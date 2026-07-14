@@ -5,7 +5,7 @@ use chrono::Utc;
 use piquel_auth_protocol::{AccountStatus, TokenId, UserId};
 use piquel_repository::{
     AppendAuditEvent, AppendInternalEvent, Database, DatabaseError, InsertUser,
-    InsertVerifiedEmail, StoredUser,
+    InsertVerifiedEmail, StoredUser, UpdateUserProfile,
 };
 use thiserror::Error;
 
@@ -25,12 +25,31 @@ pub(super) struct CreateAccount {
     pub verified_email: Option<String>,
 }
 
+pub(super) struct UpdateAccountProfile {
+    pub id: UserId,
+    pub expected_version: u64,
+    pub username: String,
+    pub display_name: String,
+}
+
 #[derive(Debug, Error)]
 pub(super) enum AccountError {
     #[error("invalid account profile")]
     InvalidProfile,
     #[error("account operation failed")]
     Database(#[from] DatabaseError),
+}
+
+impl From<StoredUser> for AccountProfile {
+    fn from(user: StoredUser) -> Self {
+        Self {
+            id: user.id,
+            username: user.username,
+            display_name: user.display_name,
+            version: user.profile_version,
+            status: user.status,
+        }
+    }
 }
 
 /// Creates account state, optional verified email, audit, and internal event in one transaction.
@@ -133,6 +152,51 @@ pub(super) async fn disable(database: &Database, user_id: UserId) -> Result<bool
     Ok(true)
 }
 
+/// Reads the current account profile snapshot.
+pub(super) async fn find(
+    database: &Database,
+    user_id: UserId,
+) -> Result<Option<AccountProfile>, AccountError> {
+    Ok(database
+        .users()
+        .find_by_id(user_id)
+        .await?
+        .map(AccountProfile::from))
+}
+
+/// Updates presentation fields and emits the matching event atomically.
+pub(super) async fn update_profile(
+    database: &Database,
+    input: UpdateAccountProfile,
+) -> Result<AccountProfile, AccountError> {
+    validate_username(&input.username).map_err(|()| AccountError::InvalidProfile)?;
+    validate_display_name(&input.display_name).map_err(|()| AccountError::InvalidProfile)?;
+
+    let mut transaction = database.begin().await?;
+    let user = transaction
+        .users()
+        .update_profile(&UpdateUserProfile {
+            id: input.id,
+            expected_version: input.expected_version,
+            username: input.username,
+            display_name: input.display_name,
+        })
+        .await?;
+    transaction
+        .internal_events()
+        .append(&AppendInternalEvent {
+            id: TokenId::new(),
+            aggregate_type: "user".into(),
+            aggregate_id: user.id,
+            event_type: "profile.updated".into(),
+            schema_version: 1,
+            payload: serde_json::json!({"profile_version": user.profile_version}),
+        })
+        .await?;
+    transaction.commit().await?;
+    Ok(user.into())
+}
+
 /// Checks the deliberately narrow username policy used for initial accounts.
 pub(super) fn validate_username(value: &str) -> Result<(), ()> {
     if !(3..=32).contains(&value.len())
@@ -156,10 +220,63 @@ pub(super) fn validate_display_name(value: &str) -> Result<(), ()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use piquel_repository::DatabaseConfig;
+    use std::{env, time::Duration};
+
     #[test]
     fn profile_validation_is_deliberate() {
         assert!(validate_username("ada_lovelace").is_ok());
         assert!(validate_username("Ada").is_err());
         assert!(validate_display_name("Ada Lovelace").is_ok());
+    }
+
+    #[tokio::test]
+    #[ignore = "requires TEST_DATABASE_URL"]
+    async fn profile_update_and_event_commit_together() {
+        let url = env::var("TEST_DATABASE_URL")
+            .expect("TEST_DATABASE_URL must name an isolated PostgreSQL database");
+        let config = DatabaseConfig::new_development(url, 5, Duration::from_secs(5))
+            .expect("test database configuration");
+        let database = Database::connect(config).await.expect("connect database");
+        database.run_migrations().await.expect("run migrations");
+
+        let unique = UserId::new().to_string();
+        let suffix = &unique[unique.len() - 12..];
+        let created = create(
+            &database,
+            CreateAccount {
+                username: format!("profile_{suffix}"),
+                display_name: "Before".into(),
+                verified_email: None,
+            },
+        )
+        .await
+        .expect("create account");
+        let updated = update_profile(
+            &database,
+            UpdateAccountProfile {
+                id: created.id,
+                expected_version: created.profile_version,
+                username: created.username,
+                display_name: "After".into(),
+            },
+        )
+        .await
+        .expect("update profile");
+        assert_eq!(updated.version, 2);
+
+        let next_sequence = database
+            .internal_events()
+            .append(&AppendInternalEvent {
+                id: TokenId::new(),
+                aggregate_type: "user".into(),
+                aggregate_id: created.id,
+                event_type: "test.probe".into(),
+                schema_version: 1,
+                payload: serde_json::json!({}),
+            })
+            .await
+            .expect("append probe event");
+        assert_eq!(next_sequence, 3);
     }
 }

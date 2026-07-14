@@ -22,7 +22,8 @@ async fn database() -> Database {
 
 async fn insert_user(database: &Database, prefix: &str) -> UserId {
     let id = UserId::new();
-    let username = format!("{prefix}_{}", &id.to_string()[..8]);
+    let identifier = id.to_string();
+    let username = format!("{prefix}_{}", &identifier[identifier.len() - 12..]);
     database
         .users()
         .insert(&InsertUser {
@@ -323,4 +324,91 @@ async fn identity_transactions_and_concurrency_hold() {
         }
     );
     assert_eq!(usize::from(left.is_ok()) + usize::from(right.is_ok()), 1);
+
+    // Verified-email insertion and disablement must serialize on the user row.
+    // Regardless of which operation wins, lookup must never expose a disabled
+    // account through stale ownership state.
+    for _ in 0..20 {
+        let user = insert_user(&database, "disable_email_race").await;
+        let normalized = format!("disable-race-{user}@example.com");
+        database
+            .emails()
+            .insert_verified(&InsertVerifiedEmail {
+                id: TokenId::new(),
+                user_id: user,
+                normalized_email: normalized.clone(),
+                is_primary: true,
+                verified_at: Utc::now(),
+            })
+            .await
+            .expect("initial email");
+        let one = database.clone();
+        let two = database.clone();
+        let concurrent_email = InsertVerifiedEmail {
+            id: TokenId::new(),
+            user_id: user,
+            normalized_email: normalized.clone(),
+            is_primary: false,
+            verified_at: Utc::now(),
+        };
+        let (disabled, inserted) = tokio::join!(
+            async move { one.users().set_status(user, AccountStatus::Disabled).await },
+            async move { two.emails().insert_verified(&concurrent_email).await }
+        );
+        assert!(disabled.expect("disable race"));
+        inserted.expect("concurrent email");
+        assert!(
+            database
+                .emails()
+                .find_active_verified(&normalized)
+                .await
+                .expect("active email lookup")
+                .is_none()
+        );
+    }
+
+    // Updating user_id affects both sides of the deferred primary-email
+    // invariant. A transfer must not strand the source with no primary.
+    let source = insert_user(&database, "transfer_source").await;
+    let destination = insert_user(&database, "transfer_destination").await;
+    let primary_id = TokenId::new();
+    database
+        .emails()
+        .insert_verified(&InsertVerifiedEmail {
+            id: primary_id,
+            user_id: source,
+            normalized_email: format!("transfer-primary-{source}@example.com"),
+            is_primary: true,
+            verified_at: Utc::now(),
+        })
+        .await
+        .expect("source primary");
+    database
+        .emails()
+        .insert_verified(&InsertVerifiedEmail {
+            id: TokenId::new(),
+            user_id: source,
+            normalized_email: format!("transfer-secondary-{source}@example.com"),
+            is_primary: false,
+            verified_at: Utc::now(),
+        })
+        .await
+        .expect("source secondary");
+    database
+        .users()
+        .set_status(source, AccountStatus::Disabled)
+        .await
+        .expect("disable transfer source");
+    let raw = sqlx::PgPool::connect(&env::var("TEST_DATABASE_URL").expect("database URL"))
+        .await
+        .expect("raw constraint test connection");
+    let mut transfer = raw.begin().await.expect("begin transfer");
+    sqlx::query("UPDATE user_emails SET user_id=$1 WHERE id=$2")
+        .bind(destination.as_uuid())
+        .bind(primary_id.as_uuid())
+        .execute(&mut *transfer)
+        .await
+        .expect("update remains deferred");
+    assert!(transfer.commit().await.is_err());
+    raw.close().await;
 }
