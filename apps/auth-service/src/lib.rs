@@ -16,6 +16,8 @@ mod email;
 #[allow(dead_code)]
 mod event_log;
 #[allow(dead_code)]
+mod federation;
+#[allow(dead_code)]
 mod oidc;
 pub use oidc::{Es256KeyProvider, OidcApplication};
 #[allow(dead_code)]
