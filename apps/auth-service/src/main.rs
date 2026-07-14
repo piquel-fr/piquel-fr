@@ -134,6 +134,14 @@ async fn main() -> anyhow::Result<()> {
 }
 
 async fn shutdown_signal() {
+    #[cfg(unix)]
+    {
+        let mut terminate =
+            tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())
+                .expect("install SIGTERM handler");
+        tokio::select! { _ = tokio::signal::ctrl_c()=>{}, _ = terminate.recv()=>{} }
+    }
+    #[cfg(not(unix))]
     let _ = tokio::signal::ctrl_c().await;
 }
 async fn wait_for_shutdown(mut receiver: tokio::sync::watch::Receiver<bool>) {
