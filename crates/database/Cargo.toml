@@ -10,8 +10,12 @@ rust-version.workspace = true
 async-trait.workspace = true
 anyhow.workspace = true
 chrono.workspace = true
+<<<<<<< HEAD
 piquel-auth-protocol = { path = "../auth-protocol" }
 serde_json.workspace = true
+=======
+piquel-auth-protocol.workspace = true
+>>>>>>> main
 sqlx.workspace = true
 thiserror.workspace = true
 tokio.workspace = true

@@ -40,9 +40,16 @@ impl<'a> DatabaseTransaction<'a> {
         ServiceIdentityRepository::from_connection(&mut self.inner)
     }
     pub async fn commit(self) -> Result<(), DatabaseError> {
+<<<<<<< HEAD
         self.inner.commit().await.map_err(crate::error::map_error)
     }
     pub async fn rollback(self) -> Result<(), DatabaseError> {
         self.inner.rollback().await.map_err(crate::error::map_error)
+=======
+        self.inner.commit().await.map_err(Into::into)
+    }
+    pub async fn rollback(self) -> Result<(), DatabaseError> {
+        self.inner.rollback().await.map_err(Into::into)
+>>>>>>> main
     }
 }

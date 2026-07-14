@@ -42,6 +42,7 @@ macro_rules! uuid_id {
             pub fn as_uuid(self) -> Uuid {
                 self.0
             }
+<<<<<<< HEAD
 
             /// Validates and wraps an existing UUID.
             ///
@@ -54,6 +55,8 @@ macro_rules! uuid_id {
                 }
                 Ok(Self(value))
             }
+=======
+>>>>>>> main
         }
         impl fmt::Display for $name {
             fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {

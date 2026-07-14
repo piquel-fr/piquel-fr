@@ -12,13 +12,19 @@
 
 mod connection;
 mod error;
+<<<<<<< HEAD
 mod models;
+=======
+>>>>>>> main
 mod repositories;
 mod transaction;
 
 pub use connection::{Database, DatabaseConfig};
 pub use error::{DatabaseConnectionError, DatabaseError};
+<<<<<<< HEAD
 pub use models::*;
+=======
+>>>>>>> main
 pub use repositories::{
     AuditEventRepository, EmailRepository, FederationRepository, InternalEventRepository,
     OidcRepository, PasskeyRepository, ServiceIdentityRepository, SessionRepository,

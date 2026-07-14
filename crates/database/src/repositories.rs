@@ -1,11 +1,15 @@
 //! Domain repository handles backed by a private pool or transaction connection.
 
+<<<<<<< HEAD
 use crate::{
     AppendAuditEvent, AppendInternalEvent, DatabaseError, InsertSession, InsertUser,
     InsertVerifiedEmail, StoredEmail, StoredSession, StoredUser, UpdateUserProfile,
 };
 use piquel_auth_protocol::{AccountStatus, SessionId, UserId};
 use sqlx::{PgConnection, PgPool, Row};
+=======
+use sqlx::{PgConnection, PgPool};
+>>>>>>> main
 
 #[allow(dead_code)]
 pub(crate) enum RepositoryExecutor<'a> {
@@ -44,6 +48,7 @@ repository!(OidcRepository);
 repository!(TokenRepository);
 repository!(FederationRepository);
 repository!(ServiceIdentityRepository);
+<<<<<<< HEAD
 
 macro_rules! fetch_optional {
     ($self:expr, $query:expr) => {{
@@ -312,3 +317,5 @@ impl InternalEventRepository<'_> {
         .map_err(|_| DatabaseError::InvalidStoredData)
     }
 }
+=======
+>>>>>>> main

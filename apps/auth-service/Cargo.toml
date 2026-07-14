@@ -10,6 +10,7 @@ rust-version.workspace = true
 anyhow.workspace = true
 async-trait.workspace = true
 axum.workspace = true
+<<<<<<< HEAD
 chrono.workspace = true
 piquel-auth-protocol = { path = "../../crates/auth-protocol" }
 piquel-configuration = { path = "../../crates/configuration" }
@@ -21,6 +22,14 @@ thiserror.workspace = true
 tokio.workspace = true
 tracing.workspace = true
 unicode-normalization.workspace = true
+=======
+piquel-configuration.workspace = true
+piquel-repository.workspace = true
+piquel-telemetry.workspace = true
+serde.workspace = true
+tokio.workspace = true
+tracing.workspace = true
+>>>>>>> main
 
 [dev-dependencies]
 tower.workspace = true
