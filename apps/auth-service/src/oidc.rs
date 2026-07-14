@@ -862,7 +862,11 @@ fn require_same_origin(app: &OidcApplication, headers: &HeaderMap) -> Result<(),
         .get("x-piquel-csrf")
         .and_then(|value| value.to_str().ok())
         == Some("1");
-    (origin_matches && csrf_header)
+    let same_origin_fetch = headers
+        .get("sec-fetch-site")
+        .and_then(|value| value.to_str().ok())
+        == Some("same-origin");
+    (origin_matches && (csrf_header || same_origin_fetch))
         .then_some(())
         .ok_or_else(ApiError::request)
 }

@@ -234,18 +234,15 @@ impl OidcClient {
         parse_token_response(response).await
     }
 
-    /// Builds an exact post-logout redirect request.
+    /// Builds the parameters for a CSRF-protected POST to the logout endpoint.
     #[must_use]
-    pub fn logout_url(&self, post_logout_redirect_uri: &Url, state: &str) -> Url {
-        let mut url = self.discovery.end_session_endpoint.clone();
-        url.query_pairs_mut()
-            .append_pair("client_id", self.client_id.as_str())
-            .append_pair(
-                "post_logout_redirect_uri",
-                post_logout_redirect_uri.as_str(),
-            )
-            .append_pair("state", state);
-        url
+    pub fn logout_request(&self, post_logout_redirect_uri: &Url, state: &str) -> LogoutRequest {
+        LogoutRequest {
+            endpoint: self.discovery.end_session_endpoint.clone(),
+            client_id: self.client_id.as_str().to_owned(),
+            post_logout_redirect_uri: post_logout_redirect_uri.clone(),
+            state: state.to_owned(),
+        }
     }
 
     #[must_use]
@@ -275,6 +272,31 @@ impl OidcClient {
         (bytes.len() <= 256 * 1024)
             .then(|| bytes.to_vec())
             .ok_or(OidcClientError::Request)
+    }
+}
+
+pub struct LogoutRequest {
+    endpoint: Url,
+    client_id: String,
+    post_logout_redirect_uri: Url,
+    state: String,
+}
+impl LogoutRequest {
+    #[must_use]
+    pub const fn endpoint(&self) -> &Url {
+        &self.endpoint
+    }
+    #[must_use]
+    pub fn client_id(&self) -> &str {
+        &self.client_id
+    }
+    #[must_use]
+    pub const fn post_logout_redirect_uri(&self) -> &Url {
+        &self.post_logout_redirect_uri
+    }
+    #[must_use]
+    pub fn state(&self) -> &str {
+        &self.state
     }
 }
 

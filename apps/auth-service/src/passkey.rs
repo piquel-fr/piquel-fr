@@ -105,11 +105,6 @@ pub(super) fn routes(application: PasskeyApplication) -> Router {
             patch(rename_passkey).delete(revoke_passkey),
         )
         .route("/session/logout", post(logout))
-        .route("/account/passkeys", get(list_passkeys))
-        .route(
-            "/account/passkeys/{id}",
-            patch(rename_passkey).delete(revoke_passkey),
-        )
         .with_state(application)
 }
 
@@ -392,6 +387,7 @@ async fn start_enrollment(
     State(app): State<PasskeyApplication>,
     headers: HeaderMap,
 ) -> Result<Json<RegistrationStarted>, ApiError> {
+    validate_mutation_origin(&app, &headers)?;
     let session = active_session(&app.database, &headers).await?;
     require_fresh_session(&session)?;
     let user = app
@@ -437,6 +433,7 @@ async fn finish_enrollment(
     headers: HeaderMap,
     Json(input): Json<RegistrationFinish>,
 ) -> Result<StatusCode, ApiError> {
+    validate_mutation_origin(&app, &headers)?;
     if input.friendly_name.trim().is_empty() || input.friendly_name.chars().count() > 80 {
         return Err(ApiError);
     }
@@ -523,7 +520,9 @@ async fn rename_passkey(
     if input.friendly_name.trim().is_empty() || input.friendly_name.chars().count() > 80 {
         return Err(ApiError);
     }
+    validate_mutation_origin(&app, &headers)?;
     let session = active_session(&app.database, &headers).await?;
+    require_fresh_session(&session)?;
     app.database
         .passkeys()
         .rename(id, session.user_id, &input.friendly_name)
@@ -538,6 +537,7 @@ async fn revoke_passkey(
     headers: HeaderMap,
     Path(id): Path<TokenId>,
 ) -> Result<StatusCode, ApiError> {
+    validate_mutation_origin(&app, &headers)?;
     let session = active_session(&app.database, &headers).await?;
     require_fresh_session(&session)?;
     let mut transaction = app.database.begin().await.map_err(|_| ApiError)?;
@@ -627,6 +627,7 @@ async fn logout(
     State(app): State<PasskeyApplication>,
     headers: HeaderMap,
 ) -> Result<Response, ApiError> {
+    validate_mutation_origin(&app, &headers)?;
     let secret = session_secret(&headers).ok_or(ApiError)?;
     if let Some(session) = app
         .database
@@ -658,98 +659,6 @@ fn session_secret(headers: &HeaderMap) -> Option<Vec<u8>> {
         .filter(|secret| secret.len() == 32)
 }
 
-#[derive(Serialize)]
-struct PasskeySummary {
-    id: TokenId,
-    friendly_name: String,
-}
-async fn list_passkeys(
-    State(app): State<PasskeyApplication>,
-    headers: HeaderMap,
-) -> Result<Json<Vec<PasskeySummary>>, ApiError> {
-    let session = active_browser_session(&app, &headers).await?;
-    let values = app
-        .database
-        .passkeys()
-        .list_active(session.user_id, 20)
-        .await
-        .map_err(|_| ApiError)?
-        .into_iter()
-        .map(|passkey| PasskeySummary {
-            id: passkey.id,
-            friendly_name: passkey.friendly_name,
-        })
-        .collect();
-    Ok(Json(values))
-}
-#[derive(Deserialize)]
-struct RenamePasskey {
-    friendly_name: String,
-}
-async fn rename_passkey(
-    State(app): State<PasskeyApplication>,
-    Path(id): Path<TokenId>,
-    headers: HeaderMap,
-    Json(input): Json<RenamePasskey>,
-) -> Result<StatusCode, ApiError> {
-    let session = fresh_browser_session(&app, &headers).await?;
-    validate_mutation_origin(&app, &headers)?;
-    if input.friendly_name.trim().is_empty() || input.friendly_name.chars().count() > 80 {
-        return Err(ApiError);
-    }
-    app.database
-        .passkeys()
-        .rename(id, session.user_id, &input.friendly_name)
-        .await
-        .map_err(|_| ApiError)?
-        .then_some(StatusCode::NO_CONTENT)
-        .ok_or(ApiError)
-}
-async fn revoke_passkey(
-    State(app): State<PasskeyApplication>,
-    Path(id): Path<TokenId>,
-    headers: HeaderMap,
-) -> Result<StatusCode, ApiError> {
-    let session = fresh_browser_session(&app, &headers).await?;
-    validate_mutation_origin(&app, &headers)?;
-    let active = app
-        .database
-        .passkeys()
-        .list_active(session.user_id, 2)
-        .await
-        .map_err(|_| ApiError)?;
-    if active.len() <= 1 {
-        return Err(ApiError);
-    }
-    app.database
-        .passkeys()
-        .revoke(id, session.user_id)
-        .await
-        .map_err(|_| ApiError)?
-        .then_some(StatusCode::NO_CONTENT)
-        .ok_or(ApiError)
-}
-async fn active_browser_session(
-    app: &PasskeyApplication,
-    headers: &HeaderMap,
-) -> Result<piquel_repository::StoredSession, ApiError> {
-    let secret = session_secret(headers).ok_or(ApiError)?;
-    app.database
-        .sessions()
-        .find_active_by_browser_secret(&Sha256::digest(secret))
-        .await
-        .map_err(|_| ApiError)?
-        .ok_or(ApiError)
-}
-async fn fresh_browser_session(
-    app: &PasskeyApplication,
-    headers: &HeaderMap,
-) -> Result<piquel_repository::StoredSession, ApiError> {
-    let session = active_browser_session(app, headers).await?;
-    (Utc::now().signed_duration_since(session.authenticated_at) <= Duration::minutes(10))
-        .then_some(session)
-        .ok_or(ApiError)
-}
 fn validate_mutation_origin(app: &PasskeyApplication, headers: &HeaderMap) -> Result<(), ApiError> {
     let origin = headers
         .get(header::ORIGIN)
