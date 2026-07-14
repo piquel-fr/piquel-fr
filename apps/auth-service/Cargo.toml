@@ -10,9 +10,9 @@ rust-version.workspace = true
 anyhow.workspace = true
 async-trait.workspace = true
 axum.workspace = true
-piquel-configuration = { path = "../../crates/configuration" }
-piquel-repository = { path = "../../crates/database" }
-piquel-telemetry = { path = "../../crates/telemetry" }
+piquel-configuration.workspace = true
+piquel-repository.workspace = true
+piquel-telemetry.workspace = true
 serde.workspace = true
 tokio.workspace = true
 tracing.workspace = true
