@@ -1,6 +1,9 @@
 format:
     @cargo fmt --all
 
+lint:
+    @cargo clippy --workspace
+
 check:
     @cargo check --workspace --all-targets
 
