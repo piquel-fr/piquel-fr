@@ -108,6 +108,7 @@ pub(super) async fn disable(database: &Database, user_id: UserId) -> Result<bool
         return Ok(false);
     }
     transaction.sessions().revoke_all_for_user(user_id).await?;
+    transaction.tokens().revoke_all_for_user(user_id).await?;
     transaction
         .audit_events()
         .append(&AppendAuditEvent {

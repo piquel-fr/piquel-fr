@@ -2,7 +2,7 @@
 
 use axum::{
     Form, Json, Router,
-    extract::{Query, State},
+    extract::{Path, Query, State},
     http::{HeaderMap, StatusCode, header},
     response::{IntoResponse, Redirect, Response},
     routing::{get, post},
@@ -19,8 +19,9 @@ use p256::{
 };
 use piquel_auth_protocol::{SessionId, TokenId, UserId};
 use piquel_repository::{
-    Database, InsertAuthorizationCode, InsertRefreshFamily, InsertRefreshToken,
-    RefreshRotationError, StoredSession,
+    AppendAuditEvent, Database, InsertAuthorizationCode, InsertAuthorizationRequest,
+    InsertRefreshFamily, InsertRefreshToken, RefreshRotationError, StoredAuthorizationRequest,
+    StoredSession,
 };
 use rand::{RngCore, rngs::OsRng};
 use serde::{Deserialize, Serialize};
@@ -230,10 +231,15 @@ pub(super) fn routes(application: OidcApplication) -> Router {
         .route("/.well-known/openid-configuration", get(discovery))
         .route("/.well-known/jwks.json", get(jwks))
         .route("/oauth/authorize", get(authorize))
+        .route(
+            "/oauth/authorize/transaction/{transaction}",
+            get(authorization_transaction),
+        )
+        .route("/oauth/authorize/decision", post(authorization_decision))
         .route("/oauth/token", post(token))
         .route("/oauth/revoke", post(revoke))
         .route("/oidc/userinfo", get(userinfo))
-        .route("/oidc/logout", get(logout))
+        .route("/oidc/logout", post(logout))
         .with_state(application)
 }
 
@@ -315,45 +321,174 @@ async fn authorize(
     {
         return Err(fail("invalid_request"));
     }
-    let session = browser_session(&app.database, &headers)
-        .await
-        .ok_or_else(|| fail("login_required"))?;
-    if q.prompt.as_deref() == Some("login")
+    let session = browser_session(&app.database, &headers).await;
+    let requires_login = q.prompt.as_deref() == Some("login")
+        || session.is_none()
         || q.max_age.is_some_and(|age| {
             age < 0
-                || Utc::now()
-                    .signed_duration_since(session.authenticated_at)
-                    .num_seconds()
-                    > age
-        })
-    {
+                || session.as_ref().is_none_or(|session| {
+                    Utc::now()
+                        .signed_duration_since(session.authenticated_at)
+                        .num_seconds()
+                        > age
+                })
+        });
+    if q.prompt.as_deref() == Some("none") && requires_login {
         return Err(fail("login_required"));
     }
-    let (code, id, secret) = new_opaque("pac_v1");
+    let (transaction, id, secret) = new_opaque("par_v1");
     let digest = keyed_digest(app.refresh_key.as_ref(), &secret)?;
     app.database
         .oidc()
-        .insert_code(&InsertAuthorizationCode {
+        .insert_authorization_request(&InsertAuthorizationRequest {
             id,
             secret_digest: digest.to_vec(),
             client_id: q.client_id,
-            user_id: session.user_id,
-            session_id: session.id,
             redirect_uri: q.redirect_uri,
+            client_state: q.state,
             pkce_challenge: q.code_challenge,
             nonce: q.nonce,
             scopes: scopes.into_iter().collect(),
             audience: q.audience,
-            expires_at: Utc::now() + Duration::minutes(2),
+            force_login: q.prompt.as_deref() == Some("login"),
+            max_age: q.max_age,
+            expires_at: Utc::now() + Duration::minutes(10),
         })
         .await
         .map_err(|_| ApiError::server())?;
-    let mut location = redirect;
-    location
-        .query_pairs_mut()
-        .append_pair("code", &code)
-        .append_pair("state", &q.state);
-    Ok(Redirect::to(location.as_str()))
+    let page = if requires_login { "login" } else { "authorize" };
+    Ok(Redirect::to(&format!(
+        "{}/{page}?transaction={transaction}",
+        app.issuer
+    )))
+}
+
+#[derive(Serialize)]
+struct AuthorizationTransactionView {
+    client_name: String,
+    scopes: Vec<String>,
+    audience: String,
+}
+
+async fn authorization_transaction(
+    State(app): State<OidcApplication>,
+    headers: HeaderMap,
+    Path(transaction): Path<String>,
+) -> Result<Json<AuthorizationTransactionView>, ApiError> {
+    let session = browser_session(&app.database, &headers)
+        .await
+        .ok_or_else(ApiError::unauthorized)?;
+    let request = find_authorization_request(&app, &transaction).await?;
+    require_authorization_session(&request, &session)?;
+    Ok(Json(AuthorizationTransactionView {
+        client_name: request.client_display_name,
+        scopes: request.scopes,
+        audience: request.audience,
+    }))
+}
+
+#[derive(Deserialize)]
+struct AuthorizationDecision {
+    transaction: String,
+    decision: String,
+}
+
+async fn authorization_decision(
+    State(app): State<OidcApplication>,
+    headers: HeaderMap,
+    Form(input): Form<AuthorizationDecision>,
+) -> Result<Redirect, ApiError> {
+    require_same_origin(&app, &headers)?;
+    let session = browser_session(&app.database, &headers)
+        .await
+        .ok_or_else(ApiError::unauthorized)?;
+    let (id, secret) = parse_opaque("par_v1", &input.transaction)?;
+    let digest = keyed_digest(app.refresh_key.as_ref(), &secret)?;
+    let mut transaction = app.database.begin().await.map_err(|_| ApiError::server())?;
+    let request = transaction
+        .oidc()
+        .consume_authorization_request(id, &digest)
+        .await
+        .map_err(|_| ApiError::request())?;
+    require_authorization_session(&request, &session)?;
+    let mut redirect = Url::parse(&request.redirect_uri).map_err(|_| ApiError::server())?;
+    match input.decision.as_str() {
+        "deny" => {
+            redirect
+                .query_pairs_mut()
+                .append_pair("error", "access_denied")
+                .append_pair("state", &request.client_state);
+        }
+        "approve" => {
+            let user = transaction
+                .users()
+                .find_active_by_id_for_update(session.user_id)
+                .await
+                .map_err(|_| ApiError::server())?
+                .ok_or_else(ApiError::unauthorized)?;
+            if user.id != session.user_id {
+                return Err(ApiError::unauthorized());
+            }
+            let (code, code_id, code_secret) = new_opaque("pac_v1");
+            let code_digest = keyed_digest(app.refresh_key.as_ref(), &code_secret)?;
+            transaction
+                .oidc()
+                .insert_code(&InsertAuthorizationCode {
+                    id: code_id,
+                    secret_digest: code_digest.to_vec(),
+                    client_id: request.client_id,
+                    user_id: session.user_id,
+                    session_id: session.id,
+                    redirect_uri: request.redirect_uri,
+                    pkce_challenge: request.pkce_challenge,
+                    nonce: request.nonce,
+                    scopes: request.scopes,
+                    audience: request.audience,
+                    expires_at: Utc::now() + Duration::minutes(2),
+                })
+                .await
+                .map_err(|_| ApiError::server())?;
+            redirect
+                .query_pairs_mut()
+                .append_pair("code", &code)
+                .append_pair("state", &request.client_state);
+        }
+        _ => return Err(ApiError::request()),
+    }
+    transaction.commit().await.map_err(|_| ApiError::server())?;
+    Ok(Redirect::to(redirect.as_str()))
+}
+
+async fn find_authorization_request(
+    app: &OidcApplication,
+    value: &str,
+) -> Result<StoredAuthorizationRequest, ApiError> {
+    let (id, secret) = parse_opaque("par_v1", value)?;
+    let digest = keyed_digest(app.refresh_key.as_ref(), &secret)?;
+    app.database
+        .oidc()
+        .find_authorization_request(id, &digest)
+        .await
+        .map_err(|_| ApiError::server())?
+        .ok_or_else(ApiError::request)
+}
+
+fn require_authorization_session(
+    request: &StoredAuthorizationRequest,
+    session: &StoredSession,
+) -> Result<(), ApiError> {
+    let newer_than_request = session.authenticated_at >= request.created_at;
+    let within_max_age = request.max_age.is_none_or(|age| {
+        age >= 0
+            && Utc::now()
+                .signed_duration_since(session.authenticated_at)
+                .num_seconds()
+                <= age
+    });
+    (!request.force_login || newer_than_request)
+        .then_some(())
+        .filter(|()| within_max_age)
+        .ok_or_else(ApiError::unauthorized)
 }
 
 #[derive(Deserialize)]
@@ -414,7 +549,7 @@ async fn exchange_code(app: &OidcApplication, form: TokenForm) -> Result<TokenRe
     }
     let user = tx
         .users()
-        .find_by_id(code.user_id)
+        .find_active_by_id_for_update(code.user_id)
         .await
         .map_err(|_| ApiError::server())?
         .ok_or_else(|| ApiError::oauth("invalid_grant"))?;
@@ -474,7 +609,35 @@ async fn rotate_refresh(app: &OidcApplication, form: TokenForm) -> Result<TokenR
     let mut tx = app.database.begin().await.map_err(|_| ApiError::server())?;
     let rotated = match tx.tokens().consume_for_rotation(id, &digest).await {
         Ok(value) => value,
-        Err(RefreshRotationError::Replay) => {
+        Err(RefreshRotationError::Replay { user_id }) => {
+            tx.audit_events()
+                .append(&AppendAuditEvent {
+                    id: TokenId::new(),
+                    user_id: Some(user_id),
+                    action: "refresh.replay".into(),
+                    outcome: "rejected".into(),
+                    request_metadata: json!({}),
+                })
+                .await
+                .map_err(|_| ApiError::server())?;
+            tx.commit().await.map_err(|_| ApiError::server())?;
+            tracing::warn!(
+                event = "auth.refresh_replay",
+                "refresh token replay rejected"
+            );
+            return Err(ApiError::oauth("invalid_grant"));
+        }
+        Err(RefreshRotationError::Policy { user_id }) => {
+            tx.audit_events()
+                .append(&AppendAuditEvent {
+                    id: TokenId::new(),
+                    user_id: Some(user_id),
+                    action: "refresh.policy_rejected".into(),
+                    outcome: "rejected".into(),
+                    request_metadata: json!({}),
+                })
+                .await
+                .map_err(|_| ApiError::server())?;
             tx.commit().await.map_err(|_| ApiError::server())?;
             return Err(ApiError::oauth("invalid_grant"));
         }
@@ -647,8 +810,9 @@ struct LogoutQuery {
 async fn logout(
     State(app): State<OidcApplication>,
     headers: HeaderMap,
-    Query(q): Query<LogoutQuery>,
+    Form(q): Form<LogoutQuery>,
 ) -> Result<Response, ApiError> {
+    require_same_origin(&app, &headers)?;
     if let Some(session) = browser_session(&app.database, &headers).await {
         app.database
             .sessions()
@@ -674,6 +838,20 @@ async fn logout(
         return Ok(Redirect::to(url.as_str()).into_response());
     }
     Ok(StatusCode::NO_CONTENT.into_response())
+}
+
+fn require_same_origin(app: &OidcApplication, headers: &HeaderMap) -> Result<(), ApiError> {
+    let origin_matches = headers
+        .get(header::ORIGIN)
+        .and_then(|value| value.to_str().ok())
+        .is_some_and(|origin| origin == app.issuer);
+    let csrf_header = headers
+        .get("x-piquel-csrf")
+        .and_then(|value| value.to_str().ok())
+        == Some("1");
+    (origin_matches && csrf_header)
+        .then_some(())
+        .ok_or_else(ApiError::request)
 }
 
 async fn browser_session(database: &Database, headers: &HeaderMap) -> Option<StoredSession> {

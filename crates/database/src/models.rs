@@ -115,12 +115,45 @@ pub struct ConsumedCeremony {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct StoredOidcClient {
     pub id: String,
+    pub display_name: String,
     pub enabled: bool,
     pub redirect_uris: Vec<String>,
     pub post_logout_uris: Vec<String>,
     pub allowed_scopes: Vec<String>,
     pub allowed_audiences: Vec<String>,
     pub allow_refresh: bool,
+}
+
+#[derive(Clone, Debug)]
+pub struct InsertAuthorizationRequest {
+    pub id: TokenId,
+    pub secret_digest: Vec<u8>,
+    pub client_id: String,
+    pub redirect_uri: String,
+    pub client_state: String,
+    pub nonce: Option<String>,
+    pub pkce_challenge: String,
+    pub scopes: Vec<String>,
+    pub audience: String,
+    pub force_login: bool,
+    pub max_age: Option<i64>,
+    pub expires_at: DateTime<Utc>,
+}
+
+#[derive(Clone, Debug)]
+pub struct StoredAuthorizationRequest {
+    pub id: TokenId,
+    pub client_id: String,
+    pub client_display_name: String,
+    pub redirect_uri: String,
+    pub client_state: String,
+    pub nonce: Option<String>,
+    pub pkce_challenge: String,
+    pub scopes: Vec<String>,
+    pub audience: String,
+    pub force_login: bool,
+    pub max_age: Option<i64>,
+    pub created_at: DateTime<Utc>,
 }
 
 #[derive(Clone, Debug)]
@@ -192,5 +225,6 @@ pub struct RotatedRefreshToken {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum RefreshRotationError {
     Invalid,
-    Replay,
+    Replay { user_id: UserId },
+    Policy { user_id: UserId },
 }

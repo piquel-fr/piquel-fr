@@ -207,9 +207,9 @@ async fn identity_transactions_and_concurrency_hold() {
                 tx.commit().await.expect("rotation commit");
                 Ok(replacement)
             }
-            Err(RefreshRotationError::Replay) => {
+            Err(error @ RefreshRotationError::Replay { .. }) => {
                 tx.commit().await.expect("persist replay revocation");
-                Err(RefreshRotationError::Replay)
+                Err(error)
             }
             Err(error) => Err(error),
         }
@@ -222,8 +222,8 @@ async fn identity_transactions_and_concurrency_hold() {
     );
     assert_eq!(usize::from(left.is_ok()) + usize::from(right.is_ok()), 1);
     assert!(
-        matches!(left, Err(RefreshRotationError::Replay))
-            || matches!(right, Err(RefreshRotationError::Replay))
+        matches!(left, Err(RefreshRotationError::Replay { .. }))
+            || matches!(right, Err(RefreshRotationError::Replay { .. }))
     );
 
     let credential_id = vec![7_u8; 32];

@@ -32,6 +32,24 @@ CREATE TABLE authorization_codes (
 );
 CREATE INDEX authorization_codes_active_idx ON authorization_codes (expires_at) WHERE consumed_at IS NULL;
 
+CREATE TABLE authorization_requests (
+    id UUID PRIMARY KEY,
+    secret_digest BYTEA NOT NULL UNIQUE,
+    client_id TEXT NOT NULL REFERENCES oidc_clients(id),
+    redirect_uri TEXT NOT NULL,
+    client_state TEXT NOT NULL,
+    nonce TEXT,
+    pkce_challenge TEXT NOT NULL,
+    scopes JSONB NOT NULL,
+    audience TEXT NOT NULL,
+    force_login BOOLEAN NOT NULL,
+    max_age BIGINT,
+    expires_at TIMESTAMPTZ NOT NULL,
+    consumed_at TIMESTAMPTZ,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX authorization_requests_active_idx ON authorization_requests (expires_at) WHERE consumed_at IS NULL;
+
 CREATE TABLE refresh_token_families (
     id UUID PRIMARY KEY,
     user_id UUID NOT NULL REFERENCES users(id),
