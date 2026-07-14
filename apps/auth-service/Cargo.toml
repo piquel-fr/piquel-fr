@@ -8,6 +8,7 @@ rust-version.workspace = true
 
 [dependencies]
 anyhow.workspace = true
+async-trait.workspace = true
 axum.workspace = true
 piquel-configuration = { path = "../../crates/configuration" }
 piquel-repository = { path = "../../crates/database" }
@@ -15,6 +16,9 @@ piquel-telemetry = { path = "../../crates/telemetry" }
 serde.workspace = true
 tokio.workspace = true
 tracing.workspace = true
+
+[dev-dependencies]
+tower.workspace = true
 
 [lints]
 workspace = true

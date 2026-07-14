@@ -1,8 +1,8 @@
 #![allow(missing_docs)]
 
-use auth_service::{AuthConfig, router};
+use auth_service::{AuthConfig, ProductionReadiness, router};
 use piquel_repository::Database;
-use std::net::SocketAddr;
+use std::{net::SocketAddr, sync::Arc};
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
@@ -14,7 +14,10 @@ async fn main() -> anyhow::Result<()> {
     tracing::info!(%listener_address, "auth service listening");
     axum::serve(
         listener,
-        router(Some(database), config.key_provider.is_configured()),
+        router(Arc::new(ProductionReadiness::new(
+            database,
+            config.key_provider,
+        ))),
     )
     .with_graceful_shutdown(shutdown_signal())
     .await?;

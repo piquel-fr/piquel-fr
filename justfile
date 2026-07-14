@@ -7,8 +7,8 @@ check:
 test:
     cargo test --workspace
 
-migrate database_url:
-    DATABASE_URL={{database_url}} cargo run -p piquel-repository --bin migrate
+migrate:
+    cargo run -p piquel-repository --bin migrate
 
 prepare-sqlx:
     cargo sqlx prepare --workspace

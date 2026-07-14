@@ -63,12 +63,14 @@ name = "auth-service"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "async-trait",
  "axum",
  "piquel-configuration",
  "piquel-repository",
  "piquel-telemetry",
  "serde",
  "tokio",
+ "tower",
  "tracing",
 ]
 
@@ -1048,6 +1050,7 @@ dependencies = [
  "thiserror",
  "tokio",
  "tracing",
+ "url",
 ]
 
 [[package]]

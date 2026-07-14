@@ -10,34 +10,34 @@ impl<'a> DatabaseTransaction<'a> {
         Self { inner }
     }
     pub fn users(&mut self) -> UserRepository<'_> {
-        UserRepository::new()
+        UserRepository::from_connection(&mut self.inner)
     }
     pub fn emails(&mut self) -> EmailRepository<'_> {
-        EmailRepository::new()
+        EmailRepository::from_connection(&mut self.inner)
     }
     pub fn sessions(&mut self) -> SessionRepository<'_> {
-        SessionRepository::new()
+        SessionRepository::from_connection(&mut self.inner)
     }
     pub fn audit_events(&mut self) -> AuditEventRepository<'_> {
-        AuditEventRepository::new()
+        AuditEventRepository::from_connection(&mut self.inner)
     }
     pub fn internal_events(&mut self) -> InternalEventRepository<'_> {
-        InternalEventRepository::new()
+        InternalEventRepository::from_connection(&mut self.inner)
     }
     pub fn passkeys(&mut self) -> PasskeyRepository<'_> {
-        PasskeyRepository::new()
+        PasskeyRepository::from_connection(&mut self.inner)
     }
     pub fn oidc(&mut self) -> OidcRepository<'_> {
-        OidcRepository::new()
+        OidcRepository::from_connection(&mut self.inner)
     }
     pub fn tokens(&mut self) -> TokenRepository<'_> {
-        TokenRepository::new()
+        TokenRepository::from_connection(&mut self.inner)
     }
     pub fn federation(&mut self) -> FederationRepository<'_> {
-        FederationRepository::new()
+        FederationRepository::from_connection(&mut self.inner)
     }
     pub fn service_identities(&mut self) -> ServiceIdentityRepository<'_> {
-        ServiceIdentityRepository::new()
+        ServiceIdentityRepository::from_connection(&mut self.inner)
     }
     pub async fn commit(self) -> Result<(), DatabaseError> {
         self.inner.commit().await.map_err(crate::error::map_error)

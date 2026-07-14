@@ -2,7 +2,8 @@ use crate::{
     DatabaseConnectionError, DatabaseError, repositories::*, transaction::DatabaseTransaction,
 };
 use sqlx::{PgPool, postgres::PgPoolOptions};
-use std::time::Duration;
+use std::{net::IpAddr, time::Duration};
+use url::Url;
 
 /// Validated database connection configuration.
 #[derive(Clone)]
@@ -22,23 +23,65 @@ impl std::fmt::Debug for DatabaseConfig {
     }
 }
 impl DatabaseConfig {
-    /// Creates configuration without exposing the URL through `Debug`.
+    /// Creates production configuration requiring verified `PostgreSQL` TLS.
     pub fn new(
         url: String,
         max_connections: u32,
         connect_timeout: Duration,
     ) -> Result<Self, DatabaseConnectionError> {
-        if !url.starts_with("postgres://") && !url.starts_with("postgresql://")
-            || max_connections == 0
-            || connect_timeout.is_zero()
-        {
-            return Err(DatabaseConnectionError::InvalidConfiguration);
-        }
+        Self::validate(&url, max_connections, connect_timeout, false)?;
         Ok(Self {
             url,
             max_connections,
             connect_timeout,
         })
+    }
+
+    /// Creates explicit local-development configuration for a loopback database.
+    pub fn new_development(
+        url: String,
+        max_connections: u32,
+        connect_timeout: Duration,
+    ) -> Result<Self, DatabaseConnectionError> {
+        Self::validate(&url, max_connections, connect_timeout, true)?;
+        Ok(Self {
+            url,
+            max_connections,
+            connect_timeout,
+        })
+    }
+
+    fn validate(
+        url: &str,
+        max_connections: u32,
+        connect_timeout: Duration,
+        development: bool,
+    ) -> Result<(), DatabaseConnectionError> {
+        let parsed = Url::parse(url).map_err(|_| DatabaseConnectionError::InvalidConfiguration)?;
+        if !matches!(parsed.scheme(), "postgres" | "postgresql")
+            || max_connections == 0
+            || connect_timeout.is_zero()
+        {
+            return Err(DatabaseConnectionError::InvalidConfiguration);
+        }
+        let host = parsed
+            .host_str()
+            .ok_or(DatabaseConnectionError::InvalidConfiguration)?;
+        if development {
+            let loopback = host.eq_ignore_ascii_case("localhost")
+                || host
+                    .parse::<IpAddr>()
+                    .is_ok_and(|address| address.is_loopback());
+            if !loopback {
+                return Err(DatabaseConnectionError::InvalidConfiguration);
+            }
+        } else if !parsed
+            .query_pairs()
+            .any(|(name, value)| name == "sslmode" && value == "verify-full")
+        {
+            return Err(DatabaseConnectionError::InvalidConfiguration);
+        }
+        Ok(())
     }
 }
 
@@ -60,11 +103,14 @@ impl Database {
     }
     /// Checks availability with a bounded, non-sensitive query.
     pub async fn health_check(&self) -> Result<(), DatabaseError> {
-        sqlx::query("SELECT 1")
-            .execute(&self.pool)
-            .await
-            .map(|_| ())
-            .map_err(crate::error::map_error)
+        tokio::time::timeout(
+            Duration::from_secs(2),
+            sqlx::query("SELECT 1").execute(&self.pool),
+        )
+        .await
+        .map_err(|_| DatabaseError::Timeout)?
+        .map(|_| ())
+        .map_err(crate::error::map_error)
     }
     /// Opens an explicit short-lived transaction.
     pub async fn begin(&self) -> Result<DatabaseTransaction<'_>, DatabaseError> {
@@ -82,33 +128,78 @@ impl Database {
             .map_err(|_| DatabaseError::Internal)
     }
     pub fn users(&self) -> UserRepository<'_> {
-        UserRepository::new()
+        UserRepository::from_pool(&self.pool)
     }
     pub fn emails(&self) -> EmailRepository<'_> {
-        EmailRepository::new()
+        EmailRepository::from_pool(&self.pool)
     }
     pub fn sessions(&self) -> SessionRepository<'_> {
-        SessionRepository::new()
+        SessionRepository::from_pool(&self.pool)
     }
     pub fn audit_events(&self) -> AuditEventRepository<'_> {
-        AuditEventRepository::new()
+        AuditEventRepository::from_pool(&self.pool)
     }
     pub fn internal_events(&self) -> InternalEventRepository<'_> {
-        InternalEventRepository::new()
+        InternalEventRepository::from_pool(&self.pool)
     }
     pub fn passkeys(&self) -> PasskeyRepository<'_> {
-        PasskeyRepository::new()
+        PasskeyRepository::from_pool(&self.pool)
     }
     pub fn oidc(&self) -> OidcRepository<'_> {
-        OidcRepository::new()
+        OidcRepository::from_pool(&self.pool)
     }
     pub fn tokens(&self) -> TokenRepository<'_> {
-        TokenRepository::new()
+        TokenRepository::from_pool(&self.pool)
     }
     pub fn federation(&self) -> FederationRepository<'_> {
-        FederationRepository::new()
+        FederationRepository::from_pool(&self.pool)
     }
     pub fn service_identities(&self) -> ServiceIdentityRepository<'_> {
-        ServiceIdentityRepository::new()
+        ServiceIdentityRepository::from_pool(&self.pool)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn production_requires_verified_tls() {
+        assert!(
+            DatabaseConfig::new(
+                "postgres://db.example/piquel".into(),
+                1,
+                Duration::from_secs(1)
+            )
+            .is_err()
+        );
+        assert!(
+            DatabaseConfig::new(
+                "postgres://db.example/piquel?sslmode=verify-full".into(),
+                1,
+                Duration::from_secs(1)
+            )
+            .is_ok()
+        );
+    }
+
+    #[test]
+    fn development_is_loopback_only() {
+        assert!(
+            DatabaseConfig::new_development(
+                "postgres://localhost/piquel".into(),
+                1,
+                Duration::from_secs(1)
+            )
+            .is_ok()
+        );
+        assert!(
+            DatabaseConfig::new_development(
+                "postgres://db.example/piquel".into(),
+                1,
+                Duration::from_secs(1)
+            )
+            .is_err()
+        );
     }
 }
