@@ -1507,6 +1507,8 @@ name = "piquel-auth-sdk"
 version = "0.1.0"
 dependencies = [
  "base64 0.22.1",
+ "chrono",
+ "p256",
  "piquel-auth-middleware",
  "piquel-auth-protocol",
  "rand 0.8.7",
