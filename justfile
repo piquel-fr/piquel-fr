@@ -7,6 +7,9 @@ check:
 test:
     cargo test --workspace
 
+test-database:
+    cargo test -p piquel-repository --test identity -- --ignored --test-threads=1
+
 migrate:
     cargo run -p piquel-repository --bin migrate
 

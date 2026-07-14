@@ -21,24 +21,63 @@ CREATE INDEX user_emails_user_id_idx ON user_emails (user_id);
 CREATE INDEX user_emails_verified_lookup_idx ON user_emails (normalized_email) WHERE verified_at IS NOT NULL;
 CREATE UNIQUE INDEX user_emails_one_primary_verified_idx ON user_emails (user_id) WHERE is_primary AND verified_at IS NOT NULL;
 
--- A trigger, rather than a blanket unique index, permits a disabled account's
--- verified address to be claimed by one active account while rejecting two
--- active owners. It locks matching verified rows to make concurrent claims safe.
-CREATE OR REPLACE FUNCTION enforce_active_verified_email_uniqueness() RETURNS TRIGGER LANGUAGE plpgsql AS $$
+-- The ownership row makes the no-existing-email concurrency case safe: the
+-- normalized address itself is the unique lockable key.
+CREATE TABLE active_verified_email_ownership (
+    normalized_email TEXT PRIMARY KEY,
+    user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE
+);
+
+CREATE OR REPLACE FUNCTION claim_active_verified_email() RETURNS TRIGGER LANGUAGE plpgsql AS $$
 BEGIN
-    IF NEW.verified_at IS NOT NULL AND EXISTS (
-        SELECT 1 FROM user_emails existing
-        JOIN users existing_user ON existing_user.id = existing.user_id
-        JOIN users new_user ON new_user.id = NEW.user_id
-        WHERE existing.normalized_email = NEW.normalized_email
-          AND existing.id <> NEW.id
-          AND existing.verified_at IS NOT NULL
-          AND existing_user.status = 'active'
-          AND new_user.status = 'active'
-    ) THEN RAISE EXCEPTION 'verified email already belongs to an active account' USING ERRCODE = 'unique_violation'; END IF;
+    IF NEW.verified_at IS NOT NULL AND (SELECT status = 'active' FROM users WHERE id = NEW.user_id) THEN
+        INSERT INTO active_verified_email_ownership(normalized_email, user_id)
+        VALUES (NEW.normalized_email, NEW.user_id)
+        ON CONFLICT (normalized_email) DO UPDATE SET user_id = EXCLUDED.user_id
+        WHERE active_verified_email_ownership.user_id = EXCLUDED.user_id;
+        IF NOT FOUND THEN
+            RAISE EXCEPTION 'verified email already belongs to an active account' USING ERRCODE = 'unique_violation';
+        END IF;
+    END IF;
     RETURN NEW;
 END $$;
-CREATE TRIGGER user_emails_active_verified_unique BEFORE INSERT OR UPDATE OF normalized_email, verified_at, user_id ON user_emails FOR EACH ROW EXECUTE FUNCTION enforce_active_verified_email_uniqueness();
+CREATE TRIGGER user_emails_claim_active_verified BEFORE INSERT OR UPDATE OF normalized_email, verified_at, user_id ON user_emails FOR EACH ROW EXECUTE FUNCTION claim_active_verified_email();
+
+CREATE OR REPLACE FUNCTION release_active_verified_email() RETURNS TRIGGER LANGUAGE plpgsql AS $$
+BEGIN
+    IF OLD.verified_at IS NOT NULL AND NOT EXISTS (
+        SELECT 1 FROM user_emails e JOIN users u ON u.id=e.user_id
+        WHERE e.user_id=OLD.user_id AND e.normalized_email=OLD.normalized_email
+          AND e.verified_at IS NOT NULL AND e.id<>OLD.id AND u.status='active'
+    ) THEN DELETE FROM active_verified_email_ownership WHERE normalized_email=OLD.normalized_email AND user_id=OLD.user_id; END IF;
+    RETURN OLD;
+END $$;
+CREATE TRIGGER user_emails_release_active_verified AFTER DELETE OR UPDATE OF normalized_email, verified_at, user_id ON user_emails FOR EACH ROW EXECUTE FUNCTION release_active_verified_email();
+
+CREATE OR REPLACE FUNCTION synchronize_user_email_ownership() RETURNS TRIGGER LANGUAGE plpgsql AS $$
+DECLARE address TEXT;
+BEGIN
+    IF NEW.status='disabled' THEN DELETE FROM active_verified_email_ownership WHERE user_id=NEW.id;
+    ELSIF OLD.status='disabled' AND NEW.status='active' THEN
+        FOR address IN SELECT DISTINCT normalized_email FROM user_emails WHERE user_id=NEW.id AND verified_at IS NOT NULL LOOP
+            INSERT INTO active_verified_email_ownership(normalized_email,user_id) VALUES(address,NEW.id)
+            ON CONFLICT(normalized_email) DO UPDATE SET user_id=EXCLUDED.user_id WHERE active_verified_email_ownership.user_id=EXCLUDED.user_id;
+            IF NOT FOUND THEN RAISE EXCEPTION 'verified email already belongs to an active account' USING ERRCODE='unique_violation'; END IF;
+        END LOOP;
+    END IF;
+    RETURN NEW;
+END $$;
+CREATE TRIGGER users_synchronize_email_ownership BEFORE UPDATE OF status ON users FOR EACH ROW EXECUTE FUNCTION synchronize_user_email_ownership();
+
+CREATE OR REPLACE FUNCTION enforce_primary_verified_email() RETURNS TRIGGER LANGUAGE plpgsql AS $$
+DECLARE affected UUID := COALESCE(NEW.user_id, OLD.user_id);
+BEGIN
+    IF EXISTS (SELECT 1 FROM user_emails WHERE user_id=affected AND verified_at IS NOT NULL)
+       AND (SELECT count(*) FROM user_emails WHERE user_id=affected AND verified_at IS NOT NULL AND is_primary) <> 1
+    THEN RAISE EXCEPTION 'verified emails require exactly one primary' USING ERRCODE='check_violation'; END IF;
+    RETURN COALESCE(NEW, OLD);
+END $$;
+CREATE CONSTRAINT TRIGGER user_emails_exactly_one_primary AFTER INSERT OR UPDATE OR DELETE ON user_emails DEFERRABLE INITIALLY DEFERRED FOR EACH ROW EXECUTE FUNCTION enforce_primary_verified_email();
 
 CREATE TABLE sessions (
     id UUID PRIMARY KEY,

@@ -1,6 +1,11 @@
 //! Domain repository handles backed by a private pool or transaction connection.
 
-use sqlx::{PgConnection, PgPool};
+use crate::{
+    AppendAuditEvent, AppendInternalEvent, DatabaseError, InsertSession, InsertUser,
+    InsertVerifiedEmail, StoredEmail, StoredSession, StoredUser, UpdateUserProfile,
+};
+use piquel_auth_protocol::{AccountStatus, SessionId, UserId};
+use sqlx::{PgConnection, PgPool, Row};
 
 #[allow(dead_code)]
 pub(crate) enum RepositoryExecutor<'a> {
@@ -39,3 +44,246 @@ repository!(OidcRepository);
 repository!(TokenRepository);
 repository!(FederationRepository);
 repository!(ServiceIdentityRepository);
+
+macro_rules! fetch_optional {
+    ($self:expr, $query:expr) => {{
+        match &mut $self.executor {
+            RepositoryExecutor::Pool(pool) => $query.fetch_optional(*pool).await,
+            RepositoryExecutor::Connection(connection) => {
+                $query.fetch_optional(&mut **connection).await
+            }
+        }
+        .map_err(crate::error::map_error)
+    }};
+}
+macro_rules! fetch_one {
+    ($self:expr, $query:expr) => {{
+        match &mut $self.executor {
+            RepositoryExecutor::Pool(pool) => $query.fetch_one(*pool).await,
+            RepositoryExecutor::Connection(connection) => $query.fetch_one(&mut **connection).await,
+        }
+        .map_err(crate::error::map_error)
+    }};
+}
+macro_rules! execute {
+    ($self:expr, $query:expr) => {{
+        match &mut $self.executor {
+            RepositoryExecutor::Pool(pool) => $query.execute(*pool).await,
+            RepositoryExecutor::Connection(connection) => $query.execute(&mut **connection).await,
+        }
+        .map_err(crate::error::map_error)
+    }};
+}
+
+fn stored_user(row: &sqlx::postgres::PgRow) -> Result<StoredUser, DatabaseError> {
+    let status = match row
+        .try_get::<String, _>("status")
+        .map_err(|_| DatabaseError::InvalidStoredData)?
+        .as_str()
+    {
+        "active" => AccountStatus::Active,
+        "disabled" => AccountStatus::Disabled,
+        _ => return Err(DatabaseError::InvalidStoredData),
+    };
+    let version = u64::try_from(
+        row.try_get::<i64, _>("profile_version")
+            .map_err(|_| DatabaseError::InvalidStoredData)?,
+    )
+    .map_err(|_| DatabaseError::InvalidStoredData)?;
+    Ok(StoredUser {
+        id: UserId::from_uuid(
+            row.try_get("id")
+                .map_err(|_| DatabaseError::InvalidStoredData)?,
+        )
+        .map_err(|_| DatabaseError::InvalidStoredData)?,
+        username: row
+            .try_get("username")
+            .map_err(|_| DatabaseError::InvalidStoredData)?,
+        display_name: row
+            .try_get("display_name")
+            .map_err(|_| DatabaseError::InvalidStoredData)?,
+        profile_version: version,
+        status,
+        created_at: row
+            .try_get("created_at")
+            .map_err(|_| DatabaseError::InvalidStoredData)?,
+        updated_at: row
+            .try_get("updated_at")
+            .map_err(|_| DatabaseError::InvalidStoredData)?,
+    })
+}
+
+impl UserRepository<'_> {
+    pub async fn insert(&mut self, input: &InsertUser) -> Result<StoredUser, DatabaseError> {
+        let row = fetch_one!(self, sqlx::query("INSERT INTO users (id, username, display_name) VALUES ($1, $2, $3) RETURNING id, username, display_name, profile_version, status, created_at, updated_at").bind(input.id.as_uuid()).bind(&input.username).bind(&input.display_name))?;
+        stored_user(&row)
+    }
+    pub async fn find_by_id(&mut self, id: UserId) -> Result<Option<StoredUser>, DatabaseError> {
+        fetch_optional!(self, sqlx::query("SELECT id, username, display_name, profile_version, status, created_at, updated_at FROM users WHERE id = $1").bind(id.as_uuid()))?.map(|row| stored_user(&row)).transpose()
+    }
+    pub async fn update_profile(
+        &mut self,
+        input: &UpdateUserProfile,
+    ) -> Result<StoredUser, DatabaseError> {
+        let expected =
+            i64::try_from(input.expected_version).map_err(|_| DatabaseError::Conflict)?;
+        let row = fetch_optional!(self, sqlx::query("UPDATE users SET username = $1, display_name = $2, profile_version = profile_version + 1, updated_at = now() WHERE id = $3 AND profile_version = $4 RETURNING id, username, display_name, profile_version, status, created_at, updated_at").bind(&input.username).bind(&input.display_name).bind(input.id.as_uuid()).bind(expected))?.ok_or(DatabaseError::Conflict)?;
+        stored_user(&row)
+    }
+    pub async fn set_status(
+        &mut self,
+        id: UserId,
+        status: AccountStatus,
+    ) -> Result<bool, DatabaseError> {
+        let status = match status {
+            AccountStatus::Active => "active",
+            AccountStatus::Disabled => "disabled",
+        };
+        Ok(execute!(
+            self,
+            sqlx::query(
+                "UPDATE users SET status = $1, updated_at = now() WHERE id = $2 AND status <> $1"
+            )
+            .bind(status)
+            .bind(id.as_uuid())
+        )?
+        .rows_affected()
+            == 1)
+    }
+}
+
+impl EmailRepository<'_> {
+    pub async fn insert_verified(
+        &mut self,
+        input: &InsertVerifiedEmail,
+    ) -> Result<StoredEmail, DatabaseError> {
+        let row = fetch_one!(self, sqlx::query("INSERT INTO user_emails (id, user_id, normalized_email, verified_at, is_primary) VALUES ($1, $2, $3, $4, $5) RETURNING id, user_id, normalized_email, verified_at, is_primary").bind(input.id.as_uuid()).bind(input.user_id.as_uuid()).bind(&input.normalized_email).bind(input.verified_at).bind(input.is_primary))?;
+        Ok(StoredEmail {
+            id: piquel_auth_protocol::TokenId::from_uuid(
+                row.try_get("id")
+                    .map_err(|_| DatabaseError::InvalidStoredData)?,
+            )
+            .map_err(|_| DatabaseError::InvalidStoredData)?,
+            user_id: UserId::from_uuid(
+                row.try_get("user_id")
+                    .map_err(|_| DatabaseError::InvalidStoredData)?,
+            )
+            .map_err(|_| DatabaseError::InvalidStoredData)?,
+            normalized_email: row
+                .try_get("normalized_email")
+                .map_err(|_| DatabaseError::InvalidStoredData)?,
+            verified_at: row
+                .try_get("verified_at")
+                .map_err(|_| DatabaseError::InvalidStoredData)?,
+            is_primary: row
+                .try_get("is_primary")
+                .map_err(|_| DatabaseError::InvalidStoredData)?,
+        })
+    }
+    pub async fn find_active_verified(
+        &mut self,
+        normalized: &str,
+    ) -> Result<Option<StoredEmail>, DatabaseError> {
+        let row = fetch_optional!(self, sqlx::query("SELECT e.id, e.user_id, e.normalized_email, e.verified_at, e.is_primary FROM active_verified_email_ownership o JOIN user_emails e ON e.user_id = o.user_id AND e.normalized_email = o.normalized_email AND e.verified_at IS NOT NULL WHERE o.normalized_email = $1 ORDER BY e.is_primary DESC, e.created_at LIMIT 1").bind(normalized))?;
+        row.map(|row| {
+            Ok(StoredEmail {
+                id: piquel_auth_protocol::TokenId::from_uuid(
+                    row.try_get("id")
+                        .map_err(|_| DatabaseError::InvalidStoredData)?,
+                )
+                .map_err(|_| DatabaseError::InvalidStoredData)?,
+                user_id: UserId::from_uuid(
+                    row.try_get("user_id")
+                        .map_err(|_| DatabaseError::InvalidStoredData)?,
+                )
+                .map_err(|_| DatabaseError::InvalidStoredData)?,
+                normalized_email: row
+                    .try_get("normalized_email")
+                    .map_err(|_| DatabaseError::InvalidStoredData)?,
+                verified_at: row
+                    .try_get("verified_at")
+                    .map_err(|_| DatabaseError::InvalidStoredData)?,
+                is_primary: row
+                    .try_get("is_primary")
+                    .map_err(|_| DatabaseError::InvalidStoredData)?,
+            })
+        })
+        .transpose()
+    }
+}
+
+impl SessionRepository<'_> {
+    pub async fn insert(&mut self, input: &InsertSession) -> Result<StoredSession, DatabaseError> {
+        let methods = serde_json::to_value(&input.authentication_methods)
+            .map_err(|_| DatabaseError::Internal)?;
+        let row = fetch_one!(self, sqlx::query("INSERT INTO sessions (id, user_id, authentication_methods, authenticated_at, expires_at, last_seen_at, user_agent_family) VALUES ($1,$2,$3,$4,$5,$4,$6) RETURNING id,user_id,authentication_methods,authenticated_at,expires_at,last_seen_at,revoked_at").bind(input.id.as_uuid()).bind(input.user_id.as_uuid()).bind(methods).bind(input.authenticated_at).bind(input.expires_at).bind(&input.user_agent_family))?;
+        stored_session(&row)
+    }
+    pub async fn find_by_id(
+        &mut self,
+        id: SessionId,
+    ) -> Result<Option<StoredSession>, DatabaseError> {
+        fetch_optional!(self, sqlx::query("SELECT id,user_id,authentication_methods,authenticated_at,expires_at,last_seen_at,revoked_at FROM sessions WHERE id=$1").bind(id.as_uuid()))?.map(|row| stored_session(&row)).transpose()
+    }
+    pub async fn touch(&mut self, id: SessionId) -> Result<bool, DatabaseError> {
+        Ok(execute!(self, sqlx::query("UPDATE sessions SET last_seen_at=now() WHERE id=$1 AND revoked_at IS NULL AND expires_at>now()").bind(id.as_uuid()))?.rows_affected()==1)
+    }
+    pub async fn revoke(&mut self, id: SessionId) -> Result<bool, DatabaseError> {
+        Ok(execute!(
+            self,
+            sqlx::query("UPDATE sessions SET revoked_at=now() WHERE id=$1 AND revoked_at IS NULL")
+                .bind(id.as_uuid())
+        )?
+        .rows_affected()
+            == 1)
+    }
+}
+fn stored_session(row: &sqlx::postgres::PgRow) -> Result<StoredSession, DatabaseError> {
+    let methods: serde_json::Value = row
+        .try_get("authentication_methods")
+        .map_err(|_| DatabaseError::InvalidStoredData)?;
+    Ok(StoredSession {
+        id: SessionId::from_uuid(
+            row.try_get("id")
+                .map_err(|_| DatabaseError::InvalidStoredData)?,
+        )
+        .map_err(|_| DatabaseError::InvalidStoredData)?,
+        user_id: UserId::from_uuid(
+            row.try_get("user_id")
+                .map_err(|_| DatabaseError::InvalidStoredData)?,
+        )
+        .map_err(|_| DatabaseError::InvalidStoredData)?,
+        authentication_methods: serde_json::from_value(methods)
+            .map_err(|_| DatabaseError::InvalidStoredData)?,
+        authenticated_at: row
+            .try_get("authenticated_at")
+            .map_err(|_| DatabaseError::InvalidStoredData)?,
+        expires_at: row
+            .try_get("expires_at")
+            .map_err(|_| DatabaseError::InvalidStoredData)?,
+        last_seen_at: row
+            .try_get("last_seen_at")
+            .map_err(|_| DatabaseError::InvalidStoredData)?,
+        revoked_at: row
+            .try_get("revoked_at")
+            .map_err(|_| DatabaseError::InvalidStoredData)?,
+    })
+}
+
+impl AuditEventRepository<'_> {
+    pub async fn append(&mut self, input: &AppendAuditEvent) -> Result<(), DatabaseError> {
+        execute!(self, sqlx::query("INSERT INTO security_audit_log (id,user_id,action,outcome,request_metadata) VALUES ($1,$2,$3,$4,$5)").bind(input.id.as_uuid()).bind(input.user_id.map(UserId::as_uuid)).bind(&input.action).bind(&input.outcome).bind(&input.request_metadata))?;
+        Ok(())
+    }
+}
+impl InternalEventRepository<'_> {
+    pub async fn append(&mut self, input: &AppendInternalEvent) -> Result<u64, DatabaseError> {
+        let version = i32::try_from(input.schema_version).map_err(|_| DatabaseError::Internal)?;
+        let row = fetch_one!(self, sqlx::query("WITH locked AS (SELECT pg_advisory_xact_lock(hashtextextended($1 || ':' || $2::text, 0))), next AS (SELECT COALESCE(MAX(aggregate_sequence),0)+1 AS sequence FROM internal_events, locked WHERE aggregate_type=$1 AND aggregate_id=$2) INSERT INTO internal_events (id,aggregate_type,aggregate_id,aggregate_sequence,event_type,schema_version,payload) SELECT $3,$1,$2,sequence,$4,$5,$6 FROM next RETURNING aggregate_sequence").bind(&input.aggregate_type).bind(input.aggregate_id.as_uuid()).bind(input.id.as_uuid()).bind(&input.event_type).bind(version).bind(&input.payload))?;
+        u64::try_from(
+            row.try_get::<i64, _>("aggregate_sequence")
+                .map_err(|_| DatabaseError::InvalidStoredData)?,
+        )
+        .map_err(|_| DatabaseError::InvalidStoredData)
+    }
+}
