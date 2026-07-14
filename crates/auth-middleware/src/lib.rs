@@ -30,13 +30,43 @@ const UNKNOWN_KID_BACKOFF: Duration = Duration::from_secs(30);
 /// A verified user identity, never a raw JWT.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct AuthenticatedUser {
-    pub user_id: UserId,
-    pub session_id: SessionId,
-    pub token_id: TokenId,
-    pub client_id: ClientId,
-    pub audience: Audience,
-    pub scopes: BTreeSet<String>,
-    pub profile_version: u64,
+    user_id: UserId,
+    session_id: SessionId,
+    token_id: TokenId,
+    client_id: ClientId,
+    audience: Audience,
+    scopes: BTreeSet<String>,
+    profile_version: u64,
+}
+impl AuthenticatedUser {
+    #[must_use]
+    pub const fn user_id(&self) -> UserId {
+        self.user_id
+    }
+    #[must_use]
+    pub const fn session_id(&self) -> SessionId {
+        self.session_id
+    }
+    #[must_use]
+    pub const fn token_id(&self) -> TokenId {
+        self.token_id
+    }
+    #[must_use]
+    pub fn client_id(&self) -> &ClientId {
+        &self.client_id
+    }
+    #[must_use]
+    pub fn audience(&self) -> &Audience {
+        &self.audience
+    }
+    #[must_use]
+    pub fn scopes(&self) -> &BTreeSet<String> {
+        &self.scopes
+    }
+    #[must_use]
+    pub const fn profile_version(&self) -> u64 {
+        self.profile_version
+    }
 }
 
 #[derive(Debug, Error)]
@@ -293,7 +323,7 @@ impl AuthMiddleware {
     ///
     /// Returns `MissingScope` when the verified token lacks the requested scope.
     pub fn require_scope(user: &AuthenticatedUser, scope: &str) -> Result<(), AuthenticationError> {
-        if user.scopes.contains(scope) {
+        if user.scopes().contains(scope) {
             Ok(())
         } else {
             Err(AuthenticationError::MissingScope)
