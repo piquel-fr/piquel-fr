@@ -1,0 +1,23 @@
+syntax = "proto3";
+package piquel.auth.v1;
+
+service AuthService {
+  rpc GetUser(GetUserRequest) returns (GetUserResponse);
+  rpc BatchGetUsers(BatchGetUsersRequest) returns (BatchGetUsersResponse);
+  rpc GetSessionStatus(GetSessionStatusRequest) returns (GetSessionStatusResponse);
+  rpc RevokeSession(RevokeSessionRequest) returns (RevokeSessionResponse);
+  rpc RevokeAllUserSessions(RevokeAllUserSessionsRequest) returns (RevokeAllUserSessionsResponse);
+  rpc GetServiceConfiguration(GetServiceConfigurationRequest) returns (GetServiceConfigurationResponse);
+}
+message GetUserRequest { string user_id = 1; reserved 2; reserved "include_private_fields"; }
+message GetUserResponse { string user_id = 1; string display_name = 2; string account_status = 3; }
+message BatchGetUsersRequest { repeated string user_ids = 1; }
+message BatchGetUsersResponse { repeated GetUserResponse users = 1; }
+message GetSessionStatusRequest { string session_id = 1; }
+message GetSessionStatusResponse { bool active = 1; string user_id = 2; }
+message RevokeSessionRequest { string session_id = 1; }
+message RevokeSessionResponse { bool revoked = 1; }
+message RevokeAllUserSessionsRequest { string user_id = 1; }
+message RevokeAllUserSessionsResponse { uint32 revoked_count = 1; }
+message GetServiceConfigurationRequest {}
+message GetServiceConfigurationResponse { string issuer = 1; string jwks_uri = 2; }
