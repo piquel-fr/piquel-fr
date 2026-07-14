@@ -7,6 +7,9 @@ check:
 test:
     @cargo nextest run --workspace
 
+doc-test:
+    @cargo test --doc --workspace
+
 migrate:
     cargo run -p piquel-repository --bin migrate
 
