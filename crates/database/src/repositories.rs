@@ -329,7 +329,7 @@ impl PasskeyRepository<'_> {
         let rows = match &mut self.executor {
             RepositoryExecutor::Pool(pool) => sqlx::query("SELECT id,credential_id,user_id,credential,friendly_name,revoked_at FROM passkey_credentials WHERE user_id=$1 AND revoked_at IS NULL ORDER BY created_at LIMIT $2").bind(user_id.as_uuid()).bind(limit).fetch_all(*pool).await,
             RepositoryExecutor::Connection(connection) => sqlx::query("SELECT id,credential_id,user_id,credential,friendly_name,revoked_at FROM passkey_credentials WHERE user_id=$1 AND revoked_at IS NULL ORDER BY created_at LIMIT $2").bind(user_id.as_uuid()).bind(limit).fetch_all(&mut **connection).await,
-        }.map_err(crate::error::map_error)?;
+        }.map_err(Into::<DatabaseError>::into)?;
         rows.iter().map(stored_passkey).collect()
     }
 
