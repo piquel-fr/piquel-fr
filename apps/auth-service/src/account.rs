@@ -93,6 +93,46 @@ pub(super) async fn create(
     Ok(user)
 }
 
+/// Disables an account and invalidates every central session atomically.
+///
+/// Later token plans extend this same transaction with refresh-family
+/// revocation; callers must not update account status directly.
+pub(super) async fn disable(database: &Database, user_id: UserId) -> Result<bool, AccountError> {
+    let mut transaction = database.begin().await?;
+    let changed = transaction
+        .users()
+        .set_status(user_id, AccountStatus::Disabled)
+        .await?;
+    if !changed {
+        transaction.rollback().await?;
+        return Ok(false);
+    }
+    transaction.sessions().revoke_all_for_user(user_id).await?;
+    transaction
+        .audit_events()
+        .append(&AppendAuditEvent {
+            id: TokenId::new(),
+            user_id: Some(user_id),
+            action: "account.disable".into(),
+            outcome: "success".into(),
+            request_metadata: serde_json::json!({}),
+        })
+        .await?;
+    transaction
+        .internal_events()
+        .append(&AppendInternalEvent {
+            id: TokenId::new(),
+            aggregate_type: "user".into(),
+            aggregate_id: user_id,
+            event_type: "account.disabled".into(),
+            schema_version: 1,
+            payload: serde_json::json!({}),
+        })
+        .await?;
+    transaction.commit().await?;
+    Ok(true)
+}
+
 /// Checks the deliberately narrow username policy used for initial accounts.
 pub(super) fn validate_username(value: &str) -> Result<(), ()> {
     if !(3..=32).contains(&value.len())

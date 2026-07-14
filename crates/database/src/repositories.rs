@@ -121,6 +121,12 @@ impl UserRepository<'_> {
     pub async fn find_by_id(&mut self, id: UserId) -> Result<Option<StoredUser>, DatabaseError> {
         fetch_optional!(self, sqlx::query("SELECT id, username, display_name, profile_version, status, created_at, updated_at FROM users WHERE id = $1").bind(id.as_uuid()))?.map(|row| stored_user(&row)).transpose()
     }
+    pub async fn find_active_by_username(
+        &mut self,
+        username: &str,
+    ) -> Result<Option<StoredUser>, DatabaseError> {
+        fetch_optional!(self, sqlx::query("SELECT id, username, display_name, profile_version, status, created_at, updated_at FROM users WHERE username = $1 AND status = 'active'").bind(username))?.map(|row| stored_user(&row)).transpose()
+    }
     pub async fn update_profile(
         &mut self,
         input: &UpdateUserProfile,
@@ -216,7 +222,10 @@ impl SessionRepository<'_> {
     pub async fn insert(&mut self, input: &InsertSession) -> Result<StoredSession, DatabaseError> {
         let methods = serde_json::to_value(&input.authentication_methods)
             .map_err(|_| DatabaseError::Internal)?;
-        let row = fetch_one!(self, sqlx::query("INSERT INTO sessions (id, user_id, authentication_methods, authenticated_at, expires_at, last_seen_at, user_agent_family) VALUES ($1,$2,$3,$4,$5,$4,$6) RETURNING id,user_id,authentication_methods,authenticated_at,expires_at,last_seen_at,revoked_at").bind(input.id.as_uuid()).bind(input.user_id.as_uuid()).bind(methods).bind(input.authenticated_at).bind(input.expires_at).bind(&input.user_agent_family))?;
+        // Lock the account row through insertion so disablement and session
+        // creation have a single serialization point. A session can never be
+        // committed for an account that was disabled first.
+        let row = fetch_one!(self, sqlx::query("WITH active_user AS (SELECT id FROM users WHERE id=$2 AND status='active' FOR UPDATE) INSERT INTO sessions (id, user_id, authentication_methods, authenticated_at, expires_at, last_seen_at, user_agent_family) SELECT $1,id,$3,$4,$5,$4,$6 FROM active_user RETURNING id,user_id,authentication_methods,authenticated_at,expires_at,last_seen_at,revoked_at").bind(input.id.as_uuid()).bind(input.user_id.as_uuid()).bind(methods).bind(input.authenticated_at).bind(input.expires_at).bind(&input.user_agent_family))?;
         stored_session(&row)
     }
     pub async fn find_by_id(
@@ -224,6 +233,12 @@ impl SessionRepository<'_> {
         id: SessionId,
     ) -> Result<Option<StoredSession>, DatabaseError> {
         fetch_optional!(self, sqlx::query("SELECT id,user_id,authentication_methods,authenticated_at,expires_at,last_seen_at,revoked_at FROM sessions WHERE id=$1").bind(id.as_uuid()))?.map(|row| stored_session(&row)).transpose()
+    }
+    pub async fn find_active_by_id(
+        &mut self,
+        id: SessionId,
+    ) -> Result<Option<StoredSession>, DatabaseError> {
+        fetch_optional!(self, sqlx::query("SELECT s.id,s.user_id,s.authentication_methods,s.authenticated_at,s.expires_at,s.last_seen_at,s.revoked_at FROM sessions s JOIN users u ON u.id=s.user_id WHERE s.id=$1 AND s.revoked_at IS NULL AND s.expires_at>now() AND u.status='active'").bind(id.as_uuid()))?.map(|row| stored_session(&row)).transpose()
     }
     pub async fn touch(&mut self, id: SessionId) -> Result<bool, DatabaseError> {
         Ok(execute!(self, sqlx::query("UPDATE sessions SET last_seen_at=now() WHERE id=$1 AND revoked_at IS NULL AND expires_at>now()").bind(id.as_uuid()))?.rows_affected()==1)
@@ -236,6 +251,16 @@ impl SessionRepository<'_> {
         )?
         .rows_affected()
             == 1)
+    }
+    pub async fn revoke_all_for_user(&mut self, user_id: UserId) -> Result<u64, DatabaseError> {
+        Ok(execute!(
+            self,
+            sqlx::query(
+                "UPDATE sessions SET revoked_at=now() WHERE user_id=$1 AND revoked_at IS NULL"
+            )
+            .bind(user_id.as_uuid())
+        )?
+        .rows_affected())
     }
 }
 fn stored_session(row: &sqlx::postgres::PgRow) -> Result<StoredSession, DatabaseError> {
