@@ -65,6 +65,7 @@ dependencies = [
  "anyhow",
  "async-trait",
  "axum",
+ "piquel-auth-protocol",
  "piquel-configuration",
  "piquel-repository",
  "piquel-telemetry",
@@ -72,6 +73,7 @@ dependencies = [
  "tokio",
  "tower",
  "tracing",
+ "unicode-normalization",
 ]
 
 [[package]]

@@ -7,6 +7,17 @@ use piquel_configuration::{ConfigurationError, PublicUrl, SecretReference, socke
 use piquel_repository::{Database, DatabaseConfig};
 use std::{env, net::SocketAddr, sync::Arc, time::Duration};
 
+#[allow(dead_code)]
+mod account;
+#[allow(dead_code)]
+mod audit;
+#[allow(dead_code)]
+mod email;
+#[allow(dead_code)]
+mod event_log;
+#[allow(dead_code)]
+mod session;
+
 /// Typed auth-service configuration.
 #[derive(Clone, Debug)]
 pub struct AuthConfig {
