@@ -109,6 +109,7 @@ async fn identity_transactions_and_concurrency_hold() {
 
     let first = insert_user(&database, "first").await;
     let second = insert_user(&database, "second").await;
+<<<<<<< HEAD
 
     let ceremony_id = TokenId::new();
     database
@@ -166,6 +167,8 @@ async fn identity_transactions_and_concurrency_hold() {
         Err(DatabaseError::Conflict)
     ));
 
+=======
+>>>>>>> main
     let normalized = format!("race-{}@example.com", UserId::new());
     let one = database.clone();
     let two = database.clone();
