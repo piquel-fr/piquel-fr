@@ -16,6 +16,8 @@ mod email;
 #[allow(dead_code)]
 mod event_log;
 #[allow(dead_code)]
+mod passkey;
+#[allow(dead_code)]
 mod session;
 
 /// Typed auth-service configuration.
