@@ -1,7 +1,8 @@
 #![allow(missing_docs)]
 
 use auth_service::{
-    AuthConfig, Es256KeyProvider, OidcApplication, PasskeyApplication, ProductionReadiness, router,
+    AuthConfig, Es256KeyProvider, FederationApplication, OidcApplication, PasskeyApplication,
+    ProductionReadiness, router,
 };
 use piquel_repository::Database;
 use std::{net::SocketAddr, sync::Arc};
@@ -47,6 +48,21 @@ async fn main() -> anyhow::Result<()> {
         )
     }
     .map_err(|()| anyhow::anyhow!("invalid OIDC configuration"))?;
+    let federation = if config.development_mode {
+        FederationApplication::new_development(
+            database.clone(),
+            config.public_base_url.as_url(),
+            config.github,
+            config.google,
+        )
+    } else {
+        FederationApplication::new(
+            database.clone(),
+            config.public_base_url.as_url(),
+            config.github,
+            config.google,
+        )
+    }?;
     let listener = tokio::net::TcpListener::bind(listener_address).await?;
     tracing::info!(%listener_address, "auth service listening");
     axum::serve(
@@ -55,6 +71,7 @@ async fn main() -> anyhow::Result<()> {
             Arc::new(ProductionReadiness::new(database, config.key_provider)),
             Some(passkeys),
             Some(oidc),
+            Some(federation),
         ),
     )
     .with_graceful_shutdown(shutdown_signal())

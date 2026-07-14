@@ -13,6 +13,7 @@ axum.workspace = true
 base64.workspace = true
 chrono.workspace = true
 hmac.workspace = true
+jsonwebtoken.workspace = true
 openssl.workspace = true
 p256.workspace = true
 piquel-auth-protocol = { path = "../../crates/auth-protocol" }
@@ -23,6 +24,7 @@ serde.workspace = true
 serde_json.workspace = true
 sha2.workspace = true
 rand.workspace = true
+reqwest.workspace = true
 thiserror.workspace = true
 tokio.workspace = true
 tracing.workspace = true

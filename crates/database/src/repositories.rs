@@ -2,11 +2,12 @@
 
 use crate::{
     AppendAuditEvent, AppendInternalEvent, BootstrapOidcClient, ConsumedAuthorizationCode,
-    ConsumedCeremony, DatabaseError, InsertAuthorizationCode, InsertAuthorizationRequest,
-    InsertCeremony, InsertPasskey, InsertRefreshFamily, InsertRefreshToken, InsertSession,
-    InsertUser, InsertVerifiedEmail, RefreshRotationError, RotatedRefreshToken,
-    StoredAuthorizationRequest, StoredEmail, StoredOidcClient, StoredPasskey, StoredSession,
-    StoredUser, UpdateUserProfile,
+    ConsumedCeremony, ConsumedFederationTransaction, DatabaseError, InsertAuthorizationCode,
+    InsertAuthorizationRequest, InsertCeremony, InsertExternalIdentity,
+    InsertFederationTransaction, InsertPasskey, InsertRefreshFamily, InsertRefreshToken,
+    InsertSession, InsertUser, InsertVerifiedEmail, RefreshRotationError, RotatedRefreshToken,
+    StoredAuthorizationRequest, StoredEmail, StoredExternalIdentity, StoredOidcClient,
+    StoredPasskey, StoredSession, StoredUser, UpdateUserProfile,
 };
 use piquel_auth_protocol::{AccountStatus, SessionId, TokenId, UserId};
 use sqlx::{PgConnection, PgPool, Row};
@@ -225,6 +226,14 @@ impl EmailRepository<'_> {
             })
         })
         .transpose()
+    }
+
+    pub async fn find_users_by_verified_email(
+        &mut self,
+        normalized: &str,
+    ) -> Result<Vec<StoredUser>, DatabaseError> {
+        let rows=match &mut self.executor{RepositoryExecutor::Pool(pool)=>sqlx::query("SELECT DISTINCT u.id,u.username,u.display_name,u.profile_version,u.status,u.created_at,u.updated_at FROM user_emails e JOIN users u ON u.id=e.user_id WHERE e.normalized_email=$1 AND e.verified_at IS NOT NULL ORDER BY u.id").bind(normalized).fetch_all(*pool).await,RepositoryExecutor::Connection(connection)=>sqlx::query("SELECT DISTINCT u.id,u.username,u.display_name,u.profile_version,u.status,u.created_at,u.updated_at FROM user_emails e JOIN users u ON u.id=e.user_id WHERE e.normalized_email=$1 AND e.verified_at IS NOT NULL ORDER BY u.id").bind(normalized).fetch_all(&mut **connection).await}.map_err(crate::error::map_error)?;
+        rows.iter().map(stored_user).collect()
     }
 }
 
@@ -603,6 +612,85 @@ impl TokenRepository<'_> {
     pub async fn revoke_all_for_user(&mut self, user_id: UserId) -> Result<u64, DatabaseError> {
         Ok(execute!(self, sqlx::query("UPDATE refresh_token_families SET revoked_at=now() WHERE user_id=$1 AND revoked_at IS NULL").bind(user_id.as_uuid()))?.rows_affected())
     }
+}
+
+impl FederationRepository<'_> {
+    pub async fn insert_transaction(
+        &mut self,
+        input: &InsertFederationTransaction,
+    ) -> Result<(), DatabaseError> {
+        execute!(self,sqlx::query("INSERT INTO federation_transactions(id,provider_name,state_digest,browser_digest,nonce,pkce_verifier,expires_at) VALUES($1,$2,$3,$4,$5,$6,$7)").bind(input.id.as_uuid()).bind(&input.provider).bind(&input.state_digest).bind(&input.browser_digest).bind(&input.nonce).bind(&input.pkce_verifier).bind(input.expires_at))?;
+        Ok(())
+    }
+    pub async fn consume_transaction(
+        &mut self,
+        provider: &str,
+        state_digest: &[u8],
+        browser_digest: &[u8],
+    ) -> Result<ConsumedFederationTransaction, DatabaseError> {
+        let row=fetch_optional!(self,sqlx::query("UPDATE federation_transactions SET consumed_at=now() WHERE provider_name=$1 AND state_digest=$2 AND browser_digest=$3 AND consumed_at IS NULL AND expires_at>now() RETURNING nonce,pkce_verifier").bind(provider).bind(state_digest).bind(browser_digest))?.ok_or(DatabaseError::NotFound)?;
+        Ok(ConsumedFederationTransaction {
+            nonce: row
+                .try_get("nonce")
+                .map_err(|_| DatabaseError::InvalidStoredData)?,
+            pkce_verifier: row
+                .try_get("pkce_verifier")
+                .map_err(|_| DatabaseError::InvalidStoredData)?,
+        })
+    }
+    pub async fn find_active(
+        &mut self,
+        issuer: &str,
+        subject: &str,
+    ) -> Result<Option<StoredExternalIdentity>, DatabaseError> {
+        fetch_optional!(self,sqlx::query("SELECT id,user_id,provider_name,issuer,subject,linked_email FROM external_login_identities WHERE issuer=$1 AND subject=$2 AND revoked_at IS NULL").bind(issuer).bind(subject))?.map(|row|stored_external_identity(&row)).transpose()
+    }
+    pub async fn insert_identity(
+        &mut self,
+        input: &InsertExternalIdentity,
+    ) -> Result<StoredExternalIdentity, DatabaseError> {
+        let row=fetch_one!(self,sqlx::query("INSERT INTO external_login_identities(id,user_id,provider_name,issuer,subject,linked_email) VALUES($1,$2,$3,$4,$5,$6) RETURNING id,user_id,provider_name,issuer,subject,linked_email").bind(input.id.as_uuid()).bind(input.user_id.as_uuid()).bind(&input.provider).bind(&input.issuer).bind(&input.subject).bind(&input.linked_email))?;
+        stored_external_identity(&row)
+    }
+    pub async fn record_login(&mut self, id: TokenId) -> Result<(), DatabaseError> {
+        execute!(self,sqlx::query("UPDATE external_login_identities SET last_login_at=now() WHERE id=$1 AND revoked_at IS NULL").bind(id.as_uuid()))?;
+        Ok(())
+    }
+    pub async fn list_active(
+        &mut self,
+        user_id: UserId,
+    ) -> Result<Vec<StoredExternalIdentity>, DatabaseError> {
+        let rows=match &mut self.executor{RepositoryExecutor::Pool(pool)=>sqlx::query("SELECT id,user_id,provider_name,issuer,subject,linked_email FROM external_login_identities WHERE user_id=$1 AND revoked_at IS NULL ORDER BY linked_at").bind(user_id.as_uuid()).fetch_all(*pool).await,RepositoryExecutor::Connection(connection)=>sqlx::query("SELECT id,user_id,provider_name,issuer,subject,linked_email FROM external_login_identities WHERE user_id=$1 AND revoked_at IS NULL ORDER BY linked_at").bind(user_id.as_uuid()).fetch_all(&mut **connection).await}.map_err(crate::error::map_error)?;
+        rows.iter().map(stored_external_identity).collect()
+    }
+}
+fn stored_external_identity(
+    row: &sqlx::postgres::PgRow,
+) -> Result<StoredExternalIdentity, DatabaseError> {
+    Ok(StoredExternalIdentity {
+        id: TokenId::from_uuid(
+            row.try_get("id")
+                .map_err(|_| DatabaseError::InvalidStoredData)?,
+        )
+        .map_err(|_| DatabaseError::InvalidStoredData)?,
+        user_id: UserId::from_uuid(
+            row.try_get("user_id")
+                .map_err(|_| DatabaseError::InvalidStoredData)?,
+        )
+        .map_err(|_| DatabaseError::InvalidStoredData)?,
+        provider: row
+            .try_get("provider_name")
+            .map_err(|_| DatabaseError::InvalidStoredData)?,
+        issuer: row
+            .try_get("issuer")
+            .map_err(|_| DatabaseError::InvalidStoredData)?,
+        subject: row
+            .try_get("subject")
+            .map_err(|_| DatabaseError::InvalidStoredData)?,
+        linked_email: row
+            .try_get("linked_email")
+            .map_err(|_| DatabaseError::InvalidStoredData)?,
+    })
 }
 fn stored_session(row: &sqlx::postgres::PgRow) -> Result<StoredSession, DatabaseError> {
     let methods: serde_json::Value = row

@@ -17,6 +17,7 @@ mod email;
 mod event_log;
 #[allow(dead_code)]
 mod federation;
+pub use federation::{FederationApplication, ProviderConfiguration};
 #[allow(dead_code)]
 mod oidc;
 pub use oidc::{Es256KeyProvider, OidcApplication};
@@ -45,6 +46,10 @@ pub struct AuthConfig {
     pub development_mode: bool,
     /// Stable identifier published with the active signing key.
     pub signing_key_id: String,
+    /// GitHub OAuth client configuration.
+    pub github: ProviderConfiguration,
+    /// Google OIDC client configuration.
+    pub google: ProviderConfiguration,
 }
 impl AuthConfig {
     /// Loads the minimum service configuration from the environment.
@@ -84,6 +89,14 @@ impl AuthConfig {
             webauthn_rp_id: required("AUTH_WEBAUTHN_RP_ID")?,
             development_mode: development,
             signing_key_id: required("AUTH_SIGNING_KEY_ID")?,
+            github: ProviderConfiguration {
+                client_id: required("AUTH_GITHUB_CLIENT_ID")?,
+                client_secret: SecretReference::parse(&required("AUTH_GITHUB_CLIENT_SECRET")?)?,
+            },
+            google: ProviderConfiguration {
+                client_id: required("AUTH_GOOGLE_CLIENT_ID")?,
+                client_secret: SecretReference::parse(&required("AUTH_GOOGLE_CLIENT_SECRET")?)?,
+            },
         })
     }
 }
@@ -132,6 +145,7 @@ pub fn router(
     readiness: Arc<dyn Readiness>,
     passkeys: Option<PasskeyApplication>,
     oidc: Option<OidcApplication>,
+    federation: Option<FederationApplication>,
 ) -> Router {
     let health = Router::new()
         .route("/health/live", get(|| async { StatusCode::NO_CONTENT }))
@@ -140,7 +154,10 @@ pub fn router(
     let router = passkeys.map_or(health.clone(), |passkeys| {
         health.merge(passkey::routes(passkeys))
     });
-    oidc.map_or(router.clone(), |oidc| router.merge(oidc::routes(oidc)))
+    let router = oidc.map_or(router.clone(), |oidc| router.merge(oidc::routes(oidc)));
+    federation.map_or(router.clone(), |federation| {
+        router.merge(federation::routes(federation))
+    })
 }
 
 async fn ready(State(state): State<AppState>) -> impl IntoResponse {
@@ -165,7 +182,7 @@ mod tests {
 
     #[tokio::test]
     async fn liveness_has_no_dependencies_and_readiness_fails_closed() {
-        let app = router(Arc::new(FixedReadiness(false)), None, None);
+        let app = router(Arc::new(FixedReadiness(false)), None, None, None);
         let live = app
             .clone()
             .oneshot(
@@ -189,7 +206,7 @@ mod tests {
 
     #[tokio::test]
     async fn readiness_succeeds_with_test_substitutes() {
-        let response = router(Arc::new(FixedReadiness(true)), None, None)
+        let response = router(Arc::new(FixedReadiness(true)), None, None, None)
             .oneshot(
                 axum::http::Request::get("/health/ready")
                     .body(axum::body::Body::empty())

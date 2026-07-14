@@ -228,3 +228,37 @@ pub enum RefreshRotationError {
     Replay { user_id: UserId },
     Policy { user_id: UserId },
 }
+
+#[derive(Clone, Debug)]
+pub struct InsertFederationTransaction {
+    pub id: TokenId,
+    pub provider: String,
+    pub state_digest: Vec<u8>,
+    pub browser_digest: Vec<u8>,
+    pub nonce: String,
+    pub pkce_verifier: String,
+    pub expires_at: DateTime<Utc>,
+}
+#[derive(Clone, Debug)]
+pub struct ConsumedFederationTransaction {
+    pub nonce: String,
+    pub pkce_verifier: String,
+}
+#[derive(Clone, Debug)]
+pub struct InsertExternalIdentity {
+    pub id: TokenId,
+    pub user_id: UserId,
+    pub provider: String,
+    pub issuer: String,
+    pub subject: String,
+    pub linked_email: String,
+}
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct StoredExternalIdentity {
+    pub id: TokenId,
+    pub user_id: UserId,
+    pub provider: String,
+    pub issuer: String,
+    pub subject: String,
+    pub linked_email: String,
+}

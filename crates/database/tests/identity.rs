@@ -4,8 +4,9 @@ use chrono::{Duration as ChronoDuration, Utc};
 use piquel_auth_protocol::{AccountStatus, AuthenticationMethod, SessionId, TokenId, UserId};
 use piquel_repository::{
     AppendInternalEvent, BootstrapOidcClient, Database, DatabaseConfig, DatabaseError,
-    InsertCeremony, InsertPasskey, InsertRefreshFamily, InsertRefreshToken, InsertSession,
-    InsertUser, InsertVerifiedEmail, RefreshRotationError, UpdateUserProfile,
+    InsertCeremony, InsertExternalIdentity, InsertFederationTransaction, InsertPasskey,
+    InsertRefreshFamily, InsertRefreshToken, InsertSession, InsertUser, InsertVerifiedEmail,
+    RefreshRotationError, UpdateUserProfile,
 };
 use std::{env, time::Duration};
 
@@ -225,6 +226,66 @@ async fn identity_transactions_and_concurrency_hold() {
         matches!(left, Err(RefreshRotationError::Replay { .. }))
             || matches!(right, Err(RefreshRotationError::Replay { .. }))
     );
+
+    let federation_state = vec![11_u8; 32];
+    let browser = vec![12_u8; 32];
+    database
+        .federation()
+        .insert_transaction(&InsertFederationTransaction {
+            id: TokenId::new(),
+            provider: "github".into(),
+            state_digest: federation_state.clone(),
+            browser_digest: browser.clone(),
+            nonce: "nonce".into(),
+            pkce_verifier: "v".repeat(43),
+            expires_at: Utc::now() + ChronoDuration::minutes(5),
+        })
+        .await
+        .expect("federation transaction");
+    let one = database.clone();
+    let two = database.clone();
+    let (left, right) = tokio::join!(
+        async move {
+            one.federation()
+                .consume_transaction("github", &federation_state, &browser)
+                .await
+        },
+        async move {
+            two.federation()
+                .consume_transaction("github", &[11_u8; 32], &[12_u8; 32])
+                .await
+        },
+    );
+    assert_eq!(usize::from(left.is_ok()) + usize::from(right.is_ok()), 1);
+
+    let issuer = "https://github.com";
+    let subject = format!("subject-{first}");
+    database
+        .federation()
+        .insert_identity(&InsertExternalIdentity {
+            id: TokenId::new(),
+            user_id: first,
+            provider: "github".into(),
+            issuer: issuer.into(),
+            subject: subject.clone(),
+            linked_email: "first@example.com".into(),
+        })
+        .await
+        .expect("first identity");
+    assert!(matches!(
+        database
+            .federation()
+            .insert_identity(&InsertExternalIdentity {
+                id: TokenId::new(),
+                user_id: second,
+                provider: "github".into(),
+                issuer: issuer.into(),
+                subject,
+                linked_email: "second@example.com".into(),
+            })
+            .await,
+        Err(DatabaseError::Conflict)
+    ));
 
     let credential_id = vec![7_u8; 32];
     database
