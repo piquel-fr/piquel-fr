@@ -187,26 +187,6 @@ started enrollment from a stolen browser session.
 fresh-authentication requirement inside the protected transaction. Serialize
 revocation on the same session row and add race tests.
 
-### Medium — abuse limits are neither replica-safe nor capacity-safe
-
-The public limiter is in process memory (`apps/auth-service/src/hardening.rs:23-50`).
-N replicas permit N times the configured rate and restart/autoscaling resets
-all windows. After 10,000 distinct `(IP, endpoint-class)` keys, every unseen
-legitimate client receives 503 (`apps/auth-service/src/hardening.rs:85-93`).
-Rotating IPv6 addresses or a botnet can reach that global new-client denial
-state within one window.
-
-Private service-token issuance is outside this limiter. A CA-trusted but
-compromised/looping service can multiply the per-connection concurrency limit
-with new connections, cause database work for assertions, and append a durable
-audit row for every rejected assertion (`apps/auth-service/src/main.rs:125-136`,
-`apps/auth-service/src/service_rpc.rs:195-213`).
-
-**Required action:** place the authoritative aggregate limit at ingress or in
-explicitly disposable shared coordination, retain a local circuit breaker, use
-bounded eviction rather than global 503 for unseen clients, aggregate IPv6
-prefixes, and add global/per-service RPC concurrency and rate limits.
-
 ### Medium — outstanding OIDC state survives policy removal
 
 Authorization-request and code consumption check that the client is enabled,
