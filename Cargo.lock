@@ -65,13 +65,18 @@ dependencies = [
  "anyhow",
  "async-trait",
  "axum",
+ "chrono",
+ "piquel-auth-protocol",
  "piquel-configuration",
  "piquel-repository",
  "piquel-telemetry",
  "serde",
+ "serde_json",
+ "thiserror",
  "tokio",
  "tower",
  "tracing",
+ "unicode-normalization",
 ]
 
 [[package]]
@@ -1046,6 +1051,7 @@ dependencies = [
  "async-trait",
  "chrono",
  "piquel-auth-protocol",
+ "serde_json",
  "sqlx",
  "thiserror",
  "tokio",

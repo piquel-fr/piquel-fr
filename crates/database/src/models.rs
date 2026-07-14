@@ -1,0 +1,79 @@
+use chrono::{DateTime, Utc};
+use piquel_auth_protocol::{AccountStatus, AuthenticationMethod, SessionId, TokenId, UserId};
+use serde_json::Value;
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct StoredUser {
+    pub id: UserId,
+    pub username: String,
+    pub display_name: String,
+    pub profile_version: u64,
+    pub status: AccountStatus,
+    pub created_at: DateTime<Utc>,
+    pub updated_at: DateTime<Utc>,
+}
+#[derive(Clone, Debug)]
+pub struct InsertUser {
+    pub id: UserId,
+    pub username: String,
+    pub display_name: String,
+}
+#[derive(Clone, Debug)]
+pub struct UpdateUserProfile {
+    pub id: UserId,
+    pub expected_version: u64,
+    pub username: String,
+    pub display_name: String,
+}
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct StoredEmail {
+    pub id: TokenId,
+    pub user_id: UserId,
+    pub normalized_email: String,
+    pub verified_at: Option<DateTime<Utc>>,
+    pub is_primary: bool,
+}
+#[derive(Clone, Debug)]
+pub struct InsertVerifiedEmail {
+    pub id: TokenId,
+    pub user_id: UserId,
+    pub normalized_email: String,
+    pub is_primary: bool,
+    pub verified_at: DateTime<Utc>,
+}
+#[derive(Clone, Debug)]
+pub struct InsertSession {
+    pub id: SessionId,
+    pub user_id: UserId,
+    pub authentication_methods: Vec<AuthenticationMethod>,
+    pub authenticated_at: DateTime<Utc>,
+    pub expires_at: DateTime<Utc>,
+    pub user_agent_family: Option<String>,
+}
+#[derive(Clone, Debug)]
+pub struct StoredSession {
+    pub id: SessionId,
+    pub user_id: UserId,
+    pub authentication_methods: Vec<AuthenticationMethod>,
+    pub authenticated_at: DateTime<Utc>,
+    pub expires_at: DateTime<Utc>,
+    pub last_seen_at: DateTime<Utc>,
+    pub revoked_at: Option<DateTime<Utc>>,
+}
+#[derive(Clone, Debug)]
+pub struct AppendAuditEvent {
+    pub id: TokenId,
+    pub user_id: Option<UserId>,
+    pub action: String,
+    pub outcome: String,
+    pub request_metadata: Value,
+}
+#[derive(Clone, Debug)]
+pub struct AppendInternalEvent {
+    pub id: TokenId,
+    pub aggregate_type: String,
+    pub aggregate_id: UserId,
+    pub event_type: String,
+    pub schema_version: u32,
+    pub payload: Value,
+}
