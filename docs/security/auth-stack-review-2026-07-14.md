@@ -2,11 +2,224 @@
 
 Date: 2026-07-14
 
-Scope: the complete authentication stack from `main` through
-`auth/08-hardening-operations` (`e3fde34...f024438`), with emphasis on
-architecture, trust boundaries, concurrency, and operational security.
+Original scope: the complete authentication stack from `main` through the
+then-current `auth/08-hardening-operations`, with emphasis on architecture,
+trust boundaries, concurrency, and operational security.
 
-## Remediation follow-up
+Second-review scope: the rebuilt cumulative stack from `main` at `e3fde34`
+through `auth/08-hardening-operations` at `47d9f4d`, as presented by this final
+audit PR. The second review was performed independently across architecture,
+security, and remediation-evidence validation.
+
+## Second review verdict
+
+**Do not merge or deploy the stack as a completed authentication service.**
+
+The rebuild replaces the original scaffolding with substantial executable
+code, but the prior remediation follow-up overstates completion. The second
+review found three release blockers and several P1 trust, concurrency, and
+operability gaps. In particular, account disablement is not an authentication
+invariant, signing-key rotation is both unsupported and destructive to refresh
+tokens, and there is still no deployable end-to-end browser/OIDC flow.
+
+The findings below are based on the rebuilt implementation and supersede the
+claims in **First remediation follow-up (superseded)**.
+
+### P0 — Disabled accounts can authenticate with passkeys
+
+Passkey authentication consumes and verifies a ceremony, updates a credential,
+and creates a new session without loading the user or requiring an active
+account (`apps/auth-service/src/passkey.rs:316-363`). Browser-session resolution
+joins only `browser_session_secrets` and `sessions`, so an existing session for
+a subsequently disabled account remains accepted by account endpoints
+(`crates/database/src/repositories.rs:768-773`). Private RPC likewise reports a
+session active from revocation and expiry alone
+(`apps/auth-service/src/service_rpc.rs:207-229`). Federation checks account
+status before session creation in a separate transaction, leaving a disable
+race (`apps/auth-service/src/federation.rs:475-495,582-617`).
+
+OIDC code and refresh queries do require an active user, so the same account has
+different status semantics at different trust boundaries. Administrative
+disablement therefore does not reliably disable authentication or central
+session use.
+
+**Required action:** enforce active account status transactionally whenever a
+session is resolved or created. Make account disablement revoke sessions and
+refresh families and append its audit/event records in the same transaction.
+Make RPC session status include account status and add disable-versus-login race
+tests.
+
+### P0 — Signing-key rotation is unsupported and invalidates refresh tokens
+
+The authority loads exactly one ES256 private key and publishes exactly one JWK
+(`apps/auth-service/src/oidc.rs:58-110`). It also passes the signing PEM bytes
+into OIDC construction and derives the authorization-code/refresh-token digest
+key from those bytes (`apps/auth-service/src/main.rs:25-56` and
+`apps/auth-service/src/oidc.rs:223-235`). Replacing the signing key therefore
+removes the old public key immediately and invalidates every outstanding
+authorization code and refresh token, despite refresh tokens being issued for
+up to 30 days.
+
+This makes the overlap procedure in
+`docs/operations/auth-key-rotation.md:3-7` impossible to perform and turns a
+routine signing-key rotation into a global session outage.
+
+**Required action:** use an independently managed, stable digest key for opaque
+tokens. Implement an active-plus-retired signing key ring that can publish old
+and new JWKs concurrently, then prove new issuance, overlap, removal after the
+last token expiry, and refresh continuity in an authority integration test.
+
+### P0 — No complete browser/OIDC authorization flow is deployable
+
+An unauthenticated `/oauth/authorize` request is redirected back to the client
+with `login_required`; there is no server-side authorization transaction,
+login continuation, or authorization/consent UX
+(`apps/auth-service/src/oidc.rs:284-369`). The independently deployed SvelteKit
+application calls relative API paths, but has no proxy or server routes and no
+documented edge-routing contract that composes page and API routes on
+`auth.piquel.fr` (`apps/auth-web/src/lib/webauthn.ts:21-22` and
+`apps/auth-web/svelte.config.js:1-3`).
+
+The account-security page's “Add a passkey” link opens the new-account
+registration flow; the backend has no authenticated enrollment ceremony
+(`apps/auth-web/src/routes/security/+page.svelte:8` and
+`apps/auth-service/src/passkey.rs:137-247`). Social-identity listing, OIDC
+authorization presentation/cancellation, and continuation after authentication
+are also absent.
+
+**Required action:** define the production edge/BFF routing contract, persist a
+bounded server-side authorization continuation, implement the authenticated
+enrollment and authorization UX, and prove passkey, federation, SSO
+continuation, cancellation, and logout with browser tests through that topology.
+
+### P1 — Public transport and rate limiting depend on an undefined proxy
+
+Production configuration validates an advertised HTTPS issuer, but the public
+server binds a plaintext `TcpListener` with `axum::serve`
+(`apps/auth-service/src/main.rs:88-105`). Secure deployment therefore requires
+an external TLS terminator and private backend network, neither of which is an
+enforced or documented invariant. The limiter keys on the TCP peer address
+(`apps/auth-service/src/hardening.rs:51-74`), so a reverse proxy collapses all
+users into one 30-per-minute login/WebAuthn bucket. Health endpoints share the
+public bucket, and more than 10,000 recent source keys cause a full map scan
+under a mutex on each request.
+
+**Required action:** terminate TLS in process or specify and enforce a trusted
+proxy/private-listener topology. Define authenticated client-IP propagation,
+separate health traffic, and use bounded incremental limiter eviction.
+
+### P1 — Refresh rotation ignores current client policy
+
+Refresh consumption checks that the client remains enabled, but does not
+require `allow_refresh` or verify that the family's stored audience and scopes
+remain allowed (`crates/database/src/repositories.rs:401-455`). Rotation then
+reissues those stored grants unchanged (`apps/auth-service/src/oidc.rs:479-533`).
+Removing a client scope/audience or disabling refresh therefore has no effect on
+existing families.
+
+**Required action:** reapply current client policy inside the locked rotation
+transaction, or explicitly model immutable grants and atomically revoke affected
+families whenever client policy is reduced. Add policy-reduction tests.
+
+### P1 — Passkey state changes have revocation and last-factor races
+
+Authentication reads credential state and later updates it without a row lock
+or optimistic state condition. The handler ignores the boolean result of the
+conditional `revoked_at IS NULL` update, so a credential revoked between lookup
+and update can still produce a session
+(`apps/auth-service/src/passkey.rs:335-362` and
+`crates/database/src/repositories.rs:665-677`). Concurrent authentications can
+also overwrite newer authenticator state.
+
+The “keep at least one passkey” rule is a list-then-delete sequence over separate
+pool operations (`apps/auth-service/src/passkey.rs:488-510`). Two concurrent
+deletions can each observe two credentials and leave the account with none.
+
+**Required action:** lock or compare-and-swap credential state through
+authentication completion, require a successful update before creating a
+session, and enforce last-factor removal in one transaction with the relevant
+credential set locked.
+
+### P1 — The SDK returns an unvalidated ID token
+
+The OIDC SDK creates and stores a nonce, but callback exchange validates only
+state and sends the token request. The nonce is never consumed, and the returned
+ID token is exposed after only response-shape checks
+(`crates/auth-sdk/src/lib.rs:118-192,236-315`). There is no ID-token verifier in
+the SDK that checks signature, issuer, client audience, time claims, and nonce.
+
+**Required action:** validate the ID token against the trusted issuer/JWKS and
+the single-use callback nonce before returning an authenticated result. Keep raw
+token access separate from a verified identity type and add negative nonce,
+audience, issuer, algorithm, and signature tests.
+
+### P1 — Required replay evidence and RPC hardening are absent
+
+Refresh replay revokes the family but writes no security-audit record and emits
+no replay-specific bounded signal (`apps/auth-service/src/oidc.rs:487-495`).
+This contradicts `docs/operations/auth-incidents.md:3-4` and the Plan 08 release
+gate. Public HTTP limits do not cover Tonic; private RPC has no server-enforced
+request deadline or concurrency bound and no mTLS/authentication/permission
+integration test (`apps/auth-service/src/main.rs:107-125`).
+
+**Required action:** co-commit a sanitized replay audit record with family
+revocation, emit a bounded replay metric, and test both. Add RPC deadlines,
+concurrency limits, certificate/service-identity binding policy, and black-box
+mTLS and permission tests.
+
+### P1 — Passing gates do not verify the implemented system
+
+The default Rust suite passes but the sole PostgreSQL integration test is
+ignored unless `TEST_DATABASE_URL` is supplied, and `just ci` does not run it
+(`crates/database/tests/identity.rs:40` and `justfile:19-24`). Auth-service HTTP
+tests mount only health routes with all applications set to `None`
+(`apps/auth-service/src/lib.rs:199-234`). There are no handler-level OIDC,
+federation, startup, mTLS/RPC, or browser-flow tests. The web package's `test`
+script is a production build (`apps/auth-web/package.json:8-10`), not a test.
+
+The second review reran formatting, Clippy, the default Rust suite, SvelteKit
+checking, the production web build, and inspected the PostgreSQL concurrency
+suite. Those gates pass or are structurally present, but they cannot support the
+claim that a real authentication flow or production topology was exercised.
+`cargo deny check advisories` now fails on unmaintained `rustls-pemfile 2.2.0`
+through Tonic (`RUSTSEC-2025-0134`), and `pnpm audit` still reports the already
+documented low-severity `cookie` advisory (`GHSA-pxg6-pf52-xh8x`). The follow-up
+claim that the advisory gate passed is no longer current.
+
+**Required action:** make the isolated PostgreSQL suite mandatory in CI and add
+black-box HTTP, RPC, and browser tests that start the production composition.
+Tie every release-control claim to an enforced test rather than a helper or
+build-only check.
+
+### Additional P2 findings
+
+- `/oidc/logout` mutates session state on GET without origin or CSRF validation,
+  so a cross-site top-level navigation can force logout
+  (`apps/auth-service/src/oidc.rs:654-689`). Use POST with an exact origin and
+  CSRF control; keep GET non-mutating if a confirmation page is required.
+- The mTLS listener requires a CA-issued certificate but token issuance never
+  binds the verified peer certificate identity to the assertion's service ID
+  (`apps/auth-service/src/main.rs:106-125` and
+  `apps/auth-service/src/service_rpc.rs:62-109`). Define a SAN/SPIFFE-style
+  identity contract and require it to match the assertion subject.
+- Expired sessions, browser secrets, WebAuthn ceremonies, authorization codes,
+  refresh records, and federation transactions have no bounded cleanup owner.
+  Public start endpoints can grow several of these stores indefinitely. Define
+  retention periods and a bounded purge mechanism.
+- Federation initial linking queries all historical verified-email owners rather
+  than the active ownership row (`apps/auth-service/src/federation.rs:497-530`
+  and `crates/database/src/repositories.rs:188-224`). A disabled historical
+  owner can make an otherwise unambiguous active-account login fail.
+- Client bootstrap accepts raw URI/scope/audience strings and performs its
+  replace operation as multiple statements without requiring a transaction
+  (`crates/database/src/repositories.rs:265-295`). Validate the registration at
+  a typed administrative boundary and make replacement atomic.
+- HTTP handlers have a ten-second timeout, but the Tonic listener and overall
+  graceful drain have no server deadline. Secret readiness wraps synchronous
+  file reads in an async timeout that cannot preempt them. Bound both listener
+  drains and use a genuinely deadline-aware secret-provider boundary.
+
+## First remediation follow-up (superseded)
 
 The decision and findings below describe the originally reviewed commits. They
 were accurate: the PRs had been presented as implementations even though most
@@ -17,7 +230,8 @@ acceptance criteria were treated as file-shape requirements, tests exercised
 helpers rather than flows, and completion was reported without tracing a real
 request through HTTP, cryptography, persistence, and concurrency boundaries.
 
-The release-blocking findings have been remediated as follows:
+The first follow-up claimed the release-blocking findings had been remediated as
+follows. The second review above found these claims incomplete:
 
 - The authority now exposes and wires WebAuthn, OIDC discovery/JWKS/code/token/
   refresh/revoke/userinfo/logout, GitHub and Google login, account-security
@@ -61,7 +275,7 @@ provider/browser and backup/restore drills before release. The in-process rate
 limiter is per replica; a shared disposable limiter requires a separately
 reviewed failure-mode design if aggregate limits are required.
 
-## Decision
+## Original review decision
 
 **Do not merge or deploy the stack as a completed authentication service.**
 
