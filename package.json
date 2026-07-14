@@ -1,0 +1,9 @@
+{
+  "name": "piquel-fr",
+  "private": true,
+  "packageManager": "pnpm@11.9.0",
+  "scripts": {
+    "check:web": "pnpm --filter @piquel/auth-web check",
+    "test:web": "pnpm --filter @piquel/auth-web test"
+  }
+}
