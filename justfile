@@ -10,6 +10,7 @@ test:
 test-database:
     cargo test -p piquel-repository --test identity -- --ignored --test-threads=1
     cargo test -p auth-service --test http_flow -- --ignored --test-threads=1
+    cargo test -p auth-service --test rpc_flow -- --ignored --test-threads=1
 
 check-web:
     pnpm check:web
@@ -25,6 +26,8 @@ ci:
     cargo clippy --workspace --all-targets --all-features -- -D warnings
     cargo test --workspace
     cargo test -p piquel-repository --test identity -- --ignored --test-threads=1
+    cargo test -p auth-service --test http_flow -- --ignored --test-threads=1
+    cargo test -p auth-service --test rpc_flow -- --ignored --test-threads=1
     pnpm check:web
     pnpm test:web
     pnpm test:browser

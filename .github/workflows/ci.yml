@@ -47,6 +47,7 @@ jobs:
       - run: cargo test --workspace
       - run: cargo test -p piquel-repository --test identity -- --ignored --test-threads=1
       - run: cargo test -p auth-service --test http_flow -- --ignored --test-threads=1
+      - run: cargo test -p auth-service --test rpc_flow -- --ignored --test-threads=1
       - run: pnpm check:web
       - run: pnpm test:web
       - run: pnpm test:browser
