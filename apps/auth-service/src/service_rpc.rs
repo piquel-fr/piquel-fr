@@ -5,7 +5,7 @@ use base64::{Engine, engine::general_purpose::URL_SAFE_NO_PAD};
 use chrono::{TimeZone, Utc};
 use p256::ecdsa::{Signature, VerifyingKey, signature::Verifier};
 use piquel_auth_protocol::{SessionId, TokenId, UserId};
-use piquel_repository::Database;
+use piquel_repository::{AppendAuditEvent, Database};
 use piquel_service_auth::v1::{
     self, auth_service_server::AuthService, service_token_service_server::ServiceTokenService,
 };
@@ -22,6 +22,20 @@ pub struct ServiceRpcApplication {
     keys: Arc<dyn KeyProvider>,
 }
 impl ServiceRpcApplication {
+    async fn audit_token_issue(&self, outcome: &str) -> Result<(), Status> {
+        self.database
+            .audit_events()
+            .append(&AppendAuditEvent {
+                id: TokenId::new(),
+                user_id: None,
+                action: "service_token.issue".into(),
+                outcome: outcome.into(),
+                request_metadata: json!({}),
+            })
+            .await
+            .map_err(internal)
+    }
+
     /// Constructs the private RPC service.
     #[must_use]
     pub fn new(database: Database, issuer: String, keys: Arc<dyn KeyProvider>) -> Self {
@@ -184,11 +198,19 @@ impl ServiceTokenService for ServiceRpcApplication {
         request: Request<v1::IssueServiceTokenRequest>,
     ) -> Result<Response<v1::IssueServiceTokenResponse>, Status> {
         let peer_service_id = service_identity_from_peer(&request)?;
-        let (service_id, permissions) = self
+        let verified = self
             .verify_assertion(&request.into_inner().client_assertion, &peer_service_id)
-            .await?;
+            .await;
+        let (service_id, permissions) = match verified {
+            Ok(verified) => verified,
+            Err(error) => {
+                let _ = self.audit_token_issue("failure").await;
+                return Err(error);
+            }
+        };
         let now = Utc::now().timestamp();
         let token=self.keys.sign("service+jwt",&json!({"iss":self.issuer,"sub":service_id,"aud":"piquel-internal-api","jti":TokenId::new(),"permissions":permissions,"iat":now,"exp":now+300})).map_err(|()|Status::internal("token issuance failed"))?;
+        self.audit_token_issue("success").await?;
         Ok(Response::new(v1::IssueServiceTokenResponse {
             access_token: token,
             expires_in: 300,

@@ -108,13 +108,28 @@ impl ServiceAuthClient {
         );
         Ok(request)
     }
+    async fn invalidate_token(&self) {
+        *self.cache.lock().await = None;
+    }
     pub async fn get_user(&mut self, user_id: String) -> Result<v1::GetUserResponse, ClientError> {
-        let request = self.authorized(v1::GetUserRequest { user_id }).await?;
-        self.auth
-            .get_user(request)
-            .await
-            .map(tonic::Response::into_inner)
-            .map_err(|_| ClientError)
+        let request = self
+            .authorized(v1::GetUserRequest {
+                user_id: user_id.clone(),
+            })
+            .await?;
+        match self.auth.get_user(request).await {
+            Ok(response) => Ok(response.into_inner()),
+            Err(status) if status.code() == tonic::Code::Unauthenticated => {
+                self.invalidate_token().await;
+                let retry = self.authorized(v1::GetUserRequest { user_id }).await?;
+                self.auth
+                    .get_user(retry)
+                    .await
+                    .map(tonic::Response::into_inner)
+                    .map_err(|_| ClientError)
+            }
+            Err(_) => Err(ClientError),
+        }
     }
     pub async fn revoke_session(&mut self, session_id: String) -> Result<bool, ClientError> {
         let request = self

@@ -1,9 +1,9 @@
 //! Domain repository handles backed by a private pool or transaction connection.
 
 use crate::{
-    AppendAuditEvent, AppendInternalEvent, BootstrapOidcClient, ConsumedAuthorizationCode,
-    ConsumedCeremony, ConsumedFederationTransaction, DatabaseError, InsertAuthorizationCode,
-    InsertAuthorizationRequest, InsertCeremony, InsertExternalIdentity,
+    AppendAuditEvent, AppendInternalEvent, BootstrapOidcClient, BootstrapServiceIdentity,
+    ConsumedAuthorizationCode, ConsumedCeremony, ConsumedFederationTransaction, DatabaseError,
+    InsertAuthorizationCode, InsertAuthorizationRequest, InsertCeremony, InsertExternalIdentity,
     InsertFederationTransaction, InsertPasskey, InsertRefreshFamily, InsertRefreshToken,
     InsertSession, InsertUser, InsertVerifiedEmail, RefreshRotationError, RotatedRefreshToken,
     StoredAuthorizationRequest, StoredEmail, StoredExternalIdentity, StoredOidcClient,
@@ -697,6 +697,19 @@ fn stored_external_identity(
 }
 
 impl ServiceIdentityRepository<'_> {
+    /// Atomically provisions an administratively reviewed service key and permission set.
+    pub async fn bootstrap(
+        &mut self,
+        input: &BootstrapServiceIdentity,
+    ) -> Result<(), DatabaseError> {
+        validate_service_identity(input)?;
+        fetch_one!(self, sqlx::query("WITH service AS (INSERT INTO service_identities(id,display_name,enabled) VALUES($1,$2,$3) ON CONFLICT(id) DO UPDATE SET display_name=EXCLUDED.display_name,enabled=EXCLUDED.enabled RETURNING id), key AS (INSERT INTO service_identity_keys(id,service_id,kid,algorithm,public_key,not_before,expires_at) SELECT $4,$1,$5,'ES256',$6,$7,$8 FROM service ON CONFLICT(service_id,kid) DO UPDATE SET public_key=EXCLUDED.public_key,not_before=EXCLUDED.not_before,expires_at=EXCLUDED.expires_at,revoked_at=NULL RETURNING service_id), desired(method) AS (SELECT unnest($9::text[])), removed AS (DELETE FROM service_rpc_permissions p WHERE p.service_id=$1 AND NOT EXISTS(SELECT 1 FROM desired d WHERE d.method=p.method) RETURNING method), inserted AS (INSERT INTO service_rpc_permissions(service_id,method) SELECT $1,d.method FROM desired d,key ON CONFLICT DO NOTHING RETURNING method) SELECT id FROM service")
+            .bind(&input.id).bind(&input.display_name).bind(input.enabled)
+            .bind(TokenId::new().as_uuid()).bind(&input.kid).bind(&input.public_key)
+            .bind(input.not_before).bind(input.expires_at).bind(&input.permissions))?;
+        Ok(())
+    }
+
     pub async fn find_active_key(
         &mut self,
         service_id: &str,
@@ -743,6 +756,46 @@ impl ServiceIdentityRepository<'_> {
             .bind(expires_at)
         )?;
         Ok(())
+    }
+}
+
+fn validate_service_identity(input: &BootstrapServiceIdentity) -> Result<(), DatabaseError> {
+    const METHODS: &[&str] = &[
+        "GetUser",
+        "BatchGetUsers",
+        "GetSessionStatus",
+        "RevokeSession",
+        "RevokeAllUserSessions",
+        "GetServiceConfiguration",
+    ];
+    let identifier = |value: &str| {
+        (1..=64).contains(&value.len())
+            && value
+                .bytes()
+                .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_' | b'.'))
+    };
+    let valid = identifier(&input.id)
+        && identifier(&input.kid)
+        && !input.display_name.trim().is_empty()
+        && input.display_name.chars().count() <= 80
+        && matches!(input.public_key.len(), 33 | 65)
+        && input.not_before < input.expires_at
+        && !input.permissions.is_empty()
+        && input.permissions.len() <= METHODS.len()
+        && input
+            .permissions
+            .iter()
+            .collect::<std::collections::BTreeSet<_>>()
+            .len()
+            == input.permissions.len()
+        && input
+            .permissions
+            .iter()
+            .all(|method| METHODS.contains(&method.as_str()));
+    if valid {
+        Ok(())
+    } else {
+        Err(DatabaseError::Conflict)
     }
 }
 fn stored_session(row: &sqlx::postgres::PgRow) -> Result<StoredSession, DatabaseError> {

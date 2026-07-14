@@ -35,6 +35,8 @@ url.workspace = true
 webauthn-rs.workspace = true
 
 [dev-dependencies]
+piquel-auth-client = { path = "../../crates/auth-client" }
+tokio-stream.workspace = true
 tower.workspace = true
 webauthn-authenticator-rs = { version = "0.5.5", features = ["softpasskey"] }
 

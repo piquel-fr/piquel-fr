@@ -266,6 +266,17 @@ pub struct StoredExternalIdentity {
 }
 
 #[derive(Clone, Debug)]
+pub struct BootstrapServiceIdentity {
+    pub id: String,
+    pub display_name: String,
+    pub enabled: bool,
+    pub kid: String,
+    pub public_key: Vec<u8>,
+    pub not_before: DateTime<Utc>,
+    pub expires_at: DateTime<Utc>,
+    pub permissions: Vec<String>,
+}
+#[derive(Clone, Debug)]
 pub struct StoredServiceIdentity {
     pub id: String,
     pub kid: String,
