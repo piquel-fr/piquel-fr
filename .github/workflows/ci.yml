@@ -1,0 +1,65 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: piquel_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d piquel_test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 12
+    env:
+      TEST_DATABASE_URL: postgres://postgres:postgres@127.0.0.1:5432/piquel_test
+    steps:
+      - uses: actions/checkout@v6
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: '1.97'
+          components: rustfmt, clippy
+      - uses: pnpm/action-setup@v6
+        with:
+          version: 11.9.0
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm --filter @piquel/auth-web exec playwright install --with-deps chromium
+      - run: cargo fmt --all --check
+      - run: cargo clippy --workspace --all-targets --all-features -- -D warnings
+      - run: cargo test --workspace
+      - run: cargo test -p piquel-repository --test identity -- --ignored --test-threads=1
+      - run: cargo test -p auth-service --test http_flow -- --ignored --test-threads=1
+      - run: pnpm check:web
+      - run: pnpm test:web
+      - run: pnpm test:browser
+      - uses: EmbarkStudios/cargo-deny-action@v2
+        with:
+          command: check advisories
+      - run: pnpm audit --audit-level=high
+      - name: Validate Traefik auth topology
+        run: |
+          docker run -d --name auth-traefik-config \
+            -v "$PWD/infra/traefik:/etc/traefik:ro" \
+            traefik:v3.6 --configFile=/etc/traefik/auth-static.yml
+          trap 'docker logs auth-traefik-config; docker rm -f auth-traefik-config' EXIT
+          sleep 3
+          test "$(docker inspect -f '{{.State.Running}}' auth-traefik-config)" = true
+          test "$(docker inspect -f '{{.State.ExitCode}}' auth-traefik-config)" = 0

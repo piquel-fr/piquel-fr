@@ -4,9 +4,9 @@ use chrono::{Duration as ChronoDuration, Utc};
 use piquel_auth_protocol::{AccountStatus, AuthenticationMethod, SessionId, TokenId, UserId};
 use piquel_repository::{
     AppendInternalEvent, BootstrapOidcClient, Database, DatabaseConfig, DatabaseError,
-    InsertCeremony, InsertExternalIdentity, InsertFederationTransaction, InsertPasskey,
-    InsertRefreshFamily, InsertRefreshToken, InsertSession, InsertUser, InsertVerifiedEmail,
-    RefreshRotationError, UpdateUserProfile,
+    InsertAuthorizationRequest, InsertCeremony, InsertExternalIdentity,
+    InsertFederationTransaction, InsertPasskey, InsertRefreshFamily, InsertRefreshToken,
+    InsertSession, InsertUser, InsertVerifiedEmail, RefreshRotationError, UpdateUserProfile,
 };
 use std::{env, time::Duration};
 
@@ -192,6 +192,41 @@ async fn identity_transactions_and_concurrency_hold() {
         .await
         .expect("refresh family");
     setup.commit().await.expect("OIDC setup commit");
+    let authorization_id = TokenId::new();
+    let authorization_digest = vec![31_u8; 32];
+    database
+        .oidc()
+        .insert_authorization_request(&InsertAuthorizationRequest {
+            id: authorization_id,
+            secret_digest: authorization_digest.clone(),
+            client_id: "test-client".into(),
+            redirect_uri: "https://client.example/callback".into(),
+            client_state: "client-state".into(),
+            nonce: Some("nonce".into()),
+            pkce_challenge: "challenge".into(),
+            scopes: vec!["openid".into()],
+            audience: "test-api".into(),
+            force_login: false,
+            max_age: None,
+            expires_at: Utc::now() + ChronoDuration::minutes(5),
+        })
+        .await
+        .expect("authorization request");
+    let one = database.clone();
+    let two = database.clone();
+    let (left, right) = tokio::join!(
+        async move {
+            one.oidc()
+                .consume_authorization_request(authorization_id, &authorization_digest)
+                .await
+        },
+        async move {
+            two.oidc()
+                .consume_authorization_request(authorization_id, &[31_u8; 32])
+                .await
+        }
+    );
+    assert_eq!(usize::from(left.is_ok()) + usize::from(right.is_ok()), 1);
     let rotate = |database: Database, replacement: TokenId, digest: Vec<u8>| async move {
         let mut tx = database.begin().await.expect("rotation transaction");
         match tx.tokens().consume_for_rotation(refresh_id, &digest).await {
@@ -227,6 +262,46 @@ async fn identity_transactions_and_concurrency_hold() {
             || matches!(right, Err(RefreshRotationError::Replay { .. }))
     );
 
+    let last_factor_user = insert_user(&database, "factors").await;
+    let factor_one = TokenId::new();
+    let factor_two = TokenId::new();
+    for (id, credential) in [(factor_one, 41_u8), (factor_two, 42_u8)] {
+        database
+            .passkeys()
+            .insert(&InsertPasskey {
+                id,
+                credential_id: vec![credential; 32],
+                user_id: last_factor_user,
+                credential: serde_json::json!({"fixture":credential}),
+                friendly_name: "Factor".into(),
+            })
+            .await
+            .expect("factor");
+    }
+    let remove = |database: Database, id: TokenId| async move {
+        let mut tx = database.begin().await.expect("factor transaction");
+        let removed = tx
+            .passkeys()
+            .revoke_if_not_last(id, last_factor_user)
+            .await
+            .expect("factor removal");
+        tx.commit().await.expect("factor commit");
+        removed
+    };
+    let (left, right) = tokio::join!(
+        remove(database.clone(), factor_one),
+        remove(database.clone(), factor_two)
+    );
+    assert_eq!(usize::from(left) + usize::from(right), 1);
+    assert_eq!(
+        database
+            .passkeys()
+            .list_active(last_factor_user, 20)
+            .await
+            .expect("remaining factors")
+            .len(),
+        1
+    );
     let federation_state = vec![11_u8; 32];
     let browser = vec![12_u8; 32];
     database
@@ -258,6 +333,121 @@ async fn identity_transactions_and_concurrency_hold() {
         },
     );
     assert_eq!(usize::from(left.is_ok()) + usize::from(right.is_ok()), 1);
+
+    let disable_race_user = insert_user(&database, "disable_race").await;
+    let disable_race_session = SessionId::new();
+    let insert_database = database.clone();
+    let disable_database = database.clone();
+    let (inserted, disabled) = tokio::join!(
+        async move {
+            insert_database
+                .sessions()
+                .insert(&InsertSession {
+                    id: disable_race_session,
+                    user_id: disable_race_user,
+                    authentication_methods: vec![AuthenticationMethod::Passkey],
+                    authenticated_at: Utc::now(),
+                    expires_at: Utc::now() + ChronoDuration::hours(1),
+                    user_agent_family: None,
+                })
+                .await
+        },
+        async move {
+            disable_database
+                .users()
+                .set_status(disable_race_user, AccountStatus::Disabled)
+                .await
+        }
+    );
+    assert!(disabled.expect("disable race status"));
+    assert!(inserted.is_ok() || matches!(inserted, Err(DatabaseError::NotFound)));
+    assert!(
+        database
+            .sessions()
+            .find_active_by_id(disable_race_session)
+            .await
+            .expect("active session lookup")
+            .is_none()
+    );
+
+    let policy_user = insert_user(&database, "policy").await;
+    let policy_session = SessionId::new();
+    database
+        .sessions()
+        .insert(&InsertSession {
+            id: policy_session,
+            user_id: policy_user,
+            authentication_methods: vec![AuthenticationMethod::Passkey],
+            authenticated_at: Utc::now(),
+            expires_at: Utc::now() + ChronoDuration::hours(1),
+            user_agent_family: None,
+        })
+        .await
+        .expect("policy session");
+    database
+        .oidc()
+        .bootstrap_client(&BootstrapOidcClient {
+            id: "policy-client".into(),
+            display_name: "Policy client".into(),
+            redirect_uris: vec!["https://policy.example/callback".into()],
+            post_logout_uris: vec!["https://policy.example/logout".into()],
+            allowed_scopes: vec!["openid".into()],
+            allowed_audiences: vec!["policy-api".into()],
+            allow_refresh: true,
+        })
+        .await
+        .expect("policy client");
+    let policy_family = TokenId::new();
+    let policy_token = TokenId::new();
+    let policy_digest = vec![51_u8; 32];
+    database
+        .tokens()
+        .insert_family(
+            &InsertRefreshFamily {
+                id: policy_family,
+                user_id: policy_user,
+                client_id: "policy-client".into(),
+                session_id: policy_session,
+                audience: "policy-api".into(),
+                scopes: vec!["openid".into()],
+            },
+            &InsertRefreshToken {
+                id: policy_token,
+                family_id: policy_family,
+                secret_digest: policy_digest.clone(),
+                expires_at: Utc::now() + ChronoDuration::days(1),
+            },
+        )
+        .await
+        .expect("policy family");
+    database
+        .oidc()
+        .bootstrap_client(&BootstrapOidcClient {
+            id: "policy-client".into(),
+            display_name: "Policy client".into(),
+            redirect_uris: vec!["https://policy.example/callback".into()],
+            post_logout_uris: vec!["https://policy.example/logout".into()],
+            allowed_scopes: vec!["openid".into()],
+            allowed_audiences: vec!["policy-api".into()],
+            allow_refresh: false,
+        })
+        .await
+        .expect("reduce policy");
+    let mut tx = database.begin().await.expect("policy transaction");
+    assert!(matches!(
+        tx.tokens()
+            .consume_for_rotation(policy_token, &policy_digest)
+            .await,
+        Err(RefreshRotationError::Policy { user_id }) if user_id == policy_user
+    ));
+    tx.commit().await.expect("persist policy revocation");
+    assert!(matches!(
+        database
+            .tokens()
+            .consume_for_rotation(policy_token, &policy_digest)
+            .await,
+        Err(RefreshRotationError::Invalid)
+    ));
 
     let issuer = "https://github.com";
     let subject = format!("subject-{first}");

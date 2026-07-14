@@ -1,0 +1,39 @@
+http:
+  routers:
+    auth-protocol:
+      entryPoints: [websecure]
+      rule: >-
+        Host(`auth.piquel.fr`) &&
+        (PathPrefix(`/.well-known/`) || PathPrefix(`/oauth/`) ||
+        PathPrefix(`/oidc/`) || PathPrefix(`/webauthn/`) ||
+        PathPrefix(`/account/`) || PathPrefix(`/session/`) ||
+        PathPrefix(`/login/github`) || PathPrefix(`/login/google`))
+      priority: 200
+      service: auth-service
+      middlewares: [auth-security-headers]
+      tls: {}
+    auth-web:
+      entryPoints: [websecure]
+      rule: Host(`auth.piquel.fr`)
+      priority: 100
+      service: auth-web
+      middlewares: [auth-security-headers]
+      tls: {}
+  services:
+    auth-service:
+      loadBalancer:
+        passHostHeader: true
+        servers:
+          - url: http://auth-service:8080
+    auth-web:
+      loadBalancer:
+        passHostHeader: true
+        servers:
+          - url: http://auth-web:3000
+  middlewares:
+    auth-security-headers:
+      headers:
+        stsSeconds: 31536000
+        stsIncludeSubdomains: true
+        contentTypeNosniff: true
+        referrerPolicy: no-referrer

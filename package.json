@@ -4,6 +4,7 @@
   "packageManager": "pnpm@11.9.0",
   "scripts": {
     "check:web": "pnpm --filter @piquel/auth-web check",
-    "test:web": "pnpm --filter @piquel/auth-web test"
+    "test:web": "pnpm --filter @piquel/auth-web test",
+    "test:browser": "pnpm --filter @piquel/auth-web test:browser"
   }
 }

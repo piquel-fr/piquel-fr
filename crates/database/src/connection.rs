@@ -127,6 +127,34 @@ impl Database {
             .await
             .map_err(|_| DatabaseError::Internal)
     }
+    /// Purges a bounded batch of expired ephemeral authentication state.
+    pub async fn purge_expired_auth_state(&self, batch_size: u32) -> Result<u64, DatabaseError> {
+        let limit = i64::from(batch_size.clamp(1, 1_000));
+        let mut transaction = self.pool.begin().await.map_err(crate::error::map_error)?;
+        let mut deleted = 0;
+        for statement in [
+            "DELETE FROM federation_transactions WHERE ctid IN (SELECT ctid FROM federation_transactions WHERE expires_at<now() OR consumed_at<now()-interval '1 day' LIMIT $1)",
+            "DELETE FROM webauthn_ceremonies WHERE ctid IN (SELECT ctid FROM webauthn_ceremonies WHERE expires_at<now() OR consumed_at<now()-interval '1 day' LIMIT $1)",
+            "DELETE FROM authorization_requests WHERE ctid IN (SELECT ctid FROM authorization_requests WHERE expires_at<now() OR consumed_at<now()-interval '1 day' LIMIT $1)",
+            "DELETE FROM authorization_codes WHERE ctid IN (SELECT ctid FROM authorization_codes WHERE expires_at<now() OR consumed_at<now()-interval '1 day' LIMIT $1)",
+            "DELETE FROM refresh_tokens t WHERE t.ctid IN (SELECT token.ctid FROM refresh_tokens token JOIN refresh_token_families family ON family.id=token.family_id WHERE token.expires_at<now() OR family.revoked_at<now()-interval '1 day' LIMIT $1)",
+            "DELETE FROM refresh_token_families f WHERE f.ctid IN (SELECT family.ctid FROM refresh_token_families family WHERE (family.revoked_at<now()-interval '1 day' OR family.created_at<now()-interval '31 days') AND NOT EXISTS(SELECT 1 FROM refresh_tokens token WHERE token.family_id=family.id) LIMIT $1)",
+            "DELETE FROM browser_session_secrets b WHERE b.ctid IN (SELECT secret.ctid FROM browser_session_secrets secret JOIN sessions session ON session.id=secret.session_id WHERE session.expires_at<now() OR session.revoked_at<now()-interval '1 day' LIMIT $1)",
+            "DELETE FROM sessions s WHERE s.ctid IN (SELECT session.ctid FROM sessions session WHERE (session.expires_at<now() OR session.revoked_at<now()-interval '1 day') AND NOT EXISTS(SELECT 1 FROM refresh_token_families family WHERE family.session_id=session.id) AND NOT EXISTS(SELECT 1 FROM authorization_codes code WHERE code.session_id=session.id) LIMIT $1)",
+        ] {
+            deleted += sqlx::query(statement)
+                .bind(limit)
+                .execute(&mut *transaction)
+                .await
+                .map_err(crate::error::map_error)?
+                .rows_affected();
+        }
+        transaction
+            .commit()
+            .await
+            .map_err(crate::error::map_error)?;
+        Ok(deleted)
+    }
     pub fn users(&self) -> UserRepository<'_> {
         UserRepository::from_pool(&self.pool)
     }

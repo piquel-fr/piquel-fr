@@ -1,0 +1,33 @@
+entryPoints:
+  traefik:
+    address: :8082
+  web:
+    address: :80
+    http:
+      redirections:
+        entryPoint:
+          to: websecure
+          scheme: https
+          permanent: true
+  websecure:
+    address: :443
+    forwardedHeaders:
+      insecure: false
+    http:
+      encodeQuerySemicolons: true
+    transport:
+      respondingTimeouts:
+        readTimeout: 15s
+        writeTimeout: 15s
+        idleTimeout: 60s
+
+providers:
+  file:
+    filename: /etc/traefik/auth-dynamic.yml
+    watch: true
+
+api:
+  dashboard: false
+
+ping:
+  entryPoint: traefik
