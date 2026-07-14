@@ -6,6 +6,61 @@ Scope: the complete authentication stack from `main` through
 `auth/08-hardening-operations` (`e3fde34...f024438`), with emphasis on
 architecture, trust boundaries, concurrency, and operational security.
 
+## Remediation follow-up
+
+The decision and findings below describe the originally reviewed commits. They
+were accurate: the PRs had been presented as implementations even though most
+contained only schemas, policy-shaped helpers, and UI/protocol scaffolding. The
+stack was subsequently rebuilt on the same ordered branches and re-reviewed on
+2026-07-14. The cause was an implementation/review failure, not a regression:
+acceptance criteria were treated as file-shape requirements, tests exercised
+helpers rather than flows, and completion was reported without tracing a real
+request through HTTP, cryptography, persistence, and concurrency boundaries.
+
+The release-blocking findings have been remediated as follows:
+
+- The authority now exposes and wires WebAuthn, OIDC discovery/JWKS/code/token/
+  refresh/revoke/userinfo/logout, GitHub and Google login, account-security
+  operations, and a separate mTLS Tonic listener.
+- Repositories now borrow a real pool or transaction executor. Conditional
+  `UPDATE ... RETURNING` consumption is used for ceremonies and codes; refresh
+  rotation locks records and revokes a family on replay.
+- Static OIDC clients own exact redirect/post-logout URIs, scopes, audiences,
+  enabled state, refresh permission, and authentication method. Access and ID
+  tokens are ES256 and cryptographically separated by `typ` and audience.
+- The SDK now validates a single Bearer value, fixed `at+jwt`/ES256/`kid`, a
+  trusted cached JWKS key, signature, exact issuer/audience, time claims, and
+  typed UUIDv7 claims. `AuthenticatedUser` is opaque outside the validator.
+- Active verified-email ownership is represented by a unique lockable row and
+  is synchronized on account status changes. Federation uses verified provider
+  email only for the initial link and stores issuer/subject as the durable key.
+- WebAuthn uses `webauthn-rs` with parsed exact origins and server-side,
+  single-use state. The three attacker-controlled origin examples in this
+  report are regression tests.
+- Production public/database transport fails closed unless HTTPS and verified
+  PostgreSQL TLS are configured. Secret locators are allowlisted and redacted;
+  readiness resolves the signing, provider, and RPC TLS dependencies.
+- Migration credentials are environment-only. Refresh/cookie secrets have
+  exact bounds, public bodies and handler time are bounded, sensitive endpoint
+  classes are rate limited, and SIGINT/SIGTERM coordinate graceful public and
+  private listener shutdown.
+
+Verification after remediation includes the full Rust format/test/clippy gates,
+SvelteKit type checking and an adapter-node production build, real ES256 and
+software-WebAuthn interoperability tests, JWKS failure/rotation tests, and an
+empty PostgreSQL 17 database test using separate concurrent connections. The
+database test proves rollback, verified-email claim/reactivation exclusion,
+exactly-one WebAuthn/federation transaction consumption, duplicate credential
+and provider-subject rejection, optimistic profile conflict, idempotent session
+revocation, event ordering, and refresh one-winner/replay-family revocation.
+
+Remaining deployment work is environmental rather than a claim of an
+implemented control: production must provision reviewed OIDC/service clients,
+ES256 and mTLS key material, GitHub/Google applications, and exercise live
+provider/browser and backup/restore drills before release. The in-process rate
+limiter is per replica; a shared disposable limiter requires a separately
+reviewed failure-mode design if aggregate limits are required.
+
 ## Decision
 
 **Do not merge or deploy the stack as a completed authentication service.**
