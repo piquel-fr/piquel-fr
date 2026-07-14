@@ -55,12 +55,39 @@ jobs:
         with:
           command: check advisories
       - run: pnpm audit --audit-level=high
-      - name: Validate Traefik auth topology
+      - name: Exercise Traefik auth topology
         run: |
-          docker run -d --name auth-traefik-config \
+          cleanup() {
+            docker logs auth-traefik-edge || true
+            docker rm -f auth-traefik-edge auth-service auth-web || true
+            docker network rm piquel-auth-edge || true
+          }
+          trap cleanup EXIT
+          docker network create piquel-auth-edge
+          docker run -d --name auth-service --hostname auth-service \
+            --network piquel-auth-edge traefik/whoami:v1.11 --port 8080
+          docker run -d --name auth-web --hostname auth-web \
+            --network piquel-auth-edge traefik/whoami:v1.11 --port 3000
+          docker run -d --name auth-traefik-edge --network piquel-auth-edge \
+            -p 127.0.0.1:18443:443 \
             -v "$PWD/infra/traefik:/etc/traefik:ro" \
             traefik:v3.6 --configFile=/etc/traefik/auth-static.yml
-          trap 'docker logs auth-traefik-config; docker rm -f auth-traefik-config' EXIT
           sleep 3
-          test "$(docker inspect -f '{{.State.Running}}' auth-traefik-config)" = true
-          test "$(docker inspect -f '{{.State.ExitCode}}' auth-traefik-config)" = 0
+          test "$(docker inspect -f '{{.State.Running}}' auth-traefik-edge)" = true
+          protocol="$(curl --fail --silent --show-error --insecure \
+            -H 'Host: auth.piquel.fr' -H 'X-Forwarded-For: 198.51.100.9' \
+            https://127.0.0.1:18443/oauth/token)"
+          printf '%s' "$protocol" | grep --quiet 'Hostname: auth-service'
+          if printf '%s' "$protocol" | grep --quiet '198.51.100.9'; then exit 1; fi
+          curl --fail --silent --show-error --insecure -H 'Host: auth.piquel.fr' \
+            https://127.0.0.1:18443/.well-known/openid-configuration \
+            | grep --quiet 'Hostname: auth-service'
+          curl --fail --silent --show-error --insecure -H 'Host: auth.piquel.fr' \
+            https://127.0.0.1:18443/login/github \
+            | grep --quiet 'Hostname: auth-service'
+          curl --fail --silent --show-error --insecure -H 'Host: auth.piquel.fr' \
+            https://127.0.0.1:18443/login \
+            | grep --quiet 'Hostname: auth-web'
+          curl --fail --silent --show-error --insecure -H 'Host: auth.piquel.fr' \
+            https://127.0.0.1:18443/_app/test.js \
+            | grep --quiet 'Hostname: auth-web'
