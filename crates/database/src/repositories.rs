@@ -190,7 +190,7 @@ impl EmailRepository<'_> {
         &mut self,
         normalized: &str,
     ) -> Result<Option<StoredEmail>, DatabaseError> {
-        let row = fetch_optional!(self, sqlx::query("SELECT e.id, e.user_id, e.normalized_email, e.verified_at, e.is_primary FROM active_verified_email_ownership o JOIN user_emails e ON e.user_id = o.user_id AND e.normalized_email = o.normalized_email AND e.verified_at IS NOT NULL WHERE o.normalized_email = $1 ORDER BY e.is_primary DESC, e.created_at LIMIT 1").bind(normalized))?;
+        let row = fetch_optional!(self, sqlx::query("SELECT e.id, e.user_id, e.normalized_email, e.verified_at, e.is_primary FROM active_verified_email_ownership o JOIN users u ON u.id = o.user_id AND u.status = 'active' JOIN user_emails e ON e.user_id = o.user_id AND e.normalized_email = o.normalized_email AND e.verified_at IS NOT NULL WHERE o.normalized_email = $1 ORDER BY e.is_primary DESC, e.created_at LIMIT 1").bind(normalized))?;
         row.map(|row| {
             Ok(StoredEmail {
                 id: piquel_auth_protocol::TokenId::from_uuid(
@@ -241,7 +241,7 @@ impl SessionRepository<'_> {
         fetch_optional!(self, sqlx::query("SELECT s.id,s.user_id,s.authentication_methods,s.authenticated_at,s.expires_at,s.last_seen_at,s.revoked_at FROM sessions s JOIN users u ON u.id=s.user_id WHERE s.id=$1 AND s.revoked_at IS NULL AND s.expires_at>now() AND u.status='active'").bind(id.as_uuid()))?.map(|row| stored_session(&row)).transpose()
     }
     pub async fn touch(&mut self, id: SessionId) -> Result<bool, DatabaseError> {
-        Ok(execute!(self, sqlx::query("UPDATE sessions SET last_seen_at=now() WHERE id=$1 AND revoked_at IS NULL AND expires_at>now()").bind(id.as_uuid()))?.rows_affected()==1)
+        Ok(execute!(self, sqlx::query("UPDATE sessions s SET last_seen_at=now() FROM users u WHERE s.id=$1 AND s.user_id=u.id AND u.status='active' AND s.revoked_at IS NULL AND s.expires_at>now()").bind(id.as_uuid()))?.rows_affected()==1)
     }
     pub async fn revoke(&mut self, id: SessionId) -> Result<bool, DatabaseError> {
         Ok(execute!(
