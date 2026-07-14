@@ -20,7 +20,7 @@ async fn database() -> Database {
     let url = env::var("TEST_DATABASE_URL")
         .expect("TEST_DATABASE_URL must name an isolated PostgreSQL database");
     Database::connect(
-        DatabaseConfig::new_development(url, 5, Duration::from_secs(5))
+        DatabaseConfig::new_development(&url, 5, Duration::from_secs(5))
             .expect("test database configuration"),
     )
     .await

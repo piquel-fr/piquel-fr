@@ -13,7 +13,7 @@ use std::{env, time::Duration};
 async fn database() -> Database {
     let url = env::var("TEST_DATABASE_URL")
         .expect("TEST_DATABASE_URL must name an isolated PostgreSQL database");
-    let config = DatabaseConfig::new_development(url, 10, Duration::from_secs(5))
+    let config = DatabaseConfig::new_development(&url, 10, Duration::from_secs(5))
         .expect("test database configuration");
     let database = Database::connect(config)
         .await
@@ -140,6 +140,26 @@ async fn identity_transactions_and_concurrency_hold() {
         }
     );
     assert_eq!(usize::from(left.is_ok()) + usize::from(right.is_ok()), 1);
+
+    let enrollment_id = TokenId::new();
+    database
+        .passkeys()
+        .insert_ceremony(&InsertCeremony {
+            id: enrollment_id,
+            user_id: Some(first),
+            session_id: None,
+            kind: "enrollment".into(),
+            challenge_digest: vec![2; 32],
+            state: serde_json::json!({"enrollment":true}),
+            expires_at: Utc::now() + ChronoDuration::minutes(5),
+        })
+        .await
+        .expect("enrollment ceremony");
+    database
+        .passkeys()
+        .consume_ceremony(enrollment_id, "enrollment")
+        .await
+        .expect("consume enrollment ceremony");
 
     let refresh_session = SessionId::new();
     database

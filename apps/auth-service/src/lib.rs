@@ -81,9 +81,9 @@ impl AuthConfig {
             PublicUrl::parse(&required("AUTH_PUBLIC_BASE_URL")?)?
         };
         let database = if development {
-            DatabaseConfig::new_development(database_url, 10, Duration::from_secs(5))
+            DatabaseConfig::new_development(&database_url, 10, Duration::from_secs(5))
         } else {
-            DatabaseConfig::new(database_url, 10, Duration::from_secs(5))
+            DatabaseConfig::new(&database_url, 10, Duration::from_secs(5))
         }
         .map_err(|_| ConfigurationError::Invalid {
             name: "AUTH_DATABASE_URL",

@@ -1,14 +1,17 @@
 use crate::{
     DatabaseConnectionError, DatabaseError, repositories::*, transaction::DatabaseTransaction,
 };
-use sqlx::{PgPool, postgres::PgPoolOptions};
-use std::{net::IpAddr, time::Duration};
+use sqlx::{
+    PgPool,
+    postgres::{PgConnectOptions, PgPoolOptions, PgSslMode},
+};
+use std::{net::IpAddr, str::FromStr, time::Duration};
 use url::Url;
 
 /// Validated database connection configuration.
 #[derive(Clone)]
 pub struct DatabaseConfig {
-    url: String,
+    options: PgConnectOptions,
     max_connections: u32,
     connect_timeout: Duration,
 }
@@ -16,7 +19,7 @@ impl std::fmt::Debug for DatabaseConfig {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         formatter
             .debug_struct("DatabaseConfig")
-            .field("url", &"[REDACTED]")
+            .field("options", &"[REDACTED]")
             .field("max_connections", &self.max_connections)
             .field("connect_timeout", &self.connect_timeout)
             .finish()
@@ -25,13 +28,13 @@ impl std::fmt::Debug for DatabaseConfig {
 impl DatabaseConfig {
     /// Creates production configuration requiring verified `PostgreSQL` TLS.
     pub fn new(
-        url: String,
+        url: &str,
         max_connections: u32,
         connect_timeout: Duration,
     ) -> Result<Self, DatabaseConnectionError> {
-        Self::validate(&url, max_connections, connect_timeout, false)?;
+        let options = Self::validate(url, max_connections, connect_timeout, false)?;
         Ok(Self {
-            url,
+            options,
             max_connections,
             connect_timeout,
         })
@@ -39,13 +42,13 @@ impl DatabaseConfig {
 
     /// Creates explicit local-development configuration for a loopback database.
     pub fn new_development(
-        url: String,
+        url: &str,
         max_connections: u32,
         connect_timeout: Duration,
     ) -> Result<Self, DatabaseConnectionError> {
-        Self::validate(&url, max_connections, connect_timeout, true)?;
+        let options = Self::validate(url, max_connections, connect_timeout, true)?;
         Ok(Self {
-            url,
+            options,
             max_connections,
             connect_timeout,
         })
@@ -56,7 +59,7 @@ impl DatabaseConfig {
         max_connections: u32,
         connect_timeout: Duration,
         development: bool,
-    ) -> Result<(), DatabaseConnectionError> {
+    ) -> Result<PgConnectOptions, DatabaseConnectionError> {
         let parsed = Url::parse(url).map_err(|_| DatabaseConnectionError::InvalidConfiguration)?;
         if !matches!(parsed.scheme(), "postgres" | "postgresql")
             || max_connections == 0
@@ -67,6 +70,18 @@ impl DatabaseConfig {
         let host = parsed
             .host_str()
             .ok_or(DatabaseConnectionError::InvalidConfiguration)?;
+
+        let mut ssl_modes = parsed.query_pairs().filter_map(|(name, value)| {
+            matches!(name.as_ref(), "sslmode" | "ssl-mode").then_some(value)
+        });
+        let ssl_mode = ssl_modes.next();
+        if ssl_modes.next().is_some()
+            || parsed
+                .query_pairs()
+                .any(|(name, _)| matches!(name.as_ref(), "host" | "hostaddr"))
+        {
+            return Err(DatabaseConnectionError::InvalidConfiguration);
+        }
         if development {
             let loopback = host.eq_ignore_ascii_case("localhost")
                 || host
@@ -75,13 +90,19 @@ impl DatabaseConfig {
             if !loopback {
                 return Err(DatabaseConnectionError::InvalidConfiguration);
             }
-        } else if !parsed
-            .query_pairs()
-            .any(|(name, value)| name == "sslmode" && value == "verify-full")
-        {
+        } else if ssl_mode.as_deref() != Some("verify-full") {
             return Err(DatabaseConnectionError::InvalidConfiguration);
         }
-        Ok(())
+
+        let options = PgConnectOptions::from_str(url)
+            .map_err(|_| DatabaseConnectionError::InvalidConfiguration)?;
+        Ok(if development {
+            options
+        } else {
+            // Keep the effective mode explicit even after validating the URL so
+            // future parser changes cannot silently weaken production TLS.
+            options.ssl_mode(PgSslMode::VerifyFull)
+        })
     }
 }
 
@@ -96,7 +117,7 @@ impl Database {
         let pool = PgPoolOptions::new()
             .max_connections(config.max_connections)
             .acquire_timeout(config.connect_timeout)
-            .connect(&config.url)
+            .connect_with(config.options)
             .await
             .map_err(|_| DatabaseConnectionError::Unavailable)?;
         Ok(Self { pool })
@@ -194,16 +215,19 @@ mod tests {
     #[test]
     fn production_requires_verified_tls() {
         assert!(
-            DatabaseConfig::new(
-                "postgres://db.example/piquel".into(),
-                1,
-                Duration::from_secs(1)
-            )
-            .is_err()
+            DatabaseConfig::new("postgres://db.example/piquel", 1, Duration::from_secs(1)).is_err()
         );
         assert!(
             DatabaseConfig::new(
-                "postgres://db.example/piquel?sslmode=verify-full".into(),
+                "postgres://db.example/piquel?sslmode=verify-full",
+                1,
+                Duration::from_secs(1)
+            )
+            .is_ok()
+        );
+        assert!(
+            DatabaseConfig::new(
+                "postgres://db.example/piquel?ssl-mode=verify-full",
                 1,
                 Duration::from_secs(1)
             )
@@ -212,10 +236,27 @@ mod tests {
     }
 
     #[test]
+    fn production_rejects_ambiguous_tls_modes_and_host_overrides() {
+        for url in [
+            "postgres://db.example/piquel?sslmode=verify-full&sslmode=disable",
+            "postgres://db.example/piquel?sslmode=disable&sslmode=verify-full",
+            "postgres://db.example/piquel?sslmode=verify-full&ssl-mode=disable",
+            "postgres://db.example/piquel?sslmode=verify-full&ssl-mode=verify-full",
+            "postgres://db.example/piquel?sslmode=verify-full&host=elsewhere.example",
+            "postgres://db.example/piquel?sslmode=verify-full&hostaddr=127.0.0.1",
+        ] {
+            assert!(
+                DatabaseConfig::new(url, 1, Duration::from_secs(1)).is_err(),
+                "accepted ambiguous database URL: {url}"
+            );
+        }
+    }
+
+    #[test]
     fn development_is_loopback_only() {
         assert!(
             DatabaseConfig::new_development(
-                "postgres://localhost/piquel".into(),
+                "postgres://localhost/piquel",
                 1,
                 Duration::from_secs(1)
             )
@@ -223,7 +264,15 @@ mod tests {
         );
         assert!(
             DatabaseConfig::new_development(
-                "postgres://db.example/piquel".into(),
+                "postgres://db.example/piquel",
+                1,
+                Duration::from_secs(1)
+            )
+            .is_err()
+        );
+        assert!(
+            DatabaseConfig::new_development(
+                "postgres://localhost/piquel?host=db.example",
                 1,
                 Duration::from_secs(1)
             )
