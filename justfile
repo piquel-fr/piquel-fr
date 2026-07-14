@@ -1,22 +1,4 @@
 format:
-<<<<<<< HEAD
-    cargo fmt --all
-
-check:
-    cargo check --workspace --all-targets
-
-test:
-    cargo test --workspace
-
-test-database:
-    cargo test -p piquel-repository --test identity -- --ignored --test-threads=1
-
-migrate:
-    cargo run -p piquel-repository --bin migrate
-
-prepare-sqlx:
-    cargo sqlx prepare --workspace
-=======
     @cargo fmt --all
 
 lint:
@@ -28,6 +10,9 @@ check:
 test:
     @cargo nextest run --workspace
 
+test-database:
+    @cargo nextest run -p piquel-repository --test identity -- --ignored --test-threads=1
+
 doc-test:
     @cargo test --doc --workspace
 
@@ -36,4 +21,3 @@ migrate:
 
 prepare-sqlx:
     @cargo sqlx prepare --workspace
->>>>>>> main
