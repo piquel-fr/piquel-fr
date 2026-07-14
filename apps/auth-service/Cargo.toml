@@ -1,0 +1,20 @@
+[package]
+name = "auth-service"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+anyhow.workspace = true
+axum.workspace = true
+piquel-configuration = { path = "../../crates/configuration" }
+piquel-repository = { path = "../../crates/database" }
+piquel-telemetry = { path = "../../crates/telemetry" }
+serde.workspace = true
+tokio.workspace = true
+tracing.workspace = true
+
+[lints]
+workspace = true
