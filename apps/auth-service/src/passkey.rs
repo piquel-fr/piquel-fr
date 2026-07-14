@@ -163,7 +163,9 @@ async fn start_registration(
         .passkeys()
         .insert_ceremony(&InsertCeremony {
             id: ceremony_id,
-            user_id: Some(user_id),
+            // Bootstrap users do not exist until the registration response is
+            // verified and the account is created atomically at finish time.
+            user_id: None,
             session_id: None,
             kind: "registration".into(),
             challenge_digest: Sha256::digest(serialized).to_vec(),
@@ -185,8 +187,11 @@ async fn finish_registration(
     if input.friendly_name.trim().is_empty() || input.friendly_name.chars().count() > 80 {
         return Err(ApiError);
     }
-    let mut transaction = app.database.begin().await.map_err(|_| ApiError)?;
-    let ceremony = transaction
+    // Consumption is intentionally committed before processing the response:
+    // invalid responses and downstream failures must not make a challenge
+    // reusable.
+    let ceremony = app
+        .database
         .passkeys()
         .consume_ceremony(input.ceremony_id, "registration")
         .await
@@ -198,6 +203,7 @@ async fn finish_registration(
         .map_err(|_| ApiError)?;
     let credential_id = passkey.cred_id().as_ref().to_vec();
     let credential = serde_json::to_value(passkey).map_err(|_| ApiError)?;
+    let mut transaction = app.database.begin().await.map_err(|_| ApiError)?;
     transaction
         .users()
         .insert(&InsertUser {
@@ -281,7 +287,7 @@ async fn start_authentication(
     let stored = app
         .database
         .passkeys()
-        .list_active(user.id, 20)
+        .list_active(user.id)
         .await
         .map_err(|_| ApiError)?;
     if stored.is_empty() {
@@ -325,8 +331,8 @@ async fn finish_authentication(
     State(app): State<PasskeyApplication>,
     Json(input): Json<AuthenticationFinish>,
 ) -> Result<Response, ApiError> {
-    let mut transaction = app.database.begin().await.map_err(|_| ApiError)?;
-    let ceremony = transaction
+    let ceremony = app
+        .database
         .passkeys()
         .consume_ceremony(input.ceremony_id, "authentication")
         .await
@@ -340,6 +346,7 @@ async fn finish_authentication(
     if !result.user_verified() {
         return Err(ApiError);
     }
+    let mut transaction = app.database.begin().await.map_err(|_| ApiError)?;
     let stored = transaction
         .passkeys()
         .find_active_by_credential_id_for_update(result.cred_id().as_ref())
@@ -435,8 +442,8 @@ async fn finish_enrollment(
     }
     let session = active_session(&app.database, &headers).await?;
     require_fresh_session(&session)?;
-    let mut transaction = app.database.begin().await.map_err(|_| ApiError)?;
-    let ceremony = transaction
+    let ceremony = app
+        .database
         .passkeys()
         .consume_ceremony(input.ceremony_id, "enrollment")
         .await
@@ -449,6 +456,7 @@ async fn finish_enrollment(
         .webauthn
         .finish_passkey_registration(&input.credential, &state.webauthn)
         .map_err(|_| ApiError)?;
+    let mut transaction = app.database.begin().await.map_err(|_| ApiError)?;
     transaction
         .passkeys()
         .insert(&InsertPasskey {
@@ -489,7 +497,7 @@ async fn list_passkeys(
     let keys = app
         .database
         .passkeys()
-        .list_active(session.user_id, 20)
+        .list_active(session.user_id)
         .await
         .map_err(|_| ApiError)?;
     Ok(Json(

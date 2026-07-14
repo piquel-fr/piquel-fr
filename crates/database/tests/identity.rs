@@ -110,6 +110,33 @@ async fn identity_transactions_and_concurrency_hold() {
     let first = insert_user(&database, "first").await;
     let second = insert_user(&database, "second").await;
 
+    database
+        .passkeys()
+        .insert_ceremony(&InsertCeremony {
+            id: TokenId::new(),
+            user_id: None,
+            session_id: None,
+            kind: "registration".into(),
+            challenge_digest: vec![2; 32],
+            state: serde_json::json!({"bootstrap":true}),
+            expires_at: Utc::now() + ChronoDuration::minutes(5),
+        })
+        .await
+        .expect("bootstrap ceremony before user creation");
+    database
+        .passkeys()
+        .insert_ceremony(&InsertCeremony {
+            id: TokenId::new(),
+            user_id: Some(first),
+            session_id: None,
+            kind: "enrollment".into(),
+            challenge_digest: vec![3; 32],
+            state: serde_json::json!({"enrollment":true}),
+            expires_at: Utc::now() + ChronoDuration::minutes(5),
+        })
+        .await
+        .expect("enrollment ceremony");
+
     let ceremony_id = TokenId::new();
     database
         .passkeys()
@@ -165,6 +192,31 @@ async fn identity_transactions_and_concurrency_hold() {
             .await,
         Err(DatabaseError::Conflict)
     ));
+
+    for suffix in 0_u8..20 {
+        let mut additional_credential_id = vec![suffix; 32];
+        additional_credential_id.push(42);
+        database
+            .passkeys()
+            .insert(&InsertPasskey {
+                id: TokenId::new(),
+                credential_id: additional_credential_id,
+                user_id: first,
+                credential: serde_json::json!({"fixture":true}),
+                friendly_name: format!("Additional {suffix}"),
+            })
+            .await
+            .expect("additional passkey");
+    }
+    assert_eq!(
+        database
+            .passkeys()
+            .list_active(first)
+            .await
+            .expect("list every passkey")
+            .len(),
+        21
+    );
 
     let normalized = format!("race-{}@example.com", UserId::new());
     let one = database.clone();

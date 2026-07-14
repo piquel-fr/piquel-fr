@@ -20,7 +20,7 @@ CREATE TABLE webauthn_ceremonies (
     id UUID PRIMARY KEY,
     user_id UUID REFERENCES users(id) ON DELETE CASCADE,
     session_id UUID REFERENCES sessions(id) ON DELETE CASCADE,
-    ceremony_kind TEXT NOT NULL CHECK (ceremony_kind IN ('registration', 'authentication')),
+    ceremony_kind TEXT NOT NULL CHECK (ceremony_kind IN ('registration', 'authentication', 'enrollment')),
     challenge_digest BYTEA NOT NULL,
     state JSONB NOT NULL,
     expires_at TIMESTAMPTZ NOT NULL,
