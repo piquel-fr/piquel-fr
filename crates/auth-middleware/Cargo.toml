@@ -7,8 +7,16 @@ repository.workspace = true
 rust-version.workspace = true
 
 [dependencies]
+async-trait.workspace = true
+base64.workspace = true
+chrono.workspace = true
+p256.workspace = true
 piquel-auth-protocol = { path = "../auth-protocol" }
+reqwest.workspace = true
+serde.workspace = true
+serde_json.workspace = true
 thiserror.workspace = true
+tokio.workspace = true
 url.workspace = true
 
 [lints]
