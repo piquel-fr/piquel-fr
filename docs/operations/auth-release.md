@@ -2,7 +2,8 @@
 
 1. Run `just check`, `just test`, `pnpm check:web`, and `pnpm test:web`.
 2. Back up PostgreSQL and verify the restore procedure before a schema release.
-3. Run `just migrate "$DATABASE_URL"` once with the migration role.
+3. Export `AUTH_DATABASE_URL` only in the migration process environment and run
+   `just migrate` once with the migration role; never pass credentials in argv.
 4. Deploy auth-service replicas with readiness checks enabled; replicas never run
    migrations at startup.
 5. Deploy auth-web only after the public auth endpoints it references are live.

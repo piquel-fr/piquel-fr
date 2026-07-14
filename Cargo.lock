@@ -148,6 +148,7 @@ dependencies = [
  "tokio-stream",
  "tonic",
  "tower 0.5.3",
+ "tower-http",
  "tracing",
  "unicode-normalization",
  "url",
@@ -3116,10 +3117,13 @@ dependencies = [
  "futures-util",
  "http",
  "http-body",
+ "http-body-util",
  "pin-project-lite",
+ "tokio",
  "tower 0.5.3",
  "tower-layer",
  "tower-service",
+ "tracing",
  "url",
 ]
 

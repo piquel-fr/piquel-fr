@@ -12,6 +12,14 @@ use std::{net::SocketAddr, sync::Arc, time::Duration};
 async fn main() -> anyhow::Result<()> {
     piquel_telemetry::init("auth_service=info");
     let config = AuthConfig::from_environment()?;
+    let readiness_secrets = vec![
+        config.key_provider.clone(),
+        config.github.client_secret.clone(),
+        config.google.client_secret.clone(),
+        config.rpc_tls_certificate.clone(),
+        config.rpc_tls_private_key.clone(),
+        config.rpc_client_ca.clone(),
+    ];
     let listener_address: SocketAddr = config.public_listener;
     let database = Database::connect(config.database).await?;
     let key_secret = config.key_provider.resolve()?;
@@ -79,15 +87,22 @@ async fn main() -> anyhow::Result<()> {
     let rpc_client_ca = config.rpc_client_ca.resolve()?;
     let listener = tokio::net::TcpListener::bind(listener_address).await?;
     tracing::info!(%listener_address, "auth service listening");
+    let (shutdown_sender, shutdown_receiver) = tokio::sync::watch::channel(false);
+    tokio::spawn(async move {
+        shutdown_signal().await;
+        let _ = shutdown_sender.send(true);
+    });
     let public = axum::serve(
         listener,
         router(
-            Arc::new(ProductionReadiness::new(database, config.key_provider)),
+            Arc::new(ProductionReadiness::new(database, readiness_secrets)),
             Some(passkeys),
             Some(oidc),
             Some(federation),
-        ),
-    );
+        )
+        .into_make_service_with_connect_info::<SocketAddr>(),
+    )
+    .with_graceful_shutdown(wait_for_shutdown(shutdown_receiver.clone()));
     let tls = tonic::transport::ServerTlsConfig::new()
         .identity(tonic::transport::Identity::from_pem(
             rpc_certificate.expose_secret(),
@@ -108,15 +123,23 @@ async fn main() -> anyhow::Result<()> {
                 .max_decoding_message_size(16 * 1024),
         )
         .add_service(rpc.auth_server().max_decoding_message_size(1024 * 1024))
-        .serve(config.internal_listener);
-    tokio::select! {
-        result = public => result?,
-        result = private => result?,
-        () = shutdown_signal() => {},
-    }
+        .serve_with_shutdown(
+            config.internal_listener,
+            wait_for_shutdown(shutdown_receiver),
+        );
+    tokio::try_join!(async { public.await.map_err(anyhow::Error::from) }, async {
+        private.await.map_err(anyhow::Error::from)
+    })?;
     Ok(())
 }
 
 async fn shutdown_signal() {
     let _ = tokio::signal::ctrl_c().await;
+}
+async fn wait_for_shutdown(mut receiver: tokio::sync::watch::Receiver<bool>) {
+    while !*receiver.borrow() {
+        if receiver.changed().await.is_err() {
+            break;
+        }
+    }
 }

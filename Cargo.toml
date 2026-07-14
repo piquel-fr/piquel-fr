@@ -52,7 +52,7 @@ tonic-build = "0.12"
 tokio = { version = "1.48", features = ["macros", "rt-multi-thread", "signal", "net", "time", "sync"] }
 tokio-stream = { version = "0.1", features = ["net"] }
 tower = { version = "0.5", features = ["util"] }
-tower-http = { version = "0.6", features = ["trace"] }
+tower-http = { version = "0.6", features = ["trace", "limit", "timeout", "set-header", "catch-panic"] }
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
 url = { version = "2.5", features = ["serde"] }

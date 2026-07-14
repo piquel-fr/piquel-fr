@@ -24,6 +24,7 @@ pub use oidc::{Es256KeyProvider, KeyProvider, OidcApplication};
 #[allow(dead_code)]
 mod passkey;
 pub use passkey::PasskeyApplication;
+mod hardening;
 mod service_rpc;
 #[allow(dead_code)]
 mod session;
@@ -122,15 +123,15 @@ pub trait Readiness: Send + Sync {
 /// Production readiness checks `PostgreSQL` and resolves the configured key.
 pub struct ProductionReadiness {
     database: Database,
-    key_provider: SecretReference,
+    secret_providers: Vec<SecretReference>,
 }
 impl ProductionReadiness {
     /// Builds the production readiness dependency set.
     #[must_use]
-    pub const fn new(database: Database, key_provider: SecretReference) -> Self {
+    pub fn new(database: Database, secret_providers: Vec<SecretReference>) -> Self {
         Self {
             database,
-            key_provider,
+            secret_providers,
         }
     }
 }
@@ -138,11 +139,14 @@ impl ProductionReadiness {
 impl Readiness for ProductionReadiness {
     async fn check(&self) -> Result<(), ()> {
         self.database.health_check().await.map_err(|_| ())?;
-        tokio::time::timeout(Duration::from_secs(2), async {
-            self.key_provider.resolve().map(|_| ()).map_err(|_| ())
-        })
-        .await
-        .map_err(|_| ())?
+        for provider in &self.secret_providers {
+            tokio::time::timeout(Duration::from_secs(2), async {
+                provider.resolve().map(|_| ()).map_err(|_| ())
+            })
+            .await
+            .map_err(|_| ())??;
+        }
+        Ok(())
     }
 }
 
@@ -166,9 +170,10 @@ pub fn router(
         health.merge(passkey::routes(passkeys))
     });
     let router = oidc.map_or(router.clone(), |oidc| router.merge(oidc::routes(oidc)));
-    federation.map_or(router.clone(), |federation| {
+    let router = federation.map_or(router.clone(), |federation| {
         router.merge(federation::routes(federation))
-    })
+    });
+    hardening::apply(router)
 }
 
 async fn ready(State(state): State<AppState>) -> impl IntoResponse {
