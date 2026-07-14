@@ -11,7 +11,63 @@ through `auth/08-hardening-operations` at `47d9f4d`, as presented by this final
 audit PR. The second review was performed independently across architecture,
 security, and remediation-evidence validation.
 
-## Second review verdict
+## Second-review remediation follow-up
+
+The cumulative implementation was repaired again through
+`auth/08-hardening-operations` at `3f46509`. Every second-review finding except
+signing/service-key rotation has an implemented control and enforced evidence.
+Key rotation is deliberately deferred at the owner's direction; the runbook now
+states that overlap rotation is unsupported and that emergency replacement
+causes global reauthentication. It no longer describes a nonexistent control.
+
+The corrected stack now provides the following evidence:
+
+- Active-account status is enforced while sessions are created and resolved.
+  Account disablement atomically revokes browser sessions and refresh families
+  with its audit/event records. Database races cover disable-versus-login and
+  concurrent last-factor removal.
+- OIDC authorization uses a bounded, single-use server-side continuation. The
+  SvelteKit login, authorization, and security flows support passkeys, GitHub,
+  Google, authenticated passkey enrollment, social-identity display,
+  authorization cancellation, and POST/CSRF logout. SvelteKit now generates a
+  nonce-aware CSP instead of blocking its own production hydration scripts.
+- Traefik terminates TLS for the one `auth.piquel.fr` origin. Checked-in static
+  and dynamic configuration separates page and protocol routes, discards
+  untrusted forwarding headers, and keeps health and private RPC listeners off
+  the edge. Auth-service accepts client IP forwarding only from configured
+  Docker CIDRs and uses bounded incremental limiter eviction.
+- Refresh rotation re-evaluates current client grants and emits a sanitized
+  replay audit/signal. Passkey authentication locks and conditionally updates
+  the credential row. Federation uses active verified-email ownership. The SDK
+  verifies ID-token signature, algorithm, issuer, audience, time, and the
+  single-use nonce before exposing a verified identity.
+- Private RPC binds the assertion subject and service token subject to the
+  exact `spiffe://piquel.fr/service/<service-id>` URI SAN. Administrative
+  service provisioning is atomic, token issuance is audited, replay state is
+  authoritative, and the client retries only the idempotent `GetUser` call once
+  after an authentication failure. A live mTLS/Tonic/PostgreSQL test proves CA
+  enforcement, missing and mismatched identities, assertion replay rejection,
+  successful token injection, and method-permission denial.
+- Expired state has a bounded cleanup owner; health traffic is isolated;
+  synchronous secret checks cannot create unbounded blocking work; HTTP and
+  RPC drains are deadline bounded. Tonic 0.14 removes the withdrawn
+  `rustls-pemfile` dependency.
+
+CI now provisions PostgreSQL 17 and runs the formerly optional concurrency
+suite plus black-box HTTP and mTLS RPC suites. It runs real Vitest and Chromium
+flows, formatting, Clippy, all Rust tests, high-severity package audit, and
+`cargo deny`. It also boots the production Traefik configuration with separate
+backends and proves protocol/page path ownership and forwarded-header
+sanitization. Local verification repeated these gates, including the isolated
+PostgreSQL tests and Traefik composition.
+
+With key rotation recorded as an explicit accepted first-version limitation,
+the second review's remaining findings are remediated. Live GitHub/Google
+credentials, production certificates/secrets, backup restoration, and provider
+callback drills remain release-environment checks; the repository does not
+claim that local tests can substitute for those deployments.
+
+## Second review verdict (superseded by the remediation follow-up)
 
 **Do not merge or deploy the stack as a completed authentication service.**
 
