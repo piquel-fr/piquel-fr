@@ -3,6 +3,8 @@ resolver = "3"
 members = [
     "apps/auth-service",
     "crates/auth-protocol",
+    "crates/auth-middleware",
+    "crates/auth-sdk",
     "crates/configuration",
     "crates/database",
     "crates/telemetry",

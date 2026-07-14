@@ -1409,12 +1409,29 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a89322df9ebe1c1578d689c92318e070967d1042b512afbe49518723f4e6d5cd"
 
 [[package]]
+name = "piquel-auth-middleware"
+version = "0.1.0"
+dependencies = [
+ "piquel-auth-protocol",
+ "thiserror",
+ "url",
+]
+
+[[package]]
 name = "piquel-auth-protocol"
 version = "0.1.0"
 dependencies = [
  "serde",
  "thiserror 2.0.18",
  "uuid",
+]
+
+[[package]]
+name = "piquel-auth-sdk"
+version = "0.1.0"
+dependencies = [
+ "piquel-auth-middleware",
+ "piquel-auth-protocol",
 ]
 
 [[package]]
