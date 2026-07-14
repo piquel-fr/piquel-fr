@@ -7,7 +7,7 @@ use crate::{
     InsertFederationTransaction, InsertPasskey, InsertRefreshFamily, InsertRefreshToken,
     InsertSession, InsertUser, InsertVerifiedEmail, RefreshRotationError, RotatedRefreshToken,
     StoredAuthorizationRequest, StoredEmail, StoredExternalIdentity, StoredOidcClient,
-    StoredPasskey, StoredSession, StoredUser, UpdateUserProfile,
+    StoredPasskey, StoredServiceIdentity, StoredSession, StoredUser, UpdateUserProfile,
 };
 use piquel_auth_protocol::{AccountStatus, SessionId, TokenId, UserId};
 use sqlx::{PgConnection, PgPool, Row};
@@ -694,6 +694,56 @@ fn stored_external_identity(
             .try_get("linked_email")
             .map_err(|_| DatabaseError::InvalidStoredData)?,
     })
+}
+
+impl ServiceIdentityRepository<'_> {
+    pub async fn find_active_key(
+        &mut self,
+        service_id: &str,
+        kid: &str,
+    ) -> Result<Option<StoredServiceIdentity>, DatabaseError> {
+        let row=fetch_optional!(self,sqlx::query("SELECT s.id,k.kid,k.public_key,COALESCE(jsonb_agg(p.method) FILTER(WHERE p.method IS NOT NULL),'[]'::jsonb) permissions FROM service_identities s JOIN service_identity_keys k ON k.service_id=s.id LEFT JOIN service_rpc_permissions p ON p.service_id=s.id WHERE s.id=$1 AND k.kid=$2 AND s.enabled AND k.algorithm='ES256' AND k.revoked_at IS NULL AND k.not_before<=now() AND k.expires_at>now() GROUP BY s.id,k.kid,k.public_key").bind(service_id).bind(kid))?;
+        row.map(|row| {
+            Ok(StoredServiceIdentity {
+                id: row
+                    .try_get("id")
+                    .map_err(|_| DatabaseError::InvalidStoredData)?,
+                kid: row
+                    .try_get("kid")
+                    .map_err(|_| DatabaseError::InvalidStoredData)?,
+                public_key: row
+                    .try_get("public_key")
+                    .map_err(|_| DatabaseError::InvalidStoredData)?,
+                permissions: serde_json::from_value(
+                    row.try_get("permissions")
+                        .map_err(|_| DatabaseError::InvalidStoredData)?,
+                )
+                .map_err(|_| DatabaseError::InvalidStoredData)?,
+            })
+        })
+        .transpose()
+    }
+    pub async fn record_assertion(
+        &mut self,
+        jti: TokenId,
+        service_id: &str,
+        expires_at: chrono::DateTime<chrono::Utc>,
+    ) -> Result<(), DatabaseError> {
+        execute!(
+            self,
+            sqlx::query("DELETE FROM service_assertion_replays WHERE expires_at<=now()")
+        )?;
+        execute!(
+            self,
+            sqlx::query(
+                "INSERT INTO service_assertion_replays(jti,service_id,expires_at) VALUES($1,$2,$3)"
+            )
+            .bind(jti.as_uuid())
+            .bind(service_id)
+            .bind(expires_at)
+        )?;
+        Ok(())
+    }
 }
 fn stored_session(row: &sqlx::postgres::PgRow) -> Result<StoredSession, DatabaseError> {
     let methods: serde_json::Value = row

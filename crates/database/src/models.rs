@@ -264,3 +264,11 @@ pub struct StoredExternalIdentity {
     pub subject: String,
     pub linked_email: String,
 }
+
+#[derive(Clone, Debug)]
+pub struct StoredServiceIdentity {
+    pub id: String,
+    pub kid: String,
+    pub public_key: Vec<u8>,
+    pub permissions: Vec<String>,
+}

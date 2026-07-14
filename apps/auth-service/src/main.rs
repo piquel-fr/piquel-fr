@@ -2,12 +2,13 @@
 
 use auth_service::{
     AuthConfig, Es256KeyProvider, FederationApplication, OidcApplication, PasskeyApplication,
-    ProductionReadiness, router,
+    ProductionReadiness, ServiceRpcApplication, router,
 };
 use piquel_repository::Database;
 use std::{net::SocketAddr, sync::Arc};
 
 #[tokio::main]
+#[allow(clippy::too_many_lines)]
 async fn main() -> anyhow::Result<()> {
     piquel_telemetry::init("auth_service=info");
     let config = AuthConfig::from_environment()?;
@@ -37,14 +38,14 @@ async fn main() -> anyhow::Result<()> {
             database.clone(),
             config.public_base_url.as_url(),
             key_secret.expose_secret(),
-            keys,
+            keys.clone(),
         )
     } else {
         OidcApplication::new(
             database.clone(),
             config.public_base_url.as_url(),
             key_secret.expose_secret(),
-            keys,
+            keys.clone(),
         )
     }
     .map_err(|()| anyhow::anyhow!("invalid OIDC configuration"))?;
@@ -63,9 +64,22 @@ async fn main() -> anyhow::Result<()> {
             config.google,
         )
     }?;
+    let rpc = ServiceRpcApplication::new(
+        database.clone(),
+        config
+            .public_base_url
+            .as_url()
+            .as_str()
+            .trim_end_matches('/')
+            .to_owned(),
+        keys,
+    );
+    let rpc_certificate = config.rpc_tls_certificate.resolve()?;
+    let rpc_private_key = config.rpc_tls_private_key.resolve()?;
+    let rpc_client_ca = config.rpc_client_ca.resolve()?;
     let listener = tokio::net::TcpListener::bind(listener_address).await?;
     tracing::info!(%listener_address, "auth service listening");
-    axum::serve(
+    let public = axum::serve(
         listener,
         router(
             Arc::new(ProductionReadiness::new(database, config.key_provider)),
@@ -73,9 +87,29 @@ async fn main() -> anyhow::Result<()> {
             Some(oidc),
             Some(federation),
         ),
-    )
-    .with_graceful_shutdown(shutdown_signal())
-    .await?;
+    );
+    let tls = tonic::transport::ServerTlsConfig::new()
+        .identity(tonic::transport::Identity::from_pem(
+            rpc_certificate.expose_secret(),
+            rpc_private_key.expose_secret(),
+        ))
+        .client_ca_root(tonic::transport::Certificate::from_pem(
+            rpc_client_ca.expose_secret(),
+        ));
+    let private = tonic::transport::Server::builder()
+        .tls_config(tls)?
+        .add_service(
+            rpc.clone()
+                .token_server()
+                .max_decoding_message_size(16 * 1024),
+        )
+        .add_service(rpc.auth_server().max_decoding_message_size(1024 * 1024))
+        .serve(config.internal_listener);
+    tokio::select! {
+        result = public => result?,
+        result = private => result?,
+        () = shutdown_signal() => {},
+    }
     Ok(())
 }
 

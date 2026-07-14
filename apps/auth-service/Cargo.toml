@@ -19,6 +19,7 @@ p256.workspace = true
 piquel-auth-protocol = { path = "../../crates/auth-protocol" }
 piquel-configuration = { path = "../../crates/configuration" }
 piquel-repository = { path = "../../crates/database" }
+piquel-service-auth = { path = "../../crates/service-auth" }
 piquel-telemetry = { path = "../../crates/telemetry" }
 serde.workspace = true
 serde_json.workspace = true
@@ -27,6 +28,7 @@ rand.workspace = true
 reqwest.workspace = true
 thiserror.workspace = true
 tokio.workspace = true
+tonic.workspace = true
 tracing.workspace = true
 unicode-normalization.workspace = true
 url.workspace = true

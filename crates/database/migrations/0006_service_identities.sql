@@ -1,3 +1,5 @@
 CREATE TABLE service_identities (id TEXT PRIMARY KEY, display_name TEXT NOT NULL, enabled BOOLEAN NOT NULL DEFAULT TRUE, created_at TIMESTAMPTZ NOT NULL DEFAULT now());
-CREATE TABLE service_identity_keys (id UUID PRIMARY KEY, service_id TEXT NOT NULL REFERENCES service_identities(id) ON DELETE CASCADE, kid TEXT NOT NULL, algorithm TEXT NOT NULL, public_key BYTEA NOT NULL, not_before TIMESTAMPTZ NOT NULL, expires_at TIMESTAMPTZ NOT NULL, revoked_at TIMESTAMPTZ, UNIQUE (service_id, kid));
+CREATE TABLE service_identity_keys (id UUID PRIMARY KEY, service_id TEXT NOT NULL REFERENCES service_identities(id) ON DELETE CASCADE, kid TEXT NOT NULL, algorithm TEXT NOT NULL CHECK(algorithm='ES256'), public_key BYTEA NOT NULL, not_before TIMESTAMPTZ NOT NULL, expires_at TIMESTAMPTZ NOT NULL, revoked_at TIMESTAMPTZ, UNIQUE (service_id, kid));
 CREATE TABLE service_rpc_permissions (service_id TEXT NOT NULL REFERENCES service_identities(id) ON DELETE CASCADE, method TEXT NOT NULL, PRIMARY KEY (service_id, method));
+CREATE TABLE service_assertion_replays (jti UUID PRIMARY KEY, service_id TEXT NOT NULL REFERENCES service_identities(id), expires_at TIMESTAMPTZ NOT NULL);
+CREATE INDEX service_assertion_replays_expiry_idx ON service_assertion_replays(expires_at);

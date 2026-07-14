@@ -37,9 +37,22 @@ const ACCESS_TOKEN_SECONDS: i64 = 300;
 
 /// Supplies a stable active ES256 key and its public JWK.
 pub trait KeyProvider: Send + Sync {
+    /// Signs a JSON claim set with the active asymmetric key.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when claims cannot be serialized or signed.
+    #[allow(clippy::result_unit_err)]
     fn sign(&self, token_type: &str, claims: &Value) -> Result<String, ()>;
+    /// Publishes the provider's public verification keys.
     fn jwks(&self) -> Value;
-    fn verify_access(&self, token: &str, issuer: &str) -> Result<Value, ()>;
+    /// Verifies a locally issued token with an exact type and issuer.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error for malformed, expired, mismatched, or invalidly signed tokens.
+    #[allow(clippy::result_unit_err)]
+    fn verify(&self, token: &str, token_type: &str, issuer: &str) -> Result<Value, ()>;
 }
 
 /// Local PEM-backed key provider. Production callers resolve the PEM through a secret reference.
@@ -98,7 +111,7 @@ impl KeyProvider for Es256KeyProvider {
         }]})
     }
 
-    fn verify_access(&self, token: &str, issuer: &str) -> Result<Value, ()> {
+    fn verify(&self, token: &str, token_type: &str, issuer: &str) -> Result<Value, ()> {
         if token.len() > 8192 {
             return Err(());
         }
@@ -114,7 +127,7 @@ impl KeyProvider for Es256KeyProvider {
                 .map_err(|_| ())?;
         if header.get("alg") != Some(&json!("ES256"))
             || header.get("kid") != Some(&json!(self.kid))
-            || header.get("typ") != Some(&json!("at+jwt"))
+            || header.get("typ") != Some(&json!(token_type))
         {
             return Err(());
         }
@@ -775,7 +788,7 @@ async fn userinfo(
         .ok_or_else(ApiError::unauthorized)?;
     let claims = app
         .keys
-        .verify_access(token, &app.issuer)
+        .verify(token, "at+jwt", &app.issuer)
         .map_err(|()| ApiError::unauthorized())?;
     let scopes: BTreeSet<_> = claims
         .get("scope")
@@ -999,13 +1012,13 @@ mod tests {
                 &json!({"iss":"https://issuer","exp":now+60,"iat":now}),
             )
             .expect("sign");
-        assert!(keys.verify_access(&id, "https://issuer").is_err());
+        assert!(keys.verify(&id, "at+jwt", "https://issuer").is_err());
         let access = keys
             .sign(
                 "at+jwt",
                 &json!({"iss":"https://issuer","exp":now+60,"iat":now}),
             )
             .expect("sign");
-        assert!(keys.verify_access(&access, "https://issuer").is_ok());
+        assert!(keys.verify(&access, "at+jwt", "https://issuer").is_ok());
     }
 }

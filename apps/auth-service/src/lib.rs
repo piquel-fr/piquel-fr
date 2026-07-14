@@ -20,12 +20,14 @@ mod federation;
 pub use federation::{FederationApplication, ProviderConfiguration};
 #[allow(dead_code)]
 mod oidc;
-pub use oidc::{Es256KeyProvider, OidcApplication};
+pub use oidc::{Es256KeyProvider, KeyProvider, OidcApplication};
 #[allow(dead_code)]
 mod passkey;
 pub use passkey::PasskeyApplication;
+mod service_rpc;
 #[allow(dead_code)]
 mod session;
+pub use service_rpc::ServiceRpcApplication;
 
 /// Typed auth-service configuration.
 #[derive(Clone, Debug)]
@@ -50,6 +52,12 @@ pub struct AuthConfig {
     pub github: ProviderConfiguration,
     /// Google OIDC client configuration.
     pub google: ProviderConfiguration,
+    /// Server certificate for the mTLS private RPC listener.
+    pub rpc_tls_certificate: SecretReference,
+    /// Server private key for the mTLS private RPC listener.
+    pub rpc_tls_private_key: SecretReference,
+    /// Client CA used to require private-RPC client certificates.
+    pub rpc_client_ca: SecretReference,
 }
 impl AuthConfig {
     /// Loads the minimum service configuration from the environment.
@@ -97,6 +105,9 @@ impl AuthConfig {
                 client_id: required("AUTH_GOOGLE_CLIENT_ID")?,
                 client_secret: SecretReference::parse(&required("AUTH_GOOGLE_CLIENT_SECRET")?)?,
             },
+            rpc_tls_certificate: SecretReference::parse(&required("AUTH_RPC_TLS_CERTIFICATE")?)?,
+            rpc_tls_private_key: SecretReference::parse(&required("AUTH_RPC_TLS_PRIVATE_KEY")?)?,
+            rpc_client_ca: SecretReference::parse(&required("AUTH_RPC_CLIENT_CA")?)?,
         })
     }
 }

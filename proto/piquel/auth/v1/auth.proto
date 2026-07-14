@@ -9,6 +9,11 @@ service AuthService {
   rpc RevokeAllUserSessions(RevokeAllUserSessionsRequest) returns (RevokeAllUserSessionsResponse);
   rpc GetServiceConfiguration(GetServiceConfigurationRequest) returns (GetServiceConfigurationResponse);
 }
+service ServiceTokenService {
+  rpc IssueServiceToken(IssueServiceTokenRequest) returns (IssueServiceTokenResponse);
+}
+message IssueServiceTokenRequest { string client_assertion = 1; }
+message IssueServiceTokenResponse { string access_token = 1; uint32 expires_in = 2; string token_type = 3; }
 message GetUserRequest { string user_id = 1; reserved 2; reserved "include_private_fields"; }
 message GetUserResponse { string user_id = 1; string display_name = 2; string account_status = 3; }
 message BatchGetUsersRequest { repeated string user_ids = 1; }

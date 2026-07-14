@@ -1,6 +1,7 @@
 //! Downstream facade for local token validation and server-side OIDC flows.
 #![allow(missing_docs)]
 
+pub use piquel_auth_client::{ClientError as ServiceClientError, ServiceAuthClient};
 pub use piquel_auth_middleware::{
     AuthMiddleware, AuthenticatedUser, AuthenticationError, ConfigurationError, JwksFetcher,
 };
