@@ -3,8 +3,8 @@
 use chrono::{Duration as ChronoDuration, Utc};
 use piquel_auth_protocol::{AccountStatus, AuthenticationMethod, SessionId, TokenId, UserId};
 use piquel_repository::{
-    AppendInternalEvent, Database, DatabaseConfig, DatabaseError, InsertSession, InsertUser,
-    InsertVerifiedEmail, UpdateUserProfile,
+    AppendInternalEvent, Database, DatabaseConfig, DatabaseError, InsertCeremony, InsertPasskey,
+    InsertSession, InsertUser, InsertVerifiedEmail, UpdateUserProfile,
 };
 use std::{env, time::Duration};
 
@@ -108,6 +108,63 @@ async fn identity_transactions_and_concurrency_hold() {
 
     let first = insert_user(&database, "first").await;
     let second = insert_user(&database, "second").await;
+
+    let ceremony_id = TokenId::new();
+    database
+        .passkeys()
+        .insert_ceremony(&InsertCeremony {
+            id: ceremony_id,
+            user_id: Some(first),
+            session_id: None,
+            kind: "authentication".into(),
+            challenge_digest: vec![1; 32],
+            state: serde_json::json!({"test":true}),
+            expires_at: Utc::now() + ChronoDuration::minutes(5),
+        })
+        .await
+        .expect("ceremony");
+    let one = database.clone();
+    let two = database.clone();
+    let (left, right) = tokio::join!(
+        async move {
+            one.passkeys()
+                .consume_ceremony(ceremony_id, "authentication")
+                .await
+        },
+        async move {
+            two.passkeys()
+                .consume_ceremony(ceremony_id, "authentication")
+                .await
+        }
+    );
+    assert_eq!(usize::from(left.is_ok()) + usize::from(right.is_ok()), 1);
+
+    let credential_id = vec![7_u8; 32];
+    database
+        .passkeys()
+        .insert(&InsertPasskey {
+            id: TokenId::new(),
+            credential_id: credential_id.clone(),
+            user_id: first,
+            credential: serde_json::json!({"fixture":true}),
+            friendly_name: "First".into(),
+        })
+        .await
+        .expect("passkey");
+    assert!(matches!(
+        database
+            .passkeys()
+            .insert(&InsertPasskey {
+                id: TokenId::new(),
+                credential_id,
+                user_id: second,
+                credential: serde_json::json!({"fixture":true}),
+                friendly_name: "Duplicate".into()
+            })
+            .await,
+        Err(DatabaseError::Conflict)
+    ));
+
     let normalized = format!("race-{}@example.com", UserId::new());
     let one = database.clone();
     let two = database.clone();
