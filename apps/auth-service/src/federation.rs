@@ -1,6 +1,42 @@
 //! Approved-provider identity-linking invariants.
 
 use piquel_auth_protocol::UserId;
+use piquel_configuration::SecretReference;
+
+/// The only approved social identity providers in the first iteration.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) enum Provider {
+    /// GitHub's OAuth identity API with verified-email lookup.
+    GitHub,
+    /// Google's `OpenID` Connect identity API.
+    Google,
+}
+
+impl Provider {
+    /// Stable provider label stored in the database.
+    pub(super) const fn name(self) -> &'static str {
+        match self {
+            Self::GitHub => "github",
+            Self::Google => "google",
+        }
+    }
+
+    /// Expected issuer used as the durable external identity namespace.
+    pub(super) const fn issuer(self) -> &'static str {
+        match self {
+            Self::GitHub => "https://github.com",
+            Self::Google => "https://accounts.google.com",
+        }
+    }
+}
+
+/// Provider-specific configuration, with client secrets held only by references.
+#[derive(Clone, Debug)]
+pub(super) struct ProviderConfiguration {
+    pub provider: Provider,
+    pub client_id: String,
+    pub client_secret: SecretReference,
+}
 
 /// Provider claims after issuer/signature/nonce verification by the adapter.
 pub(super) struct VerifiedProviderIdentity {
@@ -44,5 +80,11 @@ mod tests {
             )
             .is_err()
         );
+    }
+
+    #[test]
+    fn provider_set_is_explicit_and_stable() {
+        assert_eq!(Provider::GitHub.name(), "github");
+        assert_eq!(Provider::Google.issuer(), "https://accounts.google.com");
     }
 }

@@ -1,7 +1,7 @@
 CREATE TABLE external_login_identities (
     id UUID PRIMARY KEY,
     user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-    provider_name TEXT NOT NULL,
+    provider_name TEXT NOT NULL CHECK (provider_name IN ('github', 'google')),
     issuer TEXT NOT NULL,
     subject TEXT NOT NULL,
     linked_email TEXT NOT NULL,
