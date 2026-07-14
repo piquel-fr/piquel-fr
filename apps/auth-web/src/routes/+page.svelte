@@ -1,12 +1,10 @@
 <script lang="ts">
-  let submitting = $state(false);
-  function beginPasskey() { submitting = true; window.location.assign('/webauthn/authenticate/start'); }
+  import { authenticatePasskey, webauthnAvailable } from '$lib/webauthn';
+  let accountId=$state('');let submitting=$state(false);let error=$state('');
+  async function signIn(){if(submitting)return;submitting=true;error='';try{await authenticatePasskey(accountId.trim());window.location.assign('/security');}catch{error='We could not sign you in. Check the account and try again.';submitting=false;}}
 </script>
-
-<h1>Sign in to Piquel</h1>
-<p>Use a passkey or one of the approved identity providers.</p>
-<button type="button" onclick={beginPasskey} disabled={submitting}>{submitting ? 'Starting passkey…' : 'Sign in with a passkey'}</button>
-<p><a href="/login/github" rel="nofollow">Sign in with GitHub</a></p>
-<p><a href="/login/google" rel="nofollow">Sign in with Google</a></p>
-<p class="help">Connecting a product-owned GitHub integration is different from signing in with GitHub.</p>
-<style>.help { color: #555; font-size: .9rem; }</style>
+<svelte:head><title>Sign in · Piquel</title></svelte:head>
+<section aria-labelledby="title"><p class="eyebrow">Piquel account</p><h1 id="title">Sign in</h1><p>Use your passkey, or continue with an approved identity provider.</p>
+{#if error}<div class="error" role="alert" tabindex="-1">{error}</div>{/if}
+{#if webauthnAvailable()}<form onsubmit={async(event)=>{event.preventDefault();await signIn();}}><label for="account">Account ID</label><input id="account" bind:value={accountId} autocomplete="username" required /><button disabled={submitting}>{submitting?'Waiting for your passkey…':'Sign in with a passkey'}</button></form>{:else}<p role="status">Passkeys are unavailable in this browser or insecure context.</p>{/if}
+<div class="alternatives" aria-label="Social sign in"><a class="provider" href="/login/github">Sign in with GitHub</a><a class="provider" href="/login/google">Sign in with Google</a></div><p class="help">Need a new account? <a href="/register">Create one with a passkey</a>.</p><p class="help">“Sign in with GitHub” identifies you. Connecting a product-owned GitHub integration is a separate feature.</p></section>
