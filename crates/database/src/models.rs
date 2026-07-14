@@ -111,3 +111,86 @@ pub struct ConsumedCeremony {
     pub session_id: Option<SessionId>,
     pub state: Value,
 }
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct StoredOidcClient {
+    pub id: String,
+    pub enabled: bool,
+    pub redirect_uris: Vec<String>,
+    pub post_logout_uris: Vec<String>,
+    pub allowed_scopes: Vec<String>,
+    pub allowed_audiences: Vec<String>,
+    pub allow_refresh: bool,
+}
+
+#[derive(Clone, Debug)]
+pub struct BootstrapOidcClient {
+    pub id: String,
+    pub display_name: String,
+    pub redirect_uris: Vec<String>,
+    pub post_logout_uris: Vec<String>,
+    pub allowed_scopes: Vec<String>,
+    pub allowed_audiences: Vec<String>,
+    pub allow_refresh: bool,
+}
+
+#[derive(Clone, Debug)]
+pub struct InsertAuthorizationCode {
+    pub id: TokenId,
+    pub secret_digest: Vec<u8>,
+    pub client_id: String,
+    pub user_id: UserId,
+    pub session_id: SessionId,
+    pub redirect_uri: String,
+    pub pkce_challenge: String,
+    pub nonce: Option<String>,
+    pub scopes: Vec<String>,
+    pub audience: String,
+    pub expires_at: DateTime<Utc>,
+}
+
+#[derive(Clone, Debug)]
+pub struct ConsumedAuthorizationCode {
+    pub client_id: String,
+    pub user_id: UserId,
+    pub session_id: SessionId,
+    pub redirect_uri: String,
+    pub pkce_challenge: String,
+    pub nonce: Option<String>,
+    pub scopes: Vec<String>,
+    pub audience: String,
+}
+
+#[derive(Clone, Debug)]
+pub struct InsertRefreshFamily {
+    pub id: TokenId,
+    pub user_id: UserId,
+    pub client_id: String,
+    pub session_id: SessionId,
+    pub audience: String,
+    pub scopes: Vec<String>,
+}
+
+#[derive(Clone, Debug)]
+pub struct InsertRefreshToken {
+    pub id: TokenId,
+    pub family_id: TokenId,
+    pub secret_digest: Vec<u8>,
+    pub expires_at: DateTime<Utc>,
+}
+
+#[derive(Clone, Debug)]
+pub struct RotatedRefreshToken {
+    pub family_id: TokenId,
+    pub user_id: UserId,
+    pub client_id: String,
+    pub session_id: SessionId,
+    pub audience: String,
+    pub scopes: Vec<String>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum RefreshRotationError {
+    Invalid,
+    Replay,
+}

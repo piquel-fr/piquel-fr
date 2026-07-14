@@ -17,6 +17,7 @@ mod email;
 mod event_log;
 #[allow(dead_code)]
 mod oidc;
+pub use oidc::{Es256KeyProvider, OidcApplication};
 #[allow(dead_code)]
 mod passkey;
 pub use passkey::PasskeyApplication;
@@ -38,6 +39,10 @@ pub struct AuthConfig {
     pub key_provider: SecretReference,
     /// `WebAuthn` relying-party identifier.
     pub webauthn_rp_id: String,
+    /// Enables loopback-only development relaxations.
+    pub development_mode: bool,
+    /// Stable identifier published with the active signing key.
+    pub signing_key_id: String,
 }
 impl AuthConfig {
     /// Loads the minimum service configuration from the environment.
@@ -75,6 +80,8 @@ impl AuthConfig {
             database,
             key_provider: SecretReference::parse(&required("AUTH_KEY_PROVIDER")?)?,
             webauthn_rp_id: required("AUTH_WEBAUTHN_RP_ID")?,
+            development_mode: development,
+            signing_key_id: required("AUTH_SIGNING_KEY_ID")?,
         })
     }
 }
@@ -119,16 +126,19 @@ struct AppState {
 }
 
 /// Builds the public health-only router. Liveness has no dependencies; readiness fails closed.
-pub fn router(readiness: Arc<dyn Readiness>, passkeys: Option<PasskeyApplication>) -> Router {
+pub fn router(
+    readiness: Arc<dyn Readiness>,
+    passkeys: Option<PasskeyApplication>,
+    oidc: Option<OidcApplication>,
+) -> Router {
     let health = Router::new()
         .route("/health/live", get(|| async { StatusCode::NO_CONTENT }))
         .route("/health/ready", get(ready))
         .with_state(AppState { readiness });
-    if let Some(passkeys) = passkeys {
+    let router = passkeys.map_or(health.clone(), |passkeys| {
         health.merge(passkey::routes(passkeys))
-    } else {
-        health
-    }
+    });
+    oidc.map_or(router.clone(), |oidc| router.merge(oidc::routes(oidc)))
 }
 
 async fn ready(State(state): State<AppState>) -> impl IntoResponse {
@@ -153,7 +163,7 @@ mod tests {
 
     #[tokio::test]
     async fn liveness_has_no_dependencies_and_readiness_fails_closed() {
-        let app = router(Arc::new(FixedReadiness(false)), None);
+        let app = router(Arc::new(FixedReadiness(false)), None, None);
         let live = app
             .clone()
             .oneshot(
@@ -177,7 +187,7 @@ mod tests {
 
     #[tokio::test]
     async fn readiness_succeeds_with_test_substitutes() {
-        let response = router(Arc::new(FixedReadiness(true)), None)
+        let response = router(Arc::new(FixedReadiness(true)), None, None)
             .oneshot(
                 axum::http::Request::get("/health/ready")
                     .body(axum::body::Body::empty())

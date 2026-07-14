@@ -1,8 +1,10 @@
 //! Domain repository handles backed by a private pool or transaction connection.
 
 use crate::{
-    AppendAuditEvent, AppendInternalEvent, ConsumedCeremony, DatabaseError, InsertCeremony,
-    InsertPasskey, InsertSession, InsertUser, InsertVerifiedEmail, StoredEmail, StoredPasskey,
+    AppendAuditEvent, AppendInternalEvent, BootstrapOidcClient, ConsumedAuthorizationCode,
+    ConsumedCeremony, DatabaseError, InsertAuthorizationCode, InsertCeremony, InsertPasskey,
+    InsertRefreshFamily, InsertRefreshToken, InsertSession, InsertUser, InsertVerifiedEmail,
+    RefreshRotationError, RotatedRefreshToken, StoredEmail, StoredOidcClient, StoredPasskey,
     StoredSession, StoredUser, UpdateUserProfile,
 };
 use piquel_auth_protocol::{AccountStatus, SessionId, TokenId, UserId};
@@ -262,6 +264,209 @@ impl SessionRepository<'_> {
             .bind(user_id.as_uuid())
         )?
         .rows_affected())
+    }
+}
+
+impl OidcRepository<'_> {
+    /// Idempotently provisions a statically reviewed public client and exact URI allowlists.
+    pub async fn bootstrap_client(
+        &mut self,
+        input: &BootstrapOidcClient,
+    ) -> Result<(), DatabaseError> {
+        let scopes =
+            serde_json::to_value(&input.allowed_scopes).map_err(|_| DatabaseError::Internal)?;
+        let audiences =
+            serde_json::to_value(&input.allowed_audiences).map_err(|_| DatabaseError::Internal)?;
+        execute!(self, sqlx::query("INSERT INTO oidc_clients(id,display_name,allowed_scopes,allowed_audiences,allow_refresh) VALUES($1,$2,$3,$4,$5) ON CONFLICT(id) DO UPDATE SET display_name=EXCLUDED.display_name,allowed_scopes=EXCLUDED.allowed_scopes,allowed_audiences=EXCLUDED.allowed_audiences,allow_refresh=EXCLUDED.allow_refresh")
+            .bind(&input.id).bind(&input.display_name).bind(scopes).bind(audiences).bind(input.allow_refresh))?;
+        execute!(
+            self,
+            sqlx::query("DELETE FROM oidc_redirect_uris WHERE client_id=$1").bind(&input.id)
+        )?;
+        for uri in &input.redirect_uris {
+            execute!(self, sqlx::query("INSERT INTO oidc_redirect_uris(client_id,uri,kind) VALUES($1,$2,'authorization')").bind(&input.id).bind(uri))?;
+        }
+        for uri in &input.post_logout_uris {
+            execute!(
+                self,
+                sqlx::query(
+                    "INSERT INTO oidc_redirect_uris(client_id,uri,kind) VALUES($1,$2,'post_logout')"
+                )
+                .bind(&input.id)
+                .bind(uri)
+            )?;
+        }
+        Ok(())
+    }
+
+    pub async fn find_client(
+        &mut self,
+        id: &str,
+    ) -> Result<Option<StoredOidcClient>, DatabaseError> {
+        let row = fetch_optional!(self, sqlx::query("SELECT c.id,c.enabled,c.allowed_scopes,c.allowed_audiences,c.allow_refresh,COALESCE(jsonb_agg(r.uri) FILTER (WHERE r.kind='authorization'),'[]'::jsonb) AS redirect_uris,COALESCE(jsonb_agg(r.uri) FILTER (WHERE r.kind='post_logout'),'[]'::jsonb) AS post_logout_uris FROM oidc_clients c LEFT JOIN oidc_redirect_uris r ON r.client_id=c.id WHERE c.id=$1 GROUP BY c.id").bind(id))?;
+        row.map(|row| {
+            let strings = |column| -> Result<Vec<String>, DatabaseError> {
+                serde_json::from_value(
+                    row.try_get(column)
+                        .map_err(|_| DatabaseError::InvalidStoredData)?,
+                )
+                .map_err(|_| DatabaseError::InvalidStoredData)
+            };
+            Ok(StoredOidcClient {
+                id: row
+                    .try_get("id")
+                    .map_err(|_| DatabaseError::InvalidStoredData)?,
+                enabled: row
+                    .try_get("enabled")
+                    .map_err(|_| DatabaseError::InvalidStoredData)?,
+                redirect_uris: strings("redirect_uris")?,
+                post_logout_uris: strings("post_logout_uris")?,
+                allowed_scopes: strings("allowed_scopes")?,
+                allowed_audiences: strings("allowed_audiences")?,
+                allow_refresh: row
+                    .try_get("allow_refresh")
+                    .map_err(|_| DatabaseError::InvalidStoredData)?,
+            })
+        })
+        .transpose()
+    }
+
+    pub async fn insert_code(
+        &mut self,
+        input: &InsertAuthorizationCode,
+    ) -> Result<(), DatabaseError> {
+        let scopes = serde_json::to_value(&input.scopes).map_err(|_| DatabaseError::Internal)?;
+        execute!(self, sqlx::query("INSERT INTO authorization_codes(id,secret_digest,client_id,user_id,session_id,redirect_uri,pkce_challenge,nonce,scopes,audience,expires_at) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)")
+            .bind(input.id.as_uuid()).bind(&input.secret_digest).bind(&input.client_id)
+            .bind(input.user_id.as_uuid()).bind(input.session_id.as_uuid()).bind(&input.redirect_uri)
+            .bind(&input.pkce_challenge).bind(&input.nonce).bind(scopes).bind(&input.audience).bind(input.expires_at))?;
+        Ok(())
+    }
+
+    pub async fn consume_code(
+        &mut self,
+        id: TokenId,
+        digest: &[u8],
+    ) -> Result<ConsumedAuthorizationCode, DatabaseError> {
+        let row = fetch_optional!(self, sqlx::query("UPDATE authorization_codes c SET consumed_at=now() FROM oidc_clients cl,sessions s,users u WHERE c.id=$1 AND c.secret_digest=$2 AND c.consumed_at IS NULL AND c.expires_at>now() AND cl.id=c.client_id AND cl.enabled AND s.id=c.session_id AND s.revoked_at IS NULL AND s.expires_at>now() AND u.id=c.user_id AND u.status='active' RETURNING c.client_id,c.user_id,c.session_id,c.redirect_uri,c.pkce_challenge,c.nonce,c.scopes,c.audience").bind(id.as_uuid()).bind(digest))?.ok_or(DatabaseError::NotFound)?;
+        Ok(ConsumedAuthorizationCode {
+            client_id: row
+                .try_get("client_id")
+                .map_err(|_| DatabaseError::InvalidStoredData)?,
+            user_id: UserId::from_uuid(
+                row.try_get("user_id")
+                    .map_err(|_| DatabaseError::InvalidStoredData)?,
+            )
+            .map_err(|_| DatabaseError::InvalidStoredData)?,
+            session_id: SessionId::from_uuid(
+                row.try_get("session_id")
+                    .map_err(|_| DatabaseError::InvalidStoredData)?,
+            )
+            .map_err(|_| DatabaseError::InvalidStoredData)?,
+            redirect_uri: row
+                .try_get("redirect_uri")
+                .map_err(|_| DatabaseError::InvalidStoredData)?,
+            pkce_challenge: row
+                .try_get("pkce_challenge")
+                .map_err(|_| DatabaseError::InvalidStoredData)?,
+            nonce: row
+                .try_get("nonce")
+                .map_err(|_| DatabaseError::InvalidStoredData)?,
+            scopes: serde_json::from_value(
+                row.try_get("scopes")
+                    .map_err(|_| DatabaseError::InvalidStoredData)?,
+            )
+            .map_err(|_| DatabaseError::InvalidStoredData)?,
+            audience: row
+                .try_get("audience")
+                .map_err(|_| DatabaseError::InvalidStoredData)?,
+        })
+    }
+}
+
+impl TokenRepository<'_> {
+    pub async fn insert_family(
+        &mut self,
+        family: &InsertRefreshFamily,
+        token: &InsertRefreshToken,
+    ) -> Result<(), DatabaseError> {
+        let scopes = serde_json::to_value(&family.scopes).map_err(|_| DatabaseError::Internal)?;
+        execute!(self, sqlx::query("INSERT INTO refresh_token_families(id,user_id,client_id,session_id,audience,scopes) VALUES($1,$2,$3,$4,$5,$6)")
+            .bind(family.id.as_uuid()).bind(family.user_id.as_uuid()).bind(&family.client_id)
+            .bind(family.session_id.as_uuid()).bind(&family.audience).bind(scopes))?;
+        self.insert_token(token).await
+    }
+
+    pub async fn insert_token(&mut self, token: &InsertRefreshToken) -> Result<(), DatabaseError> {
+        execute!(self, sqlx::query("INSERT INTO refresh_tokens(id,family_id,secret_digest,expires_at) VALUES($1,$2,$3,$4)")
+            .bind(token.id.as_uuid()).bind(token.family_id.as_uuid()).bind(&token.secret_digest).bind(token.expires_at))?;
+        Ok(())
+    }
+
+    pub async fn consume_for_rotation(
+        &mut self,
+        id: TokenId,
+        digest: &[u8],
+    ) -> Result<RotatedRefreshToken, RefreshRotationError> {
+        let row = fetch_optional!(self, sqlx::query("SELECT t.family_id,t.consumed_at,f.user_id,f.client_id,f.session_id,f.audience,f.scopes FROM refresh_tokens t JOIN refresh_token_families f ON f.id=t.family_id JOIN oidc_clients c ON c.id=f.client_id JOIN sessions s ON s.id=f.session_id JOIN users u ON u.id=f.user_id WHERE t.id=$1 AND t.secret_digest=$2 AND t.expires_at>now() AND f.revoked_at IS NULL AND c.enabled AND s.revoked_at IS NULL AND s.expires_at>now() AND u.status='active' FOR UPDATE OF t,f").bind(id.as_uuid()).bind(digest)).map_err(|_| RefreshRotationError::Invalid)?.ok_or(RefreshRotationError::Invalid)?;
+        let family_uuid: uuid::Uuid = row
+            .try_get("family_id")
+            .map_err(|_| RefreshRotationError::Invalid)?;
+        if row
+            .try_get::<Option<chrono::DateTime<chrono::Utc>>, _>("consumed_at")
+            .map_err(|_| RefreshRotationError::Invalid)?
+            .is_some()
+        {
+            execute!(self, sqlx::query("UPDATE refresh_token_families SET revoked_at=now() WHERE id=$1 AND revoked_at IS NULL").bind(family_uuid)).map_err(|_| RefreshRotationError::Invalid)?;
+            return Err(RefreshRotationError::Replay);
+        }
+        if execute!(
+            self,
+            sqlx::query(
+                "UPDATE refresh_tokens SET consumed_at=now() WHERE id=$1 AND consumed_at IS NULL"
+            )
+            .bind(id.as_uuid())
+        )
+        .map_err(|_| RefreshRotationError::Invalid)?
+        .rows_affected()
+            != 1
+        {
+            return Err(RefreshRotationError::Invalid);
+        }
+        Ok(RotatedRefreshToken {
+            family_id: TokenId::from_uuid(family_uuid)
+                .map_err(|_| RefreshRotationError::Invalid)?,
+            user_id: UserId::from_uuid(
+                row.try_get("user_id")
+                    .map_err(|_| RefreshRotationError::Invalid)?,
+            )
+            .map_err(|_| RefreshRotationError::Invalid)?,
+            client_id: row
+                .try_get("client_id")
+                .map_err(|_| RefreshRotationError::Invalid)?,
+            session_id: SessionId::from_uuid(
+                row.try_get("session_id")
+                    .map_err(|_| RefreshRotationError::Invalid)?,
+            )
+            .map_err(|_| RefreshRotationError::Invalid)?,
+            audience: row
+                .try_get("audience")
+                .map_err(|_| RefreshRotationError::Invalid)?,
+            scopes: serde_json::from_value(
+                row.try_get("scopes")
+                    .map_err(|_| RefreshRotationError::Invalid)?,
+            )
+            .map_err(|_| RefreshRotationError::Invalid)?,
+        })
+    }
+
+    pub async fn revoke_family_for_token(
+        &mut self,
+        id: TokenId,
+        digest: &[u8],
+    ) -> Result<(), DatabaseError> {
+        execute!(self, sqlx::query("UPDATE refresh_token_families f SET revoked_at=COALESCE(revoked_at,now()) FROM refresh_tokens t WHERE t.id=$1 AND t.secret_digest=$2 AND t.family_id=f.id").bind(id.as_uuid()).bind(digest))?;
+        Ok(())
     }
 }
 fn stored_session(row: &sqlx::postgres::PgRow) -> Result<StoredSession, DatabaseError> {

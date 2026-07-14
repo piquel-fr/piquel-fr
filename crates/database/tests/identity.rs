@@ -3,8 +3,9 @@
 use chrono::{Duration as ChronoDuration, Utc};
 use piquel_auth_protocol::{AccountStatus, AuthenticationMethod, SessionId, TokenId, UserId};
 use piquel_repository::{
-    AppendInternalEvent, Database, DatabaseConfig, DatabaseError, InsertCeremony, InsertPasskey,
-    InsertSession, InsertUser, InsertVerifiedEmail, UpdateUserProfile,
+    AppendInternalEvent, BootstrapOidcClient, Database, DatabaseConfig, DatabaseError,
+    InsertCeremony, InsertPasskey, InsertRefreshFamily, InsertRefreshToken, InsertSession,
+    InsertUser, InsertVerifiedEmail, RefreshRotationError, UpdateUserProfile,
 };
 use std::{env, time::Duration};
 
@@ -138,6 +139,92 @@ async fn identity_transactions_and_concurrency_hold() {
         }
     );
     assert_eq!(usize::from(left.is_ok()) + usize::from(right.is_ok()), 1);
+
+    let refresh_session = SessionId::new();
+    database
+        .sessions()
+        .insert(&InsertSession {
+            id: refresh_session,
+            user_id: first,
+            authentication_methods: vec![AuthenticationMethod::Passkey],
+            authenticated_at: Utc::now(),
+            expires_at: Utc::now() + ChronoDuration::hours(1),
+            user_agent_family: None,
+        })
+        .await
+        .expect("refresh session");
+    let mut setup = database.begin().await.expect("OIDC setup");
+    setup
+        .oidc()
+        .bootstrap_client(&BootstrapOidcClient {
+            id: "test-client".into(),
+            display_name: "Test".into(),
+            redirect_uris: vec!["https://client.example/callback".into()],
+            post_logout_uris: vec!["https://client.example/logout".into()],
+            allowed_scopes: vec!["openid".into(), "offline_access".into()],
+            allowed_audiences: vec!["test-api".into()],
+            allow_refresh: true,
+        })
+        .await
+        .expect("client");
+    let family_id = TokenId::new();
+    let refresh_id = TokenId::new();
+    let digest = vec![9_u8; 32];
+    setup
+        .tokens()
+        .insert_family(
+            &InsertRefreshFamily {
+                id: family_id,
+                user_id: first,
+                client_id: "test-client".into(),
+                session_id: refresh_session,
+                audience: "test-api".into(),
+                scopes: vec!["openid".into()],
+            },
+            &InsertRefreshToken {
+                id: refresh_id,
+                family_id,
+                secret_digest: digest.clone(),
+                expires_at: Utc::now() + ChronoDuration::days(1),
+            },
+        )
+        .await
+        .expect("refresh family");
+    setup.commit().await.expect("OIDC setup commit");
+    let rotate = |database: Database, replacement: TokenId, digest: Vec<u8>| async move {
+        let mut tx = database.begin().await.expect("rotation transaction");
+        match tx.tokens().consume_for_rotation(refresh_id, &digest).await {
+            Ok(token) => {
+                tx.tokens()
+                    .insert_token(&InsertRefreshToken {
+                        id: replacement,
+                        family_id: token.family_id,
+                        secret_digest: vec![replacement.as_uuid().as_bytes()[0]; 32],
+                        expires_at: Utc::now() + ChronoDuration::days(1),
+                    })
+                    .await
+                    .expect("replacement");
+                tx.commit().await.expect("rotation commit");
+                Ok(replacement)
+            }
+            Err(RefreshRotationError::Replay) => {
+                tx.commit().await.expect("persist replay revocation");
+                Err(RefreshRotationError::Replay)
+            }
+            Err(error) => Err(error),
+        }
+    };
+    let replacement_one = TokenId::new();
+    let replacement_two = TokenId::new();
+    let (left, right) = tokio::join!(
+        rotate(database.clone(), replacement_one, digest.clone()),
+        rotate(database.clone(), replacement_two, digest),
+    );
+    assert_eq!(usize::from(left.is_ok()) + usize::from(right.is_ok()), 1);
+    assert!(
+        matches!(left, Err(RefreshRotationError::Replay))
+            || matches!(right, Err(RefreshRotationError::Replay))
+    );
 
     let credential_id = vec![7_u8; 32];
     database
