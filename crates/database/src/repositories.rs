@@ -1,15 +1,11 @@
 //! Domain repository handles backed by a private pool or transaction connection.
 
-<<<<<<< HEAD
 use crate::{
     AppendAuditEvent, AppendInternalEvent, DatabaseError, InsertSession, InsertUser,
     InsertVerifiedEmail, StoredEmail, StoredSession, StoredUser, UpdateUserProfile,
 };
 use piquel_auth_protocol::{AccountStatus, SessionId, UserId};
 use sqlx::{PgConnection, PgPool, Row};
-=======
-use sqlx::{PgConnection, PgPool};
->>>>>>> main
 
 #[allow(dead_code)]
 pub(crate) enum RepositoryExecutor<'a> {
@@ -48,7 +44,6 @@ repository!(OidcRepository);
 repository!(TokenRepository);
 repository!(FederationRepository);
 repository!(ServiceIdentityRepository);
-<<<<<<< HEAD
 
 macro_rules! fetch_optional {
     ($self:expr, $query:expr) => {{
@@ -58,7 +53,7 @@ macro_rules! fetch_optional {
                 $query.fetch_optional(&mut **connection).await
             }
         }
-        .map_err(crate::error::map_error)
+        .map_err(Into::<DatabaseError>::into)
     }};
 }
 macro_rules! fetch_one {
@@ -67,7 +62,7 @@ macro_rules! fetch_one {
             RepositoryExecutor::Pool(pool) => $query.fetch_one(*pool).await,
             RepositoryExecutor::Connection(connection) => $query.fetch_one(&mut **connection).await,
         }
-        .map_err(crate::error::map_error)
+        .map_err(Into::<DatabaseError>::into)
     }};
 }
 macro_rules! execute {
@@ -76,7 +71,7 @@ macro_rules! execute {
             RepositoryExecutor::Pool(pool) => $query.execute(*pool).await,
             RepositoryExecutor::Connection(connection) => $query.execute(&mut **connection).await,
         }
-        .map_err(crate::error::map_error)
+        .map_err(Into::<DatabaseError>::into)
     }};
 }
 
@@ -317,5 +312,3 @@ impl InternalEventRepository<'_> {
         .map_err(|_| DatabaseError::InvalidStoredData)
     }
 }
-=======
->>>>>>> main

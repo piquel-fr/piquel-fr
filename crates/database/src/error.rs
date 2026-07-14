@@ -28,19 +28,6 @@ pub enum DatabaseConnectionError {
     Unavailable,
 }
 
-<<<<<<< HEAD
-pub(crate) fn map_error(error: sqlx::Error) -> DatabaseError {
-    match error {
-        sqlx::Error::RowNotFound => DatabaseError::NotFound,
-        sqlx::Error::PoolTimedOut => DatabaseError::Timeout,
-        sqlx::Error::PoolClosed | sqlx::Error::Io(_) | sqlx::Error::Tls(_) => {
-            DatabaseError::Unavailable
-        }
-        sqlx::Error::Database(database_error) if database_error.is_unique_violation() => {
-            DatabaseError::Conflict
-        }
-        _ => DatabaseError::Internal,
-=======
 impl From<sqlx::Error> for DatabaseError {
     fn from(value: sqlx::Error) -> Self {
         match value {
@@ -52,6 +39,5 @@ impl From<sqlx::Error> for DatabaseError {
             }
             _ => Self::Internal,
         }
->>>>>>> main
     }
 }

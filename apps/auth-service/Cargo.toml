@@ -7,29 +7,21 @@ repository.workspace = true
 rust-version.workspace = true
 
 [dependencies]
+piquel-configuration.workspace = true
+piquel-repository.workspace = true
+piquel-telemetry.workspace = true
+piquel-auth-protocol.workspace = true
+
 anyhow.workspace = true
 async-trait.workspace = true
 axum.workspace = true
-<<<<<<< HEAD
 chrono.workspace = true
-piquel-auth-protocol = { path = "../../crates/auth-protocol" }
-piquel-configuration = { path = "../../crates/configuration" }
-piquel-repository = { path = "../../crates/database" }
-piquel-telemetry = { path = "../../crates/telemetry" }
 serde.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true
 tokio.workspace = true
 tracing.workspace = true
 unicode-normalization.workspace = true
-=======
-piquel-configuration.workspace = true
-piquel-repository.workspace = true
-piquel-telemetry.workspace = true
-serde.workspace = true
-tokio.workspace = true
-tracing.workspace = true
->>>>>>> main
 
 [dev-dependencies]
 tower.workspace = true

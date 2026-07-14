@@ -110,11 +110,7 @@ impl Database {
         .await
         .map_err(|_| DatabaseError::Timeout)?
         .map(|_| ())
-<<<<<<< HEAD
-        .map_err(crate::error::map_error)
-=======
         .map_err(Into::into)
->>>>>>> main
     }
     /// Opens an explicit short-lived transaction.
     pub async fn begin(&self) -> Result<DatabaseTransaction<'_>, DatabaseError> {
@@ -122,11 +118,7 @@ impl Database {
             .begin()
             .await
             .map(DatabaseTransaction::new)
-<<<<<<< HEAD
-            .map_err(crate::error::map_error)
-=======
             .map_err(Into::into)
->>>>>>> main
     }
     /// Runs immutable migrations only when explicitly invoked by the migration binary.
     pub async fn run_migrations(&self) -> Result<(), DatabaseError> {
