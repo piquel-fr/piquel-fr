@@ -5,7 +5,7 @@ use auth_service::{
     ProductionReadiness, ServiceRpcApplication, router,
 };
 use piquel_repository::Database;
-use std::{net::SocketAddr, sync::Arc};
+use std::{net::SocketAddr, sync::Arc, time::Duration};
 
 #[tokio::main]
 #[allow(clippy::too_many_lines)]
@@ -98,6 +98,10 @@ async fn main() -> anyhow::Result<()> {
         ));
     let private = tonic::transport::Server::builder()
         .tls_config(tls)?
+        .timeout(Duration::from_secs(10))
+        .concurrency_limit_per_connection(64)
+        .http2_keepalive_interval(Some(Duration::from_secs(30)))
+        .http2_keepalive_timeout(Some(Duration::from_secs(5)))
         .add_service(
             rpc.clone()
                 .token_server()

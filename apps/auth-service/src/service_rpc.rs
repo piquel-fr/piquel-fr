@@ -59,7 +59,11 @@ struct AssertionClaims {
     exp: i64,
 }
 impl ServiceRpcApplication {
-    async fn verify_assertion(&self, token: &str) -> Result<(String, Vec<String>), Status> {
+    async fn verify_assertion(
+        &self,
+        token: &str,
+        peer_service_id: &str,
+    ) -> Result<(String, Vec<String>), Status> {
         if token.len() > 8192 {
             return Err(Status::unauthenticated("invalid service credential"));
         }
@@ -76,6 +80,7 @@ impl ServiceRpcApplication {
         if header.alg != "ES256"
             || header.typ != "client-assertion+jwt"
             || claims.iss != claims.sub
+            || claims.sub != peer_service_id
             || claims.aud != "piquel-service-token"
             || claims.exp <= now
             || claims.exp > claims.iat + 60
@@ -110,6 +115,7 @@ impl ServiceRpcApplication {
     }
     #[allow(clippy::result_large_err)]
     fn authorize<T>(&self, request: &Request<T>, method: &str) -> Result<Value, Status> {
+        let peer_service_id = service_identity_from_peer(request)?;
         let token = request
             .metadata()
             .get("authorization")
@@ -121,6 +127,7 @@ impl ServiceRpcApplication {
             .verify(token, "service+jwt", &self.issuer)
             .map_err(|()| auth_error())?;
         if claims.get("aud") != Some(&json!("piquel-internal-api"))
+            || claims.get("sub").and_then(Value::as_str) != Some(peer_service_id.as_str())
             || !claims
                 .get("permissions")
                 .and_then(Value::as_array)
@@ -130,6 +137,33 @@ impl ServiceRpcApplication {
         }
         Ok(claims)
     }
+}
+
+#[allow(clippy::result_large_err)]
+fn service_identity_from_peer<T>(request: &Request<T>) -> Result<String, Status> {
+    let certificates = request.peer_certs().ok_or_else(auth_error)?;
+    let leaf = certificates.first().ok_or_else(auth_error)?;
+    service_identity_from_certificate(leaf.as_ref()).ok_or_else(auth_error)
+}
+
+fn service_identity_from_certificate(der: &[u8]) -> Option<String> {
+    const PREFIX: &str = "spiffe://piquel.fr/service/";
+    let certificate = openssl::x509::X509::from_der(der).ok()?;
+    let identities: Vec<_> = certificate
+        .subject_alt_names()?
+        .iter()
+        .filter_map(|name| name.uri())
+        .filter_map(|uri| uri.strip_prefix(PREFIX))
+        .filter(|service_id| {
+            !service_id.is_empty()
+                && service_id.len() <= 64
+                && service_id
+                    .bytes()
+                    .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_' | b'.'))
+        })
+        .map(str::to_owned)
+        .collect();
+    (identities.len() == 1).then(|| identities[0].clone())
 }
 #[allow(clippy::result_large_err)]
 fn decode_part<T: for<'de> Deserialize<'de>>(part: &str) -> Result<T, Status> {
@@ -149,8 +183,9 @@ impl ServiceTokenService for ServiceRpcApplication {
         &self,
         request: Request<v1::IssueServiceTokenRequest>,
     ) -> Result<Response<v1::IssueServiceTokenResponse>, Status> {
+        let peer_service_id = service_identity_from_peer(&request)?;
         let (service_id, permissions) = self
-            .verify_assertion(&request.into_inner().client_assertion)
+            .verify_assertion(&request.into_inner().client_assertion, &peer_service_id)
             .await?;
         let now = Utc::now().timestamp();
         let token=self.keys.sign("service+jwt",&json!({"iss":self.issuer,"sub":service_id,"aud":"piquel-internal-api","jti":TokenId::new(),"permissions":permissions,"iat":now,"exp":now+300})).map_err(|()|Status::internal("token issuance failed"))?;
@@ -214,14 +249,11 @@ impl AuthService for ServiceRpcApplication {
         let session = self
             .database
             .sessions()
-            .find_by_id(id)
+            .find_active_by_id(id)
             .await
             .map_err(internal)?;
         let (active, user_id) = session.map_or((false, String::new()), |session| {
-            (
-                session.revoked_at.is_none() && session.expires_at > Utc::now(),
-                session.user_id.to_string(),
-            )
+            (true, session.user_id.to_string())
         });
         Ok(Response::new(v1::GetSessionStatusResponse {
             active,
@@ -280,5 +312,61 @@ fn user_response(user: piquel_repository::StoredUser) -> v1::GetUserResponse {
             piquel_auth_protocol::AccountStatus::Disabled => "disabled",
         }
         .into(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use openssl::{
+        asn1::Asn1Time,
+        hash::MessageDigest,
+        pkey::PKey,
+        rsa::Rsa,
+        x509::{X509, X509NameBuilder, extension::SubjectAlternativeName},
+    };
+
+    fn certificate(uri: &str) -> Vec<u8> {
+        let key = PKey::from_rsa(Rsa::generate(2048).expect("RSA key")).expect("private key");
+        let mut name = X509NameBuilder::new().expect("name");
+        name.append_entry_by_text("CN", "service test")
+            .expect("common name");
+        let name = name.build();
+        let mut builder = X509::builder().expect("certificate");
+        builder.set_version(2).expect("version");
+        builder.set_subject_name(&name).expect("subject");
+        builder.set_issuer_name(&name).expect("issuer");
+        builder.set_pubkey(&key).expect("public key");
+        builder
+            .set_not_before(&Asn1Time::days_from_now(0).expect("not before"))
+            .expect("not before");
+        builder
+            .set_not_after(&Asn1Time::days_from_now(1).expect("not after"))
+            .expect("not after");
+        let extension = SubjectAlternativeName::new()
+            .uri(uri)
+            .build(&builder.x509v3_context(None, None))
+            .expect("SAN");
+        builder.append_extension(extension).expect("extension");
+        builder
+            .sign(&key, MessageDigest::sha256())
+            .expect("signature");
+        builder.build().to_der().expect("DER")
+    }
+
+    #[test]
+    fn service_identity_is_an_exact_spiffe_uri_san() {
+        assert_eq!(
+            service_identity_from_certificate(&certificate(
+                "spiffe://piquel.fr/service/catalog-api"
+            )),
+            Some("catalog-api".into())
+        );
+        assert!(
+            service_identity_from_certificate(&certificate(
+                "spiffe://attacker.example/service/catalog-api"
+            ))
+            .is_none()
+        );
     }
 }
