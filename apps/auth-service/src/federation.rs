@@ -18,7 +18,7 @@ use piquel_repository::{
     InsertFederationTransaction, InsertSession, InsertUser, InsertVerifiedEmail,
 };
 use rand::{RngCore, rngs::OsRng};
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::{collections::HashMap, fmt::Write, sync::Arc, time::Duration as StdDuration};
 use thiserror::Error;
@@ -147,12 +147,19 @@ pub(super) fn routes(app: FederationApplication) -> Router {
     Router::new()
         .route("/login/{provider}", get(start))
         .route("/login/{provider}/callback", get(callback))
+        .route("/account/social-identities", get(list_identities))
         .with_state(app)
+}
+
+#[derive(Default, Deserialize)]
+struct StartQuery {
+    return_to: Option<String>,
 }
 
 async fn start(
     State(app): State<FederationApplication>,
     Path(provider): Path<String>,
+    Query(query): Query<StartQuery>,
 ) -> Result<Response, ApiError> {
     let provider = Provider::parse(&provider).ok_or(ApiError)?;
     let config = app.providers.get(provider.name()).ok_or(ApiError)?;
@@ -161,6 +168,7 @@ async fn start(
     let verifier = random();
     let browser = random();
     let challenge = URL_SAFE_NO_PAD.encode(Sha256::digest(verifier.as_bytes()));
+    let return_to = validate_return_to(query.return_to.as_deref())?;
     app.database
         .federation()
         .insert_transaction(&InsertFederationTransaction {
@@ -170,6 +178,7 @@ async fn start(
             browser_digest: Sha256::digest(browser.as_bytes()).to_vec(),
             nonce: nonce.clone(),
             pkce_verifier: verifier,
+            return_to,
             expires_at: Utc::now() + Duration::minutes(10),
         })
         .await
@@ -245,9 +254,10 @@ async fn callback(
     .await?;
     let user_id = link_identity(&app.database, provider, &identity).await?;
     let cookie = create_session(&app.database, user_id).await?;
-    let mut destination = app.base_url.clone();
-    destination.set_path("/");
-    destination.set_query(None);
+    let destination = app
+        .base_url
+        .join(&transaction.return_to)
+        .map_err(|_| ApiError)?;
     let mut response = Redirect::to(destination.as_str()).into_response();
     response.headers_mut().append(
         header::SET_COOKIE,
@@ -260,6 +270,57 @@ async fn callback(
         ),
     );
     Ok(response)
+}
+
+fn validate_return_to(value: Option<&str>) -> Result<String, ApiError> {
+    let value = value.unwrap_or("/");
+    if value.len() > 512
+        || !value.starts_with('/')
+        || value.starts_with("//")
+        || value.contains('#')
+    {
+        return Err(ApiError);
+    }
+    Ok(value.to_owned())
+}
+
+#[derive(Serialize)]
+struct SocialIdentityView {
+    provider: String,
+    linked_email: String,
+}
+
+async fn list_identities(
+    State(app): State<FederationApplication>,
+    headers: HeaderMap,
+) -> Result<Json<Vec<SocialIdentityView>>, ApiError> {
+    let raw = cookie(&headers, "__Host-piquel_session").ok_or(ApiError)?;
+    let secret = URL_SAFE_NO_PAD.decode(raw).map_err(|_| ApiError)?;
+    if secret.len() != 32 {
+        return Err(ApiError);
+    }
+    let session = app
+        .database
+        .sessions()
+        .find_active_by_browser_secret(&Sha256::digest(secret))
+        .await
+        .map_err(|_| ApiError)?
+        .ok_or(ApiError)?;
+    let identities = app
+        .database
+        .federation()
+        .list_active(session.user_id)
+        .await
+        .map_err(|_| ApiError)?;
+    Ok(Json(
+        identities
+            .into_iter()
+            .map(|identity| SocialIdentityView {
+                provider: identity.provider,
+                linked_email: identity.linked_email,
+            })
+            .collect(),
+    ))
 }
 
 struct VerifiedIdentity {
@@ -496,12 +557,19 @@ async fn link_identity(
     }
     let email = normalize(&identity.email).map_err(|()| ApiError)?;
     let mut tx = database.begin().await.map_err(|_| ApiError)?;
-    let users = tx
+    let owner = tx
         .emails()
-        .find_users_by_verified_email(email.as_str())
+        .find_active_verified(email.as_str())
         .await
         .map_err(|_| ApiError)?;
-    let user_id = if users.is_empty() {
+    let user_id = if let Some(owner) = owner {
+        tx.users()
+            .find_active_by_id_for_update(owner.user_id)
+            .await
+            .map_err(|_| ApiError)?
+            .map(|user| user.id)
+            .ok_or(ApiError)?
+    } else {
         let id = UserId::new();
         let suffix = &hex_digest(identity.subject.as_bytes())[..12];
         let username = format!("{}_{}", provider.name(), suffix);
@@ -524,10 +592,6 @@ async fn link_identity(
             .await
             .map_err(|_| ApiError)?;
         id
-    } else if users.len() == 1 && users[0].status == AccountStatus::Active {
-        users[0].id
-    } else {
-        return Err(ApiError);
     };
     match tx
         .federation()

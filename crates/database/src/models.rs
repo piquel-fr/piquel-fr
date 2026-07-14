@@ -237,12 +237,14 @@ pub struct InsertFederationTransaction {
     pub browser_digest: Vec<u8>,
     pub nonce: String,
     pub pkce_verifier: String,
+    pub return_to: String,
     pub expires_at: DateTime<Utc>,
 }
 #[derive(Clone, Debug)]
 pub struct ConsumedFederationTransaction {
     pub nonce: String,
     pub pkce_verifier: String,
+    pub return_to: String,
 }
 #[derive(Clone, Debug)]
 pub struct InsertExternalIdentity {

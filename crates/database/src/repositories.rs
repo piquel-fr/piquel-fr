@@ -619,7 +619,7 @@ impl FederationRepository<'_> {
         &mut self,
         input: &InsertFederationTransaction,
     ) -> Result<(), DatabaseError> {
-        execute!(self,sqlx::query("INSERT INTO federation_transactions(id,provider_name,state_digest,browser_digest,nonce,pkce_verifier,expires_at) VALUES($1,$2,$3,$4,$5,$6,$7)").bind(input.id.as_uuid()).bind(&input.provider).bind(&input.state_digest).bind(&input.browser_digest).bind(&input.nonce).bind(&input.pkce_verifier).bind(input.expires_at))?;
+        execute!(self,sqlx::query("INSERT INTO federation_transactions(id,provider_name,state_digest,browser_digest,nonce,pkce_verifier,return_to,expires_at) VALUES($1,$2,$3,$4,$5,$6,$7,$8)").bind(input.id.as_uuid()).bind(&input.provider).bind(&input.state_digest).bind(&input.browser_digest).bind(&input.nonce).bind(&input.pkce_verifier).bind(&input.return_to).bind(input.expires_at))?;
         Ok(())
     }
     pub async fn consume_transaction(
@@ -628,13 +628,16 @@ impl FederationRepository<'_> {
         state_digest: &[u8],
         browser_digest: &[u8],
     ) -> Result<ConsumedFederationTransaction, DatabaseError> {
-        let row=fetch_optional!(self,sqlx::query("UPDATE federation_transactions SET consumed_at=now() WHERE provider_name=$1 AND state_digest=$2 AND browser_digest=$3 AND consumed_at IS NULL AND expires_at>now() RETURNING nonce,pkce_verifier").bind(provider).bind(state_digest).bind(browser_digest))?.ok_or(DatabaseError::NotFound)?;
+        let row=fetch_optional!(self,sqlx::query("UPDATE federation_transactions SET consumed_at=now() WHERE provider_name=$1 AND state_digest=$2 AND browser_digest=$3 AND consumed_at IS NULL AND expires_at>now() RETURNING nonce,pkce_verifier,return_to").bind(provider).bind(state_digest).bind(browser_digest))?.ok_or(DatabaseError::NotFound)?;
         Ok(ConsumedFederationTransaction {
             nonce: row
                 .try_get("nonce")
                 .map_err(|_| DatabaseError::InvalidStoredData)?,
             pkce_verifier: row
                 .try_get("pkce_verifier")
+                .map_err(|_| DatabaseError::InvalidStoredData)?,
+            return_to: row
+                .try_get("return_to")
                 .map_err(|_| DatabaseError::InvalidStoredData)?,
         })
     }

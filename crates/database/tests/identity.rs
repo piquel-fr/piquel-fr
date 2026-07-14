@@ -238,6 +238,7 @@ async fn identity_transactions_and_concurrency_hold() {
             browser_digest: browser.clone(),
             nonce: "nonce".into(),
             pkce_verifier: "v".repeat(43),
+            return_to: "/".into(),
             expires_at: Utc::now() + ChronoDuration::minutes(5),
         })
         .await

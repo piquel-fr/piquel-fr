@@ -19,6 +19,7 @@ CREATE TABLE federation_transactions (
     browser_digest BYTEA NOT NULL,
     nonce TEXT NOT NULL,
     pkce_verifier TEXT NOT NULL,
+    return_to TEXT NOT NULL,
     expires_at TIMESTAMPTZ NOT NULL,
     consumed_at TIMESTAMPTZ,
     created_at TIMESTAMPTZ NOT NULL DEFAULT now()
