@@ -8,29 +8,18 @@ rust-version.workspace = true
 
 [dependencies]
 anyhow.workspace = true
-async-trait.workspace = true
 axum.workspace = true
 base64.workspace = true
-chrono.workspace = true
-openssl.workspace = true
+hmac.workspace = true
 piquel-auth-protocol = { path = "../../crates/auth-protocol" }
 piquel-configuration = { path = "../../crates/configuration" }
 piquel-repository = { path = "../../crates/database" }
 piquel-telemetry = { path = "../../crates/telemetry" }
-rand.workspace = true
 serde.workspace = true
-serde_json.workspace = true
-thiserror.workspace = true
 sha2.workspace = true
 tokio.workspace = true
 tracing.workspace = true
 unicode-normalization.workspace = true
-url.workspace = true
-webauthn-rs.workspace = true
-
-[dev-dependencies]
-tower.workspace = true
-webauthn-authenticator-rs = { version = "0.5.5", features = ["softpasskey"] }
 
 [lints]
 workspace = true

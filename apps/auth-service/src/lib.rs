@@ -16,6 +16,8 @@ mod email;
 #[allow(dead_code)]
 mod event_log;
 #[allow(dead_code)]
+mod oidc;
+#[allow(dead_code)]
 mod passkey;
 pub use passkey::PasskeyApplication;
 #[allow(dead_code)]
