@@ -3,10 +3,10 @@
 use crate::account::{validate_display_name, validate_username};
 use axum::{
     Json, Router,
-    extract::State,
+    extract::{Path, State},
     http::{HeaderMap, HeaderValue, StatusCode, header},
     response::{IntoResponse, Response},
-    routing::post,
+    routing::{get, patch, post},
 };
 use base64::{Engine, engine::general_purpose::URL_SAFE_NO_PAD};
 use chrono::{Duration, Utc};
@@ -95,6 +95,13 @@ pub(super) fn routes(application: PasskeyApplication) -> Router {
         .route("/webauthn/register/finish", post(finish_registration))
         .route("/webauthn/authenticate/start", post(start_authentication))
         .route("/webauthn/authenticate/finish", post(finish_authentication))
+        .route("/account/passkeys/enroll/start", post(start_enrollment))
+        .route("/account/passkeys/enroll/finish", post(finish_enrollment))
+        .route("/account/passkeys", get(list_passkeys))
+        .route(
+            "/account/passkeys/{id}",
+            patch(rename_passkey).delete(revoke_passkey),
+        )
         .route("/session/logout", post(logout))
         .with_state(application)
 }
@@ -241,7 +248,7 @@ async fn finish_registration(
 
 #[derive(Deserialize)]
 struct AuthenticationStart {
-    user_id: UserId,
+    username: String,
 }
 #[derive(Serialize)]
 struct AuthenticationStarted {
@@ -263,10 +270,18 @@ async fn start_authentication(
     State(app): State<PasskeyApplication>,
     Json(input): Json<AuthenticationStart>,
 ) -> Result<Json<AuthenticationStarted>, ApiError> {
+    validate_username(&input.username).map_err(|()| ApiError)?;
+    let user = app
+        .database
+        .users()
+        .find_active_by_username(&input.username)
+        .await
+        .map_err(|_| ApiError)?
+        .ok_or(ApiError)?;
     let stored = app
         .database
         .passkeys()
-        .list_active(input.user_id, 20)
+        .list_active(user.id, 20)
         .await
         .map_err(|_| ApiError)?;
     if stored.is_empty() {
@@ -281,7 +296,7 @@ async fn start_authentication(
         .start_passkey_authentication(&passkeys)
         .map_err(|_| ApiError)?;
     let state = serde_json::to_value(AuthenticationState {
-        user_id: input.user_id,
+        user_id: user.id,
         webauthn,
     })
     .map_err(|_| ApiError)?;
@@ -291,7 +306,7 @@ async fn start_authentication(
         .passkeys()
         .insert_ceremony(&InsertCeremony {
             id: ceremony_id,
-            user_id: Some(input.user_id),
+            user_id: Some(user.id),
             session_id: None,
             kind: "authentication".into(),
             challenge_digest: Sha256::digest(serialized).to_vec(),
@@ -327,7 +342,7 @@ async fn finish_authentication(
     }
     let stored = transaction
         .passkeys()
-        .find_active_by_credential_id(result.cred_id().as_ref())
+        .find_active_by_credential_id_for_update(result.cred_id().as_ref())
         .await
         .map_err(|_| ApiError)?
         .filter(|credential| credential.user_id == state.user_id)
@@ -335,11 +350,14 @@ async fn finish_authentication(
     let mut passkey: Passkey = serde_json::from_value(stored.credential).map_err(|_| ApiError)?;
     passkey.update_credential(&result).ok_or(ApiError)?;
     let credential = serde_json::to_value(passkey).map_err(|_| ApiError)?;
-    transaction
+    let updated = transaction
         .passkeys()
         .update_after_authentication(result.cred_id().as_ref(), &credential)
         .await
         .map_err(|_| ApiError)?;
+    if !updated {
+        return Err(ApiError);
+    }
     let cookie = create_session(&mut transaction, state.user_id).await?;
     transaction
         .audit_events()
@@ -354,6 +372,208 @@ async fn finish_authentication(
         .map_err(|_| ApiError)?;
     transaction.commit().await.map_err(|_| ApiError)?;
     no_content_with_cookie(&cookie)
+}
+
+#[derive(Serialize, Deserialize)]
+struct EnrollmentState {
+    user_id: UserId,
+    session_id: SessionId,
+    webauthn: PasskeyRegistration,
+}
+
+async fn start_enrollment(
+    State(app): State<PasskeyApplication>,
+    headers: HeaderMap,
+) -> Result<Json<RegistrationStarted>, ApiError> {
+    let session = active_session(&app.database, &headers).await?;
+    require_fresh_session(&session)?;
+    let user = app
+        .database
+        .users()
+        .find_by_id(session.user_id)
+        .await
+        .map_err(|_| ApiError)?
+        .ok_or(ApiError)?;
+    let (challenge, webauthn) = app
+        .webauthn
+        .start_passkey_registration(user.id.as_uuid(), &user.username, &user.display_name, None)
+        .map_err(|_| ApiError)?;
+    let state = serde_json::to_value(EnrollmentState {
+        user_id: user.id,
+        session_id: session.id,
+        webauthn,
+    })
+    .map_err(|_| ApiError)?;
+    let serialized = serde_json::to_vec(&state).map_err(|_| ApiError)?;
+    let ceremony_id = TokenId::new();
+    app.database
+        .passkeys()
+        .insert_ceremony(&InsertCeremony {
+            id: ceremony_id,
+            user_id: Some(user.id),
+            session_id: Some(session.id),
+            kind: "enrollment".into(),
+            challenge_digest: Sha256::digest(serialized).to_vec(),
+            state,
+            expires_at: Utc::now() + Duration::minutes(5),
+        })
+        .await
+        .map_err(|_| ApiError)?;
+    Ok(Json(RegistrationStarted {
+        ceremony_id,
+        public_key: challenge,
+    }))
+}
+
+async fn finish_enrollment(
+    State(app): State<PasskeyApplication>,
+    headers: HeaderMap,
+    Json(input): Json<RegistrationFinish>,
+) -> Result<StatusCode, ApiError> {
+    if input.friendly_name.trim().is_empty() || input.friendly_name.chars().count() > 80 {
+        return Err(ApiError);
+    }
+    let session = active_session(&app.database, &headers).await?;
+    require_fresh_session(&session)?;
+    let mut transaction = app.database.begin().await.map_err(|_| ApiError)?;
+    let ceremony = transaction
+        .passkeys()
+        .consume_ceremony(input.ceremony_id, "enrollment")
+        .await
+        .map_err(|_| ApiError)?;
+    let state: EnrollmentState = serde_json::from_value(ceremony.state).map_err(|_| ApiError)?;
+    if state.user_id != session.user_id || state.session_id != session.id {
+        return Err(ApiError);
+    }
+    let passkey = app
+        .webauthn
+        .finish_passkey_registration(&input.credential, &state.webauthn)
+        .map_err(|_| ApiError)?;
+    transaction
+        .passkeys()
+        .insert(&InsertPasskey {
+            id: TokenId::new(),
+            credential_id: passkey.cred_id().as_ref().to_vec(),
+            user_id: session.user_id,
+            credential: serde_json::to_value(passkey).map_err(|_| ApiError)?,
+            friendly_name: input.friendly_name,
+        })
+        .await
+        .map_err(|_| ApiError)?;
+    transaction
+        .audit_events()
+        .append(&AppendAuditEvent {
+            id: TokenId::new(),
+            user_id: Some(session.user_id),
+            action: "passkey.enroll".into(),
+            outcome: "success".into(),
+            request_metadata: serde_json::json!({}),
+        })
+        .await
+        .map_err(|_| ApiError)?;
+    transaction.commit().await.map_err(|_| ApiError)?;
+    Ok(StatusCode::NO_CONTENT)
+}
+
+#[derive(Serialize)]
+struct PasskeyView {
+    id: TokenId,
+    friendly_name: String,
+}
+
+async fn list_passkeys(
+    State(app): State<PasskeyApplication>,
+    headers: HeaderMap,
+) -> Result<Json<Vec<PasskeyView>>, ApiError> {
+    let session = active_session(&app.database, &headers).await?;
+    let keys = app
+        .database
+        .passkeys()
+        .list_active(session.user_id, 20)
+        .await
+        .map_err(|_| ApiError)?;
+    Ok(Json(
+        keys.into_iter()
+            .map(|key| PasskeyView {
+                id: key.id,
+                friendly_name: key.friendly_name,
+            })
+            .collect(),
+    ))
+}
+
+#[derive(Deserialize)]
+struct RenamePasskey {
+    friendly_name: String,
+}
+
+async fn rename_passkey(
+    State(app): State<PasskeyApplication>,
+    headers: HeaderMap,
+    Path(id): Path<TokenId>,
+    Json(input): Json<RenamePasskey>,
+) -> Result<StatusCode, ApiError> {
+    if input.friendly_name.trim().is_empty() || input.friendly_name.chars().count() > 80 {
+        return Err(ApiError);
+    }
+    let session = active_session(&app.database, &headers).await?;
+    app.database
+        .passkeys()
+        .rename(id, session.user_id, &input.friendly_name)
+        .await
+        .map_err(|_| ApiError)?
+        .then_some(StatusCode::NO_CONTENT)
+        .ok_or(ApiError)
+}
+
+async fn revoke_passkey(
+    State(app): State<PasskeyApplication>,
+    headers: HeaderMap,
+    Path(id): Path<TokenId>,
+) -> Result<StatusCode, ApiError> {
+    let session = active_session(&app.database, &headers).await?;
+    require_fresh_session(&session)?;
+    let mut transaction = app.database.begin().await.map_err(|_| ApiError)?;
+    let revoked = transaction
+        .passkeys()
+        .revoke_if_not_last(id, session.user_id)
+        .await
+        .map_err(|_| ApiError)?;
+    if !revoked {
+        return Err(ApiError);
+    }
+    transaction
+        .audit_events()
+        .append(&AppendAuditEvent {
+            id: TokenId::new(),
+            user_id: Some(session.user_id),
+            action: "passkey.revoke".into(),
+            outcome: "success".into(),
+            request_metadata: serde_json::json!({}),
+        })
+        .await
+        .map_err(|_| ApiError)?;
+    transaction.commit().await.map_err(|_| ApiError)?;
+    Ok(StatusCode::NO_CONTENT)
+}
+
+async fn active_session(
+    database: &Database,
+    headers: &HeaderMap,
+) -> Result<piquel_repository::StoredSession, ApiError> {
+    let secret = session_secret(headers).ok_or(ApiError)?;
+    database
+        .sessions()
+        .find_active_by_browser_secret(&Sha256::digest(secret))
+        .await
+        .map_err(|_| ApiError)?
+        .ok_or(ApiError)
+}
+
+fn require_fresh_session(session: &piquel_repository::StoredSession) -> Result<(), ApiError> {
+    (Utc::now().signed_duration_since(session.authenticated_at) <= Duration::minutes(10))
+        .then_some(())
+        .ok_or(ApiError)
 }
 
 async fn create_session(

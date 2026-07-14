@@ -340,6 +340,13 @@ impl PasskeyRepository<'_> {
         fetch_optional!(self, sqlx::query("SELECT id,credential_id,user_id,credential,friendly_name,revoked_at FROM passkey_credentials WHERE credential_id=$1 AND revoked_at IS NULL").bind(credential_id))?.map(|row| stored_passkey(&row)).transpose()
     }
 
+    pub async fn find_active_by_credential_id_for_update(
+        &mut self,
+        credential_id: &[u8],
+    ) -> Result<Option<StoredPasskey>, DatabaseError> {
+        fetch_optional!(self, sqlx::query("SELECT id,credential_id,user_id,credential,friendly_name,revoked_at FROM passkey_credentials WHERE credential_id=$1 AND revoked_at IS NULL FOR UPDATE").bind(credential_id))?.map(|row| stored_passkey(&row)).transpose()
+    }
+
     pub async fn update_after_authentication(
         &mut self,
         credential_id: &[u8],
@@ -355,6 +362,17 @@ impl PasskeyRepository<'_> {
         name: &str,
     ) -> Result<bool, DatabaseError> {
         Ok(execute!(self, sqlx::query("UPDATE passkey_credentials SET friendly_name=$1 WHERE id=$2 AND user_id=$3 AND revoked_at IS NULL").bind(name).bind(id.as_uuid()).bind(user_id.as_uuid()))?.rows_affected()==1)
+    }
+
+    /// Revokes a credential only while another active passkey remains.
+    /// All of the user's credential rows are locked in one statement so two
+    /// concurrent removals cannot both pass the last-factor check.
+    pub async fn revoke_if_not_last(
+        &mut self,
+        id: TokenId,
+        user_id: UserId,
+    ) -> Result<bool, DatabaseError> {
+        Ok(execute!(self, sqlx::query("WITH locked AS MATERIALIZED (SELECT id,revoked_at FROM passkey_credentials WHERE user_id=$2 FOR UPDATE), eligible AS (SELECT 1 FROM locked WHERE id=$1 AND revoked_at IS NULL AND (SELECT count(*) FROM locked WHERE revoked_at IS NULL)>1) UPDATE passkey_credentials SET revoked_at=now() FROM eligible WHERE passkey_credentials.id=$1 AND passkey_credentials.user_id=$2 AND passkey_credentials.revoked_at IS NULL").bind(id.as_uuid()).bind(user_id.as_uuid()))?.rows_affected()==1)
     }
 
     pub async fn revoke(&mut self, id: TokenId, user_id: UserId) -> Result<bool, DatabaseError> {
@@ -440,6 +458,6 @@ impl SessionRepository<'_> {
         &mut self,
         digest: &[u8],
     ) -> Result<Option<StoredSession>, DatabaseError> {
-        fetch_optional!(self, sqlx::query("SELECT s.id,s.user_id,s.authentication_methods,s.authenticated_at,s.expires_at,s.last_seen_at,s.revoked_at FROM browser_session_secrets b JOIN sessions s ON s.id=b.session_id WHERE b.secret_digest=$1 AND s.revoked_at IS NULL AND s.expires_at>now()").bind(digest))?.map(|row| stored_session(&row)).transpose()
+        fetch_optional!(self, sqlx::query("SELECT s.id,s.user_id,s.authentication_methods,s.authenticated_at,s.expires_at,s.last_seen_at,s.revoked_at FROM browser_session_secrets b JOIN sessions s ON s.id=b.session_id JOIN users u ON u.id=s.user_id WHERE b.secret_digest=$1 AND s.revoked_at IS NULL AND s.expires_at>now() AND u.status='active'").bind(digest))?.map(|row| stored_session(&row)).transpose()
     }
 }
