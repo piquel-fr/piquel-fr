@@ -21,3 +21,6 @@ migrate:
 
 prepare-sqlx:
     @cargo sqlx prepare --workspace
+
+validate: lint check test test-database doc-test
+
