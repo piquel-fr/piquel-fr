@@ -26,6 +26,13 @@ pedantic   = "warn"
 unwrap_used = "warn"
 
 [workspace.dependencies]
+# Local crates
+piquel-configuration = { path = "crates/configuration" }
+piquel-repository    = { path = "crates/database" }
+piquel-telemetry     = { path = "crates/telemetry" }
+piquel-auth-protocol = { path = "crates/auth-protocol" }
+
+# External crates
 anyhow = "1.0"
 async-trait = "0.1"
 axum = "0.8"

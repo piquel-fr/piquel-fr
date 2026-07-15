@@ -30,6 +30,7 @@ async fn main() -> anyhow::Result<()> {
         database.clone(),
         &config.webauthn_rp_id,
         config.public_base_url.as_url(),
+        Arc::clone(&keys),
     )?;
     let oidc = if config.development_mode {
         OidcApplication::new_development(

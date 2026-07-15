@@ -29,14 +29,22 @@ CREATE TABLE active_verified_email_ownership (
 );
 
 CREATE OR REPLACE FUNCTION claim_active_verified_email() RETURNS TRIGGER LANGUAGE plpgsql AS $$
+DECLARE account_active BOOLEAN;
 BEGIN
-    IF NEW.verified_at IS NOT NULL AND (SELECT status = 'active' FROM users WHERE id = NEW.user_id) THEN
-        INSERT INTO active_verified_email_ownership(normalized_email, user_id)
-        VALUES (NEW.normalized_email, NEW.user_id)
-        ON CONFLICT (normalized_email) DO UPDATE SET user_id = EXCLUDED.user_id
-        WHERE active_verified_email_ownership.user_id = EXCLUDED.user_id;
-        IF NOT FOUND THEN
-            RAISE EXCEPTION 'verified email already belongs to an active account' USING ERRCODE = 'unique_violation';
+    IF NEW.verified_at IS NOT NULL THEN
+        -- Serialize email claims with status changes. Without this row lock an
+        -- insert can observe an active account, wait behind disablement, and
+        -- recreate ownership after the account has become disabled.
+        SELECT status = 'active' INTO account_active
+        FROM users WHERE id = NEW.user_id FOR UPDATE;
+        IF account_active THEN
+            INSERT INTO active_verified_email_ownership(normalized_email, user_id)
+            VALUES (NEW.normalized_email, NEW.user_id)
+            ON CONFLICT (normalized_email) DO UPDATE SET user_id = EXCLUDED.user_id
+            WHERE active_verified_email_ownership.user_id = EXCLUDED.user_id;
+            IF NOT FOUND THEN
+                RAISE EXCEPTION 'verified email already belongs to an active account' USING ERRCODE = 'unique_violation';
+            END IF;
         END IF;
     END IF;
     RETURN NEW;
@@ -70,12 +78,22 @@ END $$;
 CREATE TRIGGER users_synchronize_email_ownership BEFORE UPDATE OF status ON users FOR EACH ROW EXECUTE FUNCTION synchronize_user_email_ownership();
 
 CREATE OR REPLACE FUNCTION enforce_primary_verified_email() RETURNS TRIGGER LANGUAGE plpgsql AS $$
-DECLARE affected UUID := COALESCE(NEW.user_id, OLD.user_id);
+DECLARE
+    affected UUID;
+    affected_users UUID[];
 BEGIN
-    IF EXISTS (SELECT 1 FROM user_emails WHERE user_id=affected AND verified_at IS NOT NULL)
-       AND (SELECT count(*) FROM user_emails WHERE user_id=affected AND verified_at IS NOT NULL AND is_primary) <> 1
-    THEN RAISE EXCEPTION 'verified emails require exactly one primary' USING ERRCODE='check_violation'; END IF;
-    RETURN COALESCE(NEW, OLD);
+    IF TG_OP = 'INSERT' THEN affected_users := ARRAY[NEW.user_id];
+    ELSIF TG_OP = 'DELETE' THEN affected_users := ARRAY[OLD.user_id];
+    ELSE affected_users := ARRAY[NEW.user_id, OLD.user_id];
+    END IF;
+
+    FOREACH affected IN ARRAY affected_users LOOP
+        IF EXISTS (SELECT 1 FROM user_emails WHERE user_id=affected AND verified_at IS NOT NULL)
+           AND (SELECT count(*) FROM user_emails WHERE user_id=affected AND verified_at IS NOT NULL AND is_primary) <> 1
+        THEN RAISE EXCEPTION 'verified emails require exactly one primary' USING ERRCODE='check_violation'; END IF;
+    END LOOP;
+    IF TG_OP = 'DELETE' THEN RETURN OLD; END IF;
+    RETURN NEW;
 END $$;
 CREATE CONSTRAINT TRIGGER user_emails_exactly_one_primary AFTER INSERT OR UPDATE OR DELETE ON user_emails DEFERRABLE INITIALLY DEFERRED FOR EACH ROW EXECUTE FUNCTION enforce_primary_verified_email();
 
