@@ -47,7 +47,7 @@ macro_rules! uuid_id {
             ///
             /// # Errors
             ///
-            /// Returns an error unless the value is `UUIDv7`.
+            /// Returns an error if the value is not `UUIDv7`.
             pub fn from_uuid(value: Uuid) -> Result<Self, InvalidValue> {
                 if value.get_version_num() != 7 {
                     return Err(InvalidValue::new(stringify!($name)));

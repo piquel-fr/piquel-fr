@@ -1,5 +1,6 @@
 //! Authorization Code + PKCE, ES256 tokens, and rotating opaque refresh tokens.
 
+use crate::Es256KeyProvider;
 use axum::{
     Form, Json, Router,
     extract::{Path, Query, State},
@@ -10,13 +11,6 @@ use axum::{
 use base64::{Engine, engine::general_purpose::URL_SAFE_NO_PAD};
 use chrono::{Duration, Utc};
 use hmac::{Hmac, Mac};
-use p256::{
-    ecdsa::{
-        Signature, SigningKey,
-        signature::{Signer, Verifier},
-    },
-    pkcs8::DecodePrivateKey,
-};
 use piquel_auth_protocol::{SessionId, TokenId, UserId};
 use piquel_repository::{
     AppendAuditEvent, Database, InsertAuthorizationCode, InsertAuthorizationRequest,
@@ -55,94 +49,17 @@ pub trait KeyProvider: Send + Sync {
     fn verify(&self, token: &str, token_type: &str, issuer: &str) -> Result<Value, ()>;
 }
 
-/// Local PEM-backed key provider. Production callers resolve the PEM through a secret reference.
-pub struct Es256KeyProvider {
-    kid: String,
-    signing: SigningKey,
-}
-
-impl Es256KeyProvider {
-    /// Loads a PKCS#8 PEM signing key.
-    ///
-    /// # Errors
-    ///
-    /// Returns an error when the PEM is not a P-256 PKCS#8 private key.
-    #[allow(clippy::result_unit_err)]
-    pub fn from_pkcs8_pem(kid: impl Into<String>, pem: &str) -> Result<Self, ()> {
-        Ok(Self {
-            kid: kid.into(),
-            signing: SigningKey::from_pkcs8_pem(pem).map_err(|_| ())?,
-        })
-    }
-
-    /// Generates an ephemeral key for explicit development and tests only.
-    #[must_use]
-    pub fn generate_for_development(kid: impl Into<String>) -> Self {
-        Self {
-            kid: kid.into(),
-            signing: SigningKey::random(&mut OsRng),
-        }
-    }
-}
-
 impl KeyProvider for Es256KeyProvider {
     fn sign(&self, token_type: &str, claims: &Value) -> Result<String, ()> {
-        let header = URL_SAFE_NO_PAD.encode(
-            serde_json::to_vec(&json!({
-                "alg":"ES256", "kid":self.kid, "typ":token_type
-            }))
-            .map_err(|_| ())?,
-        );
-        let payload = URL_SAFE_NO_PAD.encode(serde_json::to_vec(claims).map_err(|_| ())?);
-        let signing_input = format!("{header}.{payload}");
-        let signature: Signature = self.signing.sign(signing_input.as_bytes());
-        Ok(format!(
-            "{signing_input}.{}",
-            URL_SAFE_NO_PAD.encode(signature.to_bytes())
-        ))
+        Es256KeyProvider::sign(self, token_type, claims)
     }
 
     fn jwks(&self) -> Value {
-        let point = self.signing.verifying_key().to_encoded_point(false);
-        json!({"keys":[{
-            "kty":"EC", "crv":"P-256", "use":"sig", "alg":"ES256", "kid":self.kid,
-            "x":URL_SAFE_NO_PAD.encode(point.x().expect("uncompressed point")),
-            "y":URL_SAFE_NO_PAD.encode(point.y().expect("uncompressed point"))
-        }]})
+        self.public_jwks()
     }
 
     fn verify(&self, token: &str, token_type: &str, issuer: &str) -> Result<Value, ()> {
-        if token.len() > 8192 {
-            return Err(());
-        }
-        let mut pieces = token.split('.');
-        let header_part = pieces.next().ok_or(())?;
-        let claims_part = pieces.next().ok_or(())?;
-        let signature_part = pieces.next().ok_or(())?;
-        if pieces.next().is_some() {
-            return Err(());
-        }
-        let header: Value =
-            serde_json::from_slice(&URL_SAFE_NO_PAD.decode(header_part).map_err(|_| ())?)
-                .map_err(|_| ())?;
-        if header.get("alg") != Some(&json!("ES256"))
-            || header.get("kid") != Some(&json!(self.kid))
-            || header.get("typ") != Some(&json!(token_type))
-        {
-            return Err(());
-        }
-        let signature = URL_SAFE_NO_PAD.decode(signature_part).map_err(|_| ())?;
-        let signature = Signature::from_slice(&signature).map_err(|_| ())?;
-        self.signing
-            .verifying_key()
-            .verify(
-                format!("{header_part}.{claims_part}").as_bytes(),
-                &signature,
-            )
-            .map_err(|_| ())?;
-        let claims: Value =
-            serde_json::from_slice(&URL_SAFE_NO_PAD.decode(claims_part).map_err(|_| ())?)
-                .map_err(|_| ())?;
+        let claims: Value = Es256KeyProvider::verify(self, token_type, token)?;
         let now = Utc::now().timestamp();
         if claims.get("iss") != Some(&json!(issuer))
             || claims
@@ -1016,13 +933,13 @@ mod tests {
                 &json!({"iss":"https://issuer","exp":now+60,"iat":now}),
             )
             .expect("sign");
-        assert!(keys.verify(&id, "at+jwt", "https://issuer").is_err());
+        assert!(KeyProvider::verify(&keys, &id, "at+jwt", "https://issuer").is_err());
         let access = keys
             .sign(
                 "at+jwt",
                 &json!({"iss":"https://issuer","exp":now+60,"iat":now}),
             )
             .expect("sign");
-        assert!(keys.verify(&access, "at+jwt", "https://issuer").is_ok());
+        assert!(KeyProvider::verify(&keys, &access, "at+jwt", "https://issuer").is_ok());
     }
 }
