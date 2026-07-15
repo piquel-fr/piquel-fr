@@ -7,6 +7,11 @@ repository.workspace = true
 rust-version.workspace = true
 
 [dependencies]
+piquel-configuration.workspace = true
+piquel-repository.workspace = true
+piquel-telemetry.workspace = true
+piquel-auth-protocol.workspace = true
+
 anyhow.workspace = true
 async-trait.workspace = true
 axum.workspace = true
@@ -16,14 +21,10 @@ hmac.workspace = true
 jsonwebtoken.workspace = true
 openssl.workspace = true
 p256.workspace = true
-piquel-auth-protocol = { path = "../../crates/auth-protocol" }
-piquel-configuration = { path = "../../crates/configuration" }
-piquel-repository = { path = "../../crates/database" }
-piquel-telemetry = { path = "../../crates/telemetry" }
+rand.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 sha2.workspace = true
-rand.workspace = true
 reqwest.workspace = true
 thiserror.workspace = true
 tokio.workspace = true
