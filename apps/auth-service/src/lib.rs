@@ -15,11 +15,12 @@ mod audit;
 mod email;
 #[allow(dead_code)]
 mod event_log;
-#[allow(dead_code)]
 mod passkey;
 pub use passkey::PasskeyApplication;
 #[allow(dead_code)]
 mod session;
+mod signing;
+pub use signing::Es256KeyProvider;
 
 /// Typed auth-service configuration.
 #[derive(Clone, Debug)]
@@ -36,6 +37,8 @@ pub struct AuthConfig {
     pub key_provider: SecretReference,
     /// `WebAuthn` relying-party identifier.
     pub webauthn_rp_id: String,
+    /// Stable identifier embedded in signed-token headers.
+    pub signing_key_id: String,
 }
 impl AuthConfig {
     /// Loads the minimum service configuration from the environment.
@@ -73,6 +76,7 @@ impl AuthConfig {
             database,
             key_provider: SecretReference::parse(&required("AUTH_KEY_PROVIDER")?)?,
             webauthn_rp_id: required("AUTH_WEBAUTHN_RP_ID")?,
+            signing_key_id: required("AUTH_SIGNING_KEY_ID")?,
         })
     }
 }

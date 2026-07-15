@@ -111,3 +111,11 @@ pub struct ConsumedCeremony {
     pub session_id: Option<SessionId>,
     pub state: Value,
 }
+#[derive(Clone, Debug)]
+pub struct InsertPurposeAuthorization {
+    pub id: TokenId,
+    pub user_id: UserId,
+    pub session_id: SessionId,
+    pub purpose: String,
+    pub expires_at: DateTime<Utc>,
+}

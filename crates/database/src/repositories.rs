@@ -2,8 +2,8 @@
 
 use crate::{
     AppendAuditEvent, AppendInternalEvent, ConsumedCeremony, DatabaseError, InsertCeremony,
-    InsertPasskey, InsertSession, InsertUser, InsertVerifiedEmail, StoredEmail, StoredPasskey,
-    StoredSession, StoredUser, UpdateUserProfile,
+    InsertPasskey, InsertPurposeAuthorization, InsertSession, InsertUser, InsertVerifiedEmail,
+    StoredEmail, StoredPasskey, StoredSession, StoredUser, UpdateUserProfile,
 };
 use piquel_auth_protocol::{AccountStatus, SessionId, TokenId, UserId};
 use sqlx::{PgConnection, PgPool, Row};
@@ -405,6 +405,34 @@ impl PasskeyRepository<'_> {
                 .try_get("state")
                 .map_err(|_| DatabaseError::InvalidStoredData)?,
         })
+    }
+
+    pub async fn insert_purpose_authorization(
+        &mut self,
+        input: &InsertPurposeAuthorization,
+    ) -> Result<(), DatabaseError> {
+        execute!(self, sqlx::query("INSERT INTO purpose_authorizations(id,user_id,session_id,purpose,expires_at) VALUES($1,$2,$3,$4,$5)").bind(input.id.as_uuid()).bind(input.user_id.as_uuid()).bind(input.session_id.as_uuid()).bind(&input.purpose).bind(input.expires_at))?;
+        Ok(())
+    }
+
+    pub async fn purpose_authorization_is_active(
+        &mut self,
+        id: TokenId,
+        user_id: UserId,
+        session_id: SessionId,
+        purpose: &str,
+    ) -> Result<bool, DatabaseError> {
+        Ok(fetch_optional!(self, sqlx::query("SELECT 1 FROM purpose_authorizations p JOIN sessions s ON s.id=p.session_id JOIN users u ON u.id=p.user_id WHERE p.id=$1 AND p.user_id=$2 AND p.session_id=$3 AND p.purpose=$4 AND p.consumed_at IS NULL AND p.expires_at>now() AND s.revoked_at IS NULL AND s.expires_at>now() AND u.status='active'").bind(id.as_uuid()).bind(user_id.as_uuid()).bind(session_id.as_uuid()).bind(purpose))?.is_some())
+    }
+
+    pub async fn consume_purpose_authorization(
+        &mut self,
+        id: TokenId,
+        user_id: UserId,
+        session_id: SessionId,
+        purpose: &str,
+    ) -> Result<bool, DatabaseError> {
+        Ok(execute!(self, sqlx::query("WITH active_session AS MATERIALIZED (SELECT s.id FROM sessions s JOIN users u ON u.id=s.user_id WHERE s.id=$3 AND s.user_id=$2 AND s.revoked_at IS NULL AND s.expires_at>now() AND u.status='active' FOR UPDATE OF s) UPDATE purpose_authorizations p SET consumed_at=now() FROM active_session s WHERE p.id=$1 AND p.user_id=$2 AND p.session_id=s.id AND p.purpose=$4 AND p.consumed_at IS NULL AND p.expires_at>now()").bind(id.as_uuid()).bind(user_id.as_uuid()).bind(session_id.as_uuid()).bind(purpose))?.rows_affected()==1)
     }
 }
 

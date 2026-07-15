@@ -20,7 +20,7 @@ CREATE TABLE webauthn_ceremonies (
     id UUID PRIMARY KEY,
     user_id UUID REFERENCES users(id) ON DELETE CASCADE,
     session_id UUID REFERENCES sessions(id) ON DELETE CASCADE,
-    ceremony_kind TEXT NOT NULL CHECK (ceremony_kind IN ('registration', 'authentication', 'enrollment')),
+    ceremony_kind TEXT NOT NULL CHECK (ceremony_kind IN ('registration', 'authentication', 'enrollment', 'purpose_authentication')),
     challenge_digest BYTEA NOT NULL,
     state JSONB NOT NULL,
     expires_at TIMESTAMPTZ NOT NULL,
@@ -28,6 +28,17 @@ CREATE TABLE webauthn_ceremonies (
     created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 CREATE INDEX webauthn_ceremonies_expiry_idx ON webauthn_ceremonies (expires_at) WHERE consumed_at IS NULL;
+
+CREATE TABLE purpose_authorizations (
+    id UUID PRIMARY KEY,
+    user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    session_id UUID NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
+    purpose TEXT NOT NULL CHECK (purpose IN ('manage-passkeys')),
+    expires_at TIMESTAMPTZ NOT NULL,
+    consumed_at TIMESTAMPTZ,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX purpose_authorizations_expiry_idx ON purpose_authorizations (expires_at) WHERE consumed_at IS NULL;
 
 CREATE TABLE browser_session_secrets (
     session_id UUID PRIMARY KEY REFERENCES sessions(id) ON DELETE CASCADE,
