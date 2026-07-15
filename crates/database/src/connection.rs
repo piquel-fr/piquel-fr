@@ -110,7 +110,7 @@ impl Database {
         .await
         .map_err(|_| DatabaseError::Timeout)?
         .map(|_| ())
-        .map_err(crate::error::map_error)
+        .map_err(Into::into)
     }
     /// Opens an explicit short-lived transaction.
     pub async fn begin(&self) -> Result<DatabaseTransaction<'_>, DatabaseError> {
@@ -118,7 +118,7 @@ impl Database {
             .begin()
             .await
             .map(DatabaseTransaction::new)
-            .map_err(crate::error::map_error)
+            .map_err(Into::into)
     }
     /// Runs immutable migrations only when explicitly invoked by the migration binary.
     pub async fn run_migrations(&self) -> Result<(), DatabaseError> {
@@ -130,7 +130,7 @@ impl Database {
     /// Purges a bounded batch of expired ephemeral authentication state.
     pub async fn purge_expired_auth_state(&self, batch_size: u32) -> Result<u64, DatabaseError> {
         let limit = i64::from(batch_size.clamp(1, 1_000));
-        let mut transaction = self.pool.begin().await.map_err(crate::error::map_error)?;
+        let mut transaction = self.pool.begin().await.map_err(DatabaseError::from)?;
         let mut deleted = 0;
         for statement in [
             "DELETE FROM federation_transactions WHERE ctid IN (SELECT ctid FROM federation_transactions WHERE expires_at<now() OR consumed_at<now()-interval '1 day' LIMIT $1)",
@@ -146,13 +146,10 @@ impl Database {
                 .bind(limit)
                 .execute(&mut *transaction)
                 .await
-                .map_err(crate::error::map_error)?
+                .map_err(DatabaseError::from)?
                 .rows_affected();
         }
-        transaction
-            .commit()
-            .await
-            .map_err(crate::error::map_error)?;
+        transaction.commit().await.map_err(DatabaseError::from)?;
         Ok(deleted)
     }
     pub fn users(&self) -> UserRepository<'_> {

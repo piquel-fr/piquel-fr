@@ -21,7 +21,7 @@ mod federation;
 pub use federation::{FederationApplication, ProviderConfiguration};
 #[allow(dead_code)]
 mod oidc;
-pub use oidc::{Es256KeyProvider, KeyProvider, OidcApplication};
+pub use oidc::{KeyProvider, OidcApplication};
 #[allow(dead_code)]
 mod passkey;
 pub use passkey::PasskeyApplication;
@@ -30,6 +30,8 @@ mod service_rpc;
 #[allow(dead_code)]
 mod session;
 pub use service_rpc::ServiceRpcApplication;
+mod signing;
+pub use signing::Es256KeyProvider;
 
 /// Typed auth-service configuration.
 #[derive(Clone, Debug)]
@@ -50,7 +52,7 @@ pub struct AuthConfig {
     pub webauthn_rp_id: String,
     /// Enables loopback-only development relaxations.
     pub development_mode: bool,
-    /// Stable identifier published with the active signing key.
+    /// Stable identifier embedded in signed-token headers.
     pub signing_key_id: String,
     /// GitHub OAuth client configuration.
     pub github: ProviderConfiguration,
