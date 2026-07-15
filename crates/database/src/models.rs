@@ -77,3 +77,45 @@ pub struct AppendInternalEvent {
     pub schema_version: u32,
     pub payload: Value,
 }
+
+#[derive(Clone, Debug)]
+pub struct InsertPasskey {
+    pub id: TokenId,
+    pub credential_id: Vec<u8>,
+    pub user_id: UserId,
+    pub credential: Value,
+    pub friendly_name: String,
+}
+#[derive(Clone, Debug)]
+pub struct StoredPasskey {
+    pub id: TokenId,
+    pub credential_id: Vec<u8>,
+    pub user_id: UserId,
+    pub credential: Value,
+    pub friendly_name: String,
+    pub revoked_at: Option<DateTime<Utc>>,
+}
+#[derive(Clone, Debug)]
+pub struct InsertCeremony {
+    pub id: TokenId,
+    pub user_id: Option<UserId>,
+    pub session_id: Option<SessionId>,
+    pub kind: String,
+    pub challenge_digest: Vec<u8>,
+    pub state: Value,
+    pub expires_at: DateTime<Utc>,
+}
+#[derive(Clone, Debug)]
+pub struct ConsumedCeremony {
+    pub user_id: Option<UserId>,
+    pub session_id: Option<SessionId>,
+    pub state: Value,
+}
+#[derive(Clone, Debug)]
+pub struct InsertPurposeAuthorization {
+    pub id: TokenId,
+    pub user_id: UserId,
+    pub session_id: SessionId,
+    pub purpose: String,
+    pub expires_at: DateTime<Utc>,
+}

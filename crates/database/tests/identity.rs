@@ -3,8 +3,8 @@
 use chrono::{Duration as ChronoDuration, Utc};
 use piquel_auth_protocol::{AccountStatus, AuthenticationMethod, SessionId, TokenId, UserId};
 use piquel_repository::{
-    AppendInternalEvent, Database, DatabaseConfig, DatabaseError, InsertSession, InsertUser,
-    InsertVerifiedEmail, UpdateUserProfile,
+    AppendInternalEvent, Database, DatabaseConfig, DatabaseError, InsertCeremony, InsertPasskey,
+    InsertPurposeAuthorization, InsertSession, InsertUser, InsertVerifiedEmail, UpdateUserProfile,
 };
 use std::{env, time::Duration};
 
@@ -109,6 +109,128 @@ async fn identity_transactions_and_concurrency_hold() {
 
     let first = insert_user(&database, "first").await;
     let second = insert_user(&database, "second").await;
+
+    database
+        .passkeys()
+        .insert_ceremony(&InsertCeremony {
+            id: TokenId::new(),
+            user_id: None,
+            session_id: None,
+            kind: "registration".into(),
+            challenge_digest: vec![2; 32],
+            state: serde_json::json!({"bootstrap":true}),
+            expires_at: Utc::now() + ChronoDuration::minutes(5),
+        })
+        .await
+        .expect("bootstrap ceremony before user creation");
+    database
+        .passkeys()
+        .insert_ceremony(&InsertCeremony {
+            id: TokenId::new(),
+            user_id: Some(first),
+            session_id: None,
+            kind: "enrollment".into(),
+            challenge_digest: vec![3; 32],
+            state: serde_json::json!({"enrollment":true}),
+            expires_at: Utc::now() + ChronoDuration::minutes(5),
+        })
+        .await
+        .expect("enrollment ceremony");
+    database
+        .passkeys()
+        .insert_ceremony(&InsertCeremony {
+            id: TokenId::new(),
+            user_id: Some(first),
+            session_id: None,
+            kind: "purpose_authentication".into(),
+            challenge_digest: vec![4; 32],
+            state: serde_json::json!({"purpose":true}),
+            expires_at: Utc::now() + ChronoDuration::minutes(5),
+        })
+        .await
+        .expect("purpose authentication ceremony");
+
+    let ceremony_id = TokenId::new();
+    database
+        .passkeys()
+        .insert_ceremony(&InsertCeremony {
+            id: ceremony_id,
+            user_id: Some(first),
+            session_id: None,
+            kind: "authentication".into(),
+            challenge_digest: vec![1; 32],
+            state: serde_json::json!({"test":true}),
+            expires_at: Utc::now() + ChronoDuration::minutes(5),
+        })
+        .await
+        .expect("ceremony");
+    let one = database.clone();
+    let two = database.clone();
+    let (left, right) = tokio::join!(
+        async move {
+            one.passkeys()
+                .consume_ceremony(ceremony_id, "authentication")
+                .await
+        },
+        async move {
+            two.passkeys()
+                .consume_ceremony(ceremony_id, "authentication")
+                .await
+        }
+    );
+    assert_eq!(usize::from(left.is_ok()) + usize::from(right.is_ok()), 1);
+
+    let credential_id = vec![7_u8; 32];
+    database
+        .passkeys()
+        .insert(&InsertPasskey {
+            id: TokenId::new(),
+            credential_id: credential_id.clone(),
+            user_id: first,
+            credential: serde_json::json!({"fixture":true}),
+            friendly_name: "First".into(),
+        })
+        .await
+        .expect("passkey");
+    assert!(matches!(
+        database
+            .passkeys()
+            .insert(&InsertPasskey {
+                id: TokenId::new(),
+                credential_id,
+                user_id: second,
+                credential: serde_json::json!({"fixture":true}),
+                friendly_name: "Duplicate".into()
+            })
+            .await,
+        Err(DatabaseError::Conflict)
+    ));
+
+    for suffix in 0_u8..20 {
+        let mut additional_credential_id = vec![suffix; 32];
+        additional_credential_id.push(42);
+        database
+            .passkeys()
+            .insert(&InsertPasskey {
+                id: TokenId::new(),
+                credential_id: additional_credential_id,
+                user_id: first,
+                credential: serde_json::json!({"fixture":true}),
+                friendly_name: format!("Additional {suffix}"),
+            })
+            .await
+            .expect("additional passkey");
+    }
+    assert_eq!(
+        database
+            .passkeys()
+            .list_active(first)
+            .await
+            .expect("list every passkey")
+            .len(),
+        21
+    );
+
     let normalized = format!("race-{}@example.com", UserId::new());
     let one = database.clone();
     let two = database.clone();
@@ -182,6 +304,55 @@ async fn identity_transactions_and_concurrency_hold() {
         })
         .await
         .expect("session");
+    let purpose_id = TokenId::new();
+    database
+        .passkeys()
+        .insert_purpose_authorization(&InsertPurposeAuthorization {
+            id: purpose_id,
+            user_id: first,
+            session_id,
+            purpose: "manage-passkeys".into(),
+            expires_at: Utc::now() + ChronoDuration::minutes(2),
+        })
+        .await
+        .expect("purpose authorization");
+    assert!(
+        database
+            .passkeys()
+            .purpose_authorization_is_active(purpose_id, first, session_id, "manage-passkeys")
+            .await
+            .expect("active purpose authorization")
+    );
+    let one = database.clone();
+    let two = database.clone();
+    let (left, right) = tokio::join!(
+        async move {
+            one.passkeys()
+                .consume_purpose_authorization(purpose_id, first, session_id, "manage-passkeys")
+                .await
+        },
+        async move {
+            two.passkeys()
+                .consume_purpose_authorization(purpose_id, first, session_id, "manage-passkeys")
+                .await
+        }
+    );
+    assert_eq!(
+        usize::from(matches!(left, Ok(true))) + usize::from(matches!(right, Ok(true))),
+        1
+    );
+    let revoked_purpose_id = TokenId::new();
+    database
+        .passkeys()
+        .insert_purpose_authorization(&InsertPurposeAuthorization {
+            id: revoked_purpose_id,
+            user_id: first,
+            session_id,
+            purpose: "manage-passkeys".into(),
+            expires_at: Utc::now() + ChronoDuration::minutes(2),
+        })
+        .await
+        .expect("purpose authorization invalidated by logout");
     assert!(
         database
             .sessions()
@@ -195,6 +366,25 @@ async fn identity_transactions_and_concurrency_hold() {
             .revoke(session_id)
             .await
             .expect("idempotent revoke")
+    );
+    assert!(
+        !database
+            .passkeys()
+            .purpose_authorization_is_active(
+                revoked_purpose_id,
+                first,
+                session_id,
+                "manage-passkeys"
+            )
+            .await
+            .expect("revoked-session purpose lookup")
+    );
+    assert!(
+        !database
+            .passkeys()
+            .consume_purpose_authorization(revoked_purpose_id, first, session_id, "manage-passkeys")
+            .await
+            .expect("revoked-session purpose consumption")
     );
 
     let event = |kind: &str| AppendInternalEvent {

@@ -1,10 +1,11 @@
 //! Domain repository handles backed by a private pool or transaction connection.
 
 use crate::{
-    AppendAuditEvent, AppendInternalEvent, DatabaseError, InsertSession, InsertUser,
-    InsertVerifiedEmail, StoredEmail, StoredSession, StoredUser, UpdateUserProfile,
+    AppendAuditEvent, AppendInternalEvent, ConsumedCeremony, DatabaseError, InsertCeremony,
+    InsertPasskey, InsertPurposeAuthorization, InsertSession, InsertUser, InsertVerifiedEmail,
+    StoredEmail, StoredPasskey, StoredSession, StoredUser, UpdateUserProfile,
 };
-use piquel_auth_protocol::{AccountStatus, SessionId, UserId};
+use piquel_auth_protocol::{AccountStatus, SessionId, TokenId, UserId};
 use sqlx::{PgConnection, PgPool, Row};
 
 #[allow(dead_code)]
@@ -310,5 +311,179 @@ impl InternalEventRepository<'_> {
                 .map_err(|_| DatabaseError::InvalidStoredData)?,
         )
         .map_err(|_| DatabaseError::InvalidStoredData)
+    }
+}
+
+impl PasskeyRepository<'_> {
+    pub async fn insert(&mut self, input: &InsertPasskey) -> Result<StoredPasskey, DatabaseError> {
+        let row = fetch_one!(self, sqlx::query("INSERT INTO passkey_credentials (id,credential_id,user_id,credential,backup_eligible,backup_state,friendly_name) VALUES ($1,$2,$3,$4,false,false,$5) RETURNING id,credential_id,user_id,credential,friendly_name,revoked_at").bind(input.id.as_uuid()).bind(&input.credential_id).bind(input.user_id.as_uuid()).bind(&input.credential).bind(&input.friendly_name))?;
+        stored_passkey(&row)
+    }
+
+    pub async fn list_active(
+        &mut self,
+        user_id: UserId,
+    ) -> Result<Vec<StoredPasskey>, DatabaseError> {
+        let rows = match &mut self.executor {
+            RepositoryExecutor::Pool(pool) => sqlx::query("SELECT id,credential_id,user_id,credential,friendly_name,revoked_at FROM passkey_credentials WHERE user_id=$1 AND revoked_at IS NULL ORDER BY created_at").bind(user_id.as_uuid()).fetch_all(*pool).await,
+            RepositoryExecutor::Connection(connection) => sqlx::query("SELECT id,credential_id,user_id,credential,friendly_name,revoked_at FROM passkey_credentials WHERE user_id=$1 AND revoked_at IS NULL ORDER BY created_at").bind(user_id.as_uuid()).fetch_all(&mut **connection).await,
+        }.map_err(Into::<DatabaseError>::into)?;
+        rows.iter().map(stored_passkey).collect()
+    }
+
+    pub async fn find_active_by_credential_id(
+        &mut self,
+        credential_id: &[u8],
+    ) -> Result<Option<StoredPasskey>, DatabaseError> {
+        fetch_optional!(self, sqlx::query("SELECT id,credential_id,user_id,credential,friendly_name,revoked_at FROM passkey_credentials WHERE credential_id=$1 AND revoked_at IS NULL").bind(credential_id))?.map(|row| stored_passkey(&row)).transpose()
+    }
+
+    pub async fn find_active_by_credential_id_for_update(
+        &mut self,
+        credential_id: &[u8],
+    ) -> Result<Option<StoredPasskey>, DatabaseError> {
+        fetch_optional!(self, sqlx::query("SELECT id,credential_id,user_id,credential,friendly_name,revoked_at FROM passkey_credentials WHERE credential_id=$1 AND revoked_at IS NULL FOR UPDATE").bind(credential_id))?.map(|row| stored_passkey(&row)).transpose()
+    }
+
+    pub async fn update_after_authentication(
+        &mut self,
+        credential_id: &[u8],
+        credential: &serde_json::Value,
+    ) -> Result<bool, DatabaseError> {
+        Ok(execute!(self, sqlx::query("UPDATE passkey_credentials SET credential=$1,last_used_at=now() WHERE credential_id=$2 AND revoked_at IS NULL").bind(credential).bind(credential_id))?.rows_affected()==1)
+    }
+
+    pub async fn rename(
+        &mut self,
+        id: TokenId,
+        user_id: UserId,
+        name: &str,
+    ) -> Result<bool, DatabaseError> {
+        Ok(execute!(self, sqlx::query("UPDATE passkey_credentials SET friendly_name=$1 WHERE id=$2 AND user_id=$3 AND revoked_at IS NULL").bind(name).bind(id.as_uuid()).bind(user_id.as_uuid()))?.rows_affected()==1)
+    }
+
+    /// Revokes a credential only while another active passkey remains.
+    /// All of the user's credential rows are locked in one statement so two
+    /// concurrent removals cannot both pass the last-factor check.
+    pub async fn revoke_if_not_last(
+        &mut self,
+        id: TokenId,
+        user_id: UserId,
+    ) -> Result<bool, DatabaseError> {
+        Ok(execute!(self, sqlx::query("WITH locked AS MATERIALIZED (SELECT id,revoked_at FROM passkey_credentials WHERE user_id=$2 FOR UPDATE), eligible AS (SELECT 1 FROM locked WHERE id=$1 AND revoked_at IS NULL AND (SELECT count(*) FROM locked WHERE revoked_at IS NULL)>1) UPDATE passkey_credentials SET revoked_at=now() FROM eligible WHERE passkey_credentials.id=$1 AND passkey_credentials.user_id=$2 AND passkey_credentials.revoked_at IS NULL").bind(id.as_uuid()).bind(user_id.as_uuid()))?.rows_affected()==1)
+    }
+
+    pub async fn revoke(&mut self, id: TokenId, user_id: UserId) -> Result<bool, DatabaseError> {
+        Ok(execute!(self, sqlx::query("UPDATE passkey_credentials SET revoked_at=now() WHERE id=$1 AND user_id=$2 AND revoked_at IS NULL").bind(id.as_uuid()).bind(user_id.as_uuid()))?.rows_affected()==1)
+    }
+
+    pub async fn insert_ceremony(&mut self, input: &InsertCeremony) -> Result<(), DatabaseError> {
+        execute!(self, sqlx::query("INSERT INTO webauthn_ceremonies (id,user_id,session_id,ceremony_kind,challenge_digest,state,expires_at) VALUES ($1,$2,$3,$4,$5,$6,$7)").bind(input.id.as_uuid()).bind(input.user_id.map(UserId::as_uuid)).bind(input.session_id.map(SessionId::as_uuid)).bind(&input.kind).bind(&input.challenge_digest).bind(&input.state).bind(input.expires_at))?;
+        Ok(())
+    }
+
+    pub async fn consume_ceremony(
+        &mut self,
+        id: TokenId,
+        kind: &str,
+    ) -> Result<ConsumedCeremony, DatabaseError> {
+        let row = fetch_optional!(self, sqlx::query("UPDATE webauthn_ceremonies SET consumed_at=now() WHERE id=$1 AND ceremony_kind=$2 AND consumed_at IS NULL AND expires_at>now() RETURNING user_id,session_id,state").bind(id.as_uuid()).bind(kind))?.ok_or(DatabaseError::NotFound)?;
+        Ok(ConsumedCeremony {
+            user_id: row
+                .try_get::<Option<uuid::Uuid>, _>("user_id")
+                .map_err(|_| DatabaseError::InvalidStoredData)?
+                .map(UserId::from_uuid)
+                .transpose()
+                .map_err(|_| DatabaseError::InvalidStoredData)?,
+            session_id: row
+                .try_get::<Option<uuid::Uuid>, _>("session_id")
+                .map_err(|_| DatabaseError::InvalidStoredData)?
+                .map(SessionId::from_uuid)
+                .transpose()
+                .map_err(|_| DatabaseError::InvalidStoredData)?,
+            state: row
+                .try_get("state")
+                .map_err(|_| DatabaseError::InvalidStoredData)?,
+        })
+    }
+
+    pub async fn insert_purpose_authorization(
+        &mut self,
+        input: &InsertPurposeAuthorization,
+    ) -> Result<(), DatabaseError> {
+        execute!(self, sqlx::query("INSERT INTO purpose_authorizations(id,user_id,session_id,purpose,expires_at) VALUES($1,$2,$3,$4,$5)").bind(input.id.as_uuid()).bind(input.user_id.as_uuid()).bind(input.session_id.as_uuid()).bind(&input.purpose).bind(input.expires_at))?;
+        Ok(())
+    }
+
+    pub async fn purpose_authorization_is_active(
+        &mut self,
+        id: TokenId,
+        user_id: UserId,
+        session_id: SessionId,
+        purpose: &str,
+    ) -> Result<bool, DatabaseError> {
+        Ok(fetch_optional!(self, sqlx::query("SELECT 1 FROM purpose_authorizations p JOIN sessions s ON s.id=p.session_id JOIN users u ON u.id=p.user_id WHERE p.id=$1 AND p.user_id=$2 AND p.session_id=$3 AND p.purpose=$4 AND p.consumed_at IS NULL AND p.expires_at>now() AND s.revoked_at IS NULL AND s.expires_at>now() AND u.status='active'").bind(id.as_uuid()).bind(user_id.as_uuid()).bind(session_id.as_uuid()).bind(purpose))?.is_some())
+    }
+
+    pub async fn consume_purpose_authorization(
+        &mut self,
+        id: TokenId,
+        user_id: UserId,
+        session_id: SessionId,
+        purpose: &str,
+    ) -> Result<bool, DatabaseError> {
+        Ok(execute!(self, sqlx::query("WITH active_session AS MATERIALIZED (SELECT s.id FROM sessions s JOIN users u ON u.id=s.user_id WHERE s.id=$3 AND s.user_id=$2 AND s.revoked_at IS NULL AND s.expires_at>now() AND u.status='active' FOR UPDATE OF s) UPDATE purpose_authorizations p SET consumed_at=now() FROM active_session s WHERE p.id=$1 AND p.user_id=$2 AND p.session_id=s.id AND p.purpose=$4 AND p.consumed_at IS NULL AND p.expires_at>now()").bind(id.as_uuid()).bind(user_id.as_uuid()).bind(session_id.as_uuid()).bind(purpose))?.rows_affected()==1)
+    }
+}
+
+fn stored_passkey(row: &sqlx::postgres::PgRow) -> Result<StoredPasskey, DatabaseError> {
+    Ok(StoredPasskey {
+        id: TokenId::from_uuid(
+            row.try_get("id")
+                .map_err(|_| DatabaseError::InvalidStoredData)?,
+        )
+        .map_err(|_| DatabaseError::InvalidStoredData)?,
+        credential_id: row
+            .try_get("credential_id")
+            .map_err(|_| DatabaseError::InvalidStoredData)?,
+        user_id: UserId::from_uuid(
+            row.try_get("user_id")
+                .map_err(|_| DatabaseError::InvalidStoredData)?,
+        )
+        .map_err(|_| DatabaseError::InvalidStoredData)?,
+        credential: row
+            .try_get("credential")
+            .map_err(|_| DatabaseError::InvalidStoredData)?,
+        friendly_name: row
+            .try_get("friendly_name")
+            .map_err(|_| DatabaseError::InvalidStoredData)?,
+        revoked_at: row
+            .try_get("revoked_at")
+            .map_err(|_| DatabaseError::InvalidStoredData)?,
+    })
+}
+
+impl SessionRepository<'_> {
+    pub async fn insert_browser_secret(
+        &mut self,
+        session_id: SessionId,
+        digest: &[u8],
+    ) -> Result<(), DatabaseError> {
+        execute!(
+            self,
+            sqlx::query(
+                "INSERT INTO browser_session_secrets(session_id,secret_digest) VALUES($1,$2)"
+            )
+            .bind(session_id.as_uuid())
+            .bind(digest)
+        )?;
+        Ok(())
+    }
+
+    pub async fn find_active_by_browser_secret(
+        &mut self,
+        digest: &[u8],
+    ) -> Result<Option<StoredSession>, DatabaseError> {
+        fetch_optional!(self, sqlx::query("SELECT s.id,s.user_id,s.authentication_methods,s.authenticated_at,s.expires_at,s.last_seen_at,s.revoked_at FROM browser_session_secrets b JOIN sessions s ON s.id=b.session_id JOIN users u ON u.id=s.user_id WHERE b.secret_digest=$1 AND s.revoked_at IS NULL AND s.expires_at>now() AND u.status='active'").bind(digest))?.map(|row| stored_session(&row)).transpose()
     }
 }
