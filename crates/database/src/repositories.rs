@@ -4,10 +4,11 @@ use crate::{
     AppendAuditEvent, AppendInternalEvent, BootstrapOidcClient, BootstrapServiceIdentity,
     ConsumedAuthorizationCode, ConsumedCeremony, ConsumedFederationTransaction, DatabaseError,
     InsertAuthorizationCode, InsertAuthorizationRequest, InsertCeremony, InsertExternalIdentity,
-    InsertFederationTransaction, InsertPasskey, InsertRefreshFamily, InsertRefreshToken,
-    InsertSession, InsertUser, InsertVerifiedEmail, RefreshRotationError, RotatedRefreshToken,
-    StoredAuthorizationRequest, StoredEmail, StoredExternalIdentity, StoredOidcClient,
-    StoredPasskey, StoredServiceIdentity, StoredSession, StoredUser, UpdateUserProfile,
+    InsertFederationTransaction, InsertPasskey, InsertPurposeAuthorization, InsertRefreshFamily,
+    InsertRefreshToken, InsertSession, InsertUser, InsertVerifiedEmail, RefreshRotationError,
+    RotatedRefreshToken, StoredAuthorizationRequest, StoredEmail, StoredExternalIdentity,
+    StoredOidcClient, StoredPasskey, StoredServiceIdentity, StoredSession, StoredUser,
+    UpdateUserProfile,
 };
 use piquel_auth_protocol::{AccountStatus, SessionId, TokenId, UserId};
 use sqlx::{PgConnection, PgPool, Row};
@@ -58,7 +59,7 @@ macro_rules! fetch_optional {
                 $query.fetch_optional(&mut **connection).await
             }
         }
-        .map_err(crate::error::map_error)
+        .map_err(Into::<DatabaseError>::into)
     }};
 }
 macro_rules! fetch_one {
@@ -67,7 +68,7 @@ macro_rules! fetch_one {
             RepositoryExecutor::Pool(pool) => $query.fetch_one(*pool).await,
             RepositoryExecutor::Connection(connection) => $query.fetch_one(&mut **connection).await,
         }
-        .map_err(crate::error::map_error)
+        .map_err(Into::<DatabaseError>::into)
     }};
 }
 macro_rules! execute {
@@ -76,7 +77,7 @@ macro_rules! execute {
             RepositoryExecutor::Pool(pool) => $query.execute(*pool).await,
             RepositoryExecutor::Connection(connection) => $query.execute(&mut **connection).await,
         }
-        .map_err(crate::error::map_error)
+        .map_err(Into::<DatabaseError>::into)
     }};
 }
 
@@ -201,7 +202,7 @@ impl EmailRepository<'_> {
         &mut self,
         normalized: &str,
     ) -> Result<Option<StoredEmail>, DatabaseError> {
-        let row = fetch_optional!(self, sqlx::query("SELECT e.id, e.user_id, e.normalized_email, e.verified_at, e.is_primary FROM active_verified_email_ownership o JOIN user_emails e ON e.user_id = o.user_id AND e.normalized_email = o.normalized_email AND e.verified_at IS NOT NULL WHERE o.normalized_email = $1 ORDER BY e.is_primary DESC, e.created_at LIMIT 1").bind(normalized))?;
+        let row = fetch_optional!(self, sqlx::query("SELECT e.id, e.user_id, e.normalized_email, e.verified_at, e.is_primary FROM active_verified_email_ownership o JOIN users u ON u.id = o.user_id AND u.status = 'active' JOIN user_emails e ON e.user_id = o.user_id AND e.normalized_email = o.normalized_email AND e.verified_at IS NOT NULL WHERE o.normalized_email = $1 ORDER BY e.is_primary DESC, e.created_at LIMIT 1").bind(normalized))?;
         row.map(|row| {
             Ok(StoredEmail {
                 id: piquel_auth_protocol::TokenId::from_uuid(
@@ -232,7 +233,7 @@ impl EmailRepository<'_> {
         &mut self,
         normalized: &str,
     ) -> Result<Vec<StoredUser>, DatabaseError> {
-        let rows=match &mut self.executor{RepositoryExecutor::Pool(pool)=>sqlx::query("SELECT DISTINCT u.id,u.username,u.display_name,u.profile_version,u.status,u.created_at,u.updated_at FROM user_emails e JOIN users u ON u.id=e.user_id WHERE e.normalized_email=$1 AND e.verified_at IS NOT NULL ORDER BY u.id").bind(normalized).fetch_all(*pool).await,RepositoryExecutor::Connection(connection)=>sqlx::query("SELECT DISTINCT u.id,u.username,u.display_name,u.profile_version,u.status,u.created_at,u.updated_at FROM user_emails e JOIN users u ON u.id=e.user_id WHERE e.normalized_email=$1 AND e.verified_at IS NOT NULL ORDER BY u.id").bind(normalized).fetch_all(&mut **connection).await}.map_err(crate::error::map_error)?;
+        let rows=match &mut self.executor{RepositoryExecutor::Pool(pool)=>sqlx::query("SELECT DISTINCT u.id,u.username,u.display_name,u.profile_version,u.status,u.created_at,u.updated_at FROM user_emails e JOIN users u ON u.id=e.user_id WHERE e.normalized_email=$1 AND e.verified_at IS NOT NULL ORDER BY u.id").bind(normalized).fetch_all(*pool).await,RepositoryExecutor::Connection(connection)=>sqlx::query("SELECT DISTINCT u.id,u.username,u.display_name,u.profile_version,u.status,u.created_at,u.updated_at FROM user_emails e JOIN users u ON u.id=e.user_id WHERE e.normalized_email=$1 AND e.verified_at IS NOT NULL ORDER BY u.id").bind(normalized).fetch_all(&mut **connection).await}.map_err(Into::<DatabaseError>::into)?;
         rows.iter().map(stored_user).collect()
     }
 }
@@ -260,7 +261,7 @@ impl SessionRepository<'_> {
         fetch_optional!(self, sqlx::query("SELECT s.id,s.user_id,s.authentication_methods,s.authenticated_at,s.expires_at,s.last_seen_at,s.revoked_at FROM sessions s JOIN users u ON u.id=s.user_id WHERE s.id=$1 AND s.revoked_at IS NULL AND s.expires_at>now() AND u.status='active'").bind(id.as_uuid()))?.map(|row| stored_session(&row)).transpose()
     }
     pub async fn touch(&mut self, id: SessionId) -> Result<bool, DatabaseError> {
-        Ok(execute!(self, sqlx::query("UPDATE sessions SET last_seen_at=now() WHERE id=$1 AND revoked_at IS NULL AND expires_at>now()").bind(id.as_uuid()))?.rows_affected()==1)
+        Ok(execute!(self, sqlx::query("UPDATE sessions s SET last_seen_at=now() FROM users u WHERE s.id=$1 AND s.user_id=u.id AND u.status='active' AND s.revoked_at IS NULL AND s.expires_at>now()").bind(id.as_uuid()))?.rows_affected()==1)
     }
     pub async fn revoke(&mut self, id: SessionId) -> Result<bool, DatabaseError> {
         Ok(execute!(
@@ -663,7 +664,7 @@ impl FederationRepository<'_> {
         &mut self,
         user_id: UserId,
     ) -> Result<Vec<StoredExternalIdentity>, DatabaseError> {
-        let rows=match &mut self.executor{RepositoryExecutor::Pool(pool)=>sqlx::query("SELECT id,user_id,provider_name,issuer,subject,linked_email FROM external_login_identities WHERE user_id=$1 AND revoked_at IS NULL ORDER BY linked_at").bind(user_id.as_uuid()).fetch_all(*pool).await,RepositoryExecutor::Connection(connection)=>sqlx::query("SELECT id,user_id,provider_name,issuer,subject,linked_email FROM external_login_identities WHERE user_id=$1 AND revoked_at IS NULL ORDER BY linked_at").bind(user_id.as_uuid()).fetch_all(&mut **connection).await}.map_err(crate::error::map_error)?;
+        let rows=match &mut self.executor{RepositoryExecutor::Pool(pool)=>sqlx::query("SELECT id,user_id,provider_name,issuer,subject,linked_email FROM external_login_identities WHERE user_id=$1 AND revoked_at IS NULL ORDER BY linked_at").bind(user_id.as_uuid()).fetch_all(*pool).await,RepositoryExecutor::Connection(connection)=>sqlx::query("SELECT id,user_id,provider_name,issuer,subject,linked_email FROM external_login_identities WHERE user_id=$1 AND revoked_at IS NULL ORDER BY linked_at").bind(user_id.as_uuid()).fetch_all(&mut **connection).await}.map_err(Into::<DatabaseError>::into)?;
         rows.iter().map(stored_external_identity).collect()
     }
 }
@@ -857,13 +858,11 @@ impl PasskeyRepository<'_> {
     pub async fn list_active(
         &mut self,
         user_id: UserId,
-        limit: u32,
     ) -> Result<Vec<StoredPasskey>, DatabaseError> {
-        let limit = i64::from(limit.min(20));
         let rows = match &mut self.executor {
-            RepositoryExecutor::Pool(pool) => sqlx::query("SELECT id,credential_id,user_id,credential,friendly_name,revoked_at FROM passkey_credentials WHERE user_id=$1 AND revoked_at IS NULL ORDER BY created_at LIMIT $2").bind(user_id.as_uuid()).bind(limit).fetch_all(*pool).await,
-            RepositoryExecutor::Connection(connection) => sqlx::query("SELECT id,credential_id,user_id,credential,friendly_name,revoked_at FROM passkey_credentials WHERE user_id=$1 AND revoked_at IS NULL ORDER BY created_at LIMIT $2").bind(user_id.as_uuid()).bind(limit).fetch_all(&mut **connection).await,
-        }.map_err(crate::error::map_error)?;
+            RepositoryExecutor::Pool(pool) => sqlx::query("SELECT id,credential_id,user_id,credential,friendly_name,revoked_at FROM passkey_credentials WHERE user_id=$1 AND revoked_at IS NULL ORDER BY created_at").bind(user_id.as_uuid()).fetch_all(*pool).await,
+            RepositoryExecutor::Connection(connection) => sqlx::query("SELECT id,credential_id,user_id,credential,friendly_name,revoked_at FROM passkey_credentials WHERE user_id=$1 AND revoked_at IS NULL ORDER BY created_at").bind(user_id.as_uuid()).fetch_all(&mut **connection).await,
+        }.map_err(Into::<DatabaseError>::into)?;
         rows.iter().map(stored_passkey).collect()
     }
 
@@ -941,6 +940,34 @@ impl PasskeyRepository<'_> {
                 .try_get("state")
                 .map_err(|_| DatabaseError::InvalidStoredData)?,
         })
+    }
+
+    pub async fn insert_purpose_authorization(
+        &mut self,
+        input: &InsertPurposeAuthorization,
+    ) -> Result<(), DatabaseError> {
+        execute!(self, sqlx::query("INSERT INTO purpose_authorizations(id,user_id,session_id,purpose,expires_at) VALUES($1,$2,$3,$4,$5)").bind(input.id.as_uuid()).bind(input.user_id.as_uuid()).bind(input.session_id.as_uuid()).bind(&input.purpose).bind(input.expires_at))?;
+        Ok(())
+    }
+
+    pub async fn purpose_authorization_is_active(
+        &mut self,
+        id: TokenId,
+        user_id: UserId,
+        session_id: SessionId,
+        purpose: &str,
+    ) -> Result<bool, DatabaseError> {
+        Ok(fetch_optional!(self, sqlx::query("SELECT 1 FROM purpose_authorizations p JOIN sessions s ON s.id=p.session_id JOIN users u ON u.id=p.user_id WHERE p.id=$1 AND p.user_id=$2 AND p.session_id=$3 AND p.purpose=$4 AND p.consumed_at IS NULL AND p.expires_at>now() AND s.revoked_at IS NULL AND s.expires_at>now() AND u.status='active'").bind(id.as_uuid()).bind(user_id.as_uuid()).bind(session_id.as_uuid()).bind(purpose))?.is_some())
+    }
+
+    pub async fn consume_purpose_authorization(
+        &mut self,
+        id: TokenId,
+        user_id: UserId,
+        session_id: SessionId,
+        purpose: &str,
+    ) -> Result<bool, DatabaseError> {
+        Ok(execute!(self, sqlx::query("WITH active_session AS MATERIALIZED (SELECT s.id FROM sessions s JOIN users u ON u.id=s.user_id WHERE s.id=$3 AND s.user_id=$2 AND s.revoked_at IS NULL AND s.expires_at>now() AND u.status='active' FOR UPDATE OF s) UPDATE purpose_authorizations p SET consumed_at=now() FROM active_session s WHERE p.id=$1 AND p.user_id=$2 AND p.session_id=s.id AND p.purpose=$4 AND p.consumed_at IS NULL AND p.expires_at>now()").bind(id.as_uuid()).bind(user_id.as_uuid()).bind(session_id.as_uuid()).bind(purpose))?.rows_affected()==1)
     }
 }
 
