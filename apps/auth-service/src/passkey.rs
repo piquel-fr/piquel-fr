@@ -982,7 +982,9 @@ mod tests {
     ) -> Request<Body> {
         let mut builder = Request::builder().method(method).uri(uri);
         if let Some(cookie) = cookie {
-            builder = builder.header(header::COOKIE, cookie);
+            builder = builder
+                .header(header::COOKIE, cookie)
+                .header(header::ORIGIN, "https://auth.example.com");
         }
         if let Some(token) = purpose_token {
             builder = builder.header(header::AUTHORIZATION, format!("Bearer {token}"));
