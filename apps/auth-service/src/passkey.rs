@@ -982,7 +982,9 @@ mod tests {
     ) -> Request<Body> {
         let mut builder = Request::builder().method(method).uri(uri);
         if let Some(cookie) = cookie {
-            builder = builder.header(header::COOKIE, cookie);
+            builder = builder
+                .header(header::COOKIE, cookie)
+                .header(header::ORIGIN, "https://auth.example.com");
         }
         if let Some(token) = purpose_token {
             builder = builder.header(header::AUTHORIZATION, format!("Bearer {token}"));
@@ -1129,7 +1131,7 @@ mod tests {
         let database_url = env::var("TEST_DATABASE_URL")
             .expect("TEST_DATABASE_URL must name an isolated PostgreSQL database");
         let database = Database::connect(
-            DatabaseConfig::new_development(database_url, 5, StdDuration::from_secs(5))
+            DatabaseConfig::new_development(&database_url, 5, StdDuration::from_secs(5))
                 .expect("database configuration"),
         )
         .await

@@ -236,7 +236,7 @@ mod tests {
     async fn profile_update_and_event_commit_together() {
         let url = env::var("TEST_DATABASE_URL")
             .expect("TEST_DATABASE_URL must name an isolated PostgreSQL database");
-        let config = DatabaseConfig::new_development(url, 5, Duration::from_secs(5))
+        let config = DatabaseConfig::new_development(&url, 5, Duration::from_secs(5))
             .expect("test database configuration");
         let database = Database::connect(config).await.expect("connect database");
         database.run_migrations().await.expect("run migrations");

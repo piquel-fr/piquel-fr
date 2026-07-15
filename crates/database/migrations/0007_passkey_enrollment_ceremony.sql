@@ -3,4 +3,4 @@ ALTER TABLE webauthn_ceremonies
 
 ALTER TABLE webauthn_ceremonies
     ADD CONSTRAINT webauthn_ceremonies_ceremony_kind_check
-    CHECK (ceremony_kind IN ('registration', 'authentication', 'enrollment'));
+    CHECK (ceremony_kind IN ('registration', 'authentication', 'enrollment', 'purpose_authentication'));
