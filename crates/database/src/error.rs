@@ -17,6 +17,8 @@ pub enum DatabaseError {
     TransactionFailed,
     #[error("an unexpected database error occurred")]
     Internal,
+    #[error("database operation failed")]
+    Operation(#[source] Box<dyn std::error::Error + Send + Sync>),
 }
 
 /// Errors that can occur while constructing the database boundary.
@@ -26,18 +28,18 @@ pub enum DatabaseConnectionError {
     InvalidConfiguration,
     #[error("database connection is unavailable")]
     Unavailable,
+    #[error("database connection failed")]
+    Connection(#[source] Box<dyn std::error::Error + Send + Sync>),
 }
 
 impl From<sqlx::Error> for DatabaseError {
     fn from(value: sqlx::Error) -> Self {
         match value {
             sqlx::Error::RowNotFound => Self::NotFound,
-            sqlx::Error::PoolTimedOut => Self::Timeout,
-            sqlx::Error::PoolClosed | sqlx::Error::Io(_) | sqlx::Error::Tls(_) => Self::Unavailable,
             sqlx::Error::Database(database_error) if database_error.is_unique_violation() => {
                 Self::Conflict
             }
-            _ => Self::Internal,
+            error => Self::Operation(Box::new(error)),
         }
     }
 }

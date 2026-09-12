@@ -120,17 +120,3 @@ CREATE TABLE security_audit_log (
     created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 CREATE INDEX security_audit_log_user_created_idx ON security_audit_log (user_id, created_at DESC);
-
-CREATE TABLE internal_events (
-    id UUID PRIMARY KEY,
-    aggregate_type TEXT NOT NULL,
-    aggregate_id UUID NOT NULL,
-    aggregate_sequence BIGINT NOT NULL CHECK (aggregate_sequence > 0),
-    event_type TEXT NOT NULL,
-    schema_version INTEGER NOT NULL CHECK (schema_version > 0),
-    payload JSONB NOT NULL,
-    occurred_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-    published_at TIMESTAMPTZ,
-    UNIQUE (aggregate_type, aggregate_id, aggregate_sequence)
-);
-CREATE INDEX internal_events_unpublished_idx ON internal_events (occurred_at) WHERE published_at IS NULL;

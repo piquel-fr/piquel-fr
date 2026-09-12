@@ -1,0 +1,8 @@
+[advisories]
+version = 2
+
+[licenses]
+version = 2
+# Permissive dependencies and unchanged MPL library files may be distributed
+# with this Apache-2.0 service; retain their notices in source distributions.
+allow = ["Apache-2.0", "MIT", "BSD-3-Clause", "ISC", "Unicode-3.0", "Zlib", "CDLA-Permissive-2.0", "MPL-2.0"]

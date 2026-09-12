@@ -1,11 +1,6 @@
 //! Small validated configuration primitives. Secrets are references, never values.
 
-use std::{
-    env, fmt, fs,
-    net::{IpAddr, SocketAddr},
-    str::FromStr,
-    time::Duration,
-};
+use std::{env, fmt, fs, net::IpAddr};
 use thiserror::Error;
 use url::Url;
 
@@ -84,7 +79,7 @@ impl SecretReference {
     ///
     /// Returns an error for empty or whitespace-containing references.
     pub fn parse(value: &str) -> Result<Self, ConfigurationError> {
-        let allowed = ["env://", "file://", "kms://"];
+        let allowed = ["env://", "file://"];
         if value.trim().is_empty()
             || value.chars().any(char::is_whitespace)
             || !allowed.iter().any(|prefix| value.starts_with(prefix))
@@ -149,29 +144,6 @@ impl fmt::Display for SecretReference {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.write_str("[REDACTED]")
     }
-}
-
-/// Parses a socket address from an environment value.
-///
-/// # Errors
-///
-/// Returns an error if the supplied value is not a socket address.
-pub fn socket_addr(name: &'static str, value: &str) -> Result<SocketAddr, ConfigurationError> {
-    SocketAddr::from_str(value).map_err(|_| ConfigurationError::Invalid { name })
-}
-/// Parses a non-zero duration expressed as seconds.
-///
-/// # Errors
-///
-/// Returns an error if the supplied value is zero or not an unsigned integer.
-pub fn seconds(name: &'static str, value: &str) -> Result<Duration, ConfigurationError> {
-    let seconds = value
-        .parse::<u64>()
-        .map_err(|_| ConfigurationError::Invalid { name })?;
-    if seconds == 0 {
-        return Err(ConfigurationError::Invalid { name });
-    }
-    Ok(Duration::from_secs(seconds))
 }
 
 #[cfg(test)]

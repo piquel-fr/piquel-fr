@@ -1,38 +1,30 @@
-# Authentication implementation plan index
+# Accepted authentication release
 
-Implement these plans in numeric order. Each plan is intentionally a reviewable
-vertical slice with explicit prerequisites; do not start a later plan by
-recreating boundaries established by an earlier one.
+This plan supersedes the prototype's phased OIDC/SDK/RPC/frontend/operations stack.
+The implementation may reuse sound pieces; prototype compatibility is unnecessary.
 
-| Plan | Outcome | Depends on |
-| --- | --- | --- |
-| [00-foundation.md](00-foundation.md) | Workspace, typed auth protocol, database crate, and configuration/telemetry foundations | — |
-| [01-identity-sessions.md](01-identity-sessions.md) | Accounts, verified emails, central sessions, audit trail, and transactional event log | 00 |
-| [02-passkeys.md](02-passkeys.md) | WebAuthn registration/authentication and a central browser session | 01 |
-| [03-oidc-token-lifecycle.md](03-oidc-token-lifecycle.md) | OIDC Authorization Code + PKCE, signed tokens, refresh rotation, JWKS, and revocation | 01, 02 |
-| [04-sdk-resource-validation.md](04-sdk-resource-validation.md) | Published Rust SDK surface and mandatory local access-token validation | 00, 03 |
-| [05-federation.md](05-federation.md) | First approved social provider and safe automatic account linking | 01, 02 |
-| [06-service-rpc.md](06-service-rpc.md) | Service identities, short-lived service tokens, private gRPC, and typed client | 00, 01, 03 |
-| [07-auth-web.md](07-auth-web.md) | User-facing login, authorization, account-security, and error UI | 02, 03, 05 |
-| [08-hardening-operations.md](08-hardening-operations.md) | Security hardening, observability, key rotation, operational runbooks, and end-to-end tests | 00–07 |
+The agreed design tree:
 
-## Shared constraints
+- Registration: invitation-only by default, runtime switch for public signup,
+  CLI-generated single-use expiring links, username-based passkey-only accounts,
+  optional email established from a verified linked provider.
+- Authentication: discoverable synced passkeys with username fallback; GitHub and
+  Google for ordinary sign-in; social-first signup must enroll its first key.
+- Settings: piquel.fr frontend, public auth API, auth-host WebAuthn ceremonies;
+  passkey confirmation opens a reusable fixed two-minute window for every sensitive
+  change; no social renewal; never remove the last passkey.
+- Identity linking: matching email prompts, never auto-links; passkey proof required;
+  declining cancels; explicit linking supports different/missing emails; one identity
+  per provider; unlink first is the only transfer mechanism; local email stays stable.
+- OIDC: configured public/confidential web clients, code + S256 PKCE, remembered
+  consent with explicit trusted-client bypass, optional rotating refresh tokens.
+- Sessions: 30-day absolute cap, five-minute access tokens, logout blocks future
+  central SSO/refresh; credential removal revokes other central sessions.
+- Packaging: one Rust auth binary with static SvelteKit auth assets and migration/
+  invitation commands; separately built piquel.fr settings; PostgreSQL only.
+- Deferred: recovery, public client registration, native/device/machine flows,
+  immediate application-wide logout, SDK/RPC scaffolding, deployment and infrastructure.
 
-- Read `docs/architecture/monorepo.md` before changing workspace structure and
-  `docs/architecture/database-crate.md` before changing persistence.
-- `crates/database` (package name `piquel-repository`) is the only SQLx
-  consumer. Applications receive `Database` and typed repository APIs only.
-- Keep policy in `apps/auth-service`; keep stable shared protocol types in
-  `crates/auth-protocol`; do not create speculative crates or applications.
-- Public endpoints are HTTP/OIDC. Private RPC is gRPC on a separate,
-  authenticated listener. Browser code never receives service credentials.
-- Preserve exact audience validation and five-minute maximum access-token
-  lifetime. Never log credentials, token material, codes, PKCE verifiers,
-  WebAuthn challenges, or provider credentials.
-- Each schema change is an immutable migration in `crates/database/migrations/`;
-  update SQLx metadata when checked queries are used. Application replicas do
-  not automatically run migrations.
-
-The design intentionally defers a broker, Redis implementation, deletion
-orchestration, TOTP, third-party/dynamic client registration, and product-owned
-external OAuth credential storage. Do not add them in these plans.
+Validation includes actual PostgreSQL transactions, signed WebAuthn assertions,
+local signed provider fixtures and real browser flows. Physical Apple/Google device
+checks and live provider login are separate evidence, never implied by virtual tests.

@@ -1,0 +1,19 @@
+packages:
+  - apps/*
+  - packages/*
+
+catalog:
+  '@sveltejs/adapter-static': 3.0.10
+  '@sveltejs/kit': 2.70.3
+  '@sveltejs/vite-plugin-svelte': 7.3.0
+  svelte: 5.57.0
+  svelte-check: 4.7.6
+  typescript: 6.0.3
+  vite: 8.3.0
+
+onlyBuiltDependencies:
+  - esbuild
+
+# SvelteKit's cookie API is compatible with the security-patched 0.7 series.
+overrides:
+  cookie@<0.7.0: 0.7.2

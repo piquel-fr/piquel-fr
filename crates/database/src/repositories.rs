@@ -1,14 +1,9 @@
 //! Domain repository handles backed by a private pool or transaction connection.
 
-use crate::{
-    AppendAuditEvent, AppendInternalEvent, ConsumedCeremony, DatabaseError, InsertCeremony,
-    InsertPasskey, InsertPurposeAuthorization, InsertSession, InsertUser, InsertVerifiedEmail,
-    StoredEmail, StoredPasskey, StoredSession, StoredUser, UpdateUserProfile,
-};
+use crate::{DatabaseError, models::*};
 use piquel_auth_protocol::{AccountStatus, SessionId, TokenId, UserId};
 use sqlx::{PgConnection, PgPool, Row};
 
-#[allow(dead_code)]
 pub(crate) enum RepositoryExecutor<'a> {
     Pool(&'a PgPool),
     Connection(&'a mut PgConnection),
@@ -18,7 +13,6 @@ macro_rules! repository {
     ($name:ident) => {
         /// Focused persistence handle; it has no policy and no public SQL escape hatch.
         pub struct $name<'a> {
-            #[allow(dead_code)]
             pub(crate) executor: RepositoryExecutor<'a>,
         }
         impl<'a> $name<'a> {
@@ -39,12 +33,11 @@ repository!(UserRepository);
 repository!(EmailRepository);
 repository!(SessionRepository);
 repository!(AuditEventRepository);
-repository!(InternalEventRepository);
 repository!(PasskeyRepository);
 repository!(OidcRepository);
 repository!(TokenRepository);
 repository!(FederationRepository);
-repository!(ServiceIdentityRepository);
+repository!(SecurityRepository);
 
 macro_rules! fetch_optional {
     ($self:expr, $query:expr) => {{
@@ -122,40 +115,17 @@ impl UserRepository<'_> {
     pub async fn find_by_id(&mut self, id: UserId) -> Result<Option<StoredUser>, DatabaseError> {
         fetch_optional!(self, sqlx::query("SELECT id, username, display_name, profile_version, status, created_at, updated_at FROM users WHERE id = $1").bind(id.as_uuid()))?.map(|row| stored_user(&row)).transpose()
     }
+    pub async fn find_active_by_id_for_update(
+        &mut self,
+        id: UserId,
+    ) -> Result<Option<StoredUser>, DatabaseError> {
+        fetch_optional!(self, sqlx::query("SELECT id, username, display_name, profile_version, status, created_at, updated_at FROM users WHERE id = $1 AND status='active' FOR UPDATE").bind(id.as_uuid()))?.map(|row| stored_user(&row)).transpose()
+    }
     pub async fn find_active_by_username(
         &mut self,
         username: &str,
     ) -> Result<Option<StoredUser>, DatabaseError> {
         fetch_optional!(self, sqlx::query("SELECT id, username, display_name, profile_version, status, created_at, updated_at FROM users WHERE username = $1 AND status = 'active'").bind(username))?.map(|row| stored_user(&row)).transpose()
-    }
-    pub async fn update_profile(
-        &mut self,
-        input: &UpdateUserProfile,
-    ) -> Result<StoredUser, DatabaseError> {
-        let expected =
-            i64::try_from(input.expected_version).map_err(|_| DatabaseError::Conflict)?;
-        let row = fetch_optional!(self, sqlx::query("UPDATE users SET username = $1, display_name = $2, profile_version = profile_version + 1, updated_at = now() WHERE id = $3 AND profile_version = $4 RETURNING id, username, display_name, profile_version, status, created_at, updated_at").bind(&input.username).bind(&input.display_name).bind(input.id.as_uuid()).bind(expected))?.ok_or(DatabaseError::Conflict)?;
-        stored_user(&row)
-    }
-    pub async fn set_status(
-        &mut self,
-        id: UserId,
-        status: AccountStatus,
-    ) -> Result<bool, DatabaseError> {
-        let status = match status {
-            AccountStatus::Active => "active",
-            AccountStatus::Disabled => "disabled",
-        };
-        Ok(execute!(
-            self,
-            sqlx::query(
-                "UPDATE users SET status = $1, updated_at = now() WHERE id = $2 AND status <> $1"
-            )
-            .bind(status)
-            .bind(id.as_uuid())
-        )?
-        .rows_affected()
-            == 1)
     }
 }
 
@@ -241,9 +211,7 @@ impl SessionRepository<'_> {
     ) -> Result<Option<StoredSession>, DatabaseError> {
         fetch_optional!(self, sqlx::query("SELECT s.id,s.user_id,s.authentication_methods,s.authenticated_at,s.expires_at,s.last_seen_at,s.revoked_at FROM sessions s JOIN users u ON u.id=s.user_id WHERE s.id=$1 AND s.revoked_at IS NULL AND s.expires_at>now() AND u.status='active'").bind(id.as_uuid()))?.map(|row| stored_session(&row)).transpose()
     }
-    pub async fn touch(&mut self, id: SessionId) -> Result<bool, DatabaseError> {
-        Ok(execute!(self, sqlx::query("UPDATE sessions s SET last_seen_at=now() FROM users u WHERE s.id=$1 AND s.user_id=u.id AND u.status='active' AND s.revoked_at IS NULL AND s.expires_at>now()").bind(id.as_uuid()))?.rows_affected()==1)
-    }
+
     pub async fn revoke(&mut self, id: SessionId) -> Result<bool, DatabaseError> {
         Ok(execute!(
             self,
@@ -253,17 +221,8 @@ impl SessionRepository<'_> {
         .rows_affected()
             == 1)
     }
-    pub async fn revoke_all_for_user(&mut self, user_id: UserId) -> Result<u64, DatabaseError> {
-        Ok(execute!(
-            self,
-            sqlx::query(
-                "UPDATE sessions SET revoked_at=now() WHERE user_id=$1 AND revoked_at IS NULL"
-            )
-            .bind(user_id.as_uuid())
-        )?
-        .rows_affected())
-    }
 }
+
 fn stored_session(row: &sqlx::postgres::PgRow) -> Result<StoredSession, DatabaseError> {
     let methods: serde_json::Value = row
         .try_get("authentication_methods")
@@ -302,21 +261,9 @@ impl AuditEventRepository<'_> {
         Ok(())
     }
 }
-impl InternalEventRepository<'_> {
-    pub async fn append(&mut self, input: &AppendInternalEvent) -> Result<u64, DatabaseError> {
-        let version = i32::try_from(input.schema_version).map_err(|_| DatabaseError::Internal)?;
-        let row = fetch_one!(self, sqlx::query("WITH locked AS (SELECT pg_advisory_xact_lock(hashtextextended($1 || ':' || $2::text, 0))), next AS (SELECT COALESCE(MAX(aggregate_sequence),0)+1 AS sequence FROM internal_events, locked WHERE aggregate_type=$1 AND aggregate_id=$2) INSERT INTO internal_events (id,aggregate_type,aggregate_id,aggregate_sequence,event_type,schema_version,payload) SELECT $3,$1,$2,sequence,$4,$5,$6 FROM next RETURNING aggregate_sequence").bind(&input.aggregate_type).bind(input.aggregate_id.as_uuid()).bind(input.id.as_uuid()).bind(&input.event_type).bind(version).bind(&input.payload))?;
-        u64::try_from(
-            row.try_get::<i64, _>("aggregate_sequence")
-                .map_err(|_| DatabaseError::InvalidStoredData)?,
-        )
-        .map_err(|_| DatabaseError::InvalidStoredData)
-    }
-}
-
 impl PasskeyRepository<'_> {
     pub async fn insert(&mut self, input: &InsertPasskey) -> Result<StoredPasskey, DatabaseError> {
-        let row = fetch_one!(self, sqlx::query("INSERT INTO passkey_credentials (id,credential_id,user_id,credential,backup_eligible,backup_state,friendly_name) VALUES ($1,$2,$3,$4,false,false,$5) RETURNING id,credential_id,user_id,credential,friendly_name,revoked_at").bind(input.id.as_uuid()).bind(&input.credential_id).bind(input.user_id.as_uuid()).bind(&input.credential).bind(&input.friendly_name))?;
+        let row = fetch_one!(self, sqlx::query("INSERT INTO passkey_credentials (id,credential_id,user_id,credential,friendly_name) VALUES ($1,$2,$3,$4,$5) RETURNING id,credential_id,user_id,credential,friendly_name,revoked_at").bind(input.id.as_uuid()).bind(&input.credential_id).bind(input.user_id.as_uuid()).bind(&input.credential).bind(&input.friendly_name))?;
         stored_passkey(&row)
     }
 
@@ -329,13 +276,6 @@ impl PasskeyRepository<'_> {
             RepositoryExecutor::Connection(connection) => sqlx::query("SELECT id,credential_id,user_id,credential,friendly_name,revoked_at FROM passkey_credentials WHERE user_id=$1 AND revoked_at IS NULL ORDER BY created_at").bind(user_id.as_uuid()).fetch_all(&mut **connection).await,
         }.map_err(Into::<DatabaseError>::into)?;
         rows.iter().map(stored_passkey).collect()
-    }
-
-    pub async fn find_active_by_credential_id(
-        &mut self,
-        credential_id: &[u8],
-    ) -> Result<Option<StoredPasskey>, DatabaseError> {
-        fetch_optional!(self, sqlx::query("SELECT id,credential_id,user_id,credential,friendly_name,revoked_at FROM passkey_credentials WHERE credential_id=$1 AND revoked_at IS NULL").bind(credential_id))?.map(|row| stored_passkey(&row)).transpose()
     }
 
     pub async fn find_active_by_credential_id_for_update(
@@ -406,34 +346,6 @@ impl PasskeyRepository<'_> {
                 .map_err(|_| DatabaseError::InvalidStoredData)?,
         })
     }
-
-    pub async fn insert_purpose_authorization(
-        &mut self,
-        input: &InsertPurposeAuthorization,
-    ) -> Result<(), DatabaseError> {
-        execute!(self, sqlx::query("INSERT INTO purpose_authorizations(id,user_id,session_id,purpose,expires_at) VALUES($1,$2,$3,$4,$5)").bind(input.id.as_uuid()).bind(input.user_id.as_uuid()).bind(input.session_id.as_uuid()).bind(&input.purpose).bind(input.expires_at))?;
-        Ok(())
-    }
-
-    pub async fn purpose_authorization_is_active(
-        &mut self,
-        id: TokenId,
-        user_id: UserId,
-        session_id: SessionId,
-        purpose: &str,
-    ) -> Result<bool, DatabaseError> {
-        Ok(fetch_optional!(self, sqlx::query("SELECT 1 FROM purpose_authorizations p JOIN sessions s ON s.id=p.session_id JOIN users u ON u.id=p.user_id WHERE p.id=$1 AND p.user_id=$2 AND p.session_id=$3 AND p.purpose=$4 AND p.consumed_at IS NULL AND p.expires_at>now() AND s.revoked_at IS NULL AND s.expires_at>now() AND u.status='active'").bind(id.as_uuid()).bind(user_id.as_uuid()).bind(session_id.as_uuid()).bind(purpose))?.is_some())
-    }
-
-    pub async fn consume_purpose_authorization(
-        &mut self,
-        id: TokenId,
-        user_id: UserId,
-        session_id: SessionId,
-        purpose: &str,
-    ) -> Result<bool, DatabaseError> {
-        Ok(execute!(self, sqlx::query("WITH active_session AS MATERIALIZED (SELECT s.id FROM sessions s JOIN users u ON u.id=s.user_id WHERE s.id=$3 AND s.user_id=$2 AND s.revoked_at IS NULL AND s.expires_at>now() AND u.status='active' FOR UPDATE OF s) UPDATE purpose_authorizations p SET consumed_at=now() FROM active_session s WHERE p.id=$1 AND p.user_id=$2 AND p.session_id=s.id AND p.purpose=$4 AND p.consumed_at IS NULL AND p.expires_at>now()").bind(id.as_uuid()).bind(user_id.as_uuid()).bind(session_id.as_uuid()).bind(purpose))?.rows_affected()==1)
-    }
 }
 
 fn stored_passkey(row: &sqlx::postgres::PgRow) -> Result<StoredPasskey, DatabaseError> {
@@ -487,3 +399,8 @@ impl SessionRepository<'_> {
         fetch_optional!(self, sqlx::query("SELECT s.id,s.user_id,s.authentication_methods,s.authenticated_at,s.expires_at,s.last_seen_at,s.revoked_at FROM browser_session_secrets b JOIN sessions s ON s.id=b.session_id JOIN users u ON u.id=s.user_id WHERE b.secret_digest=$1 AND s.revoked_at IS NULL AND s.expires_at>now() AND u.status='active'").bind(digest))?.map(|row| stored_session(&row)).transpose()
     }
 }
+
+mod federation;
+mod oidc;
+
+mod security;

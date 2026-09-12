@@ -1,25 +1,29 @@
+# Build browser assets before compiling the single auth executable.
+build:
+    pnpm build
+    cargo build --release -p auth-service
+
 format:
-    @cargo fmt --all
+    cargo fmt --all
 
 lint:
-    @cargo clippy --workspace
+    cargo clippy --workspace --all-targets
+    pnpm check
 
 check:
-    @cargo check --workspace --all-targets
+    cargo check --workspace --all-targets
 
 test:
-    @cargo nextest run --workspace
+    cargo nextest run --workspace
 
+# TEST_DATABASE_URL must identify a disposable local database.
 test-database:
-    @echo "No test database is configured; database tests will not run."
-
-doc-test:
-    @cargo test --doc --workspace
+    test -n "${TEST_DATABASE_URL:?Set a disposable TEST_DATABASE_URL}"
+    cargo nextest run -p auth-service -p piquel-repository --run-ignored all
 
 migrate:
-    @cargo run -p piquel-repository --bin migrate
+    cargo run -p auth-service -- migrate
 
-prepare-sqlx:
-    @cargo sqlx prepare --workspace
-
-validate: lint check test test-database doc-test
+audit:
+    cargo deny check advisories licenses
+    pnpm audit

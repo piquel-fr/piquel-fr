@@ -18,13 +18,6 @@ pub struct InsertUser {
     pub username: String,
     pub display_name: String,
 }
-#[derive(Clone, Debug)]
-pub struct UpdateUserProfile {
-    pub id: UserId,
-    pub expected_version: u64,
-    pub username: String,
-    pub display_name: String,
-}
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct StoredEmail {
     pub id: TokenId,
@@ -69,16 +62,6 @@ pub struct AppendAuditEvent {
     pub request_metadata: Value,
 }
 #[derive(Clone, Debug)]
-pub struct AppendInternalEvent {
-    pub id: TokenId,
-    pub aggregate_type: String,
-    pub aggregate_id: UserId,
-    pub event_type: String,
-    pub schema_version: u32,
-    pub payload: Value,
-}
-
-#[derive(Clone, Debug)]
 pub struct InsertPasskey {
     pub id: TokenId,
     pub credential_id: Vec<u8>,
@@ -111,11 +94,8 @@ pub struct ConsumedCeremony {
     pub session_id: Option<SessionId>,
     pub state: Value,
 }
-#[derive(Clone, Debug)]
-pub struct InsertPurposeAuthorization {
-    pub id: TokenId,
-    pub user_id: UserId,
-    pub session_id: SessionId,
-    pub purpose: String,
-    pub expires_at: DateTime<Utc>,
-}
+
+mod federation;
+mod oidc;
+pub use federation::*;
+pub use oidc::*;
