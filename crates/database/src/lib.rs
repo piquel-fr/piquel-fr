@@ -1,8 +1,9 @@
 //! The sole `SQLx` boundary for the Piquel workspace.
 //!
 //! Applications receive typed repositories and never a pool, executor, row, or
-//! `SQLx` error. Feature repositories are intentionally scaffolded until their
-//! owning auth plan supplies persistence operations.
+//! `SQLx` error. Repositories expose only the operations used by the service.
+// This unpublished persistence API mirrors the schema; field-by-field rustdoc
+// and mechanical accessor annotations would duplicate the migration documentation.
 #![allow(missing_docs)]
 #![allow(
     clippy::missing_errors_doc,
@@ -20,8 +21,7 @@ pub use connection::{Database, DatabaseConfig};
 pub use error::{DatabaseConnectionError, DatabaseError};
 pub use models::*;
 pub use repositories::{
-    AuditEventRepository, EmailRepository, FederationRepository, InternalEventRepository,
-    OidcRepository, PasskeyRepository, ServiceIdentityRepository, SessionRepository,
-    TokenRepository, UserRepository,
+    AuditEventRepository, EmailRepository, FederationRepository, OidcRepository, PasskeyRepository,
+    SecurityRepository, SessionRepository, TokenRepository, UserRepository,
 };
 pub use transaction::DatabaseTransaction;

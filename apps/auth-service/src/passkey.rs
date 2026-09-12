@@ -1,9 +1,5 @@
-//! `WebAuthn` registration/authentication with database-backed single-use state.
-
-use crate::{
-    Es256KeyProvider,
-    account::{validate_display_name, validate_username},
-};
+//! Browser-bound `WebAuthn` ceremonies and passkey-only management authorization.
+use crate::security::{self, ApiError, BrowserSecret};
 use axum::{
     Json, Router,
     extract::{Path, State},
@@ -11,1277 +7,830 @@ use axum::{
     response::{IntoResponse, Response},
     routing::{get, patch, post},
 };
-use base64::{Engine, engine::general_purpose::URL_SAFE_NO_PAD};
 use chrono::{Duration, Utc};
 use piquel_auth_protocol::{AuthenticationMethod, SessionId, TokenId, UserId};
 use piquel_repository::{
-    AppendAuditEvent, AppendInternalEvent, Database, DatabaseError, InsertCeremony, InsertPasskey,
-    InsertPurposeAuthorization, InsertSession, InsertUser, StoredSession,
+    AppendAuditEvent, Database, DatabaseTransaction, InsertCeremony, InsertPasskey, InsertUser,
 };
-use rand::{RngCore, rngs::OsRng};
 use serde::{Deserialize, Serialize};
-use sha2::{Digest, Sha256};
+use serde_json::{Value, json};
 use std::sync::Arc;
-use thiserror::Error;
 use url::Url;
-use webauthn_rs::{
-    Webauthn, WebauthnBuilder,
-    prelude::{
-        CreationChallengeResponse, Passkey, PasskeyAuthentication, PasskeyRegistration,
-        PublicKeyCredential, RegisterPublicKeyCredential, RequestChallengeResponse,
-    },
-};
+use webauthn_rs::{Webauthn, WebauthnBuilder, prelude::*};
+use webauthn_rs_proto::ResidentKeyRequirement;
 
-/// Runnable passkey HTTP application state.
 #[derive(Clone)]
 pub struct PasskeyApplication {
     database: Database,
     webauthn: Arc<Webauthn>,
-    issuer: Arc<str>,
-    purpose_keys: Arc<Es256KeyProvider>,
+    invite_required: bool,
 }
 
-const PURPOSE_TOKEN_TYPE: &str = "purpose+jwt";
-const PURPOSE_AUDIENCE: &str = "piquel-account-management";
-const MANAGE_PASSKEYS_PURPOSE: &str = "manage-passkeys";
-const PURPOSE_TOKEN_SECONDS: i64 = 120;
-
-#[derive(Debug, Error)]
-pub enum PasskeyConfigurationError {
-    #[error("invalid WebAuthn relying-party configuration")]
-    Invalid,
-}
-
-impl PasskeyApplication {
-    /// Builds exact origin/RP validation. Subdomains and alternate ports are not enabled.
-    ///
-    /// # Errors
-    ///
-    /// Returns an error when the origin and RP identifier are not an exact valid pair.
-    pub fn new(
-        database: Database,
-        rp_id: &str,
-        origin: &Url,
-        purpose_keys: Arc<Es256KeyProvider>,
-    ) -> Result<Self, PasskeyConfigurationError> {
-        validate_rp_origin(rp_id, origin)?;
-        let webauthn = WebauthnBuilder::new(rp_id, origin)
-            .map_err(|_| PasskeyConfigurationError::Invalid)?
-            .rp_name("Piquel")
-            .build()
-            .map_err(|_| PasskeyConfigurationError::Invalid)?;
-        Ok(Self {
-            database,
-            webauthn: Arc::new(webauthn),
-            issuer: origin.as_str().trim_end_matches('/').into(),
-            purpose_keys,
-        })
-    }
-}
-
-fn validate_rp_origin(rp_id: &str, origin: &Url) -> Result<(), PasskeyConfigurationError> {
-    if origin.scheme() != "https"
-        || origin.username() != ""
-        || origin.password().is_some()
-        || origin.path() != "/"
-        || origin.query().is_some()
-        || origin.fragment().is_some()
-    {
-        return Err(PasskeyConfigurationError::Invalid);
-    }
-    let host = origin
-        .host_str()
-        .ok_or(PasskeyConfigurationError::Invalid)?;
-    if host != rp_id
-        && !host
-            .strip_suffix(rp_id)
-            .is_some_and(|prefix| prefix.ends_with('.'))
-    {
-        return Err(PasskeyConfigurationError::Invalid);
-    }
-    Ok(())
-}
-
-pub(super) fn routes(application: PasskeyApplication) -> Router {
-    Router::new()
-        .route("/webauthn/register/start", post(start_registration))
-        .route("/webauthn/register/finish", post(finish_registration))
-        .route("/webauthn/authenticate/start", post(start_authentication))
-        .route("/webauthn/authenticate/finish", post(finish_authentication))
-        .route("/account/passkeys/enroll/start", post(start_enrollment))
-        .route("/account/passkeys/enroll/finish", post(finish_enrollment))
-        .route(
-            "/account/passkeys/authorize/start",
-            post(start_purpose_authorization),
-        )
-        .route(
-            "/account/passkeys/authorize/finish",
-            post(finish_purpose_authorization),
-        )
-        .route("/account/passkeys", get(list_passkeys))
-        .route(
-            "/account/passkeys/{id}",
-            patch(rename_passkey).delete(revoke_passkey),
-        )
-        .route("/session/logout", post(logout))
-        .with_state(application)
-}
-
-#[derive(Deserialize)]
-struct RegistrationStart {
-    username: String,
-    display_name: String,
-}
-#[derive(Serialize)]
-struct RegistrationStarted {
-    ceremony_id: TokenId,
-    public_key: CreationChallengeResponse,
+#[derive(Serialize, Deserialize)]
+enum Ceremony {
+    Register {
+        user_id: UserId,
+        username: String,
+        display_name: String,
+        invitation: Option<Vec<u8>>,
+        pending: Option<TokenId>,
+        state: PasskeyRegistration,
+    },
+    Login {
+        user_id: UserId,
+        state: PasskeyAuthentication,
+    },
+    Discover {
+        state: DiscoverableAuthentication,
+    },
+    Manage {
+        user_id: UserId,
+        session_id: SessionId,
+        state: PasskeyAuthentication,
+    },
+    Enroll {
+        user_id: UserId,
+        session_id: SessionId,
+        state: PasskeyRegistration,
+    },
 }
 #[derive(Serialize, Deserialize)]
-struct RegistrationState {
-    user_id: UserId,
+struct BoundCeremony {
+    browser_digest: Vec<u8>,
+    ceremony: Ceremony,
+}
+#[derive(Clone, Copy, Default, Deserialize)]
+#[serde(rename_all = "snake_case")]
+enum PasskeyKind {
+    #[default]
+    Standard,
+    GooglePasswordManager,
+}
+#[derive(Default, Deserialize)]
+struct EnrollmentStart {
+    #[serde(default)]
+    passkey_kind: PasskeyKind,
+}
+#[derive(Deserialize)]
+struct RegistrationStart {
+    #[serde(default)]
+    passkey_kind: PasskeyKind,
     username: String,
+    #[serde(default)]
     display_name: String,
-    webauthn: PasskeyRegistration,
+    invitation: Option<String>,
 }
 #[derive(Deserialize)]
 struct RegistrationFinish {
     ceremony_id: TokenId,
     credential: RegisterPublicKeyCredential,
-    #[serde(default = "default_passkey_name")]
+    #[serde(default = "RegistrationFinish::default_name")]
     friendly_name: String,
 }
-fn default_passkey_name() -> String {
-    "Passkey".into()
-}
-
-async fn start_registration(
-    State(app): State<PasskeyApplication>,
-    Json(input): Json<RegistrationStart>,
-) -> Result<Json<RegistrationStarted>, ApiError> {
-    validate_username(&input.username).map_err(|()| ApiError)?;
-    validate_display_name(&input.display_name).map_err(|()| ApiError)?;
-    let user_id = UserId::new();
-    let (challenge, webauthn) = app
-        .webauthn
-        .start_passkey_registration(
-            user_id.as_uuid(),
-            &input.username,
-            &input.display_name,
-            None,
-        )
-        .map_err(|_| ApiError)?;
-    let state = RegistrationState {
-        user_id,
-        username: input.username,
-        display_name: input.display_name,
-        webauthn,
-    };
-    let state = serde_json::to_value(state).map_err(|_| ApiError)?;
-    let serialized = serde_json::to_vec(&state).map_err(|_| ApiError)?;
-    let ceremony_id = TokenId::new();
-    app.database
-        .passkeys()
-        .insert_ceremony(&InsertCeremony {
-            id: ceremony_id,
-            // Bootstrap users do not exist until the registration response is
-            // verified and the account is created atomically at finish time.
-            user_id: None,
-            session_id: None,
-            kind: "registration".into(),
-            challenge_digest: Sha256::digest(serialized).to_vec(),
-            state,
-            expires_at: Utc::now() + Duration::minutes(5),
-        })
-        .await
-        .map_err(|_| ApiError)?;
-    Ok(Json(RegistrationStarted {
-        ceremony_id,
-        public_key: challenge,
-    }))
-}
-
-async fn finish_registration(
-    State(app): State<PasskeyApplication>,
-    Json(input): Json<RegistrationFinish>,
-) -> Result<Response, ApiError> {
-    if input.friendly_name.trim().is_empty() || input.friendly_name.chars().count() > 80 {
-        return Err(ApiError);
+impl RegistrationFinish {
+    fn default_name() -> String {
+        "Passkey".into()
     }
-    // Consumption is intentionally committed before processing the response:
-    // invalid responses and downstream failures must not make a challenge
-    // reusable.
-    let ceremony = app
-        .database
-        .passkeys()
-        .consume_ceremony(input.ceremony_id, "registration")
-        .await
-        .map_err(|_| ApiError)?;
-    let state: RegistrationState = serde_json::from_value(ceremony.state).map_err(|_| ApiError)?;
-    let passkey = app
-        .webauthn
-        .finish_passkey_registration(&input.credential, &state.webauthn)
-        .map_err(|_| ApiError)?;
-    let credential_id = passkey.cred_id().as_ref().to_vec();
-    let credential = serde_json::to_value(passkey).map_err(|_| ApiError)?;
-    let mut transaction = app.database.begin().await.map_err(|_| ApiError)?;
-    transaction
-        .users()
-        .insert(&InsertUser {
-            id: state.user_id,
-            username: state.username,
-            display_name: state.display_name,
-        })
-        .await
-        .map_err(|_| ApiError)?;
-    transaction
-        .passkeys()
-        .insert(&InsertPasskey {
-            id: TokenId::new(),
-            credential_id,
-            user_id: state.user_id,
-            credential,
-            friendly_name: input.friendly_name,
-        })
-        .await
-        .map_err(|_| ApiError)?;
-    let cookie = create_session(&mut transaction, state.user_id).await?;
-    transaction
-        .audit_events()
-        .append(&AppendAuditEvent {
-            id: TokenId::new(),
-            user_id: Some(state.user_id),
-            action: "passkey.enroll".into(),
-            outcome: "success".into(),
-            request_metadata: serde_json::json!({}),
-        })
-        .await
-        .map_err(|_| ApiError)?;
-    transaction
-        .internal_events()
-        .append(&AppendInternalEvent {
-            id: TokenId::new(),
-            aggregate_type: "user".into(),
-            aggregate_id: state.user_id,
-            event_type: "passkey.enrolled".into(),
-            schema_version: 1,
-            payload: serde_json::json!({}),
-        })
-        .await
-        .map_err(|_| ApiError)?;
-    transaction.commit().await.map_err(|_| ApiError)?;
-    no_content_with_cookie(&cookie)
 }
-
 #[derive(Deserialize)]
-struct AuthenticationStart {
-    username: String,
-}
-#[derive(Serialize)]
-struct AuthenticationStarted {
-    ceremony_id: TokenId,
-    public_key: RequestChallengeResponse,
-}
-#[derive(Serialize, Deserialize)]
-struct AuthenticationState {
-    user_id: UserId,
-    webauthn: PasskeyAuthentication,
+struct LoginStart {
+    username: Option<String>,
 }
 #[derive(Deserialize)]
 struct AuthenticationFinish {
     ceremony_id: TokenId,
     credential: PublicKeyCredential,
 }
-
-async fn start_authentication(
-    State(app): State<PasskeyApplication>,
-    Json(input): Json<AuthenticationStart>,
-) -> Result<Json<AuthenticationStarted>, ApiError> {
-    validate_username(&input.username).map_err(|()| ApiError)?;
-    let user = app
-        .database
-        .users()
-        .find_active_by_username(&input.username)
-        .await
-        .map_err(|_| ApiError)?
-        .ok_or(ApiError)?;
-    let passkeys = active_passkeys(&app.database, user.id).await?;
-    let (challenge, webauthn) = app
-        .webauthn
-        .start_passkey_authentication(&passkeys)
-        .map_err(|_| ApiError)?;
-    let state = serde_json::to_value(AuthenticationState {
-        user_id: user.id,
-        webauthn,
-    })
-    .map_err(|_| ApiError)?;
-    let serialized = serde_json::to_vec(&state).map_err(|_| ApiError)?;
-    let ceremony_id = TokenId::new();
-    app.database
-        .passkeys()
-        .insert_ceremony(&InsertCeremony {
-            id: ceremony_id,
-            user_id: Some(user.id),
-            session_id: None,
-            kind: "authentication".into(),
-            challenge_digest: Sha256::digest(serialized).to_vec(),
-            state,
-            expires_at: Utc::now() + Duration::minutes(5),
-        })
-        .await
-        .map_err(|_| ApiError)?;
-    Ok(Json(AuthenticationStarted {
-        ceremony_id,
-        public_key: challenge,
-    }))
-}
-
-async fn finish_authentication(
-    State(app): State<PasskeyApplication>,
-    Json(input): Json<AuthenticationFinish>,
-) -> Result<Response, ApiError> {
-    let ceremony = app
-        .database
-        .passkeys()
-        .consume_ceremony(input.ceremony_id, "authentication")
-        .await
-        .map_err(|_| ApiError)?;
-    let state: AuthenticationState =
-        serde_json::from_value(ceremony.state).map_err(|_| ApiError)?;
-    let result = app
-        .webauthn
-        .finish_passkey_authentication(&input.credential, &state.webauthn)
-        .map_err(|_| ApiError)?;
-    if !result.user_verified() {
-        return Err(ApiError);
-    }
-    let mut transaction = app.database.begin().await.map_err(|_| ApiError)?;
-    let stored = transaction
-        .passkeys()
-        .find_active_by_credential_id_for_update(result.cred_id().as_ref())
-        .await
-        .map_err(|_| ApiError)?
-        .filter(|credential| credential.user_id == state.user_id)
-        .ok_or(ApiError)?;
-    let mut passkey: Passkey = serde_json::from_value(stored.credential).map_err(|_| ApiError)?;
-    passkey.update_credential(&result).ok_or(ApiError)?;
-    let credential = serde_json::to_value(passkey).map_err(|_| ApiError)?;
-    let updated = transaction
-        .passkeys()
-        .update_after_authentication(result.cred_id().as_ref(), &credential)
-        .await
-        .map_err(|_| ApiError)?;
-    if !updated {
-        return Err(ApiError);
-    }
-    let cookie = create_session(&mut transaction, state.user_id).await?;
-    transaction
-        .audit_events()
-        .append(&AppendAuditEvent {
-            id: TokenId::new(),
-            user_id: Some(state.user_id),
-            action: "passkey.authenticate".into(),
-            outcome: "success".into(),
-            request_metadata: serde_json::json!({}),
-        })
-        .await
-        .map_err(|_| ApiError)?;
-    transaction.commit().await.map_err(|_| ApiError)?;
-    no_content_with_cookie(&cookie)
-}
-
-async fn active_passkeys(database: &Database, user_id: UserId) -> Result<Vec<Passkey>, ApiError> {
-    let stored = database
-        .passkeys()
-        .list_active(user_id)
-        .await
-        .map_err(|_| ApiError)?;
-    if stored.is_empty() {
-        return Err(ApiError);
-    }
-    stored
-        .into_iter()
-        .map(|stored| serde_json::from_value(stored.credential).map_err(|_| ApiError))
-        .collect()
-}
-
-#[derive(Serialize, Deserialize)]
-struct PurposeAuthenticationState {
-    user_id: UserId,
-    session_id: SessionId,
-    webauthn: PasskeyAuthentication,
-}
-
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(deny_unknown_fields)]
-struct PurposeTokenClaims {
-    iss: String,
-    sub: UserId,
-    aud: String,
-    purpose: String,
-    sid: SessionId,
-    auth_time: i64,
-    iat: i64,
-    exp: i64,
-    jti: TokenId,
-}
-
-impl PurposeTokenClaims {
-    fn is_valid_for(&self, issuer: &str, user_id: UserId, session_id: SessionId, now: i64) -> bool {
-        self.iss == issuer
-            && self.sub == user_id
-            && self.aud == PURPOSE_AUDIENCE
-            && self.purpose == MANAGE_PASSKEYS_PURPOSE
-            && self.sid == session_id
-            && self.exp > now
-            && self.exp > self.iat
-            && self.exp - self.iat <= PURPOSE_TOKEN_SECONDS
-            && self.iat <= now + 30
-            && self.auth_time <= self.iat
-            && self.iat - self.auth_time <= 30
-    }
-}
-
-#[derive(Serialize)]
-struct PurposeAuthorized {
-    purpose_token: String,
-    token_type: &'static str,
-    expires_in: i64,
-}
-
-async fn start_purpose_authorization(
-    State(app): State<PasskeyApplication>,
-    headers: HeaderMap,
-) -> Result<Json<AuthenticationStarted>, ApiError> {
-    let session = active_session(&app.database, &headers).await?;
-    let passkeys = active_passkeys(&app.database, session.user_id).await?;
-    let (challenge, webauthn) = app
-        .webauthn
-        .start_passkey_authentication(&passkeys)
-        .map_err(|_| ApiError)?;
-    let state = serde_json::to_value(PurposeAuthenticationState {
-        user_id: session.user_id,
-        session_id: session.id,
-        webauthn,
-    })
-    .map_err(|_| ApiError)?;
-    let serialized = serde_json::to_vec(&state).map_err(|_| ApiError)?;
-    let ceremony_id = TokenId::new();
-    app.database
-        .passkeys()
-        .insert_ceremony(&InsertCeremony {
-            id: ceremony_id,
-            user_id: Some(session.user_id),
-            session_id: Some(session.id),
-            kind: "purpose_authentication".into(),
-            challenge_digest: Sha256::digest(serialized).to_vec(),
-            state,
-            expires_at: Utc::now() + Duration::minutes(5),
-        })
-        .await
-        .map_err(|_| ApiError)?;
-    Ok(Json(AuthenticationStarted {
-        ceremony_id,
-        public_key: challenge,
-    }))
-}
-
-async fn finish_purpose_authorization(
-    State(app): State<PasskeyApplication>,
-    headers: HeaderMap,
-    Json(input): Json<AuthenticationFinish>,
-) -> Result<Response, ApiError> {
-    let session = active_session(&app.database, &headers).await?;
-    let ceremony = app
-        .database
-        .passkeys()
-        .consume_ceremony(input.ceremony_id, "purpose_authentication")
-        .await
-        .map_err(|_| ApiError)?;
-    let state: PurposeAuthenticationState =
-        serde_json::from_value(ceremony.state).map_err(|_| ApiError)?;
-    if state.user_id != session.user_id || state.session_id != session.id {
-        return Err(ApiError);
-    }
-    let result = app
-        .webauthn
-        .finish_passkey_authentication(&input.credential, &state.webauthn)
-        .map_err(|_| ApiError)?;
-    if !result.user_verified() {
-        return Err(ApiError);
-    }
-
-    let now = Utc::now();
-    let authorization_id = TokenId::new();
-    let claims = PurposeTokenClaims {
-        iss: app.issuer.to_string(),
-        sub: session.user_id,
-        aud: PURPOSE_AUDIENCE.into(),
-        purpose: MANAGE_PASSKEYS_PURPOSE.into(),
-        sid: session.id,
-        auth_time: now.timestamp(),
-        iat: now.timestamp(),
-        exp: (now + Duration::seconds(PURPOSE_TOKEN_SECONDS)).timestamp(),
-        jti: authorization_id,
-    };
-    let token = app
-        .purpose_keys
-        .sign(PURPOSE_TOKEN_TYPE, &claims)
-        .map_err(|()| ApiError)?;
-
-    let mut transaction = app.database.begin().await.map_err(|_| ApiError)?;
-    let stored = transaction
-        .passkeys()
-        .find_active_by_credential_id_for_update(result.cred_id().as_ref())
-        .await
-        .map_err(|_| ApiError)?
-        .filter(|credential| credential.user_id == session.user_id)
-        .ok_or(ApiError)?;
-    let mut passkey: Passkey = serde_json::from_value(stored.credential).map_err(|_| ApiError)?;
-    passkey.update_credential(&result).ok_or(ApiError)?;
-    let updated = transaction
-        .passkeys()
-        .update_after_authentication(
-            result.cred_id().as_ref(),
-            &serde_json::to_value(passkey).map_err(|_| ApiError)?,
-        )
-        .await
-        .map_err(|_| ApiError)?;
-    if !updated {
-        return Err(ApiError);
-    }
-    transaction
-        .passkeys()
-        .insert_purpose_authorization(&InsertPurposeAuthorization {
-            id: authorization_id,
-            user_id: session.user_id,
-            session_id: session.id,
-            purpose: MANAGE_PASSKEYS_PURPOSE.into(),
-            expires_at: now + Duration::seconds(PURPOSE_TOKEN_SECONDS),
-        })
-        .await
-        .map_err(|_| ApiError)?;
-    transaction
-        .audit_events()
-        .append(&AppendAuditEvent {
-            id: TokenId::new(),
-            user_id: Some(session.user_id),
-            action: "passkey.authorize_management".into(),
-            outcome: "success".into(),
-            request_metadata: serde_json::json!({}),
-        })
-        .await
-        .map_err(|_| ApiError)?;
-    transaction.commit().await.map_err(|_| ApiError)?;
-
-    let mut response = Json(PurposeAuthorized {
-        purpose_token: token,
-        token_type: "Bearer",
-        expires_in: PURPOSE_TOKEN_SECONDS,
-    })
-    .into_response();
-    response
-        .headers_mut()
-        .insert(header::CACHE_CONTROL, HeaderValue::from_static("no-store"));
-    Ok(response)
-}
-
-#[derive(Serialize, Deserialize)]
-struct EnrollmentState {
-    user_id: UserId,
-    session_id: SessionId,
-    authorization_id: TokenId,
-    webauthn: PasskeyRegistration,
-}
-
-async fn start_enrollment(
-    State(app): State<PasskeyApplication>,
-    headers: HeaderMap,
-) -> Result<Json<RegistrationStarted>, ApiError> {
-    let session = active_session(&app.database, &headers).await?;
-    let authorization = require_purpose_authorization(&app, &headers, &session).await?;
-    let user = app
-        .database
-        .users()
-        .find_by_id(session.user_id)
-        .await
-        .map_err(|_| ApiError)?
-        .ok_or(ApiError)?;
-    let (challenge, webauthn) = app
-        .webauthn
-        .start_passkey_registration(user.id.as_uuid(), &user.username, &user.display_name, None)
-        .map_err(|_| ApiError)?;
-    let state = serde_json::to_value(EnrollmentState {
-        user_id: user.id,
-        session_id: session.id,
-        authorization_id: authorization.jti,
-        webauthn,
-    })
-    .map_err(|_| ApiError)?;
-    let serialized = serde_json::to_vec(&state).map_err(|_| ApiError)?;
-    let ceremony_id = TokenId::new();
-    app.database
-        .passkeys()
-        .insert_ceremony(&InsertCeremony {
-            id: ceremony_id,
-            user_id: Some(user.id),
-            session_id: Some(session.id),
-            kind: "enrollment".into(),
-            challenge_digest: Sha256::digest(serialized).to_vec(),
-            state,
-            expires_at: Utc::now() + Duration::minutes(5),
-        })
-        .await
-        .map_err(|_| ApiError)?;
-    Ok(Json(RegistrationStarted {
-        ceremony_id,
-        public_key: challenge,
-    }))
-}
-
-async fn finish_enrollment(
-    State(app): State<PasskeyApplication>,
-    headers: HeaderMap,
-    Json(input): Json<RegistrationFinish>,
-) -> Result<StatusCode, ApiError> {
-    if input.friendly_name.trim().is_empty() || input.friendly_name.chars().count() > 80 {
-        return Err(ApiError);
-    }
-    let session = active_session(&app.database, &headers).await?;
-    let authorization = require_purpose_authorization(&app, &headers, &session).await?;
-    let ceremony = app
-        .database
-        .passkeys()
-        .consume_ceremony(input.ceremony_id, "enrollment")
-        .await
-        .map_err(|_| ApiError)?;
-    let state: EnrollmentState = serde_json::from_value(ceremony.state).map_err(|_| ApiError)?;
-    if state.user_id != session.user_id
-        || state.session_id != session.id
-        || state.authorization_id != authorization.jti
-    {
-        return Err(ApiError);
-    }
-    let passkey = app
-        .webauthn
-        .finish_passkey_registration(&input.credential, &state.webauthn)
-        .map_err(|_| ApiError)?;
-    let mut transaction = app.database.begin().await.map_err(|_| ApiError)?;
-    let consumed = transaction
-        .passkeys()
-        .consume_purpose_authorization(
-            authorization.jti,
-            session.user_id,
-            session.id,
-            MANAGE_PASSKEYS_PURPOSE,
-        )
-        .await
-        .map_err(|_| ApiError)?;
-    if !consumed {
-        return Err(ApiError);
-    }
-    transaction
-        .passkeys()
-        .insert(&InsertPasskey {
-            id: TokenId::new(),
-            credential_id: passkey.cred_id().as_ref().to_vec(),
-            user_id: session.user_id,
-            credential: serde_json::to_value(passkey).map_err(|_| ApiError)?,
-            friendly_name: input.friendly_name,
-        })
-        .await
-        .map_err(|_| ApiError)?;
-    transaction
-        .audit_events()
-        .append(&AppendAuditEvent {
-            id: TokenId::new(),
-            user_id: Some(session.user_id),
-            action: "passkey.enroll".into(),
-            outcome: "success".into(),
-            request_metadata: serde_json::json!({}),
-        })
-        .await
-        .map_err(|_| ApiError)?;
-    transaction.commit().await.map_err(|_| ApiError)?;
-    Ok(StatusCode::NO_CONTENT)
-}
-
-#[derive(Serialize)]
-struct PasskeyView {
-    id: TokenId,
-    friendly_name: String,
-}
-
-async fn list_passkeys(
-    State(app): State<PasskeyApplication>,
-    headers: HeaderMap,
-) -> Result<Json<Vec<PasskeyView>>, ApiError> {
-    let session = active_session(&app.database, &headers).await?;
-    let keys = app
-        .database
-        .passkeys()
-        .list_active(session.user_id)
-        .await
-        .map_err(|_| ApiError)?;
-    Ok(Json(
-        keys.into_iter()
-            .map(|key| PasskeyView {
-                id: key.id,
-                friendly_name: key.friendly_name,
-            })
-            .collect(),
-    ))
-}
-
 #[derive(Deserialize)]
-struct RenamePasskey {
+struct Rename {
     friendly_name: String,
 }
 
-async fn rename_passkey(
-    State(app): State<PasskeyApplication>,
-    headers: HeaderMap,
-    Path(id): Path<TokenId>,
-    Json(input): Json<RenamePasskey>,
-) -> Result<StatusCode, ApiError> {
-    if input.friendly_name.trim().is_empty() || input.friendly_name.chars().count() > 80 {
-        return Err(ApiError);
-    }
-    let session = active_session(&app.database, &headers).await?;
-    app.database
-        .passkeys()
-        .rename(id, session.user_id, &input.friendly_name)
-        .await
-        .map_err(|_| ApiError)?
-        .then_some(StatusCode::NO_CONTENT)
-        .ok_or(ApiError)
-}
-
-async fn revoke_passkey(
-    State(app): State<PasskeyApplication>,
-    headers: HeaderMap,
-    Path(id): Path<TokenId>,
-) -> Result<StatusCode, ApiError> {
-    let session = active_session(&app.database, &headers).await?;
-    let authorization = require_purpose_authorization(&app, &headers, &session).await?;
-    let mut transaction = app.database.begin().await.map_err(|_| ApiError)?;
-    let consumed = transaction
-        .passkeys()
-        .consume_purpose_authorization(
-            authorization.jti,
-            session.user_id,
-            session.id,
-            MANAGE_PASSKEYS_PURPOSE,
-        )
-        .await
-        .map_err(|_| ApiError)?;
-    if !consumed {
-        return Err(ApiError);
-    }
-    let revoked = transaction
-        .passkeys()
-        .revoke_if_not_last(id, session.user_id)
-        .await
-        .map_err(|_| ApiError)?;
-    if !revoked {
-        return Err(ApiError);
-    }
-    transaction
-        .audit_events()
-        .append(&AppendAuditEvent {
-            id: TokenId::new(),
-            user_id: Some(session.user_id),
-            action: "passkey.revoke".into(),
-            outcome: "success".into(),
-            request_metadata: serde_json::json!({}),
+impl PasskeyApplication {
+    pub fn new(
+        database: Database,
+        rp_id: &str,
+        origin: &Url,
+        invite_required: bool,
+    ) -> anyhow::Result<Self> {
+        anyhow::ensure!(
+            origin.host_str() == Some(rp_id)
+                && origin.username().is_empty()
+                && origin.password().is_none()
+                && origin.path() == "/"
+                && origin.query().is_none()
+                && origin.fragment().is_none(),
+            "WebAuthn origin must exactly match its RP ID"
+        );
+        anyhow::ensure!(
+            origin.scheme() == "https"
+                || (origin.scheme() == "http" && matches!(rp_id, "localhost" | "127.0.0.1")),
+            "WebAuthn requires HTTPS outside loopback development"
+        );
+        Ok(Self {
+            database,
+            webauthn: Arc::new(
+                WebauthnBuilder::new(rp_id, origin)?
+                    .rp_name("Piquel")
+                    .build()?,
+            ),
+            invite_required,
         })
-        .await
-        .map_err(|_| ApiError)?;
-    transaction.commit().await.map_err(|_| ApiError)?;
-    Ok(StatusCode::NO_CONTENT)
-}
-
-async fn active_session(
-    database: &Database,
-    headers: &HeaderMap,
-) -> Result<piquel_repository::StoredSession, ApiError> {
-    let secret = session_secret(headers).ok_or(ApiError)?;
-    database
-        .sessions()
-        .find_active_by_browser_secret(&Sha256::digest(secret))
-        .await
-        .map_err(|_| ApiError)?
-        .ok_or(ApiError)
-}
-
-async fn require_purpose_authorization(
-    app: &PasskeyApplication,
-    headers: &HeaderMap,
-    session: &StoredSession,
-) -> Result<PurposeTokenClaims, ApiError> {
-    let token = bearer_token(headers).ok_or(ApiError)?;
-    let claims: PurposeTokenClaims = app
-        .purpose_keys
-        .verify(PURPOSE_TOKEN_TYPE, token)
-        .map_err(|()| ApiError)?;
-    if !claims.is_valid_for(
-        &app.issuer,
-        session.user_id,
-        session.id,
-        Utc::now().timestamp(),
-    ) {
-        return Err(ApiError);
     }
-    let active = app
-        .database
-        .passkeys()
-        .purpose_authorization_is_active(
-            claims.jti,
-            session.user_id,
-            session.id,
-            MANAGE_PASSKEYS_PURPOSE,
+
+    pub(crate) fn routes(self) -> Router {
+        Router::new()
+            .route("/webauthn/register/start", post(Self::start_registration))
+            .route("/webauthn/register/finish", post(Self::finish_registration))
+            .route("/webauthn/authenticate/start", post(Self::start_login))
+            .route("/webauthn/authenticate/finish", post(Self::finish_login))
+            .route(
+                "/account/passkeys/authorize/start",
+                post(Self::start_management),
+            )
+            .route(
+                "/account/passkeys/authorize/finish",
+                post(Self::finish_management),
+            )
+            .route(
+                "/account/passkeys/enroll/start",
+                post(Self::start_enrollment),
+            )
+            .route(
+                "/account/passkeys/enroll/finish",
+                post(Self::finish_enrollment),
+            )
+            .route("/account/passkeys", get(Self::list))
+            .route(
+                "/account/passkeys/{id}",
+                patch(Self::rename).delete(Self::revoke),
+            )
+            .route("/session", get(Self::session_view))
+            .route("/session/logout", post(Self::logout))
+            .with_state(self)
+    }
+
+    fn valid_name(name: &str) -> bool {
+        !name.trim().is_empty() && name.chars().count() <= 80 && !name.chars().any(char::is_control)
+    }
+    fn failed(error: impl std::fmt::Debug) -> ApiError {
+        // Authentication errors are intentionally generic; credential/challenge contents are never logged.
+        tracing::debug!(?error, "WebAuthn request rejected");
+        ApiError::bad_request("Passkey verification failed. Please try again.")
+    }
+    fn response(value: impl Serialize, cookie: Option<String>) -> Result<Response, ApiError> {
+        let mut response = Json(value).into_response();
+        if let Some(cookie) = cookie {
+            response.headers_mut().append(
+                header::SET_COOKIE,
+                HeaderValue::from_str(&cookie).map_err(ApiError::internal)?,
+            );
+        }
+        Ok(response)
+    }
+    fn signed_in(cookie: &str) -> Result<Response, ApiError> {
+        let mut response = StatusCode::NO_CONTENT.into_response();
+        response.headers_mut().append(
+            header::SET_COOKIE,
+            HeaderValue::from_str(cookie).map_err(ApiError::internal)?,
+        );
+        Ok(response)
+    }
+
+    async fn start(
+        &self,
+        headers: &HeaderMap,
+        kind: &str,
+        user_id: Option<UserId>,
+        session_id: Option<SessionId>,
+        ceremony: Ceremony,
+        challenge: impl Serialize,
+    ) -> Result<Response, ApiError> {
+        let browser = BrowserSecret::from_cookie(headers, "__Host-piquel_ceremony")
+            .unwrap_or_else(BrowserSecret::new);
+        let id = TokenId::new();
+        self.database
+            .passkeys()
+            .insert_ceremony(&InsertCeremony {
+                id,
+                user_id,
+                session_id,
+                kind: kind.into(),
+                challenge_digest: browser.digest(),
+                state: serde_json::to_value(BoundCeremony {
+                    browser_digest: browser.digest(),
+                    ceremony,
+                })
+                .map_err(ApiError::internal)?,
+                expires_at: Utc::now() + Duration::minutes(5),
+            })
+            .await?;
+        Self::response(
+            json!({"ceremony_id":id,"public_key":challenge}),
+            Some(browser.cookie("__Host-piquel_ceremony", 600)),
         )
-        .await
-        .map_err(|_| ApiError)?;
-    active.then_some(claims).ok_or(ApiError)
-}
+    }
+    async fn consume(
+        &self,
+        headers: &HeaderMap,
+        id: TokenId,
+        kind: &str,
+    ) -> Result<Ceremony, ApiError> {
+        let browser =
+            BrowserSecret::from_cookie(headers, "__Host-piquel_ceremony").ok_or_else(|| {
+                ApiError::bad_request("Please restart the passkey flow in this browser.")
+            })?;
+        let record = self.database.passkeys().consume_ceremony(id, kind).await?;
+        let bound: BoundCeremony =
+            serde_json::from_value(record.state).map_err(ApiError::internal)?;
+        if bound.browser_digest != browser.digest() {
+            return Err(Self::failed("browser mismatch"));
+        }
+        Ok(bound.ceremony)
+    }
+    async fn keys(&self, user_id: UserId) -> Result<Vec<Passkey>, ApiError> {
+        self.database
+            .passkeys()
+            .list_active(user_id)
+            .await?
+            .into_iter()
+            .map(|v| serde_json::from_value(v.credential).map_err(ApiError::internal))
+            .collect()
+    }
+    fn registration(
+        &self,
+        user_id: UserId,
+        username: &str,
+        name: &str,
+        exclusions: Option<Vec<CredentialID>>,
+        kind: PasskeyKind,
+        headers: &HeaderMap,
+    ) -> Result<(CreationChallengeResponse, PasskeyRegistration), ApiError> {
+        if matches!(kind, PasskeyKind::GooglePasswordManager) {
+            if !headers
+                .get(header::USER_AGENT)
+                .and_then(|v| v.to_str().ok())
+                .is_some_and(|v| v.contains("Android"))
+            {
+                return Err(ApiError::bad_request(
+                    "Choose Google Password Manager only on an Android device with Google services.",
+                ));
+            }
+            return self
+                .webauthn
+                .start_google_passkey_in_google_password_manager_only_registration(
+                    user_id.as_uuid(),
+                    username,
+                    name,
+                    exclusions,
+                )
+                .map_err(Self::failed);
+        }
+        let (mut challenge, state) = self
+            .webauthn
+            .start_passkey_registration(user_id.as_uuid(), username, name, exclusions)
+            .map_err(Self::failed)?;
+        // Prefer account-picker credentials while retaining security keys that need a username.
+        if let Some(selection) = challenge.public_key.authenticator_selection.as_mut() {
+            selection.resident_key = Some(ResidentKeyRequirement::Preferred);
+            selection.require_resident_key = false;
+        }
+        Ok((challenge, state))
+    }
+    async fn audit(
+        tx: &mut DatabaseTransaction<'_>,
+        user_id: UserId,
+        action: &str,
+    ) -> Result<(), ApiError> {
+        tx.audit_events()
+            .append(&AppendAuditEvent {
+                id: TokenId::new(),
+                user_id: Some(user_id),
+                action: action.into(),
+                outcome: "success".into(),
+                request_metadata: json!({}),
+            })
+            .await?;
+        Ok(())
+    }
+    async fn update_credential(
+        tx: &mut DatabaseTransaction<'_>,
+        user_id: UserId,
+        result: &AuthenticationResult,
+    ) -> Result<(), ApiError> {
+        if !result.user_verified() {
+            return Err(Self::failed("user verification required"));
+        }
+        tx.users()
+            .find_active_by_id_for_update(user_id)
+            .await?
+            .ok_or_else(ApiError::unauthorized)?;
+        let stored = tx
+            .passkeys()
+            .find_active_by_credential_id_for_update(result.cred_id().as_ref())
+            .await?
+            .filter(|v| v.user_id == user_id)
+            .ok_or_else(ApiError::unauthorized)?;
+        // The ceremony contains a credential snapshot. Check the latest counter under
+        // the row lock as well, so overlapping ceremonies cannot accept a regression.
+        let counter = stored
+            .credential
+            .pointer("/cred/counter")
+            .and_then(Value::as_u64)
+            .ok_or_else(|| {
+                ApiError::internal(anyhow::anyhow!("stored passkey counter is missing"))
+            })?;
+        if (counter > 0 || result.counter() > 0) && u64::from(result.counter()) <= counter {
+            return Err(Self::failed("credential counter did not increase"));
+        }
+        let mut credential: Passkey =
+            serde_json::from_value(stored.credential).map_err(ApiError::internal)?;
+        credential
+            .update_credential(result)
+            .ok_or_else(|| Self::failed("credential mismatch"))?;
+        if !tx
+            .passkeys()
+            .update_after_authentication(
+                result.cred_id().as_ref(),
+                &serde_json::to_value(credential).map_err(ApiError::internal)?,
+            )
+            .await?
+        {
+            return Err(Self::failed("revoked credential"));
+        }
+        Ok(())
+    }
+    async fn lock_management(
+        tx: &mut DatabaseTransaction<'_>,
+        session: &piquel_repository::StoredSession,
+    ) -> Result<(), ApiError> {
+        tx.users()
+            .find_active_by_id_for_update(session.user_id)
+            .await?
+            .ok_or_else(ApiError::unauthorized)?;
+        if !tx.sessions().management_active(session.id).await? {
+            return Err(ApiError::forbidden(
+                "Your management window expired. Confirm with a passkey again.",
+            ));
+        }
+        Ok(())
+    }
 
-fn bearer_token(headers: &HeaderMap) -> Option<&str> {
-    let value = headers.get(header::AUTHORIZATION)?.to_str().ok()?;
-    let token = value.strip_prefix("Bearer ")?;
-    (!token.is_empty() && !token.bytes().any(|byte| byte.is_ascii_whitespace())).then_some(token)
-}
-
-async fn create_session(
-    transaction: &mut piquel_repository::DatabaseTransaction<'_>,
-    user_id: UserId,
-) -> Result<String, ApiError> {
-    let session_id = SessionId::new();
-    let now = Utc::now();
-    let mut secret = [0_u8; 32];
-    OsRng.fill_bytes(&mut secret);
-    transaction
-        .sessions()
-        .insert(&InsertSession {
-            id: session_id,
+    async fn start_registration(
+        State(app): State<Self>,
+        headers: HeaderMap,
+        Json(mut input): Json<RegistrationStart>,
+    ) -> Result<Response, ApiError> {
+        if input.username.len() < 3
+            || input.username.len() > 32
+            || !input
+                .username
+                .bytes()
+                .all(|v| v.is_ascii_lowercase() || v.is_ascii_digit() || v == b'_' || v == b'-')
+        {
+            return Err(ApiError::bad_request(
+                "Use 3–32 lowercase letters, numbers, underscores or hyphens for your username.",
+            ));
+        }
+        if input.display_name.is_empty() {
+            input.display_name = input.username.clone();
+        }
+        if !Self::valid_name(&input.display_name) {
+            return Err(ApiError::bad_request(
+                "Choose a display name of at most 80 characters.",
+            ));
+        }
+        let invitation = input
+            .invitation
+            .as_deref()
+            .and_then(BrowserSecret::parse)
+            .map(|v| v.digest());
+        if app.invite_required {
+            let digest = invitation
+                .as_ref()
+                .ok_or_else(|| ApiError::forbidden("A valid invitation is required."))?;
+            if !app.database.security().invitation_active(digest).await? {
+                return Err(ApiError::forbidden(
+                    "This invitation has expired or has already been used.",
+                ));
+            }
+        }
+        let pending = crate::federation::pending_signup(&app.database, &headers).await?;
+        let user_id = UserId::new();
+        let (challenge, state) = app.registration(
             user_id,
-            authentication_methods: vec![AuthenticationMethod::Passkey],
-            authenticated_at: now,
-            expires_at: now + Duration::days(30),
-            user_agent_family: None,
-        })
-        .await
-        .map_err(|_| ApiError)?;
-    transaction
-        .sessions()
-        .insert_browser_secret(session_id, &Sha256::digest(secret))
-        .await
-        .map_err(|_| ApiError)?;
-    Ok(format!(
-        "__Host-piquel_session={}; Path=/; Secure; HttpOnly; SameSite=Lax; Max-Age=2592000",
-        URL_SAFE_NO_PAD.encode(secret)
-    ))
-}
-
-fn no_content_with_cookie(cookie: &str) -> Result<Response, ApiError> {
-    let mut response = StatusCode::NO_CONTENT.into_response();
-    response.headers_mut().insert(
-        header::SET_COOKIE,
-        HeaderValue::from_str(cookie).map_err(|_| ApiError)?,
-    );
-    Ok(response)
-}
-
-async fn logout(
-    State(app): State<PasskeyApplication>,
-    headers: HeaderMap,
-) -> Result<Response, ApiError> {
-    let secret = session_secret(&headers).ok_or(ApiError)?;
-    if let Some(session) = app
-        .database
-        .sessions()
-        .find_active_by_browser_secret(&Sha256::digest(secret))
-        .await
-        .map_err(|_| ApiError)?
-    {
-        app.database
-            .sessions()
-            .revoke(session.id)
-            .await
-            .map_err(|_| ApiError)?;
-    }
-    no_content_with_cookie(
-        "__Host-piquel_session=; Path=/; Secure; HttpOnly; SameSite=Lax; Max-Age=0",
-    )
-}
-
-fn session_secret(headers: &HeaderMap) -> Option<Vec<u8>> {
-    headers
-        .get(header::COOKIE)?
-        .to_str()
-        .ok()?
-        .split(';')
-        .map(str::trim)
-        .find_map(|cookie| cookie.strip_prefix("__Host-piquel_session="))
-        .and_then(|value| URL_SAFE_NO_PAD.decode(value).ok())
-        .filter(|secret| secret.len() == 32)
-}
-
-#[derive(Debug)]
-struct ApiError;
-impl IntoResponse for ApiError {
-    fn into_response(self) -> Response {
-        (
-            StatusCode::BAD_REQUEST,
-            Json(serde_json::json!({"error":"authentication_failed"})),
+            &input.username,
+            &input.display_name,
+            None,
+            input.passkey_kind,
+            &headers,
+        )?;
+        app.start(
+            &headers,
+            "registration",
+            None,
+            None,
+            Ceremony::Register {
+                user_id,
+                username: input.username,
+                display_name: input.display_name,
+                invitation,
+                pending: pending.map(|v| v.id),
+                state,
+            },
+            challenge,
         )
-            .into_response()
+        .await
     }
-}
-impl From<DatabaseError> for ApiError {
-    fn from(_: DatabaseError) -> Self {
-        Self
+    async fn finish_registration(
+        State(app): State<Self>,
+        headers: HeaderMap,
+        Json(input): Json<RegistrationFinish>,
+    ) -> Result<Response, ApiError> {
+        if !Self::valid_name(&input.friendly_name) {
+            return Err(ApiError::bad_request(
+                "Choose a passkey name of at most 80 characters.",
+            ));
+        }
+        let Ceremony::Register {
+            user_id,
+            username,
+            display_name,
+            invitation,
+            pending,
+            state,
+        } = app
+            .consume(&headers, input.ceremony_id, "registration")
+            .await?
+        else {
+            return Err(Self::failed("wrong ceremony"));
+        };
+        let key = app
+            .webauthn
+            .finish_passkey_registration(&input.credential, &state)
+            .map_err(Self::failed)?;
+        let mut tx = app.database.begin().await?;
+        if app.invite_required
+            && !tx
+                .security()
+                .redeem_invitation(
+                    invitation
+                        .as_deref()
+                        .ok_or_else(|| ApiError::forbidden("Invitation required."))?,
+                )
+                .await?
+        {
+            return Err(ApiError::forbidden(
+                "This invitation has expired or has already been used.",
+            ));
+        }
+        tx.users()
+            .insert(&InsertUser {
+                id: user_id,
+                username,
+                display_name,
+            })
+            .await?;
+        tx.passkeys()
+            .insert(&InsertPasskey {
+                id: TokenId::new(),
+                credential_id: key.cred_id().as_ref().to_vec(),
+                user_id,
+                credential: serde_json::to_value(key).map_err(ApiError::internal)?,
+                friendly_name: input.friendly_name,
+            })
+            .await?;
+        if let Some(pending) = pending {
+            crate::federation::attach_signup(&mut tx, pending, &headers, user_id).await?;
+        }
+        let cookie =
+            security::create_session(&mut tx, user_id, AuthenticationMethod::Passkey).await?;
+        Self::audit(&mut tx, user_id, "account.create").await?;
+        tx.commit().await?;
+        let mut response = Self::signed_in(&cookie)?;
+        response.headers_mut().append(
+            header::SET_COOKIE,
+            HeaderValue::from_static(crate::federation::pending_cookie_clear()),
+        );
+        Ok(response)
+    }
+    async fn start_login(
+        State(app): State<Self>,
+        headers: HeaderMap,
+        Json(input): Json<LoginStart>,
+    ) -> Result<Response, ApiError> {
+        if let Some(username) = input.username.filter(|v| !v.is_empty()) {
+            let user = app
+                .database
+                .users()
+                .find_active_by_username(&username)
+                .await?
+                .ok_or_else(|| Self::failed("account unavailable"))?;
+            let (challenge, state) = app
+                .webauthn
+                .start_passkey_authentication(&app.keys(user.id).await?)
+                .map_err(Self::failed)?;
+            app.start(
+                &headers,
+                "authentication",
+                Some(user.id),
+                None,
+                Ceremony::Login {
+                    user_id: user.id,
+                    state,
+                },
+                challenge,
+            )
+            .await
+        } else {
+            let (mut challenge, state) = app
+                .webauthn
+                .start_discoverable_authentication()
+                .map_err(Self::failed)?;
+            challenge.mediation = None;
+            app.start(
+                &headers,
+                "authentication",
+                None,
+                None,
+                Ceremony::Discover { state },
+                challenge,
+            )
+            .await
+        }
+    }
+    async fn finish_login(
+        State(app): State<Self>,
+        headers: HeaderMap,
+        Json(input): Json<AuthenticationFinish>,
+    ) -> Result<Response, ApiError> {
+        let (user_id, result) = match app
+            .consume(&headers, input.ceremony_id, "authentication")
+            .await?
+        {
+            Ceremony::Login { user_id, state } => (
+                user_id,
+                app.webauthn
+                    .finish_passkey_authentication(&input.credential, &state)
+                    .map_err(Self::failed)?,
+            ),
+            Ceremony::Discover { state } => {
+                let (uuid, _) = app
+                    .webauthn
+                    .identify_discoverable_authentication(&input.credential)
+                    .map_err(Self::failed)?;
+                let user_id = UserId::from_uuid(uuid).map_err(Self::failed)?;
+                let keys: Vec<DiscoverableKey> = app
+                    .keys(user_id)
+                    .await?
+                    .iter()
+                    .map(DiscoverableKey::from)
+                    .collect();
+                (
+                    user_id,
+                    app.webauthn
+                        .finish_discoverable_authentication(&input.credential, state, &keys)
+                        .map_err(Self::failed)?,
+                )
+            }
+            _ => return Err(Self::failed("wrong ceremony")),
+        };
+        let mut tx = app.database.begin().await?;
+        Self::update_credential(&mut tx, user_id, &result).await?;
+        let cookie =
+            security::create_session(&mut tx, user_id, AuthenticationMethod::Passkey).await?;
+        Self::audit(&mut tx, user_id, "passkey.login").await?;
+        tx.commit().await?;
+        Self::signed_in(&cookie)
+    }
+    async fn start_management(
+        State(app): State<Self>,
+        headers: HeaderMap,
+    ) -> Result<Response, ApiError> {
+        let session = security::session(&app.database, &headers).await?;
+        let (challenge, state) = app
+            .webauthn
+            .start_passkey_authentication(&app.keys(session.user_id).await?)
+            .map_err(Self::failed)?;
+        app.start(
+            &headers,
+            "purpose_authentication",
+            Some(session.user_id),
+            Some(session.id),
+            Ceremony::Manage {
+                user_id: session.user_id,
+                session_id: session.id,
+                state,
+            },
+            challenge,
+        )
+        .await
+    }
+    async fn finish_management(
+        State(app): State<Self>,
+        headers: HeaderMap,
+        Json(input): Json<AuthenticationFinish>,
+    ) -> Result<Response, ApiError> {
+        let session = security::session(&app.database, &headers).await?;
+        let Ceremony::Manage {
+            user_id,
+            session_id,
+            state,
+        } = app
+            .consume(&headers, input.ceremony_id, "purpose_authentication")
+            .await?
+        else {
+            return Err(Self::failed("wrong ceremony"));
+        };
+        if session.user_id != user_id || session.id != session_id {
+            return Err(Self::failed("session changed"));
+        }
+        let result = app
+            .webauthn
+            .finish_passkey_authentication(&input.credential, &state)
+            .map_err(Self::failed)?;
+        let mut tx = app.database.begin().await?;
+        Self::update_credential(&mut tx, user_id, &result).await?;
+        let expires = tx.sessions().grant_management(session_id).await?;
+        Self::audit(&mut tx, user_id, "settings.unlock").await?;
+        tx.commit().await?;
+        Self::response(
+            json!({"expires_in":120,"management_expires_at":expires}),
+            None,
+        )
+    }
+    async fn start_enrollment(
+        State(app): State<Self>,
+        headers: HeaderMap,
+        input: Option<Json<EnrollmentStart>>,
+    ) -> Result<Response, ApiError> {
+        let session = security::management(&app.database, &headers).await?;
+        let user = app
+            .database
+            .users()
+            .find_by_id(session.user_id)
+            .await?
+            .ok_or_else(ApiError::unauthorized)?;
+        let exclusions = app
+            .keys(user.id)
+            .await?
+            .iter()
+            .map(|v| v.cred_id().clone())
+            .collect();
+        let (challenge, state) = app.registration(
+            user.id,
+            &user.username,
+            &user.display_name,
+            Some(exclusions),
+            input.map(|Json(v)| v.passkey_kind).unwrap_or_default(),
+            &headers,
+        )?;
+        app.start(
+            &headers,
+            "enrollment",
+            Some(user.id),
+            Some(session.id),
+            Ceremony::Enroll {
+                user_id: user.id,
+                session_id: session.id,
+                state,
+            },
+            challenge,
+        )
+        .await
+    }
+    async fn finish_enrollment(
+        State(app): State<Self>,
+        headers: HeaderMap,
+        Json(input): Json<RegistrationFinish>,
+    ) -> Result<StatusCode, ApiError> {
+        if !Self::valid_name(&input.friendly_name) {
+            return Err(ApiError::bad_request(
+                "Choose a passkey name of at most 80 characters.",
+            ));
+        }
+        let session = security::management(&app.database, &headers).await?;
+        let Ceremony::Enroll {
+            user_id,
+            session_id,
+            state,
+        } = app
+            .consume(&headers, input.ceremony_id, "enrollment")
+            .await?
+        else {
+            return Err(Self::failed("wrong ceremony"));
+        };
+        if user_id != session.user_id || session_id != session.id {
+            return Err(Self::failed("session changed"));
+        }
+        let key = app
+            .webauthn
+            .finish_passkey_registration(&input.credential, &state)
+            .map_err(Self::failed)?;
+        let mut tx = app.database.begin().await?;
+        Self::lock_management(&mut tx, &session).await?;
+        tx.passkeys()
+            .insert(&InsertPasskey {
+                id: TokenId::new(),
+                credential_id: key.cred_id().as_ref().to_vec(),
+                user_id,
+                credential: serde_json::to_value(key).map_err(ApiError::internal)?,
+                friendly_name: input.friendly_name,
+            })
+            .await?;
+        Self::audit(&mut tx, user_id, "passkey.add").await?;
+        tx.commit().await?;
+        Ok(StatusCode::NO_CONTENT)
+    }
+    async fn list(State(app): State<Self>, headers: HeaderMap) -> Result<Json<Value>, ApiError> {
+        let session = security::session(&app.database, &headers).await?;
+        Ok(Json(json!(
+            app.database
+                .passkeys()
+                .list_active(session.user_id)
+                .await?
+                .into_iter()
+                .map(|v| json!({"id":v.id,"friendly_name":v.friendly_name}))
+                .collect::<Vec<_>>()
+        )))
+    }
+    async fn rename(
+        State(app): State<Self>,
+        headers: HeaderMap,
+        Path(id): Path<TokenId>,
+        Json(input): Json<Rename>,
+    ) -> Result<StatusCode, ApiError> {
+        if !Self::valid_name(&input.friendly_name) {
+            return Err(ApiError::bad_request(
+                "Choose a passkey name of at most 80 characters.",
+            ));
+        }
+        let session = security::management(&app.database, &headers).await?;
+        let mut tx = app.database.begin().await?;
+        Self::lock_management(&mut tx, &session).await?;
+        if !tx
+            .passkeys()
+            .rename(id, session.user_id, &input.friendly_name)
+            .await?
+        {
+            return Err(ApiError::bad_request("Passkey not found."));
+        }
+        Self::audit(&mut tx, session.user_id, "passkey.rename").await?;
+        tx.commit().await?;
+        Ok(StatusCode::NO_CONTENT)
+    }
+    async fn revoke(
+        State(app): State<Self>,
+        headers: HeaderMap,
+        Path(id): Path<TokenId>,
+    ) -> Result<StatusCode, ApiError> {
+        let session = security::management(&app.database, &headers).await?;
+        let mut tx = app.database.begin().await?;
+        Self::lock_management(&mut tx, &session).await?;
+        if !tx
+            .passkeys()
+            .revoke_if_not_last(id, session.user_id)
+            .await?
+        {
+            return Err(ApiError::bad_request(
+                "Keep at least one passkey on your account.",
+            ));
+        }
+        tx.sessions()
+            .revoke_other(session.user_id, session.id)
+            .await?;
+        Self::audit(&mut tx, session.user_id, "passkey.remove").await?;
+        tx.commit().await?;
+        Ok(StatusCode::NO_CONTENT)
+    }
+    async fn session_view(
+        State(app): State<Self>,
+        headers: HeaderMap,
+    ) -> Result<Json<Value>, ApiError> {
+        let session = security::session(&app.database, &headers).await?;
+        let user = app
+            .database
+            .users()
+            .find_by_id(session.user_id)
+            .await?
+            .ok_or_else(ApiError::unauthorized)?;
+        let expires = app
+            .database
+            .sessions()
+            .management_expiry(session.id)
+            .await?;
+        Ok(Json(
+            json!({"user":{"id":user.id,"username":user.username,"display_name":user.display_name},"management_expires_at":expires}),
+        ))
+    }
+    async fn logout(State(app): State<Self>, headers: HeaderMap) -> Result<Response, ApiError> {
+        if let Some(session) = security::optional_session(&app.database, &headers).await? {
+            app.database.sessions().revoke(session.id).await?;
+        }
+        Self::signed_in("__Host-piquel_session=; Path=/; Secure; HttpOnly; SameSite=Lax; Max-Age=0")
     }
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use axum::{
-        body::Body,
-        http::{Method, Request},
-    };
-    use piquel_repository::DatabaseConfig;
-    use std::{env, time::Duration as StdDuration};
-    use tower::ServiceExt;
-    use webauthn_authenticator_rs::{WebauthnAuthenticator, softpasskey::SoftPasskey};
-
-    fn http_request(
-        method: Method,
-        uri: &str,
-        cookie: Option<&str>,
-        purpose_token: Option<&str>,
-        body: Option<serde_json::Value>,
-    ) -> Request<Body> {
-        let mut builder = Request::builder().method(method).uri(uri);
-        if let Some(cookie) = cookie {
-            builder = builder.header(header::COOKIE, cookie);
-        }
-        if let Some(token) = purpose_token {
-            builder = builder.header(header::AUTHORIZATION, format!("Bearer {token}"));
-        }
-        let body = if let Some(body) = body {
-            builder = builder.header(header::CONTENT_TYPE, "application/json");
-            Body::from(serde_json::to_vec(&body).expect("request JSON"))
-        } else {
-            Body::empty()
-        };
-        builder.body(body).expect("request")
-    }
-
-    async fn response_json(response: Response) -> serde_json::Value {
-        let bytes = axum::body::to_bytes(response.into_body(), 1_048_576)
-            .await
-            .expect("response body");
-        serde_json::from_slice(&bytes).expect("response JSON")
-    }
-
-    #[test]
-    fn rp_origin_rejects_attacker_controlled_urls() {
-        for origin in [
-            "https://example.com.evil",
-            "https://evil.test/example.com",
-            "https://example.com@evil.test",
-        ] {
-            let url = Url::parse(origin).expect("URL fixture");
-            assert!(
-                validate_rp_origin("example.com", &url).is_err(),
-                "accepted {origin}"
-            );
-        }
-        assert!(
-            validate_rp_origin(
-                "example.com",
-                &Url::parse("https://example.com").expect("valid URL")
-            )
-            .is_ok()
-        );
-    }
-
-    #[test]
-    fn cookie_parser_requires_exact_secret_size() {
-        let secret = [7_u8; 32];
-        let mut headers = HeaderMap::new();
-        headers.insert(
-            header::COOKIE,
-            HeaderValue::from_str(&format!(
-                "__Host-piquel_session={}",
-                URL_SAFE_NO_PAD.encode(secret)
-            ))
-            .expect("cookie"),
-        );
-        assert_eq!(session_secret(&headers), Some(secret.to_vec()));
-    }
-
-    #[test]
-    fn purpose_tokens_are_exactly_bound_and_short_lived() {
-        let keys = Es256KeyProvider::generate_for_tests("purpose-test");
-        let user_id = UserId::new();
-        let session_id = SessionId::new();
-        let now = Utc::now().timestamp();
-        let claims = PurposeTokenClaims {
-            iss: "https://auth.example.com".into(),
-            sub: user_id,
-            aud: PURPOSE_AUDIENCE.into(),
-            purpose: MANAGE_PASSKEYS_PURPOSE.into(),
-            sid: session_id,
-            auth_time: now,
-            iat: now,
-            exp: now + PURPOSE_TOKEN_SECONDS,
-            jti: TokenId::new(),
-        };
-        let token = keys
-            .sign(PURPOSE_TOKEN_TYPE, &claims)
-            .expect("purpose token");
-        let verified: PurposeTokenClaims = keys
-            .verify(PURPOSE_TOKEN_TYPE, &token)
-            .expect("verify purpose token");
-        assert!(verified.is_valid_for("https://auth.example.com", user_id, session_id, now));
-        assert!(!verified.is_valid_for("https://attacker.example", user_id, session_id, now));
-        assert!(!verified.is_valid_for("https://auth.example.com", UserId::new(), session_id, now));
-        assert!(!verified.is_valid_for("https://auth.example.com", user_id, SessionId::new(), now));
-        let mut wrong_audience = verified.clone();
-        wrong_audience.aud = "another-audience".into();
-        assert!(!wrong_audience.is_valid_for("https://auth.example.com", user_id, session_id, now));
-        let mut wrong_purpose = verified.clone();
-        wrong_purpose.purpose = "delete-account".into();
-        assert!(!wrong_purpose.is_valid_for("https://auth.example.com", user_id, session_id, now));
-        assert!(!verified.is_valid_for(
-            "https://auth.example.com",
-            user_id,
-            session_id,
-            now + PURPOSE_TOKEN_SECONDS
-        ));
-
-        let mut headers = HeaderMap::new();
-        headers.insert(
-            header::AUTHORIZATION,
-            HeaderValue::from_str(&format!("Bearer {token}")).expect("authorization header"),
-        );
-        assert_eq!(bearer_token(&headers), Some(token.as_str()));
-    }
-
-    #[test]
-    fn standards_conformant_authenticator_registers_and_authenticates() {
-        let origin = Url::parse("https://auth.example.com").expect("origin");
-        let webauthn = WebauthnBuilder::new("example.com", &origin)
-            .expect("builder")
-            .rp_name("Piquel Test")
-            .build()
-            .expect("webauthn");
-        let user_id = UserId::new();
-        let (challenge, registration_state) = webauthn
-            .start_passkey_registration(user_id.as_uuid(), "test_user", "Test User", None)
-            .expect("registration start");
-        // The software authenticator has no physical verification gesture. Enable its
-        // explicit test-only UV simulation so the ceremony exercises our required-UV
-        // policy instead of weakening production configuration for this test.
-        let mut authenticator = WebauthnAuthenticator::new(SoftPasskey::new(true));
-        let registration = authenticator
-            .do_registration(origin.clone(), challenge)
-            .expect("authenticator registration");
-        let passkey = webauthn
-            .finish_passkey_registration(&registration, &registration_state)
-            .expect("registration finish");
-        let (challenge, authentication_state) = webauthn
-            .start_passkey_authentication(&[passkey])
-            .expect("authentication start");
-        let assertion = authenticator
-            .do_authentication(origin, challenge)
-            .expect("authenticator assertion");
-        let result = webauthn
-            .finish_passkey_authentication(&assertion, &authentication_state)
-            .expect("authentication finish");
-        assert!(result.user_verified());
-    }
-
-    #[tokio::test]
-    #[ignore = "requires TEST_DATABASE_URL"]
-    #[allow(clippy::too_many_lines)]
-    async fn purpose_authorization_is_required_and_single_use_over_http() {
-        let database_url = env::var("TEST_DATABASE_URL")
-            .expect("TEST_DATABASE_URL must name an isolated PostgreSQL database");
-        let database = Database::connect(
-            DatabaseConfig::new_development(database_url, 5, StdDuration::from_secs(5))
-                .expect("database configuration"),
-        )
-        .await
-        .expect("database");
-        database.run_migrations().await.expect("migrations");
-
-        let origin = Url::parse("https://auth.example.com").expect("origin");
-        let application = PasskeyApplication::new(
-            database,
-            "example.com",
-            &origin,
-            Arc::new(Es256KeyProvider::generate_for_tests("purpose-http")),
-        )
-        .expect("passkey application");
-        let app = routes(application);
-        let mut authenticator = WebauthnAuthenticator::new(SoftPasskey::new(true));
-        let suffix = UserId::new().to_string();
-        let username = format!("purpose_{}", &suffix[suffix.len() - 12..]);
-
-        let response = app
-            .clone()
-            .oneshot(http_request(
-                Method::POST,
-                "/webauthn/register/start",
-                None,
-                None,
-                Some(serde_json::json!({
-                    "username": username,
-                    "display_name": "Purpose Test"
-                })),
-            ))
-            .await
-            .expect("registration start");
-        assert_eq!(response.status(), StatusCode::OK);
-        let started = response_json(response).await;
-        let creation: CreationChallengeResponse =
-            serde_json::from_value(started["public_key"].clone()).expect("creation options");
-        let registered = authenticator
-            .do_registration(origin.clone(), creation)
-            .expect("registration response");
-        let response = app
-            .clone()
-            .oneshot(http_request(
-                Method::POST,
-                "/webauthn/register/finish",
-                None,
-                None,
-                Some(serde_json::json!({
-                    "ceremony_id": started["ceremony_id"],
-                    "credential": registered,
-                    "friendly_name": "Primary"
-                })),
-            ))
-            .await
-            .expect("registration finish");
-        assert_eq!(response.status(), StatusCode::NO_CONTENT);
-        let cookie = response
-            .headers()
-            .get(header::SET_COOKIE)
-            .expect("session cookie")
-            .to_str()
-            .expect("cookie text")
-            .split(';')
-            .next()
-            .expect("cookie pair")
-            .to_owned();
-
-        let response = app
-            .clone()
-            .oneshot(http_request(
-                Method::POST,
-                "/account/passkeys/enroll/start",
-                Some(&cookie),
-                None,
-                None,
-            ))
-            .await
-            .expect("unauthorized enrollment");
-        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
-
-        let response = app
-            .clone()
-            .oneshot(http_request(
-                Method::POST,
-                "/account/passkeys/authorize/start",
-                Some(&cookie),
-                None,
-                None,
-            ))
-            .await
-            .expect("purpose start");
-        assert_eq!(response.status(), StatusCode::OK);
-        let purpose_started = response_json(response).await;
-        let request: RequestChallengeResponse =
-            serde_json::from_value(purpose_started["public_key"].clone())
-                .expect("authentication options");
-        let assertion = authenticator
-            .do_authentication(origin.clone(), request)
-            .expect("purpose assertion");
-        let response = app
-            .clone()
-            .oneshot(http_request(
-                Method::POST,
-                "/account/passkeys/authorize/finish",
-                Some(&cookie),
-                None,
-                Some(serde_json::json!({
-                    "ceremony_id": purpose_started["ceremony_id"],
-                    "credential": assertion
-                })),
-            ))
-            .await
-            .expect("purpose finish");
-        assert_eq!(response.status(), StatusCode::OK);
-        assert_eq!(
-            response.headers().get(header::CACHE_CONTROL),
-            Some(&HeaderValue::from_static("no-store"))
-        );
-        let authorized = response_json(response).await;
-        let purpose_token = authorized["purpose_token"]
-            .as_str()
-            .expect("purpose token")
-            .to_owned();
-
-        let response = app
-            .clone()
-            .oneshot(http_request(
-                Method::POST,
-                "/account/passkeys/enroll/start",
-                Some(&cookie),
-                Some(&purpose_token),
-                None,
-            ))
-            .await
-            .expect("enrollment start");
-        assert_eq!(response.status(), StatusCode::OK);
-        let enrollment = response_json(response).await;
-        let creation: CreationChallengeResponse =
-            serde_json::from_value(enrollment["public_key"].clone()).expect("creation options");
-        let registered = authenticator
-            .do_registration(origin, creation)
-            .expect("backup registration response");
-        let response = app
-            .clone()
-            .oneshot(http_request(
-                Method::POST,
-                "/account/passkeys/enroll/finish",
-                Some(&cookie),
-                Some(&purpose_token),
-                Some(serde_json::json!({
-                    "ceremony_id": enrollment["ceremony_id"],
-                    "credential": registered,
-                    "friendly_name": "Backup"
-                })),
-            ))
-            .await
-            .expect("enrollment finish");
-        assert_eq!(response.status(), StatusCode::NO_CONTENT);
-
-        let response = app
-            .oneshot(http_request(
-                Method::POST,
-                "/account/passkeys/enroll/start",
-                Some(&cookie),
-                Some(&purpose_token),
-                None,
-            ))
-            .await
-            .expect("replayed purpose token");
-        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
-    }
-}
+#[path = "passkey_tests.rs"]
+mod tests;

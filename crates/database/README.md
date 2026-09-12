@@ -1,14 +1,11 @@
-# Piquel repository
+# piquel-repository
 
-`piquel-repository` is the only SQLx consumer. Applications use `Database` and
-typed repositories only; pool, transaction, row, and SQLx error types are not
-public API.
+Typed PostgreSQL persistence for the authentication service. SQLx pools and SQL
+remain private; callers use repositories or a `DatabaseTransaction`.
 
-Set `DATABASE_URL` in the process environment and run migrations explicitly with
-`just migrate`. Applications do
-not migrate on startup. Database integration tests use a disposable PostgreSQL
-database named by `TEST_DATABASE_URL`; each test must create an isolated schema
-and drop it afterwards, so ordering is never significant.
+See [database architecture](../../docs/architecture/database-crate.md) for invariants.
+Run migrations through the single service binary: `auth-service migrate`.
 
-Database tests are not currently configured. `just test-database` prints a
-message and skips the database suite.
+Integration tests use a disposable `TEST_DATABASE_URL`, apply the schema, and insert
+uniquely named fixtures into that database. They do not create per-test schemas.
+Run them explicitly with the command in the root README; ordinary tests skip them.

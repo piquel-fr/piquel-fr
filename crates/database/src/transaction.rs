@@ -21,9 +21,6 @@ impl<'a> DatabaseTransaction<'a> {
     pub fn audit_events(&mut self) -> AuditEventRepository<'_> {
         AuditEventRepository::from_connection(&mut self.inner)
     }
-    pub fn internal_events(&mut self) -> InternalEventRepository<'_> {
-        InternalEventRepository::from_connection(&mut self.inner)
-    }
     pub fn passkeys(&mut self) -> PasskeyRepository<'_> {
         PasskeyRepository::from_connection(&mut self.inner)
     }
@@ -36,8 +33,8 @@ impl<'a> DatabaseTransaction<'a> {
     pub fn federation(&mut self) -> FederationRepository<'_> {
         FederationRepository::from_connection(&mut self.inner)
     }
-    pub fn service_identities(&mut self) -> ServiceIdentityRepository<'_> {
-        ServiceIdentityRepository::from_connection(&mut self.inner)
+    pub fn security(&mut self) -> SecurityRepository<'_> {
+        SecurityRepository::from_connection(&mut self.inner)
     }
     pub async fn commit(self) -> Result<(), DatabaseError> {
         self.inner.commit().await.map_err(Into::into)
