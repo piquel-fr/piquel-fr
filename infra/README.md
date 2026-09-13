@@ -5,42 +5,33 @@ applications are `piquel-fr-dev` and `piquel-fr-prod`.
 
 ## Development
 
-Install `piquelctl`, Git, Node 24+, and `just` on the server. Piqueld needs Git,
-the Docker CLI, and access to this checkout. Increase its
-`reconciliation.prepare_timeout_seconds` to `1200` for cold Rust builds.
+`infra/dev.toml` is the complete development manifest. It reads itself and builds
+both services from the `main` branch of `/home/piquel/Projects/piquel-fr` on the
+server. Piqueld needs Git, the Docker CLI, and read access to that repository.
+Increase its `reconciliation.prepare_timeout_seconds` to `1200` for cold Rust builds.
 
-Commit your changes before deploying. Both the manifest template and service
-sources come from the checked-out **HEAD**, including a feature branch. Dirty
-files are excluded. No push to GitHub is needed.
+Replace the `AUTH_DATABASE_URL` placeholder in `dev.toml` with your development
+PostgreSQL URL, then commit the manifest and application changes to the configured
+branch. No push to GitHub is needed. To use another checkout or branch, edit all
+three repository sections in `dev.toml` (manifest, auth, and web).
 
 ```sh
-export AUTH_DATABASE_URL='postgres://USER:PASSWORD@DB_HOST/DEV_DATABASE?sslmode=verify-full'
-# Optional when using a non-default daemon socket or CLI location:
-# export PIQUELD_SOCKET=/path/to/piqueld.sock
-# export PIQUELCTL=/path/to/piquelctl
-
-just dev-init  # once per application; registers it and deploys HEAD
-just dev       # subsequent deployments
+just dev-init  # once: register the application and deploy
+just dev       # deploy the configured local branch again
 ```
 
-Use a separate development database. Auth applies its migrations before serving.
-Remote PostgreSQL must use `sslmode=verify-full` and a certificate trusted by the
-container. No database is provisioned by these manifests. Private CAs require
-adding a read-only certificate volume and an `sslrootcert` URL parameter.
+These recipes call `piquelctl` directly. For a non-default socket, use
+`piquelctl --socket /path/to/piqueld.sock` with the same apply/deploy arguments.
+Running a command from a different worktree does not change the deployment source;
+uncommitted edits and other branches are excluded. Piqueld resolves the manifest
+and service revisions independently, so avoid moving the branch during deployment.
 
-`dev.mjs` reads `infra/dev.json` from HEAD, pins each Git build to that commit and
-this checkout's absolute path, and writes a repository-backed manifest into
-`.piqueld/manifest`. It commits that generated manifest locally and asks piqueld
-to Deploy. The daemon fetches the manifest and builds both images. This auxiliary
-Git repository never changes the checkout's branch or index.
-
-Keep `.piqueld` in place: subsequent manual Deploy actions fetch it. It is ignored
-by Git and Docker and created with private permissions, but **contains the database
-URL in Git history**, as does piqueld's deployment state. This is temporary secret
-handling. Do not push that repository or reuse production credentials.
-The daemon must run as a user able to read these private files and the checkout.
-Keep using the same checkout for this application; changing its path requires
-updating the application's repository connection in piqueld.
+Use a separate development database with `sslmode=verify-full` and a certificate
+trusted by the container. Auth applies migrations before serving. No database is
+provisioned here. Private CAs require adding a read-only certificate volume and an
+`sslrootcert` URL parameter. The database URL is stored literally in the manifest
+and deployment history as temporary secret handling; it is not expanded from your
+shell environment. Replace this with managed secrets before production use.
 
 Auth listens on HTTP port 8080; nginx serves settings on HTTP port 8080 in its own
 container. Browser URLs are `http://localhost:8080` and

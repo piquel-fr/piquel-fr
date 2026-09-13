@@ -2,4 +2,3 @@ target
 node_modules
 .git
 .svelte-kit
-.piqueld

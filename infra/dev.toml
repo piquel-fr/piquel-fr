@@ -1,0 +1,59 @@
+api_version = "piqueld.dev/v1alpha1"
+kind = "Application"
+
+[metadata]
+name = "piquel-fr-dev"
+
+[spec.manifest]
+path = "infra/dev.toml"
+
+[spec.manifest.repository]
+url = "/home/piquel/Projects/piquel-fr"
+branch = "main"
+
+[[spec.services]]
+name = "auth"
+replicas = 1
+
+[spec.services.source]
+type = "git"
+[spec.services.source.repository]
+url = "/home/piquel/Projects/piquel-fr"
+branch = "main"
+[spec.services.source.build]
+type = "docker"
+dockerfile = "infra/auth.Dockerfile"
+context = "."
+
+[spec.services.environment]
+# Replace with the separate development database's connection URL before deploying.
+AUTH_DATABASE_URL = "postgres://USER:PASSWORD@DB_HOST/DEV_DATABASE?sslmode=verify-full"
+AUTH_PUBLIC_LISTENER = "0.0.0.0:8080"
+AUTH_DEVELOPMENT_MODE = "true"
+AUTH_PUBLIC_BASE_URL = "http://localhost:8080"
+AUTH_SETTINGS_URL = "http://localhost:8081/settings"
+AUTH_INVITE_REQUIRED = "false"
+
+[spec.services.healthcheck]
+type = "http"
+port = 8080
+path = "/health/ready"
+
+[[spec.services]]
+name = "web"
+replicas = 1
+
+[spec.services.source]
+type = "git"
+[spec.services.source.repository]
+url = "/home/piquel/Projects/piquel-fr"
+branch = "main"
+[spec.services.source.build]
+type = "docker"
+dockerfile = "infra/web.Dockerfile"
+context = "."
+
+[spec.services.healthcheck]
+type = "http"
+port = 8080
+path = "/"

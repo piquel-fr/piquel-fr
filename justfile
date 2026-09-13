@@ -28,10 +28,10 @@ audit:
     cargo deny check advisories licenses
     pnpm audit
 
-# Deploy committed HEAD through the server's local piqueld daemon.
+# Deploy the local branch configured in infra/dev.toml.
 dev:
-    node infra/dev.mjs
+    piquelctl --timeout 20m deploy piquel-fr-dev --yes
 
 # Register the development application once, then deploy it.
 dev-init:
-    node infra/dev.mjs --init
+    piquelctl --timeout 20m apply --file infra/dev.toml --deploy --yes
