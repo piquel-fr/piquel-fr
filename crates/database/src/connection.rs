@@ -40,7 +40,7 @@ impl DatabaseConfig {
         })
     }
 
-    /// Creates explicit local-development configuration for a loopback database.
+    /// Allows unencrypted loopback development databases; remote hosts require verified TLS.
     pub fn new_development(
         url: &str,
         max_connections: u32,
@@ -82,26 +82,23 @@ impl DatabaseConfig {
         {
             return Err(DatabaseConnectionError::InvalidConfiguration);
         }
-        if development {
-            let loopback = host.eq_ignore_ascii_case("localhost")
-                || host
-                    .parse::<IpAddr>()
-                    .is_ok_and(|address| address.is_loopback());
-            if !loopback {
-                return Err(DatabaseConnectionError::InvalidConfiguration);
-            }
-        } else if ssl_mode.as_deref() != Some("verify-full") {
+        let loopback = host.eq_ignore_ascii_case("localhost")
+            || host
+                .parse::<IpAddr>()
+                .is_ok_and(|address| address.is_loopback());
+        let require_verified_tls = !development || !loopback;
+        if require_verified_tls && ssl_mode.as_deref() != Some("verify-full") {
             return Err(DatabaseConnectionError::InvalidConfiguration);
         }
 
         let options = PgConnectOptions::from_str(url)
             .map_err(|_| DatabaseConnectionError::InvalidConfiguration)?;
-        Ok(if development {
-            options
-        } else {
+        Ok(if require_verified_tls {
             // Keep the effective mode explicit even after validating the URL so
             // future parser changes cannot silently weaken production TLS.
             options.ssl_mode(PgSslMode::VerifyFull)
+        } else {
+            options
         })
     }
 }
@@ -250,7 +247,7 @@ mod tests {
     }
 
     #[test]
-    fn development_is_loopback_only() {
+    fn development_requires_verified_tls_outside_loopback() {
         assert!(
             DatabaseConfig::new_development(
                 "postgres://localhost/piquel",
@@ -275,5 +272,25 @@ mod tests {
             )
             .is_err()
         );
+        for mode in ["disable", "prefer", "require", "verify-ca"] {
+            assert!(
+                DatabaseConfig::new_development(
+                    &format!("postgres://db.example/piquel?sslmode={mode}"),
+                    1,
+                    Duration::from_secs(1)
+                )
+                .is_err()
+            );
+        }
+        let config = DatabaseConfig::new_development(
+            "postgres://db.example/piquel?sslmode=verify-full",
+            1,
+            Duration::from_secs(1),
+        )
+        .expect("verified remote database is safe in development");
+        assert!(matches!(
+            config.options.get_ssl_mode(),
+            PgSslMode::VerifyFull
+        ));
     }
 }

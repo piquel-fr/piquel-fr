@@ -24,3 +24,6 @@ node_modules
 
 /test-results/
 /playwright-report/
+
+# Local repository-backed development manifests (contain database credentials).
+/.piqueld/

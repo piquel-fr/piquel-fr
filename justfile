@@ -27,3 +27,11 @@ migrate:
 audit:
     cargo deny check advisories licenses
     pnpm audit
+
+# Deploy committed HEAD through the server's local piqueld daemon.
+dev:
+    node infra/dev.mjs
+
+# Register the development application once, then deploy it.
+dev-init:
+    node infra/dev.mjs --init

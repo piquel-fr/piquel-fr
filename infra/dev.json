@@ -1,0 +1,60 @@
+{
+  "api_version": "piqueld.dev/v1alpha1",
+  "kind": "Application",
+  "metadata": {
+    "name": "piquel-fr-dev"
+  },
+  "spec": {
+    "services": [
+      {
+        "name": "auth",
+        "replicas": 1,
+        "source": {
+          "type": "git",
+          "repository": {
+            "url": "https://github.com/piquel-fr/piquel-fr.git",
+            "branch": "main"
+          },
+          "build": {
+            "type": "docker",
+            "dockerfile": "infra/auth.Dockerfile",
+            "context": "."
+          }
+        },
+        "environment": {
+          "AUTH_PUBLIC_LISTENER": "0.0.0.0:8080",
+          "AUTH_DEVELOPMENT_MODE": "true",
+          "AUTH_PUBLIC_BASE_URL": "http://localhost:8080",
+          "AUTH_SETTINGS_URL": "http://localhost:8081/settings",
+          "AUTH_INVITE_REQUIRED": "false"
+        },
+        "healthcheck": {
+          "type": "http",
+          "port": 8080,
+          "path": "/health/ready"
+        }
+      },
+      {
+        "name": "web",
+        "replicas": 1,
+        "source": {
+          "type": "git",
+          "repository": {
+            "url": "https://github.com/piquel-fr/piquel-fr.git",
+            "branch": "main"
+          },
+          "build": {
+            "type": "docker",
+            "dockerfile": "infra/web.Dockerfile",
+            "context": "."
+          }
+        },
+        "healthcheck": {
+          "type": "http",
+          "port": 8080,
+          "path": "/"
+        }
+      }
+    ]
+  }
+}

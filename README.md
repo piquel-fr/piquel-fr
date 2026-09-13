@@ -6,8 +6,8 @@ OIDC/SSO authority at `auth.piquel.fr`, with account settings on `piquel.fr`.
 The authentication service is **one Rust executable** containing its login,
 onboarding, consent and passkey pages. PostgreSQL is its only external data
 service. GitHub and Google are optional login providers. The separate settings
-frontend calls the public authentication API. Infrastructure is outside this repo's
-current scope.
+frontend calls the public authentication API. See [infra/README.md](infra/README.md)
+for repository-driven piqueld deployments.
 
 ## Build
 
@@ -38,6 +38,8 @@ is `apps/piquel-web/build`. Node is needed to build the frontends, not to run au
 | `AUTH_GITHUB_CLIENT_ID`, `AUTH_GITHUB_CLIENT_SECRET` | Both required to enable GitHub; secret is an env/file reference |
 | `AUTH_GOOGLE_CLIENT_ID`, `AUTH_GOOGLE_CLIENT_SECRET` | Both required to enable Google; secret is an env/file reference |
 | `AUTH_DEVELOPMENT_MODE` | Explicit `true` permits HTTP and unencrypted PostgreSQL on loopback only, plus ephemeral signing keys |
+
+Development mode also accepts remote PostgreSQL when using `sslmode=verify-full`.
 
 Generate a persistent RSA key with OpenSSL, for example
 `openssl genpkey -algorithm RSA -pkeyopt rsa_keygen_bits:3072 -out /absolute/path/key.pem`.
