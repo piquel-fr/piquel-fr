@@ -26,7 +26,7 @@ impl std::fmt::Debug for DatabaseConfig {
     }
 }
 impl DatabaseConfig {
-    /// Creates production configuration requiring verified `PostgreSQL` TLS.
+    /// Creates production configuration using verified TLS or an explicit local Unix socket.
     pub fn new(
         url: &str,
         max_connections: u32,
@@ -75,10 +75,16 @@ impl DatabaseConfig {
             matches!(name.as_ref(), "sslmode" | "ssl-mode").then_some(value)
         });
         let ssl_mode = ssl_modes.next();
+        let mut socket_paths = parsed
+            .query_pairs()
+            .filter_map(|(name, value)| (name == "host").then_some(value));
+        let socket_path = socket_paths.next();
         if ssl_modes.next().is_some()
-            || parsed
-                .query_pairs()
-                .any(|(name, _)| matches!(name.as_ref(), "host" | "hostaddr"))
+            || socket_paths.next().is_some()
+            || socket_path.as_ref().is_some_and(|path| {
+                host != "localhost" || !path.starts_with('/') || path.contains('\0')
+            })
+            || parsed.query_pairs().any(|(name, _)| name == "hostaddr")
         {
             return Err(DatabaseConnectionError::InvalidConfiguration);
         }
@@ -86,7 +92,7 @@ impl DatabaseConfig {
             || host
                 .parse::<IpAddr>()
                 .is_ok_and(|address| address.is_loopback());
-        let require_verified_tls = !development || !loopback;
+        let require_verified_tls = socket_path.is_none() && (!development || !loopback);
         if require_verified_tls && ssl_mode.as_deref() != Some("verify-full") {
             return Err(DatabaseConnectionError::InvalidConfiguration);
         }
@@ -227,6 +233,30 @@ mod tests {
             )
             .is_ok()
         );
+    }
+
+    #[test]
+    fn unix_sockets_are_explicit_and_cannot_override_tcp_hosts() {
+        let config = DatabaseConfig::new(
+            "postgres://piquel:password@localhost/piquel?host=/run/postgresql&sslmode=disable",
+            1,
+            Duration::from_secs(1),
+        )
+        .expect("local socket does not require TLS");
+        assert_eq!(
+            config.options.get_socket().map(std::path::PathBuf::as_path),
+            Some(std::path::Path::new("/run/postgresql"))
+        );
+        for url in [
+            "postgres://db.example/piquel?host=/run/postgresql",
+            "postgres://localhost/piquel?host=relative/path",
+            "postgres://localhost/piquel?host=/run/postgresql&host=db.example",
+            "postgres://localhost/piquel?host=db.example&host=/run/postgresql",
+            "postgres://localhost/piquel?host=/run/postgresql&hostaddr=192.0.2.1",
+        ] {
+            assert!(DatabaseConfig::new(url, 1, Duration::from_secs(1)).is_err());
+            assert!(DatabaseConfig::new_development(url, 1, Duration::from_secs(1)).is_err());
+        }
     }
 
     #[test]

@@ -1,4 +1,4 @@
-# Reserved application only: no production services are deployed yet.
+# Provision the production database; application services remain placeholders.
 api_version = "piqueld.dev/v1alpha1"
 kind = "Application"
 
@@ -11,3 +11,40 @@ path = "infra/prod.toml"
 [spec.manifest.repository]
 url = "https://github.com/piquel-fr/piquel-fr.git"
 branch = "main"
+
+[[spec.services]]
+name = "postgres"
+replicas = 1
+# Connections stay on the shared Unix socket; PostgreSQL has no TCP listener.
+arguments = ["postgres", "-c", "listen_addresses="]
+
+[spec.services.source]
+type = "image"
+image = "postgres:18-bookworm"
+
+[spec.services.environment]
+POSTGRES_USER = "piquel"
+POSTGRES_DB = "piquel"
+# Temporary credentials; replace before proper deployment.
+POSTGRES_PASSWORD = "piquel-prod"
+POSTGRES_INITDB_ARGS = "--auth-local=scram-sha-256"
+# Also used by the image's initialization commands over the local socket.
+PGPASSWORD = "piquel-prod"
+
+[[spec.services.mounts]]
+volume = "postgres-data"
+target = "/var/lib/postgresql"
+
+[[spec.services.mounts]]
+volume = "postgres-socket"
+target = "/var/run/postgresql"
+
+[spec.services.healthcheck]
+type = "command"
+command = ["psql", "-h", "/var/run/postgresql", "-U", "piquel", "-d", "piquel", "-tAc", "SELECT 1"]
+
+[[spec.volumes]]
+name = "postgres-data"
+
+[[spec.volumes]]
+name = "postgres-socket"

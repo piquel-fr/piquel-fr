@@ -27,7 +27,7 @@ is `apps/piquel-web/build`. Node is needed to build the frontends, not to run au
 
 | Variable | Meaning |
 | --- | --- |
-| `AUTH_DATABASE_URL` | PostgreSQL URL; production requires `sslmode=verify-full` |
+| `AUTH_DATABASE_URL` | PostgreSQL URL; TCP in production requires `sslmode=verify-full`; local Unix sockets are also supported |
 | `AUTH_PUBLIC_BASE_URL` | Exact auth origin, normally `https://auth.piquel.fr` |
 | `AUTH_SETTINGS_URL` | Exact settings destination; defaults to `https://piquel.fr/settings` |
 | `AUTH_PUBLIC_LISTENER` | Listener address; defaults to `127.0.0.1:8080` |
@@ -40,6 +40,9 @@ is `apps/piquel-web/build`. Node is needed to build the frontends, not to run au
 | `AUTH_DEVELOPMENT_MODE` | Explicit `true` permits HTTP and unencrypted PostgreSQL on loopback only, plus ephemeral signing keys |
 
 Development mode also accepts remote PostgreSQL when using `sslmode=verify-full`.
+For a local Unix socket, use `localhost` as the URL host and an absolute socket
+directory in the `host` query parameter, e.g.
+`postgres://USER:PASSWORD@localhost/piquel?host=/run/postgresql&sslmode=disable`.
 
 Generate a persistent RSA key with OpenSSL, for example
 `openssl genpkey -algorithm RSA -pkeyopt rsa_keygen_bits:3072 -out /absolute/path/key.pem`.

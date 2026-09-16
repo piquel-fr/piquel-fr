@@ -1,7 +1,7 @@
 #!/bin/sh
 set -eu
 
-# Keep database credentials outside the repository and piqueld's saved manifest.
+# Also support file-provisioned credentials when no URL is set in the environment.
 if [ -z "${AUTH_DATABASE_URL:-}" ]; then
     AUTH_DATABASE_URL=$(cat /run/auth-config/database-url)
     export AUTH_DATABASE_URL

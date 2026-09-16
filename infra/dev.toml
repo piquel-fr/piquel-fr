@@ -26,13 +26,18 @@ dockerfile = "infra/auth.Dockerfile"
 context = "."
 
 [spec.services.environment]
-# Replace with the separate development database's connection URL before deploying.
-AUTH_DATABASE_URL = "postgres://USER:PASSWORD@DB_HOST/DEV_DATABASE?sslmode=verify-full"
+# Temporary credentials, matching the postgres service below.
+AUTH_DATABASE_URL = "postgres://piquel:piquel-dev@localhost/piquel?host=/run/postgresql&sslmode=disable"
 AUTH_PUBLIC_LISTENER = "0.0.0.0:8080"
 AUTH_DEVELOPMENT_MODE = "true"
 AUTH_PUBLIC_BASE_URL = "http://localhost:8080"
 AUTH_SETTINGS_URL = "http://localhost:8081/settings"
 AUTH_INVITE_REQUIRED = "false"
+
+[[spec.services.mounts]]
+volume = "postgres-socket"
+target = "/run/postgresql"
+read_only = true
 
 [spec.services.healthcheck]
 type = "http"
@@ -57,3 +62,40 @@ context = "."
 type = "http"
 port = 8080
 path = "/"
+
+[[spec.services]]
+name = "postgres"
+replicas = 1
+# Connections stay on the shared Unix socket; PostgreSQL has no TCP listener.
+arguments = ["postgres", "-c", "listen_addresses="]
+
+[spec.services.source]
+type = "image"
+image = "postgres:18-bookworm"
+
+[spec.services.environment]
+POSTGRES_USER = "piquel"
+POSTGRES_DB = "piquel"
+# Temporary credentials; replace before proper deployment.
+POSTGRES_PASSWORD = "piquel-dev"
+POSTGRES_INITDB_ARGS = "--auth-local=scram-sha-256"
+# Also used by the image's initialization commands over the local socket.
+PGPASSWORD = "piquel-dev"
+
+[[spec.services.mounts]]
+volume = "postgres-data"
+target = "/var/lib/postgresql"
+
+[[spec.services.mounts]]
+volume = "postgres-socket"
+target = "/var/run/postgresql"
+
+[spec.services.healthcheck]
+type = "command"
+command = ["psql", "-h", "/var/run/postgresql", "-U", "piquel", "-d", "piquel", "-tAc", "SELECT 1"]
+
+[[spec.volumes]]
+name = "postgres-data"
+
+[[spec.volumes]]
+name = "postgres-socket"
