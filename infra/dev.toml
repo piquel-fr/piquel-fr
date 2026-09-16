@@ -47,7 +47,7 @@ replicas = 1
 type = "git"
 [spec.services.source.repository]
 url = "/home/piquel/Projects/piquel-fr"
-branch = "main"
+branch = "t3code/add-piqueld-deployment-manifests" # Temp for testing, move to main before merging
 [spec.services.source.build]
 type = "docker"
 dockerfile = "infra/web.Dockerfile"
