@@ -5,7 +5,7 @@ use sqlx::{
     PgPool,
     postgres::{PgConnectOptions, PgPoolOptions, PgSslMode},
 };
-use std::{net::IpAddr, str::FromStr, time::Duration};
+use std::{str::FromStr, time::Duration};
 use url::Url;
 
 /// Validated database connection configuration.
@@ -96,10 +96,7 @@ impl DatabaseConfig {
         {
             return Err(DatabaseConnectionError::InvalidConfiguration);
         }
-        let loopback = host.eq_ignore_ascii_case("localhost")
-            || host
-                .parse::<IpAddr>()
-                .is_ok_and(|address| address.is_loopback());
+        let loopback = piquel_configuration::PublicUrl::has_loopback_host(&parsed);
         // Plaintext TCP needs an explicit `sslmode=disable`, e.g. on a private container
         // network. Weaker TLS modes would look encrypted without verifying the server.
         let plaintext = ssl_mode.as_deref() == Some("disable");
@@ -312,6 +309,10 @@ mod tests {
 
     #[test]
     fn development_requires_verified_tls_outside_loopback() {
+        assert!(
+            DatabaseConfig::new_development("postgres://[::1]/test", 1, Duration::from_secs(1))
+                .is_ok()
+        );
         assert!(
             DatabaseConfig::new_development(
                 "postgres://localhost/piquel",

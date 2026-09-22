@@ -1,6 +1,6 @@
 //! Small validated configuration primitives. Secrets are references, never values.
 
-use std::{env, fmt, fs, net::IpAddr};
+use std::{env, fmt, fs};
 use thiserror::Error;
 use url::Url;
 
@@ -26,7 +26,7 @@ impl PublicUrl {
     ///
     /// # Errors
     ///
-    /// Returns an error when the value is not an absolute HTTPS origin.
+    /// Returns an error when the value is not an absolute HTTPS URL without query or fragment.
     pub fn parse(value: &str) -> Result<Self, ConfigurationError> {
         let url = Url::parse(value).map_err(|_| ConfigurationError::Invalid { name: "URL" })?;
         if url.scheme() != "https"
@@ -46,14 +46,7 @@ impl PublicUrl {
     /// Returns an error unless the URL uses HTTP(S) and a loopback hostname.
     pub fn parse_development(value: &str) -> Result<Self, ConfigurationError> {
         let url = Url::parse(value).map_err(|_| ConfigurationError::Invalid { name: "URL" })?;
-        let host = url
-            .host_str()
-            .ok_or(ConfigurationError::Invalid { name: "URL" })?;
-        let loopback = host.eq_ignore_ascii_case("localhost")
-            || host
-                .parse::<IpAddr>()
-                .is_ok_and(|address| address.is_loopback());
-        if !loopback
+        if !Self::has_loopback_host(&url)
             || !matches!(url.scheme(), "http" | "https")
             || url.query().is_some()
             || url.fragment().is_some()
@@ -61,6 +54,21 @@ impl PublicUrl {
             return Err(ConfigurationError::Invalid { name: "URL" });
         }
         Ok(Self(url))
+    }
+    /// Tests a parsed URL host without reparsing bracketed IPv6 literals.
+    #[must_use]
+    pub fn has_loopback_host(url: &Url) -> bool {
+        match url.host() {
+            Some(url::Host::Domain(host)) => {
+                host.eq_ignore_ascii_case("localhost")
+                    || host
+                        .parse::<std::net::IpAddr>()
+                        .is_ok_and(|ip| ip.is_loopback())
+            }
+            Some(url::Host::Ipv4(ip)) => ip.is_loopback(),
+            Some(url::Host::Ipv6(ip)) => ip.is_loopback(),
+            None => false,
+        }
     }
     /// Returns the parsed URL.
     #[must_use]
@@ -156,6 +164,8 @@ mod tests {
         assert!(PublicUrl::parse("http://auth.piquel.fr").is_err());
         assert!(PublicUrl::parse_development("http://localhost:3000").is_ok());
         assert!(PublicUrl::parse_development("http://example.com").is_err());
+        assert!(PublicUrl::parse_development("http://[::1]:3000").is_ok());
+        assert!(PublicUrl::parse_development("http://[2001:db8::1]").is_err());
     }
 
     #[test]

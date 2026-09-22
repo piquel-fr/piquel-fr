@@ -7,6 +7,7 @@ use tower::ServiceExt;
 struct SecurityFixture {
     router: Router,
     peer: SocketAddr,
+    policy: HttpSecurity,
 }
 impl SecurityFixture {
     async fn database(max_connections: u32, timeout: std::time::Duration) -> Database {
@@ -23,6 +24,8 @@ impl SecurityFixture {
         let database = Self::database(5, std::time::Duration::from_secs(5)).await;
         database.run_migrations().await.expect("migrations");
         let policy = HttpSecurity {
+            trusted_proxy_ips: Arc::new(vec![]),
+            request_timeout: std::time::Duration::from_secs(30),
             database,
             auth_origin: "https://auth.piquel.fr".into(),
             settings_origin: "https://piquel.fr".into(),
@@ -48,10 +51,11 @@ impl SecurityFixture {
         );
         Self {
             router: router.layer(middleware::from_fn_with_state(
-                policy,
+                policy.clone(),
                 HttpSecurity::protect,
             )),
             peer,
+            policy,
         }
     }
     async fn request(
@@ -272,4 +276,158 @@ async fn optional_session_preserves_database_failure_instead_of_reporting_signed
         StatusCode::INTERNAL_SERVER_ERROR
     );
     transaction.rollback().await.expect("release connection");
+}
+
+#[tokio::test]
+#[ignore = "requires TEST_DATABASE_URL"]
+async fn forwarded_addresses_require_an_explicit_trusted_peer() {
+    let mut fixture = SecurityFixture::new().await;
+    let mut request = HttpRequest::builder()
+        .header("x-real-ip", "192.0.2.7")
+        .body(Body::empty())
+        .expect("request");
+    request.extensions_mut().insert(ConnectInfo(fixture.peer));
+    assert_eq!(
+        fixture.policy.client_ip(&request).expect("direct peer"),
+        fixture.peer.ip()
+    );
+    fixture.policy.trusted_proxy_ips = Arc::new(vec![fixture.peer.ip()]);
+    assert_eq!(
+        fixture.policy.client_ip(&request).expect("trusted header"),
+        "192.0.2.7".parse::<IpAddr>().expect("IP")
+    );
+    request
+        .headers_mut()
+        .append("x-real-ip", HeaderValue::from_static("192.0.2.8"));
+    assert!(fixture.policy.client_ip(&request).is_err());
+    request.headers_mut().remove("x-real-ip");
+    assert!(fixture.policy.client_ip(&request).is_err());
+    request.headers_mut().insert(
+        "x-real-ip",
+        HeaderValue::from_static("192.0.2.7, 192.0.2.8"),
+    );
+    assert!(fixture.policy.client_ip(&request).is_err());
+}
+
+#[tokio::test]
+#[ignore = "requires TEST_DATABASE_URL"]
+async fn rate_limit_deadline_includes_a_blocked_database_query() {
+    let mut fixture = SecurityFixture::new().await;
+    let bucket = Sha256::digest(format!("token:{}", fixture.peer.ip()).as_bytes());
+    let mut transaction = fixture.policy.database.begin().await.expect("transaction");
+    transaction
+        .security()
+        .allow_request(&bucket, 120)
+        .await
+        .expect("hold bucket lock");
+    fixture.policy.request_timeout = std::time::Duration::from_millis(100);
+    fixture.router = Router::new()
+        .route("/oauth/token", any(|| async { StatusCode::ACCEPTED }))
+        .layer(middleware::from_fn_with_state(
+            fixture.policy.clone(),
+            HttpSecurity::protect,
+        ));
+    let response = tokio::time::timeout(
+        std::time::Duration::from_secs(2),
+        fixture.request(Method::POST, "/oauth/token", None, false),
+    )
+    .await
+    .expect("whole request is bounded");
+    assert_eq!(response.status(), StatusCode::GATEWAY_TIMEOUT);
+    transaction.rollback().await.expect("release lock");
+    assert_eq!(
+        fixture
+            .request(Method::POST, "/oauth/token", None, false)
+            .await
+            .status(),
+        StatusCode::ACCEPTED
+    );
+}
+
+#[tokio::test]
+#[ignore = "requires TEST_DATABASE_URL"]
+async fn rate_budgets_are_separate_and_unknown_paths_do_not_consume_them() {
+    let fixture = SecurityFixture::new().await;
+    for _ in 0..125 {
+        assert_eq!(
+            fixture
+                .request(Method::GET, "/login/nonexistent", None, false)
+                .await
+                .status(),
+            StatusCode::NOT_FOUND
+        );
+    }
+    let bucket = Sha256::digest(format!("token:{}", fixture.peer.ip()).as_bytes());
+    for _ in 0..120 {
+        fixture
+            .policy
+            .database
+            .security()
+            .allow_request(&bucket, 120)
+            .await
+            .expect("fill token budget");
+    }
+    assert_eq!(
+        fixture
+            .request(Method::POST, "/oauth/token", None, false)
+            .await
+            .status(),
+        StatusCode::TOO_MANY_REQUESTS
+    );
+    assert_eq!(
+        fixture
+            .request(
+                Method::POST,
+                "/webauthn/authenticate/start",
+                Some("https://auth.piquel.fr"),
+                true
+            )
+            .await
+            .status(),
+        StatusCode::ACCEPTED
+    );
+}
+
+#[tokio::test]
+#[ignore = "requires TEST_DATABASE_URL"]
+async fn trusted_proxy_clients_have_independent_budgets() {
+    let mut fixture = SecurityFixture::new().await;
+    fixture.policy.trusted_proxy_ips = Arc::new(vec![fixture.peer.ip()]);
+    let bucket = Sha256::digest(b"token:192.0.2.17");
+    for _ in 0..120 {
+        fixture
+            .policy
+            .database
+            .security()
+            .allow_request(&bucket, 120)
+            .await
+            .expect("fill first client's budget");
+    }
+    let router = Router::new()
+        .route("/oauth/token", any(|| async { StatusCode::ACCEPTED }))
+        .layer(middleware::from_fn_with_state(
+            fixture.policy,
+            HttpSecurity::protect,
+        ));
+    for (client, expected) in [
+        ("192.0.2.17", StatusCode::TOO_MANY_REQUESTS),
+        ("192.0.2.18", StatusCode::ACCEPTED),
+    ] {
+        let mut request = HttpRequest::builder()
+            .method(Method::POST)
+            .uri("/oauth/token")
+            .header("x-real-ip", client)
+            .body(Body::empty())
+            .expect("request");
+        request.extensions_mut().insert(ConnectInfo(fixture.peer));
+        assert_eq!(
+            router
+                .clone()
+                .oneshot(request)
+                .await
+                .expect("response")
+                .status(),
+            expected
+        );
+    }
 }

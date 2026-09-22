@@ -37,6 +37,14 @@ pub(crate) async fn serve(uri: Uri) -> Response {
         header::CONTENT_TYPE,
         content_type.parse().expect("static content type"),
     );
+    if name.starts_with("/_app/immutable/") {
+        response.headers_mut().insert(
+            header::CACHE_CONTROL,
+            "public, max-age=31536000, immutable"
+                .parse()
+                .expect("static cache policy"),
+        );
+    }
     // SvelteKit emits per-page script hashes in a CSP meta tag; frame-ancestors requires a header.
     response.headers_mut().insert(
         header::CONTENT_SECURITY_POLICY,

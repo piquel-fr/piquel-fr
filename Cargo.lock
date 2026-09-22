@@ -1442,6 +1442,7 @@ dependencies = [
  "async-trait",
  "chrono",
  "piquel-auth-protocol",
+ "piquel-configuration",
  "serde_json",
  "sqlx",
  "thiserror 2.0.18",

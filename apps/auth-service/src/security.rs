@@ -2,7 +2,7 @@
 
 use axum::{
     Json,
-    extract::{ConnectInfo, Request, State},
+    extract::{ConnectInfo, MatchedPath, Request, State},
     http::{HeaderMap, HeaderValue, Method, StatusCode, header},
     middleware::Next,
     response::{IntoResponse, Response},
@@ -15,7 +15,11 @@ use piquel_repository::{
 };
 use rand::{RngCore, rngs::OsRng};
 use sha2::{Digest, Sha256};
-use std::{net::SocketAddr, sync::Arc};
+use std::{
+    net::{IpAddr, SocketAddr},
+    sync::Arc,
+    time::Duration as StdDuration,
+};
 
 #[derive(Debug)]
 pub(crate) struct ApiError {
@@ -170,11 +174,60 @@ pub(crate) async fn create_session(
 #[derive(Clone)]
 pub(crate) struct HttpSecurity {
     pub database: Database,
+    pub trusted_proxy_ips: Arc<Vec<IpAddr>>,
+    pub request_timeout: StdDuration,
     pub auth_origin: String,
     pub settings_origin: String,
     pub client_origins: Arc<Vec<String>>,
 }
 impl HttpSecurity {
+    /// A trusted edge must overwrite X-Real-IP with one validated client address.
+    fn client_ip(&self, request: &Request) -> Result<IpAddr, ApiError> {
+        let peer = request
+            .extensions()
+            .get::<ConnectInfo<SocketAddr>>()
+            .ok_or_else(|| ApiError::internal(anyhow::anyhow!("HTTP peer address missing")))?
+            .0
+            .ip();
+        if !self.trusted_proxy_ips.contains(&peer) {
+            return Ok(peer);
+        }
+        let mut forwarded = request.headers().get_all("x-real-ip").iter();
+        let ip = forwarded
+            .next()
+            .and_then(|value| value.to_str().ok())
+            .and_then(|value| value.parse().ok());
+        if forwarded.next().is_some() {
+            return Err(ApiError::bad_request(
+                "Trusted proxy must supply one X-Real-IP address.",
+            ));
+        }
+        ip.ok_or_else(|| ApiError::bad_request("Trusted proxy must supply one X-Real-IP address."))
+    }
+
+    fn rate_bucket(&self, request: &Request) -> Result<Option<Vec<u8>>, ApiError> {
+        let Some(route) = request.extensions().get::<MatchedPath>() else {
+            return Ok(None);
+        };
+        let path = route.as_str();
+        let mutation = !matches!(*request.method(), Method::GET | Method::HEAD);
+        let category = if matches!(
+            path,
+            "/oauth/token" | "/oauth/revoke" | "/oidc/token" | "/oidc/revoke"
+        ) {
+            "token"
+        } else if mutation && (path.starts_with("/account/") || path == "/session/logout") {
+            "account"
+        } else if mutation || path.starts_with("/login/") || path == "/oauth/authorize" {
+            "login"
+        } else {
+            return Ok(None);
+        };
+        Ok(Some(
+            Sha256::digest(format!("{category}:{}", self.client_ip(request)?).as_bytes()).to_vec(),
+        ))
+    }
+
     fn allowed_origin(&self, path: &str, origin: &str) -> bool {
         origin == self.auth_origin
             || (origin == self.settings_origin
@@ -210,60 +263,51 @@ impl HttpSecurity {
         let allowed = origin
             .as_deref()
             .is_some_and(|v| policy.allowed_origin(path, v));
-        let mut response = if request.method() == Method::OPTIONS {
-            if allowed {
-                StatusCode::NO_CONTENT.into_response()
-            } else {
-                ApiError::forbidden("Origin is not allowed.").into_response()
-            }
-        } else {
-            // OAuth back-channel endpoints authenticate the client/token and do not use browser cookies.
-            let logout = path == "/oidc/logout";
-            let protocol = logout
-                || matches!(
-                    path,
-                    "/oauth/token" | "/oauth/revoke" | "/oidc/token" | "/oidc/revoke"
-                );
-            let mutation = !matches!(*request.method(), Method::GET | Method::HEAD);
-            if (origin.is_some() && !allowed && !logout)
-                || (mutation
-                    && !protocol
-                    && (!allowed || request.headers().get("x-piquel-csrf").is_none()))
-            {
-                ApiError::forbidden("This request must originate from an approved Piquel page.")
-                    .into_response()
-            } else {
-                let limited = mutation
-                    || path.starts_with("/federation/")
-                    || path.starts_with("/login/")
-                    || path == "/oauth/authorize";
-                let rate = if limited {
-                    let ip = request
-                        .extensions()
-                        .get::<ConnectInfo<SocketAddr>>()
-                        .map_or_else(|| "local-test".into(), |v| v.0.ip().to_string());
-                    policy
-                        .database
-                        .security()
-                        .allow_request(&Sha256::digest(ip.as_bytes()), 120)
-                        .await
+        let operation = async {
+            let path = request.uri().path();
+            if request.method() == Method::OPTIONS {
+                if allowed {
+                    StatusCode::NO_CONTENT.into_response()
                 } else {
-                    Ok(true)
-                };
-                match rate {
-                    Ok(true) => match tokio::time::timeout(
-                        std::time::Duration::from_secs(30),
-                        next.run(request),
-                    )
-                    .await
-                    {
-                        Ok(response) => response,
-                        Err(_) => (
-                            StatusCode::GATEWAY_TIMEOUT,
-                            Json(serde_json::json!({"error":"Request timed out."})),
-                        )
-                            .into_response(),
-                    },
+                    ApiError::forbidden("Origin is not allowed.").into_response()
+                }
+            } else {
+                // OAuth endpoints enforce their protocol credentials and state;
+                // authorization also accepts cross-site browser form navigation.
+                let logout = path == "/oidc/logout";
+                let protocol = logout
+                    || matches!(
+                        path,
+                        "/oauth/token"
+                            | "/oauth/revoke"
+                            | "/oidc/token"
+                            | "/oidc/revoke"
+                            | "/oauth/authorize"
+                            | "/oidc/authorize"
+                            | "/oauth/userinfo"
+                            | "/oidc/userinfo"
+                    );
+                let mutation = !matches!(*request.method(), Method::GET | Method::HEAD);
+                if (origin.is_some() && !allowed && !protocol)
+                    || (mutation
+                        && !protocol
+                        && (!allowed || request.headers().get("x-piquel-csrf").is_none()))
+                {
+                    ApiError::forbidden("This request must originate from an approved Piquel page.")
+                        .into_response()
+                } else {
+                    let rate = match policy.rate_bucket(&request) {
+                        Ok(Some(bucket)) => policy
+                            .database
+                            .security()
+                            .allow_request(&bucket, 120)
+                            .await
+                            .map_err(ApiError::from),
+                        Ok(None) => Ok(true),
+                        Err(error) => Err(error),
+                    };
+                    match rate {
+                    Ok(true) => next.run(request).await,
                     Ok(false) => (
                         StatusCode::TOO_MANY_REQUESTS,
                         [(header::RETRY_AFTER, "60")],
@@ -272,16 +316,27 @@ impl HttpSecurity {
                         ),
                     )
                         .into_response(),
-                    Err(error) => ApiError::from(error).into_response(),
+                    Err(error) => error.into_response(),
+                }
                 }
             }
+        };
+        let mut response = match tokio::time::timeout(policy.request_timeout, operation).await {
+            Ok(response) => response,
+            Err(_) => (
+                StatusCode::GATEWAY_TIMEOUT,
+                Json(serde_json::json!({"error":"Request timed out."})),
+            )
+                .into_response(),
         };
         Self::decorate(&mut response, origin, allowed);
         response
     }
     fn decorate(response: &mut Response, origin: Option<String>, allowed: bool) {
         let headers = response.headers_mut();
-        headers.insert(header::CACHE_CONTROL, HeaderValue::from_static("no-store"));
+        if !headers.contains_key(header::CACHE_CONTROL) {
+            headers.insert(header::CACHE_CONTROL, HeaderValue::from_static("no-store"));
+        }
         headers.insert(
             header::X_CONTENT_TYPE_OPTIONS,
             HeaderValue::from_static("nosniff"),
