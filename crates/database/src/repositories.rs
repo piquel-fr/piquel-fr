@@ -115,11 +115,12 @@ impl UserRepository<'_> {
     pub async fn find_by_id(&mut self, id: UserId) -> Result<Option<StoredUser>, DatabaseError> {
         fetch_optional!(self, sqlx::query("SELECT id, username, display_name, profile_version, status, created_at, updated_at FROM users WHERE id = $1").bind(id.as_uuid()))?.map(|row| stored_user(&row)).transpose()
     }
+    // Account mutations serialize without blocking foreign-key checks from logout/audit.
     pub async fn find_active_by_id_for_update(
         &mut self,
         id: UserId,
     ) -> Result<Option<StoredUser>, DatabaseError> {
-        fetch_optional!(self, sqlx::query("SELECT id, username, display_name, profile_version, status, created_at, updated_at FROM users WHERE id = $1 AND status='active' FOR UPDATE").bind(id.as_uuid()))?.map(|row| stored_user(&row)).transpose()
+        fetch_optional!(self, sqlx::query("SELECT id, username, display_name, profile_version, status, created_at, updated_at FROM users WHERE id = $1 AND status='active' FOR NO KEY UPDATE").bind(id.as_uuid()))?.map(|row| stored_user(&row)).transpose()
     }
     pub async fn find_active_by_username(
         &mut self,

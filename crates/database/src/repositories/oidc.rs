@@ -257,13 +257,105 @@ impl TokenRepository<'_> {
         Ok(())
     }
 
+    async fn lock_rotation(
+        &mut self,
+        id: TokenId,
+        digest: &[u8],
+        client: &str,
+    ) -> Result<(), RefreshRotationError> {
+        // All state locks must outlive rotation, replacement insertion and commit.
+        if matches!(self.executor, RepositoryExecutor::Pool(_)) {
+            return Err(RefreshRotationError::database(std::io::Error::other(
+                "refresh rotation requires a transaction",
+            )));
+        }
+        // Look up immutable ownership without locks, then acquire locks explicitly.
+        // Account mutations take user -> session -> family; logout takes session ->
+        // family. A joined FOR UPDATE does not guarantee that ordering.
+        let owner = fetch_optional!(
+            self,
+            sqlx::query(
+                "SELECT f.user_id,f.session_id,f.id AS family_id FROM refresh_tokens t
+             JOIN refresh_token_families f ON f.id=t.family_id
+             WHERE t.id=$1 AND t.secret_digest=$2 AND f.client_id=$3"
+            )
+            .bind(id.as_uuid())
+            .bind(digest)
+            .bind(client)
+        )
+        .map_err(RefreshRotationError::database)?
+        .ok_or(RefreshRotationError::Invalid)?;
+        let owner_user: uuid::Uuid = owner
+            .try_get("user_id")
+            .map_err(RefreshRotationError::database)?;
+        let owner_session: uuid::Uuid = owner
+            .try_get("session_id")
+            .map_err(RefreshRotationError::database)?;
+        let owner_family: uuid::Uuid = owner
+            .try_get("family_id")
+            .map_err(RefreshRotationError::database)?;
+        // The user key never changes: NO KEY UPDATE permits concurrent logout
+        // audit/session foreign-key checks while we wait for its session lock.
+        for (query, key) in [
+            (
+                "SELECT id FROM users WHERE id=$1 AND status='active' FOR NO KEY UPDATE",
+                owner_user,
+            ),
+            (
+                "SELECT id FROM sessions WHERE id=$1 AND revoked_at IS NULL AND expires_at>now() FOR UPDATE",
+                owner_session,
+            ),
+            (
+                "SELECT id FROM refresh_token_families WHERE id=$1 AND revoked_at IS NULL FOR UPDATE",
+                owner_family,
+            ),
+        ] {
+            fetch_optional!(self, sqlx::query(query).bind(key))
+                .map_err(RefreshRotationError::database)?
+                .ok_or(RefreshRotationError::Invalid)?;
+        }
+        // Shared policy locks let independent accounts refresh concurrently while
+        // still serializing client-policy updates until token issuance commits.
+        fetch_optional!(
+            self,
+            sqlx::query("SELECT id FROM oidc_clients WHERE id=$1 AND enabled FOR SHARE")
+                .bind(client)
+        )
+        .map_err(RefreshRotationError::database)?
+        .ok_or(RefreshRotationError::Invalid)?;
+        Ok(())
+    }
+
+    /// Requires a transaction retained through replacement-token insertion and commit.
     pub async fn consume_for_rotation(
         &mut self,
         id: TokenId,
         digest: &[u8],
         client: &str,
     ) -> Result<RotatedRefreshToken, RefreshRotationError> {
-        let row = fetch_optional!(self, sqlx::query("SELECT t.family_id,t.consumed_at,f.user_id,f.client_id,f.session_id,f.audience,f.scopes,c.allow_refresh,c.allowed_scopes,c.allowed_audiences FROM refresh_tokens t JOIN refresh_token_families f ON f.id=t.family_id JOIN oidc_clients c ON c.id=f.client_id JOIN sessions s ON s.id=f.session_id JOIN users u ON u.id=f.user_id WHERE t.id=$1 AND t.secret_digest=$2 AND f.client_id=$3 AND t.expires_at>now() AND f.revoked_at IS NULL AND c.enabled AND s.revoked_at IS NULL AND s.expires_at>now() AND u.status='active' FOR UPDATE OF t,f,c,s,u").bind(id.as_uuid()).bind(digest).bind(client)).map_err(RefreshRotationError::database)?.ok_or(RefreshRotationError::Invalid)?;
+        self.lock_rotation(id, digest, client).await?;
+        let row = fetch_optional!(
+            self,
+            sqlx::query(
+                "SELECT t.family_id,t.consumed_at,f.user_id,f.client_id,f.session_id,
+                    f.audience,f.scopes,c.allow_refresh,c.allowed_scopes,c.allowed_audiences
+             FROM refresh_tokens t
+             JOIN refresh_token_families f ON f.id=t.family_id
+             JOIN oidc_clients c ON c.id=f.client_id
+             JOIN sessions s ON s.id=f.session_id
+             JOIN users u ON u.id=f.user_id
+             WHERE t.id=$1 AND t.secret_digest=$2 AND f.client_id=$3
+               AND t.expires_at>now() AND f.revoked_at IS NULL AND c.enabled
+               AND s.user_id=f.user_id AND s.revoked_at IS NULL AND s.expires_at>now()
+               AND u.status='active'
+             FOR UPDATE OF t"
+            )
+            .bind(id.as_uuid())
+            .bind(digest)
+            .bind(client)
+        )
+        .map_err(RefreshRotationError::database)?
+        .ok_or(RefreshRotationError::Invalid)?;
         let family_uuid: uuid::Uuid = row
             .try_get("family_id")
             .map_err(RefreshRotationError::database)?;
@@ -399,3 +491,7 @@ impl TokenRepository<'_> {
         Ok(())
     }
 }
+
+#[cfg(test)]
+#[path = "oidc_tests.rs"]
+mod tests;
