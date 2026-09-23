@@ -683,3 +683,163 @@ async fn callback_email_collision_never_links_and_known_subject_never_bootstraps
         email_owner
     );
 }
+
+#[test]
+fn google_signed_tokens_require_well_typed_trusted_issuer_and_audience() {
+    use jsonwebtoken::{EncodingKey, Header, encode};
+    let rsa = openssl::rsa::Rsa::generate(2048).expect("RSA key");
+    let encoding =
+        EncodingKey::from_rsa_pem(&rsa.private_key_to_pem().expect("PEM")).expect("encoding key");
+    let decoding =
+        DecodingKey::from_rsa_pem(&rsa.public_key_to_pem().expect("PEM")).expect("decoding key");
+    let header = Header::new(Algorithm::RS256);
+    let valid = serde_json::json!({"iss":"https://accounts.google.com","aud":"client","sub":"subject","iat":Utc::now().timestamp(),"exp":Utc::now().timestamp()+300,"nonce":"nonce"});
+    let verify = |claims: &serde_json::Value| {
+        FederationApplication::verify_google_token(
+            &encode(&header, claims, &encoding).expect("signed token"),
+            &decoding,
+            "client",
+            "nonce",
+        )
+    };
+    assert!(verify(&valid).is_ok());
+    for field in ["iss", "aud", "exp", "sub"] {
+        let mut claims = valid.clone();
+        claims.as_object_mut().expect("object").remove(field);
+        assert!(verify(&claims).is_err(), "missing {field}");
+        for value in [
+            serde_json::Value::Null,
+            serde_json::json!(123),
+            serde_json::json!({}),
+        ] {
+            claims[field] = value;
+            // Numeric expiry is valid only while it lies in the future; 123 is expired.
+            assert!(verify(&claims).is_err(), "invalid {field}");
+        }
+    }
+    for audience in [
+        serde_json::json!([]),
+        serde_json::json!(["client", "untrusted"]),
+        serde_json::json!(["client", 123]),
+        serde_json::json!("other"),
+    ] {
+        let mut claims = valid.clone();
+        claims["aud"] = audience;
+        assert!(verify(&claims).is_err());
+    }
+    let mut claims = valid.clone();
+    claims["aud"] = serde_json::json!(["client"]);
+    assert!(verify(&claims).is_ok());
+    claims["iss"] = serde_json::json!("https://untrusted.example");
+    assert!(verify(&claims).is_err());
+    claims = valid;
+    claims["azp"] = serde_json::json!("other");
+    assert!(verify(&claims).is_err());
+}
+
+#[test]
+fn provider_secrets_fail_early_with_context() {
+    let path = std::env::temp_dir().join(format!("piquel-provider-secret-{}", TokenId::new()));
+    let config = || ProviderConfiguration {
+        client_id: "client".into(),
+        client_secret: SecretReference::parse(&format!("file://{}", path.display()))
+            .expect("reference"),
+    };
+    let error = config()
+        .resolve("github")
+        .err()
+        .expect("missing file rejected");
+    assert_eq!(error.to_string(), "invalid github client secret");
+    assert!(std::error::Error::source(&error).is_some());
+    for contents in [b"".as_slice(), &[0xff]] {
+        std::fs::write(&path, contents).expect("secret file");
+        assert!(config().resolve("google").is_err());
+    }
+    std::fs::write(&path, "secret").expect("secret file");
+    let resolved = config().resolve("google").expect("valid secret");
+    std::fs::remove_file(path).expect("remove secret");
+    assert_eq!(resolved.client_secret.expose_secret(), b"secret");
+}
+
+#[tokio::test]
+#[ignore = "requires TEST_DATABASE_URL"]
+async fn failed_provider_preserves_stored_continuation_and_consumes_state() {
+    let mut test = TestApp::new().await;
+    test.app.endpoints.github_token.push_str("/missing");
+    let router = routes(test.app.clone());
+    let destination = "/oauth/authorize/resume?transaction=trusted-transaction";
+    for (callback_query, error) in [
+        ("error=access_denied", "social_cancelled"),
+        ("code=invalid", "social_failed"),
+        ("code=", "social_failed"),
+        ("", "social_failed"),
+    ] {
+        let response = router
+            .clone()
+            .oneshot(request(
+                Method::POST,
+                "/login/github/start",
+                None,
+                &serde_json::json!({"return_to":destination}),
+            ))
+            .await
+            .expect("start");
+        let cookie = response.headers()[header::SET_COOKIE]
+            .to_str()
+            .expect("cookie")
+            .split(';')
+            .next()
+            .expect("pair")
+            .to_owned();
+        let body = json(response).await;
+        let authorization = Url::parse(body["redirect_url"].as_str().expect("URL")).expect("URL");
+        let state = authorization
+            .query_pairs()
+            .find(|(key, _)| key == "state")
+            .expect("state")
+            .1
+            .into_owned();
+        let path = format!(
+            "/login/github/callback?{callback_query}&state={state}&return_to=https://evil.example"
+        );
+        let response = router
+            .clone()
+            .oneshot(request(
+                Method::GET,
+                &path,
+                Some(&cookie),
+                &serde_json::Value::Null,
+            ))
+            .await
+            .expect("cancel");
+        assert_eq!(response.status(), StatusCode::SEE_OTHER);
+        let target = Url::parse(
+            response.headers()[header::LOCATION]
+                .to_str()
+                .expect("location"),
+        )
+        .expect("target");
+        assert_eq!(target.origin(), test.app.base_url.origin());
+        assert!(
+            target
+                .query_pairs()
+                .any(|(key, value)| key == "return_to" && value == destination)
+        );
+        assert!(
+            target
+                .query_pairs()
+                .any(|(key, value)| key == "error" && value == error)
+        );
+        let response = router
+            .clone()
+            .oneshot(request(
+                Method::GET,
+                &path,
+                Some(&cookie),
+                &serde_json::Value::Null,
+            ))
+            .await
+            .expect("replay");
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+    }
+}

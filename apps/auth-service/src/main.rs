@@ -83,7 +83,7 @@ async fn main() -> Result<()> {
             let listener = tokio::net::TcpListener::bind(config.public_listener).await?;
             let router = auth_service::router(&config, database.clone()).await?;
             let cleanup = tokio::spawn(async move {
-                let mut interval = tokio::time::interval(std::time::Duration::from_secs(300));
+                let mut interval = tokio::time::interval(std::time::Duration::from_mins(5));
                 loop {
                     interval.tick().await;
                     if let Err(error) = database.purge_expired_auth_state(1000).await {

@@ -5,7 +5,7 @@ test('passkey lifecycle, protected settings and browser OIDC consent with SSO', 
   const settingsUrl = process.env.E2E_SETTINGS_URL;
   if (!settingsUrl) throw new Error('Set E2E_SETTINGS_URL to the separately served piquel-web frontend, with VITE_AUTH_ORIGIN matching E2E_AUTH_URL.');
   const authUrl = process.env.E2E_AUTH_URL ?? 'http://localhost:3000';
-  const username = `browser_${Date.now().toString(36)}`;
+  const username = `browser-${Date.now().toString(36)}`;
   const cdp = await context.newCDPSession(page);
   await cdp.send('WebAuthn.enable');
   const { authenticatorId } = await cdp.send('WebAuthn.addVirtualAuthenticator', { options: {

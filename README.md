@@ -54,6 +54,8 @@ invalidates issued tokens; overlapping signing-key rotation is not implemented.
 Provider callback URLs are `/login/github/callback` and `/login/google/callback`
 on the auth origin. GitHub uses `read:user user:email`; Google uses `openid email profile`.
 Never put provider secrets or confidential-client secrets in frontend configuration.
+Enabled provider secrets are loaded and validated at startup; restart the service
+after rotating their referenced values.
 
 Apply migrations explicitly, then run the same executable:
 

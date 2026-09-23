@@ -28,6 +28,7 @@
     android = /Android/i.test(navigator.userAgent);
     const query = new URLSearchParams(window.location.search);
     if (query.get('error') === 'social_cancelled') error = 'Social sign-in was cancelled. You can try again or use a passkey.';
+    if (query.get('error') === 'social_failed') error = 'Social sign-in could not be verified. Please try again or use a passkey.';
     transaction = query.get('transaction') ?? '';
     invitation = query.get('invitation') ?? query.get('invite') ?? sessionStorage.getItem('piquel.invitation') ?? '';
     returnTo = query.get('return_to') ?? '';
@@ -111,8 +112,8 @@
       {#if available}
         <form onsubmit={(event) => { event.preventDefault(); void submit(); }}>
           {#if registration || fallback}
-            <label>Username<input bind:value={username} autocomplete="username webauthn" autocapitalize="none" spellcheck="false" pattern={'[a-z0-9_]{3,32}'} minlength="3" maxlength="32" required={registration || fallback} /></label>
-            {#if registration}<small>3–32 lowercase letters, numbers, or underscores.</small>{/if}
+            <label>Username<input bind:value={username} autocomplete="username webauthn" autocapitalize="none" spellcheck="false" pattern={'[a-z0-9_\\-]{3,32}'} minlength="3" maxlength="32" required={registration || fallback} /></label>
+            {#if registration}<small>3–32 lowercase letters, numbers, underscores, or hyphens.</small>{/if}
           {/if}
           {#if registration || mode === 'enroll'}<label>Passkey name<input bind:value={friendlyName} maxlength="80" required autocomplete="off" /></label>{/if}
           {#if android && (registration || mode === 'enroll')}

@@ -15,7 +15,7 @@ use base64::{Engine, engine::general_purpose::URL_SAFE_NO_PAD};
 use chrono::{Duration, Utc};
 use jsonwebtoken::{Algorithm, DecodingKey, Validation, decode, decode_header};
 use piquel_auth_protocol::{AuthenticationMethod, SessionId, TokenId, UserId};
-use piquel_configuration::SecretReference;
+use piquel_configuration::{SecretBytes, SecretReference};
 use piquel_repository::{
     AppendAuditEvent, Database, DatabaseTransaction, InsertExternalIdentity,
     InsertFederationTransaction, PendingFederation,
@@ -70,8 +70,36 @@ impl Provider {
 pub struct ProviderConfiguration {
     /// Client identifier assigned by GitHub or Google.
     pub client_id: String,
-    /// Secret reference resolved only for the provider token exchange.
+    /// Secret reference resolved and validated during startup.
     pub client_secret: SecretReference,
+}
+
+struct ResolvedProvider {
+    client_id: String,
+    client_secret: SecretBytes,
+}
+impl ProviderConfiguration {
+    fn resolve(
+        self,
+        provider: &'static str,
+    ) -> Result<ResolvedProvider, FederationConfigurationError> {
+        let secret = self.client_secret.resolve().map_err(|source| {
+            FederationConfigurationError::Secret {
+                provider,
+                source: source.into(),
+            }
+        })?;
+        std::str::from_utf8(secret.expose_secret()).map_err(|source| {
+            FederationConfigurationError::Secret {
+                provider,
+                source: source.into(),
+            }
+        })?;
+        Ok(ResolvedProvider {
+            client_id: self.client_id,
+            client_secret: secret,
+        })
+    }
 }
 
 #[derive(Clone)]
@@ -94,12 +122,12 @@ impl Default for Endpoints {
     }
 }
 
-/// Social login and explicit linking, backed exclusively by PostgreSQL.
+/// Social login and explicit linking, backed exclusively by `PostgreSQL`.
 #[derive(Clone)]
 pub struct FederationApplication {
     database: Database,
     base_url: Url,
-    providers: Arc<HashMap<&'static str, ProviderConfiguration>>,
+    providers: Arc<HashMap<&'static str, ResolvedProvider>>,
     client: reqwest::Client,
     endpoints: Endpoints,
     settings_url: Option<Url>,
@@ -108,7 +136,7 @@ impl FederationApplication {
     /// Build independently optional providers with bounded, non-redirecting HTTP.
     ///
     /// # Errors
-    /// Rejects invalid origins, client identifiers, or HTTP client configuration.
+    /// Rejects invalid origins, client identifiers, secrets, or HTTP client configuration.
     pub fn new(
         database: Database,
         base_url: &Url,
@@ -123,7 +151,7 @@ impl FederationApplication {
             || !base_url.username().is_empty()
             || base_url.password().is_some()
         {
-            return Err(FederationConfigurationError);
+            return Err(FederationConfigurationError::Invalid);
         }
         let providers: HashMap<_, _> = [("github", github), ("google", google)]
             .into_iter()
@@ -133,8 +161,12 @@ impl FederationApplication {
             .values()
             .any(|config| config.client_id.is_empty() || config.client_id.len() > 512)
         {
-            return Err(FederationConfigurationError);
+            return Err(FederationConfigurationError::Invalid);
         }
+        let providers = providers
+            .into_iter()
+            .map(|(name, config)| config.resolve(name).map(|config| (name, config)))
+            .collect::<Result<_, _>>()?;
         Ok(Self {
             database,
             base_url: base_url.clone(),
@@ -147,18 +179,12 @@ impl FederationApplication {
                 .redirect(reqwest::redirect::Policy::none())
                 .user_agent("piquel-auth")
                 .build()
-                .map_err(|_| FederationConfigurationError)?,
+                .map_err(FederationConfigurationError::Http)?,
         })
     }
     fn secure_or_loopback(url: &Url) -> bool {
         url.scheme() == "https"
-            || (url.scheme() == "http"
-                && url.host_str().is_some_and(|host| {
-                    host == "localhost"
-                        || host
-                            .parse::<std::net::IpAddr>()
-                            .is_ok_and(|ip| ip.is_loopback())
-                }))
+            || (url.scheme() == "http" && piquel_configuration::PublicUrl::has_loopback_host(url))
     }
     /// Allow only the configured settings page as an external continuation.
     ///
@@ -174,7 +200,7 @@ impl FederationApplication {
             || settings_url.password().is_some()
             || settings_url.fragment().is_some()
         {
-            return Err(FederationConfigurationError);
+            return Err(FederationConfigurationError::Invalid);
         }
         self.settings_url = Some(settings_url.clone());
         Ok(self)
@@ -190,14 +216,39 @@ impl FederationApplication {
         }
         validate_return_to(value)
     }
+    fn failed_callback(&self, error: &str, return_to: &str) -> Result<Response, ApiError> {
+        let mut destination = self.base_url.join("login").map_err(ApiError::internal)?;
+        destination
+            .query_pairs_mut()
+            .append_pair("error", error)
+            .append_pair("return_to", return_to);
+        let mut response = Redirect::to(destination.as_str()).into_response();
+        FederationFlow::append(&mut response, FederationFlow::clear_flow())?;
+        Ok(response)
+    }
     fn callback_url(&self, provider: Provider) -> String {
         format!("{}login/{}/callback", self.base_url, provider.name())
     }
 }
 /// A configured callback origin or provider is invalid.
 #[derive(Debug, Error)]
-#[error("invalid federation configuration")]
-pub struct FederationConfigurationError;
+pub enum FederationConfigurationError {
+    /// Invalid callback origin or provider identifier.
+    #[error("invalid federation configuration")]
+    Invalid,
+    /// An enabled provider has an unreadable or invalid UTF-8 secret.
+    #[error("invalid {provider} client secret")]
+    Secret {
+        /// Provider whose credentials could not be loaded.
+        provider: &'static str,
+        /// Underlying reference or encoding failure, without secret contents.
+        #[source]
+        source: anyhow::Error,
+    },
+    /// Failed to initialize the provider HTTP client.
+    #[error("could not initialize federation HTTP client")]
+    Http(#[source] reqwest::Error),
+}
 
 pub(super) fn routes(app: FederationApplication) -> Router {
     Router::new()
@@ -328,19 +379,28 @@ async fn callback(
         )
         .await?;
     if query.error.is_some() {
-        let mut response = Redirect::to("/login?error=social_cancelled").into_response();
-        FederationFlow::append(&mut response, FederationFlow::clear_flow())?;
-        return Ok(response);
+        return app.failed_callback("social_cancelled", &flow.return_to);
     }
-    let code = query
+    let Some(code) = query
         .code
         .filter(|code| !code.is_empty() && code.len() <= 2048)
-        .ok_or_else(|| {
-            ApiError::bad_request("The provider did not return a valid sign-in response.")
-        })?;
-    let identity = app
+    else {
+        return app.failed_callback("social_failed", &flow.return_to);
+    };
+    let identity = match app
         .exchange(provider, &code, &flow.pkce_verifier, &flow.nonce)
-        .await?;
+        .await
+    {
+        Ok(identity) => identity,
+        Err(error) => {
+            tracing::warn!(
+                ?error,
+                provider = provider.name(),
+                "provider sign-in failed"
+            );
+            return app.failed_callback("social_failed", &flow.return_to);
+        }
+    };
     if let Some(user_id) = flow.link_user_id {
         let session = security::session(&app.database, &headers).await?;
         if session.user_id != user_id || Some(session.id) != flow.link_session_id {
@@ -745,8 +805,8 @@ impl FederationApplication {
             .providers
             .get(provider.name())
             .ok_or_else(|| ApiError::bad_request("This sign-in provider is not configured."))?;
-        let secret = config.client_secret.resolve().map_err(ApiError::internal)?;
-        let secret = std::str::from_utf8(secret.expose_secret()).map_err(ApiError::internal)?;
+        let secret = std::str::from_utf8(config.client_secret.expose_secret())
+            .map_err(ApiError::internal)?;
         let callback = self.callback_url(provider);
         let endpoint = match provider {
             Provider::GitHub => &self.endpoints.github_token,
@@ -882,27 +942,7 @@ impl FederationApplication {
         let key = DecodingKey::from_rsa_components(&jwk.n, &jwk.e).map_err(|_| {
             ApiError::bad_request("The provider sign-in could not be verified. Please try again.")
         })?;
-        let mut validation = Validation::new(Algorithm::RS256);
-        validation.set_audience(&[client_id]);
-        validation.set_issuer(&[Provider::Google.issuer(), "accounts.google.com"]);
-        validation.leeway = 30;
-        let claims = decode::<GoogleClaims>(&token.id_token, &key, &validation)
-            .map_err(|_| {
-                ApiError::bad_request(
-                    "The provider sign-in could not be verified. Please try again.",
-                )
-            })?
-            .claims;
-        if claims.nonce != nonce
-            || claims.sub.is_empty()
-            || claims.exp <= Utc::now().timestamp()
-            || claims.iat > Utc::now().timestamp() + 30
-            || claims.azp.as_deref().is_some_and(|azp| azp != client_id)
-        {
-            return Err(ApiError::bad_request(
-                "The provider sign-in could not be verified. Please try again.",
-            ));
-        }
+        let claims = Self::verify_google_token(&token.id_token, &key, client_id, nonce)?;
         let email = claims
             .email
             .filter(|_| claims.email_verified)
@@ -919,6 +959,40 @@ impl FederationApplication {
                 .take(80)
                 .collect(),
         })
+    }
+    fn verify_google_token(
+        token: &str,
+        key: &DecodingKey,
+        client_id: &str,
+        nonce: &str,
+    ) -> Result<GoogleClaims, ApiError> {
+        let mut validation = Validation::new(Algorithm::RS256);
+        validation.set_required_spec_claims(&["iss", "aud", "exp", "sub"]);
+        validation.set_audience(&[client_id]);
+        validation.set_issuer(&[Provider::Google.issuer(), "accounts.google.com"]);
+        validation.leeway = 30;
+        let claims = decode::<GoogleClaims>(token, key, &validation)
+            .map_err(|_| {
+                ApiError::bad_request(
+                    "The provider sign-in could not be verified. Please try again.",
+                )
+            })?
+            .claims;
+        if !matches!(
+            claims.iss.as_str(),
+            "https://accounts.google.com" | "accounts.google.com"
+        ) || !claims.aud.only_contains(client_id)
+            || claims.nonce != nonce
+            || claims.sub.is_empty()
+            || claims.exp <= Utc::now().timestamp()
+            || claims.iat > Utc::now().timestamp() + 30
+            || claims.azp.as_deref().is_some_and(|azp| azp != client_id)
+        {
+            return Err(ApiError::bad_request(
+                "The provider sign-in could not be verified. Please try again.",
+            ));
+        }
+        Ok(claims)
     }
     /// Bound even chunked provider responses before parsing them.
     async fn json<T: DeserializeOwned>(response: reqwest::Response) -> Result<T, ApiError> {
@@ -959,6 +1033,8 @@ struct GoogleToken {
 }
 #[derive(Clone, Deserialize)]
 struct GoogleClaims {
+    iss: String,
+    aud: GoogleAudience,
     sub: String,
     exp: i64,
     iat: i64,
@@ -968,6 +1044,22 @@ struct GoogleClaims {
     #[serde(default)]
     email_verified: bool,
     name: Option<String>,
+}
+#[derive(Clone, Deserialize)]
+#[serde(untagged)]
+enum GoogleAudience {
+    Single(String),
+    Multiple(Vec<String>),
+}
+impl GoogleAudience {
+    fn only_contains(&self, client_id: &str) -> bool {
+        match self {
+            Self::Single(value) => value == client_id,
+            Self::Multiple(values) => {
+                !values.is_empty() && values.iter().all(|value| value == client_id)
+            }
+        }
+    }
 }
 #[derive(Deserialize)]
 struct GoogleJwks {
