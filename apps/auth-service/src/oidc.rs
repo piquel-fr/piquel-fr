@@ -147,12 +147,7 @@ impl OidcApplication {
         secret: &[u8],
         keys: Arc<Rs256KeyProvider>,
     ) -> Result<Self, ()> {
-        let loopback = issuer.host_str().is_some_and(|host| {
-            host == "localhost"
-                || host
-                    .parse::<std::net::IpAddr>()
-                    .is_ok_and(|ip| ip.is_loopback())
-        });
+        let loopback = piquel_configuration::PublicUrl::has_loopback_host(issuer);
         if !loopback
             || !matches!(issuer.scheme(), "http" | "https")
             || issuer.query().is_some()
@@ -184,7 +179,7 @@ pub(super) fn routes(application: OidcApplication) -> Router {
     Router::new()
         .route("/.well-known/openid-configuration", get(discovery))
         .route("/.well-known/jwks.json", get(jwks))
-        .route("/oauth/authorize", get(authorize))
+        .route("/oauth/authorize", get(authorize).post(authorize_post))
         .route("/oauth/authorize/resume", get(resume))
         .route(
             "/oauth/authorize/transaction/{transaction}",
@@ -193,7 +188,7 @@ pub(super) fn routes(application: OidcApplication) -> Router {
         .route("/oauth/authorize/decision", post(authorization_decision))
         .route("/oauth/token", post(token))
         .route("/oauth/revoke", post(revoke))
-        .route("/oidc/userinfo", get(userinfo))
+        .route("/oidc/userinfo", get(userinfo).post(userinfo))
         .route("/oidc/logout", get(logout_start).post(logout))
         .with_state(application)
 }
@@ -206,7 +201,8 @@ async fn discovery(State(app): State<OidcApplication>) -> Json<Value> {
         "userinfo_endpoint":format!("{base}/oidc/userinfo"), "jwks_uri":format!("{base}/.well-known/jwks.json"),
         "end_session_endpoint":format!("{base}/oidc/logout"), "response_types_supported":["code"],
         "grant_types_supported":["authorization_code","refresh_token"], "code_challenge_methods_supported":["S256"],
-        "token_endpoint_auth_methods_supported":["none","client_secret_basic"], "subject_types_supported":["public"], "response_modes_supported":["query"], "claims_supported":["sub","name","preferred_username","email","email_verified","auth_time","amr","sid"], "id_token_signing_alg_values_supported":["RS256"],
+        "token_endpoint_auth_methods_supported":["none","client_secret_basic"], "subject_types_supported":["public"], "response_modes_supported":["query"], "claims_supported":["sub","name","preferred_username","email","email_verified","profile_version","auth_time","amr","sid"], "id_token_signing_alg_values_supported":["RS256"],
+        "request_uri_parameter_supported":false, "request_parameter_supported":false,
         "scopes_supported":["openid","profile","email","offline_access"]
     }))
 }
@@ -214,13 +210,13 @@ async fn jwks(State(app): State<OidcApplication>) -> Json<Value> {
     Json(app.keys.jwks())
 }
 
-#[derive(Deserialize)]
+#[derive(Default, Deserialize)]
+#[serde(default)]
 struct AuthorizeQuery {
     response_type: String,
     client_id: String,
     redirect_uri: String,
     scope: String,
-    #[serde(default)]
     state: String,
     nonce: Option<String>,
     code_challenge: String,
@@ -228,12 +224,99 @@ struct AuthorizeQuery {
     audience: Option<String>,
     prompt: Option<String>,
     max_age: Option<i64>,
+    id_token_hint: Option<String>,
+    request: Option<String>,
+    request_uri: Option<String>,
+    response_mode: Option<String>,
+}
+
+impl AuthorizeQuery {
+    fn requires_login(
+        &self,
+        session: Option<&StoredSession>,
+        force_login: bool,
+        hinted_user_id: Option<UserId>,
+    ) -> bool {
+        force_login
+            || session.is_none()
+            || hinted_user_id
+                .is_some_and(|subject| session.is_some_and(|session| session.user_id != subject))
+            || self.max_age.is_some_and(|age| {
+                age == 0
+                    || session.is_none_or(|session| {
+                        Utc::now()
+                            .signed_duration_since(session.authenticated_at)
+                            .num_seconds()
+                            > age
+                    })
+            })
+    }
+
+    /// Reject unsupported security parameters and bind a verified ID-token hint.
+    fn hinted_user_id(
+        &self,
+        app: &OidcApplication,
+        redirect: &Url,
+    ) -> Result<Option<UserId>, ApiError> {
+        let fail = |error: &str| redirect_error(redirect, error, &self.state);
+        if self.request.is_some() {
+            return Err(fail("request_not_supported"));
+        }
+        if self.request_uri.is_some() {
+            return Err(fail("request_uri_not_supported"));
+        }
+        if self
+            .response_mode
+            .as_deref()
+            .is_some_and(|mode| mode != "query")
+        {
+            return Err(fail("invalid_request"));
+        }
+        self.id_token_hint
+            .as_deref()
+            .map(|hint| {
+                // A previously issued, expired ID token still identifies an account.
+                let claims = app
+                    .keys
+                    .verify_id_token_hint(hint, &app.issuer)
+                    .map_err(|()| fail("invalid_request"))?;
+                if claims["aud"] != self.client_id
+                    || claims.get("exp").and_then(Value::as_i64).is_none()
+                {
+                    return Err(fail("invalid_request"));
+                }
+                claims
+                    .get("sub")
+                    .and_then(Value::as_str)
+                    .and_then(|subject| UserId::from_str(subject).ok())
+                    .ok_or_else(|| fail("invalid_request"))
+            })
+            .transpose()
+    }
 }
 
 async fn authorize(
     State(app): State<OidcApplication>,
     headers: HeaderMap,
-    Query(q): Query<AuthorizeQuery>,
+    query: Result<Query<AuthorizeQuery>, axum::extract::rejection::QueryRejection>,
+) -> Result<Redirect, ApiError> {
+    let Query(query) = query.map_err(|_| ApiError::request())?;
+    authorize_request(app, headers, query).await
+}
+
+async fn authorize_post(
+    State(app): State<OidcApplication>,
+    headers: HeaderMap,
+    form: Result<Form<AuthorizeQuery>, axum::extract::rejection::FormRejection>,
+) -> Result<Redirect, ApiError> {
+    let Form(query) = form.map_err(|_| ApiError::request())?;
+    authorize_request(app, headers, query).await
+}
+
+async fn authorize_request(
+    app: OidcApplication,
+    headers: HeaderMap,
+    q: AuthorizeQuery,
 ) -> Result<Redirect, ApiError> {
     let client = app
         .database
@@ -247,6 +330,7 @@ async fn authorize(
     }
     let redirect = Url::parse(&q.redirect_uri).map_err(|_| ApiError::request())?;
     let fail = |error: &str| redirect_error(&redirect, error, &q.state);
+    let hinted_user_id = q.hinted_user_id(&app, &redirect)?;
     let challenge_valid = URL_SAFE_NO_PAD
         .decode(&q.code_challenge)
         .is_ok_and(|value| value.len() == 32);
@@ -293,17 +377,8 @@ async fn authorize(
         return Err(fail("invalid_request"));
     }
     let session = browser_session(&app.database, &headers).await?;
-    let requires_login = (prompts.contains("login") || prompts.contains("select_account"))
-        || session.is_none()
-        || q.max_age.is_some_and(|age| {
-            age == 0
-                || session.as_ref().is_none_or(|session| {
-                    Utc::now()
-                        .signed_duration_since(session.authenticated_at)
-                        .num_seconds()
-                        > age
-                })
-        });
+    let force_login = prompts.contains("login") || prompts.contains("select_account");
+    let requires_login = q.requires_login(session.as_ref(), force_login, hinted_user_id);
     if prompts.contains("none") && requires_login {
         return Err(fail("login_required"));
     }
@@ -322,8 +397,9 @@ async fn authorize(
             scopes: scopes.into_iter().collect(),
             audience,
             force_consent: prompts.contains("consent"),
-            force_login: (prompts.contains("login") || prompts.contains("select_account")),
+            force_login,
             max_age: q.max_age,
+            hinted_user_id,
             expires_at: Utc::now() + Duration::minutes(10),
         })
         .await
@@ -492,6 +568,11 @@ fn require_authorization_session(
     (!request.force_login || newer_than_request)
         .then_some(())
         .filter(|()| within_max_age)
+        .filter(|()| {
+            request
+                .hinted_user_id
+                .is_none_or(|subject| subject == session.user_id)
+        })
         .ok_or_else(ApiError::unauthorized)
 }
 
@@ -533,8 +614,9 @@ struct TokenResponse {
 async fn token(
     State(app): State<OidcApplication>,
     headers: HeaderMap,
-    Form(mut form): Form<TokenForm>,
+    form: Result<Form<TokenForm>, axum::extract::rejection::FormRejection>,
 ) -> Result<Json<TokenResponse>, ApiError> {
+    let Form(mut form) = form.map_err(|_| ApiError::request())?;
     let client = app
         .authenticate_client(&headers, form.client_id.as_deref())
         .await?;
@@ -787,6 +869,7 @@ impl TokenGrant<'_> {
         if scopes.iter().any(|s| s == "profile") {
             claims["preferred_username"] = json!(user.username);
             claims["name"] = json!(user.display_name);
+            claims["profile_version"] = json!(user.profile_version);
         }
         if scopes.iter().any(|s| s == "email")
             && let Some(email) = email
@@ -835,8 +918,9 @@ struct RevokeForm {
 async fn revoke(
     State(app): State<OidcApplication>,
     headers: HeaderMap,
-    Form(form): Form<RevokeForm>,
+    form: Result<Form<RevokeForm>, axum::extract::rejection::FormRejection>,
 ) -> Result<StatusCode, ApiError> {
+    let Form(form) = form.map_err(|_| ApiError::request())?;
     let client = app
         .authenticate_client(&headers, form.client_id.as_deref())
         .await?;
@@ -914,7 +998,7 @@ impl OidcApplication {
             .as_ref()
             .map(|token| {
                 self.keys
-                    .verify_logout(token, &self.issuer)
+                    .verify_id_token_hint(token, &self.issuer)
                     .map_err(|()| ApiError::request())
             })
             .transpose()?;
@@ -1158,11 +1242,18 @@ impl IntoResponse for ApiError {
             return Redirect::to(&location).into_response();
         }
         let client_error = self.1.get("error") == Some(&json!("invalid_client"));
+        let bearer_error = self.1.get("error") == Some(&json!("invalid_token"));
         let mut response = (self.0, Json(self.1)).into_response();
         if client_error {
             response.headers_mut().insert(
                 header::WWW_AUTHENTICATE,
                 axum::http::HeaderValue::from_static("Basic realm=\"token\""),
+            );
+        }
+        if bearer_error {
+            response.headers_mut().insert(
+                header::WWW_AUTHENTICATE,
+                axum::http::HeaderValue::from_static("Bearer error=\"invalid_token\""),
             );
         }
         response

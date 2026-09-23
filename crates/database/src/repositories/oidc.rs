@@ -80,11 +80,11 @@ impl OidcRepository<'_> {
         input: &InsertAuthorizationRequest,
     ) -> Result<(), DatabaseError> {
         let scopes = serde_json::to_value(&input.scopes).map_err(|_| DatabaseError::Internal)?;
-        execute!(self, sqlx::query("INSERT INTO authorization_requests(id,secret_digest,client_id,redirect_uri,client_state,nonce,pkce_challenge,scopes,audience,force_login,max_age,expires_at,force_consent) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)")
+        execute!(self, sqlx::query("INSERT INTO authorization_requests(id,secret_digest,client_id,redirect_uri,client_state,nonce,pkce_challenge,scopes,audience,force_login,max_age,expires_at,force_consent,hinted_user_id) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)")
             .bind(input.id.as_uuid()).bind(&input.secret_digest).bind(&input.client_id)
             .bind(&input.redirect_uri).bind(&input.client_state).bind(&input.nonce)
             .bind(&input.pkce_challenge).bind(scopes).bind(&input.audience)
-            .bind(input.force_login).bind(input.max_age).bind(input.expires_at).bind(input.force_consent))?;
+            .bind(input.force_login).bind(input.max_age).bind(input.expires_at).bind(input.force_consent).bind(input.hinted_user_id.map(UserId::as_uuid)))?;
         Ok(())
     }
 
@@ -93,7 +93,7 @@ impl OidcRepository<'_> {
         id: TokenId,
         digest: &[u8],
     ) -> Result<Option<StoredAuthorizationRequest>, DatabaseError> {
-        fetch_optional!(self, sqlx::query("SELECT r.id,r.client_id,c.display_name AS client_display_name,r.redirect_uri,r.client_state,r.nonce,r.pkce_challenge,r.scopes,r.audience,r.force_login,r.force_consent,r.max_age,r.created_at FROM authorization_requests r JOIN oidc_clients c ON c.id=r.client_id WHERE r.id=$1 AND r.secret_digest=$2 AND r.consumed_at IS NULL AND r.expires_at>now() AND c.enabled").bind(id.as_uuid()).bind(digest))?.map(|row| stored_authorization_request(&row)).transpose()
+        fetch_optional!(self, sqlx::query("SELECT r.id,r.client_id,c.display_name AS client_display_name,r.redirect_uri,r.client_state,r.nonce,r.pkce_challenge,r.scopes,r.audience,r.force_login,r.force_consent,r.max_age,r.hinted_user_id,r.created_at FROM authorization_requests r JOIN oidc_clients c ON c.id=r.client_id WHERE r.id=$1 AND r.secret_digest=$2 AND r.consumed_at IS NULL AND r.expires_at>now() AND c.enabled").bind(id.as_uuid()).bind(digest))?.map(|row| stored_authorization_request(&row)).transpose()
     }
 
     pub async fn consume_authorization_request(
@@ -101,7 +101,7 @@ impl OidcRepository<'_> {
         id: TokenId,
         digest: &[u8],
     ) -> Result<StoredAuthorizationRequest, DatabaseError> {
-        let row = fetch_optional!(self, sqlx::query("UPDATE authorization_requests r SET consumed_at=now() FROM oidc_clients c WHERE r.id=$1 AND r.secret_digest=$2 AND r.consumed_at IS NULL AND r.expires_at>now() AND c.id=r.client_id AND c.enabled AND c.allowed_scopes @> r.scopes AND c.allowed_audiences ? r.audience AND EXISTS(SELECT 1 FROM oidc_redirect_uris d WHERE d.client_id=c.id AND d.kind='authorization' AND d.uri=r.redirect_uri) RETURNING r.id,r.client_id,c.display_name AS client_display_name,r.redirect_uri,r.client_state,r.nonce,r.pkce_challenge,r.scopes,r.audience,r.force_login,r.force_consent,r.max_age,r.created_at").bind(id.as_uuid()).bind(digest))?.ok_or(DatabaseError::NotFound)?;
+        let row = fetch_optional!(self, sqlx::query("UPDATE authorization_requests r SET consumed_at=now() FROM oidc_clients c WHERE r.id=$1 AND r.secret_digest=$2 AND r.consumed_at IS NULL AND r.expires_at>now() AND c.id=r.client_id AND c.enabled AND c.allowed_scopes @> r.scopes AND c.allowed_audiences ? r.audience AND EXISTS(SELECT 1 FROM oidc_redirect_uris d WHERE d.client_id=c.id AND d.kind='authorization' AND d.uri=r.redirect_uri) RETURNING r.id,r.client_id,c.display_name AS client_display_name,r.redirect_uri,r.client_state,r.nonce,r.pkce_challenge,r.scopes,r.audience,r.force_login,r.force_consent,r.max_age,r.hinted_user_id,r.created_at").bind(id.as_uuid()).bind(digest))?.ok_or(DatabaseError::NotFound)?;
         stored_authorization_request(&row)
     }
 
@@ -228,6 +228,12 @@ fn stored_authorization_request(
             .map_err(|_| DatabaseError::InvalidStoredData)?,
         force_login: row
             .try_get("force_login")
+            .map_err(|_| DatabaseError::InvalidStoredData)?,
+        hinted_user_id: row
+            .try_get::<Option<uuid::Uuid>, _>("hinted_user_id")
+            .map_err(|_| DatabaseError::InvalidStoredData)?
+            .map(UserId::from_uuid)
+            .transpose()
             .map_err(|_| DatabaseError::InvalidStoredData)?,
         max_age: row
             .try_get("max_age")

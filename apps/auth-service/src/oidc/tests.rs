@@ -133,6 +133,15 @@ impl Flow {
             .expect("dispatch OIDC HTTP request")
     }
     async fn authorize(&self, scope: &str, prompt: Option<&str>) -> Response {
+        self.authorize_with(Method::GET, scope, prompt, &[]).await
+    }
+    async fn authorize_with(
+        &self,
+        method: Method,
+        scope: &str,
+        prompt: Option<&str>,
+        extra: &[(&str, &str)],
+    ) -> Response {
         let mut url = Url::parse("https://auth.example.com/oauth/authorize")
             .expect("parse authorization endpoint URL");
         url.query_pairs_mut().extend_pairs([
@@ -151,18 +160,27 @@ impl Flow {
         if let Some(prompt) = prompt {
             url.query_pairs_mut().append_pair("prompt", prompt);
         }
-        self.request(
-            Method::GET,
-            &format!(
-                "{}?{}",
-                url.path(),
-                url.query()
-                    .expect("authorization URL contains query parameters")
-            ),
-            &[],
-            None,
-        )
-        .await
+        url.query_pairs_mut().extend_pairs(extra.iter().copied());
+        if method == Method::POST {
+            let owned: Vec<_> = url.query_pairs().into_owned().collect();
+            let fields: Vec<_> = owned
+                .iter()
+                .map(|(key, value)| (key.as_str(), value.as_str()))
+                .collect();
+            self.request(method, url.path(), &fields, None).await
+        } else {
+            self.request(
+                method,
+                &format!(
+                    "{}?{}",
+                    url.path(),
+                    url.query().expect("authorization query")
+                ),
+                &[],
+                None,
+            )
+            .await
+        }
     }
     fn verifier() -> &'static str {
         "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
@@ -468,4 +486,158 @@ async fn policy_reduction_blocks_outstanding_codes_and_refresh() {
         )
         .await;
     assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+}
+
+#[tokio::test]
+#[ignore = "requires TEST_DATABASE_URL"]
+async fn authorization_hints_bind_initial_resumed_and_consent_requests() {
+    let flow = Flow::new(false, true).await;
+    let now = Utc::now().timestamp();
+    let claims = json!({"iss":flow.app.issuer,"sub":flow.user_id,"aud":flow.client.id,"iat":now-600,"exp":now-300});
+    let hint = flow
+        .app
+        .keys
+        .sign("JWT", &claims)
+        .expect("sign expired hint");
+    let response = flow
+        .authorize_with(
+            Method::GET,
+            "openid",
+            Some("none"),
+            &[("id_token_hint", &hint)],
+        )
+        .await;
+    assert!(!Flow::parameter(&Flow::location(&response), "code").is_empty());
+    for (field, value) in [
+        ("iss", json!("https://foreign.example")),
+        ("aud", json!("other-client")),
+    ] {
+        let mut invalid = claims.clone();
+        invalid[field] = value;
+        let hint = flow
+            .app
+            .keys
+            .sign("JWT", &invalid)
+            .expect("sign invalid hint");
+        let response = flow
+            .authorize_with(
+                Method::GET,
+                "openid",
+                Some("none"),
+                &[("id_token_hint", &hint)],
+            )
+            .await;
+        assert_eq!(
+            Flow::parameter(&Flow::location(&response), "error"),
+            "invalid_request"
+        );
+    }
+    let mut other = claims;
+    other["sub"] = json!(UserId::new());
+    let hint = flow
+        .app
+        .keys
+        .sign("JWT", &other)
+        .expect("sign other account hint");
+    let response = flow
+        .authorize_with(
+            Method::GET,
+            "openid",
+            Some("none"),
+            &[("id_token_hint", &hint)],
+        )
+        .await;
+    assert_eq!(
+        Flow::parameter(&Flow::location(&response), "error"),
+        "login_required"
+    );
+    let response = flow
+        .authorize_with(Method::GET, "openid", None, &[("id_token_hint", &hint)])
+        .await;
+    let location = Flow::location(&response);
+    assert_eq!(location.path(), "/login");
+    let transaction = Flow::parameter(&location, "transaction");
+    let response = flow
+        .request(
+            Method::GET,
+            &format!("/oauth/authorize/resume?transaction={transaction}"),
+            &[],
+            None,
+        )
+        .await;
+    assert_eq!(Flow::location(&response).path(), "/login");
+    let response = flow
+        .request(
+            Method::POST,
+            "/oauth/authorize/decision",
+            &[("transaction", &transaction), ("decision", "approve")],
+            None,
+        )
+        .await;
+    assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+}
+
+#[tokio::test]
+#[ignore = "requires TEST_DATABASE_URL"]
+async fn post_protocol_endpoints_and_error_contracts() {
+    let flow = Flow::new(false, true).await;
+    for (name, value, expected) in [
+        ("id_token_hint", "invalid", "invalid_request"),
+        ("request", "ignored.jwt", "request_not_supported"),
+        (
+            "request_uri",
+            "https://example.com/request.jwt",
+            "request_uri_not_supported",
+        ),
+        ("response_mode", "form_post", "invalid_request"),
+    ] {
+        let response = flow
+            .authorize_with(Method::GET, "openid", Some("none"), &[(name, value)])
+            .await;
+        assert_eq!(
+            Flow::parameter(&Flow::location(&response), "error"),
+            expected
+        );
+    }
+    let discovery = Flow::json(
+        flow.request(Method::GET, "/.well-known/openid-configuration", &[], None)
+            .await,
+    )
+    .await;
+    assert_eq!(discovery["request_parameter_supported"], false);
+    assert_eq!(discovery["request_uri_parameter_supported"], false);
+    let response = flow
+        .authorize_with(Method::POST, "openid profile", None, &[])
+        .await;
+    let code = Flow::parameter(&Flow::location(&response), "code");
+    let tokens = Flow::json(flow.exchange(&code, Flow::verifier(), None).await).await;
+    let bearer = format!(
+        "Bearer {}",
+        tokens["access_token"].as_str().expect("access token")
+    );
+    let response = flow
+        .request(Method::POST, "/oidc/userinfo", &[], Some(&bearer))
+        .await;
+    assert_eq!(response.status(), StatusCode::OK);
+    let userinfo = Flow::json(response).await;
+    assert_eq!(userinfo["sub"], json!(flow.user_id));
+    assert!(userinfo["profile_version"].is_number());
+    let response = flow
+        .request(Method::POST, "/oidc/userinfo", &[], None)
+        .await;
+    assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+    assert_eq!(
+        response.headers()[header::WWW_AUTHENTICATE],
+        "Bearer error=\"invalid_token\""
+    );
+    let response = flow
+        .request(
+            Method::POST,
+            "/oauth/token",
+            &[("client_id", &flow.client.id)],
+            None,
+        )
+        .await;
+    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+    assert_eq!(Flow::json(response).await["error"], "invalid_request");
 }

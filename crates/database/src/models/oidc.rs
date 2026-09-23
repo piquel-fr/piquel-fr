@@ -28,6 +28,7 @@ pub struct InsertAuthorizationRequest {
     pub force_login: bool,
     pub force_consent: bool,
     pub max_age: Option<i64>,
+    pub hinted_user_id: Option<UserId>,
     pub expires_at: DateTime<Utc>,
 }
 
@@ -45,6 +46,7 @@ pub struct StoredAuthorizationRequest {
     pub force_login: bool,
     pub force_consent: bool,
     pub max_age: Option<i64>,
+    pub hinted_user_id: Option<UserId>,
     pub created_at: DateTime<Utc>,
 }
 

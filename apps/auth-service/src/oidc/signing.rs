@@ -113,7 +113,7 @@ impl Rs256KeyProvider {
         }
         Ok(claims)
     }
-    pub(super) fn verify_logout(&self, token: &str, issuer: &str) -> Result<Value, ()> {
+    pub(super) fn verify_id_token_hint(&self, token: &str, issuer: &str) -> Result<Value, ()> {
         self.verified(token, "JWT", issuer)
     }
 }
@@ -131,8 +131,14 @@ mod tests {
             .sign("JWT", &claims)
             .expect("sign expired ID token hint");
         assert!(key.verify(&expired, "JWT", "https://auth.example").is_err());
-        assert!(key.verify_logout(&expired, "https://auth.example").is_ok());
-        assert!(key.verify_logout(&expired, "https://evil.example").is_err());
+        assert!(
+            key.verify_id_token_hint(&expired, "https://auth.example")
+                .is_ok()
+        );
+        assert!(
+            key.verify_id_token_hint(&expired, "https://evil.example")
+                .is_err()
+        );
         let mut valid = claims;
         valid["exp"] = json!(now + 300);
         let token = key.sign("at+jwt", &valid).expect("sign access token");

@@ -38,6 +38,7 @@ impl SecurityFixture {
             "/.well-known/openid-configuration",
             "/.well-known/jwks.json",
             "/oauth/token",
+            "/oauth/authorize",
             "/oauth/userinfo",
             "/oidc/token",
             "/oidc/userinfo",
@@ -180,6 +181,7 @@ async fn router_enforces_exact_browser_origins_csrf_and_public_client_cors_bound
         (Method::POST, "/oidc/token"),
         (Method::GET, "/oauth/userinfo"),
         (Method::GET, "/oidc/userinfo"),
+        (Method::POST, "/oidc/userinfo"),
     ] {
         let response = fixture
             .request(method, path, Some("https://external.example"), false)
@@ -187,6 +189,22 @@ async fn router_enforces_exact_browser_origins_csrf_and_public_client_cors_bound
         assert_eq!(response.status(), StatusCode::ACCEPTED, "{path}");
         SecurityFixture::exact_cors(&response, "https://external.example");
     }
+    // A browser form navigation from an RP does not use the settings CSRF header.
+    let response = fixture
+        .request(
+            Method::POST,
+            "/oauth/authorize",
+            Some("https://external.example"),
+            false,
+        )
+        .await;
+    assert_eq!(response.status(), StatusCode::ACCEPTED);
+    assert!(
+        response
+            .headers()
+            .get(header::ACCESS_CONTROL_ALLOW_ORIGIN)
+            .is_none()
+    );
     for method in [Method::GET, Method::POST, Method::OPTIONS] {
         let response = fixture
             .request(
