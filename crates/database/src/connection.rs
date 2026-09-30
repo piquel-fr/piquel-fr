@@ -54,6 +54,13 @@ impl DatabaseConfig {
         })
     }
 
+    /// Sets the password separately from the URL, e.g. from a mounted secret file.
+    #[must_use]
+    pub fn with_password(mut self, password: &str) -> Self {
+        self.options = self.options.password(password);
+        self
+    }
+
     fn validate(
         url: &str,
         max_connections: u32,
