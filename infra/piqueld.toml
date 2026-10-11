@@ -83,7 +83,8 @@ type = "docker"
 dockerfile = "infra/auth.Dockerfile"
 
 [spec.services.environment]
-AUTH_DATABASE_URL = "postgres://piquel@localhost:5433/piquel?host=/run/postgresql&sslmode=disable"
+# Plaintext stays on the application's private network, which ingress cannot reach.
+AUTH_DATABASE_URL = "postgres://piquel@postgres:5432/piquel?sslmode=disable"
 AUTH_DATABASE_PASSWORD = "file:///run/secrets/database-password"
 AUTH_KEY_PROVIDER = "file:///run/secrets/signing-key"
 AUTH_PUBLIC_LISTENER = "0.0.0.0:8080"
@@ -98,11 +99,6 @@ target = "/run/secrets/database-password"
 [[spec.services.secrets]]
 name = "signing-key"
 target = "/run/secrets/signing-key"
-
-[[spec.services.mounts]]
-volume = "postgres-socket"
-target = "/run/postgresql"
-read_only = true
 
 [spec.services.healthcheck]
 type = "http"
@@ -129,12 +125,8 @@ type = "http"
 port = 8080
 path = "/"
 
-# Auth refuses plaintext TCP, so PostgreSQL has no TCP listener and shares its
-# Unix socket instead. The server initializing a new volume always listens on
-# port 5432, so the real one uses 5433 and is not ready until it starts.
 [[spec.services]]
 name = "postgres"
-arguments = ["postgres", "-c", "listen_addresses=", "-p", "5433"]
 
 [spec.services.source]
 type = "image"
@@ -144,7 +136,6 @@ image = "postgres:18-bookworm"
 POSTGRES_USER = "piquel"
 POSTGRES_DB = "piquel"
 POSTGRES_PASSWORD_FILE = "/run/secrets/database-password"
-POSTGRES_INITDB_ARGS = "--auth-local=scram-sha-256"
 
 [[spec.services.secrets]]
 name = "database-password"
@@ -154,16 +145,11 @@ target = "/run/secrets/database-password"
 volume = "postgres-data"
 target = "/var/lib/postgresql"
 
-[[spec.services.mounts]]
-volume = "postgres-socket"
-target = "/var/run/postgresql"
-
+# Over TCP: the server initializing a new volume listens only on its socket, so
+# the migration job waits for the real one.
 [spec.services.healthcheck]
 type = "command"
-command = ["pg_isready", "-h", "/var/run/postgresql", "-p", "5433", "-U", "piquel", "-d", "piquel"]
+command = ["pg_isready", "-h", "127.0.0.1", "-U", "piquel", "-d", "piquel"]
 
 [[spec.volumes]]
 name = "postgres-data"
-
-[[spec.volumes]]
-name = "postgres-socket"

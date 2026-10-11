@@ -78,11 +78,10 @@ daemon's `[previews]` limits bound their CPU, memory and replicas.
 
 ## Database
 
-Each environment and preview has its own PostgreSQL 18 volume. Auth refuses
-plaintext TCP, so PostgreSQL has no TCP listener and shares its Unix socket with
-auth through the `postgres-socket` volume; connections require SCRAM password
-authentication. The server listens on port 5433: the temporary server that
-initializes a new volume always uses 5432, so readiness never reports it.
+Each environment and preview has its own PostgreSQL 18 volume. Auth connects
+over TCP to `postgres:5432` on the application's private network, which ingress
+and other environments cannot reach, so the URL opts into plaintext with
+`sslmode=disable`; connections require SCRAM password authentication.
 
 The `migrate` job applies migrations before every rollout, once PostgreSQL is
 healthy. Environment volumes survive deletion. PostgreSQL major upgrades require

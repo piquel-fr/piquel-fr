@@ -26,7 +26,8 @@ impl std::fmt::Debug for DatabaseConfig {
     }
 }
 impl DatabaseConfig {
-    /// Creates production configuration using verified TLS or an explicit local Unix socket.
+    /// Creates production configuration using verified TLS, an explicit local Unix socket,
+    /// or plaintext TCP explicitly requested with `sslmode=disable`.
     pub fn new(
         url: &str,
         max_connections: u32,
@@ -40,7 +41,7 @@ impl DatabaseConfig {
         })
     }
 
-    /// Allows unencrypted loopback development databases; remote hosts require verified TLS.
+    /// Also allows unencrypted loopback databases without `sslmode`.
     pub fn new_development(
         url: &str,
         max_connections: u32,
@@ -99,7 +100,11 @@ impl DatabaseConfig {
             || host
                 .parse::<IpAddr>()
                 .is_ok_and(|address| address.is_loopback());
-        let require_verified_tls = socket_path.is_none() && (!development || !loopback);
+        // Plaintext TCP needs an explicit `sslmode=disable`, e.g. on a private container
+        // network. Weaker TLS modes would look encrypted without verifying the server.
+        let plaintext = ssl_mode.as_deref() == Some("disable");
+        let require_verified_tls =
+            socket_path.is_none() && !plaintext && (!development || !loopback);
         if require_verified_tls && ssl_mode.as_deref() != Some("verify-full") {
             return Err(DatabaseConnectionError::InvalidConfiguration);
         }
@@ -240,6 +245,28 @@ mod tests {
             )
             .is_ok()
         );
+        for mode in ["prefer", "require", "verify-ca"] {
+            assert!(
+                DatabaseConfig::new(
+                    &format!("postgres://db.example/piquel?sslmode={mode}"),
+                    1,
+                    Duration::from_secs(1)
+                )
+                .is_err(),
+                "accepted unverified TLS mode {mode}"
+            );
+        }
+    }
+
+    #[test]
+    fn plaintext_tcp_requires_explicit_opt_in() {
+        let config = DatabaseConfig::new(
+            "postgres://postgres:5432/piquel?sslmode=disable",
+            1,
+            Duration::from_secs(1),
+        )
+        .expect("explicit plaintext is allowed");
+        assert!(matches!(config.options.get_ssl_mode(), PgSslMode::Disable));
     }
 
     #[test]
@@ -309,7 +336,7 @@ mod tests {
             )
             .is_err()
         );
-        for mode in ["disable", "prefer", "require", "verify-ca"] {
+        for mode in ["prefer", "require", "verify-ca"] {
             assert!(
                 DatabaseConfig::new_development(
                     &format!("postgres://db.example/piquel?sslmode={mode}"),

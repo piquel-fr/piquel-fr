@@ -27,7 +27,7 @@ is `apps/piquel-web/build`. Node is needed to build the frontends, not to run au
 
 | Variable | Meaning |
 | --- | --- |
-| `AUTH_DATABASE_URL` | PostgreSQL URL; TCP in production requires `sslmode=verify-full`; local Unix sockets are also supported |
+| `AUTH_DATABASE_URL` | PostgreSQL URL; TCP requires `sslmode=verify-full`, or an explicit `sslmode=disable` on a trusted private network; local Unix sockets are also supported |
 | `AUTH_DATABASE_PASSWORD` | Optional env/file reference for the database password, when omitted from the URL |
 | `AUTH_PUBLIC_BASE_URL` | Exact auth origin, normally `https://auth.piquel.fr` |
 | `AUTH_SETTINGS_URL` | Exact settings destination; defaults to `https://piquel.fr/settings` |
@@ -38,7 +38,7 @@ is `apps/piquel-web/build`. Node is needed to build the frontends, not to run au
 | `AUTH_INVITE_REQUIRED` | `true` by default; set `false` to allow public registration |
 | `AUTH_GITHUB_CLIENT_ID`, `AUTH_GITHUB_CLIENT_SECRET` | Both required to enable GitHub; secret is an env/file reference |
 | `AUTH_GOOGLE_CLIENT_ID`, `AUTH_GOOGLE_CLIENT_SECRET` | Both required to enable Google; secret is an env/file reference |
-| `AUTH_DEVELOPMENT_MODE` | Explicit `true` permits HTTP and unencrypted PostgreSQL on loopback only, plus ephemeral signing keys |
+| `AUTH_DEVELOPMENT_MODE` | Explicit `true` permits HTTP and PostgreSQL on loopback without `sslmode`, plus ephemeral signing keys |
 
 Development mode also accepts remote PostgreSQL when using `sslmode=verify-full`.
 For a local Unix socket, use `localhost` as the URL host and an absolute socket
