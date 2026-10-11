@@ -1,75 +1,113 @@
 # Piqueld deployments
 
-Both environments run on the server's piqueld daemon as repository-backed
-applications. They share one layout: auth, the web settings frontend, and
-PostgreSQL, exposed through piqueld's managed HTTPS ingress.
+`infra/piqueld.toml` deploys piquel.fr as one repository-backed piqueld
+application, `piquel-fr`: auth, the web settings frontend, and PostgreSQL. Its
+environments and previews share the manifest; variables give each its own
+hostnames.
 
-| Application | Manifest | Source | Auth | Settings |
+| Deployment | Source | Web | Auth | Reachable from |
 | --- | --- | --- | --- | --- |
-| `piquel-fr-dev` | `infra/dev.toml` | local checkout | `auth.dev.piquel.fr` | `dev.piquel.fr` |
-| `piquel-fr` | `infra/prod.toml` | GitHub `main` | `auth.piquel.fr` | `piquel.fr` |
+| `production` | promoted from staging | `piquel.fr` | `auth.piquel.fr` | internet |
+| `staging` | `main`, on every push | `staging.piquel.fr` | `auth.staging.piquel.fr` | tailnet |
+| previews | a branch or a local worktree | `<slug>.dev.piquel.fr` | `auth-<slug>.dev.piquel.fr` | tailnet |
 
-## Server prerequisites
+Production never builds. It only receives releases that staging built and ran:
+the same images, never rebuilt. Promotion is refused unless staging's current
+deployment succeeded and every service runs healthy. Build inputs therefore
+contain nothing environment-specific: per-environment values are runtime
+`environment` entries.
 
-- Git and the Docker CLI in piqueld's `PATH`. Dev reads
-  `/home/piquel/Projects/piquel-fr`; production clones this repository from GitHub.
+## Daemon requirements
+
+- piqueld with in-container HTTP probes and local previews (`main` after #219).
+- Managed ingress with the private apps node, and a DNS provider for
+  `piquel.fr`: private routes get DNS-01 certificates (`*.dev.piquel.fr` covers
+  every preview).
+- DNS records for every hostname: `manage_records = true` on that provider, or by
+  hand: public hosts to the server, and `staging.piquel.fr`,
+  `*.staging.piquel.fr` and `*.dev.piquel.fr` to the apps node's tailnet
+  addresses.
+- `ingress.webhook_hostname` for deploy-on-push.
+- Read access to this private repository for the daemon's Git.
 - `reconciliation.prepare_timeout_seconds = 1200` for cold Rust builds.
-- `[ingress] enabled = true`, ports 80/443 reachable, and A records for all four
-  hostnames. Piqueld's own `auth.public_url` must not be one of these hostnames or
-  a parent domain: piqueld reserves it and its subdomains.
-- Node wherever `just init` runs; it generates the secrets.
 
-## Deploying
+## Setup
+
+Once, after this manifest is on `main`:
 
 ```sh
-just dev-init                          # once: register dev, generate secrets, deploy
-just dev                               # deploy the configured local branch again
-just init piquel-fr infra/prod.toml    # once, after merging to main
-piquelctl app deploy piquel-fr --yes   # deploy main again
+piquelctl app apply --file infra/piqueld.toml --yes
+piquelctl env create piquel-fr staging --branch main --yes
+piquelctl env source piquel-fr production --promote-from staging --yes
+piquelctl env sync piquel-fr staging on
+piquelctl app repository webhook rotate piquel-fr   # prints the secret once
+piquelctl app repository webhook show piquel-fr     # prints the payload URL
 ```
 
-`init` applies the manifest, stores fresh `database-password` and `signing-key`
-secrets, and deploys. Run it only once per application: a new password does not
-change the one stored in an existing database volume.
+Add a GitHub webhook to this repository with that URL and secret,
+`application/json`, and the `push` event. Then deploy staging once; it follows
+`main` from then on:
 
-Dev currently selects `t3code/add-piqueld-deployment-manifests` for testing; change
-all three branch settings in `dev.toml` to `main` before merging. Commit changes to
-the configured branch; no push is needed. Uncommitted edits and other branches are
-excluded. Piqueld resolves the manifest and service revisions independently, so
-avoid moving the branch during deployment.
+```sh
+piquelctl --timeout 30m env deploy piquel-fr staging --yes
+```
+
+## Releasing
+
+```sh
+piquelctl env promote piquel-fr production --plan   # review the release and changes
+piquelctl env promote piquel-fr production --yes
+```
+
+`--deployment ID` refuses to promote anything but the staging deployment you
+tested. `piquelctl app releases piquel-fr` lists earlier releases; `env promote
+--release ID` rolls back to one.
+
+## Previews
+
+`just preview` deploys the current worktree, uncommitted files included, and
+prints its URLs. `just preview-delete` removes it with its database. Pushed
+branches can also be previewed with `piquelctl preview create piquel-fr --branch
+NAME`, and redeploy on push. `.agents/skills/preview` and
+`.agents/skills/test-change` describe the workflow for agents. Agents need a
+token with `previews:deploy` and `previews:delete` on `piquel-fr`, which cannot
+touch staging or production.
+
+Preview databases start empty and registration needs no invitation. The
+daemon's `[previews]` limits bound their CPU, memory and replicas.
 
 ## Database
 
-PostgreSQL 18 keeps its data in the `postgres-data` volume and shares its Unix
-socket with auth through `postgres-socket`. It has no TCP listener. Dev and
-production use different Docker volumes even though their logical names match.
-Named volumes survive application deletion. PostgreSQL major upgrades require an
-explicit data migration.
+Each environment and preview has its own PostgreSQL 18 volume. Auth refuses
+plaintext TCP, so PostgreSQL has no TCP listener and shares its Unix socket with
+auth through the `postgres-socket` volume; connections require SCRAM password
+authentication. The server listens on port 5433: the temporary server that
+initializes a new volume always uses 5432, so readiness never reports it.
 
-Both services read the `database-password` secret: PostgreSQL through
-`POSTGRES_PASSWORD_FILE` when initializing an empty volume, and auth through
-`AUTH_DATABASE_PASSWORD`. Socket connections require SCRAM password authentication.
-Auth applies migrations before serving. Piqueld starts services independently, so
-auth may restart while PostgreSQL initializes on the first deploy.
+The `migrate` job applies migrations before every rollout, once PostgreSQL is
+healthy. Environment volumes survive deletion. PostgreSQL major upgrades require
+an explicit data migration.
 
 ## Auth
 
-Auth runs in production mode in both environments with a persistent signing key
-from the `signing-key` secret. Registration requires an invitation. Create one in
-the running auth container (find it with `docker ps`):
+piqueld generates `database-password` and `signing-key` for each environment and
+preview on its first deployment and never changes them;
+`piquelctl env secret piquel-fr --env ENV regenerate NAME` rotates one. A new
+password does not change the one an existing database volume stores.
+
+Staging and production require invitations:
 
 ```sh
-docker exec CONTAINER auth-service invite create
+piquelctl app exec piquel-fr auth --env production -- auth-service invite create
 ```
 
-No external identity providers or OIDC clients are configured.
-
-Caddy terminates TLS and proxies to each service's port 8080. Auth throttles by
-direct peer IP and does not trust forwarded headers, so behind ingress every
-client shares one rate limit.
+No external identity providers or OIDC clients are configured. Auth throttles by
+direct peer IP and does not trust forwarded headers yet, so behind ingress every
+client shares one rate limit; piqueld passes the gateway's range in
+`PIQUELD_INGRESS_PROXIES`.
 
 ## Web
 
-Piqueld cannot pass Docker build arguments, so `web.Dockerfile` builds the
-settings frontend once per auth origin. nginx serves the `dev.piquel.fr` build to
-that hostname and the production build to every other host.
+The web image is built without an auth origin. `web-entrypoint.sh` reads
+`AUTH_ORIGIN` at startup; nginx serves it as `/config.json` and narrows the
+page's CSP `connect-src` to it.

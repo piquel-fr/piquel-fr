@@ -17,13 +17,12 @@ RUN cargo build --locked --release -p auth-service
 
 FROM debian:bookworm-slim
 RUN apt-get update \
-    && apt-get install --yes --no-install-recommends ca-certificates wget \
+    && apt-get install --yes --no-install-recommends ca-certificates \
     && rm -rf /var/lib/apt/lists/* \
     && groupadd --gid 10001 auth \
     && useradd --uid 10001 --gid auth --no-create-home auth
 COPY --from=backend /app/target/release/auth-service /usr/local/bin/auth-service
-COPY --chmod=755 infra/auth-entrypoint.sh /usr/local/bin/auth-entrypoint
 USER 10001:10001
 EXPOSE 8080
-ENTRYPOINT ["auth-entrypoint"]
+ENTRYPOINT ["auth-service"]
 CMD ["serve"]

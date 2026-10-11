@@ -28,18 +28,12 @@ audit:
     cargo deny check advisories licenses
     pnpm audit
 
-# Deploy the local branch configured in infra/dev.toml.
-dev:
-    piquelctl --timeout 20m app deploy piquel-fr-dev --yes
+# `--slot NAME` keeps several previews of one branch.
+# Deploy this worktree, uncommitted changes included, to its preview; print its URLs.
+preview *args:
+    piquelctl --timeout 30m preview deploy piquel-fr --local {{args}}
+    piquelctl --timeout 10m preview wait piquel-fr "$(git branch --show-current)" {{args}} --ready routes
 
-# Register the development application once, then deploy it.
-dev-init: (init "piquel-fr-dev" "infra/dev.toml")
-
-# Register an application once, generating its secrets, then deploy it.
-init name manifest:
-    piquelctl app apply --file {{manifest}} --yes
-    node -e "process.stdout.write(require('crypto').randomBytes(32).toString('hex'))" \
-        | piquelctl app secret {{name}} set database-password --stdin --yes
-    node -e "process.stdout.write(require('crypto').generateKeyPairSync('rsa', {modulusLength: 3072}).privateKey.export({type: 'pkcs8', format: 'pem'}))" \
-        | piquelctl app secret {{name}} set signing-key --stdin --yes
-    piquelctl --timeout 20m app deploy {{name}} --yes
+# Delete this worktree's preview with its database.
+preview-delete *args:
+    piquelctl preview delete piquel-fr "$(git branch --show-current)" {{args}} --yes
