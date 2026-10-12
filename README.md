@@ -199,10 +199,10 @@ Use individual recipes while iterating:
 
 | Task | Recipe |
 | --- | --- |
-| Full validation (format, Clippy, Rust/Svelte checks, unit/doc tests, audits) | `just validate` |
-| Format Rust / check formatting | `just fmt` / `just fmt-check` |
-| Rust / frontend checks | `just check-rust` / `just check-web` |
-| Clippy | `just lint` |
+| Full validation (format, Clippy/ESLint, Rust/Svelte checks, unit/doc tests, audits) | `just validate` |
+| Format Rust and web / check formatting | `just fmt` / `just fmt-check` (`-rust` / `-web` variants) |
+| Rust / frontend checks (svelte-check, tsc) | `just check-rust` / `just check-web` |
+| Clippy and ESLint, warnings denied | `just lint` (`just lint-rust` / `just lint-web`) |
 | Unit tests / focused package tests | `just test` / `just test -p auth-service` |
 | Documentation tests | `just doc-test` |
 | Database integration tests | `TEST_DATABASE_URL=postgres://... just test-database` |
@@ -212,6 +212,8 @@ Use individual recipes while iterating:
 | Static frontends / embedded debug binary / release binary | `just build-web` / `just build-debug` / `just build` |
 | Run with caller-provided auth configuration | `just serve`, `just migrate`, `just invite --expires-in 7d` |
 
+Web code is formatted by Prettier and linted by type-aware ESLint (typescript-eslint
+`strictTypeChecked`), configured once at the repository root.
 `just --list` shows every recipe. Test recipes forward extra arguments to nextest
 or Playwright, including quoted filter expressions. `just run` forwards arguments
 to the auth binary. `just serve` builds auth assets before compiling and serving.

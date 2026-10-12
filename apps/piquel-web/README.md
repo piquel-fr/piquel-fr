@@ -9,6 +9,8 @@ Settings call the public auth API with credentialed requests and a CSRF header.
 The auth service must allow this exact settings origin and configure its complete
 settings URL. All WebAuthn operations redirect to the auth origin; the two-minute
 management authorization remains in PostgreSQL and is checked by the API.
-This frontend never stores access or refresh tokens.
+This frontend never stores access or refresh tokens. It uses the shared
+`packages/auth-client` SDK; `just fmt-web`, `just lint-web` and `just check-web`
+format, lint and type-check all web code.
 
 For validation with the real Rust service, see `tests/browser/README.md`.

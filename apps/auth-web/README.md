@@ -23,4 +23,6 @@ never made automatically.
 
 SvelteKit emits per-page CSP hashes in HTML. The Rust service adds frame-ancestor
 protection in its response header without imposing a conflicting script policy.
-Account settings are built separately in `apps/piquel-web`.
+Account settings are built separately in `apps/piquel-web`. API, passkey and redirect
+helpers come from the shared `packages/auth-client` SDK. `just fmt-web`,
+`just lint-web` and `just check-web` format, lint and type-check all web code.

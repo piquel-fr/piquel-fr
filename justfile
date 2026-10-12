@@ -27,14 +27,31 @@ generate:
 
 alias format := fmt
 
-fmt:
+fmt: fmt-rust fmt-web
+
+fmt-rust:
     @cargo fmt --all
 
-fmt-check:
+fmt-web:
+    @pnpm format
+
+fmt-check: fmt-check-rust fmt-check-web
+
+fmt-check-rust:
     @cargo fmt --all -- --check
 
-lint:
+fmt-check-web:
+    @pnpm format:check
+
+# Warnings fail both linters, like `-D warnings`.
+lint: lint-rust lint-web
+
+lint-rust:
     @cargo clippy --locked --workspace --all-targets -- -D warnings
+
+# Type-aware linting reads SvelteKit's generated tsconfig files.
+lint-web: generate
+    @pnpm lint
 
 check: check-rust check-web
 

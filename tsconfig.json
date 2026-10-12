@@ -1,0 +1,17 @@
+{
+  "compilerOptions": {
+    "strict": true,
+    "noEmit": true,
+    "allowJs": true,
+    "checkJs": true,
+    "skipLibCheck": true,
+    "target": "esnext",
+    "module": "esnext",
+    "moduleResolution": "bundler",
+    "lib": ["esnext", "DOM", "DOM.Iterable"],
+    "types": ["node"],
+    "verbatimModuleSyntax": true,
+    "isolatedModules": true
+  },
+  "include": ["*.js", "*.ts", "packages/*/src/**/*.ts", "tests/browser/**/*.ts"]
+}

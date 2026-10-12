@@ -1,0 +1,9 @@
+# Prettier also skips the root .gitignore, but not nested ones. It formats the web
+# workspace only: Rust, SQL and infrastructure files have their own conventions,
+# and Markdown tables stay hand-aligned.
+build/
+pnpm-lock.yaml
+*.md
+apps/auth-service/
+crates/
+infra/

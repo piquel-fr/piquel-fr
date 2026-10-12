@@ -14,6 +14,9 @@ is authentication and the piquel.fr account settings frontend.
 | `crates/configuration` | URL and redacted secret-reference validation |
 | `crates/telemetry` | Tracing initialization |
 
+Prettier and type-aware ESLint cover all web code from the root configuration, as
+rustfmt and Clippy cover Rust; `just fmt`, `just lint` and `just check` run both.
+
 Only the database crate accesses SQLx. Auth-service owns authentication policy;
 frontends never receive database credentials or provider secrets. Add new crates
 only when another actual consumer needs them.
