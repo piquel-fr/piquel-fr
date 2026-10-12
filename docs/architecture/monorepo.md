@@ -33,6 +33,7 @@ invitations, consent, refresh tokens, rate limits and security audit records.
 No separate cache, RPC service, Node server, event bus or key-management service is
 required. External applications consume standard OIDC with static client registration.
 
-Build/configuration and testing instructions are in the root README; every task
-runs through `just`. Deployment uses piqueld (`infra/README.md`). Public application
+[surfaces.md](surfaces.md) sets out what auth.piquel.fr, piquel.fr and
+admin.piquel.fr each serve. Build/configuration and testing instructions are in
+the root README; every task runs through `just`. Deployment uses piqueld (`infra/README.md`). Public application
 registration, SDKs and account recovery are outside this release.
