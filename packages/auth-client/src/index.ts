@@ -181,14 +181,13 @@ export function errorMessage(error: unknown): string {
       ? error.message
       : 'Something went wrong. Please try again.';
 }
+// Mirrors the auth service's `return_to` rules: an auth-origin path without a
+// fragment, backslash or control character.
+const localPath = /^\/(?![/\\])[^\\#\p{Cc}]*$/u;
+/**
+ * Returns `value` unchanged when it is a valid auth-origin path, else the settings URL.
+ * Never throws, and keeps relative paths relative so social-login start accepts them.
+ */
 export function safeDestination(value: string | null, settingsUrl: string): string {
-  if (!value) return settingsUrl;
-  const candidate = new URL(value, window.location.origin);
-  if (
-    candidate.origin === window.location.origin &&
-    value.startsWith('/') &&
-    !value.startsWith('//')
-  )
-    return candidate.href;
-  return candidate.href === new URL(settingsUrl).href ? candidate.href : settingsUrl;
+  return value && value.length <= 2048 && localPath.test(value) ? value : settingsUrl;
 }
