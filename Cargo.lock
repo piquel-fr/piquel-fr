@@ -130,7 +130,6 @@ name = "auth-service"
 version = "0.1.0"
 dependencies = [
  "anyhow",
- "async-trait",
  "axum",
  "base64 0.22.1",
  "chrono",
@@ -1484,8 +1483,6 @@ dependencies = [
 name = "piquel-repository"
 version = "0.1.0"
 dependencies = [
- "anyhow",
- "async-trait",
  "chrono",
  "piquel-auth-protocol",
  "piquel-configuration",
@@ -1493,7 +1490,6 @@ dependencies = [
  "sqlx",
  "thiserror 2.0.18",
  "tokio",
- "tracing",
  "url",
  "uuid",
 ]

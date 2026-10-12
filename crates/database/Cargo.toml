@@ -7,8 +7,6 @@ repository.workspace = true
 rust-version.workspace = true
 
 [dependencies]
-async-trait.workspace = true
-anyhow.workspace = true
 chrono.workspace = true
 piquel-auth-protocol.workspace = true
 piquel-configuration.workspace = true
@@ -16,12 +14,8 @@ serde_json.workspace = true
 sqlx.workspace = true
 thiserror.workspace = true
 tokio.workspace = true
-tracing.workspace = true
 url.workspace = true
 uuid.workspace = true
-
-[dev-dependencies]
-tokio.workspace = true
 
 [lints]
 workspace = true

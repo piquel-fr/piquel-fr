@@ -32,7 +32,6 @@ piquel-auth-protocol = { path = "crates/auth-protocol" }
 
 # External crates
 anyhow = "1.0"
-async-trait = "0.1"
 axum = "0.8"
 base64 = "0.22"
 clap = { version = "4.6", default-features = false, features = ["std", "derive", "help", "usage", "error-context"] }
