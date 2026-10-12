@@ -5,10 +5,15 @@
 connections, rows and raw SQL remain private. Application modules choose policy;
 repository methods enforce atomic persistence and return contextual errors.
 
-Repository modules separate identity/passkeys, OIDC and federation. Transactions
-expose the same repository families as `Database`. User, session and credential
-locks serialize security-sensitive changes. Acquire account locks before session
-and credential locks. Credentials are rechecked under lock before authentication
+Each repository has its own module under `src/repositories/` (`users`, `emails`,
+`sessions`, `audit`, `passkeys`, `oidc`, `tokens`, `federation`, `security`),
+holding its methods and the records they take and return. `repositories/mod.rs`
+holds only shared plumbing: the executor, the `repositories!` macro that declares
+every handle and its accessors on both `Database` and `DatabaseTransaction`, the
+query macros and typed row decoding. Database tests live in `<module>/tests.rs`.
+
+User, session and credential locks serialize security-sensitive changes. Acquire
+account locks before session and credential locks. Credentials are rechecked under lock before authentication
 updates; a ceremony snapshot cannot override newer counters or revocation.
 
 Important invariants:
@@ -30,9 +35,10 @@ Important invariants:
   Refresh tokens rotate transactionally, remain bound to their client/session,
   and reuse revokes the family.
 
-The prototype schema is disposable. The release requires a fresh database;
-subsequent released migrations must be immutable. Run migrations with
-`auth-service migrate`; startup does not silently mutate the schema.
+The schema is a single initial migration, `migrations/0001_initial.sql`. The
+prototype schema is disposable and the release requires a fresh database. Released
+migrations are immutable; later schema changes go in new numbered files. Run
+migrations with `auth-service migrate`; startup does not silently mutate the schema.
 
 Every five minutes the service purges bounded batches of expired ephemeral state.
 Security audit history is retained. Tests that use `TEST_DATABASE_URL` are explicitly
