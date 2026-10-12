@@ -75,8 +75,8 @@ impl OidcApplication {
             .get(header::AUTHORIZATION)
             .map(|header| {
                 let value = header.to_str().map_err(|_| OAuthCode::InvalidClient)?;
-                let encoded = value
-                    .strip_prefix("Basic ")
+                let encoded = AuthScheme::Basic
+                    .credentials(value)
                     .ok_or(OAuthCode::InvalidClient)?;
                 if encoded.len() > 1024 {
                     return Err(OAuthCode::InvalidClient.into());
@@ -245,6 +245,25 @@ async fn browser_session(
         .find_active_by_browser_secret(&secret.digest())
         .await
         .map_err(OAuthError::internal)
+}
+
+/// HTTP authentication schemes accepted by the protocol endpoints.
+#[derive(Clone, Copy)]
+enum AuthScheme {
+    Basic,
+    Bearer,
+}
+impl AuthScheme {
+    /// Returns the credentials of an `Authorization` value using this scheme.
+    /// Scheme names are case-insensitive (RFC 9110); credentials are untouched.
+    fn credentials(self, value: &str) -> Option<&str> {
+        let (scheme, credentials) = value.split_once(' ')?;
+        let expected = match self {
+            Self::Basic => "Basic",
+            Self::Bearer => "Bearer",
+        };
+        scheme.eq_ignore_ascii_case(expected).then_some(credentials)
+    }
 }
 
 fn parse_scopes(value: &str) -> Option<BTreeSet<String>> {

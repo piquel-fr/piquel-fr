@@ -652,3 +652,11 @@ fn exact_redirect_and_pkce_and_refresh_bounds() {
     let huge = format!("prt_v1_{}.{:0200}", TokenId::new(), "x");
     assert!(parse_opaque("prt_v1", &huge).is_err());
 }
+
+#[test]
+fn authentication_schemes_are_case_insensitive() {
+    assert_eq!(AuthScheme::Bearer.credentials("bEaReR a.B"), Some("a.B"));
+    assert_eq!(AuthScheme::Basic.credentials("BASIC Zm9v"), Some("Zm9v"));
+    assert_eq!(AuthScheme::Basic.credentials("Bearer Zm9v"), None);
+    assert_eq!(AuthScheme::Bearer.credentials("Bearer"), None);
+}

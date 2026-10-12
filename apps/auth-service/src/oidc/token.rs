@@ -1,8 +1,8 @@
 //! Token exchange, refresh rotation, revocation and `UserInfo`.
 
 use super::{
-    ACCESS_TOKEN_SECONDS, OAuthCode, OAuthError, OidcApplication, keyed_digest, new_opaque,
-    parse_opaque, parse_scopes, validate_pkce_s256,
+    ACCESS_TOKEN_SECONDS, AuthScheme, OAuthCode, OAuthError, OidcApplication, keyed_digest,
+    new_opaque, parse_opaque, parse_scopes, validate_pkce_s256,
 };
 use axum::{
     Form, Json,
@@ -383,7 +383,7 @@ pub(super) async fn userinfo(
     let token = headers
         .get(header::AUTHORIZATION)
         .and_then(|v| v.to_str().ok())
-        .and_then(|v| v.strip_prefix("Bearer "))
+        .and_then(|v| AuthScheme::Bearer.credentials(v))
         .ok_or(OAuthCode::InvalidToken)?;
     let claims = app
         .keys
