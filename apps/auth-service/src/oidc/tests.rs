@@ -509,7 +509,7 @@ async fn authorization_hints_bind_initial_resumed_and_consent_requests() {
             &[("id_token_hint", &hint)],
         )
         .await;
-    assert!(!Flow::parameter(&Flow::location(&response), "code").is_empty());
+    assert_ne!(Flow::parameter(&Flow::location(&response), "code"), "");
     for (field, value) in [
         ("iss", json!("https://foreign.example")),
         ("aud", json!("other-client")),
