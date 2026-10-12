@@ -1,10 +1,13 @@
-use super::*;
+use super::{identities::PendingIdentity, *};
 use axum::{
     body::{Body, to_bytes},
-    http::{Method, Request},
+    http::{Method, Request, StatusCode},
     routing::post,
 };
-use piquel_repository::{DatabaseConfig, InsertPasskey, InsertUser, InsertVerifiedEmail};
+use jsonwebtoken::{Algorithm, DecodingKey};
+use piquel_repository::{
+    DatabaseConfig, InsertExternalIdentity, InsertPasskey, InsertUser, InsertVerifiedEmail,
+};
 use rand::{RngCore, rngs::OsRng};
 use tower::ServiceExt;
 
