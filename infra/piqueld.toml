@@ -1,0 +1,155 @@
+#:schema https://raw.githubusercontent.com/piquel-fr/piqueld/main/docs/application-manifest.schema.json
+# piquel.fr on piqueld. Staging builds `main` on every push, production only
+# receives releases promoted from staging, and previews deploy branches or local
+# worktrees. See infra/README.md.
+api_version = "piqueld.dev/v1alpha1"
+kind = "Application"
+
+[metadata]
+name = "piquel-fr"
+
+[spec.manifest]
+path = "infra/piqueld.toml"
+sync = { mode = "webhook" }
+
+[spec.manifest.repository]
+url = "https://github.com/piquel-fr/piquel-fr.git"
+branch = "main"
+
+# Hostnames have no default: an environment without its own fails to deploy
+# instead of competing for another one's.
+[spec.variables]
+invite_required = "true"
+
+[spec.environments.production.variables]
+web_host = "piquel.fr"
+auth_host = "auth.piquel.fr"
+
+[spec.environments.staging]
+visibility = "private"
+
+[spec.environments.staging.variables]
+web_host = "staging.piquel.fr"
+auth_host = "auth.staging.piquel.fr"
+
+# Flat hostnames, so the `*.dev.piquel.fr` certificate covers every preview.
+# Preview databases start empty, so anyone on the tailnet may register.
+[spec.previews]
+visibility = "private"
+
+[spec.previews.variables]
+web_host = "${{ env.slug }}.dev.piquel.fr"
+auth_host = "auth-${{ env.slug }}.dev.piquel.fr"
+invite_required = "false"
+
+[[spec.routes]]
+name = "web"
+hostname = "${{ vars.web_host }}"
+service = "web"
+port = 8080
+visibility = "public"
+
+[[spec.routes]]
+name = "auth"
+hostname = "${{ vars.auth_host }}"
+service = "auth"
+port = 8080
+visibility = "public"
+
+[[spec.secrets]]
+name = "database-password"
+generate = { type = "random", bytes = 32, encoding = "hex" }
+
+[[spec.secrets]]
+name = "signing-key"
+generate = { type = "rsa", bits = 3072 }
+
+[[spec.jobs]]
+name = "migrate"
+service = "auth"
+command = ["auth-service", "migrate"]
+run = "before-rollout"
+
+[[spec.services]]
+name = "auth"
+depends_on = ["postgres"]
+
+[spec.services.source]
+type = "git"
+repository = "self"
+
+[spec.services.source.build]
+type = "docker"
+dockerfile = "infra/auth.Dockerfile"
+
+[spec.services.environment]
+# Plaintext stays on the application's private network, which ingress cannot reach.
+AUTH_DATABASE_URL = "postgres://piquel@postgres:5432/piquel?sslmode=disable"
+AUTH_DATABASE_PASSWORD = "file:///run/secrets/database-password"
+AUTH_KEY_PROVIDER = "file:///run/secrets/signing-key"
+AUTH_PUBLIC_LISTENER = "0.0.0.0:8080"
+AUTH_PUBLIC_BASE_URL = "https://${{ vars.auth_host }}"
+AUTH_SETTINGS_URL = "https://${{ vars.web_host }}/settings"
+AUTH_INVITE_REQUIRED = "${{ vars.invite_required }}"
+
+[[spec.services.secrets]]
+name = "database-password"
+target = "/run/secrets/database-password"
+
+[[spec.services.secrets]]
+name = "signing-key"
+target = "/run/secrets/signing-key"
+
+[spec.services.healthcheck]
+type = "http"
+port = 8080
+path = "/health/ready"
+
+[[spec.services]]
+name = "web"
+
+[spec.services.source]
+type = "git"
+repository = "self"
+
+[spec.services.source.build]
+type = "docker"
+dockerfile = "infra/web.Dockerfile"
+
+# Runtime configuration, not a build argument, so staging's image can be promoted.
+[spec.services.environment]
+AUTH_ORIGIN = "https://${{ vars.auth_host }}"
+
+[spec.services.healthcheck]
+type = "http"
+port = 8080
+path = "/"
+
+[[spec.services]]
+name = "postgres"
+
+[spec.services.source]
+type = "image"
+image = "postgres:18-bookworm"
+
+[spec.services.environment]
+POSTGRES_USER = "piquel"
+POSTGRES_DB = "piquel"
+POSTGRES_PASSWORD_FILE = "/run/secrets/database-password"
+
+[[spec.services.secrets]]
+name = "database-password"
+target = "/run/secrets/database-password"
+
+[[spec.services.mounts]]
+volume = "postgres-data"
+target = "/var/lib/postgresql"
+
+# Over TCP: the server initializing a new volume listens only on its socket, so
+# the migration job waits for the real one.
+[spec.services.healthcheck]
+type = "command"
+command = ["pg_isready", "-h", "127.0.0.1", "-U", "piquel", "-d", "piquel"]
+
+[[spec.volumes]]
+name = "postgres-data"

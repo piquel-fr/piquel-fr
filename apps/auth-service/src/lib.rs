@@ -106,16 +106,29 @@ impl AuthConfig {
         }
     }
     /// Loads database settings independently for migration/invitation commands.
+    /// `AUTH_DATABASE_PASSWORD` optionally supplies the password as a secret reference.
     ///
     /// # Errors
-    /// Returns missing configuration or invalid database/TLS settings.
+    /// Returns missing configuration, invalid database/TLS settings, or an unresolved password.
     pub fn database_from_environment() -> Result<DatabaseConfig> {
         let url = Self::required("AUTH_DATABASE_URL")?;
-        Ok(if Self::flag("AUTH_DEVELOPMENT_MODE", false)? {
+        let config = if Self::flag("AUTH_DEVELOPMENT_MODE", false)? {
             DatabaseConfig::new_development(&url, 10, Duration::from_secs(5))?
         } else {
             DatabaseConfig::new(&url, 10, Duration::from_secs(5))?
-        })
+        };
+        let Ok(reference) = env::var("AUTH_DATABASE_PASSWORD") else {
+            return Ok(config);
+        };
+        anyhow::ensure!(
+            Url::parse(&url)?.password().is_none(),
+            "Set the database password in AUTH_DATABASE_URL or AUTH_DATABASE_PASSWORD, not both"
+        );
+        let secret = SecretReference::parse(&reference)?.resolve()?;
+        let password = std::str::from_utf8(secret.expose_secret())
+            .context("database password is not UTF-8")?;
+        // Match PostgreSQL's *_FILE handling, which drops trailing newlines.
+        Ok(config.with_password(password.trim_end_matches('\n')))
     }
     /// Validates service, provider, and client settings before startup.
     ///
