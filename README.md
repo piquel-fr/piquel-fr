@@ -11,7 +11,7 @@ for repository-driven piqueld deployments.
 
 ## Build
 
-Requires Rust 1.97+, Node 24+, just, and pnpm (the workspace pins its version).
+Requires Rust (pinned by `rust-toolchain.toml`), Node 24+, just, and pnpm (the workspace pins its version).
 
 ```sh
 just install
@@ -24,7 +24,7 @@ is `apps/piquel-web/build`. Node is needed to build the frontends, not to run au
 
 ## Development
 
-Install the build prerequisites above, `just`, and `cargo-watch` (`cargo install cargo-watch --locked`).
+Install the build prerequisites above, then the Cargo tools with `just install-tools`.
 Local signing-key generation uses the OpenSSL CLI. The combined development recipe
 uses Bash, `setsid` (util-linux), and `pkill`/`pgrep` (procps) on Linux.
 Create a local PostgreSQL database, then run:
@@ -92,8 +92,8 @@ For a local Unix socket, use `localhost` as the URL host and an absolute socket
 directory in the `host` query parameter, e.g.
 `postgres://USER:PASSWORD@localhost/piquel?host=/run/postgresql&sslmode=disable`.
 
-Generate a persistent RSA key with OpenSSL, for example
-`openssl genpkey -algorithm RSA -pkeyopt rsa_keygen_bits:3072 -out /absolute/path/key.pem`.
+Generate a persistent RSA key with `just generate-key /absolute/path/key.pem` (uses the
+OpenSSL CLI; piqueld generates its own, see `infra/README.md`).
 Keep the same key and ID across restarts. Replacing the only configured key
 invalidates issued tokens; overlapping signing-key rotation is not implemented.
 
@@ -103,11 +103,12 @@ Never put provider secrets or confidential-client secrets in frontend configurat
 Enabled provider secrets are loaded and validated at startup; restart the service
 after rotating their referenced values.
 
-Apply migrations explicitly, then run the same executable:
+Apply migrations explicitly, then serve. Deployed images run the same
+`migrate` and `serve` subcommands of the executable directly.
 
 ```sh
-auth-service migrate
-auth-service serve
+just migrate
+just serve
 ```
 
 The schema intentionally replaces the throwaway prototype. Use a fresh database;
@@ -116,7 +117,7 @@ there is no migration path for prototype account data.
 ### Invitations
 
 ```sh
-auth-service invite create --expires-in 7d
+just invite --expires-in 7d
 ```
 
 This prints one signup link. The database stores a digest, expiry and redemption
@@ -144,7 +145,7 @@ Client IDs must be unique. A minimal public web client looks like:
 ```
 
 For a confidential backend client, add `"client_secret": "env://MY_CLIENT_SECRET"`.
-Generate its random secret with `auth-service secret`. Clients use
+Generate its random secret with `just secret`. Clients use
 `client_secret_basic` when confidential and `none` when public; both require S256
 PKCE. Redirect URLs must match exactly. HTTP loopback callbacks are permitted for
 local testing. Non-loopback callbacks require HTTPS.

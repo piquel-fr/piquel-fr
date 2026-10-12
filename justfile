@@ -6,6 +6,10 @@ validate: fmt-check lint check test doc-test audit
 install:
     @pnpm install --frozen-lockfile
 
+# Cargo tools used by the test, audit and dev recipes.
+install-tools:
+    @cargo install --locked cargo-nextest cargo-deny cargo-watch
+
 # Build static browser assets before embedding them in the release executable.
 build: build-web
     @cargo build --locked --release -p auth-service
@@ -103,17 +107,29 @@ migrate:
 invite *ARGS:
     @just run invite create "$@"
 
+# Print a random secret, e.g. for a confidential OIDC client.
+secret:
+    @just run secret
+
+# Write a new RSA signing key; refuses to overwrite an existing file.
+generate-key PATH:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    path={{ quote(PATH) }}
+    if [[ -e "$path" ]]; then echo "$path already exists" >&2; exit 1; fi
+    umask 077
+    mkdir -p "$(dirname "$path")"
+    key_tmp=$(mktemp "$path.XXXXXX")
+    trap 'rm -f "$key_tmp"' EXIT
+    openssl genpkey -algorithm RSA -pkeyopt rsa_keygen_bits:3072 -out "$key_tmp"
+    mv -n "$key_tmp" "$path"
+
 # Generate once; never rotate a configured or existing local key on restart.
 generate-dev-key:
     #!/usr/bin/env bash
     set -euo pipefail
     if [[ -n "${AUTH_KEY_PROVIDER:-}" || -f .dev/signing-key.pem ]]; then exit 0; fi
-    umask 077
-    mkdir -p .dev
-    key_tmp=$(mktemp .dev/signing-key.XXXXXX)
-    trap 'rm -f "$key_tmp"' EXIT
-    openssl genpkey -algorithm RSA -pkeyopt rsa_keygen_bits:3072 -out "$key_tmp"
-    mv -n "$key_tmp" .dev/signing-key.pem
+    just generate-key .dev/signing-key.pem
 
 # Build embedded assets and apply migrations before the dev servers start.
 dev-prepare: _dev-check build-auth-web generate-dev-key

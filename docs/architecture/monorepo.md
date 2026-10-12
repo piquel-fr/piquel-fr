@@ -33,7 +33,6 @@ invitations, consent, refresh tokens, rate limits and security audit records.
 No separate cache, RPC service, Node server, event bus or key-management service is
 required. External applications consume standard OIDC with static client registration.
 
-The accepted release scope is in [plans/auth/README.md](../../plans/auth/README.md).
-Build/configuration and testing instructions are in the root README. Deployment,
-infrastructure, public application registration, SDKs and account recovery are
-outside this release.
+Build/configuration and testing instructions are in the root README; every task
+runs through `just`. Deployment uses piqueld (`infra/README.md`). Public application
+registration, SDKs and account recovery are outside this release.

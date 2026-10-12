@@ -1,4 +1,4 @@
-Static SvelteKit pages for the authentication origin. `pnpm --filter @piquel/auth-web build`
+Static SvelteKit pages for the authentication origin. `just build-auth-web`
 produces `build/`, which the Rust auth-service build embeds into its executable.
 Node is needed only to build these assets.
 

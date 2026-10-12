@@ -1,6 +1,6 @@
 Static SvelteKit account settings, available at `/` and `/settings`.
 
-`VITE_AUTH_ORIGIN=https://auth.piquel.fr pnpm --filter @piquel/piquel-web build`
+`VITE_AUTH_ORIGIN=https://auth.piquel.fr just build-settings-web`
 produces the standalone `build/` directory. This public build setting also
 configures the page's CSP. Without it, the page reads `auth_origin` from
 `/config.json` at runtime, as deployed images do (see `infra/README.md`).

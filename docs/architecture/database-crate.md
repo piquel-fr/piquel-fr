@@ -38,7 +38,7 @@ Important invariants:
 The schema is a single initial migration, `migrations/0001_initial.sql`. The
 prototype schema is disposable and the release requires a fresh database. Released
 migrations are immutable; later schema changes go in new numbered files. Run
-migrations with `auth-service migrate`; startup does not silently mutate the schema.
+migrations with `just migrate` (`auth-service migrate` in deployed images); startup does not silently mutate the schema.
 
 Every five minutes the service drains expired ephemeral state in bounded batches,
 for up to one minute per pass.

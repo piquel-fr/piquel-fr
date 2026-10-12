@@ -14,8 +14,8 @@ run, against real PostgreSQL behind real HTTPS, then let the user try it.
 
 ## 1. Check locally first
 
-Run only the checks for what changed: `cargo nextest run -p <crate>`,
-`pnpm --filter <package> check`, `cargo clippy -p <crate>`. For changes to
+Run only the checks for what changed: `just test -p <crate>`, `just lint-rust`
+or `just lint-web`, and `just check-web`. For changes to
 `infra/piqueld.toml`, run `piquelctl app validate --file infra/piqueld.toml`.
 Fix failures before deploying: a preview build costs minutes.
 
