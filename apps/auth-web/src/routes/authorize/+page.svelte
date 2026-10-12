@@ -1,6 +1,6 @@
 <script lang="ts">
   import { onMount } from 'svelte';
-  import { AuthApi, errorMessage } from '@piquel/browser';
+  import { AuthApi, errorMessage } from '@piquel/auth-client';
   const api = new AuthApi();
   let transaction = $state('');
   let details = $state<{ client_name: string; scopes: string[]; audience: string } | null>(null);

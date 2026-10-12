@@ -1,5 +1,5 @@
 <script lang="ts">
-  import "@piquel/browser/style.css";
+  import "@piquel/auth-client/style.css";
   let { children } = $props();
 </script>
 <svelte:head><meta name="robots" content="noindex" /></svelte:head>

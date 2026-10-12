@@ -1,6 +1,6 @@
 <script lang="ts">
   import { onMount } from 'svelte';
-  import { AuthApi, Passkeys, errorMessage, passkeysAvailable, providerName, safeDestination, type Configuration, type PasskeyKind, type Provider, type Session } from '@piquel/browser';
+  import { AuthApi, Passkeys, errorMessage, passkeysAvailable, providerName, safeDestination, type Configuration, type PasskeyKind, type Provider, type Session } from '@piquel/auth-client';
   let { mode = 'login' }: { mode?: 'login' | 'register' | 'manage' | 'enroll' | 'link' } = $props();
   const api = new AuthApi();
   const passkeys = new Passkeys(api);

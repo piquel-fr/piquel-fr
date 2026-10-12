@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { AuthApi, errorMessage } from '@piquel/browser';
+  import { AuthApi, errorMessage } from '@piquel/auth-client';
   let error = $state(''); let busy = $state(false);
   async function logout() { busy = true; try { const response = await new AuthApi().form('/oidc/logout', new URLSearchParams(window.location.search)); window.location.assign(response.redirect_url); } catch (cause) { error = errorMessage(cause); busy = false; } }
 </script>

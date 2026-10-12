@@ -9,7 +9,7 @@
     "check": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json"
   },
   "dependencies": {
-    "@piquel/browser": "workspace:*"
+    "@piquel/auth-client": "workspace:*"
   },
   "devDependencies": {
     "@sveltejs/adapter-static": "catalog:",

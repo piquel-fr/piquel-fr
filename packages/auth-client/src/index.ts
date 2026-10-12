@@ -1,3 +1,8 @@
+/**
+ * Browser-side SDK for the piquel auth service, shared by auth-web and piquel-web:
+ * a typed API client, WebAuthn passkey ceremonies and redirect helpers.
+ * Shared presentation styles are exported separately as `@piquel/auth-client/style.css`.
+ */
 export type Provider = 'github' | 'google';
 export type PasskeyKind = 'standard' | 'google_password_manager';
 export type Session = { user: { id: string; username: string; display_name: string }; management_expires_at: string | null };

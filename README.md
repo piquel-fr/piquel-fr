@@ -42,9 +42,10 @@ and starts all three processes. Ctrl+C stops them together:
 - Rust listener: `127.0.0.1:8080` (use the public auth URL in the browser).
 - Account settings: `http://localhost:4173/settings` (a separate origin, as in production).
 
-Svelte, TypeScript and CSS edits hot reload through Vite, including shared browser
-code. `cargo-watch` rebuilds and restarts the normal `auth-service serve` command
-when Rust sources, migrations or Cargo configuration change. Frontend edits do not
+Svelte, TypeScript and CSS edits hot reload through Vite, including the shared
+`packages/auth-client` SDK. `cargo-watch` rebuilds and restarts the normal
+`auth-service serve` command when Rust sources, migrations or Cargo configuration
+change. Frontend edits do not
 restart Rust. A backend restart briefly interrupts requests; retry after it starts.
 Restart `just dev` after changing environment configuration.
 New database migrations are also applied before each watched backend restart.

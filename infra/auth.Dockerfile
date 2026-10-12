@@ -3,7 +3,7 @@ WORKDIR /app
 COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
 RUN npm install --global "$(node -p 'require("./package.json").packageManager')"
 COPY apps/auth-web apps/auth-web
-COPY packages/browser packages/browser
+COPY packages/auth-client packages/auth-client
 RUN pnpm install --frozen-lockfile --filter @piquel/auth-web...
 RUN pnpm --filter @piquel/auth-web build
 

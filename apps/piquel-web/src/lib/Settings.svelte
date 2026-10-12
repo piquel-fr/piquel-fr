@@ -1,6 +1,6 @@
 <script lang="ts">
   import { onMount } from 'svelte';
-  import { AuthApi, errorMessage, providerName, type Configuration, type Provider, type Session } from '@piquel/browser';
+  import { AuthApi, errorMessage, providerName, type Configuration, type Provider, type Session } from '@piquel/auth-client';
   // Local builds set VITE_AUTH_ORIGIN. Deployed images serve every environment, so they
   // read it from /config.json, which the container serves from its AUTH_ORIGIN (see infra/).
   let authOrigin = $state('');
