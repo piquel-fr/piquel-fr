@@ -7,7 +7,7 @@ COPY packages/auth-client packages/auth-client
 RUN pnpm install --frozen-lockfile --filter @piquel/auth-web...
 RUN pnpm --filter @piquel/auth-web build
 
-FROM rust:1.97.0-bookworm AS backend
+FROM rust:1.99.0-bookworm AS backend
 WORKDIR /app
 COPY Cargo.toml Cargo.lock ./
 COPY crates crates
