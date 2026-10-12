@@ -287,6 +287,17 @@ async fn decide(
                 .append_pair("state", &request.client_state);
         }
         "approve" => {
+            // Lock the account before writing consent: the consent row's foreign key
+            // would otherwise take a key-share lock that deadlocks with a concurrent login.
+            let user = transaction
+                .users()
+                .find_active_by_id_for_update(session.user_id)
+                .await
+                .map_err(OAuthError::internal)?
+                .ok_or(OAuthCode::InvalidToken)?;
+            if user.id != session.user_id {
+                return Err(OAuthCode::InvalidToken.into());
+            }
             if explicit {
                 transaction
                     .oidc()
@@ -298,15 +309,6 @@ async fn decide(
                     )
                     .await
                     .map_err(OAuthError::internal)?;
-            }
-            let user = transaction
-                .users()
-                .find_active_by_id_for_update(session.user_id)
-                .await
-                .map_err(OAuthError::internal)?
-                .ok_or(OAuthCode::InvalidToken)?;
-            if user.id != session.user_id {
-                return Err(OAuthCode::InvalidToken.into());
             }
             let (code, code_id, code_secret) = new_opaque("pac_v1");
             let code_digest = keyed_digest(app.refresh_key.as_ref(), &code_secret)?;
