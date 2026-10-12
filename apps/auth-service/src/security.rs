@@ -211,6 +211,43 @@ pub(crate) async fn create_session(
     Ok(BrowserCookie::Session.set(&secret))
 }
 
+/// How the HTTP boundary treats a route. Origin, CSRF and rate policy all read this one
+/// classification, so it must list every route that differs from `Other`.
+#[derive(Clone, Copy)]
+enum Endpoint {
+    /// Token and revocation, authenticated by client credentials.
+    OAuthBackChannel,
+    /// Bearer-authenticated `UserInfo`.
+    UserInfo,
+    /// Public discovery and signing keys.
+    Discovery,
+    /// Authorization requests, including cross-site form navigation.
+    Authorize,
+    /// RP-initiated logout, validated by its own hint and same-origin checks.
+    Logout,
+    /// Account and session APIs shared with the settings site.
+    Account,
+    /// Social sign-in, also started from the settings site.
+    Login,
+    /// Auth-origin pages and ceremonies.
+    Other,
+}
+impl Endpoint {
+    fn classify(path: &str) -> Self {
+        match path {
+            "/oauth/token" | "/oauth/revoke" => Self::OAuthBackChannel,
+            "/oidc/userinfo" => Self::UserInfo,
+            "/.well-known/openid-configuration" | "/.well-known/jwks.json" => Self::Discovery,
+            "/oauth/authorize" => Self::Authorize,
+            "/oidc/logout" => Self::Logout,
+            "/config" | "/session" | "/session/logout" => Self::Account,
+            _ if path.starts_with("/account/") => Self::Account,
+            _ if path.starts_with("/login/") => Self::Login,
+            _ => Self::Other,
+        }
+    }
+}
+
 #[derive(Clone)]
 pub(crate) struct HttpSecurity {
     pub database: Database,
@@ -249,43 +286,26 @@ impl HttpSecurity {
         let Some(route) = request.extensions().get::<MatchedPath>() else {
             return Ok(None);
         };
-        let path = route.as_str();
         let mutation = !matches!(*request.method(), Method::GET | Method::HEAD);
-        let category = if matches!(
-            path,
-            "/oauth/token" | "/oauth/revoke" | "/oidc/token" | "/oidc/revoke"
-        ) {
-            "token"
-        } else if mutation && (path.starts_with("/account/") || path == "/session/logout") {
-            "account"
-        } else if mutation || path.starts_with("/login/") || path == "/oauth/authorize" {
-            "login"
-        } else {
-            return Ok(None);
+        let category = match Endpoint::classify(route.as_str()) {
+            Endpoint::OAuthBackChannel => "token",
+            Endpoint::Account if mutation => "account",
+            Endpoint::Login | Endpoint::Authorize => "login",
+            _ if mutation => "login",
+            _ => return Ok(None),
         };
         Ok(Some(
             Sha256::digest(format!("{category}:{}", self.client_ip(request)?).as_bytes()).to_vec(),
         ))
     }
 
-    fn allowed_origin(&self, path: &str, origin: &str) -> bool {
+    fn allowed_origin(&self, endpoint: Endpoint, origin: &str) -> bool {
         origin == self.auth_origin
             || (origin == self.settings_origin
-                && (path.starts_with("/account/")
-                    || path.starts_with("/session")
-                    || path == "/config"
-                    || path.starts_with("/federation/")
-                    || path.starts_with("/login/")))
+                && matches!(endpoint, Endpoint::Account | Endpoint::Login))
             || (matches!(
-                path,
-                "/oauth/token"
-                    | "/oauth/userinfo"
-                    | "/oauth/revoke"
-                    | "/oidc/token"
-                    | "/oidc/userinfo"
-                    | "/oidc/revoke"
-                    | "/.well-known/openid-configuration"
-                    | "/.well-known/jwks.json"
+                endpoint,
+                Endpoint::OAuthBackChannel | Endpoint::UserInfo | Endpoint::Discovery
             ) && self.client_origins.iter().any(|v| v == origin))
     }
 
@@ -299,12 +319,11 @@ impl HttpSecurity {
             .get(header::ORIGIN)
             .and_then(|v| v.to_str().ok())
             .map(str::to_owned);
-        let path = request.uri().path();
+        let endpoint = Endpoint::classify(request.uri().path());
         let allowed = origin
             .as_deref()
-            .is_some_and(|v| policy.allowed_origin(path, v));
+            .is_some_and(|v| policy.allowed_origin(endpoint, v));
         let operation = async {
-            let path = request.uri().path();
             if request.method() == Method::OPTIONS {
                 if allowed {
                     StatusCode::NO_CONTENT.into_response()
@@ -314,19 +333,13 @@ impl HttpSecurity {
             } else {
                 // OAuth endpoints enforce their protocol credentials and state;
                 // authorization also accepts cross-site browser form navigation.
-                let logout = path == "/oidc/logout";
-                let protocol = logout
-                    || matches!(
-                        path,
-                        "/oauth/token"
-                            | "/oauth/revoke"
-                            | "/oidc/token"
-                            | "/oidc/revoke"
-                            | "/oauth/authorize"
-                            | "/oidc/authorize"
-                            | "/oauth/userinfo"
-                            | "/oidc/userinfo"
-                    );
+                let protocol = matches!(
+                    endpoint,
+                    Endpoint::OAuthBackChannel
+                        | Endpoint::UserInfo
+                        | Endpoint::Authorize
+                        | Endpoint::Logout
+                );
                 let mutation = !matches!(*request.method(), Method::GET | Method::HEAD);
                 if (origin.is_some() && !allowed && !protocol)
                     || (mutation

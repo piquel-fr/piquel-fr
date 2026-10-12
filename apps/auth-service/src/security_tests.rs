@@ -39,8 +39,7 @@ impl SecurityFixture {
             "/.well-known/jwks.json",
             "/oauth/token",
             "/oauth/authorize",
-            "/oauth/userinfo",
-            "/oidc/token",
+            "/oauth/revoke",
             "/oidc/userinfo",
             "/oidc/logout",
         ] {
@@ -178,8 +177,7 @@ async fn router_enforces_exact_browser_origins_csrf_and_public_client_cors_bound
         (Method::GET, "/.well-known/openid-configuration"),
         (Method::GET, "/.well-known/jwks.json"),
         (Method::POST, "/oauth/token"),
-        (Method::POST, "/oidc/token"),
-        (Method::GET, "/oauth/userinfo"),
+        (Method::POST, "/oauth/revoke"),
         (Method::GET, "/oidc/userinfo"),
         (Method::POST, "/oidc/userinfo"),
     ] {
@@ -232,7 +230,7 @@ async fn router_enforces_exact_browser_origins_csrf_and_public_client_cors_bound
     let response = fixture
         .request(
             Method::OPTIONS,
-            "/oidc/token",
+            "/oauth/token",
             Some("https://external.example"),
             false,
         )
