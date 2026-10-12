@@ -21,7 +21,8 @@
   let config = $state<Configuration | null>(null);
   let session = $state<Session | null>(null);
   let passkeys = $state<Passkey[]>([]);
-  let identities = $state<{ provider: Provider; linked_email?: string }[]>([]);
+  type Identity = { provider: Provider; linked_email: string | null };
+  let identities = $state<Identity[]>([]);
   let loading = $state(true);
   let busy = $state(false);
   let error = $state('');
@@ -39,6 +40,12 @@
     )
   );
   const unlocked = $derived(remaining > 0);
+  const configured = (provider: Provider) => config?.providers.includes(provider) ?? false;
+  // Identities of since-disabled providers stay listed so they can still be unlinked.
+  const providers = $derived([
+    ...(config?.providers ?? []),
+    ...identities.map((identity) => identity.provider).filter((provider) => !configured(provider))
+  ]);
   onMount(() => {
     void load();
     const timer = setInterval(() => (now = Date.now()), 1000);
@@ -57,7 +64,7 @@
       session = await api.request('/session');
       [passkeys, identities] = await Promise.all([
         api.request<Passkey[]>('/account/passkeys'),
-        api.request<{ provider: Provider; linked_email?: string }[]>('/account/social-identities')
+        api.request<Identity[]>('/account/social-identities')
       ]);
     } catch (cause) {
       error = errorMessage(cause);
@@ -234,7 +241,7 @@
         Linked providers can sign you in. Only a passkey can authorize changes to these settings.
       </p>
       <ul class="list">
-        {#each config?.providers ?? [] as provider (provider)}{@const identity = identities.find(
+        {#each providers as provider (provider)}{@const identity = identities.find(
             (value) => value.provider === provider
           )}
           <li>
@@ -244,6 +251,9 @@
                 <p class="help">
                   {identity ? (identity.linked_email ?? 'Linked to your account') : 'Not linked'}
                 </p>
+                {#if !configured(provider)}<p class="help">
+                    {providerName(provider)} sign-in is currently unavailable.
+                  </p>{/if}
               </div>
               {#if identity}<button
                   class="secondary"
@@ -267,7 +277,7 @@
               </div>{/if}
           </li>{/each}
       </ul>
-      {#if !config?.providers.length}<p class="empty">Social sign-in is not available yet.</p>{/if}
+      {#if !providers.length}<p class="empty">Social sign-in is not available yet.</p>{/if}
     </section>
   {/if}
 </section>
