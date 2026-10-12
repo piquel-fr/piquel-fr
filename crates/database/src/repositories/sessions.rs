@@ -94,6 +94,20 @@ impl SessionRepository<'_> {
         fetch_optional!(self, sqlx::query("SELECT s.id,s.user_id,s.authentication_methods,s.authenticated_at,s.expires_at,s.last_seen_at,s.revoked_at FROM sessions s JOIN users u ON u.id=s.user_id WHERE s.id=$1 AND s.revoked_at IS NULL AND s.expires_at>now() AND u.status='active'").bind(id.as_uuid()))?.as_ref().map(StoredSession::from_row).transpose()
     }
 
+    /// Finds and locks an unrevoked, unexpired session of an active account, so a
+    /// concurrent logout either commits first or waits until this transaction ends.
+    /// Callers lock the account first.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`DatabaseError`] if the query fails or the row is invalid.
+    pub async fn find_active_by_id_for_update(
+        &mut self,
+        id: SessionId,
+    ) -> Result<Option<StoredSession>, DatabaseError> {
+        fetch_optional!(self, sqlx::query("SELECT s.id,s.user_id,s.authentication_methods,s.authenticated_at,s.expires_at,s.last_seen_at,s.revoked_at FROM sessions s JOIN users u ON u.id=s.user_id WHERE s.id=$1 AND s.revoked_at IS NULL AND s.expires_at>now() AND u.status='active' FOR NO KEY UPDATE OF s").bind(id.as_uuid()))?.as_ref().map(StoredSession::from_row).transpose()
+    }
+
     /// Revokes a session. Returns `false` if it was already revoked or unknown.
     ///
     /// # Errors

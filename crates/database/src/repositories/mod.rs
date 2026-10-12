@@ -189,7 +189,7 @@ pub(crate) mod users;
 
 /// Connects to `TEST_DATABASE_URL` and applies the schema for database tests.
 #[cfg(test)]
-async fn test_pool() -> PgPool {
+pub(crate) async fn test_pool() -> PgPool {
     let pool = sqlx::postgres::PgPoolOptions::new()
         .max_connections(5)
         .connect(&std::env::var("TEST_DATABASE_URL").expect("TEST_DATABASE_URL"))

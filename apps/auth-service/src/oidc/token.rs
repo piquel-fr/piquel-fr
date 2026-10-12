@@ -98,11 +98,14 @@ async fn exchange_code(
         .await
         .map_err(OAuthError::internal)?
         .ok_or(OAuthCode::InvalidGrant)?;
+    // Revalidate under lock: logout may have revoked the session since the code
+    // was consumed, while this exchange waited for the account lock.
     let session = tx
         .sessions()
-        .find_by_id(code.session_id)
+        .find_active_by_id_for_update(code.session_id)
         .await
         .map_err(OAuthError::internal)?
+        .filter(|session| session.user_id == user.id)
         .ok_or(OAuthCode::InvalidGrant)?;
     let client = tx
         .oidc()
