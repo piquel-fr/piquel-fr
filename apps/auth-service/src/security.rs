@@ -73,7 +73,7 @@ impl IntoResponse for ApiError {
     }
 }
 
-/// Random browser secrets are encoded once, and only their digests reach the database.
+/// Random 32-byte secrets travel base64url-encoded; only their digests reach the database.
 pub(crate) struct BrowserSecret(Vec<u8>);
 impl BrowserSecret {
     pub(crate) fn new() -> Self {
@@ -88,29 +88,69 @@ impl BrowserSecret {
             .filter(|v| v.len() == 32)
             .map(Self)
     }
-    pub(crate) fn from_cookie(headers: &HeaderMap, name: &str) -> Option<Self> {
-        headers
-            .get(header::COOKIE)?
-            .to_str()
-            .ok()?
-            .split(';')
-            .map(str::trim)
-            .find_map(|v| {
-                v.split_once('=')
-                    .filter(|(key, _)| *key == name)
-                    .and_then(|(_, v)| Self::parse(v))
-            })
-    }
     pub(crate) fn encoded(&self) -> String {
         URL_SAFE_NO_PAD.encode(&self.0)
     }
     pub(crate) fn digest(&self) -> Vec<u8> {
         Sha256::digest(&self.0).to_vec()
     }
-    pub(crate) fn cookie(&self, name: &str, max_age: i64) -> String {
+}
+
+/// Host-only cookies that bind server-side state to a browser through a `BrowserSecret`.
+#[derive(Clone, Copy)]
+pub(crate) enum BrowserCookie {
+    /// The central sign-in session.
+    Session,
+    /// An in-progress `WebAuthn` ceremony.
+    Ceremony,
+    /// A social login redirect awaiting its provider callback.
+    Federation,
+    /// A verified social identity awaiting signup or linking.
+    FederationPending,
+}
+impl BrowserCookie {
+    pub(crate) const fn name(self) -> &'static str {
+        match self {
+            Self::Session => "__Host-piquel_session",
+            Self::Ceremony => "__Host-piquel_ceremony",
+            Self::Federation => "__Host-piquel_federation",
+            Self::FederationPending => "__Host-piquel_federation_pending",
+        }
+    }
+    /// Lifetime in seconds. Flow cookies outlive their server-side state slightly.
+    const fn max_age(self) -> u32 {
+        match self {
+            Self::Session => 30 * 24 * 60 * 60,
+            Self::Ceremony | Self::Federation | Self::FederationPending => 600,
+        }
+    }
+    /// Reads this cookie's secret. A malformed or duplicated cookie counts as absent,
+    /// so an injected value can never shadow the browser's own.
+    pub(crate) fn read(self, headers: &HeaderMap) -> Option<BrowserSecret> {
+        let mut values = headers
+            .get_all(header::COOKIE)
+            .iter()
+            .filter_map(|header| header.to_str().ok())
+            .flat_map(|header| header.split(';'))
+            .filter_map(|part| part.trim().strip_prefix(self.name())?.strip_prefix('='));
+        let value = values.next()?;
+        values
+            .next()
+            .is_none()
+            .then(|| BrowserSecret::parse(value))?
+    }
+    /// `Set-Cookie` value storing `secret` in this cookie.
+    pub(crate) fn set(self, secret: &BrowserSecret) -> String {
+        self.header(&secret.encoded(), self.max_age())
+    }
+    /// `Set-Cookie` value deleting this cookie.
+    pub(crate) fn clear(self) -> String {
+        self.header("", 0)
+    }
+    fn header(self, value: &str, max_age: u32) -> String {
         format!(
-            "{name}={}; Path=/; Secure; HttpOnly; SameSite=Lax; Max-Age={max_age}",
-            self.encoded()
+            "{}={value}; Path=/; Secure; HttpOnly; SameSite=Lax; Max-Age={max_age}",
+            self.name()
         )
     }
 }
@@ -119,7 +159,7 @@ pub(crate) async fn optional_session(
     database: &Database,
     headers: &HeaderMap,
 ) -> Result<Option<StoredSession>, ApiError> {
-    let Some(secret) = BrowserSecret::from_cookie(headers, "__Host-piquel_session") else {
+    let Some(secret) = BrowserCookie::Session.read(headers) else {
         return Ok(None);
     };
     Ok(database
@@ -168,7 +208,7 @@ pub(crate) async fn create_session(
     tx.sessions()
         .insert_browser_secret(id, &secret.digest())
         .await?;
-    Ok(secret.cookie("__Host-piquel_session", 30 * 24 * 60 * 60))
+    Ok(BrowserCookie::Session.set(&secret))
 }
 
 #[derive(Clone)]

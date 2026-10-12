@@ -2,7 +2,7 @@
 
 use crate::{
     email::normalize,
-    security::{self, ApiError},
+    security::{self, ApiError, BrowserCookie, BrowserSecret},
 };
 use axum::{
     Json, Router,
@@ -20,15 +20,11 @@ use piquel_repository::{
     AppendAuditEvent, Database, DatabaseTransaction, InsertExternalIdentity,
     InsertFederationTransaction, PendingFederation,
 };
-use rand::{RngCore, rngs::OsRng};
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
 use sha2::{Digest, Sha256};
 use std::{collections::HashMap, sync::Arc, time::Duration as StdDuration};
 use thiserror::Error;
 use url::Url;
-
-const PENDING_COOKIE: &str = "__Host-piquel_federation_pending";
-const FLOW_COOKIE: &str = "__Host-piquel_federation";
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum Provider {
@@ -223,7 +219,7 @@ impl FederationApplication {
             .append_pair("error", error)
             .append_pair("return_to", return_to);
         let mut response = Redirect::to(destination.as_str()).into_response();
-        FederationFlow::append(&mut response, FederationFlow::clear_flow())?;
+        FederationFlow::append(&mut response, &BrowserCookie::Federation.clear())?;
         Ok(response)
     }
     fn callback_url(&self, provider: Provider) -> String {
@@ -298,10 +294,10 @@ async fn start(
         StartMode::Login => None,
         StartMode::Link => Some(security::management(&app.database, &headers).await?),
     };
-    let state = BrowserSecret::random();
-    let nonce = BrowserSecret::random();
-    let verifier = BrowserSecret::random();
-    let browser = BrowserSecret::random();
+    let state = BrowserSecret::new();
+    let nonce = BrowserSecret::new().encoded();
+    let verifier = BrowserSecret::new().encoded();
+    let browser = BrowserSecret::new();
     let return_to = app.return_to(input.return_to.as_deref())?;
     app.database
         .federation()
@@ -310,8 +306,8 @@ async fn start(
             provider: provider.name().into(),
             state_digest: state.digest(),
             browser_digest: browser.digest(),
-            nonce: nonce.0.clone(),
-            pkce_verifier: verifier.0.clone(),
+            nonce: nonce.clone(),
+            pkce_verifier: verifier.clone(),
             return_to,
             link_user_id: session.as_ref().map(|s| s.user_id),
             link_session_id: session.as_ref().map(|s| s.id),
@@ -330,19 +326,19 @@ async fn start(
                 Provider::Google => "openid email profile",
             },
         )
-        .append_pair("state", &state.0)
+        .append_pair("state", &state.encoded())
         .append_pair(
             "code_challenge",
-            &URL_SAFE_NO_PAD.encode(Sha256::digest(verifier.0.as_bytes())),
+            &URL_SAFE_NO_PAD.encode(Sha256::digest(verifier.as_bytes())),
         )
         .append_pair("code_challenge_method", "S256");
     if provider == Provider::Google {
         url.query_pairs_mut()
-            .append_pair("nonce", &nonce.0)
+            .append_pair("nonce", &nonce)
             .append_pair("prompt", "select_account");
     }
     let mut response = Json(serde_json::json!({"redirect_url":url.as_str()})).into_response();
-    FederationFlow::append(&mut response, &browser.cookie(FLOW_COOKIE, 600))?;
+    FederationFlow::append(&mut response, &BrowserCookie::Federation.set(&browser))?;
     Ok(response)
 }
 #[derive(Deserialize)]
@@ -358,11 +354,13 @@ async fn callback(
     Query(query): Query<CallbackQuery>,
 ) -> Result<Response, ApiError> {
     let provider = Provider::parse(&provider)?;
-    let browser =
-        BrowserSecret::from_headers(&headers, FLOW_COOKIE)?.ok_or_else(ApiError::unauthorized)?;
+    let browser = BrowserCookie::Federation
+        .read(&headers)
+        .ok_or_else(ApiError::unauthorized)?;
     let state = query
         .state
-        .filter(|state| state.len() == 43)
+        .as_deref()
+        .and_then(BrowserSecret::parse)
         .ok_or_else(|| {
             ApiError::bad_request(
                 "This sign-in attempt is invalid or has expired. Please start again.",
@@ -372,11 +370,7 @@ async fn callback(
     let flow = app
         .database
         .federation()
-        .consume_transaction(
-            provider.name(),
-            &Sha256::digest(state.as_bytes()),
-            &browser.digest(),
-        )
+        .consume_transaction(provider.name(), &state.digest(), &browser.digest())
         .await?;
     if query.error.is_some() {
         return app.failed_callback("social_cancelled", &flow.return_to);
@@ -481,7 +475,7 @@ impl FederationApplication {
             tx.commit().await?;
             let mut response = Redirect::to(&return_to).into_response();
             FederationFlow::append(&mut response, &cookie)?;
-            FederationFlow::append(&mut response, FederationFlow::clear_flow())?;
+            FederationFlow::append(&mut response, &BrowserCookie::Federation.clear())?;
             return Ok(response);
         }
         let owner = match &identity.email {
@@ -504,7 +498,7 @@ impl FederationApplication {
         link_user_id: Option<UserId>,
         link_session_id: Option<SessionId>,
     ) -> Result<Response, ApiError> {
-        let browser = BrowserSecret::random();
+        let browser = BrowserSecret::new();
         self.database
             .federation()
             .insert_pending(&PendingFederation {
@@ -527,8 +521,11 @@ impl FederationApplication {
             "/login?social=signup"
         })
         .into_response();
-        FederationFlow::append(&mut response, &browser.cookie(PENDING_COOKIE, 600))?;
-        FederationFlow::append(&mut response, FederationFlow::clear_flow())?;
+        FederationFlow::append(
+            &mut response,
+            &BrowserCookie::FederationPending.set(&browser),
+        )?;
+        FederationFlow::append(&mut response, &BrowserCookie::Federation.clear())?;
         Ok(response)
     }
 }
@@ -555,7 +552,7 @@ pub(crate) async fn pending_signup(
     database: &Database,
     headers: &HeaderMap,
 ) -> Result<Option<PendingFederation>, ApiError> {
-    let Some(browser) = BrowserSecret::from_headers(headers, PENDING_COOKIE)? else {
+    let Some(browser) = BrowserCookie::FederationPending.read(headers) else {
         return Ok(None);
     };
     let pending = database
@@ -577,8 +574,9 @@ pub(crate) async fn attach_signup(
     headers: &HeaderMap,
     user_id: UserId,
 ) -> Result<(), ApiError> {
-    let browser =
-        BrowserSecret::from_headers(headers, PENDING_COOKIE)?.ok_or_else(ApiError::unauthorized)?;
+    let browser = BrowserCookie::FederationPending
+        .read(headers)
+        .ok_or_else(ApiError::unauthorized)?;
     let pending = tx
         .federation()
         .consume_pending(pending_id, &browser.digest())
@@ -617,14 +615,12 @@ impl PendingIdentity for PendingFederation {
         }
     }
 }
-pub(crate) const fn pending_cookie_clear() -> &'static str {
-    "__Host-piquel_federation_pending=; Path=/; Secure; HttpOnly; SameSite=Lax; Max-Age=0"
-}
 async fn pending_view(
     State(app): State<FederationApplication>,
     headers: HeaderMap,
 ) -> Result<Json<serde_json::Value>, ApiError> {
-    let browser = BrowserSecret::from_headers(&headers, PENDING_COOKIE)?
+    let browser = BrowserCookie::FederationPending
+        .read(&headers)
         .ok_or_else(ApiError::unauthorized)?;
     let pending = app
         .database
@@ -643,7 +639,8 @@ async fn confirm_link(
     headers: HeaderMap,
 ) -> Result<Response, ApiError> {
     let session = security::management(&app.database, &headers).await?;
-    let browser = BrowserSecret::from_headers(&headers, PENDING_COOKIE)?
+    let browser = BrowserCookie::FederationPending
+        .read(&headers)
         .ok_or_else(ApiError::unauthorized)?;
     let mut tx = app.database.begin().await?;
     tx.users()
@@ -708,21 +705,21 @@ async fn confirm_link(
     .await?;
     tx.commit().await?;
     let mut response = Json(serde_json::json!({"return_to":pending.return_to})).into_response();
-    FederationFlow::append(&mut response, pending_cookie_clear())?;
+    FederationFlow::append(&mut response, &BrowserCookie::FederationPending.clear())?;
     Ok(response)
 }
 async fn cancel(
     State(app): State<FederationApplication>,
     headers: HeaderMap,
 ) -> Result<Response, ApiError> {
-    if let Some(browser) = BrowserSecret::from_headers(&headers, PENDING_COOKIE)? {
+    if let Some(browser) = BrowserCookie::FederationPending.read(&headers) {
         app.database
             .federation()
             .cancel_pending(&browser.digest())
             .await?;
     }
     let mut response = StatusCode::NO_CONTENT.into_response();
-    FederationFlow::append(&mut response, pending_cookie_clear())?;
+    FederationFlow::append(&mut response, &BrowserCookie::FederationPending.clear())?;
     Ok(response)
 }
 #[derive(Serialize)]
@@ -1076,46 +1073,6 @@ struct GoogleJwk {
     e: String,
 }
 
-struct BrowserSecret(String);
-impl BrowserSecret {
-    fn random() -> Self {
-        let mut bytes = [0_u8; 32];
-        OsRng.fill_bytes(&mut bytes);
-        Self(URL_SAFE_NO_PAD.encode(bytes))
-    }
-    fn digest(&self) -> Vec<u8> {
-        Sha256::digest(self.0.as_bytes()).to_vec()
-    }
-    fn from_headers(headers: &HeaderMap, name: &str) -> Result<Option<Self>, ApiError> {
-        let prefix = format!("{name}=");
-        let mut found = None;
-        for header in headers.get_all(header::COOKIE) {
-            let header = header.to_str().map_err(|_| {
-                ApiError::bad_request("This browser session is invalid. Please start again.")
-            })?;
-            for part in header.split(';').map(str::trim) {
-                if let Some(value) = part.strip_prefix(&prefix) {
-                    if found.is_some()
-                        || value.len() != 43
-                        || URL_SAFE_NO_PAD.decode(value).is_err()
-                    {
-                        return Err(ApiError::bad_request(
-                            "This browser session is invalid. Please start again.",
-                        ));
-                    }
-                    found = Some(Self(value.into()));
-                }
-            }
-        }
-        Ok(found)
-    }
-    fn cookie(&self, name: &str, max_age: u32) -> String {
-        format!(
-            "{name}={}; Path=/; Secure; HttpOnly; SameSite=Lax; Max-Age={max_age}",
-            self.0
-        )
-    }
-}
 struct FederationFlow;
 impl FederationFlow {
     fn append(response: &mut Response, cookie: &str) -> Result<(), ApiError> {
@@ -1124,9 +1081,6 @@ impl FederationFlow {
             HeaderValue::from_str(cookie).map_err(ApiError::internal)?,
         );
         Ok(())
-    }
-    const fn clear_flow() -> &'static str {
-        "__Host-piquel_federation=; Path=/; Secure; HttpOnly; SameSite=Lax; Max-Age=0"
     }
     async fn audit(
         tx: &mut DatabaseTransaction<'_>,

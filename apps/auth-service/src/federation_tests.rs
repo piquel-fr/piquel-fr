@@ -5,6 +5,7 @@ use axum::{
     routing::post,
 };
 use piquel_repository::{DatabaseConfig, InsertPasskey, InsertUser, InsertVerifiedEmail};
+use rand::{RngCore, rngs::OsRng};
 use tower::ServiceExt;
 
 struct TestApp {
@@ -172,7 +173,7 @@ impl TestApp {
         owner: Option<UserId>,
         email: Option<&str>,
     ) -> (PendingFederation, HeaderMap) {
-        let secret = BrowserSecret::random();
+        let secret = BrowserSecret::new();
         let pending = PendingFederation {
             id: TokenId::new(),
             browser_digest: secret.digest(),
@@ -195,7 +196,12 @@ impl TestApp {
         let mut headers = HeaderMap::new();
         headers.insert(
             header::COOKIE,
-            HeaderValue::from_str(&format!("{PENDING_COOKIE}={}", secret.0)).expect("cookie"),
+            HeaderValue::from_str(&format!(
+                "{}={}",
+                BrowserCookie::FederationPending.name(),
+                secret.encoded()
+            ))
+            .expect("cookie"),
         );
         (pending, headers)
     }
@@ -257,17 +263,18 @@ fn return_destinations_and_browser_bindings_are_strict() {
         validate_return_to(Some("/oauth/authorize?request=abc")).expect("local return"),
         "/oauth/authorize?request=abc"
     );
-    let secret = BrowserSecret::random();
+    let secret = BrowserSecret::new();
     let mut headers = HeaderMap::new();
     headers.insert(
         header::COOKIE,
         HeaderValue::from_str(&format!(
-            "{PENDING_COOKIE}={0}; {PENDING_COOKIE}={0}",
-            secret.0
+            "{0}={1}; {0}={1}",
+            BrowserCookie::FederationPending.name(),
+            secret.encoded()
         ))
         .expect("cookie"),
     );
-    assert!(BrowserSecret::from_headers(&headers, PENDING_COOKIE).is_err());
+    assert!(BrowserCookie::FederationPending.read(&headers).is_none());
 }
 
 #[tokio::test]

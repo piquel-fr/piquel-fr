@@ -1,5 +1,5 @@
 //! Browser-bound `WebAuthn` ceremonies and passkey-only management authorization.
-use crate::security::{self, ApiError, BrowserSecret};
+use crate::security::{self, ApiError, BrowserCookie, BrowserSecret};
 use axum::{
     Json, Router,
     extract::{Path, State},
@@ -206,7 +206,8 @@ impl PasskeyApplication {
         ceremony: Ceremony,
         challenge: impl Serialize,
     ) -> Result<Response, ApiError> {
-        let browser = BrowserSecret::from_cookie(headers, "__Host-piquel_ceremony")
+        let browser = BrowserCookie::Ceremony
+            .read(headers)
             .unwrap_or_else(BrowserSecret::new);
         let id = TokenId::new();
         self.database
@@ -227,7 +228,7 @@ impl PasskeyApplication {
             .await?;
         Self::response(
             json!({"ceremony_id":id,"public_key":challenge}),
-            Some(browser.cookie("__Host-piquel_ceremony", 600)),
+            Some(BrowserCookie::Ceremony.set(&browser)),
         )
     }
     async fn consume(
@@ -236,10 +237,9 @@ impl PasskeyApplication {
         id: TokenId,
         kind: &str,
     ) -> Result<Ceremony, ApiError> {
-        let browser =
-            BrowserSecret::from_cookie(headers, "__Host-piquel_ceremony").ok_or_else(|| {
-                ApiError::bad_request("Please restart the passkey flow in this browser.")
-            })?;
+        let browser = BrowserCookie::Ceremony.read(headers).ok_or_else(|| {
+            ApiError::bad_request("Please restart the passkey flow in this browser.")
+        })?;
         let record = self.database.passkeys().consume_ceremony(id, kind).await?;
         let bound: BoundCeremony =
             serde_json::from_value(record.state).map_err(ApiError::internal)?;
@@ -510,7 +510,8 @@ impl PasskeyApplication {
         let mut response = Self::signed_in(&cookie)?;
         response.headers_mut().append(
             header::SET_COOKIE,
-            HeaderValue::from_static(crate::federation::pending_cookie_clear()),
+            HeaderValue::from_str(&BrowserCookie::FederationPending.clear())
+                .map_err(ApiError::internal)?,
         );
         Ok(response)
     }
@@ -827,7 +828,7 @@ impl PasskeyApplication {
         if let Some(session) = security::optional_session(&app.database, &headers).await? {
             app.database.sessions().revoke(session.id).await?;
         }
-        Self::signed_in("__Host-piquel_session=; Path=/; Secure; HttpOnly; SameSite=Lax; Max-Age=0")
+        Self::signed_in(&BrowserCookie::Session.clear())
     }
 }
 

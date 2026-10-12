@@ -1081,7 +1081,8 @@ async fn logout(
     let mut response = Json(json!({"redirect_url":destination})).into_response();
     response.headers_mut().insert(
         header::SET_COOKIE,
-        "__Host-piquel_session=; Path=/; Secure; HttpOnly; SameSite=Lax; Max-Age=0"
+        crate::security::BrowserCookie::Session
+            .clear()
             .parse()
             .map_err(ApiError::internal)?,
     );
@@ -1110,9 +1111,7 @@ async fn browser_session(
     database: &Database,
     headers: &HeaderMap,
 ) -> Result<Option<StoredSession>, ApiError> {
-    let Some(secret) =
-        crate::security::BrowserSecret::from_cookie(headers, "__Host-piquel_session")
-    else {
+    let Some(secret) = crate::security::BrowserCookie::Session.read(headers) else {
         return Ok(None);
     };
     database
