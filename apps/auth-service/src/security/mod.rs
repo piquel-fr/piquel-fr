@@ -9,6 +9,7 @@ use axum::{
 };
 use base64::{Engine, engine::general_purpose::URL_SAFE_NO_PAD};
 use chrono::{Duration, Utc};
+use ipnet::IpNet;
 use piquel_auth_protocol::{AuthenticationMethod, SessionId, UserId};
 use piquel_repository::{
     Database, DatabaseError, DatabaseTransaction, InsertSession, StoredSession,
@@ -251,14 +252,14 @@ impl Endpoint {
 #[derive(Clone)]
 pub(crate) struct HttpSecurity {
     pub database: Database,
-    pub trusted_proxy_ips: Arc<Vec<IpAddr>>,
+    pub trusted_proxies: Arc<Vec<IpNet>>,
     pub request_timeout: StdDuration,
     pub auth_origin: String,
     pub settings_origin: String,
     pub client_origins: Arc<Vec<String>>,
 }
 impl HttpSecurity {
-    /// A trusted edge must overwrite X-Real-IP with one validated client address.
+    /// A trusted edge must overwrite X-Forwarded-For with one validated client address.
     fn client_ip(&self, request: &Request) -> Result<IpAddr, ApiError> {
         let peer = request
             .extensions()
@@ -266,20 +267,26 @@ impl HttpSecurity {
             .ok_or_else(|| ApiError::internal(anyhow::anyhow!("HTTP peer address missing")))?
             .0
             .ip();
-        if !self.trusted_proxy_ips.contains(&peer) {
+        if !self
+            .trusted_proxies
+            .iter()
+            .any(|proxy| proxy.contains(&peer))
+        {
             return Ok(peer);
         }
-        let mut forwarded = request.headers().get_all("x-real-ip").iter();
+        let mut forwarded = request.headers().get_all("x-forwarded-for").iter();
         let ip = forwarded
             .next()
             .and_then(|value| value.to_str().ok())
             .and_then(|value| value.parse().ok());
         if forwarded.next().is_some() {
             return Err(ApiError::bad_request(
-                "Trusted proxy must supply one X-Real-IP address.",
+                "Trusted proxy must supply one X-Forwarded-For address.",
             ));
         }
-        ip.ok_or_else(|| ApiError::bad_request("Trusted proxy must supply one X-Real-IP address."))
+        ip.ok_or_else(|| {
+            ApiError::bad_request("Trusted proxy must supply one X-Forwarded-For address.")
+        })
     }
 
     fn rate_bucket(&self, request: &Request) -> Result<Option<Vec<u8>>, ApiError> {

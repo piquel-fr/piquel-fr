@@ -76,7 +76,7 @@ startup; it remains the production asset-serving path.
 | `AUTH_DATABASE_PASSWORD` | Optional env/file reference for the database password, when omitted from the URL |
 | `AUTH_PUBLIC_BASE_URL` | Exact auth origin, normally `https://auth.piquel.fr` |
 | `AUTH_SETTINGS_URL` | Exact settings destination; defaults to `https://piquel.fr/settings` |
-| `AUTH_TRUSTED_PROXY_IPS` | Optional comma-separated exact proxy peer IPs; these peers must overwrite `X-Real-IP` with one client IP |
+| `AUTH_TRUSTED_PROXIES` | Optional comma-separated proxy peer IPs or CIDRs; these peers must overwrite `X-Forwarded-For` with one client IP. Defaults to piqueld's `PIQUELD_INGRESS_PROXIES` |
 | `AUTH_PUBLIC_LISTENER` | Listener address; defaults to `127.0.0.1:8080` |
 | `AUTH_KEY_PROVIDER` | RSA private-key reference, `file:///absolute/path/key.pem` or `env://VARIABLE_NAME` |
 | `AUTH_SIGNING_KEY_ID` | Stable ID for that signing key; defaults to `primary` |
@@ -183,8 +183,8 @@ client and scope; explicitly trusted clients bypass consent.
   Mutations require an exact allowed origin and CSRF header; OIDC back-channel
   endpoints instead validate their protocol credentials.
 - Request throttling and expiring-state cleanup use PostgreSQL. Throttling uses separate login, token and account budgets per client IP.
-  By default it uses the direct peer IP; only configured `AUTH_TRUSTED_PROXY_IPS`
-  may supply a single overwritten `X-Real-IP`. Configure this when terminating TLS
+  By default it uses the direct peer IP; only peers in `AUTH_TRUSTED_PROXIES`
+  may supply a single overwritten `X-Forwarded-For`. Configure this when terminating TLS
   at a reverse proxy so users do not share the proxy’s budget. Untrusted headers
   are ignored; missing/ambiguous headers from a trusted proxy fail closed. Security audit records are
   retained. Readiness checks PostgreSQL; startup validates configured signing/provider

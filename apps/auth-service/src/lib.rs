@@ -12,6 +12,7 @@ use passkey::PasskeyApplication;
 
 use anyhow::{Context, Result};
 use axum::{Json, Router, extract::DefaultBodyLimit, middleware, routing::get};
+use ipnet::IpNet;
 use piquel_configuration::{PublicUrl, SecretReference};
 use piquel_repository::{BootstrapOidcClient, Database, DatabaseConfig};
 use serde::Deserialize;
@@ -36,7 +37,7 @@ pub struct AuthConfig {
     github: Option<ProviderConfiguration>,
     google: Option<ProviderConfiguration>,
     clients: Vec<BootstrapOidcClient>,
-    trusted_proxy_ips: Vec<IpAddr>,
+    trusted_proxies: Vec<IpNet>,
 }
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -96,6 +97,27 @@ impl AuthConfig {
             Err(env::VarError::NotPresent) => Ok(default),
             _ => anyhow::bail!("{name} must be true or false"),
         }
+    }
+    /// Proxy peers allowed to supply the client address, as IPs or CIDR ranges.
+    /// Defaults to piqueld's ingress ranges so deployments need no extra setting.
+    fn trusted_proxies() -> Result<Vec<IpNet>> {
+        let Some((name, value)) = ["AUTH_TRUSTED_PROXIES", "PIQUELD_INGRESS_PROXIES"]
+            .into_iter()
+            .find_map(|name| env::var(name).ok().map(|value| (name, value)))
+        else {
+            return Ok(Vec::new());
+        };
+        value
+            .split(',')
+            .map(str::trim)
+            .filter(|proxy| !proxy.is_empty())
+            .map(|proxy| {
+                proxy
+                    .parse::<IpNet>()
+                    .or_else(|_| proxy.parse::<IpAddr>().map(IpNet::from))
+                    .with_context(|| format!("{name} contains an invalid IP or CIDR: {proxy}"))
+            })
+            .collect()
     }
     fn provider(name: &str) -> Result<Option<ProviderConfiguration>> {
         let id = env::var(format!("AUTH_{name}_CLIENT_ID")).ok();
@@ -202,18 +224,7 @@ impl AuthConfig {
             github: Self::provider("GITHUB")?,
             google: Self::provider("GOOGLE")?,
             clients,
-            trusted_proxy_ips: env::var("AUTH_TRUSTED_PROXY_IPS")
-                .ok()
-                .filter(|value| !value.trim().is_empty())
-                .map(|value| {
-                    value
-                        .split(',')
-                        .map(|ip| ip.trim().parse::<IpAddr>())
-                        .collect::<Result<Vec<_>, _>>()
-                })
-                .transpose()
-                .context("AUTH_TRUSTED_PROXY_IPS must contain comma-separated IP addresses")?
-                .unwrap_or_default(),
+            trusted_proxies: Self::trusted_proxies()?,
         })
     }
     fn oidc(&self, database: &Database) -> Result<OidcApplication> {
@@ -291,7 +302,7 @@ pub async fn router(config: &AuthConfig, database: Database) -> Result<Router> {
     let public_config = serde_json::json!({"settings_url":config.settings_url,"providers":provider_names,"invite_required":config.invite_required});
     let health = database.clone();
     let policy = security::HttpSecurity {
-        trusted_proxy_ips: Arc::new(config.trusted_proxy_ips.clone()),
+        trusted_proxies: Arc::new(config.trusted_proxies.clone()),
         request_timeout: Duration::from_secs(30),
         database,
         auth_origin: config.public_base_url.origin().ascii_serialization(),

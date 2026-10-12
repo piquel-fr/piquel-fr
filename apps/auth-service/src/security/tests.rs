@@ -24,7 +24,7 @@ impl SecurityFixture {
         let database = Self::database(5, std::time::Duration::from_secs(5)).await;
         database.run_migrations().await.expect("migrations");
         let policy = HttpSecurity {
-            trusted_proxy_ips: Arc::new(vec![]),
+            trusted_proxies: Arc::new(vec![]),
             request_timeout: std::time::Duration::from_secs(30),
             database,
             auth_origin: "https://auth.piquel.fr".into(),
@@ -299,7 +299,7 @@ async fn optional_session_preserves_database_failure_instead_of_reporting_signed
 async fn forwarded_addresses_require_an_explicit_trusted_peer() {
     let mut fixture = SecurityFixture::new().await;
     let mut request = HttpRequest::builder()
-        .header("x-real-ip", "192.0.2.7")
+        .header("x-forwarded-for", "192.0.2.7")
         .body(Body::empty())
         .expect("request");
     request.extensions_mut().insert(ConnectInfo(fixture.peer));
@@ -307,19 +307,19 @@ async fn forwarded_addresses_require_an_explicit_trusted_peer() {
         fixture.policy.client_ip(&request).expect("direct peer"),
         fixture.peer.ip()
     );
-    fixture.policy.trusted_proxy_ips = Arc::new(vec![fixture.peer.ip()]);
+    fixture.policy.trusted_proxies = Arc::new(vec![IpNet::from(fixture.peer.ip())]);
     assert_eq!(
         fixture.policy.client_ip(&request).expect("trusted header"),
         "192.0.2.7".parse::<IpAddr>().expect("IP")
     );
     request
         .headers_mut()
-        .append("x-real-ip", HeaderValue::from_static("192.0.2.8"));
+        .append("x-forwarded-for", HeaderValue::from_static("192.0.2.8"));
     assert!(fixture.policy.client_ip(&request).is_err());
-    request.headers_mut().remove("x-real-ip");
+    request.headers_mut().remove("x-forwarded-for");
     assert!(fixture.policy.client_ip(&request).is_err());
     request.headers_mut().insert(
-        "x-real-ip",
+        "x-forwarded-for",
         HeaderValue::from_static("192.0.2.7, 192.0.2.8"),
     );
     assert!(fixture.policy.client_ip(&request).is_err());
@@ -408,7 +408,7 @@ async fn rate_budgets_are_separate_and_unknown_paths_do_not_consume_them() {
 #[ignore = "requires TEST_DATABASE_URL"]
 async fn trusted_proxy_clients_have_independent_budgets() {
     let mut fixture = SecurityFixture::new().await;
-    fixture.policy.trusted_proxy_ips = Arc::new(vec![fixture.peer.ip()]);
+    fixture.policy.trusted_proxies = Arc::new(vec![IpNet::from(fixture.peer.ip())]);
     let bucket = Sha256::digest(b"token:192.0.2.17");
     for _ in 0..120 {
         fixture
@@ -432,7 +432,7 @@ async fn trusted_proxy_clients_have_independent_budgets() {
         let mut request = HttpRequest::builder()
             .method(Method::POST)
             .uri("/oauth/token")
-            .header("x-real-ip", client)
+            .header("x-forwarded-for", client)
             .body(Body::empty())
             .expect("request");
         request.extensions_mut().insert(ConnectInfo(fixture.peer));
