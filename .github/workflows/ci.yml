@@ -1,0 +1,243 @@
+# Continuous integration for piquel.fr. Every job runs the same `just` recipes
+# as local validation:
+#
+#   checks -> Rust formatting and the Rust dependency audit, which compile nothing
+#   web    -> Prettier, svelte-check and tsc, ESLint, both static builds and the
+#             web dependency audit
+#   rust   -> Clippy, unit, database and doc tests against PostgreSQL
+#   e2e    -> the browser suite against the real binary, with the auth pages
+#             embedded, the settings build and PostgreSQL
+#   docker -> both deployment images
+#
+# Pull requests run only the jobs their changes can affect (see `changes`).
+# Pushes to main and manual runs run everything except `docker`: staging builds
+# the same images from every push to main. `ci` is the single status to
+# require: it fails if any job failed and passes when the rest succeeded or
+# were skipped. audit.yml audits new advisories weekly.
+#
+# Caches are saved from main only. Pull requests restore main's caches, so a
+# branch never evicts them with copies no other branch can read.
+
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+  # Incremental artifacts only bloat CI caches; restored dependency builds
+  # make up for the lost reuse.
+  CARGO_INCREMENTAL: '0'
+  RUST_BACKTRACE: short
+
+jobs:
+  # Decides which jobs a pull request needs from the paths it changes. A file
+  # matches a filter only when it matches every pattern, so `web` covers
+  # everything Prettier, ESLint or the frontends can see.
+  changes:
+    name: changes
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      pull-requests: read
+    outputs:
+      rust: ${{ github.event_name != 'pull_request' || steps.filter.outputs.rust == 'true' }}
+      web: ${{ github.event_name != 'pull_request' || steps.filter.outputs.web == 'true' }}
+      deps: ${{ github.event_name != 'pull_request' || steps.filter.outputs.deps == 'true' }}
+      docker: ${{ github.event_name == 'workflow_dispatch' || steps.filter.outputs.docker == 'true' }}
+    steps:
+      - if: github.event_name == 'pull_request'
+        id: filter
+        uses: dorny/paths-filter@ceb8a2b8f2d89434be7ff52d3de7ec3738c5cc9d # v4.0.3
+        with:
+          predicate-quantifier: every
+          filters: |
+            rust:
+              - '{Cargo.toml,Cargo.lock,rust-toolchain.toml,justfile,apps/auth-service/**,crates/**,.github/workflows/ci.yml}'
+            web:
+              - '**'
+              - '!Cargo.toml'
+              - '!Cargo.lock'
+              - '!rust-toolchain.toml'
+              - '!deny.toml'
+              - '!apps/auth-service/**'
+              - '!crates/**'
+              - '!infra/**'
+              - '!.dockerignore'
+              - '!**/*.md'
+            deps:
+              - '{Cargo.toml,**/Cargo.toml,Cargo.lock,deny.toml,package.json,**/package.json,pnpm-lock.yaml,pnpm-workspace.yaml,.github/workflows/ci.yml}'
+            docker:
+              - '{infra/**,.dockerignore,Cargo.toml,pnpm-workspace.yaml,.github/workflows/ci.yml}'
+
+  checks:
+    name: checks
+    needs: changes
+    if: needs.changes.outputs.rust == 'true' || needs.changes.outputs.deps == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: taiki-e/install-action@3f74d7c16a4242f1c95561e98edc25d36adb4375 # v2
+        with:
+          tool: just,cargo-deny
+      - run: just fmt-check-rust
+      - if: needs.changes.outputs.deps == 'true'
+        run: just deny
+
+  web:
+    name: web
+    needs: changes
+    if: needs.changes.outputs.web == 'true' || needs.changes.outputs.deps == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - &install-just
+        uses: taiki-e/install-action@3f74d7c16a4242f1c95561e98edc25d36adb4375 # v2
+        with:
+          tool: just
+      # pnpm's version comes from package.json's packageManager.
+      - &setup-pnpm
+        uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+      - &setup-node
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: '24'
+          cache: pnpm
+      - run: just install
+      - run: just fmt-check-web
+      - run: just check-web
+      - run: just lint-web
+      - run: just build-web
+      - if: needs.changes.outputs.deps == 'true'
+        run: just audit-web
+
+  # Clippy runs first so lint failures report early; the tests then reuse the
+  # dependencies it compiled for build scripts and proc macros.
+  rust:
+    name: rust
+    needs: changes
+    if: needs.changes.outputs.rust == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      TEST_DATABASE_URL: postgres://postgres:postgres@localhost:5432/postgres
+    # A disposable server for the database tests, and for the browser suite.
+    services:
+      postgres: &postgres
+        image: postgres:18-bookworm
+        env:
+          POSTGRES_PASSWORD: postgres
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd pg_isready --health-interval 2s --health-timeout 5s --health-retries 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: taiki-e/install-action@3f74d7c16a4242f1c95561e98edc25d36adb4375 # v2
+        with:
+          tool: just,cargo-nextest
+      - &rust-cache
+        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
+        with:
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+      - run: just lint-rust
+      - run: just test --workspace --run-ignored all
+      - run: just doc-test
+
+  e2e:
+    name: e2e
+    needs: changes
+    if: needs.changes.outputs.rust == 'true' || needs.changes.outputs.web == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    services:
+      postgres: *postgres
+    env:
+      E2E_AUTH_URL: http://localhost:3000
+      E2E_SETTINGS_URL: http://localhost:4173/settings
+      AUTH_DATABASE_URL: postgres://postgres:postgres@localhost:5432/postgres
+      AUTH_DEVELOPMENT_MODE: 'true'
+      AUTH_PUBLIC_BASE_URL: http://localhost:3000
+      AUTH_PUBLIC_LISTENER: 127.0.0.1:3000
+      AUTH_SETTINGS_URL: http://localhost:4173/settings
+      AUTH_INVITE_REQUIRED: 'false'
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - *install-just
+      - *setup-pnpm
+      - *setup-node
+      - *rust-cache
+      - run: just install
+      # Embeds the auth pages, as in the deployed image.
+      - run: just build-debug
+      - run: VITE_AUTH_ORIGIN="$E2E_AUTH_URL" just build-settings-web
+      # The suite signs in through the public OIDC client from tests/browser/README.md.
+      - name: Start the auth service and the settings frontend
+        run: |
+          export AUTH_CLIENTS_FILE="$RUNNER_TEMP/clients.json"
+          cat > "$AUTH_CLIENTS_FILE" <<'EOF'
+          [
+            {
+              "id": "browser-e2e",
+              "display_name": "Browser E2E",
+              "redirect_uris": ["http://localhost:4173/callback"],
+              "post_logout_uris": ["http://localhost:4173/settings"],
+              "allowed_scopes": ["openid", "profile", "email"],
+              "allow_refresh": false,
+              "trusted": false
+            }
+          ]
+          EOF
+          target/debug/auth-service migrate
+          target/debug/auth-service serve > "$RUNNER_TEMP/auth.log" 2>&1 &
+          pnpm --filter @piquel/piquel-web exec vite preview --host localhost --port 4173 --strictPort > "$RUNNER_TEMP/settings.log" 2>&1 &
+          curl -fsS --retry 30 --retry-delay 1 --retry-all-errors "$E2E_AUTH_URL/health/ready"
+          curl -fsS --retry 30 --retry-delay 1 --retry-all-errors -o /dev/null "$E2E_SETTINGS_URL"
+      - run: just test-browser
+        env:
+          CHROMIUM_EXECUTABLE: /usr/bin/google-chrome
+      - if: failure()
+        run: cat "$RUNNER_TEMP/auth.log" "$RUNNER_TEMP/settings.log"
+
+  docker:
+    name: docker (${{ matrix.image }})
+    needs: changes
+    if: needs.changes.outputs.docker == 'true'
+    strategy:
+      fail-fast: false
+      matrix:
+        image: [auth, web]
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - run: docker build --file infra/${{ matrix.image }}.Dockerfile .
+
+  ci:
+    name: ci
+    if: always()
+    needs:
+      - changes
+      - checks
+      - web
+      - rust
+      - e2e
+      - docker
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: re-actors/alls-green@b5b5b37504aa4183270bd3d855c52a67f212be35 # v1.3.0
+        with:
+          allowed-skips: checks, web, rust, e2e, docker
+          jobs: ${{ toJSON(needs) }}
