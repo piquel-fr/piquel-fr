@@ -2,6 +2,8 @@ import adapter from '@sveltejs/adapter-static';
 
 // Without VITE_AUTH_ORIGIN, the build reads its auth origin at runtime, and the
 // server narrows connect-src with its own CSP header (see infra/nginx.conf).
+// Export VITE_AUTH_ORIGIN in the shell: this config cannot see Vite .env files, so
+// an origin set only there would reach the page but not its CSP.
 const authOrigin = process.env.VITE_AUTH_ORIGIN ?? 'https:';
 export default {
   kit: {
