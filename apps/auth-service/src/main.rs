@@ -86,6 +86,32 @@ impl DatabaseCommand {
         println!("{url}");
         Ok(())
     }
+    /// Resolves on Ctrl+C or SIGTERM, the signal container runtimes send on stop.
+    async fn shutdown_signal() {
+        use tokio::signal::unix::{SignalKind, signal};
+        let ctrl_c = async {
+            if let Err(error) = tokio::signal::ctrl_c().await {
+                tracing::error!(?error, "Ctrl+C handler unavailable");
+                std::future::pending::<()>().await;
+            }
+        };
+        let terminate = async {
+            match signal(SignalKind::terminate()) {
+                Ok(mut terminate) => {
+                    terminate.recv().await;
+                }
+                Err(error) => {
+                    tracing::error!(?error, "SIGTERM handler unavailable");
+                    std::future::pending::<()>().await;
+                }
+            }
+        };
+        tokio::select! {
+            () = ctrl_c => {}
+            () = terminate => {}
+        }
+        tracing::info!("shutting down");
+    }
     async fn serve(database: Database) -> Result<()> {
         auth_service::require_embedded_assets()?;
         let config = AuthConfig::from_environment()?;
@@ -105,11 +131,7 @@ impl DatabaseCommand {
             listener,
             router.into_make_service_with_connect_info::<SocketAddr>(),
         )
-        .with_graceful_shutdown(async {
-            if let Err(error) = tokio::signal::ctrl_c().await {
-                tracing::error!(?error, "shutdown signal unavailable");
-            }
-        })
+        .with_graceful_shutdown(Self::shutdown_signal())
         .await;
         cleanup.abort();
         Ok(result?)
