@@ -2,6 +2,14 @@ Static SvelteKit pages for the authentication origin. `pnpm --filter @piquel/aut
 produces `build/`, which the Rust auth-service build embeds into its executable.
 Node is needed only to build these assets.
 
+For local development, run `just dev` from the repository root with
+`AUTH_DATABASE_URL` set to a local PostgreSQL database (see the root README).
+Open `http://localhost:3000`: Vite hot reloads the UI and proxies auth endpoints to
+the normal Rust service on port 8080, restarted by cargo-watch. `/login` is a UI
+route; `/login/*` contains backend social-login endpoints. The proxy preserves
+Origin, cookies and redirects. Running this app's `dev` script alone requires
+that backend to already be running with `AUTH_PUBLIC_BASE_URL=http://localhost:3000`.
+
 Passkey ceremonies, login, social linking and authorization confirmation run here.
 All configuration comes from the public `/config` endpoint; no provider secrets or
 session tokens are placed in the frontend bundle. The auth session uses an HttpOnly

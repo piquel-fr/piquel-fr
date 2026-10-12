@@ -11,17 +11,62 @@ for repository-driven piqueld deployments.
 
 ## Build
 
-Requires Rust 1.97+, Node 24+, and pnpm (the workspace pins its version).
+Requires Rust 1.97+, Node 24+, just, and pnpm (the workspace pins its version).
 
 ```sh
-pnpm install --frozen-lockfile
-pnpm build
-cargo build --release -p auth-service
+just install
+just build
 ```
 
 The executable is `target/release/auth-service`. Auth assets are embedded at compile
 time; rebuild Rust after changing `apps/auth-web`. The standalone settings build
 is `apps/piquel-web/build`. Node is needed to build the frontends, not to run auth.
+
+## Development
+
+Install the build prerequisites above, `just`, and `cargo-watch` (`cargo install cargo-watch --locked`).
+Local signing-key generation uses the OpenSSL CLI. The combined development recipe
+uses Bash, `setsid` (util-linux), and `pkill`/`pgrep` (procps) on Linux.
+Create a local PostgreSQL database, then run:
+
+```sh
+just install
+export AUTH_DATABASE_URL='postgres://localhost/piquel_dev'
+just dev
+```
+
+This applies migrations to that database, builds the embedded auth assets once,
+and starts all three processes. Ctrl+C stops them together:
+
+- Auth UI and API: `http://localhost:3000` (Vite proxies API requests to Rust).
+- Rust listener: `127.0.0.1:8080` (use the public auth URL in the browser).
+- Account settings: `http://localhost:4173/settings` (a separate origin, as in production).
+
+Svelte, TypeScript and CSS edits hot reload through Vite, including shared browser
+code. `cargo-watch` rebuilds and restarts the normal `auth-service serve` command
+when Rust sources, migrations or Cargo configuration change. Frontend edits do not
+restart Rust. A backend restart briefly interrupts requests; retry after it starts.
+Restart `just dev` after changing environment configuration.
+New database migrations are also applied before each watched backend restart.
+
+The development recipes set these fixed local origins and `AUTH_DEVELOPMENT_MODE=true`
+for their child processes. They retain other auth configuration, including invitations, clients
+and optional social providers. Signup still requires an invitation by default;
+set `AUTH_INVITE_REQUIRED=false` explicitly for an unrestricted local signup flow.
+Provider callbacks must use `http://localhost:3000/login/<provider>/callback`.
+The configured providers must accept that local callback URL.
+
+The same Rust routes, database, origin checks, CSRF checks and Secure/HttpOnly
+cookies run in development. Use **localhost**, not the backend address. Local HTTP
+uses browsers' localhost secure-context exception; production uses HTTPS. Vite's
+development rendering/HMR does not exercise the static build's per-page CSP hashes,
+so use `just build` and serve the resulting executable for final production checks.
+There are no development-only auth handlers or cookie rewrites.
+
+Unless `AUTH_KEY_PROVIDER` is set, `just generate-dev-key` creates a private signing key at
+`.dev/signing-key.pem` and reuses it across restarts, preserving token validity.
+That directory is ignored by Git. The embedded frontend is refreshed at launcher
+startup; it remains the production asset-serving path.
 
 ## Configuration
 
@@ -147,15 +192,34 @@ client and scope; explicitly trusted clients bypass consent.
 
 ## Validation
 
-```sh
-pnpm check
-cargo fmt --all --check
-cargo clippy --workspace --all-targets
-cargo nextest run --workspace
-TEST_DATABASE_URL=postgres://... cargo nextest run -p auth-service -p piquel-repository --run-ignored all
-cargo deny check advisories licenses
-pnpm audit
-```
+`just` runs `validate` by default.
+Install `cargo-nextest` and `cargo-deny` to run the complete validation suite.
+Use individual recipes while iterating:
+
+| Task | Recipe |
+| --- | --- |
+| Full validation (format, Clippy, Rust/Svelte checks, unit/doc tests, audits) | `just validate` |
+| Format Rust / check formatting | `just fmt` / `just fmt-check` |
+| Rust / frontend checks | `just check-rust` / `just check-web` |
+| Clippy | `just lint` |
+| Unit tests / focused package tests | `just test` / `just test -p auth-service` |
+| Documentation tests | `just doc-test` |
+| Database integration tests | `TEST_DATABASE_URL=postgres://... just test-database` |
+| Browser tests against running servers | `just test-browser` |
+| Dependency audits | `just audit` (`deny` + `audit-web`) |
+| SvelteKit generated types/config | `just generate` |
+| Static frontends / embedded debug binary / release binary | `just build-web` / `just build-debug` / `just build` |
+| Run with caller-provided auth configuration | `just serve`, `just migrate`, `just invite --expires-in 7d` |
+
+`just --list` shows every recipe. Test recipes forward extra arguments to nextest
+or Playwright, including quoted filter expressions. `just run` forwards arguments
+to the auth binary. `just serve` builds auth assets before compiling and serving.
+Cargo generates the embedded asset table and embeds migrations during compilation;
+there is no separate API/schema code-generation step.
+
+`just dev` runs all development servers. For separate terminal logs, run
+`just dev-rust`, `just dev-auth`, and `just dev-settings`; `dev-rust` prepares the
+assets, signing key and database first. Use `just dev-prepare` for preparation alone.
 
 Database integration tests are explicitly marked ignored for the ordinary test
 command. The database command above runs them against a **disposable loopback test

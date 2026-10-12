@@ -2,9 +2,16 @@ The browser suite uses the real auth binary and PostgreSQL, with Chromium's virt
 WebAuthn authenticator. It does not intercept or mock API responses. Use an isolated
 database: tests create accounts and credentials.
 
+To test the hot-reload setup, use the client configuration below, set
+`AUTH_CLIENTS_FILE`, an isolated `AUTH_DATABASE_URL`, and `AUTH_INVITE_REQUIRED=false`,
+then run `just dev`. In another terminal run
+`E2E_AUTH_URL=http://localhost:3000 E2E_SETTINGS_URL=http://localhost:4173/settings just test-browser`.
+This exercises the same browser suite through Vite's auth proxy. Also run against
+the embedded production build when validating static assets and their CSP.
+
 Build `apps/piquel-web` with `VITE_AUTH_ORIGIN` set to the auth origin. Serve that
 static build at the service's configured settings URL, then set `E2E_AUTH_URL`
-and `E2E_SETTINGS_URL` and run `pnpm test:browser`. If signup requires an invitation,
+and `E2E_SETTINGS_URL` and run `just test-browser`. If signup requires an invitation,
 provide an unused `E2E_INVITATION`. Both origins must support secure contexts;
 loopback HTTP requires the service's explicit development mode.
 
