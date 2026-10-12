@@ -196,7 +196,8 @@ impl Database {
     /// rows per table.
     ///
     /// Each table's batch commits on its own and skips rows that live requests have
-    /// locked, so cleanup never waits on a request or holds locks across tables.
+    /// locked, so cleanup never holds locks across tables. Deleting a session can
+    /// still wait briefly on a locked child row it cascades to.
     ///
     /// # Errors
     ///
