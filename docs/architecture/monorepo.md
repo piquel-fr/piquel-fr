@@ -8,7 +8,7 @@ is authentication and the piquel.fr account settings frontend.
 | `apps/auth-service` | Rust auth authority, browser ceremonies, social adapters, OIDC, settings API, CLI |
 | `apps/auth-web` | Static SvelteKit auth pages embedded by the Rust build |
 | `apps/piquel-web` | Static SvelteKit account settings calling the auth API |
-| `packages/auth-client` | Browser auth SDK: API client, WebAuthn passkey ceremonies, redirect helpers, shared styles |
+| `packages/auth-sdk` | Browser auth SDK: API client, WebAuthn passkey ceremonies, redirect helpers, shared styles |
 | `crates/database` | PostgreSQL connections, migrations and typed persistence operations |
 | `crates/auth-protocol` | Shared identity/session/token IDs and authentication enums |
 | `crates/configuration` | URL and redacted secret-reference validation |

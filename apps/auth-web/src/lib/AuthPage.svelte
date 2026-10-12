@@ -11,7 +11,7 @@
     type PasskeyKind,
     type Provider,
     type Session
-  } from '@piquel/auth-client';
+  } from '@piquel/auth-sdk';
   let { mode = 'login' }: { mode?: 'login' | 'register' | 'manage' | 'enroll' | 'link' } = $props();
   const api = new AuthApi();
   const passkeys = new Passkeys(api);

@@ -3,7 +3,7 @@ WORKDIR /app
 COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
 RUN npm install --global "$(node -p 'require("./package.json").packageManager')"
 COPY apps/piquel-web apps/piquel-web
-COPY packages/auth-client packages/auth-client
+COPY packages/auth-sdk packages/auth-sdk
 RUN pnpm install --frozen-lockfile --filter @piquel/piquel-web...
 # No VITE_AUTH_ORIGIN: one image serves every environment. The page reads its
 # auth origin from /config.json, which nginx serves from AUTH_ORIGIN.

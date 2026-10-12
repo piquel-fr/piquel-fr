@@ -1,5 +1,5 @@
 {
-  "name": "@piquel/auth-client",
+  "name": "@piquel/auth-sdk",
   "private": true,
   "version": "0.1.0",
   "type": "module",

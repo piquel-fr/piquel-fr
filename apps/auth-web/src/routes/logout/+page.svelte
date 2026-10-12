@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { AuthApi, errorMessage } from '@piquel/auth-client';
+  import { AuthApi, errorMessage } from '@piquel/auth-sdk';
   let error = $state('');
   let busy = $state(false);
   async function logout() {

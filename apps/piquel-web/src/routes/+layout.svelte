@@ -1,5 +1,5 @@
 <script lang="ts">
-  import '@piquel/auth-client/style.css';
+  import '@piquel/auth-sdk/style.css';
   import type { LayoutProps } from './$types';
   let { children }: LayoutProps = $props();
 </script>
