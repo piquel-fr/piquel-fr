@@ -1,4 +1,4 @@
-use super::DatabaseConfig;
+use super::{Database, DatabaseConfig};
 use sqlx::postgres::PgSslMode;
 use std::time::Duration;
 
@@ -129,4 +129,40 @@ fn development_requires_verified_tls_outside_loopback() {
         config.options.get_ssl_mode(),
         PgSslMode::VerifyFull
     ));
+}
+
+/// Cleanup skips rows a live request has locked instead of waiting on them.
+#[tokio::test]
+#[ignore = "requires a disposable TEST_DATABASE_URL"]
+async fn cleanup_skips_rows_locked_by_requests() {
+    let pool = crate::repositories::test_pool().await;
+    let bucket = uuid::Uuid::now_v7().as_bytes().to_vec();
+    sqlx::query(
+        "INSERT INTO request_limits(bucket,requests,expires_at) VALUES($1,1,now()-interval '1 minute')",
+    )
+    .bind(&bucket)
+    .execute(&pool)
+    .await
+    .expect("expired limit");
+    let mut request = pool.begin().await.expect("request transaction");
+    sqlx::query("SELECT 1 FROM request_limits WHERE bucket=$1 FOR UPDATE")
+        .bind(&bucket)
+        .execute(&mut *request)
+        .await
+        .expect("lock");
+    let database = Database { pool: pool.clone() };
+    tokio::time::timeout(
+        Duration::from_secs(2),
+        database.purge_expired_auth_state(1000),
+    )
+    .await
+    .expect("cleanup must not wait on a locked row")
+    .expect("purge");
+    let remaining: i64 = sqlx::query_scalar("SELECT count(*) FROM request_limits WHERE bucket=$1")
+        .bind(&bucket)
+        .fetch_one(&pool)
+        .await
+        .expect("count");
+    assert_eq!(remaining, 1);
+    request.rollback().await.expect("rollback request");
 }
