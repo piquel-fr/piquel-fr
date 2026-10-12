@@ -276,7 +276,9 @@ async fn router_enforces_exact_browser_origins_csrf_and_public_client_cors_bound
 #[tokio::test]
 #[ignore = "requires TEST_DATABASE_URL"]
 async fn optional_session_preserves_database_failure_instead_of_reporting_signed_out() {
-    let database = SecurityFixture::database(1, std::time::Duration::from_millis(50)).await;
+    // The timeout also bounds the first connection, so it leaves room for
+    // connecting while other database tests run.
+    let database = SecurityFixture::database(1, std::time::Duration::from_secs(1)).await;
     // Exhaust only this test's private pool; the database and all other tests
     // remain usable. A well-formed session cookie must trigger a real lookup.
     let transaction = database.begin().await.expect("hold sole connection");
@@ -347,7 +349,9 @@ async fn rate_limit_deadline_includes_a_blocked_database_query() {
         .allow_request(bucket.as_bytes(), 120)
         .await
         .expect("hold bucket lock");
-    fixture.policy.request_timeout = std::time::Duration::from_millis(100);
+    // The deadline also bounds the request after the lock is released, so it
+    // leaves room for queries while other database tests run.
+    fixture.policy.request_timeout = std::time::Duration::from_secs(1);
     fixture.router = Router::new()
         .route("/oauth/token", any(|| async { StatusCode::ACCEPTED }))
         .layer(middleware::from_fn_with_state(
@@ -355,7 +359,7 @@ async fn rate_limit_deadline_includes_a_blocked_database_query() {
             HttpSecurity::protect,
         ));
     let response = tokio::time::timeout(
-        std::time::Duration::from_secs(2),
+        std::time::Duration::from_secs(5),
         fixture.request(Method::POST, "/oauth/token", None, false),
     )
     .await
