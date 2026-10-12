@@ -1,5 +1,12 @@
 import { expect, test } from '@playwright/test';
 
+// Response shapes this test reads; anything else stays unknown.
+type Tokens = { id_token: string; access_token: string };
+type Jwks = { keys: (JsonWebKey & { kid: string })[] };
+type Json = Record<string, unknown>;
+type Session = { user: { id: string } };
+type Passkeys = { id: string }[];
+
 /** Runs against the real Rust binary and an isolated PostgreSQL database. */
 test('passkey lifecycle, protected settings and browser OIDC consent with SSO', async ({
   page,
@@ -74,7 +81,7 @@ test('passkey lifecycle, protected settings and browser OIDC consent with SSO', 
     const callback = new URL(page.url());
     expect(callback.searchParams.get('state')).toBe(oidc.state);
     expect(callback.searchParams.has('error')).toBe(false);
-    const code = callback.searchParams.get('code');
+    const code = callback.searchParams.get('code') ?? '';
     expect(code).toBeTruthy();
     // Execute token handling on the genuine client origin, under its real CSP and CORS policy.
     await page.goto(settingsUrl);
@@ -84,21 +91,24 @@ test('passkey lifecycle, protected settings and browser OIDC consent with SSO', 
           grant_type: 'authorization_code',
           client_id: 'browser-e2e',
           redirect_uri: redirectUri,
-          code: code!,
+          code,
           code_verifier: verifier
         });
         const response = await fetch(`${origin}/oauth/token`, { method: 'POST', body });
         if (!response.ok) return { status: response.status };
-        const tokens = await response.json();
+        const tokens = (await response.json()) as Tokens;
         const decode = (value: string) =>
           Uint8Array.from(atob(value.replace(/-/g, '+').replace(/_/g, '/')), (character) =>
             character.charCodeAt(0)
           );
         const [header, payload, signature] = tokens.id_token.split('.');
-        const metadata = JSON.parse(new TextDecoder().decode(decode(header)));
-        const claims = JSON.parse(new TextDecoder().decode(decode(payload)));
-        const jwks = await fetch(`${origin}/.well-known/jwks.json`).then((result) => result.json());
-        const jwk = jwks.keys.find((key: JsonWebKey & { kid: string }) => key.kid === metadata.kid);
+        const metadata = JSON.parse(new TextDecoder().decode(decode(header))) as Json;
+        const claims = JSON.parse(new TextDecoder().decode(decode(payload))) as Json;
+        const jwks = (await fetch(`${origin}/.well-known/jwks.json`).then((result) =>
+          result.json()
+        )) as Jwks;
+        const jwk = jwks.keys.find((key) => key.kid === metadata.kid);
+        if (!jwk) throw new Error('The ID token signing key is not published.');
         const key = await crypto.subtle.importKey(
           'jwk',
           jwk,
@@ -117,10 +127,10 @@ test('passkey lifecycle, protected settings and browser OIDC consent with SSO', 
         const userinfoResponse = await fetch(`${origin}/oidc/userinfo`, {
           headers: { authorization: `Bearer ${tokens.access_token}` }
         });
-        const userinfo = await userinfoResponse.json();
-        const session = await fetch(`${origin}/session`, { credentials: 'include' }).then(
+        const userinfo = (await userinfoResponse.json()) as Json;
+        const session = (await fetch(`${origin}/session`, { credentials: 'include' }).then(
           (result) => result.json()
-        );
+        )) as Session;
         const replay = await fetch(`${origin}/oauth/token`, { method: 'POST', body });
         return {
           status: response.status,
@@ -172,9 +182,9 @@ test('passkey lifecycle, protected settings and browser OIDC consent with SSO', 
 
     const rejected = await page.evaluate(async (origin) => {
       const options = { credentials: 'include' as const };
-      const list = await fetch(`${origin}/account/passkeys`, options).then((response) =>
+      const list = (await fetch(`${origin}/account/passkeys`, options).then((response) =>
         response.json()
-      );
+      )) as Passkeys;
       return fetch(`${origin}/account/passkeys/${list[0].id}`, {
         ...options,
         method: 'PATCH',
@@ -220,9 +230,9 @@ test('passkey lifecycle, protected settings and browser OIDC consent with SSO', 
     });
     await cdp.send('WebAuthn.setAutomaticPresenceSimulation', { authenticatorId, enabled: true });
     const lastPasskey = await page.evaluate(async (origin) => {
-      const list = await fetch(`${origin}/account/passkeys`, { credentials: 'include' }).then(
+      const list = (await fetch(`${origin}/account/passkeys`, { credentials: 'include' }).then(
         (response) => response.json()
-      );
+      )) as Passkeys;
       return fetch(`${origin}/account/passkeys/${list[0].id}`, {
         credentials: 'include',
         method: 'DELETE',

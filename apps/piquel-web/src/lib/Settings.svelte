@@ -42,7 +42,9 @@
   onMount(() => {
     void load();
     const timer = setInterval(() => (now = Date.now()), 1000);
-    return () => clearInterval(timer);
+    return () => {
+      clearInterval(timer);
+    };
   });
   async function load() {
     try {
@@ -93,10 +95,11 @@
   }
   async function link(provider: Provider) {
     await run(async () => {
+      if (!config) throw new Error('Account settings are still loading. Please try again.');
       const result = await api.request<{ redirect_url: string }>(
         `/login/${provider}/start`,
         'POST',
-        { mode: 'link', return_to: config!.settings_url }
+        { mode: 'link', return_to: config.settings_url }
       );
       window.location.assign(result.redirect_url);
     });
@@ -167,7 +170,7 @@
         get back in.
       </p>
       <ul class="list">
-        {#each passkeys as passkey}<li>
+        {#each passkeys as passkey (passkey.id)}<li>
             {#if editing === passkey.id}<form
                 onsubmit={(event) => {
                   event.preventDefault();
@@ -231,7 +234,7 @@
         Linked providers can sign you in. Only a passkey can authorize changes to these settings.
       </p>
       <ul class="list">
-        {#each config?.providers ?? [] as provider}{@const identity = identities.find(
+        {#each config?.providers ?? [] as provider (provider)}{@const identity = identities.find(
             (value) => value.provider === provider
           )}
           <li>

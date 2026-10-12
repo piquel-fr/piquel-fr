@@ -49,7 +49,7 @@
   {:else}<div class="card">
       <h2>{details.client_name}</h2>
       <ul>
-        {#each details.scopes as scope}<li>
+        {#each details.scopes as scope (scope)}<li>
             {scope === 'openid'
               ? 'Your account identifier'
               : scope === 'profile'

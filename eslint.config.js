@@ -29,7 +29,13 @@ export default defineConfig(
     rules: {
       // TypeScript already reports undefined identifiers, including browser and
       // Node globals, so ESLint's environment-unaware check only adds noise.
-      'no-undef': 'off'
+      'no-undef': 'off',
+      // The codebase consistently declares object shapes as type aliases.
+      '@typescript-eslint/consistent-type-definitions': ['error', 'type'],
+      // Both apps are served from their origin root without `paths.base`, and
+      // most links point at other origins (auth pages, the settings URL) that
+      // `resolve()` cannot express. Programmatic navigation is still checked.
+      'svelte/no-navigation-without-resolve': ['error', { ignoreLinks: true }]
     }
   },
   {

@@ -54,7 +54,7 @@ export class AuthApi {
               : 'This action could not be completed. Please try again.'
       );
     }
-    return response.status === 204 ? (undefined as T) : response.json();
+    return response.status === 204 ? (undefined as T) : (response.json() as Promise<T>);
   }
   async form(path: string, body: URLSearchParams): Promise<{ redirect_url: string }> {
     const response = await fetch(`${this.origin}${path}`, {
@@ -64,7 +64,7 @@ export class AuthApi {
       body
     });
     if (!response.ok) throw new Error('This request has expired. Please start again.');
-    return response.json();
+    return response.json() as Promise<{ redirect_url: string }>;
   }
 }
 

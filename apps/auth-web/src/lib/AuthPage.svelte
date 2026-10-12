@@ -78,7 +78,8 @@
   function destination() {
     if (transaction)
       return `/oauth/authorize/resume?transaction=${encodeURIComponent(transaction)}`;
-    return safeDestination(pending?.return_to || returnTo, config!.settings_url);
+    if (!config) throw new Error('Sign-in options are still loading. Please try again.');
+    return safeDestination(pending?.return_to ?? returnTo, config.settings_url);
   }
   async function run(action: () => Promise<void>) {
     if (busy) return;
@@ -172,12 +173,12 @@
           : 'Your Piquel account'}
   </p>
   <h1>{title}</h1>
-  {#if linking}
+  {#if linking && pending}
     <p>
-      {providerName(pending!.provider)} uses an email associated with an existing account. Verify that
+      {providerName(pending.provider)} uses an email associated with an existing account. Verify that
       account with its passkey to add this provider.
     </p>
-    {#if pending?.email}<p class="notice">{pending.email}</p>{/if}
+    {#if pending.email}<p class="notice">{pending.email}</p>{/if}
     {#if session}<p class="help">Signed in as @{session.user.username}.</p>{/if}
   {:else if registration}
     <p>
@@ -194,7 +195,7 @@
   {:else}<p>Sign in with a passkey, or use a linked social account.</p>{/if}
   {#if error}<p class="notice error" role="alert">{error}</p>{/if}
   {#if !ready && !error}<p role="status">Loading your sign-in options…</p>{/if}
-  {#if ready}
+  {#if ready && config}
     <div class="stack">
       {#if available}
         <form
@@ -242,7 +243,7 @@
               Choose Google Password Manager only if it is available on this Android device.
             </p>
           {/if}
-          {#if registration && config?.invite_required}<label
+          {#if registration && config.invite_required}<label
               >Invitation<input bind:value={invitation} required autocomplete="off" /></label
             >{/if}
           <button disabled={busy} class="full"
@@ -269,8 +270,8 @@
           Chrome, or another browser with passkey support.
         </p>{/if}
       {#if !registration && !management && !linking}
-        {#if config?.providers.length}<div class="divider">or continue with</div>{/if}
-        {#each config?.providers ?? [] as provider}<button
+        {#if config.providers.length}<div class="divider">or continue with</div>{/if}
+        {#each config.providers as provider (provider)}<button
             class="secondary full"
             disabled={busy}
             onclick={() => social(provider)}>{providerName(provider)}</button
@@ -284,7 +285,7 @@
       {/if}
     </div>
     <footer>
-      {#if management}<a href={config!.settings_url}>Back to account settings</a>
+      {#if management}<a href={config.settings_url}>Back to account settings</a>
       {:else if registration}<p class="help">
           Already have an account? <a
             href={`/login?${new URLSearchParams({ ...(transaction ? { transaction } : {}), ...(returnTo ? { return_to: returnTo } : {}) })}`}

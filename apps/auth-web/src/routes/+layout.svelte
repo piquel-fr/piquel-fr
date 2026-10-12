@@ -1,6 +1,7 @@
 <script lang="ts">
   import '@piquel/auth-client/style.css';
-  let { children } = $props();
+  import type { LayoutProps } from './$types';
+  let { children }: LayoutProps = $props();
 </script>
 
 <svelte:head><meta name="robots" content="noindex" /></svelte:head>
