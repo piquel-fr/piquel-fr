@@ -80,6 +80,8 @@ struct RegistrationStart {
     #[serde(default)]
     display_name: String,
     invitation: Option<String>,
+    /// Pending social signup to attach; sent only by the social signup page.
+    pending_signup: Option<TokenId>,
 }
 #[derive(Deserialize)]
 struct RegistrationFinish {
@@ -423,7 +425,10 @@ impl PasskeyApplication {
                 ));
             }
         }
-        let pending = crate::federation::pending_signup(&app.database, &headers).await?;
+        let pending = match input.pending_signup {
+            Some(id) => Some(crate::federation::pending_signup(&app.database, &headers, id).await?),
+            None => None,
+        };
         let user_id = UserId::new();
         let (challenge, state) = app.registration(
             user_id,
@@ -443,7 +448,7 @@ impl PasskeyApplication {
                 username: input.username,
                 display_name: input.display_name,
                 invitation,
-                pending: pending.map(|v| v.id),
+                pending,
                 state,
             },
             challenge,
@@ -516,11 +521,14 @@ impl PasskeyApplication {
         Self::audit(&mut tx, user_id, "account.create").await?;
         tx.commit().await?;
         let mut response = Self::signed_in(&cookie)?;
-        response.headers_mut().append(
-            header::SET_COOKIE,
-            HeaderValue::from_str(&BrowserCookie::FederationPending.clear())
-                .map_err(ApiError::internal)?,
-        );
+        // Ordinary registration leaves any unrelated pending social flow untouched.
+        if pending.is_some() {
+            response.headers_mut().append(
+                header::SET_COOKIE,
+                HeaderValue::from_str(&BrowserCookie::FederationPending.clear())
+                    .map_err(ApiError::internal)?,
+            );
+        }
         Ok(response)
     }
     async fn start_login(

@@ -3,7 +3,7 @@ use axum::{
     body::{Body, to_bytes},
     http::{Method, Request},
 };
-use piquel_repository::DatabaseConfig;
+use piquel_repository::{DatabaseConfig, PendingFederation};
 use tower::ServiceExt;
 use webauthn_authenticator_rs::{WebauthnAuthenticator, softpasskey::SoftPasskey};
 
@@ -135,6 +135,85 @@ impl Fixture {
             .await;
         assert_eq!(response.status(), StatusCode::NO_CONTENT);
         Self::cookie(&response)
+    }
+    /// Registers a new account with a fresh software credential; returns the finish response.
+    async fn register(&self, cookies: &str, body: Value) -> Response {
+        let (started, browser) = self.start("/webauthn/register/start", cookies, body).await;
+        let challenge =
+            serde_json::from_value(started["public_key"].clone()).expect("registration challenge");
+        let credential = WebauthnAuthenticator::new(SoftPasskey::new(true))
+            .do_registration(self.origin.clone(), challenge)
+            .expect("software registration");
+        self.request(
+            "/webauthn/register/finish",
+            Method::POST,
+            &format!("{cookies}; {browser}"),
+            json!({"ceremony_id":started["ceremony_id"],"credential":credential}),
+        )
+        .await
+    }
+}
+
+#[tokio::test]
+#[ignore = "requires TEST_DATABASE_URL"]
+async fn registration_attaches_a_pending_social_signup_only_when_it_names_it() {
+    let fixture = Fixture::new().await;
+    let secret = BrowserSecret::new();
+    let pending = PendingFederation {
+        id: TokenId::new(),
+        browser_digest: secret.digest(),
+        provider: "github".into(),
+        issuer: "https://github.com".into(),
+        subject: TokenId::new().to_string(),
+        email: None,
+        display_name: "Abandoned signup".into(),
+        return_to: "/".into(),
+        link_user_id: None,
+        link_session_id: None,
+        expires_at: Utc::now() + Duration::minutes(5),
+    };
+    let database = fixture.app.database.clone();
+    database
+        .federation()
+        .insert_pending(&pending)
+        .await
+        .expect("pending signup");
+    let social = format!(
+        "{}={}",
+        BrowserCookie::FederationPending.name(),
+        secret.encoded()
+    );
+    let response = fixture
+        .request(
+            "/webauthn/register/start",
+            Method::POST,
+            &social,
+            json!({"username":"unrelated","pending_signup":TokenId::new()}),
+        )
+        .await;
+    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+    for (explicit, attached) in [(None, false), (Some(pending.id), true)] {
+        let username = format!("reg_{}", &TokenId::new().to_string()[24..]);
+        let response = fixture
+            .register(
+                &social,
+                json!({"username":username,"pending_signup":explicit}),
+            )
+            .await;
+        assert_eq!(response.status(), StatusCode::NO_CONTENT);
+        let user = database
+            .users()
+            .find_active_by_username(&username)
+            .await
+            .expect("user")
+            .expect("registered");
+        let owner = database
+            .federation()
+            .find_active(&pending.issuer, &pending.subject)
+            .await
+            .expect("identity")
+            .map(|identity| identity.user_id);
+        assert_eq!(owner, attached.then_some(user.id), "{username}");
     }
 }
 

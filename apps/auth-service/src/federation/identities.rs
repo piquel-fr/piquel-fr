@@ -12,24 +12,29 @@ use piquel_auth_protocol::{TokenId, UserId};
 use piquel_repository::{Database, DatabaseTransaction, InsertExternalIdentity, PendingFederation};
 use serde::Serialize;
 
+/// Verifies that `id`, sent only by the social signup page, names this browser's
+/// current pending signup. Registration without it never reads pending state.
 pub(crate) async fn pending_signup(
     database: &Database,
     headers: &HeaderMap,
-) -> Result<Option<PendingFederation>, ApiError> {
-    let Some(browser) = BrowserCookie::FederationPending.read(headers) else {
-        return Ok(None);
-    };
+    id: TokenId,
+) -> Result<TokenId, ApiError> {
+    let expired = || ApiError::bad_request("This signup has expired. Please start again.");
+    let browser = BrowserCookie::FederationPending
+        .read(headers)
+        .ok_or_else(expired)?;
     let pending = database
         .federation()
         .pending(&browser.digest())
         .await?
-        .ok_or_else(|| ApiError::bad_request("This signup has expired. Please start again."))?;
+        .filter(|pending| pending.id == id)
+        .ok_or_else(expired)?;
     if pending.link_user_id.is_some() {
         return Err(ApiError::forbidden(
             "Use a passkey for your existing account to link this provider.",
         ));
     }
-    Ok(Some(pending))
+    Ok(id)
 }
 /// Called only inside the transaction that creates the account and first key.
 pub(crate) async fn attach_signup(
@@ -79,10 +84,29 @@ impl PendingIdentity for PendingFederation {
         }
     }
 }
+#[derive(Serialize)]
+#[serde(rename_all = "snake_case")]
+enum PendingKind {
+    /// Social-first signup, attached only by a registration naming its `id`.
+    Signup,
+    /// Email match: any session of the matching account may confirm it.
+    Link,
+    /// Started from settings: only the initiating session may confirm it.
+    ExplicitLink,
+}
+#[derive(Serialize)]
+pub(super) struct PendingView {
+    id: TokenId,
+    kind: PendingKind,
+    provider: String,
+    email: Option<String>,
+    display_name: String,
+    return_to: String,
+}
 pub(super) async fn pending_view(
     State(app): State<FederationApplication>,
     headers: HeaderMap,
-) -> Result<Json<serde_json::Value>, ApiError> {
+) -> Result<Json<PendingView>, ApiError> {
     let browser = BrowserCookie::FederationPending
         .read(&headers)
         .ok_or_else(ApiError::unauthorized)?;
@@ -94,9 +118,18 @@ pub(super) async fn pending_view(
         .ok_or_else(|| {
             ApiError::bad_request("This sign-in attempt has expired. Please start again.")
         })?;
-    Ok(Json(
-        serde_json::json!({"kind":if pending.link_user_id.is_some(){"link"}else{"signup"},"provider":pending.provider,"email":pending.email,"display_name":pending.display_name,"return_to":pending.return_to}),
-    ))
+    Ok(Json(PendingView {
+        id: pending.id,
+        kind: match (pending.link_user_id, pending.link_session_id) {
+            (None, _) => PendingKind::Signup,
+            (Some(_), None) => PendingKind::Link,
+            (Some(_), Some(_)) => PendingKind::ExplicitLink,
+        },
+        provider: pending.provider,
+        email: pending.email,
+        display_name: pending.display_name,
+        return_to: pending.return_to,
+    }))
 }
 pub(super) async fn confirm_link(
     State(app): State<FederationApplication>,

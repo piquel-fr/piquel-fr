@@ -165,16 +165,20 @@ client and scope; explicitly trusted clients bypass consent.
   passkeys and security keys are accepted. Android enrollment offers an explicit
   Google Password Manager option for devices with Google services. Authentication supports the browser
   account picker and a username fallback.
-- Social-first signup remains pending until its first passkey is committed. A
-  social login can never replace an established account's passkeys.
+- Social-first signup remains pending until its first passkey is committed. Only
+  a registration that names the pending identity shown on the signup page attaches
+  it; plain registration ignores it. A social login can never replace an
+  established account's passkeys.
 - A passkey confirmation opens a fixed two-minute management window for the
   current account and browser session. It permits repeated sensitive changes and
   does not slide or renew through social login. Reads need only ordinary login.
 - Matching verified email suggests linking; it never grants account access.
   Linking requires possession of the provider account and the target account's
-  passkey authorization. Explicit linking permits different/missing provider email.
+  passkey authorization. Explicit linking, started from settings, permits
+  different/missing provider email and is bound to the session that started it.
 - One Google and one GitHub identity may be linked. Unlinking releases the provider
   identity so another account can link it; account data and credentials never move.
+  Settings keep listing identities of disabled providers so they can be unlinked.
 - The last passkey cannot be removed. Removing a passkey/provider revokes other
   central sessions. There is no recovery if every passkey is lost.
 - Sessions last at most 30 days. Access tokens last five minutes. Refresh rotation

@@ -358,11 +358,14 @@ async fn onboarding_commits_only_with_first_key_and_browser_and_never_claims_exi
     let test = TestApp::new().await;
     let (pending, headers) = test.pending(None, None).await;
     assert!(
-        pending_signup(&test.app.database, &headers)
+        pending_signup(&test.app.database, &headers, TokenId::new())
             .await
-            .expect("pending signup")
-            .is_some()
+            .is_err(),
+        "registration must name the displayed pending signup"
     );
+    pending_signup(&test.app.database, &headers, pending.id)
+        .await
+        .expect("pending signup");
     let user = test.user(None, false).await;
     let mut tx = test.app.database.begin().await.expect("tx");
     assert!(

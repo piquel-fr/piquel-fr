@@ -135,9 +135,13 @@ export class Passkeys {
       }
     });
   }
+  /**
+   * Creates an account when `account` is given, else enrolls a key for the signed-in user.
+   * `pending_signup` attaches the pending social identity the signup page displayed.
+   */
   async register(
     friendlyName: string,
-    account?: { username: string; invitation?: string },
+    account?: { username: string; invitation?: string; pending_signup?: string },
     kind: PasskeyKind = 'standard'
   ): Promise<void> {
     const path = account ? '/webauthn/register' : '/account/passkeys/enroll';

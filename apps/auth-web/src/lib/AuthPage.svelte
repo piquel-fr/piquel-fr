@@ -17,11 +17,13 @@
   const passkeys = new Passkeys(api);
   let config = $state<Configuration | null>(null);
   let session = $state<Session | null>(null);
+  // `link` comes from an email match; `explicit_link` from settings, bound to that session.
   let pending = $state<{
-    kind: 'signup' | 'link';
+    id: string;
+    kind: 'signup' | 'link' | 'explicit_link';
     provider: Provider;
     display_name: string;
-    email?: string;
+    email: string | null;
     return_to: string;
   } | null>(null);
   let username = $state('');
@@ -37,7 +39,7 @@
   let android = $state(false);
   let passkeyKind = $state<PasskeyKind>('standard');
   const registration = $derived(mode === 'register' || pending?.kind === 'signup');
-  const linking = $derived(pending?.kind === 'link');
+  const linking = $derived(pending?.kind === 'link' || pending?.kind === 'explicit_link');
   const management = $derived(mode === 'manage' || mode === 'enroll');
   const title = $derived(
     linking
@@ -103,25 +105,30 @@
   }
   async function submit() {
     await run(async () => {
+      // Resolve the destination first, so nothing can fail after authentication commits.
+      const target = destination();
       if (registration) {
         await passkeys.register(
           friendlyName.trim(),
-          { username: username.trim(), ...(invitation ? { invitation } : {}) },
+          {
+            username: username.trim(),
+            ...(invitation ? { invitation } : {}),
+            // Only the social signup page joins its pending identity, never plain registration.
+            ...(pending?.kind === 'signup' ? { pending_signup: pending.id } : {})
+          },
           passkeyKind
         );
         sessionStorage.removeItem('piquel.invitation');
       } else if (linking) {
         await unlock();
-        const result = await api.request<{ return_to: string }>('/login/social/link', 'POST', {});
-        returnTo = result.return_to;
-        pending = null;
+        await api.request('/login/social/link', 'POST', {});
       } else if (management) {
         await unlock();
         if (mode === 'enroll') await passkeys.register(friendlyName.trim(), undefined, passkeyKind);
       } else {
         await passkeys.authenticate(username.trim() || undefined);
       }
-      window.location.assign(destination());
+      window.location.assign(target);
     });
   }
   async function social(provider: Provider) {
@@ -135,10 +142,17 @@
       window.location.assign(result.redirect_url);
     });
   }
+  // Both keep the stored continuation: explicit links return to it (settings), while
+  // email-match links offer sign-in again before continuing.
   async function cancelLink() {
     await run(async () => {
+      const target = destination();
       await api.request('/login/social/cancel', 'POST', {});
-      window.location.assign('/login');
+      window.location.assign(
+        pending?.kind === 'explicit_link'
+          ? target
+          : `/login?${new URLSearchParams({ return_to: target })}`
+      );
     });
   }
   async function switchAccount() {
@@ -174,10 +188,13 @@
   </p>
   <h1>{title}</h1>
   {#if linking && pending}
-    <p>
-      {providerName(pending.provider)} uses an email associated with an existing account. Verify that
-      account with its passkey to add this provider.
-    </p>
+    {#if pending.kind === 'explicit_link'}<p>
+        Verify your passkey to add {providerName(pending.provider)} sign-in to your account.
+      </p>
+    {:else}<p>
+        {providerName(pending.provider)} uses an email associated with an existing account. Verify that
+        account with its passkey to add this provider.
+      </p>{/if}
     {#if pending.email}<p class="notice">{pending.email}</p>{/if}
     {#if session}<p class="help">Signed in as @{session.user.username}.</p>{/if}
   {:else if registration}
@@ -278,8 +295,11 @@
           >{/each}
       {/if}
       {#if linking}
-        {#if session}<button class="secondary" disabled={busy} onclick={switchAccount}
-            >Use a different account</button
+        <!-- Explicit links are bound to this session; signing out would strand them. -->
+        {#if session && pending?.kind === 'link'}<button
+            class="secondary"
+            disabled={busy}
+            onclick={switchAccount}>Use a different account</button
           >{/if}
         <button class="text-button" disabled={busy} onclick={cancelLink}>Cancel linking</button>
       {/if}
