@@ -833,5 +833,4 @@ impl PasskeyApplication {
 }
 
 #[cfg(test)]
-#[path = "passkey_tests.rs"]
 mod tests;

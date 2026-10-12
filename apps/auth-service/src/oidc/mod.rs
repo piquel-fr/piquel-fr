@@ -298,18 +298,4 @@ fn validate_pkce_s256(verifier: &str, challenge: &str) -> Result<(), ()> {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    #[test]
-    fn exact_redirect_and_pkce_and_refresh_bounds() {
-        let registered = ["https://a.example/cb".to_owned()];
-        assert!(!registered.contains(&"https://a.example/cb.evil".to_owned()));
-        assert!(validate_pkce_s256("short", "x").is_err());
-        let huge = format!("prt_v1_{}.{:0200}", TokenId::new(), "x");
-        assert!(parse_opaque("prt_v1", &huge).is_err());
-    }
-}
-
-#[cfg(test)]
-#[path = "oidc/tests.rs"]
-mod flow_tests;
+mod tests;

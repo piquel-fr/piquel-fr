@@ -579,5 +579,4 @@ impl FederationFlow {
 }
 
 #[cfg(test)]
-#[path = "federation_tests.rs"]
 mod tests;

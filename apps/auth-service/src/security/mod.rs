@@ -425,5 +425,4 @@ impl HttpSecurity {
 }
 
 #[cfg(test)]
-#[path = "security_tests.rs"]
 mod tests;

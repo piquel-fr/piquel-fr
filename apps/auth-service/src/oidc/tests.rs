@@ -643,3 +643,12 @@ async fn post_protocol_endpoints_and_error_contracts() {
     assert_eq!(response.status(), StatusCode::BAD_REQUEST);
     assert_eq!(Flow::json(response).await["error"], "invalid_request");
 }
+
+#[test]
+fn exact_redirect_and_pkce_and_refresh_bounds() {
+    let registered = ["https://a.example/cb".to_owned()];
+    assert!(!registered.contains(&"https://a.example/cb.evil".to_owned()));
+    assert!(validate_pkce_s256("short", "x").is_err());
+    let huge = format!("prt_v1_{}.{:0200}", TokenId::new(), "x");
+    assert!(parse_opaque("prt_v1", &huge).is_err());
+}
