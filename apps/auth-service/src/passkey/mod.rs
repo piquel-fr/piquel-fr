@@ -9,6 +9,7 @@ use axum::{
 };
 use chrono::{Duration, Utc};
 use piquel_auth_protocol::{AuthenticationMethod, SessionId, TokenId, UserId};
+use piquel_configuration::PublicUrl;
 use piquel_repository::{
     AppendAuditEvent, Database, DatabaseTransaction, InsertCeremony, InsertPasskey, InsertUser,
 };
@@ -122,10 +123,17 @@ impl PasskeyApplication {
                 && origin.fragment().is_none(),
             "WebAuthn origin must exactly match its RP ID"
         );
+        // WebAuthn RP IDs are domains, so loopback IP literals can never work.
+        anyhow::ensure!(
+            origin
+                .host()
+                .is_some_and(|host| matches!(host, url::Host::Domain(_))),
+            "WebAuthn requires a domain name, not an IP address; use localhost in development"
+        );
         anyhow::ensure!(
             origin.scheme() == "https"
-                || (origin.scheme() == "http" && matches!(rp_id, "localhost" | "127.0.0.1")),
-            "WebAuthn requires HTTPS outside loopback development"
+                || (origin.scheme() == "http" && PublicUrl::has_loopback_host(origin)),
+            "WebAuthn requires HTTPS outside localhost development"
         );
         Ok(Self {
             database,
