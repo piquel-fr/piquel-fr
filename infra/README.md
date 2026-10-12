@@ -28,7 +28,6 @@ contain nothing environment-specific: per-environment values are runtime
   `*.staging.piquel.fr` and `*.dev.piquel.fr` to the apps node's tailnet
   addresses.
 - `ingress.webhook_hostname` for deploy-on-push.
-- Read access to this private repository for the daemon's Git.
 - `reconciliation.prepare_timeout_seconds = 1200` for cold Rust builds.
 
 ## Setup
