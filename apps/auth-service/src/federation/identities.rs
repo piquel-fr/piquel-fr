@@ -55,17 +55,21 @@ pub(crate) async fn attach_signup(
             "Create your first passkey before continuing.",
         ));
     }
-    if let Some(email) = &pending.email {
-        if tx.emails().find_active_verified(email).await?.is_some() {
-            return Err(ApiError::forbidden(
-                "This email belongs to an existing account. Sign in with its passkey to link this provider.",
-            ));
-        }
-        tx.federation().set_first_email(user_id, email).await?;
+    if let Some(email) = &pending.email
+        && tx.emails().find_active_verified(email).await?.is_some()
+    {
+        return Err(ApiError::forbidden(
+            "This email belongs to an existing account. Sign in with its passkey to link this provider.",
+        ));
     }
+    // Claim the identity before the email, the order link confirmation uses, so
+    // concurrent flows for the same subject and address cannot deadlock.
     tx.federation()
         .insert_identity(&pending.identity(user_id))
         .await?;
+    if let Some(email) = &pending.email {
+        tx.federation().set_first_email(user_id, email).await?;
+    }
     FederationFlow::audit(tx, user_id, "federation.link", &pending.provider).await
 }
 // Identity policy stays in this application, rather than the persistence model.
