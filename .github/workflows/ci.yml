@@ -7,16 +7,17 @@
 #   rust   -> Clippy, unit, database and doc tests against PostgreSQL
 #   e2e    -> the browser suite against the real binary, with the auth pages
 #             embedded, the settings build and PostgreSQL
-#   docker -> both deployment images
+#   docker -> both deployment images, on pull requests only: staging builds
+#             them from every push to main
 #
 # Pull requests run only the jobs their changes can affect (see `changes`).
-# Pushes to main and manual runs run everything except `docker`: staging builds
-# the same images from every push to main. `ci` is the single status to
+# Pushes to main and manual runs run everything. `ci` is the single status to
 # require: it fails if any job failed and passes when the rest succeeded or
 # were skipped. audit.yml audits new advisories weekly.
 #
-# Caches are saved from main only. Pull requests restore main's caches, so a
-# branch never evicts them with copies no other branch can read.
+# Rust caches are saved from main only. Pull requests restore main's caches,
+# so a branch never evicts them with copies no other branch can read. pnpm's
+# small store cache is saved whenever its lockfile hash is new.
 
 name: CI
 
@@ -42,8 +43,10 @@ env:
 
 jobs:
   # Decides which jobs a pull request needs from the paths it changes. A file
-  # matches a filter only when it matches every pattern, so `web` covers
-  # everything Prettier, ESLint or the frontends can see.
+  # matches a filter only when it matches every pattern. `web` covers every
+  # file Prettier, ESLint, tsc or the frontends can see, so it excludes file
+  # types rather than directories. `app` covers everything the running
+  # service and its images are built from.
   changes:
     name: changes
     runs-on: ubuntu-latest
@@ -54,7 +57,8 @@ jobs:
       rust: ${{ github.event_name != 'pull_request' || steps.filter.outputs.rust == 'true' }}
       web: ${{ github.event_name != 'pull_request' || steps.filter.outputs.web == 'true' }}
       deps: ${{ github.event_name != 'pull_request' || steps.filter.outputs.deps == 'true' }}
-      docker: ${{ github.event_name == 'workflow_dispatch' || steps.filter.outputs.docker == 'true' }}
+      app: ${{ github.event_name != 'pull_request' || steps.filter.outputs.app == 'true' }}
+      docker: ${{ github.event_name == 'workflow_dispatch' || steps.filter.outputs.app == 'true' }}
     steps:
       - if: github.event_name == 'pull_request'
         id: filter
@@ -64,21 +68,19 @@ jobs:
           filters: |
             rust:
               - '{Cargo.toml,Cargo.lock,rust-toolchain.toml,justfile,apps/auth-service/**,crates/**,.github/workflows/ci.yml}'
+              - '!**/*.md'
             web:
               - '**'
-              - '!Cargo.toml'
+              - '!**/*.{rs,sql,toml,md}'
               - '!Cargo.lock'
-              - '!rust-toolchain.toml'
-              - '!deny.toml'
-              - '!apps/auth-service/**'
-              - '!crates/**'
-              - '!infra/**'
+              - '!infra/*.{Dockerfile,conf,sh}'
               - '!.dockerignore'
-              - '!**/*.md'
             deps:
               - '{Cargo.toml,**/Cargo.toml,Cargo.lock,deny.toml,package.json,**/package.json,pnpm-lock.yaml,pnpm-workspace.yaml,.github/workflows/ci.yml}'
-            docker:
-              - '{infra/**,.dockerignore,Cargo.toml,pnpm-workspace.yaml,.github/workflows/ci.yml}'
+            app:
+              - '{Cargo.toml,Cargo.lock,rust-toolchain.toml,justfile,package.json,pnpm-lock.yaml,pnpm-workspace.yaml,playwright.config.ts,apps/**,crates/**,packages/**,tests/browser/**,infra/**,.dockerignore,.github/workflows/ci.yml}'
+              - '!**/*.md'
+              - '!infra/piqueld.toml'
 
   checks:
     name: checks
@@ -158,7 +160,7 @@ jobs:
   e2e:
     name: e2e
     needs: changes
-    if: needs.changes.outputs.rust == 'true' || needs.changes.outputs.web == 'true'
+    if: needs.changes.outputs.app == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 30
     services:
@@ -204,9 +206,10 @@ jobs:
           pnpm --filter @piquel/piquel-web exec vite preview --host localhost --port 4173 --strictPort > "$RUNNER_TEMP/settings.log" 2>&1 &
           curl -fsS --retry 30 --retry-delay 1 --retry-all-errors "$E2E_AUTH_URL/health/ready"
           curl -fsS --retry 30 --retry-delay 1 --retry-all-errors -o /dev/null "$E2E_SETTINGS_URL"
+      # The headless build matching the pinned Playwright, so runner image
+      # updates cannot change the browser under test.
+      - run: pnpm exec playwright install --only-shell chromium
       - run: just test-browser
-        env:
-          CHROMIUM_EXECUTABLE: /usr/bin/google-chrome
       - if: failure()
         run: cat "$RUNNER_TEMP/auth.log" "$RUNNER_TEMP/settings.log"
 
