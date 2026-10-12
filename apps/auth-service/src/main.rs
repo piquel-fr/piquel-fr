@@ -112,20 +112,37 @@ impl DatabaseCommand {
         }
         tracing::info!("shutting down");
     }
+    /// Every five minutes, drains expired auth state in bounded batches until a
+    /// pass finds nothing or a one-minute budget runs out. Short pauses between
+    /// batches keep cleanup from monopolizing the database under heavy churn.
+    async fn purge_expired_state(database: Database) {
+        use std::time::Duration;
+        let mut interval = tokio::time::interval(Duration::from_mins(5));
+        loop {
+            interval.tick().await;
+            let deadline = tokio::time::Instant::now() + Duration::from_mins(1);
+            loop {
+                match database.purge_expired_auth_state(1000).await {
+                    Ok(0) => break,
+                    Ok(_) if tokio::time::Instant::now() >= deadline => {
+                        tracing::warn!("expired authentication state cleanup is falling behind");
+                        break;
+                    }
+                    Ok(_) => tokio::time::sleep(Duration::from_millis(100)).await,
+                    Err(error) => {
+                        tracing::error!(?error, "expired authentication state cleanup failed");
+                        break;
+                    }
+                }
+            }
+        }
+    }
     async fn serve(database: Database) -> Result<()> {
         auth_service::require_embedded_assets()?;
         let config = AuthConfig::from_environment()?;
         let listener = tokio::net::TcpListener::bind(config.public_listener).await?;
         let router = auth_service::router(&config, database.clone()).await?;
-        let cleanup = tokio::spawn(async move {
-            let mut interval = tokio::time::interval(std::time::Duration::from_mins(5));
-            loop {
-                interval.tick().await;
-                if let Err(error) = database.purge_expired_auth_state(1000).await {
-                    tracing::error!(?error, "expired authentication state cleanup failed");
-                }
-            }
-        });
+        let cleanup = tokio::spawn(Self::purge_expired_state(database));
         tracing::info!(address=%config.public_listener,"authentication service listening");
         let result = axum::serve(
             listener,

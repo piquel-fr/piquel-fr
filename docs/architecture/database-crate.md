@@ -40,7 +40,8 @@ prototype schema is disposable and the release requires a fresh database. Releas
 migrations are immutable; later schema changes go in new numbered files. Run
 migrations with `auth-service migrate`; startup does not silently mutate the schema.
 
-Every five minutes the service purges bounded batches of expired ephemeral state.
+Every five minutes the service drains expired ephemeral state in bounded batches,
+for up to one minute per pass.
 Security audit history is retained. Tests that use `TEST_DATABASE_URL` are explicitly
 marked ignored by the ordinary unit test runner; the documented database test
 command includes them and must use a disposable database.
