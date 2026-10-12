@@ -11,7 +11,7 @@ RUN pnpm --filter @piquel/piquel-web build
 
 FROM nginx:stable-bookworm
 RUN rm -rf /usr/share/nginx/html/*
-COPY infra/nginx.conf /etc/nginx/nginx.conf
+COPY --chmod=644 infra/nginx.conf /etc/nginx/nginx.conf
 COPY --chmod=755 infra/web-entrypoint.sh /usr/local/bin/web-entrypoint
 COPY --from=frontend /app/apps/piquel-web/build /usr/share/nginx/html
 USER nginx
