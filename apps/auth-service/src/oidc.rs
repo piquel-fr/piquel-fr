@@ -23,7 +23,6 @@ use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
 use std::{collections::BTreeSet, str::FromStr, sync::Arc};
-use thiserror::Error;
 use url::Url;
 
 const OPAQUE_SECRET_BYTES: usize = 32;
@@ -67,50 +66,52 @@ impl OidcApplication {
         &self,
         headers: &HeaderMap,
         supplied_id: Option<&str>,
-    ) -> Result<StoredOidcClient, ApiError> {
+    ) -> Result<StoredOidcClient, OAuthError> {
         let basic = headers
             .get(header::AUTHORIZATION)
             .map(|header| {
-                let value = header.to_str().map_err(|_| ApiError::client())?;
-                let encoded = value.strip_prefix("Basic ").ok_or_else(ApiError::client)?;
+                let value = header.to_str().map_err(|_| OAuthCode::InvalidClient)?;
+                let encoded = value
+                    .strip_prefix("Basic ")
+                    .ok_or(OAuthCode::InvalidClient)?;
                 if encoded.len() > 1024 {
-                    return Err(ApiError::client());
+                    return Err(OAuthCode::InvalidClient.into());
                 }
                 let bytes = base64::engine::general_purpose::STANDARD
                     .decode(encoded)
-                    .map_err(|_| ApiError::client())?;
-                let decoded = String::from_utf8(bytes).map_err(|_| ApiError::client())?;
-                let (id, secret) = decoded.split_once(':').ok_or_else(ApiError::client)?;
+                    .map_err(|_| OAuthCode::InvalidClient)?;
+                let decoded = String::from_utf8(bytes).map_err(|_| OAuthCode::InvalidClient)?;
+                let (id, secret) = decoded.split_once(':').ok_or(OAuthCode::InvalidClient)?;
                 let decode = |value: &str| {
                     url::form_urlencoded::parse(format!("v={value}").as_bytes())
                         .next()
                         .map(|(_, v)| v.into_owned())
-                        .ok_or_else(ApiError::client)
+                        .ok_or_else(|| OAuthError::from(OAuthCode::InvalidClient))
                 };
-                Ok::<_, ApiError>((decode(id)?, decode(secret)?))
+                Ok::<_, OAuthError>((decode(id)?, decode(secret)?))
             })
             .transpose()?;
         let id = basic
             .as_ref()
             .map(|(id, _)| id.as_str())
             .or(supplied_id)
-            .ok_or_else(ApiError::client)?;
+            .ok_or(OAuthCode::InvalidClient)?;
         if supplied_id.is_some_and(|supplied| supplied != id) {
-            return Err(ApiError::client());
+            return Err(OAuthCode::InvalidClient.into());
         }
         let client = self
             .database
             .oidc()
             .find_client(id)
             .await
-            .map_err(ApiError::internal)?
+            .map_err(OAuthError::internal)?
             .filter(|c| c.enabled)
-            .ok_or_else(ApiError::client)?;
+            .ok_or(OAuthCode::InvalidClient)?;
         match (&client.client_secret_hash, basic) {
             (None, None) => {}
             (Some(expected), Some((_, secret)))
                 if openssl::memcmp::eq(expected, &Sha256::digest(secret.as_bytes())) => {}
-            _ => return Err(ApiError::client()),
+            _ => return Err(OAuthCode::InvalidClient.into()),
         }
         Ok(client)
     }
@@ -257,20 +258,20 @@ impl AuthorizeQuery {
         &self,
         app: &OidcApplication,
         redirect: &Url,
-    ) -> Result<Option<UserId>, ApiError> {
-        let fail = |error: &str| redirect_error(redirect, error, &self.state);
+    ) -> Result<Option<UserId>, OAuthError> {
+        let fail = |code| OAuthError::redirect(redirect, code, &self.state);
         if self.request.is_some() {
-            return Err(fail("request_not_supported"));
+            return Err(fail(OAuthCode::RequestNotSupported));
         }
         if self.request_uri.is_some() {
-            return Err(fail("request_uri_not_supported"));
+            return Err(fail(OAuthCode::RequestUriNotSupported));
         }
         if self
             .response_mode
             .as_deref()
             .is_some_and(|mode| mode != "query")
         {
-            return Err(fail("invalid_request"));
+            return Err(fail(OAuthCode::InvalidRequest));
         }
         self.id_token_hint
             .as_deref()
@@ -279,17 +280,17 @@ impl AuthorizeQuery {
                 let claims = app
                     .keys
                     .verify_id_token_hint(hint, &app.issuer)
-                    .map_err(|()| fail("invalid_request"))?;
+                    .map_err(|()| fail(OAuthCode::InvalidRequest))?;
                 if claims["aud"] != self.client_id
                     || claims.get("exp").and_then(Value::as_i64).is_none()
                 {
-                    return Err(fail("invalid_request"));
+                    return Err(fail(OAuthCode::InvalidRequest));
                 }
                 claims
                     .get("sub")
                     .and_then(Value::as_str)
                     .and_then(|subject| UserId::from_str(subject).ok())
-                    .ok_or_else(|| fail("invalid_request"))
+                    .ok_or_else(|| fail(OAuthCode::InvalidRequest))
             })
             .transpose()
     }
@@ -299,8 +300,8 @@ async fn authorize(
     State(app): State<OidcApplication>,
     headers: HeaderMap,
     query: Result<Query<AuthorizeQuery>, axum::extract::rejection::QueryRejection>,
-) -> Result<Redirect, ApiError> {
-    let Query(query) = query.map_err(|_| ApiError::request())?;
+) -> Result<Redirect, OAuthError> {
+    let Query(query) = query.map_err(|_| OAuthCode::InvalidRequest)?;
     authorize_request(app, headers, query).await
 }
 
@@ -308,8 +309,8 @@ async fn authorize_post(
     State(app): State<OidcApplication>,
     headers: HeaderMap,
     form: Result<Form<AuthorizeQuery>, axum::extract::rejection::FormRejection>,
-) -> Result<Redirect, ApiError> {
-    let Form(query) = form.map_err(|_| ApiError::request())?;
+) -> Result<Redirect, OAuthError> {
+    let Form(query) = form.map_err(|_| OAuthCode::InvalidRequest)?;
     authorize_request(app, headers, query).await
 }
 
@@ -317,19 +318,19 @@ async fn authorize_request(
     app: OidcApplication,
     headers: HeaderMap,
     q: AuthorizeQuery,
-) -> Result<Redirect, ApiError> {
+) -> Result<Redirect, OAuthError> {
     let client = app
         .database
         .oidc()
         .find_client(&q.client_id)
         .await
-        .map_err(ApiError::internal)?
-        .ok_or_else(ApiError::request)?;
+        .map_err(OAuthError::internal)?
+        .ok_or(OAuthCode::InvalidRequest)?;
     if !client.enabled || !client.redirect_uris.contains(&q.redirect_uri) {
-        return Err(ApiError::request());
+        return Err(OAuthCode::InvalidRequest.into());
     }
-    let redirect = Url::parse(&q.redirect_uri).map_err(|_| ApiError::request())?;
-    let fail = |error: &str| redirect_error(&redirect, error, &q.state);
+    let redirect = Url::parse(&q.redirect_uri).map_err(|_| OAuthCode::InvalidRequest)?;
+    let fail = |code| OAuthError::redirect(&redirect, code, &q.state);
     let hinted_user_id = q.hinted_user_id(&app, &redirect)?;
     let challenge_valid = URL_SAFE_NO_PAD
         .decode(&q.code_challenge)
@@ -339,29 +340,29 @@ async fn authorize_request(
         || q.code_challenge_method != "S256"
         || !challenge_valid
     {
-        return Err(fail("invalid_request"));
+        return Err(fail(OAuthCode::InvalidRequest));
     }
-    let scopes = parse_scopes(&q.scope).ok_or_else(|| fail("invalid_scope"))?;
+    let scopes = parse_scopes(&q.scope).ok_or_else(|| fail(OAuthCode::InvalidScope))?;
     if !scopes
         .iter()
         .all(|scope| client.allowed_scopes.contains(scope))
     {
-        return Err(fail("invalid_scope"));
+        return Err(fail(OAuthCode::InvalidScope));
     }
     let audience = q
         .audience
         .clone()
         .or_else(|| client.allowed_audiences.first().cloned())
-        .ok_or_else(ApiError::server)?;
+        .ok_or(OAuthCode::ServerError)?;
     if !client.allowed_audiences.contains(&audience) {
-        return Err(fail("invalid_target"));
+        return Err(fail(OAuthCode::InvalidTarget));
     }
     if q.nonce
         .as_ref()
         .is_some_and(|nonce| nonce.is_empty() || nonce.len() > 512)
         || q.max_age.is_some_and(|age| age < 0)
     {
-        return Err(fail("invalid_request"));
+        return Err(fail(OAuthCode::InvalidRequest));
     }
     let prompts: BTreeSet<_> = q
         .prompt
@@ -374,13 +375,13 @@ async fn authorize_request(
         .any(|value| !matches!(*value, "none" | "login" | "consent" | "select_account"))
         || (prompts.contains("none") && prompts.len() > 1)
     {
-        return Err(fail("invalid_request"));
+        return Err(fail(OAuthCode::InvalidRequest));
     }
     let session = browser_session(&app.database, &headers).await?;
     let force_login = prompts.contains("login") || prompts.contains("select_account");
     let requires_login = q.requires_login(session.as_ref(), force_login, hinted_user_id);
     if prompts.contains("none") && requires_login {
-        return Err(fail("login_required"));
+        return Err(fail(OAuthCode::LoginRequired));
     }
     let (transaction, id, secret) = new_opaque("par_v1");
     let digest = keyed_digest(app.refresh_key.as_ref(), &secret)?;
@@ -403,7 +404,7 @@ async fn authorize_request(
             expires_at: Utc::now() + Duration::minutes(10),
         })
         .await
-        .map_err(ApiError::internal)?;
+        .map_err(OAuthError::internal)?;
     if requires_login {
         return Ok(app.continuation_page("login", &transaction));
     }
@@ -422,10 +423,10 @@ async fn authorization_transaction(
     State(app): State<OidcApplication>,
     headers: HeaderMap,
     Path(transaction): Path<String>,
-) -> Result<Json<AuthorizationTransactionView>, ApiError> {
+) -> Result<Json<AuthorizationTransactionView>, OAuthError> {
     let session = browser_session(&app.database, &headers)
         .await?
-        .ok_or_else(ApiError::unauthorized)?;
+        .ok_or(OAuthCode::InvalidToken)?;
     let request = find_authorization_request(&app, &transaction).await?;
     require_authorization_session(&request, &session)?;
     Ok(Json(AuthorizationTransactionView {
@@ -445,12 +446,12 @@ async fn authorization_decision(
     State(app): State<OidcApplication>,
     headers: HeaderMap,
     Form(input): Form<AuthorizationDecision>,
-) -> Result<Json<Value>, ApiError> {
+) -> Result<Json<Value>, OAuthError> {
     require_same_origin(&app, &headers)?;
     let redirect = decide(&app, &headers, input, true).await?;
     let response = redirect.into_response();
     Ok(Json(
-        json!({"redirect_url":response.headers().get(header::LOCATION).and_then(|v|v.to_str().ok()).ok_or_else(ApiError::server)?}),
+        json!({"redirect_url":response.headers().get(header::LOCATION).and_then(|v|v.to_str().ok()).ok_or(OAuthCode::ServerError)?}),
     ))
 }
 
@@ -459,24 +460,24 @@ async fn decide(
     headers: &HeaderMap,
     input: AuthorizationDecision,
     explicit: bool,
-) -> Result<Redirect, ApiError> {
+) -> Result<Redirect, OAuthError> {
     let session = browser_session(&app.database, headers)
         .await?
-        .ok_or_else(ApiError::unauthorized)?;
+        .ok_or(OAuthCode::InvalidToken)?;
     let pending = find_authorization_request(app, &input.transaction).await?;
     if !explicit && !can_authorize(app, &pending, &session).await? {
-        return Err(ApiError::request());
+        return Err(OAuthCode::InvalidRequest.into());
     }
     let (id, secret) = parse_opaque("par_v1", &input.transaction)?;
     let digest = keyed_digest(app.refresh_key.as_ref(), &secret)?;
-    let mut transaction = app.database.begin().await.map_err(ApiError::internal)?;
+    let mut transaction = app.database.begin().await.map_err(OAuthError::internal)?;
     let request = transaction
         .oidc()
         .consume_authorization_request(id, &digest)
         .await
-        .map_err(|error| ApiError::database(error, "invalid_request"))?;
+        .map_err(|error| OAuthError::database(error, OAuthCode::InvalidRequest))?;
     require_authorization_session(&request, &session)?;
-    let mut redirect = Url::parse(&request.redirect_uri).map_err(ApiError::internal)?;
+    let mut redirect = Url::parse(&request.redirect_uri).map_err(OAuthError::internal)?;
     match input.decision.as_str() {
         "deny" => {
             redirect
@@ -495,16 +496,16 @@ async fn decide(
                         &request.scopes,
                     )
                     .await
-                    .map_err(ApiError::internal)?;
+                    .map_err(OAuthError::internal)?;
             }
             let user = transaction
                 .users()
                 .find_active_by_id_for_update(session.user_id)
                 .await
-                .map_err(ApiError::internal)?
-                .ok_or_else(ApiError::unauthorized)?;
+                .map_err(OAuthError::internal)?
+                .ok_or(OAuthCode::InvalidToken)?;
             if user.id != session.user_id {
-                return Err(ApiError::unauthorized());
+                return Err(OAuthCode::InvalidToken.into());
             }
             let (code, code_id, code_secret) = new_opaque("pac_v1");
             let code_digest = keyed_digest(app.refresh_key.as_ref(), &code_secret)?;
@@ -524,36 +525,36 @@ async fn decide(
                     expires_at: Utc::now() + Duration::minutes(2),
                 })
                 .await
-                .map_err(ApiError::internal)?;
+                .map_err(OAuthError::internal)?;
             redirect
                 .query_pairs_mut()
                 .append_pair("code", &code)
                 .append_pair("state", &request.client_state);
         }
-        _ => return Err(ApiError::request()),
+        _ => return Err(OAuthCode::InvalidRequest.into()),
     }
-    transaction.commit().await.map_err(ApiError::internal)?;
+    transaction.commit().await.map_err(OAuthError::internal)?;
     Ok(Redirect::to(redirect.as_str()))
 }
 
 async fn find_authorization_request(
     app: &OidcApplication,
     value: &str,
-) -> Result<StoredAuthorizationRequest, ApiError> {
+) -> Result<StoredAuthorizationRequest, OAuthError> {
     let (id, secret) = parse_opaque("par_v1", value)?;
     let digest = keyed_digest(app.refresh_key.as_ref(), &secret)?;
     app.database
         .oidc()
         .find_authorization_request(id, &digest)
         .await
-        .map_err(ApiError::internal)?
-        .ok_or_else(ApiError::request)
+        .map_err(OAuthError::internal)?
+        .ok_or_else(|| OAuthError::from(OAuthCode::InvalidRequest))
 }
 
 fn require_authorization_session(
     request: &StoredAuthorizationRequest,
     session: &StoredSession,
-) -> Result<(), ApiError> {
+) -> Result<(), OAuthError> {
     let newer_than_request = session.authenticated_at >= request.created_at;
     let within_max_age = request.max_age.is_none_or(|age| {
         if age == 0 {
@@ -573,7 +574,7 @@ fn require_authorization_session(
                 .hinted_user_id
                 .is_none_or(|subject| subject == session.user_id)
         })
-        .ok_or_else(ApiError::unauthorized)
+        .ok_or_else(|| OAuthError::from(OAuthCode::InvalidToken))
 }
 
 #[derive(Deserialize)]
@@ -587,13 +588,13 @@ struct TokenForm {
     scope: Option<String>,
 }
 impl TokenForm {
-    fn refresh_scopes(&self, granted: &[String]) -> Result<Vec<String>, ApiError> {
+    fn refresh_scopes(&self, granted: &[String]) -> Result<Vec<String>, OAuthError> {
         let Some(requested) = self.scope.as_deref() else {
             return Ok(granted.to_vec());
         };
-        let scopes = parse_scopes(requested).ok_or_else(|| ApiError::oauth("invalid_scope"))?;
+        let scopes = parse_scopes(requested).ok_or(OAuthCode::InvalidScope)?;
         if !scopes.iter().all(|scope| granted.contains(scope)) {
-            return Err(ApiError::oauth("invalid_scope"));
+            return Err(OAuthCode::InvalidScope.into());
         }
         Ok(scopes.into_iter().collect())
     }
@@ -615,8 +616,8 @@ async fn token(
     State(app): State<OidcApplication>,
     headers: HeaderMap,
     form: Result<Form<TokenForm>, axum::extract::rejection::FormRejection>,
-) -> Result<Json<TokenResponse>, ApiError> {
-    let Form(mut form) = form.map_err(|_| ApiError::request())?;
+) -> Result<Json<TokenResponse>, OAuthError> {
+    let Form(mut form) = form.map_err(|_| OAuthCode::InvalidRequest)?;
     let client = app
         .authenticate_client(&headers, form.client_id.as_deref())
         .await?;
@@ -624,24 +625,25 @@ async fn token(
     match form.grant_type.as_str() {
         "authorization_code" => exchange_code(&app, form).await.map(Json),
         "refresh_token" => rotate_refresh(&app, form).await.map(Json),
-        _ => Err(ApiError::oauth("unsupported_grant_type")),
+        _ => Err(OAuthCode::UnsupportedGrantType.into()),
     }
 }
 
-async fn exchange_code(app: &OidcApplication, form: TokenForm) -> Result<TokenResponse, ApiError> {
+async fn exchange_code(
+    app: &OidcApplication,
+    form: TokenForm,
+) -> Result<TokenResponse, OAuthError> {
     let (id, secret) = parse_opaque(
         "pac_v1",
-        form.code
-            .as_deref()
-            .ok_or_else(|| ApiError::oauth("invalid_grant"))?,
+        form.code.as_deref().ok_or(OAuthCode::InvalidGrant)?,
     )?;
     let digest = keyed_digest(app.refresh_key.as_ref(), &secret)?;
-    let mut tx = app.database.begin().await.map_err(ApiError::internal)?;
+    let mut tx = app.database.begin().await.map_err(OAuthError::internal)?;
     let code = tx
         .oidc()
         .consume_code(id, &digest)
         .await
-        .map_err(|error| ApiError::database(error, "invalid_grant"))?;
+        .map_err(|error| OAuthError::database(error, OAuthCode::InvalidGrant))?;
     if Some(code.client_id.as_str()) != form.client_id.as_deref()
         || form.redirect_uri.as_deref() != Some(&code.redirect_uri)
         || validate_pkce_s256(
@@ -650,31 +652,31 @@ async fn exchange_code(app: &OidcApplication, form: TokenForm) -> Result<TokenRe
         )
         .is_err()
     {
-        return Err(ApiError::oauth("invalid_grant"));
+        return Err(OAuthCode::InvalidGrant.into());
     }
     let user = tx
         .users()
         .find_active_by_id_for_update(code.user_id)
         .await
-        .map_err(ApiError::internal)?
-        .ok_or_else(|| ApiError::oauth("invalid_grant"))?;
+        .map_err(OAuthError::internal)?
+        .ok_or(OAuthCode::InvalidGrant)?;
     let session = tx
         .sessions()
         .find_by_id(code.session_id)
         .await
-        .map_err(ApiError::internal)?
-        .ok_or_else(|| ApiError::oauth("invalid_grant"))?;
+        .map_err(OAuthError::internal)?
+        .ok_or(OAuthCode::InvalidGrant)?;
     let client = tx
         .oidc()
-        .find_client(form.client_id.as_deref().ok_or_else(ApiError::client)?)
+        .find_client(form.client_id.as_deref().ok_or(OAuthCode::InvalidClient)?)
         .await
-        .map_err(ApiError::internal)?
-        .ok_or_else(|| ApiError::oauth("invalid_client"))?;
+        .map_err(OAuthError::internal)?
+        .ok_or(OAuthCode::InvalidClient)?;
     let email = tx
         .oidc()
         .primary_email(user.id)
         .await
-        .map_err(ApiError::internal)?;
+        .map_err(OAuthError::internal)?;
     let tokens = TokenGrant {
         client: &client.id,
         audience: &code.audience,
@@ -699,28 +701,31 @@ async fn exchange_code(app: &OidcApplication, form: TokenForm) -> Result<TokenRe
         } else {
             None
         };
-    tx.commit().await.map_err(ApiError::internal)?;
+    tx.commit().await.map_err(OAuthError::internal)?;
     Ok(TokenResponse {
         refresh_token: refresh,
         ..tokens
     })
 }
 
-async fn rotate_refresh(app: &OidcApplication, form: TokenForm) -> Result<TokenResponse, ApiError> {
+async fn rotate_refresh(
+    app: &OidcApplication,
+    form: TokenForm,
+) -> Result<TokenResponse, OAuthError> {
     let (id, secret) = parse_opaque(
         "prt_v1",
         form.refresh_token
             .as_deref()
-            .ok_or_else(|| ApiError::oauth("invalid_grant"))?,
+            .ok_or(OAuthCode::InvalidGrant)?,
     )?;
     let digest = keyed_digest(app.refresh_key.as_ref(), &secret)?;
-    let mut tx = app.database.begin().await.map_err(ApiError::internal)?;
+    let mut tx = app.database.begin().await.map_err(OAuthError::internal)?;
     let rotated = match tx
         .tokens()
         .consume_for_rotation(
             id,
             &digest,
-            form.client_id.as_deref().ok_or_else(ApiError::client)?,
+            form.client_id.as_deref().ok_or(OAuthCode::InvalidClient)?,
         )
         .await
     {
@@ -735,13 +740,13 @@ async fn rotate_refresh(app: &OidcApplication, form: TokenForm) -> Result<TokenR
                     request_metadata: json!({}),
                 })
                 .await
-                .map_err(ApiError::internal)?;
-            tx.commit().await.map_err(ApiError::internal)?;
+                .map_err(OAuthError::internal)?;
+            tx.commit().await.map_err(OAuthError::internal)?;
             tracing::warn!(
                 event = "auth.refresh_replay",
                 "refresh token replay rejected"
             );
-            return Err(ApiError::oauth("invalid_grant"));
+            return Err(OAuthCode::InvalidGrant.into());
         }
         Err(RefreshRotationError::Policy { user_id }) => {
             tx.audit_events()
@@ -753,29 +758,31 @@ async fn rotate_refresh(app: &OidcApplication, form: TokenForm) -> Result<TokenR
                     request_metadata: json!({}),
                 })
                 .await
-                .map_err(ApiError::internal)?;
-            tx.commit().await.map_err(ApiError::internal)?;
-            return Err(ApiError::oauth("invalid_grant"));
+                .map_err(OAuthError::internal)?;
+            tx.commit().await.map_err(OAuthError::internal)?;
+            return Err(OAuthCode::InvalidGrant.into());
         }
-        Err(RefreshRotationError::Invalid) => return Err(ApiError::oauth("invalid_grant")),
-        Err(RefreshRotationError::Database(error)) => return Err(ApiError::internal(error)),
+        Err(RefreshRotationError::Invalid) => {
+            return Err(OAuthCode::InvalidGrant.into());
+        }
+        Err(RefreshRotationError::Database(error)) => return Err(OAuthError::internal(error)),
     };
     if Some(rotated.client_id.as_str()) != form.client_id.as_deref() {
-        return Err(ApiError::oauth("invalid_grant"));
+        return Err(OAuthCode::InvalidGrant.into());
     }
     let scopes = form.refresh_scopes(&rotated.scopes)?;
     let user = tx
         .users()
         .find_by_id(rotated.user_id)
         .await
-        .map_err(ApiError::internal)?
-        .ok_or_else(|| ApiError::oauth("invalid_grant"))?;
+        .map_err(OAuthError::internal)?
+        .ok_or(OAuthCode::InvalidGrant)?;
     let session = tx
         .sessions()
         .find_by_id(rotated.session_id)
         .await
-        .map_err(ApiError::internal)?
-        .ok_or_else(|| ApiError::oauth("invalid_grant"))?;
+        .map_err(OAuthError::internal)?
+        .ok_or(OAuthCode::InvalidGrant)?;
     let (raw, new_id, new_secret) = new_opaque("prt_v1");
     let new_digest = keyed_digest(app.refresh_key.as_ref(), &new_secret)?;
     tx.tokens()
@@ -786,12 +793,12 @@ async fn rotate_refresh(app: &OidcApplication, form: TokenForm) -> Result<TokenR
             expires_at: session.expires_at,
         })
         .await
-        .map_err(ApiError::internal)?;
+        .map_err(OAuthError::internal)?;
     let email = tx
         .oidc()
         .primary_email(user.id)
         .await
-        .map_err(ApiError::internal)?;
+        .map_err(OAuthError::internal)?;
     let mut tokens = TokenGrant {
         client: &rotated.client_id,
         audience: &rotated.audience,
@@ -800,7 +807,7 @@ async fn rotate_refresh(app: &OidcApplication, form: TokenForm) -> Result<TokenR
     }
     .issue(app, &user, &session, email.as_deref())?;
     tokens.refresh_token = Some(raw);
-    tx.commit().await.map_err(ApiError::internal)?;
+    tx.commit().await.map_err(OAuthError::internal)?;
     Ok(tokens)
 }
 
@@ -812,13 +819,13 @@ async fn create_refresh(
     client_id: String,
     audience: String,
     scopes: Vec<String>,
-) -> Result<String, ApiError> {
+) -> Result<String, OAuthError> {
     let session = tx
         .sessions()
         .find_active_by_id(session_id)
         .await
-        .map_err(ApiError::internal)?
-        .ok_or_else(|| ApiError::oauth("invalid_grant"))?;
+        .map_err(OAuthError::internal)?
+        .ok_or(OAuthCode::InvalidGrant)?;
     let family_id = TokenId::new();
     let (raw, id, secret) = new_opaque("prt_v1");
     let digest = keyed_digest(app.refresh_key.as_ref(), &secret)?;
@@ -840,7 +847,7 @@ async fn create_refresh(
             },
         )
         .await
-        .map_err(ApiError::internal)?;
+        .map_err(OAuthError::internal)?;
     Ok(raw)
 }
 
@@ -857,7 +864,7 @@ impl TokenGrant<'_> {
         user: &piquel_repository::StoredUser,
         session: &StoredSession,
         email: Option<&str>,
-    ) -> Result<TokenResponse, ApiError> {
+    ) -> Result<TokenResponse, OAuthError> {
         let Self {
             client,
             audience,
@@ -885,7 +892,7 @@ impl TokenGrant<'_> {
         let access_token = app
             .keys
             .sign("at+jwt", &access)
-            .map_err(|()| ApiError::server())?;
+            .map_err(|()| OAuthCode::ServerError)?;
         let id_token = if scopes.iter().any(|s| s == "openid") {
             claims["aud"] = json!(client);
             if let Some(nonce) = nonce {
@@ -894,7 +901,7 @@ impl TokenGrant<'_> {
             Some(
                 app.keys
                     .sign("JWT", &claims)
-                    .map_err(|()| ApiError::server())?,
+                    .map_err(|()| OAuthCode::ServerError)?,
             )
         } else {
             None
@@ -919,19 +926,19 @@ async fn revoke(
     State(app): State<OidcApplication>,
     headers: HeaderMap,
     form: Result<Form<RevokeForm>, axum::extract::rejection::FormRejection>,
-) -> Result<StatusCode, ApiError> {
-    let Form(form) = form.map_err(|_| ApiError::request())?;
+) -> Result<StatusCode, OAuthError> {
+    let Form(form) = form.map_err(|_| OAuthCode::InvalidRequest)?;
     let client = app
         .authenticate_client(&headers, form.client_id.as_deref())
         .await?;
     if let Ok((id, secret)) = parse_opaque("prt_v1", &form.token) {
         let digest = keyed_digest(app.refresh_key.as_ref(), &secret)?;
-        let mut tx = app.database.begin().await.map_err(ApiError::internal)?;
+        let mut tx = app.database.begin().await.map_err(OAuthError::internal)?;
         tx.tokens()
             .revoke_family_for_client_token(id, &digest, &client.id)
             .await
-            .map_err(ApiError::internal)?;
-        tx.commit().await.map_err(ApiError::internal)?;
+            .map_err(OAuthError::internal)?;
+        tx.commit().await.map_err(OAuthError::internal)?;
     }
     Ok(StatusCode::OK)
 }
@@ -939,16 +946,16 @@ async fn revoke(
 async fn userinfo(
     State(app): State<OidcApplication>,
     headers: HeaderMap,
-) -> Result<Json<Value>, ApiError> {
+) -> Result<Json<Value>, OAuthError> {
     let token = headers
         .get(header::AUTHORIZATION)
         .and_then(|v| v.to_str().ok())
         .and_then(|v| v.strip_prefix("Bearer "))
-        .ok_or_else(ApiError::unauthorized)?;
+        .ok_or(OAuthCode::InvalidToken)?;
     let claims = app
         .keys
         .verify(token, "at+jwt", &app.issuer)
-        .map_err(|()| ApiError::unauthorized())?;
+        .map_err(|()| OAuthCode::InvalidToken)?;
     let scopes: BTreeSet<_> = claims
         .get("scope")
         .and_then(Value::as_str)
@@ -956,7 +963,7 @@ async fn userinfo(
         .split_ascii_whitespace()
         .collect();
     if !scopes.contains("openid") {
-        return Err(ApiError::unauthorized());
+        return Err(OAuthCode::InvalidToken.into());
     }
     let mut response = json!({"sub":claims.get("sub")});
     if scopes.contains("profile") {
@@ -989,9 +996,9 @@ struct LogoutQuery {
 }
 
 impl OidcApplication {
-    async fn logout_destination(&self, q: &LogoutQuery) -> Result<String, ApiError> {
+    async fn logout_destination(&self, q: &LogoutQuery) -> Result<String, OAuthError> {
         if q.state.as_ref().is_some_and(|s| s.len() > 512) {
-            return Err(ApiError::request());
+            return Err(OAuthCode::InvalidRequest.into());
         }
         let hint = q
             .id_token_hint
@@ -999,7 +1006,7 @@ impl OidcApplication {
             .map(|token| {
                 self.keys
                     .verify_id_token_hint(token, &self.issuer)
-                    .map_err(|()| ApiError::request())
+                    .map_err(|()| OAuthError::from(OAuthCode::InvalidRequest))
             })
             .transpose()?;
         let hinted_client = hint
@@ -1011,7 +1018,7 @@ impl OidcApplication {
             .zip(hinted_client)
             .is_some_and(|(a, b)| a != b)
         {
-            return Err(ApiError::request());
+            return Err(OAuthCode::InvalidRequest.into());
         }
         let Some(uri) = q.post_logout_redirect_uri.as_ref() else {
             return Ok(format!("{}/login", self.issuer));
@@ -1020,19 +1027,19 @@ impl OidcApplication {
             .client_id
             .as_deref()
             .or(hinted_client)
-            .ok_or_else(ApiError::request)?;
+            .ok_or(OAuthCode::InvalidRequest)?;
         let client = self
             .database
             .oidc()
             .find_client(id)
             .await
-            .map_err(ApiError::internal)?
+            .map_err(OAuthError::internal)?
             .filter(|c| c.enabled)
-            .ok_or_else(ApiError::request)?;
+            .ok_or(OAuthCode::InvalidRequest)?;
         if !client.post_logout_uris.contains(uri) {
-            return Err(ApiError::request());
+            return Err(OAuthCode::InvalidRequest.into());
         }
-        let mut url = Url::parse(uri).map_err(|_| ApiError::request())?;
+        let mut url = Url::parse(uri).map_err(|_| OAuthCode::InvalidRequest)?;
         if let Some(state) = &q.state {
             url.query_pairs_mut().append_pair("state", state);
         }
@@ -1043,9 +1050,9 @@ impl OidcApplication {
 async fn logout_start(
     State(app): State<OidcApplication>,
     Query(q): Query<LogoutQuery>,
-) -> Result<Redirect, ApiError> {
+) -> Result<Redirect, OAuthError> {
     app.logout_destination(&q).await?;
-    let mut url = Url::parse(&format!("{}/logout", app.issuer)).map_err(ApiError::internal)?;
+    let mut url = Url::parse(&format!("{}/logout", app.issuer)).map_err(OAuthError::internal)?;
     for (name, value) in [
         ("client_id", &q.client_id),
         ("id_token_hint", &q.id_token_hint),
@@ -1063,7 +1070,7 @@ async fn logout(
     State(app): State<OidcApplication>,
     headers: HeaderMap,
     Form(q): Form<LogoutQuery>,
-) -> Result<Response, ApiError> {
+) -> Result<Response, OAuthError> {
     if require_same_origin(&app, &headers).is_err() {
         return logout_start(State(app), Query(q))
             .await
@@ -1071,12 +1078,12 @@ async fn logout(
     }
     let destination = app.logout_destination(&q).await?;
     if let Some(session) = browser_session(&app.database, &headers).await? {
-        let mut tx = app.database.begin().await.map_err(ApiError::internal)?;
+        let mut tx = app.database.begin().await.map_err(OAuthError::internal)?;
         tx.oidc()
             .revoke_session(session.id)
             .await
-            .map_err(ApiError::internal)?;
-        tx.commit().await.map_err(ApiError::internal)?;
+            .map_err(OAuthError::internal)?;
+        tx.commit().await.map_err(OAuthError::internal)?;
     }
     let mut response = Json(json!({"redirect_url":destination})).into_response();
     response.headers_mut().insert(
@@ -1084,12 +1091,12 @@ async fn logout(
         crate::security::BrowserCookie::Session
             .clear()
             .parse()
-            .map_err(ApiError::internal)?,
+            .map_err(OAuthError::internal)?,
     );
     Ok(response)
 }
 
-fn require_same_origin(app: &OidcApplication, headers: &HeaderMap) -> Result<(), ApiError> {
+fn require_same_origin(app: &OidcApplication, headers: &HeaderMap) -> Result<(), OAuthError> {
     let origin_matches = headers
         .get(header::ORIGIN)
         .and_then(|value| value.to_str().ok())
@@ -1104,13 +1111,13 @@ fn require_same_origin(app: &OidcApplication, headers: &HeaderMap) -> Result<(),
         == Some("same-origin");
     (origin_matches && (csrf_header || same_origin_fetch))
         .then_some(())
-        .ok_or_else(ApiError::request)
+        .ok_or_else(|| OAuthError::from(OAuthCode::InvalidRequest))
 }
 
 async fn browser_session(
     database: &Database,
     headers: &HeaderMap,
-) -> Result<Option<StoredSession>, ApiError> {
+) -> Result<Option<StoredSession>, OAuthError> {
     let Some(secret) = crate::security::BrowserCookie::Session.read(headers) else {
         return Ok(None);
     };
@@ -1118,10 +1125,7 @@ async fn browser_session(
         .sessions()
         .find_active_by_browser_secret(&secret.digest())
         .await
-        .map_err(|error| {
-            tracing::error!(?error, "OIDC session lookup failed");
-            ApiError::server()
-        })
+        .map_err(OAuthError::internal)
 }
 
 fn parse_scopes(value: &str) -> Option<BTreeSet<String>> {
@@ -1141,27 +1145,24 @@ fn new_opaque(prefix: &str) -> (String, TokenId, [u8; OPAQUE_SECRET_BYTES]) {
 fn parse_opaque(
     prefix: &str,
     value: &str,
-) -> Result<(TokenId, [u8; OPAQUE_SECRET_BYTES]), ApiError> {
+) -> Result<(TokenId, [u8; OPAQUE_SECRET_BYTES]), OAuthError> {
     if value.len() > 160 {
-        return Err(ApiError::oauth("invalid_grant"));
+        return Err(OAuthCode::InvalidGrant.into());
     }
     let rest = value
         .strip_prefix(&format!("{prefix}_"))
-        .ok_or_else(|| ApiError::oauth("invalid_grant"))?;
-    let (id, secret) = rest
-        .split_once('.')
-        .ok_or_else(|| ApiError::oauth("invalid_grant"))?;
-    let id = TokenId::from_str(id).map_err(|_| ApiError::oauth("invalid_grant"))?;
+        .ok_or(OAuthCode::InvalidGrant)?;
+    let (id, secret) = rest.split_once('.').ok_or(OAuthCode::InvalidGrant)?;
+    let id = TokenId::from_str(id).map_err(|_| OAuthCode::InvalidGrant)?;
     let decoded = URL_SAFE_NO_PAD
         .decode(secret)
-        .map_err(|_| ApiError::oauth("invalid_grant"))?;
-    let secret: [u8; OPAQUE_SECRET_BYTES] = decoded
-        .try_into()
-        .map_err(|_| ApiError::oauth("invalid_grant"))?;
+        .map_err(|_| OAuthCode::InvalidGrant)?;
+    let secret: [u8; OPAQUE_SECRET_BYTES] =
+        decoded.try_into().map_err(|_| OAuthCode::InvalidGrant)?;
     Ok((id, secret))
 }
-fn keyed_digest(key: &[u8], secret: &[u8]) -> Result<[u8; 32], ApiError> {
-    OidcApplication::hmac(key, secret).map_err(|()| ApiError::server())
+fn keyed_digest(key: &[u8], secret: &[u8]) -> Result<[u8; 32], OAuthError> {
+    OidcApplication::hmac(key, secret).map_err(|()| OAuthError::from(OAuthCode::ServerError))
 }
 
 fn validate_pkce_s256(verifier: &str, challenge: &str) -> Result<(), ()> {
@@ -1176,83 +1177,110 @@ fn validate_pkce_s256(verifier: &str, challenge: &str) -> Result<(), ()> {
         .then_some(())
         .ok_or(())
 }
-fn redirect_error(base: &Url, error: &str, state: &str) -> ApiError {
-    let mut url = base.clone();
-    url.query_pairs_mut()
-        .append_pair("error", error)
-        .append_pair("state", state);
-    ApiError(
-        StatusCode::FOUND,
-        json!({"error":error}),
-        Some(url.to_string()),
-    )
+/// OAuth 2.0 and OIDC error codes returned by this provider.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum OAuthCode {
+    InvalidRequest,
+    InvalidClient,
+    InvalidGrant,
+    InvalidScope,
+    InvalidTarget,
+    InvalidToken,
+    UnsupportedGrantType,
+    LoginRequired,
+    ConsentRequired,
+    RequestNotSupported,
+    RequestUriNotSupported,
+    ServerError,
+}
+impl OAuthCode {
+    const fn as_str(self) -> &'static str {
+        match self {
+            Self::InvalidRequest => "invalid_request",
+            Self::InvalidClient => "invalid_client",
+            Self::InvalidGrant => "invalid_grant",
+            Self::InvalidScope => "invalid_scope",
+            Self::InvalidTarget => "invalid_target",
+            Self::InvalidToken => "invalid_token",
+            Self::UnsupportedGrantType => "unsupported_grant_type",
+            Self::LoginRequired => "login_required",
+            Self::ConsentRequired => "consent_required",
+            Self::RequestNotSupported => "request_not_supported",
+            Self::RequestUriNotSupported => "request_uri_not_supported",
+            Self::ServerError => "server_error",
+        }
+    }
+    const fn status(self) -> StatusCode {
+        match self {
+            Self::InvalidClient | Self::InvalidToken => StatusCode::UNAUTHORIZED,
+            Self::ServerError => StatusCode::INTERNAL_SERVER_ERROR,
+            _ => StatusCode::BAD_REQUEST,
+        }
+    }
+    /// `WWW-Authenticate` challenge for failed client or bearer-token authentication.
+    const fn challenge(self) -> Option<&'static str> {
+        match self {
+            Self::InvalidClient => Some("Basic realm=\"token\""),
+            Self::InvalidToken => Some("Bearer error=\"invalid_token\""),
+            _ => None,
+        }
+    }
 }
 
-#[derive(Debug, Error)]
-#[error("OIDC request failed")]
-struct ApiError(StatusCode, Value, Option<String>);
-impl ApiError {
+/// A protocol failure, answered with `{"error": code}` or by redirecting to the client.
+///
+/// Browser-facing account APIs use `security::ApiError` instead; OIDC clients and the
+/// auth pages rely on these machine-readable codes.
+#[derive(Debug)]
+struct OAuthError {
+    code: OAuthCode,
+    redirect: Option<Url>,
+}
+impl From<OAuthCode> for OAuthError {
+    fn from(code: OAuthCode) -> Self {
+        Self {
+            code,
+            redirect: None,
+        }
+    }
+}
+impl OAuthError {
     fn internal(error: impl std::fmt::Debug) -> Self {
         tracing::error!(error=?error,"OIDC operation failed");
-        Self::server()
+        OAuthCode::ServerError.into()
     }
-    fn database(error: piquel_repository::DatabaseError, expected: &str) -> Self {
+    fn database(error: piquel_repository::DatabaseError, expected: OAuthCode) -> Self {
         match error {
-            piquel_repository::DatabaseError::NotFound => Self::oauth(expected),
+            piquel_repository::DatabaseError::NotFound => expected.into(),
             error => Self::internal(error),
         }
     }
-
-    fn client() -> Self {
-        Self(
-            StatusCode::UNAUTHORIZED,
-            json!({"error":"invalid_client"}),
-            None,
-        )
-    }
-    fn request() -> Self {
-        Self(
-            StatusCode::BAD_REQUEST,
-            json!({"error":"invalid_request"}),
-            None,
-        )
-    }
-    fn oauth(code: &str) -> Self {
-        Self(StatusCode::BAD_REQUEST, json!({"error":code}), None)
-    }
-    fn unauthorized() -> Self {
-        Self(
-            StatusCode::UNAUTHORIZED,
-            json!({"error":"invalid_token"}),
-            None,
-        )
-    }
-    fn server() -> Self {
-        Self(
-            StatusCode::INTERNAL_SERVER_ERROR,
-            json!({"error":"server_error"}),
-            None,
-        )
+    /// Returns `code` to a validated client redirect URI with its `state`.
+    fn redirect(base: &Url, code: OAuthCode, state: &str) -> Self {
+        let mut url = base.clone();
+        url.query_pairs_mut()
+            .append_pair("error", code.as_str())
+            .append_pair("state", state);
+        Self {
+            code,
+            redirect: Some(url),
+        }
     }
 }
-impl IntoResponse for ApiError {
+impl IntoResponse for OAuthError {
     fn into_response(self) -> Response {
-        if let Some(location) = self.2 {
-            return Redirect::to(&location).into_response();
+        if let Some(location) = self.redirect {
+            return Redirect::to(location.as_str()).into_response();
         }
-        let client_error = self.1.get("error") == Some(&json!("invalid_client"));
-        let bearer_error = self.1.get("error") == Some(&json!("invalid_token"));
-        let mut response = (self.0, Json(self.1)).into_response();
-        if client_error {
+        let mut response = (
+            self.code.status(),
+            Json(json!({"error":self.code.as_str()})),
+        )
+            .into_response();
+        if let Some(challenge) = self.code.challenge() {
             response.headers_mut().insert(
                 header::WWW_AUTHENTICATE,
-                axum::http::HeaderValue::from_static("Basic realm=\"token\""),
-            );
-        }
-        if bearer_error {
-            response.headers_mut().insert(
-                header::WWW_AUTHENTICATE,
-                axum::http::HeaderValue::from_static("Bearer error=\"invalid_token\""),
+                axum::http::HeaderValue::from_static(challenge),
             );
         }
         response
@@ -1280,7 +1308,7 @@ async fn resume(
     State(app): State<OidcApplication>,
     headers: HeaderMap,
     Query(q): Query<ResumeQuery>,
-) -> Result<Redirect, ApiError> {
+) -> Result<Redirect, OAuthError> {
     app.continue_authorization(&headers, q.transaction, false)
         .await
 }
@@ -1293,16 +1321,16 @@ impl OidcApplication {
         headers: &HeaderMap,
         transaction: String,
         silent: bool,
-    ) -> Result<Redirect, ApiError> {
+    ) -> Result<Redirect, OAuthError> {
         let request = find_authorization_request(self, &transaction).await?;
-        let redirect = Url::parse(&request.redirect_uri).map_err(ApiError::internal)?;
-        let fail = |code| redirect_error(&redirect, code, &request.client_state);
+        let redirect = Url::parse(&request.redirect_uri).map_err(OAuthError::internal)?;
+        let fail = |code| OAuthError::redirect(&redirect, code, &request.client_state);
         let session = browser_session(&self.database, headers).await?;
         let Some(session) =
             session.filter(|session| require_authorization_session(&request, session).is_ok())
         else {
             if silent {
-                return Err(fail("login_required"));
+                return Err(fail(OAuthCode::LoginRequired));
             }
             return Ok(self.continuation_page("login", &transaction));
         };
@@ -1319,7 +1347,7 @@ impl OidcApplication {
             .await;
         }
         if silent {
-            return Err(fail("consent_required"));
+            return Err(fail(OAuthCode::ConsentRequired));
         }
         Ok(self.continuation_page("authorize", &transaction))
     }
@@ -1329,7 +1357,7 @@ async fn can_authorize(
     app: &OidcApplication,
     request: &StoredAuthorizationRequest,
     session: &StoredSession,
-) -> Result<bool, ApiError> {
+) -> Result<bool, OAuthError> {
     if request.force_consent {
         return Ok(false);
     }
@@ -1338,8 +1366,8 @@ async fn can_authorize(
         .oidc()
         .find_client(&request.client_id)
         .await
-        .map_err(ApiError::internal)?
-        .ok_or_else(ApiError::request)?;
+        .map_err(OAuthError::internal)?
+        .ok_or(OAuthCode::InvalidRequest)?;
     Ok(client.trusted
         || app
             .database
@@ -1351,7 +1379,7 @@ async fn can_authorize(
                 &request.scopes,
             )
             .await
-            .map_err(ApiError::internal)?)
+            .map_err(OAuthError::internal)?)
 }
 
 #[cfg(test)]
