@@ -142,6 +142,16 @@
   </div>
   {#if error}<p class="notice error" role="alert">{error}</p>{/if}
   {#if loading}<p role="status">Loading account settings…</p>
+  {:else if !config}<div class="card stack">
+      <h2>Account settings are unavailable</h2>
+      <p>Piquel's sign-in service could not be reached.</p>
+      <button
+        class="button"
+        onclick={() => {
+          window.location.reload();
+        }}>Try again</button
+      >
+    </div>
   {:else if !session}<div class="card stack">
       <h2>Sign in to see your settings</h2>
       <p>Use your Piquel account to manage your passkeys and linked providers.</p>
