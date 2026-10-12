@@ -16,10 +16,11 @@ export default defineConfig({
     // Keep /login itself in SvelteKit, but send /login/* (including callbacks)
     // to the same Rust handlers as production. Preserve Origin and cookies.
     proxy: {
-      '^/(config|session)(/|\\?|$)|^/(health|webauthn|account|login|oauth|oidc|federation|\\.well-known)/': {
-        target: 'http://127.0.0.1:8080',
-        changeOrigin: false
-      }
+      '^/(config|session)(/|\\?|$)|^/(health|webauthn|account|login|oauth|oidc|federation|\\.well-known)/':
+        {
+          target: 'http://127.0.0.1:8080',
+          changeOrigin: false
+        }
     }
   }
 });

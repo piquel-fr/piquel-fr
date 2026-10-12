@@ -9,7 +9,9 @@ export default defineConfig({
   use: {
     baseURL: process.env.E2E_AUTH_URL ?? 'http://localhost:3000',
     // Authentication artifacts must never be included in screenshots or traces.
-    trace: 'off', screenshot: 'off', video: 'off',
+    trace: 'off',
+    screenshot: 'off',
+    video: 'off',
     launchOptions: { executablePath: process.env.CHROMIUM_EXECUTABLE },
     ignoreHTTPSErrors: Boolean(process.env.E2E_ALLOW_SELF_SIGNED_TLS)
   },
