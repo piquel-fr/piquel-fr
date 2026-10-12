@@ -43,9 +43,10 @@ BEGIN
     IF NEW.verified_at IS NOT NULL THEN
         -- Serialize email claims with status changes. Without this row lock an
         -- insert can observe an active account, wait behind disablement, and
-        -- recreate ownership after the account has become disabled.
+        -- recreate ownership after the account has become disabled. NO KEY UPDATE
+        -- still admits foreign-key checks, which FOR UPDATE would deadlock with.
         SELECT status = 'active' INTO account_active
-        FROM users WHERE id = NEW.user_id FOR UPDATE;
+        FROM users WHERE id = NEW.user_id FOR NO KEY UPDATE;
         IF account_active THEN
             INSERT INTO active_verified_email_ownership(normalized_email, user_id)
             VALUES (NEW.normalized_email, NEW.user_id)

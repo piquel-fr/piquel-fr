@@ -66,7 +66,7 @@ impl SessionRepository<'_> {
     /// Returns [`DatabaseError::NotFound`] if the account is not active, or
     /// another [`DatabaseError`] if the query fails.
     pub async fn insert(&mut self, input: &InsertSession) -> Result<StoredSession, DatabaseError> {
-        let row = fetch_one!(self, sqlx::query("WITH active_user AS (SELECT id FROM users WHERE id=$2 AND status='active' FOR UPDATE) INSERT INTO sessions (id, user_id, authentication_methods, authenticated_at, expires_at, last_seen_at, user_agent_family) SELECT $1,id,$3,$4,$5,$4,$6 FROM active_user RETURNING id,user_id,authentication_methods,authenticated_at,expires_at,last_seen_at,revoked_at").bind(input.id.as_uuid()).bind(input.user_id.as_uuid()).bind(Json(&input.authentication_methods)).bind(input.authenticated_at).bind(input.expires_at).bind(&input.user_agent_family))?;
+        let row = fetch_one!(self, sqlx::query("WITH active_user AS (SELECT id FROM users WHERE id=$2 AND status='active' FOR NO KEY UPDATE) INSERT INTO sessions (id, user_id, authentication_methods, authenticated_at, expires_at, last_seen_at, user_agent_family) SELECT $1,id,$3,$4,$5,$4,$6 FROM active_user RETURNING id,user_id,authentication_methods,authenticated_at,expires_at,last_seen_at,revoked_at").bind(input.id.as_uuid()).bind(input.user_id.as_uuid()).bind(Json(&input.authentication_methods)).bind(input.authenticated_at).bind(input.expires_at).bind(&input.user_agent_family))?;
         StoredSession::from_row(&row)
     }
 
