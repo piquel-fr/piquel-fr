@@ -1,5 +1,6 @@
 //! Shared provider code exchange and verified identity extraction. Each provider's
-//! protocol facts and identity checks live in its own module.
+//! protocol facts and identity checks live in its own module; see
+//! `docs/architecture/federation-providers.md` to add one.
 
 use super::{FederationApplication, Provider};
 use crate::email::NormalizedEmail;
