@@ -4,6 +4,7 @@ members = [
     "apps/auth-service",
     "crates/auth-protocol",
     "crates/common",
+    "crates/crypto",
     "crates/database",
     "crates/telemetry",
 ]
@@ -25,6 +26,7 @@ unwrap_used = "warn"
 [workspace.dependencies]
 # Local crates
 piquel-common        = { path = "crates/common" }
+piquel-crypto        = { path = "crates/crypto" }
 piquel-repository    = { path = "crates/database" }
 piquel-telemetry     = { path = "crates/telemetry" }
 piquel-auth-protocol = { path = "crates/auth-protocol" }

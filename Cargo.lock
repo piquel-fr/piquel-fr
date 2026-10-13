@@ -1482,6 +1482,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "piquel-crypto"
+version = "0.1.0"
+dependencies = [
+ "base64 0.22.1",
+ "chrono",
+ "openssl",
+ "piquel-common",
+ "rand 0.8.7",
+ "serde",
+ "serde_json",
+ "sha2",
+ "thiserror 2.0.18",
+]
+
+[[package]]
 name = "piquel-repository"
 version = "0.1.0"
 dependencies = [
