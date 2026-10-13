@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE refresh_token_families\n                SET revoked_at = now()\n                WHERE authorization_code_id = $1\n                AND revoked_at IS NULL",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "ceba390bc188ed3137bdc46794d109689a7a1ac4272c8f02eca32a639edc2b80"
+}

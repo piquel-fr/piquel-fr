@@ -3,62 +3,17 @@ use crate::Database;
 
 use super::{InsertRefreshFamily, InsertRefreshToken, RefreshRotationError};
 use crate::repositories::{OidcRepository, TokenRepository};
+use crate::{CodeRedemptionError, DatabaseTransaction};
 use chrono::{Duration, Utc};
 use piquel_auth_protocol::{SessionId, TokenId, UserId};
-use sqlx::PgPool;
+use sqlx::{PgConnection, PgPool};
 use std::time::Duration as Wait;
-/// Creates a committed refresh grant and browser session for concurrent rotation scenarios.
-async fn family(pool: &PgPool, client: &str) -> (TokenId, Vec<u8>, SessionId) {
-    let user = UserId::new();
-    let session = SessionId::new();
-    let family = TokenId::new();
-    let token = TokenId::new();
-    let digest = token.as_uuid().as_bytes().repeat(2);
-    let mut tx = pool.begin().await.expect("transaction");
-    sqlx::query("INSERT INTO users(id,username,display_name) VALUES($1,$2,'Lock test')")
-        .bind(user.as_uuid())
-        .bind(format!("lock_{user}"))
-        .execute(&mut *tx)
-        .await
-        .expect("user");
-    sqlx::query(
-        "INSERT INTO sessions (
-            id, user_id, authentication_methods, authenticated_at, expires_at, last_seen_at
-        ) VALUES ($1, $2, '[]', now(), now() + interval '1 hour', now())",
-    )
-    .bind(session.as_uuid())
-    .bind(user.as_uuid())
-    .execute(&mut *tx)
-    .await
-    .expect("session");
-    TokenRepository::from_connection(&mut tx)
-        .insert_family(
-            &InsertRefreshFamily {
-                id: family,
-                user_id: user,
-                session_id: session,
-                client_id: client.into(),
-                audience: "test".into(),
-                scopes: vec!["openid".into()],
-            },
-            &InsertRefreshToken {
-                id: token,
-                family_id: family,
-                secret_digest: digest.clone(),
-                expires_at: Utc::now() + Duration::hours(1),
-            },
-        )
-        .await
-        .expect("family");
-    tx.commit().await.expect("commit");
-    (token, digest, session)
-}
-/// Shared client policy permits independent refreshes while logout waits in the
-/// documented lock order.
-#[tokio::test]
-#[ignore = "requires a disposable TEST_DATABASE_URL"]
-async fn independent_refreshes_share_client_and_logout_does_not_deadlock() {
-    let pool = Database::test_pool().await;
+
+/// Authorization callback registered for every fixture client.
+const REDIRECT_URI: &str = "https://client.example/callback";
+
+/// Registers a refresh-capable client whose policy allows fixture codes.
+async fn client(pool: &PgPool) -> String {
     let client = format!("locks_{}", UserId::new());
     sqlx::query(
         "INSERT INTO oidc_clients (
@@ -66,11 +21,157 @@ async fn independent_refreshes_share_client_and_logout_does_not_deadlock() {
         ) VALUES ($1, 'Lock test', '[\"openid\"]', '[\"test\"]', true)",
     )
     .bind(&client)
-    .execute(&pool)
+    .execute(pool)
     .await
     .expect("client");
-    let (first, digest_first, session) = family(&pool, &client).await;
-    let (second, digest_second, _) = family(&pool, &client).await;
+    sqlx::query(
+        "INSERT INTO oidc_redirect_uris (client_id, uri, kind) VALUES ($1, $2, 'authorization')",
+    )
+    .bind(&client)
+    .bind(REDIRECT_URI)
+    .execute(pool)
+    .await
+    .expect("redirect");
+    client
+}
+
+/// Returns the server process of a connection, to observe its lock waits.
+async fn backend(connection: &mut PgConnection) -> i32 {
+    sqlx::query_scalar("SELECT pg_backend_pid()")
+        .fetch_one(connection)
+        .await
+        .expect("backend pid")
+}
+
+/// Waits until the server process `backend` is blocked on a lock.
+async fn wait_for_lock(pool: &PgPool, backend: i32) {
+    tokio::time::timeout(Wait::from_secs(2), async {
+        loop {
+            let waiting: bool = sqlx::query_scalar(
+                "SELECT EXISTS (
+                    SELECT 1
+                    FROM pg_stat_activity
+                    WHERE pid = $1
+                    AND wait_event_type = 'Lock'
+                )",
+            )
+            .bind(backend)
+            .fetch_one(pool)
+            .await
+            .expect("wait state");
+            if waiting {
+                break;
+            }
+            tokio::time::sleep(Wait::from_millis(10)).await;
+        }
+    })
+    .await
+    .expect("the transaction waits for a lock");
+}
+
+/// A committed account, browser session and unredeemed authorization code.
+struct Grant {
+    /// Account the code was issued to.
+    user: UserId,
+    /// Session that authorized the code.
+    session: SessionId,
+    /// Authorization code identifier.
+    code: TokenId,
+    /// Digest of the code secret.
+    code_digest: Vec<u8>,
+}
+
+impl Grant {
+    /// Commits a fresh account, session and code issued to `client`.
+    async fn new(pool: &PgPool, client: &str) -> Self {
+        let grant = Self {
+            user: UserId::new(),
+            session: SessionId::new(),
+            code: TokenId::new(),
+            code_digest: TokenId::new().as_uuid().as_bytes().repeat(2),
+        };
+        let mut tx = pool.begin().await.expect("transaction");
+        sqlx::query("INSERT INTO users(id,username,display_name) VALUES($1,$2,'Lock test')")
+            .bind(grant.user.as_uuid())
+            .bind(format!("lock_{}", grant.user))
+            .execute(&mut *tx)
+            .await
+            .expect("user");
+        sqlx::query(
+            "INSERT INTO sessions (
+                id, user_id, authentication_methods, authenticated_at, expires_at, last_seen_at
+            ) VALUES ($1, $2, '[]', now(), now() + interval '1 hour', now())",
+        )
+        .bind(grant.session.as_uuid())
+        .bind(grant.user.as_uuid())
+        .execute(&mut *tx)
+        .await
+        .expect("session");
+        sqlx::query(
+            "INSERT INTO authorization_codes (
+                id, secret_digest, client_id, user_id, session_id, redirect_uri,
+                pkce_challenge, scopes, audience, expires_at
+            ) VALUES ($1, $2, $3, $4, $5, $6, 'challenge', '[\"openid\"]', 'test',
+                now() + interval '1 minute')",
+        )
+        .bind(grant.code.as_uuid())
+        .bind(&grant.code_digest)
+        .bind(client)
+        .bind(grant.user.as_uuid())
+        .bind(grant.session.as_uuid())
+        .bind(REDIRECT_URI)
+        .execute(&mut *tx)
+        .await
+        .expect("code");
+        tx.commit().await.expect("commit");
+        grant
+    }
+
+    /// Creates a refresh family redeemed from this grant's code and returns its
+    /// first token with that token's digest.
+    async fn family(&self, tokens: &mut TokenRepository<'_>, client: &str) -> (TokenId, Vec<u8>) {
+        let family = TokenId::new();
+        let token = TokenId::new();
+        let digest = token.as_uuid().as_bytes().repeat(2);
+        tokens
+            .insert_family(
+                &InsertRefreshFamily {
+                    id: family,
+                    user_id: self.user,
+                    session_id: self.session,
+                    client_id: client.into(),
+                    authorization_code_id: self.code,
+                    audience: "test".into(),
+                    scopes: vec!["openid".into()],
+                },
+                &InsertRefreshToken {
+                    id: token,
+                    family_id: family,
+                    secret_digest: digest.clone(),
+                    expires_at: Utc::now() + Duration::hours(1),
+                },
+            )
+            .await
+            .expect("family");
+        (token, digest)
+    }
+}
+
+/// Shared client policy permits independent refreshes while logout waits in the
+/// documented lock order.
+#[tokio::test]
+#[ignore = "requires a disposable TEST_DATABASE_URL"]
+async fn independent_refreshes_share_client_and_logout_does_not_deadlock() {
+    let pool = Database::test_pool().await;
+    let client = client(&pool).await;
+    let grant = Grant::new(&pool, &client).await;
+    let (first, digest_first) = grant
+        .family(&mut TokenRepository::from_pool(&pool), &client)
+        .await;
+    let (second, digest_second) = Grant::new(&pool, &client)
+        .await
+        .family(&mut TokenRepository::from_pool(&pool), &client)
+        .await;
     let mut first_tx = pool.begin().await.expect("first transaction");
     TokenRepository::from_connection(&mut first_tx)
         .consume_for_rotation(first, &digest_first, &client)
@@ -93,15 +194,12 @@ async fn independent_refreshes_share_client_and_logout_does_not_deadlock() {
 
     let mut logout = pool.begin().await.expect("logout transaction");
     sqlx::query("UPDATE sessions SET revoked_at=now() WHERE id=$1")
-        .bind(session.as_uuid())
+        .bind(grant.session.as_uuid())
         .execute(&mut *logout)
         .await
         .expect("lock session");
     let mut rotation = pool.begin().await.expect("rotation transaction");
-    let backend: i32 = sqlx::query_scalar("SELECT pg_backend_pid()")
-        .fetch_one(&mut *rotation)
-        .await
-        .expect("backend pid");
+    let rotation_backend = backend(&mut rotation).await;
     let rotation_task = tokio::spawn(async move {
         let result = TokenRepository::from_connection(&mut rotation)
             .consume_for_rotation(first, &digest_first, &client)
@@ -109,31 +207,10 @@ async fn independent_refreshes_share_client_and_logout_does_not_deadlock() {
         rotation.rollback().await.expect("rollback rotation");
         result
     });
-    tokio::time::timeout(Wait::from_secs(2), async {
-        loop {
-            let waiting: bool = sqlx::query_scalar(
-                "SELECT EXISTS (
-                    SELECT 1
-                    FROM pg_stat_activity
-                    WHERE pid = $1
-                    AND wait_event_type = 'Lock'
-                )",
-            )
-            .bind(backend)
-            .fetch_one(&pool)
-            .await
-            .expect("wait state");
-            if waiting {
-                break;
-            }
-            tokio::time::sleep(Wait::from_millis(10)).await;
-        }
-    })
-    .await
-    .expect("rotation waits for logout session lock");
+    wait_for_lock(&pool, rotation_backend).await;
     tokio::time::timeout(
         Wait::from_secs(2),
-        OidcRepository::from_connection(&mut logout).revoke_session(session),
+        OidcRepository::from_connection(&mut logout).revoke_session(grant.session),
     )
     .await
     .expect("logout must not wait for refresh family locks")
@@ -152,17 +229,11 @@ async fn independent_refreshes_share_client_and_logout_does_not_deadlock() {
 #[ignore = "requires a disposable TEST_DATABASE_URL"]
 async fn replay_revokes_family_despite_invalid_scopes() {
     let pool = Database::test_pool().await;
-    let client = format!("replay_{}", UserId::new());
-    sqlx::query(
-        "INSERT INTO oidc_clients (
-            id, display_name, allowed_scopes, allowed_audiences, allow_refresh
-        ) VALUES ($1, 'Replay test', '[\"openid\"]', '[\"test\"]', true)",
-    )
-    .bind(&client)
-    .execute(&pool)
-    .await
-    .expect("client");
-    let (token, digest, _) = family(&pool, &client).await;
+    let client = client(&pool).await;
+    let (token, digest) = Grant::new(&pool, &client)
+        .await
+        .family(&mut TokenRepository::from_pool(&pool), &client)
+        .await;
     for statement in [
         "UPDATE refresh_tokens SET consumed_at=now() WHERE id=$1",
         "UPDATE refresh_token_families SET scopes='[1]'
@@ -194,4 +265,44 @@ async fn replay_revokes_family_despite_invalid_scopes() {
     .await
     .expect("family");
     assert!(revoked);
+}
+
+/// A replay racing the first redemption waits for it, then revokes the family
+/// that redemption committed.
+#[tokio::test]
+#[ignore = "requires a disposable TEST_DATABASE_URL"]
+async fn code_replay_waits_for_first_redemption_and_revokes_its_family() {
+    let pool = Database::test_pool().await;
+    let client = client(&pool).await;
+    let grant = Grant::new(&pool, &client).await;
+    let mut first = DatabaseTransaction::new(pool.begin().await.expect("first redemption"));
+    first
+        .oidc()
+        .consume_code(grant.code, &grant.code_digest)
+        .await
+        .expect("first redemption");
+    let (token, digest) = grant.family(&mut first.tokens(), &client).await;
+    let mut replay = DatabaseTransaction::new(pool.begin().await.expect("replay"));
+    let replay_backend = backend(&mut replay.inner).await;
+    let (code, code_digest) = (grant.code, grant.code_digest.clone());
+    let replay_task = tokio::spawn(async move {
+        let result = replay.oidc().consume_code(code, &code_digest).await;
+        replay.commit().await.expect("commit replay");
+        result
+    });
+    wait_for_lock(&pool, replay_backend).await;
+    first.commit().await.expect("commit first redemption");
+    let result = replay_task.await.expect("replay task");
+    assert!(
+        matches!(result, Err(CodeRedemptionError::Replay { user_id }) if user_id == grant.user),
+        "{result:?}"
+    );
+    let mut rotation = pool.begin().await.expect("rotation transaction");
+    let result = TokenRepository::from_connection(&mut rotation)
+        .consume_for_rotation(token, &digest, &client)
+        .await;
+    assert!(
+        matches!(result, Err(RefreshRotationError::Invalid)),
+        "{result:?}"
+    );
 }

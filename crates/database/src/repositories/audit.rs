@@ -30,6 +30,8 @@ piquel_common::str_enum! {
         RefreshReplay = "refresh.replay",
         /// Refresh token policy rejected rotation.
         RefreshPolicyRejected = "refresh.policy_rejected",
+        /// A redeemed authorization code was redeemed again.
+        AuthorizationCodeReplay = "authorization_code.replay",
     }
 }
 piquel_common::str_enum! {

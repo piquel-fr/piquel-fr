@@ -23,9 +23,9 @@ pub use repositories::{
         PendingFederation, StoredExternalIdentity,
     },
     oidc::{
-        BootstrapOidcClient, ClientConfigurationError, ConsumedAuthorizationCode,
-        InsertAuthorizationCode, InsertAuthorizationRequest, OidcRedirectKind,
-        StoredAuthorizationRequest, StoredOidcClient,
+        BootstrapOidcClient, ClientConfigurationError, CodeRedemptionError,
+        ConsumedAuthorizationCode, InsertAuthorizationCode, InsertAuthorizationRequest,
+        OidcRedirectKind, StoredAuthorizationRequest, StoredOidcClient,
     },
     passkeys::{CeremonyKind, ConsumedCeremony, InsertCeremony, InsertPasskey, StoredPasskey},
     sessions::{InsertSession, StoredSession},

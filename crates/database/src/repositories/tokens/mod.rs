@@ -18,6 +18,9 @@ pub struct InsertRefreshFamily {
     pub client_id: String,
     /// Session the grant came from; revoking it revokes the family.
     pub session_id: SessionId,
+    /// Authorization code the grant was redeemed from; replaying the code
+    /// revokes the family.
+    pub authorization_code_id: TokenId,
     /// Granted token audience.
     pub audience: String,
     /// Granted scopes.
@@ -95,12 +98,13 @@ impl TokenRepository<'_> {
             execute,
             sqlx::query!(
                 "INSERT INTO refresh_token_families (
-                    id, user_id, client_id, session_id, audience, scopes
-                ) VALUES ($1, $2, $3, $4, $5, $6)",
+                    id, user_id, client_id, session_id, authorization_code_id, audience, scopes
+                ) VALUES ($1, $2, $3, $4, $5, $6, $7)",
                 family.id.as_uuid(),
                 family.user_id.as_uuid(),
                 family.client_id,
                 family.session_id.as_uuid(),
+                family.authorization_code_id.as_uuid(),
                 family.audience,
                 Json(&family.scopes) as _,
             )

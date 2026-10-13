@@ -1,0 +1,23 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT user_id AS \"user_id: UserId\"\n                FROM authorization_codes\n                WHERE id = $1\n                AND secret_digest = $2\n                AND consumed_at IS NOT NULL\n                FOR SHARE",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "user_id: UserId",
+        "type_info": "Uuid"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Bytea"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "4f9fe424f911b00583d71fb55c431b02a1b11af58acddb85289e932f60e058dc"
+}

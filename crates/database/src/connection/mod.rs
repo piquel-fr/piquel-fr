@@ -210,8 +210,9 @@ impl Database {
     /// rows per table.
     ///
     /// Each table's batch commits on its own and skips rows that live requests have
-    /// locked, so cleanup never holds locks across tables. Deleting a session can
-    /// still wait briefly on a locked child row it cascades to.
+    /// locked, so cleanup never holds locks across tables. Deleting a session or an
+    /// authorization code can still wait briefly on a locked child row it cascades
+    /// to or unlinks.
     ///
     /// # Errors
     ///
@@ -283,11 +284,13 @@ impl Database {
                 LIMIT $1
                 FOR UPDATE SKIP LOCKED
             )",
+            // Redeemed codes outlive their expiry by a day so a late replay still finds
+            // them and revokes the refresh family they produced.
             "DELETE FROM authorization_codes
             WHERE ctid IN (
                 SELECT ctid
                 FROM authorization_codes
-                WHERE expires_at < now()
+                WHERE (consumed_at IS NULL AND expires_at < now())
                 OR consumed_at < now() - interval '1 day'
                 LIMIT $1
                 FOR UPDATE SKIP LOCKED
