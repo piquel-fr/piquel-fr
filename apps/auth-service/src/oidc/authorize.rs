@@ -8,7 +8,10 @@ use super::{
 use crate::{routes, security::Session};
 use axum::{
     Form, Json,
-    extract::{Path, Query, State, rejection::FormRejection},
+    extract::{
+        Path, Query, State,
+        rejection::{FormRejection, QueryRejection},
+    },
     http::HeaderMap,
     response::Redirect,
 };
@@ -20,6 +23,11 @@ use piquel_repository::{
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use url::Url;
+
+/// Rejection of a pending authorization that cannot be found.
+const UNKNOWN_TRANSACTION: &str = "transaction is unknown, expired or already used";
+/// Rejection of a `prompt=none` request without a suitable sign-in.
+const SILENT_LOGIN_REQUIRED: &str = "prompt=none was requested, but the user must sign in first";
 
 /// Authorization request parameters. None of them is trusted, and errors are not
 /// redirected, until `redirect_uri` matches the client's registration.
@@ -63,16 +71,20 @@ impl AuthorizeQuery {
     /// `id_token_hint`.
     fn hinted_user_id(&self, app: &OidcApplication) -> Result<Option<UserId>, OAuthError> {
         if self.request.is_some() {
-            return Err(OAuthCode::RequestNotSupported.into());
+            return Err(OAuthCode::RequestNotSupported
+                .reject("request objects are not supported; send the parameters directly"));
         }
         if self.request_uri.is_some() {
-            return Err(OAuthCode::RequestUriNotSupported.into());
+            return Err(OAuthCode::RequestUriNotSupported
+                .reject("request_uri is not supported; send the parameters directly"));
         }
         if let Some(mode) = &self.response_mode {
-            match mode
-                .parse::<ResponseMode>()
-                .map_err(|error| OAuthError::rejected(OAuthCode::InvalidRequest, error))?
-            {
+            match mode.parse::<ResponseMode>().map_err(|error| {
+                OAuthCode::InvalidRequest.reject_with(
+                    format!("response_mode must be {}", ResponseMode::Query),
+                    error,
+                )
+            })? {
                 ResponseMode::Query => {}
             }
         }
@@ -83,22 +95,32 @@ impl AuthorizeQuery {
         let claims = app
             .keys
             .verify_id_token_hint(hint, &app.issuer)
-            .map_err(|error| OAuthError::rejected(OAuthCode::InvalidRequest, error))?;
-        if claims[Claim::Audience.as_str()] != self.client_id
-            || claims
-                .get(Claim::ExpiresAt.as_str())
-                .and_then(Value::as_i64)
-                .is_none()
+            .map_err(|error| {
+                OAuthCode::InvalidRequest
+                    .reject_with(format!("id_token_hint is invalid: {error}"), error)
+            })?;
+        if claims[Claim::Audience.as_str()] != self.client_id {
+            return Err(
+                OAuthCode::InvalidRequest.reject("id_token_hint was issued to another client")
+            );
+        }
+        if claims
+            .get(Claim::ExpiresAt.as_str())
+            .and_then(Value::as_i64)
+            .is_none()
         {
-            return Err(OAuthCode::InvalidRequest.into());
+            return Err(OAuthCode::InvalidRequest.reject("id_token_hint has no numeric exp claim"));
         }
         claims
             .get(Claim::Subject.as_str())
             .and_then(Value::as_str)
-            .ok_or(OAuthCode::InvalidRequest)?
+            .ok_or_else(|| OAuthCode::InvalidRequest.reject("id_token_hint has no sub claim"))?
             .parse()
             .map(Some)
-            .map_err(|error| OAuthError::rejected(OAuthCode::InvalidRequest, error))
+            .map_err(|error| {
+                OAuthCode::InvalidRequest
+                    .reject_with("id_token_hint sub claim is not an account ID", error)
+            })
     }
 
     /// Checks the response type, PKCE challenge and `state`, then parses the scopes.
@@ -106,21 +128,35 @@ impl AuthorizeQuery {
         match self
             .response_type
             .parse::<ResponseType>()
-            .map_err(|error| OAuthError::rejected(OAuthCode::InvalidRequest, error))?
-        {
+            .map_err(|error| {
+                OAuthCode::InvalidRequest.reject_with(
+                    format!("response_type must be {}", ResponseType::Code),
+                    error,
+                )
+            })? {
             ResponseType::Code => {}
         }
         match self
             .code_challenge_method
             .parse::<CodeChallengeMethod>()
-            .map_err(|error| OAuthError::rejected(OAuthCode::InvalidRequest, error))?
-        {
+            .map_err(|error| {
+                OAuthCode::InvalidRequest.reject_with(
+                    format!(
+                        "code_challenge_method must be {}",
+                        CodeChallengeMethod::S256
+                    ),
+                    error,
+                )
+            })? {
             CodeChallengeMethod::S256 => {}
         }
-        if self.state.len() > MAX_STATE_BYTES
-            || !piquel_crypto::Pkce::valid_challenge(&self.code_challenge)
-        {
-            return Err(OAuthCode::InvalidRequest.into());
+        if self.state.len() > MAX_STATE_BYTES {
+            return Err(OAuthCode::InvalidRequest
+                .reject(format!("state must be at most {MAX_STATE_BYTES} bytes")));
+        }
+        if !piquel_crypto::Pkce::valid_challenge(&self.code_challenge) {
+            return Err(OAuthCode::InvalidRequest
+                .reject("code_challenge must be a base64url SHA-256 digest, 43 characters long"));
         }
         Scopes::parse(&self.scope)
     }
@@ -131,9 +167,12 @@ impl AuthorizeQuery {
             .nonce
             .as_ref()
             .is_some_and(|nonce| nonce.is_empty() || nonce.len() > MAX_STATE_BYTES)
-            || self.max_age.is_some_and(|age| age < 0)
         {
-            return Err(OAuthCode::InvalidRequest.into());
+            return Err(OAuthCode::InvalidRequest
+                .reject(format!("nonce must be 1 to {MAX_STATE_BYTES} bytes")));
+        }
+        if self.max_age.is_some_and(|age| age < 0) {
+            return Err(OAuthCode::InvalidRequest.reject("max_age cannot be negative"));
         }
         Prompts::parse(self.prompt.as_deref().unwrap_or_default())
     }
@@ -189,30 +228,45 @@ impl OidcApplication {
         // `Form` reads the query string of GET requests.
         form: Result<Form<AuthorizeQuery>, FormRejection>,
     ) -> Result<Redirect, OAuthError> {
-        let Form(q) =
-            form.map_err(|error| OAuthError::rejected(OAuthCode::InvalidRequest, error))?;
+        let Form(q) = form.map_err(|error| {
+            OAuthCode::InvalidRequest.reject_with(
+                format!("authorization request is malformed: {error}"),
+                error,
+            )
+        })?;
         let client = app
             .database
             .oidc()
             .find_client(&q.client_id)
             .await?
-            .filter(|client| client.enabled && client.redirect_uris.contains(&q.redirect_uri))
-            .ok_or(OAuthCode::InvalidRequest)?;
-        let redirect = Url::parse(&q.redirect_uri)
-            .map_err(|error| OAuthError::rejected(OAuthCode::InvalidRequest, error))?;
+            .filter(|client| client.enabled)
+            .ok_or_else(|| {
+                OAuthCode::InvalidRequest.reject("client_id is not a registered, enabled client")
+            })?;
+        if !client.redirect_uris.contains(&q.redirect_uri) {
+            return Err(OAuthCode::InvalidRequest
+                .reject("redirect_uri is not registered for this client; it must match exactly"));
+        }
+        let redirect = Url::parse(&q.redirect_uri).map_err(|error| {
+            OAuthCode::InvalidRequest.reject_with("redirect_uri is not a valid URL", error)
+        })?;
         // The redirect URI is now verified, so rejections go back to the client.
         let back = |error: OAuthError| error.redirected(&redirect, &q.state);
         let hinted_user_id = q.hinted_user_id(&app).map_err(back)?;
         let scopes = q.scopes().map_err(back)?;
         if !scopes.allowed_by(&client.allowed_scopes) {
-            return Err(back(OAuthCode::InvalidScope.into()));
+            return Err(back(
+                OAuthCode::InvalidScope.reject("scope includes values this client may not request"),
+            ));
         }
         let audience = q
             .audience
             .clone()
             .or_else(|| client.allowed_audiences.first().cloned())
             .filter(|audience| client.allowed_audiences.contains(audience))
-            .ok_or_else(|| back(OAuthCode::InvalidTarget.into()))?;
+            .ok_or_else(|| {
+                back(OAuthCode::InvalidTarget.reject("audience is not registered for this client"))
+            })?;
         let prompts = q.prompts().map_err(back)?;
         let session = Session::optional(&app.database, &headers).await?;
         let requires_login = session.as_ref().is_none_or(|session| {
@@ -225,7 +279,7 @@ impl OidcApplication {
             )
         });
         if prompts.silent && requires_login {
-            return Err(back(OAuthCode::LoginRequired.into()));
+            return Err(back(OAuthCode::LoginRequired.reject(SILENT_LOGIN_REQUIRED)));
         }
         let opaque = OpaqueToken::new(TokenPrefix::AuthorizationRequest)?;
         let transaction = opaque.encoded();
@@ -259,8 +313,12 @@ impl OidcApplication {
     pub(super) async fn resume(
         State(app): State<Self>,
         headers: HeaderMap,
-        Query(q): Query<ResumeQuery>,
+        query: Result<Query<ResumeQuery>, QueryRejection>,
     ) -> Result<Redirect, OAuthError> {
+        let Query(q) = query.map_err(|error| {
+            OAuthCode::InvalidRequest
+                .reject_with(format!("resume request is malformed: {error}"), error)
+        })?;
         app.continue_authorization(&headers, q.transaction, false)
             .await
     }
@@ -285,9 +343,13 @@ impl OidcApplication {
     pub(super) async fn authorization_decision(
         State(app): State<Self>,
         headers: HeaderMap,
-        Form(input): Form<AuthorizationDecision>,
+        form: Result<Form<AuthorizationDecision>, FormRejection>,
     ) -> Result<Json<Value>, OAuthError> {
         app.require_same_origin(&headers)?;
+        let Form(input) = form.map_err(|error| {
+            OAuthCode::InvalidRequest
+                .reject_with(format!("consent decision is malformed: {error}"), error)
+        })?;
         let redirect = app.decide(&headers, input, true).await?;
         Ok(Json(json!({"redirect_url":redirect.as_str()})))
     }
@@ -304,7 +366,9 @@ impl OidcApplication {
         let session = Session::required(&self.database, headers).await?;
         let pending = self.find_authorization_request(&input.transaction).await?;
         if !explicit && !self.can_authorize(&pending, &session).await? {
-            return Err(OAuthCode::InvalidRequest.into());
+            return Err(
+                OAuthCode::InvalidRequest.reject("this authorization needs the user's consent")
+            );
         }
         let opaque = OpaqueToken::parse(TokenPrefix::AuthorizationRequest, &input.transaction)?;
         let digest = self.token_digest(&opaque)?;
@@ -313,14 +377,20 @@ impl OidcApplication {
             .oidc()
             .consume_authorization_request(opaque.id, digest.as_bytes())
             .await
-            .map_err(|error| OAuthError::database(error, OAuthCode::InvalidRequest))?;
+            .map_err(|error| {
+                OAuthError::database(error, OAuthCode::InvalidRequest, UNKNOWN_TRANSACTION)
+            })?;
         Self::require_authorization_session(&request, &session)?;
         let redirect = Url::parse(&request.redirect_uri)?;
         let redirect = match input.decision {
-            ConsentDecision::Unsupported => return Err(OAuthCode::InvalidRequest.into()),
-            ConsentDecision::Deny => {
-                OAuthCode::AccessDenied.redirect_url(&redirect, &request.client_state)
+            ConsentDecision::Unsupported => {
+                return Err(OAuthCode::InvalidRequest.reject("decision must be approve or deny"));
             }
+            ConsentDecision::Deny => OAuthCode::AccessDenied.redirect_url(
+                &redirect,
+                "the user denied the request",
+                &request.client_state,
+            ),
             ConsentDecision::Approve => {
                 // Lock the account before writing consent: the consent row's foreign key
                 // would otherwise take a key-share lock that deadlocks with a concurrent login.
@@ -328,7 +398,7 @@ impl OidcApplication {
                     .users()
                     .find_active_by_id_for_update(session.user_id)
                     .await?
-                    .ok_or(OAuthCode::InvalidToken)?;
+                    .ok_or_else(|| OAuthCode::InvalidToken.reject("this account is disabled"))?;
                 if explicit {
                     transaction
                         .oidc()
@@ -376,12 +446,11 @@ impl OidcApplication {
     ) -> Result<StoredAuthorizationRequest, OAuthError> {
         let opaque = OpaqueToken::parse(TokenPrefix::AuthorizationRequest, value)?;
         let digest = self.token_digest(&opaque)?;
-        Ok(self
-            .database
+        self.database
             .oidc()
             .find_authorization_request(opaque.id, digest.as_bytes())
             .await?
-            .ok_or(OAuthCode::InvalidRequest)?)
+            .ok_or_else(|| OAuthCode::InvalidRequest.reject(UNKNOWN_TRANSACTION))
     }
 
     /// Requires the session to meet the pending authorization's requirements.
@@ -398,7 +467,9 @@ impl OidcApplication {
         ) {
             Ok(())
         } else {
-            Err(OAuthCode::InvalidToken.into())
+            Err(OAuthCode::InvalidToken.reject(
+                "this sign-in does not meet the authorization's requirements; sign in again",
+            ))
         }
     }
 
@@ -444,14 +515,16 @@ impl OidcApplication {
     ) -> Result<Redirect, OAuthError> {
         let request = self.find_authorization_request(&transaction).await?;
         let redirect = Url::parse(&request.redirect_uri)?;
-        let back =
-            |code: OAuthCode| OAuthError::from(code).redirected(&redirect, &request.client_state);
+        let back = |code: OAuthCode, description| {
+            code.reject(description)
+                .redirected(&redirect, &request.client_state)
+        };
         let session = Session::optional(&self.database, headers)
             .await?
             .filter(|session| Self::require_authorization_session(&request, session).is_ok());
         let Some(session) = session else {
             if silent {
-                return Err(back(OAuthCode::LoginRequired));
+                return Err(back(OAuthCode::LoginRequired, SILENT_LOGIN_REQUIRED));
             }
             return Ok(self.continuation_page(routes::page::LOGIN, &transaction));
         };
@@ -464,7 +537,10 @@ impl OidcApplication {
             return Ok(Redirect::to(redirect.as_str()));
         }
         if silent {
-            return Err(back(OAuthCode::ConsentRequired));
+            return Err(back(
+                OAuthCode::ConsentRequired,
+                "prompt=none was requested, but the user must consent first",
+            ));
         }
         Ok(self.continuation_page(routes::page::CONSENT, &transaction))
     }
@@ -484,7 +560,9 @@ impl OidcApplication {
             .oidc()
             .find_client(&request.client_id)
             .await?
-            .ok_or(OAuthCode::InvalidRequest)?;
+            .ok_or_else(|| {
+                OAuthCode::InvalidRequest.reject("the client is no longer registered")
+            })?;
         Ok(client.trusted
             || self
                 .database
@@ -515,17 +593,19 @@ impl Prompts {
     fn parse(value: &str) -> Result<Self, OAuthError> {
         let mut policy = Self::default();
         for prompt in value.split_ascii_whitespace() {
-            match prompt
-                .parse()
-                .map_err(|error| OAuthError::rejected(OAuthCode::InvalidRequest, error))?
-            {
+            match prompt.parse().map_err(|error| {
+                let supported = Prompt::ALL.map(Prompt::as_str).join(", ");
+                OAuthCode::InvalidRequest
+                    .reject_with(format!("prompt values must be among: {supported}"), error)
+            })? {
                 Prompt::None => policy.silent = true,
                 Prompt::Login | Prompt::SelectAccount => policy.force_login = true,
                 Prompt::Consent => policy.force_consent = true,
             }
         }
         if policy.silent && (policy.force_login || policy.force_consent) {
-            return Err(OAuthCode::InvalidRequest.into());
+            return Err(OAuthCode::InvalidRequest
+                .reject("prompt=none cannot be combined with other prompt values"));
         }
         Ok(policy)
     }

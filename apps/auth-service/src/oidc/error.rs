@@ -10,7 +10,7 @@ use piquel_common::ErrorChain;
 use piquel_crypto::CryptoError;
 use piquel_repository::DatabaseError;
 use serde_json::json;
-use std::error::Error as StdError;
+use std::{borrow::Cow, error::Error as StdError};
 use thiserror::Error;
 use url::Url;
 
@@ -84,13 +84,40 @@ impl OAuthCode {
         }
     }
 
-    /// Adds this error code and the client's `state` to a client redirect URI.
-    pub(super) fn redirect_url(self, base: &Url, state: &str) -> Url {
+    /// Adds this error code, its description and the client's `state` to a client
+    /// redirect URI.
+    pub(super) fn redirect_url(self, base: &Url, description: &str, state: &str) -> Url {
         let mut url = base.clone();
         url.query_pairs_mut()
             .append_pair("error", self.as_str())
+            .append_pair("error_description", &OAuthError::wire_text(description))
             .append_pair("state", state);
         url
+    }
+
+    /// Rejects the request with this code. `description` tells the client what to fix;
+    /// it must not reveal secrets or whether a credential exists.
+    pub(super) fn reject(self, description: impl Into<Cow<'static, str>>) -> OAuthError {
+        OAuthError::Protocol {
+            code: self,
+            description: description.into(),
+            redirect: None,
+            source: None,
+        }
+    }
+
+    /// Like [`Self::reject`], keeping the parse or verification error for logs.
+    pub(super) fn reject_with(
+        self,
+        description: impl Into<Cow<'static, str>>,
+        error: impl StdError + Send + Sync + 'static,
+    ) -> OAuthError {
+        OAuthError::Protocol {
+            code: self,
+            description: description.into(),
+            redirect: None,
+            source: Some(Box::new(error)),
+        }
     }
 }
 
@@ -98,13 +125,17 @@ impl OAuthCode {
 /// already reads OAuth codes, so it does not use `ApiError` messages.
 #[derive(Debug, Error)]
 pub(super) enum OAuthError {
-    /// The request was rejected with `code`. The cause, if any, is logged but never sent.
-    #[error("OAuth request rejected: {code}")]
+    /// The request was rejected with `code` and `description`. The cause, if any, is
+    /// logged but never sent.
+    #[error("OAuth request rejected with {code}: {description}")]
     Protocol {
         /// Code sent to the client.
         code: OAuthCode,
+        /// Sent to the client as `error_description`.
+        description: Cow<'static, str>,
         /// Client redirect carrying the error; only set once the redirect URI is verified.
-        redirect: Option<Url>,
+        /// Boxed to keep `Result<_, OAuthError>` small.
+        redirect: Option<Box<Url>>,
         /// Why the input was rejected.
         #[source]
         source: Option<Box<dyn StdError + Send + Sync>>,
@@ -123,31 +154,16 @@ pub(super) enum OAuthError {
     CookieHeader(#[from] axum::http::header::InvalidHeaderValue),
 }
 
-impl From<OAuthCode> for OAuthError {
-    /// Rejects a request that broke a rule, with no underlying error to keep.
-    fn from(code: OAuthCode) -> Self {
-        Self::Protocol {
-            code,
-            redirect: None,
-            source: None,
-        }
-    }
-}
-
 impl OAuthError {
-    /// Rejects the request with `code`, keeping the parse or verification error for logs.
-    pub(super) fn rejected(code: OAuthCode, error: impl StdError + Send + Sync + 'static) -> Self {
-        Self::Protocol {
-            code,
-            redirect: None,
-            source: Some(Box::new(error)),
-        }
-    }
-
-    /// Turns a missing or already consumed record into `expected`; other failures stay internal.
-    pub(super) fn database(error: DatabaseError, expected: OAuthCode) -> Self {
+    /// Turns a missing or already consumed record into `expected` with `description`;
+    /// other failures stay internal.
+    pub(super) fn database(
+        error: DatabaseError,
+        expected: OAuthCode,
+        description: &'static str,
+    ) -> Self {
         match error {
-            DatabaseError::NotFound => Self::rejected(expected, error),
+            DatabaseError::NotFound => expected.reject_with(description, error),
             DatabaseError::Conflict(_)
             | DatabaseError::Timeout(_)
             | DatabaseError::InvalidStoredData { .. }
@@ -159,14 +175,33 @@ impl OAuthError {
     /// Internal failures stay JSON 500 responses.
     pub(super) fn redirected(self, base: &Url, state: &str) -> Self {
         match self {
-            Self::Protocol { code, source, .. } => Self::Protocol {
+            Self::Protocol {
                 code,
-                redirect: Some(code.redirect_url(base, state)),
+                description,
+                source,
+                ..
+            } => Self::Protocol {
+                code,
+                redirect: Some(Box::new(code.redirect_url(base, &description, state))),
+                description,
                 source,
             },
             error
             @ (Self::Database(_) | Self::Crypto(_) | Self::Url(_) | Self::CookieHeader(_)) => error,
         }
+    }
+
+    /// Restricts a description to the characters RFC 6749 allows in `error_description`:
+    /// printable ASCII without `"` or `\`. Descriptions may quote library errors.
+    fn wire_text(description: &str) -> String {
+        description
+            .chars()
+            .map(|character| match character {
+                '"' => '\'',
+                ' '..='~' if character != '\\' => character,
+                _ => '?',
+            })
+            .collect()
     }
 }
 
@@ -174,26 +209,32 @@ impl IntoResponse for OAuthError {
     /// Redirects or answers with OAuth error JSON. Internal failures are logged as errors;
     /// rejections with a cause are logged at debug level, since clients trigger them.
     fn into_response(self) -> Response {
-        let (code, redirect) = match &self {
+        let (code, description, redirect) = match &self {
             Self::Protocol {
                 code,
+                description,
                 redirect,
                 source,
             } => {
                 if source.is_some() {
                     tracing::debug!(error = %ErrorChain(&self), "OAuth request rejected");
                 }
-                (*code, redirect.as_ref())
+                (*code, description.as_ref(), redirect.as_ref())
             }
             Self::Database(_) | Self::Crypto(_) | Self::Url(_) | Self::CookieHeader(_) => {
                 ApiError::log_error(&self);
-                (OAuthCode::ServerError, None)
+                (
+                    OAuthCode::ServerError,
+                    "the request could not be completed; try again",
+                    None,
+                )
             }
         };
         if let Some(location) = redirect {
             return Redirect::to(location.as_str()).into_response();
         }
-        let mut response = (code.status(), Json(json!({"error":code}))).into_response();
+        let body = json!({"error": code, "error_description": Self::wire_text(description)});
+        let mut response = (code.status(), Json(body)).into_response();
         if let Some(challenge) = code.challenge() {
             response.headers_mut().insert(
                 header::WWW_AUTHENTICATE,
@@ -208,8 +249,11 @@ impl From<SessionError> for OAuthError {
     /// A missing session is `invalid_token`, as OIDC and the consent page expect.
     fn from(error: SessionError) -> Self {
         match error {
-            SessionError::Missing | SessionError::ManagementRequired => {
-                Self::rejected(OAuthCode::InvalidToken, error)
+            SessionError::Missing => {
+                OAuthCode::InvalidToken.reject_with("sign in to continue", error)
+            }
+            SessionError::ManagementRequired => {
+                OAuthCode::InvalidToken.reject_with("confirm with a passkey to continue", error)
             }
             SessionError::Database(error) => Self::Database(error),
             SessionError::Crypto(error) => Self::Crypto(error),
@@ -222,10 +266,20 @@ impl From<piquel_repository::RefreshRotationError> for OAuthError {
     fn from(error: piquel_repository::RefreshRotationError) -> Self {
         match error {
             piquel_repository::RefreshRotationError::Database(source) => source.into(),
-            error @ (piquel_repository::RefreshRotationError::Invalid
-            | piquel_repository::RefreshRotationError::Replay { .. }
-            | piquel_repository::RefreshRotationError::Policy { .. }) => {
-                Self::rejected(OAuthCode::InvalidGrant, error)
+            error @ piquel_repository::RefreshRotationError::Invalid => OAuthCode::InvalidGrant
+                .reject_with("refresh_token is unknown, expired or revoked", error),
+            error @ piquel_repository::RefreshRotationError::Replay { .. } => {
+                OAuthCode::InvalidGrant.reject_with(
+                    "refresh_token was already used, so its whole token family is now revoked",
+                    error,
+                )
+            }
+            error @ piquel_repository::RefreshRotationError::Policy { .. } => {
+                OAuthCode::InvalidGrant.reject_with(
+                    "the client or account no longer allows this grant, so its token family \
+                     is now revoked",
+                    error,
+                )
             }
         }
     }

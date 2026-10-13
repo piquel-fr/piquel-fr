@@ -807,8 +807,8 @@ fn opaque_tokens_preserve_envelopes_and_reject_wrong_purpose() {
 }
 
 /// Checks that protocol failures retain both internal and rejected-input source chains.
-#[test]
-fn oauth_failures_preserve_sources_and_statuses() {
+#[tokio::test]
+async fn oauth_failures_preserve_sources_and_statuses() {
     use axum::response::IntoResponse;
     use std::error::Error;
     let error = OAuthError::from(piquel_repository::DatabaseError::Operation(Box::new(
@@ -822,12 +822,21 @@ fn oauth_failures_preserve_sources_and_statuses() {
         error.into_response().status(),
         StatusCode::INTERNAL_SERVER_ERROR
     );
-    let error = OAuthError::rejected(
-        OAuthCode::InvalidGrant,
+    let error = OAuthCode::InvalidGrant.reject_with(
+        "code is \"malformed\" \u{2014} retry",
         piquel_crypto::CryptoError::SecretLength,
     );
     assert!(error.source().is_some());
-    assert_eq!(error.into_response().status(), StatusCode::BAD_REQUEST);
+    let response = error.into_response();
+    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+    // The description reaches the client, restricted to the RFC 6749 character set.
+    assert_eq!(
+        Flow::json(response).await,
+        serde_json::json!({
+            "error": "invalid_grant",
+            "error_description": "code is 'malformed' ? retry",
+        })
+    );
 }
 
 /// Existing approve form spelling, independent of the JSON-only consent enum.

@@ -44,7 +44,9 @@ impl TokenForm {
         };
         let scopes = Scopes::parse(requested)?;
         if !scopes.allowed_by(granted) {
-            return Err(OAuthCode::InvalidScope.into());
+            return Err(
+                OAuthCode::InvalidScope.reject("scope cannot add values to the original grant")
+            );
         }
         Ok(scopes)
     }
@@ -160,27 +162,35 @@ impl OidcApplication {
         headers: HeaderMap,
         form: Result<Form<TokenForm>, axum::extract::rejection::FormRejection>,
     ) -> Result<Json<TokenResponse>, OAuthError> {
-        let Form(mut form) =
-            form.map_err(|error| OAuthError::rejected(OAuthCode::InvalidRequest, error))?;
+        let Form(form) = form.map_err(|error| {
+            OAuthCode::InvalidRequest
+                .reject_with(format!("token request is malformed: {error}"), error)
+        })?;
         let client = app
             .authenticate_client(&headers, form.client_id.as_deref())
             .await?;
-        form.client_id = Some(client.id);
-        match form
-            .grant_type
-            .parse::<GrantType>()
-            .map_err(|error| OAuthError::rejected(OAuthCode::UnsupportedGrantType, error))?
-        {
-            GrantType::AuthorizationCode => app.exchange_code(form).await.map(Json),
-            GrantType::RefreshToken => app.rotate_refresh(form).await.map(Json),
+        match form.grant_type.parse::<GrantType>().map_err(|error| {
+            let supported = GrantType::ALL.map(GrantType::as_str).join(", ");
+            OAuthCode::UnsupportedGrantType
+                .reject_with(format!("grant_type must be one of: {supported}"), error)
+        })? {
+            GrantType::AuthorizationCode => app.exchange_code(form, &client.id).await.map(Json),
+            GrantType::RefreshToken => app.rotate_refresh(form, &client.id).await.map(Json),
         }
     }
 
-    /// Exchanges a one-use code after checking its client, redirect and PKCE binding.
-    async fn exchange_code(&self, form: TokenForm) -> Result<TokenResponse, OAuthError> {
+    /// Exchanges a one-use code for the authenticated client after checking its client,
+    /// redirect and PKCE binding.
+    async fn exchange_code(
+        &self,
+        form: TokenForm,
+        client_id: &str,
+    ) -> Result<TokenResponse, OAuthError> {
         let opaque = OpaqueToken::parse(
             TokenPrefix::AuthorizationCode,
-            form.code.as_deref().ok_or(OAuthCode::InvalidGrant)?,
+            form.code
+                .as_deref()
+                .ok_or_else(|| OAuthCode::InvalidGrant.reject("code is required"))?,
         )?;
         let digest = self.token_digest(&opaque)?;
         let mut tx = self.database.begin().await?;
@@ -188,22 +198,32 @@ impl OidcApplication {
             .oidc()
             .consume_code(opaque.id, digest.as_bytes())
             .await
-            .map_err(|error| OAuthError::database(error, OAuthCode::InvalidGrant))?;
-        if Some(code.client_id.as_str()) != form.client_id.as_deref()
-            || form.redirect_uri.as_deref() != Some(&code.redirect_uri)
-        {
-            return Err(OAuthCode::InvalidGrant.into());
+            .map_err(|error| {
+                OAuthError::database(
+                    error,
+                    OAuthCode::InvalidGrant,
+                    "code is unknown, expired or already used",
+                )
+            })?;
+        if code.client_id != client_id {
+            return Err(OAuthCode::InvalidGrant.reject("code was issued to another client"));
+        }
+        if form.redirect_uri.as_deref() != Some(&code.redirect_uri) {
+            return Err(OAuthCode::InvalidGrant
+                .reject("redirect_uri must match the one sent with the authorization request"));
         }
         piquel_crypto::Pkce::verify(
             form.code_verifier.as_deref().unwrap_or_default(),
             &code.pkce_challenge,
         )
-        .map_err(|error| OAuthError::rejected(OAuthCode::InvalidGrant, error))?;
+        .map_err(|error| {
+            OAuthCode::InvalidGrant.reject_with(format!("code_verifier is invalid: {error}"), error)
+        })?;
         let user = tx
             .users()
             .find_active_by_id_for_update(code.user_id)
             .await?
-            .ok_or(OAuthCode::InvalidGrant)?;
+            .ok_or_else(|| OAuthCode::InvalidGrant.reject(ACCOUNT_DISABLED))?;
         // Revalidate under lock: logout may have revoked the session since the code
         // was consumed, while this exchange waited for the account lock.
         let session = tx
@@ -211,12 +231,12 @@ impl OidcApplication {
             .find_active_by_id_for_update(code.session_id)
             .await?
             .filter(|session| session.user_id == user.id)
-            .ok_or(OAuthCode::InvalidGrant)?;
+            .ok_or_else(|| OAuthCode::InvalidGrant.reject(SESSION_ENDED))?;
         let client = tx
             .oidc()
-            .find_client(form.client_id.as_deref().ok_or(OAuthCode::InvalidClient)?)
+            .find_client(&code.client_id)
             .await?
-            .ok_or(OAuthCode::InvalidClient)?;
+            .ok_or_else(|| OAuthCode::InvalidClient.reject("the client is no longer registered"))?;
         let email = tx.oidc().primary_email(user.id).await?;
         let scopes = Scopes::from_stored(&code.scopes);
         let tokens = TokenGrant {
@@ -248,42 +268,45 @@ impl OidcApplication {
         })
     }
 
-    /// Rotates a valid token and commits replay or policy revocation before rejecting it.
-    async fn rotate_refresh(&self, form: TokenForm) -> Result<TokenResponse, OAuthError> {
+    /// Rotates the authenticated client's valid token, and commits replay or policy
+    /// revocation before rejecting it.
+    async fn rotate_refresh(
+        &self,
+        form: TokenForm,
+        client_id: &str,
+    ) -> Result<TokenResponse, OAuthError> {
         let opaque = OpaqueToken::parse(
             TokenPrefix::RefreshToken,
             form.refresh_token
                 .as_deref()
-                .ok_or(OAuthCode::InvalidGrant)?,
+                .ok_or_else(|| OAuthCode::InvalidGrant.reject("refresh_token is required"))?,
         )?;
         let digest = self.token_digest(&opaque)?;
         let mut tx = self.database.begin().await?;
         let rotated = match tx
             .tokens()
-            .consume_for_rotation(
-                opaque.id,
-                digest.as_bytes(),
-                form.client_id.as_deref().ok_or(OAuthCode::InvalidClient)?,
-            )
+            .consume_for_rotation(opaque.id, digest.as_bytes(), client_id)
             .await
         {
             Ok(value) => value,
             Err(error) => return Err(self.refresh_rejection(tx, error).await),
         };
-        if Some(rotated.client_id.as_str()) != form.client_id.as_deref() {
-            return Err(OAuthCode::InvalidGrant.into());
+        if rotated.client_id != client_id {
+            return Err(
+                OAuthCode::InvalidGrant.reject("refresh_token was issued to another client")
+            );
         }
         let scopes = form.refresh_scopes(&rotated.scopes)?;
         let user = tx
             .users()
             .find_by_id(rotated.user_id)
             .await?
-            .ok_or(OAuthCode::InvalidGrant)?;
+            .ok_or_else(|| OAuthCode::InvalidGrant.reject("the account no longer exists"))?;
         let session = tx
             .sessions()
             .find_by_id(rotated.session_id)
             .await?
-            .ok_or(OAuthCode::InvalidGrant)?;
+            .ok_or_else(|| OAuthCode::InvalidGrant.reject(SESSION_ENDED))?;
         let opaque_refresh = OpaqueToken::new(TokenPrefix::RefreshToken)?;
         let raw = opaque_refresh.encoded();
         let new_digest = self.token_digest(&opaque_refresh)?;
@@ -322,7 +345,7 @@ impl OidcApplication {
             .sessions()
             .find_active_by_id(session_id)
             .await?
-            .ok_or(OAuthCode::InvalidGrant)?;
+            .ok_or_else(|| OAuthCode::InvalidGrant.reject(SESSION_ENDED))?;
         let family_id = TokenId::new();
         let opaque = OpaqueToken::new(TokenPrefix::RefreshToken)?;
         let raw = opaque.encoded();
@@ -354,8 +377,10 @@ impl OidcApplication {
         headers: HeaderMap,
         form: Result<Form<RevokeForm>, axum::extract::rejection::FormRejection>,
     ) -> Result<StatusCode, OAuthError> {
-        let Form(form) =
-            form.map_err(|error| OAuthError::rejected(OAuthCode::InvalidRequest, error))?;
+        let Form(form) = form.map_err(|error| {
+            OAuthCode::InvalidRequest
+                .reject_with(format!("revocation request is malformed: {error}"), error)
+        })?;
         let client = app
             .authenticate_client(&headers, form.client_id.as_deref())
             .await?;
@@ -385,27 +410,36 @@ impl OidcApplication {
 
     /// Builds scoped identity JSON after synchronous verification of the supplied bearer token.
     fn userinfo_response(&self, headers: &HeaderMap) -> Result<Json<Value>, OAuthError> {
+        let bearer = || format!("send an access token as {} credentials", AuthScheme::Bearer);
         let authorization = headers
             .get(header::AUTHORIZATION)
-            .ok_or(OAuthCode::InvalidToken)?
+            .ok_or_else(|| OAuthCode::InvalidToken.reject(bearer()))?
             .to_str()
-            .map_err(|error| OAuthError::rejected(OAuthCode::InvalidToken, error))?;
+            .map_err(|error| OAuthCode::InvalidToken.reject_with(bearer(), error))?;
         let token = AuthScheme::Bearer
             .credentials(authorization)
-            .ok_or(OAuthCode::InvalidToken)?;
+            .ok_or_else(|| OAuthCode::InvalidToken.reject(bearer()))?;
         let claims = self
             .keys
             .verify(token, TokenType::Access, &self.issuer)
-            .map_err(|error| OAuthError::rejected(OAuthCode::InvalidToken, error))?;
+            .map_err(|error| {
+                OAuthCode::InvalidToken
+                    .reject_with(format!("access token is invalid: {error}"), error)
+            })?;
         let scopes = Scopes::parse(
             claims
                 .get(Claim::Scope.as_str())
                 .and_then(Value::as_str)
                 .unwrap_or_default(),
         )
-        .map_err(|error| OAuthError::rejected(OAuthCode::InvalidToken, error))?;
+        .map_err(|error| {
+            OAuthCode::InvalidToken.reject_with("access token has no valid scope claim", error)
+        })?;
         if !scopes.contains(Scope::OpenId) {
-            return Err(OAuthCode::InvalidToken.into());
+            return Err(OAuthCode::InvalidToken.reject(format!(
+                "access token was not granted the {} scope",
+                Scope::OpenId
+            )));
         }
         let mut response = json!({(Claim::Subject.as_str()):claims.get(Claim::Subject.as_str())});
         if scopes.contains(Scope::Profile) {
@@ -475,6 +509,11 @@ impl OidcApplication {
         error.into()
     }
 }
+
+/// Rejection of a grant whose account was disabled.
+const ACCOUNT_DISABLED: &str = "the account is disabled";
+/// Rejection of a grant whose browser session ended.
+const SESSION_ENDED: &str = "the sign-in session behind this grant has ended";
 
 /// Stable telemetry event name for refresh-token replay rejection.
 const REFRESH_REPLAY_EVENT: &str = "auth.refresh_replay";

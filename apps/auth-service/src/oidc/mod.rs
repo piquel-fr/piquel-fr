@@ -103,6 +103,17 @@ piquel_common::str_enum! {
     }
 }
 
+impl TokenPrefix {
+    /// Request parameter carrying this kind of token, named in error descriptions.
+    const fn parameter(self) -> &'static str {
+        match self {
+            Self::AuthorizationRequest => "transaction",
+            Self::AuthorizationCode => "code",
+            Self::RefreshToken => "refresh_token",
+        }
+    }
+}
+
 /// An opaque token, encoded as `<prefix>_<id>.<secret>`. Only the secret's HMAC is stored.
 struct OpaqueToken {
     /// Database record the token points to.
@@ -126,20 +137,24 @@ impl OpaqueToken {
     /// Parses a token sent by a client, rejecting it as `invalid_grant` if malformed
     /// or meant for another purpose.
     fn parse(prefix: TokenPrefix, value: &str) -> Result<Self, OAuthError> {
+        let malformed = || format!("{} is malformed", prefix.parameter());
         if value.len() > MAX_OPAQUE_TOKEN_BYTES {
-            return Err(OAuthCode::InvalidGrant.into());
+            return Err(OAuthCode::InvalidGrant.reject(format!(
+                "{} must be at most {MAX_OPAQUE_TOKEN_BYTES} bytes",
+                prefix.parameter()
+            )));
         }
         let (id, secret) = value
             .strip_prefix(prefix.as_str())
             .and_then(|rest| rest.strip_prefix('_'))
             .and_then(|rest| rest.split_once('.'))
-            .ok_or(OAuthCode::InvalidGrant)?;
+            .ok_or_else(|| OAuthCode::InvalidGrant.reject(malformed()))?;
         Ok(Self {
             id: id
                 .parse()
-                .map_err(|error| OAuthError::rejected(OAuthCode::InvalidGrant, error))?,
+                .map_err(|error| OAuthCode::InvalidGrant.reject_with(malformed(), error))?,
             secret: Secret::parse(secret)
-                .map_err(|error| OAuthError::rejected(OAuthCode::InvalidGrant, error))?,
+                .map_err(|error| OAuthCode::InvalidGrant.reject_with(malformed(), error))?,
             prefix,
         })
     }
@@ -159,8 +174,12 @@ impl Scopes {
     /// Parses a space-separated scope list, which must be non-empty and bounded.
     fn parse(value: &str) -> Result<Self, OAuthError> {
         let scopes: BTreeSet<_> = value.split_ascii_whitespace().map(str::to_owned).collect();
-        if scopes.is_empty() || scopes.len() > MAX_SCOPES {
-            return Err(OAuthCode::InvalidScope.into());
+        if scopes.is_empty() {
+            return Err(OAuthCode::InvalidScope.reject("scope is required"));
+        }
+        if scopes.len() > MAX_SCOPES {
+            return Err(OAuthCode::InvalidScope
+                .reject(format!("scope may list at most {MAX_SCOPES} values")));
         }
         Ok(Self(scopes))
     }
@@ -366,46 +385,79 @@ impl OidcApplication {
             .as_ref()
             .map(|(id, _)| id.as_str())
             .or(supplied_id)
-            .ok_or(OAuthCode::InvalidClient)?;
+            .ok_or_else(|| {
+                OAuthCode::InvalidClient.reject("send client_id, or HTTP Basic client credentials")
+            })?;
         if supplied_id.is_some_and(|supplied| supplied != id) {
-            return Err(OAuthCode::InvalidClient.into());
+            return Err(OAuthCode::InvalidClient
+                .reject("client_id does not match the HTTP Basic client credentials"));
         }
+        // Client IDs are public, so naming an unknown one reveals nothing secret.
         let client = self
             .database
             .oidc()
             .find_client(id)
             .await?
             .filter(|client| client.enabled)
-            .ok_or(OAuthCode::InvalidClient)?;
-        let authenticated = match (&client.client_secret_hash, &basic) {
-            // Public clients have no secret and must not send one.
-            (None, None) => true,
+            .ok_or_else(|| {
+                OAuthCode::InvalidClient.reject("client_id is not a registered, enabled client")
+            })?;
+        match (&client.client_secret_hash, &basic) {
+            (None, None) => Ok(client),
             (Some(expected), Some((_, secret))) => {
-                Digest::constant_time_eq(expected, Digest::sha256(secret.as_bytes()).as_bytes())
+                if Digest::constant_time_eq(expected, Digest::sha256(secret.as_bytes()).as_bytes())
+                {
+                    Ok(client)
+                } else {
+                    Err(OAuthCode::InvalidClient.reject("the client secret is incorrect"))
+                }
             }
-            (None, Some(_)) | (Some(_), None) => false,
-        };
-        if !authenticated {
-            return Err(OAuthCode::InvalidClient.into());
+            // Public clients have no secret and must not send one.
+            (None, Some(_)) => Err(OAuthCode::InvalidClient
+                .reject("this public client must not send HTTP Basic credentials")),
+            (Some(_), None) => Err(OAuthCode::InvalidClient
+                .reject("this client must authenticate with HTTP Basic credentials")),
         }
-        Ok(client)
     }
 
     /// Decodes HTTP Basic client credentials into an ID and secret.
     fn basic_credentials(value: &HeaderValue) -> Result<(String, String), OAuthError> {
-        let value = value
-            .to_str()
-            .map_err(|error| OAuthError::rejected(OAuthCode::InvalidClient, error))?;
-        let encoded = AuthScheme::Basic
-            .credentials(value)
-            .filter(|encoded| encoded.len() <= MAX_BASIC_CREDENTIAL_BYTES)
-            .ok_or(OAuthCode::InvalidClient)?;
+        let value = value.to_str().map_err(|error| {
+            OAuthCode::InvalidClient
+                .reject_with("the Authorization header is not valid text", error)
+        })?;
+        let encoded = AuthScheme::Basic.credentials(value).ok_or_else(|| {
+            OAuthCode::InvalidClient.reject(format!(
+                "the Authorization header must use {}",
+                AuthScheme::Basic
+            ))
+        })?;
+        if encoded.len() > MAX_BASIC_CREDENTIAL_BYTES {
+            return Err(OAuthCode::InvalidClient.reject(format!(
+                "{} credentials must be at most {MAX_BASIC_CREDENTIAL_BYTES} bytes",
+                AuthScheme::Basic
+            )));
+        }
         let bytes = base64::engine::general_purpose::STANDARD
             .decode(encoded)
-            .map_err(|error| OAuthError::rejected(OAuthCode::InvalidClient, error))?;
-        let decoded = String::from_utf8(bytes)
-            .map_err(|error| OAuthError::rejected(OAuthCode::InvalidClient, error))?;
-        let (id, secret) = decoded.split_once(':').ok_or(OAuthCode::InvalidClient)?;
+            .map_err(|error| {
+                OAuthCode::InvalidClient.reject_with(
+                    format!("{} credentials are not valid base64", AuthScheme::Basic),
+                    error,
+                )
+            })?;
+        let decoded = String::from_utf8(bytes).map_err(|error| {
+            OAuthCode::InvalidClient.reject_with(
+                format!("{} credentials are not UTF-8", AuthScheme::Basic),
+                error,
+            )
+        })?;
+        let (id, secret) = decoded.split_once(':').ok_or_else(|| {
+            OAuthCode::InvalidClient.reject(format!(
+                "{} credentials must be client_id:client_secret",
+                AuthScheme::Basic
+            ))
+        })?;
         // RFC 6749 §2.3.1 form-encodes the ID and secret before base64. Decoding a
         // single `v=<value>` pair always yields that pair.
         let decode = |value: &str| {
@@ -422,13 +474,17 @@ impl OidcApplication {
     fn require_same_origin(&self, headers: &HeaderMap) -> Result<(), OAuthError> {
         // Non-text header values cannot match, so they fail like absent ones.
         let text = |name: &str| headers.get(name).and_then(|value| value.to_str().ok());
-        let origin_matches = text(header::ORIGIN.as_str()) == Some(self.issuer.as_str());
+        if text(header::ORIGIN.as_str()) != Some(self.issuer.as_str()) {
+            return Err(OAuthCode::InvalidRequest.reject("Origin must be this issuer"));
+        }
         let csrf_header = text(CSRF_HEADER) == Some(CSRF_HEADER_VALUE);
         let same_origin_fetch = text(FETCH_SITE_HEADER) == Some(FETCH_SITE_SAME_ORIGIN);
-        if origin_matches && (csrf_header || same_origin_fetch) {
+        if csrf_header || same_origin_fetch {
             Ok(())
         } else {
-            Err(OAuthCode::InvalidRequest.into())
+            Err(OAuthCode::InvalidRequest.reject(format!(
+                "send {CSRF_HEADER}: {CSRF_HEADER_VALUE}, or make a same-origin request"
+            )))
         }
     }
     /// HMAC of an opaque token's secret, the only form in which it is stored.
