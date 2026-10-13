@@ -88,11 +88,11 @@ enum DatabaseCommand {
     Serve,
     /// Apply database migrations.
     Migrate,
-    /// Manage signup invitations.
+    /// Print a single-use signup link.
     Invite {
-        /// Invitation action to run.
-        #[command(subcommand)]
-        command: InviteCommand,
+        /// How long the link stays valid, in hours or days (e.g. 24h, 7d).
+        #[arg(long, default_value = "7d")]
+        expires_in: InviteExpiry,
     },
 }
 
@@ -103,9 +103,7 @@ impl DatabaseCommand {
         match self {
             Self::Serve => Self::serve(database).await,
             Self::Migrate => Ok(database.run_migrations().await?),
-            Self::Invite {
-                command: InviteCommand::Create { expires_in },
-            } => Self::invite(&database, expires_in).await,
+            Self::Invite { expires_in } => Self::invite(&database, expires_in).await,
         }
     }
 
@@ -192,17 +190,6 @@ impl DatabaseCommand {
         cleanup.abort();
         Ok(result?)
     }
-}
-
-/// Administrative operations on single-use signup invitations.
-#[derive(Subcommand)]
-enum InviteCommand {
-    /// Print a single-use signup link.
-    Create {
-        /// How long the link stays valid, in hours or days (e.g. 24h, 7d).
-        #[arg(long, default_value = "7d")]
-        expires_in: InviteExpiry,
-    },
 }
 
 /// An invitation lifetime of 1 to 365 hours or days.

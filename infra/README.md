@@ -96,7 +96,7 @@ password does not change the one an existing database volume stores.
 Staging and production require invitations:
 
 ```sh
-piquelctl app exec piquel-fr auth --env production -- auth-service invite create
+piquelctl app exec piquel-fr auth --env production -- auth-service invite
 ```
 
 No external identity providers or OIDC clients are configured by default. Auth uses

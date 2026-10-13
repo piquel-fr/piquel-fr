@@ -105,7 +105,7 @@ migrate:
 
 [positional-arguments]
 invite *ARGS:
-    @just run invite create "$@"
+    @just run invite "$@"
 
 # Print a random secret, e.g. for a confidential OIDC client.
 secret:
