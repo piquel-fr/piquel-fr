@@ -58,3 +58,9 @@ webauthn-rs = { version = "0.5.5", features = ["danger-allow-state-serialisation
 jsonwebtoken = "9.3"
 reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
 webauthn-rs-proto = "0.5.5"
+
+# Line tables keep file and line numbers in backtraces but drop the variable
+# and type info that makes up most of a debug build's output. Also applies to
+# tests, which inherit this profile.
+[profile.dev]
+debug = "line-tables-only"
