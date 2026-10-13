@@ -48,7 +48,9 @@ macro_rules! repositories {
 
         impl Database {
             $(
-                #[doc = concat!("Returns a [`", stringify!($name), "`] that runs each query on the pool.")]
+                #[doc = concat!(
+                    "Returns a [`", stringify!($name), "`] that runs each query on the pool."
+                )]
                 pub fn $accessor(&self) -> $name<'_> {
                     $name::from_pool(&self.pool)
                 }
@@ -120,7 +122,8 @@ macro_rules! stored_ids {
     ($($id:ty),*) => {$(
         impl StoredId for $id {
             type Raw = Uuid;
-            /// Validates the decoded storage representation before constructing a protocol identifier.
+            /// Validates the decoded storage representation before constructing a protocol
+            /// identifier.
             fn from_raw(raw: Uuid) -> Result<Self, InvalidValue> {
                 Self::from_uuid(raw)
             }
@@ -131,7 +134,8 @@ stored_ids!(UserId, SessionId, TokenId);
 
 impl<I: StoredId<Raw = Uuid>> StoredId for Option<I> {
     type Raw = Option<Uuid>;
-    /// Validates the decoded storage representation before constructing a protocol identifier.
+    /// Validates the decoded storage representation before constructing a protocol
+    /// identifier.
     fn from_raw(raw: Option<Uuid>) -> Result<Self, InvalidValue> {
         raw.map(I::from_raw).transpose()
     }

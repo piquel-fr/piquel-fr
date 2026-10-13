@@ -93,7 +93,19 @@ impl AuditEventRepository<'_> {
     ///
     /// Returns [`DatabaseError`] if the insert fails. Outcomes are validated by their type.
     pub async fn append(&mut self, input: &AppendAuditEvent) -> Result<(), DatabaseError> {
-        run!(self, execute, sqlx::query("INSERT INTO security_audit_log (id,user_id,action,outcome,request_metadata) VALUES ($1,$2,$3,$4,$5)").bind(input.id.as_uuid()).bind(input.user_id.map(UserId::as_uuid)).bind(input.action.as_str()).bind(input.outcome.as_str()).bind(sqlx::types::Json(&input.request_metadata)))?;
+        run!(
+            self,
+            execute,
+            sqlx::query(
+                "INSERT INTO security_audit_log (id, user_id, action, outcome, request_metadata)
+                VALUES ($1, $2, $3, $4, $5)"
+            )
+            .bind(input.id.as_uuid())
+            .bind(input.user_id.map(UserId::as_uuid))
+            .bind(input.action.as_str())
+            .bind(input.outcome.as_str())
+            .bind(sqlx::types::Json(&input.request_metadata))
+        )?;
         Ok(())
     }
 }

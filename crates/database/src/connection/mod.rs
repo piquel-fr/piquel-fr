@@ -25,6 +25,128 @@ const SOCKET_HOST: &str = "localhost";
 
 /// Maximum rows removed from each table in one maintenance batch.
 const MAX_PURGE_BATCH: u32 = 1_000;
+/// Cleanup deletes run by [`Database::purge_expired_auth_state`], in order, each
+/// removing at most `$1` expired rows that no live request has locked.
+const PURGE_STATEMENTS: [&str; 11] = [
+    "DELETE FROM request_limits
+    WHERE ctid IN (
+        SELECT ctid
+        FROM request_limits
+        WHERE expires_at < now()
+        LIMIT $1
+        FOR UPDATE SKIP LOCKED
+    )",
+    "DELETE FROM invitations
+    WHERE ctid IN (
+        SELECT ctid
+        FROM invitations
+        WHERE expires_at < now()
+        OR redeemed_at < now() - interval '1 day'
+        LIMIT $1
+        FOR UPDATE SKIP LOCKED
+    )",
+    "DELETE FROM pending_federation
+    WHERE ctid IN (
+        SELECT ctid
+        FROM pending_federation
+        WHERE expires_at < now()
+        LIMIT $1
+        FOR UPDATE SKIP LOCKED
+    )",
+    "DELETE FROM federation_transactions
+    WHERE ctid IN (
+        SELECT ctid
+        FROM federation_transactions
+        WHERE expires_at < now()
+        OR consumed_at < now() - interval '1 day'
+        LIMIT $1
+        FOR UPDATE SKIP LOCKED
+    )",
+    "DELETE FROM webauthn_ceremonies
+    WHERE ctid IN (
+        SELECT ctid
+        FROM webauthn_ceremonies
+        WHERE expires_at < now()
+        OR consumed_at < now() - interval '1 day'
+        LIMIT $1
+        FOR UPDATE SKIP LOCKED
+    )",
+    "DELETE FROM authorization_requests
+    WHERE ctid IN (
+        SELECT ctid
+        FROM authorization_requests
+        WHERE expires_at < now()
+        OR consumed_at < now() - interval '1 day'
+        LIMIT $1
+        FOR UPDATE SKIP LOCKED
+    )",
+    "DELETE FROM authorization_codes
+    WHERE ctid IN (
+        SELECT ctid
+        FROM authorization_codes
+        WHERE expires_at < now()
+        OR consumed_at < now() - interval '1 day'
+        LIMIT $1
+        FOR UPDATE SKIP LOCKED
+    )",
+    "DELETE FROM refresh_tokens t
+    WHERE t.ctid IN (
+        SELECT token.ctid
+        FROM refresh_tokens token
+        JOIN refresh_token_families family ON family.id = token.family_id
+        WHERE token.expires_at < now()
+        OR family.revoked_at < now() - interval '1 day'
+        LIMIT $1
+        FOR UPDATE OF token SKIP LOCKED
+    )",
+    "DELETE FROM refresh_token_families f
+    WHERE f.ctid IN (
+        SELECT family.ctid
+        FROM refresh_token_families family
+        WHERE (
+            family.revoked_at < now() - interval '1 day'
+            OR family.created_at < now() - interval '31 days'
+        )
+        AND NOT EXISTS (
+            SELECT 1
+            FROM refresh_tokens token
+            WHERE token.family_id = family.id
+        )
+        LIMIT $1
+        FOR UPDATE SKIP LOCKED
+    )",
+    "DELETE FROM browser_session_secrets b
+    WHERE b.ctid IN (
+        SELECT secret.ctid
+        FROM browser_session_secrets secret
+        JOIN sessions session ON session.id = secret.session_id
+        WHERE session.expires_at < now()
+        OR session.revoked_at < now() - interval '1 day'
+        LIMIT $1
+        FOR UPDATE OF secret SKIP LOCKED
+    )",
+    "DELETE FROM sessions s
+    WHERE s.ctid IN (
+        SELECT session.ctid
+        FROM sessions session
+        WHERE (
+            session.expires_at < now()
+            OR session.revoked_at < now() - interval '1 day'
+        )
+        AND NOT EXISTS (
+            SELECT 1
+            FROM refresh_token_families family
+            WHERE family.session_id = session.id
+        )
+        AND NOT EXISTS (
+            SELECT 1
+            FROM authorization_codes code
+            WHERE code.session_id = session.id
+        )
+        LIMIT $1
+        FOR UPDATE SKIP LOCKED
+    )",
+];
 /// Readiness must fail quickly when the database stops responding.
 const HEALTH_CHECK_TIMEOUT: Duration = Duration::from_secs(2);
 
@@ -219,19 +341,7 @@ impl Database {
     pub async fn purge_expired_auth_state(&self, batch_size: u32) -> Result<u64, DatabaseError> {
         let limit = i64::from(batch_size.clamp(1, MAX_PURGE_BATCH));
         let mut deleted = 0;
-        for statement in [
-            "DELETE FROM request_limits WHERE ctid IN (SELECT ctid FROM request_limits WHERE expires_at<now() LIMIT $1 FOR UPDATE SKIP LOCKED)",
-            "DELETE FROM invitations WHERE ctid IN (SELECT ctid FROM invitations WHERE expires_at<now() OR redeemed_at<now()-interval '1 day' LIMIT $1 FOR UPDATE SKIP LOCKED)",
-            "DELETE FROM pending_federation WHERE ctid IN (SELECT ctid FROM pending_federation WHERE expires_at<now() LIMIT $1 FOR UPDATE SKIP LOCKED)",
-            "DELETE FROM federation_transactions WHERE ctid IN (SELECT ctid FROM federation_transactions WHERE expires_at<now() OR consumed_at<now()-interval '1 day' LIMIT $1 FOR UPDATE SKIP LOCKED)",
-            "DELETE FROM webauthn_ceremonies WHERE ctid IN (SELECT ctid FROM webauthn_ceremonies WHERE expires_at<now() OR consumed_at<now()-interval '1 day' LIMIT $1 FOR UPDATE SKIP LOCKED)",
-            "DELETE FROM authorization_requests WHERE ctid IN (SELECT ctid FROM authorization_requests WHERE expires_at<now() OR consumed_at<now()-interval '1 day' LIMIT $1 FOR UPDATE SKIP LOCKED)",
-            "DELETE FROM authorization_codes WHERE ctid IN (SELECT ctid FROM authorization_codes WHERE expires_at<now() OR consumed_at<now()-interval '1 day' LIMIT $1 FOR UPDATE SKIP LOCKED)",
-            "DELETE FROM refresh_tokens t WHERE t.ctid IN (SELECT token.ctid FROM refresh_tokens token JOIN refresh_token_families family ON family.id=token.family_id WHERE token.expires_at<now() OR family.revoked_at<now()-interval '1 day' LIMIT $1 FOR UPDATE OF token SKIP LOCKED)",
-            "DELETE FROM refresh_token_families f WHERE f.ctid IN (SELECT family.ctid FROM refresh_token_families family WHERE (family.revoked_at<now()-interval '1 day' OR family.created_at<now()-interval '31 days') AND NOT EXISTS(SELECT 1 FROM refresh_tokens token WHERE token.family_id=family.id) LIMIT $1 FOR UPDATE SKIP LOCKED)",
-            "DELETE FROM browser_session_secrets b WHERE b.ctid IN (SELECT secret.ctid FROM browser_session_secrets secret JOIN sessions session ON session.id=secret.session_id WHERE session.expires_at<now() OR session.revoked_at<now()-interval '1 day' LIMIT $1 FOR UPDATE OF secret SKIP LOCKED)",
-            "DELETE FROM sessions s WHERE s.ctid IN (SELECT session.ctid FROM sessions session WHERE (session.expires_at<now() OR session.revoked_at<now()-interval '1 day') AND NOT EXISTS(SELECT 1 FROM refresh_token_families family WHERE family.session_id=session.id) AND NOT EXISTS(SELECT 1 FROM authorization_codes code WHERE code.session_id=session.id) LIMIT $1 FOR UPDATE SKIP LOCKED)",
-        ] {
+        for statement in PURGE_STATEMENTS {
             deleted += sqlx::query(statement)
                 .bind(limit)
                 .execute(&self.pool)

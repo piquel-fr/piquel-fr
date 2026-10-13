@@ -56,18 +56,21 @@ pub enum DatabaseConnectionError {
     ZeroPoolBound,
     /// A TCP hostname or localhost for a Unix socket is required.
     #[error(
-        "database URL must include a host; use localhost with host=/absolute/socket/path for Unix sockets"
+        "database URL must include a host; use localhost with \
+         host=/absolute/socket/path for Unix sockets"
     )]
     MissingHost,
     /// Repeated TLS or socket settings, or a `hostaddr` override, would make the
     /// effective transport depend on parser order instead of the validated URL.
     #[error(
-        "database URL must contain at most one sslmode (or ssl-mode) and one host parameter, and no hostaddr"
+        "database URL must contain at most one sslmode (or ssl-mode) and one host parameter, \
+         and no hostaddr"
     )]
     AmbiguousTransport,
     /// The socket is not an absolute local path or overrides a remote host.
     #[error(
-        "database host parameter must be an absolute Unix socket path without NUL bytes, with localhost as the URL host"
+        "database host parameter must be an absolute Unix socket path without NUL bytes, \
+         with localhost as the URL host"
     )]
     InvalidSocket,
     /// TCP requires authenticated TLS or an explicit plaintext choice.

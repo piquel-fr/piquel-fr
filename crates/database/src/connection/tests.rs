@@ -119,7 +119,8 @@ async fn cleanup_skips_rows_locked_by_requests() {
     let pool = Database::test_pool().await;
     let bucket = uuid::Uuid::now_v7().as_bytes().to_vec();
     sqlx::query(
-        "INSERT INTO request_limits(bucket,requests,expires_at) VALUES($1,1,now()-interval '1 minute')",
+        "INSERT INTO request_limits (bucket, requests, expires_at)
+        VALUES ($1, 1, now() - interval '1 minute')",
     )
     .bind(&bucket)
     .execute(&pool)

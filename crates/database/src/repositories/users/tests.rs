@@ -79,7 +79,8 @@ async fn account_locks_do_not_wait_on_foreign_key_checks() {
     tokio::time::timeout(
         Duration::from_secs(2),
         sqlx::query(
-            "INSERT INTO user_emails(id,user_id,normalized_email,verified_at) VALUES($1,$2,$3,now())",
+            "INSERT INTO user_emails (id, user_id, normalized_email, verified_at)
+            VALUES ($1, $2, $3, now())",
         )
         .bind(uuid::Uuid::now_v7())
         .bind(user.as_uuid())

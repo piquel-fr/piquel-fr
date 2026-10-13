@@ -155,7 +155,26 @@ impl FederationRepository<'_> {
         &mut self,
         input: &InsertFederationTransaction,
     ) -> Result<(), DatabaseError> {
-        run!(self, execute, sqlx::query("INSERT INTO federation_transactions(id,provider_name,state_digest,browser_digest,nonce,pkce_verifier,return_to,expires_at,link_user_id,link_session_id) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)").bind(input.id.as_uuid()).bind(input.provider.as_str()).bind(&input.state_digest).bind(&input.browser_digest).bind(&input.nonce).bind(&input.pkce_verifier).bind(&input.return_to).bind(input.expires_at).bind(input.link_user_id.map(UserId::as_uuid)).bind(input.link_session_id.map(SessionId::as_uuid)))?;
+        run!(
+            self,
+            execute,
+            sqlx::query(
+                "INSERT INTO federation_transactions (
+                    id, provider_name, state_digest, browser_digest, nonce,
+                    pkce_verifier, return_to, expires_at, link_user_id, link_session_id
+                ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)"
+            )
+            .bind(input.id.as_uuid())
+            .bind(input.provider.as_str())
+            .bind(&input.state_digest)
+            .bind(&input.browser_digest)
+            .bind(&input.nonce)
+            .bind(&input.pkce_verifier)
+            .bind(&input.return_to)
+            .bind(input.expires_at)
+            .bind(input.link_user_id.map(UserId::as_uuid))
+            .bind(input.link_session_id.map(SessionId::as_uuid))
+        )?;
         Ok(())
     }
 
@@ -172,7 +191,23 @@ impl FederationRepository<'_> {
         state_digest: &[u8],
         browser_digest: &[u8],
     ) -> Result<ConsumedFederationTransaction, DatabaseError> {
-        let row = run!(self, fetch_one, sqlx::query("UPDATE federation_transactions SET consumed_at=now() WHERE provider_name=$1 AND state_digest=$2 AND browser_digest=$3 AND consumed_at IS NULL AND expires_at>now() RETURNING nonce,pkce_verifier,return_to,link_user_id,link_session_id").bind(provider.as_str()).bind(state_digest).bind(browser_digest))?;
+        let row = run!(
+            self,
+            fetch_one,
+            sqlx::query(
+                "UPDATE federation_transactions
+                SET consumed_at = now()
+                WHERE provider_name = $1
+                AND state_digest = $2
+                AND browser_digest = $3
+                AND consumed_at IS NULL
+                AND expires_at > now()
+                RETURNING nonce, pkce_verifier, return_to, link_user_id, link_session_id"
+            )
+            .bind(provider.as_str())
+            .bind(state_digest)
+            .bind(browser_digest)
+        )?;
         Ok(ConsumedFederationTransaction {
             nonce: row.column("nonce")?,
             pkce_verifier: row.column("pkce_verifier")?,
@@ -192,7 +227,22 @@ impl FederationRepository<'_> {
         issuer: &str,
         subject: &str,
     ) -> Result<Option<StoredExternalIdentity>, DatabaseError> {
-        run!(self, fetch_optional, sqlx::query("SELECT id,user_id,provider_name,issuer,subject,linked_email FROM external_login_identities WHERE issuer=$1 AND subject=$2 AND revoked_at IS NULL").bind(issuer).bind(subject))?.as_ref().map(StoredExternalIdentity::from_row).transpose()
+        run!(
+            self,
+            fetch_optional,
+            sqlx::query(
+                "SELECT id, user_id, provider_name, issuer, subject, linked_email
+                FROM external_login_identities
+                WHERE issuer = $1
+                AND subject = $2
+                AND revoked_at IS NULL"
+            )
+            .bind(issuer)
+            .bind(subject)
+        )?
+        .as_ref()
+        .map(StoredExternalIdentity::from_row)
+        .transpose()
     }
 
     /// Links a provider subject to an account.
@@ -206,7 +256,22 @@ impl FederationRepository<'_> {
         &mut self,
         input: &InsertExternalIdentity,
     ) -> Result<StoredExternalIdentity, DatabaseError> {
-        let row = run!(self, fetch_one, sqlx::query("INSERT INTO external_login_identities(id,user_id,provider_name,issuer,subject,linked_email) VALUES($1,$2,$3,$4,$5,$6) RETURNING id,user_id,provider_name,issuer,subject,linked_email").bind(input.id.as_uuid()).bind(input.user_id.as_uuid()).bind(input.provider.as_str()).bind(&input.issuer).bind(&input.subject).bind(&input.linked_email))?;
+        let row = run!(
+            self,
+            fetch_one,
+            sqlx::query(
+                "INSERT INTO external_login_identities (
+                    id, user_id, provider_name, issuer, subject, linked_email
+                ) VALUES ($1, $2, $3, $4, $5, $6)
+                RETURNING id, user_id, provider_name, issuer, subject, linked_email"
+            )
+            .bind(input.id.as_uuid())
+            .bind(input.user_id.as_uuid())
+            .bind(input.provider.as_str())
+            .bind(&input.issuer)
+            .bind(&input.subject)
+            .bind(&input.linked_email)
+        )?;
         StoredExternalIdentity::from_row(&row)
     }
 
@@ -216,7 +281,17 @@ impl FederationRepository<'_> {
     ///
     /// Returns [`DatabaseError`] if the query fails.
     pub async fn record_login(&mut self, id: TokenId) -> Result<(), DatabaseError> {
-        run!(self, execute, sqlx::query("UPDATE external_login_identities SET last_login_at=now() WHERE id=$1 AND revoked_at IS NULL").bind(id.as_uuid()))?;
+        run!(
+            self,
+            execute,
+            sqlx::query(
+                "UPDATE external_login_identities
+                SET last_login_at = now()
+                WHERE id = $1
+                AND revoked_at IS NULL"
+            )
+            .bind(id.as_uuid())
+        )?;
         Ok(())
     }
 
@@ -229,7 +304,21 @@ impl FederationRepository<'_> {
         &mut self,
         user_id: UserId,
     ) -> Result<Vec<StoredExternalIdentity>, DatabaseError> {
-        run!(self, fetch_all, sqlx::query("SELECT id,user_id,provider_name,issuer,subject,linked_email FROM external_login_identities WHERE user_id=$1 AND revoked_at IS NULL ORDER BY linked_at").bind(user_id.as_uuid()))?.iter().map(StoredExternalIdentity::from_row).collect()
+        run!(
+            self,
+            fetch_all,
+            sqlx::query(
+                "SELECT id, user_id, provider_name, issuer, subject, linked_email
+                FROM external_login_identities
+                WHERE user_id = $1
+                AND revoked_at IS NULL
+                ORDER BY linked_at"
+            )
+            .bind(user_id.as_uuid())
+        )?
+        .iter()
+        .map(StoredExternalIdentity::from_row)
+        .collect()
     }
 
     /// Revokes the account's active link for a provider, releasing its
@@ -243,7 +332,21 @@ impl FederationRepository<'_> {
         user_id: UserId,
         provider: Provider,
     ) -> Result<bool, DatabaseError> {
-        Ok(run!(self, execute, sqlx::query("UPDATE external_login_identities SET revoked_at=now() WHERE user_id=$1 AND provider_name=$2 AND revoked_at IS NULL").bind(user_id.as_uuid()).bind(provider.as_str()))?.rows_affected()==1)
+        Ok(run!(
+            self,
+            execute,
+            sqlx::query(
+                "UPDATE external_login_identities
+                SET revoked_at = now()
+                WHERE user_id = $1
+                AND provider_name = $2
+                AND revoked_at IS NULL"
+            )
+            .bind(user_id.as_uuid())
+            .bind(provider.as_str())
+        )?
+        .rows_affected()
+            == 1)
     }
 
     /// Stores verified provider evidence for a pending signup or link.
@@ -253,8 +356,27 @@ impl FederationRepository<'_> {
     /// Returns [`DatabaseError`] if the insert fails, e.g. when the browser
     /// already has a pending record.
     pub async fn insert_pending(&mut self, input: &PendingFederation) -> Result<(), DatabaseError> {
-        run!(self, execute, sqlx::query("INSERT INTO pending_federation(id,browser_digest,provider_name,issuer,subject,email,display_name,return_to,link_user_id,link_session_id,expires_at) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)")
-            .bind(input.id.as_uuid()).bind(&input.browser_digest).bind(input.provider.as_str()).bind(&input.issuer).bind(&input.subject).bind(&input.email).bind(&input.display_name).bind(&input.return_to).bind(input.link_user_id.map(UserId::as_uuid)).bind(input.link_session_id.map(SessionId::as_uuid)).bind(input.expires_at))?;
+        run!(
+            self,
+            execute,
+            sqlx::query(
+                "INSERT INTO pending_federation (
+                    id, browser_digest, provider_name, issuer, subject, email,
+                    display_name, return_to, link_user_id, link_session_id, expires_at
+                ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)"
+            )
+            .bind(input.id.as_uuid())
+            .bind(&input.browser_digest)
+            .bind(input.provider.as_str())
+            .bind(&input.issuer)
+            .bind(&input.subject)
+            .bind(&input.email)
+            .bind(&input.display_name)
+            .bind(&input.return_to)
+            .bind(input.link_user_id.map(UserId::as_uuid))
+            .bind(input.link_session_id.map(SessionId::as_uuid))
+            .bind(input.expires_at)
+        )?;
         Ok(())
     }
 
@@ -267,7 +389,21 @@ impl FederationRepository<'_> {
         &mut self,
         digest: &[u8],
     ) -> Result<Option<PendingFederation>, DatabaseError> {
-        run!(self, fetch_optional, sqlx::query("SELECT * FROM pending_federation WHERE browser_digest=$1 AND consumed_at IS NULL AND expires_at>now()").bind(digest))?.as_ref().map(PendingFederation::from_row).transpose()
+        run!(
+            self,
+            fetch_optional,
+            sqlx::query(
+                "SELECT *
+                FROM pending_federation
+                WHERE browser_digest = $1
+                AND consumed_at IS NULL
+                AND expires_at > now()"
+            )
+            .bind(digest)
+        )?
+        .as_ref()
+        .map(PendingFederation::from_row)
+        .transpose()
     }
 
     /// Consumes the browser's pending record. Run it in the transaction that
@@ -282,7 +418,21 @@ impl FederationRepository<'_> {
         id: TokenId,
         digest: &[u8],
     ) -> Result<PendingFederation, DatabaseError> {
-        let row = run!(self, fetch_one, sqlx::query("UPDATE pending_federation SET consumed_at=now() WHERE id=$1 AND browser_digest=$2 AND consumed_at IS NULL AND expires_at>now() RETURNING *").bind(id.as_uuid()).bind(digest))?;
+        let row = run!(
+            self,
+            fetch_one,
+            sqlx::query(
+                "UPDATE pending_federation
+                SET consumed_at = now()
+                WHERE id = $1
+                AND browser_digest = $2
+                AND consumed_at IS NULL
+                AND expires_at > now()
+                RETURNING *"
+            )
+            .bind(id.as_uuid())
+            .bind(digest)
+        )?;
         PendingFederation::from_row(&row)
     }
 
@@ -292,7 +442,17 @@ impl FederationRepository<'_> {
     ///
     /// Returns [`DatabaseError`] if the query fails.
     pub async fn cancel_pending(&mut self, digest: &[u8]) -> Result<(), DatabaseError> {
-        run!(self, execute, sqlx::query("UPDATE pending_federation SET consumed_at=now() WHERE browser_digest=$1 AND consumed_at IS NULL").bind(digest))?;
+        run!(
+            self,
+            execute,
+            sqlx::query(
+                "UPDATE pending_federation
+                SET consumed_at = now()
+                WHERE browser_digest = $1
+                AND consumed_at IS NULL"
+            )
+            .bind(digest)
+        )?;
         Ok(())
     }
 
@@ -309,7 +469,29 @@ impl FederationRepository<'_> {
         user_id: UserId,
         email: &str,
     ) -> Result<(), DatabaseError> {
-        run!(self, execute, sqlx::query("INSERT INTO user_emails(id,user_id,normalized_email,verified_at,is_primary) SELECT $1,$2,$3,now(),true WHERE NOT EXISTS(SELECT 1 FROM user_emails WHERE user_id=$2 AND verified_at IS NOT NULL) AND NOT EXISTS(SELECT 1 FROM active_verified_email_ownership WHERE normalized_email=$3 AND user_id<>$2)").bind(TokenId::new().as_uuid()).bind(user_id.as_uuid()).bind(email))?;
+        run!(
+            self,
+            execute,
+            sqlx::query(
+                "INSERT INTO user_emails (id, user_id, normalized_email, verified_at, is_primary)
+                SELECT $1, $2, $3, now(), true
+                WHERE NOT EXISTS (
+                    SELECT 1
+                    FROM user_emails
+                    WHERE user_id = $2
+                    AND verified_at IS NOT NULL
+                )
+                AND NOT EXISTS (
+                    SELECT 1
+                    FROM active_verified_email_ownership
+                    WHERE normalized_email = $3
+                    AND user_id <> $2
+                )"
+            )
+            .bind(TokenId::new().as_uuid())
+            .bind(user_id.as_uuid())
+            .bind(email)
+        )?;
         Ok(())
     }
 }

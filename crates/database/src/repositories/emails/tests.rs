@@ -3,6 +3,10 @@ use crate::Database;
 
 use piquel_auth_protocol::UserId;
 /// Verified email ownership follows active account status and verification changes.
+#[expect(
+    clippy::too_many_lines,
+    reason = "Keep the ownership lifecycle scenario of one address together."
+)]
 #[tokio::test]
 #[ignore = "requires a disposable TEST_DATABASE_URL"]
 async fn verified_email_updates_preserve_and_release_ownership() {
@@ -19,8 +23,16 @@ async fn verified_email_updates_preserve_and_release_ownership() {
     }
     let email = uuid::Uuid::now_v7();
     let address = format!("{email}@example.test");
-    sqlx::query("INSERT INTO user_emails(id,user_id,normalized_email,verified_at,is_primary) VALUES($1,$2,$3,now(),true)")
-        .bind(email).bind(users[0].as_uuid()).bind(&address).execute(&mut *tx).await.expect("email");
+    sqlx::query(
+        "INSERT INTO user_emails (id, user_id, normalized_email, verified_at, is_primary)
+        VALUES ($1, $2, $3, now(), true)",
+    )
+    .bind(email)
+    .bind(users[0].as_uuid())
+    .bind(&address)
+    .execute(&mut *tx)
+    .await
+    .expect("email");
     for update in [
         "verified_at=verified_at",
         "verified_at=now()+interval '1 second'",
@@ -43,8 +55,18 @@ async fn verified_email_updates_preserve_and_release_ownership() {
         .execute(&mut *tx)
         .await
         .expect("savepoint");
-    assert!(sqlx::query("INSERT INTO user_emails(id,user_id,normalized_email,verified_at,is_primary) VALUES($1,$2,$3,now(),true)")
-        .bind(uuid::Uuid::now_v7()).bind(users[1].as_uuid()).bind(&address).execute(&mut *tx).await.is_err());
+    assert!(
+        sqlx::query(
+            "INSERT INTO user_emails (id, user_id, normalized_email, verified_at, is_primary)
+            VALUES ($1, $2, $3, now(), true)"
+        )
+        .bind(uuid::Uuid::now_v7())
+        .bind(users[1].as_uuid())
+        .bind(&address)
+        .execute(&mut *tx)
+        .await
+        .is_err()
+    );
     sqlx::query("ROLLBACK TO duplicate_email")
         .execute(&mut *tx)
         .await

@@ -368,8 +368,62 @@ impl OidcRepository<'_> {
         input
             .validate()
             .map_err(|source| DatabaseError::Operation(Box::new(source)))?;
-        run!(self, execute, sqlx::query("WITH upsert AS (INSERT INTO oidc_clients(id,display_name,allowed_scopes,allowed_audiences,allow_refresh,enabled,trusted,client_secret_hash) VALUES($1,$2,$3,$4,$5,$8,$9,$10) ON CONFLICT(id) DO UPDATE SET display_name=EXCLUDED.display_name,allowed_scopes=EXCLUDED.allowed_scopes,allowed_audiences=EXCLUDED.allowed_audiences,allow_refresh=EXCLUDED.allow_refresh,enabled=EXCLUDED.enabled,trusted=EXCLUDED.trusted,client_secret_hash=EXCLUDED.client_secret_hash RETURNING id), desired(uri,kind) AS (SELECT unnest($6::text[]),'authorization' UNION ALL SELECT unnest($7::text[]),'post_logout'), inserted AS (INSERT INTO oidc_redirect_uris(client_id,uri,kind) SELECT $1,d.uri,d.kind FROM desired d,upsert ON CONFLICT DO NOTHING RETURNING uri), removed AS (DELETE FROM oidc_redirect_uris r WHERE r.client_id=$1 AND NOT EXISTS (SELECT 1 FROM desired d WHERE d.uri=r.uri AND d.kind=r.kind) RETURNING uri) SELECT id FROM upsert")
-            .bind(&input.id).bind(&input.display_name).bind(Json(&input.allowed_scopes)).bind(Json(&input.allowed_audiences)).bind(input.allow_refresh).bind(&input.redirect_uris).bind(&input.post_logout_uris).bind(input.enabled).bind(input.trusted).bind(&input.client_secret_hash))?;
+        run!(
+            self,
+            execute,
+            sqlx::query(
+                "WITH upsert AS (
+                    INSERT INTO oidc_clients (
+                        id, display_name, allowed_scopes, allowed_audiences, allow_refresh,
+                        enabled, trusted, client_secret_hash
+                    ) VALUES ($1, $2, $3, $4, $5, $8, $9, $10)
+                    ON CONFLICT (id) DO UPDATE
+                    SET display_name = EXCLUDED.display_name,
+                        allowed_scopes = EXCLUDED.allowed_scopes,
+                        allowed_audiences = EXCLUDED.allowed_audiences,
+                        allow_refresh = EXCLUDED.allow_refresh,
+                        enabled = EXCLUDED.enabled,
+                        trusted = EXCLUDED.trusted,
+                        client_secret_hash = EXCLUDED.client_secret_hash
+                    RETURNING id
+                ),
+                desired (uri, kind) AS (
+                    SELECT unnest($6::text[]), 'authorization'
+                    UNION ALL
+                    SELECT unnest($7::text[]), 'post_logout'
+                ),
+                inserted AS (
+                    INSERT INTO oidc_redirect_uris (client_id, uri, kind)
+                    SELECT $1, d.uri, d.kind
+                    FROM desired d, upsert
+                    ON CONFLICT DO NOTHING
+                    RETURNING uri
+                ),
+                removed AS (
+                    DELETE FROM oidc_redirect_uris r
+                    WHERE r.client_id = $1
+                    AND NOT EXISTS (
+                        SELECT 1
+                        FROM desired d
+                        WHERE d.uri = r.uri
+                        AND d.kind = r.kind
+                    )
+                    RETURNING uri
+                )
+                SELECT id
+                FROM upsert"
+            )
+            .bind(&input.id)
+            .bind(&input.display_name)
+            .bind(Json(&input.allowed_scopes))
+            .bind(Json(&input.allowed_audiences))
+            .bind(input.allow_refresh)
+            .bind(&input.redirect_uris)
+            .bind(&input.post_logout_uris)
+            .bind(input.enabled)
+            .bind(input.trusted)
+            .bind(&input.client_secret_hash)
+        )?;
         Ok(())
     }
 
@@ -382,7 +436,28 @@ impl OidcRepository<'_> {
         &mut self,
         id: &str,
     ) -> Result<Option<StoredOidcClient>, DatabaseError> {
-        let row = run!(self, fetch_optional, sqlx::query("SELECT c.id,c.display_name,c.enabled,c.allowed_scopes,c.allowed_audiences,c.allow_refresh,c.trusted,c.client_secret_hash,COALESCE(jsonb_agg(r.uri) FILTER (WHERE r.kind='authorization'),'[]'::jsonb) AS redirect_uris,COALESCE(jsonb_agg(r.uri) FILTER (WHERE r.kind='post_logout'),'[]'::jsonb) AS post_logout_uris FROM oidc_clients c LEFT JOIN oidc_redirect_uris r ON r.client_id=c.id WHERE c.id=$1 GROUP BY c.id").bind(id))?;
+        let row = run!(
+            self,
+            fetch_optional,
+            sqlx::query(
+                "SELECT
+                    c.id, c.display_name, c.enabled, c.allowed_scopes, c.allowed_audiences,
+                    c.allow_refresh, c.trusted, c.client_secret_hash,
+                    COALESCE(
+                        jsonb_agg(r.uri) FILTER (WHERE r.kind = 'authorization'),
+                        '[]'::jsonb
+                    ) AS redirect_uris,
+                    COALESCE(
+                        jsonb_agg(r.uri) FILTER (WHERE r.kind = 'post_logout'),
+                        '[]'::jsonb
+                    ) AS post_logout_uris
+                FROM oidc_clients c
+                LEFT JOIN oidc_redirect_uris r ON r.client_id = c.id
+                WHERE c.id = $1
+                GROUP BY c.id"
+            )
+            .bind(id)
+        )?;
         row.map(|row| {
             Ok(StoredOidcClient {
                 id: row.column("id")?,
@@ -409,11 +484,31 @@ impl OidcRepository<'_> {
         &mut self,
         input: &InsertAuthorizationRequest,
     ) -> Result<(), DatabaseError> {
-        run!(self, execute, sqlx::query("INSERT INTO authorization_requests(id,secret_digest,client_id,redirect_uri,client_state,nonce,pkce_challenge,scopes,audience,force_login,max_age,expires_at,force_consent,hinted_user_id) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)")
-            .bind(input.id.as_uuid()).bind(&input.secret_digest).bind(&input.client_id)
-            .bind(&input.redirect_uri).bind(&input.client_state).bind(&input.nonce)
-            .bind(&input.pkce_challenge).bind(Json(&input.scopes)).bind(&input.audience)
-            .bind(input.force_login).bind(input.max_age).bind(input.expires_at).bind(input.force_consent).bind(input.hinted_user_id.map(UserId::as_uuid)))?;
+        run!(
+            self,
+            execute,
+            sqlx::query(
+                "INSERT INTO authorization_requests (
+                    id, secret_digest, client_id, redirect_uri, client_state,
+                    nonce, pkce_challenge, scopes, audience, force_login,
+                    max_age, expires_at, force_consent, hinted_user_id
+                ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)"
+            )
+            .bind(input.id.as_uuid())
+            .bind(&input.secret_digest)
+            .bind(&input.client_id)
+            .bind(&input.redirect_uri)
+            .bind(&input.client_state)
+            .bind(&input.nonce)
+            .bind(&input.pkce_challenge)
+            .bind(Json(&input.scopes))
+            .bind(&input.audience)
+            .bind(input.force_login)
+            .bind(input.max_age)
+            .bind(input.expires_at)
+            .bind(input.force_consent)
+            .bind(input.hinted_user_id.map(UserId::as_uuid))
+        )?;
         Ok(())
     }
 
@@ -428,7 +523,28 @@ impl OidcRepository<'_> {
         id: TokenId,
         digest: &[u8],
     ) -> Result<Option<StoredAuthorizationRequest>, DatabaseError> {
-        run!(self, fetch_optional, sqlx::query("SELECT r.id,r.client_id,c.display_name AS client_display_name,r.redirect_uri,r.client_state,r.nonce,r.pkce_challenge,r.scopes,r.audience,r.force_login,r.force_consent,r.max_age,r.hinted_user_id,r.created_at FROM authorization_requests r JOIN oidc_clients c ON c.id=r.client_id WHERE r.id=$1 AND r.secret_digest=$2 AND r.consumed_at IS NULL AND r.expires_at>now() AND c.enabled").bind(id.as_uuid()).bind(digest))?.as_ref().map(StoredAuthorizationRequest::from_row).transpose()
+        run!(
+            self,
+            fetch_optional,
+            sqlx::query(
+                "SELECT
+                    r.id, r.client_id, c.display_name AS client_display_name, r.redirect_uri,
+                    r.client_state, r.nonce, r.pkce_challenge, r.scopes, r.audience,
+                    r.force_login, r.force_consent, r.max_age, r.hinted_user_id, r.created_at
+                FROM authorization_requests r
+                JOIN oidc_clients c ON c.id = r.client_id
+                WHERE r.id = $1
+                AND r.secret_digest = $2
+                AND r.consumed_at IS NULL
+                AND r.expires_at > now()
+                AND c.enabled"
+            )
+            .bind(id.as_uuid())
+            .bind(digest)
+        )?
+        .as_ref()
+        .map(StoredAuthorizationRequest::from_row)
+        .transpose()
     }
 
     /// Consumes a request that the client's current policy still allows:
@@ -443,7 +559,36 @@ impl OidcRepository<'_> {
         id: TokenId,
         digest: &[u8],
     ) -> Result<StoredAuthorizationRequest, DatabaseError> {
-        let row = run!(self, fetch_one, sqlx::query("UPDATE authorization_requests r SET consumed_at=now() FROM oidc_clients c WHERE r.id=$1 AND r.secret_digest=$2 AND r.consumed_at IS NULL AND r.expires_at>now() AND c.id=r.client_id AND c.enabled AND c.allowed_scopes @> r.scopes AND c.allowed_audiences ? r.audience AND EXISTS(SELECT 1 FROM oidc_redirect_uris d WHERE d.client_id=c.id AND d.kind='authorization' AND d.uri=r.redirect_uri) RETURNING r.id,r.client_id,c.display_name AS client_display_name,r.redirect_uri,r.client_state,r.nonce,r.pkce_challenge,r.scopes,r.audience,r.force_login,r.force_consent,r.max_age,r.hinted_user_id,r.created_at").bind(id.as_uuid()).bind(digest))?;
+        let row = run!(
+            self,
+            fetch_one,
+            sqlx::query(
+                "UPDATE authorization_requests r
+                SET consumed_at = now()
+                FROM oidc_clients c
+                WHERE r.id = $1
+                AND r.secret_digest = $2
+                AND r.consumed_at IS NULL
+                AND r.expires_at > now()
+                AND c.id = r.client_id
+                AND c.enabled
+                AND c.allowed_scopes @> r.scopes
+                AND c.allowed_audiences ? r.audience
+                AND EXISTS (
+                    SELECT 1
+                    FROM oidc_redirect_uris d
+                    WHERE d.client_id = c.id
+                    AND d.kind = 'authorization'
+                    AND d.uri = r.redirect_uri
+                )
+                RETURNING
+                    r.id, r.client_id, c.display_name AS client_display_name, r.redirect_uri,
+                    r.client_state, r.nonce, r.pkce_challenge, r.scopes, r.audience,
+                    r.force_login, r.force_consent, r.max_age, r.hinted_user_id, r.created_at"
+            )
+            .bind(id.as_uuid())
+            .bind(digest)
+        )?;
         StoredAuthorizationRequest::from_row(&row)
     }
 
@@ -456,10 +601,27 @@ impl OidcRepository<'_> {
         &mut self,
         input: &InsertAuthorizationCode,
     ) -> Result<(), DatabaseError> {
-        run!(self, execute, sqlx::query("INSERT INTO authorization_codes(id,secret_digest,client_id,user_id,session_id,redirect_uri,pkce_challenge,nonce,scopes,audience,expires_at) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)")
-            .bind(input.id.as_uuid()).bind(&input.secret_digest).bind(&input.client_id)
-            .bind(input.user_id.as_uuid()).bind(input.session_id.as_uuid()).bind(&input.redirect_uri)
-            .bind(&input.pkce_challenge).bind(&input.nonce).bind(Json(&input.scopes)).bind(&input.audience).bind(input.expires_at))?;
+        run!(
+            self,
+            execute,
+            sqlx::query(
+                "INSERT INTO authorization_codes (
+                    id, secret_digest, client_id, user_id, session_id, redirect_uri,
+                    pkce_challenge, nonce, scopes, audience, expires_at
+                ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)"
+            )
+            .bind(input.id.as_uuid())
+            .bind(&input.secret_digest)
+            .bind(&input.client_id)
+            .bind(input.user_id.as_uuid())
+            .bind(input.session_id.as_uuid())
+            .bind(&input.redirect_uri)
+            .bind(&input.pkce_challenge)
+            .bind(&input.nonce)
+            .bind(Json(&input.scopes))
+            .bind(&input.audience)
+            .bind(input.expires_at)
+        )?;
         Ok(())
     }
 
@@ -475,7 +637,40 @@ impl OidcRepository<'_> {
         id: TokenId,
         digest: &[u8],
     ) -> Result<ConsumedAuthorizationCode, DatabaseError> {
-        let row = run!(self, fetch_one, sqlx::query("UPDATE authorization_codes c SET consumed_at=now() FROM oidc_clients cl,sessions s,users u WHERE c.id=$1 AND c.secret_digest=$2 AND c.consumed_at IS NULL AND c.expires_at>now() AND cl.id=c.client_id AND cl.enabled AND cl.allowed_scopes @> c.scopes AND cl.allowed_audiences ? c.audience AND EXISTS(SELECT 1 FROM oidc_redirect_uris d WHERE d.client_id=cl.id AND d.kind='authorization' AND d.uri=c.redirect_uri) AND s.id=c.session_id AND s.revoked_at IS NULL AND s.expires_at>now() AND u.id=c.user_id AND u.status='active' RETURNING c.client_id,c.user_id,c.session_id,c.redirect_uri,c.pkce_challenge,c.nonce,c.scopes,c.audience").bind(id.as_uuid()).bind(digest))?;
+        let row = run!(
+            self,
+            fetch_one,
+            sqlx::query(
+                "UPDATE authorization_codes c
+                SET consumed_at = now()
+                FROM oidc_clients cl, sessions s, users u
+                WHERE c.id = $1
+                AND c.secret_digest = $2
+                AND c.consumed_at IS NULL
+                AND c.expires_at > now()
+                AND cl.id = c.client_id
+                AND cl.enabled
+                AND cl.allowed_scopes @> c.scopes
+                AND cl.allowed_audiences ? c.audience
+                AND EXISTS (
+                    SELECT 1
+                    FROM oidc_redirect_uris d
+                    WHERE d.client_id = cl.id
+                    AND d.kind = 'authorization'
+                    AND d.uri = c.redirect_uri
+                )
+                AND s.id = c.session_id
+                AND s.revoked_at IS NULL
+                AND s.expires_at > now()
+                AND u.id = c.user_id
+                AND u.status = 'active'
+                RETURNING
+                    c.client_id, c.user_id, c.session_id, c.redirect_uri, c.pkce_challenge,
+                    c.nonce, c.scopes, c.audience"
+            )
+            .bind(id.as_uuid())
+            .bind(digest)
+        )?;
         Ok(ConsumedAuthorizationCode {
             client_id: row.column("client_id")?,
             user_id: row.id("user_id")?,
@@ -501,7 +696,23 @@ impl OidcRepository<'_> {
         audience: &str,
         scopes: &[String],
     ) -> Result<bool, DatabaseError> {
-        Ok(run!(self, fetch_optional, sqlx::query("SELECT 1 FROM oidc_consents WHERE user_id=$1 AND client_id=$2 AND audience=$3 AND scopes @> $4").bind(user.as_uuid()).bind(client).bind(audience).bind(Json(scopes)))?.is_some())
+        Ok(run!(
+            self,
+            fetch_optional,
+            sqlx::query(
+                "SELECT 1
+                FROM oidc_consents
+                WHERE user_id = $1
+                AND client_id = $2
+                AND audience = $3
+                AND scopes @> $4"
+            )
+            .bind(user.as_uuid())
+            .bind(client)
+            .bind(audience)
+            .bind(Json(scopes))
+        )?
+        .is_some())
     }
 
     /// Adds `scopes` to the user's consent for this client and audience.
@@ -516,7 +727,23 @@ impl OidcRepository<'_> {
         audience: &str,
         scopes: &[String],
     ) -> Result<(), DatabaseError> {
-        run!(self, execute, sqlx::query("INSERT INTO oidc_consents(user_id,client_id,audience,scopes) VALUES($1,$2,$3,$4) ON CONFLICT(user_id,client_id,audience) DO UPDATE SET scopes=(SELECT jsonb_agg(DISTINCT value) FROM jsonb_array_elements(oidc_consents.scopes || EXCLUDED.scopes))").bind(user.as_uuid()).bind(client).bind(audience).bind(Json(scopes)))?;
+        run!(
+            self,
+            execute,
+            sqlx::query(
+                "INSERT INTO oidc_consents (user_id, client_id, audience, scopes)
+                VALUES ($1, $2, $3, $4)
+                ON CONFLICT (user_id, client_id, audience) DO UPDATE
+                SET scopes = (
+                    SELECT jsonb_agg(DISTINCT value)
+                    FROM jsonb_array_elements(oidc_consents.scopes || EXCLUDED.scopes)
+                )"
+            )
+            .bind(user.as_uuid())
+            .bind(client)
+            .bind(audience)
+            .bind(Json(scopes))
+        )?;
         Ok(())
     }
 
@@ -527,7 +754,21 @@ impl OidcRepository<'_> {
     ///
     /// Returns [`DatabaseError`] if the query fails or the row is invalid.
     pub async fn primary_email(&mut self, user: UserId) -> Result<Option<String>, DatabaseError> {
-        run!(self, fetch_optional, sqlx::query("SELECT normalized_email FROM user_emails WHERE user_id=$1 AND verified_at IS NOT NULL ORDER BY is_primary DESC,created_at LIMIT 1").bind(user.as_uuid()))?.map(|row| row.column("normalized_email")).transpose()
+        run!(
+            self,
+            fetch_optional,
+            sqlx::query(
+                "SELECT normalized_email
+                FROM user_emails
+                WHERE user_id = $1
+                AND verified_at IS NOT NULL
+                ORDER BY is_primary DESC, created_at
+                LIMIT 1"
+            )
+            .bind(user.as_uuid())
+        )?
+        .map(|row| row.column("normalized_email"))
+        .transpose()
     }
 
     /// Revokes a session (OIDC logout) and every refresh token family issued
@@ -543,7 +784,16 @@ impl OidcRepository<'_> {
             sqlx::query("UPDATE sessions SET revoked_at=COALESCE(revoked_at,now()) WHERE id=$1")
                 .bind(session.as_uuid())
         )?;
-        run!(self, execute, sqlx::query("UPDATE refresh_token_families SET revoked_at=COALESCE(revoked_at,now()) WHERE session_id=$1").bind(session.as_uuid()))?;
+        run!(
+            self,
+            execute,
+            sqlx::query(
+                "UPDATE refresh_token_families
+                SET revoked_at = COALESCE(revoked_at, now())
+                WHERE session_id = $1"
+            )
+            .bind(session.as_uuid())
+        )?;
         Ok(())
     }
 }

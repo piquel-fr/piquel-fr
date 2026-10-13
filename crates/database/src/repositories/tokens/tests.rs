@@ -21,8 +21,16 @@ async fn family(pool: &PgPool, client: &str) -> (TokenId, Vec<u8>, SessionId) {
         .execute(&mut *tx)
         .await
         .expect("user");
-    sqlx::query("INSERT INTO sessions(id,user_id,authentication_methods,authenticated_at,expires_at,last_seen_at) VALUES($1,$2,'[]',now(),now()+interval '1 hour',now())")
-        .bind(session.as_uuid()).bind(user.as_uuid()).execute(&mut *tx).await.expect("session");
+    sqlx::query(
+        "INSERT INTO sessions (
+            id, user_id, authentication_methods, authenticated_at, expires_at, last_seen_at
+        ) VALUES ($1, $2, '[]', now(), now() + interval '1 hour', now())",
+    )
+    .bind(session.as_uuid())
+    .bind(user.as_uuid())
+    .execute(&mut *tx)
+    .await
+    .expect("session");
     TokenRepository::from_connection(&mut tx)
         .insert_family(
             &InsertRefreshFamily {
@@ -45,14 +53,22 @@ async fn family(pool: &PgPool, client: &str) -> (TokenId, Vec<u8>, SessionId) {
     tx.commit().await.expect("commit");
     (token, digest, session)
 }
-/// Shared client policy permits independent refreshes while logout waits in the documented lock order.
+/// Shared client policy permits independent refreshes while logout waits in the
+/// documented lock order.
 #[tokio::test]
 #[ignore = "requires a disposable TEST_DATABASE_URL"]
 async fn independent_refreshes_share_client_and_logout_does_not_deadlock() {
     let pool = Database::test_pool().await;
     let client = format!("locks_{}", UserId::new());
-    sqlx::query("INSERT INTO oidc_clients(id,display_name,allowed_scopes,allowed_audiences,allow_refresh) VALUES($1,'Lock test','[\"openid\"]','[\"test\"]',true)")
-        .bind(&client).execute(&pool).await.expect("client");
+    sqlx::query(
+        "INSERT INTO oidc_clients (
+            id, display_name, allowed_scopes, allowed_audiences, allow_refresh
+        ) VALUES ($1, 'Lock test', '[\"openid\"]', '[\"test\"]', true)",
+    )
+    .bind(&client)
+    .execute(&pool)
+    .await
+    .expect("client");
     let (first, digest_first, session) = family(&pool, &client).await;
     let (second, digest_second, _) = family(&pool, &client).await;
     let mut first_tx = pool.begin().await.expect("first transaction");
@@ -93,14 +109,28 @@ async fn independent_refreshes_share_client_and_logout_does_not_deadlock() {
         rotation.rollback().await.expect("rollback rotation");
         result
     });
-    tokio::time::timeout(Wait::from_secs(2),async {
+    tokio::time::timeout(Wait::from_secs(2), async {
         loop {
-            let waiting: bool=sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM pg_stat_activity WHERE pid=$1 AND wait_event_type='Lock')")
-                .bind(backend).fetch_one(&pool).await.expect("wait state");
-            if waiting {break;}
+            let waiting: bool = sqlx::query_scalar(
+                "SELECT EXISTS (
+                    SELECT 1
+                    FROM pg_stat_activity
+                    WHERE pid = $1
+                    AND wait_event_type = 'Lock'
+                )",
+            )
+            .bind(backend)
+            .fetch_one(&pool)
+            .await
+            .expect("wait state");
+            if waiting {
+                break;
+            }
             tokio::time::sleep(Wait::from_millis(10)).await;
         }
-    }).await.expect("rotation waits for logout session lock");
+    })
+    .await
+    .expect("rotation waits for logout session lock");
     tokio::time::timeout(
         Wait::from_secs(2),
         OidcRepository::from_connection(&mut logout).revoke_session(session),

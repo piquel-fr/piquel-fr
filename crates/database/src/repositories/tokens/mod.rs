@@ -91,9 +91,21 @@ impl TokenRepository<'_> {
         family: &InsertRefreshFamily,
         token: &InsertRefreshToken,
     ) -> Result<(), DatabaseError> {
-        run!(self, execute, sqlx::query("INSERT INTO refresh_token_families(id,user_id,client_id,session_id,audience,scopes) VALUES($1,$2,$3,$4,$5,$6)")
-            .bind(family.id.as_uuid()).bind(family.user_id.as_uuid()).bind(&family.client_id)
-            .bind(family.session_id.as_uuid()).bind(&family.audience).bind(Json(&family.scopes)))?;
+        run!(
+            self,
+            execute,
+            sqlx::query(
+                "INSERT INTO refresh_token_families (
+                    id, user_id, client_id, session_id, audience, scopes
+                ) VALUES ($1, $2, $3, $4, $5, $6)"
+            )
+            .bind(family.id.as_uuid())
+            .bind(family.user_id.as_uuid())
+            .bind(&family.client_id)
+            .bind(family.session_id.as_uuid())
+            .bind(&family.audience)
+            .bind(Json(&family.scopes))
+        )?;
         self.insert_token(token).await
     }
 
@@ -103,8 +115,18 @@ impl TokenRepository<'_> {
     ///
     /// Returns [`DatabaseError`] if the insert fails.
     pub async fn insert_token(&mut self, token: &InsertRefreshToken) -> Result<(), DatabaseError> {
-        run!(self, execute, sqlx::query("INSERT INTO refresh_tokens(id,family_id,secret_digest,expires_at) VALUES($1,$2,$3,$4)")
-            .bind(token.id.as_uuid()).bind(token.family_id.as_uuid()).bind(&token.secret_digest).bind(token.expires_at))?;
+        run!(
+            self,
+            execute,
+            sqlx::query(
+                "INSERT INTO refresh_tokens (id, family_id, secret_digest, expires_at)
+                VALUES ($1, $2, $3, $4)"
+            )
+            .bind(token.id.as_uuid())
+            .bind(token.family_id.as_uuid())
+            .bind(&token.secret_digest)
+            .bind(token.expires_at)
+        )?;
         Ok(())
     }
 
@@ -128,9 +150,12 @@ impl TokenRepository<'_> {
             self,
             fetch_optional,
             sqlx::query(
-                "SELECT f.user_id,f.session_id,f.id AS family_id FROM refresh_tokens t
-             JOIN refresh_token_families f ON f.id=t.family_id
-             WHERE t.id=$1 AND t.secret_digest=$2 AND f.client_id=$3"
+                "SELECT f.user_id, f.session_id, f.id AS family_id
+                FROM refresh_tokens t
+                JOIN refresh_token_families f ON f.id = t.family_id
+                WHERE t.id = $1
+                AND t.secret_digest = $2
+                AND f.client_id = $3"
             )
             .bind(id.as_uuid())
             .bind(digest)
@@ -141,15 +166,28 @@ impl TokenRepository<'_> {
         // audit/session foreign-key checks while we wait for its session lock.
         for (query, key) in [
             (
-                "SELECT id FROM users WHERE id=$1 AND status='active' FOR NO KEY UPDATE",
+                "SELECT id
+                FROM users
+                WHERE id = $1
+                AND status = 'active'
+                FOR NO KEY UPDATE",
                 owner.column::<Uuid>("user_id")?,
             ),
             (
-                "SELECT id FROM sessions WHERE id=$1 AND revoked_at IS NULL AND expires_at>now() FOR UPDATE",
+                "SELECT id
+                FROM sessions
+                WHERE id = $1
+                AND revoked_at IS NULL
+                AND expires_at > now()
+                FOR UPDATE",
                 owner.column::<Uuid>("session_id")?,
             ),
             (
-                "SELECT id FROM refresh_token_families WHERE id=$1 AND revoked_at IS NULL FOR UPDATE",
+                "SELECT id
+                FROM refresh_token_families
+                WHERE id = $1
+                AND revoked_at IS NULL
+                FOR UPDATE",
                 owner.column::<Uuid>("family_id")?,
             ),
         ] {
@@ -170,7 +208,17 @@ impl TokenRepository<'_> {
 
     /// Revokes a family that was replayed or lost its client policy.
     async fn revoke_family(&mut self, family: TokenId) -> Result<(), DatabaseError> {
-        run!(self, execute, sqlx::query("UPDATE refresh_token_families SET revoked_at=now() WHERE id=$1 AND revoked_at IS NULL").bind(family.as_uuid()))?;
+        run!(
+            self,
+            execute,
+            sqlx::query(
+                "UPDATE refresh_token_families
+                SET revoked_at = now()
+                WHERE id = $1
+                AND revoked_at IS NULL"
+            )
+            .bind(family.as_uuid())
+        )?;
         Ok(())
     }
 
@@ -198,18 +246,25 @@ impl TokenRepository<'_> {
             self,
             fetch_optional,
             sqlx::query(
-                "SELECT t.family_id,t.consumed_at,f.user_id,f.client_id,f.session_id,
-                    f.audience,f.scopes,c.allow_refresh,c.allowed_scopes,c.allowed_audiences
-             FROM refresh_tokens t
-             JOIN refresh_token_families f ON f.id=t.family_id
-             JOIN oidc_clients c ON c.id=f.client_id
-             JOIN sessions s ON s.id=f.session_id
-             JOIN users u ON u.id=f.user_id
-             WHERE t.id=$1 AND t.secret_digest=$2 AND f.client_id=$3
-               AND t.expires_at>now() AND f.revoked_at IS NULL AND c.enabled
-               AND s.user_id=f.user_id AND s.revoked_at IS NULL AND s.expires_at>now()
-               AND u.status='active'
-             FOR UPDATE OF t"
+                "SELECT
+                    t.family_id, t.consumed_at, f.user_id, f.client_id, f.session_id,
+                    f.audience, f.scopes, c.allow_refresh, c.allowed_scopes, c.allowed_audiences
+                FROM refresh_tokens t
+                JOIN refresh_token_families f ON f.id = t.family_id
+                JOIN oidc_clients c ON c.id = f.client_id
+                JOIN sessions s ON s.id = f.session_id
+                JOIN users u ON u.id = f.user_id
+                WHERE t.id = $1
+                AND t.secret_digest = $2
+                AND f.client_id = $3
+                AND t.expires_at > now()
+                AND f.revoked_at IS NULL
+                AND c.enabled
+                AND s.user_id = f.user_id
+                AND s.revoked_at IS NULL
+                AND s.expires_at > now()
+                AND u.status = 'active'
+                FOR UPDATE OF t"
             )
             .bind(id.as_uuid())
             .bind(digest)
@@ -269,7 +324,20 @@ impl TokenRepository<'_> {
         id: TokenId,
         digest: &[u8],
     ) -> Result<(), DatabaseError> {
-        run!(self, execute, sqlx::query("UPDATE refresh_token_families f SET revoked_at=COALESCE(revoked_at,now()) FROM refresh_tokens t WHERE t.id=$1 AND t.secret_digest=$2 AND t.family_id=f.id").bind(id.as_uuid()).bind(digest))?;
+        run!(
+            self,
+            execute,
+            sqlx::query(
+                "UPDATE refresh_token_families f
+                SET revoked_at = COALESCE(revoked_at, now())
+                FROM refresh_tokens t
+                WHERE t.id = $1
+                AND t.secret_digest = $2
+                AND t.family_id = f.id"
+            )
+            .bind(id.as_uuid())
+            .bind(digest)
+        )?;
         Ok(())
     }
 
@@ -285,7 +353,22 @@ impl TokenRepository<'_> {
         digest: &[u8],
         client: &str,
     ) -> Result<(), DatabaseError> {
-        run!(self, execute, sqlx::query("UPDATE refresh_token_families f SET revoked_at=COALESCE(revoked_at,now()) FROM refresh_tokens t WHERE t.id=$1 AND t.secret_digest=$2 AND t.family_id=f.id AND f.client_id=$3").bind(id.as_uuid()).bind(digest).bind(client))?;
+        run!(
+            self,
+            execute,
+            sqlx::query(
+                "UPDATE refresh_token_families f
+                SET revoked_at = COALESCE(revoked_at, now())
+                FROM refresh_tokens t
+                WHERE t.id = $1
+                AND t.secret_digest = $2
+                AND t.family_id = f.id
+                AND f.client_id = $3"
+            )
+            .bind(id.as_uuid())
+            .bind(digest)
+            .bind(client)
+        )?;
         Ok(())
     }
 
@@ -296,7 +379,18 @@ impl TokenRepository<'_> {
     ///
     /// Returns [`DatabaseError`] if the query fails.
     pub async fn revoke_all_for_user(&mut self, user_id: UserId) -> Result<u64, DatabaseError> {
-        Ok(run!(self, execute, sqlx::query("UPDATE refresh_token_families SET revoked_at=now() WHERE user_id=$1 AND revoked_at IS NULL").bind(user_id.as_uuid()))?.rows_affected())
+        Ok(run!(
+            self,
+            execute,
+            sqlx::query(
+                "UPDATE refresh_token_families
+                SET revoked_at = now()
+                WHERE user_id = $1
+                AND revoked_at IS NULL"
+            )
+            .bind(user_id.as_uuid())
+        )?
+        .rows_affected())
     }
 }
 /// Focused tests for this module and its security contracts.
