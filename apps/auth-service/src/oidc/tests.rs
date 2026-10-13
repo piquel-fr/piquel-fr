@@ -1,3 +1,5 @@
+//! Focused parsing checks and database-backed OAuth/OIDC scenarios.
+
 use super::*;
 use axum::{
     body::{Body, to_bytes},
@@ -6,22 +8,33 @@ use axum::{
 };
 use chrono::Utc;
 use piquel_auth_protocol::{AuthenticationMethod, UserId};
+use piquel_crypto::Secret;
 use piquel_repository::{BootstrapOidcClient, DatabaseConfig, InsertUser, InsertVerifiedEmail};
+use serde_json::json;
 use tower::ServiceExt;
+use url::Url;
 
+/// Database-backed OIDC scenario with a provisioned client and authenticated browser.
 struct Flow {
+    /// Application under test, sharing the scenario database.
     app: OidcApplication,
+    /// Client identifier bound into the token claims.
     client: BootstrapOidcClient,
+    /// Authenticated browser cookie pair sent by the scenario.
     cookie: String,
+    /// Scenario account whose claims and grants are checked.
     user_id: UserId,
+    /// Optional encoded credentials for a confidential scenario client.
     basic: Option<String>,
 }
 impl Flow {
+    /// Creates a disposable account, client registration and persistent-key OIDC application.
     async fn new(confidential: bool, trusted: bool) -> Self {
-        let url = std::env::var("TEST_DATABASE_URL")
+        let url = piquel_common::Variable::new("TEST_DATABASE_URL")
+            .required()
             .expect("TEST_DATABASE_URL must name a disposable PostgreSQL database");
         let db = Database::connect(
-            DatabaseConfig::new_development(&url, 5, std::time::Duration::from_secs(5))
+            DatabaseConfig::new(&url, 5, std::time::Duration::from_secs(5))
                 .expect("valid local test database configuration"),
         )
         .await
@@ -50,13 +63,14 @@ impl Flow {
             .await
             .expect("insert verified test email");
         let cookie =
-            crate::security::create_session(&mut tx, user_id, AuthenticationMethod::Passkey)
+            crate::security::Session::create(&mut tx, user_id, AuthenticationMethod::Passkey)
                 .await
-                .expect("create test browser session")
-                .split(';')
-                .next()
-                .expect("extract session cookie pair")
-                .to_owned();
+                .expect("create test browser session");
+        let cookie = format!(
+            "{}={}",
+            crate::security::BrowserCookie::Session.as_str(),
+            cookie.encoded()
+        );
         tx.commit().await.expect("commit test account transaction");
         let secret = "randomly-generated-example-secret-for-testing-0123456789";
         let client = BootstrapOidcClient {
@@ -65,17 +79,20 @@ impl Flow {
             redirect_uris: vec!["https://client.example/callback".into()],
             post_logout_uris: vec!["https://client.example/logout".into()],
             allowed_scopes: vec![
-                "openid".into(),
-                "profile".into(),
-                "email".into(),
-                "offline_access".into(),
+                Scope::OpenId.as_str().into(),
+                Scope::Profile.as_str().into(),
+                Scope::Email.as_str().into(),
+                Scope::OfflineAccess.as_str().into(),
             ],
             allowed_audiences: vec!["test-api".into()],
             allow_refresh: true,
             enabled: true,
             trusted,
             client_secret_hash: confidential.then(|| {
-                OidcApplication::client_secret_hash(secret).expect("hash test client secret")
+                Digest::client_secret(secret)
+                    .expect("hash test client secret")
+                    .as_bytes()
+                    .to_vec()
             }),
         };
         db.oidc()
@@ -84,20 +101,23 @@ impl Flow {
             .expect("register test OIDC client");
         let basic = confidential.then(|| {
             format!(
-                "Basic {}",
+                "{} {}",
+                AuthScheme::Basic.as_str(),
                 base64::engine::general_purpose::STANDARD.encode(format!("{}:{secret}", client.id))
             )
         });
         let app = OidcApplication::new(
             db,
-            &Url::parse("https://auth.example.com").expect("parse test issuer URL"),
-            &[7; 32],
-            Arc::new(
-                Rs256KeyProvider::generate_for_development("oidc-tests")
-                    .expect("generate test RSA signing key"),
-            ),
-        )
-        .expect("construct test OIDC application");
+            &OidcConfig {
+                origin: "https://auth.example.com"
+                    .parse::<piquel_common::Origin>()
+                    .expect("issuer"),
+                keys: Arc::new(Rs256Key::generate("oidc-tests").expect("RSA signing key")),
+                refresh_key: Arc::new(Secret::derive(&[7; 32], REFRESH_KEY_LABEL).expect("HMAC")),
+                clients: vec![],
+                public_redirects: vec![],
+            },
+        );
         Self {
             app,
             client,
@@ -106,6 +126,7 @@ impl Flow {
             basic,
         }
     }
+    /// Dispatches an encoded protocol request through the OIDC routes.
     async fn request(
         &self,
         method: Method,
@@ -129,14 +150,18 @@ impl Flow {
             .header(header::CONTENT_TYPE, "application/x-www-form-urlencoded")
             .body(Body::from(body))
             .expect("build test HTTP request");
-        routes(self.app.clone())
+        self.app
+            .clone()
+            .routes()
             .oneshot(request)
             .await
             .expect("dispatch OIDC HTTP request")
     }
+    /// Accepts query authorization requests and returns OAuth errors for malformed input.
     async fn authorize(&self, scope: &str, prompt: Option<&str>) -> Response {
         self.authorize_with(Method::GET, scope, prompt, &[]).await
     }
+    /// Builds an authorization request with optional hint or security parameter overrides.
     async fn authorize_with(
         &self,
         method: Method,
@@ -147,16 +172,16 @@ impl Flow {
         let mut url = Url::parse("https://auth.example.com/oauth/authorize")
             .expect("parse authorization endpoint URL");
         url.query_pairs_mut().extend_pairs([
-            ("response_type", "code"),
+            ("response_type", ResponseType::Code.as_str()),
             ("client_id", &self.client.id),
             ("redirect_uri", &self.client.redirect_uris[0]),
             ("scope", scope),
             ("state", "test-state"),
             ("nonce", "test-nonce"),
-            ("code_challenge_method", "S256"),
+            ("code_challenge_method", CodeChallengeMethod::S256.as_str()),
             (
                 "code_challenge",
-                &URL_SAFE_NO_PAD.encode(Sha256::digest(Self::verifier().as_bytes())),
+                &piquel_crypto::Pkce::challenge(Self::verifier()).expect("PKCE"),
             ),
         ]);
         if let Some(prompt) = prompt {
@@ -184,9 +209,11 @@ impl Flow {
             .await
         }
     }
+    /// Returns the valid PKCE verifier used by database-backed scenarios.
     fn verifier() -> &'static str {
         "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
     }
+    /// Reads the absolute destination of a protocol redirect response.
     fn location(response: &Response) -> Url {
         Url::parse(
             response
@@ -198,6 +225,7 @@ impl Flow {
         )
         .expect("Location header contains an absolute URL")
     }
+    /// Extracts a required query parameter from a protocol redirect.
     fn parameter(url: &Url, name: &str) -> String {
         url.query_pairs()
             .find(|(key, _)| key == name)
@@ -205,6 +233,7 @@ impl Flow {
             .1
             .into_owned()
     }
+    /// Reads and decodes the scenario’s JSON response.
     async fn json(response: Response) -> Value {
         serde_json::from_slice(
             &to_bytes(response.into_body(), 1024 * 1024)
@@ -213,6 +242,7 @@ impl Flow {
         )
         .expect("decode HTTP JSON response")
     }
+    /// Completes explicit consent when needed and extracts the issued authorization code.
     async fn code(&self, scopes: &str) -> String {
         let response = self.authorize(scopes, None).await;
         assert_eq!(response.status(), StatusCode::SEE_OTHER);
@@ -223,7 +253,7 @@ impl Flow {
                 .request(
                     Method::POST,
                     "/oauth/authorize/decision",
-                    &[("transaction", &transaction), ("decision", "approve")],
+                    &[("transaction", &transaction), ("decision", APPROVE_CONSENT)],
                     None,
                 )
                 .await;
@@ -237,12 +267,13 @@ impl Flow {
         }
         Self::parameter(&location, "code")
     }
+    /// Exchanges a scenario code with the requested verifier and client credentials.
     async fn exchange(&self, code: &str, verifier: &str, basic: Option<&str>) -> Response {
         self.request(
             Method::POST,
             "/oauth/token",
             &[
-                ("grant_type", "authorization_code"),
+                ("grant_type", GrantType::AuthorizationCode.as_str()),
                 ("client_id", &self.client.id),
                 ("redirect_uri", &self.client.redirect_uris[0]),
                 ("code", code),
@@ -252,12 +283,13 @@ impl Flow {
         )
         .await
     }
+    /// Rotates a scenario refresh token using its registered client credentials.
     async fn refresh(&self, token: &str) -> Response {
         self.request(
             Method::POST,
             "/oauth/token",
             &[
-                ("grant_type", "refresh_token"),
+                ("grant_type", GrantType::RefreshToken.as_str()),
                 ("client_id", &self.client.id),
                 ("refresh_token", token),
             ],
@@ -267,16 +299,19 @@ impl Flow {
     }
 }
 
+/// Checks public-client consent, PKCE, scoped claims and one-use authorization codes.
 #[tokio::test]
 #[ignore = "requires TEST_DATABASE_URL"]
 async fn public_consent_pkce_claim_scoping_and_replay() {
     let flow = Flow::new(false, false).await;
-    let response = flow.authorize("openid", Some("none")).await;
+    let response = flow
+        .authorize(Scope::OpenId.as_str(), Some(Prompt::None.as_str()))
+        .await;
     assert_eq!(
         Flow::parameter(&Flow::location(&response), "error"),
-        "consent_required"
+        OAuthCode::ConsentRequired.as_str()
     );
-    let code = flow.code("openid").await;
+    let code = flow.code(Scope::OpenId.as_str()).await;
     assert_eq!(
         flow.exchange(&code, "wrong", None).await.status(),
         StatusCode::BAD_REQUEST
@@ -291,7 +326,7 @@ async fn public_consent_pkce_claim_scoping_and_replay() {
             tokens["id_token"]
                 .as_str()
                 .expect("token response contains an ID token"),
-            "JWT",
+            TokenType::Id,
             &flow.app.issuer,
         )
         .expect("verify scoped ID token");
@@ -302,21 +337,28 @@ async fn public_consent_pkce_claim_scoping_and_replay() {
         flow.exchange(&code, Flow::verifier(), None).await.status(),
         StatusCode::BAD_REQUEST
     );
-    let response = flow.authorize("openid", Some("none")).await;
+    let response = flow
+        .authorize(Scope::OpenId.as_str(), Some(Prompt::None.as_str()))
+        .await;
     assert!(
         Flow::location(&response)
             .query_pairs()
             .any(|(name, _)| name == "code")
     );
-    let response = flow.authorize("openid email", Some("none")).await;
+    let response = flow
+        .authorize(EMAIL_SCOPES, Some(Prompt::None.as_str()))
+        .await;
     assert_eq!(
         Flow::parameter(&Flow::location(&response), "error"),
-        "consent_required"
+        OAuthCode::ConsentRequired.as_str()
     );
-    let response = flow.authorize("openid", Some("login")).await;
+    let response = flow
+        .authorize(Scope::OpenId.as_str(), Some(Prompt::Login.as_str()))
+        .await;
     assert_eq!(Flow::location(&response).path(), "/login");
 }
 
+/// Checks refresh narrowing, replay revocation, client binding and logout.
 #[tokio::test]
 #[ignore = "requires TEST_DATABASE_URL"]
 #[expect(
@@ -325,7 +367,7 @@ async fn public_consent_pkce_claim_scoping_and_replay() {
 )]
 async fn confidential_refresh_rotation_logout_and_client_binding() {
     let flow = Flow::new(true, true).await;
-    let code = flow.code("openid email offline_access").await;
+    let code = flow.code(EMAIL_REFRESH_SCOPES).await;
     assert_eq!(
         flow.exchange(&code, Flow::verifier(), None).await.status(),
         StatusCode::UNAUTHORIZED
@@ -342,7 +384,7 @@ async fn confidential_refresh_rotation_logout_and_client_binding() {
             tokens["id_token"]
                 .as_str()
                 .expect("token response contains an ID token"),
-            "JWT",
+            TokenType::Id,
             &flow.app.issuer,
         )
         .expect("verify confidential client ID token");
@@ -358,32 +400,35 @@ async fn confidential_refresh_rotation_logout_and_client_binding() {
             Method::POST,
             "/oauth/token",
             &[
-                ("grant_type", "refresh_token"),
+                ("grant_type", GrantType::RefreshToken.as_str()),
                 ("client_id", &flow.client.id),
                 ("refresh_token", old),
-                ("scope", "openid admin"),
+                ("scope", UNGRANTED_SCOPES),
             ],
             flow.basic.as_deref(),
         )
         .await;
     assert_eq!(invalid.status(), StatusCode::BAD_REQUEST);
-    assert_eq!(Flow::json(invalid).await["error"], "invalid_scope");
+    assert_eq!(
+        Flow::json(invalid).await["error"],
+        OAuthCode::InvalidScope.as_str()
+    );
     let response = flow
         .request(
             Method::POST,
             "/oauth/token",
             &[
-                ("grant_type", "refresh_token"),
+                ("grant_type", GrantType::RefreshToken.as_str()),
                 ("client_id", &flow.client.id),
                 ("refresh_token", old),
-                ("scope", "openid"),
+                ("scope", Scope::OpenId.as_str()),
             ],
             flow.basic.as_deref(),
         )
         .await;
     assert_eq!(response.status(), StatusCode::OK);
     let narrowed = Flow::json(response).await;
-    assert_eq!(narrowed["scope"], "openid");
+    assert_eq!(narrowed["scope"], Scope::OpenId.as_str());
     let narrowed_claims = flow
         .app
         .keys
@@ -391,7 +436,7 @@ async fn confidential_refresh_rotation_logout_and_client_binding() {
             narrowed["id_token"]
                 .as_str()
                 .expect("refresh response contains an ID token"),
-            "JWT",
+            TokenType::Id,
             &flow.app.issuer,
         )
         .expect("verify narrowed ID token");
@@ -402,7 +447,7 @@ async fn confidential_refresh_rotation_logout_and_client_binding() {
         .to_owned();
     assert_eq!(flow.refresh(old).await.status(), StatusCode::BAD_REQUEST);
     assert_eq!(flow.refresh(&fresh).await.status(), StatusCode::BAD_REQUEST);
-    let code = flow.code("openid offline_access").await;
+    let code = flow.code(REFRESH_SCOPES).await;
     let response = flow
         .exchange(&code, Flow::verifier(), flow.basic.as_deref())
         .await;
@@ -437,19 +482,28 @@ async fn confidential_refresh_rotation_logout_and_client_binding() {
     );
     assert_eq!(
         Flow::parameter(
-            &Flow::location(&flow.authorize("openid", Some("none")).await),
+            &Flow::location(
+                &flow
+                    .authorize(Scope::OpenId.as_str(), Some(Prompt::None.as_str()))
+                    .await
+            ),
             "error"
         ),
-        "login_required"
+        OAuthCode::LoginRequired.as_str()
     );
 }
 
+/// Checks that policy reductions reject new requests and invalidate outstanding grants,
+/// and that unsafe logout redirects are refused.
 #[tokio::test]
 #[ignore = "requires TEST_DATABASE_URL"]
 async fn policy_reduction_blocks_outstanding_codes_and_refresh() {
     let mut flow = Flow::new(false, true).await;
-    let code = flow.code("openid email").await;
-    flow.client.allowed_scopes = vec!["openid".into(), "offline_access".into()];
+    let code = flow.code(EMAIL_SCOPES).await;
+    flow.client.allowed_scopes = vec![
+        Scope::OpenId.as_str().into(),
+        Scope::OfflineAccess.as_str().into(),
+    ];
     flow.app
         .database
         .oidc()
@@ -460,7 +514,14 @@ async fn policy_reduction_blocks_outstanding_codes_and_refresh() {
         flow.exchange(&code, Flow::verifier(), None).await.status(),
         StatusCode::BAD_REQUEST
     );
-    let code = flow.code("openid offline_access").await;
+    assert_eq!(
+        Flow::parameter(
+            &Flow::location(&flow.authorize(EMAIL_SCOPES, None).await),
+            "error"
+        ),
+        OAuthCode::InvalidScope.as_str()
+    );
+    let code = flow.code(REFRESH_SCOPES).await;
     let tokens = Flow::json(flow.exchange(&code, Flow::verifier(), None).await).await;
     flow.client.allow_refresh = false;
     flow.app
@@ -490,6 +551,7 @@ async fn policy_reduction_blocks_outstanding_codes_and_refresh() {
     assert_eq!(response.status(), StatusCode::BAD_REQUEST);
 }
 
+/// Checks that ID hints bind the account across initial, resumed and consent requests.
 #[tokio::test]
 #[ignore = "requires TEST_DATABASE_URL"]
 async fn authorization_hints_bind_initial_resumed_and_consent_requests() {
@@ -499,13 +561,13 @@ async fn authorization_hints_bind_initial_resumed_and_consent_requests() {
     let hint = flow
         .app
         .keys
-        .sign("JWT", &claims)
+        .sign(TokenType::Id, &claims)
         .expect("sign expired hint");
     let response = flow
         .authorize_with(
             Method::GET,
-            "openid",
-            Some("none"),
+            Scope::OpenId.as_str(),
+            Some(Prompt::None.as_str()),
             &[("id_token_hint", &hint)],
         )
         .await;
@@ -519,19 +581,19 @@ async fn authorization_hints_bind_initial_resumed_and_consent_requests() {
         let hint = flow
             .app
             .keys
-            .sign("JWT", &invalid)
+            .sign(TokenType::Id, &invalid)
             .expect("sign invalid hint");
         let response = flow
             .authorize_with(
                 Method::GET,
-                "openid",
-                Some("none"),
+                Scope::OpenId.as_str(),
+                Some(Prompt::None.as_str()),
                 &[("id_token_hint", &hint)],
             )
             .await;
         assert_eq!(
             Flow::parameter(&Flow::location(&response), "error"),
-            "invalid_request"
+            OAuthCode::InvalidRequest.as_str()
         );
     }
     let mut other = claims;
@@ -539,22 +601,27 @@ async fn authorization_hints_bind_initial_resumed_and_consent_requests() {
     let hint = flow
         .app
         .keys
-        .sign("JWT", &other)
+        .sign(TokenType::Id, &other)
         .expect("sign other account hint");
     let response = flow
         .authorize_with(
             Method::GET,
-            "openid",
-            Some("none"),
+            Scope::OpenId.as_str(),
+            Some(Prompt::None.as_str()),
             &[("id_token_hint", &hint)],
         )
         .await;
     assert_eq!(
         Flow::parameter(&Flow::location(&response), "error"),
-        "login_required"
+        OAuthCode::LoginRequired.as_str()
     );
     let response = flow
-        .authorize_with(Method::GET, "openid", None, &[("id_token_hint", &hint)])
+        .authorize_with(
+            Method::GET,
+            Scope::OpenId.as_str(),
+            None,
+            &[("id_token_hint", &hint)],
+        )
         .await;
     let location = Flow::location(&response);
     assert_eq!(location.path(), "/login");
@@ -572,29 +639,47 @@ async fn authorization_hints_bind_initial_resumed_and_consent_requests() {
         .request(
             Method::POST,
             "/oauth/authorize/decision",
-            &[("transaction", &transaction), ("decision", "approve")],
+            &[("transaction", &transaction), ("decision", APPROVE_CONSENT)],
             None,
         )
         .await;
     assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
 }
 
+/// Checks protocol POST parity and existing OAuth error and challenge formats.
 #[tokio::test]
 #[ignore = "requires TEST_DATABASE_URL"]
 async fn post_protocol_endpoints_and_error_contracts() {
     let flow = Flow::new(false, true).await;
     for (name, value, expected) in [
-        ("id_token_hint", "invalid", "invalid_request"),
-        ("request", "ignored.jwt", "request_not_supported"),
+        (
+            "id_token_hint",
+            "invalid",
+            OAuthCode::InvalidRequest.as_str(),
+        ),
+        (
+            "request",
+            "ignored.jwt",
+            OAuthCode::RequestNotSupported.as_str(),
+        ),
         (
             "request_uri",
             "https://example.com/request.jwt",
-            "request_uri_not_supported",
+            OAuthCode::RequestUriNotSupported.as_str(),
         ),
-        ("response_mode", "form_post", "invalid_request"),
+        (
+            "response_mode",
+            "form_post",
+            OAuthCode::InvalidRequest.as_str(),
+        ),
     ] {
         let response = flow
-            .authorize_with(Method::GET, "openid", Some("none"), &[(name, value)])
+            .authorize_with(
+                Method::GET,
+                Scope::OpenId.as_str(),
+                Some(Prompt::None.as_str()),
+                &[(name, value)],
+            )
             .await;
         assert_eq!(
             Flow::parameter(&Flow::location(&response), "error"),
@@ -609,12 +694,13 @@ async fn post_protocol_endpoints_and_error_contracts() {
     assert_eq!(discovery["request_parameter_supported"], false);
     assert_eq!(discovery["request_uri_parameter_supported"], false);
     let response = flow
-        .authorize_with(Method::POST, "openid profile", None, &[])
+        .authorize_with(Method::POST, PROFILE_SCOPES, None, &[])
         .await;
     let code = Flow::parameter(&Flow::location(&response), "code");
     let tokens = Flow::json(flow.exchange(&code, Flow::verifier(), None).await).await;
     let bearer = format!(
-        "Bearer {}",
+        "{} {}",
+        AuthScheme::Bearer.as_str(),
         tokens["access_token"].as_str().expect("access token")
     );
     let response = flow
@@ -641,18 +727,28 @@ async fn post_protocol_endpoints_and_error_contracts() {
         )
         .await;
     assert_eq!(response.status(), StatusCode::BAD_REQUEST);
-    assert_eq!(Flow::json(response).await["error"], "invalid_request");
+    assert_eq!(
+        Flow::json(response).await["error"],
+        OAuthCode::InvalidRequest.as_str()
+    );
 }
 
+/// Checks redirect equality, PKCE rejection and opaque-token bounds.
 #[test]
 fn exact_redirect_and_pkce_and_refresh_bounds() {
     let registered = ["https://a.example/cb".to_owned()];
     assert!(!registered.contains(&"https://a.example/cb.evil".to_owned()));
-    assert!(validate_pkce_s256("short", "x").is_err());
-    let huge = format!("prt_v1_{}.{:0200}", TokenId::new(), "x");
-    assert!(parse_opaque("prt_v1", &huge).is_err());
+    assert!(piquel_crypto::Pkce::verify("short", "x").is_err());
+    let huge = format!(
+        "{}_{}.{:0200}",
+        TokenPrefix::RefreshToken,
+        TokenId::new(),
+        "x"
+    );
+    assert!(OpaqueToken::parse(TokenPrefix::RefreshToken, &huge).is_err());
 }
 
+/// Checks case-insensitive scheme matching without changing credential bytes.
 #[test]
 fn authentication_schemes_are_case_insensitive() {
     assert_eq!(AuthScheme::Bearer.credentials("bEaReR a.B"), Some("a.B"));
@@ -660,3 +756,79 @@ fn authentication_schemes_are_case_insensitive() {
     assert_eq!(AuthScheme::Basic.credentials("Bearer Zm9v"), None);
     assert_eq!(AuthScheme::Bearer.credentials("Bearer"), None);
 }
+
+/// HMAC label fixture; matching production key derivation in config.
+const REFRESH_KEY_LABEL: &[u8] = b"piquel-refresh-token-digest-v1";
+/// Existing scope strings exercise the HTTP wire contract independently of enum serialization.
+const EMAIL_REFRESH_SCOPES: &str = "openid email offline_access";
+/// Identity and session-bounded refresh requested together.
+const REFRESH_SCOPES: &str = "openid offline_access";
+/// Public-profile scope fixture.
+const PROFILE_SCOPES: &str = "openid profile";
+/// Verified-email scope fixture.
+const EMAIL_SCOPES: &str = "openid email";
+/// Unregistered extension scope fixture used to check rejection.
+const UNGRANTED_SCOPES: &str = "openid admin";
+
+/// Checks deduplication, lexical ordering and preservation of registered extension scopes.
+#[test]
+fn scope_sets_preserve_existing_wire_semantics() {
+    let scopes = Scopes::parse("profile openid profile custom.read email").expect("scope set");
+    assert!(scopes.contains(Scope::OpenId));
+    assert_eq!(scopes.wire(), "custom.read email openid profile");
+    let stored = scopes.clone().into_stored();
+    assert!(scopes.allowed_by(&stored));
+    assert!(!scopes.allowed_by(&[Scope::OpenId.as_str().into()]));
+    assert_eq!(Scopes::from_stored(&stored), scopes);
+    assert!(Scopes::parse(" ").is_err());
+    let too_many = (0..=MAX_SCOPES)
+        .map(|index| format!("scope{index}"))
+        .collect::<Vec<_>>()
+        .join(" ");
+    assert!(Scopes::parse(&too_many).is_err());
+}
+
+/// Checks purpose binding and exact opaque envelope/secret round trips.
+#[test]
+fn opaque_tokens_preserve_envelopes_and_reject_wrong_purpose() {
+    for prefix in TokenPrefix::ALL {
+        let original = OpaqueToken::new(prefix).expect("random token");
+        let encoded = original.encoded();
+        let parsed = OpaqueToken::parse(prefix, &encoded).expect("parse envelope");
+        assert_eq!(parsed.id, original.id);
+        assert_eq!(parsed.secret.as_bytes(), original.secret.as_bytes());
+        assert_eq!(parsed.encoded(), encoded);
+        for other in TokenPrefix::ALL {
+            if prefix != other {
+                assert!(OpaqueToken::parse(other, &encoded).is_err());
+            }
+        }
+    }
+}
+
+/// Checks that protocol failures retain both internal and rejected-input source chains.
+#[test]
+fn oauth_failures_preserve_sources_and_statuses() {
+    use axum::response::IntoResponse;
+    use std::error::Error;
+    let error = OAuthError::from(piquel_repository::DatabaseError::Operation(Box::new(
+        std::io::Error::other("internal diagnostic"),
+    )));
+    assert_eq!(
+        error.source().expect("internal source").to_string(),
+        "internal diagnostic"
+    );
+    assert_eq!(
+        error.into_response().status(),
+        StatusCode::INTERNAL_SERVER_ERROR
+    );
+    let error = OAuthError::rejected(
+        OAuthCode::InvalidGrant,
+        piquel_crypto::CryptoError::SecretLength,
+    );
+    assert!(error.source().is_some());
+    assert_eq!(error.into_response().status(), StatusCode::BAD_REQUEST);
+}
+
+/// Existing approve form spelling, independent of the JSON-only consent enum.
+const APPROVE_CONSENT: &str = "approve";

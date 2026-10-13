@@ -2,44 +2,16 @@ The browser suite uses the real auth binary and PostgreSQL, with Chromium's virt
 WebAuthn authenticator. It does not intercept or mock API responses. Use an isolated
 database: tests create accounts and credentials.
 
-To test the hot-reload setup, use the client configuration below, set
-`AUTH_CLIENTS_FILE`, an isolated `AUTH_DATABASE_URL`, and `AUTH_INVITE_REQUIRED=false`,
-then run `just dev`. In another terminal run
-`E2E_AUTH_URL=http://localhost:3000 E2E_SETTINGS_URL=http://localhost:4173/settings just test-browser`.
-This exercises the same browser suite through Vite's auth proxy. Also run against
-the embedded production build when validating static assets and their CSP.
+Run `just preview` to build and deploy this checkout over HTTPS on piqueld.
+Set `E2E_AUTH_URL` and `E2E_SETTINGS_URL` to the printed auth origin and web
+settings URL, then run `just test-browser`. If signup requires an invitation,
+provide an unused `E2E_INVITATION`. Previews allow registration without one.
 
-Build `apps/piquel-web` with `VITE_AUTH_ORIGIN` set to the auth origin. Serve that
-static build at the service's configured settings URL, then set `E2E_AUTH_URL`
-and `E2E_SETTINGS_URL` and run `just test-browser`. If signup requires an invitation,
-provide an unused `E2E_INVITATION`. Both origins must support secure contexts;
-loopback HTTP requires the service's explicit development mode.
-
-For the verified local configuration, use `AUTH_PUBLIC_BASE_URL=http://localhost:3000`,
-`AUTH_PUBLIC_LISTENER=127.0.0.1:3000`, `AUTH_SETTINGS_URL=http://localhost:4173/settings`,
-and `AUTH_DEVELOPMENT_MODE=true`. Set `AUTH_CLIENTS_FILE` to a JSON file containing:
-
-```json
-[
-  {
-    "id": "browser-e2e",
-    "display_name": "Browser E2E",
-    "redirect_uris": ["http://localhost:4173/callback"],
-    "post_logout_uris": ["http://localhost:4173/settings"],
-    "allowed_scopes": ["openid", "profile", "email"],
-    "allow_refresh": false,
-    "trusted": false
-  }
-]
-```
-
-Omitting `client_secret` makes this a public browser client. Start the auth service
-with this configuration and an isolated `AUTH_DATABASE_URL`, then build and serve
-settings with `VITE_AUTH_ORIGIN=http://localhost:3000`. Run the suite with
-`E2E_AUTH_URL=http://localhost:3000` and
-`E2E_SETTINGS_URL=http://localhost:4173/settings`. The callback URL is a test
-destination: the suite captures its code and returns to settings before exchanging
-it, so no callback implementation is required in the settings frontend.
+The OIDC checks require a public `browser-e2e` client in `AUTH_CLIENTS_FILE`,
+with the preview web origin's `/callback` in `redirect_uris`, `/settings` in
+`post_logout_uris`, `openid`, `profile`, and `email` in `allowed_scopes`, and
+`trusted: false`. Previews do not configure this client by default. The callback
+is a test destination; the suite captures its code before exchanging it.
 
 The suite checks consent, a browser PKCE exchange, an actual
 ID-token signature using JWKS and WebCrypto, userinfo CORS, code replay rejection,

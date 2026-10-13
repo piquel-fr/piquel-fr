@@ -1,25 +1,33 @@
+//! Focused persistence and security contract tests.
+
 use super::*;
 use axum::{Router, body::Body, http::Request as HttpRequest, middleware, routing::any};
+use piquel_crypto::Secret;
 use piquel_repository::DatabaseConfig;
 use std::net::{IpAddr, Ipv6Addr};
 use tower::ServiceExt;
-
+/// An isolated request router and database for HTTP trust-boundary scenarios.
 struct SecurityFixture {
+    /// Dummy routes protected by the production middleware.
     router: Router,
+    /// Unique peer address separates concurrent test budgets.
     peer: SocketAddr,
+    /// Editable policy for proxy and deadline scenarios.
     policy: HttpSecurity,
 }
 impl SecurityFixture {
+    /// Connects an isolated test pool with caller-selected acquisition bounds.
     async fn database(max_connections: u32, timeout: std::time::Duration) -> Database {
-        let url = std::env::var("TEST_DATABASE_URL")
+        let url = piquel_common::Variable::new("TEST_DATABASE_URL")
+            .required()
             .expect("TEST_DATABASE_URL must name an isolated PostgreSQL database");
         Database::connect(
-            DatabaseConfig::new_development(&url, max_connections, timeout)
-                .expect("database configuration"),
+            DatabaseConfig::new(&url, max_connections, timeout).expect("database configuration"),
         )
         .await
         .expect("database")
     }
+    /// Builds a test policy with exact browser origins and unique client buckets.
     async fn new() -> Self {
         let database = Self::database(5, std::time::Duration::from_secs(5)).await;
         database.run_migrations().await.expect("migrations");
@@ -58,6 +66,7 @@ impl SecurityFixture {
             policy,
         }
     }
+    /// Sends a request with selected browser proof and explicit peer metadata.
     async fn request(
         &self,
         method: Method,
@@ -88,6 +97,7 @@ impl SecurityFixture {
             .await
             .expect("response")
     }
+    /// Checks credentialed CORS reflects exactly the approved origin.
     fn exact_cors(response: &Response, origin: &str) {
         assert_eq!(
             response.headers()[header::ACCESS_CONTROL_ALLOW_ORIGIN],
@@ -100,6 +110,7 @@ impl SecurityFixture {
         assert_eq!(response.headers()[header::VARY], "Origin");
         assert_ne!(response.headers()[header::ACCESS_CONTROL_ALLOW_ORIGIN], "*");
     }
+    /// Checks rejected origins receive browser isolation headers and no CORS grant.
     fn denied(response: &Response) {
         assert_eq!(response.status(), StatusCode::FORBIDDEN);
         assert!(
@@ -115,7 +126,7 @@ impl SecurityFixture {
         );
     }
 }
-
+/// Exercises exact-origin, CSRF and public-client boundaries across endpoint families.
 #[tokio::test]
 #[ignore = "requires TEST_DATABASE_URL"]
 #[expect(
@@ -261,7 +272,7 @@ async fn router_enforces_exact_browser_origins_csrf_and_public_client_cors_bound
             .is_none()
     );
 }
-
+/// A session lookup failure stays a server error rather than becoming an anonymous session.
 #[tokio::test]
 #[ignore = "requires TEST_DATABASE_URL"]
 async fn optional_session_preserves_database_failure_instead_of_reporting_signed_out() {
@@ -270,7 +281,7 @@ async fn optional_session_preserves_database_failure_instead_of_reporting_signed
     // remain usable. A well-formed session cookie must trigger a real lookup.
     let transaction = database.begin().await.expect("hold sole connection");
     assert!(
-        optional_session(&database, &HeaderMap::new())
+        Session::optional(&database, &HeaderMap::new())
             .await
             .expect("no cookie requires no lookup")
             .is_none()
@@ -280,20 +291,20 @@ async fn optional_session_preserves_database_failure_instead_of_reporting_signed
         header::COOKIE,
         HeaderValue::from_str(&format!(
             "__Host-piquel_session={}",
-            BrowserSecret::new().encoded()
+            Secret::generate().expect("browser secret").encoded()
         ))
         .expect("cookie"),
     );
-    let error = optional_session(&database, &headers)
+    let error = Session::optional(&database, &headers)
         .await
         .expect_err("database timeout must propagate");
     assert_eq!(
-        error.into_response().status(),
+        ApiError::from(error).into_response().status(),
         StatusCode::INTERNAL_SERVER_ERROR
     );
     transaction.rollback().await.expect("release connection");
 }
-
+/// Only configured ingress peers may supply a single forwarded client address.
 #[tokio::test]
 #[ignore = "requires TEST_DATABASE_URL"]
 async fn forwarded_addresses_require_an_explicit_trusted_peer() {
@@ -324,16 +335,16 @@ async fn forwarded_addresses_require_an_explicit_trusted_peer() {
     );
     assert!(fixture.policy.client_ip(&request).is_err());
 }
-
+/// The request deadline also bounds waiting for a locked rate-limit bucket.
 #[tokio::test]
 #[ignore = "requires TEST_DATABASE_URL"]
 async fn rate_limit_deadline_includes_a_blocked_database_query() {
     let mut fixture = SecurityFixture::new().await;
-    let bucket = Sha256::digest(format!("token:{}", fixture.peer.ip()).as_bytes());
+    let bucket = Digest::sha256(format!("token:{}", fixture.peer.ip()).as_bytes());
     let mut transaction = fixture.policy.database.begin().await.expect("transaction");
     transaction
         .security()
-        .allow_request(&bucket, 120)
+        .allow_request(bucket.as_bytes(), 120)
         .await
         .expect("hold bucket lock");
     fixture.policy.request_timeout = std::time::Duration::from_millis(100);
@@ -359,7 +370,7 @@ async fn rate_limit_deadline_includes_a_blocked_database_query() {
         StatusCode::ACCEPTED
     );
 }
-
+/// Unknown paths do not drain budgets and login remains available after token exhaustion.
 #[tokio::test]
 #[ignore = "requires TEST_DATABASE_URL"]
 async fn rate_budgets_are_separate_and_unknown_paths_do_not_consume_them() {
@@ -373,13 +384,13 @@ async fn rate_budgets_are_separate_and_unknown_paths_do_not_consume_them() {
             StatusCode::NOT_FOUND
         );
     }
-    let bucket = Sha256::digest(format!("token:{}", fixture.peer.ip()).as_bytes());
+    let bucket = Digest::sha256(format!("token:{}", fixture.peer.ip()).as_bytes());
     for _ in 0..120 {
         fixture
             .policy
             .database
             .security()
-            .allow_request(&bucket, 120)
+            .allow_request(bucket.as_bytes(), 120)
             .await
             .expect("fill token budget");
     }
@@ -403,19 +414,19 @@ async fn rate_budgets_are_separate_and_unknown_paths_do_not_consume_them() {
         StatusCode::ACCEPTED
     );
 }
-
+/// A trusted proxy shares each budget by forwarded client IP rather than ingress IP.
 #[tokio::test]
 #[ignore = "requires TEST_DATABASE_URL"]
 async fn trusted_proxy_clients_have_independent_budgets() {
     let mut fixture = SecurityFixture::new().await;
     fixture.policy.trusted_proxies = Arc::new(vec![IpNet::from(fixture.peer.ip())]);
-    let bucket = Sha256::digest(b"token:192.0.2.17");
+    let bucket = Digest::sha256(b"token:192.0.2.17");
     for _ in 0..120 {
         fixture
             .policy
             .database
             .security()
-            .allow_request(&bucket, 120)
+            .allow_request(bucket.as_bytes(), 120)
             .await
             .expect("fill first client's budget");
     }
@@ -446,4 +457,100 @@ async fn trusted_proxy_clients_have_independent_budgets() {
             expected
         );
     }
+}
+
+/// Browser mutation proof and independent request categories follow each endpoint's policy.
+#[test]
+fn endpoint_policy_requires_browser_proof_and_selects_independent_budgets() {
+    for (endpoint, protocol, read_budget, mutation_budget) in [
+        (
+            Endpoint::OAuthBackChannel,
+            true,
+            Some(RateCategory::Token),
+            RateCategory::Token,
+        ),
+        (Endpoint::UserInfo, true, None, RateCategory::Login),
+        (Endpoint::Discovery, false, None, RateCategory::Login),
+        (
+            Endpoint::Authorize,
+            true,
+            Some(RateCategory::Login),
+            RateCategory::Login,
+        ),
+        (Endpoint::Logout, true, None, RateCategory::Login),
+        (Endpoint::Account, false, None, RateCategory::Account),
+        (
+            Endpoint::Login,
+            false,
+            Some(RateCategory::Login),
+            RateCategory::Login,
+        ),
+        (Endpoint::Other, false, None, RateCategory::Login),
+    ] {
+        assert_eq!(endpoint.is_protocol(), protocol);
+        assert_eq!(endpoint.rate_category(false), read_budget);
+        assert_eq!(endpoint.rate_category(true), Some(mutation_budget));
+        let anonymous = HeaderMap::new();
+        let mut browser = HeaderMap::new();
+        browser.insert(
+            header::ORIGIN,
+            HeaderValue::from_static("https://evil.example"),
+        );
+        // Unapproved mutations and cross-origin reads only reach protocol handlers.
+        assert_eq!(
+            HttpSecurity::check_browser(endpoint, &anonymous, false, true).is_ok(),
+            protocol
+        );
+        assert_eq!(
+            HttpSecurity::check_browser(endpoint, &browser, false, false).is_ok(),
+            protocol
+        );
+        assert!(HttpSecurity::check_browser(endpoint, &anonymous, false, false).is_ok());
+        // Approved mutations still need CSRF proof.
+        assert_eq!(
+            HttpSecurity::check_browser(endpoint, &browser, true, true).is_ok(),
+            protocol
+        );
+        browser.insert(CSRF_HEADER, HeaderValue::from_static("1"));
+        assert!(HttpSecurity::check_browser(endpoint, &browser, true, true).is_ok());
+    }
+}
+
+/// Forwarded addresses accept one IP and retain diagnostics for malformed header text or syntax.
+#[test]
+fn forwarded_address_parser_requires_one_address_and_preserves_causes() {
+    let mut headers = HeaderMap::new();
+    assert!(matches!(
+        HttpSecurity::forwarded_ip(&headers),
+        Err(HttpSecurityError::ForwardedAddressCount)
+    ));
+    for valid in ["192.0.2.7", "2001:db8::7"] {
+        headers.insert(
+            FORWARDED_FOR_HEADER,
+            HeaderValue::from_str(valid).expect("header"),
+        );
+        assert_eq!(
+            HttpSecurity::forwarded_ip(&headers).expect("forwarded address"),
+            valid.parse::<IpAddr>().expect("IP")
+        );
+    }
+    headers.append(FORWARDED_FOR_HEADER, HeaderValue::from_static("192.0.2.8"));
+    assert!(matches!(
+        HttpSecurity::forwarded_ip(&headers),
+        Err(HttpSecurityError::ForwardedAddressCount)
+    ));
+    headers.insert(
+        FORWARDED_FOR_HEADER,
+        HeaderValue::from_static("192.0.2.7, 192.0.2.8"),
+    );
+    let error = HttpSecurity::forwarded_ip(&headers).expect_err("one address required");
+    assert!(matches!(error, HttpSecurityError::ForwardedAddress(_)));
+    assert!(std::error::Error::source(&error).is_some());
+    headers.insert(
+        FORWARDED_FOR_HEADER,
+        HeaderValue::from_bytes(&[0xff]).expect("opaque header"),
+    );
+    let error = HttpSecurity::forwarded_ip(&headers).expect_err("HTTP text required");
+    assert!(matches!(error, HttpSecurityError::ForwardedHeader(_)));
+    assert!(std::error::Error::source(&error).is_some());
 }

@@ -1,43 +1,83 @@
 //! Authentication service and its small administrative CLI.
-use anyhow::{Context, Result};
-use auth_service::AuthConfig;
-use base64::{Engine, engine::general_purpose::URL_SAFE_NO_PAD};
+use auth_service::{AuthConfig, PUBLIC_BASE_URL};
 use chrono::{Duration, Utc};
 use clap::{Parser, Subcommand};
-use piquel_repository::Database;
-use rand::{RngCore, rngs::OsRng};
-use sha2::{Digest, Sha256};
-use std::{env, net::SocketAddr, str::FromStr};
+use piquel_common::{ConfigurationError, ErrorChain, Origin};
+use piquel_crypto::{CryptoError, Secret};
+use piquel_repository::{Database, DatabaseConnectionError, DatabaseError};
+use thiserror::Error;
+
+use std::{net::SocketAddr, process::ExitCode, str::FromStr, time::Duration as StdDuration};
+
+/// How often the service starts an expired-state cleanup pass.
+const CLEANUP_INTERVAL: StdDuration = StdDuration::from_mins(5);
+/// Maximum time spent draining one cleanup pass.
+const CLEANUP_BUDGET: StdDuration = StdDuration::from_mins(1);
+/// Pause between full batches, allowing live requests to use the pool.
+const CLEANUP_PAUSE: StdDuration = StdDuration::from_millis(100);
+/// Per-table cleanup batch bound.
+const CLEANUP_BATCH_SIZE: u32 = 1_000;
+/// Largest accepted invitation lifetime number; the suffix chooses hours or days.
+const MAX_INVITE_EXPIRY: i64 = 365;
+/// Shared command-line explanation for invalid invitation lifetimes.
+const INVITE_EXPIRY_HELP: &str = "expiry must be 1 to 365 followed by h or d, e.g. 24h or 7d";
+/// Registration page used by generated signup links.
+const REGISTRATION_PATH: &str = "/register";
+/// Invitation proof sent to the registration page.
+const INVITATION_PARAMETER: &str = "invitation";
+
+/// Failures of startup and administrative commands, preserving their original causes.
+#[derive(Debug, Error)]
+enum CliError {
+    /// A required operator setting is missing or invalid.
+    #[error(transparent)]
+    Configuration(#[from] ConfigurationError),
+    /// The authentication database could not be connected.
+    #[error("could not connect to authentication database")]
+    Connection(#[from] DatabaseConnectionError),
+    /// An administrative database operation failed.
+    #[error("authentication database command failed")]
+    Database(#[from] DatabaseError),
+    /// Random invitation or client-secret generation failed.
+    #[error("could not generate secure command material")]
+    Crypto(#[from] CryptoError),
+    /// HTTP applications or embedded assets could not be initialized.
+    #[error(transparent)]
+    Startup(#[from] auth_service::StartupError),
+    /// The service listener could not be bound or served.
+    #[error("authentication HTTP listener failed")]
+    Listener(#[from] std::io::Error),
+}
 
 /// Piquel authentication service. Runs `serve` when no command is given.
 #[derive(Parser)]
 #[command(after_help = "Database commands use AUTH_DATABASE_URL. See README.md for configuration.")]
 struct Cli {
+    /// Defaults to serving when no administrative command is supplied.
     #[command(subcommand)]
     command: Option<Command>,
 }
 
+/// Top-level commands, separating offline secret generation from database work.
 #[derive(Subcommand)]
 enum Command {
+    /// Commands that need a validated database connection.
     #[command(flatten)]
     Database(DatabaseCommand),
     /// Print a random secret for a confidential OIDC client.
     Secret,
 }
+
 impl Command {
-    async fn run(self) -> Result<()> {
+    /// Executes this command and returns the original startup or operation failure.
+    async fn run(self) -> Result<(), CliError> {
         match self {
             Self::Secret => {
-                println!("{}", URL_SAFE_NO_PAD.encode(Self::random_secret()));
+                println!("{}", Secret::generate()?.encoded());
                 Ok(())
             }
             Self::Database(command) => command.run().await,
         }
-    }
-    fn random_secret() -> [u8; 32] {
-        let mut secret = [0; 32];
-        OsRng.fill_bytes(&mut secret);
-        secret
     }
 }
 
@@ -50,42 +90,40 @@ enum DatabaseCommand {
     Migrate,
     /// Manage signup invitations.
     Invite {
+        /// Invitation action to run.
         #[command(subcommand)]
         command: InviteCommand,
     },
 }
+
 impl DatabaseCommand {
-    async fn run(self) -> Result<()> {
-        let database = Database::connect(AuthConfig::database_from_environment()?)
-            .await
-            .context("connect to authentication database")?;
+    /// Executes this command and returns the original startup or operation failure.
+    async fn run(self) -> Result<(), CliError> {
+        let database = Database::connect(AuthConfig::database_from_environment()?).await?;
         match self {
             Self::Serve => Self::serve(database).await,
-            Self::Migrate => database
-                .run_migrations()
-                .await
-                .context("apply authentication schema"),
+            Self::Migrate => Ok(database.run_migrations().await?),
             Self::Invite {
                 command: InviteCommand::Create { expires_in },
             } => Self::invite(&database, expires_in).await,
         }
     }
+
     /// Prints a single-use signup link; only the secret's digest is stored.
-    async fn invite(database: &Database, expires_in: InviteExpiry) -> Result<()> {
-        let secret = Command::random_secret();
+    async fn invite(database: &Database, expires_in: InviteExpiry) -> Result<(), CliError> {
+        let secret = Secret::generate()?;
         database
             .security()
-            .create_invitation(&Sha256::digest(secret), Utc::now() + expires_in.0)
+            .create_invitation(secret.digest().as_bytes(), Utc::now() + expires_in.0)
             .await?;
-        let mut url = url::Url::parse(
-            &env::var("AUTH_PUBLIC_BASE_URL").context("AUTH_PUBLIC_BASE_URL is required")?,
-        )?
-        .join("register")?;
+        let mut url = PUBLIC_BASE_URL.parse::<Origin>()?.as_url().clone();
+        url.set_path(REGISTRATION_PATH);
         url.query_pairs_mut()
-            .append_pair("invitation", &URL_SAFE_NO_PAD.encode(secret));
+            .append_pair(INVITATION_PARAMETER, &secret.encoded());
         println!("{url}");
         Ok(())
     }
+
     /// Resolves on Ctrl+C or SIGTERM, the signal container runtimes send on stop.
     async fn shutdown_signal() {
         use tokio::signal::unix::{SignalKind, signal};
@@ -112,23 +150,23 @@ impl DatabaseCommand {
         }
         tracing::info!("shutting down");
     }
+
     /// Every five minutes, drains expired auth state in bounded batches until a
     /// pass finds nothing or a one-minute budget runs out. Short pauses between
     /// batches keep cleanup from monopolizing the database under heavy churn.
     async fn purge_expired_state(database: Database) {
-        use std::time::Duration;
-        let mut interval = tokio::time::interval(Duration::from_mins(5));
+        let mut interval = tokio::time::interval(CLEANUP_INTERVAL);
         loop {
             interval.tick().await;
-            let deadline = tokio::time::Instant::now() + Duration::from_mins(1);
+            let deadline = tokio::time::Instant::now() + CLEANUP_BUDGET;
             loop {
-                match database.purge_expired_auth_state(1000).await {
+                match database.purge_expired_auth_state(CLEANUP_BATCH_SIZE).await {
                     Ok(0) => break,
                     Ok(_) if tokio::time::Instant::now() >= deadline => {
                         tracing::warn!("expired authentication state cleanup is falling behind");
                         break;
                     }
-                    Ok(_) => tokio::time::sleep(Duration::from_millis(100)).await,
+                    Ok(_) => tokio::time::sleep(CLEANUP_PAUSE).await,
                     Err(error) => {
                         tracing::error!(?error, "expired authentication state cleanup failed");
                         break;
@@ -137,11 +175,12 @@ impl DatabaseCommand {
             }
         }
     }
-    async fn serve(database: Database) -> Result<()> {
-        auth_service::require_embedded_assets()?;
+
+    /// Builds the configured service, starts cleanup and serves until a shutdown signal.
+    async fn serve(database: Database) -> Result<(), CliError> {
         let config = AuthConfig::from_environment()?;
         let listener = tokio::net::TcpListener::bind(config.public_listener).await?;
-        let router = auth_service::router(&config, database.clone()).await?;
+        let router = config.router(database.clone()).await?;
         let cleanup = tokio::spawn(Self::purge_expired_state(database));
         tracing::info!(address=%config.public_listener,"authentication service listening");
         let result = axum::serve(
@@ -155,6 +194,7 @@ impl DatabaseCommand {
     }
 }
 
+/// Administrative operations on single-use signup invitations.
 #[derive(Subcommand)]
 enum InviteCommand {
     /// Print a single-use signup link.
@@ -169,52 +209,66 @@ enum InviteCommand {
 #[derive(Clone, Copy)]
 struct InviteExpiry(Duration);
 
-#[derive(Debug, thiserror::Error)]
-#[error("expiry must be 1 to 365 followed by h or d, e.g. 24h or 7d")]
-struct InvalidInviteExpiry;
+/// Why an invitation lifetime was rejected by the command-line parser.
+#[derive(Debug, Error)]
+enum InvalidInviteExpiry {
+    /// The unit, value or bounds violate the supported hours/days syntax.
+    #[error("{INVITE_EXPIRY_HELP}")]
+    Format,
+    /// The numeric portion could not be parsed.
+    #[error("{INVITE_EXPIRY_HELP}")]
+    Number(#[from] std::num::ParseIntError),
+}
 
 impl FromStr for InviteExpiry {
     type Err = InvalidInviteExpiry;
+    /// Parses a bounded hours/days lifetime while retaining numeric syntax errors.
     fn from_str(value: &str) -> Result<Self, Self::Err> {
         let (number, unit) = value
             .char_indices()
             .last()
             .map(|(index, _)| value.split_at(index))
-            .ok_or(InvalidInviteExpiry)?;
-        let number = number
-            .parse::<i64>()
-            .ok()
-            .filter(|n| (1..=365).contains(n))
-            .ok_or(InvalidInviteExpiry)?;
+            .ok_or(InvalidInviteExpiry::Format)?;
+        let number = number.parse::<i64>()?;
+        if !(1..=MAX_INVITE_EXPIRY).contains(&number) {
+            return Err(InvalidInviteExpiry::Format);
+        }
         match unit {
             "h" => Ok(Self(Duration::hours(number))),
             "d" => Ok(Self(Duration::days(number))),
-            _ => Err(InvalidInviteExpiry),
+            _ => Err(InvalidInviteExpiry::Format),
         }
     }
 }
 
+/// Initializes tracing, runs the selected command and prints any failure with its causes.
 #[tokio::main]
-async fn main() -> Result<()> {
+async fn main() -> ExitCode {
     piquel_telemetry::init("auth_service=info");
-    Cli::parse()
+    let command = Cli::parse()
         .command
-        .unwrap_or(Command::Database(DatabaseCommand::Serve))
-        .run()
-        .await
+        .unwrap_or(Command::Database(DatabaseCommand::Serve));
+    match command.run().await {
+        Ok(()) => ExitCode::SUCCESS,
+        Err(error) => {
+            eprintln!("error: {}", ErrorChain(&error));
+            ExitCode::FAILURE
+        }
+    }
 }
-
 #[cfg(test)]
 mod tests {
+    //! Invitation lifetime parsing and bounds.
     use super::*;
+    /// Invitation lifetimes accept bounded hours and days and reject malformed input.
     #[test]
     fn invite_expiry_accepts_bounded_hours_and_days() {
         assert_eq!(
-            "24h".parse::<InviteExpiry>().map(|e| e.0).ok(),
+            "24h".parse::<InviteExpiry>().map(|expiry| expiry.0).ok(),
             Some(Duration::hours(24))
         );
         assert_eq!(
-            "365d".parse::<InviteExpiry>().map(|e| e.0).ok(),
+            "365d".parse::<InviteExpiry>().map(|expiry| expiry.0).ok(),
             Some(Duration::days(365))
         );
         for invalid in ["", "d", "0d", "366d", "-1h", "7w", "7 d", "é"] {

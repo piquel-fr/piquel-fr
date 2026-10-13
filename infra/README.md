@@ -99,10 +99,10 @@ Staging and production require invitations:
 piquelctl app exec piquel-fr auth --env production -- auth-service invite create
 ```
 
-No external identity providers or OIDC clients are configured. Auth throttles by
-direct peer IP and does not trust forwarded headers yet, so behind ingress every
-client shares one rate limit; piqueld passes the gateway's range in
-`PIQUELD_INGRESS_PROXIES`.
+No external identity providers or OIDC clients are configured by default. Auth uses
+the gateway ranges in `PIQUELD_INGRESS_PROXIES` to trust ingress's overwritten
+`X-Forwarded-For` address and throttle each client separately.
+`AUTH_TRUSTED_PROXIES` overrides those ranges when set.
 
 ## Web
 

@@ -1,272 +1,168 @@
 //! Browser-bound `WebAuthn` ceremonies and passkey-only management authorization.
-use crate::security::{self, ApiError, BrowserCookie, BrowserSecret};
+use crate::config::PasskeyConfig;
+use crate::federation::FederationApplication;
+use crate::routes;
+use crate::security::{self, ApiError, BrowserCookie};
 use axum::{
     Json, Router,
     extract::{Path, State},
-    http::{HeaderMap, HeaderValue, StatusCode, header},
+    http::{HeaderMap, StatusCode, header},
     response::{IntoResponse, Response},
     routing::{get, patch, post},
 };
-use chrono::{Duration, Utc};
-use piquel_auth_protocol::{AuthenticationMethod, SessionId, TokenId, UserId};
-use piquel_configuration::PublicUrl;
-use piquel_repository::{
-    AppendAuditEvent, Database, DatabaseTransaction, InsertCeremony, InsertPasskey, InsertUser,
-};
-use serde::{Deserialize, Serialize};
-use serde_json::{Value, json};
+use piquel_auth_protocol::{AuthenticationMethod, TokenId, UserId};
+use piquel_crypto::Secret;
+use piquel_repository::{AuditAction, Database, DatabaseTransaction, InsertPasskey, InsertUser};
+use serde_json::Value;
 use std::sync::Arc;
-use url::Url;
 use webauthn_rs::{Webauthn, WebauthnBuilder, prelude::*};
 use webauthn_rs_proto::ResidentKeyRequirement;
 
+/// Typed challenge payloads and browser binding.
+mod ceremonies;
+/// Passkey failures and their browser response mapping.
+mod error;
+/// Validated names and browser request/response bodies.
+mod types;
+
+use ceremonies::{
+    AuthenticationCeremony, Ceremony, DiscoverCeremony, EnrollmentCeremony, LoginCeremony,
+    ManagementCeremony, RegistrationCeremony,
+};
+pub use error::PasskeyConfigError;
+use error::PasskeyError;
+use types::{
+    AuthenticationFinish, DisplayName, EnrollmentStart, LoginStart, ManagementResponse,
+    PasskeyKind, PasskeyName, PasskeyView, RegistrationFinish, RegistrationStart, Rename,
+    SessionView, UserView, Username,
+};
+
+/// Browser passkey ceremonies and management authorization.
 #[derive(Clone)]
 pub struct PasskeyApplication {
+    /// Database holding users, passkeys, ceremonies and sessions.
     database: Database,
+    /// Configured relying party and credential verifier.
     webauthn: Arc<Webauthn>,
+    /// Whether ordinary registration needs an invitation.
     invite_required: bool,
 }
 
-#[derive(Serialize, Deserialize)]
-enum Ceremony {
-    Register {
-        user_id: UserId,
-        username: String,
-        display_name: String,
-        invitation: Option<Vec<u8>>,
-        pending: Option<TokenId>,
-        state: PasskeyRegistration,
-    },
-    Login {
-        user_id: UserId,
-        state: PasskeyAuthentication,
-    },
-    Discover {
-        state: DiscoverableAuthentication,
-    },
-    Manage {
-        user_id: UserId,
-        session_id: SessionId,
-        state: PasskeyAuthentication,
-    },
-    Enroll {
-        user_id: UserId,
-        session_id: SessionId,
-        state: PasskeyRegistration,
-    },
-}
-#[derive(Serialize, Deserialize)]
-struct BoundCeremony {
-    browser_digest: Vec<u8>,
-    ceremony: Ceremony,
-}
-#[derive(Clone, Copy, Default, Deserialize)]
-#[serde(rename_all = "snake_case")]
-enum PasskeyKind {
-    #[default]
-    Standard,
-    GooglePasswordManager,
-}
-#[derive(Default, Deserialize)]
-struct EnrollmentStart {
-    #[serde(default)]
-    passkey_kind: PasskeyKind,
-}
-#[derive(Deserialize)]
-struct RegistrationStart {
-    #[serde(default)]
-    passkey_kind: PasskeyKind,
-    username: String,
-    #[serde(default)]
-    display_name: String,
-    invitation: Option<String>,
-    /// Pending social signup to attach; sent only by the social signup page.
-    pending_signup: Option<TokenId>,
-}
-#[derive(Deserialize)]
-struct RegistrationFinish {
-    ceremony_id: TokenId,
-    credential: RegisterPublicKeyCredential,
-    #[serde(default = "RegistrationFinish::default_name")]
-    friendly_name: String,
-}
-impl RegistrationFinish {
-    fn default_name() -> String {
-        "Passkey".into()
-    }
-}
-#[derive(Deserialize)]
-struct LoginStart {
-    username: Option<String>,
-}
-#[derive(Deserialize)]
-struct AuthenticationFinish {
-    ceremony_id: TokenId,
-    credential: PublicKeyCredential,
-}
-#[derive(Deserialize)]
-struct Rename {
-    friendly_name: String,
-}
+/// Nominal management lifetime, matching the repository's two-minute grant.
+/// The database caps the actual expiry at session expiry and returns that timestamp.
+const MANAGEMENT_EXPIRES_IN: u32 = 120;
+/// Human-readable `WebAuthn` relying party name.
+const RELYING_PARTY_NAME: &str = "Piquel";
+/// Android UA marker is a compatibility gate, never an authentication claim.
+const ANDROID_USER_AGENT: &str = "Android";
+/// Signature counter location in webauthn-rs's serialized passkey representation.
+const CREDENTIAL_COUNTER_POINTER: &str = "/cred/counter";
 
 impl PasskeyApplication {
-    pub fn new(
+    /// Builds `WebAuthn` from the already validated origin and admission policy.
+    pub(crate) fn new(
         database: Database,
-        rp_id: &str,
-        origin: &Url,
-        invite_required: bool,
-    ) -> anyhow::Result<Self> {
-        anyhow::ensure!(
-            origin.host_str() == Some(rp_id)
-                && origin.username().is_empty()
-                && origin.password().is_none()
-                && origin.path() == "/"
-                && origin.query().is_none()
-                && origin.fragment().is_none(),
-            "WebAuthn origin must exactly match its RP ID"
-        );
-        // WebAuthn RP IDs are domains, so loopback IP literals can never work.
-        anyhow::ensure!(
-            origin
-                .host()
-                .is_some_and(|host| matches!(host, url::Host::Domain(_))),
-            "WebAuthn requires a domain name, not an IP address; use localhost in development"
-        );
-        anyhow::ensure!(
-            origin.scheme() == "https"
-                || (origin.scheme() == "http" && PublicUrl::has_loopback_host(origin)),
-            "WebAuthn requires HTTPS outside localhost development"
-        );
+        config: &PasskeyConfig,
+    ) -> Result<Self, PasskeyConfigError> {
+        let origin = config.origin.as_url();
+        let rp_id = config.origin.host();
         Ok(Self {
             database,
             webauthn: Arc::new(
                 WebauthnBuilder::new(rp_id, origin)?
-                    .rp_name("Piquel")
+                    .rp_name(RELYING_PARTY_NAME)
                     .build()?,
             ),
-            invite_required,
+            invite_required: config.invite_required,
         })
     }
 
+    /// Returns every passkey and browser-session endpoint.
     pub(crate) fn routes(self) -> Router {
         Router::new()
-            .route("/webauthn/register/start", post(Self::start_registration))
-            .route("/webauthn/register/finish", post(Self::finish_registration))
-            .route("/webauthn/authenticate/start", post(Self::start_login))
-            .route("/webauthn/authenticate/finish", post(Self::finish_login))
             .route(
-                "/account/passkeys/authorize/start",
+                routes::passkey::REGISTER_START,
+                post(Self::start_registration),
+            )
+            .route(
+                routes::passkey::REGISTER_FINISH,
+                post(Self::finish_registration),
+            )
+            .route(routes::passkey::AUTHENTICATE_START, post(Self::start_login))
+            .route(
+                routes::passkey::AUTHENTICATE_FINISH,
+                post(Self::finish_login),
+            )
+            .route(
+                routes::passkey::AUTHORIZE_START,
                 post(Self::start_management),
             )
             .route(
-                "/account/passkeys/authorize/finish",
+                routes::passkey::AUTHORIZE_FINISH,
                 post(Self::finish_management),
             )
+            .route(routes::passkey::ENROLL_START, post(Self::start_enrollment))
             .route(
-                "/account/passkeys/enroll/start",
-                post(Self::start_enrollment),
-            )
-            .route(
-                "/account/passkeys/enroll/finish",
+                routes::passkey::ENROLL_FINISH,
                 post(Self::finish_enrollment),
             )
-            .route("/account/passkeys", get(Self::list))
+            .route(routes::passkey::LIST, get(Self::list))
             .route(
-                "/account/passkeys/{id}",
+                routes::passkey::ITEM,
                 patch(Self::rename).delete(Self::revoke),
             )
-            .route("/session", get(Self::session_view))
-            .route("/session/logout", post(Self::logout))
+            .route(routes::passkey::SESSION, get(Self::session_view))
+            .route(routes::passkey::SESSION_LOGOUT, post(Self::logout))
             .with_state(self)
     }
 
-    fn valid_name(name: &str) -> bool {
-        !name.trim().is_empty() && name.chars().count() <= 80 && !name.chars().any(char::is_control)
+    /// Stores a verified credential with its validated label inside the account transaction.
+    async fn insert_passkey(
+        tx: &mut DatabaseTransaction<'_>,
+        user_id: UserId,
+        key: Passkey,
+        friendly_name: PasskeyName,
+    ) -> Result<(), PasskeyError> {
+        tx.passkeys()
+            .insert(&InsertPasskey {
+                id: TokenId::new(),
+                credential_id: key.cred_id().as_ref().to_vec(),
+                user_id,
+                credential: serde_json::to_value(key).map_err(PasskeyError::Serialization)?,
+                friendly_name: friendly_name.into(),
+            })
+            .await?;
+        Ok(())
     }
-    fn failed(error: impl std::fmt::Debug) -> ApiError {
-        // Authentication errors are intentionally generic; credential/challenge contents are never logged.
-        tracing::debug!(?error, "WebAuthn request rejected");
-        ApiError::bad_request("Passkey verification failed. Please try again.")
-    }
-    fn response(value: impl Serialize, cookie: Option<String>) -> Result<Response, ApiError> {
-        let mut response = Json(value).into_response();
-        if let Some(cookie) = cookie {
-            response.headers_mut().append(
-                header::SET_COOKIE,
-                HeaderValue::from_str(&cookie).map_err(ApiError::internal)?,
-            );
-        }
-        Ok(response)
-    }
-    fn signed_in(cookie: &str) -> Result<Response, ApiError> {
+
+    /// Commits the account operation, its audit event and the passkey-authenticated session together.
+    async fn complete_sign_in(
+        mut tx: DatabaseTransaction<'_>,
+        user_id: UserId,
+        action: AuditAction,
+    ) -> Result<Response, PasskeyError> {
+        let session =
+            security::Session::create(&mut tx, user_id, AuthenticationMethod::Passkey).await?;
+        tx.audit_events().record(user_id, action, None).await?;
+        tx.commit().await?;
         let mut response = StatusCode::NO_CONTENT.into_response();
-        response.headers_mut().append(
-            header::SET_COOKIE,
-            HeaderValue::from_str(cookie).map_err(ApiError::internal)?,
-        );
+        BrowserCookie::Session.set_on(&mut response, &session)?;
         Ok(response)
     }
 
-    async fn start(
-        &self,
-        headers: &HeaderMap,
-        kind: &str,
-        user_id: Option<UserId>,
-        session_id: Option<SessionId>,
-        ceremony: Ceremony,
-        challenge: impl Serialize,
-    ) -> Result<Response, ApiError> {
-        let browser = BrowserCookie::Ceremony
-            .read(headers)
-            .unwrap_or_else(BrowserSecret::new);
-        let id = TokenId::new();
-        self.database
-            .passkeys()
-            .insert_ceremony(&InsertCeremony {
-                id,
-                user_id,
-                session_id,
-                kind: kind.into(),
-                challenge_digest: browser.digest(),
-                state: serde_json::to_value(BoundCeremony {
-                    browser_digest: browser.digest(),
-                    ceremony,
-                })
-                .map_err(ApiError::internal)?,
-                expires_at: Utc::now() + Duration::minutes(5),
-            })
-            .await?;
-        Self::response(
-            json!({"ceremony_id":id,"public_key":challenge}),
-            Some(BrowserCookie::Ceremony.set(&browser)),
-        )
-    }
-    async fn consume(
-        &self,
-        headers: &HeaderMap,
-        id: TokenId,
-        kind: &str,
-    ) -> Result<Ceremony, ApiError> {
-        let browser = BrowserCookie::Ceremony.read(headers).ok_or_else(|| {
-            ApiError::bad_request("Please restart the passkey flow in this browser.")
-        })?;
-        let record = self.database.passkeys().consume_ceremony(id, kind).await?;
-        let bound: BoundCeremony =
-            serde_json::from_value(record.state).map_err(ApiError::internal)?;
-        if bound.browser_digest != browser.digest() {
-            return Err(Self::failed("browser mismatch"));
-        }
-        Ok(bound.ceremony)
-    }
-    async fn keys(&self, user_id: UserId) -> Result<Vec<Passkey>, ApiError> {
+    /// Decodes the account's active passkeys for `WebAuthn`.
+    async fn keys(&self, user_id: UserId) -> Result<Vec<Passkey>, PasskeyError> {
         self.database
             .passkeys()
             .list_active(user_id)
             .await?
             .into_iter()
-            .map(|v| serde_json::from_value(v.credential).map_err(ApiError::internal))
+            .map(|key| {
+                serde_json::from_value(key.credential).map_err(PasskeyError::StoredCredential)
+            })
             .collect()
     }
+    /// Starts a registration challenge for the chosen passkey kind.
     fn registration(
         &self,
         user_id: UserId,
@@ -275,197 +171,171 @@ impl PasskeyApplication {
         exclusions: Option<Vec<CredentialID>>,
         kind: PasskeyKind,
         headers: &HeaderMap,
-    ) -> Result<(CreationChallengeResponse, PasskeyRegistration), ApiError> {
-        if matches!(kind, PasskeyKind::GooglePasswordManager) {
-            if !headers
-                .get(header::USER_AGENT)
-                .and_then(|v| v.to_str().ok())
-                .is_some_and(|v| v.contains("Android"))
-            {
-                return Err(ApiError::bad_request(
-                    "Choose Google Password Manager only on an Android device with Google services.",
-                ));
+    ) -> Result<(CreationChallengeResponse, PasskeyRegistration), PasskeyError> {
+        match kind {
+            PasskeyKind::GooglePasswordManager => {
+                // The library forbids this workaround outside Android with GMS Core.
+                // UA gating excludes other devices; the explicit UI choice acknowledges
+                // Google services because their presence cannot be proven from a UA.
+                if !headers
+                    .get(header::USER_AGENT)
+                    .and_then(|value| value.to_str().ok())
+                    .is_some_and(|value| value.contains(ANDROID_USER_AGENT))
+                {
+                    return Err(PasskeyError::GooglePasswordManagerRequiresAndroid);
+                }
+                Ok(self
+                    .webauthn
+                    .start_google_passkey_in_google_password_manager_only_registration(
+                        user_id.as_uuid(),
+                        username,
+                        name,
+                        exclusions,
+                    )?)
             }
-            return self
-                .webauthn
-                .start_google_passkey_in_google_password_manager_only_registration(
+            PasskeyKind::Standard => {
+                let (mut challenge, state) = self.webauthn.start_passkey_registration(
                     user_id.as_uuid(),
                     username,
                     name,
                     exclusions,
-                )
-                .map_err(Self::failed);
+                )?;
+                // Prefer account-picker credentials while keeping security keys that need a username.
+                if let Some(selection) = challenge.public_key.authenticator_selection.as_mut() {
+                    selection.resident_key = Some(ResidentKeyRequirement::Preferred);
+                    selection.require_resident_key = false;
+                }
+                Ok((challenge, state))
+            }
         }
-        let (mut challenge, state) = self
-            .webauthn
-            .start_passkey_registration(user_id.as_uuid(), username, name, exclusions)
-            .map_err(Self::failed)?;
-        // Prefer account-picker credentials while retaining security keys that need a username.
-        if let Some(selection) = challenge.public_key.authenticator_selection.as_mut() {
-            selection.resident_key = Some(ResidentKeyRequirement::Preferred);
-            selection.require_resident_key = false;
-        }
-        Ok((challenge, state))
     }
-    async fn audit(
-        tx: &mut DatabaseTransaction<'_>,
-        user_id: UserId,
-        action: &str,
-    ) -> Result<(), ApiError> {
-        tx.audit_events()
-            .append(&AppendAuditEvent {
-                id: TokenId::new(),
-                user_id: Some(user_id),
-                action: action.into(),
-                outcome: "success".into(),
-                request_metadata: json!({}),
-            })
-            .await?;
-        Ok(())
-    }
+
+    /// Checks the latest stored counter under lock before updating the credential.
     async fn update_credential(
         tx: &mut DatabaseTransaction<'_>,
         user_id: UserId,
         result: &AuthenticationResult,
-    ) -> Result<(), ApiError> {
+    ) -> Result<(), PasskeyError> {
         if !result.user_verified() {
-            return Err(Self::failed("user verification required"));
+            return Err(PasskeyError::UserVerificationRequired);
         }
         tx.users()
             .find_active_by_id_for_update(user_id)
             .await?
-            .ok_or_else(ApiError::unauthorized)?;
+            .ok_or(PasskeyError::AccountInactive)?;
         let stored = tx
             .passkeys()
             .find_active_by_credential_id_for_update(result.cred_id().as_ref())
             .await?
-            .filter(|v| v.user_id == user_id)
-            .ok_or_else(ApiError::unauthorized)?;
+            .filter(|stored| stored.user_id == user_id)
+            .ok_or(PasskeyError::AccountInactive)?;
         // The ceremony contains a credential snapshot. Check the latest counter under
         // the row lock as well, so overlapping ceremonies cannot accept a regression.
         let counter = stored
             .credential
-            .pointer("/cred/counter")
+            .pointer(CREDENTIAL_COUNTER_POINTER)
             .and_then(Value::as_u64)
-            .ok_or_else(|| {
-                ApiError::internal(anyhow::anyhow!("stored passkey counter is missing"))
-            })?;
+            .ok_or(PasskeyError::MissingCounter)?;
         if (counter > 0 || result.counter() > 0) && u64::from(result.counter()) <= counter {
-            return Err(Self::failed("credential counter did not increase"));
+            return Err(PasskeyError::CounterRegression);
         }
         let mut credential: Passkey =
-            serde_json::from_value(stored.credential).map_err(ApiError::internal)?;
+            serde_json::from_value(stored.credential).map_err(PasskeyError::StoredCredential)?;
         credential
             .update_credential(result)
-            .ok_or_else(|| Self::failed("credential mismatch"))?;
+            .ok_or(PasskeyError::CredentialMismatch)?;
         if !tx
             .passkeys()
             .update_after_authentication(
                 result.cred_id().as_ref(),
-                &serde_json::to_value(credential).map_err(ApiError::internal)?,
+                &serde_json::to_value(credential).map_err(PasskeyError::Serialization)?,
             )
             .await?
         {
-            return Err(Self::failed("revoked credential"));
-        }
-        Ok(())
-    }
-    async fn lock_management(
-        tx: &mut DatabaseTransaction<'_>,
-        session: &piquel_repository::StoredSession,
-    ) -> Result<(), ApiError> {
-        tx.users()
-            .find_active_by_id_for_update(session.user_id)
-            .await?
-            .ok_or_else(ApiError::unauthorized)?;
-        if !tx.sessions().management_active(session.id).await? {
-            return Err(ApiError::forbidden(
-                "Your management window expired. Confirm with a passkey again.",
-            ));
+            return Err(PasskeyError::CredentialRevoked);
         }
         Ok(())
     }
 
+    /// Locks account and session authorization in the same order as credential changes.
+    async fn lock_management(
+        tx: &mut DatabaseTransaction<'_>,
+        session: &piquel_repository::StoredSession,
+    ) -> Result<(), PasskeyError> {
+        tx.users()
+            .find_active_by_id_for_update(session.user_id)
+            .await?
+            .ok_or(PasskeyError::AccountInactive)?;
+        if !tx.sessions().management_active(session.id).await? {
+            return Err(PasskeyError::ManagementExpired);
+        }
+        Ok(())
+    }
+
+    /// Validates signup and starts the first passkey ceremony without creating an account.
     async fn start_registration(
         State(app): State<Self>,
         headers: HeaderMap,
-        Json(mut input): Json<RegistrationStart>,
+        Json(input): Json<RegistrationStart>,
     ) -> Result<Response, ApiError> {
-        if input.username.len() < 3
-            || input.username.len() > 32
-            || !input
-                .username
-                .bytes()
-                .all(|v| v.is_ascii_lowercase() || v.is_ascii_digit() || v == b'_' || v == b'-')
-        {
-            return Err(ApiError::bad_request(
-                "Use 3–32 lowercase letters, numbers, underscores or hyphens for your username.",
-            ));
-        }
-        if input.display_name.is_empty() {
-            input.display_name = input.username.clone();
-        }
-        if !Self::valid_name(&input.display_name) {
-            return Err(ApiError::bad_request(
-                "Choose a display name of at most 80 characters.",
-            ));
-        }
+        let username = Username::parse(input.username)?;
+        let display_name = DisplayName::parse(if input.display_name.is_empty() {
+            username.as_str().to_owned()
+        } else {
+            input.display_name
+        })?;
         let invitation = input
             .invitation
             .as_deref()
-            .and_then(BrowserSecret::parse)
-            .map(|v| v.digest());
+            .and_then(|value| Secret::parse(value).ok())
+            .map(|secret| secret.digest().as_bytes().to_vec());
         if app.invite_required {
             let digest = invitation
                 .as_ref()
-                .ok_or_else(|| ApiError::forbidden("A valid invitation is required."))?;
+                .ok_or(PasskeyError::InvitationRequired)?;
             if !app.database.security().invitation_active(digest).await? {
-                return Err(ApiError::forbidden(
-                    "This invitation has expired or has already been used.",
-                ));
+                return Err(PasskeyError::InvitationExpired.into());
             }
         }
         let pending = match input.pending_signup {
-            Some(id) => Some(crate::federation::pending_signup(&app.database, &headers, id).await?),
+            Some(id) => {
+                Some(FederationApplication::pending_signup(&app.database, &headers, id).await?)
+            }
             None => None,
         };
         let user_id = UserId::new();
         let (challenge, state) = app.registration(
             user_id,
-            &input.username,
-            &input.display_name,
+            username.as_str(),
+            display_name.as_str(),
             None,
             input.passkey_kind,
             &headers,
         )?;
-        app.start(
-            &headers,
-            "registration",
-            None,
-            None,
-            Ceremony::Register {
-                user_id,
-                username: input.username,
-                display_name: input.display_name,
-                invitation,
-                pending,
-                state,
-            },
-            challenge,
-        )
-        .await
+        Ok(app
+            .start(
+                &headers,
+                Ceremony::Register(RegistrationCeremony {
+                    user_id,
+                    username,
+                    display_name,
+                    invitation,
+                    pending,
+                    state,
+                }),
+                challenge,
+            )
+            .await?)
     }
+
+    /// Verifies the first passkey and atomically creates the account, invitation claim and session.
     async fn finish_registration(
         State(app): State<Self>,
         headers: HeaderMap,
         Json(input): Json<RegistrationFinish>,
     ) -> Result<Response, ApiError> {
-        if !Self::valid_name(&input.friendly_name) {
-            return Err(ApiError::bad_request(
-                "Choose a passkey name of at most 80 characters.",
-            ));
-        }
-        let Ceremony::Register {
+        let friendly_name = PasskeyName::parse(input.friendly_name)?;
+        let RegistrationCeremony {
             user_id,
             username,
             display_name,
@@ -473,15 +343,12 @@ impl PasskeyApplication {
             pending,
             state,
         } = app
-            .consume(&headers, input.ceremony_id, "registration")
-            .await?
-        else {
-            return Err(Self::failed("wrong ceremony"));
-        };
+            .consume::<RegistrationCeremony>(&headers, input.ceremony_id)
+            .await?;
         let key = app
             .webauthn
             .finish_passkey_registration(&input.credential, &state)
-            .map_err(Self::failed)?;
+            .map_err(PasskeyError::Webauthn)?;
         let mut tx = app.database.begin().await?;
         if app.invite_required
             && !tx
@@ -489,114 +356,89 @@ impl PasskeyApplication {
                 .redeem_invitation(
                     invitation
                         .as_deref()
-                        .ok_or_else(|| ApiError::forbidden("Invitation required."))?,
+                        .ok_or(PasskeyError::InvitationMissingAtFinish)?,
                 )
                 .await?
         {
-            return Err(ApiError::forbidden(
-                "This invitation has expired or has already been used.",
-            ));
+            return Err(PasskeyError::InvitationExpired.into());
         }
         tx.users()
             .insert(&InsertUser {
                 id: user_id,
-                username,
-                display_name,
+                username: username.into(),
+                display_name: display_name.into(),
             })
             .await?;
-        tx.passkeys()
-            .insert(&InsertPasskey {
-                id: TokenId::new(),
-                credential_id: key.cred_id().as_ref().to_vec(),
-                user_id,
-                credential: serde_json::to_value(key).map_err(ApiError::internal)?,
-                friendly_name: input.friendly_name,
-            })
-            .await?;
+        Self::insert_passkey(&mut tx, user_id, key, friendly_name).await?;
         if let Some(pending) = pending {
-            crate::federation::attach_signup(&mut tx, pending, &headers, user_id).await?;
+            FederationApplication::attach_signup(&mut tx, pending, &headers, user_id).await?;
         }
-        let cookie =
-            security::create_session(&mut tx, user_id, AuthenticationMethod::Passkey).await?;
-        Self::audit(&mut tx, user_id, "account.create").await?;
-        tx.commit().await?;
-        let mut response = Self::signed_in(&cookie)?;
+        let mut response = Self::complete_sign_in(tx, user_id, AuditAction::AccountCreate).await?;
         // Ordinary registration leaves any unrelated pending social flow untouched.
         if pending.is_some() {
-            response.headers_mut().append(
-                header::SET_COOKIE,
-                HeaderValue::from_str(&BrowserCookie::FederationPending.clear())
-                    .map_err(ApiError::internal)?,
-            );
+            BrowserCookie::FederationPending
+                .clear_on(&mut response)
+                .map_err(PasskeyError::CookieHeader)?;
         }
         Ok(response)
     }
+
+    /// Starts username-based authentication or lets the authenticator identify the account.
     async fn start_login(
         State(app): State<Self>,
         headers: HeaderMap,
         Json(input): Json<LoginStart>,
     ) -> Result<Response, ApiError> {
-        if let Some(username) = input.username.filter(|v| !v.is_empty()) {
-            let user = app
-                .database
-                .users()
-                .find_active_by_username(&username)
-                .await?
-                .ok_or_else(|| Self::failed("account unavailable"))?;
-            let (challenge, state) = app
-                .webauthn
-                .start_passkey_authentication(&app.keys(user.id).await?)
-                .map_err(Self::failed)?;
-            app.start(
-                &headers,
-                "authentication",
-                Some(user.id),
-                None,
-                Ceremony::Login {
+        let (ceremony, challenge) =
+            if let Some(username) = input.username.filter(|username| !username.is_empty()) {
+                let user = app
+                    .database
+                    .users()
+                    .find_active_by_username(&username)
+                    .await?
+                    .ok_or(PasskeyError::AccountUnavailable)?;
+                let (challenge, state) = app
+                    .webauthn
+                    .start_passkey_authentication(&app.keys(user.id).await?)
+                    .map_err(PasskeyError::Webauthn)?;
+                let ceremony = Ceremony::Login(LoginCeremony {
                     user_id: user.id,
                     state,
-                },
-                challenge,
-            )
-            .await
-        } else {
-            let (mut challenge, state) = app
-                .webauthn
-                .start_discoverable_authentication()
-                .map_err(Self::failed)?;
-            challenge.mediation = None;
-            app.start(
-                &headers,
-                "authentication",
-                None,
-                None,
-                Ceremony::Discover { state },
-                challenge,
-            )
-            .await
-        }
+                });
+                (ceremony, challenge)
+            } else {
+                let (mut challenge, state) = app
+                    .webauthn
+                    .start_discoverable_authentication()
+                    .map_err(PasskeyError::Webauthn)?;
+                challenge.mediation = None;
+                (Ceremony::Discover(DiscoverCeremony { state }), challenge)
+            };
+        Ok(app.start(&headers, ceremony, challenge).await?)
     }
+
+    /// Verifies the assertion and latest credential state before creating a signed-in session.
     async fn finish_login(
         State(app): State<Self>,
         headers: HeaderMap,
         Json(input): Json<AuthenticationFinish>,
     ) -> Result<Response, ApiError> {
         let (user_id, result) = match app
-            .consume(&headers, input.ceremony_id, "authentication")
+            .consume::<AuthenticationCeremony>(&headers, input.ceremony_id)
             .await?
         {
-            Ceremony::Login { user_id, state } => (
+            AuthenticationCeremony::Login(LoginCeremony { user_id, state }) => (
                 user_id,
                 app.webauthn
                     .finish_passkey_authentication(&input.credential, &state)
-                    .map_err(Self::failed)?,
+                    .map_err(PasskeyError::Webauthn)?,
             ),
-            Ceremony::Discover { state } => {
+            AuthenticationCeremony::Discover(DiscoverCeremony { state }) => {
                 let (uuid, _) = app
                     .webauthn
                     .identify_discoverable_authentication(&input.credential)
-                    .map_err(Self::failed)?;
-                let user_id = UserId::from_uuid(uuid).map_err(Self::failed)?;
+                    .map_err(PasskeyError::Webauthn)?;
+                let user_id = UserId::from_uuid(uuid).map_err(PasskeyError::InvalidUserHandle)?;
                 let keys: Vec<DiscoverableKey> = app
                     .keys(user_id)
                     .await?
@@ -607,201 +449,198 @@ impl PasskeyApplication {
                     user_id,
                     app.webauthn
                         .finish_discoverable_authentication(&input.credential, state, &keys)
-                        .map_err(Self::failed)?,
+                        .map_err(PasskeyError::Webauthn)?,
                 )
             }
-            _ => return Err(Self::failed("wrong ceremony")),
         };
         let mut tx = app.database.begin().await?;
         Self::update_credential(&mut tx, user_id, &result).await?;
-        let cookie =
-            security::create_session(&mut tx, user_id, AuthenticationMethod::Passkey).await?;
-        Self::audit(&mut tx, user_id, "passkey.login").await?;
-        tx.commit().await?;
-        Self::signed_in(&cookie)
+        Ok(Self::complete_sign_in(tx, user_id, AuditAction::PasskeyLogin).await?)
     }
+
+    /// Starts a passkey proof tied to the current signed-in session.
     async fn start_management(
         State(app): State<Self>,
+        security::Session(session): security::Session,
         headers: HeaderMap,
     ) -> Result<Response, ApiError> {
-        let session = security::session(&app.database, &headers).await?;
         let (challenge, state) = app
             .webauthn
             .start_passkey_authentication(&app.keys(session.user_id).await?)
-            .map_err(Self::failed)?;
-        app.start(
-            &headers,
-            "purpose_authentication",
-            Some(session.user_id),
-            Some(session.id),
-            Ceremony::Manage {
-                user_id: session.user_id,
-                session_id: session.id,
-                state,
-            },
-            challenge,
-        )
-        .await
+            .map_err(PasskeyError::Webauthn)?;
+        Ok(app
+            .start(
+                &headers,
+                Ceremony::Manage(ManagementCeremony {
+                    user_id: session.user_id,
+                    session_id: session.id,
+                    state,
+                }),
+                challenge,
+            )
+            .await?)
     }
+
+    /// Unlocks settings only after a fresh passkey proof for the same session.
     async fn finish_management(
         State(app): State<Self>,
+        security::Session(session): security::Session,
         headers: HeaderMap,
         Json(input): Json<AuthenticationFinish>,
     ) -> Result<Response, ApiError> {
-        let session = security::session(&app.database, &headers).await?;
-        let Ceremony::Manage {
+        let ManagementCeremony {
             user_id,
             session_id,
             state,
         } = app
-            .consume(&headers, input.ceremony_id, "purpose_authentication")
-            .await?
-        else {
-            return Err(Self::failed("wrong ceremony"));
-        };
+            .consume::<ManagementCeremony>(&headers, input.ceremony_id)
+            .await?;
         if session.user_id != user_id || session.id != session_id {
-            return Err(Self::failed("session changed"));
+            return Err(PasskeyError::SessionChanged.into());
         }
         let result = app
             .webauthn
             .finish_passkey_authentication(&input.credential, &state)
-            .map_err(Self::failed)?;
+            .map_err(PasskeyError::Webauthn)?;
         let mut tx = app.database.begin().await?;
         Self::update_credential(&mut tx, user_id, &result).await?;
         let expires = tx.sessions().grant_management(session_id).await?;
-        Self::audit(&mut tx, user_id, "settings.unlock").await?;
+        tx.audit_events()
+            .record(user_id, AuditAction::SettingsUnlock, None)
+            .await?;
         tx.commit().await?;
-        Self::response(
-            json!({"expires_in":120,"management_expires_at":expires}),
-            None,
-        )
+        Ok(Json(ManagementResponse {
+            expires_in: MANAGEMENT_EXPIRES_IN,
+            management_expires_at: expires,
+        })
+        .into_response())
     }
+
+    /// Starts another passkey registration, excluding the account's current credentials.
     async fn start_enrollment(
         State(app): State<Self>,
+        security::ManagementSession(session): security::ManagementSession,
         headers: HeaderMap,
         input: Option<Json<EnrollmentStart>>,
     ) -> Result<Response, ApiError> {
-        let session = security::management(&app.database, &headers).await?;
         let user = app
             .database
             .users()
             .find_by_id(session.user_id)
             .await?
-            .ok_or_else(ApiError::unauthorized)?;
+            .ok_or(PasskeyError::AccountInactive)?;
         let exclusions = app
             .keys(user.id)
             .await?
             .iter()
-            .map(|v| v.cred_id().clone())
+            .map(|key| key.cred_id().clone())
             .collect();
         let (challenge, state) = app.registration(
             user.id,
             &user.username,
             &user.display_name,
             Some(exclusions),
-            input.map(|Json(v)| v.passkey_kind).unwrap_or_default(),
+            input
+                .map(|Json(input)| input.passkey_kind)
+                .unwrap_or_default(),
             &headers,
         )?;
-        app.start(
-            &headers,
-            "enrollment",
-            Some(user.id),
-            Some(session.id),
-            Ceremony::Enroll {
-                user_id: user.id,
-                session_id: session.id,
-                state,
-            },
-            challenge,
-        )
-        .await
+        Ok(app
+            .start(
+                &headers,
+                Ceremony::Enroll(EnrollmentCeremony {
+                    user_id: user.id,
+                    session_id: session.id,
+                    state,
+                }),
+                challenge,
+            )
+            .await?)
     }
+
+    /// Adds a verified credential while rechecking settings authorization under lock.
     async fn finish_enrollment(
         State(app): State<Self>,
+        security::ManagementSession(session): security::ManagementSession,
         headers: HeaderMap,
         Json(input): Json<RegistrationFinish>,
     ) -> Result<StatusCode, ApiError> {
-        if !Self::valid_name(&input.friendly_name) {
-            return Err(ApiError::bad_request(
-                "Choose a passkey name of at most 80 characters.",
-            ));
-        }
-        let session = security::management(&app.database, &headers).await?;
-        let Ceremony::Enroll {
+        let friendly_name = PasskeyName::parse(input.friendly_name)?;
+
+        let EnrollmentCeremony {
             user_id,
             session_id,
             state,
         } = app
-            .consume(&headers, input.ceremony_id, "enrollment")
-            .await?
-        else {
-            return Err(Self::failed("wrong ceremony"));
-        };
+            .consume::<EnrollmentCeremony>(&headers, input.ceremony_id)
+            .await?;
         if user_id != session.user_id || session_id != session.id {
-            return Err(Self::failed("session changed"));
+            return Err(PasskeyError::SessionChanged.into());
         }
         let key = app
             .webauthn
             .finish_passkey_registration(&input.credential, &state)
-            .map_err(Self::failed)?;
+            .map_err(PasskeyError::Webauthn)?;
         let mut tx = app.database.begin().await?;
         Self::lock_management(&mut tx, &session).await?;
-        tx.passkeys()
-            .insert(&InsertPasskey {
-                id: TokenId::new(),
-                credential_id: key.cred_id().as_ref().to_vec(),
-                user_id,
-                credential: serde_json::to_value(key).map_err(ApiError::internal)?,
-                friendly_name: input.friendly_name,
-            })
+        Self::insert_passkey(&mut tx, user_id, key, friendly_name).await?;
+        tx.audit_events()
+            .record(user_id, AuditAction::PasskeyAdd, None)
             .await?;
-        Self::audit(&mut tx, user_id, "passkey.add").await?;
         tx.commit().await?;
         Ok(StatusCode::NO_CONTENT)
     }
-    async fn list(State(app): State<Self>, headers: HeaderMap) -> Result<Json<Value>, ApiError> {
-        let session = security::session(&app.database, &headers).await?;
-        Ok(Json(json!(
+
+    /// Lists public labels and identifiers of the account's active passkeys.
+    async fn list(
+        State(app): State<Self>,
+        security::Session(session): security::Session,
+    ) -> Result<Json<Vec<PasskeyView>>, ApiError> {
+        Ok(Json(
             app.database
                 .passkeys()
                 .list_active(session.user_id)
                 .await?
                 .into_iter()
-                .map(|v| json!({"id":v.id,"friendly_name":v.friendly_name}))
-                .collect::<Vec<_>>()
-        )))
+                .map(|key| PasskeyView {
+                    id: key.id,
+                    friendly_name: key.friendly_name,
+                })
+                .collect(),
+        ))
     }
+
+    /// Changes a credential label within a live, locked management window.
     async fn rename(
         State(app): State<Self>,
-        headers: HeaderMap,
+        security::ManagementSession(session): security::ManagementSession,
         Path(id): Path<TokenId>,
         Json(input): Json<Rename>,
     ) -> Result<StatusCode, ApiError> {
-        if !Self::valid_name(&input.friendly_name) {
-            return Err(ApiError::bad_request(
-                "Choose a passkey name of at most 80 characters.",
-            ));
-        }
-        let session = security::management(&app.database, &headers).await?;
+        let friendly_name = PasskeyName::parse(input.friendly_name)?;
+
         let mut tx = app.database.begin().await?;
         Self::lock_management(&mut tx, &session).await?;
         if !tx
             .passkeys()
-            .rename(id, session.user_id, &input.friendly_name)
+            .rename(id, session.user_id, friendly_name.as_str())
             .await?
         {
-            return Err(ApiError::bad_request("Passkey not found."));
+            return Err(PasskeyError::PasskeyNotFound.into());
         }
-        Self::audit(&mut tx, session.user_id, "passkey.rename").await?;
+        tx.audit_events()
+            .record(session.user_id, AuditAction::PasskeyRename, None)
+            .await?;
         tx.commit().await?;
         Ok(StatusCode::NO_CONTENT)
     }
+
+    /// Removes a passkey while retaining another and revoking the account's other sessions.
     async fn revoke(
         State(app): State<Self>,
-        headers: HeaderMap,
+        security::ManagementSession(session): security::ManagementSession,
         Path(id): Path<TokenId>,
     ) -> Result<StatusCode, ApiError> {
-        let session = security::management(&app.database, &headers).await?;
         let mut tx = app.database.begin().await?;
         Self::lock_management(&mut tx, &session).await?;
         if !tx
@@ -809,42 +648,65 @@ impl PasskeyApplication {
             .revoke_if_not_last(id, session.user_id)
             .await?
         {
-            return Err(ApiError::bad_request(
-                "Keep at least one passkey on your account.",
-            ));
+            return Err(PasskeyError::LastPasskey.into());
         }
         tx.sessions()
             .revoke_other(session.user_id, session.id)
             .await?;
-        Self::audit(&mut tx, session.user_id, "passkey.remove").await?;
+        tx.audit_events()
+            .record(session.user_id, AuditAction::PasskeyRemove, None)
+            .await?;
         tx.commit().await?;
         Ok(StatusCode::NO_CONTENT)
     }
+
+    /// Returns the current account identity and its authoritative settings authorization expiry.
     async fn session_view(
         State(app): State<Self>,
-        headers: HeaderMap,
-    ) -> Result<Json<Value>, ApiError> {
-        let session = security::session(&app.database, &headers).await?;
+        security::Session(session): security::Session,
+    ) -> Result<Json<SessionView>, ApiError> {
         let user = app
             .database
             .users()
             .find_by_id(session.user_id)
             .await?
-            .ok_or_else(ApiError::unauthorized)?;
+            .ok_or(PasskeyError::AccountInactive)?;
         let expires = app
             .database
             .sessions()
             .management_expiry(session.id)
             .await?;
-        Ok(Json(
-            json!({"user":{"id":user.id,"username":user.username,"display_name":user.display_name},"management_expires_at":expires}),
-        ))
+        Ok(Json(SessionView {
+            user: UserView {
+                id: user.id,
+                username: user.username,
+                display_name: user.display_name,
+            },
+            management_expires_at: expires,
+        }))
     }
-    async fn logout(State(app): State<Self>, headers: HeaderMap) -> Result<Response, ApiError> {
-        if let Some(session) = security::optional_session(&app.database, &headers).await? {
+
+    /// Revokes the current session if present and clears its browser cookie.
+    async fn logout(
+        State(app): State<Self>,
+        security::OptionalSession(session): security::OptionalSession,
+    ) -> Result<Response, ApiError> {
+        if let Some(session) = session {
             app.database.sessions().revoke(session.id).await?;
         }
-        Self::signed_in(&BrowserCookie::Session.clear())
+        let mut response = StatusCode::NO_CONTENT.into_response();
+        BrowserCookie::Session
+            .clear_on(&mut response)
+            .map_err(PasskeyError::CookieHeader)?;
+        Ok(response)
+    }
+}
+
+/// Supplies the shared database boundary to browser-session extractors.
+impl axum::extract::FromRef<PasskeyApplication> for Database {
+    /// Shares persistence with the session extractors without duplicating lookups.
+    fn from_ref(application: &PasskeyApplication) -> Self {
+        application.database.clone()
     }
 }
 

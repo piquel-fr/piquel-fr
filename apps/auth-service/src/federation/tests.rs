@@ -1,43 +1,70 @@
-use super::{identities::PendingIdentity, *};
+//! Federation protocol, browser-binding and transactional identity policy tests.
+
+use super::{
+    providers::{GoogleClaims, GoogleProtocol, IdentityStrategy},
+    *,
+};
 use axum::{
     body::{Body, to_bytes},
-    http::{Method, Request, StatusCode},
+    http::{HeaderValue, Method, Request, StatusCode, header},
     routing::post,
 };
 use jsonwebtoken::{Algorithm, DecodingKey};
+use piquel_common::SecretReference;
+use piquel_crypto::Rs256Key;
+use piquel_crypto::Secret;
 use piquel_repository::{
-    DatabaseConfig, InsertExternalIdentity, InsertPasskey, InsertUser, InsertVerifiedEmail,
+    DatabaseConfig, DatabaseTransaction, InsertExternalIdentity, InsertPasskey, InsertUser,
+    InsertVerifiedEmail,
 };
-use rand::{RngCore, rngs::OsRng};
+use std::collections::HashMap;
 use tower::ServiceExt;
 
+/// Isolated database fixture with replaceable provider endpoints and unique subjects.
 struct TestApp {
+    /// Federation state whose back-channel requests use a local HTTP fixture.
     app: FederationApplication,
+    /// Provider mock server, stopped when the fixture is dropped.
     task: tokio::task::JoinHandle<()>,
+    /// Temporary provider secret deleted with the fixture.
     secret_file: std::path::PathBuf,
+    /// Unique numeric subject returned by this fixture’s provider.
     subject: String,
 }
 impl Drop for TestApp {
+    /// Stops the fixture server and attempts to remove its temporary secret.
     fn drop(&mut self) {
         self.task.abort();
-        let _ = std::fs::remove_file(&self.secret_file);
+        if let Err(error) = std::fs::remove_file(&self.secret_file) {
+            tracing::warn!(%error, "could not remove federation fixture secret");
+        }
     }
 }
 impl TestApp {
+    /// Creates a provider fixture with no verified contact address.
     async fn new() -> Self {
         Self::with_email(None).await
     }
+    /// Creates unique provider evidence with an optional verified primary address.
     async fn with_email(email: Option<&str>) -> Self {
-        let url = std::env::var("TEST_DATABASE_URL")
+        let url = piquel_common::Variable::new("TEST_DATABASE_URL")
+            .required()
             .expect("TEST_DATABASE_URL must name an isolated migrated PostgreSQL database");
         let database = Database::connect(
-            DatabaseConfig::new_development(&url, 5, StdDuration::from_secs(5))
+            DatabaseConfig::new(&url, 5, StdDuration::from_secs(5))
                 .expect("database configuration"),
         )
         .await
         .expect("database");
         database.run_migrations().await.expect("migrations");
-        let subject = OsRng.next_u64().max(1);
+        let subject = u64::from_be_bytes(
+            piquel_crypto::Secret::generate()
+                .expect("random")
+                .as_bytes()[..8]
+                .try_into()
+                .expect("eight bytes"),
+        )
+        .max(1);
         let emails = email.map_or_else(
             || serde_json::json!([]),
             |email| serde_json::json!([{"email":email,"primary":true,"verified":true}]),
@@ -70,21 +97,36 @@ impl TestApp {
         let secret_file =
             std::env::temp_dir().join(format!("piquel-federation-test-{}", TokenId::new()));
         std::fs::write(&secret_file, "test-secret").expect("mock provider secret");
-        let config = ProviderConfiguration {
+        let config = ProviderConfig {
             client_id: "test-client".into(),
             client_secret: SecretReference::parse(&format!("file://{}", secret_file.display()))
                 .expect("secret reference"),
         };
         let mut app = FederationApplication::new(
             database,
-            &Url::parse("https://auth.piquel.fr/").expect("origin"),
-            Some(config),
-            None,
+            &FederationConfig {
+                origin: "https://auth.piquel.fr/"
+                    .parse::<piquel_common::Origin>()
+                    .expect("origin"),
+                settings_url: "https://piquel.fr/settings"
+                    .parse::<piquel_common::PublicUrl>()
+                    .expect("settings"),
+                providers: BTreeMap::from([(Provider::GitHub, config)]),
+            },
         )
         .expect("federation");
-        app.endpoints.github_token = format!("{base}/token");
-        app.endpoints.github_user = format!("{base}/user");
-        app.endpoints.github_emails = format!("{base}/emails");
+        let endpoints = app
+            .endpoints
+            .get_mut(&Provider::GitHub)
+            .expect("GitHub facts");
+        endpoints.token = format!("{base}/token");
+        match &mut endpoints.identity {
+            IdentityStrategy::GitHub { user, emails } => {
+                *user = format!("{base}/user");
+                *emails = format!("{base}/emails");
+            }
+            IdentityStrategy::Google(_) => panic!("GitHub must use OAuth profile fetching"),
+        }
         Self {
             app,
             task,
@@ -92,11 +134,12 @@ impl TestApp {
             subject: subject.to_string(),
         }
     }
+    /// Runs a complete GitHub authorization start and bound callback.
     async fn callback(&self) -> Response {
-        let router = routes(self.app.clone());
+        let router = self.app.clone().routes();
         let response = router
             .clone()
-            .oneshot(request(
+            .oneshot(TestApp::request(
                 Method::POST,
                 "/login/github/start",
                 None,
@@ -111,7 +154,7 @@ impl TestApp {
             .next()
             .expect("pair")
             .to_owned();
-        let body = json(response).await;
+        let body = TestApp::json(response).await;
         let url = Url::parse(body["redirect_url"].as_str().expect("redirect")).expect("url");
         let state = url
             .query_pairs()
@@ -120,7 +163,7 @@ impl TestApp {
             .1
             .into_owned();
         router
-            .oneshot(request(
+            .oneshot(TestApp::request(
                 Method::GET,
                 &format!("/login/github/callback?state={state}&code=mock-code"),
                 Some(&cookie),
@@ -129,6 +172,7 @@ impl TestApp {
             .await
             .expect("callback")
     }
+    /// Creates a unique account with optional verified email and passkey.
     async fn user(&self, email: Option<&str>, with_key: bool) -> UserId {
         let id = UserId::new();
         let mut tx = self.app.database.begin().await.expect("transaction");
@@ -158,6 +202,7 @@ impl TestApp {
         tx.commit().await.expect("commit");
         id
     }
+    /// Adds passkey-presence evidence; ceremony cryptography is covered by passkey tests.
     async fn key(&self, tx: &mut DatabaseTransaction<'_>, user_id: UserId) {
         // Federation only checks key presence; cryptographic ceremony coverage lives in passkey tests.
         tx.passkeys()
@@ -171,17 +216,18 @@ impl TestApp {
             .await
             .expect("key");
     }
+    /// Stores browser-bound evidence optionally targeting an existing account.
     async fn pending(
         &self,
         owner: Option<UserId>,
         email: Option<&str>,
     ) -> (PendingFederation, HeaderMap) {
-        let secret = BrowserSecret::new();
+        let secret = Secret::generate().expect("browser secret");
         let pending = PendingFederation {
             id: TokenId::new(),
-            browser_digest: secret.digest(),
-            provider: "github".into(),
-            issuer: Provider::GitHub.issuer().into(),
+            browser_digest: secret.digest().as_bytes().to_vec(),
+            provider: piquel_auth_protocol::Provider::GitHub,
+            issuer: ProviderEndpoints::new(Provider::GitHub).issuer.into(),
             subject: TokenId::new().to_string(),
             email: email.map(str::to_owned),
             display_name: "New social account".into(),
@@ -201,23 +247,24 @@ impl TestApp {
             header::COOKIE,
             HeaderValue::from_str(&format!(
                 "{}={}",
-                BrowserCookie::FederationPending.name(),
+                BrowserCookie::FederationPending.as_str(),
                 secret.encoded()
             ))
             .expect("cookie"),
         );
         (pending, headers)
     }
+    /// Creates a browser session and optionally grants passkey management access.
     async fn session(&self, user_id: UserId, grant: bool) -> (SessionId, String) {
         let mut tx = self.app.database.begin().await.expect("transaction");
-        let cookie = security::create_session(&mut tx, user_id, AuthenticationMethod::Federation)
+        let cookie = security::Session::create(&mut tx, user_id, AuthenticationMethod::Federation)
             .await
             .expect("session");
-        let raw = cookie.split(';').next().expect("cookie pair").to_owned();
+        let raw = format!("{}={}", BrowserCookie::Session.as_str(), cookie.encoded());
         tx.commit().await.expect("commit");
         let mut headers = HeaderMap::new();
         headers.insert(header::COOKIE, HeaderValue::from_str(&raw).expect("cookie"));
-        let session = security::session(&self.app.database, &headers)
+        let session = security::Session::required(&self.app.database, &headers)
             .await
             .expect("active session");
         if grant {
@@ -230,29 +277,40 @@ impl TestApp {
         }
         (session.id, raw)
     }
-}
-fn request(
-    method: Method,
-    path: &str,
-    cookie: Option<&str>,
-    body: &serde_json::Value,
-) -> Request<Body> {
-    let mut request = Request::builder()
-        .method(method)
-        .uri(path)
-        .header(header::CONTENT_TYPE, "application/json");
-    if let Some(cookie) = cookie {
-        request = request.header(header::COOKIE, cookie);
+    /// Borrows Google's replaceable verification facts from the fixture.
+    fn google_protocol(&self) -> &GoogleProtocol {
+        match &self.app.endpoints[&Provider::Google].identity {
+            IdentityStrategy::Google(protocol) => protocol,
+            IdentityStrategy::GitHub { .. } => panic!("Google must use signed ID tokens"),
+        }
     }
-    request.body(Body::from(body.to_string())).expect("request")
-}
-async fn json(response: Response) -> serde_json::Value {
-    serde_json::from_slice(&to_bytes(response.into_body(), 65536).await.expect("body"))
-        .expect("JSON")
-}
 
+    /// Builds a JSON HTTP request with an optional browser-cookie header.
+    fn request(
+        method: Method,
+        path: &str,
+        cookie: Option<&str>,
+        body: &serde_json::Value,
+    ) -> Request<Body> {
+        let mut request = Request::builder()
+            .method(method)
+            .uri(path)
+            .header(header::CONTENT_TYPE, "application/json");
+        if let Some(cookie) = cookie {
+            request = request.header(header::COOKIE, cookie);
+        }
+        request.body(Body::from(body.to_string())).expect("request")
+    }
+    /// Reads a bounded response body and parses the fixture’s JSON.
+    async fn json(response: Response) -> serde_json::Value {
+        serde_json::from_slice(&to_bytes(response.into_body(), 65536).await.expect("body"))
+            .expect("JSON")
+    }
+}
+/// Rejects unsafe continuations and duplicated pending-browser cookies.
 #[test]
 fn return_destinations_and_browser_bindings_are_strict() {
+    let settings = Url::parse("https://preview.example/settings").expect("settings");
     for path in [
         "//evil.test",
         "/\\evil.test",
@@ -260,19 +318,39 @@ fn return_destinations_and_browser_bindings_are_strict() {
         "/login#x",
         "/\n/evil",
     ] {
-        assert!(validate_return_to(Some(path)).is_err(), "{path}");
+        assert!(ReturnTo::parse(Some(path), &settings).is_err(), "{path}");
     }
     assert_eq!(
-        validate_return_to(Some("/oauth/authorize?request=abc")).expect("local return"),
+        ReturnTo::parse(Some("/oauth/authorize?request=abc"), &settings)
+            .expect("local return")
+            .0,
         "/oauth/authorize?request=abc"
     );
-    let secret = BrowserSecret::new();
+    assert_eq!(
+        ReturnTo::parse(None, &settings).expect("default return").0,
+        DEFAULT_RETURN_TO
+    );
+    assert_eq!(
+        ReturnTo::parse(Some(settings.as_str()), &settings)
+            .expect("settings return")
+            .0,
+        settings.as_str()
+    );
+    assert!(ReturnTo::parse(Some("https://piquel.fr/settings"), &settings).is_err());
+    assert!(
+        ReturnTo::parse(
+            Some(&format!("/{}", "x".repeat(MAX_RETURN_TO_BYTES))),
+            &settings
+        )
+        .is_err()
+    );
+    let secret = Secret::generate().expect("browser secret");
     let mut headers = HeaderMap::new();
     headers.insert(
         header::COOKIE,
         HeaderValue::from_str(&format!(
             "{0}={1}; {0}={1}",
-            BrowserCookie::FederationPending.name(),
+            BrowserCookie::FederationPending.as_str(),
             secret.encoded()
         ))
         .expect("cookie"),
@@ -280,14 +358,15 @@ fn return_destinations_and_browser_bindings_are_strict() {
     assert!(BrowserCookie::FederationPending.read(&headers).is_none());
 }
 
+/// Callbacks require browser state and retain unregistered subjects as pending evidence.
 #[tokio::test]
 #[ignore = "requires TEST_DATABASE_URL"]
 async fn provider_mock_callback_requires_browser_state_and_stays_pending() {
     let test = TestApp::new().await;
-    let router = routes(test.app.clone());
+    let router = test.app.clone().routes();
     let response = router
         .clone()
-        .oneshot(request(
+        .oneshot(TestApp::request(
             Method::POST,
             "/login/github/start",
             None,
@@ -303,7 +382,7 @@ async fn provider_mock_callback_requires_browser_state_and_stays_pending() {
         .next()
         .expect("pair")
         .to_owned();
-    let body = json(response).await;
+    let body = TestApp::json(response).await;
     let url = Url::parse(body["redirect_url"].as_str().expect("redirect")).expect("url");
     let state = url
         .query_pairs()
@@ -314,13 +393,18 @@ async fn provider_mock_callback_requires_browser_state_and_stays_pending() {
     let path = format!("/login/github/callback?code=mock-code&state={state}");
     let response = router
         .clone()
-        .oneshot(request(Method::GET, &path, None, &serde_json::Value::Null))
+        .oneshot(TestApp::request(
+            Method::GET,
+            &path,
+            None,
+            &serde_json::Value::Null,
+        ))
         .await
         .expect("unbound callback");
     assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
     let response = router
         .clone()
-        .oneshot(request(
+        .oneshot(TestApp::request(
             Method::GET,
             &path,
             Some(&cookie),
@@ -341,7 +425,7 @@ async fn provider_mock_callback_requires_browser_state_and_stays_pending() {
                 .starts_with("__Host-piquel_session="))
     );
     let response = router
-        .oneshot(request(
+        .oneshot(TestApp::request(
             Method::GET,
             &path,
             Some(&cookie),
@@ -352,24 +436,25 @@ async fn provider_mock_callback_requires_browser_state_and_stays_pending() {
     assert_eq!(response.status(), StatusCode::BAD_REQUEST);
 }
 
+/// Signup must create its first passkey and cannot claim an existing account’s email.
 #[tokio::test]
 #[ignore = "requires TEST_DATABASE_URL"]
 async fn onboarding_commits_only_with_first_key_and_browser_and_never_claims_existing_email() {
     let test = TestApp::new().await;
     let (pending, headers) = test.pending(None, None).await;
     assert!(
-        pending_signup(&test.app.database, &headers, TokenId::new())
+        FederationApplication::pending_signup(&test.app.database, &headers, TokenId::new())
             .await
             .is_err(),
         "registration must name the displayed pending signup"
     );
-    pending_signup(&test.app.database, &headers, pending.id)
+    FederationApplication::pending_signup(&test.app.database, &headers, pending.id)
         .await
         .expect("pending signup");
     let user = test.user(None, false).await;
     let mut tx = test.app.database.begin().await.expect("tx");
     assert!(
-        attach_signup(&mut tx, pending.id, &headers, user)
+        FederationApplication::attach_signup(&mut tx, pending.id, &headers, user)
             .await
             .is_err()
     );
@@ -377,11 +462,11 @@ async fn onboarding_commits_only_with_first_key_and_browser_and_never_claims_exi
     let mut tx = test.app.database.begin().await.expect("tx");
     test.key(&mut tx, user).await;
     assert!(
-        attach_signup(&mut tx, pending.id, &HeaderMap::new(), user)
+        FederationApplication::attach_signup(&mut tx, pending.id, &HeaderMap::new(), user)
             .await
             .is_err()
     );
-    attach_signup(&mut tx, pending.id, &headers, user)
+    FederationApplication::attach_signup(&mut tx, pending.id, &headers, user)
         .await
         .expect("first key authorizes signup");
     tx.commit().await.expect("commit");
@@ -401,13 +486,14 @@ async fn onboarding_commits_only_with_first_key_and_browser_and_never_claims_exi
     let (pending, headers) = test.pending(None, Some(&email)).await;
     let mut tx = test.app.database.begin().await.expect("tx");
     assert!(
-        attach_signup(&mut tx, pending.id, &headers, user)
+        FederationApplication::attach_signup(&mut tx, pending.id, &headers, user)
             .await
             .is_err()
     );
     tx.rollback().await.expect("rollback");
 }
 
+/// Linking requires the intended account’s grant; unlink frees the subject and preserves email.
 #[tokio::test]
 #[ignore = "requires TEST_DATABASE_URL"]
 async fn linking_requires_target_grant_and_unlink_releases_subject_without_changing_email() {
@@ -423,11 +509,11 @@ async fn linking_requires_target_grant_and_unlink_releases_subject_without_chang
     let pending_cookie = pending_headers[header::COOKIE]
         .to_str()
         .expect("pending cookie");
-    let router = routes(test.app.clone());
+    let router = test.app.clone().routes();
     for cookie in [&other_cookie, &target_cookie] {
         let response = router
             .clone()
-            .oneshot(request(
+            .oneshot(TestApp::request(
                 Method::POST,
                 "/login/social/link",
                 Some(&format!("{cookie}; {pending_cookie}")),
@@ -445,7 +531,7 @@ async fn linking_requires_target_grant_and_unlink_releases_subject_without_chang
         .expect("grant");
     let response = router
         .clone()
-        .oneshot(request(
+        .oneshot(TestApp::request(
             Method::POST,
             "/login/social/link",
             Some(&format!("{target_cookie}; {pending_cookie}")),
@@ -484,7 +570,7 @@ async fn linking_requires_target_grant_and_unlink_releases_subject_without_chang
             .is_none()
     );
     let response = router
-        .oneshot(request(
+        .oneshot(TestApp::request(
             Method::DELETE,
             "/account/social-identities/github",
             Some(&target_cookie),
@@ -505,19 +591,20 @@ async fn linking_requires_target_grant_and_unlink_releases_subject_without_chang
     test.app
         .database
         .federation()
-        .insert_identity(&pending.identity(other))
+        .insert_identity(&FederationApplication::identity(&pending, other))
         .await
         .expect("unlinked subject reusable");
 }
 
+/// Google evidence requires trusted signatures and claims but does not require email.
 #[tokio::test]
 #[ignore = "requires TEST_DATABASE_URL"]
 async fn google_mock_validates_signature_audience_nonce_and_expiry_without_requiring_email() {
     use jsonwebtoken::{EncodingKey, Header, encode};
     let mut test = TestApp::new().await;
-    let rsa = openssl::rsa::Rsa::generate(2048).expect("RSA test key");
+    let rsa = Rs256Key::generate("google-test").expect("RSA test key");
     let encoding =
-        EncodingKey::from_rsa_pem(&rsa.private_key_to_pem().expect("PEM")).expect("JWT key");
+        EncodingKey::from_rsa_pem(&rsa.private_key_pem().expect("PEM")).expect("JWT key");
     let mut header = Header::new(Algorithm::RS256);
     header.kid = Some("google-test".into());
     let mut claims = serde_json::json!({"iss":"https://accounts.google.com","sub":"12345","aud":"test-client","iat":Utc::now().timestamp(),"exp":Utc::now().timestamp()+300,"nonce":"test-nonce"});
@@ -527,13 +614,13 @@ async fn google_mock_validates_signature_audience_nonce_and_expiry_without_requi
     claims["aud"] = serde_json::json!("test-client");
     claims["exp"] = serde_json::json!(Utc::now().timestamp() - 120);
     let expired = encode(&header, &claims, &encoding).expect("signed token");
-    let other_rsa = openssl::rsa::Rsa::generate(2048).expect("untrusted key");
+    let other_rsa = Rs256Key::generate("google-test").expect("untrusted key");
     let other_encoding =
-        EncodingKey::from_rsa_pem(&other_rsa.private_key_to_pem().expect("PEM")).expect("JWT key");
+        EncodingKey::from_rsa_pem(&other_rsa.private_key_pem().expect("PEM")).expect("JWT key");
     claims["exp"] = serde_json::json!(Utc::now().timestamp() + 300);
     let wrong_signature =
         encode(&header, &claims, &other_encoding).expect("untrusted signed token");
-    let keys = serde_json::json!({"keys":[{"kid":"google-test","kty":"RSA","alg":"RS256","use":"sig","n":URL_SAFE_NO_PAD.encode(rsa.n().to_vec()),"e":URL_SAFE_NO_PAD.encode(rsa.e().to_vec())}]});
+    let keys = rsa.jwks();
     let tokens = Arc::new(HashMap::from([
         ("valid".to_owned(), valid),
         ("wrong-audience".to_owned(), wrong_audience),
@@ -562,7 +649,16 @@ async fn google_mock_validates_signature_audience_nonce_and_expiry_without_requi
     let task = tokio::spawn(async move {
         axum::serve(listener, mock).await.expect("mock server");
     });
-    test.app.endpoints.google_keys = format!("{base}/keys");
+    match &mut test
+        .app
+        .endpoints
+        .get_mut(&Provider::Google)
+        .expect("Google facts")
+        .identity
+    {
+        IdentityStrategy::Google(protocol) => protocol.keys = format!("{base}/keys"),
+        IdentityStrategy::GitHub { .. } => panic!("Google must use signed ID tokens"),
+    }
     let response = test
         .app
         .client
@@ -572,7 +668,12 @@ async fn google_mock_validates_signature_audience_nonce_and_expiry_without_requi
         .expect("valid response");
     let identity = test
         .app
-        .google_identity(response, "test-client", "test-nonce")
+        .google_identity(
+            response,
+            "test-client",
+            "test-nonce",
+            test.google_protocol(),
+        )
         .await
         .expect("valid Google identity without email");
     assert_eq!(identity.subject, "12345");
@@ -592,7 +693,7 @@ async fn google_mock_validates_signature_audience_nonce_and_expiry_without_requi
             .expect("mock response");
         assert!(
             test.app
-                .google_identity(response, "test-client", nonce)
+                .google_identity(response, "test-client", nonce, test.google_protocol())
                 .await
                 .is_err(),
             "{kind} {nonce}"
@@ -601,6 +702,7 @@ async fn google_mock_validates_signature_audience_nonce_and_expiry_without_requi
     task.abort();
 }
 
+/// Stable provider subjects take priority over email observations and require an existing passkey.
 #[tokio::test]
 #[ignore = "requires TEST_DATABASE_URL"]
 async fn callback_email_collision_never_links_and_known_subject_never_bootstraps_a_missing_key() {
@@ -615,7 +717,10 @@ async fn callback_email_collision_never_links_and_known_subject_never_bootstraps
         test.app
             .database
             .federation()
-            .find_active(Provider::GitHub.issuer(), &test.subject)
+            .find_active(
+                ProviderEndpoints::new(Provider::GitHub).issuer,
+                &test.subject
+            )
             .await
             .expect("identity")
             .is_none()
@@ -627,8 +732,8 @@ async fn callback_email_collision_never_links_and_known_subject_never_bootstraps
         .insert_identity(&InsertExternalIdentity {
             id: TokenId::new(),
             user_id: subject_owner,
-            provider: "github".into(),
-            issuer: Provider::GitHub.issuer().into(),
+            provider: piquel_auth_protocol::Provider::GitHub,
+            issuer: ProviderEndpoints::new(Provider::GitHub).issuer.into(),
             subject: test.subject.clone(),
             linked_email: Some(original.clone()),
         })
@@ -661,7 +766,7 @@ async fn callback_email_collision_never_links_and_known_subject_never_bootstraps
         header::COOKIE,
         HeaderValue::from_str(session_cookie).expect("cookie"),
     );
-    let session = security::session(&test.app.database, &headers)
+    let session = security::Session::required(&test.app.database, &headers)
         .await
         .expect("social session");
     assert_eq!(
@@ -669,7 +774,7 @@ async fn callback_email_collision_never_links_and_known_subject_never_bootstraps
         "stable subject takes priority over email observation"
     );
     assert!(
-        security::management(&test.app.database, &headers)
+        security::Session::management(&test.app.database, &headers)
             .await
             .is_err()
     );
@@ -697,22 +802,27 @@ async fn callback_email_collision_never_links_and_known_subject_never_bootstraps
     );
 }
 
+/// ID-token verification rejects malformed claims, untrusted issuers and additional audiences.
 #[test]
 fn google_signed_tokens_require_well_typed_trusted_issuer_and_audience() {
     use jsonwebtoken::{EncodingKey, Header, encode};
-    let rsa = openssl::rsa::Rsa::generate(2048).expect("RSA key");
+    let rsa = Rs256Key::generate("google-test").expect("RSA key");
     let encoding =
-        EncodingKey::from_rsa_pem(&rsa.private_key_to_pem().expect("PEM")).expect("encoding key");
+        EncodingKey::from_rsa_pem(&rsa.private_key_pem().expect("PEM")).expect("encoding key");
     let decoding =
-        DecodingKey::from_rsa_pem(&rsa.public_key_to_pem().expect("PEM")).expect("decoding key");
+        DecodingKey::from_rsa_pem(&rsa.public_key_pem().expect("PEM")).expect("decoding key");
     let header = Header::new(Algorithm::RS256);
     let valid = serde_json::json!({"iss":"https://accounts.google.com","aud":"client","sub":"subject","iat":Utc::now().timestamp(),"exp":Utc::now().timestamp()+300,"nonce":"nonce"});
     let verify = |claims: &serde_json::Value| {
-        FederationApplication::verify_google_token(
+        GoogleClaims::verify(
             &encode(&header, claims, &encoding).expect("signed token"),
             &decoding,
             "client",
             "nonce",
+            match &ProviderEndpoints::new(Provider::Google).identity {
+                IdentityStrategy::Google(protocol) => protocol.issuers,
+                IdentityStrategy::GitHub { .. } => panic!("Google must use signed ID tokens"),
+            },
         )
     };
     assert!(verify(&valid).is_ok());
@@ -750,36 +860,47 @@ fn google_signed_tokens_require_well_typed_trusted_issuer_and_audience() {
     assert!(verify(&claims).is_err());
 }
 
+/// Resolved credentials fail at startup with variable context and the original source.
 #[test]
 fn provider_secrets_fail_early_with_context() {
     let path = std::env::temp_dir().join(format!("piquel-provider-secret-{}", TokenId::new()));
-    let config = || ProviderConfiguration {
+    let config = || ProviderConfig {
         client_id: "client".into(),
         client_secret: SecretReference::parse(&format!("file://{}", path.display()))
             .expect("reference"),
     };
     let error = config()
-        .resolve("github")
+        .resolve(Provider::GitHub)
         .err()
         .expect("missing file rejected");
-    assert_eq!(error.to_string(), "invalid github client secret");
+    assert!(
+        error
+            .to_string()
+            .starts_with(ProviderConfig::variables(Provider::GitHub).1.name())
+    );
     assert!(std::error::Error::source(&error).is_some());
     for contents in [b"".as_slice(), &[0xff]] {
         std::fs::write(&path, contents).expect("secret file");
-        assert!(config().resolve("google").is_err());
+        assert!(config().resolve(Provider::Google).is_err());
     }
     std::fs::write(&path, "secret").expect("secret file");
-    let resolved = config().resolve("google").expect("valid secret");
+    let resolved = config().resolve(Provider::Google).expect("valid secret");
     std::fs::remove_file(path).expect("remove secret");
     assert_eq!(resolved.client_secret.expose_secret(), b"secret");
 }
 
+/// Cancelled or failed authorization preserves the original continuation and consumes state.
 #[tokio::test]
 #[ignore = "requires TEST_DATABASE_URL"]
 async fn failed_provider_preserves_stored_continuation_and_consumes_state() {
     let mut test = TestApp::new().await;
-    test.app.endpoints.github_token.push_str("/missing");
-    let router = routes(test.app.clone());
+    test.app
+        .endpoints
+        .get_mut(&Provider::GitHub)
+        .expect("GitHub facts")
+        .token
+        .push_str("/missing");
+    let router = test.app.clone().routes();
     let destination = "/oauth/authorize/resume?transaction=trusted-transaction";
     for (callback_query, error) in [
         ("error=access_denied", "social_cancelled"),
@@ -789,7 +910,7 @@ async fn failed_provider_preserves_stored_continuation_and_consumes_state() {
     ] {
         let response = router
             .clone()
-            .oneshot(request(
+            .oneshot(TestApp::request(
                 Method::POST,
                 "/login/github/start",
                 None,
@@ -804,7 +925,7 @@ async fn failed_provider_preserves_stored_continuation_and_consumes_state() {
             .next()
             .expect("pair")
             .to_owned();
-        let body = json(response).await;
+        let body = TestApp::json(response).await;
         let authorization = Url::parse(body["redirect_url"].as_str().expect("URL")).expect("URL");
         let state = authorization
             .query_pairs()
@@ -817,7 +938,7 @@ async fn failed_provider_preserves_stored_continuation_and_consumes_state() {
         );
         let response = router
             .clone()
-            .oneshot(request(
+            .oneshot(TestApp::request(
                 Method::GET,
                 &path,
                 Some(&cookie),
@@ -832,7 +953,7 @@ async fn failed_provider_preserves_stored_continuation_and_consumes_state() {
                 .expect("location"),
         )
         .expect("target");
-        assert_eq!(target.origin(), test.app.base_url.origin());
+        assert_eq!(target.origin(), test.app.origin.as_url().origin());
         assert!(
             target
                 .query_pairs()
@@ -845,7 +966,7 @@ async fn failed_provider_preserves_stored_continuation_and_consumes_state() {
         );
         let response = router
             .clone()
-            .oneshot(request(
+            .oneshot(TestApp::request(
                 Method::GET,
                 &path,
                 Some(&cookie),

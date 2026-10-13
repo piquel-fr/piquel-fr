@@ -1,71 +1,358 @@
 //! Authorization Code + PKCE, signed tokens, and rotating opaque refresh tokens.
 
+/// Authorization, login continuation and consent.
 mod authorize;
+/// Protocol errors and their HTTP responses.
 mod error;
+/// RP-initiated logout and confirmation.
 mod logout;
-mod signing;
+/// Code exchanges, refresh rotation and identity claims.
 mod token;
 
-use authorize::{
-    authorization_decision, authorization_transaction, authorize, authorize_post, resume,
-};
+use crate::config::OidcConfig;
+use crate::routes;
+use crate::security::CSRF_HEADER;
 use error::{OAuthCode, OAuthError};
-use logout::{logout, logout_start};
-pub use signing::Rs256KeyProvider;
-use token::{revoke, token, userinfo};
+use piquel_crypto::{
+    Digest, Rs256Key, Secret,
+    jwt::{Algorithm, Claim, TokenType},
+};
 
 use axum::{
     Json, Router,
     extract::State,
-    http::{HeaderMap, header},
+    http::{HeaderMap, HeaderValue, header},
     routing::{get, post},
 };
-use base64::{Engine, engine::general_purpose::URL_SAFE_NO_PAD};
-use piquel_auth_protocol::TokenId;
-use piquel_repository::{Database, StoredOidcClient, StoredSession};
-use rand::{RngCore, rngs::OsRng};
-use serde_json::{Value, json};
-use sha2::{Digest, Sha256};
-use std::{collections::BTreeSet, str::FromStr, sync::Arc};
-use url::Url;
+use base64::Engine;
+use piquel_auth_protocol::{
+    TokenId,
+    oauth::{CodeChallengeMethod, GrantType, Prompt, ResponseType, Scope},
+};
+use piquel_repository::{Database, StoredOidcClient};
+use serde::Serialize;
+use serde_json::Value;
+use std::{collections::BTreeSet, sync::Arc};
 
-const OPAQUE_SECRET_BYTES: usize = 32;
+/// Value the auth frontend sends in the CSRF header.
+const CSRF_HEADER_VALUE: &str = "1";
+/// Fetch metadata header naming the request's site relationship.
+const FETCH_SITE_HEADER: &str = "sec-fetch-site";
+/// `Sec-Fetch-Site` value proving the request came from the issuer's own pages.
+const FETCH_SITE_SAME_ORIGIN: &str = "same-origin";
+/// Lifetime of signed access tokens; kept short because they cannot be revoked.
 const ACCESS_TOKEN_SECONDS: i64 = 300;
+/// Maximum byte length of `state` and `nonce`.
+const MAX_STATE_BYTES: usize = 512;
+/// Maximum length of the base64 part of an HTTP Basic header.
+const MAX_BASIC_CREDENTIAL_BYTES: usize = 1024;
+/// Maximum length of an opaque token, checked before parsing it.
+const MAX_OPAQUE_TOKEN_BYTES: usize = 160;
+/// Maximum number of distinct scopes in a request.
+const MAX_SCOPES: usize = 16;
+/// How long a pending authorization waits for login and consent.
+const AUTHORIZATION_REQUEST_MINUTES: i64 = 10;
+/// How long an authorization code stays redeemable.
+const AUTHORIZATION_CODE_MINUTES: i64 = 2;
+/// Subject identifier type: every client sees the same account ID.
+const SUBJECT_TYPE: &str = "public";
 
-/// Runnable OIDC application state.
+/// The OAuth 2.0 and `OpenID` Connect provider.
 #[derive(Clone)]
 pub struct OidcApplication {
+    /// Shared database pool.
     database: Database,
+    /// HTTPS issuer origin, without a trailing slash.
     issuer: String,
-    refresh_key: Arc<[u8; 32]>,
-    keys: Arc<Rs256KeyProvider>,
+    /// HMAC key under which opaque token secrets are stored.
+    refresh_key: Arc<Secret>,
+    /// Persistent key that signs and verifies tokens.
+    keys: Arc<Rs256Key>,
+}
+
+piquel_common::str_enum! {
+    /// HTTP authentication schemes accepted by the protocol endpoints.
+    enum AuthScheme {
+        /// Client ID and secret, used by confidential clients at the token endpoint.
+        Basic = "Basic",
+        /// An access token, used at `UserInfo`.
+        Bearer = "Bearer",
+    }
+}
+
+impl AuthScheme {
+    /// Returns the credentials of an `Authorization` value using this scheme.
+    /// Scheme names are case-insensitive (RFC 9110); credentials are untouched.
+    fn credentials(self, value: &str) -> Option<&str> {
+        let (scheme, credentials) = value.split_once(' ')?;
+        scheme
+            .eq_ignore_ascii_case(self.as_str())
+            .then_some(credentials)
+    }
+}
+
+piquel_common::str_enum! {
+    /// Opaque token prefixes; each binds a token to one purpose so it cannot be used for another.
+    enum TokenPrefix {
+        /// Pending login and consent transaction.
+        AuthorizationRequest = "par_v1",
+        /// One-use authorization code.
+        AuthorizationCode = "pac_v1",
+        /// Rotating refresh token.
+        RefreshToken = "prt_v1",
+    }
+}
+
+/// An opaque token, encoded as `<prefix>_<id>.<secret>`. Only the secret's HMAC is stored.
+struct OpaqueToken {
+    /// Database record the token points to.
+    id: TokenId,
+    /// Random secret proving possession of the token.
+    secret: Secret,
+    /// Purpose of the token.
+    prefix: TokenPrefix,
+}
+
+impl OpaqueToken {
+    /// Creates a token with a fresh ID and random secret.
+    fn new(prefix: TokenPrefix) -> Result<Self, OAuthError> {
+        Ok(Self {
+            id: TokenId::new(),
+            secret: Secret::generate()?,
+            prefix,
+        })
+    }
+
+    /// Parses a token sent by a client, rejecting it as `invalid_grant` if malformed
+    /// or meant for another purpose.
+    fn parse(prefix: TokenPrefix, value: &str) -> Result<Self, OAuthError> {
+        if value.len() > MAX_OPAQUE_TOKEN_BYTES {
+            return Err(OAuthCode::InvalidGrant.into());
+        }
+        let (id, secret) = value
+            .strip_prefix(prefix.as_str())
+            .and_then(|rest| rest.strip_prefix('_'))
+            .and_then(|rest| rest.split_once('.'))
+            .ok_or(OAuthCode::InvalidGrant)?;
+        Ok(Self {
+            id: id
+                .parse()
+                .map_err(|error| OAuthError::rejected(OAuthCode::InvalidGrant, error))?,
+            secret: Secret::parse(secret)
+                .map_err(|error| OAuthError::rejected(OAuthCode::InvalidGrant, error))?,
+            prefix,
+        })
+    }
+
+    /// Encodes the token for the client.
+    fn encoded(&self) -> String {
+        format!("{}_{}.{}", self.prefix, self.id, self.secret.encoded())
+    }
+}
+
+/// A deduplicated scope set, sorted so its wire form is stable. Holds plain strings
+/// because clients may be granted registered extension scopes besides [`Scope`].
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct Scopes(BTreeSet<String>);
+
+impl Scopes {
+    /// Parses a space-separated scope list, which must be non-empty and bounded.
+    fn parse(value: &str) -> Result<Self, OAuthError> {
+        let scopes: BTreeSet<_> = value.split_ascii_whitespace().map(str::to_owned).collect();
+        if scopes.is_empty() || scopes.len() > MAX_SCOPES {
+            return Err(OAuthCode::InvalidScope.into());
+        }
+        Ok(Self(scopes))
+    }
+
+    /// Rebuilds a scope set read from the database.
+    fn from_stored(scopes: &[String]) -> Self {
+        Self(scopes.iter().cloned().collect())
+    }
+
+    /// Whether every scope is in `allowed`.
+    fn allowed_by(&self, allowed: &[String]) -> bool {
+        self.0.iter().all(|scope| allowed.contains(scope))
+    }
+
+    /// Whether the set contains a standard scope.
+    fn contains(&self, scope: Scope) -> bool {
+        self.0.contains(scope.as_str())
+    }
+
+    /// Converts to the list stored in the database.
+    fn into_stored(self) -> Vec<String> {
+        self.0.into_iter().collect()
+    }
+
+    /// Space-separated form used in responses and the access token's `scope` claim.
+    fn wire(&self) -> String {
+        self.0
+            .iter()
+            .map(String::as_str)
+            .collect::<Vec<_>>()
+            .join(" ")
+    }
+}
+
+piquel_common::str_enum! {
+    /// Supported authorization response modes.
+    enum ResponseMode {
+        /// Code and state go in the redirect's query string.
+        Query = "query",
+    }
+}
+
+piquel_common::str_enum! {
+    /// Token endpoint client authentication methods, listed in discovery.
+    enum ClientAuthentication {
+        /// Public client, identified by its ID alone.
+        None = "none",
+        /// Confidential client, authenticated by HTTP Basic.
+        Basic = "client_secret_basic",
+    }
+}
+
+/// Claims listed in discovery, in their published order.
+const SUPPORTED_CLAIMS: [Claim; 9] = [
+    Claim::Subject,
+    Claim::Name,
+    Claim::Username,
+    Claim::Email,
+    Claim::EmailVerified,
+    Claim::ProfileVersion,
+    Claim::AuthTime,
+    Claim::Methods,
+    Claim::Session,
+];
+
+/// `OpenID` Provider metadata. Supported value lists come from the same enums the
+/// endpoints validate against. Fields are sorted, matching the earlier `json!` output.
+#[derive(Serialize)]
+struct Discovery {
+    /// Where clients send authorization requests.
+    authorization_endpoint: String,
+    /// Claims tokens may contain.
+    claims_supported: &'static [Claim],
+    /// Accepted PKCE methods.
+    code_challenge_methods_supported: &'static [CodeChallengeMethod],
+    /// Where clients send RP-initiated logout.
+    end_session_endpoint: String,
+    /// Accepted `grant_type` values.
+    grant_types_supported: &'static [GrantType],
+    /// ID token signing algorithms.
+    id_token_signing_alg_values_supported: &'static [Algorithm],
+    /// Issuer, matching the `iss` claim.
+    issuer: String,
+    /// Where clients fetch the public signing keys.
+    jwks_uri: String,
+    /// Always false: `request` is rejected.
+    request_parameter_supported: bool,
+    /// Always false: `request_uri` is rejected.
+    request_uri_parameter_supported: bool,
+    /// Accepted `response_mode` values.
+    response_modes_supported: &'static [ResponseMode],
+    /// Accepted `response_type` values.
+    response_types_supported: &'static [ResponseType],
+    /// Where clients revoke refresh tokens.
+    revocation_endpoint: String,
+    /// Standard scopes clients may request.
+    scopes_supported: &'static [Scope],
+    /// Subject identifier types.
+    subject_types_supported: &'static [&'static str],
+    /// Where clients redeem codes and refresh tokens.
+    token_endpoint: String,
+    /// Accepted client authentication methods.
+    token_endpoint_auth_methods_supported: &'static [ClientAuthentication],
+    /// Where clients read claims with an access token.
+    userinfo_endpoint: String,
+}
+
+#[cfg(test)]
+mod tests;
+
+/// Lets the shared browser-session extractors reach the database.
+impl axum::extract::FromRef<OidcApplication> for Database {
+    /// Clones the application's database handle.
+    fn from_ref(application: &OidcApplication) -> Self {
+        application.database.clone()
+    }
 }
 
 impl OidcApplication {
-    fn hmac(key: &[u8], value: &[u8]) -> Result<[u8; 32], ()> {
-        let key = openssl::pkey::PKey::hmac(key).map_err(|_| ())?;
-        let mut signer = openssl::sign::Signer::new(openssl::hash::MessageDigest::sha256(), &key)
-            .map_err(|_| ())?;
-        signer.update(value).map_err(|_| ())?;
-        signer
-            .sign_to_vec()
-            .map_err(|_| ())?
-            .try_into()
-            .map_err(|_| ())
+    /// Builds the provider from its validated configuration.
+    pub(crate) fn new(database: Database, config: &OidcConfig) -> Self {
+        Self {
+            database,
+            issuer: config.origin.serialized(),
+            refresh_key: config.refresh_key.clone(),
+            keys: config.keys.clone(),
+        }
     }
 
-    /// Hashes a high-entropy static client secret. Generate at least 32 random bytes.
-    ///
-    /// # Errors
-    /// Returns an error when the encoded secret is too short or too large.
-    pub fn client_secret_hash(secret: &str) -> anyhow::Result<Vec<u8>> {
-        anyhow::ensure!(
-            (43..=512).contains(&secret.len()),
-            "OIDC client secrets must encode at least 32 random bytes"
-        );
-        Ok(Sha256::digest(secret.as_bytes()).to_vec())
+    /// Every discovery, OAuth and OIDC route, with `self` as their state.
+    pub(crate) fn routes(self) -> Router {
+        Router::new()
+            .route(routes::oidc::DISCOVERY, get(Self::discovery))
+            .route(routes::oidc::JWKS, get(Self::jwks))
+            .route(
+                routes::oidc::AUTHORIZE,
+                get(Self::authorize).post(Self::authorize),
+            )
+            .route(routes::oidc::AUTHORIZE_RESUME, get(Self::resume))
+            .route(
+                routes::oidc::AUTHORIZE_TRANSACTION,
+                get(Self::authorization_transaction),
+            )
+            .route(
+                routes::oidc::AUTHORIZE_DECISION,
+                post(Self::authorization_decision),
+            )
+            .route(routes::oidc::TOKEN, post(Self::token))
+            .route(routes::oidc::REVOKE, post(Self::revoke))
+            .route(
+                routes::oidc::USERINFO,
+                get(Self::userinfo).post(Self::userinfo),
+            )
+            .route(
+                routes::oidc::LOGOUT,
+                get(Self::start_logout).post(Self::logout),
+            )
+            .with_state(self)
     }
 
+    /// Serves the `OpenID` Provider metadata.
+    fn discovery(State(app): State<Self>) -> std::future::Ready<Json<Discovery>> {
+        let base = &app.issuer;
+        std::future::ready(Json(Discovery {
+            issuer: base.clone(),
+            authorization_endpoint: format!("{base}{}", routes::oidc::AUTHORIZE),
+            token_endpoint: format!("{base}{}", routes::oidc::TOKEN),
+            revocation_endpoint: format!("{base}{}", routes::oidc::REVOKE),
+            userinfo_endpoint: format!("{base}{}", routes::oidc::USERINFO),
+            jwks_uri: format!("{base}{}", routes::oidc::JWKS),
+            end_session_endpoint: format!("{base}{}", routes::oidc::LOGOUT),
+            response_types_supported: &ResponseType::ALL,
+            grant_types_supported: &GrantType::ALL,
+            code_challenge_methods_supported: &CodeChallengeMethod::ALL,
+            token_endpoint_auth_methods_supported: &ClientAuthentication::ALL,
+            subject_types_supported: &[SUBJECT_TYPE],
+            response_modes_supported: &ResponseMode::ALL,
+            claims_supported: &SUPPORTED_CLAIMS,
+            id_token_signing_alg_values_supported: &Algorithm::ALL,
+            request_uri_parameter_supported: false,
+            request_parameter_supported: false,
+            scopes_supported: &Scope::ALL,
+        }))
+    }
+
+    /// Serves the public signing keys.
+    fn jwks(State(app): State<Self>) -> std::future::Ready<Json<Value>> {
+        std::future::ready(Json(app.keys.jwks()))
+    }
+
+    /// Authenticates the client: public clients by ID alone, confidential clients with
+    /// HTTP Basic. A `client_id` form field, when sent, must name the same client.
     async fn authenticate_client(
         &self,
         headers: &HeaderMap,
@@ -73,27 +360,7 @@ impl OidcApplication {
     ) -> Result<StoredOidcClient, OAuthError> {
         let basic = headers
             .get(header::AUTHORIZATION)
-            .map(|header| {
-                let value = header.to_str().map_err(|_| OAuthCode::InvalidClient)?;
-                let encoded = AuthScheme::Basic
-                    .credentials(value)
-                    .ok_or(OAuthCode::InvalidClient)?;
-                if encoded.len() > 1024 {
-                    return Err(OAuthCode::InvalidClient.into());
-                }
-                let bytes = base64::engine::general_purpose::STANDARD
-                    .decode(encoded)
-                    .map_err(|_| OAuthCode::InvalidClient)?;
-                let decoded = String::from_utf8(bytes).map_err(|_| OAuthCode::InvalidClient)?;
-                let (id, secret) = decoded.split_once(':').ok_or(OAuthCode::InvalidClient)?;
-                let decode = |value: &str| {
-                    url::form_urlencoded::parse(format!("v={value}").as_bytes())
-                        .next()
-                        .map(|(_, v)| v.into_owned())
-                        .ok_or_else(|| OAuthError::from(OAuthCode::InvalidClient))
-                };
-                Ok::<_, OAuthError>((decode(id)?, decode(secret)?))
-            })
+            .map(Self::basic_credentials)
             .transpose()?;
         let id = basic
             .as_ref()
@@ -107,214 +374,68 @@ impl OidcApplication {
             .database
             .oidc()
             .find_client(id)
-            .await
-            .map_err(OAuthError::internal)?
-            .filter(|c| c.enabled)
+            .await?
+            .filter(|client| client.enabled)
             .ok_or(OAuthCode::InvalidClient)?;
-        match (&client.client_secret_hash, basic) {
-            (None, None) => {}
-            (Some(expected), Some((_, secret)))
-                if openssl::memcmp::eq(expected, &Sha256::digest(secret.as_bytes())) => {}
-            _ => return Err(OAuthCode::InvalidClient.into()),
+        let authenticated = match (&client.client_secret_hash, &basic) {
+            // Public clients have no secret and must not send one.
+            (None, None) => true,
+            (Some(expected), Some((_, secret))) => {
+                Digest::constant_time_eq(expected, Digest::sha256(secret.as_bytes()).as_bytes())
+            }
+            (None, Some(_)) | (Some(_), None) => false,
+        };
+        if !authenticated {
+            return Err(OAuthCode::InvalidClient.into());
         }
         Ok(client)
     }
 
-    /// Constructs an OIDC endpoint set with an exact HTTPS issuer.
-    ///
-    /// # Errors
-    ///
-    /// Returns an error for an insecure issuer or insufficient key material.
-    pub(crate) fn new(
-        database: Database,
-        issuer: &Url,
-        secret: &[u8],
-        keys: Arc<Rs256KeyProvider>,
-    ) -> Result<Self, ()> {
-        if issuer.scheme() != "https"
-            || issuer.query().is_some()
-            || issuer.fragment().is_some()
-            || secret.len() < 32
-        {
-            return Err(());
-        }
-        Self::build(database, issuer, secret, keys)
-    }
-
-    /// Constructs an HTTP issuer only for an explicit loopback development configuration.
-    ///
-    /// # Errors
-    ///
-    /// Returns an error unless the issuer is loopback-only and key material is sufficient.
-    pub(crate) fn new_development(
-        database: Database,
-        issuer: &Url,
-        secret: &[u8],
-        keys: Arc<Rs256KeyProvider>,
-    ) -> Result<Self, ()> {
-        let loopback = piquel_configuration::PublicUrl::has_loopback_host(issuer);
-        if !loopback
-            || !matches!(issuer.scheme(), "http" | "https")
-            || issuer.query().is_some()
-            || issuer.fragment().is_some()
-            || secret.len() < 32
-        {
-            return Err(());
-        }
-        Self::build(database, issuer, secret, keys)
-    }
-
-    fn build(
-        database: Database,
-        issuer: &Url,
-        secret: &[u8],
-        keys: Arc<Rs256KeyProvider>,
-    ) -> Result<Self, ()> {
-        let refresh_key = Self::hmac(secret, b"piquel-refresh-token-digest-v1")?;
-        Ok(Self {
-            database,
-            issuer: issuer.as_str().trim_end_matches('/').into(),
-            refresh_key: Arc::new(refresh_key),
-            keys,
-        })
-    }
-}
-
-pub(super) fn routes(application: OidcApplication) -> Router {
-    Router::new()
-        .route("/.well-known/openid-configuration", get(discovery))
-        .route("/.well-known/jwks.json", get(jwks))
-        .route("/oauth/authorize", get(authorize).post(authorize_post))
-        .route("/oauth/authorize/resume", get(resume))
-        .route(
-            "/oauth/authorize/transaction/{transaction}",
-            get(authorization_transaction),
-        )
-        .route("/oauth/authorize/decision", post(authorization_decision))
-        .route("/oauth/token", post(token))
-        .route("/oauth/revoke", post(revoke))
-        .route("/oidc/userinfo", get(userinfo).post(userinfo))
-        .route("/oidc/logout", get(logout_start).post(logout))
-        .with_state(application)
-}
-
-async fn discovery(State(app): State<OidcApplication>) -> Json<Value> {
-    let base = &app.issuer;
-    Json(json!({
-        "issuer":base, "authorization_endpoint":format!("{base}/oauth/authorize"),
-        "token_endpoint":format!("{base}/oauth/token"), "revocation_endpoint":format!("{base}/oauth/revoke"),
-        "userinfo_endpoint":format!("{base}/oidc/userinfo"), "jwks_uri":format!("{base}/.well-known/jwks.json"),
-        "end_session_endpoint":format!("{base}/oidc/logout"), "response_types_supported":["code"],
-        "grant_types_supported":["authorization_code","refresh_token"], "code_challenge_methods_supported":["S256"],
-        "token_endpoint_auth_methods_supported":["none","client_secret_basic"], "subject_types_supported":["public"], "response_modes_supported":["query"], "claims_supported":["sub","name","preferred_username","email","email_verified","profile_version","auth_time","amr","sid"], "id_token_signing_alg_values_supported":["RS256"],
-        "request_uri_parameter_supported":false, "request_parameter_supported":false,
-        "scopes_supported":["openid","profile","email","offline_access"]
-    }))
-}
-async fn jwks(State(app): State<OidcApplication>) -> Json<Value> {
-    Json(app.keys.jwks())
-}
-
-fn require_same_origin(app: &OidcApplication, headers: &HeaderMap) -> Result<(), OAuthError> {
-    let origin_matches = headers
-        .get(header::ORIGIN)
-        .and_then(|value| value.to_str().ok())
-        .is_some_and(|origin| origin == app.issuer);
-    let csrf_header = headers
-        .get("x-piquel-csrf")
-        .and_then(|value| value.to_str().ok())
-        == Some("1");
-    let same_origin_fetch = headers
-        .get("sec-fetch-site")
-        .and_then(|value| value.to_str().ok())
-        == Some("same-origin");
-    (origin_matches && (csrf_header || same_origin_fetch))
-        .then_some(())
-        .ok_or_else(|| OAuthError::from(OAuthCode::InvalidRequest))
-}
-
-async fn browser_session(
-    database: &Database,
-    headers: &HeaderMap,
-) -> Result<Option<StoredSession>, OAuthError> {
-    let Some(secret) = crate::security::BrowserCookie::Session.read(headers) else {
-        return Ok(None);
-    };
-    database
-        .sessions()
-        .find_active_by_browser_secret(&secret.digest())
-        .await
-        .map_err(OAuthError::internal)
-}
-
-/// HTTP authentication schemes accepted by the protocol endpoints.
-#[derive(Clone, Copy)]
-enum AuthScheme {
-    Basic,
-    Bearer,
-}
-impl AuthScheme {
-    /// Returns the credentials of an `Authorization` value using this scheme.
-    /// Scheme names are case-insensitive (RFC 9110); credentials are untouched.
-    fn credentials(self, value: &str) -> Option<&str> {
-        let (scheme, credentials) = value.split_once(' ')?;
-        let expected = match self {
-            Self::Basic => "Basic",
-            Self::Bearer => "Bearer",
+    /// Decodes HTTP Basic client credentials into an ID and secret.
+    fn basic_credentials(value: &HeaderValue) -> Result<(String, String), OAuthError> {
+        let value = value
+            .to_str()
+            .map_err(|error| OAuthError::rejected(OAuthCode::InvalidClient, error))?;
+        let encoded = AuthScheme::Basic
+            .credentials(value)
+            .filter(|encoded| encoded.len() <= MAX_BASIC_CREDENTIAL_BYTES)
+            .ok_or(OAuthCode::InvalidClient)?;
+        let bytes = base64::engine::general_purpose::STANDARD
+            .decode(encoded)
+            .map_err(|error| OAuthError::rejected(OAuthCode::InvalidClient, error))?;
+        let decoded = String::from_utf8(bytes)
+            .map_err(|error| OAuthError::rejected(OAuthCode::InvalidClient, error))?;
+        let (id, secret) = decoded.split_once(':').ok_or(OAuthCode::InvalidClient)?;
+        // RFC 6749 §2.3.1 form-encodes the ID and secret before base64. Decoding a
+        // single `v=<value>` pair always yields that pair.
+        let decode = |value: &str| {
+            url::form_urlencoded::parse(format!("v={value}").as_bytes())
+                .next()
+                .map(|(_, value)| value.into_owned())
+                .unwrap_or_default()
         };
-        scheme.eq_ignore_ascii_case(expected).then_some(credentials)
+        Ok((decode(id), decode(secret)))
+    }
+
+    /// Requires a browser mutation to come from the issuer's own pages: a matching
+    /// `Origin` plus either the CSRF header or `Sec-Fetch-Site: same-origin`.
+    fn require_same_origin(&self, headers: &HeaderMap) -> Result<(), OAuthError> {
+        // Non-text header values cannot match, so they fail like absent ones.
+        let text = |name: &str| headers.get(name).and_then(|value| value.to_str().ok());
+        let origin_matches = text(header::ORIGIN.as_str()) == Some(self.issuer.as_str());
+        let csrf_header = text(CSRF_HEADER) == Some(CSRF_HEADER_VALUE);
+        let same_origin_fetch = text(FETCH_SITE_HEADER) == Some(FETCH_SITE_SAME_ORIGIN);
+        if origin_matches && (csrf_header || same_origin_fetch) {
+            Ok(())
+        } else {
+            Err(OAuthCode::InvalidRequest.into())
+        }
+    }
+    /// HMAC of an opaque token's secret, the only form in which it is stored.
+    fn token_digest(&self, token: &OpaqueToken) -> Result<Digest, OAuthError> {
+        Ok(Digest::hmac(
+            self.refresh_key.as_bytes(),
+            token.secret.as_bytes(),
+        )?)
     }
 }
-
-fn parse_scopes(value: &str) -> Option<BTreeSet<String>> {
-    let scopes: BTreeSet<_> = value.split_ascii_whitespace().map(str::to_owned).collect();
-    (!scopes.is_empty() && scopes.len() <= 16).then_some(scopes)
-}
-fn new_opaque(prefix: &str) -> (String, TokenId, [u8; OPAQUE_SECRET_BYTES]) {
-    let id = TokenId::new();
-    let mut secret = [0; OPAQUE_SECRET_BYTES];
-    OsRng.fill_bytes(&mut secret);
-    (
-        format!("{prefix}_{id}.{}", URL_SAFE_NO_PAD.encode(secret)),
-        id,
-        secret,
-    )
-}
-fn parse_opaque(
-    prefix: &str,
-    value: &str,
-) -> Result<(TokenId, [u8; OPAQUE_SECRET_BYTES]), OAuthError> {
-    if value.len() > 160 {
-        return Err(OAuthCode::InvalidGrant.into());
-    }
-    let rest = value
-        .strip_prefix(&format!("{prefix}_"))
-        .ok_or(OAuthCode::InvalidGrant)?;
-    let (id, secret) = rest.split_once('.').ok_or(OAuthCode::InvalidGrant)?;
-    let id = TokenId::from_str(id).map_err(|_| OAuthCode::InvalidGrant)?;
-    let decoded = URL_SAFE_NO_PAD
-        .decode(secret)
-        .map_err(|_| OAuthCode::InvalidGrant)?;
-    let secret: [u8; OPAQUE_SECRET_BYTES] =
-        decoded.try_into().map_err(|_| OAuthCode::InvalidGrant)?;
-    Ok((id, secret))
-}
-fn keyed_digest(key: &[u8], secret: &[u8]) -> Result<[u8; 32], OAuthError> {
-    OidcApplication::hmac(key, secret).map_err(|()| OAuthError::from(OAuthCode::ServerError))
-}
-
-fn validate_pkce_s256(verifier: &str, challenge: &str) -> Result<(), ()> {
-    if !(43..=128).contains(&verifier.len())
-        || !verifier
-            .bytes()
-            .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'-' | b'.' | b'_' | b'~'))
-    {
-        return Err(());
-    }
-    (URL_SAFE_NO_PAD.encode(Sha256::digest(verifier.as_bytes())) == challenge)
-        .then_some(())
-        .ok_or(())
-}
-
-#[cfg(test)]
-mod tests;

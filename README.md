@@ -24,50 +24,16 @@ is `apps/piquel-web/build`. Node is needed to build the frontends, not to run au
 
 ## Development
 
-Install the build prerequisites above, then the Cargo tools with `just install-tools`.
-Local signing-key generation uses the OpenSSL CLI. The combined development recipe
-uses Bash, `setsid` (util-linux), and `pkill`/`pgrep` (procps) on Linux.
-Create a local PostgreSQL database, then run:
+Develop through the HTTPS preview on piqueld:
 
 ```sh
-just install
-export AUTH_DATABASE_URL='postgres://localhost/piquel_dev'
-just dev
+just preview
 ```
 
-This applies migrations to that database, builds the embedded auth assets once,
-and starts all three processes. Ctrl+C stops them together:
-
-- Auth UI and API: `http://localhost:3000` (Vite proxies API requests to Rust).
-- Rust listener: `127.0.0.1:8080` (use the public auth URL in the browser).
-- Account settings: `http://localhost:4173/settings` (a separate origin, as in production).
-
-Svelte, TypeScript and CSS edits hot reload through Vite, including the shared
-`packages/auth-sdk` SDK. `cargo-watch` rebuilds and restarts the normal
-`auth-service serve` command when Rust sources, migrations or Cargo configuration
-change. Frontend edits do not
-restart Rust. A backend restart briefly interrupts requests; retry after it starts.
-Restart `just dev` after changing environment configuration.
-New database migrations are also applied before each watched backend restart.
-
-The development recipes set these fixed local origins and `AUTH_DEVELOPMENT_MODE=true`
-for their child processes. They retain other auth configuration, including invitations, clients
-and optional social providers. Signup still requires an invitation by default;
-set `AUTH_INVITE_REQUIRED=false` explicitly for an unrestricted local signup flow.
-Provider callbacks must use `http://localhost:3000/login/<provider>/callback`.
-The configured providers must accept that local callback URL.
-
-The same Rust routes, database, origin checks, CSRF checks and Secure/HttpOnly
-cookies run in development. Use **localhost**, not the backend address. Local HTTP
-uses browsers' localhost secure-context exception; production uses HTTPS. Vite's
-development rendering/HMR does not exercise the static build's per-page CSP hashes,
-so use `just build` and serve the resulting executable for final production checks.
-There are no development-only auth handlers or cookie rewrites.
-
-Unless `AUTH_KEY_PROVIDER` is set, `just generate-dev-key` creates a private signing key at
-`.dev/signing-key.pem` and reuses it across restarts, preserving token validity.
-That directory is ignored by Git. The embedded frontend is refreshed at launcher
-startup; it remains the production asset-serving path.
+This snapshots this checkout, including uncommitted changes, builds both frontends
+and auth, applies migrations, and prints the web and auth URLs. The preview has its
+own database and signing key. URLs work from devices on the tailnet. Run the same
+command after changing code. `just preview-delete` removes it.
 
 ## Configuration
 
@@ -79,15 +45,13 @@ startup; it remains the production asset-serving path.
 | `AUTH_SETTINGS_URL` | Exact settings destination; defaults to `https://piquel.fr/settings` |
 | `AUTH_TRUSTED_PROXIES` | Optional comma-separated proxy peer IPs or CIDRs; these peers must overwrite `X-Forwarded-For` with one client IP. Defaults to piqueld's `PIQUELD_INGRESS_PROXIES` |
 | `AUTH_PUBLIC_LISTENER` | Listener address; defaults to `127.0.0.1:8080` |
-| `AUTH_KEY_PROVIDER` | RSA private-key reference, `file:///absolute/path/key.pem` or `env://VARIABLE_NAME` |
+| `AUTH_KEY_PROVIDER` | Required persistent RSA private-key reference, `file:///absolute/path/key.pem` or `env://VARIABLE_NAME` |
 | `AUTH_SIGNING_KEY_ID` | Stable ID for that signing key; defaults to `primary` |
 | `AUTH_CLIENTS_FILE` | JSON client configuration; omitted means no OIDC clients |
 | `AUTH_INVITE_REQUIRED` | `true` by default; set `false` to allow public registration |
 | `AUTH_GITHUB_CLIENT_ID`, `AUTH_GITHUB_CLIENT_SECRET` | Both required to enable GitHub; secret is an env/file reference |
 | `AUTH_GOOGLE_CLIENT_ID`, `AUTH_GOOGLE_CLIENT_SECRET` | Both required to enable Google; secret is an env/file reference |
-| `AUTH_DEVELOPMENT_MODE` | Explicit `true` permits HTTP and PostgreSQL on loopback without `sslmode`, plus ephemeral signing keys |
 
-Development mode also accepts remote PostgreSQL when using `sslmode=verify-full`.
 For a local Unix socket, use `localhost` as the URL host and an absolute socket
 directory in the `host` query parameter, e.g.
 `postgres://USER:PASSWORD@localhost/piquel?host=/run/postgresql&sslmode=disable`.
@@ -147,8 +111,7 @@ Client IDs must be unique. A minimal public web client looks like:
 For a confidential backend client, add `"client_secret": "env://MY_CLIENT_SECRET"`.
 Generate its random secret with `just secret`. Clients use
 `client_secret_basic` when confidential and `none` when public; both require S256
-PKCE. Redirect URLs must match exactly. HTTP loopback callbacks are permitted for
-local testing. Non-loopback callbacks require HTTPS.
+PKCE. Redirect URLs must match exactly and use HTTPS.
 
 Discovery is `/.well-known/openid-configuration`; JWKS is `/.well-known/jwks.json`.
 The endpoints implement code exchange, RS256 ID/access tokens, userinfo, opt-in
@@ -210,7 +173,7 @@ Use individual recipes while iterating:
 | Clippy and ESLint, warnings denied | `just lint` (`just lint-rust` / `just lint-web`) |
 | Unit tests / focused package tests | `just test` / `just test -p auth-service` |
 | Documentation tests | `just doc-test` |
-| Database integration tests | `TEST_DATABASE_URL=postgres://... just test-database` |
+| Database integration tests | `TEST_DATABASE_URL='postgres://USER:PASSWORD@localhost/piquel_test?sslmode=disable' just test-database` |
 | Browser tests against running servers | `just test-browser` |
 | Dependency audits | `just audit` (`deny` + `audit-web`) |
 | SvelteKit generated types/config | `just generate` |
@@ -225,13 +188,10 @@ to the auth binary. `just serve` builds auth assets before compiling and serving
 Cargo generates the embedded asset table and embeds migrations during compilation;
 there is no separate API/schema code-generation step.
 
-`just dev` runs all development servers. For separate terminal logs, run
-`just dev-rust`, `just dev-auth`, and `just dev-settings`; `dev-rust` prepares the
-assets, signing key and database first. Use `just dev-prepare` for preparation alone.
-
 Database integration tests are explicitly marked ignored for the ordinary test
-command. The database command above runs them against a **disposable loopback test
-database** and applies migrations. It must not target a real account database.
+command. The database command above runs them against a disposable database
+and applies migrations. TCP URLs must include `sslmode=disable` or `sslmode=verify-full`;
+a Unix socket is also supported. It must not target a real account database.
 For browser validation against the actual binary, see [tests/browser/README.md](tests/browser/README.md).
 
 Backend tests use signed software-authenticator responses and local GitHub/Google

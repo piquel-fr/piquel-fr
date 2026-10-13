@@ -14,3 +14,5 @@ This frontend never stores access or refresh tokens. It uses the shared
 format, lint and type-check all web code.
 
 For validation with the real Rust service, see `tests/browser/README.md`.
+
+Use `just preview` from the repository root to try changes over HTTPS on piqueld.

@@ -33,12 +33,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "940b3a0ca603d1eade50a4846a2afffd5ef57a9feac2c0e2ec2e14f9ead76000"
 
 [[package]]
-name = "anyhow"
-version = "1.0.103"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2a4385e2e34eb35d6b3efe798b9eb88096925d87726c0798709bf56d9ed84af3"
-
-[[package]]
 name = "asn1-rs"
 version = "0.6.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -129,23 +123,20 @@ checksum = "1505bd5d3d116872e7271a6d4e16d81d0c8570876c8de68093a09ac269d8aac0"
 name = "auth-service"
 version = "0.1.0"
 dependencies = [
- "anyhow",
  "axum",
  "base64 0.22.1",
  "chrono",
  "clap",
  "ipnet",
  "jsonwebtoken",
- "openssl",
  "piquel-auth-protocol",
  "piquel-common",
+ "piquel-crypto",
  "piquel-repository",
  "piquel-telemetry",
- "rand 0.8.7",
  "reqwest",
  "serde",
  "serde_json",
- "sha2",
  "thiserror 2.0.18",
  "tokio",
  "tower",
