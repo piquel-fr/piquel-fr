@@ -1,23 +1,49 @@
 //! Stable, framework-independent values shared by authentication participants.
 
+/// OAuth and OpenID Connect vocabulary shared by clients and the provider.
+pub mod oauth;
+
 use serde::{Deserialize, Serialize};
 use std::{fmt, str::FromStr};
 use thiserror::Error;
 use uuid::Uuid;
 
+piquel_common::str_enum! {
+    /// Supported external authentication providers.
+    pub enum Provider {
+        /// GitHub OAuth identity.
+        GitHub = "github",
+        /// Google `OpenID` Connect identity.
+        Google = "google",
+    }
+}
+
 /// An invalid protocol value received at a trust boundary.
 #[derive(Debug, Clone, Error, PartialEq, Eq)]
 #[error("invalid {kind}")]
 pub struct InvalidValue {
+    /// Protocol type whose contract was violated.
     kind: &'static str,
+    /// UUID parser diagnostic, absent for canonical-format or version failures.
+    #[source]
+    source: Option<uuid::Error>,
 }
 
 impl InvalidValue {
+    /// Reports a semantic contract violation without an underlying parser failure.
     const fn new(kind: &'static str) -> Self {
-        Self { kind }
+        Self { kind, source: None }
+    }
+    /// Retains syntax diagnostics when a protocol identifier cannot be decoded.
+    fn parse(kind: &'static str, source: uuid::Error) -> Self {
+        Self {
+            kind,
+            source: Some(source),
+        }
     }
 }
 
+/// Declares canonical `UUIDv7` identifiers with consistent parsing, serde and conversions.
 macro_rules! uuid_id {
     ($name:ident, $doc:literal) => {
         #[doc = $doc]
@@ -26,6 +52,7 @@ macro_rules! uuid_id {
         pub struct $name(Uuid);
 
         impl Default for $name {
+            /// Creates a fresh `UUIDv7` identifier rather than a sentinel value.
             fn default() -> Self {
                 Self::new()
             }
@@ -37,7 +64,7 @@ macro_rules! uuid_id {
             pub fn new() -> Self {
                 Self(Uuid::now_v7())
             }
-            /// Returns the canonical lower-case UUID string.
+            /// Exposes the UUID for typed persistence without re-parsing a string.
             #[must_use]
             pub fn as_uuid(self) -> Uuid {
                 self.0
@@ -56,15 +83,17 @@ macro_rules! uuid_id {
             }
         }
         impl fmt::Display for $name {
+            /// Formats the identifier as its canonical lower-case UUID string.
             fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
                 self.0.fmt(formatter)
             }
         }
         impl FromStr for $name {
             type Err = InvalidValue;
+            /// Parses and validates the type at its text boundary, retaining syntax diagnostics.
             fn from_str(value: &str) -> Result<Self, Self::Err> {
-                let parsed =
-                    Uuid::parse_str(value).map_err(|_| InvalidValue::new(stringify!($name)))?;
+                let parsed = Uuid::parse_str(value)
+                    .map_err(|source| InvalidValue::parse(stringify!($name), source))?;
                 if parsed.get_version_num() != 7 || parsed.hyphenated().to_string() != value {
                     return Err(InvalidValue::new(stringify!($name)));
                 }
@@ -73,11 +102,13 @@ macro_rules! uuid_id {
         }
         impl TryFrom<String> for $name {
             type Error = InvalidValue;
+            /// Parses the canonical identifier from owned text.
             fn try_from(value: String) -> Result<Self, Self::Error> {
                 value.parse()
             }
         }
         impl From<$name> for String {
+            /// Encodes the identifier using its canonical lower-case UUID representation.
             fn from(value: $name) -> Self {
                 value.to_string()
             }
@@ -89,14 +120,14 @@ uuid_id!(UserId, "Immutable global Piquel account identifier.");
 uuid_id!(SessionId, "Opaque central-session identifier.");
 uuid_id!(TokenId, "Identifier for a token record or JWT.");
 
-/// Account availability state.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum AccountStatus {
-    /// The account can authenticate.
-    Active,
-    /// The account is administratively unavailable.
-    Disabled,
+piquel_common::str_enum! {
+    /// Account availability state in SQL and JSON.
+    pub enum AccountStatus {
+        /// The account can authenticate.
+        Active = "active",
+        /// The account is administratively unavailable.
+        Disabled = "disabled",
+    }
 }
 
 /// Authentication method recorded on a session or token.
@@ -111,8 +142,10 @@ pub enum AuthenticationMethod {
 
 #[cfg(test)]
 mod tests {
+    //! Protocol identifier syntax and storage contracts.
     use super::*;
 
+    /// IDs accept only canonical `UUIDv7`, preserving syntax diagnostics on malformed text.
     #[test]
     fn ids_are_canonical_uuid_v7() {
         let id = UserId::new();
@@ -123,5 +156,7 @@ mod tests {
                 .is_err()
         );
         assert!(id.to_string().to_uppercase().parse::<UserId>().is_err());
+        let error = "not-a-uuid".parse::<UserId>().expect_err("UUID syntax");
+        assert!(std::error::Error::source(&error).is_some());
     }
 }

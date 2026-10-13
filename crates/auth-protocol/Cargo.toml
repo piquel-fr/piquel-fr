@@ -6,6 +6,7 @@ license.workspace = true
 repository.workspace = true
 
 [dependencies]
+piquel-common.workspace = true
 serde.workspace = true
 thiserror.workspace = true
 uuid.workspace = true
