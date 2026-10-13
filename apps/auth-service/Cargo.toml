@@ -6,7 +6,7 @@ license.workspace = true
 repository.workspace = true
 
 [dependencies]
-piquel-configuration.workspace = true
+piquel-common.workspace = true
 piquel-repository.workspace = true
 piquel-telemetry.workspace = true
 piquel-auth-protocol.workspace = true

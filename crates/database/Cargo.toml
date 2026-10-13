@@ -8,7 +8,7 @@ repository.workspace = true
 [dependencies]
 chrono.workspace = true
 piquel-auth-protocol.workspace = true
-piquel-configuration.workspace = true
+piquel-common.workspace = true
 serde_json.workspace = true
 sqlx.workspace = true
 thiserror.workspace = true

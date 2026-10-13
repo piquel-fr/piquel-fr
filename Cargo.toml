@@ -3,7 +3,7 @@ resolver = "3"
 members = [
     "apps/auth-service",
     "crates/auth-protocol",
-    "crates/configuration",
+    "crates/common",
     "crates/database",
     "crates/telemetry",
 ]
@@ -24,7 +24,7 @@ unwrap_used = "warn"
 
 [workspace.dependencies]
 # Local crates
-piquel-configuration = { path = "crates/configuration" }
+piquel-common        = { path = "crates/common" }
 piquel-repository    = { path = "crates/database" }
 piquel-telemetry     = { path = "crates/telemetry" }
 piquel-auth-protocol = { path = "crates/auth-protocol" }
