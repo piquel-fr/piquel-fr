@@ -522,7 +522,7 @@ fn forwarded_address_parser_requires_one_address_and_preserves_causes() {
     let mut headers = HeaderMap::new();
     assert!(matches!(
         HttpSecurity::forwarded_ip(&headers),
-        Err(HttpSecurityError::ForwardedAddressCount)
+        Err(HttpSecurityError::MissingForwardedAddress)
     ));
     for valid in ["192.0.2.7", "2001:db8::7"] {
         headers.insert(
@@ -537,7 +537,7 @@ fn forwarded_address_parser_requires_one_address_and_preserves_causes() {
     headers.append(FORWARDED_FOR_HEADER, HeaderValue::from_static("192.0.2.8"));
     assert!(matches!(
         HttpSecurity::forwarded_ip(&headers),
-        Err(HttpSecurityError::ForwardedAddressCount)
+        Err(HttpSecurityError::MultipleForwardedHeaders)
     ));
     headers.insert(
         FORWARDED_FOR_HEADER,

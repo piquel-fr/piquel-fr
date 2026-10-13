@@ -428,15 +428,21 @@ enum HttpSecurityError {
     /// A browser preflight came from an unapproved origin.
     #[error("preflight origin is not allowed")]
     ForbiddenPreflight,
-    /// A browser request violates the endpoint's origin policy.
+    /// A browser request comes from an origin this endpoint does not serve.
     #[error("request origin is not allowed")]
     ForbiddenOrigin,
+    /// A mutation carries no `Origin` header, so its page cannot be checked.
+    #[error("mutation has no Origin header")]
+    MissingOrigin,
     /// An approved browser mutation omitted its CSRF proof.
     #[error("browser mutation requires CSRF header")]
     MissingCsrf,
-    /// The trusted proxy omitted its header or supplied more than one.
-    #[error("trusted proxy must supply exactly one forwarded address")]
-    ForwardedAddressCount,
+    /// The trusted proxy sent no forwarded address.
+    #[error("trusted proxy sent no forwarded address")]
+    MissingForwardedAddress,
+    /// The trusted proxy sent several forwarded headers instead of overwriting them.
+    #[error("trusted proxy sent several forwarded address headers")]
+    MultipleForwardedHeaders,
     /// The forwarded header is not valid HTTP text.
     #[error("forwarded address is not HTTP text")]
     ForwardedHeader(#[from] axum::http::header::ToStrError),
@@ -458,15 +464,27 @@ impl From<HttpSecurityError> for ApiError {
     /// Maps trust-boundary failures to stable public statuses and messages.
     fn from(error: HttpSecurityError) -> Self {
         match error {
-            HttpSecurityError::ForbiddenPreflight => Self::forbidden("Origin is not allowed."),
-            HttpSecurityError::ForbiddenOrigin | HttpSecurityError::MissingCsrf => {
-                Self::forbidden("This request must originate from an approved Piquel page.")
+            HttpSecurityError::ForbiddenPreflight | HttpSecurityError::ForbiddenOrigin => {
+                Self::forbidden("This endpoint does not accept requests from this origin.")
             }
-            HttpSecurityError::ForwardedAddressCount
-            | HttpSecurityError::ForwardedHeader(_)
-            | HttpSecurityError::ForwardedAddress(_) => {
-                Self::bad_request("Trusted proxy must supply one X-Forwarded-For address.")
+            HttpSecurityError::MissingOrigin => {
+                Self::forbidden("This request must come from a Piquel page, with an Origin header.")
             }
+            HttpSecurityError::MissingCsrf => Self::forbidden(format!(
+                "This request must come from a Piquel page, with the {CSRF_HEADER} header."
+            )),
+            HttpSecurityError::MissingForwardedAddress => {
+                Self::bad_request("The proxy must send the client address in X-Forwarded-For.")
+            }
+            HttpSecurityError::MultipleForwardedHeaders => Self::bad_request(
+                "The proxy must send exactly one X-Forwarded-For header, overwriting any other.",
+            ),
+            HttpSecurityError::ForwardedHeader(_) => {
+                Self::bad_request("The proxy's X-Forwarded-For header is not valid text.")
+            }
+            HttpSecurityError::ForwardedAddress(_) => Self::bad_request(
+                "The proxy's X-Forwarded-For header must hold exactly one IP address.",
+            ),
             HttpSecurityError::RateLimited => Self {
                 status: StatusCode::TOO_MANY_REQUESTS,
                 message: "Too many requests. Please wait a minute.".into(),
@@ -546,9 +564,9 @@ impl HttpSecurity {
         let mut forwarded = headers.get_all(FORWARDED_FOR_HEADER).iter();
         let header = forwarded
             .next()
-            .ok_or(HttpSecurityError::ForwardedAddressCount)?;
+            .ok_or(HttpSecurityError::MissingForwardedAddress)?;
         if forwarded.next().is_some() {
-            return Err(HttpSecurityError::ForwardedAddressCount);
+            return Err(HttpSecurityError::MultipleForwardedHeaders);
         }
         Ok(header.to_str()?.parse()?)
     }
@@ -639,8 +657,11 @@ impl HttpSecurity {
         let origin_present = headers
             .get(header::ORIGIN)
             .is_some_and(|origin| origin.to_str().is_ok());
-        if (origin_present || mutation) && !allowed {
+        if origin_present && !allowed {
             return Err(HttpSecurityError::ForbiddenOrigin);
+        }
+        if mutation && !allowed {
+            return Err(HttpSecurityError::MissingOrigin);
         }
         if mutation && !headers.contains_key(CSRF_HEADER) {
             return Err(HttpSecurityError::MissingCsrf);
