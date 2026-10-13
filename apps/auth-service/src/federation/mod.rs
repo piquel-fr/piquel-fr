@@ -33,7 +33,7 @@ pub use error::FederationConfigError;
 use error::FederationError;
 /// Provider protocol facts and verified identity exchange.
 mod providers;
-use providers::{IdentityStrategy, ProviderEndpoints, VerifiedIdentity};
+use providers::{ProviderEndpoints, VerifiedIdentity};
 
 /// Lifetime of a started flow and of pending provider evidence.
 const FLOW_LIFETIME: Duration = Duration::minutes(10);
@@ -279,14 +279,7 @@ impl FederationApplication {
             .append_pair("state", &state.encoded())
             .append_pair("code_challenge", &Pkce::challenge(&verifier)?)
             .append_pair("code_challenge_method", CodeChallengeMethod::S256.as_str());
-        match &endpoints.identity {
-            IdentityStrategy::GitHub { .. } => {}
-            IdentityStrategy::Google(protocol) => {
-                url.query_pairs_mut()
-                    .append_pair("nonce", &nonce)
-                    .append_pair("prompt", protocol.prompt.as_str());
-            }
-        }
+        endpoints.identity.extend_authorization(&mut url, &nonce);
         let mut response = Json(StartResponse {
             redirect_url: url.as_str(),
         })

@@ -1,7 +1,7 @@
 //! Federation protocol, browser-binding and transactional identity policy tests.
 
 use super::{
-    providers::{GoogleClaims, GoogleProtocol, IdentityStrategy},
+    providers::{GoogleClaims, GoogleProtocol, IdentityStrategy, ProviderEndpoints},
     *,
 };
 use axum::{
@@ -121,9 +121,9 @@ impl TestApp {
             .expect("GitHub facts");
         endpoints.token = format!("{base}/token");
         match &mut endpoints.identity {
-            IdentityStrategy::GitHub { user, emails } => {
-                *user = format!("{base}/user");
-                *emails = format!("{base}/emails");
+            IdentityStrategy::GitHub(protocol) => {
+                protocol.user = format!("{base}/user");
+                protocol.emails = format!("{base}/emails");
             }
             IdentityStrategy::Google(_) => panic!("GitHub must use OAuth profile fetching"),
         }
@@ -281,7 +281,7 @@ impl TestApp {
     fn google_protocol(&self) -> &GoogleProtocol {
         match &self.app.endpoints[&Provider::Google].identity {
             IdentityStrategy::Google(protocol) => protocol,
-            IdentityStrategy::GitHub { .. } => panic!("Google must use signed ID tokens"),
+            IdentityStrategy::GitHub(_) => panic!("Google must use signed ID tokens"),
         }
     }
 
@@ -657,7 +657,7 @@ async fn google_mock_validates_signature_audience_nonce_and_expiry_without_requi
         .identity
     {
         IdentityStrategy::Google(protocol) => protocol.keys = format!("{base}/keys"),
-        IdentityStrategy::GitHub { .. } => panic!("Google must use signed ID tokens"),
+        IdentityStrategy::GitHub(_) => panic!("Google must use signed ID tokens"),
     }
     let response = test
         .app
@@ -678,11 +678,11 @@ async fn google_mock_validates_signature_audience_nonce_and_expiry_without_requi
         .expect("valid Google identity without email");
     assert_eq!(identity.subject, "12345");
     assert!(identity.email.is_none());
-    for (kind, nonce) in [
-        ("valid", "wrong-nonce"),
-        ("wrong-audience", "test-nonce"),
-        ("expired", "test-nonce"),
-        ("wrong-signature", "test-nonce"),
+    for (kind, nonce, expected) in [
+        ("valid", "wrong-nonce", "nonce does not match"),
+        ("wrong-audience", "test-nonce", "failed verification"),
+        ("expired", "test-nonce", "failed verification"),
+        ("wrong-signature", "test-nonce", "failed verification"),
     ] {
         let response = test
             .app
@@ -691,13 +691,13 @@ async fn google_mock_validates_signature_audience_nonce_and_expiry_without_requi
             .send()
             .await
             .expect("mock response");
-        assert!(
-            test.app
-                .google_identity(response, "test-client", nonce, test.google_protocol())
-                .await
-                .is_err(),
-            "{kind} {nonce}"
-        );
+        let error = test
+            .app
+            .google_identity(response, "test-client", nonce, test.google_protocol())
+            .await
+            .err()
+            .expect("rejected");
+        assert!(error.to_string().contains(expected), "{kind}: {error}");
     }
     task.abort();
 }
@@ -821,7 +821,7 @@ fn google_signed_tokens_require_well_typed_trusted_issuer_and_audience() {
             "nonce",
             match &ProviderEndpoints::new(Provider::Google).identity {
                 IdentityStrategy::Google(protocol) => protocol.issuers,
-                IdentityStrategy::GitHub { .. } => panic!("Google must use signed ID tokens"),
+                IdentityStrategy::GitHub(_) => panic!("Google must use signed ID tokens"),
             },
         )
     };
