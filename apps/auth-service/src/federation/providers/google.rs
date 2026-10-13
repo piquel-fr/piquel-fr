@@ -7,9 +7,16 @@ use super::{
 use chrono::Utc;
 use jsonwebtoken::{Algorithm, DecodingKey, Validation, decode, decode_header};
 use piquel_auth_protocol::oauth::{Prompt, Scope};
+use piquel_common::ErrorChain;
 use piquel_crypto::jwt::{Algorithm as JwtAlgorithm, Claim, KeyType, KeyUse};
+use reqwest::header::{CACHE_CONTROL, HeaderMap};
 use serde::Deserialize;
+use std::{
+    sync::Arc,
+    time::{Duration, Instant},
+};
 use thiserror::Error;
+use tokio::sync::Mutex;
 use url::Url;
 
 /// Google scopes: a signed ID token carrying email and profile claims.
@@ -29,6 +36,13 @@ const REQUIRED_CLAIMS: [&str; 4] = [
 const CLOCK_SKEW_SECONDS: i64 = 30;
 /// Display name proposed when the token carries no usable name.
 const FALLBACK_NAME: &str = "Google user";
+/// Shortest time between two signing-key fetches, and the shortest time fetched keys
+/// stay fresh. Bounds how often unknown key IDs or an outage can make us call Google.
+const MIN_KEYS_FETCH_INTERVAL: Duration = Duration::from_mins(1);
+/// How long fetched keys stay fresh when Google's response sets no `max-age`.
+const DEFAULT_KEYS_LIFETIME: Duration = Duration::from_hours(1);
+/// Longest time fetched keys stay fresh, whatever `max-age` says.
+const MAX_KEYS_LIFETIME: Duration = Duration::from_hours(24);
 
 /// Reasons a Google ID token is not accepted.
 #[derive(Debug, Error)]
@@ -73,6 +87,8 @@ pub(in crate::federation) struct GoogleProtocol {
     pub(in crate::federation) keys: String,
     /// Accepted `iss` values: Google uses both the HTTPS and the legacy scheme-less form.
     pub(in crate::federation) issuers: &'static [&'static str],
+    /// Keys last fetched from `keys`, shared by every clone of this protocol.
+    cache: Arc<Mutex<GoogleKeyCache>>,
 }
 
 impl ProviderEndpoints {
@@ -86,6 +102,7 @@ impl ProviderEndpoints {
             identity: IdentityStrategy::Google(GoogleProtocol {
                 keys: "https://www.googleapis.com/oauth2/v3/certs".into(),
                 issuers: &["https://accounts.google.com", "accounts.google.com"],
+                cache: Arc::default(),
             }),
         }
     }
@@ -99,10 +116,99 @@ impl GoogleProtocol {
             .append_pair("nonce", nonce)
             .append_pair("prompt", Prompt::SelectAccount.as_str());
     }
+
+    /// Returns the RS256 key named `kid`, as of `now`. Google's keys are fetched only
+    /// when the cache is stale or lacks `kid` (key rotation), and at most once per
+    /// `MIN_KEYS_FETCH_INTERVAL`. The lock is held across the fetch, so concurrent
+    /// sign-ins share one request instead of each calling Google. If a fetch fails but
+    /// the stale keys still hold `kid`, they are used: the ID token itself came straight
+    /// from Google's token endpoint over TLS, so a key endpoint outage should not stop
+    /// sign-in.
+    pub(in crate::federation) async fn signing_key(
+        &self,
+        client: &reqwest::Client,
+        kid: String,
+        now: Instant,
+    ) -> Result<DecodingKey, ProviderError> {
+        let mut cache = self.cache.lock().await;
+        if cache.needs_fetch(&kid, now)
+            && let Err(error) = cache.fetch(client, &self.keys, now).await
+        {
+            if cache.find(&kid).is_none() {
+                return Err(error);
+            }
+            tracing::warn!(error = %ErrorChain(&error), "using stale Google signing keys");
+        }
+        let jwk = cache
+            .find(&kid)
+            .ok_or(GoogleError::UnknownSigningKey(kid))?;
+        Ok(DecodingKey::from_rsa_components(&jwk.n, &jwk.e).map_err(GoogleError::from)?)
+    }
+}
+
+/// Google's signing keys as last fetched, with when to fetch them again.
+#[derive(Default)]
+struct GoogleKeyCache {
+    /// Keys from the last successful fetch; empty before the first one.
+    keys: Vec<GoogleJwk>,
+    /// When `keys` stop being fresh; `None` before the first successful fetch.
+    fresh_until: Option<Instant>,
+    /// Start of the last fetch, successful or not.
+    fetched_at: Option<Instant>,
+}
+
+impl GoogleKeyCache {
+    /// True when the keys are stale or lack `kid`, and the last fetch is at least
+    /// `MIN_KEYS_FETCH_INTERVAL` old.
+    fn needs_fetch(&self, kid: &str, now: Instant) -> bool {
+        let unusable =
+            self.fresh_until.is_none_or(|until| now >= until) || self.find(kid).is_none();
+        unusable
+            && self
+                .fetched_at
+                .is_none_or(|at| now.saturating_duration_since(at) >= MIN_KEYS_FETCH_INTERVAL)
+    }
+
+    /// Replaces the keys with Google's current ones. A failure keeps the old keys but
+    /// still counts as a fetch, so a failing endpoint is not retried on every sign-in.
+    async fn fetch(
+        &mut self,
+        client: &reqwest::Client,
+        url: &str,
+        now: Instant,
+    ) -> Result<(), ProviderError> {
+        self.fetched_at = Some(now);
+        let response = client.get(url).send().await?;
+        let lifetime = Self::lifetime(response.headers());
+        let jwks: GoogleJwks = FederationApplication::json(response).await?;
+        self.keys = jwks.keys;
+        self.fresh_until = Some(now + lifetime);
+        Ok(())
+    }
+
+    /// Reads how long keys stay fresh from `Cache-Control: max-age`, falling back to
+    /// `DEFAULT_KEYS_LIFETIME` and bounded to
+    /// `MIN_KEYS_FETCH_INTERVAL..=MAX_KEYS_LIFETIME`.
+    fn lifetime(headers: &HeaderMap) -> Duration {
+        headers
+            .get_all(CACHE_CONTROL)
+            .iter()
+            .filter_map(|value| value.to_str().ok())
+            .flat_map(|value| value.split(','))
+            .find_map(|directive| directive.trim().strip_prefix("max-age=")?.parse().ok())
+            .map_or(DEFAULT_KEYS_LIFETIME, Duration::from_secs)
+            .clamp(MIN_KEYS_FETCH_INTERVAL, MAX_KEYS_LIFETIME)
+    }
+
+    /// Finds the RS256 signing key named `kid`.
+    fn find(&self, kid: &str) -> Option<&GoogleJwk> {
+        self.keys.iter().find(|key| key.signs(kid))
+    }
 }
 
 impl FederationApplication {
-    /// Takes Google's identity only from an `RS256` ID token signed by a published key.
+    /// Takes Google's identity only from an `RS256` ID token signed by a published key,
+    /// looked up in the protocol's key cache.
     pub(in crate::federation) async fn google_identity(
         &self,
         response: reqwest::Response,
@@ -119,13 +225,9 @@ impl FederationApplication {
             return Err(GoogleError::Algorithm(header.alg).into());
         }
         let kid = header.kid.ok_or(GoogleError::MissingKeyId)?;
-        let jwks: GoogleJwks = Self::json(self.client.get(&protocol.keys).send().await?).await?;
-        let jwk = jwks
-            .keys
-            .into_iter()
-            .find(|key| key.signs(&kid))
-            .ok_or(GoogleError::UnknownSigningKey(kid))?;
-        let key = DecodingKey::from_rsa_components(&jwk.n, &jwk.e).map_err(GoogleError::from)?;
+        let key = protocol
+            .signing_key(&self.client, kid, Instant::now())
+            .await?;
         let claims =
             GoogleClaims::verify(&token.id_token, &key, client_id, nonce, protocol.issuers)?;
         VerifiedIdentity::new(

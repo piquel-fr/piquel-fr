@@ -860,6 +860,166 @@ fn google_signed_tokens_require_well_typed_trusted_issuer_and_audience() {
     assert!(verify(&claims).is_err());
 }
 
+/// Local Google key endpoint: the first response publishes key `a`, the second keys `a`
+/// and `b` (a rotation), and later ones fail as an outage would.
+struct GoogleKeysMock {
+    /// Google facts whose key endpoint is this mock.
+    protocol: GoogleProtocol,
+    /// Number of key requests served so far.
+    requests: Arc<std::sync::atomic::AtomicUsize>,
+    /// Mock server, stopped when the fixture is dropped.
+    task: tokio::task::JoinHandle<()>,
+}
+impl Drop for GoogleKeysMock {
+    /// Stops the mock server.
+    fn drop(&mut self) {
+        self.task.abort();
+    }
+}
+impl GoogleKeysMock {
+    /// How long the mock's responses let keys stay fresh.
+    const MAX_AGE: StdDuration = StdDuration::from_secs(600);
+
+    /// Serves the key endpoint on a local port.
+    async fn start() -> Self {
+        let keys = |kids: &[&str]| {
+            let keys: Vec<_> = kids
+                .iter()
+                .map(|kid| Rs256Key::generate(*kid).expect("RSA key").jwks()["keys"][0].clone())
+                .collect();
+            serde_json::json!({ "keys": keys })
+        };
+        let responses = Arc::new([keys(&["a"]), keys(&["a", "b"])]);
+        let requests = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let served = requests.clone();
+        let mock = Router::new().route(
+            "/keys",
+            get(move || async move {
+                let request = served.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                let cache_control = format!("public, max-age={}", Self::MAX_AGE.as_secs());
+                match responses.get(request) {
+                    Some(keys) => ([(header::CACHE_CONTROL, cache_control)], Json(keys.clone()))
+                        .into_response(),
+                    None => StatusCode::SERVICE_UNAVAILABLE.into_response(),
+                }
+            }),
+        );
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("mock listener");
+        let base = format!("http://{}", listener.local_addr().expect("address"));
+        let task = tokio::spawn(async move {
+            axum::serve(listener, mock).await.expect("mock server");
+        });
+        let IdentityStrategy::Google(mut protocol) =
+            ProviderEndpoints::new(Provider::Google).identity
+        else {
+            panic!("Google must use signed ID tokens");
+        };
+        protocol.keys = format!("{base}/keys");
+        Self {
+            protocol,
+            requests,
+            task,
+        }
+    }
+
+    /// Number of key requests served so far.
+    fn requests(&self) -> usize {
+        self.requests.load(std::sync::atomic::Ordering::SeqCst)
+    }
+
+    /// Looks up `kid` at `elapsed` after `start`, as one sign-in would.
+    async fn key(
+        &self,
+        kid: &str,
+        start: std::time::Instant,
+        elapsed: u64,
+    ) -> Result<DecodingKey, providers::ProviderError> {
+        self.protocol
+            .signing_key(
+                &reqwest::Client::new(),
+                kid.into(),
+                start + StdDuration::from_secs(elapsed),
+            )
+            .await
+    }
+}
+
+/// Concurrent and later sign-ins share one key fetch until `max-age` runs out, and an
+/// outage keeps the cached keys instead of retrying on every sign-in.
+#[tokio::test]
+async fn google_keys_are_cached_until_max_age_and_survive_an_outage() {
+    let mock = GoogleKeysMock::start().await;
+    let start = std::time::Instant::now();
+    let max_age = GoogleKeysMock::MAX_AGE.as_secs();
+    let mut sign_ins = tokio::task::JoinSet::new();
+    for _ in 0..5 {
+        let protocol = mock.protocol.clone();
+        sign_ins.spawn(async move {
+            protocol
+                .signing_key(&reqwest::Client::new(), "a".into(), start)
+                .await
+                .map(drop)
+        });
+    }
+    while let Some(result) = sign_ins.join_next().await {
+        result.expect("sign-in task").expect("key a");
+    }
+    assert_eq!(mock.requests(), 1, "concurrent sign-ins share one fetch");
+    mock.key("a", start, max_age - 1)
+        .await
+        .expect("cached key a");
+    assert_eq!(mock.requests(), 1, "fresh keys are reused");
+    mock.key("a", start, max_age)
+        .await
+        .expect("refetched key a");
+    assert_eq!(mock.requests(), 2, "expired keys are refetched");
+    mock.key("a", start, 2 * max_age)
+        .await
+        .expect("stale key a during an outage");
+    assert_eq!(mock.requests(), 3, "expired keys are refetched");
+    mock.key("a", start, 2 * max_age + 1)
+        .await
+        .expect("stale key a during an outage");
+    assert_eq!(mock.requests(), 3, "a failed fetch is not retried at once");
+}
+
+/// An unknown key ID refetches once, so rotated keys are found, but never more than once
+/// a minute, so bogus key IDs cannot make every sign-in call Google.
+#[tokio::test]
+async fn unknown_google_key_ids_refetch_at_most_once_a_minute() {
+    let mock = GoogleKeysMock::start().await;
+    let start = std::time::Instant::now();
+    mock.key("a", start, 0).await.expect("key a");
+    let error = mock
+        .key("b", start, 59)
+        .await
+        .err()
+        .expect("b not fetched yet");
+    assert!(error.to_string().contains("no RSA signing key"), "{error}");
+    assert_eq!(mock.requests(), 1, "refetches wait a minute");
+    mock.key("b", start, 60).await.expect("rotated key b");
+    assert_eq!(mock.requests(), 2, "an unknown key ID refetches once");
+    for elapsed in [60, 90, 119] {
+        mock.key("bogus", start, elapsed)
+            .await
+            .err()
+            .expect("bogus key");
+    }
+    assert_eq!(mock.requests(), 2, "bogus key IDs wait for the interval");
+    mock.key("bogus", start, 120)
+        .await
+        .err()
+        .expect("bogus key");
+    mock.key("bogus", start, 121)
+        .await
+        .err()
+        .expect("bogus key");
+    assert_eq!(mock.requests(), 3, "at most one refetch per interval");
+    mock.key("a", start, 121).await.expect("cached key a");
+}
+
 /// Resolved credentials fail at startup with variable context and the original source.
 #[test]
 fn provider_secrets_fail_early_with_context() {
