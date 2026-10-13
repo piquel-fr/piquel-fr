@@ -26,35 +26,45 @@ export class AuthApi {
       headers: method === 'GET' ? {} : { 'content-type': 'application/json', 'x-piquel-csrf': '1' },
       ...(body === undefined ? {} : { body: JSON.stringify(body) })
     });
-    if (!response.ok) {
-      const problem: unknown = await response.json().catch(() => null);
-      const message =
-        problem &&
-        typeof problem === 'object' &&
-        'error' in problem &&
-        typeof problem.error === 'string'
-          ? problem.error
-          : null;
-      const protocolErrors: Record<string, string> = {
-        invalid_request:
-          'This sign-in request is invalid or expired. Start again from the application.',
-        access_denied: 'Sign-in was cancelled or access was declined.',
-        login_required: 'Please sign in again.',
-        consent_required: 'Review the application’s requested access to continue.',
-        server_error: 'Sign-in is temporarily unavailable. Please try again.',
-        temporarily_unavailable: 'Sign-in is temporarily unavailable. Please try again.'
-      };
-      throw new Error(
-        response.status === 401
-          ? 'Please sign in again.'
-          : response.status === 429
-            ? 'Too many attempts. Wait a moment and try again.'
-            : message
-              ? (protocolErrors[message] ?? message)
-              : 'This action could not be completed. Please try again.'
-      );
-    }
+    if (!response.ok) throw await this.failure(response);
     return response.status === 204 ? (undefined as T) : (response.json() as Promise<T>);
+  }
+  /** Turns a failed response into an error whose message the page can show as is. */
+  private async failure(response: Response): Promise<Error> {
+    const problem: unknown = await response.json().catch(() => null);
+    const text = (name: string): string | null => {
+      if (!problem || typeof problem !== 'object') return null;
+      const value = (problem as Record<string, unknown>)[name];
+      return typeof value === 'string' ? value : null;
+    };
+    // Browser endpoints send `error` as a readable message. OAuth endpoints send a
+    // code in `error` and what to fix in `error_description`.
+    const error = text('error');
+    const description = text('error_description');
+    const protocolErrors: Record<string, string> = {
+      invalid_request:
+        'This sign-in request is invalid or expired. Start again from the application.',
+      invalid_token: 'Please sign in again.',
+      access_denied: 'Sign-in was cancelled or access was declined.',
+      login_required: 'Please sign in again.',
+      consent_required: 'Review the application’s requested access to continue.',
+      server_error: 'Sign-in is temporarily unavailable. Please try again.',
+      temporarily_unavailable: 'Sign-in is temporarily unavailable. Please try again.'
+    };
+    const protocolMessage = error === null ? undefined : protocolErrors[error];
+    return new Error(
+      response.status === 429
+        ? 'Too many attempts. Wait a moment and try again.'
+        : protocolMessage
+          ? description && response.status < 500
+            ? `${protocolMessage} (${description})`
+            : protocolMessage
+          : (description ??
+            error ??
+            (response.status === 401
+              ? 'Please sign in again.'
+              : 'This action could not be completed. Please try again.'))
+    );
   }
   async form(path: string, body: URLSearchParams): Promise<{ redirect_url: string }> {
     const response = await fetch(`${this.origin}${path}`, {
@@ -63,7 +73,7 @@ export class AuthApi {
       headers: { 'x-piquel-csrf': '1' },
       body
     });
-    if (!response.ok) throw new Error('This request has expired. Please start again.');
+    if (!response.ok) throw await this.failure(response);
     return response.json() as Promise<{ redirect_url: string }>;
   }
 }
