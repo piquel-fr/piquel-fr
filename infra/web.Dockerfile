@@ -5,15 +5,17 @@ RUN npm install --global "$(node -p 'require("./package.json").packageManager')"
 COPY apps/piquel-web apps/piquel-web
 COPY packages/auth-sdk packages/auth-sdk
 RUN pnpm install --frozen-lockfile --filter @piquel/piquel-web...
-# No VITE_AUTH_ORIGIN: one image serves every environment. The page reads its
-# auth origin from /config.json, which nginx serves from AUTH_ORIGIN.
+# No AUTH_ORIGIN: one image serves every environment. The server reads it at
+# startup and refuses to start without a valid one (see src/hooks.server.ts).
 RUN pnpm --filter @piquel/piquel-web build
 
-FROM nginx:stable-bookworm
-RUN rm -rf /usr/share/nginx/html/*
-COPY --chmod=644 infra/nginx.conf /etc/nginx/nginx.conf
-COPY --chmod=755 infra/web-entrypoint.sh /usr/local/bin/web-entrypoint
-COPY --from=frontend /app/apps/piquel-web/build /usr/share/nginx/html
-USER nginx
+# adapter-node bundles devDependencies, piquel-web's only dependencies, into build/,
+# so the image needs no node_modules.
+FROM node:24-bookworm-slim
+WORKDIR /app
+COPY --from=frontend --chmod=644 /app/apps/piquel-web/package.json ./
+COPY --from=frontend /app/apps/piquel-web/build build
+USER node
+ENV NODE_ENV=production PORT=8080
 EXPOSE 8080
-ENTRYPOINT ["web-entrypoint"]
+CMD ["node", "build"]

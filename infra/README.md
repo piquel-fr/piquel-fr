@@ -106,6 +106,10 @@ the gateway ranges in `PIQUELD_INGRESS_PROXIES` to trust ingress's overwritten
 
 ## Web
 
-The web image is built without an auth origin. `web-entrypoint.sh` reads
-`AUTH_ORIGIN` at startup; nginx serves it as `/config.json` and narrows the
-page's CSP `connect-src` to it.
+The web service is the piquel-web SvelteKit server on Node (`node build`, port
+8080, as a non-root user). Its image is built without an auth origin: the server
+reads `AUTH_ORIGIN` at startup, refuses to start unless it is an `https://`
+origin, passes it to pages as layout data and narrows their CSP `connect-src` to
+it. `ORIGIN` gives the server its public URL behind ingress. The health check,
+`GET /healthz`, does not call auth, so a server that fails to start blocks the
+deployment without coupling it to auth's health.
