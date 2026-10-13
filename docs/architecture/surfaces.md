@@ -25,11 +25,14 @@ and are cacheable.
 
 ## piquel.fr and admin.piquel.fr
 
-Both are static frontends deployed separately from auth. They call auth's JSON
-APIs from the browser with the auth session cookie. The hosts are same-site, so
-the host-only cookie is sent without third-party cookie exceptions. Each frontend
-origin is allowed exactly, and mutations still require the CSRF header. No access
-token is held by these pages.
+Both are SvelteKit servers deployed separately from auth. Today piquel.fr is
+still static files behind nginx; it moves to a server *(planned)* because public
+profiles and discovery documents are rendered per request. The servers keep no
+state and have no database: public pages read auth's public API, and account and
+admin pages call auth's JSON APIs from the browser with the auth session cookie.
+The hosts are same-site, so the host-only cookie is sent without third-party
+cookie exceptions. Each frontend origin is allowed exactly, and mutations still
+require the CSRF header. No access token is held by these pages.
 
 Passkeys are bound to the `auth.piquel.fr` RP ID, so passkey ceremonies always
 run on auth. When an API call needs a recent passkey confirmation, auth answers
@@ -38,8 +41,11 @@ back. Users never unlock settings explicitly. Today, settings still opens the
 two-minute management window explicitly before sensitive changes.
 
 The admin API *(planned)* additionally requires an administrator account and
-accepts only the admin origin. Every admin operation also exists as an
-`auth-service` CLI command.
+accepts only the admin origin. Administrators can change the settings of users
+who are not administrators, through the same handlers as the owner, but never
+add a credential or email to their account. Every admin operation also exists as
+an `auth-service` CLI command. admin.piquel.fr starts reachable only on the
+tailnet; that limits the network path and replaces none of these checks.
 
 ## Contracts
 
