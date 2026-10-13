@@ -147,6 +147,7 @@ impl Fixture {
                     .parse::<piquel_common::Origin>()
                     .expect("origin"),
                 invite_required: false,
+                decoy_key: Secret::generate().expect("decoy key"),
             },
         )
         .expect("passkey app");
@@ -219,13 +220,16 @@ impl Fixture {
         let response = self.request(path, Method::POST, cookies, body).await;
         assert_eq!(response.status(), StatusCode::OK);
         let cookie = Self::cookie(&response);
-        let value = serde_json::from_slice(
+        (Self::json(response).await, cookie)
+    }
+    /// Reads a response's JSON body.
+    async fn json(response: Response) -> Value {
+        serde_json::from_slice(
             &to_bytes(response.into_body(), MAX_RESPONSE_BYTES)
                 .await
                 .expect("body"),
         )
-        .expect("JSON");
-        (value, cookie)
+        .expect("JSON")
     }
     /// Extracts the cookie pair from a response for the next simulated browser request.
     fn cookie(response: &Response) -> String {
@@ -517,4 +521,91 @@ async fn ceremonies_require_browser_binding_and_management_requires_the_same_ses
         .expect("keys");
     assert_eq!(keys.len(), 1);
     assert_eq!(keys[0].friendly_name, "Renamed twice");
+}
+
+/// Checks that a username without an account gets a stable challenge shaped like a
+/// real account's, and that finishing it fails exactly like an unregistered passkey.
+#[tokio::test]
+#[ignore = "requires TEST_DATABASE_URL"]
+async fn unknown_usernames_get_stable_decoys_that_fail_like_unregistered_passkeys() {
+    let fixture = Fixture::new().await;
+    let unknown = format!("none_{}", &TokenId::new().to_string()[24..]);
+    let start = |username: &str| {
+        fixture.start(
+            "/webauthn/authenticate/start",
+            "",
+            json!({"username":username}),
+        )
+    };
+    let (known, known_browser) = start(&fixture.username).await;
+    let (decoy, decoy_browser) = start(&unknown).await;
+    // Apart from the fresh challenge and the credential list, the options are identical.
+    let options = |started: &Value| {
+        let mut options = started["public_key"].clone();
+        options["publicKey"]["challenge"].take();
+        options["publicKey"]["allowCredentials"].take();
+        options
+    };
+    assert_eq!(options(&known), options(&decoy));
+    let credentials = |started: &Value| {
+        started["public_key"]["publicKey"]["allowCredentials"]
+            .as_array()
+            .expect("allowCredentials")
+            .clone()
+    };
+    let real = &credentials(&known)[0];
+    let fields = |value: &Value| -> Vec<String> {
+        value
+            .as_object()
+            .expect("descriptor")
+            .keys()
+            .cloned()
+            .collect()
+    };
+    for credential in credentials(&decoy) {
+        assert_eq!(fields(&credential), fields(real));
+        assert_eq!(credential["type"], real["type"]);
+    }
+    assert_eq!(credentials(&decoy), credentials(&start(&unknown).await.0));
+    assert_ne!(
+        credentials(&decoy),
+        credentials(&start(&format!("{unknown}x")).await.0)
+    );
+
+    // A passkey the server never registered, standing in for any guess at the account.
+    let (challenge, _) = fixture
+        .app
+        .webauthn
+        .start_passkey_registration(UserId::new().as_uuid(), "stranger", "Stranger", None)
+        .expect("registration");
+    let mut stranger = WebauthnAuthenticator::new(SoftPasskey::new(true));
+    let id = stranger
+        .do_registration(fixture.origin.clone(), challenge)
+        .expect("software registration")
+        .raw_id;
+    let mut failures = Vec::new();
+    for (started, browser) in [(known, known_browser), (decoy, decoy_browser)] {
+        let mut challenge: RequestChallengeResponse =
+            serde_json::from_value(started["public_key"].clone()).expect("challenge");
+        challenge.public_key.allow_credentials = vec![webauthn_rs_proto::AllowCredentials {
+            type_: "public-key".into(),
+            id: id.clone(),
+            transports: None,
+        }];
+        let assertion = stranger
+            .do_authentication(fixture.origin.clone(), challenge)
+            .expect("software assertion");
+        let response = fixture
+            .request(
+                "/webauthn/authenticate/finish",
+                Method::POST,
+                &browser,
+                json!({"ceremony_id":started["ceremony_id"],"credential":assertion}),
+            )
+            .await;
+        assert!(response.headers().get(header::SET_COOKIE).is_none());
+        failures.push((response.status(), Fixture::json(response).await));
+    }
+    assert_eq!(failures[0].0, StatusCode::BAD_REQUEST);
+    assert_eq!(failures[0], failures[1]);
 }

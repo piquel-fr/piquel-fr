@@ -56,7 +56,7 @@ pub(super) enum PasskeyError {
     /// A discoverable credential returned an invalid account handle.
     #[error("invalid discoverable account handle")]
     InvalidUserHandle(#[source] InvalidValue),
-    /// Username-based authentication must not reveal account availability.
+    /// A decoy ceremony finished: the username has no active account or passkey.
     #[error("account unavailable for passkey authentication")]
     AccountUnavailable,
     /// The account, or the credential it signed with, was disabled or removed.
@@ -158,17 +158,14 @@ impl From<PasskeyError> for ApiError {
             error @ PasskeyError::SessionChanged => error
                 .rejected("Your session changed during this passkey request. Please start again."),
             // WebAuthn's reasons stay in the logs: some fail before possession is proven,
-            // so showing them would reveal which credentials an account has.
-            error @ PasskeyError::Webauthn(_) => {
+            // so showing them would reveal which credentials an account has. A decoy
+            // ceremony gets the same answer as an unregistered passkey, so finishing
+            // one reveals no more than starting it.
+            error @ (PasskeyError::Webauthn(_) | PasskeyError::AccountUnavailable) => {
                 error.rejected("This passkey could not be verified. Please try again.")
             }
             error @ PasskeyError::InvalidUserHandle(_) => {
                 error.rejected("This passkey does not belong to a Piquel account.")
-            }
-            // The same answer whether the account is missing or has no passkey: the
-            // username field reveals no more than it must.
-            error @ PasskeyError::AccountUnavailable => {
-                error.rejected("No passkey is available for this username.")
             }
             error @ PasskeyError::UserVerificationRequired => error
                 .rejected("Your authenticator must verify you with a PIN, fingerprint or face."),

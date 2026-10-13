@@ -2,7 +2,9 @@
 
 use ipnet::IpNet;
 use piquel_auth_protocol::{Provider, oauth::Scope};
-use piquel_common::{ConfigurationError, Origin, PublicUrl, SecretReference, Variable};
+use piquel_common::{
+    ConfigurationError, Origin, PublicUrl, SecretBytes, SecretReference, Variable,
+};
 use piquel_crypto::{Digest, Rs256Key, Secret};
 use piquel_repository::{BootstrapOidcClient, DatabaseConfig};
 use serde::Deserialize;
@@ -21,6 +23,8 @@ const MAX_SIGNING_KEY_ID_LENGTH: usize = 128;
 const DEFAULT_SIGNING_KEY_ID: &str = "primary";
 /// Separates refresh digests from every other use of the persistent PEM bytes.
 const REFRESH_DIGEST_CONTEXT: &[u8] = b"piquel-refresh-token-digest-v1";
+/// Separates the passkey decoy key from every other use of the persistent PEM bytes.
+const PASSKEY_DECOY_CONTEXT: &[u8] = b"piquel-passkey-decoy-credential-v1";
 /// Default number of pooled authentication connections.
 const DATABASE_POOL_SIZE: u32 = 10;
 /// Maximum startup wait for a pooled database connection.
@@ -60,10 +64,15 @@ pub(crate) struct PasskeyConfig {
     pub origin: Origin,
     /// Registration admission policy.
     pub invite_required: bool,
+    /// Domain-separated HMAC key for the stable decoy credentials of unknown usernames.
+    pub decoy_key: Secret,
 }
 impl PasskeyConfig {
     /// Reads the passkey policy and validates that the origin has a domain RP ID.
-    pub(crate) fn from_environment(origin: &Origin) -> Result<Self, ConfigurationError> {
+    pub(crate) fn from_environment(
+        origin: &Origin,
+        persistent_key: &SecretBytes,
+    ) -> Result<Self, ConfigurationError> {
         if !matches!(origin.as_url().host(), Some(url::Host::Domain(_))) {
             return Err(PUBLIC_BASE_URL
                 .invalid("must use a domain name for WebAuthn, e.g. https://auth.piquel.fr"));
@@ -71,6 +80,7 @@ impl PasskeyConfig {
         Ok(Self {
             origin: origin.clone(),
             invite_required: INVITE_REQUIRED.flag(true)?,
+            decoy_key: AuthConfig::derive_key(persistent_key, PASSKEY_DECOY_CONTEXT)?,
         })
     }
 }
@@ -169,15 +179,11 @@ pub(crate) struct OidcConfig {
 }
 
 impl OidcConfig {
-    /// Loads the required persistent key and statically reviewed clients.
-    pub(crate) fn from_environment(origin: &Origin) -> Result<Self, ConfigurationError> {
-        let reference: SecretReference = KEY_PROVIDER.parse()?;
-        let secret = reference.resolve().map_err(|source| {
-            KEY_PROVIDER.error(
-                "must resolve to an RSA private PEM key of at least 2048 bits",
-                source,
-            )
-        })?;
+    /// Parses the persistent signing key and loads statically reviewed clients.
+    pub(crate) fn from_environment(
+        origin: &Origin,
+        secret: &SecretBytes,
+    ) -> Result<Self, ConfigurationError> {
         let pem = secret
             .utf8()
             .map_err(|source| KEY_PROVIDER.error("must contain UTF-8 PEM", source))?;
@@ -198,10 +204,7 @@ impl OidcConfig {
                 source,
             )
         })?;
-        let refresh_key =
-            Secret::derive(secret.expose_secret(), REFRESH_DIGEST_CONTEXT).map_err(|source| {
-                KEY_PROVIDER.error("could not derive the refresh-token key", source)
-            })?;
+        let refresh_key = AuthConfig::derive_key(secret, REFRESH_DIGEST_CONTEXT)?;
         let clients = Self::clients()?;
         let public_redirects = clients
             .iter()
@@ -392,13 +395,30 @@ impl AuthConfig {
     pub fn from_environment() -> Result<Self, ConfigurationError> {
         let origin: Origin = PUBLIC_BASE_URL.parse()?;
         let settings_url: PublicUrl = SETTINGS_URL.parse_or(DEFAULT_SETTINGS_URL)?;
+        let persistent_key: SecretReference = KEY_PROVIDER.parse()?;
+        let persistent_key = persistent_key.resolve().map_err(|source| {
+            KEY_PROVIDER.error(
+                "must resolve to an RSA private PEM key of at least 2048 bits",
+                source,
+            )
+        })?;
         Ok(Self {
             public_listener: PUBLIC_LISTENER.parse_or(DEFAULT_PUBLIC_LISTENER)?,
-            passkey: PasskeyConfig::from_environment(&origin)?,
+            passkey: PasskeyConfig::from_environment(&origin, &persistent_key)?,
             federation: FederationConfig::from_environment(&origin, &settings_url)?,
-            oidc: OidcConfig::from_environment(&origin)?,
+            oidc: OidcConfig::from_environment(&origin, &persistent_key)?,
             trusted_proxies: Self::trusted_proxies()?,
         })
+    }
+
+    /// Derives a service key from the persistent PEM bytes under its own `context`,
+    /// so each key is stable across restarts and replicas but independent of the others.
+    fn derive_key(
+        persistent_key: &SecretBytes,
+        context: &[u8],
+    ) -> Result<Secret, ConfigurationError> {
+        Secret::derive(persistent_key.expose_secret(), context)
+            .map_err(|source| KEY_PROVIDER.error("could not derive a key from the PEM key", source))
     }
 
     /// Uses the operator override, then piqueld's ingress ranges, then no trusted peers.

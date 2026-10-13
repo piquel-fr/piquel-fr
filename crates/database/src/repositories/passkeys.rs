@@ -137,6 +137,36 @@ impl PasskeyRepository<'_> {
         )
     }
 
+    /// Lists the unrevoked credentials of the active account named `username`,
+    /// oldest first. A missing, inactive or passkey-less account returns none,
+    /// in the same single query, so callers cannot tell those cases apart.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`DatabaseError`] if the query fails or a row is invalid.
+    pub async fn list_active_by_username(
+        &mut self,
+        username: &str,
+    ) -> Result<Vec<StoredPasskey>, DatabaseError> {
+        run!(
+            self,
+            fetch_all,
+            sqlx::query_as!(
+                StoredPasskey,
+                r#"SELECT
+                    p.id AS "id: TokenId", p.credential_id, p.user_id AS "user_id: UserId",
+                    p.credential, p.friendly_name, p.revoked_at
+                FROM passkey_credentials p
+                JOIN users u ON u.id = p.user_id
+                WHERE u.username = $1
+                AND u.status = 'active'
+                AND p.revoked_at IS NULL
+                ORDER BY p.created_at"#,
+                username,
+            )
+        )
+    }
+
     /// Finds an unrevoked credential and locks it until the transaction ends,
     /// so authentication rechecks it before updating.
     ///

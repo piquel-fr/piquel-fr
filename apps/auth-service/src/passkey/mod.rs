@@ -14,6 +14,7 @@ use piquel_auth_protocol::{AuthenticationMethod, TokenId, UserId};
 use piquel_crypto::Secret;
 use piquel_repository::{
     AuditAction, Database, DatabaseError, DatabaseTransaction, InsertPasskey, InsertUser,
+    StoredPasskey,
 };
 use serde_json::Value;
 use std::sync::Arc;
@@ -22,6 +23,8 @@ use webauthn_rs_proto::ResidentKeyRequirement;
 
 /// Typed challenge payloads and browser binding.
 mod ceremonies;
+/// Stable decoy credentials for usernames without an active account or passkey.
+mod decoy;
 /// Passkey failures and their browser response mapping.
 mod error;
 /// Validated names and browser request/response bodies.
@@ -48,6 +51,8 @@ pub struct PasskeyApplication {
     webauthn: Arc<Webauthn>,
     /// Whether ordinary registration needs an invitation.
     invite_required: bool,
+    /// HMAC key deriving the decoy credentials of unknown usernames.
+    decoy_key: Secret,
 }
 
 /// Nominal management lifetime, matching the repository's two-minute grant.
@@ -76,6 +81,7 @@ impl PasskeyApplication {
                     .build()?,
             ),
             invite_required: config.invite_required,
+            decoy_key: config.decoy_key.clone(),
         })
     }
 
@@ -161,11 +167,12 @@ impl PasskeyApplication {
 
     /// Decodes the account's active passkeys for `WebAuthn`.
     async fn keys(&self, user_id: UserId) -> Result<Vec<Passkey>, PasskeyError> {
-        self.database
-            .passkeys()
-            .list_active(user_id)
-            .await?
-            .into_iter()
+        Self::decode(self.database.passkeys().list_active(user_id).await?)
+    }
+
+    /// Decodes stored passkey rows into `WebAuthn` credentials.
+    fn decode(keys: Vec<StoredPasskey>) -> Result<Vec<Passkey>, PasskeyError> {
+        keys.into_iter()
             .map(|key| {
                 serde_json::from_value(key.credential).map_err(PasskeyError::StoredCredential)
             })
@@ -400,6 +407,11 @@ impl PasskeyApplication {
     }
 
     /// Starts username-based authentication or lets the authenticator identify the account.
+    ///
+    /// A username without an active account or passkey gets the same response as one
+    /// with them: one lookup query, a stored ceremony and a challenge built by the same
+    /// call, listing stable decoy credentials. That ceremony fails at finish like an
+    /// unregistered passkey, so the username field reveals no account.
     async fn start_login(
         State(app): State<Self>,
         headers: HeaderMap,
@@ -407,20 +419,22 @@ impl PasskeyApplication {
     ) -> Result<Response, ApiError> {
         let (ceremony, challenge) =
             if let Some(username) = input.username.filter(|username| !username.is_empty()) {
-                let user = app
+                let keys = app
                     .database
-                    .users()
-                    .find_active_by_username(&username)
-                    .await?
-                    .ok_or(PasskeyError::AccountUnavailable)?;
-                let (challenge, state) = app
+                    .passkeys()
+                    .list_active_by_username(&username)
+                    .await?;
+                let user_id = keys.first().map(|key| key.user_id);
+                let (mut challenge, state) = app
                     .webauthn
-                    .start_passkey_authentication(&app.keys(user.id).await?)
+                    .start_passkey_authentication(&Self::decode(keys)?)
                     .map_err(PasskeyError::Webauthn)?;
-                let ceremony = Ceremony::Login(LoginCeremony {
-                    user_id: user.id,
-                    state,
-                });
+                let ceremony = if let Some(user_id) = user_id {
+                    Ceremony::Login(LoginCeremony { user_id, state })
+                } else {
+                    challenge.public_key.allow_credentials = app.decoy_credentials(&username)?;
+                    Ceremony::Decoy
+                };
                 (ceremony, challenge)
             } else {
                 let (mut challenge, state) = app
@@ -449,6 +463,7 @@ impl PasskeyApplication {
                     .finish_passkey_authentication(&input.credential, &state)
                     .map_err(PasskeyError::Webauthn)?,
             ),
+            AuthenticationCeremony::Decoy => return Err(PasskeyError::AccountUnavailable.into()),
             AuthenticationCeremony::Discover(DiscoverCeremony { state }) => {
                 let (uuid, _) = app
                     .webauthn
