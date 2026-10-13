@@ -12,6 +12,8 @@ for repository-driven piqueld deployments.
 ## Build
 
 Requires Rust (pinned by `rust-toolchain.toml`), Node 24+, just, and pnpm (the workspace pins its version).
+Building needs no database: SQL is checked against the committed query cache in
+`crates/database/.sqlx/`.
 
 ```sh
 just install
@@ -72,7 +74,7 @@ Apply migrations explicitly, then serve. Deployed images run the same
 `migrate` and `serve` subcommands of the executable directly.
 
 ```sh
-just migrate
+just db migrate
 just serve
 ```
 
@@ -163,7 +165,8 @@ client and scope; explicitly trusted clients bypass consent.
 ## Validation
 
 `just` runs `validate` by default.
-Install `cargo-nextest` and `cargo-deny` to run the complete validation suite.
+`just install-tools` installs `cargo-nextest`, `cargo-deny` and `sqlx-cli`. The
+`db` recipes also need the PostgreSQL 18 server binaries (`initdb`, `pg_ctl`).
 Use individual recipes while iterating:
 
 | Task | Recipe |
@@ -174,12 +177,14 @@ Use individual recipes while iterating:
 | Clippy and ESLint, warnings denied | `just lint` (`just lint-rust` / `just lint-web`) |
 | Unit tests / focused package tests | `just test` / `just test -p auth-service` |
 | Documentation tests | `just doc-test` |
-| Database integration tests | `TEST_DATABASE_URL='postgres://USER:PASSWORD@localhost/piquel_test?sslmode=disable' just test-database` |
+| Database integration tests and query cache check, in a scratch cluster | `just db test` |
+| Regenerate the query cache after changing SQL or migrations | `just db prepare` |
+| Run any command against a scratch cluster | `just db scratch -- psql` |
 | Browser tests against running servers | `just test-browser` |
 | Dependency audits | `just audit` (`deny` + `audit-web`) |
 | SvelteKit generated types/config | `just generate` |
 | Static frontends / embedded debug binary / release binary | `just build-web` / `just build-debug` / `just build` |
-| Run with caller-provided auth configuration | `just serve`, `just migrate`, `just invite --expires-in 7d` |
+| Run with caller-provided auth configuration | `just serve`, `just db migrate`, `just invite --expires-in 7d` |
 
 CI runs these recipes on every pull request whose changes they can affect,
 including the database and browser tests, and on every push to `main`.
@@ -187,16 +192,23 @@ Require its `ci` check: it summarizes the others.
 
 Web code is formatted by Prettier and linted by type-aware ESLint (typescript-eslint
 `strictTypeChecked`), configured once at the repository root.
-`just --list` shows every recipe. Test recipes forward extra arguments to nextest
+`just --list --list-submodules` shows every recipe. Test recipes forward extra arguments to nextest
 or Playwright, including quoted filter expressions. `just run` forwards arguments
 to the auth binary. `just serve` builds auth assets before compiling and serving.
-Cargo generates the embedded asset table and embeds migrations during compilation;
-there is no separate API/schema code-generation step.
+Cargo generates the embedded asset table and embeds migrations during compilation.
+
+Queries in `crates/database` are checked at compile time against
+`crates/database/.sqlx/`. Changing a query's text without `just db prepare` fails
+the build, so `just validate` catches it without a database. Commit the cache with
+the query or migration that changed it.
 
 Database integration tests are explicitly marked ignored for the ordinary test
-command. The database command above runs them against a disposable database
-and applies migrations. TCP URLs must include `sslmode=disable` or `sslmode=verify-full`;
-a Unix socket is also supported. It must not target a real account database.
+command. `just db test` runs them in a throwaway PostgreSQL cluster that listens
+only on a private Unix socket and is deleted afterwards, then runs
+`cargo sqlx prepare --check` against the migrated schema, which catches a
+migration that breaks a cached query. To use an existing disposable database
+instead, set `TEST_DATABASE_URL`; TCP URLs must include `sslmode=disable` or
+`sslmode=verify-full`. It must not target a real account database.
 For browser validation against the actual binary, see [tests/browser/README.md](tests/browser/README.md).
 
 Backend tests use signed software-authenticator responses and local GitHub/Google

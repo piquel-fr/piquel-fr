@@ -18,7 +18,9 @@ is authentication and the piquel.fr account settings frontend.
 Prettier and type-aware ESLint cover all web code from the root configuration, as
 rustfmt and Clippy cover Rust; `just fmt`, `just lint` and `just check` run both.
 
-Only the database crate accesses SQLx. Auth-service owns authentication policy;
+Only `crates/database` runs SQL. `piquel-common` and `piquel-auth-protocol` have
+an optional `sqlx` feature, enabled only by the database crate, that lets their
+IDs and vocabularies decode from columns. Auth-service owns authentication policy;
 frontends never receive database credentials or provider secrets. Add new crates
 for shared domain values or independently auditable primitives.
 

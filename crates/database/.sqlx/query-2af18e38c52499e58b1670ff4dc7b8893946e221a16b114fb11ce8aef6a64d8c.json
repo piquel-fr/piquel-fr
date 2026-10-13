@@ -1,0 +1,101 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT\n                    r.id AS \"id: TokenId\", r.client_id, c.display_name AS client_display_name,\n                    r.redirect_uri, r.client_state, r.nonce, r.pkce_challenge,\n                    r.scopes AS \"scopes: JsonArray<String>\", r.audience, r.force_login,\n                    r.force_consent, r.max_age, r.hinted_user_id AS \"hinted_user_id: UserId\",\n                    r.created_at\n                FROM authorization_requests r\n                JOIN oidc_clients c ON c.id = r.client_id\n                WHERE r.id = $1\n                AND r.secret_digest = $2\n                AND r.consumed_at IS NULL\n                AND r.expires_at > now()\n                AND c.enabled",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id: TokenId",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "client_id",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 2,
+        "name": "client_display_name",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 3,
+        "name": "redirect_uri",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 4,
+        "name": "client_state",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 5,
+        "name": "nonce",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 6,
+        "name": "pkce_challenge",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 7,
+        "name": "scopes: JsonArray<String>",
+        "type_info": "Jsonb"
+      },
+      {
+        "ordinal": 8,
+        "name": "audience",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 9,
+        "name": "force_login",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 10,
+        "name": "force_consent",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 11,
+        "name": "max_age",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 12,
+        "name": "hinted_user_id: UserId",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 13,
+        "name": "created_at",
+        "type_info": "Timestamptz"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Bytea"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false,
+      true,
+      false,
+      false,
+      false,
+      false,
+      false,
+      true,
+      true,
+      false
+    ]
+  },
+  "hash": "2af18e38c52499e58b1670ff4dc7b8893946e221a16b114fb11ce8aef6a64d8c"
+}

@@ -10,6 +10,8 @@ RUN pnpm --filter @piquel/auth-web build
 FROM rust:1.99.0-bookworm AS backend
 WORKDIR /app
 COPY Cargo.toml Cargo.lock ./
+# Checked SQL compiles from crates/database/.sqlx; no database is reachable here.
+COPY .cargo .cargo
 COPY crates crates
 COPY apps/auth-service apps/auth-service
 COPY --from=frontend /app/apps/auth-web/build apps/auth-web/build

@@ -1,0 +1,22 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT s.id\n                FROM sessions s\n                JOIN users u ON u.id = s.user_id\n                WHERE s.id = $1\n                AND s.revoked_at IS NULL\n                AND s.expires_at > clock_timestamp()\n                AND s.management_expires_at > clock_timestamp()\n                AND u.status = 'active'\n                FOR UPDATE OF s",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "2b3742435ab67033f0ceb6709040780d185aca35f2c2cfb743cc7b0a61737832"
+}

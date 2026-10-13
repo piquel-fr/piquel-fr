@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "DELETE FROM pending_federation\n            WHERE ctid IN (\n                SELECT ctid\n                FROM pending_federation\n                WHERE expires_at < now()\n                LIMIT $1\n                FOR UPDATE SKIP LOCKED\n            )",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Int8"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "a25d691356e678ef3ef65aefb62eaec18df6ce522121fd55fb6fbc48a15f7f73"
+}

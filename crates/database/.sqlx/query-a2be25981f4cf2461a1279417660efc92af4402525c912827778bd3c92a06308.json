@@ -1,0 +1,22 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE sessions\n                SET management_expires_at = LEAST(\n                    expires_at,\n                    clock_timestamp() + interval '2 minutes'\n                )\n                WHERE id = $1\n                AND revoked_at IS NULL\n                AND expires_at > clock_timestamp()\n                RETURNING management_expires_at AS \"management_expires_at!\"",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "management_expires_at!",
+        "type_info": "Timestamptz"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      true
+    ]
+  },
+  "hash": "a2be25981f4cf2461a1279417660efc92af4402525c912827778bd3c92a06308"
+}

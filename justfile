@@ -1,14 +1,18 @@
 # Validate by default; database and browser tests remain explicit.
 default: validate
 
+# Scratch PostgreSQL clusters, database tests, the SQLx query cache and migrations.
+mod db 'just/db.just'
+
 validate: fmt-check lint check test doc-test audit
 
 install:
     @pnpm install --frozen-lockfile
 
-# Cargo tools used by the test and audit recipes.
+# Cargo tools used by the test, audit and database recipes.
 install-tools:
     @cargo install --locked cargo-nextest cargo-deny
+    @cargo install --locked sqlx-cli --no-default-features --features rustls,postgres
 
 # Build static browser assets before embedding them in the release executable.
 build: build-web
@@ -73,12 +77,6 @@ test *ARGS='--workspace':
 doc-test:
     @cargo test --locked --doc --workspace
 
-# TEST_DATABASE_URL must identify a disposable database; TCP needs sslmode=disable or verify-full.
-[positional-arguments]
-test-database *ARGS:
-    @test -n "${TEST_DATABASE_URL:?Set a disposable TEST_DATABASE_URL}"
-    @cargo nextest run --locked -p auth-service -p piquel-repository --run-ignored all "$@"
-
 # Requires running auth/settings servers; see tests/browser/README.md.
 [positional-arguments]
 test-browser *ARGS:
@@ -99,9 +97,6 @@ run *ARGS:
 
 serve: build-auth-web
     @just run serve
-
-migrate:
-    @just run migrate
 
 [positional-arguments]
 invite *ARGS:

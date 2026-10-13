@@ -1459,6 +1459,7 @@ version = "0.1.0"
 dependencies = [
  "piquel-common",
  "serde",
+ "sqlx",
  "thiserror 2.0.18",
  "uuid",
 ]
@@ -1469,6 +1470,7 @@ version = "0.1.0"
 dependencies = [
  "serde",
  "serde_json",
+ "sqlx",
  "thiserror 2.0.18",
  "url",
 ]

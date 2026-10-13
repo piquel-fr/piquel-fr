@@ -18,11 +18,13 @@ pub enum DatabaseError {
     /// The database did not answer within the bounded wait.
     #[error("the database operation timed out")]
     Timeout(#[source] tokio::time::error::Elapsed),
-    /// A stored column could not be decoded into its typed value.
-    #[error("stored column `{column}` is invalid")]
+    /// A stored column could not be decoded into its typed value, e.g. an ID
+    /// that is not `UUIDv7` or JSON that does not match its record.
+    #[error("stored column {column} is invalid")]
     InvalidStoredData {
-        /// The column that failed to decode.
-        column: &'static str,
+        /// The column that failed to decode, as `SQLx` reports it: its index in
+        /// the query's result row.
+        column: String,
         /// Why decoding failed.
         #[source]
         source: Source,
@@ -30,16 +32,6 @@ pub enum DatabaseError {
     /// Any other driver, query or migration failure.
     #[error("database operation failed")]
     Operation(#[source] Source),
-}
-
-impl DatabaseError {
-    /// Reports that `column` holds a value its Rust type rejects.
-    pub(crate) fn invalid_stored(column: &'static str, source: impl Into<Source>) -> Self {
-        Self::InvalidStoredData {
-            column,
-            source: source.into(),
-        }
-    }
 }
 
 /// Errors that can occur while constructing the database boundary.
@@ -90,6 +82,10 @@ impl From<sqlx::Error> for DatabaseError {
         match value {
             // RowNotFound has no diagnostic fields beyond the semantic category.
             sqlx::Error::RowNotFound => Self::NotFound,
+            sqlx::Error::ColumnDecode { index, source } => Self::InvalidStoredData {
+                column: index,
+                source,
+            },
             sqlx::Error::Database(database_error) if database_error.is_unique_violation() => {
                 Self::Conflict(Box::new(sqlx::Error::Database(database_error)))
             }

@@ -1,13 +1,18 @@
 //! Domain repository handles backed by a private pool or transaction connection.
 //!
 //! This module holds only what every repository shares: the executor, the
-//! declaration macro, the `run!` query macro and typed row decoding. Each submodule owns
-//! one repository together with the records it accepts and returns.
+//! declaration macro, the `run!` query macro and the column types that checked
+//! queries decode into. Each submodule owns one repository together with the
+//! records it accepts and returns.
 
-use crate::{Database, DatabaseError, DatabaseTransaction};
-use piquel_auth_protocol::{InvalidValue, SessionId, TokenId, UserId};
-use sqlx::{Decode, PgConnection, PgPool, Postgres, Row, Type, postgres::PgRow, types::Json};
-use uuid::Uuid;
+use crate::{Database, DatabaseTransaction};
+use serde::de::DeserializeOwned;
+use sqlx::{
+    Decode, PgConnection, PgPool, Postgres, Type,
+    error::BoxDynError,
+    postgres::{PgTypeInfo, PgValueRef},
+    types::Json,
+};
 
 /// Where a repository runs its queries: directly on the pool, or on the
 /// connection of an open transaction.
@@ -89,99 +94,74 @@ repositories! {
     security: SecurityRepository;
 }
 
-/// Runs a query on the repository's pool or transaction connection and converts
-/// the driver error into a [`DatabaseError`], e.g.
-/// `run!(self, fetch_optional, sqlx::query("...").bind(id))`.
+/// Runs a checked query on the repository's pool or transaction connection and
+/// converts the driver error into a [`DatabaseError`](crate::DatabaseError), e.g.
+/// `run!(self, fetch_optional, sqlx::query_as!(StoredUser, "...", id.as_uuid()))`.
 ///
 /// `$method` is the `sqlx` executor method: `execute`, `fetch_one` (a missing row
-/// becomes [`DatabaseError::NotFound`]), `fetch_optional` or `fetch_all`. A macro
+/// becomes [`DatabaseError::NotFound`](crate::DatabaseError::NotFound)), `fetch_optional` or `fetch_all`. A macro
 /// rather than a method because `&PgPool` and `&mut PgConnection` are different
 /// executor types.
 macro_rules! run {
     ($self:expr, $method:ident, $query:expr) => {{
+        let query = $query;
         match &mut $self.executor {
-            RepositoryExecutor::Pool(pool) => $query.$method(*pool).await,
-            RepositoryExecutor::Connection(connection) => $query.$method(&mut **connection).await,
+            RepositoryExecutor::Pool(pool) => query.$method(*pool).await,
+            RepositoryExecutor::Connection(connection) => query.$method(&mut **connection).await,
         }
         .map_err(Into::<DatabaseError>::into)
     }};
 }
 
-/// A protocol identifier stored in a `UUID` column. `Option<Id>` decodes a
-/// nullable column.
-trait StoredId: Sized {
-    /// The column's SQL representation.
-    type Raw: for<'r> Decode<'r, Postgres> + Type<Postgres>;
+/// A JSONB array column decoded straight into a record's `Vec` field, e.g.
+/// `scopes AS "scopes: JsonArray<String>"` in `query_as!`, which converts each
+/// overridden column with `Into`. Invalid JSON fails decoding.
+#[derive(Debug)]
+struct JsonArray<T>(Vec<T>);
 
-    /// Validates the stored value.
-    fn from_raw(raw: Self::Raw) -> Result<Self, InvalidValue>;
-}
-
-/// Implements UUID decoding for every protocol ID without repeating validation.
-macro_rules! stored_ids {
-    ($($id:ty),*) => {$(
-        impl StoredId for $id {
-            type Raw = Uuid;
-            /// Validates the decoded storage representation before constructing a protocol
-            /// identifier.
-            fn from_raw(raw: Uuid) -> Result<Self, InvalidValue> {
-                Self::from_uuid(raw)
-            }
-        }
-    )*};
-}
-stored_ids!(UserId, SessionId, TokenId);
-
-impl<I: StoredId<Raw = Uuid>> StoredId for Option<I> {
-    type Raw = Option<Uuid>;
-    /// Validates the decoded storage representation before constructing a protocol
-    /// identifier.
-    fn from_raw(raw: Option<Uuid>) -> Result<Self, InvalidValue> {
-        raw.map(I::from_raw).transpose()
+impl<T> Type<Postgres> for JsonArray<T> {
+    /// Stored as `JSONB`.
+    fn type_info() -> PgTypeInfo {
+        Json::<Vec<T>>::type_info()
     }
 }
 
-/// Typed column access that reports malformed rows as
-/// [`DatabaseError::InvalidStoredData`] naming the column.
-trait StoredRow {
-    /// Parses a closed vocabulary stored in a text column.
-    fn vocabulary<T: std::str::FromStr<Err = piquel_common::VocabularyError>>(
-        &self,
-        column: &'static str,
-    ) -> Result<T, DatabaseError> {
-        self.column::<String>(column)?
-            .parse()
-            .map_err(|source| DatabaseError::invalid_stored(column, source))
-    }
-
-    /// Decodes a column into its SQL-compatible Rust type.
-    fn column<'r, T>(&'r self, column: &'static str) -> Result<T, DatabaseError>
-    where
-        T: Decode<'r, Postgres> + Type<Postgres>;
-
-    /// Decodes a JSONB column.
-    fn json<'r, T>(&'r self, column: &'static str) -> Result<T, DatabaseError>
-    where
-        Json<T>: Decode<'r, Postgres>,
-    {
-        self.column::<Json<T>>(column).map(|Json(value)| value)
-    }
-
-    /// Decodes and validates an identifier column.
-    fn id<I: StoredId>(&self, column: &'static str) -> Result<I, DatabaseError> {
-        I::from_raw(self.column(column)?)
-            .map_err(|error| DatabaseError::invalid_stored(column, error))
+impl<'r, T: DeserializeOwned + 'r> Decode<'r, Postgres> for JsonArray<T> {
+    /// Deserializes the stored array.
+    fn decode(value: PgValueRef<'r>) -> Result<Self, BoxDynError> {
+        Json::<Vec<T>>::decode(value).map(|Json(values)| Self(values))
     }
 }
 
-impl StoredRow for PgRow {
-    /// Decodes a column and retains both its name and the original driver diagnostic.
-    fn column<'r, T>(&'r self, column: &'static str) -> Result<T, DatabaseError>
-    where
-        T: Decode<'r, Postgres> + Type<Postgres>,
-    {
-        self.try_get(column)
-            .map_err(|error| DatabaseError::invalid_stored(column, error))
+impl<T> From<JsonArray<T>> for Vec<T> {
+    /// Unwraps the decoded array.
+    fn from(JsonArray(values): JsonArray<T>) -> Self {
+        values
+    }
+}
+
+/// A `BIGINT` column that must not be negative, decoded into a `u64` field, e.g.
+/// `profile_version AS "profile_version: Unsigned"`.
+struct Unsigned(u64);
+
+impl Type<Postgres> for Unsigned {
+    /// Stored as `BIGINT`.
+    fn type_info() -> PgTypeInfo {
+        i64::type_info()
+    }
+}
+
+impl Decode<'_, Postgres> for Unsigned {
+    /// Rejects negative values.
+    fn decode(value: PgValueRef<'_>) -> Result<Self, BoxDynError> {
+        Ok(Self(u64::try_from(i64::decode(value)?)?))
+    }
+}
+
+impl From<Unsigned> for u64 {
+    /// Unwraps the decoded value.
+    fn from(Unsigned(value): Unsigned) -> Self {
+        value
     }
 }
 
@@ -199,6 +179,9 @@ pub(crate) mod passkeys;
 pub(crate) mod security;
 /// Browser sessions, cookie digests and management windows.
 pub(crate) mod sessions;
+/// Focused tests for the column types shared by every repository.
+#[cfg(test)]
+mod tests;
 /// Refresh-token grants, rotation and replay revocation.
 pub(crate) mod tokens;
 /// Account records and serialization locks.

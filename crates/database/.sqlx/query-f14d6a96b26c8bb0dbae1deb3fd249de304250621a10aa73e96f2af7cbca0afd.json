@@ -1,0 +1,58 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT\n                    s.id AS \"id: SessionId\", s.user_id AS \"user_id: UserId\",\n                    s.authentication_methods AS \"authentication_methods: JsonArray<AuthenticationMethod>\",\n                    s.authenticated_at, s.expires_at, s.last_seen_at, s.revoked_at\n                FROM browser_session_secrets b\n                JOIN sessions s ON s.id = b.session_id\n                JOIN users u ON u.id = s.user_id\n                WHERE b.secret_digest = $1\n                AND s.revoked_at IS NULL\n                AND s.expires_at > now()\n                AND u.status = 'active'",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id: SessionId",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "user_id: UserId",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 2,
+        "name": "authentication_methods: JsonArray<AuthenticationMethod>",
+        "type_info": "Jsonb"
+      },
+      {
+        "ordinal": 3,
+        "name": "authenticated_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 4,
+        "name": "expires_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 5,
+        "name": "last_seen_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 6,
+        "name": "revoked_at",
+        "type_info": "Timestamptz"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Bytea"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      true
+    ]
+  },
+  "hash": "f14d6a96b26c8bb0dbae1deb3fd249de304250621a10aa73e96f2af7cbca0afd"
+}

@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "DELETE FROM refresh_token_families f\n            WHERE f.ctid IN (\n                SELECT family.ctid\n                FROM refresh_token_families family\n                WHERE (\n                    family.revoked_at < now() - interval '1 day'\n                    OR family.created_at < now() - interval '31 days'\n                )\n                AND NOT EXISTS (\n                    SELECT 1\n                    FROM refresh_tokens token\n                    WHERE token.family_id = family.id\n                )\n                LIMIT $1\n                FOR UPDATE SKIP LOCKED\n            )",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Int8"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "64478d40a93c1c7e3c90e2728eff30cc748b2dc49972e7a306156ee73798cf3c"
+}

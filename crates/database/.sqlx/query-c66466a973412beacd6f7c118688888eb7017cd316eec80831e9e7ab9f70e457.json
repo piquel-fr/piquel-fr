@@ -1,0 +1,22 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT id\n                FROM refresh_token_families\n                WHERE id = $1\n                AND revoked_at IS NULL\n                FOR UPDATE",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "c66466a973412beacd6f7c118688888eb7017cd316eec80831e9e7ab9f70e457"
+}

@@ -1,11 +1,10 @@
 //! Passkey credentials and single-use `WebAuthn` ceremony persistence.
 
-use super::{PasskeyRepository, RepositoryExecutor, StoredRow};
+use super::{PasskeyRepository, RepositoryExecutor};
 use crate::DatabaseError;
 use chrono::{DateTime, Utc};
 use piquel_auth_protocol::{SessionId, TokenId, UserId};
 use serde_json::Value;
-use sqlx::postgres::PgRow;
 
 piquel_common::str_enum! {
     /// SQL-compatible `WebAuthn` ceremony purpose.
@@ -53,20 +52,6 @@ pub struct StoredPasskey {
     pub revoked_at: Option<DateTime<Utc>>,
 }
 
-impl StoredPasskey {
-    /// Decodes a stored row, retaining the column name and cause for invalid data.
-    fn from_row(row: &PgRow) -> Result<Self, DatabaseError> {
-        Ok(Self {
-            id: row.id("id")?,
-            credential_id: row.column("credential_id")?,
-            user_id: row.id("user_id")?,
-            credential: row.column("credential")?,
-            friendly_name: row.column("friendly_name")?,
-            revoked_at: row.column("revoked_at")?,
-        })
-    }
-}
-
 /// Server-side state for a started `WebAuthn` ceremony. The state contains the
 /// challenge and must never be logged.
 #[derive(Clone, Debug)]
@@ -106,22 +91,24 @@ impl PasskeyRepository<'_> {
     /// Returns [`DatabaseError::Conflict`] if the credential ID is already
     /// registered, or another [`DatabaseError`] if the query fails.
     pub async fn insert(&mut self, input: &InsertPasskey) -> Result<StoredPasskey, DatabaseError> {
-        let row = run!(
+        run!(
             self,
             fetch_one,
-            sqlx::query(
-                "INSERT INTO passkey_credentials (
+            sqlx::query_as!(
+                StoredPasskey,
+                r#"INSERT INTO passkey_credentials (
                     id, credential_id, user_id, credential, friendly_name
                 ) VALUES ($1, $2, $3, $4, $5)
-                RETURNING id, credential_id, user_id, credential, friendly_name, revoked_at"
+                RETURNING
+                    id AS "id: TokenId", credential_id, user_id AS "user_id: UserId", credential,
+                    friendly_name, revoked_at"#,
+                input.id.as_uuid(),
+                input.credential_id,
+                input.user_id.as_uuid(),
+                input.credential,
+                input.friendly_name,
             )
-            .bind(input.id.as_uuid())
-            .bind(&input.credential_id)
-            .bind(input.user_id.as_uuid())
-            .bind(&input.credential)
-            .bind(&input.friendly_name)
-        )?;
-        StoredPasskey::from_row(&row)
+        )
     }
 
     /// Lists the account's unrevoked credentials, oldest first.
@@ -136,18 +123,18 @@ impl PasskeyRepository<'_> {
         run!(
             self,
             fetch_all,
-            sqlx::query(
-                "SELECT id, credential_id, user_id, credential, friendly_name, revoked_at
+            sqlx::query_as!(
+                StoredPasskey,
+                r#"SELECT
+                    id AS "id: TokenId", credential_id, user_id AS "user_id: UserId", credential,
+                    friendly_name, revoked_at
                 FROM passkey_credentials
                 WHERE user_id = $1
                 AND revoked_at IS NULL
-                ORDER BY created_at"
+                ORDER BY created_at"#,
+                user_id.as_uuid(),
             )
-            .bind(user_id.as_uuid())
-        )?
-        .iter()
-        .map(StoredPasskey::from_row)
-        .collect()
+        )
     }
 
     /// Finds an unrevoked credential and locks it until the transaction ends,
@@ -163,18 +150,18 @@ impl PasskeyRepository<'_> {
         run!(
             self,
             fetch_optional,
-            sqlx::query(
-                "SELECT id, credential_id, user_id, credential, friendly_name, revoked_at
+            sqlx::query_as!(
+                StoredPasskey,
+                r#"SELECT
+                    id AS "id: TokenId", credential_id, user_id AS "user_id: UserId", credential,
+                    friendly_name, revoked_at
                 FROM passkey_credentials
                 WHERE credential_id = $1
                 AND revoked_at IS NULL
-                FOR UPDATE"
+                FOR UPDATE"#,
+                credential_id,
             )
-            .bind(credential_id)
-        )?
-        .as_ref()
-        .map(StoredPasskey::from_row)
-        .transpose()
+        )
     }
 
     /// Stores the credential's post-authentication state, e.g. its counter.
@@ -191,14 +178,14 @@ impl PasskeyRepository<'_> {
         Ok(run!(
             self,
             execute,
-            sqlx::query(
+            sqlx::query!(
                 "UPDATE passkey_credentials
                 SET credential = $1, last_used_at = now()
                 WHERE credential_id = $2
-                AND revoked_at IS NULL"
+                AND revoked_at IS NULL",
+                credential,
+                credential_id,
             )
-            .bind(credential)
-            .bind(credential_id)
         )?
         .rows_affected()
             == 1)
@@ -219,16 +206,16 @@ impl PasskeyRepository<'_> {
         Ok(run!(
             self,
             execute,
-            sqlx::query(
+            sqlx::query!(
                 "UPDATE passkey_credentials
                 SET friendly_name = $1
                 WHERE id = $2
                 AND user_id = $3
-                AND revoked_at IS NULL"
+                AND revoked_at IS NULL",
+                name,
+                id.as_uuid(),
+                user_id.as_uuid(),
             )
-            .bind(name)
-            .bind(id.as_uuid())
-            .bind(user_id.as_uuid())
         )?
         .rows_affected()
             == 1)
@@ -251,7 +238,7 @@ impl PasskeyRepository<'_> {
         Ok(run!(
             self,
             execute,
-            sqlx::query(
+            sqlx::query!(
                 "WITH locked AS MATERIALIZED (
                     SELECT id, revoked_at
                     FROM passkey_credentials
@@ -270,10 +257,10 @@ impl PasskeyRepository<'_> {
                 FROM eligible
                 WHERE passkey_credentials.id = $1
                 AND passkey_credentials.user_id = $2
-                AND passkey_credentials.revoked_at IS NULL"
+                AND passkey_credentials.revoked_at IS NULL",
+                id.as_uuid(),
+                user_id.as_uuid(),
             )
-            .bind(id.as_uuid())
-            .bind(user_id.as_uuid())
         )?
         .rows_affected()
             == 1)
@@ -289,15 +276,15 @@ impl PasskeyRepository<'_> {
         Ok(run!(
             self,
             execute,
-            sqlx::query(
+            sqlx::query!(
                 "UPDATE passkey_credentials
                 SET revoked_at = now()
                 WHERE id = $1
                 AND user_id = $2
-                AND revoked_at IS NULL"
+                AND revoked_at IS NULL",
+                id.as_uuid(),
+                user_id.as_uuid(),
             )
-            .bind(id.as_uuid())
-            .bind(user_id.as_uuid())
         )?
         .rows_affected()
             == 1)
@@ -312,18 +299,18 @@ impl PasskeyRepository<'_> {
         run!(
             self,
             execute,
-            sqlx::query(
+            sqlx::query!(
                 "INSERT INTO webauthn_ceremonies (
                     id, user_id, session_id, ceremony_kind, challenge_digest, state, expires_at
-                ) VALUES ($1, $2, $3, $4, $5, $6, $7)"
+                ) VALUES ($1, $2, $3, $4, $5, $6, $7)",
+                input.id.as_uuid(),
+                input.user_id.map(UserId::as_uuid),
+                input.session_id.map(SessionId::as_uuid),
+                input.kind.as_str(),
+                input.challenge_digest,
+                input.state,
+                input.expires_at,
             )
-            .bind(input.id.as_uuid())
-            .bind(input.user_id.map(UserId::as_uuid))
-            .bind(input.session_id.map(SessionId::as_uuid))
-            .bind(input.kind.as_str())
-            .bind(&input.challenge_digest)
-            .bind(&input.state)
-            .bind(input.expires_at)
         )?;
         Ok(())
     }
@@ -340,25 +327,22 @@ impl PasskeyRepository<'_> {
         id: TokenId,
         kind: CeremonyKind,
     ) -> Result<ConsumedCeremony, DatabaseError> {
-        let row = run!(
+        run!(
             self,
             fetch_one,
-            sqlx::query(
-                "UPDATE webauthn_ceremonies
+            sqlx::query_as!(
+                ConsumedCeremony,
+                r#"UPDATE webauthn_ceremonies
                 SET consumed_at = now()
                 WHERE id = $1
                 AND ceremony_kind = $2
                 AND consumed_at IS NULL
                 AND expires_at > now()
-                RETURNING user_id, session_id, state"
+                RETURNING
+                    user_id AS "user_id: UserId", session_id AS "session_id: SessionId", state"#,
+                id.as_uuid(),
+                kind.as_str(),
             )
-            .bind(id.as_uuid())
-            .bind(kind.as_str())
-        )?;
-        Ok(ConsumedCeremony {
-            user_id: row.id("user_id")?,
-            session_id: row.id("session_id")?,
-            state: row.column("state")?,
-        })
+        )
     }
 }

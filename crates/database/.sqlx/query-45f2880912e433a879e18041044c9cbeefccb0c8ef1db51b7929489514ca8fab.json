@@ -1,0 +1,52 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT\n                    id AS \"id: TokenId\", user_id AS \"user_id: UserId\",\n                    provider_name AS \"provider: Provider\", issuer, subject, linked_email\n                FROM external_login_identities\n                WHERE user_id = $1\n                AND revoked_at IS NULL\n                ORDER BY linked_at",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id: TokenId",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "user_id: UserId",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 2,
+        "name": "provider: Provider",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 3,
+        "name": "issuer",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 4,
+        "name": "subject",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 5,
+        "name": "linked_email",
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false,
+      true
+    ]
+  },
+  "hash": "45f2880912e433a879e18041044c9cbeefccb0c8ef1db51b7929489514ca8fab"
+}

@@ -145,3 +145,53 @@ async fn independent_refreshes_share_client_and_logout_does_not_deadlock() {
         "{result:?}"
     );
 }
+
+/// Replay revokes the family before the grant's JSON is decoded, so invalid stored
+/// scopes cannot keep a replayed family alive.
+#[tokio::test]
+#[ignore = "requires a disposable TEST_DATABASE_URL"]
+async fn replay_revokes_family_despite_invalid_scopes() {
+    let pool = Database::test_pool().await;
+    let client = format!("replay_{}", UserId::new());
+    sqlx::query(
+        "INSERT INTO oidc_clients (
+            id, display_name, allowed_scopes, allowed_audiences, allow_refresh
+        ) VALUES ($1, 'Replay test', '[\"openid\"]', '[\"test\"]', true)",
+    )
+    .bind(&client)
+    .execute(&pool)
+    .await
+    .expect("client");
+    let (token, digest, _) = family(&pool, &client).await;
+    for statement in [
+        "UPDATE refresh_tokens SET consumed_at=now() WHERE id=$1",
+        "UPDATE refresh_token_families SET scopes='[1]'
+        WHERE id=(SELECT family_id FROM refresh_tokens WHERE id=$1)",
+    ] {
+        sqlx::query(statement)
+            .bind(token.as_uuid())
+            .execute(&pool)
+            .await
+            .expect("consumed token with invalid scopes");
+    }
+    let mut tx = pool.begin().await.expect("transaction");
+    let result = TokenRepository::from_connection(&mut tx)
+        .consume_for_rotation(token, &digest, &client)
+        .await;
+    assert!(
+        matches!(result, Err(RefreshRotationError::Replay { .. })),
+        "{result:?}"
+    );
+    tx.commit().await.expect("commit");
+    let revoked: bool = sqlx::query_scalar(
+        "SELECT f.revoked_at IS NOT NULL
+        FROM refresh_token_families f
+        JOIN refresh_tokens t ON t.family_id = f.id
+        WHERE t.id = $1",
+    )
+    .bind(token.as_uuid())
+    .fetch_one(&pool)
+    .await
+    .expect("family");
+    assert!(revoked);
+}

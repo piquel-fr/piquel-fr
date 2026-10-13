@@ -1,0 +1,12 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE oidc_clients SET enabled=FALSE",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": []
+  },
+  "hash": "90e9e183df95008e9267dad459832e9fcd285c1e4f14fd263c09d445253306d4"
+}

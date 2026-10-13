@@ -1,0 +1,83 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE pending_federation\n                SET consumed_at = now()\n                WHERE id = $1\n                AND browser_digest = $2\n                AND consumed_at IS NULL\n                AND expires_at > now()\n                RETURNING\n                    id AS \"id: TokenId\", browser_digest, provider_name AS \"provider: Provider\",\n                    issuer, subject, email, display_name, return_to,\n                    link_user_id AS \"link_user_id: UserId\",\n                    link_session_id AS \"link_session_id: SessionId\", expires_at",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id: TokenId",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "browser_digest",
+        "type_info": "Bytea"
+      },
+      {
+        "ordinal": 2,
+        "name": "provider: Provider",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 3,
+        "name": "issuer",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 4,
+        "name": "subject",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 5,
+        "name": "email",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 6,
+        "name": "display_name",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 7,
+        "name": "return_to",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 8,
+        "name": "link_user_id: UserId",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 9,
+        "name": "link_session_id: SessionId",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 10,
+        "name": "expires_at",
+        "type_info": "Timestamptz"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Bytea"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false,
+      true,
+      false,
+      false,
+      true,
+      true,
+      false
+    ]
+  },
+  "hash": "d35a79059bf86142ca691ec9a4f6b65777abfbc898dfa85f22997ed426c925b0"
+}

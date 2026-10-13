@@ -1,0 +1,23 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO federation_transactions (\n                    id, provider_name, state_digest, browser_digest, nonce,\n                    pkce_verifier, return_to, expires_at, link_user_id, link_session_id\n                ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Text",
+        "Bytea",
+        "Bytea",
+        "Text",
+        "Text",
+        "Text",
+        "Timestamptz",
+        "Uuid",
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "6ff8342c5aca693d844cf9006dfb428a904f09d77415fbf93e1bf3e955e501b8"
+}
