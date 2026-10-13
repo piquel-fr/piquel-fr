@@ -149,6 +149,71 @@ async fn cleanup_skips_rows_locked_by_requests() {
     request.rollback().await.expect("rollback request");
 }
 
+/// A redeemed code outlives its one-day grace while its refresh family can still
+/// refresh, so a late replay can revoke it; cleanup purges it once the session ends.
+#[tokio::test]
+#[ignore = "requires a disposable TEST_DATABASE_URL"]
+async fn cleanup_keeps_redeemed_codes_while_their_session_is_live() {
+    let pool = Database::test_pool().await;
+    let database = Database { pool: pool.clone() };
+    let [user, session, code, family] = [(); 4].map(|()| uuid::Uuid::now_v7());
+    let client = format!("purge_{user}");
+    // One statement keeps the fixture short; foreign keys are checked at its end.
+    sqlx::query(
+        "WITH account AS (
+            INSERT INTO users (id, username, display_name) VALUES ($1, $5, 'Purge')
+        ), browser AS (
+            INSERT INTO sessions (
+                id, user_id, authentication_methods, authenticated_at, expires_at, last_seen_at
+            ) VALUES ($2, $1, '[]', now(), now() + interval '30 days', now())
+        ), registration AS (
+            INSERT INTO oidc_clients (id, display_name, allowed_scopes, allowed_audiences)
+            VALUES ($5, 'Purge', '[]', '[]')
+        ), redeemed AS (
+            INSERT INTO authorization_codes (
+                id, secret_digest, client_id, user_id, session_id, redirect_uri,
+                pkce_challenge, scopes, audience, expires_at, consumed_at
+            ) VALUES ($3, convert_to($3::text, 'UTF8'), $5, $1, $2, 'https://client.example',
+                'challenge', '[]', 'test', now() - interval '2 days', now() - interval '2 days')
+        )
+        INSERT INTO refresh_token_families (
+            id, user_id, client_id, session_id, authorization_code_id, audience, scopes
+        ) VALUES ($4, $1, $5, $2, $3, 'test', '[]')",
+    )
+    .bind(user)
+    .bind(session)
+    .bind(code)
+    .bind(family)
+    .bind(&client)
+    .execute(&pool)
+    .await
+    .expect("redeemed grant");
+    let link = || async {
+        sqlx::query_scalar::<_, Option<uuid::Uuid>>(
+            "SELECT authorization_code_id FROM refresh_token_families WHERE id = $1",
+        )
+        .bind(family)
+        .fetch_one(&pool)
+        .await
+        .expect("family link")
+    };
+    database
+        .purge_expired_auth_state(1000)
+        .await
+        .expect("purge");
+    assert_eq!(link().await, Some(code), "a live grant keeps its code");
+    sqlx::query("UPDATE sessions SET revoked_at = now() WHERE id = $1")
+        .bind(session)
+        .execute(&pool)
+        .await
+        .expect("end session");
+    database
+        .purge_expired_auth_state(1000)
+        .await
+        .expect("purge");
+    assert_eq!(link().await, None, "an ended session releases its code");
+}
+
 /// Startup failures identify the invalid transport or pool setting without printing credentials.
 #[test]
 fn configuration_errors_name_the_constraint_and_preserve_parsers() {

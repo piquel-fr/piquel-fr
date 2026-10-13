@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "DELETE FROM authorization_codes c\n            WHERE c.ctid IN (\n                SELECT code.ctid\n                FROM authorization_codes code\n                WHERE (code.consumed_at IS NULL AND code.expires_at < now())\n                OR (\n                    code.consumed_at < now() - interval '1 day'\n                    AND NOT EXISTS (\n                        SELECT 1\n                        FROM refresh_token_families family\n                        JOIN sessions session ON session.id = family.session_id\n                        WHERE family.authorization_code_id = code.id\n                        AND family.revoked_at IS NULL\n                        AND session.revoked_at IS NULL\n                        AND session.expires_at > now()\n                    )\n                )\n                LIMIT $1\n                FOR UPDATE OF code SKIP LOCKED\n            )",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Int8"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "9acf1acac4c212893c641b7f0531c982478ddadcc096ad0eb010ef3fc228a34d"
+}

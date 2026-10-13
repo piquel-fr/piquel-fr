@@ -284,16 +284,29 @@ impl Database {
                 LIMIT $1
                 FOR UPDATE SKIP LOCKED
             )",
-            // Redeemed codes outlive their expiry by a day so a late replay still finds
-            // them and revokes the refresh family they produced.
-            "DELETE FROM authorization_codes
-            WHERE ctid IN (
-                SELECT ctid
-                FROM authorization_codes
-                WHERE (consumed_at IS NULL AND expires_at < now())
-                OR consumed_at < now() - interval '1 day'
+            // A redeemed code stays while a replay could still revoke something: an
+            // unrevoked family it produced whose session is live (refresh tokens expire
+            // with the session). The first day after redemption is kept regardless, so
+            // replays are still audited even for codes that produced no refresh family.
+            "DELETE FROM authorization_codes c
+            WHERE c.ctid IN (
+                SELECT code.ctid
+                FROM authorization_codes code
+                WHERE (code.consumed_at IS NULL AND code.expires_at < now())
+                OR (
+                    code.consumed_at < now() - interval '1 day'
+                    AND NOT EXISTS (
+                        SELECT 1
+                        FROM refresh_token_families family
+                        JOIN sessions session ON session.id = family.session_id
+                        WHERE family.authorization_code_id = code.id
+                        AND family.revoked_at IS NULL
+                        AND session.revoked_at IS NULL
+                        AND session.expires_at > now()
+                    )
+                )
                 LIMIT $1
-                FOR UPDATE SKIP LOCKED
+                FOR UPDATE OF code SKIP LOCKED
             )",
             "DELETE FROM refresh_tokens t
             WHERE t.ctid IN (
