@@ -5,6 +5,7 @@ use crate::security::SessionError;
 use piquel_auth_protocol::InvalidValue;
 use piquel_crypto::CryptoError;
 use piquel_repository::DatabaseError;
+use std::borrow::Cow;
 use webauthn_rs::prelude::WebauthnError;
 
 /// Failures while validating, persisting or completing a passkey operation.
@@ -13,6 +14,12 @@ pub(super) enum PasskeyError {
     /// The signup username violates the account naming rules.
     #[error("invalid username")]
     InvalidUsername,
+    /// Another account registered the username while this signup was in progress.
+    #[error("username is taken")]
+    UsernameTaken(#[source] DatabaseError),
+    /// The authenticator's credential is already registered to an account.
+    #[error("passkey credential is already registered")]
+    PasskeyAlreadyRegistered(#[source] DatabaseError),
     /// The account's displayed name is blank, too long or contains controls.
     #[error("invalid display name")]
     InvalidDisplayName,
@@ -109,6 +116,12 @@ impl From<PasskeyError> for ApiError {
             PasskeyError::InvalidUsername => Self::bad_request(
                 "Use 3–32 lowercase letters, numbers, underscores or hyphens for your username.",
             ),
+            PasskeyError::UsernameTaken(_) => Self::conflict(
+                "This username is taken. Choose another one and create your passkey again.",
+            ),
+            PasskeyError::PasskeyAlreadyRegistered(_) => {
+                Self::conflict("This passkey is already registered to an account.")
+            }
             PasskeyError::InvalidDisplayName => {
                 Self::bad_request("Choose a display name of at most 80 characters.")
             }
@@ -116,7 +129,9 @@ impl From<PasskeyError> for ApiError {
                 Self::bad_request("Choose a passkey name of at most 80 characters.")
             }
             PasskeyError::InvitationRequired => Self::forbidden("A valid invitation is required."),
-            PasskeyError::InvitationMissingAtFinish => Self::forbidden("Invitation required."),
+            PasskeyError::InvitationMissingAtFinish => Self::forbidden(
+                "This signup started before invitations were required. Start again with an invitation.",
+            ),
             PasskeyError::InvitationExpired => {
                 Self::forbidden("This invitation has expired or has already been used.")
             }
@@ -126,7 +141,9 @@ impl From<PasskeyError> for ApiError {
             PasskeyError::GooglePasswordManagerRequiresAndroid => Self::bad_request(
                 "Choose Google Password Manager only on an Android device with Google services.",
             ),
-            PasskeyError::AccountInactive => Self::unauthorized("Sign in to continue."),
+            PasskeyError::AccountInactive => {
+                Self::unauthorized("This account is disabled, or this passkey was removed from it.")
+            }
             PasskeyError::ManagementExpired => {
                 Self::forbidden("Your management window expired. Confirm with a passkey again.")
             }
@@ -134,19 +151,36 @@ impl From<PasskeyError> for ApiError {
             PasskeyError::LastPasskey => {
                 Self::bad_request("Keep at least one passkey on your account.")
             }
-            error @ (PasskeyError::BrowserMismatch
-            | PasskeyError::WrongCeremony
-            | PasskeyError::SessionChanged
-            | PasskeyError::Webauthn(_)
-            | PasskeyError::InvalidUserHandle(_)
-            | PasskeyError::AccountUnavailable
-            | PasskeyError::UserVerificationRequired
-            | PasskeyError::CounterRegression
-            | PasskeyError::CredentialMismatch
-            | PasskeyError::CredentialRevoked) => {
-                // Display contains only the rejection reason, never challenges or credentials.
-                tracing::debug!(error = %piquel_common::ErrorChain(&error), "WebAuthn request rejected");
-                Self::bad_request("Passkey verification failed. Please try again.")
+            error @ (PasskeyError::BrowserMismatch | PasskeyError::WrongCeremony) => error
+                .rejected(
+                    "This passkey request belongs to another sign-in attempt. Please start again.",
+                ),
+            error @ PasskeyError::SessionChanged => error
+                .rejected("Your session changed during this passkey request. Please start again."),
+            // WebAuthn's reasons stay in the logs: some fail before possession is proven,
+            // so showing them would reveal which credentials an account has.
+            error @ PasskeyError::Webauthn(_) => {
+                error.rejected("This passkey could not be verified. Please try again.")
+            }
+            error @ PasskeyError::InvalidUserHandle(_) => {
+                error.rejected("This passkey does not belong to a Piquel account.")
+            }
+            // The same answer whether the account is missing or has no passkey: the
+            // username field reveals no more than it must.
+            error @ PasskeyError::AccountUnavailable => {
+                error.rejected("No passkey is available for this username.")
+            }
+            error @ PasskeyError::UserVerificationRequired => error
+                .rejected("Your authenticator must verify you with a PIN, fingerprint or face."),
+            error @ PasskeyError::CounterRegression => error.rejected(
+                "This passkey's signature counter went backwards, which can mean it was copied. \
+                 Use another passkey.",
+            ),
+            error @ PasskeyError::CredentialMismatch => {
+                error.rejected("This passkey does not match its stored credential.")
+            }
+            error @ PasskeyError::CredentialRevoked => {
+                error.rejected("This passkey was removed from your account.")
             }
             PasskeyError::Database(error) => error.into(),
             PasskeyError::Session(error) => error.into(),
@@ -157,6 +191,15 @@ impl From<PasskeyError> for ApiError {
             | PasskeyError::CookieHeader(_)
             | PasskeyError::Crypto(_)) => Self::internal(error),
         }
+    }
+}
+
+impl PasskeyError {
+    /// Rejects a passkey ceremony with `message`. The reason is logged at debug level:
+    /// browsers trigger these, and the Display holds no challenge or credential.
+    fn rejected(&self, message: impl Into<Cow<'static, str>>) -> ApiError {
+        tracing::debug!(error = %piquel_common::ErrorChain(self), "WebAuthn request rejected");
+        ApiError::bad_request(message)
     }
 }
 

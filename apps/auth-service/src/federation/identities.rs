@@ -47,7 +47,7 @@ impl FederationApplication {
     ) -> Result<(), FederationError> {
         let browser = BrowserCookie::FederationPending
             .read(headers)
-            .ok_or(FederationError::Unauthorized)?;
+            .ok_or(FederationError::PendingBrowserMissing)?;
         let pending = tx
             .federation()
             .consume_pending(pending_id, browser.digest().as_bytes())
@@ -97,7 +97,7 @@ impl FederationApplication {
     async fn pending(&self, headers: &HeaderMap) -> Result<PendingView, FederationError> {
         let browser = BrowserCookie::FederationPending
             .read(headers)
-            .ok_or(FederationError::Unauthorized)?;
+            .ok_or(FederationError::PendingBrowserMissing)?;
         let pending = self
             .database
             .federation()
@@ -135,12 +135,12 @@ impl FederationApplication {
     ) -> Result<Response, FederationError> {
         let browser = BrowserCookie::FederationPending
             .read(headers)
-            .ok_or(FederationError::Unauthorized)?;
+            .ok_or(FederationError::PendingBrowserMissing)?;
         let mut tx = self.database.begin().await?;
         tx.users()
             .find_active_by_id_for_update(session.user_id)
             .await?
-            .ok_or(FederationError::Unauthorized)?;
+            .ok_or(FederationError::AccountInactive)?;
         if !tx.sessions().management_active(session.id).await? {
             return Err(FederationError::ManagementExpired);
         }
@@ -263,7 +263,7 @@ impl FederationApplication {
         tx.users()
             .find_active_by_id_for_update(session.user_id)
             .await?
-            .ok_or(FederationError::Unauthorized)?;
+            .ok_or(FederationError::AccountInactive)?;
         if !tx.sessions().management_active(session.id).await? {
             return Err(FederationError::ManagementExpired);
         }

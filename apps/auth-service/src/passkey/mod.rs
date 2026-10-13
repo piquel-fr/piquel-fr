@@ -12,7 +12,9 @@ use axum::{
 };
 use piquel_auth_protocol::{AuthenticationMethod, TokenId, UserId};
 use piquel_crypto::Secret;
-use piquel_repository::{AuditAction, Database, DatabaseTransaction, InsertPasskey, InsertUser};
+use piquel_repository::{
+    AuditAction, Database, DatabaseError, DatabaseTransaction, InsertPasskey, InsertUser,
+};
 use serde_json::Value;
 use std::sync::Arc;
 use webauthn_rs::{Webauthn, WebauthnBuilder, prelude::*};
@@ -131,7 +133,14 @@ impl PasskeyApplication {
                 credential: serde_json::to_value(key).map_err(PasskeyError::Serialization)?,
                 friendly_name: friendly_name.into(),
             })
-            .await?;
+            .await
+            .map_err(|error| match error {
+                DatabaseError::Conflict(_) => PasskeyError::PasskeyAlreadyRegistered(error),
+                DatabaseError::NotFound
+                | DatabaseError::Timeout(_)
+                | DatabaseError::InvalidStoredData { .. }
+                | DatabaseError::Operation(_) => error.into(),
+            })?;
         Ok(())
     }
 
@@ -368,7 +377,14 @@ impl PasskeyApplication {
                 username: username.into(),
                 display_name: display_name.into(),
             })
-            .await?;
+            .await
+            .map_err(|error| match error {
+                DatabaseError::Conflict(_) => PasskeyError::UsernameTaken(error),
+                DatabaseError::NotFound
+                | DatabaseError::Timeout(_)
+                | DatabaseError::InvalidStoredData { .. }
+                | DatabaseError::Operation(_) => error.into(),
+            })?;
         Self::insert_passkey(&mut tx, user_id, key, friendly_name).await?;
         if let Some(pending) = pending {
             FederationApplication::attach_signup(&mut tx, pending, &headers, user_id).await?;

@@ -22,9 +22,18 @@ pub(crate) enum FederationError {
     /// `return_to` is neither the settings URL nor a safe path on the auth origin.
     #[error(transparent)]
     InvalidReturnTo(#[from] InvalidReturnTo),
-    /// The flow cookie is missing, or the account is inactive or lacks a passkey.
-    #[error("active browser binding or account required")]
-    Unauthorized,
+    /// The callback's browser lacks the cookie set when its flow started.
+    #[error("federation flow cookie missing")]
+    FlowBrowserMissing,
+    /// The browser lacks the cookie binding its pending provider evidence.
+    #[error("pending federation cookie missing")]
+    PendingBrowserMissing,
+    /// The signed-in account was disabled.
+    #[error("session account is inactive")]
+    AccountInactive,
+    /// The account linked to the provider identity is inactive or has no active passkey.
+    #[error("linked account is inactive or has no passkey")]
+    LinkedAccountUnavailable,
     /// The callback's `state` is missing or malformed.
     #[error("sign-in attempt is invalid or expired")]
     InvalidAttempt,
@@ -89,7 +98,16 @@ impl From<FederationError> for ApiError {
                 Self::bad_request("This sign-in provider is not configured.")
             }
             FederationError::InvalidReturnTo(error) => Self::bad_request(error.to_string()),
-            FederationError::Unauthorized => Self::unauthorized("Sign in to continue."),
+            FederationError::FlowBrowserMissing => Self::unauthorized(
+                "This sign-in did not start in this browser, or it has expired. Please start again.",
+            ),
+            FederationError::PendingBrowserMissing => Self::unauthorized(
+                "No provider sign-in is waiting in this browser. Please start again.",
+            ),
+            FederationError::AccountInactive => Self::unauthorized("This account is disabled."),
+            FederationError::LinkedAccountUnavailable => Self::unauthorized(
+                "The Piquel account linked to this provider account is disabled or has no passkey.",
+            ),
             FederationError::InvalidAttempt => Self::bad_request(
                 "This sign-in attempt is invalid or has expired. Please start again.",
             ),

@@ -329,7 +329,7 @@ impl FederationApplication {
     ) -> Result<Response, FederationError> {
         let browser = BrowserCookie::Federation
             .read(headers)
-            .ok_or(FederationError::Unauthorized)?;
+            .ok_or(FederationError::FlowBrowserMissing)?;
         let state = query
             .state
             .as_deref()
@@ -408,13 +408,13 @@ impl FederationApplication {
             tx.users()
                 .find_active_by_id_for_update(existing.user_id)
                 .await?
-                .ok_or(FederationError::Unauthorized)?;
+                .ok_or(FederationError::LinkedAccountUnavailable)?;
             // Unlink takes this same account lock; recheck after acquiring it.
             let current = tx
                 .federation()
                 .find_active(issuer, &identity.subject)
                 .await?
-                .ok_or(FederationError::Unauthorized)?;
+                .ok_or(FederationError::LinkedAccountUnavailable)?;
             if current.id != existing.id
                 || tx
                     .passkeys()
@@ -422,7 +422,7 @@ impl FederationApplication {
                     .await?
                     .is_empty()
             {
-                return Err(FederationError::Unauthorized);
+                return Err(FederationError::LinkedAccountUnavailable);
             }
             let session = security::Session::create(
                 &mut tx,
