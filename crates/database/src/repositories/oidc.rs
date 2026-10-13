@@ -1,8 +1,76 @@
+//! Static client provisioning, authorization requests, codes and consent.
+
 use super::{OidcRepository, RepositoryExecutor, StoredRow};
 use crate::DatabaseError;
 use chrono::{DateTime, Utc};
 use piquel_auth_protocol::{SessionId, TokenId, UserId};
 use sqlx::{postgres::PgRow, types::Json};
+
+/// Largest identifier, scope or audience accepted by provisioning.
+const MAX_IDENTIFIER_LENGTH: usize = 64;
+/// Maximum number of user-visible display-name characters.
+const MAX_NAME_CHARS: usize = 80;
+/// Bound on each redirect allowlist.
+const MAX_REDIRECTS: usize = 16;
+/// Bound on a client's configured scopes.
+const MAX_SCOPES: usize = 32;
+/// Bound on a client's configured audiences.
+const MAX_AUDIENCES: usize = 16;
+/// Length of a persisted SHA-256 client-secret digest.
+const CLIENT_SECRET_DIGEST_LENGTH: usize = 32;
+
+piquel_common::str_enum! {
+    /// Purpose of a registered OIDC continuation.
+    pub enum OidcRedirectKind {
+        /// Receives the authorization code.
+        Authorization = "authorization",
+        /// Receives the browser after RP-initiated logout.
+        PostLogout = "post_logout",
+    }
+}
+
+/// Actionable failures of a statically configured client's provisioning contract.
+#[derive(Debug, thiserror::Error)]
+pub enum ClientConfigurationError {
+    /// The client ID violates the shared identifier syntax.
+    #[error("client ID must match [A-Za-z0-9._-]{{1,64}}")]
+    Identifier,
+    /// Consent-screen names must be present and bounded.
+    #[error("client display name must be nonblank and contain at most 80 characters")]
+    DisplayName,
+    /// Persisted secrets must already be hashed.
+    #[error("client secret hash must contain exactly 32 bytes")]
+    SecretDigest,
+    /// An allowlist is missing or too large.
+    #[error("{kind} redirects must contain {minimum} to 16 URIs")]
+    RedirectCount {
+        /// Which allowlist needs correction.
+        kind: OidcRedirectKind,
+        /// Authorization requires one URI; post-logout permits none.
+        minimum: usize,
+    },
+    /// A redirect could not be parsed as an absolute URL.
+    #[error("{kind} redirect must be an absolute HTTPS URL")]
+    RedirectUrl {
+        /// Which allowlist contains the malformed URL.
+        kind: OidcRedirectKind,
+        /// URL parser failure, without logging the supplied URI.
+        #[source]
+        source: url::ParseError,
+    },
+    /// A redirect violates the transport and authority policy.
+    #[error("{kind} redirect must use HTTPS with a host and no credentials or fragment")]
+    RedirectPolicy {
+        /// Which allowlist violates the redirect policy.
+        kind: OidcRedirectKind,
+    },
+    /// Scope identifiers are missing, too numerous or malformed.
+    #[error("client scopes must contain 1 to 32 values matching [A-Za-z0-9._-]{{1,64}}")]
+    Scopes,
+    /// Audience identifiers are missing, too numerous or malformed.
+    #[error("client audiences must contain 1 to 16 values matching [A-Za-z0-9._-]{{1,64}}")]
+    Audiences,
+}
 
 /// A registered OIDC client with its exact URI allowlists.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -33,7 +101,7 @@ pub struct StoredOidcClient {
 ///
 /// [`OidcRepository::bootstrap_client`] rejects identifiers, scopes and
 /// audiences outside `[A-Za-z0-9._-]{1,64}`, display names longer than 80
-/// characters, and redirect URIs that are not HTTPS (or HTTP on loopback) or
+/// characters, and redirect URIs that are not HTTPS or
 /// carry credentials or a fragment.
 #[derive(Clone, Debug)]
 pub struct BootstrapOidcClient {
@@ -60,46 +128,75 @@ pub struct BootstrapOidcClient {
 }
 
 impl BootstrapOidcClient {
-    fn validate(&self) -> Result<(), DatabaseError> {
-        let identifier = |value: &str| {
-            (1..=64).contains(&value.len())
-                && value
-                    .bytes()
-                    .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_' | b'.'))
-        };
-        let redirect = |value: &str| {
-            url::Url::parse(value).is_ok_and(|url| {
-                (url.scheme() == "https"
-                    || (url.scheme() == "http"
-                        && matches!(url.host_str(), Some("localhost" | "127.0.0.1" | "[::1]"))))
-                    && url.host_str().is_some()
-                    && url.username().is_empty()
-                    && url.password().is_none()
-                    && url.fragment().is_none()
-            })
-        };
-        let valid = self
+    /// Validates a startup client against the database's provisioning contract.
+    ///
+    /// # Errors
+    /// Identifies the invalid field or redirect allowlist and preserves URL parser failures.
+    pub fn validate(&self) -> Result<(), ClientConfigurationError> {
+        if self
             .client_secret_hash
             .as_ref()
-            .is_none_or(|hash| hash.len() == 32)
-            && identifier(&self.id)
-            && !self.display_name.trim().is_empty()
-            && self.display_name.chars().count() <= 80
-            && !self.redirect_uris.is_empty()
-            && self.redirect_uris.len() <= 16
-            && self.post_logout_uris.len() <= 16
-            && self.redirect_uris.iter().all(|uri| redirect(uri))
-            && self.post_logout_uris.iter().all(|uri| redirect(uri))
-            && !self.allowed_scopes.is_empty()
-            && self.allowed_scopes.len() <= 32
-            && self.allowed_scopes.iter().all(|scope| identifier(scope))
-            && !self.allowed_audiences.is_empty()
-            && self.allowed_audiences.len() <= 16
-            && self
-                .allowed_audiences
-                .iter()
-                .all(|audience| identifier(audience));
-        valid.then_some(()).ok_or(DatabaseError::Conflict)
+            .is_some_and(|hash| hash.len() != CLIENT_SECRET_DIGEST_LENGTH)
+        {
+            return Err(ClientConfigurationError::SecretDigest);
+        }
+        if !Self::valid_identifier(&self.id) {
+            return Err(ClientConfigurationError::Identifier);
+        }
+        if self.display_name.trim().is_empty() || self.display_name.chars().count() > MAX_NAME_CHARS
+        {
+            return Err(ClientConfigurationError::DisplayName);
+        }
+        Self::validate_redirects(OidcRedirectKind::Authorization, &self.redirect_uris)?;
+        Self::validate_redirects(OidcRedirectKind::PostLogout, &self.post_logout_uris)?;
+        if !Self::valid_identifiers(&self.allowed_scopes, MAX_SCOPES) {
+            return Err(ClientConfigurationError::Scopes);
+        }
+        if !Self::valid_identifiers(&self.allowed_audiences, MAX_AUDIENCES) {
+            return Err(ClientConfigurationError::Audiences);
+        }
+        Ok(())
+    }
+
+    /// Checks a nonempty list of at most `max` valid identifiers.
+    fn valid_identifiers(values: &[String], max: usize) -> bool {
+        (1..=max).contains(&values.len())
+            && values.iter().all(|value| Self::valid_identifier(value))
+    }
+
+    /// The same bounded ASCII syntax applies to IDs, scopes and audiences.
+    fn valid_identifier(value: &str) -> bool {
+        (1..=MAX_IDENTIFIER_LENGTH).contains(&value.len())
+            && value
+                .bytes()
+                .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_' | b'.'))
+    }
+
+    /// Validates each exact continuation while allowing query parameters used by RPs.
+    fn validate_redirects(
+        kind: OidcRedirectKind,
+        uris: &[String],
+    ) -> Result<(), ClientConfigurationError> {
+        let minimum = match kind {
+            OidcRedirectKind::Authorization => 1,
+            OidcRedirectKind::PostLogout => 0,
+        };
+        if !(minimum..=MAX_REDIRECTS).contains(&uris.len()) {
+            return Err(ClientConfigurationError::RedirectCount { kind, minimum });
+        }
+        for uri in uris {
+            let url = url::Url::parse(uri)
+                .map_err(|source| ClientConfigurationError::RedirectUrl { kind, source })?;
+            if url.scheme() != "https"
+                || url.host_str().is_none()
+                || !url.username().is_empty()
+                || url.password().is_some()
+                || url.fragment().is_some()
+            {
+                return Err(ClientConfigurationError::RedirectPolicy { kind });
+            }
+        }
+        Ok(())
     }
 }
 
@@ -171,6 +268,7 @@ pub struct StoredAuthorizationRequest {
 }
 
 impl StoredAuthorizationRequest {
+    /// Decodes a stored row, retaining the column name and cause for invalid data.
     fn from_row(row: &PgRow) -> Result<Self, DatabaseError> {
         Ok(Self {
             id: row.id("id")?,
@@ -249,7 +347,11 @@ impl OidcRepository<'_> {
     ///
     /// Returns [`DatabaseError`] if the query fails.
     pub async fn disable_all_clients(&mut self) -> Result<(), DatabaseError> {
-        execute!(self, sqlx::query("UPDATE oidc_clients SET enabled=FALSE"))?;
+        run!(
+            self,
+            execute,
+            sqlx::query("UPDATE oidc_clients SET enabled=FALSE")
+        )?;
         Ok(())
     }
 
@@ -257,15 +359,16 @@ impl OidcRepository<'_> {
     ///
     /// # Errors
     ///
-    /// Returns [`DatabaseError::Conflict`] if the configuration is invalid
-    /// (see [`BootstrapOidcClient`]), or another [`DatabaseError`] if the
-    /// query fails.
+    /// Preserves [`ClientConfigurationError`] as an operation source when configuration is
+    /// invalid, or retains the driver failure if provisioning fails.
     pub async fn bootstrap_client(
         &mut self,
         input: &BootstrapOidcClient,
     ) -> Result<(), DatabaseError> {
-        input.validate()?;
-        execute!(self, sqlx::query("WITH upsert AS (INSERT INTO oidc_clients(id,display_name,allowed_scopes,allowed_audiences,allow_refresh,enabled,trusted,client_secret_hash) VALUES($1,$2,$3,$4,$5,$8,$9,$10) ON CONFLICT(id) DO UPDATE SET display_name=EXCLUDED.display_name,allowed_scopes=EXCLUDED.allowed_scopes,allowed_audiences=EXCLUDED.allowed_audiences,allow_refresh=EXCLUDED.allow_refresh,enabled=EXCLUDED.enabled,trusted=EXCLUDED.trusted,client_secret_hash=EXCLUDED.client_secret_hash RETURNING id), desired(uri,kind) AS (SELECT unnest($6::text[]),'authorization' UNION ALL SELECT unnest($7::text[]),'post_logout'), inserted AS (INSERT INTO oidc_redirect_uris(client_id,uri,kind) SELECT $1,d.uri,d.kind FROM desired d,upsert ON CONFLICT DO NOTHING RETURNING uri), removed AS (DELETE FROM oidc_redirect_uris r WHERE r.client_id=$1 AND NOT EXISTS (SELECT 1 FROM desired d WHERE d.uri=r.uri AND d.kind=r.kind) RETURNING uri) SELECT id FROM upsert")
+        input
+            .validate()
+            .map_err(|source| DatabaseError::Operation(Box::new(source)))?;
+        run!(self, execute, sqlx::query("WITH upsert AS (INSERT INTO oidc_clients(id,display_name,allowed_scopes,allowed_audiences,allow_refresh,enabled,trusted,client_secret_hash) VALUES($1,$2,$3,$4,$5,$8,$9,$10) ON CONFLICT(id) DO UPDATE SET display_name=EXCLUDED.display_name,allowed_scopes=EXCLUDED.allowed_scopes,allowed_audiences=EXCLUDED.allowed_audiences,allow_refresh=EXCLUDED.allow_refresh,enabled=EXCLUDED.enabled,trusted=EXCLUDED.trusted,client_secret_hash=EXCLUDED.client_secret_hash RETURNING id), desired(uri,kind) AS (SELECT unnest($6::text[]),'authorization' UNION ALL SELECT unnest($7::text[]),'post_logout'), inserted AS (INSERT INTO oidc_redirect_uris(client_id,uri,kind) SELECT $1,d.uri,d.kind FROM desired d,upsert ON CONFLICT DO NOTHING RETURNING uri), removed AS (DELETE FROM oidc_redirect_uris r WHERE r.client_id=$1 AND NOT EXISTS (SELECT 1 FROM desired d WHERE d.uri=r.uri AND d.kind=r.kind) RETURNING uri) SELECT id FROM upsert")
             .bind(&input.id).bind(&input.display_name).bind(Json(&input.allowed_scopes)).bind(Json(&input.allowed_audiences)).bind(input.allow_refresh).bind(&input.redirect_uris).bind(&input.post_logout_uris).bind(input.enabled).bind(input.trusted).bind(&input.client_secret_hash))?;
         Ok(())
     }
@@ -279,7 +382,7 @@ impl OidcRepository<'_> {
         &mut self,
         id: &str,
     ) -> Result<Option<StoredOidcClient>, DatabaseError> {
-        let row = fetch_optional!(self, sqlx::query("SELECT c.id,c.display_name,c.enabled,c.allowed_scopes,c.allowed_audiences,c.allow_refresh,c.trusted,c.client_secret_hash,COALESCE(jsonb_agg(r.uri) FILTER (WHERE r.kind='authorization'),'[]'::jsonb) AS redirect_uris,COALESCE(jsonb_agg(r.uri) FILTER (WHERE r.kind='post_logout'),'[]'::jsonb) AS post_logout_uris FROM oidc_clients c LEFT JOIN oidc_redirect_uris r ON r.client_id=c.id WHERE c.id=$1 GROUP BY c.id").bind(id))?;
+        let row = run!(self, fetch_optional, sqlx::query("SELECT c.id,c.display_name,c.enabled,c.allowed_scopes,c.allowed_audiences,c.allow_refresh,c.trusted,c.client_secret_hash,COALESCE(jsonb_agg(r.uri) FILTER (WHERE r.kind='authorization'),'[]'::jsonb) AS redirect_uris,COALESCE(jsonb_agg(r.uri) FILTER (WHERE r.kind='post_logout'),'[]'::jsonb) AS post_logout_uris FROM oidc_clients c LEFT JOIN oidc_redirect_uris r ON r.client_id=c.id WHERE c.id=$1 GROUP BY c.id").bind(id))?;
         row.map(|row| {
             Ok(StoredOidcClient {
                 id: row.column("id")?,
@@ -306,7 +409,7 @@ impl OidcRepository<'_> {
         &mut self,
         input: &InsertAuthorizationRequest,
     ) -> Result<(), DatabaseError> {
-        execute!(self, sqlx::query("INSERT INTO authorization_requests(id,secret_digest,client_id,redirect_uri,client_state,nonce,pkce_challenge,scopes,audience,force_login,max_age,expires_at,force_consent,hinted_user_id) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)")
+        run!(self, execute, sqlx::query("INSERT INTO authorization_requests(id,secret_digest,client_id,redirect_uri,client_state,nonce,pkce_challenge,scopes,audience,force_login,max_age,expires_at,force_consent,hinted_user_id) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)")
             .bind(input.id.as_uuid()).bind(&input.secret_digest).bind(&input.client_id)
             .bind(&input.redirect_uri).bind(&input.client_state).bind(&input.nonce)
             .bind(&input.pkce_challenge).bind(Json(&input.scopes)).bind(&input.audience)
@@ -325,7 +428,7 @@ impl OidcRepository<'_> {
         id: TokenId,
         digest: &[u8],
     ) -> Result<Option<StoredAuthorizationRequest>, DatabaseError> {
-        fetch_optional!(self, sqlx::query("SELECT r.id,r.client_id,c.display_name AS client_display_name,r.redirect_uri,r.client_state,r.nonce,r.pkce_challenge,r.scopes,r.audience,r.force_login,r.force_consent,r.max_age,r.hinted_user_id,r.created_at FROM authorization_requests r JOIN oidc_clients c ON c.id=r.client_id WHERE r.id=$1 AND r.secret_digest=$2 AND r.consumed_at IS NULL AND r.expires_at>now() AND c.enabled").bind(id.as_uuid()).bind(digest))?.as_ref().map(StoredAuthorizationRequest::from_row).transpose()
+        run!(self, fetch_optional, sqlx::query("SELECT r.id,r.client_id,c.display_name AS client_display_name,r.redirect_uri,r.client_state,r.nonce,r.pkce_challenge,r.scopes,r.audience,r.force_login,r.force_consent,r.max_age,r.hinted_user_id,r.created_at FROM authorization_requests r JOIN oidc_clients c ON c.id=r.client_id WHERE r.id=$1 AND r.secret_digest=$2 AND r.consumed_at IS NULL AND r.expires_at>now() AND c.enabled").bind(id.as_uuid()).bind(digest))?.as_ref().map(StoredAuthorizationRequest::from_row).transpose()
     }
 
     /// Consumes a request that the client's current policy still allows:
@@ -340,7 +443,7 @@ impl OidcRepository<'_> {
         id: TokenId,
         digest: &[u8],
     ) -> Result<StoredAuthorizationRequest, DatabaseError> {
-        let row = fetch_optional!(self, sqlx::query("UPDATE authorization_requests r SET consumed_at=now() FROM oidc_clients c WHERE r.id=$1 AND r.secret_digest=$2 AND r.consumed_at IS NULL AND r.expires_at>now() AND c.id=r.client_id AND c.enabled AND c.allowed_scopes @> r.scopes AND c.allowed_audiences ? r.audience AND EXISTS(SELECT 1 FROM oidc_redirect_uris d WHERE d.client_id=c.id AND d.kind='authorization' AND d.uri=r.redirect_uri) RETURNING r.id,r.client_id,c.display_name AS client_display_name,r.redirect_uri,r.client_state,r.nonce,r.pkce_challenge,r.scopes,r.audience,r.force_login,r.force_consent,r.max_age,r.hinted_user_id,r.created_at").bind(id.as_uuid()).bind(digest))?.ok_or(DatabaseError::NotFound)?;
+        let row = run!(self, fetch_one, sqlx::query("UPDATE authorization_requests r SET consumed_at=now() FROM oidc_clients c WHERE r.id=$1 AND r.secret_digest=$2 AND r.consumed_at IS NULL AND r.expires_at>now() AND c.id=r.client_id AND c.enabled AND c.allowed_scopes @> r.scopes AND c.allowed_audiences ? r.audience AND EXISTS(SELECT 1 FROM oidc_redirect_uris d WHERE d.client_id=c.id AND d.kind='authorization' AND d.uri=r.redirect_uri) RETURNING r.id,r.client_id,c.display_name AS client_display_name,r.redirect_uri,r.client_state,r.nonce,r.pkce_challenge,r.scopes,r.audience,r.force_login,r.force_consent,r.max_age,r.hinted_user_id,r.created_at").bind(id.as_uuid()).bind(digest))?;
         StoredAuthorizationRequest::from_row(&row)
     }
 
@@ -353,7 +456,7 @@ impl OidcRepository<'_> {
         &mut self,
         input: &InsertAuthorizationCode,
     ) -> Result<(), DatabaseError> {
-        execute!(self, sqlx::query("INSERT INTO authorization_codes(id,secret_digest,client_id,user_id,session_id,redirect_uri,pkce_challenge,nonce,scopes,audience,expires_at) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)")
+        run!(self, execute, sqlx::query("INSERT INTO authorization_codes(id,secret_digest,client_id,user_id,session_id,redirect_uri,pkce_challenge,nonce,scopes,audience,expires_at) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)")
             .bind(input.id.as_uuid()).bind(&input.secret_digest).bind(&input.client_id)
             .bind(input.user_id.as_uuid()).bind(input.session_id.as_uuid()).bind(&input.redirect_uri)
             .bind(&input.pkce_challenge).bind(&input.nonce).bind(Json(&input.scopes)).bind(&input.audience).bind(input.expires_at))?;
@@ -372,7 +475,7 @@ impl OidcRepository<'_> {
         id: TokenId,
         digest: &[u8],
     ) -> Result<ConsumedAuthorizationCode, DatabaseError> {
-        let row = fetch_optional!(self, sqlx::query("UPDATE authorization_codes c SET consumed_at=now() FROM oidc_clients cl,sessions s,users u WHERE c.id=$1 AND c.secret_digest=$2 AND c.consumed_at IS NULL AND c.expires_at>now() AND cl.id=c.client_id AND cl.enabled AND cl.allowed_scopes @> c.scopes AND cl.allowed_audiences ? c.audience AND EXISTS(SELECT 1 FROM oidc_redirect_uris d WHERE d.client_id=cl.id AND d.kind='authorization' AND d.uri=c.redirect_uri) AND s.id=c.session_id AND s.revoked_at IS NULL AND s.expires_at>now() AND u.id=c.user_id AND u.status='active' RETURNING c.client_id,c.user_id,c.session_id,c.redirect_uri,c.pkce_challenge,c.nonce,c.scopes,c.audience").bind(id.as_uuid()).bind(digest))?.ok_or(DatabaseError::NotFound)?;
+        let row = run!(self, fetch_one, sqlx::query("UPDATE authorization_codes c SET consumed_at=now() FROM oidc_clients cl,sessions s,users u WHERE c.id=$1 AND c.secret_digest=$2 AND c.consumed_at IS NULL AND c.expires_at>now() AND cl.id=c.client_id AND cl.enabled AND cl.allowed_scopes @> c.scopes AND cl.allowed_audiences ? c.audience AND EXISTS(SELECT 1 FROM oidc_redirect_uris d WHERE d.client_id=cl.id AND d.kind='authorization' AND d.uri=c.redirect_uri) AND s.id=c.session_id AND s.revoked_at IS NULL AND s.expires_at>now() AND u.id=c.user_id AND u.status='active' RETURNING c.client_id,c.user_id,c.session_id,c.redirect_uri,c.pkce_challenge,c.nonce,c.scopes,c.audience").bind(id.as_uuid()).bind(digest))?;
         Ok(ConsumedAuthorizationCode {
             client_id: row.column("client_id")?,
             user_id: row.id("user_id")?,
@@ -398,7 +501,7 @@ impl OidcRepository<'_> {
         audience: &str,
         scopes: &[String],
     ) -> Result<bool, DatabaseError> {
-        Ok(fetch_optional!(self, sqlx::query("SELECT 1 FROM oidc_consents WHERE user_id=$1 AND client_id=$2 AND audience=$3 AND scopes @> $4").bind(user.as_uuid()).bind(client).bind(audience).bind(Json(scopes)))?.is_some())
+        Ok(run!(self, fetch_optional, sqlx::query("SELECT 1 FROM oidc_consents WHERE user_id=$1 AND client_id=$2 AND audience=$3 AND scopes @> $4").bind(user.as_uuid()).bind(client).bind(audience).bind(Json(scopes)))?.is_some())
     }
 
     /// Adds `scopes` to the user's consent for this client and audience.
@@ -413,7 +516,7 @@ impl OidcRepository<'_> {
         audience: &str,
         scopes: &[String],
     ) -> Result<(), DatabaseError> {
-        execute!(self, sqlx::query("INSERT INTO oidc_consents(user_id,client_id,audience,scopes) VALUES($1,$2,$3,$4) ON CONFLICT(user_id,client_id,audience) DO UPDATE SET scopes=(SELECT jsonb_agg(DISTINCT value) FROM jsonb_array_elements(oidc_consents.scopes || EXCLUDED.scopes))").bind(user.as_uuid()).bind(client).bind(audience).bind(Json(scopes)))?;
+        run!(self, execute, sqlx::query("INSERT INTO oidc_consents(user_id,client_id,audience,scopes) VALUES($1,$2,$3,$4) ON CONFLICT(user_id,client_id,audience) DO UPDATE SET scopes=(SELECT jsonb_agg(DISTINCT value) FROM jsonb_array_elements(oidc_consents.scopes || EXCLUDED.scopes))").bind(user.as_uuid()).bind(client).bind(audience).bind(Json(scopes)))?;
         Ok(())
     }
 
@@ -424,7 +527,7 @@ impl OidcRepository<'_> {
     ///
     /// Returns [`DatabaseError`] if the query fails or the row is invalid.
     pub async fn primary_email(&mut self, user: UserId) -> Result<Option<String>, DatabaseError> {
-        fetch_optional!(self,sqlx::query("SELECT normalized_email FROM user_emails WHERE user_id=$1 AND verified_at IS NOT NULL ORDER BY is_primary DESC,created_at LIMIT 1").bind(user.as_uuid()))?.map(|row| row.column("normalized_email")).transpose()
+        run!(self, fetch_optional, sqlx::query("SELECT normalized_email FROM user_emails WHERE user_id=$1 AND verified_at IS NOT NULL ORDER BY is_primary DESC,created_at LIMIT 1").bind(user.as_uuid()))?.map(|row| row.column("normalized_email")).transpose()
     }
 
     /// Revokes a session (OIDC logout) and every refresh token family issued
@@ -434,12 +537,118 @@ impl OidcRepository<'_> {
     ///
     /// Returns [`DatabaseError`] if a query fails.
     pub async fn revoke_session(&mut self, session: SessionId) -> Result<(), DatabaseError> {
-        execute!(
+        run!(
             self,
+            execute,
             sqlx::query("UPDATE sessions SET revoked_at=COALESCE(revoked_at,now()) WHERE id=$1")
                 .bind(session.as_uuid())
         )?;
-        execute!(self,sqlx::query("UPDATE refresh_token_families SET revoked_at=COALESCE(revoked_at,now()) WHERE session_id=$1").bind(session.as_uuid()))?;
+        run!(self, execute, sqlx::query("UPDATE refresh_token_families SET revoked_at=COALESCE(revoked_at,now()) WHERE session_id=$1").bind(session.as_uuid()))?;
         Ok(())
+    }
+}
+#[cfg(test)]
+mod tests {
+    //! Pure provisioning validation without a running database.
+    use super::*;
+
+    impl BootstrapOidcClient {
+        /// A valid public client for exercising individual provisioning constraints.
+        fn fixture() -> Self {
+            Self {
+                id: "test-client".into(),
+                display_name: "Test client".into(),
+                redirect_uris: vec!["https://client.example/callback?flow=one".into()],
+                post_logout_uris: Vec::new(),
+                allowed_scopes: vec!["openid".into()],
+                allowed_audiences: vec!["test-client".into()],
+                allow_refresh: false,
+                enabled: true,
+                trusted: false,
+                client_secret_hash: None,
+            }
+        }
+    }
+
+    /// URI validation preserves URL syntax errors and names the affected allowlist.
+    #[test]
+    fn redirect_validation_preserves_sources_and_applies_both_policies() {
+        let mut client = BootstrapOidcClient::fixture();
+        assert!(client.validate().is_ok());
+        client.redirect_uris.clear();
+        assert!(matches!(
+            client.validate(),
+            Err(ClientConfigurationError::RedirectCount {
+                kind: OidcRedirectKind::Authorization,
+                minimum: 1
+            })
+        ));
+        client.redirect_uris.push("/relative".into());
+        let error = client.validate().expect_err("absolute URL required");
+        assert!(std::error::Error::source(&error).is_some());
+        for invalid in [
+            "http://client.example",
+            "https://user@client.example",
+            "https://user:secret@client.example",
+            "https://client.example/#fragment",
+        ] {
+            client.redirect_uris = vec![invalid.into()];
+            assert!(matches!(
+                client.validate(),
+                Err(ClientConfigurationError::RedirectPolicy {
+                    kind: OidcRedirectKind::Authorization
+                })
+            ));
+            client.redirect_uris = BootstrapOidcClient::fixture().redirect_uris;
+            client.post_logout_uris = vec![invalid.into()];
+            assert!(matches!(
+                client.validate(),
+                Err(ClientConfigurationError::RedirectPolicy {
+                    kind: OidcRedirectKind::PostLogout
+                })
+            ));
+            client.post_logout_uris.clear();
+        }
+    }
+
+    /// Identifiers, labels and digests enforce the provisioning contract at its exact bounds.
+    #[test]
+    fn provisioning_bounds_identifiers_labels_and_digests() {
+        for (value, valid) in [
+            ("", false),
+            ("has space", false),
+            ("a._-Z09", true),
+            (&"x".repeat(64), true),
+            (&"x".repeat(65), false),
+        ] {
+            assert_eq!(BootstrapOidcClient::valid_identifier(value), valid);
+        }
+        let mut client = BootstrapOidcClient::fixture();
+        client.display_name = "é".repeat(80);
+        client.client_secret_hash = Some(vec![0; 32]);
+        assert!(client.validate().is_ok());
+        client.display_name.push('é');
+        assert!(matches!(
+            client.validate(),
+            Err(ClientConfigurationError::DisplayName)
+        ));
+        client.display_name = "Test".into();
+        client.client_secret_hash = Some(vec![0; 31]);
+        assert!(matches!(
+            client.validate(),
+            Err(ClientConfigurationError::SecretDigest)
+        ));
+        client.client_secret_hash = None;
+        client.allowed_scopes.clear();
+        assert!(matches!(
+            client.validate(),
+            Err(ClientConfigurationError::Scopes)
+        ));
+        client.allowed_scopes = vec!["openid".into()];
+        client.allowed_audiences.clear();
+        assert!(matches!(
+            client.validate(),
+            Err(ClientConfigurationError::Audiences)
+        ));
     }
 }

@@ -9,6 +9,7 @@ only shared plumbing. See [database architecture](../../docs/architecture/databa
 for the layout and invariants. Run migrations through the single service binary:
 `just migrate`.
 
-Integration tests use a disposable `TEST_DATABASE_URL`, apply the schema, and insert
+Integration tests use a disposable `TEST_DATABASE_URL` (local TCP needs
+`sslmode=disable`), apply the schema, and insert
 uniquely named fixtures into that database. They do not create per-test schemas.
 Run them explicitly with the command in the root README; ordinary tests skip them.

@@ -5,12 +5,32 @@
 connections, rows and raw SQL remain private. Application modules choose policy;
 repository methods enforce atomic persistence and return contextual errors.
 
+`piquel-common` supplies closed string enums and `piquel-auth-protocol` supplies
+IDs, account status, authentication methods and providers. Cryptographic material
+is generated and hashed in `piquel-crypto`; the repository persists its digests.
+Ceremony kinds, audit actions/outcomes and OIDC redirect kinds are typed storage
+vocabulary. Successful account operations use `audit_events().record`.
+
+`DatabaseConfig` rejects zero pool bounds, ambiguous TLS/socket options and host
+overrides with actionable `DatabaseConnectionError` variants. TCP requires
+`sslmode=verify-full` or explicit `sslmode=disable`; local Unix sockets use an
+absolute `host` path with `localhost` in the URL. Parser failures retain their
+sources. Client provisioning validates fields and allowlists through
+`ClientConfigurationError` before writing any SQL.
+
 Each repository has its own module under `src/repositories/` (`users`, `emails`,
 `sessions`, `audit`, `passkeys`, `oidc`, `tokens`, `federation`, `security`),
 holding its methods and the records they take and return. `repositories/mod.rs`
 holds only shared plumbing: the executor, the `repositories!` macro that declares
 every handle and its accessors on both `Database` and `DatabaseTransaction`, the
-query macros and typed row decoding. Database tests live in `<module>/tests.rs`.
+`run!` query macro and typed row decoding. `run!(self, fetch_one, query)` (or
+`execute`, `fetch_optional`, `fetch_all`) dispatches to the pool or transaction
+and converts SQLx errors once. Decoding names the invalid column and keeps its source;
+uniqueness conflicts and deadline failures retain theirs too. Dropping an
+unfinished `DatabaseTransaction` rolls it back.
+
+Repository tests live in `<module>/tests.rs` or an inline module for small pure
+validation tests.
 
 User, session and credential locks serialize security-sensitive changes. Acquire
 account locks before session and credential locks. Credentials are rechecked under lock before authentication

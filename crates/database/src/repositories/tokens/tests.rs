@@ -1,10 +1,13 @@
+//! Focused persistence and security contract tests.
+use crate::Database;
+
 use super::{InsertRefreshFamily, InsertRefreshToken, RefreshRotationError};
-use crate::repositories::{OidcRepository, TokenRepository, test_pool};
+use crate::repositories::{OidcRepository, TokenRepository};
 use chrono::{Duration, Utc};
 use piquel_auth_protocol::{SessionId, TokenId, UserId};
 use sqlx::PgPool;
 use std::time::Duration as Wait;
-
+/// Creates a committed refresh grant and browser session for concurrent rotation scenarios.
 async fn family(pool: &PgPool, client: &str) -> (TokenId, Vec<u8>, SessionId) {
     let user = UserId::new();
     let session = SessionId::new();
@@ -42,11 +45,11 @@ async fn family(pool: &PgPool, client: &str) -> (TokenId, Vec<u8>, SessionId) {
     tx.commit().await.expect("commit");
     (token, digest, session)
 }
-
+/// Shared client policy permits independent refreshes while logout waits in the documented lock order.
 #[tokio::test]
 #[ignore = "requires a disposable TEST_DATABASE_URL"]
 async fn independent_refreshes_share_client_and_logout_does_not_deadlock() {
-    let pool = test_pool().await;
+    let pool = Database::test_pool().await;
     let client = format!("locks_{}", UserId::new());
     sqlx::query("INSERT INTO oidc_clients(id,display_name,allowed_scopes,allowed_audiences,allow_refresh) VALUES($1,'Lock test','[\"openid\"]','[\"test\"]',true)")
         .bind(&client).execute(&pool).await.expect("client");

@@ -1,14 +1,18 @@
+//! Explicit commit/rollback over repository operations; drop rolls back unfinished work.
+
 use crate::DatabaseError;
 use sqlx::{Postgres, Transaction};
 
-/// A private-SQLx transaction with the same typed repository families as
+/// A private-`SQLx` transaction with the same typed repository families as
 /// [`Database`](crate::Database). Dropping it without committing rolls back.
 #[must_use = "dropping a transaction rolls it back"]
 pub struct DatabaseTransaction<'a> {
+    /// Private `SQLx` transaction borrowed by generated repository accessors.
     pub(crate) inner: Transaction<'a, Postgres>,
 }
 
 impl<'a> DatabaseTransaction<'a> {
+    /// Wraps a begun `SQLx` transaction without exposing its connection.
     pub(crate) const fn new(inner: Transaction<'a, Postgres>) -> Self {
         Self { inner }
     }

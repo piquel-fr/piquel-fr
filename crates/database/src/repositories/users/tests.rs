@@ -1,4 +1,7 @@
-use crate::repositories::{SessionRepository, UserRepository, sessions::InsertSession, test_pool};
+//! Focused persistence and security contract tests.
+use crate::Database;
+
+use crate::repositories::{SessionRepository, UserRepository, sessions::InsertSession};
 use chrono::Utc;
 use piquel_auth_protocol::{SessionId, UserId};
 use sqlx::PgPool;
@@ -28,11 +31,11 @@ fn session_for(user: UserId) -> InsertSession {
         user_agent_family: None,
     }
 }
-
+/// Account locks allow logout to insert audit records without a foreign-key deadlock.
 #[tokio::test]
 #[ignore = "requires a disposable TEST_DATABASE_URL"]
 async fn account_locks_allow_logout_audit_foreign_keys() {
-    let pool = test_pool().await;
+    let pool = Database::test_pool().await;
     let user = insert_user(&pool).await;
     let mut account = pool.begin().await.expect("account transaction");
     UserRepository::from_connection(&mut account)
@@ -54,7 +57,7 @@ async fn account_locks_allow_logout_audit_foreign_keys() {
 #[tokio::test]
 #[ignore = "requires a disposable TEST_DATABASE_URL"]
 async fn account_locks_do_not_wait_on_foreign_key_checks() {
-    let pool = test_pool().await;
+    let pool = Database::test_pool().await;
     let user = insert_user(&pool).await;
     let mut reference = pool.begin().await.expect("reference transaction");
     sqlx::query(
@@ -94,7 +97,7 @@ async fn account_locks_do_not_wait_on_foreign_key_checks() {
 #[tokio::test]
 #[ignore = "requires a disposable TEST_DATABASE_URL"]
 async fn locked_session_lookup_waits_for_concurrent_logout() {
-    let pool = test_pool().await;
+    let pool = Database::test_pool().await;
     let user = insert_user(&pool).await;
     let session = SessionRepository::from_pool(&pool)
         .insert(&session_for(user))

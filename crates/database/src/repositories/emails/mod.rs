@@ -1,3 +1,5 @@
+//! Verified email ownership and primary-address persistence.
+
 use super::{EmailRepository, RepositoryExecutor, StoredRow};
 use crate::DatabaseError;
 use chrono::{DateTime, Utc};
@@ -21,6 +23,7 @@ pub struct StoredEmail {
 }
 
 impl StoredEmail {
+    /// Decodes a stored row, retaining the column name and cause for invalid data.
     fn from_row(row: &PgRow) -> Result<Self, DatabaseError> {
         Ok(Self {
             id: row.id("id")?,
@@ -58,7 +61,7 @@ impl EmailRepository<'_> {
         &mut self,
         input: &InsertVerifiedEmail,
     ) -> Result<StoredEmail, DatabaseError> {
-        let row = fetch_one!(self, sqlx::query("INSERT INTO user_emails (id, user_id, normalized_email, verified_at, is_primary) VALUES ($1, $2, $3, $4, $5) RETURNING id, user_id, normalized_email, verified_at, is_primary").bind(input.id.as_uuid()).bind(input.user_id.as_uuid()).bind(&input.normalized_email).bind(input.verified_at).bind(input.is_primary))?;
+        let row = run!(self, fetch_one, sqlx::query("INSERT INTO user_emails (id, user_id, normalized_email, verified_at, is_primary) VALUES ($1, $2, $3, $4, $5) RETURNING id, user_id, normalized_email, verified_at, is_primary").bind(input.id.as_uuid()).bind(input.user_id.as_uuid()).bind(&input.normalized_email).bind(input.verified_at).bind(input.is_primary))?;
         StoredEmail::from_row(&row)
     }
 
@@ -72,9 +75,9 @@ impl EmailRepository<'_> {
         &mut self,
         normalized: &str,
     ) -> Result<Option<StoredEmail>, DatabaseError> {
-        fetch_optional!(self, sqlx::query("SELECT e.id, e.user_id, e.normalized_email, e.verified_at, e.is_primary FROM active_verified_email_ownership o JOIN users u ON u.id = o.user_id AND u.status = 'active' JOIN user_emails e ON e.user_id = o.user_id AND e.normalized_email = o.normalized_email AND e.verified_at IS NOT NULL WHERE o.normalized_email = $1 ORDER BY e.is_primary DESC, e.created_at LIMIT 1").bind(normalized))?.as_ref().map(StoredEmail::from_row).transpose()
+        run!(self, fetch_optional, sqlx::query("SELECT e.id, e.user_id, e.normalized_email, e.verified_at, e.is_primary FROM active_verified_email_ownership o JOIN users u ON u.id = o.user_id AND u.status = 'active' JOIN user_emails e ON e.user_id = o.user_id AND e.normalized_email = o.normalized_email AND e.verified_at IS NOT NULL WHERE o.normalized_email = $1 ORDER BY e.is_primary DESC, e.created_at LIMIT 1").bind(normalized))?.as_ref().map(StoredEmail::from_row).transpose()
     }
 }
-
+/// Focused tests for this module and its security contracts.
 #[cfg(test)]
 mod tests;

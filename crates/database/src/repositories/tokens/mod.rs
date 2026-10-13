@@ -1,3 +1,5 @@
+//! Transactional refresh-token families, rotation and replay revocation.
+
 use super::{RepositoryExecutor, StoredRow, TokenRepository};
 use crate::DatabaseError;
 use chrono::{DateTime, Utc};
@@ -89,7 +91,7 @@ impl TokenRepository<'_> {
         family: &InsertRefreshFamily,
         token: &InsertRefreshToken,
     ) -> Result<(), DatabaseError> {
-        execute!(self, sqlx::query("INSERT INTO refresh_token_families(id,user_id,client_id,session_id,audience,scopes) VALUES($1,$2,$3,$4,$5,$6)")
+        run!(self, execute, sqlx::query("INSERT INTO refresh_token_families(id,user_id,client_id,session_id,audience,scopes) VALUES($1,$2,$3,$4,$5,$6)")
             .bind(family.id.as_uuid()).bind(family.user_id.as_uuid()).bind(&family.client_id)
             .bind(family.session_id.as_uuid()).bind(&family.audience).bind(Json(&family.scopes)))?;
         self.insert_token(token).await
@@ -101,7 +103,7 @@ impl TokenRepository<'_> {
     ///
     /// Returns [`DatabaseError`] if the insert fails.
     pub async fn insert_token(&mut self, token: &InsertRefreshToken) -> Result<(), DatabaseError> {
-        execute!(self, sqlx::query("INSERT INTO refresh_tokens(id,family_id,secret_digest,expires_at) VALUES($1,$2,$3,$4)")
+        run!(self, execute, sqlx::query("INSERT INTO refresh_tokens(id,family_id,secret_digest,expires_at) VALUES($1,$2,$3,$4)")
             .bind(token.id.as_uuid()).bind(token.family_id.as_uuid()).bind(&token.secret_digest).bind(token.expires_at))?;
         Ok(())
     }
@@ -122,8 +124,9 @@ impl TokenRepository<'_> {
         // Look up immutable ownership without locks, then acquire locks explicitly.
         // Account mutations take user -> session -> family; logout takes session ->
         // family. A joined FOR UPDATE does not guarantee that ordering.
-        let owner = fetch_optional!(
+        let owner = run!(
             self,
+            fetch_optional,
             sqlx::query(
                 "SELECT f.user_id,f.session_id,f.id AS family_id FROM refresh_tokens t
              JOIN refresh_token_families f ON f.id=t.family_id
@@ -150,13 +153,14 @@ impl TokenRepository<'_> {
                 owner.column::<Uuid>("family_id")?,
             ),
         ] {
-            fetch_optional!(self, sqlx::query(query).bind(key))?
+            run!(self, fetch_optional, sqlx::query(query).bind(key))?
                 .ok_or(RefreshRotationError::Invalid)?;
         }
         // Shared policy locks let independent accounts refresh concurrently while
         // still serializing client-policy updates until token issuance commits.
-        fetch_optional!(
+        run!(
             self,
+            fetch_optional,
             sqlx::query("SELECT id FROM oidc_clients WHERE id=$1 AND enabled FOR SHARE")
                 .bind(client)
         )?
@@ -166,7 +170,7 @@ impl TokenRepository<'_> {
 
     /// Revokes a family that was replayed or lost its client policy.
     async fn revoke_family(&mut self, family: TokenId) -> Result<(), DatabaseError> {
-        execute!(self, sqlx::query("UPDATE refresh_token_families SET revoked_at=now() WHERE id=$1 AND revoked_at IS NULL").bind(family.as_uuid()))?;
+        run!(self, execute, sqlx::query("UPDATE refresh_token_families SET revoked_at=now() WHERE id=$1 AND revoked_at IS NULL").bind(family.as_uuid()))?;
         Ok(())
     }
 
@@ -190,8 +194,9 @@ impl TokenRepository<'_> {
         client: &str,
     ) -> Result<RotatedRefreshToken, RefreshRotationError> {
         self.lock_rotation(id, digest, client).await?;
-        let row = fetch_optional!(
+        let row = run!(
             self,
+            fetch_optional,
             sqlx::query(
                 "SELECT t.family_id,t.consumed_at,f.user_id,f.client_id,f.session_id,
                     f.audience,f.scopes,c.allow_refresh,c.allowed_scopes,c.allowed_audiences
@@ -231,8 +236,9 @@ impl TokenRepository<'_> {
             self.revoke_family(family_id).await?;
             return Err(RefreshRotationError::Policy { user_id });
         }
-        if execute!(
+        if run!(
             self,
+            execute,
             sqlx::query(
                 "UPDATE refresh_tokens SET consumed_at=now() WHERE id=$1 AND consumed_at IS NULL"
             )
@@ -263,7 +269,7 @@ impl TokenRepository<'_> {
         id: TokenId,
         digest: &[u8],
     ) -> Result<(), DatabaseError> {
-        execute!(self, sqlx::query("UPDATE refresh_token_families f SET revoked_at=COALESCE(revoked_at,now()) FROM refresh_tokens t WHERE t.id=$1 AND t.secret_digest=$2 AND t.family_id=f.id").bind(id.as_uuid()).bind(digest))?;
+        run!(self, execute, sqlx::query("UPDATE refresh_token_families f SET revoked_at=COALESCE(revoked_at,now()) FROM refresh_tokens t WHERE t.id=$1 AND t.secret_digest=$2 AND t.family_id=f.id").bind(id.as_uuid()).bind(digest))?;
         Ok(())
     }
 
@@ -279,7 +285,7 @@ impl TokenRepository<'_> {
         digest: &[u8],
         client: &str,
     ) -> Result<(), DatabaseError> {
-        execute!(self,sqlx::query("UPDATE refresh_token_families f SET revoked_at=COALESCE(revoked_at,now()) FROM refresh_tokens t WHERE t.id=$1 AND t.secret_digest=$2 AND t.family_id=f.id AND f.client_id=$3").bind(id.as_uuid()).bind(digest).bind(client))?;
+        run!(self, execute, sqlx::query("UPDATE refresh_token_families f SET revoked_at=COALESCE(revoked_at,now()) FROM refresh_tokens t WHERE t.id=$1 AND t.secret_digest=$2 AND t.family_id=f.id AND f.client_id=$3").bind(id.as_uuid()).bind(digest).bind(client))?;
         Ok(())
     }
 
@@ -290,9 +296,9 @@ impl TokenRepository<'_> {
     ///
     /// Returns [`DatabaseError`] if the query fails.
     pub async fn revoke_all_for_user(&mut self, user_id: UserId) -> Result<u64, DatabaseError> {
-        Ok(execute!(self, sqlx::query("UPDATE refresh_token_families SET revoked_at=now() WHERE user_id=$1 AND revoked_at IS NULL").bind(user_id.as_uuid()))?.rows_affected())
+        Ok(run!(self, execute, sqlx::query("UPDATE refresh_token_families SET revoked_at=now() WHERE user_id=$1 AND revoked_at IS NULL").bind(user_id.as_uuid()))?.rows_affected())
     }
 }
-
+/// Focused tests for this module and its security contracts.
 #[cfg(test)]
 mod tests;

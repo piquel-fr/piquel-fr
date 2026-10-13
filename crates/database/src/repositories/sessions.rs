@@ -1,3 +1,5 @@
+//! Active browser sessions, cookie digests and short management windows.
+
 use super::{RepositoryExecutor, SessionRepository, StoredRow};
 use crate::DatabaseError;
 use chrono::{DateTime, Utc};
@@ -41,6 +43,7 @@ pub struct StoredSession {
 }
 
 impl StoredSession {
+    /// Decodes a stored row, retaining the column name and cause for invalid data.
     fn from_row(row: &PgRow) -> Result<Self, DatabaseError> {
         Ok(Self {
             id: row.id("id")?,
@@ -66,7 +69,7 @@ impl SessionRepository<'_> {
     /// Returns [`DatabaseError::NotFound`] if the account is not active, or
     /// another [`DatabaseError`] if the query fails.
     pub async fn insert(&mut self, input: &InsertSession) -> Result<StoredSession, DatabaseError> {
-        let row = fetch_one!(self, sqlx::query("WITH active_user AS (SELECT id FROM users WHERE id=$2 AND status='active' FOR NO KEY UPDATE) INSERT INTO sessions (id, user_id, authentication_methods, authenticated_at, expires_at, last_seen_at, user_agent_family) SELECT $1,id,$3,$4,$5,$4,$6 FROM active_user RETURNING id,user_id,authentication_methods,authenticated_at,expires_at,last_seen_at,revoked_at").bind(input.id.as_uuid()).bind(input.user_id.as_uuid()).bind(Json(&input.authentication_methods)).bind(input.authenticated_at).bind(input.expires_at).bind(&input.user_agent_family))?;
+        let row = run!(self, fetch_one, sqlx::query("WITH active_user AS (SELECT id FROM users WHERE id=$2 AND status='active' FOR NO KEY UPDATE) INSERT INTO sessions (id, user_id, authentication_methods, authenticated_at, expires_at, last_seen_at, user_agent_family) SELECT $1,id,$3,$4,$5,$4,$6 FROM active_user RETURNING id,user_id,authentication_methods,authenticated_at,expires_at,last_seen_at,revoked_at").bind(input.id.as_uuid()).bind(input.user_id.as_uuid()).bind(Json(&input.authentication_methods)).bind(input.authenticated_at).bind(input.expires_at).bind(&input.user_agent_family))?;
         StoredSession::from_row(&row)
     }
 
@@ -79,7 +82,7 @@ impl SessionRepository<'_> {
         &mut self,
         id: SessionId,
     ) -> Result<Option<StoredSession>, DatabaseError> {
-        fetch_optional!(self, sqlx::query("SELECT id,user_id,authentication_methods,authenticated_at,expires_at,last_seen_at,revoked_at FROM sessions WHERE id=$1").bind(id.as_uuid()))?.as_ref().map(StoredSession::from_row).transpose()
+        run!(self, fetch_optional, sqlx::query("SELECT id,user_id,authentication_methods,authenticated_at,expires_at,last_seen_at,revoked_at FROM sessions WHERE id=$1").bind(id.as_uuid()))?.as_ref().map(StoredSession::from_row).transpose()
     }
 
     /// Finds an unrevoked, unexpired session of an active account.
@@ -91,7 +94,7 @@ impl SessionRepository<'_> {
         &mut self,
         id: SessionId,
     ) -> Result<Option<StoredSession>, DatabaseError> {
-        fetch_optional!(self, sqlx::query("SELECT s.id,s.user_id,s.authentication_methods,s.authenticated_at,s.expires_at,s.last_seen_at,s.revoked_at FROM sessions s JOIN users u ON u.id=s.user_id WHERE s.id=$1 AND s.revoked_at IS NULL AND s.expires_at>now() AND u.status='active'").bind(id.as_uuid()))?.as_ref().map(StoredSession::from_row).transpose()
+        run!(self, fetch_optional, sqlx::query("SELECT s.id,s.user_id,s.authentication_methods,s.authenticated_at,s.expires_at,s.last_seen_at,s.revoked_at FROM sessions s JOIN users u ON u.id=s.user_id WHERE s.id=$1 AND s.revoked_at IS NULL AND s.expires_at>now() AND u.status='active'").bind(id.as_uuid()))?.as_ref().map(StoredSession::from_row).transpose()
     }
 
     /// Finds and locks an unrevoked, unexpired session of an active account, so a
@@ -105,7 +108,7 @@ impl SessionRepository<'_> {
         &mut self,
         id: SessionId,
     ) -> Result<Option<StoredSession>, DatabaseError> {
-        fetch_optional!(self, sqlx::query("SELECT s.id,s.user_id,s.authentication_methods,s.authenticated_at,s.expires_at,s.last_seen_at,s.revoked_at FROM sessions s JOIN users u ON u.id=s.user_id WHERE s.id=$1 AND s.revoked_at IS NULL AND s.expires_at>now() AND u.status='active' FOR NO KEY UPDATE OF s").bind(id.as_uuid()))?.as_ref().map(StoredSession::from_row).transpose()
+        run!(self, fetch_optional, sqlx::query("SELECT s.id,s.user_id,s.authentication_methods,s.authenticated_at,s.expires_at,s.last_seen_at,s.revoked_at FROM sessions s JOIN users u ON u.id=s.user_id WHERE s.id=$1 AND s.revoked_at IS NULL AND s.expires_at>now() AND u.status='active' FOR NO KEY UPDATE OF s").bind(id.as_uuid()))?.as_ref().map(StoredSession::from_row).transpose()
     }
 
     /// Revokes a session. Returns `false` if it was already revoked or unknown.
@@ -114,8 +117,9 @@ impl SessionRepository<'_> {
     ///
     /// Returns [`DatabaseError`] if the query fails.
     pub async fn revoke(&mut self, id: SessionId) -> Result<bool, DatabaseError> {
-        Ok(execute!(
+        Ok(run!(
             self,
+            execute,
             sqlx::query("UPDATE sessions SET revoked_at=now() WHERE id=$1 AND revoked_at IS NULL")
                 .bind(id.as_uuid())
         )?
@@ -134,7 +138,7 @@ impl SessionRepository<'_> {
         user_id: UserId,
         except_session: SessionId,
     ) -> Result<u64, DatabaseError> {
-        Ok(execute!(self, sqlx::query("UPDATE sessions SET revoked_at=now(),management_expires_at=NULL WHERE user_id=$1 AND id<>$2 AND revoked_at IS NULL").bind(user_id.as_uuid()).bind(except_session.as_uuid()))?.rows_affected())
+        Ok(run!(self, execute, sqlx::query("UPDATE sessions SET revoked_at=now(),management_expires_at=NULL WHERE user_id=$1 AND id<>$2 AND revoked_at IS NULL").bind(user_id.as_uuid()).bind(except_session.as_uuid()))?.rows_affected())
     }
 
     /// Stores the digest of a session's browser cookie secret.
@@ -148,8 +152,9 @@ impl SessionRepository<'_> {
         session_id: SessionId,
         digest: &[u8],
     ) -> Result<(), DatabaseError> {
-        execute!(
+        run!(
             self,
+            execute,
             sqlx::query(
                 "INSERT INTO browser_session_secrets(session_id,secret_digest) VALUES($1,$2)"
             )
@@ -168,7 +173,7 @@ impl SessionRepository<'_> {
         &mut self,
         digest: &[u8],
     ) -> Result<Option<StoredSession>, DatabaseError> {
-        fetch_optional!(self, sqlx::query("SELECT s.id,s.user_id,s.authentication_methods,s.authenticated_at,s.expires_at,s.last_seen_at,s.revoked_at FROM browser_session_secrets b JOIN sessions s ON s.id=b.session_id JOIN users u ON u.id=s.user_id WHERE b.secret_digest=$1 AND s.revoked_at IS NULL AND s.expires_at>now() AND u.status='active'").bind(digest))?.as_ref().map(StoredSession::from_row).transpose()
+        run!(self, fetch_optional, sqlx::query("SELECT s.id,s.user_id,s.authentication_methods,s.authenticated_at,s.expires_at,s.last_seen_at,s.revoked_at FROM browser_session_secrets b JOIN sessions s ON s.id=b.session_id JOIN users u ON u.id=s.user_id WHERE b.secret_digest=$1 AND s.revoked_at IS NULL AND s.expires_at>now() AND u.status='active'").bind(digest))?.as_ref().map(StoredSession::from_row).transpose()
     }
 
     /// Reports whether the session holds an unexpired management window.
@@ -180,7 +185,7 @@ impl SessionRepository<'_> {
     ///
     /// Returns [`DatabaseError`] if the query fails.
     pub async fn management_active(&mut self, id: SessionId) -> Result<bool, DatabaseError> {
-        Ok(fetch_optional!(self, sqlx::query("SELECT s.id FROM sessions s JOIN users u ON u.id=s.user_id WHERE s.id=$1 AND s.revoked_at IS NULL AND s.expires_at>clock_timestamp() AND s.management_expires_at>clock_timestamp() AND u.status='active' FOR UPDATE OF s").bind(id.as_uuid()))?.is_some())
+        Ok(run!(self, fetch_optional, sqlx::query("SELECT s.id FROM sessions s JOIN users u ON u.id=s.user_id WHERE s.id=$1 AND s.revoked_at IS NULL AND s.expires_at>clock_timestamp() AND s.management_expires_at>clock_timestamp() AND u.status='active' FOR UPDATE OF s").bind(id.as_uuid()))?.is_some())
     }
 
     /// Returns when the session's management window closes, or `None` if it
@@ -193,7 +198,7 @@ impl SessionRepository<'_> {
         &mut self,
         id: SessionId,
     ) -> Result<Option<DateTime<Utc>>, DatabaseError> {
-        fetch_optional!(self, sqlx::query("SELECT management_expires_at FROM sessions WHERE id=$1 AND revoked_at IS NULL AND expires_at>now() AND management_expires_at>now()").bind(id.as_uuid()))?
+        run!(self, fetch_optional, sqlx::query("SELECT management_expires_at FROM sessions WHERE id=$1 AND revoked_at IS NULL AND expires_at>now() AND management_expires_at>now()").bind(id.as_uuid()))?
             .map(|row| row.column("management_expires_at"))
             .transpose()
     }
@@ -209,7 +214,7 @@ impl SessionRepository<'_> {
         &mut self,
         id: SessionId,
     ) -> Result<DateTime<Utc>, DatabaseError> {
-        fetch_one!(self, sqlx::query("UPDATE sessions SET management_expires_at=LEAST(expires_at,clock_timestamp()+interval '2 minutes') WHERE id=$1 AND revoked_at IS NULL AND expires_at>clock_timestamp() RETURNING management_expires_at").bind(id.as_uuid()))?
+        run!(self, fetch_one, sqlx::query("UPDATE sessions SET management_expires_at=LEAST(expires_at,clock_timestamp()+interval '2 minutes') WHERE id=$1 AND revoked_at IS NULL AND expires_at>clock_timestamp() RETURNING management_expires_at").bind(id.as_uuid()))?
             .column("management_expires_at")
     }
 }

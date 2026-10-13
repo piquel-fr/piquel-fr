@@ -1504,6 +1504,7 @@ dependencies = [
  "chrono",
  "piquel-auth-protocol",
  "piquel-common",
+ "serde",
  "serde_json",
  "sqlx",
  "thiserror 2.0.18",

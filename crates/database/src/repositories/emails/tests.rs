@@ -1,10 +1,12 @@
-use crate::repositories::test_pool;
-use piquel_auth_protocol::UserId;
+//! Focused persistence and security contract tests.
+use crate::Database;
 
+use piquel_auth_protocol::UserId;
+/// Verified email ownership follows active account status and verification changes.
 #[tokio::test]
 #[ignore = "requires a disposable TEST_DATABASE_URL"]
 async fn verified_email_updates_preserve_and_release_ownership() {
-    let pool = test_pool().await;
+    let pool = Database::test_pool().await;
     let mut tx = pool.begin().await.expect("transaction");
     let users = [UserId::new(), UserId::new()];
     for user in users {

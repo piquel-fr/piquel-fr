@@ -1,3 +1,5 @@
+//! Account records and locks that serialize security-sensitive mutations.
+
 use super::{RepositoryExecutor, StoredRow, UserRepository};
 use crate::DatabaseError;
 use chrono::{DateTime, Utc};
@@ -24,24 +26,15 @@ pub struct StoredUser {
 }
 
 impl StoredUser {
+    /// Decodes a stored row, retaining the column name and cause for invalid data.
     fn from_row(row: &PgRow) -> Result<Self, DatabaseError> {
-        let status = match row.column::<String>("status")?.as_str() {
-            "active" => AccountStatus::Active,
-            "disabled" => AccountStatus::Disabled,
-            other => {
-                return Err(DatabaseError::invalid_stored(
-                    "status",
-                    format!("unknown account status `{other}`"),
-                ));
-            }
-        };
         Ok(Self {
             id: row.id("id")?,
             username: row.column("username")?,
             display_name: row.column("display_name")?,
             profile_version: u64::try_from(row.column::<i64>("profile_version")?)
                 .map_err(|error| DatabaseError::invalid_stored("profile_version", error))?,
-            status,
+            status: row.vocabulary("status")?,
             created_at: row.column("created_at")?,
             updated_at: row.column("updated_at")?,
         })
@@ -67,7 +60,7 @@ impl UserRepository<'_> {
     /// Returns [`DatabaseError::Conflict`] if the id or username is taken, or
     /// another [`DatabaseError`] if the query fails.
     pub async fn insert(&mut self, input: &InsertUser) -> Result<StoredUser, DatabaseError> {
-        let row = fetch_one!(self, sqlx::query("INSERT INTO users (id, username, display_name) VALUES ($1, $2, $3) RETURNING id, username, display_name, profile_version, status, created_at, updated_at").bind(input.id.as_uuid()).bind(&input.username).bind(&input.display_name))?;
+        let row = run!(self, fetch_one, sqlx::query("INSERT INTO users (id, username, display_name) VALUES ($1, $2, $3) RETURNING id, username, display_name, profile_version, status, created_at, updated_at").bind(input.id.as_uuid()).bind(&input.username).bind(&input.display_name))?;
         StoredUser::from_row(&row)
     }
 
@@ -77,7 +70,7 @@ impl UserRepository<'_> {
     ///
     /// Returns [`DatabaseError`] if the query fails or the row is invalid.
     pub async fn find_by_id(&mut self, id: UserId) -> Result<Option<StoredUser>, DatabaseError> {
-        fetch_optional!(self, sqlx::query("SELECT id, username, display_name, profile_version, status, created_at, updated_at FROM users WHERE id = $1").bind(id.as_uuid()))?.as_ref().map(StoredUser::from_row).transpose()
+        run!(self, fetch_optional, sqlx::query("SELECT id, username, display_name, profile_version, status, created_at, updated_at FROM users WHERE id = $1").bind(id.as_uuid()))?.as_ref().map(StoredUser::from_row).transpose()
     }
 
     /// Finds an active account and locks it until the transaction ends.
@@ -92,7 +85,7 @@ impl UserRepository<'_> {
         &mut self,
         id: UserId,
     ) -> Result<Option<StoredUser>, DatabaseError> {
-        fetch_optional!(self, sqlx::query("SELECT id, username, display_name, profile_version, status, created_at, updated_at FROM users WHERE id = $1 AND status='active' FOR NO KEY UPDATE").bind(id.as_uuid()))?.as_ref().map(StoredUser::from_row).transpose()
+        run!(self, fetch_optional, sqlx::query("SELECT id, username, display_name, profile_version, status, created_at, updated_at FROM users WHERE id = $1 AND status='active' FOR NO KEY UPDATE").bind(id.as_uuid()))?.as_ref().map(StoredUser::from_row).transpose()
     }
 
     /// Finds an active account by its login name.
@@ -104,9 +97,9 @@ impl UserRepository<'_> {
         &mut self,
         username: &str,
     ) -> Result<Option<StoredUser>, DatabaseError> {
-        fetch_optional!(self, sqlx::query("SELECT id, username, display_name, profile_version, status, created_at, updated_at FROM users WHERE username = $1 AND status = 'active'").bind(username))?.as_ref().map(StoredUser::from_row).transpose()
+        run!(self, fetch_optional, sqlx::query("SELECT id, username, display_name, profile_version, status, created_at, updated_at FROM users WHERE username = $1 AND status = 'active'").bind(username))?.as_ref().map(StoredUser::from_row).transpose()
     }
 }
-
+/// Focused tests for this module and its security contracts.
 #[cfg(test)]
 mod tests;

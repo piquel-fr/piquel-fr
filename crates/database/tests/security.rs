@@ -2,7 +2,7 @@
 use chrono::{Duration, Utc};
 use piquel_auth_protocol::{AuthenticationMethod, SessionId, UserId};
 use piquel_repository::{Database, DatabaseConfig, InsertSession, InsertUser};
-
+/// Invitations are single-use and management authorization follows session expiry and revocation.
 #[expect(
     clippy::too_many_lines,
     reason = "Keep the invitation rollback and session lifecycle scenario together."
@@ -12,8 +12,7 @@ use piquel_repository::{Database, DatabaseConfig, InsertSession, InsertUser};
 async fn invitation_redemption_and_management_lifecycle() {
     let url = std::env::var("TEST_DATABASE_URL").expect("TEST_DATABASE_URL");
     let db = Database::connect(
-        DatabaseConfig::new_development(&url, 5, std::time::Duration::from_secs(5))
-            .expect("config"),
+        DatabaseConfig::new(&url, 5, std::time::Duration::from_secs(5)).expect("config"),
     )
     .await
     .expect("connect");
