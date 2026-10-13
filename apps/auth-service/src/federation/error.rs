@@ -1,11 +1,13 @@
 //! Federation failures and their single mapping to browser responses.
 
+use super::MAX_RETURN_TO_BYTES;
 use crate::security::{ApiError, SessionError};
 use axum::http::header::InvalidHeaderValue;
 use piquel_common::{ConfigurationError, VocabularyError};
 use piquel_crypto::CryptoError;
 use piquel_repository::DatabaseError;
 use thiserror::Error;
+use url::Url;
 
 /// Federation failures that reach the browser, mapped to HTTP once in `From<FederationError>`.
 /// Provider exchange failures are a separate `ProviderError`: they are logged, never shown.
@@ -18,8 +20,8 @@ pub(crate) enum FederationError {
     #[error("sign-in provider is not configured")]
     ProviderNotConfigured,
     /// `return_to` is neither the settings URL nor a safe path on the auth origin.
-    #[error("return address is not allowed")]
-    InvalidReturnTo,
+    #[error(transparent)]
+    InvalidReturnTo(#[from] InvalidReturnTo),
     /// The flow cookie is missing, or the account is inactive or lacks a passkey.
     #[error("active browser binding or account required")]
     Unauthorized,
@@ -86,9 +88,7 @@ impl From<FederationError> for ApiError {
             FederationError::ProviderNotConfigured => {
                 Self::bad_request("This sign-in provider is not configured.")
             }
-            FederationError::InvalidReturnTo => {
-                Self::bad_request("This return address is not allowed.")
-            }
+            FederationError::InvalidReturnTo(error) => Self::bad_request(error.to_string()),
             FederationError::Unauthorized => Self::unauthorized("Sign in to continue."),
             FederationError::InvalidAttempt => Self::bad_request(
                 "This sign-in attempt is invalid or has expired. Please start again.",
@@ -133,6 +133,29 @@ impl From<FederationError> for ApiError {
             | FederationError::Url(_)) => Self::internal(error),
         }
     }
+}
+
+/// Why a `return_to` address is refused. Each message names the rule it breaks.
+#[derive(Debug, Error)]
+pub(crate) enum InvalidReturnTo {
+    /// Anything that is not a path, other than the settings URL.
+    #[error("return_to must be a path on this site, starting with /, or exactly {0}")]
+    External(Url),
+    /// Browsers read a leading `//` as another host.
+    #[error("return_to cannot start with //, which browsers read as another host")]
+    ProtocolRelative,
+    /// Browsers treat `\` like `/`, so it could also reach another host.
+    #[error("return_to cannot contain a backslash")]
+    Backslash,
+    /// Fragments are not kept through the sign-in redirects.
+    #[error("return_to cannot contain a # fragment")]
+    Fragment,
+    /// Control characters have no place in a URL path.
+    #[error("return_to cannot contain control characters")]
+    ControlCharacter,
+    /// The path is longer than we store.
+    #[error("return_to is {0} bytes; at most {MAX_RETURN_TO_BYTES} are allowed")]
+    TooLong(usize),
 }
 
 /// Provider startup failures with operator-facing configuration context and sources.

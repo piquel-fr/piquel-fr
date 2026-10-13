@@ -30,7 +30,7 @@ mod error;
 /// Pending evidence, signup attachment, linking and unlinking.
 mod identities;
 pub use error::FederationConfigError;
-use error::FederationError;
+use error::{FederationError, InvalidReturnTo};
 /// Provider protocol facts and verified identity exchange.
 mod providers;
 use providers::{ProviderEndpoints, VerifiedIdentity};
@@ -74,18 +74,29 @@ piquel_common::str_enum! {
 struct ReturnTo(String);
 impl ReturnTo {
     /// Accepts the exact settings URL, or a path that cannot leave the auth origin.
-    fn parse(value: Option<&str>, settings_url: &Url) -> Result<Self, FederationError> {
+    fn parse(value: Option<&str>, settings_url: &Url) -> Result<Self, InvalidReturnTo> {
         let value = value.unwrap_or(DEFAULT_RETURN_TO);
-        // One leading `/` makes this a path on the current origin. `//` and `\` are
-        // excluded because browsers read them as the start of another host.
-        let local_path = value.starts_with('/')
-            && !value.starts_with("//")
-            && !value.contains('\\')
-            && !value.contains('#')
-            && !value.chars().any(char::is_control)
-            && value.len() <= MAX_RETURN_TO_BYTES;
-        if value != settings_url.as_str() && !local_path {
-            return Err(FederationError::InvalidReturnTo);
+        if value == settings_url.as_str() {
+            return Ok(Self(value.into()));
+        }
+        // One leading `/` makes this a path on the current origin.
+        if !value.starts_with('/') {
+            return Err(InvalidReturnTo::External(settings_url.clone()));
+        }
+        if value.starts_with("//") {
+            return Err(InvalidReturnTo::ProtocolRelative);
+        }
+        if value.contains('\\') {
+            return Err(InvalidReturnTo::Backslash);
+        }
+        if value.contains('#') {
+            return Err(InvalidReturnTo::Fragment);
+        }
+        if value.chars().any(char::is_control) {
+            return Err(InvalidReturnTo::ControlCharacter);
+        }
+        if value.len() > MAX_RETURN_TO_BYTES {
+            return Err(InvalidReturnTo::TooLong(value.len()));
         }
         Ok(Self(value.into()))
     }
