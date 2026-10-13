@@ -21,6 +21,7 @@ use piquel_repository::{
     Database, DatabaseError, DatabaseTransaction, InsertSession, StoredSession,
 };
 use std::{
+    borrow::Cow,
     net::{IpAddr, SocketAddr},
     sync::Arc,
     time::Duration as StdDuration,
@@ -47,8 +48,8 @@ const FLOW_COOKIE_MAX_AGE: u32 = 600;
 pub(crate) struct ApiError {
     /// Status code of the error response.
     status: StatusCode,
-    /// Fixed, non-sensitive explanation shown to the user.
-    message: &'static str,
+    /// Non-sensitive explanation shown to the user, specific enough to act on.
+    message: Cow<'static, str>,
 }
 
 impl ApiError {
@@ -57,35 +58,43 @@ impl ApiError {
         tracing::error!(error = %ErrorChain(error), "authentication operation failed");
     }
 
-    /// Rejects invalid browser input with its fixed explanation.
-    pub(crate) fn bad_request(message: &'static str) -> Self {
+    /// Rejects invalid browser input, explaining what is wrong.
+    pub(crate) fn bad_request(message: impl Into<Cow<'static, str>>) -> Self {
         Self {
             status: StatusCode::BAD_REQUEST,
-            message,
+            message: message.into(),
         }
     }
 
-    /// Reports a missing browser resource with a fixed public explanation.
-    pub(crate) fn not_found(message: &'static str) -> Self {
+    /// Reports a missing browser resource.
+    pub(crate) fn not_found(message: impl Into<Cow<'static, str>>) -> Self {
         Self {
             status: StatusCode::NOT_FOUND,
-            message,
+            message: message.into(),
         }
     }
 
-    /// Requires the browser to sign in.
-    pub(crate) fn unauthorized() -> Self {
+    /// Requires the browser to sign in, explaining why its current sign-in is not enough.
+    pub(crate) fn unauthorized(message: impl Into<Cow<'static, str>>) -> Self {
         Self {
             status: StatusCode::UNAUTHORIZED,
-            message: "Sign in to continue.",
+            message: message.into(),
         }
     }
 
-    /// Rejects an unauthorized operation with its fixed explanation.
-    pub(crate) fn forbidden(message: &'static str) -> Self {
+    /// Rejects an operation the browser is not allowed to perform, explaining why.
+    pub(crate) fn forbidden(message: impl Into<Cow<'static, str>>) -> Self {
         Self {
             status: StatusCode::FORBIDDEN,
-            message,
+            message: message.into(),
+        }
+    }
+
+    /// Rejects a write that collides with existing data, naming what is already in use.
+    pub(crate) fn conflict(message: impl Into<Cow<'static, str>>) -> Self {
+        Self {
+            status: StatusCode::CONFLICT,
+            message: message.into(),
         }
     }
 
@@ -95,7 +104,7 @@ impl ApiError {
 
         Self {
             status: StatusCode::INTERNAL_SERVER_ERROR,
-            message: "The request could not be completed. Please try again.",
+            message: "The request could not be completed. Please try again.".into(),
         }
     }
 }
@@ -107,10 +116,7 @@ impl From<DatabaseError> for ApiError {
             DatabaseError::NotFound => {
                 Self::bad_request("This request has expired or is no longer available.")
             }
-            DatabaseError::Conflict(_) => Self {
-                status: StatusCode::CONFLICT,
-                message: "This information is already in use.",
-            },
+            DatabaseError::Conflict(_) => Self::conflict("This information is already in use."),
             error @ (DatabaseError::Timeout(_)
             | DatabaseError::InvalidStoredData { .. }
             | DatabaseError::Operation(_)) => Self::internal(error),
@@ -228,7 +234,7 @@ impl From<SessionError> for ApiError {
     /// A missing session is 401 and an expired management window 403.
     fn from(error: SessionError) -> Self {
         match error {
-            SessionError::Missing => Self::unauthorized(),
+            SessionError::Missing => Self::unauthorized("Sign in to continue."),
             SessionError::ManagementRequired => {
                 Self::forbidden("Confirm with a passkey to unlock settings for two minutes.")
             }
@@ -463,11 +469,11 @@ impl From<HttpSecurityError> for ApiError {
             }
             HttpSecurityError::RateLimited => Self {
                 status: StatusCode::TOO_MANY_REQUESTS,
-                message: "Too many requests. Please wait a minute.",
+                message: "Too many requests. Please wait a minute.".into(),
             },
             HttpSecurityError::Timeout(_) => Self {
                 status: StatusCode::GATEWAY_TIMEOUT,
-                message: "Request timed out.",
+                message: "Request timed out.".into(),
             },
             HttpSecurityError::Database(error) => error.into(),
             error @ HttpSecurityError::MissingPeer => Self::internal(error),

@@ -89,7 +89,7 @@ impl From<FederationError> for ApiError {
             FederationError::InvalidReturnTo => {
                 Self::bad_request("This return address is not allowed.")
             }
-            FederationError::Unauthorized => Self::unauthorized(),
+            FederationError::Unauthorized => Self::unauthorized("Sign in to continue."),
             FederationError::InvalidAttempt => Self::bad_request(
                 "This sign-in attempt is invalid or has expired. Please start again.",
             ),

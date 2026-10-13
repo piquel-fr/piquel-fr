@@ -126,7 +126,7 @@ impl From<PasskeyError> for ApiError {
             PasskeyError::GooglePasswordManagerRequiresAndroid => Self::bad_request(
                 "Choose Google Password Manager only on an Android device with Google services.",
             ),
-            PasskeyError::AccountInactive => Self::unauthorized(),
+            PasskeyError::AccountInactive => Self::unauthorized("Sign in to continue."),
             PasskeyError::ManagementExpired => {
                 Self::forbidden("Your management window expired. Confirm with a passkey again.")
             }
