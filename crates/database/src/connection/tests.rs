@@ -570,6 +570,46 @@ async fn failed_provisioning_does_not_echo_the_password() {
     assert!(!debug.contains(password), "{debug}");
 }
 
+/// Canceling provisioning while it waits to change the password, here behind
+/// the role's own open `ALTER ROLE`, does not echo the statement either.
+#[tokio::test]
+#[ignore = "requires a disposable TEST_DATABASE_URL"]
+async fn canceled_provisioning_does_not_echo_the_password() {
+    let role = RoleFixture::new().await;
+    role.grant("first").await.expect("create runtime role");
+    let runtime = role.connect("first").await;
+    let mut held = runtime.begin().await.expect("begin");
+    let holder: i32 = sqlx::query_scalar("SELECT pg_backend_pid()")
+        .fetch_one(&mut *held)
+        .await
+        .expect("backend");
+    sqlx::query("ALTER ROLE CURRENT_USER PASSWORD 'held'")
+        .execute(&mut *held)
+        .await
+        .expect("lock the role");
+    let password = "never-echoed-password";
+    let cancel = async {
+        while !sqlx::query_scalar::<_, bool>(
+            "SELECT coalesce(bool_or(pg_cancel_backend(pid)), false) FROM pg_stat_activity
+            WHERE $1 = ANY (pg_blocking_pids(pid))",
+        )
+        .bind(holder)
+        .fetch_one(&role.owner.pool)
+        .await
+        .expect("cancel")
+        {
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+    };
+    let (result, ()) = tokio::join!(role.grant(password), cancel);
+    let debug = format!("{:?}", result.expect_err("canceled"));
+    assert!(debug.contains("canceling statement"), "{debug}");
+    assert!(!debug.contains(password), "{debug}");
+    held.rollback().await.expect("release the role");
+    runtime.close().await;
+    role.drop_role().await;
+}
+
 /// Settings persisted on the role, globally or for this database, are reset,
 /// so a new login does not start with triggers disabled.
 #[tokio::test]

@@ -376,7 +376,7 @@ impl AuthConfig {
     /// # Errors
     /// Names invalid transport settings or unresolved password references.
     pub fn database_from_environment() -> Result<DatabaseConfig, ConfigurationError> {
-        Ok(Self::database(DATABASE_URL, DATABASE_PASSWORD)?.0)
+        Self::runtime_database().map(|(config, _)| config)
     }
 
     /// Loads the connection `migrate` applies migrations with. When
@@ -388,8 +388,8 @@ impl AuthConfig {
     /// requires `AUTH_DATABASE_PASSWORD` for the runtime role when an owner is set.
     /// An owner password without an owner URL is rejected rather than ignored.
     pub fn migration_from_environment() -> Result<MigrationConfig, ConfigurationError> {
-        let (runtime, password) = Self::database(DATABASE_URL, DATABASE_PASSWORD)?;
-        if DATABASE_OWNER_URL.optional()?.is_none() {
+        let (runtime, password) = Self::runtime_database()?;
+        let Some(owner_url) = DATABASE_OWNER_URL.optional()? else {
             if DATABASE_OWNER_PASSWORD.optional()?.is_some() {
                 return Err(DATABASE_OWNER_PASSWORD
                     .invalid("must not be set without AUTH_DATABASE_OWNER_URL"));
@@ -398,24 +398,31 @@ impl AuthConfig {
                 database: runtime,
                 runtime_role: None,
             });
-        }
-        let password = password.ok_or(DATABASE_PASSWORD.invalid(
-            "must be set with AUTH_DATABASE_OWNER_URL; migrate assigns it to the runtime role",
-        ))?;
+        };
+        let password = password.ok_or_else(|| {
+            DATABASE_PASSWORD.invalid(
+                "must be set with AUTH_DATABASE_OWNER_URL; migrate assigns it to the runtime role",
+            )
+        })?;
         Ok(MigrationConfig {
-            database: Self::database(DATABASE_OWNER_URL, DATABASE_OWNER_PASSWORD)?.0,
+            database: Self::database(DATABASE_OWNER_URL, &owner_url, DATABASE_OWNER_PASSWORD)?.0,
             runtime_role: Some(RuntimeRole::new(&runtime, &password)),
         })
     }
 
-    /// Reads one connection from `url` and its optional separate `password`
-    /// reference, returning the resolved separate password as well.
+    /// Reads the service's own connection and its resolved separate password.
+    fn runtime_database() -> Result<(DatabaseConfig, Option<String>), ConfigurationError> {
+        Self::database(DATABASE_URL, &DATABASE_URL.required()?, DATABASE_PASSWORD)
+    }
+
+    /// Reads one connection from `value`, the setting of `url`, and its optional
+    /// separate `password` reference, returning the resolved separate password as well.
     fn database(
         url: Variable,
+        value: &str,
         password: Variable,
     ) -> Result<(DatabaseConfig, Option<String>), ConfigurationError> {
-        let value = url.required()?;
-        let config = DatabaseConfig::new(&value, DATABASE_POOL_SIZE, DATABASE_CONNECT_TIMEOUT)
+        let config = DatabaseConfig::new(value, DATABASE_POOL_SIZE, DATABASE_CONNECT_TIMEOUT)
             .map_err(|source| {
                 url.error(
                     "must be a postgres:// URL with sslmode=verify-full, explicit \
@@ -426,7 +433,7 @@ impl AuthConfig {
         let Some(reference) = password.optional()? else {
             return Ok((config, None));
         };
-        let parsed = url::Url::parse(&value)
+        let parsed = url::Url::parse(value)
             .map_err(|source| url.error("must be a postgres:// URL", source))?;
         if parsed.password().is_some() {
             return Err(

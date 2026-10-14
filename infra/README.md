@@ -122,15 +122,21 @@ first deployment that mounts them (for environments created before
 `piquelctl env secret piquel-fr --env ENV regenerate NAME` rotates one. A new
 `database-runtime-password` takes effect on the next deployment, when `migrate`
 sets it. Until the rollout replaces them, old replicas keep their open
-connections but cannot open new ones. Open sessions survive the change, so after
-a leak, end them once the rollout finishes:
+connections but cannot open new ones. Open sessions survive the change, and one
+holding a lock on the role makes `migrate` fail after 10 seconds. So after a
+leak, regenerate the secret, lock the role out and end its sessions, then deploy;
+`migrate` restores its login with the new password:
 
 ```sh
-piquelctl app exec piquel-fr postgres --env ENV -- psql -U piquel -d piquel -c \
-  "SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE usename = 'piquel_auth'"
+piquelctl env secret piquel-fr --env ENV regenerate database-runtime-password
+piquelctl app exec piquel-fr postgres --env ENV -- psql -U piquel -d piquel \
+  -c "SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE usename = 'piquel_auth'" \
+  -c "ALTER ROLE piquel_auth NOLOGIN" \
+  -c "SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE usename = 'piquel_auth'"
 ```
 
-The new replicas reconnect with the new password. A new `database-password` does
+Auth is unavailable until the new replicas start. Run the same `psql` command
+whenever `migrate` times out waiting for a lock. A new `database-password` does
 not change the one an existing database volume stores.
 
 Staging and production require invitations:

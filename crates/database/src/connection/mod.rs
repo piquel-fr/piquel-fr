@@ -68,6 +68,9 @@ DECLARE
     blocked_function REGPROCEDURE;
     excess TEXT;
 BEGIN
+    -- A session holding a row this block updates, such as the runtime role's own
+    -- open ALTER ROLE, would otherwise stall `migrate` until its job times out.
+    SET LOCAL lock_timeout = '10s';
     -- MAINTAIN, checked below, is new in PostgreSQL 17.
     IF current_setting('server_version_num')::INT < 170000 THEN
         RAISE EXCEPTION 'provisioning the runtime role needs PostgreSQL 17 or later, not %',
@@ -78,10 +81,9 @@ BEGIN
     IF NOT (SELECT rolsuper FROM pg_roles WHERE rolname = current_user) THEN
         RAISE EXCEPTION 'provisioning the runtime role needs a superuser owner, not "%"', current_user;
     END IF;
-    -- Resetting the attributes below would demote the migration role or a superuser.
-    IF runtime_role = current_user OR EXISTS (
-        SELECT FROM pg_roles WHERE oid = runtime_oid AND rolsuper
-    ) THEN
+    -- Resetting the attributes below would demote the migration role, which is a
+    -- superuser, or another superuser.
+    IF EXISTS (SELECT FROM pg_roles WHERE oid = runtime_oid AND rolsuper) THEN
         RAISE EXCEPTION 'runtime role "%" must not be the migration role or a superuser', runtime_role;
     END IF;
     -- Memberships (e.g. SET ROLE to a superuser) and ownership here or of shared
@@ -101,14 +103,17 @@ BEGIN
         EXECUTE format('CREATE ROLE %I', runtime_role);
         SELECT oid INTO runtime_oid FROM pg_roles WHERE rolname = runtime_role;
     END IF;
-    -- A failing statement would appear, password included, in the error's
-    -- context and the server log, so only its message is passed on.
+    -- A failing or canceled statement would appear, password included, in the
+    -- error's context and the server log, so only its message is passed on.
+    -- OTHERS excludes query_canceled (statement_timeout or a cancel request);
+    -- lock_timeout raises lock_not_available, which it covers.
     BEGIN
         EXECUTE format(
-            'ALTER ROLE %I LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS PASSWORD %L',
+            'ALTER ROLE %I LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS '
+                'INHERIT CONNECTION LIMIT -1 VALID UNTIL ''infinity'' PASSWORD %L',
             runtime_role, current_setting('piquel.runtime_password')
         );
-    EXCEPTION WHEN OTHERS THEN
+    EXCEPTION WHEN query_canceled OR OTHERS THEN
         RAISE EXCEPTION 'could not set the attributes and password of runtime role "%": %',
             runtime_role, SQLERRM USING ERRCODE = SQLSTATE;
     END;
@@ -194,6 +199,10 @@ BEGIN
             'its grants from other roles, to PUBLIC or on parameters, and its settings, '
             'or use a new role', runtime_role, excess;
     END IF;
+EXCEPTION WHEN lock_not_available THEN
+    RAISE EXCEPTION 'provisioning runtime role "%" timed out waiting for a lock held by '
+        'another session, e.g. its own open transaction: end its sessions with '
+        'pg_terminate_backend, then run migrate again', runtime_role USING ERRCODE = SQLSTATE;
 END $$
 "#;
 /// Advisory lock key held while privileges change, the ASCII bytes of "piquelrl".

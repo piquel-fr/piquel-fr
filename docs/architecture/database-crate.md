@@ -93,9 +93,13 @@ Deployments separate the schema owner from the role the service runs as.
 owner, creates or updates a `RuntimeRole` (the service connection's user) as a
 plain login role with row access to every table. It skips `_sqlx_migrations` and
 leaves `security_audit_log` append-only. It needs PostgreSQL 17 or later and a
-superuser owner, and checks both first. The password reaches the block as a bind
+superuser owner, and checks both first. It resets every role attribute,
+including `VALID UNTIL` and `CONNECTION LIMIT`. Lock waits time out after 10
+seconds, so a session holding a lock on the role, e.g. its own open
+`ALTER ROLE`, fails `migrate` with instructions instead of stalling it. The password reaches the block as a bind
 parameter, so a server logging every statement with its parameters records it;
-if setting it fails, the error carries only PostgreSQL's reason, not the statement.
+if setting it fails or is canceled, the error carries only PostgreSQL's reason,
+not the statement.
 Errors put their guidance in the message, since `migrate` prints only that.
 
 A role that belongs to another role, or owns an object in this database (large

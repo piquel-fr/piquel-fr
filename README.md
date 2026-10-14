@@ -99,14 +99,16 @@ Each run, `migrate` revokes everything granted to the role and resets its
 settings before granting again, so new tables are covered and changes made by
 hand are removed. It also resets the password, so changing
 `AUTH_DATABASE_PASSWORD` and running `migrate` rotates it. Sessions already open
-keep working, so after a leak also end them as the owner with
-`pg_terminate_backend`. It refuses, changing nothing, a role that belongs to
-another role or owns an object in this database or a shared one, or that still
-holds more than row access afterwards, e.g. through another role's grant. Other
-databases in the cluster are out of scope: by PostgreSQL's defaults the role may
-connect to them, e.g. `postgres`, but gains no meaningful privileges there;
-objects and settings it creates there are ignored. Revoke PUBLIC's `CONNECT` on
-them if you prefer.
+keep working, and one holding a lock on the role makes `migrate` fail after 10
+seconds. So after a leak, first disable the role's login (`ALTER ROLE …
+NOLOGIN`) and end its sessions with `pg_terminate_backend`, then run `migrate`,
+which restores the login with the new password. It refuses, changing nothing, a
+role that belongs to another role or owns an object in this database or a shared
+one, or that still holds more than row access afterwards, e.g. through another
+role's grant. Other databases in the cluster are out of scope: by PostgreSQL's
+defaults the role may connect to them, e.g. `postgres`, but gains no meaningful
+privileges there; objects and settings it creates there are ignored. Revoke
+PUBLIC's `CONNECT` on them if you prefer.
 
 The schema intentionally replaces the throwaway prototype. Use a fresh database;
 there is no migration path for prototype account data.
