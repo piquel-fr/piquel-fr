@@ -5,8 +5,8 @@
 #   web    -> Prettier, svelte-check and tsc, ESLint, both static builds and the
 #             web dependency audit
 #   rust   -> Clippy, unit, database and doc tests against PostgreSQL
-#   e2e    -> the browser suite against the real binary, with the auth pages
-#             embedded, the settings build and PostgreSQL
+#   e2e    -> the browser suite over HTTPS against the real binary, with the
+#             auth pages embedded, the settings build and PostgreSQL
 #   docker -> both deployment images, on pull requests only: staging builds
 #             them from every push to main
 #
@@ -134,7 +134,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     env:
-      TEST_DATABASE_URL: postgres://postgres:postgres@localhost:5432/postgres
+      TEST_DATABASE_URL: postgres://postgres:postgres@localhost:5432/postgres?sslmode=disable
     # A disposable server for the database tests, and for the browser suite.
     services:
       postgres: &postgres
@@ -166,13 +166,13 @@ jobs:
     services:
       postgres: *postgres
     env:
-      E2E_AUTH_URL: http://localhost:3000
-      E2E_SETTINGS_URL: http://localhost:4173/settings
-      AUTH_DATABASE_URL: postgres://postgres:postgres@localhost:5432/postgres
-      AUTH_DEVELOPMENT_MODE: 'true'
-      AUTH_PUBLIC_BASE_URL: http://localhost:3000
+      E2E_AUTH_URL: https://localhost:3443
+      E2E_SETTINGS_URL: https://localhost:4443/settings
+      E2E_ALLOW_SELF_SIGNED_TLS: '1'
+      AUTH_DATABASE_URL: postgres://postgres:postgres@localhost:5432/postgres?sslmode=disable
+      AUTH_PUBLIC_BASE_URL: https://localhost:3443
       AUTH_PUBLIC_LISTENER: 127.0.0.1:3000
-      AUTH_SETTINGS_URL: http://localhost:4173/settings
+      AUTH_SETTINGS_URL: https://localhost:4443/settings
       AUTH_INVITE_REQUIRED: 'false'
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
@@ -184,34 +184,54 @@ jobs:
       # Embeds the auth pages, as in the deployed image.
       - run: just build-debug
       - run: VITE_AUTH_ORIGIN="$E2E_AUTH_URL" just build-settings-web
-      # The suite signs in through the public OIDC client from tests/browser/README.md.
+      # The service accepts only HTTPS origins, as in production. Caddy
+      # terminates TLS for both servers with its local CA, which the suite is
+      # told to accept. The suite signs in through the public OIDC client from
+      # tests/browser/README.md.
       - name: Start the auth service and the settings frontend
         run: |
+          just generate-key "$RUNNER_TEMP/key.pem"
+          export AUTH_KEY_PROVIDER="file://$RUNNER_TEMP/key.pem"
           export AUTH_CLIENTS_FILE="$RUNNER_TEMP/clients.json"
           cat > "$AUTH_CLIENTS_FILE" <<'EOF'
           [
             {
               "id": "browser-e2e",
               "display_name": "Browser E2E",
-              "redirect_uris": ["http://localhost:4173/callback"],
-              "post_logout_uris": ["http://localhost:4173/settings"],
+              "redirect_uris": ["https://localhost:4443/callback"],
+              "post_logout_uris": ["https://localhost:4443/settings"],
               "allowed_scopes": ["openid", "profile", "email"],
               "allow_refresh": false,
               "trusted": false
             }
           ]
           EOF
+          cat > "$RUNNER_TEMP/Caddyfile" <<'EOF'
+          {
+            auto_https disable_redirects
+            skip_install_trust
+          }
+          localhost:3443 {
+            reverse_proxy 127.0.0.1:3000
+          }
+          localhost:4443 {
+            reverse_proxy 127.0.0.1:4173
+          }
+          EOF
+          docker run --detach --name caddy --network host --volume "$RUNNER_TEMP/Caddyfile:/etc/caddy/Caddyfile:ro" caddy:2-alpine
           target/debug/auth-service migrate
           target/debug/auth-service serve > "$RUNNER_TEMP/auth.log" 2>&1 &
-          pnpm --filter @piquel/piquel-web exec vite preview --host localhost --port 4173 --strictPort > "$RUNNER_TEMP/settings.log" 2>&1 &
-          curl -fsS --retry 30 --retry-delay 1 --retry-all-errors "$E2E_AUTH_URL/health/ready"
-          curl -fsS --retry 30 --retry-delay 1 --retry-all-errors -o /dev/null "$E2E_SETTINGS_URL"
+          pnpm --filter @piquel/piquel-web exec vite preview --host 127.0.0.1 --port 4173 --strictPort > "$RUNNER_TEMP/settings.log" 2>&1 &
+          curl -kfsS --retry 30 --retry-delay 1 --retry-all-errors "$E2E_AUTH_URL/health/ready"
+          curl -kfsS --retry 30 --retry-delay 1 --retry-all-errors -o /dev/null "$E2E_SETTINGS_URL"
       # The headless build matching the pinned Playwright, so runner image
       # updates cannot change the browser under test.
       - run: pnpm exec playwright install --only-shell chromium
       - run: just test-browser
       - if: failure()
-        run: cat "$RUNNER_TEMP/auth.log" "$RUNNER_TEMP/settings.log"
+        run: |
+          cat "$RUNNER_TEMP"/*.log || true
+          docker logs caddy || true
 
   docker:
     name: docker (${{ matrix.image }})
