@@ -25,6 +25,7 @@ use webauthn_rs_proto::ResidentKeyRequirement;
 mod ceremonies;
 /// Stable decoy credentials for usernames without an active account or passkey.
 mod decoy;
+pub(crate) use decoy::DecoyKey;
 /// Passkey failures and their browser response mapping.
 mod error;
 /// Validated names and browser request/response bodies.
@@ -51,8 +52,8 @@ pub struct PasskeyApplication {
     webauthn: Arc<Webauthn>,
     /// Whether ordinary registration needs an invitation.
     invite_required: bool,
-    /// HMAC key deriving the decoy credentials of unknown usernames.
-    decoy_key: Secret,
+    /// Derives the decoy credentials of unknown usernames.
+    decoy_key: DecoyKey,
 }
 
 /// Nominal management lifetime, matching the repository's two-minute grant.
@@ -432,7 +433,10 @@ impl PasskeyApplication {
                 let ceremony = if let Some(user_id) = user_id {
                     Ceremony::Login(LoginCeremony { user_id, state })
                 } else {
-                    challenge.public_key.allow_credentials = app.decoy_credentials(&username)?;
+                    challenge.public_key.allow_credentials = app
+                        .decoy_key
+                        .credentials(&username)
+                        .map_err(PasskeyError::Crypto)?;
                     Ceremony::Decoy
                 };
                 (ceremony, challenge)

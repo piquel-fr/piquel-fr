@@ -127,6 +127,8 @@ impl fmt::Debug for Secret {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Digest([u8; SECRET_BYTES]);
 impl Digest {
+    /// Byte length of every digest.
+    pub const LENGTH: usize = SECRET_BYTES;
     /// Computes SHA-256 over arbitrary bytes.
     #[must_use]
     pub fn sha256(value: &[u8]) -> Self {

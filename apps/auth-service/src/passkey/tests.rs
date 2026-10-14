@@ -147,7 +147,7 @@ impl Fixture {
                     .parse::<piquel_common::Origin>()
                     .expect("origin"),
                 invite_required: false,
-                decoy_key: Secret::generate().expect("decoy key"),
+                decoy_key: DecoyKey::new(Secret::generate().expect("decoy key")),
             },
         )
         .expect("passkey app");

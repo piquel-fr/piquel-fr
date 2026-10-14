@@ -104,7 +104,7 @@ pub(super) enum PasskeyError {
     /// Creating a browser session failed.
     #[error(transparent)]
     Session(#[from] SessionError),
-    /// Generating a browser-binding secret failed.
+    /// Generating a browser-binding secret or deriving decoy credentials failed.
     #[error(transparent)]
     Crypto(#[from] CryptoError),
 }

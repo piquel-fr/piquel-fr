@@ -64,6 +64,9 @@ Generate a persistent RSA key with `just generate-key /absolute/path/key.pem` (u
 OpenSSL CLI; piqueld generates its own, see `infra/README.md`).
 Keep the same key and ID across restarts. Replacing the only configured key
 invalidates issued tokens; overlapping signing-key rotation is not implemented.
+It also changes the decoy passkey IDs that username sign-in returns for unknown
+usernames, while real accounts keep theirs, so comparing responses from before and
+after a replacement reveals which usernames exist.
 
 Provider callback URLs are `/login/github/callback` and `/login/google/callback`
 on the auth origin. GitHub uses `read:user user:email`; Google uses `openid email profile`.

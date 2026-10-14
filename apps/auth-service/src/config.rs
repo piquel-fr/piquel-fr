@@ -1,5 +1,6 @@
 //! Validated startup configuration, grouped by application.
 
+use crate::passkey::DecoyKey;
 use ipnet::IpNet;
 use piquel_auth_protocol::{Provider, oauth::Scope};
 use piquel_common::{
@@ -64,11 +65,12 @@ pub(crate) struct PasskeyConfig {
     pub origin: Origin,
     /// Registration admission policy.
     pub invite_required: bool,
-    /// Domain-separated HMAC key for the stable decoy credentials of unknown usernames.
-    pub decoy_key: Secret,
+    /// Domain-separated key for the stable decoy credentials of unknown usernames.
+    pub decoy_key: DecoyKey,
 }
 impl PasskeyConfig {
-    /// Reads the passkey policy and validates that the origin has a domain RP ID.
+    /// Reads the passkey policy, validates that the origin has a domain RP ID and
+    /// derives the decoy key from the persistent PEM key.
     pub(crate) fn from_environment(
         origin: &Origin,
         persistent_key: &SecretBytes,
@@ -80,7 +82,10 @@ impl PasskeyConfig {
         Ok(Self {
             origin: origin.clone(),
             invite_required: INVITE_REQUIRED.flag(true)?,
-            decoy_key: AuthConfig::derive_key(persistent_key, PASSKEY_DECOY_CONTEXT)?,
+            decoy_key: DecoyKey::new(AuthConfig::derive_key(
+                persistent_key,
+                PASSKEY_DECOY_CONTEXT,
+            )?),
         })
     }
 }
