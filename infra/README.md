@@ -142,7 +142,7 @@ owner_sql -c "DO \$\$ BEGIN IF NOT coalesce((SELECT bool_and(pg_terminate_backen
 ```
 
 Auth is unavailable until the new replicas start. Whenever `migrate` times out
-waiting for a lock, run the last four lines again. A new `database-password`
+waiting for a lock, run everything after `regenerate` again. A new `database-password`
 does not change the one an existing database volume stores.
 
 Staging and production require invitations:
