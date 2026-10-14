@@ -80,6 +80,7 @@ test('passkey lifecycle, protected settings and browser OIDC consent with SSO', 
     );
     const callback = new URL(page.url());
     expect(callback.searchParams.get('state')).toBe(oidc.state);
+    expect(callback.searchParams.get('iss')).toBe(authUrl);
     expect(callback.searchParams.has('error')).toBe(false);
     const code = callback.searchParams.get('code') ?? '';
     expect(code).toBeTruthy();
@@ -174,6 +175,7 @@ test('passkey lifecycle, protected settings and browser OIDC consent with SSO', 
     );
     const sso = new URL(page.url());
     expect(sso.searchParams.get('state')).toBe(`${oidc.state}-sso`);
+    expect(sso.searchParams.get('iss')).toBe(authUrl);
     expect(sso.searchParams.has('error')).toBe(false);
     expect(sso.searchParams.get('code')).toBeTruthy();
     expect(sso.searchParams.get('code')).not.toBe(code);

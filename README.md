@@ -119,6 +119,9 @@ Generate its random secret with `just secret`. Clients use
 PKCE. Redirect URLs must match exactly and use HTTPS.
 
 Discovery is `/.well-known/openid-configuration`; JWKS is `/.well-known/jwks.json`.
+Every authorization response redirected to a client, success or error, carries
+`iss` (RFC 9207), so clients that use several issuers can reject mix-ups; discovery
+advertises `authorization_response_iss_parameter_supported`.
 The endpoints implement code exchange, RS256 ID/access tokens, userinfo, opt-in
 rotating refresh tokens, revocation and RP-initiated logout. Access tokens are
 intended for the configured client audience. Only requested claims are released;

@@ -33,6 +33,7 @@ use piquel_repository::{Database, StoredOidcClient};
 use serde::Serialize;
 use serde_json::Value;
 use std::{collections::BTreeSet, sync::Arc};
+use url::Url;
 
 /// Value the auth frontend sends in the CSRF header.
 const CSRF_HEADER_VALUE: &str = "1";
@@ -251,6 +252,8 @@ const SUPPORTED_CLAIMS: [Claim; 9] = [
 struct Discovery {
     /// Where clients send authorization requests.
     authorization_endpoint: String,
+    /// Always true: authorization responses carry `iss` (RFC 9207).
+    authorization_response_iss_parameter_supported: bool,
     /// Claims tokens may contain.
     claims_supported: &'static [Claim],
     /// Accepted PKCE methods.
@@ -285,6 +288,30 @@ struct Discovery {
     token_endpoint_auth_methods_supported: &'static [ClientAuthentication],
     /// Where clients read claims with an access token.
     userinfo_endpoint: String,
+}
+
+/// Where an authorization response goes: a verified client redirect URI, the request's
+/// `state` and this issuer. Every success and error redirect to the client is built
+/// here, so none can miss `state` or the RFC 9207 `iss`.
+struct ClientRedirect<'a> {
+    /// Redirect URI, already matched against the client's registration.
+    uri: &'a Url,
+    /// Client value returned unchanged.
+    state: &'a str,
+    /// Issuer identifier, exactly as in discovery.
+    issuer: &'a str,
+}
+
+impl ClientRedirect<'_> {
+    /// The redirect URI with `parameters`, `state` and `iss` appended.
+    fn url(&self, parameters: &[(&str, &str)]) -> Url {
+        let mut url = self.uri.clone();
+        url.query_pairs_mut()
+            .extend_pairs(parameters)
+            .append_pair("state", self.state)
+            .append_pair("iss", self.issuer);
+        url
+    }
 }
 
 #[cfg(test)]
@@ -346,6 +373,7 @@ impl OidcApplication {
         std::future::ready(Json(Discovery {
             issuer: base.clone(),
             authorization_endpoint: format!("{base}{}", routes::oidc::AUTHORIZE),
+            authorization_response_iss_parameter_supported: true,
             token_endpoint: format!("{base}{}", routes::oidc::TOKEN),
             revocation_endpoint: format!("{base}{}", routes::oidc::REVOKE),
             userinfo_endpoint: format!("{base}{}", routes::oidc::USERINFO),
@@ -487,6 +515,15 @@ impl OidcApplication {
             )))
         }
     }
+    /// Responses to an authorization request with `state`, sent to its verified `uri`.
+    fn client_redirect<'a>(&'a self, uri: &'a Url, state: &'a str) -> ClientRedirect<'a> {
+        ClientRedirect {
+            uri,
+            state,
+            issuer: &self.issuer,
+        }
+    }
+
     /// HMAC of an opaque token's secret, the only form in which it is stored.
     fn token_digest(&self, token: &OpaqueToken) -> Result<Digest, OAuthError> {
         Ok(Digest::hmac(

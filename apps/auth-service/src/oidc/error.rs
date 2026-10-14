@@ -1,5 +1,6 @@
 //! OAuth protocol failures, keeping the cause of every rejection and internal error.
 
+use super::ClientRedirect;
 use crate::security::{ApiError, SessionError};
 use axum::{
     Json,
@@ -84,15 +85,12 @@ impl OAuthCode {
         }
     }
 
-    /// Adds this error code, its description and the client's `state` to a client
-    /// redirect URI.
-    pub(super) fn redirect_url(self, base: &Url, description: &str, state: &str) -> Url {
-        let mut url = base.clone();
-        url.query_pairs_mut()
-            .append_pair("error", self.as_str())
-            .append_pair("error_description", &OAuthError::wire_text(description))
-            .append_pair("state", state);
-        url
+    /// Client redirect carrying this error code and its description.
+    pub(super) fn redirect_url(self, to: &ClientRedirect<'_>, description: &str) -> Url {
+        to.url(&[
+            ("error", self.as_str()),
+            ("error_description", &OAuthError::wire_text(description)),
+        ])
     }
 
     /// Rejects the request with this code. `description` tells the client what to fix;
@@ -171,9 +169,9 @@ impl OAuthError {
         }
     }
 
-    /// Sends a rejection back to the client's verified redirect URI with its `state`.
+    /// Sends a rejection back to the client's verified redirect URI.
     /// Internal failures stay JSON 500 responses.
-    pub(super) fn redirected(self, base: &Url, state: &str) -> Self {
+    pub(super) fn redirected(self, to: &ClientRedirect<'_>) -> Self {
         match self {
             Self::Protocol {
                 code,
@@ -182,7 +180,7 @@ impl OAuthError {
                 ..
             } => Self::Protocol {
                 code,
-                redirect: Some(Box::new(code.redirect_url(base, &description, state))),
+                redirect: Some(Box::new(code.redirect_url(to, &description))),
                 description,
                 source,
             },

@@ -251,7 +251,8 @@ impl OidcApplication {
             OAuthCode::InvalidRequest.reject_with("redirect_uri is not a valid URL", error)
         })?;
         // The redirect URI is now verified, so rejections go back to the client.
-        let back = |error: OAuthError| error.redirected(&redirect, &q.state);
+        let client_redirect = app.client_redirect(&redirect, &q.state);
+        let back = |error: OAuthError| error.redirected(&client_redirect);
         let hinted_user_id = q.hinted_user_id(&app).map_err(back)?;
         let scopes = q.scopes().map_err(back)?;
         if !scopes.allowed_by(&client.allowed_scopes) {
@@ -382,15 +383,13 @@ impl OidcApplication {
             })?;
         Self::require_authorization_session(&request, &session)?;
         let redirect = Url::parse(&request.redirect_uri)?;
+        let client_redirect = self.client_redirect(&redirect, &request.client_state);
         let redirect = match input.decision {
             ConsentDecision::Unsupported => {
                 return Err(OAuthCode::InvalidRequest.reject("decision must be approve or deny"));
             }
-            ConsentDecision::Deny => OAuthCode::AccessDenied.redirect_url(
-                &redirect,
-                "the user denied the request",
-                &request.client_state,
-            ),
+            ConsentDecision::Deny => OAuthCode::AccessDenied
+                .redirect_url(&client_redirect, "the user denied the request"),
             ConsentDecision::Approve => {
                 // Lock the account before writing consent: the consent row's foreign key
                 // would otherwise take a key-share lock that deadlocks with a concurrent login.
@@ -427,12 +426,7 @@ impl OidcApplication {
                         expires_at: Utc::now() + Duration::minutes(AUTHORIZATION_CODE_MINUTES),
                     })
                     .await?;
-                let mut redirect = redirect;
-                redirect
-                    .query_pairs_mut()
-                    .append_pair("code", &code.encoded())
-                    .append_pair("state", &request.client_state);
-                redirect
+                client_redirect.url(&[("code", &code.encoded())])
             }
         };
         transaction.commit().await?;
@@ -515,10 +509,9 @@ impl OidcApplication {
     ) -> Result<Redirect, OAuthError> {
         let request = self.find_authorization_request(&transaction).await?;
         let redirect = Url::parse(&request.redirect_uri)?;
-        let back = |code: OAuthCode, description| {
-            code.reject(description)
-                .redirected(&redirect, &request.client_state)
-        };
+        let client_redirect = self.client_redirect(&redirect, &request.client_state);
+        let back =
+            |code: OAuthCode, description| code.reject(description).redirected(&client_redirect);
         let session = Session::optional(&self.database, headers)
             .await?
             .filter(|session| Self::require_authorization_session(&request, session).is_ok());
