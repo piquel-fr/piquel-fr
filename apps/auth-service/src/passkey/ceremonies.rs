@@ -84,6 +84,9 @@ pub(super) enum Ceremony {
     Register(RegistrationCeremony),
     /// Username-based authentication.
     Login(LoginCeremony),
+    /// Username-based authentication for a username without an active account or
+    /// passkey. It holds no `WebAuthn` state, so its finish can never succeed.
+    Decoy,
     /// Discoverable account-picker authentication.
     Discover(DiscoverCeremony),
     /// Settings authorization for the initiating session.
@@ -97,7 +100,7 @@ impl Ceremony {
     pub(super) const fn kind(&self) -> CeremonyKind {
         match self {
             Self::Register(_) => CeremonyKind::Registration,
-            Self::Login(_) | Self::Discover(_) => CeremonyKind::Authentication,
+            Self::Login(_) | Self::Decoy | Self::Discover(_) => CeremonyKind::Authentication,
             Self::Manage(_) => CeremonyKind::PurposeAuthentication,
             Self::Enroll(_) => CeremonyKind::Enrollment,
         }
@@ -106,7 +109,7 @@ impl Ceremony {
     /// Derives the existing-account binding; signup has no account row yet.
     const fn user_id(&self) -> Option<UserId> {
         match self {
-            Self::Register(_) | Self::Discover(_) => None,
+            Self::Register(_) | Self::Decoy | Self::Discover(_) => None,
             Self::Login(state) => Some(state.user_id),
             Self::Manage(state) => Some(state.user_id),
             Self::Enroll(state) => Some(state.user_id),
@@ -116,7 +119,7 @@ impl Ceremony {
     /// Derives the initiating-session binding for settings operations.
     const fn session_id(&self) -> Option<SessionId> {
         match self {
-            Self::Register(_) | Self::Login(_) | Self::Discover(_) => None,
+            Self::Register(_) | Self::Login(_) | Self::Decoy | Self::Discover(_) => None,
             Self::Manage(state) => Some(state.session_id),
             Self::Enroll(state) => Some(state.session_id),
         }
@@ -164,6 +167,8 @@ ceremony_state!(EnrollmentCeremony, Enroll, Enrollment);
 pub(super) enum AuthenticationCeremony {
     /// Account identified by username before the challenge.
     Login(LoginCeremony),
+    /// Username without an active account or passkey; always rejected.
+    Decoy,
     /// Account identified by the authenticator's response.
     Discover(DiscoverCeremony),
 }
@@ -174,6 +179,7 @@ impl CeremonyState for AuthenticationCeremony {
     fn extract(ceremony: Ceremony) -> Option<Self> {
         match ceremony {
             Ceremony::Login(state) => Some(Self::Login(state)),
+            Ceremony::Decoy => Some(Self::Decoy),
             Ceremony::Discover(state) => Some(Self::Discover(state)),
             Ceremony::Register(_) | Ceremony::Manage(_) | Ceremony::Enroll(_) => None,
         }

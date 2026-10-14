@@ -137,6 +137,36 @@ impl PasskeyRepository<'_> {
         )
     }
 
+    /// Lists the unrevoked credentials of the active account named `username`,
+    /// oldest first. A missing, inactive or passkey-less account returns none,
+    /// in the same single query, so callers cannot tell those cases apart.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`DatabaseError`] if the query fails or a row is invalid.
+    pub async fn list_active_by_username(
+        &mut self,
+        username: &str,
+    ) -> Result<Vec<StoredPasskey>, DatabaseError> {
+        run!(
+            self,
+            fetch_all,
+            sqlx::query_as!(
+                StoredPasskey,
+                r#"SELECT
+                    p.id AS "id: TokenId", p.credential_id, p.user_id AS "user_id: UserId",
+                    p.credential, p.friendly_name, p.revoked_at
+                FROM passkey_credentials p
+                JOIN users u ON u.id = p.user_id
+                WHERE u.username = $1
+                AND u.status = 'active'
+                AND p.revoked_at IS NULL
+                ORDER BY p.created_at"#,
+                username,
+            )
+        )
+    }
+
     /// Finds an unrevoked credential and locks it until the transaction ends,
     /// so authentication rechecks it before updating.
     ///
@@ -344,5 +374,60 @@ impl PasskeyRepository<'_> {
                 kind.as_str(),
             )
         )
+    }
+}
+
+/// Username lookups against a running database.
+#[cfg(test)]
+mod tests {
+    use super::{InsertPasskey, PasskeyRepository};
+    use crate::Database;
+    use piquel_auth_protocol::{TokenId, UserId};
+
+    /// A disabled account and an account whose only passkey is revoked list no
+    /// credentials, like a username nobody holds.
+    #[tokio::test]
+    #[ignore = "requires a disposable TEST_DATABASE_URL"]
+    async fn username_lookup_hides_disabled_accounts_and_revoked_passkeys() {
+        let pool = Database::test_pool().await;
+        let mut passkeys = PasskeyRepository::from_pool(&pool);
+        for disable in [true, false] {
+            let user = UserId::new();
+            let username = format!("passkey_{user}");
+            sqlx::query("INSERT INTO users(id,username,display_name) VALUES($1,$2,'Passkey test')")
+                .bind(user.as_uuid())
+                .bind(&username)
+                .execute(&pool)
+                .await
+                .expect("user");
+            let key = passkeys
+                .insert(&InsertPasskey {
+                    id: TokenId::new(),
+                    credential_id: user.as_uuid().as_bytes().to_vec(),
+                    user_id: user,
+                    credential: serde_json::json!({}),
+                    friendly_name: "Passkey test".into(),
+                })
+                .await
+                .expect("passkey");
+            let listed = || async {
+                PasskeyRepository::from_pool(&pool)
+                    .list_active_by_username(&username)
+                    .await
+                    .expect("lookup")
+                    .len()
+            };
+            assert_eq!(listed().await, 1);
+            if disable {
+                sqlx::query("UPDATE users SET status = 'disabled' WHERE id = $1")
+                    .bind(user.as_uuid())
+                    .execute(&pool)
+                    .await
+                    .expect("disable");
+            } else {
+                assert!(passkeys.revoke(key.id, user).await.expect("revoke"));
+            }
+            assert_eq!(listed().await, 0, "disable: {disable}");
+        }
     }
 }
