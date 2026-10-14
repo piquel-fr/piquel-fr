@@ -10,7 +10,7 @@ use chrono::Utc;
 use piquel_auth_protocol::{AuthenticationMethod, UserId};
 use piquel_crypto::Secret;
 use piquel_repository::{BootstrapOidcClient, DatabaseConfig, InsertUser, InsertVerifiedEmail};
-use serde_json::json;
+use serde_json::{Value, json};
 use tower::ServiceExt;
 use url::Url;
 
@@ -117,7 +117,8 @@ impl Flow {
                 clients: vec![],
                 public_redirects: vec![],
             },
-        );
+        )
+        .expect("OIDC application");
         Self {
             app,
             client,
@@ -305,6 +306,48 @@ impl Flow {
             self.basic.as_deref(),
         )
         .await
+    }
+}
+
+/// Both well-known paths serve the same cacheable, typed document, and every endpoint
+/// it advertises is routed on the issuer.
+#[tokio::test]
+#[ignore = "requires TEST_DATABASE_URL"]
+async fn metadata_is_one_document_whose_endpoints_are_routed() {
+    let flow = Flow::new(false, false).await;
+    let mut documents = vec![];
+    for path in [routes::oidc::DISCOVERY, routes::oidc::OAUTH_METADATA] {
+        let response = flow.request(Method::GET, path, &[], None).await;
+        assert_eq!(response.status(), StatusCode::OK, "{path}");
+        assert_eq!(
+            response.headers()[header::CACHE_CONTROL],
+            PublicDocument::CACHE_CONTROL
+        );
+        documents.push(
+            to_bytes(response.into_body(), 1024 * 1024)
+                .await
+                .expect("read metadata"),
+        );
+    }
+    assert_eq!(documents[0], documents[1]);
+    let metadata: ServerMetadata = serde_json::from_slice(&documents[0]).expect("typed metadata");
+    assert_eq!(metadata.issuer, flow.app.issuer);
+    let Value::Object(fields) = serde_json::from_slice(&documents[0]).expect("metadata JSON")
+    else {
+        panic!("metadata is not a JSON object");
+    };
+    for (name, value) in fields {
+        if !(name.ends_with("_endpoint") || name == "jwks_uri") {
+            continue;
+        }
+        let url = Url::parse(value.as_str().expect("endpoint text")).expect("endpoint URL");
+        assert_eq!(
+            url.origin().ascii_serialization(),
+            metadata.issuer,
+            "{name}"
+        );
+        let response = flow.request(Method::GET, url.path(), &[], None).await;
+        assert_ne!(response.status(), StatusCode::NOT_FOUND, "{name}");
     }
 }
 

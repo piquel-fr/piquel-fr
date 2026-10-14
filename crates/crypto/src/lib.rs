@@ -2,8 +2,6 @@
 /// RSA signing and verification of compact JWTs.
 mod signing;
 pub use signing::Rs256Key;
-/// Shared JWT claim and JOSE field vocabulary.
-pub mod jwt;
 
 use base64::{Engine, engine::general_purpose::URL_SAFE_NO_PAD};
 use openssl::{hash::MessageDigest, pkey::PKey, sign::Signer};

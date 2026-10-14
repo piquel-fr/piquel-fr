@@ -41,6 +41,9 @@ pub enum StartupError {
     /// Provider credentials or HTTP client initialization failed.
     #[error("could not initialize federation application")]
     Federation(#[from] federation::FederationConfigError),
+    /// The OIDC metadata or signing keys could not be serialized.
+    #[error("could not initialize OIDC application")]
+    Oidc(#[from] oidc::OidcConfigError),
     /// Static OIDC client provisioning failed.
     #[error("could not provision OIDC clients")]
     Database(#[from] DatabaseError),
@@ -64,7 +67,7 @@ impl AuthConfig {
             .merge(ServiceApplication::new(database.clone(), self).routes())
             .merge(PasskeyApplication::new(database.clone(), &self.passkey)?.routes())
             .merge(FederationApplication::new(database.clone(), &self.federation)?.routes())
-            .merge(OidcApplication::new(database.clone(), &self.oidc).routes());
+            .merge(OidcApplication::new(database.clone(), &self.oidc)?.routes());
         let mut tx = database.begin().await?;
         tx.oidc().disable_all_clients().await?;
         for client in &self.oidc.clients {

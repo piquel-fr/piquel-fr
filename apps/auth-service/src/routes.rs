@@ -61,8 +61,12 @@ pub(crate) mod federation {
 
 /// OAuth 2.0 and `OpenID` Connect endpoints.
 pub(crate) mod oidc {
+    use piquel_auth_protocol::metadata;
+
     /// `OpenID` Provider metadata.
-    pub(crate) const DISCOVERY: &str = "/.well-known/openid-configuration";
+    pub(crate) const DISCOVERY: &str = metadata::OPENID_CONFIGURATION_PATH;
+    /// OAuth authorization server metadata (RFC 8414), the same document as [`DISCOVERY`].
+    pub(crate) const OAUTH_METADATA: &str = metadata::OAUTH_AUTHORIZATION_SERVER_PATH;
     /// Public signing keys.
     pub(crate) const JWKS: &str = "/.well-known/jwks.json";
     /// Authorization requests, by GET or form POST.

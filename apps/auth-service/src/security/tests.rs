@@ -45,6 +45,7 @@ impl SecurityFixture {
             "/account/passkeys",
             "/webauthn/authenticate/start",
             "/.well-known/openid-configuration",
+            "/.well-known/oauth-authorization-server",
             "/.well-known/jwks.json",
             "/oauth/token",
             "/oauth/authorize",
@@ -184,11 +185,32 @@ async fn router_enforces_exact_browser_origins_csrf_and_public_client_cors_bound
         .await;
     assert_eq!(response.status(), StatusCode::ACCEPTED);
 
+    // Any page may read the public metadata and keys, without credentials.
+    for path in [
+        "/.well-known/openid-configuration",
+        "/.well-known/oauth-authorization-server",
+        "/.well-known/jwks.json",
+    ] {
+        for (method, status) in [
+            (Method::GET, StatusCode::ACCEPTED),
+            (Method::OPTIONS, StatusCode::NO_CONTENT),
+        ] {
+            let response = fixture
+                .request(method, path, Some("https://tool.example"), false)
+                .await;
+            assert_eq!(response.status(), status, "{path}");
+            assert_eq!(response.headers()[header::ACCESS_CONTROL_ALLOW_ORIGIN], "*");
+            assert!(
+                response
+                    .headers()
+                    .get(header::ACCESS_CONTROL_ALLOW_CREDENTIALS)
+                    .is_none()
+            );
+        }
+    }
     // OIDC endpoints authenticate their own tokens/client credentials. Browser
-    // clients can read public metadata and call protocol APIs, never settings.
+    // clients can call protocol APIs, never settings.
     for (method, path) in [
-        (Method::GET, "/.well-known/openid-configuration"),
-        (Method::GET, "/.well-known/jwks.json"),
         (Method::POST, "/oauth/token"),
         (Method::POST, "/oauth/revoke"),
         (Method::GET, "/oidc/userinfo"),
@@ -500,6 +522,7 @@ fn routes_doing_real_work_have_budgets() {
         (service::LIVE, None),
         (service::READY, None),
         (oidc::DISCOVERY, None),
+        (oidc::OAUTH_METADATA, None),
         (oidc::JWKS, None),
         (oidc::TOKEN, Some(RateCategory::Token)),
         (oidc::USERINFO, Some(RateCategory::UserInfo)),

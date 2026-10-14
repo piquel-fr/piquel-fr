@@ -1,8 +1,5 @@
 //! RSA signing for interoperable `OpenID` Connect ID and access tokens.
-use super::{
-    CryptoError,
-    jwt::{Algorithm, Claim, KeyType, KeyUse, TokenType},
-};
+use super::CryptoError;
 use base64::{Engine, engine::general_purpose::URL_SAFE_NO_PAD};
 use chrono::Utc;
 use openssl::{
@@ -11,6 +8,7 @@ use openssl::{
     rsa::Rsa,
     sign::{Signer, Verifier},
 };
+use piquel_auth_protocol::jwt::{Algorithm, Claim, KeyType, KeyUse, TokenType};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::borrow::Cow;

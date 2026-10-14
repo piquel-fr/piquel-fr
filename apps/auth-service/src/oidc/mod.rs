@@ -12,26 +12,30 @@ mod token;
 use crate::config::OidcConfig;
 use crate::routes;
 use crate::security::CSRF_HEADER;
+pub use error::OidcConfigError;
 use error::{OAuthCode, OAuthError};
-use piquel_crypto::{
-    Digest, Rs256Key, Secret,
-    jwt::{Algorithm, Claim, TokenType},
-};
+use piquel_crypto::{Digest, Rs256Key, Secret};
 
 use axum::{
-    Json, Router,
+    Router,
+    body::Bytes,
     extract::State,
     http::{HeaderMap, HeaderValue, header},
+    response::{IntoResponse, Response},
     routing::{get, post},
 };
 use base64::Engine;
 use piquel_auth_protocol::{
     TokenId,
-    oauth::{CodeChallengeMethod, GrantType, Prompt, ResponseType, Scope},
+    jwt::{Algorithm, Claim, TokenType},
+    metadata::ServerMetadata,
+    oauth::{
+        ClientAuthMethod, CodeChallengeMethod, GrantType, Prompt, ResponseMode, ResponseType,
+        Scope, SubjectType,
+    },
 };
 use piquel_repository::{Database, StoredOidcClient};
 use serde::Serialize;
-use serde_json::Value;
 use std::{collections::BTreeSet, sync::Arc};
 use url::Url;
 
@@ -55,8 +59,8 @@ const MAX_SCOPES: usize = 16;
 const AUTHORIZATION_REQUEST_MINUTES: i64 = 10;
 /// How long an authorization code stays redeemable.
 const AUTHORIZATION_CODE_MINUTES: i64 = 2;
-/// Subject identifier type: every client sees the same account ID.
-const SUBJECT_TYPE: &str = "public";
+/// Developer documentation advertised in the metadata.
+const SERVICE_DOCUMENTATION: &str = "https://github.com/piquel-fr/piquel-fr#oidc-clients";
 
 /// The OAuth 2.0 and `OpenID` Connect provider.
 #[derive(Clone)]
@@ -69,6 +73,10 @@ pub struct OidcApplication {
     refresh_key: Arc<Secret>,
     /// Persistent key that signs and verifies tokens.
     keys: Arc<Rs256Key>,
+    /// Server metadata, served at both well-known discovery paths.
+    metadata: PublicDocument,
+    /// Public signing keys.
+    jwks: PublicDocument,
 }
 
 piquel_common::str_enum! {
@@ -215,25 +223,7 @@ impl Scopes {
     }
 }
 
-piquel_common::str_enum! {
-    /// Supported authorization response modes.
-    enum ResponseMode {
-        /// Code and state go in the redirect's query string.
-        Query = "query",
-    }
-}
-
-piquel_common::str_enum! {
-    /// Token endpoint client authentication methods, listed in discovery.
-    enum ClientAuthentication {
-        /// Public client, identified by its ID alone.
-        None = "none",
-        /// Confidential client, authenticated by HTTP Basic.
-        Basic = "client_secret_basic",
-    }
-}
-
-/// Claims listed in discovery, in their published order.
+/// Claims listed in the metadata, in their published order.
 const SUPPORTED_CLAIMS: [Claim; 9] = [
     Claim::Subject,
     Claim::Name,
@@ -246,48 +236,33 @@ const SUPPORTED_CLAIMS: [Claim; 9] = [
     Claim::Session,
 ];
 
-/// `OpenID` Provider metadata. Supported value lists come from the same enums the
-/// endpoints validate against. Fields are sorted, matching the earlier `json!` output.
-#[derive(Serialize)]
-struct Discovery {
-    /// Where clients send authorization requests.
-    authorization_endpoint: String,
-    /// Always true: authorization responses carry `iss` (RFC 9207).
-    authorization_response_iss_parameter_supported: bool,
-    /// Claims tokens may contain.
-    claims_supported: &'static [Claim],
-    /// Accepted PKCE methods.
-    code_challenge_methods_supported: &'static [CodeChallengeMethod],
-    /// Where clients send RP-initiated logout.
-    end_session_endpoint: String,
-    /// Accepted `grant_type` values.
-    grant_types_supported: &'static [GrantType],
-    /// ID token signing algorithms.
-    id_token_signing_alg_values_supported: &'static [Algorithm],
-    /// Issuer, matching the `iss` claim.
-    issuer: String,
-    /// Where clients fetch the public signing keys.
-    jwks_uri: String,
-    /// Always false: `request` is rejected.
-    request_parameter_supported: bool,
-    /// Always false: `request_uri` is rejected.
-    request_uri_parameter_supported: bool,
-    /// Accepted `response_mode` values.
-    response_modes_supported: &'static [ResponseMode],
-    /// Accepted `response_type` values.
-    response_types_supported: &'static [ResponseType],
-    /// Where clients revoke refresh tokens.
-    revocation_endpoint: String,
-    /// Standard scopes clients may request.
-    scopes_supported: &'static [Scope],
-    /// Subject identifier types.
-    subject_types_supported: &'static [&'static str],
-    /// Where clients redeem codes and refresh tokens.
-    token_endpoint: String,
-    /// Accepted client authentication methods.
-    token_endpoint_auth_methods_supported: &'static [ClientAuthentication],
-    /// Where clients read claims with an access token.
-    userinfo_endpoint: String,
+/// A public JSON document serialized once at startup. Responses share its bytes and
+/// let any cache keep them for an hour.
+#[derive(Clone)]
+struct PublicDocument(Bytes);
+
+impl PublicDocument {
+    /// How long caches may reuse the document.
+    const CACHE_CONTROL: &str = "public, max-age=3600";
+
+    /// Serializes `value` once.
+    fn new(value: &impl Serialize) -> Result<Self, serde_json::Error> {
+        Ok(Self(serde_json::to_vec(value)?.into()))
+    }
+}
+
+impl IntoResponse for PublicDocument {
+    /// Sends the stored bytes as cacheable JSON.
+    fn into_response(self) -> Response {
+        (
+            [
+                (header::CONTENT_TYPE, "application/json"),
+                (header::CACHE_CONTROL, Self::CACHE_CONTROL),
+            ],
+            self.0,
+        )
+            .into_response()
+    }
 }
 
 /// Where an authorization response goes: a verified client redirect URI, the request's
@@ -326,20 +301,57 @@ impl axum::extract::FromRef<OidcApplication> for Database {
 }
 
 impl OidcApplication {
-    /// Builds the provider from its validated configuration.
-    pub(crate) fn new(database: Database, config: &OidcConfig) -> Self {
-        Self {
+    /// Builds the provider from its validated configuration, serializing its public
+    /// documents once.
+    pub(crate) fn new(database: Database, config: &OidcConfig) -> Result<Self, OidcConfigError> {
+        Ok(Self {
             database,
             issuer: config.origin.serialized(),
             refresh_key: config.refresh_key.clone(),
             keys: config.keys.clone(),
-        }
+            metadata: PublicDocument::new(&Self::metadata(config)?)?,
+            jwks: PublicDocument::new(&config.keys.jwks())?,
+        })
+    }
+
+    /// The server metadata. Supported value lists are the `ALL` of the enums the
+    /// endpoints parse into, so nothing is advertised that is not handled.
+    fn metadata(config: &OidcConfig) -> Result<ServerMetadata, OidcConfigError> {
+        let origin = &config.origin;
+        Ok(ServerMetadata {
+            issuer: origin.serialized(),
+            authorization_endpoint: origin.url(routes::oidc::AUTHORIZE),
+            token_endpoint: origin.url(routes::oidc::TOKEN),
+            revocation_endpoint: origin.url(routes::oidc::REVOKE),
+            userinfo_endpoint: origin.url(routes::oidc::USERINFO),
+            end_session_endpoint: origin.url(routes::oidc::LOGOUT),
+            jwks_uri: origin.url(routes::oidc::JWKS),
+            service_documentation: SERVICE_DOCUMENTATION
+                .parse()
+                .map_err(OidcConfigError::Documentation)?,
+            scopes_supported: Scope::ALL.into(),
+            response_types_supported: ResponseType::ALL.into(),
+            response_modes_supported: ResponseMode::ALL.into(),
+            grant_types_supported: GrantType::ALL.into(),
+            // Both endpoints authenticate clients with `authenticate_client`.
+            token_endpoint_auth_methods_supported: ClientAuthMethod::ALL.into(),
+            revocation_endpoint_auth_methods_supported: ClientAuthMethod::ALL.into(),
+            code_challenge_methods_supported: CodeChallengeMethod::ALL.into(),
+            subject_types_supported: SubjectType::ALL.into(),
+            id_token_signing_alg_values_supported: Algorithm::ALL.into(),
+            claims_supported: SUPPORTED_CLAIMS.into(),
+            claims_parameter_supported: false,
+            request_parameter_supported: false,
+            request_uri_parameter_supported: false,
+            authorization_response_iss_parameter_supported: true,
+        })
     }
 
     /// Every discovery, OAuth and OIDC route, with `self` as their state.
     pub(crate) fn routes(self) -> Router {
         Router::new()
             .route(routes::oidc::DISCOVERY, get(Self::discovery))
+            .route(routes::oidc::OAUTH_METADATA, get(Self::discovery))
             .route(routes::oidc::JWKS, get(Self::jwks))
             .route(
                 routes::oidc::AUTHORIZE,
@@ -367,35 +379,14 @@ impl OidcApplication {
             .with_state(self)
     }
 
-    /// Serves the `OpenID` Provider metadata.
-    fn discovery(State(app): State<Self>) -> std::future::Ready<Json<Discovery>> {
-        let base = &app.issuer;
-        std::future::ready(Json(Discovery {
-            issuer: base.clone(),
-            authorization_endpoint: format!("{base}{}", routes::oidc::AUTHORIZE),
-            authorization_response_iss_parameter_supported: true,
-            token_endpoint: format!("{base}{}", routes::oidc::TOKEN),
-            revocation_endpoint: format!("{base}{}", routes::oidc::REVOKE),
-            userinfo_endpoint: format!("{base}{}", routes::oidc::USERINFO),
-            jwks_uri: format!("{base}{}", routes::oidc::JWKS),
-            end_session_endpoint: format!("{base}{}", routes::oidc::LOGOUT),
-            response_types_supported: &ResponseType::ALL,
-            grant_types_supported: &GrantType::ALL,
-            code_challenge_methods_supported: &CodeChallengeMethod::ALL,
-            token_endpoint_auth_methods_supported: &ClientAuthentication::ALL,
-            subject_types_supported: &[SUBJECT_TYPE],
-            response_modes_supported: &ResponseMode::ALL,
-            claims_supported: &SUPPORTED_CLAIMS,
-            id_token_signing_alg_values_supported: &Algorithm::ALL,
-            request_uri_parameter_supported: false,
-            request_parameter_supported: false,
-            scopes_supported: &Scope::ALL,
-        }))
+    /// Serves the server metadata, identical at both well-known paths.
+    fn discovery(State(app): State<Self>) -> std::future::Ready<PublicDocument> {
+        std::future::ready(app.metadata)
     }
 
     /// Serves the public signing keys.
-    fn jwks(State(app): State<Self>) -> std::future::Ready<Json<Value>> {
-        std::future::ready(Json(app.keys.jwks()))
+    fn jwks(State(app): State<Self>) -> std::future::Ready<PublicDocument> {
+        std::future::ready(app.jwks)
     }
 
     /// Authenticates the client: public clients by ID alone, confidential clients with
@@ -430,9 +421,26 @@ impl OidcApplication {
             .ok_or_else(|| {
                 OAuthCode::InvalidClient.reject("client_id is not a registered, enabled client")
             })?;
-        match (&client.client_secret_hash, &basic) {
-            (None, None) => Ok(client),
-            (Some(expected), Some((_, secret))) => {
+        let method = match basic {
+            Some(_) => ClientAuthMethod::ClientSecretBasic,
+            None => ClientAuthMethod::None,
+        };
+        // Exhaustive over the methods the metadata advertises, so a new one cannot be
+        // advertised without being checked here.
+        match method {
+            ClientAuthMethod::None if client.client_secret_hash.is_some() => {
+                Err(OAuthCode::InvalidClient
+                    .reject("this client must authenticate with HTTP Basic credentials"))
+            }
+            ClientAuthMethod::None => Ok(client),
+            ClientAuthMethod::ClientSecretBasic => {
+                // `basic` is always present here, so only a public client fails.
+                let (Some(expected), Some((_, secret))) = (&client.client_secret_hash, &basic)
+                else {
+                    // Public clients have no secret and must not send one.
+                    return Err(OAuthCode::InvalidClient
+                        .reject("this public client must not send HTTP Basic credentials"));
+                };
                 if Digest::constant_time_eq(expected, Digest::sha256(secret.as_bytes()).as_bytes())
                 {
                     Ok(client)
@@ -440,11 +448,6 @@ impl OidcApplication {
                     Err(OAuthCode::InvalidClient.reject("the client secret is incorrect"))
                 }
             }
-            // Public clients have no secret and must not send one.
-            (None, Some(_)) => Err(OAuthCode::InvalidClient
-                .reject("this public client must not send HTTP Basic credentials")),
-            (Some(_), None) => Err(OAuthCode::InvalidClient
-                .reject("this client must authenticate with HTTP Basic credentials")),
         }
     }
 
