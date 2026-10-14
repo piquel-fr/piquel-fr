@@ -421,9 +421,26 @@ impl OidcApplication {
             .ok_or_else(|| {
                 OAuthCode::InvalidClient.reject("client_id is not a registered, enabled client")
             })?;
-        match (&client.client_secret_hash, &basic) {
-            (None, None) => Ok(client),
-            (Some(expected), Some((_, secret))) => {
+        let method = match basic {
+            Some(_) => ClientAuthMethod::ClientSecretBasic,
+            None => ClientAuthMethod::None,
+        };
+        // Exhaustive over the methods the metadata advertises, so a new one cannot be
+        // advertised without being checked here.
+        match method {
+            ClientAuthMethod::None if client.client_secret_hash.is_some() => {
+                Err(OAuthCode::InvalidClient
+                    .reject("this client must authenticate with HTTP Basic credentials"))
+            }
+            ClientAuthMethod::None => Ok(client),
+            ClientAuthMethod::ClientSecretBasic => {
+                // `basic` is always present here, so only a public client fails.
+                let (Some(expected), Some((_, secret))) = (&client.client_secret_hash, &basic)
+                else {
+                    // Public clients have no secret and must not send one.
+                    return Err(OAuthCode::InvalidClient
+                        .reject("this public client must not send HTTP Basic credentials"));
+                };
                 if Digest::constant_time_eq(expected, Digest::sha256(secret.as_bytes()).as_bytes())
                 {
                     Ok(client)
@@ -431,11 +448,6 @@ impl OidcApplication {
                     Err(OAuthCode::InvalidClient.reject("the client secret is incorrect"))
                 }
             }
-            // Public clients have no secret and must not send one.
-            (None, Some(_)) => Err(OAuthCode::InvalidClient
-                .reject("this public client must not send HTTP Basic credentials")),
-            (Some(_), None) => Err(OAuthCode::InvalidClient
-                .reject("this client must authenticate with HTTP Basic credentials")),
         }
     }
 
