@@ -15,8 +15,7 @@ root layout data. `src/hooks.server.ts` adds
 every page and endpoint response, with `X-Frame-Options: DENY`, `nosniff`,
 `strict-origin-when-cross-origin`, HSTS and, on HTML, `Cache-Control: no-store`.
 Framing is forbidden because other `piquel.fr` sites, previews included, share
-the auth cookie's site, and ingress adds none of these headers. The
-hook comes from `@piquel/auth-sdk/server`, for reuse by other piquel.fr servers.
+the auth cookie's site. Ingress adds none of these headers. The hook comes from `@piquel/auth-sdk/server`, for reuse by other piquel.fr servers.
 Built assets, and SvelteKit's trailing-slash redirects, are served before the hook
 runs, so they do not get these headers.
 
