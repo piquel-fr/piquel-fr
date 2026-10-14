@@ -2,8 +2,8 @@
 # as local validation:
 #
 #   checks -> Rust formatting and the Rust dependency audit, which compile nothing
-#   web    -> Prettier, svelte-check and tsc, ESLint, both static builds and the
-#             web dependency audit
+#   web    -> Prettier, svelte-check and tsc, ESLint, both builds, the piquel-web
+#             server tests and the web dependency audit
 #   rust   -> Clippy, unit, database and doc tests against PostgreSQL
 #   e2e    -> the browser suite over HTTPS against the real binary, with the
 #             auth pages embedded, the settings build and PostgreSQL
@@ -122,6 +122,7 @@ jobs:
       - run: just check-web
       - run: just lint-web
       - run: just build-web
+      - run: just test-web
       - if: needs.changes.outputs.deps == 'true'
         run: just audit-web
 
@@ -183,7 +184,7 @@ jobs:
       - run: just install
       # Embeds the auth pages, as in the deployed image.
       - run: just build-debug
-      - run: VITE_AUTH_ORIGIN="$E2E_AUTH_URL" just build-settings-web
+      - run: just build-settings-web
       # The service accepts only HTTPS origins, as in production. Caddy
       # terminates TLS for both servers with its local CA, which the suite is
       # told to accept. The suite signs in through the public OIDC client from
@@ -221,7 +222,7 @@ jobs:
           docker run --detach --name caddy --network host --volume "$RUNNER_TEMP/Caddyfile:/etc/caddy/Caddyfile:ro" caddy:2-alpine
           target/debug/auth-service migrate
           target/debug/auth-service serve > "$RUNNER_TEMP/auth.log" 2>&1 &
-          pnpm --filter @piquel/piquel-web exec vite preview --host 127.0.0.1 --port 4173 --strictPort > "$RUNNER_TEMP/settings.log" 2>&1 &
+          AUTH_ORIGIN="$E2E_AUTH_URL" ORIGIN=https://localhost:4443 HOST=127.0.0.1 PORT=4173 node apps/piquel-web/build > "$RUNNER_TEMP/settings.log" 2>&1 &
           curl -kfsS --retry 30 --retry-delay 1 --retry-all-errors "$E2E_AUTH_URL/health/ready"
           curl -kfsS --retry 30 --retry-delay 1 --retry-all-errors -o /dev/null "$E2E_SETTINGS_URL"
       # The headless build matching the pinned Playwright, so runner image

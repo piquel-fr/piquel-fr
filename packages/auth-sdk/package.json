@@ -5,6 +5,13 @@
   "type": "module",
   "exports": {
     ".": "./src/index.ts",
-    "./style.css": "./src/style.css"
+    "./style.css": "./src/style.css",
+    "./server": "./src/server.ts"
+  },
+  "peerDependencies": {
+    "@sveltejs/kit": "catalog:"
+  },
+  "devDependencies": {
+    "@sveltejs/kit": "catalog:"
   }
 }

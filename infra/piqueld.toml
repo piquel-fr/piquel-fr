@@ -117,13 +117,15 @@ type = "docker"
 dockerfile = "infra/web.Dockerfile"
 
 # Runtime configuration, not a build argument, so staging's image can be promoted.
+# ORIGIN gives the server its public URL behind ingress.
 [spec.services.environment]
 AUTH_ORIGIN = "https://${{ vars.auth_host }}"
+ORIGIN = "https://${{ vars.web_host }}"
 
 [spec.services.healthcheck]
 type = "http"
 port = 8080
-path = "/"
+path = "/healthz"
 
 [[spec.services]]
 name = "postgres"

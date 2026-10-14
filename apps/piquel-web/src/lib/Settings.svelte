@@ -1,5 +1,6 @@
 <script lang="ts">
   import { onMount } from 'svelte';
+  import { page } from '$app/state';
   import {
     AuthApi,
     errorMessage,
@@ -8,10 +9,9 @@
     type Provider,
     type Session
   } from '@piquel/auth-sdk';
-  // Local builds set VITE_AUTH_ORIGIN. Deployed images serve every environment, so they
-  // read it from /config.json, which the container serves from its AUTH_ORIGIN (see infra/).
-  let authOrigin = $state('');
-  let api = new AuthApi();
+  // Each environment has its own auth origin, which the server sets at runtime.
+  const authOrigin = page.data.authOrigin;
+  const api = new AuthApi(authOrigin);
   type Passkey = {
     id: string;
     friendly_name: string;
@@ -55,11 +55,6 @@
   });
   async function load() {
     try {
-      authOrigin = (
-        import.meta.env.VITE_AUTH_ORIGIN ??
-        (await api.request<{ auth_origin: string }>('/config.json')).auth_origin
-      ).replace(/\/$/, '');
-      api = new AuthApi(authOrigin);
       config = await api.request('/config');
       session = await api.request('/session');
       [passkeys, identities] = await Promise.all([

@@ -25,10 +25,9 @@ and are cacheable.
 
 ## piquel.fr and admin.piquel.fr
 
-Both are SvelteKit servers deployed separately from auth. Today piquel.fr is
-still static files behind nginx; it moves to a server *(planned)* because public
-profiles and discovery documents are rendered per request. The servers keep no
-state and have no database: public pages read auth's public API, and account and
+Both are SvelteKit servers on Node (adapter-node), deployed separately from
+auth, so public profiles and discovery documents *(planned)* can be rendered per
+request. The servers keep no state and have no database: public pages read auth's public API, and account and
 admin pages call auth's JSON APIs from the browser with the auth session cookie.
 The hosts are same-site, so the host-only cookie is sent without third-party
 cookie exceptions. Each frontend origin is allowed exactly, and mutations still

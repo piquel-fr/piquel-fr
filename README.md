@@ -21,8 +21,9 @@ just build
 ```
 
 The executable is `target/release/auth-service`. Auth assets are embedded at compile
-time; rebuild Rust after changing `apps/auth-web`. The standalone settings build
-is `apps/piquel-web/build`. Node is needed to build the frontends, not to run auth.
+time; rebuild Rust after changing `apps/auth-web`. piquel.fr's settings server builds to
+`apps/piquel-web/build` and runs on Node (see its README). Auth needs Node only
+to build its pages.
 
 ## Development
 
@@ -35,7 +36,8 @@ just preview
 This snapshots this checkout, including uncommitted changes, builds both frontends
 and auth, applies migrations, and prints the web and auth URLs. The preview has its
 own database and signing key. URLs work from devices on the tailnet. Run the same
-command after changing code. `just preview-delete` removes it.
+command after changing code. `just preview-delete` removes it. `just dev` serves
+piquel-web with Vite against an auth service on `http://localhost:3000`.
 
 ## Configuration
 
@@ -171,11 +173,12 @@ Use individual recipes while iterating:
 
 | Task | Recipe |
 | --- | --- |
-| Full validation (format, Clippy/ESLint, Rust/Svelte checks, unit/doc tests, audits) | `just validate` |
+| Full validation (format, Clippy/ESLint, Rust/Svelte checks, unit/web/doc tests, audits) | `just validate` |
 | Format Rust and web / check formatting | `just fmt` / `just fmt-check` (`-rust` / `-web` variants) |
 | Rust / frontend checks (svelte-check, tsc) | `just check-rust` / `just check-web` |
 | Clippy and ESLint, warnings denied | `just lint` (`just lint-rust` / `just lint-web`) |
 | Unit tests / focused package tests | `just test` / `just test -p auth-service` |
+| piquel-web server tests (builds it first) | `just test-web` |
 | Documentation tests | `just doc-test` |
 | Database integration tests and query cache check, in a scratch cluster | `just db test` |
 | Regenerate the query cache after changing SQL or migrations | `just db prepare` |
@@ -183,7 +186,7 @@ Use individual recipes while iterating:
 | Browser tests against running servers | `just test-browser` |
 | Dependency audits | `just audit` (`deny` + `audit-web`) |
 | SvelteKit generated types/config | `just generate` |
-| Static frontends / embedded debug binary / release binary | `just build-web` / `just build-debug` / `just build` |
+| Frontends / embedded debug binary / release binary | `just build-web` / `just build-debug` / `just build` |
 | Run with caller-provided auth configuration | `just serve`, `just db migrate`, `just invite --expires-in 7d` |
 
 CI runs these recipes on every pull request whose changes they can affect,

@@ -29,7 +29,7 @@ is `https://auth-<slug>.dev.piquel.fr`.
 
 ```sh
 curl -fsS "$auth/health/ready"
-curl -fsS "$web/config.json"     # {"auth_origin":"<$auth>"}
+curl -fsSI "$web/settings"       # content-security-policy: ..., connect-src 'self' <$auth>
 piquelctl preview logs piquel-fr "$(git branch --show-current)" --tail 200
 ```
 

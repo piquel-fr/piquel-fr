@@ -4,7 +4,7 @@ default: validate
 # Scratch PostgreSQL clusters, database tests, the SQLx query cache and migrations.
 mod db 'just/db.just'
 
-validate: fmt-check lint check test doc-test audit
+validate: fmt-check lint check test test-web doc-test audit
 
 install:
     @pnpm install --frozen-lockfile
@@ -14,7 +14,7 @@ install-tools:
     @cargo install --locked cargo-nextest cargo-deny
     @cargo install --locked sqlx-cli --no-default-features --features rustls,postgres
 
-# Build static browser assets before embedding them in the release executable.
+# Build auth's static assets before embedding them in the release executable.
 build: build-web
     @cargo build --locked --release -p auth-service
 
@@ -28,6 +28,10 @@ build-auth-web:
 
 build-settings-web:
     @pnpm --filter @piquel/piquel-web build
+
+# Serve piquel-web with Vite against a local auth service; AUTH_ORIGIN overrides it.
+dev:
+    @AUTH_ORIGIN="${AUTH_ORIGIN:-http://localhost:3000}" pnpm --filter @piquel/piquel-web dev
 
 # Refresh SvelteKit's generated types/config. Cargo generates its own asset table.
 generate:
@@ -73,6 +77,10 @@ check-web:
 [positional-arguments]
 test *ARGS='--workspace':
     @cargo nextest run --locked "$@"
+
+# Starts the production piquel-web server and checks its headers and startup validation.
+test-web: build-settings-web
+    @pnpm --filter @piquel/piquel-web test
 
 doc-test:
     @cargo test --locked --doc --workspace

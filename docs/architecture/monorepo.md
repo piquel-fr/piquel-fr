@@ -7,8 +7,8 @@ is authentication and the piquel.fr account settings frontend.
 | --- | --- |
 | `apps/auth-service` | Rust auth authority, browser ceremonies, social adapters, OIDC, settings API, CLI |
 | `apps/auth-web` | Static SvelteKit auth pages embedded by the Rust build |
-| `apps/piquel-web` | Static SvelteKit account settings calling the auth API |
-| `packages/auth-sdk` | Browser auth SDK: API client, WebAuthn passkey ceremonies, redirect helpers, shared styles |
+| `apps/piquel-web` | piquel.fr's SvelteKit server on Node: account settings calling the auth API |
+| `packages/auth-sdk` | Browser auth SDK: API client, WebAuthn passkey ceremonies, redirect helpers, shared styles; `/server`: auth origin validation and security headers for SvelteKit servers |
 | `crates/database` | `piquel-repository`: PostgreSQL connections, migrations and typed persistence operations |
 | `crates/auth-protocol` | Shared identity/session/token IDs, providers, OAuth/OIDC vocabulary, account status and authentication methods |
 | `crates/common` | Named environment variables, validated URLs, secret references and string enums |
@@ -33,8 +33,9 @@ hostname, never a wildcard over piquel.fr subdomains.
 The auth binary also runs explicit migrations and generates invitations. PostgreSQL
 stores sessions, WebAuthn challenges, OAuth state, pending social identities,
 invitations, consent, refresh tokens, rate limits and security audit records.
-No separate cache, RPC service, Node server, event bus or key-management service is
-required. External applications consume standard OIDC with static client registration.
+Auth needs no separate cache, RPC service, event bus or key-management service.
+piquel.fr's Node server holds no state and reads everything it renders from auth's
+HTTP API. External applications consume standard OIDC with static client registration.
 
 [surfaces.md](surfaces.md) sets out what auth.piquel.fr, piquel.fr and
 admin.piquel.fr each serve. Build/configuration and testing instructions are in
