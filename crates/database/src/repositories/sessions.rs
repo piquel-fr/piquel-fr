@@ -1,10 +1,10 @@
 //! Active browser sessions, cookie digests and short management windows.
 
-use super::{RepositoryExecutor, SessionRepository, StoredRow};
+use super::{JsonArray, RepositoryExecutor, SessionRepository};
 use crate::DatabaseError;
 use chrono::{DateTime, Utc};
 use piquel_auth_protocol::{AuthenticationMethod, SessionId, UserId};
-use sqlx::{postgres::PgRow, types::Json};
+use sqlx::types::Json;
 
 /// A new browser session.
 #[derive(Clone, Debug)]
@@ -42,21 +42,6 @@ pub struct StoredSession {
     pub revoked_at: Option<DateTime<Utc>>,
 }
 
-impl StoredSession {
-    /// Decodes a stored row, retaining the column name and cause for invalid data.
-    fn from_row(row: &PgRow) -> Result<Self, DatabaseError> {
-        Ok(Self {
-            id: row.id("id")?,
-            user_id: row.id("user_id")?,
-            authentication_methods: row.json("authentication_methods")?,
-            authenticated_at: row.column("authenticated_at")?,
-            expires_at: row.column("expires_at")?,
-            last_seen_at: row.column("last_seen_at")?,
-            revoked_at: row.column("revoked_at")?,
-        })
-    }
-}
-
 impl SessionRepository<'_> {
     /// Creates a session for an active account.
     ///
@@ -69,11 +54,12 @@ impl SessionRepository<'_> {
     /// Returns [`DatabaseError::NotFound`] if the account is not active, or
     /// another [`DatabaseError`] if the query fails.
     pub async fn insert(&mut self, input: &InsertSession) -> Result<StoredSession, DatabaseError> {
-        let row = run!(
+        run!(
             self,
             fetch_one,
-            sqlx::query(
-                "WITH active_user AS (
+            sqlx::query_as!(
+                StoredSession,
+                r#"WITH active_user AS (
                     SELECT id
                     FROM users
                     WHERE id = $2
@@ -87,17 +73,17 @@ impl SessionRepository<'_> {
                 SELECT $1, id, $3, $4, $5, $4, $6
                 FROM active_user
                 RETURNING
-                    id, user_id, authentication_methods, authenticated_at, expires_at,
-                    last_seen_at, revoked_at"
+                    id AS "id: SessionId", user_id AS "user_id: UserId",
+                    authentication_methods AS "authentication_methods: JsonArray<AuthenticationMethod>",
+                    authenticated_at, expires_at, last_seen_at, revoked_at"#,
+                input.id.as_uuid(),
+                input.user_id.as_uuid(),
+                Json(&input.authentication_methods) as _,
+                input.authenticated_at,
+                input.expires_at,
+                input.user_agent_family,
             )
-            .bind(input.id.as_uuid())
-            .bind(input.user_id.as_uuid())
-            .bind(Json(&input.authentication_methods))
-            .bind(input.authenticated_at)
-            .bind(input.expires_at)
-            .bind(&input.user_agent_family)
-        )?;
-        StoredSession::from_row(&row)
+        )
     }
 
     /// Finds a session in any state.
@@ -112,18 +98,17 @@ impl SessionRepository<'_> {
         run!(
             self,
             fetch_optional,
-            sqlx::query(
-                "SELECT
-                    id, user_id, authentication_methods, authenticated_at, expires_at,
-                    last_seen_at, revoked_at
+            sqlx::query_as!(
+                StoredSession,
+                r#"SELECT
+                    id AS "id: SessionId", user_id AS "user_id: UserId",
+                    authentication_methods AS "authentication_methods: JsonArray<AuthenticationMethod>",
+                    authenticated_at, expires_at, last_seen_at, revoked_at
                 FROM sessions
-                WHERE id = $1"
+                WHERE id = $1"#,
+                id.as_uuid(),
             )
-            .bind(id.as_uuid())
-        )?
-        .as_ref()
-        .map(StoredSession::from_row)
-        .transpose()
+        )
     }
 
     /// Finds an unrevoked, unexpired session of an active account.
@@ -138,22 +123,21 @@ impl SessionRepository<'_> {
         run!(
             self,
             fetch_optional,
-            sqlx::query(
-                "SELECT
-                    s.id, s.user_id, s.authentication_methods, s.authenticated_at, s.expires_at,
-                    s.last_seen_at, s.revoked_at
+            sqlx::query_as!(
+                StoredSession,
+                r#"SELECT
+                    s.id AS "id: SessionId", s.user_id AS "user_id: UserId",
+                    s.authentication_methods AS "authentication_methods: JsonArray<AuthenticationMethod>",
+                    s.authenticated_at, s.expires_at, s.last_seen_at, s.revoked_at
                 FROM sessions s
                 JOIN users u ON u.id = s.user_id
                 WHERE s.id = $1
                 AND s.revoked_at IS NULL
                 AND s.expires_at > now()
-                AND u.status = 'active'"
+                AND u.status = 'active'"#,
+                id.as_uuid(),
             )
-            .bind(id.as_uuid())
-        )?
-        .as_ref()
-        .map(StoredSession::from_row)
-        .transpose()
+        )
     }
 
     /// Finds and locks an unrevoked, unexpired session of an active account, so a
@@ -170,23 +154,22 @@ impl SessionRepository<'_> {
         run!(
             self,
             fetch_optional,
-            sqlx::query(
-                "SELECT
-                    s.id, s.user_id, s.authentication_methods, s.authenticated_at, s.expires_at,
-                    s.last_seen_at, s.revoked_at
+            sqlx::query_as!(
+                StoredSession,
+                r#"SELECT
+                    s.id AS "id: SessionId", s.user_id AS "user_id: UserId",
+                    s.authentication_methods AS "authentication_methods: JsonArray<AuthenticationMethod>",
+                    s.authenticated_at, s.expires_at, s.last_seen_at, s.revoked_at
                 FROM sessions s
                 JOIN users u ON u.id = s.user_id
                 WHERE s.id = $1
                 AND s.revoked_at IS NULL
                 AND s.expires_at > now()
                 AND u.status = 'active'
-                FOR NO KEY UPDATE OF s"
+                FOR NO KEY UPDATE OF s"#,
+                id.as_uuid(),
             )
-            .bind(id.as_uuid())
-        )?
-        .as_ref()
-        .map(StoredSession::from_row)
-        .transpose()
+        )
     }
 
     /// Revokes a session. Returns `false` if it was already revoked or unknown.
@@ -198,8 +181,10 @@ impl SessionRepository<'_> {
         Ok(run!(
             self,
             execute,
-            sqlx::query("UPDATE sessions SET revoked_at=now() WHERE id=$1 AND revoked_at IS NULL")
-                .bind(id.as_uuid())
+            sqlx::query!(
+                "UPDATE sessions SET revoked_at=now() WHERE id=$1 AND revoked_at IS NULL",
+                id.as_uuid(),
+            )
         )?
         .rows_affected()
             == 1)
@@ -219,15 +204,15 @@ impl SessionRepository<'_> {
         Ok(run!(
             self,
             execute,
-            sqlx::query(
+            sqlx::query!(
                 "UPDATE sessions
                 SET revoked_at = now(), management_expires_at = NULL
                 WHERE user_id = $1
                 AND id <> $2
-                AND revoked_at IS NULL"
+                AND revoked_at IS NULL",
+                user_id.as_uuid(),
+                except_session.as_uuid(),
             )
-            .bind(user_id.as_uuid())
-            .bind(except_session.as_uuid())
         )?
         .rows_affected())
     }
@@ -246,11 +231,11 @@ impl SessionRepository<'_> {
         run!(
             self,
             execute,
-            sqlx::query(
-                "INSERT INTO browser_session_secrets(session_id,secret_digest) VALUES($1,$2)"
+            sqlx::query!(
+                "INSERT INTO browser_session_secrets(session_id,secret_digest) VALUES($1,$2)",
+                session_id.as_uuid(),
+                digest,
             )
-            .bind(session_id.as_uuid())
-            .bind(digest)
         )?;
         Ok(())
     }
@@ -267,23 +252,22 @@ impl SessionRepository<'_> {
         run!(
             self,
             fetch_optional,
-            sqlx::query(
-                "SELECT
-                    s.id, s.user_id, s.authentication_methods, s.authenticated_at, s.expires_at,
-                    s.last_seen_at, s.revoked_at
+            sqlx::query_as!(
+                StoredSession,
+                r#"SELECT
+                    s.id AS "id: SessionId", s.user_id AS "user_id: UserId",
+                    s.authentication_methods AS "authentication_methods: JsonArray<AuthenticationMethod>",
+                    s.authenticated_at, s.expires_at, s.last_seen_at, s.revoked_at
                 FROM browser_session_secrets b
                 JOIN sessions s ON s.id = b.session_id
                 JOIN users u ON u.id = s.user_id
                 WHERE b.secret_digest = $1
                 AND s.revoked_at IS NULL
                 AND s.expires_at > now()
-                AND u.status = 'active'"
+                AND u.status = 'active'"#,
+                digest,
             )
-            .bind(digest)
-        )?
-        .as_ref()
-        .map(StoredSession::from_row)
-        .transpose()
+        )
     }
 
     /// Reports whether the session holds an unexpired management window.
@@ -298,7 +282,7 @@ impl SessionRepository<'_> {
         Ok(run!(
             self,
             fetch_optional,
-            sqlx::query(
+            sqlx::query_scalar!(
                 "SELECT s.id
                 FROM sessions s
                 JOIN users u ON u.id = s.user_id
@@ -307,9 +291,9 @@ impl SessionRepository<'_> {
                 AND s.expires_at > clock_timestamp()
                 AND s.management_expires_at > clock_timestamp()
                 AND u.status = 'active'
-                FOR UPDATE OF s"
+                FOR UPDATE OF s",
+                id.as_uuid(),
             )
-            .bind(id.as_uuid())
         )?
         .is_some())
     }
@@ -327,18 +311,16 @@ impl SessionRepository<'_> {
         run!(
             self,
             fetch_optional,
-            sqlx::query(
-                "SELECT management_expires_at
+            sqlx::query_scalar!(
+                r#"SELECT management_expires_at AS "management_expires_at!"
                 FROM sessions
                 WHERE id = $1
                 AND revoked_at IS NULL
                 AND expires_at > now()
-                AND management_expires_at > now()"
+                AND management_expires_at > now()"#,
+                id.as_uuid(),
             )
-            .bind(id.as_uuid())
-        )?
-        .map(|row| row.column("management_expires_at"))
-        .transpose()
+        )
     }
 
     /// Opens a two-minute management window, capped at the session expiry,
@@ -355,8 +337,8 @@ impl SessionRepository<'_> {
         run!(
             self,
             fetch_one,
-            sqlx::query(
-                "UPDATE sessions
+            sqlx::query_scalar!(
+                r#"UPDATE sessions
                 SET management_expires_at = LEAST(
                     expires_at,
                     clock_timestamp() + interval '2 minutes'
@@ -364,10 +346,9 @@ impl SessionRepository<'_> {
                 WHERE id = $1
                 AND revoked_at IS NULL
                 AND expires_at > clock_timestamp()
-                RETURNING management_expires_at"
+                RETURNING management_expires_at AS "management_expires_at!""#,
+                id.as_uuid(),
             )
-            .bind(id.as_uuid())
-        )?
-        .column("management_expires_at")
+        )
     }
 }

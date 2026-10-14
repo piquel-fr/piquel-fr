@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "DELETE FROM sessions s\n            WHERE s.ctid IN (\n                SELECT session.ctid\n                FROM sessions session\n                WHERE (\n                    session.expires_at < now()\n                    OR session.revoked_at < now() - interval '1 day'\n                )\n                AND NOT EXISTS (\n                    SELECT 1\n                    FROM refresh_token_families family\n                    WHERE family.session_id = session.id\n                )\n                AND NOT EXISTS (\n                    SELECT 1\n                    FROM authorization_codes code\n                    WHERE code.session_id = session.id\n                )\n                LIMIT $1\n                FOR UPDATE SKIP LOCKED\n            )",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Int8"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "f515da3a5574afefc1f6466b421f0250e4ad598f356fcfd533d490a99b7dd96b"
+}

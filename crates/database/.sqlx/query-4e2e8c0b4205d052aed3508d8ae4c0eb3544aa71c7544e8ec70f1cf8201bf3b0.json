@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE refresh_tokens SET consumed_at=now() WHERE id=$1 AND consumed_at IS NULL",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "4e2e8c0b4205d052aed3508d8ae4c0eb3544aa71c7544e8ec70f1cf8201bf3b0"
+}

@@ -43,7 +43,8 @@ impl InvalidValue {
     }
 }
 
-/// Declares canonical `UUIDv7` identifiers with consistent parsing, serde and conversions.
+/// Declares canonical `UUIDv7` identifiers with consistent parsing, serde and conversions,
+/// plus `SQLx` decoding when the `sqlx` feature is on.
 macro_rules! uuid_id {
     ($name:ident, $doc:literal) => {
         #[doc = $doc]
@@ -111,6 +112,25 @@ macro_rules! uuid_id {
             /// Encodes the identifier using its canonical lower-case UUID representation.
             fn from(value: $name) -> Self {
                 value.to_string()
+            }
+        }
+        #[cfg(feature = "sqlx")]
+        impl sqlx::Type<sqlx::Postgres> for $name {
+            /// Stored as `UUID`.
+            fn type_info() -> sqlx::postgres::PgTypeInfo {
+                <Uuid as sqlx::Type<sqlx::Postgres>>::type_info()
+            }
+        }
+        #[cfg(feature = "sqlx")]
+        impl<'r> sqlx::Decode<'r, sqlx::Postgres> for $name {
+            /// Decodes a `UUID` column, rejecting values that are not `UUIDv7`.
+            fn decode(
+                value: sqlx::postgres::PgValueRef<'r>,
+            ) -> Result<Self, sqlx::error::BoxDynError> {
+                Ok(Self::from_uuid(<Uuid as sqlx::Decode<
+                    'r,
+                    sqlx::Postgres,
+                >>::decode(value)?)?)
             }
         }
     };

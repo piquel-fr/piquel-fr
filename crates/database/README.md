@@ -7,9 +7,14 @@ The schema is a single migration, `migrations/0001_initial.sql`. Each repository
 module in `src/repositories/` owns its methods and record types; `mod.rs` holds
 only shared plumbing. See [database architecture](../../docs/architecture/database-crate.md)
 for the layout and invariants. Run migrations through the single service binary:
-`just migrate`.
+`just db migrate`.
 
-Integration tests use a disposable `TEST_DATABASE_URL` (local TCP needs
-`sslmode=disable`), apply the schema, and insert
-uniquely named fixtures into that database. They do not create per-test schemas.
-Run them explicitly with the command in the root README; ordinary tests skip them.
+Every query is an SQLx `query!`, `query_as!` or `query_scalar!` macro, checked at
+compile time against the committed cache in `.sqlx/`. After changing a query or a
+migration, run `just db prepare` and commit the cache with the change.
+
+Integration tests apply the schema and insert uniquely named fixtures into one
+database. They do not create per-test schemas. `just db test` runs them in a
+scratch cluster, or against a disposable `TEST_DATABASE_URL` (local TCP needs
+`sslmode=disable`); ordinary tests skip them. Fixtures may use unchecked
+`sqlx::query`.

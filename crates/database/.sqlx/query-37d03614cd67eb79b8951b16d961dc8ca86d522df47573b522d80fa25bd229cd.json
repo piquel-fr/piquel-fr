@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "WITH locked AS MATERIALIZED (\n                    SELECT id, revoked_at\n                    FROM passkey_credentials\n                    WHERE user_id = $2\n                    FOR UPDATE\n                ),\n                eligible AS (\n                    SELECT 1\n                    FROM locked\n                    WHERE id = $1\n                    AND revoked_at IS NULL\n                    AND (SELECT count(*) FROM locked WHERE revoked_at IS NULL) > 1\n                )\n                UPDATE passkey_credentials\n                SET revoked_at = now()\n                FROM eligible\n                WHERE passkey_credentials.id = $1\n                AND passkey_credentials.user_id = $2\n                AND passkey_credentials.revoked_at IS NULL",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "37d03614cd67eb79b8951b16d961dc8ca86d522df47573b522d80fa25bd229cd"
+}

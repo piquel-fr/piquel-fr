@@ -1,0 +1,46 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT\n                    e.id AS \"id: TokenId\", e.user_id AS \"user_id: UserId\", e.normalized_email,\n                    e.verified_at, e.is_primary\n                FROM active_verified_email_ownership o\n                JOIN users u ON u.id = o.user_id\n                    AND u.status = 'active'\n                JOIN user_emails e ON e.user_id = o.user_id\n                    AND e.normalized_email = o.normalized_email\n                    AND e.verified_at IS NOT NULL\n                WHERE o.normalized_email = $1\n                ORDER BY e.is_primary DESC, e.created_at\n                LIMIT 1",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id: TokenId",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "user_id: UserId",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 2,
+        "name": "normalized_email",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 3,
+        "name": "verified_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 4,
+        "name": "is_primary",
+        "type_info": "Bool"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      true,
+      false
+    ]
+  },
+  "hash": "6997c039bff8c19f9fcd3168da58e88deeb66ec53a10d822d01ab796164b155f"
+}

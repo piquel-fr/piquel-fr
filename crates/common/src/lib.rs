@@ -367,8 +367,54 @@ pub struct VocabularyError {
 /// Serde paths used by exported macros, independent of downstream dependencies.
 #[doc(hidden)]
 pub use serde as __serde;
+/// `SQLx` paths used by exported macros when the `sqlx` feature is on.
+#[cfg(feature = "sqlx")]
+#[doc(hidden)]
+pub use sqlx as __sqlx;
 
-/// Declares a documented, closed string vocabulary with serde and parsing support.
+/// Lets `str_enum!` vocabularies decode from `PostgreSQL` text columns, e.g.
+/// `status AS "status: AccountStatus"` in a checked query. A value outside the
+/// vocabulary fails decoding. This crate's `sqlx` feature selects which
+/// definition every `str_enum!` expands to, wherever it is invoked.
+#[cfg(feature = "sqlx")]
+#[doc(hidden)]
+#[macro_export]
+macro_rules! __str_enum_sqlx {
+    ($name:ident) => {
+        impl $crate::__sqlx::Type<$crate::__sqlx::Postgres> for $name {
+            /// Stored as `TEXT`.
+            fn type_info() -> $crate::__sqlx::postgres::PgTypeInfo {
+                <str as $crate::__sqlx::Type<$crate::__sqlx::Postgres>>::type_info()
+            }
+            /// Accepts every text-like column, as `str` does.
+            fn compatible(ty: &$crate::__sqlx::postgres::PgTypeInfo) -> bool {
+                <str as $crate::__sqlx::Type<$crate::__sqlx::Postgres>>::compatible(ty)
+            }
+        }
+        impl<'r> $crate::__sqlx::Decode<'r, $crate::__sqlx::Postgres> for $name {
+            /// Parses the stored spelling, rejecting values outside the vocabulary.
+            fn decode(
+                value: $crate::__sqlx::postgres::PgValueRef<'r>,
+            ) -> Result<Self, $crate::__sqlx::error::BoxDynError> {
+                Ok(
+                    <&str as $crate::__sqlx::Decode<'r, $crate::__sqlx::Postgres>>::decode(value)?
+                        .parse()?,
+                )
+            }
+        }
+    };
+}
+
+/// Without the `sqlx` feature, vocabularies carry no database impls.
+#[cfg(not(feature = "sqlx"))]
+#[doc(hidden)]
+#[macro_export]
+macro_rules! __str_enum_sqlx {
+    ($name:ident) => {};
+}
+
+/// Declares a documented, closed string vocabulary with serde and parsing support,
+/// plus `SQLx` text decoding when the `sqlx` feature is on.
 #[macro_export]
 macro_rules! str_enum {
     ($(#[$meta:meta])* $vis:vis enum $name:ident { $($(#[$variant_meta:meta])* $variant:ident = $value:literal),+ $(,)? }) => {
@@ -402,6 +448,7 @@ macro_rules! str_enum {
                 value.parse().map_err($crate::__serde::de::Error::custom)
             }
         }
+        $crate::__str_enum_sqlx!($name);
     };
     (@count $($variant:ident),+) => { <[()]>::len(&[$($crate::str_enum!(@unit $variant)),+]) };
     (@unit $variant:ident) => { () };

@@ -86,8 +86,9 @@ in crypto. Storage vocabulary (`AuditAction`, `AuditOutcome`, `CeremonyKind`,
 `OidcRedirectKind`) lives in the repository. Record successful account operations
 with `tx.audit_events().record(user_id, action, provider)`. Keep digests typed until
 their persistence boundary. SQL, rows and connections stay inside the repository.
-Local TCP database tests need `TEST_DATABASE_URL` with `sslmode=disable`; use a
-disposable database. Ordinary tests skip database integration tests.
+Write queries with SQLx's checked macros and refresh the cache with
+`just db prepare`. `just db test` runs the database integration tests in a scratch
+cluster; ordinary tests skip them.
 
 ## Documentation and tests
 

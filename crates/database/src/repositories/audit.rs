@@ -96,15 +96,15 @@ impl AuditEventRepository<'_> {
         run!(
             self,
             execute,
-            sqlx::query(
+            sqlx::query!(
                 "INSERT INTO security_audit_log (id, user_id, action, outcome, request_metadata)
-                VALUES ($1, $2, $3, $4, $5)"
+                VALUES ($1, $2, $3, $4, $5)",
+                input.id.as_uuid(),
+                input.user_id.map(UserId::as_uuid),
+                input.action.as_str(),
+                input.outcome.as_str(),
+                sqlx::types::Json(&input.request_metadata) as _,
             )
-            .bind(input.id.as_uuid())
-            .bind(input.user_id.map(UserId::as_uuid))
-            .bind(input.action.as_str())
-            .bind(input.outcome.as_str())
-            .bind(sqlx::types::Json(&input.request_metadata))
         )?;
         Ok(())
     }

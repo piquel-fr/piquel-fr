@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "DELETE FROM browser_session_secrets b\n            WHERE b.ctid IN (\n                SELECT secret.ctid\n                FROM browser_session_secrets secret\n                JOIN sessions session ON session.id = secret.session_id\n                WHERE session.expires_at < now()\n                OR session.revoked_at < now() - interval '1 day'\n                LIMIT $1\n                FOR UPDATE OF secret SKIP LOCKED\n            )",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Int8"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "13f00520d943f7a60c54c65a0c5bfe5857f90a65dc0aa90a99a0010330953736"
+}

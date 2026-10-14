@@ -1,0 +1,22 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT EXISTS (\n                    SELECT\n                    FROM invitations\n                    WHERE secret_digest = $1\n                    AND redeemed_at IS NULL\n                    AND expires_at > now()\n                ) AS \"active!\"",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "active!",
+        "type_info": "Bool"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Bytea"
+      ]
+    },
+    "nullable": [
+      null
+    ]
+  },
+  "hash": "4bfaf01e03c60dd60d8be2a9c296d3b7420f48d4e4ffd455b54e25a541c0aa6a"
+}

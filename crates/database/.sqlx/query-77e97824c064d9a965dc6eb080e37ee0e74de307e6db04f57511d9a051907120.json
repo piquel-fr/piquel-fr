@@ -1,0 +1,22 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT normalized_email\n                FROM user_emails\n                WHERE user_id = $1\n                AND verified_at IS NOT NULL\n                ORDER BY is_primary DESC, created_at\n                LIMIT 1",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "normalized_email",
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "77e97824c064d9a965dc6eb080e37ee0e74de307e6db04f57511d9a051907120"
+}

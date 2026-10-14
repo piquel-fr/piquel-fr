@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO browser_session_secrets(session_id,secret_digest) VALUES($1,$2)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Bytea"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "4f27c429aede2174f1215b97ac82246d73c72ef93dcf6ccc518d76483fa1b803"
+}

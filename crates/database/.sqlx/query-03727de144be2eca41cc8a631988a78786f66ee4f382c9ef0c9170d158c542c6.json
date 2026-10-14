@@ -1,0 +1,20 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO webauthn_ceremonies (\n                    id, user_id, session_id, ceremony_kind, challenge_digest, state, expires_at\n                ) VALUES ($1, $2, $3, $4, $5, $6, $7)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid",
+        "Uuid",
+        "Text",
+        "Bytea",
+        "Jsonb",
+        "Timestamptz"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "03727de144be2eca41cc8a631988a78786f66ee4f382c9ef0c9170d158c542c6"
+}

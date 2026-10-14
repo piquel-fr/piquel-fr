@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE external_login_identities\n                SET last_login_at = now()\n                WHERE id = $1\n                AND revoked_at IS NULL",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "5faa57a8ef812342d5c565e06185af7f6748c503bfa4797c722aba85d535f30c"
+}

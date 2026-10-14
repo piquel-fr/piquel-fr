@@ -1,0 +1,31 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "WITH upsert AS (\n                    INSERT INTO oidc_clients (\n                        id, display_name, allowed_scopes, allowed_audiences, allow_refresh,\n                        enabled, trusted, client_secret_hash\n                    ) VALUES ($1, $2, $3, $4, $5, $8, $9, $10)\n                    ON CONFLICT (id) DO UPDATE\n                    SET display_name = EXCLUDED.display_name,\n                        allowed_scopes = EXCLUDED.allowed_scopes,\n                        allowed_audiences = EXCLUDED.allowed_audiences,\n                        allow_refresh = EXCLUDED.allow_refresh,\n                        enabled = EXCLUDED.enabled,\n                        trusted = EXCLUDED.trusted,\n                        client_secret_hash = EXCLUDED.client_secret_hash\n                    RETURNING id\n                ),\n                desired (uri, kind) AS (\n                    SELECT unnest($6::text[]), 'authorization'\n                    UNION ALL\n                    SELECT unnest($7::text[]), 'post_logout'\n                ),\n                inserted AS (\n                    INSERT INTO oidc_redirect_uris (client_id, uri, kind)\n                    SELECT $1, d.uri, d.kind\n                    FROM desired d, upsert\n                    ON CONFLICT DO NOTHING\n                    RETURNING uri\n                ),\n                removed AS (\n                    DELETE FROM oidc_redirect_uris r\n                    WHERE r.client_id = $1\n                    AND NOT EXISTS (\n                        SELECT 1\n                        FROM desired d\n                        WHERE d.uri = r.uri\n                        AND d.kind = r.kind\n                    )\n                    RETURNING uri\n                )\n                SELECT id\n                FROM upsert",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Text",
+        "Jsonb",
+        "Jsonb",
+        "Bool",
+        "TextArray",
+        "TextArray",
+        "Bool",
+        "Bool",
+        "Bytea"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "ef8a3251e12e410a98f259f48dc47713bef4fbaa533334fb2002753a7ec1002b"
+}

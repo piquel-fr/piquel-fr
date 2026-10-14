@@ -1,0 +1,4 @@
+[env]
+# Checked SQLx queries compile from crates/database/.sqlx, so a DATABASE_URL in
+# the shell never makes a build connect. `just db prepare` overrides it.
+SQLX_OFFLINE = "true"

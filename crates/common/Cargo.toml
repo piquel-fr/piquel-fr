@@ -8,8 +8,13 @@ repository.workspace = true
 [dev-dependencies]
 serde_json.workspace = true
 
+[features]
+# SQLx text decoding for `str_enum!` vocabularies; only `crates/database` enables it.
+sqlx = ["dep:sqlx"]
+
 [dependencies]
 serde.workspace = true
+sqlx = { workspace = true, optional = true }
 thiserror.workspace = true
 url.workspace = true
 
