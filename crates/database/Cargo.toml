@@ -9,6 +9,7 @@ repository.workspace = true
 chrono.workspace = true
 piquel-auth-protocol = { workspace = true, features = ["sqlx"] }
 piquel-common = { workspace = true, features = ["sqlx"] }
+piquel-crypto.workspace = true
 serde_json.workspace = true
 serde.workspace = true
 sqlx.workspace = true

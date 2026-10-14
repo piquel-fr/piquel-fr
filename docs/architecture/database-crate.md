@@ -96,10 +96,11 @@ leaves `security_audit_log` append-only. It needs PostgreSQL 17 or later and a
 superuser owner, and checks both first. It resets every role attribute,
 including `VALID UNTIL` and `CONNECTION LIMIT`. Lock waits time out after 10
 seconds, so a session holding a lock on the role, e.g. its own open
-`ALTER ROLE`, fails `migrate` with instructions instead of stalling it. The password reaches the block as a bind
-parameter, so a server logging every statement with its parameters records it;
-if setting it fails or is canceled, the error carries only PostgreSQL's reason,
-not the statement.
+`ALTER ROLE`, fails `migrate` with instructions instead of stalling it. The
+password never reaches the server: `RuntimeRole` hashes it into a SCRAM-SHA-256
+verifier (`piquel_crypto::ScramVerifier`), which `ALTER ROLE … PASSWORD` stores
+as is. Statements in errors, lock-wait logs or parameter logs, including ones
+from a terminated backend, which no handler can intercept, show only the verifier.
 Errors put their guidance in the message, since `migrate` prints only that.
 
 A role that belongs to another role, or owns an object in this database (large

@@ -1,6 +1,7 @@
 //! Validated `PostgreSQL` transport, bounded pools and explicit maintenance.
 
 use crate::{DatabaseConnectionError, DatabaseError, DatabaseTransaction};
+use piquel_crypto::{CryptoError, ScramVerifier};
 use sqlx::{
     PgPool,
     postgres::{PgConnectOptions, PgPoolOptions, PgSslMode},
@@ -25,8 +26,9 @@ const SOCKET_HOST: &str = "localhost";
 
 /// Maximum rows removed from each table in one maintenance batch.
 const MAX_PURGE_BATCH: u32 = 1_000;
-/// Creates or updates the runtime role named by `piquel.runtime_role`, then
-/// grants it row access to the `public` schema. The grants on `ALL TABLES` are
+/// Creates or updates the runtime role named by `piquel.runtime_role`, with the
+/// password verifier in `piquel.runtime_verifier`, then grants it row access to
+/// the `public` schema. The grants on `ALL TABLES` are
 /// repeated after every migration run, so they cover tables new migrations add.
 ///
 /// A role that belongs to another role, or owns an object in this database
@@ -103,20 +105,13 @@ BEGIN
         EXECUTE format('CREATE ROLE %I', runtime_role);
         SELECT oid INTO runtime_oid FROM pg_roles WHERE rolname = runtime_role;
     END IF;
-    -- A failing or canceled statement would appear, password included, in the
-    -- error's context and the server log, so only its message is passed on.
-    -- OTHERS excludes query_canceled (statement_timeout or a cancel request);
-    -- lock_timeout raises lock_not_available, which it covers.
-    BEGIN
-        EXECUTE format(
-            'ALTER ROLE %I LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS '
-                'INHERIT CONNECTION LIMIT -1 VALID UNTIL ''infinity'' PASSWORD %L',
-            runtime_role, current_setting('piquel.runtime_password')
-        );
-    EXCEPTION WHEN query_canceled OR OTHERS THEN
-        RAISE EXCEPTION 'could not set the attributes and password of runtime role "%": %',
-            runtime_role, SQLERRM USING ERRCODE = SQLSTATE;
-    END;
+    -- The password is a SCRAM verifier, stored as is, so the statement, which
+    -- errors and the server log may show, never contains the password itself.
+    EXECUTE format(
+        'ALTER ROLE %I LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS '
+            'INHERIT CONNECTION LIMIT -1 VALID UNTIL ''infinity'' PASSWORD %L',
+        runtime_role, current_setting('piquel.runtime_verifier')
+    );
     -- Start from nothing. The role owns nothing, so DROP OWNED only revokes its
     -- privileges and default privileges; settings such as
     -- session_replication_role = replica would otherwise apply to every new
@@ -324,33 +319,36 @@ impl DatabaseConfig {
 
 /// The dedicated login role the service runs as, holding only row privileges.
 /// [`Database::grant_runtime_role`] creates it and resets its password.
-#[derive(Clone)]
 pub struct RuntimeRole {
     /// Role name: the user of the service's own connection.
     name: String,
-    /// Password assigned on every migration run, so rotating it needs no manual SQL.
-    password: String,
+    /// Password verifier assigned on every migration run, so rotating it needs
+    /// no manual SQL. Only the verifier reaches the server.
+    verifier: ScramVerifier,
 }
 
 impl std::fmt::Debug for RuntimeRole {
-    /// Renders the role name without exposing its password.
+    /// Renders the role name without its password verifier.
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         formatter
             .debug_struct("RuntimeRole")
             .field("name", &self.name)
-            .field("password", &"[REDACTED]")
+            .field("verifier", &"[REDACTED]")
             .finish()
     }
 }
 
 impl RuntimeRole {
     /// Names the role that `runtime` connects as, to be assigned `password`.
-    #[must_use]
-    pub fn new(runtime: &DatabaseConfig, password: &str) -> Self {
-        Self {
+    ///
+    /// # Errors
+    /// Returns [`CryptoError::ScramPassword`] for passwords that are not ASCII,
+    /// and preserves failures to hash the password.
+    pub fn new(runtime: &DatabaseConfig, password: &str) -> Result<Self, CryptoError> {
+        Ok(Self {
             name: runtime.options.get_username().to_owned(),
-            password: password.to_owned(),
-        }
+            verifier: ScramVerifier::generate(password)?,
+        })
     }
 }
 
@@ -438,17 +436,16 @@ impl Database {
     pub async fn grant_runtime_role(&self, role: &RuntimeRole) -> Result<(), DatabaseError> {
         let mut transaction = self.pool.begin().await?;
         // Utility statements take no bind parameters, so transaction-local settings
-        // pass both values to the block, which quotes them with format(). Calling
-        // them in FROM returns no columns, so the password is not sent back. The
-        // lock serializes concurrent runs, whose catalog updates would otherwise
-        // fail with "tuple concurrently updated".
+        // pass the name and verifier to the block, which quotes them with format().
+        // The lock serializes concurrent runs, whose catalog updates would
+        // otherwise fail with "tuple concurrently updated".
         sqlx::query!(
             "SELECT FROM pg_advisory_xact_lock($1),
                 set_config('piquel.runtime_role', $2, true) AS role,
-                set_config('piquel.runtime_password', $3, true) AS password",
+                set_config('piquel.runtime_verifier', $3, true) AS verifier",
             RUNTIME_ROLE_LOCK,
             role.name,
-            role.password,
+            role.verifier.as_str(),
         )
         .execute(&mut *transaction)
         .await?;

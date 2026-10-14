@@ -266,7 +266,7 @@ impl RoleFixture {
     /// Provisions the role with `password`, as `migrate` does.
     async fn grant(&self, password: &str) -> Result<(), DatabaseError> {
         self.owner
-            .grant_runtime_role(&RuntimeRole::new(&self.config, password))
+            .grant_runtime_role(&RuntimeRole::new(&self.config, password).expect("verifier"))
             .await
     }
 
@@ -380,7 +380,7 @@ async fn runtime_role_with_memberships_or_objects_is_refused() {
     let owner_config = DatabaseConfig::new(&url, 1, Duration::from_secs(5)).expect("test URL");
     assert!(
         role.owner
-            .grant_runtime_role(&RuntimeRole::new(&owner_config, "unused"))
+            .grant_runtime_role(&RuntimeRole::new(&owner_config, "unused").expect("verifier"))
             .await
             .is_err()
     );
@@ -550,7 +550,7 @@ async fn default_privileges_cannot_block_provisioning() {
 }
 
 /// A failed password change reports PostgreSQL's reason, here a reserved role
-/// name, without echoing the statement and its password.
+/// name. Its statement only holds the password's SCRAM verifier.
 #[tokio::test]
 #[ignore = "requires a disposable TEST_DATABASE_URL"]
 async fn failed_provisioning_does_not_echo_the_password() {
@@ -562,7 +562,7 @@ async fn failed_provisioning_does_not_echo_the_password() {
     reserved.options = reserved.options.username("pg_read_all_data");
     let password = "never-echoed-password";
     let error = owner
-        .grant_runtime_role(&RuntimeRole::new(&reserved, password))
+        .grant_runtime_role(&RuntimeRole::new(&reserved, password).expect("verifier"))
         .await
         .expect_err("reserved role name");
     let debug = format!("{error:?}");
@@ -570,11 +570,13 @@ async fn failed_provisioning_does_not_echo_the_password() {
     assert!(!debug.contains(password), "{debug}");
 }
 
-/// Canceling provisioning while it waits to change the password, here behind
-/// the role's own open `ALTER ROLE`, does not echo the statement either.
+/// Ending provisioning while it waits to change the password, here behind the
+/// role's own open `ALTER ROLE`, cannot echo the password either: canceling
+/// raises an error and terminating a FATAL one, which no handler intercepts,
+/// both naming the statement, and that only holds the verifier.
 #[tokio::test]
 #[ignore = "requires a disposable TEST_DATABASE_URL"]
-async fn canceled_provisioning_does_not_echo_the_password() {
+async fn interrupted_provisioning_does_not_echo_the_password() {
     let role = RoleFixture::new().await;
     role.grant("first").await.expect("create runtime role");
     let runtime = role.connect("first").await;
@@ -588,23 +590,28 @@ async fn canceled_provisioning_does_not_echo_the_password() {
         .await
         .expect("lock the role");
     let password = "never-echoed-password";
-    let cancel = async {
-        while !sqlx::query_scalar::<_, bool>(
-            "SELECT coalesce(bool_or(pg_cancel_backend(pid)), false) FROM pg_stat_activity
-            WHERE $1 = ANY (pg_blocking_pids(pid))",
-        )
-        .bind(holder)
-        .fetch_one(&role.owner.pool)
-        .await
-        .expect("cancel")
-        {
-            tokio::time::sleep(Duration::from_millis(20)).await;
-        }
-    };
-    let (result, ()) = tokio::join!(role.grant(password), cancel);
-    let debug = format!("{:?}", result.expect_err("canceled"));
-    assert!(debug.contains("canceling statement"), "{debug}");
-    assert!(!debug.contains(password), "{debug}");
+    for (interrupt, reason) in [
+        ("pg_cancel_backend", "canceling statement"),
+        ("pg_terminate_backend", "terminating connection"),
+    ] {
+        let stop = async {
+            while !sqlx::query_scalar::<_, bool>(&format!(
+                "SELECT coalesce(bool_or({interrupt}(pid)), false) FROM pg_stat_activity
+                WHERE $1 = ANY (pg_blocking_pids(pid))"
+            ))
+            .bind(holder)
+            .fetch_one(&role.owner.pool)
+            .await
+            .expect("interrupt")
+            {
+                tokio::time::sleep(Duration::from_millis(20)).await;
+            }
+        };
+        let (result, ()) = tokio::join!(role.grant(password), stop);
+        let debug = format!("{:?}", result.expect_err(interrupt));
+        assert!(debug.contains(reason), "{debug}");
+        assert!(!debug.contains(password), "{debug}");
+    }
     held.rollback().await.expect("release the role");
     runtime.close().await;
     role.drop_role().await;

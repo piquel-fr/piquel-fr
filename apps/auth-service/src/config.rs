@@ -406,7 +406,12 @@ impl AuthConfig {
         })?;
         Ok(MigrationConfig {
             database: Self::database(DATABASE_OWNER_URL, &owner_url, DATABASE_OWNER_PASSWORD)?.0,
-            runtime_role: Some(RuntimeRole::new(&runtime, &password)),
+            runtime_role: Some(RuntimeRole::new(&runtime, &password).map_err(|source| {
+                DATABASE_PASSWORD.error(
+                    "must be ASCII text; migrate hashes it into a SCRAM verifier for PostgreSQL",
+                    source,
+                )
+            })?),
         })
     }
 

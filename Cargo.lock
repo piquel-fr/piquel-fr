@@ -1499,6 +1499,7 @@ dependencies = [
  "chrono",
  "piquel-auth-protocol",
  "piquel-common",
+ "piquel-crypto",
  "serde",
  "serde_json",
  "sqlx",

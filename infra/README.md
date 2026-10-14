@@ -125,19 +125,21 @@ sets it. Until the rollout replaces them, old replicas keep their open
 connections but cannot open new ones. Open sessions survive the change, and one
 holding a lock on the role makes `migrate` fail after 10 seconds. So after a
 leak, regenerate the secret, lock the role out and end its sessions, then deploy;
-`migrate` restores its login with the new password:
+`migrate` restores its login with the new password. A reconnecting session can
+hold the role's row again, so each attempt gives up after a second and the loop
+retries until `NOLOGIN` commits:
 
 ```sh
 piquelctl env secret piquel-fr --env ENV regenerate database-runtime-password
-piquelctl app exec piquel-fr postgres --env ENV -- psql -U piquel -d piquel \
-  -c "SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE usename = 'piquel_auth'" \
-  -c "ALTER ROLE piquel_auth NOLOGIN" \
-  -c "SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE usename = 'piquel_auth'"
+owner_sql() { piquelctl app exec piquel-fr postgres --env ENV -- psql -U piquel -d piquel -v ON_ERROR_STOP=1 "$@"; }
+end="SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE usename = 'piquel_auth'"
+until owner_sql -c "SET lock_timeout = '1s'" -c "$end" -c "ALTER ROLE piquel_auth NOLOGIN"; do sleep 1; done
+owner_sql -c "$end"
 ```
 
-Auth is unavailable until the new replicas start. Run the same `psql` command
-whenever `migrate` times out waiting for a lock. A new `database-password` does
-not change the one an existing database volume stores.
+Auth is unavailable until the new replicas start. Whenever `migrate` times out
+waiting for a lock, run the last three lines again. A new `database-password`
+does not change the one an existing database volume stores.
 
 Staging and production require invitations:
 

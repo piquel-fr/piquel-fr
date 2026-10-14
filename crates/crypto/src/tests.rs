@@ -138,3 +138,26 @@ fn jwt_persistence_and_trust_boundaries() {
         );
     }
 }
+
+/// SCRAM verifiers match one PostgreSQL 18 stored for `CREATE ROLE … PASSWORD
+/// 'pencil'`, given its salt, and non-ASCII passwords are refused.
+#[test]
+fn scram_verifiers_match_postgresql() {
+    let postgres = "SCRAM-SHA-256$4096:dtqdTd57WUumF9C1VLYkbg==$\
+        3/Fz6JiFQBmNCZUat32Gs3tFgZy1xy8cEY5uG2cBVaI=:\
+        LgtLyL24eOzI1HrlCpew9BBLYDpvIJkIMvN51XZlYwM=";
+    let salt = STANDARD.decode("dtqdTd57WUumF9C1VLYkbg==").expect("salt");
+    assert_eq!(
+        ScramVerifier::with_salt("pencil", &salt)
+            .expect("verifier")
+            .as_str(),
+        postgres
+    );
+    let generated = ScramVerifier::generate("pencil").expect("verifier");
+    assert!(generated.as_str().starts_with("SCRAM-SHA-256$4096:"));
+    assert_ne!(generated.as_str(), postgres, "salts are random");
+    assert!(matches!(
+        ScramVerifier::generate("pässword"),
+        Err(CryptoError::ScramPassword)
+    ));
+}

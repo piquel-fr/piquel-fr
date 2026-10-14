@@ -3,8 +3,11 @@
 mod signing;
 pub use signing::Rs256Key;
 
-use base64::{Engine, engine::general_purpose::URL_SAFE_NO_PAD};
-use openssl::{hash::MessageDigest, pkey::PKey, sign::Signer};
+use base64::{
+    Engine,
+    engine::general_purpose::{STANDARD, URL_SAFE_NO_PAD},
+};
+use openssl::{hash::MessageDigest, pkcs5::pbkdf2_hmac, pkey::PKey, sign::Signer};
 use rand::{RngCore, rngs::OsRng};
 use sha2::{Digest as _, Sha256};
 use std::fmt;
@@ -20,6 +23,10 @@ const MAX_CLIENT_SECRET_LENGTH: usize = 512;
 const MIN_PKCE_VERIFIER_LENGTH: usize = 43;
 /// RFC 7636 maximum verifier length.
 const MAX_PKCE_VERIFIER_LENGTH: usize = 128;
+/// PBKDF2 iterations of SCRAM verifiers, PostgreSQL's default `scram_iterations`.
+const SCRAM_ITERATIONS: usize = 4096;
+/// Salt length of SCRAM verifiers, as PostgreSQL generates them.
+const SCRAM_SALT_BYTES: usize = 16;
 
 /// Cryptographic failures, preserving provider diagnostics without secret values.
 #[derive(Debug, Error)]
@@ -63,6 +70,58 @@ pub enum CryptoError {
     /// The PKCE verifier does not match its challenge.
     #[error("PKCE S256 challenge does not match the verifier")]
     PkceMismatch,
+    /// SCRAM verifiers are only computed for ASCII passwords; see [`ScramVerifier`].
+    #[error("database passwords must be ASCII")]
+    ScramPassword,
+}
+
+/// A PostgreSQL SCRAM-SHA-256 password verifier. `ALTER ROLE … PASSWORD` stores
+/// one as is, so the password itself never reaches the server, its logs or its
+/// error messages. The verifier only allows an offline guess of the password.
+pub struct ScramVerifier(String);
+impl ScramVerifier {
+    /// Hashes `password` with a random salt, as PostgreSQL would.
+    ///
+    /// # Errors
+    /// Rejects passwords that are not ASCII and preserves randomness and
+    /// cryptographic provider failures.
+    pub fn generate(password: &str) -> Result<Self, CryptoError> {
+        let mut salt = [0; SCRAM_SALT_BYTES];
+        OsRng
+            .try_fill_bytes(&mut salt)
+            .map_err(CryptoError::Random)?;
+        Self::with_salt(password, &salt)
+    }
+    /// Builds `SCRAM-SHA-256$<iterations>:<salt>$<StoredKey>:<ServerKey>` (RFC
+    /// 5802). PostgreSQL first applies `SASLprep`, which leaves ASCII unchanged
+    /// except control characters, and it hashes the raw bytes of those. Skipping
+    /// it is therefore exact for ASCII, and other passwords are rejected.
+    fn with_salt(password: &str, salt: &[u8]) -> Result<Self, CryptoError> {
+        if !password.is_ascii() {
+            return Err(CryptoError::ScramPassword);
+        }
+        let mut salted = [0; SECRET_BYTES];
+        pbkdf2_hmac(
+            password.as_bytes(),
+            salt,
+            SCRAM_ITERATIONS,
+            MessageDigest::sha256(),
+            &mut salted,
+        )?;
+        let stored = Digest::sha256(Digest::hmac(&salted, b"Client Key")?.as_bytes());
+        let server = Digest::hmac(&salted, b"Server Key")?;
+        Ok(Self(format!(
+            "SCRAM-SHA-256${SCRAM_ITERATIONS}:{}${}:{}",
+            STANDARD.encode(salt),
+            STANDARD.encode(stored.as_bytes()),
+            STANDARD.encode(server.as_bytes()),
+        )))
+    }
+    /// The verifier in PostgreSQL's `rolpassword` format.
+    #[must_use]
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
 }
 
 /// A random 256-bit secret with redacted diagnostics.

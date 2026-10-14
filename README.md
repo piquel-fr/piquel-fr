@@ -44,7 +44,7 @@ piquel-web with Vite against an auth service on `http://localhost:3000`.
 | Variable | Meaning |
 | --- | --- |
 | `AUTH_DATABASE_URL` | PostgreSQL URL the service connects with; TCP requires `sslmode=verify-full`, or an explicit `sslmode=disable` on a trusted private network; local Unix sockets are also supported |
-| `AUTH_DATABASE_PASSWORD` | Optional env/file reference for the database password, when omitted from the URL; required with `AUTH_DATABASE_OWNER_URL` |
+| `AUTH_DATABASE_PASSWORD` | Optional env/file reference for the database password, when omitted from the URL; required with `AUTH_DATABASE_OWNER_URL`, and then ASCII, since `migrate` sends PostgreSQL only its SCRAM verifier |
 | `AUTH_DATABASE_OWNER_URL`, `AUTH_DATABASE_OWNER_PASSWORD` | Optional schema-owner connection for `migrate`, same rules as above. When set, `migrate` also makes the `AUTH_DATABASE_URL` user a restricted runtime role (see below); this needs PostgreSQL 17 or later and a superuser owner |
 | `AUTH_PUBLIC_BASE_URL` | Exact auth origin, normally `https://auth.piquel.fr` |
 | `AUTH_SETTINGS_URL` | Exact settings destination; defaults to `https://piquel.fr/settings` |
