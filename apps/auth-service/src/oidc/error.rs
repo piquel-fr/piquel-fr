@@ -303,3 +303,14 @@ impl From<piquel_repository::RefreshRotationError> for OAuthError {
         }
     }
 }
+
+/// Failure to build the provider's public documents at startup.
+#[derive(Debug, Error)]
+pub enum OidcConfigError {
+    /// The documentation link is not an absolute URL.
+    #[error("the service documentation link is not a URL")]
+    Documentation(#[source] url::ParseError),
+    /// A public document could not be serialized.
+    #[error("could not serialize a public OIDC document")]
+    Serialize(#[from] serde_json::Error),
+}

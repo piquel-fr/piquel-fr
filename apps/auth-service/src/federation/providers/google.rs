@@ -6,9 +6,9 @@ use super::{
 };
 use chrono::Utc;
 use jsonwebtoken::{Algorithm, DecodingKey, Validation, decode, decode_header};
+use piquel_auth_protocol::jwt::{Algorithm as JwtAlgorithm, Claim, KeyType, KeyUse};
 use piquel_auth_protocol::oauth::{Prompt, Scope};
 use piquel_common::ErrorChain;
-use piquel_crypto::jwt::{Algorithm as JwtAlgorithm, Claim, KeyType, KeyUse};
 use reqwest::header::{CACHE_CONTROL, HeaderMap};
 use serde::Deserialize;
 use std::{

@@ -220,8 +220,15 @@ impl Origin {
     }
     /// The absolute URL of `path`, which must start with `/`, on this origin.
     #[must_use]
+    pub fn url(&self, path: &str) -> Url {
+        let mut url = self.url.clone();
+        url.set_path(path);
+        url
+    }
+    /// Like [`Self::url`], as text.
+    #[must_use]
     pub fn join(&self, path: &str) -> String {
-        format!("{}{path}", self.serialized())
+        self.url(path).into()
     }
 }
 impl FromStr for Origin {

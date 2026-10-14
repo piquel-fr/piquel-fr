@@ -20,6 +20,32 @@ piquel_common::str_enum! {
 }
 
 piquel_common::str_enum! {
+    /// Authorization response modes. Only the query string is supported.
+    pub enum ResponseMode {
+        /// Code and state go in the redirect's query string.
+        Query = "query",
+    }
+}
+
+piquel_common::str_enum! {
+    /// Client authentication methods at the token and revocation endpoints.
+    pub enum ClientAuthMethod {
+        /// Public client, identified by its ID alone.
+        None = "none",
+        /// Confidential client, authenticated by HTTP Basic.
+        ClientSecretBasic = "client_secret_basic",
+    }
+}
+
+piquel_common::str_enum! {
+    /// OIDC subject identifier types.
+    pub enum SubjectType {
+        /// Every client sees the same account ID.
+        Public = "public",
+    }
+}
+
+piquel_common::str_enum! {
     /// PKCE code challenge methods (RFC 7636). `plain` is deliberately absent.
     pub enum CodeChallengeMethod {
         /// The challenge is the base64url SHA-256 of the verifier.

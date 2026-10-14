@@ -1,5 +1,9 @@
 //! Stable, framework-independent values shared by authentication participants.
 
+/// JWT claim and JOSE field vocabulary shared by token issuers and verifiers.
+pub mod jwt;
+/// Authorization server metadata, as published at both well-known discovery paths.
+pub mod metadata;
 /// OAuth and OpenID Connect vocabulary shared by clients and the provider.
 pub mod oauth;
 

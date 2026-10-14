@@ -356,7 +356,7 @@ enum Endpoint {
     OAuthBackChannel,
     /// Bearer-authenticated `UserInfo`.
     UserInfo,
-    /// Public discovery and signing keys, served from memory.
+    /// Public metadata and signing keys, served from memory and readable from any origin.
     Discovery,
     /// Liveness and readiness probes polled by the orchestrator.
     Health,
@@ -378,7 +378,7 @@ impl Endpoint {
         match path {
             oidc::TOKEN | oidc::REVOKE => Self::OAuthBackChannel,
             oidc::USERINFO => Self::UserInfo,
-            oidc::DISCOVERY | oidc::JWKS => Self::Discovery,
+            oidc::DISCOVERY | oidc::OAUTH_METADATA | oidc::JWKS => Self::Discovery,
             service::LIVE | service::READY => Self::Health,
             oidc::AUTHORIZE => Self::Authorize,
             oidc::LOGOUT => Self::Logout,
@@ -427,6 +427,14 @@ piquel_common::str_enum! {
         /// Sign-in, authorization, logout and the other auth-origin routes.
         Login = "login",
     }
+}
+
+/// The CORS headers a response carries.
+enum CorsGrant {
+    /// Public, credential-free documents that any origin may read.
+    Public,
+    /// An approved origin, which may send the browser's cookies.
+    Credentialed(HeaderValue),
 }
 
 /// Failures in shared HTTP trust checks, preserving actionable internal sources.
@@ -583,13 +591,12 @@ impl HttpSecurity {
 
     /// Determines whether an exact browser origin may access this endpoint family.
     fn allowed_origin(&self, endpoint: Endpoint, origin: &str) -> bool {
-        origin == self.auth_origin
+        matches!(endpoint, Endpoint::Discovery)
+            || origin == self.auth_origin
             || (origin == self.settings_origin
                 && matches!(endpoint, Endpoint::Account | Endpoint::Login))
-            || (matches!(
-                endpoint,
-                Endpoint::OAuthBackChannel | Endpoint::UserInfo | Endpoint::Discovery
-            ) && self.client_origins.iter().any(|v| v == origin))
+            || (matches!(endpoint, Endpoint::OAuthBackChannel | Endpoint::UserInfo)
+                && self.client_origins.iter().any(|v| v == origin))
     }
 
     /// Middleware: runs the trust checks and the handler under one deadline, then adds the
@@ -614,7 +621,11 @@ impl HttpSecurity {
         .map_err(HttpSecurityError::from)
         .flatten()
         .unwrap_or_else(|error| ApiError::from(error).into_response());
-        Self::decorate(&mut response, origin.filter(|_| allowed));
+        let grant = match endpoint {
+            Endpoint::Discovery => Some(CorsGrant::Public),
+            _ => origin.filter(|_| allowed).map(CorsGrant::Credentialed),
+        };
+        Self::decorate(&mut response, grant);
         response
     }
 
@@ -679,9 +690,8 @@ impl HttpSecurity {
         Ok(())
     }
 
-    /// Adds cache and browser isolation headers, plus an exact-origin CORS grant when
-    /// `allowed_origin` is set.
-    fn decorate(response: &mut Response, allowed_origin: Option<HeaderValue>) {
+    /// Adds cache and browser isolation headers, plus the CORS `grant` when set.
+    fn decorate(response: &mut Response, grant: Option<CorsGrant>) {
         let headers = response.headers_mut();
         // Private by default; static assets set their own cache policy.
         headers
@@ -699,8 +709,19 @@ impl HttpSecurity {
         ] {
             headers.insert(name, HeaderValue::from_static(value));
         }
-        let Some(origin) = allowed_origin else {
-            return;
+        let origin = match grant {
+            None => return,
+            Some(CorsGrant::Public) => {
+                for (name, value) in [
+                    (header::ACCESS_CONTROL_ALLOW_ORIGIN, "*"),
+                    (header::ACCESS_CONTROL_ALLOW_HEADERS, "*"),
+                    (header::ACCESS_CONTROL_ALLOW_METHODS, "GET, OPTIONS"),
+                ] {
+                    headers.insert(name, HeaderValue::from_static(value));
+                }
+                return;
+            }
+            Some(CorsGrant::Credentialed(origin)) => origin,
         };
         headers.insert(header::ACCESS_CONTROL_ALLOW_ORIGIN, origin);
         for (name, value) in [

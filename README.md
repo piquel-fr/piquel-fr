@@ -121,7 +121,10 @@ Generate its random secret with `just secret`. Clients use
 `client_secret_basic` when confidential and `none` when public; both require S256
 PKCE. Redirect URLs must match exactly and use HTTPS.
 
-Discovery is `/.well-known/openid-configuration`; JWKS is `/.well-known/jwks.json`.
+Discovery is served at both `/.well-known/openid-configuration` (OIDC) and
+`/.well-known/oauth-authorization-server` (RFC 8414, read by OAuth-only and MCP
+clients); the two are the same document. JWKS is `/.well-known/jwks.json`. All three
+are cacheable for an hour and readable from any origin, without credentials.
 Every authorization response redirected to a client, success or error, carries
 `iss` (RFC 9207), so clients that use several issuers can reject mix-ups; discovery
 advertises `authorization_response_iss_parameter_supported`.
