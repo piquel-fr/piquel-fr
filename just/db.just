@@ -34,6 +34,8 @@ scratch *ARGS:
     dir=$(mktemp -d /tmp/piquel-db.XXXXXX)
     trap '"$bin/pg_ctl" --pgdata "$dir/data" --mode immediate stop >/dev/null 2>&1 || true; rm -rf "$dir"' EXIT
     "$bin/initdb" --pgdata "$dir/data" --username piquel --auth trust --no-sync >/dev/null
+    # Only the superuser is trusted, so other roles' passwords are checked, as in CI.
+    printf 'local all piquel trust\nlocal all all scram-sha-256\n' >"$dir/data/pg_hba.conf"
     "$bin/pg_ctl" --pgdata "$dir/data" --log "$dir/postgres.log" --wait \
         --options "-c listen_addresses='' -c unix_socket_directories='$dir' -c fsync=off" \
         start >/dev/null

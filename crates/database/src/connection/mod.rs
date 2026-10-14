@@ -25,6 +25,179 @@ const SOCKET_HOST: &str = "localhost";
 
 /// Maximum rows removed from each table in one maintenance batch.
 const MAX_PURGE_BATCH: u32 = 1_000;
+/// Creates or updates the runtime role named by `piquel.runtime_role`, then
+/// grants it row access to the `public` schema. The grants on `ALL TABLES` are
+/// repeated after every migration run, so they cover tables new migrations add.
+///
+/// A role that belongs to another role, or owns an object in this database
+/// (large objects included) or a shared one, is refused, since revoking
+/// privileges undoes neither. Default privileges it set are not refused: they
+/// only apply to objects it creates, and `DROP OWNED` removes them. Objects
+/// owned in other databases are ignored: they cannot reach this one, and the
+/// role may connect there. Otherwise `DROP OWNED` revokes the privileges its
+/// owners granted it, in this database and on shared objects such as
+/// parameters, and its global and app-database settings are reset. PUBLIC
+/// loses temporary tables, schema creation, table and sequence privileges, and
+/// the large-object, server-file and advisory-lock functions. Grants made by
+/// other grantors survive all of that, so a final check of the role's
+/// effective privileges rolls everything back, naming each check that failed,
+/// if any exceed row access.
+///
+/// Errors carry their guidance in the message, which is all `migrate` prints.
+///
+/// Trigger functions run as the invoker, so the role maintains
+/// `active_verified_email_ownership` itself; foreign-key checks run as the owner.
+const GRANT_RUNTIME_ROLE: &str = r#"
+DO $$
+DECLARE
+    runtime_role TEXT := current_setting('piquel.runtime_role');
+    runtime_oid OID := (SELECT oid FROM pg_roles WHERE rolname = runtime_role);
+    database_oid OID := (SELECT oid FROM pg_database WHERE datname = current_database());
+    -- Built-in functions the runtime role must not execute, through PUBLIC or
+    -- otherwise: creating large objects, which it would own, reaching server
+    -- files, and taking advisory locks, which could stall `migrate` (the
+    -- service takes none).
+    blocked_functions CONSTANT NAME[] := ARRAY[
+        'lo_create', 'lo_creat', 'lo_from_bytea', 'lo_import', 'lo_export',
+        'pg_read_file', 'pg_read_binary_file', 'pg_ls_dir', 'pg_stat_file',
+        'pg_advisory_lock', 'pg_advisory_lock_shared',
+        'pg_try_advisory_lock', 'pg_try_advisory_lock_shared',
+        'pg_advisory_xact_lock', 'pg_advisory_xact_lock_shared',
+        'pg_try_advisory_xact_lock', 'pg_try_advisory_xact_lock_shared'
+    ];
+    blocked_function REGPROCEDURE;
+    excess TEXT;
+BEGIN
+    -- MAINTAIN, checked below, is new in PostgreSQL 17.
+    IF current_setting('server_version_num')::INT < 170000 THEN
+        RAISE EXCEPTION 'provisioning the runtime role needs PostgreSQL 17 or later, not %',
+            current_setting('server_version');
+    END IF;
+    -- Only a superuser can set the attributes below and revoke PUBLIC's grants
+    -- on built-in functions.
+    IF NOT (SELECT rolsuper FROM pg_roles WHERE rolname = current_user) THEN
+        RAISE EXCEPTION 'provisioning the runtime role needs a superuser owner, not "%"', current_user;
+    END IF;
+    -- Resetting the attributes below would demote the migration role or a superuser.
+    IF runtime_role = current_user OR EXISTS (
+        SELECT FROM pg_roles WHERE oid = runtime_oid AND rolsuper
+    ) THEN
+        RAISE EXCEPTION 'runtime role "%" must not be the migration role or a superuser', runtime_role;
+    END IF;
+    -- Memberships (e.g. SET ROLE to a superuser) and ownership here or of shared
+    -- objects, including large objects, would survive the reset below, and DROP
+    -- OWNED would drop owned objects, so such a role is rejected before any
+    -- change. Objects it owns in other databases cannot touch this one; counting
+    -- them, or its default privileges, would let the role block every later run.
+    IF EXISTS (SELECT FROM pg_auth_members WHERE member = runtime_oid) OR EXISTS (
+        SELECT FROM pg_shdepend
+        WHERE refclassid = 'pg_authid'::regclass AND refobjid = runtime_oid AND deptype = 'o'
+        AND dbid IN (0, database_oid) AND classid <> 'pg_default_acl'::regclass
+    ) THEN
+        RAISE EXCEPTION 'runtime role "%" must not belong to other roles or own objects: '
+            'revoke its memberships and drop or reassign its objects, or use a new role', runtime_role;
+    END IF;
+    IF runtime_oid IS NULL THEN
+        EXECUTE format('CREATE ROLE %I', runtime_role);
+        SELECT oid INTO runtime_oid FROM pg_roles WHERE rolname = runtime_role;
+    END IF;
+    -- A failing statement would appear, password included, in the error's
+    -- context and the server log, so only its message is passed on.
+    BEGIN
+        EXECUTE format(
+            'ALTER ROLE %I LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS PASSWORD %L',
+            runtime_role, current_setting('piquel.runtime_password')
+        );
+    EXCEPTION WHEN OTHERS THEN
+        RAISE EXCEPTION 'could not set the attributes and password of runtime role "%": %',
+            runtime_role, SQLERRM USING ERRCODE = SQLSTATE;
+    END;
+    -- Start from nothing. The role owns nothing, so DROP OWNED only revokes its
+    -- privileges and default privileges; settings such as
+    -- session_replication_role = replica would otherwise apply to every new
+    -- login and skip triggers.
+    EXECUTE format('DROP OWNED BY %I', runtime_role);
+    EXECUTE format('ALTER ROLE %I RESET ALL', runtime_role);
+    EXECUTE format('ALTER ROLE %I IN DATABASE %I RESET ALL', runtime_role, current_database());
+    -- PUBLIC's defaults include temporary tables, which could shadow tables, and
+    -- executing the functions listed above.
+    EXECUTE format('REVOKE CREATE, TEMPORARY ON DATABASE %I FROM PUBLIC', current_database());
+    REVOKE CREATE ON SCHEMA public FROM PUBLIC;
+    REVOKE ALL ON ALL TABLES IN SCHEMA public FROM PUBLIC;
+    REVOKE ALL ON ALL SEQUENCES IN SCHEMA public FROM PUBLIC;
+    FOR blocked_function IN
+        SELECT oid FROM pg_proc
+        WHERE pronamespace = 'pg_catalog'::regnamespace AND proname = ANY (blocked_functions)
+    LOOP
+        EXECUTE format('REVOKE EXECUTE ON FUNCTION %s FROM PUBLIC', blocked_function);
+    END LOOP;
+    EXECUTE format('GRANT CONNECT ON DATABASE %I TO %I', current_database(), runtime_role);
+    EXECUTE format('GRANT USAGE ON SCHEMA public TO %I', runtime_role);
+    EXECUTE format('GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO %I', runtime_role);
+    EXECUTE format('GRANT USAGE ON ALL SEQUENCES IN SCHEMA public TO %I', runtime_role);
+    -- Migration history belongs to `migrate`, and security audit history is append-only.
+    EXECUTE format('REVOKE ALL ON public._sqlx_migrations FROM %I', runtime_role);
+    EXECUTE format('REVOKE UPDATE, DELETE ON public.security_audit_log FROM %I', runtime_role);
+    -- Grants from other grantors survive DROP OWNED, which revokes as the owner.
+    -- Rather than chase them, check what the role can effectively do and refuse
+    -- anything beyond the grants above, naming every check that fails.
+    SELECT string_agg(name, ', ') INTO excess FROM (VALUES
+        ('database CREATE or TEMPORARY',
+            has_database_privilege(runtime_oid, current_database(), 'CREATE, TEMPORARY')),
+        ('schema CREATE', has_schema_privilege(runtime_oid, 'public', 'CREATE')),
+        ('table privileges beyond row access', EXISTS (
+            SELECT FROM pg_class t
+            WHERE t.relnamespace = 'public'::regnamespace AND t.relkind IN ('r', 'p', 'v', 'm', 'f')
+            AND (
+                has_table_privilege(runtime_oid, t.oid, 'TRUNCATE, TRIGGER, MAINTAIN')
+                OR has_any_column_privilege(runtime_oid, t.oid, 'REFERENCES')
+                OR (t.relname IN ('security_audit_log', '_sqlx_migrations') AND (
+                    has_table_privilege(runtime_oid, t.oid, 'DELETE')
+                    OR has_any_column_privilege(runtime_oid, t.oid, 'UPDATE')
+                ))
+                OR (t.relname = '_sqlx_migrations'
+                    AND has_any_column_privilege(runtime_oid, t.oid, 'SELECT, INSERT'))
+            )
+        )),
+        ('sequence SELECT or UPDATE', EXISTS (
+            SELECT FROM pg_class s
+            -- CASE fixes the evaluation order: the function rejects non-sequences.
+            WHERE s.relnamespace = 'public'::regnamespace AND CASE WHEN s.relkind = 'S'
+                THEN has_sequence_privilege(runtime_oid, s.oid, 'SELECT, UPDATE') END
+        )),
+        ('EXECUTE on a blocked function', EXISTS (
+            SELECT FROM pg_proc p
+            WHERE p.pronamespace = 'pg_catalog'::regnamespace AND p.proname = ANY (blocked_functions)
+            AND has_function_privilege(runtime_oid, p.oid, 'EXECUTE')
+        )),
+        -- e.g. SET on session_replication_role, which disables triggers.
+        ('a parameter grant to it or PUBLIC', EXISTS (
+            SELECT FROM pg_parameter_acl, aclexplode(paracl) AS acl
+            WHERE acl.grantee IN (runtime_oid, 0)
+        )),
+        -- Settings that apply to the role's logins here: its own, which the reset
+        -- above cleared unless changed concurrently, or a database or cluster-wide
+        -- replica role. Settings for other databases never apply here.
+        ('a setting for its logins', EXISTS (
+            SELECT FROM pg_db_role_setting s
+            WHERE s.setdatabase IN (0, database_oid) AND (
+                s.setrole = runtime_oid OR s.setrole = 0 AND EXISTS (
+                    SELECT FROM unnest(s.setconfig) AS setting
+                    WHERE setting LIKE 'session\_replication\_role=%'
+                )
+            )
+        ))
+    ) AS checks (name, failed)
+    WHERE failed;
+    IF excess IS NOT NULL THEN
+        RAISE EXCEPTION 'runtime role "%" holds privileges beyond row access (%): revoke '
+            'its grants from other roles, to PUBLIC or on parameters, and its settings, '
+            'or use a new role', runtime_role, excess;
+    END IF;
+END $$
+"#;
+/// Advisory lock key held while privileges change, the ASCII bytes of "piquelrl".
+const RUNTIME_ROLE_LOCK: i64 = 0x7069_7175_656c_726c;
 /// Readiness must fail quickly when the database stops responding.
 const HEALTH_CHECK_TIMEOUT: Duration = Duration::from_secs(2);
 
@@ -140,6 +313,38 @@ impl DatabaseConfig {
     }
 }
 
+/// The dedicated login role the service runs as, holding only row privileges.
+/// [`Database::grant_runtime_role`] creates it and resets its password.
+#[derive(Clone)]
+pub struct RuntimeRole {
+    /// Role name: the user of the service's own connection.
+    name: String,
+    /// Password assigned on every migration run, so rotating it needs no manual SQL.
+    password: String,
+}
+
+impl std::fmt::Debug for RuntimeRole {
+    /// Renders the role name without exposing its password.
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("RuntimeRole")
+            .field("name", &self.name)
+            .field("password", &"[REDACTED]")
+            .finish()
+    }
+}
+
+impl RuntimeRole {
+    /// Names the role that `runtime` connects as, to be assigned `password`.
+    #[must_use]
+    pub fn new(runtime: &DatabaseConfig, password: &str) -> Self {
+        Self {
+            name: runtime.options.get_username().to_owned(),
+            password: password.to_owned(),
+        }
+    }
+}
+
 /// Typed database boundary. Its pool is intentionally private.
 #[derive(Clone)]
 pub struct Database {
@@ -203,6 +408,45 @@ impl Database {
             .run(&self.pool)
             .await
             .map_err(|error| DatabaseError::Operation(Box::new(error)))
+    }
+
+    /// Creates `role` or resets it to a plain login role with its password and no
+    /// privileges, then grants it row access to every table except the migration
+    /// history; security audit rows stay append-only. The role owns nothing and
+    /// belongs to no role, so it cannot change tables, disable their triggers or
+    /// reach server files and programs.
+    ///
+    /// Run it after [`Self::run_migrations`], connected as the schema owner, which
+    /// must be a superuser. Everything commits in one transaction.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`DatabaseError::Operation`], changing nothing, on servers older
+    /// than PostgreSQL 17; if the connected role is not a superuser; if `role` is
+    /// the connected role, a superuser, a member of another role or an object
+    /// owner; or if privileges granted by other roles leave it more than row
+    /// access.
+    pub async fn grant_runtime_role(&self, role: &RuntimeRole) -> Result<(), DatabaseError> {
+        let mut transaction = self.pool.begin().await?;
+        // Utility statements take no bind parameters, so transaction-local settings
+        // pass both values to the block, which quotes them with format(). Calling
+        // them in FROM returns no columns, so the password is not sent back. The
+        // lock serializes concurrent runs, whose catalog updates would otherwise
+        // fail with "tuple concurrently updated".
+        sqlx::query!(
+            "SELECT FROM pg_advisory_xact_lock($1),
+                set_config('piquel.runtime_role', $2, true) AS role,
+                set_config('piquel.runtime_password', $3, true) AS password",
+            RUNTIME_ROLE_LOCK,
+            role.name,
+            role.password,
+        )
+        .execute(&mut *transaction)
+        .await?;
+        sqlx::raw_sql(GRANT_RUNTIME_ROLE)
+            .execute(&mut *transaction)
+            .await?;
+        Ok(transaction.commit().await?)
     }
 
     /// Purges a bounded batch of expired ephemeral authentication state and

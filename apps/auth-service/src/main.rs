@@ -51,7 +51,10 @@ enum CliError {
 
 /// Piquel authentication service. Runs `serve` when no command is given.
 #[derive(Parser)]
-#[command(after_help = "Database commands use AUTH_DATABASE_URL. See README.md for configuration.")]
+#[command(
+    after_help = "Database commands use AUTH_DATABASE_URL; migrate uses AUTH_DATABASE_OWNER_URL \
+                  when set. See README.md for configuration."
+)]
 struct Cli {
     /// Defaults to serving when no administrative command is supplied.
     #[command(subcommand)]
@@ -64,6 +67,8 @@ enum Command {
     /// Commands that need a validated database connection.
     #[command(flatten)]
     Database(DatabaseCommand),
+    /// Apply database migrations, then set up the runtime role if an owner URL is set.
+    Migrate,
     /// Print a random secret for a confidential OIDC client.
     Secret,
 }
@@ -76,8 +81,21 @@ impl Command {
                 println!("{}", Secret::generate()?.encoded());
                 Ok(())
             }
+            Self::Migrate => Self::migrate().await,
             Self::Database(command) => command.run().await,
         }
+    }
+
+    /// Applies migrations, then grants the runtime role access to every table,
+    /// including ones those migrations just created.
+    async fn migrate() -> Result<(), CliError> {
+        let config = AuthConfig::migration_from_environment()?;
+        let database = Database::connect(config.database).await?;
+        database.run_migrations().await?;
+        if let Some(role) = config.runtime_role {
+            database.grant_runtime_role(&role).await?;
+        }
+        Ok(())
     }
 }
 
@@ -86,8 +104,6 @@ impl Command {
 enum DatabaseCommand {
     /// Serve the authentication service.
     Serve,
-    /// Apply database migrations.
-    Migrate,
     /// Print a single-use signup link.
     Invite {
         /// How long the link stays valid, in hours or days (e.g. 24h, 7d).
@@ -102,7 +118,6 @@ impl DatabaseCommand {
         let database = Database::connect(AuthConfig::database_from_environment()?).await?;
         match self {
             Self::Serve => Self::serve(database).await,
-            Self::Migrate => Ok(database.run_migrations().await?),
             Self::Invite { expires_in } => Self::invite(&database, expires_in).await,
         }
     }

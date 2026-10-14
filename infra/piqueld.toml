@@ -67,14 +67,22 @@ hostname = "${{ vars.www_host }}"
 redirect = { to = "https://${{ vars.web_host }}", status = 308, preserve_path = true }
 visibility = "public"
 
+# The PostgreSQL superuser `piquel`, which owns the schema and runs migrations.
 [[spec.secrets]]
 name = "database-password"
+generate = { type = "random", bytes = 32, encoding = "hex" }
+
+# The restricted `piquel_auth` role that serves requests.
+[[spec.secrets]]
+name = "database-runtime-password"
 generate = { type = "random", bytes = 32, encoding = "hex" }
 
 [[spec.secrets]]
 name = "signing-key"
 generate = { type = "rsa", bits = 3072 }
 
+# Connects as the owner, applies migrations, then creates or updates
+# `piquel_auth` with the runtime password and grants it row access only.
 [[spec.jobs]]
 name = "migrate"
 service = "auth"
@@ -95,8 +103,11 @@ dockerfile = "infra/auth.Dockerfile"
 
 [spec.services.environment]
 # Plaintext stays on the application's private network, which ingress cannot reach.
-AUTH_DATABASE_URL = "postgres://piquel@postgres:5432/piquel?sslmode=disable"
-AUTH_DATABASE_PASSWORD = "file:///run/secrets/database-password"
+# Jobs share their service's environment and secrets: only `migrate` reads the owner's.
+AUTH_DATABASE_URL = "postgres://piquel_auth@postgres:5432/piquel?sslmode=disable"
+AUTH_DATABASE_PASSWORD = "file:///run/secrets/database-runtime-password"
+AUTH_DATABASE_OWNER_URL = "postgres://piquel@postgres:5432/piquel?sslmode=disable"
+AUTH_DATABASE_OWNER_PASSWORD = "file:///run/secrets/database-owner-password"
 AUTH_KEY_PROVIDER = "file:///run/secrets/signing-key"
 AUTH_PUBLIC_LISTENER = "0.0.0.0:8080"
 AUTH_PUBLIC_BASE_URL = "https://${{ vars.auth_host }}"
@@ -104,8 +115,12 @@ AUTH_SETTINGS_URL = "https://${{ vars.web_host }}/settings"
 AUTH_INVITE_REQUIRED = "${{ vars.invite_required }}"
 
 [[spec.services.secrets]]
+name = "database-runtime-password"
+target = "/run/secrets/database-runtime-password"
+
+[[spec.services.secrets]]
 name = "database-password"
-target = "/run/secrets/database-password"
+target = "/run/secrets/database-owner-password"
 
 [[spec.services.secrets]]
 name = "signing-key"

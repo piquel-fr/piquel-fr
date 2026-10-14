@@ -11,7 +11,7 @@ mod repositories;
 /// Explicit transactions spanning typed repository operations.
 mod transaction;
 
-pub use connection::{Database, DatabaseConfig};
+pub use connection::{Database, DatabaseConfig, RuntimeRole};
 pub use error::{DatabaseConnectionError, DatabaseError};
 pub use repositories::{
     AuditEventRepository, EmailRepository, FederationRepository, OidcRepository, PasskeyRepository,

@@ -7,7 +7,7 @@ use piquel_common::{
     ConfigurationError, Origin, PublicUrl, SecretBytes, SecretReference, Variable,
 };
 use piquel_crypto::{Digest, Rs256Key, Secret};
-use piquel_repository::{BootstrapOidcClient, DatabaseConfig};
+use piquel_repository::{BootstrapOidcClient, DatabaseConfig, RuntimeRole};
 use serde::Deserialize;
 use std::{
     collections::{BTreeMap, HashSet},
@@ -45,6 +45,10 @@ const PUBLIC_LISTENER: Variable = Variable::new("AUTH_PUBLIC_LISTENER");
 const DATABASE_URL: Variable = Variable::new("AUTH_DATABASE_URL");
 /// Optional separately mounted database password.
 const DATABASE_PASSWORD: Variable = Variable::new("AUTH_DATABASE_PASSWORD");
+/// Optional schema-owner connection that `migrate` uses instead of `AUTH_DATABASE_URL`.
+const DATABASE_OWNER_URL: Variable = Variable::new("AUTH_DATABASE_OWNER_URL");
+/// Optional separately mounted schema-owner password.
+const DATABASE_OWNER_PASSWORD: Variable = Variable::new("AUTH_DATABASE_OWNER_PASSWORD");
 /// Required persistent signing-key reference.
 const KEY_PROVIDER: Variable = Variable::new("AUTH_KEY_PROVIDER");
 /// Stable public signing-key identifier.
@@ -344,6 +348,14 @@ impl ClientConfig {
     }
 }
 
+/// The connection `migrate` uses, and the runtime role it provisions afterwards.
+pub struct MigrationConfig {
+    /// The schema owner when `AUTH_DATABASE_OWNER_URL` is set, else `AUTH_DATABASE_URL`.
+    pub database: DatabaseConfig,
+    /// The `AUTH_DATABASE_URL` role, provisioned only when a separate owner is set.
+    pub runtime_role: Option<RuntimeRole>,
+}
+
 /// Validated service configuration combining one section per application.
 pub struct AuthConfig {
     /// Address bound by the HTTP listener behind piqueld.
@@ -359,38 +371,78 @@ pub struct AuthConfig {
 }
 
 impl AuthConfig {
-    /// Loads the database independently for migration and invitation commands.
+    /// Loads the service's own database connection, also used by `invite`.
     ///
     /// # Errors
     /// Names invalid transport settings or unresolved password references.
     pub fn database_from_environment() -> Result<DatabaseConfig, ConfigurationError> {
-        let url = DATABASE_URL.required()?;
-        let config = DatabaseConfig::new(&url, DATABASE_POOL_SIZE, DATABASE_CONNECT_TIMEOUT)
+        Ok(Self::database(DATABASE_URL, DATABASE_PASSWORD)?.0)
+    }
+
+    /// Loads the connection `migrate` applies migrations with. When
+    /// `AUTH_DATABASE_OWNER_URL` is set, `migrate` connects as that owner and then
+    /// provisions the `AUTH_DATABASE_URL` user as the restricted runtime role.
+    ///
+    /// # Errors
+    /// Names invalid transport settings or unresolved password references, and
+    /// requires `AUTH_DATABASE_PASSWORD` for the runtime role when an owner is set.
+    /// An owner password without an owner URL is rejected rather than ignored.
+    pub fn migration_from_environment() -> Result<MigrationConfig, ConfigurationError> {
+        let (runtime, password) = Self::database(DATABASE_URL, DATABASE_PASSWORD)?;
+        if DATABASE_OWNER_URL.optional()?.is_none() {
+            if DATABASE_OWNER_PASSWORD.optional()?.is_some() {
+                return Err(DATABASE_OWNER_PASSWORD
+                    .invalid("must not be set without AUTH_DATABASE_OWNER_URL"));
+            }
+            return Ok(MigrationConfig {
+                database: runtime,
+                runtime_role: None,
+            });
+        }
+        let password = password.ok_or(DATABASE_PASSWORD.invalid(
+            "must be set with AUTH_DATABASE_OWNER_URL; migrate assigns it to the runtime role",
+        ))?;
+        Ok(MigrationConfig {
+            database: Self::database(DATABASE_OWNER_URL, DATABASE_OWNER_PASSWORD)?.0,
+            runtime_role: Some(RuntimeRole::new(&runtime, &password)),
+        })
+    }
+
+    /// Reads one connection from `url` and its optional separate `password`
+    /// reference, returning the resolved separate password as well.
+    fn database(
+        url: Variable,
+        password: Variable,
+    ) -> Result<(DatabaseConfig, Option<String>), ConfigurationError> {
+        let value = url.required()?;
+        let config = DatabaseConfig::new(&value, DATABASE_POOL_SIZE, DATABASE_CONNECT_TIMEOUT)
             .map_err(|source| {
-                DATABASE_URL.error(
+                url.error(
                     "must be a postgres:// URL with sslmode=verify-full, explicit \
                      sslmode=disable, or a Unix socket",
                     source,
                 )
             })?;
-        let Some(reference) = DATABASE_PASSWORD.optional()? else {
-            return Ok(config);
+        let Some(reference) = password.optional()? else {
+            return Ok((config, None));
         };
-        let parsed = url::Url::parse(&url)
-            .map_err(|source| DATABASE_URL.error("must be a postgres:// URL", source))?;
+        let parsed = url::Url::parse(&value)
+            .map_err(|source| url.error("must be a postgres:// URL", source))?;
         if parsed.password().is_some() {
-            return Err(DATABASE_PASSWORD
-                .invalid("must be omitted when AUTH_DATABASE_URL contains a password"));
+            return Err(
+                password.invalid("must be omitted when its database URL contains a password")
+            );
         }
         let secret = SecretReference::parse(&reference)
             .and_then(|reference| reference.resolve())
             .map_err(|source| {
-                DATABASE_PASSWORD.error("must resolve through env://NAME or file://PATH", source)
+                password.error("must resolve through env://NAME or file://PATH", source)
             })?;
-        let password = secret
+        let text = secret
             .utf8()
-            .map_err(|source| DATABASE_PASSWORD.error("must contain UTF-8 text", source))?;
-        Ok(config.with_password(password.trim_end_matches('\n')))
+            .map_err(|source| password.error("must contain UTF-8 text", source))?
+            .trim_end_matches('\n');
+        Ok((config.with_password(text), Some(text.to_owned())))
     }
 
     /// Validates all service and application settings before startup.

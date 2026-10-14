@@ -43,8 +43,9 @@ piquel-web with Vite against an auth service on `http://localhost:3000`.
 
 | Variable | Meaning |
 | --- | --- |
-| `AUTH_DATABASE_URL` | PostgreSQL URL; TCP requires `sslmode=verify-full`, or an explicit `sslmode=disable` on a trusted private network; local Unix sockets are also supported |
-| `AUTH_DATABASE_PASSWORD` | Optional env/file reference for the database password, when omitted from the URL |
+| `AUTH_DATABASE_URL` | PostgreSQL URL the service connects with; TCP requires `sslmode=verify-full`, or an explicit `sslmode=disable` on a trusted private network; local Unix sockets are also supported |
+| `AUTH_DATABASE_PASSWORD` | Optional env/file reference for the database password, when omitted from the URL; required with `AUTH_DATABASE_OWNER_URL` |
+| `AUTH_DATABASE_OWNER_URL`, `AUTH_DATABASE_OWNER_PASSWORD` | Optional schema-owner connection for `migrate`, same rules as above. When set, `migrate` also makes the `AUTH_DATABASE_URL` user a restricted runtime role (see below); this needs PostgreSQL 17 or later and a superuser owner |
 | `AUTH_PUBLIC_BASE_URL` | Exact auth origin, normally `https://auth.piquel.fr` |
 | `AUTH_SETTINGS_URL` | Exact settings destination; defaults to `https://piquel.fr/settings` |
 | `AUTH_TRUSTED_PROXIES` | Optional comma-separated proxy peer IPs or CIDRs; these peers must overwrite `X-Forwarded-For` with one client IP. Defaults to piqueld's `PIQUELD_INGRESS_PROXIES` |
@@ -82,6 +83,30 @@ Apply migrations explicitly, then serve. Deployed images run the same
 just db migrate
 just serve
 ```
+
+Without `AUTH_DATABASE_OWNER_URL`, both connect as the `AUTH_DATABASE_URL` user,
+which must then own the schema. With it, `migrate` connects as the owner, applies
+migrations, then creates or updates the `AUTH_DATABASE_URL` user: a login role
+without superuser, role or database creation, given the `AUTH_DATABASE_PASSWORD`
+password and only row access to the tables. It cannot change the schema, disable
+triggers, rewrite the security audit log, read migration history, or create
+temporary tables or large objects, or take advisory locks. This needs PostgreSQL
+17 or later, and the owner must be a different role and a superuser (`migrate`
+checks both): only a superuser can set the role's attributes and revoke PUBLIC's
+defaults on built-in functions.
+
+Each run, `migrate` revokes everything granted to the role and resets its
+settings before granting again, so new tables are covered and changes made by
+hand are removed. It also resets the password, so changing
+`AUTH_DATABASE_PASSWORD` and running `migrate` rotates it. Sessions already open
+keep working, so after a leak also end them as the owner with
+`pg_terminate_backend`. It refuses, changing nothing, a role that belongs to
+another role or owns an object in this database or a shared one, or that still
+holds more than row access afterwards, e.g. through another role's grant. Other
+databases in the cluster are out of scope: by PostgreSQL's defaults the role may
+connect to them, e.g. `postgres`, but gains no meaningful privileges there;
+objects and settings it creates there are ignored. Revoke PUBLIC's `CONNECT` on
+them if you prefer.
 
 The schema intentionally replaces the throwaway prototype. Use a fresh database;
 there is no migration path for prototype account data.

@@ -31,6 +31,8 @@ dispatches to the pool or transaction and converts SQLx errors once. Dropping an
 unfinished `DatabaseTransaction` rolls it back.
 
 Every query is a checked SQLx macro: `query!`, `query_as!` or `query_scalar!`.
+The one exception is the runtime-role provisioning block (below), which builds
+role and grant statements at run time and runs through `raw_sql`.
 The compiler checks its SQL, column names, nullability and bind types against the
 schema recorded in `.sqlx/`. `query_as!` decodes straight into the public records,
 with type overrides for typed columns, e.g. `id AS "id: SessionId"`,
@@ -85,6 +87,52 @@ The schema starts with the initial migration, `migrations/0001_initial.sql`. The
 prototype schema is disposable and the release requires a fresh database. Released
 migrations are immutable; later schema changes go in new numbered files. Run
 migrations with `just db migrate` (`auth-service migrate` in deployed images); startup does not silently mutate the schema.
+
+Deployments separate the schema owner from the role the service runs as.
+`Database::grant_runtime_role`, run by `migrate` after the migrations as the
+owner, creates or updates a `RuntimeRole` (the service connection's user) as a
+plain login role with row access to every table. It skips `_sqlx_migrations` and
+leaves `security_audit_log` append-only. It needs PostgreSQL 17 or later and a
+superuser owner, and checks both first. The password reaches the block as a bind
+parameter, so a server logging every statement with its parameters records it;
+if setting it fails, the error carries only PostgreSQL's reason, not the statement.
+Errors put their guidance in the message, since `migrate` prints only that.
+
+A role that belongs to another role, or owns an object in this database (large
+objects included) or a shared object, is refused before any change, since revoking
+privileges cannot undo either. Objects it owns in other databases are ignored:
+PUBLIC may connect to those by default, so counting them would let the role block
+every later run, and they cannot reach the app database. Default privileges are
+ignored for the same reason: setting them needs no privilege, and they apply only
+to objects the role creates. The role then owns nothing, so `DROP OWNED BY` only
+revokes its privileges in the database and on shared objects such as parameters,
+and removes its default privileges. `ALTER ROLE … RESET ALL`, globally and in the
+database, clears settings such as `session_replication_role = replica`, which
+would skip triggers on every login. Then it grants exactly the set above, so new
+migrations need no grant statements and changes made by hand do not survive.
+PUBLIC, which every role inherits from, loses its default temporary tables, schema
+creation, table and sequence privileges, and `EXECUTE` on the large-object,
+server-file and advisory-lock functions in one list in the provisioning SQL. The
+service takes no advisory locks; the role could otherwise hold `migrate`'s locks
+and stall every deployment. SQLx's migrator takes one, so afterwards only a
+superuser can run migrations, which provisioning requires anyway.
+
+`DROP OWNED` revokes as the object owner, so grants made by another grantor survive
+it. Rather than chase them, provisioning finally checks the role's effective
+privileges on tables, sequences, the schema, the database and those functions,
+plus parameter grants and settings that apply to its logins in this database
+(its own global or app-database ones, or a database or cluster-wide
+`session_replication_role`), and rolls back with an error naming each check
+that found more than row access.
+Trigger functions run as the invoker, so the runtime role needs, and has, row
+access to the tables they maintain, such as `active_verified_email_ownership`;
+foreign-key checks run as the table owner.
+
+Every function must pin `SET search_path = pg_catalog, public, pg_temp`, which
+`0003_pin_function_search_path.sql` adds to the initial ones. Otherwise the
+caller's `search_path` applies, and it searches `pg_temp` first unless that is
+listed, so a temporary table could shadow a table the function reads. A database
+test fails for any function in the schema without it.
 
 Every five minutes the service drains expired ephemeral state in bounded batches,
 for up to one minute per pass.

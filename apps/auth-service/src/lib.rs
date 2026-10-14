@@ -18,7 +18,7 @@ mod security;
 /// Built-in public configuration, liveness and readiness.
 mod service;
 
-pub use config::{AuthConfig, PUBLIC_BASE_URL};
+pub use config::{AuthConfig, MigrationConfig, PUBLIC_BASE_URL};
 use federation::FederationApplication;
 use oidc::OidcApplication;
 use passkey::PasskeyApplication;

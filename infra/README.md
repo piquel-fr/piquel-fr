@@ -85,21 +85,53 @@ daemon's `[previews]` limits bound their CPU, memory and replicas.
 
 ## Database
 
-Each environment and preview has its own PostgreSQL 18 volume. Auth connects
+Each environment and preview has its own PostgreSQL 18 volume; the runtime role
+setup below needs 17 or later. Auth connects
 over TCP to `postgres:5432` on the application's private network, which ingress
 and other environments cannot reach, so the URL opts into plaintext with
 `sslmode=disable`; connections require SCRAM password authentication.
 
-The `migrate` job applies migrations before every rollout, once PostgreSQL is
-healthy. Environment volumes survive deletion. PostgreSQL major upgrades require
-an explicit data migration.
+Two roles use the database. `piquel` is the image's superuser: it owns the
+schema and only the `migrate` job connects as it. Auth serves as `piquel_auth`,
+which has no superuser, role or database creation rights, and only row access
+to the tables: it cannot change the schema, disable the email-ownership
+triggers, rewrite `security_audit_log` or run server programs.
+
+The `migrate` job runs before every rollout, once PostgreSQL is healthy. It
+applies migrations as `piquel`, then creates `piquel_auth` if missing, resets its
+attributes, password, privileges and settings, and grants it access to every table,
+including new ones. Fresh and existing volumes therefore converge on the same
+roles. If `piquel_auth` was made a member of another role, given an object in
+`piquel` or a shared one, or granted more than row access by another role,
+`migrate` fails without changes until that is undone. `piquel_auth` can still
+connect to the cluster's other databases (`postgres`, `template1`), where
+PostgreSQL's defaults give it no meaningful privileges; revoke PUBLIC's
+`CONNECT` there to prevent even that. piqueld
+jobs share their service's secrets, so the `auth` container also mounts the
+owner password for `migrate`; `serve` and `invite` never read it.
+
+Environment volumes survive deletion. PostgreSQL major upgrades require an
+explicit data migration.
 
 ## Auth
 
-piqueld generates `database-password` and `signing-key` for each environment and
-preview on its first deployment and never changes them;
+piqueld generates `database-password` (for `piquel`), `database-runtime-password`
+(for `piquel_auth`) and `signing-key` for each environment and preview on the
+first deployment that mounts them (for environments created before
+`piquel_auth`, the deployment that introduces it) and never changes them;
 `piquelctl env secret piquel-fr --env ENV regenerate NAME` rotates one. A new
-password does not change the one an existing database volume stores.
+`database-runtime-password` takes effect on the next deployment, when `migrate`
+sets it. Until the rollout replaces them, old replicas keep their open
+connections but cannot open new ones. Open sessions survive the change, so after
+a leak, end them once the rollout finishes:
+
+```sh
+piquelctl app exec piquel-fr postgres --env ENV -- psql -U piquel -d piquel -c \
+  "SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE usename = 'piquel_auth'"
+```
+
+The new replicas reconnect with the new password. A new `database-password` does
+not change the one an existing database volume stores.
 
 Staging and production require invitations:
 
