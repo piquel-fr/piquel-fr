@@ -10,9 +10,11 @@ use axum::{
     http::{HeaderMap, StatusCode, header},
 };
 use chrono::Utc;
-use piquel_auth_protocol::{SessionId, TokenId, UserId};
+use piquel_auth_protocol::{TokenId, UserId};
 use piquel_repository::{
-    AppendAuditEvent, InsertRefreshFamily, InsertRefreshToken, RefreshRotationError, StoredSession,
+    AppendAuditEvent, AuditAction, AuditMetadata, AuditOutcome, CodeRedemptionError,
+    ConsumedAuthorizationCode, DatabaseError, DatabaseTransaction, InsertRefreshFamily,
+    InsertRefreshToken, RefreshRotationError, StoredSession,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
@@ -180,7 +182,8 @@ impl OidcApplication {
     }
 
     /// Exchanges a one-use code for the authenticated client after checking its client,
-    /// redirect and PKCE binding.
+    /// redirect and PKCE binding. A replayed code has its refresh family revoked and
+    /// committed before the rejection.
     async fn exchange_code(
         &self,
         form: TokenForm,
@@ -194,17 +197,14 @@ impl OidcApplication {
         )?;
         let digest = self.token_digest(&opaque)?;
         let mut tx = self.database.begin().await?;
-        let code = tx
+        let code = match tx
             .oidc()
-            .consume_code(opaque.id, digest.as_bytes())
+            .consume_code(opaque.id, digest.as_bytes(), client_id)
             .await
-            .map_err(|error| {
-                OAuthError::database(
-                    error,
-                    OAuthCode::InvalidGrant,
-                    "code is unknown, expired or already used",
-                )
-            })?;
+        {
+            Ok(code) => code,
+            Err(error) => return Err(Self::code_rejection(tx, error).await),
+        };
         if code.client_id != client_id {
             return Err(OAuthCode::InvalidGrant.reject("code was issued to another client"));
         }
@@ -247,17 +247,7 @@ impl OidcApplication {
         }
         .issue(self, &user, &session, email.as_deref())?;
         let refresh = if client.allow_refresh && scopes.contains(Scope::OfflineAccess) {
-            Some(
-                self.create_refresh(
-                    &mut tx,
-                    code.user_id,
-                    code.session_id,
-                    client.id,
-                    code.audience,
-                    code.scopes,
-                )
-                .await?,
-            )
+            Some(self.create_refresh(&mut tx, code).await?)
         } else {
             None
         };
@@ -289,7 +279,7 @@ impl OidcApplication {
             .await
         {
             Ok(value) => value,
-            Err(error) => return Err(self.refresh_rejection(tx, error).await),
+            Err(error) => return Err(Self::refresh_rejection(tx, error).await),
         };
         if rotated.client_id != client_id {
             return Err(
@@ -331,19 +321,16 @@ impl OidcApplication {
         Ok(tokens)
     }
 
-    /// Creates a refresh family and first token bounded by the browser session lifetime.
+    /// Creates the refresh family of a redeemed code, linked to the code so a replay
+    /// can revoke it, and its first token bounded by the browser session lifetime.
     async fn create_refresh(
         &self,
-        tx: &mut piquel_repository::DatabaseTransaction<'_>,
-        user_id: UserId,
-        session_id: SessionId,
-        client_id: String,
-        audience: String,
-        scopes: Vec<String>,
+        tx: &mut DatabaseTransaction<'_>,
+        code: ConsumedAuthorizationCode,
     ) -> Result<String, OAuthError> {
         let session = tx
             .sessions()
-            .find_active_by_id(session_id)
+            .find_active_by_id(code.session_id)
             .await?
             .ok_or_else(|| OAuthCode::InvalidGrant.reject(SESSION_ENDED))?;
         let family_id = TokenId::new();
@@ -354,11 +341,12 @@ impl OidcApplication {
             .insert_family(
                 &InsertRefreshFamily {
                     id: family_id,
-                    user_id,
-                    client_id,
-                    session_id,
-                    audience,
-                    scopes,
+                    user_id: code.user_id,
+                    client_id: code.client_id,
+                    session_id: code.session_id,
+                    authorization_code_id: code.id,
+                    audience: code.audience,
+                    scopes: code.scopes,
                 },
                 &InsertRefreshToken {
                     id: opaque.id,
@@ -469,35 +457,19 @@ impl OidcApplication {
 
     /// Persists replay/policy rejection before returning the preserved rotation failure.
     async fn refresh_rejection(
-        &self,
-        mut tx: piquel_repository::DatabaseTransaction<'_>,
+        tx: DatabaseTransaction<'_>,
         error: RefreshRotationError,
     ) -> OAuthError {
-        use piquel_repository::{AuditAction, AuditMetadata, AuditOutcome};
         let (user_id, action) = match error {
             RefreshRotationError::Replay { user_id } => (user_id, AuditAction::RefreshReplay),
             RefreshRotationError::Policy { user_id } => {
                 (user_id, AuditAction::RefreshPolicyRejected)
             }
-            RefreshRotationError::Invalid => {
+            RefreshRotationError::Invalid | RefreshRotationError::Database(_) => {
                 return error.into();
             }
-            RefreshRotationError::Database(_) => return error.into(),
         };
-        let audit = async {
-            tx.audit_events()
-                .append(&AppendAuditEvent {
-                    id: TokenId::new(),
-                    user_id: Some(user_id),
-                    action,
-                    outcome: AuditOutcome::Rejected,
-                    request_metadata: AuditMetadata::default(),
-                })
-                .await?;
-            tx.commit().await
-        }
-        .await;
-        if let Err(source) = audit {
+        if let Err(source) = Self::commit_rejection(tx, user_id, action).await {
             return source.into();
         }
         if action == AuditAction::RefreshReplay {
@@ -508,6 +480,51 @@ impl OidcApplication {
         }
         error.into()
     }
+
+    /// Persists the family revocation of a replayed code before returning the
+    /// preserved redemption failure. Access tokens already issued from the code
+    /// cannot be revoked and simply expire.
+    ///
+    /// The browser session behind the code stays signed in: a leaked code exposes
+    /// the client's callback, not the session cookie, and anyone holding the code
+    /// could otherwise sign the user out of every application.
+    async fn code_rejection(tx: DatabaseTransaction<'_>, error: CodeRedemptionError) -> OAuthError {
+        let user_id = match error {
+            CodeRedemptionError::Replay { user_id } => user_id,
+            CodeRedemptionError::Invalid | CodeRedemptionError::Database(_) => {
+                return error.into();
+            }
+        };
+        if let Err(source) =
+            Self::commit_rejection(tx, user_id, AuditAction::AuthorizationCodeReplay).await
+        {
+            return source.into();
+        }
+        tracing::warn!(
+            event = CODE_REPLAY_EVENT,
+            "authorization code replay rejected"
+        );
+        error.into()
+    }
+
+    /// Commits the revocation a rejected grant already made in `tx`, together with
+    /// its rejected audit event.
+    async fn commit_rejection(
+        mut tx: DatabaseTransaction<'_>,
+        user_id: UserId,
+        action: AuditAction,
+    ) -> Result<(), DatabaseError> {
+        tx.audit_events()
+            .append(&AppendAuditEvent {
+                id: TokenId::new(),
+                user_id: Some(user_id),
+                action,
+                outcome: AuditOutcome::Rejected,
+                request_metadata: AuditMetadata::default(),
+            })
+            .await?;
+        tx.commit().await
+    }
 }
 
 /// Rejection of a grant whose account was disabled.
@@ -517,3 +534,5 @@ const SESSION_ENDED: &str = "the sign-in session behind this grant has ended";
 
 /// Stable telemetry event name for refresh-token replay rejection.
 const REFRESH_REPLAY_EVENT: &str = "auth.refresh_replay";
+/// Stable telemetry event name for authorization-code replay rejection.
+const CODE_REPLAY_EVENT: &str = "auth.code_replay";

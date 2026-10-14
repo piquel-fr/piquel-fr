@@ -261,6 +261,27 @@ impl From<SessionError> for OAuthError {
     }
 }
 
+impl From<piquel_repository::CodeRedemptionError> for OAuthError {
+    /// Redemption failures reject the grant; persistence failures retain their internal status.
+    fn from(error: piquel_repository::CodeRedemptionError) -> Self {
+        match error {
+            piquel_repository::CodeRedemptionError::Database(source) => source.into(),
+            error @ piquel_repository::CodeRedemptionError::Invalid => OAuthCode::InvalidGrant
+                .reject_with(
+                    "code is unknown or expired, or its client, account or sign-in session no \
+                     longer allows it",
+                    error,
+                ),
+            error @ piquel_repository::CodeRedemptionError::Replay { .. } => {
+                OAuthCode::InvalidGrant.reject_with(
+                    "code was already used, so any refresh tokens issued from it are revoked",
+                    error,
+                )
+            }
+        }
+    }
+}
+
 impl From<piquel_repository::RefreshRotationError> for OAuthError {
     /// Rotation failures reject the grant; persistence failures retain their internal status.
     fn from(error: piquel_repository::RefreshRotationError) -> Self {

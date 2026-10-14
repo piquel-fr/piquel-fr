@@ -3,7 +3,7 @@
 Typed PostgreSQL persistence for the authentication service. SQLx pools and SQL
 remain private; callers use repositories or a `DatabaseTransaction`.
 
-The schema is a single migration, `migrations/0001_initial.sql`. Each repository
+The schema lives in numbered, immutable files under `migrations/`. Each repository
 module in `src/repositories/` owns its methods and record types; `mod.rs` holds
 only shared plumbing. See [database architecture](../../docs/architecture/database-crate.md)
 for the layout and invariants. Run migrations through the single service binary:

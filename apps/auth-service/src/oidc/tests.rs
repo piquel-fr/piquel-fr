@@ -493,6 +493,57 @@ async fn confidential_refresh_rotation_logout_and_client_binding() {
     );
 }
 
+/// Replaying a redeemed code revokes the refresh family it produced, while the same
+/// code ID with a guessed secret revokes nothing.
+#[tokio::test]
+#[ignore = "requires TEST_DATABASE_URL"]
+async fn code_replay_revokes_its_refresh_family() {
+    let flow = Flow::new(true, true).await;
+    let code = flow.code(REFRESH_SCOPES).await;
+    let response = flow
+        .exchange(&code, Flow::verifier(), flow.basic.as_deref())
+        .await;
+    assert_eq!(response.status(), StatusCode::OK);
+    let tokens = Flow::json(response).await;
+    let guessed = OpaqueToken {
+        id: OpaqueToken::parse(TokenPrefix::AuthorizationCode, &code)
+            .expect("issued code parses")
+            .id,
+        ..OpaqueToken::new(TokenPrefix::AuthorizationCode).expect("random secret")
+    }
+    .encoded();
+    assert_eq!(
+        flow.exchange(&guessed, Flow::verifier(), flow.basic.as_deref())
+            .await
+            .status(),
+        StatusCode::BAD_REQUEST
+    );
+    let response = flow
+        .refresh(
+            tokens["refresh_token"]
+                .as_str()
+                .expect("token response contains a refresh token"),
+        )
+        .await;
+    assert_eq!(response.status(), StatusCode::OK, "a guess revokes nothing");
+    let rotated = Flow::json(response).await["refresh_token"]
+        .as_str()
+        .expect("refresh response contains the rotated token")
+        .to_owned();
+    let replay = flow
+        .exchange(&code, Flow::verifier(), flow.basic.as_deref())
+        .await;
+    assert_eq!(replay.status(), StatusCode::BAD_REQUEST);
+    assert_eq!(
+        Flow::json(replay).await["error"],
+        OAuthCode::InvalidGrant.as_str()
+    );
+    assert_eq!(
+        flow.refresh(&rotated).await.status(),
+        StatusCode::BAD_REQUEST
+    );
+}
+
 /// Checks that policy reductions reject new requests and invalidate outstanding grants,
 /// and that unsafe logout redirects are refused.
 #[tokio::test]

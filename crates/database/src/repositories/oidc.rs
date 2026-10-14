@@ -299,6 +299,8 @@ pub struct InsertAuthorizationCode {
 /// the client, redirect URI and PKCE verifier against it.
 #[derive(Clone, Debug)]
 pub struct ConsumedAuthorizationCode {
+    /// Code identifier, recorded on the refresh family the exchange creates.
+    pub id: TokenId,
     /// Client the code was issued to.
     pub client_id: String,
     /// Authorizing account.
@@ -315,6 +317,25 @@ pub struct ConsumedAuthorizationCode {
     pub scopes: Vec<String>,
     /// Granted token audience.
     pub audience: String,
+}
+
+/// Why [`OidcRepository::consume_code`] could not redeem a code.
+#[derive(Debug, thiserror::Error)]
+pub enum CodeRedemptionError {
+    /// The database failed.
+    #[error(transparent)]
+    Database(#[from] DatabaseError),
+    /// The code is unknown or expired, or its client, session or account no
+    /// longer allows it.
+    #[error("the authorization code is invalid")]
+    Invalid,
+    /// The code was already redeemed; any refresh families issued from it are
+    /// now revoked.
+    #[error("the authorization code was replayed")]
+    Replay {
+        /// Account whose grant was revoked.
+        user_id: UserId,
+    },
 }
 
 impl OidcRepository<'_> {
@@ -597,18 +618,30 @@ impl OidcRepository<'_> {
     /// Consumes an unexpired code once. The client's current policy must still
     /// allow it, and its session and account must still be active.
     ///
+    /// Redeeming an already consumed code with its secret, as the authenticated
+    /// `client_id` it was issued to, is a replay (RFC 6749 section 4.1.2): the
+    /// refresh families issued from the code are revoked in this transaction, which
+    /// the caller commits even though the exchange fails. The caller still checks
+    /// the returned code's client, so `client_id` only scopes replay detection.
+    ///
     /// # Errors
     ///
-    /// Returns [`DatabaseError::NotFound`] if no such code exists, or another
-    /// [`DatabaseError`] if the query fails.
+    /// Returns [`CodeRedemptionError::Replay`] after revoking the code's refresh
+    /// families, [`CodeRedemptionError::Invalid`] if the code is otherwise not
+    /// usable, or [`CodeRedemptionError::Database`] if a query fails.
     pub async fn consume_code(
         &mut self,
         id: TokenId,
         digest: &[u8],
-    ) -> Result<ConsumedAuthorizationCode, DatabaseError> {
-        run!(
+        client_id: &str,
+    ) -> Result<ConsumedAuthorizationCode, CodeRedemptionError> {
+        // If the code still looks redeemable, this update waits on a concurrent
+        // first redemption's row lock, then re-reads the row and skips it if that
+        // exchange committed. Otherwise it skips the row without waiting, and the
+        // replay lookup below waits instead.
+        let code = run!(
             self,
-            fetch_one,
+            fetch_optional,
             sqlx::query_as!(
                 ConsumedAuthorizationCode,
                 r#"UPDATE authorization_codes c
@@ -635,13 +668,73 @@ impl OidcRepository<'_> {
                 AND u.id = c.user_id
                 AND u.status = 'active'
                 RETURNING
-                    c.client_id, c.user_id AS "user_id: UserId",
+                    c.id AS "id: TokenId", c.client_id, c.user_id AS "user_id: UserId",
                     c.session_id AS "session_id: SessionId", c.redirect_uri, c.pkce_challenge,
                     c.nonce, c.scopes AS "scopes: JsonArray<String>", c.audience"#,
                 id.as_uuid(),
                 digest,
             )
-        )
+        )?;
+        match code {
+            Some(code) => Ok(code),
+            None => Err(
+                match self.revoke_replayed_code(id, digest, client_id).await? {
+                    Some(user_id) => CodeRedemptionError::Replay { user_id },
+                    None => CodeRedemptionError::Invalid,
+                },
+            ),
+        }
+    }
+
+    /// Revokes the refresh families issued from an already consumed code and
+    /// returns its account, or `None` if `id`, `digest` and `client_id` match no
+    /// consumed code. Matching the secret digest and client means neither a guessed
+    /// code ID nor a leaked code presented by another client can revoke a grant.
+    async fn revoke_replayed_code(
+        &mut self,
+        id: TokenId,
+        digest: &[u8],
+        client_id: &str,
+    ) -> Result<Option<UserId>, DatabaseError> {
+        // The row qualifies whether or not it is consumed, so FOR SHARE waits for
+        // an in-flight first redemption and then reads the committed row, together
+        // with its family. Filtering on `consumed_at` would test this statement's
+        // snapshot, where an uncommitted redemption is invisible, and skip the wait.
+        // The lock also stops cleanup from purging the code, and unlinking the
+        // family, before this transaction commits.
+        let Some(code) = run!(
+            self,
+            fetch_optional,
+            sqlx::query!(
+                r#"SELECT user_id AS "user_id: UserId", consumed_at IS NOT NULL AS "consumed!"
+                FROM authorization_codes
+                WHERE id = $1
+                AND secret_digest = $2
+                AND client_id = $3
+                FOR SHARE"#,
+                id.as_uuid(),
+                digest,
+                client_id,
+            )
+        )?
+        .filter(|code| code.consumed) else {
+            return Ok(None);
+        };
+        // A separate statement takes a fresh snapshot, which includes a family
+        // committed while the lock above waited. Only the family lock is taken, so
+        // this stays within the user -> session -> family order of rotation.
+        run!(
+            self,
+            execute,
+            sqlx::query!(
+                "UPDATE refresh_token_families
+                SET revoked_at = now()
+                WHERE authorization_code_id = $1
+                AND revoked_at IS NULL",
+                id.as_uuid(),
+            )
+        )?;
+        Ok(Some(code.user_id))
     }
 
     /// Reports whether the user already consented to all of `scopes` for this
