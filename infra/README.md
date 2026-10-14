@@ -5,11 +5,17 @@ application, `piquel-fr`: auth, the web settings frontend, and PostgreSQL. Its
 environments and previews share the manifest; variables give each its own
 hostnames.
 
-| Deployment | Source | Web | Auth | Reachable from |
-| --- | --- | --- | --- | --- |
-| `production` | promoted from staging | `piquel.fr` | `auth.piquel.fr` | internet |
-| `staging` | `main`, on every push | `staging.piquel.fr` | `auth.staging.piquel.fr` | tailnet |
-| previews | a branch or a local worktree | `<slug>.dev.piquel.fr` | `auth-<slug>.dev.piquel.fr` | tailnet |
+| Deployment | Source | Web | Auth | Redirects to web | Reachable from |
+| --- | --- | --- | --- | --- | --- |
+| `production` | promoted from staging | `piquel.fr` | `auth.piquel.fr` | `www.piquel.fr` | internet |
+| `staging` | `main`, on every push | `staging.piquel.fr` | `auth.staging.piquel.fr` | `www.staging.piquel.fr` | tailnet |
+| previews | a branch or a local worktree | `<slug>.dev.piquel.fr` | `auth-<slug>.dev.piquel.fr` | `www-<slug>.dev.piquel.fr` | tailnet |
+
+The `www` route is a permanent (308) redirect that the gateway answers itself,
+keeping the path and query: `www.piquel.fr/settings?x=1` goes to
+`piquel.fr/settings?x=1`. piqueld renders every route in every environment, so
+staging and previews get one too; their names fall under the existing wildcard
+records and certificates.
 
 Production never builds. It only receives releases that staging built and ran:
 the same images, never rebuilt. Promotion is refused unless staging's current
@@ -24,9 +30,11 @@ contain nothing environment-specific: per-environment values are runtime
   `piquel.fr`: private routes get DNS-01 certificates (`*.dev.piquel.fr` covers
   every preview).
 - DNS records for every hostname: `manage_records = true` on that provider, or by
-  hand: public hosts to the server, and `staging.piquel.fr`,
-  `*.staging.piquel.fr` and `*.dev.piquel.fr` to the apps node's tailnet
-  addresses.
+  hand: public hosts (`piquel.fr`, `auth.piquel.fr`, `www.piquel.fr`) to the
+  server, and `staging.piquel.fr`, `*.staging.piquel.fr` and `*.dev.piquel.fr`
+  to the apps node's tailnet addresses. Through the Cloudflare Tunnel, a public
+  host is a proxied CNAME to the tunnel; on ports 80/443, an A record, and Caddy
+  obtains its certificate over HTTP-01.
 - `ingress.webhook_hostname` for deploy-on-push.
 - `reconciliation.prepare_timeout_seconds = 1200` for cold Rust builds.
 

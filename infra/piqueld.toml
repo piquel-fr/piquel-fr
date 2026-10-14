@@ -24,6 +24,7 @@ invite_required = "true"
 [spec.environments.production.variables]
 web_host = "piquel.fr"
 auth_host = "auth.piquel.fr"
+www_host = "www.piquel.fr"
 
 [spec.environments.staging]
 visibility = "private"
@@ -31,6 +32,7 @@ visibility = "private"
 [spec.environments.staging.variables]
 web_host = "staging.piquel.fr"
 auth_host = "auth.staging.piquel.fr"
+www_host = "www.staging.piquel.fr"
 
 # Flat hostnames, so the `*.dev.piquel.fr` certificate covers every preview.
 # Preview databases start empty, so anyone on the tailnet may register.
@@ -40,6 +42,7 @@ visibility = "private"
 [spec.previews.variables]
 web_host = "${{ env.slug }}.dev.piquel.fr"
 auth_host = "auth-${{ env.slug }}.dev.piquel.fr"
+www_host = "www-${{ env.slug }}.dev.piquel.fr"
 invite_required = "false"
 
 [[spec.routes]]
@@ -54,6 +57,14 @@ name = "auth"
 hostname = "${{ vars.auth_host }}"
 service = "auth"
 port = 8080
+visibility = "public"
+
+# Routes cannot be limited to one environment, so staging and previews redirect
+# their own `www` name too. The gateway answers; path and query are kept.
+[[spec.routes]]
+name = "www"
+hostname = "${{ vars.www_host }}"
+redirect = { to = "https://${{ vars.web_host }}", status = 308, preserve_path = true }
 visibility = "public"
 
 [[spec.secrets]]
