@@ -225,6 +225,15 @@ impl Flow {
         )
         .expect("Location header contains an absolute URL")
     }
+    /// Reads a redirect back to the client, which must name this issuer in `iss` (RFC 9207).
+    fn client_redirect(&self, response: &Response) -> Url {
+        self.issued(Self::location(response))
+    }
+    /// Returns an authorization response URL after checking its `iss`.
+    fn issued(&self, url: Url) -> Url {
+        assert_eq!(Self::parameter(&url, "iss"), self.app.issuer);
+        url
+    }
     /// Extracts a required query parameter from a protocol redirect.
     fn parameter(url: &Url, name: &str) -> String {
         url.query_pairs()
@@ -265,7 +274,7 @@ impl Flow {
             )
             .expect("decision redirect is a valid URL");
         }
-        Self::parameter(&location, "code")
+        Self::parameter(&self.issued(location), "code")
     }
     /// Exchanges a scenario code with the requested verifier and client credentials.
     async fn exchange(&self, code: &str, verifier: &str, basic: Option<&str>) -> Response {
@@ -308,7 +317,7 @@ async fn public_consent_pkce_claim_scoping_and_replay() {
         .authorize(Scope::OpenId.as_str(), Some(Prompt::None.as_str()))
         .await;
     assert_eq!(
-        Flow::parameter(&Flow::location(&response), "error"),
+        Flow::parameter(&flow.client_redirect(&response), "error"),
         OAuthCode::ConsentRequired.as_str()
     );
     let code = flow.code(Scope::OpenId.as_str()).await;
@@ -341,7 +350,7 @@ async fn public_consent_pkce_claim_scoping_and_replay() {
         .authorize(Scope::OpenId.as_str(), Some(Prompt::None.as_str()))
         .await;
     assert!(
-        Flow::location(&response)
+        flow.client_redirect(&response)
             .query_pairs()
             .any(|(name, _)| name == "code")
     );
@@ -349,7 +358,7 @@ async fn public_consent_pkce_claim_scoping_and_replay() {
         .authorize(EMAIL_SCOPES, Some(Prompt::None.as_str()))
         .await;
     assert_eq!(
-        Flow::parameter(&Flow::location(&response), "error"),
+        Flow::parameter(&flow.client_redirect(&response), "error"),
         OAuthCode::ConsentRequired.as_str()
     );
     let response = flow
@@ -482,7 +491,7 @@ async fn confidential_refresh_rotation_logout_and_client_binding() {
     );
     assert_eq!(
         Flow::parameter(
-            &Flow::location(
+            &flow.client_redirect(
                 &flow
                     .authorize(Scope::OpenId.as_str(), Some(Prompt::None.as_str()))
                     .await
@@ -516,7 +525,7 @@ async fn policy_reduction_blocks_outstanding_codes_and_refresh() {
     );
     assert_eq!(
         Flow::parameter(
-            &Flow::location(&flow.authorize(EMAIL_SCOPES, None).await),
+            &flow.client_redirect(&flow.authorize(EMAIL_SCOPES, None).await),
             "error"
         ),
         OAuthCode::InvalidScope.as_str()
@@ -571,7 +580,10 @@ async fn authorization_hints_bind_initial_resumed_and_consent_requests() {
             &[("id_token_hint", &hint)],
         )
         .await;
-    assert_ne!(Flow::parameter(&Flow::location(&response), "code"), "");
+    assert_ne!(
+        Flow::parameter(&flow.client_redirect(&response), "code"),
+        ""
+    );
     for (field, value) in [
         ("iss", json!("https://foreign.example")),
         ("aud", json!("other-client")),
@@ -592,7 +604,7 @@ async fn authorization_hints_bind_initial_resumed_and_consent_requests() {
             )
             .await;
         assert_eq!(
-            Flow::parameter(&Flow::location(&response), "error"),
+            Flow::parameter(&flow.client_redirect(&response), "error"),
             OAuthCode::InvalidRequest.as_str()
         );
     }
@@ -612,7 +624,7 @@ async fn authorization_hints_bind_initial_resumed_and_consent_requests() {
         )
         .await;
     assert_eq!(
-        Flow::parameter(&Flow::location(&response), "error"),
+        Flow::parameter(&flow.client_redirect(&response), "error"),
         OAuthCode::LoginRequired.as_str()
     );
     let response = flow
@@ -682,7 +694,7 @@ async fn post_protocol_endpoints_and_error_contracts() {
             )
             .await;
         assert_eq!(
-            Flow::parameter(&Flow::location(&response), "error"),
+            Flow::parameter(&flow.client_redirect(&response), "error"),
             expected
         );
     }
@@ -693,10 +705,14 @@ async fn post_protocol_endpoints_and_error_contracts() {
     .await;
     assert_eq!(discovery["request_parameter_supported"], false);
     assert_eq!(discovery["request_uri_parameter_supported"], false);
+    assert_eq!(
+        discovery["authorization_response_iss_parameter_supported"],
+        true
+    );
     let response = flow
         .authorize_with(Method::POST, PROFILE_SCOPES, None, &[])
         .await;
-    let code = Flow::parameter(&Flow::location(&response), "code");
+    let code = Flow::parameter(&flow.client_redirect(&response), "code");
     let tokens = Flow::json(flow.exchange(&code, Flow::verifier(), None).await).await;
     let bearer = format!(
         "{} {}",

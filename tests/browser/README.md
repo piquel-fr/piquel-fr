@@ -14,9 +14,10 @@ with the preview web origin's `/callback` in `redirect_uris`, `/settings` in
 `trusted: false`. Previews do not configure this client by default. The callback
 is a test destination; the suite captures its code before exchanging it.
 
-The suite checks consent, a browser PKCE exchange, an actual
-ID-token signature using JWKS and WebCrypto, userinfo CORS, code replay rejection,
-and a subsequent `prompt=none` request using remembered consent. Passkey-only
+The suite checks consent, the `iss` on each authorization response, a browser
+PKCE exchange, an actual ID-token signature using JWKS and WebCrypto, userinfo
+CORS, code replay rejection, and a subsequent `prompt=none` request using
+remembered consent. Passkey-only
 accounts must not acquire email claims.
 
 `CHROMIUM_EXECUTABLE` can select an existing Chromium installation.
