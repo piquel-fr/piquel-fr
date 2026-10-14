@@ -18,6 +18,7 @@ generated secrets, and URLs.
 | --- | --- |
 | web (settings) | `https://<slug>.dev.piquel.fr` |
 | auth | `https://auth-<slug>.dev.piquel.fr` |
+| www (redirects to web) | `https://www-<slug>.dev.piquel.fr` |
 
 URLs are private: they work from devices on the tailnet, including this machine
 and the user's devices, and nowhere else. Each preview's database starts empty
