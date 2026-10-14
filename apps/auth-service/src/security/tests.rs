@@ -1,6 +1,7 @@
 //! Focused persistence and security contract tests.
 
 use super::*;
+use crate::routes::federation;
 use axum::{Router, body::Body, http::Request as HttpRequest, middleware, routing::any};
 use piquel_crypto::Secret;
 use piquel_repository::DatabaseConfig;
@@ -50,6 +51,7 @@ impl SecurityFixture {
             "/oauth/revoke",
             "/oidc/userinfo",
             "/oidc/logout",
+            "/session",
         ] {
             router = router.route(path, any(|| async { StatusCode::ACCEPTED }));
         }
@@ -418,6 +420,33 @@ async fn rate_budgets_are_separate_and_unknown_paths_do_not_consume_them() {
         StatusCode::ACCEPTED
     );
 }
+/// Reads spend their budget and then get a retry delay, without draining other budgets.
+#[tokio::test]
+#[ignore = "requires TEST_DATABASE_URL"]
+async fn reads_exhaust_their_own_budget() {
+    let fixture = SecurityFixture::new().await;
+    for _ in 0..REQUESTS_PER_MINUTE {
+        assert_eq!(
+            fixture
+                .request(Method::GET, "/oidc/userinfo", None, false)
+                .await
+                .status(),
+            StatusCode::ACCEPTED
+        );
+    }
+    let response = fixture
+        .request(Method::GET, "/oidc/userinfo", None, false)
+        .await;
+    assert_eq!(response.status(), StatusCode::TOO_MANY_REQUESTS);
+    assert_eq!(response.headers()[header::RETRY_AFTER], RETRY_AFTER_SECONDS);
+    assert_eq!(
+        fixture
+            .request(Method::GET, "/session", None, false)
+            .await
+            .status(),
+        StatusCode::ACCEPTED
+    );
+}
 /// A trusted proxy shares each budget by forwarded client IP rather than ingress IP.
 #[tokio::test]
 #[ignore = "requires TEST_DATABASE_URL"]
@@ -463,37 +492,45 @@ async fn trusted_proxy_clients_have_independent_budgets() {
     }
 }
 
-/// Browser mutation proof and independent request categories follow each endpoint's policy.
+/// Every route that verifies a token or queries the database has a budget, reads
+/// included; only in-memory discovery and health probes are free.
 #[test]
-fn endpoint_policy_requires_browser_proof_and_selects_independent_budgets() {
-    for (endpoint, protocol, read_budget, mutation_budget) in [
-        (
-            Endpoint::OAuthBackChannel,
-            true,
-            Some(RateCategory::Token),
-            RateCategory::Token,
-        ),
-        (Endpoint::UserInfo, true, None, RateCategory::Login),
-        (Endpoint::Discovery, false, None, RateCategory::Login),
-        (
-            Endpoint::Authorize,
-            true,
-            Some(RateCategory::Login),
-            RateCategory::Login,
-        ),
-        (Endpoint::Logout, true, None, RateCategory::Login),
-        (Endpoint::Account, false, None, RateCategory::Account),
-        (
-            Endpoint::Login,
-            false,
-            Some(RateCategory::Login),
-            RateCategory::Login,
-        ),
-        (Endpoint::Other, false, None, RateCategory::Login),
+fn routes_doing_real_work_have_budgets() {
+    for (path, budget) in [
+        (service::LIVE, None),
+        (service::READY, None),
+        (oidc::DISCOVERY, None),
+        (oidc::JWKS, None),
+        (oidc::TOKEN, Some(RateCategory::Token)),
+        (oidc::USERINFO, Some(RateCategory::UserInfo)),
+        (oidc::LOGOUT, Some(RateCategory::Login)),
+        (oidc::AUTHORIZE, Some(RateCategory::Login)),
+        (oidc::AUTHORIZE_RESUME, Some(RateCategory::Login)),
+        ("/oauth/authorize/transaction/1", Some(RateCategory::Login)),
+        (passkey::SESSION, Some(RateCategory::Account)),
+        (passkey::LIST, Some(RateCategory::Account)),
+        (federation::IDENTITIES, Some(RateCategory::Account)),
+        (federation::PENDING, Some(RateCategory::Login)),
+    ] {
+        assert_eq!(Endpoint::classify(path).rate_category(), budget, "{path}");
+    }
+}
+
+/// Browser origin and mutation proof are required everywhere except protocol endpoints.
+#[test]
+fn endpoint_policy_requires_browser_proof_outside_protocol_endpoints() {
+    for (endpoint, protocol) in [
+        (Endpoint::OAuthBackChannel, true),
+        (Endpoint::UserInfo, true),
+        (Endpoint::Discovery, false),
+        (Endpoint::Health, false),
+        (Endpoint::Authorize, true),
+        (Endpoint::Logout, true),
+        (Endpoint::Account, false),
+        (Endpoint::Login, false),
+        (Endpoint::Other, false),
     ] {
         assert_eq!(endpoint.is_protocol(), protocol);
-        assert_eq!(endpoint.rate_category(false), read_budget);
-        assert_eq!(endpoint.rate_category(true), Some(mutation_budget));
         let anonymous = HeaderMap::new();
         let mut browser = HeaderMap::new();
         browser.insert(

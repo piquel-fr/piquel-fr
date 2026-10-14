@@ -156,7 +156,7 @@ client and scope; explicitly trusted clients bypass consent.
   bound to the initiating browser. Auth cookies are host-only, Secure and HttpOnly.
   Mutations require an exact allowed origin and CSRF header; OIDC back-channel
   endpoints instead validate their protocol credentials.
-- Request throttling and expiring-state cleanup use PostgreSQL. Throttling uses separate login, token and account budgets per client IP.
+- Request throttling and expiring-state cleanup use PostgreSQL. Throttling uses separate login, token, userinfo and account budgets per client IP, and covers every API route except health probes and discovery.
   By default it uses the direct peer IP; only peers in `AUTH_TRUSTED_PROXIES`
   may supply a single overwritten `X-Forwarded-For`. Configure this when terminating TLS
   at a reverse proxy so users do not share the proxy’s budget. Untrusted headers

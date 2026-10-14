@@ -356,8 +356,10 @@ enum Endpoint {
     OAuthBackChannel,
     /// Bearer-authenticated `UserInfo`.
     UserInfo,
-    /// Public discovery and signing keys.
+    /// Public discovery and signing keys, served from memory.
     Discovery,
+    /// Liveness and readiness probes polled by the orchestrator.
+    Health,
     /// Authorization requests, including cross-site form navigation.
     Authorize,
     /// RP-initiated logout, validated by its own hint and same-origin checks.
@@ -377,6 +379,7 @@ impl Endpoint {
             oidc::TOKEN | oidc::REVOKE => Self::OAuthBackChannel,
             oidc::USERINFO => Self::UserInfo,
             oidc::DISCOVERY | oidc::JWKS => Self::Discovery,
+            service::LIVE | service::READY => Self::Health,
             oidc::AUTHORIZE => Self::Authorize,
             oidc::LOGOUT => Self::Logout,
             service::CONFIG | passkey::SESSION | passkey::SESSION_LOGOUT => Self::Account,
@@ -390,31 +393,38 @@ impl Endpoint {
     const fn is_protocol(self) -> bool {
         match self {
             Self::OAuthBackChannel | Self::UserInfo | Self::Authorize | Self::Logout => true,
-            Self::Discovery | Self::Account | Self::Login | Self::Other => false,
+            Self::Discovery | Self::Health | Self::Account | Self::Login | Self::Other => false,
         }
     }
 
-    /// Selects a request budget. Safe reads only count on login flows and the token endpoint.
-    fn rate_category(self, mutation: bool) -> Option<RateCategory> {
+    /// Selects the budget of a matched route, reads included: they verify token
+    /// signatures or hold a connection from the small database pool. Only routes that
+    /// do neither are free. Discovery is served from memory and cacheable, and a
+    /// throttled health probe would take the service out of rotation; readiness costs
+    /// one `SELECT 1`, no more than the budget's own upsert would.
+    const fn rate_category(self) -> Option<RateCategory> {
         match self {
             Self::OAuthBackChannel => Some(RateCategory::Token),
-            Self::Login | Self::Authorize => Some(RateCategory::Login),
-            Self::Account => mutation.then_some(RateCategory::Account),
-            Self::UserInfo | Self::Discovery | Self::Logout | Self::Other => {
-                mutation.then_some(RateCategory::Login)
-            }
+            Self::UserInfo => Some(RateCategory::UserInfo),
+            Self::Account => Some(RateCategory::Account),
+            Self::Login | Self::Authorize | Self::Logout | Self::Other => Some(RateCategory::Login),
+            Self::Discovery | Self::Health => None,
         }
     }
 }
 
 piquel_common::str_enum! {
-    /// Independent request budgets persisted under stable category names.
+    /// Independent request budgets persisted under stable category names, so one kind of
+    /// traffic from a client cannot exhaust another: a relying party's `UserInfo` calls
+    /// never block its code exchanges, and settings reads never block a sign-in.
     enum RateCategory {
         /// OAuth credential exchanges and revocation.
         Token = "token",
-        /// Settings mutations.
+        /// Bearer-token claim lookups by relying parties.
+        UserInfo = "userinfo",
+        /// Settings and browser-session reads and mutations.
         Account = "account",
-        /// Login navigation and other mutations.
+        /// Sign-in, authorization, logout and the other auth-origin routes.
         Login = "login",
     }
 }
@@ -627,7 +637,7 @@ impl HttpSecurity {
         Self::check_browser(endpoint, request.headers(), allowed, mutation)?;
         // Unknown paths have no `MatchedPath`: they never consume a budget or need peer metadata.
         if request.extensions().get::<MatchedPath>().is_some()
-            && let Some(category) = endpoint.rate_category(mutation)
+            && let Some(category) = endpoint.rate_category()
         {
             let bucket =
                 Digest::sha256(format!("{category}:{}", self.client_ip(&request)?).as_bytes());
