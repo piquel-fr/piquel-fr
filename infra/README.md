@@ -127,18 +127,22 @@ holding a lock on the role makes `migrate` fail after 10 seconds. So after a
 leak, regenerate the secret, lock the role out and end its sessions, then deploy;
 `migrate` restores its login with the new password. A reconnecting session can
 hold the role's row again, so each attempt gives up after a second and the loop
-retries until `NOLOGIN` commits:
+retries until `NOLOGIN` commits. A connection can pass the login check just before
+it and still be starting, with no user name yet, so the final sweep also ends
+those (any client's), waits for each and fails if one survives:
 
 ```sh
 piquelctl env secret piquel-fr --env ENV regenerate database-runtime-password
 owner_sql() { piquelctl app exec piquel-fr postgres --env ENV -- psql -U piquel -d piquel -v ON_ERROR_STOP=1 "$@"; }
 end="SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE usename = 'piquel_auth'"
 until owner_sql -c "SET lock_timeout = '1s'" -c "$end" -c "ALTER ROLE piquel_auth NOLOGIN"; do sleep 1; done
-owner_sql -c "$end"
+owner_sql -c "DO \$\$ BEGIN IF NOT coalesce((SELECT bool_and(pg_terminate_backend(pid, 5000))
+  FROM pg_stat_activity WHERE usename = 'piquel_auth' OR backend_type = 'client backend' AND usename IS NULL),
+  true) THEN RAISE EXCEPTION 'a session survived; run this again'; END IF; END \$\$"
 ```
 
 Auth is unavailable until the new replicas start. Whenever `migrate` times out
-waiting for a lock, run the last three lines again. A new `database-password`
+waiting for a lock, run the last four lines again. A new `database-password`
 does not change the one an existing database volume stores.
 
 Staging and production require invitations:

@@ -100,7 +100,8 @@ seconds, so a session holding a lock on the role, e.g. its own open
 password never reaches the server: `RuntimeRole` hashes it into a SCRAM-SHA-256
 verifier (`piquel_crypto::ScramVerifier`), which `ALTER ROLE … PASSWORD` stores
 as is. Statements in errors, lock-wait logs or parameter logs, including ones
-from a terminated backend, which no handler can intercept, show only the verifier.
+from a terminated backend, which no handler can intercept, show only the verifier,
+which is still sensitive: with a captured SCRAM exchange it can authenticate.
 Errors put their guidance in the message, since `migrate` prints only that.
 
 A role that belongs to another role, or owns an object in this database (large

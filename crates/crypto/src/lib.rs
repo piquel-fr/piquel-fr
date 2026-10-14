@@ -70,14 +70,17 @@ pub enum CryptoError {
     /// The PKCE verifier does not match its challenge.
     #[error("PKCE S256 challenge does not match the verifier")]
     PkceMismatch,
-    /// SCRAM verifiers are only computed for ASCII passwords; see [`ScramVerifier`].
-    #[error("database passwords must be ASCII")]
+    /// SCRAM verifiers are only computed for nonempty ASCII passwords without
+    /// NUL; see [`ScramVerifier`].
+    #[error("database passwords must be nonempty ASCII without NUL bytes")]
     ScramPassword,
 }
 
 /// A PostgreSQL SCRAM-SHA-256 password verifier. `ALTER ROLE … PASSWORD` stores
 /// one as is, so the password itself never reaches the server, its logs or its
-/// error messages. The verifier only allows an offline guess of the password.
+/// error messages. The verifier is still sensitive authentication material:
+/// with a captured SCRAM exchange it lets an attacker authenticate as the role
+/// (RFC 5802, section 9), and it allows offline guessing of the password.
 pub struct ScramVerifier(String);
 impl ScramVerifier {
     /// Hashes `password` with a random salt, as PostgreSQL would.
@@ -95,9 +98,11 @@ impl ScramVerifier {
     /// Builds `SCRAM-SHA-256$<iterations>:<salt>$<StoredKey>:<ServerKey>` (RFC
     /// 5802). PostgreSQL first applies `SASLprep`, which leaves ASCII unchanged
     /// except control characters, and it hashes the raw bytes of those. Skipping
-    /// it is therefore exact for ASCII, and other passwords are rejected.
+    /// it is therefore exact for ASCII, and other passwords are rejected. So are
+    /// empty passwords, which PostgreSQL silently clears instead of storing, and
+    /// NUL bytes, which clients stop hashing at.
     fn with_salt(password: &str, salt: &[u8]) -> Result<Self, CryptoError> {
-        if !password.is_ascii() {
+        if password.is_empty() || !password.is_ascii() || password.contains('\0') {
             return Err(CryptoError::ScramPassword);
         }
         let mut salted = [0; SECRET_BYTES];
