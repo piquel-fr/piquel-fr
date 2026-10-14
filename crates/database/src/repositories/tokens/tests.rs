@@ -268,41 +268,84 @@ async fn replay_revokes_family_despite_invalid_scopes() {
 }
 
 /// A replay racing the first redemption waits for it, then revokes the family
-/// that redemption committed.
+/// that redemption committed. While the code still looks redeemable the replay's
+/// consuming update waits; once the client drops the code's redirect URI that
+/// update skips the row without waiting, so the replay lookup must wait instead.
 #[tokio::test]
 #[ignore = "requires a disposable TEST_DATABASE_URL"]
 async fn code_replay_waits_for_first_redemption_and_revokes_its_family() {
     let pool = Database::test_pool().await;
+    for redeemable in [true, false] {
+        let client = client(&pool).await;
+        let grant = Grant::new(&pool, &client).await;
+        let mut first = DatabaseTransaction::new(pool.begin().await.expect("first redemption"));
+        first
+            .oidc()
+            .consume_code(grant.code, &grant.code_digest, &client)
+            .await
+            .expect("first redemption");
+        let (token, digest) = grant.family(&mut first.tokens(), &client).await;
+        if !redeemable {
+            sqlx::query("DELETE FROM oidc_redirect_uris WHERE client_id = $1")
+                .bind(&client)
+                .execute(&pool)
+                .await
+                .expect("remove redirect URI");
+        }
+        let mut replay = DatabaseTransaction::new(pool.begin().await.expect("replay"));
+        let replay_backend = backend(&mut replay.inner).await;
+        let (code, code_digest, replay_client) =
+            (grant.code, grant.code_digest.clone(), client.clone());
+        let replay_task = tokio::spawn(async move {
+            let result = replay
+                .oidc()
+                .consume_code(code, &code_digest, &replay_client)
+                .await;
+            replay.commit().await.expect("commit replay");
+            result
+        });
+        wait_for_lock(&pool, replay_backend).await;
+        first.commit().await.expect("commit first redemption");
+        let result = replay_task.await.expect("replay task");
+        assert!(
+            matches!(result, Err(CodeRedemptionError::Replay { user_id }) if user_id == grant.user),
+            "redeemable {redeemable}: {result:?}"
+        );
+        let mut rotation = pool.begin().await.expect("rotation transaction");
+        let result = TokenRepository::from_connection(&mut rotation)
+            .consume_for_rotation(token, &digest, &client)
+            .await;
+        assert!(
+            matches!(result, Err(RefreshRotationError::Invalid)),
+            "redeemable {redeemable}: {result:?}"
+        );
+    }
+}
+
+/// A redeemed code presented by another client is invalid and revokes nothing.
+#[tokio::test]
+#[ignore = "requires a disposable TEST_DATABASE_URL"]
+async fn code_replay_by_another_client_revokes_nothing() {
+    let pool = Database::test_pool().await;
     let client = client(&pool).await;
     let grant = Grant::new(&pool, &client).await;
-    let mut first = DatabaseTransaction::new(pool.begin().await.expect("first redemption"));
-    first
-        .oidc()
-        .consume_code(grant.code, &grant.code_digest)
+    let mut oidc = OidcRepository::from_pool(&pool);
+    oidc.consume_code(grant.code, &grant.code_digest, &client)
         .await
         .expect("first redemption");
-    let (token, digest) = grant.family(&mut first.tokens(), &client).await;
-    let mut replay = DatabaseTransaction::new(pool.begin().await.expect("replay"));
-    let replay_backend = backend(&mut replay.inner).await;
-    let (code, code_digest) = (grant.code, grant.code_digest.clone());
-    let replay_task = tokio::spawn(async move {
-        let result = replay.oidc().consume_code(code, &code_digest).await;
-        replay.commit().await.expect("commit replay");
-        result
-    });
-    wait_for_lock(&pool, replay_backend).await;
-    first.commit().await.expect("commit first redemption");
-    let result = replay_task.await.expect("replay task");
+    let (token, digest) = grant
+        .family(&mut TokenRepository::from_pool(&pool), &client)
+        .await;
+    let result = oidc
+        .consume_code(grant.code, &grant.code_digest, "another-client")
+        .await;
     assert!(
-        matches!(result, Err(CodeRedemptionError::Replay { user_id }) if user_id == grant.user),
+        matches!(result, Err(CodeRedemptionError::Invalid)),
         "{result:?}"
     );
     let mut rotation = pool.begin().await.expect("rotation transaction");
-    let result = TokenRepository::from_connection(&mut rotation)
+    TokenRepository::from_connection(&mut rotation)
         .consume_for_rotation(token, &digest, &client)
-        .await;
-    assert!(
-        matches!(result, Err(RefreshRotationError::Invalid)),
-        "{result:?}"
-    );
+        .await
+        .expect("the family still rotates");
 }

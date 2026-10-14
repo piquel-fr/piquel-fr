@@ -274,7 +274,7 @@ impl From<piquel_repository::CodeRedemptionError> for OAuthError {
                 ),
             error @ piquel_repository::CodeRedemptionError::Replay { .. } => {
                 OAuthCode::InvalidGrant.reject_with(
-                    "code was already used, so the refresh tokens issued from it are now revoked",
+                    "code was already used, so any refresh tokens issued from it are revoked",
                     error,
                 )
             }

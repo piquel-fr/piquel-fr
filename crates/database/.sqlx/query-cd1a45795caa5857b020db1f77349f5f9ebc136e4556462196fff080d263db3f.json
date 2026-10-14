@@ -1,0 +1,30 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT user_id AS \"user_id: UserId\", consumed_at IS NOT NULL AS \"consumed!\"\n                FROM authorization_codes\n                WHERE id = $1\n                AND secret_digest = $2\n                AND client_id = $3\n                FOR SHARE",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "user_id: UserId",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "consumed!",
+        "type_info": "Bool"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Bytea",
+        "Text"
+      ]
+    },
+    "nullable": [
+      false,
+      null
+    ]
+  },
+  "hash": "cd1a45795caa5857b020db1f77349f5f9ebc136e4556462196fff080d263db3f"
+}

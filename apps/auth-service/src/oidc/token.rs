@@ -197,7 +197,11 @@ impl OidcApplication {
         )?;
         let digest = self.token_digest(&opaque)?;
         let mut tx = self.database.begin().await?;
-        let code = match tx.oidc().consume_code(opaque.id, digest.as_bytes()).await {
+        let code = match tx
+            .oidc()
+            .consume_code(opaque.id, digest.as_bytes(), client_id)
+            .await
+        {
             Ok(code) => code,
             Err(error) => return Err(Self::code_rejection(tx, error).await),
         };

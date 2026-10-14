@@ -75,15 +75,15 @@ Important invariants:
   Refresh tokens rotate transactionally, remain bound to their client/session,
   and reuse revokes the family.
 - Each refresh family records the code it was redeemed from. Redeeming that code
-  again with its secret revokes the family and audits the replay; a wrong secret
-  revokes nothing. The browser session stays signed in. Cleanup keeps a redeemed
-  code for at least a day, and for as long as a family it produced is unrevoked
-  and its session live, so a replay is detected while it could still revoke tokens.
+  again with its secret, as the same client, revokes the family and audits the
+  replay; a wrong secret or client revokes nothing. The browser session stays
+  signed in. Cleanup keeps a redeemed code for at least a day, and for as long as
+  a family it produced is unrevoked and its session live, so a replay is detected
+  while it could still revoke tokens.
 
-The schema starts from `migrations/0001_initial.sql`, which replaces the
-throwaway prototype: deployments start from a fresh database, with no migration
-path for prototype data. Released migrations are immutable; later schema changes
-go in new numbered files, such as `0002_refresh_family_authorization_code.sql`. Run
+The schema starts with the initial migration, `migrations/0001_initial.sql`. The
+prototype schema is disposable and the release requires a fresh database. Released
+migrations are immutable; later schema changes go in new numbered files. Run
 migrations with `just db migrate` (`auth-service migrate` in deployed images); startup does not silently mutate the schema.
 
 Every five minutes the service drains expired ephemeral state in bounded batches,

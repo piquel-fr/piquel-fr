@@ -329,7 +329,7 @@ pub enum CodeRedemptionError {
     /// longer allows it.
     #[error("the authorization code is invalid")]
     Invalid,
-    /// The code was already redeemed; the refresh families issued from it are
+    /// The code was already redeemed; any refresh families issued from it are
     /// now revoked.
     #[error("the authorization code was replayed")]
     Replay {
@@ -618,9 +618,11 @@ impl OidcRepository<'_> {
     /// Consumes an unexpired code once. The client's current policy must still
     /// allow it, and its session and account must still be active.
     ///
-    /// Redeeming an already consumed code with its secret is a replay (RFC 6749
-    /// section 4.1.2): the refresh families issued from the code are revoked in
-    /// this transaction, which the caller commits even though the exchange fails.
+    /// Redeeming an already consumed code with its secret, as the authenticated
+    /// `client_id` it was issued to, is a replay (RFC 6749 section 4.1.2): the
+    /// refresh families issued from the code are revoked in this transaction, which
+    /// the caller commits even though the exchange fails. The caller still checks
+    /// the returned code's client, so `client_id` only scopes replay detection.
     ///
     /// # Errors
     ///
@@ -631,9 +633,12 @@ impl OidcRepository<'_> {
         &mut self,
         id: TokenId,
         digest: &[u8],
+        client_id: &str,
     ) -> Result<ConsumedAuthorizationCode, CodeRedemptionError> {
-        // A concurrent first redemption holds the row lock until it ends; this
-        // update then re-reads the row and skips it if that exchange committed.
+        // If the code still looks redeemable, this update waits on a concurrent
+        // first redemption's row lock, then re-reads the row and skips it if that
+        // exchange committed. Otherwise it skips the row without waiting, and the
+        // replay lookup below waits instead.
         let code = run!(
             self,
             fetch_optional,
@@ -672,41 +677,47 @@ impl OidcRepository<'_> {
         )?;
         match code {
             Some(code) => Ok(code),
-            None => Err(match self.revoke_replayed_code(id, digest).await? {
-                Some(user_id) => CodeRedemptionError::Replay { user_id },
-                None => CodeRedemptionError::Invalid,
-            }),
+            None => Err(
+                match self.revoke_replayed_code(id, digest, client_id).await? {
+                    Some(user_id) => CodeRedemptionError::Replay { user_id },
+                    None => CodeRedemptionError::Invalid,
+                },
+            ),
         }
     }
 
     /// Revokes the refresh families issued from an already consumed code and
-    /// returns its account, or `None` if `id` and `digest` match no consumed code.
-    /// Matching the secret digest means a guessed code ID cannot revoke anyone's
-    /// grant.
+    /// returns its account, or `None` if `id`, `digest` and `client_id` match no
+    /// consumed code. Matching the secret digest and client means neither a guessed
+    /// code ID nor a leaked code presented by another client can revoke a grant.
     async fn revoke_replayed_code(
         &mut self,
         id: TokenId,
         digest: &[u8],
+        client_id: &str,
     ) -> Result<Option<UserId>, DatabaseError> {
-        // FOR SHARE waits for an in-flight first redemption, so `consumed_at` is
-        // only seen once that exchange committed, together with its family. The
-        // lock also stops cleanup from purging the code, and unlinking the family,
-        // before this transaction commits.
-        let Some(user_id) = run!(
+        // The row qualifies whether or not it is consumed, so FOR SHARE waits for
+        // an in-flight first redemption and then reads the committed row, together
+        // with its family. Filtering on `consumed_at` would test this statement's
+        // snapshot, where an uncommitted redemption is invisible, and skip the wait.
+        // The lock also stops cleanup from purging the code, and unlinking the
+        // family, before this transaction commits.
+        let Some(code) = run!(
             self,
             fetch_optional,
-            sqlx::query_scalar!(
-                r#"SELECT user_id AS "user_id: UserId"
+            sqlx::query!(
+                r#"SELECT user_id AS "user_id: UserId", consumed_at IS NOT NULL AS "consumed!"
                 FROM authorization_codes
                 WHERE id = $1
                 AND secret_digest = $2
-                AND consumed_at IS NOT NULL
+                AND client_id = $3
                 FOR SHARE"#,
                 id.as_uuid(),
                 digest,
+                client_id,
             )
         )?
-        else {
+        .filter(|code| code.consumed) else {
             return Ok(None);
         };
         // A separate statement takes a fresh snapshot, which includes a family
@@ -723,7 +734,7 @@ impl OidcRepository<'_> {
                 id.as_uuid(),
             )
         )?;
-        Ok(Some(user_id))
+        Ok(Some(code.user_id))
     }
 
     /// Reports whether the user already consented to all of `scopes` for this

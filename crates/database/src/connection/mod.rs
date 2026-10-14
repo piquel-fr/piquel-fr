@@ -288,6 +288,8 @@ impl Database {
             // unrevoked family it produced whose session is live (refresh tokens expire
             // with the session). The first day after redemption is kept regardless, so
             // replays are still audited even for codes that produced no refresh family.
+            // Retained codes are rechecked on every pass, so this scan grows with
+            // every redeemed code past its first day, not only with purgeable ones.
             "DELETE FROM authorization_codes c
             WHERE c.ctid IN (
                 SELECT code.ctid
