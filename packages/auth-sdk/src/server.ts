@@ -39,8 +39,11 @@ export class AuthOrigin {
   /**
    * Exposes the origin as `locals.authOrigin` and adds security headers to every page
    * and endpoint response. The page's own CSP allows any HTTPS `connect-src`, since
-   * the build serves every environment; browsers enforce both policies.
-   * SvelteKit's trailing-slash redirects and built assets bypass hooks.
+   * the build serves every environment; browsers enforce both policies. Framing is
+   * forbidden because other piquel.fr sites, previews included, are the same site,
+   * so `SameSite=Lax` cookies reach their frames. Only a header can set
+   * `frame-ancestors`. SvelteKit's trailing-slash redirects and built assets bypass
+   * hooks.
    */
   readonly handle: Handle = async ({ event, resolve }) => {
     event.locals.authOrigin = this.value;
@@ -48,9 +51,15 @@ export class AuthOrigin {
     // `Response.redirect()` or a proxied `fetch()`.
     const resolved = await resolve(event);
     const response = new Response(resolved.body, resolved);
-    response.headers.append('content-security-policy', `connect-src 'self' ${this.value}`);
+    response.headers.append(
+      'content-security-policy',
+      `frame-ancestors 'none'; connect-src 'self' ${this.value}`
+    );
+    response.headers.set('x-frame-options', 'DENY');
     response.headers.set('x-content-type-options', 'nosniff');
     response.headers.set('referrer-policy', 'strict-origin-when-cross-origin');
+    // Ingress sets no HSTS, so the server does, as the auth service does.
+    response.headers.set('strict-transport-security', 'max-age=31536000');
     if (response.headers.get('content-type')?.startsWith('text/html'))
       response.headers.set('cache-control', 'no-store');
     return response;

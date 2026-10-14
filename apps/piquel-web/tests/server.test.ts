@@ -46,11 +46,13 @@ void test('every response carries the auth origin and security headers', async (
       const headers = response.headers;
       assert.match(
         headers.get('content-security-policy') ?? '',
-        new RegExp(`(^|, )connect-src 'self' ${authOrigin}$`),
+        new RegExp(`(^|, )frame-ancestors 'none'; connect-src 'self' ${authOrigin}$`),
         path
       );
+      assert.equal(headers.get('x-frame-options'), 'DENY', path);
       assert.equal(headers.get('x-content-type-options'), 'nosniff', path);
       assert.equal(headers.get('referrer-policy'), 'strict-origin-when-cross-origin', path);
+      assert.equal(headers.get('strict-transport-security'), 'max-age=31536000', path);
       const html = headers.get('content-type')?.startsWith('text/html') ?? false;
       assert.equal(headers.get('cache-control'), html ? 'no-store' : null, path);
       if (path === '/settings') assert.match(await response.text(), /authOrigin:"https:\/\/auth/);
