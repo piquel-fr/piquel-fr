@@ -52,7 +52,7 @@ pub(super) enum PasskeyError {
     GooglePasswordManagerRequiresAndroid,
     /// `WebAuthn` rejected the challenge, credential or authenticator options.
     #[error("WebAuthn operation rejected")]
-    Webauthn(#[from] WebauthnError),
+    Webauthn(#[source] WebauthnError),
     /// A discoverable credential returned an invalid account handle.
     #[error("invalid discoverable account handle")]
     InvalidUserHandle(#[source] InvalidValue),
@@ -68,11 +68,14 @@ pub(super) enum PasskeyError {
     /// The latest stored signature counter is absent or malformed.
     #[error("stored passkey counter is missing")]
     MissingCounter,
-    /// A counter-capable authenticator reused or decreased its counter.
+    /// A counter-capable authenticator reused or decreased its counter, compared with
+    /// the ceremony's credential snapshot or the latest stored value. Only a holder of
+    /// the credential, or of a copy, can cause this, so it is audited against the account.
     #[error("passkey signature counter did not increase")]
     CounterRegression,
-    /// The verified credential does not match the stored passkey.
-    #[error("verified passkey credential mismatch")]
+    /// The stored credential's ID differs from the row it was looked up by, so the
+    /// stored passkey is corrupt.
+    #[error("stored passkey credential does not match its ID")]
     CredentialMismatch,
     /// The credential was revoked before its authentication update.
     #[error("passkey credential revoked")]
@@ -173,15 +176,13 @@ impl From<PasskeyError> for ApiError {
                 "This passkey's signature counter went backwards, which can mean it was copied. \
                  Use another passkey.",
             ),
-            error @ PasskeyError::CredentialMismatch => {
-                error.rejected("This passkey does not match its stored credential.")
-            }
             error @ PasskeyError::CredentialRevoked => {
                 error.rejected("This passkey was removed from your account.")
             }
             PasskeyError::Database(error) => error.into(),
             PasskeyError::Session(error) => error.into(),
             error @ (PasskeyError::MissingCounter
+            | PasskeyError::CredentialMismatch
             | PasskeyError::StoredCredential(_)
             | PasskeyError::StoredCeremony(_)
             | PasskeyError::Serialization(_)
@@ -193,10 +194,25 @@ impl From<PasskeyError> for ApiError {
 
 impl PasskeyError {
     /// Rejects a passkey ceremony with `message`. The reason is logged at debug level:
-    /// browsers trigger these, and the Display holds no challenge or credential.
+    /// any browser can trigger these up to the rate limit, so a higher level would let
+    /// it flood the logs. A [`CounterRegression`](Self::CounterRegression) is also
+    /// audited and logged as a warning. The Display holds no challenge or credential.
     fn rejected(&self, message: impl Into<Cow<'static, str>>) -> ApiError {
         tracing::debug!(error = %piquel_common::ErrorChain(self), "WebAuthn request rejected");
         ApiError::bad_request(message)
+    }
+}
+
+impl From<WebauthnError> for PasskeyError {
+    /// webauthn-rs compares the counter with the ceremony's credential snapshot only
+    /// after the signature verified, so its possible-compromise verdict is the same
+    /// [`CounterRegression`](Self::CounterRegression) as the locked recheck. Its other
+    /// errors, user verification included, can precede the signature check.
+    fn from(error: WebauthnError) -> Self {
+        match error {
+            WebauthnError::CredentialPossibleCompromise => Self::CounterRegression,
+            error => Self::Webauthn(error),
+        }
     }
 }
 

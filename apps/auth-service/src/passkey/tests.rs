@@ -7,7 +7,7 @@ use axum::{
 };
 use chrono::{Duration, Utc};
 use piquel_crypto::Secret;
-use piquel_repository::{DatabaseConfig, PendingFederation};
+use piquel_repository::{AuditOutcome, DatabaseConfig, PendingFederation};
 use serde_json::json;
 use tower::ServiceExt;
 use url::Url;
@@ -270,6 +270,15 @@ impl Fixture {
         assert_eq!(response.status(), StatusCode::NO_CONTENT);
         Self::cookie(&response)
     }
+    /// Lists the seeded account's audit actions and outcomes, newest first.
+    async fn audit(&self) -> Vec<(AuditAction, AuditOutcome)> {
+        self.app
+            .database
+            .audit_events()
+            .list_for_user(self.user_id)
+            .await
+            .expect("audit log")
+    }
     /// Registers a new account with a fresh software credential; returns the finish response.
     async fn register(&self, cookies: &str, body: Value) -> Response {
         let (started, browser) = self.start("/webauthn/register/start", cookies, body).await;
@@ -352,7 +361,8 @@ async fn registration_attaches_a_pending_social_signup_only_when_it_names_it() {
     }
 }
 
-/// Checks counter ordering under concurrent ceremony snapshots and prevents replay.
+/// Checks counter ordering under concurrent ceremony snapshots, audits the regression
+/// and prevents replay.
 #[tokio::test]
 #[ignore = "requires TEST_DATABASE_URL"]
 async fn overlapping_assertions_reject_old_counter_after_new_counter_commits() {
@@ -416,6 +426,66 @@ async fn overlapping_assertions_reject_old_counter_after_new_counter_commits() {
     assert_eq!(
         keys[0].credential.pointer(CREDENTIAL_COUNTER_POINTER),
         Some(&json!(2))
+    );
+    assert_eq!(
+        fixture.audit().await,
+        [
+            (
+                AuditAction::PasskeyCounterRegression,
+                AuditOutcome::Rejected
+            ),
+            (AuditAction::PasskeyLogin, AuditOutcome::Success),
+        ],
+        "the regression outlives its rolled-back authentication transaction; the replay is not audited"
+    );
+}
+
+/// A copy of a passkey that signs behind the stored counter is rejected by `WebAuthn`'s
+/// snapshot check, and the rejection is audited like the locked check.
+#[tokio::test]
+#[ignore = "requires TEST_DATABASE_URL"]
+async fn lagging_counter_copy_is_rejected_and_audited() {
+    let mut fixture = Fixture::new().await;
+    // Simulate the original authenticator having signed far ahead of this copy.
+    let mut passkeys = fixture.app.database.passkeys();
+    let mut key = passkeys
+        .list_active(fixture.user_id)
+        .await
+        .expect("keys")
+        .remove(0);
+    *key.credential
+        .pointer_mut(CREDENTIAL_COUNTER_POINTER)
+        .expect("counter") = json!(100);
+    assert!(
+        passkeys
+            .update_after_authentication(&key.credential_id, &key.credential)
+            .await
+            .expect("advanced counter")
+    );
+    let (started, browser) = fixture
+        .start(
+            "/webauthn/authenticate/start",
+            "",
+            json!({"username":fixture.username}),
+        )
+        .await;
+    let assertion = fixture.assertion(&started);
+    let response = fixture
+        .request(
+            "/webauthn/authenticate/finish",
+            Method::POST,
+            &browser,
+            json!({"ceremony_id":started["ceremony_id"],"credential":assertion}),
+        )
+        .await;
+    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+    assert!(response.headers().get(header::SET_COOKIE).is_none());
+    assert_eq!(
+        fixture.audit().await,
+        [(
+            AuditAction::PasskeyCounterRegression,
+            AuditOutcome::Rejected
+        )]
     );
 }
 

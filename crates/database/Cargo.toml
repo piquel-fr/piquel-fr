@@ -17,5 +17,9 @@ tokio.workspace = true
 url.workspace = true
 uuid.workspace = true
 
+[features]
+# Read-only helpers that let other crates' tests observe stored state.
+test-support = []
+
 [lints]
 workspace = true

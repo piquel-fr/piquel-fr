@@ -14,10 +14,11 @@ test *ARGS:
 prepare:
     @just db scratch just db _prepare
 
-# Test targets are included so a checked query in a test is cached too.
+# Test targets and the `test-support` feature are included so checked queries
+# compiled only for tests are cached too.
 [positional-arguments]
 _prepare *ARGS:
-    @cd crates/database && cargo sqlx prepare "$@" -- --all-targets
+    @cd crates/database && cargo sqlx prepare "$@" -- --all-targets --all-features
 
 # DATABASE_URL, TEST_DATABASE_URL and libpq's PG* variables point at the cluster,
 # which listens only on a socket under /tmp (socket paths are limited to about 100

@@ -31,6 +31,7 @@ webauthn-rs.workspace = true
 webauthn-rs-proto.workspace = true
 
 [dev-dependencies]
+piquel-repository = { workspace = true, features = ["test-support"] }
 tower.workspace = true
 webauthn-authenticator-rs = { version = "0.5.5", features = ["softpasskey"] }
 

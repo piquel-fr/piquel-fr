@@ -65,6 +65,8 @@ const RELYING_PARTY_NAME: &str = "Piquel";
 const ANDROID_USER_AGENT: &str = "Android";
 /// Signature counter location in webauthn-rs's serialized passkey representation.
 const CREDENTIAL_COUNTER_POINTER: &str = "/cred/counter";
+/// Stable telemetry event name for a signature counter regression, a sign of a copied passkey.
+const COUNTER_REGRESSION_EVENT: &str = "auth.passkey_counter_regression";
 
 impl PasskeyApplication {
     /// Builds `WebAuthn` from the already validated origin and admission policy.
@@ -274,6 +276,45 @@ impl PasskeyApplication {
         Ok(())
     }
 
+    /// Takes `WebAuthn`'s verdict on an assertion for `user_id` and, once the latest
+    /// credential state also accepts it, opens the transaction that completes the
+    /// authentication. The ceremony was already consumed. A
+    /// [`PasskeyError::CounterRegression`] rolls this transaction back, then commits
+    /// its audit entry on the pool so the record outlives the rejection.
+    async fn accept_credential(
+        &self,
+        user_id: UserId,
+        verified: Result<AuthenticationResult, WebauthnError>,
+    ) -> Result<DatabaseTransaction<'_>, PasskeyError> {
+        let (error, tx) = match verified {
+            Ok(result) => {
+                let mut tx = self.database.begin().await?;
+                match Self::update_credential(&mut tx, user_id, &result).await {
+                    Ok(()) => return Ok(tx),
+                    Err(error) => (error, Some(tx)),
+                }
+            }
+            Err(error) => (error.into(), None),
+        };
+        let PasskeyError::CounterRegression = error else {
+            return Err(error);
+        };
+        // Logged first so the signal survives a database failure.
+        tracing::warn!(
+            event = COUNTER_REGRESSION_EVENT,
+            %user_id,
+            "passkey signature counter regression rejected"
+        );
+        if let Some(tx) = tx {
+            tx.rollback().await?;
+        }
+        self.database
+            .audit_events()
+            .record_rejection(user_id, AuditAction::PasskeyCounterRegression)
+            .await?;
+        Err(error)
+    }
+
     /// Locks account and session authorization in the same order as credential changes.
     async fn lock_management(
         tx: &mut DatabaseTransaction<'_>,
@@ -457,15 +498,14 @@ impl PasskeyApplication {
         headers: HeaderMap,
         Json(input): Json<AuthenticationFinish>,
     ) -> Result<Response, ApiError> {
-        let (user_id, result) = match app
+        let (user_id, verified) = match app
             .consume::<AuthenticationCeremony>(&headers, input.ceremony_id)
             .await?
         {
             AuthenticationCeremony::Login(LoginCeremony { user_id, state }) => (
                 user_id,
                 app.webauthn
-                    .finish_passkey_authentication(&input.credential, &state)
-                    .map_err(PasskeyError::Webauthn)?,
+                    .finish_passkey_authentication(&input.credential, &state),
             ),
             AuthenticationCeremony::Decoy => return Err(PasskeyError::AccountUnavailable.into()),
             AuthenticationCeremony::Discover(DiscoverCeremony { state }) => {
@@ -482,14 +522,15 @@ impl PasskeyApplication {
                     .collect();
                 (
                     user_id,
-                    app.webauthn
-                        .finish_discoverable_authentication(&input.credential, state, &keys)
-                        .map_err(PasskeyError::Webauthn)?,
+                    app.webauthn.finish_discoverable_authentication(
+                        &input.credential,
+                        state,
+                        &keys,
+                    ),
                 )
             }
         };
-        let mut tx = app.database.begin().await?;
-        Self::update_credential(&mut tx, user_id, &result).await?;
+        let tx = app.accept_credential(user_id, verified).await?;
         Ok(Self::complete_sign_in(tx, user_id, AuditAction::PasskeyLogin).await?)
     }
 
@@ -533,12 +574,10 @@ impl PasskeyApplication {
         if session.user_id != user_id || session.id != session_id {
             return Err(PasskeyError::SessionChanged.into());
         }
-        let result = app
+        let verified = app
             .webauthn
-            .finish_passkey_authentication(&input.credential, &state)
-            .map_err(PasskeyError::Webauthn)?;
-        let mut tx = app.database.begin().await?;
-        Self::update_credential(&mut tx, user_id, &result).await?;
+            .finish_passkey_authentication(&input.credential, &state);
+        let mut tx = app.accept_credential(user_id, verified).await?;
         let expires = tx.sessions().grant_management(session_id).await?;
         tx.audit_events()
             .record(user_id, AuditAction::SettingsUnlock, None)

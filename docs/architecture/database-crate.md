@@ -11,7 +11,9 @@ enabled only here, lets IDs decode from `UUID` columns (rejecting anything but
 `UUIDv7`) and vocabularies from `TEXT` columns. Cryptographic material
 is generated and hashed in `piquel-crypto`; the repository persists its digests.
 Ceremony kinds, audit actions/outcomes and OIDC redirect kinds are typed storage
-vocabulary. Successful account operations use `audit_events().record`.
+vocabulary. Successful account operations use `audit_events().record`; rejections
+that implicate an account, such as refresh replay or a passkey counter regression,
+use `audit_events().record_rejection`.
 
 `DatabaseConfig` rejects zero pool bounds, ambiguous TLS/socket options and host
 overrides with actionable `DatabaseConnectionError` variants. TCP requires
@@ -89,5 +91,6 @@ migrations with `just db migrate` (`auth-service migrate` in deployed images); s
 Every five minutes the service drains expired ephemeral state in bounded batches,
 for up to one minute per pass.
 Security audit history is retained. Tests that use `TEST_DATABASE_URL` are explicitly
-marked ignored by the ordinary unit test runner. `just db test` runs them in a
+marked ignored by the ordinary unit test runner; other crates' tests read stored state
+through helpers behind the `test-support` feature. `just db test` runs them in a
 throwaway PostgreSQL cluster, or against an explicit, disposable `TEST_DATABASE_URL`.
