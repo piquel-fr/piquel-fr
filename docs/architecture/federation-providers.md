@@ -23,7 +23,9 @@ Pick how the provider proves identity:
 
 - **`OpenID` Connect** (like Google): take the identity only from a signed ID token.
   Verify its signature against the provider's published keys, then its issuer,
-  exclusive audience, nonce and expiry.
+  exclusive audience, nonce and expiry. Cache the keys rather than fetching them on
+  every sign-in: `GoogleProtocol` keeps them for the response's `max-age`, refetches
+  once when a token names an unknown key, and fetches at most once a minute.
 - **OAuth only** (like GitHub): fetch the profile with the access token.
 
 Either way, the subject must be the provider's stable account ID, never an email.
