@@ -279,8 +279,8 @@ impl PasskeyApplication {
     /// Takes `WebAuthn`'s verdict on an assertion for `user_id` and, once the latest
     /// credential state also accepts it, opens the transaction that completes the
     /// authentication. The ceremony was already consumed. A
-    /// [`PasskeyError::CounterRegression`] rolls this transaction back, then commits
-    /// its audit entry on the pool so the record outlives the rejection.
+    /// [`PasskeyError::CounterRegression`] rolls back any transaction it opened, then
+    /// commits its audit entry on the pool so the record outlives the rejection.
     async fn accept_credential(
         &self,
         user_id: UserId,
@@ -305,8 +305,15 @@ impl PasskeyApplication {
             %user_id,
             "passkey signature counter regression rejected"
         );
-        if let Some(tx) = tx {
-            tx.rollback().await?;
+        // A failed rollback is only logged: the audit entry matters more, and a broken
+        // connection releases its locks anyway.
+        if let Some(tx) = tx
+            && let Err(rollback) = tx.rollback().await
+        {
+            tracing::error!(
+                error = %piquel_common::ErrorChain(&rollback),
+                "passkey authentication rollback failed"
+            );
         }
         self.database
             .audit_events()
@@ -406,7 +413,7 @@ impl PasskeyApplication {
         let key = app
             .webauthn
             .finish_passkey_registration(&input.credential, &state)
-            .map_err(PasskeyError::Webauthn)?;
+            .map_err(PasskeyError::from)?;
         let mut tx = app.database.begin().await?;
         if app.invite_required
             && !tx
@@ -470,7 +477,7 @@ impl PasskeyApplication {
                 let (mut challenge, state) = app
                     .webauthn
                     .start_passkey_authentication(&Self::decode(keys)?)
-                    .map_err(PasskeyError::Webauthn)?;
+                    .map_err(PasskeyError::from)?;
                 let ceremony = if let Some(user_id) = user_id {
                     Ceremony::Login(LoginCeremony { user_id, state })
                 } else {
@@ -485,7 +492,7 @@ impl PasskeyApplication {
                 let (mut challenge, state) = app
                     .webauthn
                     .start_discoverable_authentication()
-                    .map_err(PasskeyError::Webauthn)?;
+                    .map_err(PasskeyError::from)?;
                 challenge.mediation = None;
                 (Ceremony::Discover(DiscoverCeremony { state }), challenge)
             };
@@ -512,7 +519,7 @@ impl PasskeyApplication {
                 let (uuid, _) = app
                     .webauthn
                     .identify_discoverable_authentication(&input.credential)
-                    .map_err(PasskeyError::Webauthn)?;
+                    .map_err(PasskeyError::from)?;
                 let user_id = UserId::from_uuid(uuid).map_err(PasskeyError::InvalidUserHandle)?;
                 let keys: Vec<DiscoverableKey> = app
                     .keys(user_id)
@@ -543,7 +550,7 @@ impl PasskeyApplication {
         let (challenge, state) = app
             .webauthn
             .start_passkey_authentication(&app.keys(session.user_id).await?)
-            .map_err(PasskeyError::Webauthn)?;
+            .map_err(PasskeyError::from)?;
         Ok(app
             .start(
                 &headers,
@@ -654,7 +661,7 @@ impl PasskeyApplication {
         let key = app
             .webauthn
             .finish_passkey_registration(&input.credential, &state)
-            .map_err(PasskeyError::Webauthn)?;
+            .map_err(PasskeyError::from)?;
         let mut tx = app.database.begin().await?;
         Self::lock_management(&mut tx, &session).await?;
         Self::insert_passkey(&mut tx, user_id, key, friendly_name).await?;

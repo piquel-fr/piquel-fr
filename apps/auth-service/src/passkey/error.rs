@@ -194,9 +194,10 @@ impl From<PasskeyError> for ApiError {
 
 impl PasskeyError {
     /// Rejects a passkey ceremony with `message`. The reason is logged at debug level:
-    /// any browser can trigger these up to the rate limit, so a higher level would let
-    /// it flood the logs. A [`CounterRegression`](Self::CounterRegression) is also
-    /// audited and logged as a warning. The Display holds no challenge or credential.
+    /// any browser can trigger most of these up to the rate limit, so a higher level
+    /// would let it flood the logs. Only a credential holder can cause a
+    /// [`CounterRegression`](Self::CounterRegression), so it is also audited and logged
+    /// as a warning. The Display holds no challenge or credential.
     fn rejected(&self, message: impl Into<Cow<'static, str>>) -> ApiError {
         tracing::debug!(error = %piquel_common::ErrorChain(self), "WebAuthn request rejected");
         ApiError::bad_request(message)
