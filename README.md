@@ -181,6 +181,10 @@ Use individual recipes while iterating:
 | Static frontends / embedded debug binary / release binary | `just build-web` / `just build-debug` / `just build` |
 | Run with caller-provided auth configuration | `just serve`, `just migrate`, `just invite --expires-in 7d` |
 
+CI runs these recipes on every pull request whose changes they can affect,
+including the database and browser tests, and on every push to `main`.
+Require its `ci` check: it summarizes the others.
+
 Web code is formatted by Prettier and linted by type-aware ESLint (typescript-eslint
 `strictTypeChecked`), configured once at the repository root.
 `just --list` shows every recipe. Test recipes forward extra arguments to nextest

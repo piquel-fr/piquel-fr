@@ -1,6 +1,7 @@
 The browser suite uses the real auth binary and PostgreSQL, with Chromium's virtual
 WebAuthn authenticator. It does not intercept or mock API responses. Use an isolated
-database: tests create accounts and credentials.
+database: tests create accounts and credentials. CI runs it against the embedded
+production build, as configured below.
 
 Run `just preview` to build and deploy this checkout over HTTPS on piqueld.
 Set `E2E_AUTH_URL` and `E2E_SETTINGS_URL` to the printed auth origin and web
