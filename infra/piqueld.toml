@@ -1,7 +1,8 @@
 #:schema https://raw.githubusercontent.com/piquel-fr/piqueld/main/docs/application-manifest.schema.json
-# piquel.fr on piqueld. Staging builds `main` on every push, production only
-# receives releases promoted from staging, and previews deploy branches or local
-# worktrees. See infra/README.md.
+# piquel.fr on piqueld. The environments below are the application's only ones:
+# staging builds `main` on every push, production only receives releases
+# promoted from staging, and previews deploy branches or local worktrees. See
+# infra/README.md.
 api_version = "piqueld.dev/v1alpha1"
 kind = "Application"
 
@@ -21,12 +22,16 @@ branch = "main"
 [spec.variables]
 invite_required = "true"
 
+[spec.environments.production]
+promote_from = "staging"
+
 [spec.environments.production.variables]
 web_host = "piquel.fr"
 auth_host = "auth.piquel.fr"
 www_host = "www.piquel.fr"
 
 [spec.environments.staging]
+sync = true
 visibility = "private"
 
 [spec.environments.staging.variables]

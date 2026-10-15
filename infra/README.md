@@ -25,7 +25,8 @@ contain nothing environment-specific: per-environment values are runtime
 
 ## Daemon requirements
 
-- piqueld with in-container HTTP probes and local previews (`main` after #219).
+- piqueld with in-container HTTP probes, local previews and manifest-declared
+  environments (`main` after #233).
 - Managed ingress with the private apps node, and a DNS provider for
   `piquel.fr`: private routes get DNS-01 certificates (`*.dev.piquel.fr` covers
   every preview).
@@ -40,24 +41,23 @@ contain nothing environment-specific: per-environment values are runtime
 
 ## Setup
 
+The manifest declares both environments and where each deploys from: staging
+follows pushes to `main` (`sync = true`), production is `promote_from =
+"staging"`. Saving it creates them, or converts an existing application's, and
+every later save or push to `main` keeps them in line; edit the manifest rather
+than running `piquelctl env create`, `env source` or `env sync`.
+
 Once, after this manifest is on `main`:
 
 ```sh
-piquelctl app apply --file infra/piqueld.toml --yes
-piquelctl env create piquel-fr staging --branch main --yes
-piquelctl env source piquel-fr production --promote-from staging --yes
-piquelctl env sync piquel-fr staging on
+piquelctl --timeout 30m app apply --file infra/piqueld.toml --deploy --yes   # deploys staging
 piquelctl app repository webhook rotate piquel-fr   # prints the secret once
 piquelctl app repository webhook show piquel-fr     # prints the payload URL
 ```
 
 Add a GitHub webhook to this repository with that URL and secret,
-`application/json`, and the `push` event. Then deploy staging once; it follows
-`main` from then on:
-
-```sh
-piquelctl --timeout 30m env deploy piquel-fr staging --yes
-```
+`application/json`, and the `push` event. Staging follows `main` from then on;
+production waits for its first promotion.
 
 ## Releasing
 
