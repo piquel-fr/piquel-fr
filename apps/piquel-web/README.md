@@ -1,7 +1,7 @@
 The piquel.fr SvelteKit server. Today it serves account settings at `/` and
 `/settings`, and `GET /healthz` for piqueld.
 
-It runs on Node with `@sveltejs/adapter-node`: `just build-settings-web`
+It runs on Node with `@sveltejs/adapter-node`: `just web build-settings`
 produces `build/`, which `AUTH_ORIGIN=https://auth.piquel.fr node build` serves
 on port 3000 (`PORT` changes it). adapter-node bundles `devDependencies` into
 `build/` and leaves `dependencies` external, so every dependency belongs in
@@ -21,7 +21,7 @@ runs, so they do not get these headers.
 
 `just dev` runs Vite against an auth service at `http://localhost:3000`; set
 `AUTH_ORIGIN` to use another. In development, loopback `http://` origins are
-accepted too. `just test-web` builds the server and checks its headers and
+accepted too. `just web test` builds the server and checks its headers and
 startup validation.
 
 Settings call the public auth API with credentialed requests and a CSRF header.
@@ -29,7 +29,7 @@ The auth service must allow this exact settings origin and configure its complet
 settings URL. All WebAuthn operations redirect to the auth origin; the two-minute
 management authorization remains in PostgreSQL and is checked by the API.
 This frontend never stores access or refresh tokens. It uses the shared
-`packages/auth-sdk` SDK; `just fmt-web`, `just lint-web` and `just check-web`
+`packages/auth-sdk` SDK; `just web fmt`, `just web lint` and `just web check`
 format, lint and type-check all web code.
 
 For validation with the real Rust service, see `tests/browser/README.md`.

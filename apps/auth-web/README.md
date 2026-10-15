@@ -1,4 +1,4 @@
-Static SvelteKit pages for the authentication origin. `just build-auth-web`
+Static SvelteKit pages for the authentication origin. `just web build-auth`
 produces `build/`, which the Rust auth-service build embeds into its executable.
 Node is needed only to build these assets.
 
@@ -20,5 +20,5 @@ never made automatically.
 SvelteKit emits per-page CSP hashes in HTML. The Rust service adds frame-ancestor
 protection in its response header without imposing a conflicting script policy.
 Account settings are built separately in `apps/piquel-web`. API, passkey and redirect
-helpers come from the shared `packages/auth-sdk` SDK. `just fmt-web`,
-`just lint-web` and `just check-web` format, lint and type-check all web code.
+helpers come from the shared `packages/auth-sdk` SDK. `just web fmt`,
+`just web lint` and `just web check` format, lint and type-check all web code.

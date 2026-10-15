@@ -45,4 +45,4 @@ scratch *ARGS:
 
 # Apply migrations with the caller's auth configuration.
 migrate:
-    @just run migrate
+    @just auth run migrate

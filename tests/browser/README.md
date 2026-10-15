@@ -5,7 +5,7 @@ production build, as configured below.
 
 Run `just preview` to build and deploy this checkout over HTTPS on piqueld.
 Set `E2E_AUTH_URL` and `E2E_SETTINGS_URL` to the printed auth origin and web
-settings URL, then run `just test-browser`. If signup requires an invitation,
+settings URL, then run `just web test-browser`. If signup requires an invitation,
 provide an unused `E2E_INVITATION`. Previews allow registration without one.
 
 The OIDC checks require a public `browser-e2e` client in `AUTH_CLIENTS_FILE`,
