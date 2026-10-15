@@ -1,4 +1,6 @@
-//! One authentication authority: browser flows, settings API, and OIDC.
+//! One authentication authority: browser flows, settings and admin APIs, and OIDC.
+/// Administrator operations and the admin API.
+mod admin;
 /// Embedded auth frontend pages and static resources.
 mod assets;
 /// Validated service and application configuration.
@@ -18,6 +20,8 @@ mod security;
 /// Built-in public configuration, liveness and readiness.
 mod service;
 
+use admin::AdminApplication;
+pub use admin::{AdminError, AdminOperations, CreatedInvitation, InviteExpiry};
 pub use config::{AuthConfig, PUBLIC_BASE_URL};
 use federation::FederationApplication;
 use oidc::OidcApplication;
@@ -63,11 +67,15 @@ impl AuthConfig {
     pub async fn router(&self, database: Database) -> Result<Router, StartupError> {
         // Finish fallible application initialization before changing client registrations.
         let assets = EmbeddedAssets::new()?;
-        let application = Router::new()
+        let mut application = Router::new()
             .merge(ServiceApplication::new(database.clone(), self).routes())
             .merge(PasskeyApplication::new(database.clone(), &self.passkey)?.routes())
             .merge(FederationApplication::new(database.clone(), &self.federation)?.routes())
             .merge(OidcApplication::new(database.clone(), &self.oidc)?.routes());
+        // Without an admin origin the admin API is absent: its paths answer 404.
+        if self.admin_origin.is_some() {
+            application = application.merge(AdminApplication::new(database.clone(), self).routes());
+        }
         let mut tx = database.begin().await?;
         tx.oidc().disable_all_clients().await?;
         for client in &self.oidc.clients {

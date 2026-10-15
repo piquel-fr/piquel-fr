@@ -4,9 +4,10 @@ use super::{EmailRepository, RepositoryExecutor};
 use crate::DatabaseError;
 use chrono::{DateTime, Utc};
 use piquel_auth_protocol::{TokenId, UserId};
+use serde::Serialize;
 
 /// An email address attached to an account.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 pub struct StoredEmail {
     /// Row identifier.
     pub id: TokenId,
@@ -62,6 +63,31 @@ impl EmailRepository<'_> {
                 input.normalized_email,
                 input.verified_at,
                 input.is_primary,
+            )
+        )
+    }
+
+    /// Lists the account's addresses, primary first.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`DatabaseError`] if the query fails or a row is invalid.
+    pub async fn list_for_user(
+        &mut self,
+        user_id: UserId,
+    ) -> Result<Vec<StoredEmail>, DatabaseError> {
+        run!(
+            self,
+            fetch_all,
+            sqlx::query_as!(
+                StoredEmail,
+                r#"SELECT
+                    id AS "id: TokenId", user_id AS "user_id: UserId", normalized_email,
+                    verified_at, is_primary
+                FROM user_emails
+                WHERE user_id = $1
+                ORDER BY is_primary DESC, created_at"#,
+                user_id.as_uuid(),
             )
         )
     }

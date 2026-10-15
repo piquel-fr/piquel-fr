@@ -1,13 +1,12 @@
 //! Authentication service and its small administrative CLI.
-use auth_service::{AuthConfig, PUBLIC_BASE_URL};
-use chrono::{Duration, Utc};
+use auth_service::{AdminError, AdminOperations, AuthConfig, InviteExpiry, PUBLIC_BASE_URL};
 use clap::{Parser, Subcommand};
-use piquel_common::{ConfigurationError, ErrorChain, Origin};
+use piquel_common::{ConfigurationError, ErrorChain, Origin, Variable};
 use piquel_crypto::{CryptoError, Secret};
-use piquel_repository::{Database, DatabaseConnectionError, DatabaseError};
+use piquel_repository::{Actor, Database, DatabaseConnectionError, DatabaseError};
 use thiserror::Error;
 
-use std::{net::SocketAddr, process::ExitCode, str::FromStr, time::Duration as StdDuration};
+use std::{net::SocketAddr, process::ExitCode, time::Duration as StdDuration};
 
 /// How often the service starts an expired-state cleanup pass.
 const CLEANUP_INTERVAL: StdDuration = StdDuration::from_mins(5);
@@ -17,14 +16,14 @@ const CLEANUP_BUDGET: StdDuration = StdDuration::from_mins(1);
 const CLEANUP_PAUSE: StdDuration = StdDuration::from_millis(100);
 /// Per-table cleanup batch bound.
 const CLEANUP_BATCH_SIZE: u32 = 1_000;
-/// Largest accepted invitation lifetime number; the suffix chooses hours or days.
-const MAX_INVITE_EXPIRY: i64 = 365;
-/// Shared command-line explanation for invalid invitation lifetimes.
-const INVITE_EXPIRY_HELP: &str = "expiry must be 1 to 365 followed by h or d, e.g. 24h or 7d";
-/// Registration page used by generated signup links.
-const REGISTRATION_PATH: &str = "/register";
-/// Invitation proof sent to the registration page.
-const INVITATION_PARAMETER: &str = "invitation";
+/// Login name of the operator running a command.
+const OPERATOR_USER: Variable = Variable::new("USER");
+/// Fallback login name, set where `USER` is not.
+const OPERATOR_LOGNAME: Variable = Variable::new("LOGNAME");
+/// Kernel's name for this host, recorded with the operator.
+const HOSTNAME_PATH: &str = "/proc/sys/kernel/hostname";
+/// Recorded when the operator's name or host cannot be determined.
+const UNKNOWN_OPERATOR: &str = "unknown";
 
 /// Failures of startup and administrative commands, preserving their original causes.
 #[derive(Debug, Error)]
@@ -38,9 +37,12 @@ enum CliError {
     /// An administrative database operation failed.
     #[error("authentication database command failed")]
     Database(#[from] DatabaseError),
-    /// Random invitation or client-secret generation failed.
+    /// Random client-secret generation failed.
     #[error("could not generate secure command material")]
     Crypto(#[from] CryptoError),
+    /// An administrative operation was refused or failed.
+    #[error(transparent)]
+    Admin(#[from] AdminError),
     /// HTTP applications or embedded assets could not be initialized.
     #[error(transparent)]
     Startup(#[from] auth_service::StartupError),
@@ -94,6 +96,29 @@ enum DatabaseCommand {
         #[arg(long, default_value = "7d")]
         expires_in: InviteExpiry,
     },
+    /// Grant, revoke or list administrator rights. No HTTP route can change them.
+    Admin {
+        /// The administrator operation.
+        #[command(subcommand)]
+        command: AdminCommand,
+    },
+}
+
+/// Administrator rights, managed only from the CLI.
+#[derive(Subcommand)]
+enum AdminCommand {
+    /// Make an active account an administrator.
+    Grant {
+        /// The account's username.
+        username: String,
+    },
+    /// Remove an account's administrator rights.
+    Revoke {
+        /// The account's username.
+        username: String,
+    },
+    /// List administrators: username, account ID, grant time and granting operator.
+    List,
 }
 
 impl DatabaseCommand {
@@ -103,23 +128,64 @@ impl DatabaseCommand {
         match self {
             Self::Serve => Self::serve(database).await,
             Self::Migrate => Ok(database.run_migrations().await?),
-            Self::Invite { expires_in } => Self::invite(&database, expires_in).await,
+            Self::Invite { expires_in } => {
+                let invitation = Self::operations(database)?
+                    .create_invitation(&Self::operator(), expires_in)
+                    .await?;
+                println!("{}", invitation.url);
+                Ok(())
+            }
+            Self::Admin { command } => {
+                let operations = Self::operations(database)?;
+                match command {
+                    AdminCommand::Grant { username } => {
+                        operations
+                            .grant_administrator(&Self::operator(), &username)
+                            .await?;
+                    }
+                    AdminCommand::Revoke { username } => {
+                        operations
+                            .revoke_administrator(&Self::operator(), &username)
+                            .await?;
+                    }
+                    AdminCommand::List => {
+                        for admin in operations.list_administrators().await? {
+                            println!(
+                                "{}\t{}\t{}\t{}",
+                                admin.username,
+                                admin.user_id,
+                                admin.granted_at.to_rfc3339(),
+                                admin.granted_by,
+                            );
+                        }
+                    }
+                }
+                Ok(())
+            }
         }
     }
 
-    /// Prints a single-use signup link; only the secret's digest is stored.
-    async fn invite(database: &Database, expires_in: InviteExpiry) -> Result<(), CliError> {
-        let secret = Secret::generate()?;
-        database
-            .security()
-            .create_invitation(secret.digest().as_bytes(), Utc::now() + expires_in.0)
-            .await?;
-        let mut url = PUBLIC_BASE_URL.parse::<Origin>()?.as_url().clone();
-        url.set_path(REGISTRATION_PATH);
-        url.query_pairs_mut()
-            .append_pair(INVITATION_PARAMETER, &secret.encoded());
-        println!("{url}");
-        Ok(())
+    /// Admin operations on `database`, linking invitations to `AUTH_PUBLIC_BASE_URL`.
+    fn operations(database: Database) -> Result<AdminOperations, CliError> {
+        Ok(AdminOperations::new(
+            database,
+            PUBLIC_BASE_URL.parse::<Origin>()?,
+        ))
+    }
+
+    /// The operator running this command, recorded with every change it makes.
+    /// Attribution is best effort: break-glass commands must work in a bare
+    /// container, so an unknown user or host is recorded as such, not refused.
+    fn operator() -> Actor {
+        let os_user = OPERATOR_USER
+            .optional()
+            .ok()
+            .flatten()
+            .or_else(|| OPERATOR_LOGNAME.optional().ok().flatten())
+            .unwrap_or_else(|| UNKNOWN_OPERATOR.into());
+        let host = std::fs::read_to_string(HOSTNAME_PATH)
+            .map_or_else(|_| UNKNOWN_OPERATOR.into(), |host| host.trim().to_owned());
+        Actor::Cli { os_user, host }
     }
 
     /// Resolves on Ctrl+C or SIGTERM, the signal container runtimes send on stop.
@@ -192,42 +258,6 @@ impl DatabaseCommand {
     }
 }
 
-/// An invitation lifetime of 1 to 365 hours or days.
-#[derive(Clone, Copy)]
-struct InviteExpiry(Duration);
-
-/// Why an invitation lifetime was rejected by the command-line parser.
-#[derive(Debug, Error)]
-enum InvalidInviteExpiry {
-    /// The unit, value or bounds violate the supported hours/days syntax.
-    #[error("{INVITE_EXPIRY_HELP}")]
-    Format,
-    /// The numeric portion could not be parsed.
-    #[error("{INVITE_EXPIRY_HELP}")]
-    Number(#[from] std::num::ParseIntError),
-}
-
-impl FromStr for InviteExpiry {
-    type Err = InvalidInviteExpiry;
-    /// Parses a bounded hours/days lifetime while retaining numeric syntax errors.
-    fn from_str(value: &str) -> Result<Self, Self::Err> {
-        let (number, unit) = value
-            .char_indices()
-            .last()
-            .map(|(index, _)| value.split_at(index))
-            .ok_or(InvalidInviteExpiry::Format)?;
-        let number = number.parse::<i64>()?;
-        if !(1..=MAX_INVITE_EXPIRY).contains(&number) {
-            return Err(InvalidInviteExpiry::Format);
-        }
-        match unit {
-            "h" => Ok(Self(Duration::hours(number))),
-            "d" => Ok(Self(Duration::days(number))),
-            _ => Err(InvalidInviteExpiry::Format),
-        }
-    }
-}
-
 /// Initializes tracing, runs the selected command and prints any failure with its causes.
 #[tokio::main]
 async fn main() -> ExitCode {
@@ -240,26 +270,6 @@ async fn main() -> ExitCode {
         Err(error) => {
             eprintln!("error: {}", ErrorChain(&error));
             ExitCode::FAILURE
-        }
-    }
-}
-#[cfg(test)]
-mod tests {
-    //! Invitation lifetime parsing and bounds.
-    use super::*;
-    /// Invitation lifetimes accept bounded hours and days and reject malformed input.
-    #[test]
-    fn invite_expiry_accepts_bounded_hours_and_days() {
-        assert_eq!(
-            "24h".parse::<InviteExpiry>().map(|expiry| expiry.0).ok(),
-            Some(Duration::hours(24))
-        );
-        assert_eq!(
-            "365d".parse::<InviteExpiry>().map(|expiry| expiry.0).ok(),
-            Some(Duration::days(365))
-        );
-        for invalid in ["", "d", "0d", "366d", "-1h", "7w", "7 d", "é"] {
-            assert!(invalid.parse::<InviteExpiry>().is_err(), "{invalid}");
         }
     }
 }

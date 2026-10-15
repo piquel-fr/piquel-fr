@@ -1,6 +1,6 @@
 //! Shared browser-session, management authorization, and HTTP trust boundaries.
 
-use crate::routes::{ACCOUNT_PREFIX, LOGIN_PREFIX, oidc, passkey, service};
+use crate::routes::{ACCOUNT_PREFIX, ADMIN_PREFIX, LOGIN_PREFIX, oidc, passkey, service};
 use axum::{
     Json,
     extract::{ConnectInfo, FromRef, FromRequestParts, MatchedPath, Request, State},
@@ -15,7 +15,7 @@ use axum::{
 use chrono::{Duration, Utc};
 use ipnet::IpNet;
 use piquel_auth_protocol::{AuthenticationMethod, SessionId, UserId};
-use piquel_common::ErrorChain;
+use piquel_common::{ErrorChain, Origin};
 use piquel_crypto::{CryptoError, Digest, Secret};
 use piquel_repository::{
     Database, DatabaseError, DatabaseTransaction, InsertSession, StoredSession,
@@ -42,6 +42,8 @@ const REQUEST_TIMEOUT: StdDuration = StdDuration::from_secs(30);
 const SESSION_LIFETIME_DAYS: u32 = 30;
 /// Browser flow cookies slightly outlive their server-side ceremonies.
 const FLOW_COOKIE_MAX_AGE: u32 = 600;
+/// The admin API needs a passkey sign-in at most this old, whatever the session lifetime.
+const ADMIN_SIGN_IN_MAX_AGE_HOURS: i64 = 12;
 
 /// Browser JSON error `{"error": message}`; internal causes only reach the logs.
 #[derive(Debug)]
@@ -244,6 +246,47 @@ impl From<SessionError> for ApiError {
     }
 }
 
+/// Why a browser session may not use the admin API.
+#[derive(Debug, Error)]
+pub(crate) enum AdminSessionError {
+    /// No usable session, or its lookup failed.
+    #[error(transparent)]
+    Session(#[from] SessionError),
+    /// The session's account is not an administrator.
+    #[error("administrator account required")]
+    NotAdministrator,
+    /// The administrator's session was not authenticated with a passkey.
+    #[error("administrator session must be authenticated with a passkey")]
+    PasskeyRequired,
+    /// The administrator's passkey sign-in is older than the admin API accepts.
+    #[error("administrator passkey sign-in expired")]
+    SignInExpired,
+    /// An admin mutation needs a recent passkey confirmation.
+    #[error("administrator passkey confirmation required")]
+    ConfirmationRequired,
+}
+
+impl From<AdminSessionError> for ApiError {
+    /// Non-administrators get the reply of an unknown path, so the admin API is not
+    /// discoverable; administrators learn how to sign in or confirm.
+    fn from(error: AdminSessionError) -> Self {
+        match error {
+            AdminSessionError::Session(error) => error.into(),
+            AdminSessionError::NotAdministrator => Self::not_found("Not found."),
+            AdminSessionError::PasskeyRequired => {
+                Self::forbidden("Sign in with a passkey to use the admin API.")
+            }
+            AdminSessionError::SignInExpired => Self::unauthorized(format!(
+                "Sign in again with a passkey: the admin API accepts sign-ins up to \
+                 {ADMIN_SIGN_IN_MAX_AGE_HOURS} hours old."
+            )),
+            AdminSessionError::ConfirmationRequired => {
+                Self::forbidden("Confirm with a passkey to make admin changes for two minutes.")
+            }
+        }
+    }
+}
+
 impl Session {
     /// Looks up a session, treating missing or malformed cookies as anonymous.
     pub(crate) async fn optional(
@@ -289,6 +332,51 @@ impl Session {
         Ok(session)
     }
 
+    /// Requires an administrator's session, signed in with a passkey within the last
+    /// [`ADMIN_SIGN_IN_MAX_AGE_HOURS`]. Social sign-in never grants admin access.
+    pub(crate) async fn admin(
+        database: &Database,
+        headers: &HeaderMap,
+    ) -> Result<StoredSession, AdminSessionError> {
+        let session = Self::required(database, headers).await?;
+        if !database
+            .administrators()
+            .contains(session.user_id)
+            .await
+            .map_err(SessionError::from)?
+        {
+            return Err(AdminSessionError::NotAdministrator);
+        }
+        if !session
+            .authentication_methods
+            .contains(&AuthenticationMethod::Passkey)
+        {
+            return Err(AdminSessionError::PasskeyRequired);
+        }
+        if session.authenticated_at < Utc::now() - Duration::hours(ADMIN_SIGN_IN_MAX_AGE_HOURS) {
+            return Err(AdminSessionError::SignInExpired);
+        }
+        Ok(session)
+    }
+
+    /// Requires an administrator's session with a live passkey confirmation, the
+    /// session's two-minute management window.
+    pub(crate) async fn confirmed_admin(
+        database: &Database,
+        headers: &HeaderMap,
+    ) -> Result<StoredSession, AdminSessionError> {
+        let session = Self::admin(database, headers).await?;
+        if !database
+            .sessions()
+            .management_active(session.id)
+            .await
+            .map_err(SessionError::from)?
+        {
+            return Err(AdminSessionError::ConfirmationRequired);
+        }
+        Ok(session)
+    }
+
     /// Creates a session inside the caller's transaction and returns the secret for
     /// its cookie. Callers set the cookie only after the transaction commits.
     pub(crate) async fn create(
@@ -322,6 +410,11 @@ pub(crate) struct Session(pub StoredSession);
 pub(crate) struct OptionalSession(pub Option<StoredSession>);
 /// Browser session with a live passkey management window.
 pub(crate) struct ManagementSession(pub StoredSession);
+/// An administrator's session, authenticated with a passkey (never social-only).
+/// Admin API reads take it.
+pub(crate) struct Admin(pub StoredSession);
+/// An administrator with a recent passkey confirmation. Admin API mutations take it.
+pub(crate) struct ConfirmedAdmin(pub StoredSession);
 
 /// Implements the common database-backed extraction contract for session variants.
 macro_rules! session_extractor {
@@ -347,6 +440,8 @@ macro_rules! session_extractor {
 session_extractor!(Session, required);
 session_extractor!(OptionalSession, optional);
 session_extractor!(ManagementSession, management);
+session_extractor!(Admin, admin);
+session_extractor!(ConfirmedAdmin, confirmed_admin);
 
 /// How the HTTP boundary treats a route. Origin, CSRF and rate policy all read this one
 /// classification, so it must list every route that differs from `Other`.
@@ -368,6 +463,8 @@ enum Endpoint {
     Account,
     /// Social sign-in, also started from the settings site.
     Login,
+    /// The admin API, which only the admin site may call.
+    Admin,
     /// Auth-origin pages and ceremonies.
     Other,
 }
@@ -385,6 +482,7 @@ impl Endpoint {
             service::CONFIG | passkey::SESSION | passkey::SESSION_LOGOUT => Self::Account,
             _ if path.starts_with(ACCOUNT_PREFIX) => Self::Account,
             _ if path.starts_with(LOGIN_PREFIX) => Self::Login,
+            _ if path.starts_with(ADMIN_PREFIX) => Self::Admin,
             _ => Self::Other,
         }
     }
@@ -393,7 +491,12 @@ impl Endpoint {
     const fn is_protocol(self) -> bool {
         match self {
             Self::OAuthBackChannel | Self::UserInfo | Self::Authorize | Self::Logout => true,
-            Self::Discovery | Self::Health | Self::Account | Self::Login | Self::Other => false,
+            Self::Discovery
+            | Self::Health
+            | Self::Account
+            | Self::Login
+            | Self::Admin
+            | Self::Other => false,
         }
     }
 
@@ -407,6 +510,7 @@ impl Endpoint {
             Self::OAuthBackChannel => Some(RateCategory::Token),
             Self::UserInfo => Some(RateCategory::UserInfo),
             Self::Account => Some(RateCategory::Account),
+            Self::Admin => Some(RateCategory::Admin),
             Self::Login | Self::Authorize | Self::Logout | Self::Other => Some(RateCategory::Login),
             Self::Discovery | Self::Health => None,
         }
@@ -424,6 +528,8 @@ piquel_common::str_enum! {
         UserInfo = "userinfo",
         /// Settings and browser-session reads and mutations.
         Account = "account",
+        /// Admin API reads and mutations.
+        Admin = "admin",
         /// Sign-in, authorization, logout and the other auth-origin routes.
         Login = "login",
     }
@@ -530,6 +636,8 @@ pub(crate) struct HttpSecurity {
     pub auth_origin: String,
     /// Origin of the settings site, allowed on account and login endpoints.
     pub settings_origin: String,
+    /// Origin of the admin site, the only one allowed on admin endpoints, if configured.
+    pub admin_origin: Option<String>,
     /// Public OIDC client origins permitted on protocol endpoints.
     pub client_origins: Arc<Vec<String>>,
 }
@@ -548,6 +656,7 @@ impl HttpSecurity {
                 .as_url()
                 .origin()
                 .ascii_serialization(),
+            admin_origin: config.admin_origin.as_ref().map(Origin::serialized),
             client_origins: Arc::new(
                 config
                     .oidc
@@ -590,13 +699,21 @@ impl HttpSecurity {
     }
 
     /// Determines whether an exact browser origin may access this endpoint family.
+    /// Only the admin site may call the admin API; not even auth pages can.
     fn allowed_origin(&self, endpoint: Endpoint, origin: &str) -> bool {
-        matches!(endpoint, Endpoint::Discovery)
-            || origin == self.auth_origin
-            || (origin == self.settings_origin
-                && matches!(endpoint, Endpoint::Account | Endpoint::Login))
-            || (matches!(endpoint, Endpoint::OAuthBackChannel | Endpoint::UserInfo)
-                && self.client_origins.iter().any(|v| v == origin))
+        match endpoint {
+            Endpoint::Discovery => true,
+            Endpoint::Admin => self.admin_origin.as_deref() == Some(origin),
+            Endpoint::Account | Endpoint::Login => {
+                origin == self.auth_origin || origin == self.settings_origin
+            }
+            Endpoint::OAuthBackChannel | Endpoint::UserInfo => {
+                origin == self.auth_origin || self.client_origins.iter().any(|v| v == origin)
+            }
+            Endpoint::Health | Endpoint::Authorize | Endpoint::Logout | Endpoint::Other => {
+                origin == self.auth_origin
+            }
+        }
     }
 
     /// Middleware: runs the trust checks and the handler under one deadline, then adds the

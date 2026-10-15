@@ -1,7 +1,7 @@
 //! Focused persistence and security contract tests.
 
 use super::*;
-use crate::routes::federation;
+use crate::routes::{admin, federation};
 use axum::{Router, body::Body, http::Request as HttpRequest, middleware, routing::any};
 use piquel_crypto::Secret;
 use piquel_repository::DatabaseConfig;
@@ -38,6 +38,7 @@ impl SecurityFixture {
             database,
             auth_origin: "https://auth.piquel.fr".into(),
             settings_origin: "https://piquel.fr".into(),
+            admin_origin: Some("https://admin.piquel.fr".into()),
             client_origins: Arc::new(vec!["https://external.example".into()]),
         };
         let mut router = Router::new();
@@ -53,6 +54,7 @@ impl SecurityFixture {
             "/oidc/userinfo",
             "/oidc/logout",
             "/session",
+            "/admin/users",
         ] {
             router = router.route(path, any(|| async { StatusCode::ACCEPTED }));
         }
@@ -175,6 +177,31 @@ async fn router_enforces_exact_browser_origins_csrf_and_public_client_cors_bound
         )
         .await;
     SecurityFixture::denied(&response);
+    // Only the admin site may call the admin API, and it may call nothing else.
+    let response = fixture
+        .request(
+            Method::POST,
+            "/admin/users",
+            Some("https://admin.piquel.fr"),
+            true,
+        )
+        .await;
+    assert_eq!(response.status(), StatusCode::ACCEPTED);
+    SecurityFixture::exact_cors(&response, "https://admin.piquel.fr");
+    for origin in ["https://auth.piquel.fr", "https://piquel.fr"] {
+        for method in [Method::GET, Method::POST, Method::OPTIONS] {
+            let response = fixture
+                .request(method, "/admin/users", Some(origin), true)
+                .await;
+            SecurityFixture::denied(&response);
+        }
+    }
+    for path in ["/account/passkeys", "/webauthn/authenticate/start"] {
+        let response = fixture
+            .request(Method::POST, path, Some("https://admin.piquel.fr"), true)
+            .await;
+        SecurityFixture::denied(&response);
+    }
     let response = fixture
         .request(
             Method::POST,
@@ -534,6 +561,8 @@ fn routes_doing_real_work_have_budgets() {
         (passkey::LIST, Some(RateCategory::Account)),
         (federation::IDENTITIES, Some(RateCategory::Account)),
         (federation::PENDING, Some(RateCategory::Login)),
+        (admin::USERS, Some(RateCategory::Admin)),
+        ("/admin/users/1/disable", Some(RateCategory::Admin)),
     ] {
         assert_eq!(Endpoint::classify(path).rate_category(), budget, "{path}");
     }
@@ -551,6 +580,7 @@ fn endpoint_policy_requires_browser_proof_outside_protocol_endpoints() {
         (Endpoint::Logout, true),
         (Endpoint::Account, false),
         (Endpoint::Login, false),
+        (Endpoint::Admin, false),
         (Endpoint::Other, false),
     ] {
         assert_eq!(endpoint.is_protocol(), protocol);

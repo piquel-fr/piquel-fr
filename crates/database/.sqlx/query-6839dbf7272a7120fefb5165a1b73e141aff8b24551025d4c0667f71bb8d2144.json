@@ -1,0 +1,38 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT\n                    a.user_id AS \"user_id: UserId\", u.username, a.granted_at,\n                    a.granted_by AS \"granted_by: Json<Actor>\"\n                FROM administrators a\n                JOIN users u ON u.id = a.user_id\n                ORDER BY a.granted_at, a.user_id",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "user_id: UserId",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "username",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 2,
+        "name": "granted_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 3,
+        "name": "granted_by: Json<Actor>",
+        "type_info": "Jsonb"
+      }
+    ],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "6839dbf7272a7120fefb5165a1b73e141aff8b24551025d4c0667f71bb8d2144"
+}

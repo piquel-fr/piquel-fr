@@ -37,10 +37,11 @@ use ceremonies::{
 };
 pub use error::PasskeyConfigError;
 use error::PasskeyError;
+pub(crate) use types::PasskeyView;
 use types::{
     AuthenticationFinish, DisplayName, EnrollmentStart, LoginStart, ManagementResponse,
-    PasskeyKind, PasskeyName, PasskeyView, RegistrationFinish, RegistrationStart, Rename,
-    SessionView, UserView, Username,
+    PasskeyKind, PasskeyName, RegistrationFinish, RegistrationStart, Rename, SessionView, UserView,
+    Username,
 };
 
 /// Browser passkey ceremonies and management authorization.
@@ -683,10 +684,7 @@ impl PasskeyApplication {
                 .list_active(session.user_id)
                 .await?
                 .into_iter()
-                .map(|key| PasskeyView {
-                    id: key.id,
-                    friendly_name: key.friendly_name,
-                })
+                .map(PasskeyView::from)
                 .collect(),
         ))
     }

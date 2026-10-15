@@ -1,7 +1,7 @@
 //! Persistence guarantees behind invitations and reusable management windows.
 use chrono::{Duration, Utc};
-use piquel_auth_protocol::{AuthenticationMethod, SessionId, UserId};
-use piquel_repository::{Database, DatabaseConfig, InsertSession, InsertUser};
+use piquel_auth_protocol::{AuthenticationMethod, SessionId, TokenId, UserId};
+use piquel_repository::{Actor, Database, DatabaseConfig, InsertSession, InsertUser};
 /// Invitations are single-use and management authorization follows session expiry and revocation.
 #[expect(
     clippy::too_many_lines,
@@ -19,10 +19,43 @@ async fn invitation_redemption_and_management_lifecycle() {
     db.run_migrations().await.expect("migrate");
     let user = UserId::new();
     let digest = user.as_uuid().as_bytes().repeat(2);
-    db.security()
-        .create_invitation(&digest, Utc::now() + Duration::minutes(1))
-        .await
-        .expect("invite");
+    let operator = Actor::Cli {
+        os_user: "test".into(),
+        host: "test".into(),
+    };
+    let invite = |id, digest| {
+        let operator = operator.clone();
+        let db = &db;
+        async move {
+            db.security()
+                .create_invitation(id, digest, Utc::now() + Duration::minutes(1), &operator)
+                .await
+                .expect("invite");
+        }
+    };
+    invite(TokenId::new(), &digest).await;
+    // A revoked invitation can no longer be redeemed, and is revoked only once.
+    let revoked = TokenId::new();
+    let revoked_digest = TokenId::new().as_uuid().as_bytes().repeat(2);
+    invite(revoked, &revoked_digest).await;
+    assert!(
+        db.security()
+            .revoke_invitation(revoked)
+            .await
+            .expect("revoke")
+    );
+    assert!(
+        !db.security()
+            .revoke_invitation(revoked)
+            .await
+            .expect("revoke again")
+    );
+    assert!(
+        !db.security()
+            .redeem_invitation(&revoked_digest)
+            .await
+            .expect("redeem revoked")
+    );
     let mut tx = db.begin().await.expect("transaction");
     assert!(
         tx.security()

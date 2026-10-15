@@ -1,0 +1,17 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO invitations(id,secret_digest,expires_at,created_by) VALUES($1,$2,$3,$4)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Bytea",
+        "Timestamptz",
+        "Jsonb"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "28891ebebbf3bd55fc7bc1d9d3345e55e5ceeb676d6171935b6d886aa0ff1248"
+}

@@ -13,7 +13,9 @@ is generated and hashed in `piquel-crypto`; the repository persists its digests.
 Ceremony kinds, audit actions/outcomes and OIDC redirect kinds are typed storage
 vocabulary. Successful account operations use `audit_events().record`; rejections
 that implicate an account, such as refresh replay or a passkey counter regression,
-use `audit_events().record_rejection`.
+use `audit_events().record_rejection`. Administrative operations use
+`audit_events().record_by`, which stores their `Actor` (an administrator's account
+and session, or the CLI's OS user and host) and reason in `request_metadata`.
 
 `DatabaseConfig` rejects zero pool bounds, ambiguous TLS/socket options and host
 overrides with actionable `DatabaseConnectionError` variants. TCP requires
@@ -23,7 +25,8 @@ sources. Client provisioning validates fields and allowlists through
 `ClientConfigurationError` before writing any SQL.
 
 Each repository has its own module under `src/repositories/` (`users`, `emails`,
-`sessions`, `audit`, `passkeys`, `oidc`, `tokens`, `federation`, `security`),
+`sessions`, `audit`, `passkeys`, `oidc`, `tokens`, `federation`, `security`,
+`administrators`),
 holding its methods and the records they take and return. `repositories/mod.rs`
 holds only shared plumbing: the executor, the `repositories!` macro that declares
 every handle and its accessors on both `Database` and `DatabaseTransaction`, the

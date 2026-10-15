@@ -39,6 +39,8 @@ const DEFAULT_PUBLIC_LISTENER: &str = "127.0.0.1:8080";
 pub const PUBLIC_BASE_URL: Variable = Variable::new("AUTH_PUBLIC_BASE_URL");
 /// Public settings continuation.
 const SETTINGS_URL: Variable = Variable::new("AUTH_SETTINGS_URL");
+/// Optional admin site origin; the admin API is off without it.
+const ADMIN_URL: Variable = Variable::new("AUTH_ADMIN_URL");
 /// HTTP listener behind the HTTPS ingress.
 const PUBLIC_LISTENER: Variable = Variable::new("AUTH_PUBLIC_LISTENER");
 /// `PostgreSQL` transport and database.
@@ -356,6 +358,8 @@ pub struct AuthConfig {
     pub(crate) oidc: OidcConfig,
     /// Trusted reverse-proxy peers.
     pub(crate) trusted_proxies: Vec<IpNet>,
+    /// Exact admin site origin; `None` turns the admin API off.
+    pub(crate) admin_origin: Option<Origin>,
 }
 
 impl AuthConfig {
@@ -413,7 +417,34 @@ impl AuthConfig {
             federation: FederationConfig::from_environment(&origin, &settings_url)?,
             oidc: OidcConfig::from_environment(&origin, &persistent_key)?,
             trusted_proxies: Self::trusted_proxies()?,
+            admin_origin: Self::admin_origin(&origin, &settings_url)?,
         })
+    }
+
+    /// Reads the optional admin origin, which must differ from the auth and settings
+    /// origins: the admin API accepts only its own origin.
+    fn admin_origin(
+        origin: &Origin,
+        settings_url: &PublicUrl,
+    ) -> Result<Option<Origin>, ConfigurationError> {
+        let Some(value) = ADMIN_URL.optional()? else {
+            return Ok(None);
+        };
+        let admin: Origin = value.parse().map_err(|source| {
+            ADMIN_URL.error(
+                "must be an exact HTTPS origin, e.g. https://admin.piquel.fr",
+                source,
+            )
+        })?;
+        let admin_origin = admin.as_url().origin();
+        if admin_origin == origin.as_url().origin()
+            || admin_origin == settings_url.as_url().origin()
+        {
+            return Err(ADMIN_URL.invalid(
+                "must differ from the AUTH_PUBLIC_BASE_URL and AUTH_SETTINGS_URL origins",
+            ));
+        }
+        Ok(Some(admin))
     }
 
     /// Derives a service key from the persistent PEM bytes under its own `context`,

@@ -1,0 +1,50 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT\n                    id AS \"id: TokenId\", created_by AS \"created_by: Json<Actor>\",\n                    created_at, expires_at, redeemed_at, revoked_at\n                FROM invitations\n                ORDER BY id DESC",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id: TokenId",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "created_by: Json<Actor>",
+        "type_info": "Jsonb"
+      },
+      {
+        "ordinal": 2,
+        "name": "created_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 3,
+        "name": "expires_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 4,
+        "name": "redeemed_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 5,
+        "name": "revoked_at",
+        "type_info": "Timestamptz"
+      }
+    ],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": [
+      false,
+      true,
+      false,
+      false,
+      true,
+      true
+    ]
+  },
+  "hash": "7218669b070abd967ae28d29d284194a3ea8e169e4ca7accc19f1ec27165e7ee"
+}

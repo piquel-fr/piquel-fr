@@ -1,0 +1,34 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT client_id, audience, scopes AS \"scopes: JsonArray<String>\"\n                FROM oidc_consents\n                WHERE user_id = $1\n                ORDER BY client_id, audience",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "client_id",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 1,
+        "name": "audience",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 2,
+        "name": "scopes: JsonArray<String>",
+        "type_info": "Jsonb"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "b65fa93ee413d6af8ac77d9b945fb204415f91e74664c6f22e688c31306d58b7"
+}

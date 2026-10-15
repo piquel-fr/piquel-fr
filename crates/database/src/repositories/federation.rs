@@ -65,7 +65,7 @@ pub struct InsertExternalIdentity {
 
 /// An active link between an account and a provider subject. Each subject and
 /// each provider per account has at most one active link.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize)]
 pub struct StoredExternalIdentity {
     /// Link identifier.
     pub id: TokenId,

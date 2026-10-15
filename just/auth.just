@@ -14,6 +14,11 @@ serve:
 invite *ARGS:
     @just auth run invite "$@"
 
+# Grant, revoke or list administrators, e.g. `just auth admin grant alice`.
+[positional-arguments]
+admin *ARGS:
+    @just auth run admin "$@"
+
 # Print a random secret, e.g. for a confidential OIDC client.
 secret:
     @just auth run secret

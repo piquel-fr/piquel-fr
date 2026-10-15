@@ -1,0 +1,46 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT\n                    id AS \"id: TokenId\", user_id AS \"user_id: UserId\", normalized_email,\n                    verified_at, is_primary\n                FROM user_emails\n                WHERE user_id = $1\n                ORDER BY is_primary DESC, created_at",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id: TokenId",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "user_id: UserId",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 2,
+        "name": "normalized_email",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 3,
+        "name": "verified_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 4,
+        "name": "is_primary",
+        "type_info": "Bool"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      true,
+      false
+    ]
+  },
+  "hash": "14c3784397ec078b39a14c418a9642984418a39840126a27edfa89b8cf06273b"
+}

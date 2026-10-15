@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "DELETE FROM invitations\n            WHERE ctid IN (\n                SELECT ctid\n                FROM invitations\n                WHERE expires_at < now()\n                OR redeemed_at < now() - interval '1 day'\n                OR revoked_at < now() - interval '1 day'\n                LIMIT $1\n                FOR UPDATE SKIP LOCKED\n            )",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Int8"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "a6b932c32ed3bc0e678978e6a11a46a24750cca1c184243b6b78133631e08259"
+}

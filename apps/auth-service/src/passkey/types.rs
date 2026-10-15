@@ -3,6 +3,7 @@
 use super::PasskeyError;
 use chrono::{DateTime, Utc};
 use piquel_auth_protocol::{TokenId, UserId};
+use piquel_repository::StoredPasskey;
 use serde::{Deserialize, Serialize};
 use webauthn_rs::prelude::{PublicKeyCredential, RegisterPublicKeyCredential};
 
@@ -180,12 +181,23 @@ pub(super) struct ManagementResponse {
 }
 
 /// Public credential metadata, excluding the credential's cryptographic contents.
+/// Settings and the admin API both show passkeys this way.
 #[derive(Serialize)]
-pub(super) struct PasskeyView {
+pub(crate) struct PasskeyView {
     /// User-chosen credential label.
-    pub(super) friendly_name: String,
+    friendly_name: String,
     /// Credential row identifier used for rename and removal.
-    pub(super) id: TokenId,
+    id: TokenId,
+}
+
+impl From<StoredPasskey> for PasskeyView {
+    /// Keeps only the label and identifier.
+    fn from(key: StoredPasskey) -> Self {
+        Self {
+            friendly_name: key.friendly_name,
+            id: key.id,
+        }
+    }
 }
 
 /// Account identity shown in the browser session view.

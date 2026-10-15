@@ -87,6 +87,32 @@ pub(crate) mod oidc {
     pub(crate) const LOGOUT: &str = "/oidc/logout";
 }
 
+/// The admin API, served only when an admin origin is configured.
+pub(crate) mod admin {
+    /// Searches accounts.
+    pub(crate) const USERS: &str = "/admin/users";
+    /// Describes one account.
+    pub(crate) const USER: &str = "/admin/users/{id}";
+    /// Disables an account and ends its sessions.
+    pub(crate) const USER_DISABLE: &str = "/admin/users/{id}/disable";
+    /// Reactivates an account.
+    pub(crate) const USER_ENABLE: &str = "/admin/users/{id}/enable";
+    /// Ends every session and refresh grant of an account.
+    pub(crate) const USER_SESSIONS_REVOKE: &str = "/admin/users/{id}/sessions/revoke";
+    /// Ends one session and its refresh grants.
+    pub(crate) const SESSION: &str = "/admin/sessions/{id}";
+    /// Lists and creates invitations, while signup requires them.
+    pub(crate) const INVITATIONS: &str = "/admin/invitations";
+    /// Revokes one invitation.
+    pub(crate) const INVITATION: &str = "/admin/invitations/{id}";
+    /// Lists OIDC clients.
+    pub(crate) const CLIENTS: &str = "/admin/clients";
+    /// Describes one OIDC client.
+    pub(crate) const CLIENT: &str = "/admin/clients/{id}";
+    /// Pages through the security audit log.
+    pub(crate) const AUDIT: &str = "/admin/audit";
+}
+
 /// Pages of the embedded auth frontend that the service redirects browsers to.
 pub(crate) mod page {
     /// Sign-in, social signup and link confirmation.
@@ -101,3 +127,5 @@ pub(crate) mod page {
 pub(crate) const ACCOUNT_PREFIX: &str = "/account/";
 /// Prefix shared by social sign-in, which the settings site may also start.
 pub(crate) const LOGIN_PREFIX: &str = "/login/";
+/// Prefix shared by the admin API, which only the admin site may call.
+pub(crate) const ADMIN_PREFIX: &str = "/admin/";
