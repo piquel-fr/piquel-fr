@@ -32,6 +32,8 @@ piquel_common::str_enum! {
         RefreshPolicyRejected = "refresh.policy_rejected",
         /// A redeemed authorization code was redeemed again.
         AuthorizationCodeReplay = "authorization_code.replay",
+        /// A passkey's signature counter did not increase, so it may have been copied.
+        PasskeyCounterRegression = "passkey.counter_regression",
     }
 }
 piquel_common::str_enum! {
@@ -47,25 +49,10 @@ piquel_common::str_enum! {
 }
 /// Non-sensitive context stored in the audit JSON column.
 #[derive(Clone, Debug, Default, Serialize)]
-pub struct AuditMetadata {
+pub(crate) struct AuditMetadata {
     /// Provider involved in the operation, if any.
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub provider: Option<Provider>,
-}
-
-/// A security audit entry. Audit history is retained indefinitely.
-#[derive(Clone, Debug)]
-pub struct AppendAuditEvent {
-    /// Entry identifier.
-    pub id: TokenId,
-    /// Affected account, when one is known.
-    pub user_id: Option<UserId>,
-    /// Operation that occurred.
-    pub action: AuditAction,
-    /// Whether the operation succeeded, failed or was rejected by policy.
-    pub outcome: AuditOutcome,
-    /// Non-sensitive request context as a JSON object.
-    pub request_metadata: AuditMetadata,
+    provider: Option<Provider>,
 }
 
 impl AuditEventRepository<'_> {
@@ -79,35 +66,82 @@ impl AuditEventRepository<'_> {
         action: AuditAction,
         provider: Option<Provider>,
     ) -> Result<(), DatabaseError> {
-        self.append(&AppendAuditEvent {
-            id: TokenId::new(),
-            user_id: Some(user_id),
+        self.record_outcome(
+            user_id,
             action,
-            outcome: AuditOutcome::Success,
-            request_metadata: AuditMetadata { provider },
-        })
+            AuditOutcome::Success,
+            AuditMetadata { provider },
+        )
         .await
     }
 
-    /// Appends an audit entry.
+    /// Records an account operation that policy rejected.
     ///
     /// # Errors
-    ///
-    /// Returns [`DatabaseError`] if the insert fails. Outcomes are validated by their type.
-    pub async fn append(&mut self, input: &AppendAuditEvent) -> Result<(), DatabaseError> {
+    /// Preserves database failures from the append operation.
+    pub async fn record_rejection(
+        &mut self,
+        user_id: UserId,
+        action: AuditAction,
+    ) -> Result<(), DatabaseError> {
+        self.record_outcome(
+            user_id,
+            action,
+            AuditOutcome::Rejected,
+            AuditMetadata::default(),
+        )
+        .await
+    }
+
+    /// Appends a new entry for an account operation. Audit history is retained
+    /// indefinitely; actions and outcomes are validated by their types.
+    async fn record_outcome(
+        &mut self,
+        user_id: UserId,
+        action: AuditAction,
+        outcome: AuditOutcome,
+        request_metadata: AuditMetadata,
+    ) -> Result<(), DatabaseError> {
         run!(
             self,
             execute,
             sqlx::query!(
                 "INSERT INTO security_audit_log (id, user_id, action, outcome, request_metadata)
                 VALUES ($1, $2, $3, $4, $5)",
-                input.id.as_uuid(),
-                input.user_id.map(UserId::as_uuid),
-                input.action.as_str(),
-                input.outcome.as_str(),
-                sqlx::types::Json(&input.request_metadata) as _,
+                TokenId::new().as_uuid(),
+                user_id.as_uuid(),
+                action.as_str(),
+                outcome.as_str(),
+                sqlx::types::Json(&request_metadata) as _,
             )
         )?;
         Ok(())
+    }
+
+    /// Lists an account's audit actions and outcomes, newest first, so other crates'
+    /// tests can observe what the service recorded.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`DatabaseError`] if the query fails or a stored value is outside its vocabulary.
+    #[cfg(feature = "test-support")]
+    pub async fn list_for_user(
+        &mut self,
+        user_id: UserId,
+    ) -> Result<Vec<(AuditAction, AuditOutcome)>, DatabaseError> {
+        Ok(run!(
+            self,
+            fetch_all,
+            sqlx::query!(
+                r#"SELECT action AS "action: AuditAction", outcome AS "outcome: AuditOutcome"
+                FROM security_audit_log
+                WHERE user_id = $1
+                ORDER BY created_at DESC, id DESC"#,
+                user_id.as_uuid(),
+            )
+        )?
+        .into_iter()
+        .map(|row| (row.action, row.outcome))
+        .collect())
     }
 }

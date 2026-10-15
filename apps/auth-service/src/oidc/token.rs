@@ -12,9 +12,8 @@ use axum::{
 use chrono::Utc;
 use piquel_auth_protocol::{TokenId, UserId};
 use piquel_repository::{
-    AppendAuditEvent, AuditAction, AuditMetadata, AuditOutcome, CodeRedemptionError,
-    ConsumedAuthorizationCode, DatabaseError, DatabaseTransaction, InsertRefreshFamily,
-    InsertRefreshToken, RefreshRotationError, StoredSession,
+    AuditAction, CodeRedemptionError, ConsumedAuthorizationCode, DatabaseTransaction,
+    InsertRefreshFamily, InsertRefreshToken, RefreshRotationError, StoredSession,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
@@ -469,16 +468,15 @@ impl OidcApplication {
                 return error.into();
             }
         };
-        if let Err(source) = Self::commit_rejection(tx, user_id, action).await {
-            return source.into();
-        }
+        // Logged first so the signal survives a database failure.
         if action == AuditAction::RefreshReplay {
             tracing::warn!(
                 event = REFRESH_REPLAY_EVENT,
+                %user_id,
                 "refresh token replay rejected"
             );
         }
-        error.into()
+        Self::commit_rejection(tx, user_id, action, error).await
     }
 
     /// Persists the family revocation of a replayed code before returning the
@@ -495,35 +493,33 @@ impl OidcApplication {
                 return error.into();
             }
         };
-        if let Err(source) =
-            Self::commit_rejection(tx, user_id, AuditAction::AuthorizationCodeReplay).await
-        {
-            return source.into();
-        }
+        // Logged first so the signal survives a database failure.
         tracing::warn!(
             event = CODE_REPLAY_EVENT,
+            %user_id,
             "authorization code replay rejected"
         );
-        error.into()
+        Self::commit_rejection(tx, user_id, AuditAction::AuthorizationCodeReplay, error).await
     }
 
     /// Commits the revocation a rejected grant already made in `tx`, together with
-    /// its rejected audit event.
+    /// its rejected audit event, then returns the grant's `error`, or the database
+    /// failure that prevented the commit.
     async fn commit_rejection(
         mut tx: DatabaseTransaction<'_>,
         user_id: UserId,
         action: AuditAction,
-    ) -> Result<(), DatabaseError> {
-        tx.audit_events()
-            .append(&AppendAuditEvent {
-                id: TokenId::new(),
-                user_id: Some(user_id),
-                action,
-                outcome: AuditOutcome::Rejected,
-                request_metadata: AuditMetadata::default(),
-            })
-            .await?;
-        tx.commit().await
+        error: impl Into<OAuthError>,
+    ) -> OAuthError {
+        let committed = async {
+            tx.audit_events().record_rejection(user_id, action).await?;
+            tx.commit().await
+        }
+        .await;
+        match committed {
+            Ok(()) => error.into(),
+            Err(source) => source.into(),
+        }
     }
 }
 

@@ -1,7 +1,8 @@
 //! The sole `SQLx` boundary for the Piquel workspace.
 //!
 //! Applications receive typed repositories and never a pool, executor, row, or
-//! `SQLx` error. Repositories expose only the operations used by the service.
+//! `SQLx` error. Repositories expose only the operations used by the service, plus
+//! read-only helpers behind the `test-support` feature for other crates' tests.
 /// Validated `PostgreSQL` transport and bounded connection pools.
 mod connection;
 /// Typed persistence and connection failures.
@@ -16,7 +17,7 @@ pub use error::{DatabaseConnectionError, DatabaseError};
 pub use repositories::{
     AuditEventRepository, EmailRepository, FederationRepository, OidcRepository, PasskeyRepository,
     SecurityRepository, SessionRepository, TokenRepository, UserRepository,
-    audit::{AppendAuditEvent, AuditAction, AuditMetadata, AuditOutcome},
+    audit::{AuditAction, AuditOutcome},
     emails::{InsertVerifiedEmail, StoredEmail},
     federation::{
         ConsumedFederationTransaction, InsertExternalIdentity, InsertFederationTransaction,

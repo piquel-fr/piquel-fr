@@ -84,7 +84,9 @@ variants. Limits and lifetimes are named constants. Preserve existing wire spell
 Shared authentication vocabulary lives in auth-protocol; JWT/JWK vocabulary lives
 in crypto. Storage vocabulary (`AuditAction`, `AuditOutcome`, `CeremonyKind`,
 `OidcRedirectKind`) lives in the repository. Record successful account operations
-with `tx.audit_events().record(user_id, action, provider)`. Keep digests typed until
+with `tx.audit_events().record(user_id, action, provider)`. Record rejections that
+implicate an account with `record_rejection(user_id, action)`, committed even though
+the operation fails; never store challenges, cookies or tokens. Keep digests typed until
 their persistence boundary. SQL, rows and connections stay inside the repository.
 Write queries with SQLx's checked macros and refresh the cache with
 `just db prepare`. `just db test` runs the database integration tests in a scratch
