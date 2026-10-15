@@ -29,6 +29,7 @@ fn session_for(user: UserId) -> InsertSession {
         authenticated_at: now,
         expires_at: now + chrono::Duration::days(1),
         user_agent_family: None,
+        passkey_confirmed_at: None,
     }
 }
 /// Account locks allow logout to insert audit records without a foreign-key deadlock.

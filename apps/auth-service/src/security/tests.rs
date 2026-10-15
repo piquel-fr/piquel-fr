@@ -3,10 +3,31 @@
 use super::*;
 use crate::routes::federation;
 use axum::{Router, body::Body, http::Request as HttpRequest, middleware, routing::any};
+use piquel_auth_protocol::TokenId;
 use piquel_crypto::Secret;
-use piquel_repository::DatabaseConfig;
+use piquel_repository::{DatabaseConfig, InsertUser};
 use std::net::{IpAddr, Ipv6Addr};
 use tower::ServiceExt;
+/// Asserts that `response` asks the frontend to confirm the session with a passkey
+/// at most [`CONFIRMATION_MAX_AGE`] seconds old, in the stable JSON shape.
+pub(crate) async fn assert_step_up_required(response: Response) {
+    assert_eq!(response.status(), StatusCode::FORBIDDEN);
+    let body: serde_json::Value = serde_json::from_slice(
+        &axum::body::to_bytes(response.into_body(), 4096)
+            .await
+            .expect("body"),
+    )
+    .expect("JSON");
+    assert_eq!(
+        body,
+        serde_json::json!({
+            "error": "Confirm with your passkey to continue.",
+            "code": "step_up_required",
+            "max_age": CONFIRMATION_MAX_AGE,
+        })
+    );
+}
+
 /// An isolated request router and database for HTTP trust-boundary scenarios.
 struct SecurityFixture {
     /// Dummy routes protected by the production middleware.
@@ -37,7 +58,9 @@ impl SecurityFixture {
             request_timeout: std::time::Duration::from_secs(30),
             database,
             auth_origin: "https://auth.piquel.fr".into(),
-            settings_origin: "https://piquel.fr".into(),
+            frontends: FrontendOrigins::new([&"https://piquel.fr/settings"
+                .parse()
+                .expect("settings URL")]),
             client_origins: Arc::new(vec!["https://external.example".into()]),
         };
         let mut router = Router::new();
@@ -617,4 +640,84 @@ fn forwarded_address_parser_requires_one_address_and_preserves_causes() {
     let error = HttpSecurity::forwarded_ip(&headers).expect_err("HTTP text required");
     assert!(matches!(error, HttpSecurityError::ForwardedHeader(_)));
     assert!(std::error::Error::source(&error).is_some());
+}
+
+/// A confirmation counts from its own timestamp, against each action's maximum age.
+#[test]
+fn confirmation_age_is_fixed_from_its_timestamp() {
+    let session = |age: Option<i64>| {
+        let now = Utc::now();
+        StoredSession {
+            id: SessionId::new(),
+            user_id: UserId::new(),
+            authentication_methods: vec![AuthenticationMethod::Passkey],
+            authenticated_at: now - Duration::days(1),
+            expires_at: now + Duration::days(1),
+            last_seen_at: now,
+            revoked_at: None,
+            passkey_confirmed_at: age.map(|age| now - Duration::seconds(age)),
+        }
+    };
+    assert!(Confirmed::<CONFIRMATION_MAX_AGE>::check(&session(Some(290))).is_ok());
+    for age in [None, Some(310), Some(86_400)] {
+        assert!(matches!(
+            Confirmed::<CONFIRMATION_MAX_AGE>::check(&session(age)),
+            Err(SessionError::StepUpRequired {
+                max_age: CONFIRMATION_MAX_AGE
+            })
+        ));
+    }
+    assert!(matches!(
+        Confirmed::<60>::check(&session(Some(90))),
+        Err(SessionError::StepUpRequired { max_age: 60 })
+    ));
+}
+
+/// A confirmed change holds the session row, so a racing logout waits for it, and a
+/// change after logout fails.
+#[tokio::test]
+#[ignore = "requires TEST_DATABASE_URL"]
+async fn confirmed_changes_serialize_with_logout() {
+    let database = SecurityFixture::database(5, std::time::Duration::from_secs(5)).await;
+    database.run_migrations().await.expect("migrations");
+    let user_id = UserId::new();
+    let mut tx = database.begin().await.expect("transaction");
+    tx.users()
+        .insert(&InsertUser {
+            id: user_id,
+            username: format!("lock_{}", &TokenId::new().to_string()[24..]),
+            display_name: "Lock test".into(),
+        })
+        .await
+        .expect("user");
+    let secret = Session::create(&mut tx, user_id, AuthenticationMethod::Passkey)
+        .await
+        .expect("session");
+    tx.commit().await.expect("commit");
+    let session = database
+        .sessions()
+        .find_active_by_browser_secret(secret.digest().as_bytes())
+        .await
+        .expect("lookup")
+        .expect("session");
+    let id = session.id;
+    let confirmed: Confirmed = Confirmed(session);
+    let mut change = database.begin().await.expect("change transaction");
+    confirmed
+        .lock(&mut change)
+        .await
+        .expect("passkey sign-in confirms");
+    let logout = tokio::spawn({
+        let database = database.clone();
+        async move { database.sessions().revoke(id).await }
+    });
+    tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+    assert!(!logout.is_finished(), "logout must wait for the change");
+    change.commit().await.expect("commit change");
+    assert!(logout.await.expect("logout task").expect("logout"));
+    let mut change = database.begin().await.expect("change transaction");
+    assert!(matches!(
+        confirmed.lock(&mut change).await,
+        Err(SessionError::Missing)
+    ));
 }

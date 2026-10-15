@@ -1,15 +1,15 @@
-//! Persistence guarantees behind invitations and reusable management windows.
+//! Persistence guarantees behind invitations and session passkey confirmations.
 use chrono::{Duration, Utc};
 use piquel_auth_protocol::{AuthenticationMethod, SessionId, UserId};
-use piquel_repository::{Database, DatabaseConfig, InsertSession, InsertUser};
-/// Invitations are single-use and management authorization follows session expiry and revocation.
+use piquel_repository::{Database, DatabaseConfig, DatabaseError, InsertSession, InsertUser};
+/// Invitations are single-use, and passkey confirmations belong to one session and end with it.
 #[expect(
     clippy::too_many_lines,
     reason = "Keep the invitation rollback and session lifecycle scenario together."
 )]
 #[tokio::test]
 #[ignore = "requires a disposable TEST_DATABASE_URL"]
-async fn invitation_redemption_and_management_lifecycle() {
+async fn invitation_redemption_and_confirmation_lifecycle() {
     let url = std::env::var("TEST_DATABASE_URL").expect("TEST_DATABASE_URL");
     let db = Database::connect(
         DatabaseConfig::new(&url, 5, std::time::Duration::from_secs(5)).expect("config"),
@@ -63,40 +63,37 @@ async fn invitation_redemption_and_management_lifecycle() {
                 user_id: user,
                 authentication_methods: vec![AuthenticationMethod::Federation],
                 authenticated_at: now,
-                expires_at: now + Duration::seconds(3),
+                expires_at: now + Duration::minutes(1),
                 user_agent_family: None,
+                passkey_confirmed_at: None,
             })
             .await
             .expect("session");
     }
-    assert!(
-        !db.sessions()
-            .management_active(session)
+    let database = &db;
+    let confirmed_at = |id| async move {
+        database
+            .sessions()
+            .find_active_by_id(id)
             .await
-            .expect("social has no grant")
-    );
-    let expiry = db
-        .sessions()
-        .grant_management(session)
-        .await
-        .expect("grant");
+            .expect("lookup")
+            .and_then(|session| session.passkey_confirmed_at)
+    };
     assert!(
-        expiry <= now + Duration::seconds(3),
-        "management cannot outlive session"
+        confirmed_at(session).await.is_none(),
+        "social sign-in has no confirmation"
     );
-    for _ in 0..2 {
-        assert!(
-            db.sessions()
-                .management_active(session)
-                .await
-                .expect("reusable grant")
-        );
+    let at = Utc::now() - Duration::seconds(30);
+    for id in [session, other] {
+        db.sessions()
+            .confirm_passkey(id, at)
+            .await
+            .expect("confirm");
     }
+    let stored = confirmed_at(session).await.expect("confirmation");
     assert!(
-        !db.sessions()
-            .management_active(other)
-            .await
-            .expect("grant is session-bound")
+        (stored - at).abs() < Duration::milliseconds(1),
+        "stored as given"
     );
     db.sessions()
         .revoke_other(user, session)
@@ -104,22 +101,19 @@ async fn invitation_redemption_and_management_lifecycle() {
         .expect("revoke others");
     assert!(
         db.sessions()
-            .find_active_by_id(other)
+            .find_by_id(other)
             .await
             .expect("other")
-            .is_none()
+            .is_some_and(|other| other.revoked_at.is_some() && other.passkey_confirmed_at.is_none()),
+        "revoking other sessions clears their confirmation"
     );
-    assert!(
-        db.sessions()
-            .management_active(session)
-            .await
-            .expect("current preserved")
-    );
+    assert!(confirmed_at(session).await.is_some(), "current preserved");
     db.sessions().revoke(session).await.expect("logout");
     assert!(
-        !db.sessions()
-            .management_active(session)
-            .await
-            .expect("logout invalidates grant")
+        matches!(
+            db.sessions().confirm_passkey(session, Utc::now()).await,
+            Err(DatabaseError::NotFound)
+        ),
+        "a revoked session cannot be confirmed"
     );
 }

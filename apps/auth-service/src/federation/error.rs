@@ -1,13 +1,13 @@
 //! Federation failures and their single mapping to browser responses.
 
 use super::MAX_RETURN_TO_BYTES;
+use crate::config::FrontendOrigins;
 use crate::security::{ApiError, SessionError};
 use axum::http::header::InvalidHeaderValue;
 use piquel_common::{ConfigurationError, VocabularyError};
 use piquel_crypto::CryptoError;
 use piquel_repository::DatabaseError;
 use thiserror::Error;
-use url::Url;
 
 /// Federation failures that reach the browser, mapped to HTTP once in `From<FederationError>`.
 /// Provider exchange failures are a separate `ProviderError`: they are logged, never shown.
@@ -19,7 +19,7 @@ pub(crate) enum FederationError {
     /// The requested provider has no configured credentials.
     #[error("sign-in provider is not configured")]
     ProviderNotConfigured,
-    /// `return_to` is neither the settings URL nor a safe path on the auth origin.
+    /// `return_to` is neither a safe path on the auth origin nor a frontend URL.
     #[error(transparent)]
     InvalidReturnTo(#[from] InvalidReturnTo),
     /// The callback's browser lacks the cookie set when its flow started.
@@ -28,9 +28,6 @@ pub(crate) enum FederationError {
     /// The browser lacks the cookie binding its pending provider evidence.
     #[error("pending federation cookie missing")]
     PendingBrowserMissing,
-    /// The signed-in account was disabled.
-    #[error("session account is inactive")]
-    AccountInactive,
     /// The account linked to the provider identity is inactive or has no active passkey.
     #[error("linked account is inactive or has no passkey")]
     LinkedAccountUnavailable,
@@ -58,9 +55,6 @@ pub(crate) enum FederationError {
     /// The provider's verified email belongs to another account.
     #[error("observed email belongs to an existing account")]
     EmailAlreadyOwned,
-    /// The passkey management grant expired before the account lock was acquired.
-    #[error("passkey management authorization expired")]
-    ManagementExpired,
     /// The current account or session is not the one the pending link targets.
     #[error("passkey session does not match the intended linking account")]
     LinkAccountMismatch,
@@ -104,7 +98,6 @@ impl From<FederationError> for ApiError {
             FederationError::PendingBrowserMissing => Self::unauthorized(
                 "No provider sign-in is waiting in this browser. Please start again.",
             ),
-            FederationError::AccountInactive => Self::unauthorized("This account is disabled."),
             FederationError::LinkedAccountUnavailable => Self::unauthorized(
                 "The Piquel account linked to this provider account is disabled or has no passkey.",
             ),
@@ -132,9 +125,6 @@ impl From<FederationError> for ApiError {
             FederationError::EmailAlreadyOwned => Self::forbidden(
                 "This email belongs to an existing account. Sign in with its passkey to link this provider.",
             ),
-            FederationError::ManagementExpired => {
-                Self::forbidden("Confirm with a passkey to change authentication settings.")
-            }
             FederationError::LinkAccountMismatch => Self::forbidden(
                 "Sign in with a passkey for the account this provider should be linked to.",
             ),
@@ -156,9 +146,12 @@ impl From<FederationError> for ApiError {
 /// Why a `return_to` address is refused. Each message names the rule it breaks.
 #[derive(Debug, Error)]
 pub(crate) enum InvalidReturnTo {
-    /// Anything that is not a path, other than the settings URL.
-    #[error("return_to must be a path on this site, starting with /, or exactly {0}")]
-    External(Url),
+    /// Anything that is neither a path nor a URL on a frontend origin.
+    #[error("return_to must be a path on this site, starting with /, or a URL on {0}")]
+    External(FrontendOrigins),
+    /// A user name or password in the URL can disguise its real host.
+    #[error("return_to cannot contain a user name or password")]
+    Credentials,
     /// Browsers read a leading `//` as another host.
     #[error("return_to cannot start with //, which browsers read as another host")]
     ProtocolRelative,

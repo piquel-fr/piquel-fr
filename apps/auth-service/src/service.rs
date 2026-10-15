@@ -1,5 +1,5 @@
 //! Built-in health and public configuration routes.
-use crate::{AuthConfig, routes, security::ApiError};
+use crate::{AuthConfig, config::FrontendOrigins, routes, security::ApiError};
 use axum::{Json, Router, extract::State, http::StatusCode, routing::get};
 use piquel_auth_protocol::Provider;
 use piquel_repository::Database;
@@ -9,6 +9,8 @@ use serde::Serialize;
 #[derive(Clone, Serialize)]
 struct PublicConfig {
     // Keep fields in the original JSON object's sorted order for byte-for-byte replies.
+    /// Frontend origins that sign-in may return to.
+    frontend_origins: FrontendOrigins,
     /// Whether signup requires a single-use invitation.
     invite_required: bool,
     /// Enabled social login choices, in protocol declaration order.
@@ -36,6 +38,7 @@ impl ServiceApplication {
         Self {
             database,
             public_config: PublicConfig {
+                frontend_origins: config.federation.frontends.clone(),
                 settings_url: config.federation.settings_url.as_url().clone(),
                 providers,
                 invite_required: config.passkey.invite_required,

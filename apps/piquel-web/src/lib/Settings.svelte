@@ -3,6 +3,8 @@
   import { page } from '$app/state';
   import {
     AuthApi,
+    Passkeys,
+    StepUp,
     errorMessage,
     providerName,
     type Configuration,
@@ -26,20 +28,23 @@
   let loading = $state(true);
   let busy = $state(false);
   let error = $state('');
-  let now = $state(Date.now());
   let editing = $state<string | null>(null);
   let name = $state('');
   let removing = $state<string | null>(null);
-  const remaining = $derived(
-    Math.max(
-      0,
-      Math.ceil(
-        ((session?.management_expires_at ? Date.parse(session.management_expires_at) : 0) - now) /
-          1000
-      )
-    )
-  );
-  const unlocked = $derived(remaining > 0);
+  // Removing a passkey or unlinking a provider needs a recent passkey confirmation.
+  // When the session has none, auth confirms it and sends the user back to finish.
+  const stepUp = new StepUp(new Passkeys(api), {
+    remove: async (id) => {
+      await api.request(`/account/passkeys/${id}`, 'DELETE');
+      passkeys = passkeys.filter((key) => key.id !== id);
+      removing = null;
+    },
+    unlink: async (provider) => {
+      await api.request(`/account/social-identities/${provider}`, 'DELETE');
+      identities = identities.filter((identity) => identity.provider !== provider);
+      removing = null;
+    }
+  });
   const configured = (provider: Provider) => config?.providers.includes(provider) ?? false;
   // Identities of since-disabled providers stay listed so they can still be unlinked.
   const providers = $derived([
@@ -48,10 +53,6 @@
   ]);
   onMount(() => {
     void load();
-    const timer = setInterval(() => (now = Date.now()), 1000);
-    return () => {
-      clearInterval(timer);
-    };
   });
   async function load() {
     try {
@@ -61,6 +62,7 @@
         api.request<Passkey[]>('/account/passkeys'),
         api.request<Identity[]>('/account/social-identities')
       ]);
+      await stepUp.resume();
     } catch (cause) {
       error = errorMessage(cause);
     } finally {
@@ -88,13 +90,6 @@
       editing = null;
     });
   }
-  async function remove(passkey: Passkey) {
-    await run(async () => {
-      await api.request(`/account/passkeys/${passkey.id}`, 'DELETE');
-      passkeys = passkeys.filter((key) => key.id !== passkey.id);
-      removing = null;
-    });
-  }
   async function link(provider: Provider) {
     await run(async () => {
       if (!config) throw new Error('Account settings are still loading. Please try again.');
@@ -104,13 +99,6 @@
         { mode: 'link', return_to: config.settings_url }
       );
       window.location.assign(result.redirect_url);
-    });
-  }
-  async function unlink(provider: Provider) {
-    await run(async () => {
-      await api.request(`/account/social-identities/${provider}`, 'DELETE');
-      identities = identities.filter((identity) => identity.provider !== provider);
-      removing = null;
     });
   }
   async function logout() {
@@ -160,18 +148,6 @@
       </div>
       <button class="text-button" disabled={busy} onclick={logout}>Sign out</button>
     </div>
-    <div class="notice row between">
-      <div>
-        {#if unlocked}<strong>Security settings unlocked</strong>
-          <p class="help">
-            {Math.floor(remaining / 60)}:{String(remaining % 60).padStart(2, '0')} remaining. Your passkey
-            verification expires automatically.
-          </p>{:else}<strong>Your settings are protected</strong>
-          <p class="help">Verify a passkey to make changes for two minutes.</p>{/if}
-      </div>
-      {#if !unlocked}<a class="button secondary" href={authPage('manage')}>Unlock with a passkey</a
-        >{/if}
-    </div>
     <section class="card" aria-labelledby="passkeys-heading">
       <div class="row between">
         <h2 id="passkeys-heading">Passkeys</h2>
@@ -191,7 +167,7 @@
               >
                 <label>Passkey name<input bind:value={name} maxlength="80" required /></label>
                 <div class="row actions">
-                  <button disabled={busy || !unlocked}>Save name</button><button
+                  <button disabled={busy}>Save name</button><button
                     class="secondary"
                     type="button"
                     onclick={() => (editing = null)}>Cancel</button
@@ -204,8 +180,9 @@
                 <div class="row actions">
                   <button
                     class="danger"
-                    disabled={busy || !unlocked}
-                    onclick={() => remove(passkey)}>Confirm removal</button
+                    disabled={busy}
+                    onclick={() => run(() => stepUp.run('remove', passkey.id))}
+                    >Confirm removal</button
                   ><button class="secondary" onclick={() => (removing = null)}>Cancel</button>
                 </div>
               </div>
@@ -218,7 +195,7 @@
                 <div class="row">
                   <button
                     class="text-button"
-                    disabled={!unlocked || busy}
+                    disabled={busy}
                     aria-label={`Rename ${passkey.friendly_name}`}
                     onclick={() => {
                       editing = passkey.id;
@@ -226,7 +203,7 @@
                     }}>Rename</button
                   ><button
                     class="text-button"
-                    disabled={!unlocked || busy || passkeys.length < 2}
+                    disabled={busy || passkeys.length < 2}
                     aria-label={`Remove ${passkey.friendly_name}`}
                     onclick={() => (removing = passkey.id)}>Remove</button
                   >
@@ -235,7 +212,7 @@
           </li>{/each}
       </ul>
       {#if !passkeys.length}<p class="empty">
-          Add your first passkey to protect your account and unlock security settings.
+          Add your first passkey to protect your account.
         </p>{/if}
       <a class="button secondary full" href={authPage('enroll')}>Add a passkey</a>
       <p class="help">Your last passkey cannot be removed.</p>
@@ -262,12 +239,10 @@
               </div>
               {#if identity}<button
                   class="secondary"
-                  disabled={!unlocked || busy}
+                  disabled={busy}
                   onclick={() => (removing = provider)}>Unlink</button
-                >{:else}<button
-                  class="secondary"
-                  disabled={!unlocked || busy}
-                  onclick={() => link(provider)}>Link {providerName(provider)}</button
+                >{:else}<button class="secondary" disabled={busy} onclick={() => link(provider)}
+                  >Link {providerName(provider)}</button
                 >{/if}
             </div>
             {#if removing === provider}<div class="notice stack">
@@ -275,8 +250,8 @@
                 <div class="row actions">
                   <button
                     class="danger"
-                    disabled={busy || !unlocked}
-                    onclick={() => unlink(provider)}>Confirm unlink</button
+                    disabled={busy}
+                    onclick={() => run(() => stepUp.run('unlink', provider))}>Confirm unlink</button
                   ><button class="secondary" onclick={() => (removing = null)}>Cancel</button>
                 </div>
               </div>{/if}

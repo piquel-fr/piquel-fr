@@ -97,7 +97,7 @@ fn typed_ceremonies_preserve_persistence_and_check_the_expected_payload() {
     assert!(AuthenticationCeremony::extract(stored()).is_some());
     assert!(RegistrationCeremony::extract(stored()).is_none());
     assert!(EnrollmentCeremony::extract(stored()).is_none());
-    assert!(ManagementCeremony::extract(stored()).is_none());
+    assert!(ConfirmationCeremony::extract(stored()).is_none());
 
     let (_, state) = webauthn
         .start_passkey_registration(user_id.as_uuid(), "alice", "Alice", None)
@@ -489,10 +489,15 @@ async fn lagging_counter_copy_is_rejected_and_audited() {
     );
 }
 
-/// Checks browser/session binding, reusable authorization and last-passkey protection.
+/// Checks browser binding, and that a passkey confirmation belongs to one session,
+/// counts from its own time and is required only where an action needs it.
 #[tokio::test]
 #[ignore = "requires TEST_DATABASE_URL"]
-async fn ceremonies_require_browser_binding_and_management_requires_the_same_session() {
+#[expect(
+    clippy::too_many_lines,
+    reason = "Keep one session's confirmation lifecycle in a single scenario."
+)]
+async fn ceremonies_require_browser_binding_and_confirmation_belongs_to_one_session() {
     let mut fixture = Fixture::new().await;
     let (started, _) = fixture
         .start(
@@ -522,66 +527,123 @@ async fn ceremonies_require_browser_binding_and_management_requires_the_same_ses
         assert_eq!(response.status(), StatusCode::BAD_REQUEST);
         assert!(response.headers().get(header::SET_COOKIE).is_none());
     }
-    let first = fixture.login().await;
-    let second = fixture.login().await;
-    let (started, browser) = fixture
-        .start("/account/passkeys/authorize/start", &first, json!({}))
+    // A passkey sign-in confirms its session, so enrollment right after it prompts once.
+    let signed_in = fixture.login().await;
+    fixture
+        .start("/account/passkeys/enroll/start", &signed_in, json!({}))
         .await;
-    let assertion = fixture.assertion(&started);
-    let response = fixture
-        .request(
-            "/account/passkeys/authorize/finish",
-            Method::POST,
-            &format!("{second}; {browser}"),
-            json!({"ceremony_id":started["ceremony_id"],"credential":assertion}),
+    // Another session of the same account, from social sign-in, is not confirmed.
+    let mut tx = fixture.app.database.begin().await.expect("transaction");
+    let secret =
+        security::Session::create(&mut tx, fixture.user_id, AuthenticationMethod::Federation)
+            .await
+            .expect("social session");
+    tx.commit().await.expect("commit");
+    let social = format!("{}={}", BrowserCookie::Session.as_str(), secret.encoded());
+    let session_id = fixture
+        .app
+        .database
+        .sessions()
+        .find_active_by_browser_secret(secret.digest().as_bytes())
+        .await
+        .expect("lookup")
+        .expect("session")
+        .id;
+    let path = format!("/account/passkeys/{}", fixture.key_id);
+    for (path, method) in [
+        ("/account/passkeys/enroll/start", Method::POST),
+        ("/account/passkeys/enroll/finish", Method::POST),
+        (path.as_str(), Method::DELETE),
+    ] {
+        security::tests::assert_step_up_required(
+            fixture.request(path, method, &social, json!({})).await,
         )
         .await;
-    assert_eq!(
-        response.status(),
-        StatusCode::BAD_REQUEST,
-        "management proof is bound to the initiating session"
-    );
-    let path = format!("/account/passkeys/{}", fixture.key_id);
+    }
     let response = fixture
         .request(
             &path,
             Method::PATCH,
-            &second,
-            json!({"friendly_name":"Unauthorized"}),
+            &social,
+            json!({"friendly_name":"Renamed"}),
         )
         .await;
-    assert_eq!(response.status(), StatusCode::FORBIDDEN);
+    assert_eq!(
+        response.status(),
+        StatusCode::NO_CONTENT,
+        "renaming needs no confirmation"
+    );
+    // A confirmation proves possession for the session that started it only.
     let (started, browser) = fixture
-        .start("/account/passkeys/authorize/start", &first, json!({}))
+        .start("/account/passkeys/confirm/start", &social, json!({}))
         .await;
     let assertion = fixture.assertion(&started);
     let response = fixture
         .request(
-            "/account/passkeys/authorize/finish",
+            "/account/passkeys/confirm/finish",
             Method::POST,
-            &format!("{first}; {browser}"),
+            &format!("{signed_in}; {browser}"),
             json!({"ceremony_id":started["ceremony_id"],"credential":assertion}),
         )
-        .await;
-    assert_eq!(response.status(), StatusCode::OK);
-    for name in ["Renamed once", "Renamed twice"] {
-        let response = fixture
-            .request(&path, Method::PATCH, &first, json!({"friendly_name":name}))
-            .await;
-        assert_eq!(
-            response.status(),
-            StatusCode::NO_CONTENT,
-            "management grant is reusable"
-        );
-    }
-    let response = fixture
-        .request(&path, Method::DELETE, &first, json!({}))
         .await;
     assert_eq!(
         response.status(),
         StatusCode::BAD_REQUEST,
-        "last passkey cannot be removed"
+        "confirmation is bound to the initiating session"
     );
+    let (started, browser) = fixture
+        .start("/account/passkeys/confirm/start", &social, json!({}))
+        .await;
+    let assertion = fixture.assertion(&started);
+    let response = fixture
+        .request(
+            "/account/passkeys/confirm/finish",
+            Method::POST,
+            &format!("{social}; {browser}"),
+            json!({"ceremony_id":started["ceremony_id"],"credential":assertion}),
+        )
+        .await;
+    assert_eq!(response.status(), StatusCode::NO_CONTENT);
+    assert_eq!(
+        fixture.audit().await.first(),
+        Some(&(AuditAction::SessionPasskeyConfirmed, AuditOutcome::Success))
+    );
+    let confirmed_at = || async {
+        fixture
+            .app
+            .database
+            .sessions()
+            .find_active_by_id(session_id)
+            .await
+            .expect("lookup")
+            .expect("session")
+            .passkey_confirmed_at
+            .expect("confirmed")
+    };
+    let confirmed = confirmed_at().await;
+    // Confirmed actions do not extend the confirmation.
+    let (started, browser) = fixture
+        .start("/account/passkeys/enroll/start", &social, json!({}))
+        .await;
+    let challenge =
+        serde_json::from_value(started["public_key"].clone()).expect("registration challenge");
+    let credential = WebauthnAuthenticator::new(SoftPasskey::new(true))
+        .do_registration(fixture.origin.clone(), challenge)
+        .expect("software registration");
+    let response = fixture
+        .request(
+            "/account/passkeys/enroll/finish",
+            Method::POST,
+            &format!("{social}; {browser}"),
+            json!({"ceremony_id":started["ceremony_id"],"friendly_name":"Second","credential":credential}),
+        )
+        .await;
+    assert_eq!(response.status(), StatusCode::NO_CONTENT);
+    let response = fixture
+        .request(&path, Method::DELETE, &social, json!({}))
+        .await;
+    assert_eq!(response.status(), StatusCode::NO_CONTENT);
+    assert_eq!(confirmed_at().await, confirmed);
     let keys = fixture
         .app
         .database
@@ -590,7 +652,27 @@ async fn ceremonies_require_browser_binding_and_management_requires_the_same_ses
         .await
         .expect("keys");
     assert_eq!(keys.len(), 1);
-    assert_eq!(keys[0].friendly_name, "Renamed twice");
+    let response = fixture
+        .request(
+            &format!("/account/passkeys/{}", keys[0].id),
+            Method::DELETE,
+            &social,
+            json!({}),
+        )
+        .await;
+    assert_eq!(
+        response.status(),
+        StatusCode::BAD_REQUEST,
+        "last passkey cannot be removed"
+    );
+    let response = fixture
+        .request("/session", Method::GET, &signed_in, json!({}))
+        .await;
+    assert_eq!(
+        response.status(),
+        StatusCode::UNAUTHORIZED,
+        "removing a passkey revokes other sessions"
+    );
 }
 
 /// Checks that a username without an account gets a stable challenge shaped like a

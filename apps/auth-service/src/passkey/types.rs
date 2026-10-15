@@ -1,7 +1,6 @@
 //! Validated names and the browser API's request and response bodies.
 
 use super::PasskeyError;
-use chrono::{DateTime, Utc};
 use piquel_auth_protocol::{TokenId, UserId};
 use serde::{Deserialize, Serialize};
 use webauthn_rs::prelude::{PublicKeyCredential, RegisterPublicKeyCredential};
@@ -145,7 +144,7 @@ pub(super) struct LoginStart {
     pub(super) username: Option<String>,
 }
 
-/// Browser assertion response for login and management authorization.
+/// Browser assertion response for login and session confirmation.
 #[derive(Deserialize)]
 pub(super) struct AuthenticationFinish {
     /// Server-side ceremony to consume exactly once.
@@ -157,7 +156,7 @@ pub(super) struct AuthenticationFinish {
 /// New label for an existing credential.
 #[derive(Deserialize)]
 pub(super) struct Rename {
-    /// Label validated before locking the management transaction.
+    /// Label validated before the rename transaction.
     pub(super) friendly_name: String,
 }
 
@@ -168,15 +167,6 @@ pub(super) struct CeremonyResponse {
     pub(super) ceremony_id: TokenId,
     /// `WebAuthn` options passed directly to the browser authenticator API.
     pub(super) public_key: serde_json::Value,
-}
-
-/// Management authorization expiry returned after a passkey proof.
-#[derive(Serialize)]
-pub(super) struct ManagementResponse {
-    /// Nominal window; the database caps the actual expiry at session expiry.
-    pub(super) expires_in: u32,
-    /// Authoritative expiry from the database's granted management window.
-    pub(super) management_expires_at: DateTime<Utc>,
 }
 
 /// Public credential metadata, excluding the credential's cryptographic contents.
@@ -199,11 +189,9 @@ pub(super) struct UserView {
     pub(super) username: String,
 }
 
-/// Signed-in account and its optional current management authorization.
+/// Signed-in account of the browser session.
 #[derive(Serialize)]
 pub(super) struct SessionView {
-    /// `None` when management is locked or its window has expired.
-    pub(super) management_expires_at: Option<DateTime<Utc>>,
     /// Current account identity.
     pub(super) user: UserView,
 }

@@ -46,7 +46,7 @@ piquel-web with Vite against an auth service on `http://localhost:3000`.
 | `AUTH_DATABASE_URL` | PostgreSQL URL; TCP requires `sslmode=verify-full`, or an explicit `sslmode=disable` on a trusted private network; local Unix sockets are also supported |
 | `AUTH_DATABASE_PASSWORD` | Optional env/file reference for the database password, when omitted from the URL |
 | `AUTH_PUBLIC_BASE_URL` | Exact auth origin, normally `https://auth.piquel.fr` |
-| `AUTH_SETTINGS_URL` | Exact settings destination; defaults to `https://piquel.fr/settings` |
+| `AUTH_SETTINGS_URL` | Exact settings destination; defaults to `https://piquel.fr/settings`. Its origin is a frontend origin: it may call the account API, and sign-in may return to any URL on it |
 | `AUTH_TRUSTED_PROXIES` | Optional comma-separated proxy peer IPs or CIDRs; these peers must overwrite `X-Forwarded-For` with one client IP. Defaults to piqueld's `PIQUELD_INGRESS_PROXIES` |
 | `AUTH_PUBLIC_LISTENER` | Listener address; defaults to `127.0.0.1:8080` |
 | `AUTH_KEY_PROVIDER` | Required persistent RSA private-key reference, `file:///absolute/path/key.pem` or `env://VARIABLE_NAME` |
@@ -146,12 +146,16 @@ client and scope; explicitly trusted clients bypass consent.
   a registration that names the pending identity shown on the signup page attaches
   it; plain registration ignores it. A social login can never replace an
   established account's passkeys.
-- A passkey confirmation opens a fixed two-minute management window for the
-  current account and browser session. It permits repeated sensitive changes and
-  does not slide or renew through social login. Reads need only ordinary login.
+- Sensitive changes (adding or removing a passkey, linking or unlinking a provider)
+  need a passkey confirmation of the current browser session from the last five
+  minutes. A passkey sign-in counts; social sign-in never does. The age counts from
+  the confirmation and is never extended by use, and it never applies to another
+  session. Without one, the API answers `403` with `"code": "step_up_required"` and
+  `max_age`; the frontend confirms on auth's `/confirm` page and finishes the change.
+  Reads and renaming a passkey need only ordinary login.
 - Matching verified email suggests linking; it never grants account access.
   Linking requires possession of the provider account and the target account's
-  passkey authorization. Explicit linking, started from settings, permits
+  passkey confirmation. Explicit linking, started from settings, permits
   different/missing provider email and is bound to the session that started it.
 - One Google and one GitHub identity may be linked. Unlinking releases the provider
   identity so another account can link it; account data and credentials never move.

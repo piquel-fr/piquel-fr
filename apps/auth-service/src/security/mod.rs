@@ -1,5 +1,6 @@
-//! Shared browser-session, management authorization, and HTTP trust boundaries.
+//! Shared browser-session, passkey confirmation and HTTP trust boundaries.
 
+use crate::config::FrontendOrigins;
 use crate::routes::{ACCOUNT_PREFIX, LOGIN_PREFIX, oidc, passkey, service};
 use axum::{
     Json,
@@ -20,6 +21,7 @@ use piquel_crypto::{CryptoError, Digest, Secret};
 use piquel_repository::{
     Database, DatabaseError, DatabaseTransaction, InsertSession, StoredSession,
 };
+use serde::Serialize;
 use std::{
     borrow::Cow,
     net::{IpAddr, SocketAddr},
@@ -42,17 +44,54 @@ const REQUEST_TIMEOUT: StdDuration = StdDuration::from_secs(30);
 const SESSION_LIFETIME_DAYS: u32 = 30;
 /// Browser flow cookies slightly outlive their server-side ceremonies.
 const FLOW_COOKIE_MAX_AGE: u32 = 600;
+/// Default maximum age, in seconds, of the passkey confirmation a protected action
+/// accepts. The confirmation happens just before the action, so it can be short.
+pub(crate) const CONFIRMATION_MAX_AGE: u32 = 300;
 
-/// Browser JSON error `{"error": message}`; internal causes only reach the logs.
+/// Browser JSON error `{"error": message}`, plus a machine-readable `code` when the
+/// frontend can resolve it. Internal causes only reach the logs.
 #[derive(Debug)]
 pub(crate) struct ApiError {
     /// Status code of the error response.
     status: StatusCode,
     /// Non-sensitive explanation shown to the user, specific enough to act on.
     message: Cow<'static, str>,
+    /// Stable reason a frontend can react to, serialized next to the message.
+    code: Option<ErrorCode>,
+}
+
+/// First-party error codes, serialized as `"code"` with their parameters beside it.
+#[derive(Debug, Serialize)]
+#[serde(tag = "code", rename_all = "snake_case")]
+enum ErrorCode {
+    /// The action needs a passkey confirmation of this session. Frontends confirm
+    /// and retry. `max_age` is borrowed from RFC 9470.
+    StepUpRequired {
+        /// Maximum confirmation age the action accepts, in seconds.
+        max_age: u32,
+    },
+}
+
+/// Serialized form of an [`ApiError`].
+#[derive(Serialize)]
+struct ErrorBody<'a> {
+    /// Human-readable message.
+    error: &'a str,
+    /// Machine-readable code and its parameters, when there is one.
+    #[serde(flatten)]
+    code: Option<&'a ErrorCode>,
 }
 
 impl ApiError {
+    /// An error without a machine-readable code.
+    fn new(status: StatusCode, message: impl Into<Cow<'static, str>>) -> Self {
+        Self {
+            status,
+            message: message.into(),
+            code: None,
+        }
+    }
+
     /// Logs a failure with every preserved cause, once, at the HTTP boundary.
     pub(crate) fn log_error(error: &dyn std::error::Error) {
         tracing::error!(error = %ErrorChain(error), "authentication operation failed");
@@ -60,52 +99,36 @@ impl ApiError {
 
     /// Rejects invalid browser input, explaining what is wrong.
     pub(crate) fn bad_request(message: impl Into<Cow<'static, str>>) -> Self {
-        Self {
-            status: StatusCode::BAD_REQUEST,
-            message: message.into(),
-        }
+        Self::new(StatusCode::BAD_REQUEST, message)
     }
 
     /// Reports a missing browser resource.
     pub(crate) fn not_found(message: impl Into<Cow<'static, str>>) -> Self {
-        Self {
-            status: StatusCode::NOT_FOUND,
-            message: message.into(),
-        }
+        Self::new(StatusCode::NOT_FOUND, message)
     }
 
     /// Requires the browser to sign in, explaining why its current sign-in is not enough.
     pub(crate) fn unauthorized(message: impl Into<Cow<'static, str>>) -> Self {
-        Self {
-            status: StatusCode::UNAUTHORIZED,
-            message: message.into(),
-        }
+        Self::new(StatusCode::UNAUTHORIZED, message)
     }
 
     /// Rejects an operation the browser is not allowed to perform, explaining why.
     pub(crate) fn forbidden(message: impl Into<Cow<'static, str>>) -> Self {
-        Self {
-            status: StatusCode::FORBIDDEN,
-            message: message.into(),
-        }
+        Self::new(StatusCode::FORBIDDEN, message)
     }
 
     /// Rejects a write that collides with existing data, naming what is already in use.
     pub(crate) fn conflict(message: impl Into<Cow<'static, str>>) -> Self {
-        Self {
-            status: StatusCode::CONFLICT,
-            message: message.into(),
-        }
+        Self::new(StatusCode::CONFLICT, message)
     }
 
     /// Logs an internal source chain and returns a generic browser message.
     pub(crate) fn internal(error: impl std::error::Error) -> Self {
         Self::log_error(&error);
-
-        Self {
-            status: StatusCode::INTERNAL_SERVER_ERROR,
-            message: "The request could not be completed. Please try again.".into(),
-        }
+        Self::new(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "The request could not be completed. Please try again.",
+        )
     }
 }
 
@@ -129,7 +152,10 @@ impl IntoResponse for ApiError {
     fn into_response(self) -> Response {
         let mut response = (
             self.status,
-            Json(serde_json::json!({ "error": self.message })),
+            Json(ErrorBody {
+                error: &self.message,
+                code: self.code.as_ref(),
+            }),
         )
             .into_response();
         if self.status == StatusCode::TOO_MANY_REQUESTS {
@@ -219,9 +245,12 @@ pub(crate) enum SessionError {
     /// No active sign-in session exists.
     #[error("active browser session required")]
     Missing,
-    /// Settings authorization has expired or was never granted.
-    #[error("active passkey management authorization required")]
-    ManagementRequired,
+    /// The session has no passkey confirmation at most `max_age` seconds old.
+    #[error("passkey confirmation at most {max_age} seconds old required")]
+    StepUpRequired {
+        /// Maximum confirmation age the action accepts, in seconds.
+        max_age: u32,
+    },
     /// Session persistence failed.
     #[error(transparent)]
     Database(#[from] DatabaseError),
@@ -231,13 +260,14 @@ pub(crate) enum SessionError {
 }
 
 impl From<SessionError> for ApiError {
-    /// A missing session is 401 and an expired management window 403.
+    /// A missing session is 401. A stale confirmation is 403 with `step_up_required`.
     fn from(error: SessionError) -> Self {
         match error {
             SessionError::Missing => Self::unauthorized("Sign in to continue."),
-            SessionError::ManagementRequired => {
-                Self::forbidden("Confirm with a passkey to unlock settings for two minutes.")
-            }
+            SessionError::StepUpRequired { max_age } => Self {
+                code: Some(ErrorCode::StepUpRequired { max_age }),
+                ..Self::forbidden("Confirm with your passkey to continue.")
+            },
             SessionError::Database(error) => error.into(),
             error @ SessionError::Crypto(_) => Self::internal(error),
         }
@@ -269,28 +299,9 @@ impl Session {
             .ok_or(SessionError::Missing)
     }
 
-    /// Requires the session's short passkey management window.
-    pub(crate) async fn management(
-        database: &Database,
-        headers: &HeaderMap,
-    ) -> Result<StoredSession, SessionError> {
-        let session = Self::required(database, headers).await?;
-        Self::authorize_management(database, session).await
-    }
-
-    /// Applies management authorization to an already extracted session.
-    pub(crate) async fn authorize_management(
-        database: &Database,
-        session: StoredSession,
-    ) -> Result<StoredSession, SessionError> {
-        if !database.sessions().management_active(session.id).await? {
-            return Err(SessionError::ManagementRequired);
-        }
-        Ok(session)
-    }
-
     /// Creates a session inside the caller's transaction and returns the secret for
-    /// its cookie. Callers set the cookie only after the transaction commits.
+    /// its cookie. Callers set the cookie only after the transaction commits. A passkey
+    /// sign-in also confirms the session, so an action right after it prompts no more.
     pub(crate) async fn create(
         tx: &mut DatabaseTransaction<'_>,
         user_id: UserId,
@@ -306,6 +317,8 @@ impl Session {
                 authenticated_at: now,
                 expires_at: now + Duration::days(i64::from(SESSION_LIFETIME_DAYS)),
                 user_agent_family: None,
+                passkey_confirmed_at: matches!(method, AuthenticationMethod::Passkey)
+                    .then_some(now),
             })
             .await?;
         let secret = Secret::generate()?;
@@ -320,8 +333,54 @@ impl Session {
 pub(crate) struct Session(pub StoredSession);
 /// Optional browser session for anonymous or signed-in requests.
 pub(crate) struct OptionalSession(pub Option<StoredSession>);
-/// Browser session with a live passkey management window.
-pub(crate) struct ManagementSession(pub StoredSession);
+/// Browser session whose passkey confirmation is at most `MAX_AGE` seconds old. The
+/// age counts from the confirmation itself, so using it never extends it. Handlers
+/// re-check it with [`Self::lock`] inside their transaction.
+pub(crate) struct Confirmed<const MAX_AGE: u32 = CONFIRMATION_MAX_AGE>(pub StoredSession);
+
+impl<const MAX_AGE: u32> Confirmed<MAX_AGE> {
+    /// Rejects a session without a recent enough passkey confirmation.
+    fn check(session: &StoredSession) -> Result<(), SessionError> {
+        let max_age = Duration::seconds(i64::from(MAX_AGE));
+        if session
+            .passkey_confirmed_at
+            .is_some_and(|confirmed| Utc::now() - confirmed <= max_age)
+        {
+            Ok(())
+        } else {
+            Err(SessionError::StepUpRequired { max_age: MAX_AGE })
+        }
+    }
+
+    /// Re-checks the confirmation inside `tx`, locking the account and then the session
+    /// row, so a concurrent logout or revocation either commits first or waits.
+    pub(crate) async fn lock(&self, tx: &mut DatabaseTransaction<'_>) -> Result<(), SessionError> {
+        tx.users()
+            .find_active_by_id_for_update(self.0.user_id)
+            .await?
+            .ok_or(SessionError::Missing)?;
+        let session = tx
+            .sessions()
+            .find_active_by_id_for_update(self.0.id)
+            .await?
+            .ok_or(SessionError::Missing)?;
+        Self::check(&session)
+    }
+}
+
+impl<S, const MAX_AGE: u32> FromRequestParts<S> for Confirmed<MAX_AGE>
+where
+    Database: FromRef<S>,
+    S: Send + Sync,
+{
+    type Rejection = ApiError;
+    /// Extracts the active session, then requires its recent passkey confirmation.
+    async fn from_request_parts(parts: &mut Parts, state: &S) -> Result<Self, Self::Rejection> {
+        let Session(session) = Session::from_request_parts(parts, state).await?;
+        Self::check(&session)?;
+        Ok(Self(session))
+    }
+}
 
 /// Implements the common database-backed extraction contract for session variants.
 macro_rules! session_extractor {
@@ -346,7 +405,6 @@ macro_rules! session_extractor {
 }
 session_extractor!(Session, required);
 session_extractor!(OptionalSession, optional);
-session_extractor!(ManagementSession, management);
 
 /// How the HTTP boundary treats a route. Origin, CSRF and rate policy all read this one
 /// classification, so it must list every route that differs from `Other`.
@@ -364,9 +422,9 @@ enum Endpoint {
     Authorize,
     /// RP-initiated logout, validated by its own hint and same-origin checks.
     Logout,
-    /// Account and session APIs shared with the settings site.
+    /// Account and session APIs shared with the first-party frontends.
     Account,
-    /// Social sign-in, also started from the settings site.
+    /// Social sign-in, also started from the first-party frontends.
     Login,
     /// Auth-origin pages and ceremonies.
     Other,
@@ -503,14 +561,13 @@ impl From<HttpSecurityError> for ApiError {
             HttpSecurityError::ForwardedAddress(_) => Self::bad_request(
                 "The proxy's X-Forwarded-For header must hold exactly one IP address.",
             ),
-            HttpSecurityError::RateLimited => Self {
-                status: StatusCode::TOO_MANY_REQUESTS,
-                message: "Too many requests. Please wait a minute.".into(),
-            },
-            HttpSecurityError::Timeout(_) => Self {
-                status: StatusCode::GATEWAY_TIMEOUT,
-                message: "Request timed out.".into(),
-            },
+            HttpSecurityError::RateLimited => Self::new(
+                StatusCode::TOO_MANY_REQUESTS,
+                "Too many requests. Please wait a minute.",
+            ),
+            HttpSecurityError::Timeout(_) => {
+                Self::new(StatusCode::GATEWAY_TIMEOUT, "Request timed out.")
+            }
             HttpSecurityError::Database(error) => error.into(),
             error @ HttpSecurityError::MissingPeer => Self::internal(error),
         }
@@ -528,8 +585,8 @@ pub(crate) struct HttpSecurity {
     pub request_timeout: StdDuration,
     /// Origin of the auth frontend, allowed on every endpoint.
     pub auth_origin: String,
-    /// Origin of the settings site, allowed on account and login endpoints.
-    pub settings_origin: String,
+    /// First-party frontend origins, allowed on account and login endpoints.
+    pub frontends: FrontendOrigins,
     /// Public OIDC client origins permitted on protocol endpoints.
     pub client_origins: Arc<Vec<String>>,
 }
@@ -542,12 +599,7 @@ impl HttpSecurity {
             trusted_proxies: Arc::new(config.trusted_proxies.clone()),
             request_timeout: REQUEST_TIMEOUT,
             auth_origin: config.passkey.origin.serialized(),
-            settings_origin: config
-                .federation
-                .settings_url
-                .as_url()
-                .origin()
-                .ascii_serialization(),
+            frontends: config.federation.frontends.clone(),
             client_origins: Arc::new(
                 config
                     .oidc
@@ -593,7 +645,7 @@ impl HttpSecurity {
     fn allowed_origin(&self, endpoint: Endpoint, origin: &str) -> bool {
         matches!(endpoint, Endpoint::Discovery)
             || origin == self.auth_origin
-            || (origin == self.settings_origin
+            || (self.frontends.contains(origin)
                 && matches!(endpoint, Endpoint::Account | Endpoint::Login))
             || (matches!(endpoint, Endpoint::OAuthBackChannel | Endpoint::UserInfo)
                 && self.client_origins.iter().any(|v| v == origin))
@@ -742,6 +794,6 @@ impl HttpSecurity {
     }
 }
 
-/// Focused tests for this module and its security contracts.
+/// Focused tests for this module and its security contracts, plus shared assertions.
 #[cfg(test)]
-mod tests;
+pub(crate) mod tests;

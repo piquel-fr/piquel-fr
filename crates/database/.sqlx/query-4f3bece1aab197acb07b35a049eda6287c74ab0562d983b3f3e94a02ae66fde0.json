@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "SELECT\n                    s.id AS \"id: SessionId\", s.user_id AS \"user_id: UserId\",\n                    s.authentication_methods AS \"authentication_methods: JsonArray<AuthenticationMethod>\",\n                    s.authenticated_at, s.expires_at, s.last_seen_at, s.revoked_at\n                FROM sessions s\n                JOIN users u ON u.id = s.user_id\n                WHERE s.id = $1\n                AND s.revoked_at IS NULL\n                AND s.expires_at > now()\n                AND u.status = 'active'\n                FOR NO KEY UPDATE OF s",
+  "query": "SELECT\n                    s.id AS \"id: SessionId\", s.user_id AS \"user_id: UserId\",\n                    s.authentication_methods AS \"authentication_methods: JsonArray<AuthenticationMethod>\",\n                    s.authenticated_at, s.expires_at, s.last_seen_at, s.revoked_at,\n                    s.passkey_confirmed_at\n                FROM sessions s\n                JOIN users u ON u.id = s.user_id\n                WHERE s.id = $1\n                AND s.revoked_at IS NULL\n                AND s.expires_at > now()\n                AND u.status = 'active'\n                FOR NO KEY UPDATE OF s",
   "describe": {
     "columns": [
       {
@@ -37,6 +37,11 @@
         "ordinal": 6,
         "name": "revoked_at",
         "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 7,
+        "name": "passkey_confirmed_at",
+        "type_info": "Timestamptz"
       }
     ],
     "parameters": {
@@ -51,8 +56,9 @@
       false,
       false,
       false,
+      true,
       true
     ]
   },
-  "hash": "9952e4d09fb68962ac94df2843b84b07d96b7cc7e8c73c040bbfd22be37c51d4"
+  "hash": "4f3bece1aab197acb07b35a049eda6287c74ab0562d983b3f3e94a02ae66fde0"
 }

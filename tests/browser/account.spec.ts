@@ -5,10 +5,10 @@ type Tokens = { id_token: string; access_token: string };
 type Jwks = { keys: (JsonWebKey & { kid: string })[] };
 type Json = Record<string, unknown>;
 type Session = { user: { id: string } };
-type Passkeys = { id: string }[];
+type Passkeys = { id: string; friendly_name: string }[];
 
 /** Runs against the real Rust binary and an isolated PostgreSQL database. */
-test('passkey lifecycle, protected settings and browser OIDC consent with SSO', async ({
+test('passkey lifecycle, passkey confirmation and browser OIDC consent with SSO', async ({
   page,
   context
 }) => {
@@ -179,27 +179,8 @@ test('passkey lifecycle, protected settings and browser OIDC consent with SSO', 
     expect(sso.searchParams.has('error')).toBe(false);
     expect(sso.searchParams.get('code')).toBeTruthy();
     expect(sso.searchParams.get('code')).not.toBe(code);
+    // Settings have no unlock step, and renaming needs no passkey confirmation.
     await page.goto(settingsUrl);
-    await expect(page.getByRole('button', { name: 'Rename Synced passkey' })).toBeDisabled();
-
-    const rejected = await page.evaluate(async (origin) => {
-      const options = { credentials: 'include' as const };
-      const list = (await fetch(`${origin}/account/passkeys`, options).then((response) =>
-        response.json()
-      )) as Passkeys;
-      return fetch(`${origin}/account/passkeys/${list[0].id}`, {
-        ...options,
-        method: 'PATCH',
-        headers: { 'content-type': 'application/json', 'x-piquel-csrf': '1' },
-        body: JSON.stringify({ friendly_name: 'Unauthorized rename' })
-      }).then((response) => response.status);
-    }, authUrl);
-    expect(rejected).toBeGreaterThanOrEqual(400);
-
-    await page.getByRole('link', { name: 'Unlock with a passkey' }).click();
-    await page.getByRole('button', { name: 'Verify with a passkey' }).click();
-    await expect(page).toHaveURL(settingsUrl);
-    await expect(page.getByText('Security settings unlocked', { exact: true })).toBeVisible();
     await page.getByRole('button', { name: 'Rename Synced passkey' }).click();
     await page.getByLabel('Passkey name', { exact: true }).fill('My synced passkey');
     await page.getByRole('button', { name: 'Save name' }).click();
@@ -216,13 +197,33 @@ test('passkey lifecycle, protected settings and browser OIDC consent with SSO', 
         automaticPresenceSimulation: true
       }
     });
+    // Signup confirmed this session, so enrollment asks for no other passkey: the first
+    // authenticator no longer answers, and the second has no credential to confirm with.
     await page.getByRole('link', { name: 'Add a passkey', exact: true }).click();
     await page.getByLabel('Passkey name', { exact: true }).fill('Second passkey');
-    await page.getByRole('button', { name: 'Verify and add passkey' }).click();
+    await page.getByRole('button', { name: 'Add passkey', exact: true }).click();
     await expect(page).toHaveURL(settingsUrl);
     await expect(page.getByText('Second passkey', { exact: true })).toBeVisible();
-    await page.getByRole('button', { name: 'Remove Second passkey', exact: true }).click();
-    await page.getByRole('button', { name: 'Confirm removal' }).click();
+
+    // The confirmation is still fresh, so removal would complete in place. Leave the way
+    // the SDK does when it is stale, through auth's /confirm page, and check that the
+    // removal resumes on return.
+    const secondId = await page.evaluate(async (origin) => {
+      const list = (await fetch(`${origin}/account/passkeys`, { credentials: 'include' }).then(
+        (response) => response.json()
+      )) as Passkeys;
+      const id = list.find((key) => key.friendly_name === 'Second passkey')?.id ?? '';
+      sessionStorage.setItem(
+        'piquel.step_up',
+        JSON.stringify({ key: 'remove', argument: id, started_at: Date.now() })
+      );
+      return id;
+    }, authUrl);
+    expect(secondId).toBeTruthy();
+    await page.goto(`${authUrl}/confirm?${new URLSearchParams({ return_to: settingsUrl })}`);
+    await page.getByRole('button', { name: 'Verify with a passkey' }).click();
+    await expect(page).toHaveURL(settingsUrl);
+    await expect(page.getByText('My synced passkey', { exact: true })).toBeVisible();
     await expect(page.getByText('Second passkey', { exact: true })).not.toBeVisible();
     await expect(
       page.getByRole('button', { name: 'Remove My synced passkey', exact: true })

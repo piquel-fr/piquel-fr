@@ -1,4 +1,4 @@
-//! Browser-bound `WebAuthn` ceremonies and passkey-only management authorization.
+//! Browser-bound `WebAuthn` ceremonies, passkey management and session confirmation.
 use crate::config::PasskeyConfig;
 use crate::federation::FederationApplication;
 use crate::routes;
@@ -32,18 +32,17 @@ mod error;
 mod types;
 
 use ceremonies::{
-    AuthenticationCeremony, Ceremony, DiscoverCeremony, EnrollmentCeremony, LoginCeremony,
-    ManagementCeremony, RegistrationCeremony,
+    AuthenticationCeremony, Ceremony, ConfirmationCeremony, DiscoverCeremony, EnrollmentCeremony,
+    LoginCeremony, RegistrationCeremony,
 };
 pub use error::PasskeyConfigError;
 use error::PasskeyError;
 use types::{
-    AuthenticationFinish, DisplayName, EnrollmentStart, LoginStart, ManagementResponse,
-    PasskeyKind, PasskeyName, PasskeyView, RegistrationFinish, RegistrationStart, Rename,
-    SessionView, UserView, Username,
+    AuthenticationFinish, DisplayName, EnrollmentStart, LoginStart, PasskeyKind, PasskeyName,
+    PasskeyView, RegistrationFinish, RegistrationStart, Rename, SessionView, UserView, Username,
 };
 
-/// Browser passkey ceremonies and management authorization.
+/// Browser passkey ceremonies, passkey management and session confirmation.
 #[derive(Clone)]
 pub struct PasskeyApplication {
     /// Database holding users, passkeys, ceremonies and sessions.
@@ -56,9 +55,6 @@ pub struct PasskeyApplication {
     decoy_key: DecoyKey,
 }
 
-/// Nominal management lifetime, matching the repository's two-minute grant.
-/// The database caps the actual expiry at session expiry and returns that timestamp.
-const MANAGEMENT_EXPIRES_IN: u32 = 120;
 /// Human-readable `WebAuthn` relying party name.
 const RELYING_PARTY_NAME: &str = "Piquel";
 /// Android UA marker is a compatibility gate, never an authentication claim.
@@ -105,12 +101,12 @@ impl PasskeyApplication {
                 post(Self::finish_login),
             )
             .route(
-                routes::passkey::AUTHORIZE_START,
-                post(Self::start_management),
+                routes::passkey::CONFIRM_START,
+                post(Self::start_confirmation),
             )
             .route(
-                routes::passkey::AUTHORIZE_FINISH,
-                post(Self::finish_management),
+                routes::passkey::CONFIRM_FINISH,
+                post(Self::finish_confirmation),
             )
             .route(routes::passkey::ENROLL_START, post(Self::start_enrollment))
             .route(
@@ -322,21 +318,6 @@ impl PasskeyApplication {
         Err(error)
     }
 
-    /// Locks account and session authorization in the same order as credential changes.
-    async fn lock_management(
-        tx: &mut DatabaseTransaction<'_>,
-        session: &piquel_repository::StoredSession,
-    ) -> Result<(), PasskeyError> {
-        tx.users()
-            .find_active_by_id_for_update(session.user_id)
-            .await?
-            .ok_or(PasskeyError::AccountInactive)?;
-        if !tx.sessions().management_active(session.id).await? {
-            return Err(PasskeyError::ManagementExpired);
-        }
-        Ok(())
-    }
-
     /// Validates signup and starts the first passkey ceremony without creating an account.
     async fn start_registration(
         State(app): State<Self>,
@@ -542,7 +523,7 @@ impl PasskeyApplication {
     }
 
     /// Starts a passkey proof tied to the current signed-in session.
-    async fn start_management(
+    async fn start_confirmation(
         State(app): State<Self>,
         security::Session(session): security::Session,
         headers: HeaderMap,
@@ -554,7 +535,7 @@ impl PasskeyApplication {
         Ok(app
             .start(
                 &headers,
-                Ceremony::Manage(ManagementCeremony {
+                Ceremony::Confirm(ConfirmationCeremony {
                     user_id: session.user_id,
                     session_id: session.id,
                     state,
@@ -564,19 +545,19 @@ impl PasskeyApplication {
             .await?)
     }
 
-    /// Unlocks settings only after a fresh passkey proof for the same session.
-    async fn finish_management(
+    /// Confirms the session after a fresh passkey proof started by that same session.
+    async fn finish_confirmation(
         State(app): State<Self>,
         security::Session(session): security::Session,
         headers: HeaderMap,
         Json(input): Json<AuthenticationFinish>,
-    ) -> Result<Response, ApiError> {
-        let ManagementCeremony {
+    ) -> Result<StatusCode, ApiError> {
+        let ConfirmationCeremony {
             user_id,
             session_id,
             state,
         } = app
-            .consume::<ManagementCeremony>(&headers, input.ceremony_id)
+            .consume::<ConfirmationCeremony>(&headers, input.ceremony_id)
             .await?;
         if session.user_id != user_id || session.id != session_id {
             return Err(PasskeyError::SessionChanged.into());
@@ -585,22 +566,20 @@ impl PasskeyApplication {
             .webauthn
             .finish_passkey_authentication(&input.credential, &state);
         let mut tx = app.accept_credential(user_id, verified).await?;
-        let expires = tx.sessions().grant_management(session_id).await?;
+        tx.sessions()
+            .confirm_passkey(session_id, chrono::Utc::now())
+            .await?;
         tx.audit_events()
-            .record(user_id, AuditAction::SettingsUnlock, None)
+            .record(user_id, AuditAction::SessionPasskeyConfirmed, None)
             .await?;
         tx.commit().await?;
-        Ok(Json(ManagementResponse {
-            expires_in: MANAGEMENT_EXPIRES_IN,
-            management_expires_at: expires,
-        })
-        .into_response())
+        Ok(StatusCode::NO_CONTENT)
     }
 
     /// Starts another passkey registration, excluding the account's current credentials.
     async fn start_enrollment(
         State(app): State<Self>,
-        security::ManagementSession(session): security::ManagementSession,
+        security::Confirmed(session): security::Confirmed,
         headers: HeaderMap,
         input: Option<Json<EnrollmentStart>>,
     ) -> Result<Response, ApiError> {
@@ -639,14 +618,15 @@ impl PasskeyApplication {
             .await?)
     }
 
-    /// Adds a verified credential while rechecking settings authorization under lock.
+    /// Adds a verified credential while rechecking the session's confirmation under lock.
     async fn finish_enrollment(
         State(app): State<Self>,
-        security::ManagementSession(session): security::ManagementSession,
+        confirmed: security::Confirmed,
         headers: HeaderMap,
         Json(input): Json<RegistrationFinish>,
     ) -> Result<StatusCode, ApiError> {
         let friendly_name = PasskeyName::parse(input.friendly_name)?;
+        let session = &confirmed.0;
 
         let EnrollmentCeremony {
             user_id,
@@ -663,7 +643,7 @@ impl PasskeyApplication {
             .finish_passkey_registration(&input.credential, &state)
             .map_err(PasskeyError::from)?;
         let mut tx = app.database.begin().await?;
-        Self::lock_management(&mut tx, &session).await?;
+        confirmed.lock(&mut tx).await?;
         Self::insert_passkey(&mut tx, user_id, key, friendly_name).await?;
         tx.audit_events()
             .record(user_id, AuditAction::PasskeyAdd, None)
@@ -691,17 +671,16 @@ impl PasskeyApplication {
         ))
     }
 
-    /// Changes a credential label within a live, locked management window.
+    /// Changes a credential label. A name grants nothing, so a session is enough.
     async fn rename(
         State(app): State<Self>,
-        security::ManagementSession(session): security::ManagementSession,
+        security::Session(session): security::Session,
         Path(id): Path<TokenId>,
         Json(input): Json<Rename>,
     ) -> Result<StatusCode, ApiError> {
         let friendly_name = PasskeyName::parse(input.friendly_name)?;
 
         let mut tx = app.database.begin().await?;
-        Self::lock_management(&mut tx, &session).await?;
         if !tx
             .passkeys()
             .rename(id, session.user_id, friendly_name.as_str())
@@ -719,11 +698,12 @@ impl PasskeyApplication {
     /// Removes a passkey while retaining another and revoking the account's other sessions.
     async fn revoke(
         State(app): State<Self>,
-        security::ManagementSession(session): security::ManagementSession,
+        confirmed: security::Confirmed,
         Path(id): Path<TokenId>,
     ) -> Result<StatusCode, ApiError> {
+        let session = &confirmed.0;
         let mut tx = app.database.begin().await?;
-        Self::lock_management(&mut tx, &session).await?;
+        confirmed.lock(&mut tx).await?;
         if !tx
             .passkeys()
             .revoke_if_not_last(id, session.user_id)
@@ -741,7 +721,7 @@ impl PasskeyApplication {
         Ok(StatusCode::NO_CONTENT)
     }
 
-    /// Returns the current account identity and its authoritative settings authorization expiry.
+    /// Returns the current account identity.
     async fn session_view(
         State(app): State<Self>,
         security::Session(session): security::Session,
@@ -752,18 +732,12 @@ impl PasskeyApplication {
             .find_by_id(session.user_id)
             .await?
             .ok_or(PasskeyError::AccountInactive)?;
-        let expires = app
-            .database
-            .sessions()
-            .management_expiry(session.id)
-            .await?;
         Ok(Json(SessionView {
             user: UserView {
                 id: user.id,
                 username: user.username,
                 display_name: user.display_name,
             },
-            management_expires_at: expires,
         }))
     }
 

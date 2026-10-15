@@ -11,7 +11,6 @@ use axum::{
 use piquel_auth_protocol::{TokenId, UserId};
 use piquel_repository::{
     AuditAction, Database, DatabaseTransaction, InsertExternalIdentity, PendingFederation,
-    StoredSession,
 };
 use serde::Serialize;
 
@@ -118,32 +117,27 @@ impl FederationApplication {
         })
     }
 
-    /// Confirms a pending identity using a passkey-authorized account session.
+    /// Confirms a pending identity using a passkey-confirmed account session.
     pub(super) async fn confirm_link(
         State(app): State<Self>,
-        security::ManagementSession(session): security::ManagementSession,
+        confirmed: security::Confirmed,
         headers: HeaderMap,
     ) -> Result<Response, ApiError> {
-        Ok(app.link(&session, &headers).await?)
+        Ok(app.link(&confirmed, &headers).await?)
     }
 
-    /// Claims an identity atomically after rechecking its account and management grant.
+    /// Claims an identity atomically after rechecking the session's confirmation.
     async fn link(
         &self,
-        session: &StoredSession,
+        confirmed: &security::Confirmed,
         headers: &HeaderMap,
     ) -> Result<Response, FederationError> {
+        let session = &confirmed.0;
         let browser = BrowserCookie::FederationPending
             .read(headers)
             .ok_or(FederationError::PendingBrowserMissing)?;
         let mut tx = self.database.begin().await?;
-        tx.users()
-            .find_active_by_id_for_update(session.user_id)
-            .await?
-            .ok_or(FederationError::AccountInactive)?;
-        if !tx.sessions().management_active(session.id).await? {
-            return Err(FederationError::ManagementExpired);
-        }
+        confirmed.lock(&mut tx).await?;
         let pending = tx
             .federation()
             .pending(browser.digest().as_bytes())
@@ -237,14 +231,14 @@ impl FederationApplication {
         ))
     }
 
-    /// Removes an account's provider link after passkey authorization.
+    /// Removes an account's provider link after a recent passkey confirmation.
     pub(super) async fn unlink(
         State(app): State<Self>,
         Path(provider): Path<String>,
-        security::ManagementSession(session): security::ManagementSession,
+        confirmed: security::Confirmed,
     ) -> Result<StatusCode, ApiError> {
         app.unlink_identity(
-            &session,
+            &confirmed,
             provider
                 .parse()
                 .map_err(FederationError::UnsupportedProvider)?,
@@ -256,17 +250,12 @@ impl FederationApplication {
     /// Serializes unlink against sign-in and linking, then revokes other browser sessions.
     async fn unlink_identity(
         &self,
-        session: &StoredSession,
+        confirmed: &security::Confirmed,
         provider: Provider,
     ) -> Result<(), FederationError> {
+        let session = &confirmed.0;
         let mut tx = self.database.begin().await?;
-        tx.users()
-            .find_active_by_id_for_update(session.user_id)
-            .await?
-            .ok_or(FederationError::AccountInactive)?;
-        if !tx.sessions().management_active(session.id).await? {
-            return Err(FederationError::ManagementExpired);
-        }
+        confirmed.lock(&mut tx).await?;
         if !tx.federation().unlink(session.user_id, provider).await? {
             return Err(FederationError::IdentityNotLinked);
         }

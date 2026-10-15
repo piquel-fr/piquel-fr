@@ -54,12 +54,12 @@ pub(super) struct DiscoverCeremony {
     pub(super) state: DiscoverableAuthentication,
 }
 
-/// Passkey proof that unlocks settings only for the initiating session.
+/// Passkey proof that confirms only the initiating session.
 #[derive(Serialize, Deserialize)]
-pub(super) struct ManagementCeremony {
+pub(super) struct ConfirmationCeremony {
     /// Account that must still own the current session.
     pub(super) user_id: UserId,
-    /// Initiating session; another login cannot reuse this management proof.
+    /// Initiating session; another login cannot reuse this confirmation.
     pub(super) session_id: SessionId,
     /// Server-side authentication challenge and credential snapshot.
     pub(super) state: PasskeyAuthentication,
@@ -90,7 +90,7 @@ pub(super) enum Ceremony {
     /// Discoverable account-picker authentication.
     Discover(DiscoverCeremony),
     /// Settings authorization for the initiating session.
-    Manage(ManagementCeremony),
+    Confirm(ConfirmationCeremony),
     /// Additional passkey creation.
     Enroll(EnrollmentCeremony),
 }
@@ -101,7 +101,7 @@ impl Ceremony {
         match self {
             Self::Register(_) => CeremonyKind::Registration,
             Self::Login(_) | Self::Decoy | Self::Discover(_) => CeremonyKind::Authentication,
-            Self::Manage(_) => CeremonyKind::PurposeAuthentication,
+            Self::Confirm(_) => CeremonyKind::PurposeAuthentication,
             Self::Enroll(_) => CeremonyKind::Enrollment,
         }
     }
@@ -111,7 +111,7 @@ impl Ceremony {
         match self {
             Self::Register(_) | Self::Decoy | Self::Discover(_) => None,
             Self::Login(state) => Some(state.user_id),
-            Self::Manage(state) => Some(state.user_id),
+            Self::Confirm(state) => Some(state.user_id),
             Self::Enroll(state) => Some(state.user_id),
         }
     }
@@ -120,7 +120,7 @@ impl Ceremony {
     const fn session_id(&self) -> Option<SessionId> {
         match self {
             Self::Register(_) | Self::Login(_) | Self::Decoy | Self::Discover(_) => None,
-            Self::Manage(state) => Some(state.session_id),
+            Self::Confirm(state) => Some(state.session_id),
             Self::Enroll(state) => Some(state.session_id),
         }
     }
@@ -160,7 +160,7 @@ macro_rules! ceremony_state {
     };
 }
 ceremony_state!(RegistrationCeremony, Register, Registration);
-ceremony_state!(ManagementCeremony, Manage, PurposeAuthentication);
+ceremony_state!(ConfirmationCeremony, Confirm, PurposeAuthentication);
 ceremony_state!(EnrollmentCeremony, Enroll, Enrollment);
 
 /// Either supported account sign-in payload, sharing one database purpose.
@@ -181,7 +181,7 @@ impl CeremonyState for AuthenticationCeremony {
             Ceremony::Login(state) => Some(Self::Login(state)),
             Ceremony::Decoy => Some(Self::Decoy),
             Ceremony::Discover(state) => Some(Self::Discover(state)),
-            Ceremony::Register(_) | Ceremony::Manage(_) | Ceremony::Enroll(_) => None,
+            Ceremony::Register(_) | Ceremony::Confirm(_) | Ceremony::Enroll(_) => None,
         }
     }
 }
