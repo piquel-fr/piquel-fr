@@ -624,6 +624,15 @@ async fn ceremonies_require_browser_binding_and_confirmation_belongs_to_one_sess
     let (started, browser) = fixture
         .start("/account/passkeys/enroll/start", &social, json!({}))
         .await;
+    // The confirmation authorized enrollment at start; its lapsing at the authenticator
+    // must not discard the new credential.
+    fixture
+        .app
+        .database
+        .sessions()
+        .confirm_passkey(session_id, confirmed - chrono::Duration::hours(1))
+        .await
+        .expect("stale confirmation");
     let challenge =
         serde_json::from_value(started["public_key"].clone()).expect("registration challenge");
     let credential = WebauthnAuthenticator::new(SoftPasskey::new(true))
@@ -638,6 +647,13 @@ async fn ceremonies_require_browser_binding_and_confirmation_belongs_to_one_sess
         )
         .await;
     assert_eq!(response.status(), StatusCode::NO_CONTENT);
+    fixture
+        .app
+        .database
+        .sessions()
+        .confirm_passkey(session_id, confirmed)
+        .await
+        .expect("restore confirmation");
     let response = fixture
         .request(&path, Method::DELETE, &social, json!({}))
         .await;

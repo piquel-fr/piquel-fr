@@ -106,7 +106,9 @@
   // Signs in when this browser has no session. A passkey sign-in also confirms the
   // session, so the action after it prompts no more.
   async function signIn() {
-    if (!session) await passkeys.authenticate(username.trim() || undefined);
+    if (session) return;
+    await passkeys.authenticate(username.trim() || undefined);
+    session = await api.request<Session>('/session');
   }
   async function submit() {
     await run(async () => {
