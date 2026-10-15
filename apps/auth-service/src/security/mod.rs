@@ -299,6 +299,24 @@ impl Session {
             .ok_or(SessionError::Missing)
     }
 
+    /// Locks the account, then the session row, and returns the session as it is now.
+    /// A concurrent logout or revocation either commits first or waits. Expiry is
+    /// checked after the locks, since the lookup compares it with the transaction's start.
+    pub(crate) async fn lock(
+        tx: &mut DatabaseTransaction<'_>,
+        session: &StoredSession,
+    ) -> Result<StoredSession, SessionError> {
+        tx.users()
+            .find_active_by_id_for_update(session.user_id)
+            .await?
+            .ok_or(SessionError::Missing)?;
+        tx.sessions()
+            .find_active_by_id_for_update(session.id)
+            .await?
+            .filter(|session| session.expires_at > Utc::now())
+            .ok_or(SessionError::Missing)
+    }
+
     /// Creates a session inside the caller's transaction and returns the secret for
     /// its cookie. Callers set the cookie only after the transaction commits. A passkey
     /// sign-in also confirms the session, so an action right after it prompts no more.
@@ -352,19 +370,9 @@ impl<const MAX_AGE: u32> Confirmed<MAX_AGE> {
         }
     }
 
-    /// Re-checks the confirmation inside `tx`, locking the account and then the session
-    /// row, so a concurrent logout or revocation either commits first or waits.
+    /// Re-checks the confirmation inside `tx` under [`Session::lock`].
     pub(crate) async fn lock(&self, tx: &mut DatabaseTransaction<'_>) -> Result<(), SessionError> {
-        tx.users()
-            .find_active_by_id_for_update(self.0.user_id)
-            .await?
-            .ok_or(SessionError::Missing)?;
-        let session = tx
-            .sessions()
-            .find_active_by_id_for_update(self.0.id)
-            .await?
-            .ok_or(SessionError::Missing)?;
-        Self::check(&session)
+        Self::check(&Session::lock(tx, &self.0).await?)
     }
 }
 

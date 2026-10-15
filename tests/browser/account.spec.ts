@@ -209,13 +209,22 @@ test('passkey lifecycle, passkey confirmation and browser OIDC consent with SSO'
     // the SDK does when it is stale, through auth's /confirm page, and check that the
     // removal resumes on return.
     const secondId = await page.evaluate(async (origin) => {
-      const list = (await fetch(`${origin}/account/passkeys`, { credentials: 'include' }).then(
-        (response) => response.json()
+      const options = { credentials: 'include' as const };
+      const list = (await fetch(`${origin}/account/passkeys`, options).then((response) =>
+        response.json()
       )) as Passkeys;
+      const session = (await fetch(`${origin}/session`, options).then((response) =>
+        response.json()
+      )) as Session;
       const id = list.find((key) => key.friendly_name === 'Second passkey')?.id ?? '';
       sessionStorage.setItem(
         'piquel.step_up',
-        JSON.stringify({ key: 'remove', argument: id, started_at: Date.now() })
+        JSON.stringify({
+          key: 'remove',
+          argument: id,
+          account: session.user.id,
+          started_at: Date.now()
+        })
       );
       return id;
     }, authUrl);

@@ -216,17 +216,20 @@ export function errorMessage(error: unknown): string {
 const STEP_UP_STORAGE_KEY = 'piquel.step_up';
 /** How long after leaving for /confirm an action may still resume. */
 const STEP_UP_RESUME_MS = 5 * 60 * 1000;
-type PendingStepUp = { key: string; argument: string; started_at: number };
+type PendingStepUp = { key: string; argument: string; account: string; started_at: number };
 
 /**
  * Runs named actions that may need a recent passkey confirmation. On the auth origin
  * it confirms inline and retries once. Elsewhere it saves the action in this tab,
  * sends the user to auth's /confirm page, and `resume` runs it once on return.
  * Actions take one string argument, such as the ID of the passkey to remove.
+ * `account` returns the signed-in account's ID: a saved action only resumes for the
+ * account that started it, in case /confirm signed in someone else.
  */
 export class StepUp<Key extends string> {
   constructor(
     private readonly passkeys: Passkeys,
+    private readonly account: () => string | undefined,
     private readonly actions: Record<Key, (argument: string) => Promise<void>>
   ) {}
   async run(key: Key, argument = ''): Promise<void> {
@@ -241,7 +244,9 @@ export class StepUp<Key extends string> {
       await this.passkeys.confirm();
       return this.actions[key](argument);
     }
-    const pending: PendingStepUp = { key, argument, started_at: Date.now() };
+    const account = this.account();
+    if (account === undefined) throw new Error('Sign in to continue.');
+    const pending: PendingStepUp = { key, argument, account, started_at: Date.now() };
     sessionStorage.setItem(STEP_UP_STORAGE_KEY, JSON.stringify(pending));
     const { origin, pathname, search } = window.location;
     const query = new URLSearchParams({ return_to: `${origin}${pathname}${search}` });
@@ -251,14 +256,19 @@ export class StepUp<Key extends string> {
   }
   /**
    * Runs the action saved before /confirm once, if it started in this tab less than
-   * five minutes ago. If the user came back without confirming, it does nothing.
+   * five minutes ago for the same account. If the user came back without confirming,
+   * it does nothing.
    */
   async resume(): Promise<void> {
     const saved = sessionStorage.getItem(STEP_UP_STORAGE_KEY);
     if (saved === null) return;
     sessionStorage.removeItem(STEP_UP_STORAGE_KEY);
     const pending = JSON.parse(saved) as PendingStepUp;
-    if (Date.now() - pending.started_at > STEP_UP_RESUME_MS || !(pending.key in this.actions))
+    if (
+      Date.now() - pending.started_at > STEP_UP_RESUME_MS ||
+      pending.account !== this.account() ||
+      !(pending.key in this.actions)
+    )
       return;
     try {
       await this.actions[pending.key as Key](pending.argument);

@@ -552,7 +552,6 @@ async fn ceremonies_require_browser_binding_and_confirmation_belongs_to_one_sess
     let path = format!("/account/passkeys/{}", fixture.key_id);
     for (path, method) in [
         ("/account/passkeys/enroll/start", Method::POST),
-        ("/account/passkeys/enroll/finish", Method::POST),
         (path.as_str(), Method::DELETE),
     ] {
         security::tests::assert_step_up_required(

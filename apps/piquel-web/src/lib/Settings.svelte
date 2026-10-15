@@ -33,7 +33,7 @@
   let removing = $state<string | null>(null);
   // Removing a passkey or unlinking a provider needs a recent passkey confirmation.
   // When the session has none, auth confirms it and sends the user back to finish.
-  const stepUp = new StepUp(new Passkeys(api), {
+  const stepUp = new StepUp(new Passkeys(api), () => session?.user.id, {
     remove: async (id) => {
       await api.request(`/account/passkeys/${id}`, 'DELETE');
       passkeys = passkeys.filter((key) => key.id !== id);

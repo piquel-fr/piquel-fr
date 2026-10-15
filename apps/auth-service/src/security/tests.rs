@@ -5,7 +5,7 @@ use crate::routes::federation;
 use axum::{Router, body::Body, http::Request as HttpRequest, middleware, routing::any};
 use piquel_auth_protocol::TokenId;
 use piquel_crypto::Secret;
-use piquel_repository::{DatabaseConfig, InsertUser};
+use piquel_repository::{DatabaseConfig, InsertSession, InsertUser};
 use std::net::{IpAddr, Ipv6Addr};
 use tower::ServiceExt;
 /// Asserts that `response` asks the frontend to confirm the session with a passkey
@@ -718,6 +718,62 @@ async fn confirmed_changes_serialize_with_logout() {
     let mut change = database.begin().await.expect("change transaction");
     assert!(matches!(
         confirmed.lock(&mut change).await,
+        Err(SessionError::Missing)
+    ));
+}
+
+/// A session that expires while a change waits for the account lock is rejected once
+/// the lock is acquired, even though the lookup compares with the transaction's start.
+#[tokio::test]
+#[ignore = "requires TEST_DATABASE_URL"]
+async fn session_lock_rechecks_expiry_after_waiting() {
+    let database = SecurityFixture::database(5, std::time::Duration::from_secs(5)).await;
+    database.run_migrations().await.expect("migrations");
+    let user_id = UserId::new();
+    let now = Utc::now();
+    let mut tx = database.begin().await.expect("transaction");
+    tx.users()
+        .insert(&InsertUser {
+            id: user_id,
+            username: format!("lock_{}", &TokenId::new().to_string()[24..]),
+            display_name: "Lock test".into(),
+        })
+        .await
+        .expect("user");
+    let session = tx
+        .sessions()
+        .insert(&InsertSession {
+            id: SessionId::new(),
+            user_id,
+            authentication_methods: vec![AuthenticationMethod::Passkey],
+            authenticated_at: now,
+            expires_at: now + Duration::seconds(1),
+            user_agent_family: None,
+            passkey_confirmed_at: Some(now),
+        })
+        .await
+        .expect("session");
+    tx.commit().await.expect("commit");
+    let mut holder = database.begin().await.expect("holder transaction");
+    holder
+        .users()
+        .find_active_by_id_for_update(user_id)
+        .await
+        .expect("account lock")
+        .expect("active account");
+    let change = tokio::spawn({
+        let database = database.clone();
+        async move {
+            let mut change = database.begin().await.expect("change transaction");
+            Confirmed::<CONFIRMATION_MAX_AGE>(session)
+                .lock(&mut change)
+                .await
+        }
+    });
+    tokio::time::sleep(std::time::Duration::from_millis(1500)).await;
+    holder.rollback().await.expect("release account");
+    assert!(matches!(
+        change.await.expect("change task"),
         Err(SessionError::Missing)
     ));
 }

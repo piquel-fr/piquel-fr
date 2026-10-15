@@ -99,7 +99,7 @@
     }
   }
   // On this origin, actions needing a recent passkey confirmation confirm inline.
-  const stepUp = new StepUp(passkeys, {
+  const stepUp = new StepUp(passkeys, () => session?.user.id, {
     enroll: () => passkeys.register(friendlyName.trim(), undefined, passkeyKind),
     link: () => api.request('/login/social/link', 'POST', {})
   });

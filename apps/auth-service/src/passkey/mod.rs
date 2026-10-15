@@ -618,15 +618,17 @@ impl PasskeyApplication {
             .await?)
     }
 
-    /// Adds a verified credential while rechecking the session's confirmation under lock.
+    /// Adds a verified credential under the session lock. The confirmation authorized
+    /// the ceremony at start, and the ceremony belongs to this session and expires on
+    /// its own, so a confirmation lapsing at the authenticator never discards the new
+    /// credential.
     async fn finish_enrollment(
         State(app): State<Self>,
-        confirmed: security::Confirmed,
+        security::Session(session): security::Session,
         headers: HeaderMap,
         Json(input): Json<RegistrationFinish>,
     ) -> Result<StatusCode, ApiError> {
         let friendly_name = PasskeyName::parse(input.friendly_name)?;
-        let session = &confirmed.0;
 
         let EnrollmentCeremony {
             user_id,
@@ -643,7 +645,7 @@ impl PasskeyApplication {
             .finish_passkey_registration(&input.credential, &state)
             .map_err(PasskeyError::from)?;
         let mut tx = app.database.begin().await?;
-        confirmed.lock(&mut tx).await?;
+        security::Session::lock(&mut tx, &session).await?;
         Self::insert_passkey(&mut tx, user_id, key, friendly_name).await?;
         tx.audit_events()
             .record(user_id, AuditAction::PasskeyAdd, None)
