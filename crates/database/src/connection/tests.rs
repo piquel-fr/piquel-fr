@@ -118,20 +118,27 @@ fn loopback_requires_explicit_transport() {
 async fn cleanup_skips_rows_locked_by_requests() {
     let pool = Database::test_pool().await;
     let bucket = uuid::Uuid::now_v7().as_bytes().to_vec();
-    sqlx::query(
-        "INSERT INTO request_limits (bucket, requests, expires_at)
-        VALUES ($1, 1, now() - interval '1 minute')",
-    )
-    .bind(&bucket)
-    .execute(&pool)
-    .await
-    .expect("expired limit");
-    let mut request = pool.begin().await.expect("request transaction");
-    sqlx::query("SELECT 1 FROM request_limits WHERE bucket=$1 FOR UPDATE")
+    // Concurrent tests purge too and can delete the expired row before it is
+    // locked, so insert it again until the request holds it.
+    let request = loop {
+        sqlx::query(
+            "INSERT INTO request_limits (bucket, requests, expires_at)
+            VALUES ($1, 1, now() - interval '1 minute')",
+        )
         .bind(&bucket)
-        .execute(&mut *request)
+        .execute(&pool)
         .await
-        .expect("lock");
+        .expect("expired limit");
+        let mut request = pool.begin().await.expect("request transaction");
+        let locked = sqlx::query("SELECT 1 FROM request_limits WHERE bucket=$1 FOR UPDATE")
+            .bind(&bucket)
+            .fetch_optional(&mut *request)
+            .await
+            .expect("lock");
+        if locked.is_some() {
+            break request;
+        }
+    };
     let database = Database { pool: pool.clone() };
     tokio::time::timeout(
         Duration::from_secs(2),
