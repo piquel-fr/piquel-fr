@@ -28,7 +28,9 @@ const INVITATION_PARAMETER: &str = "invitation";
 /// details, records an audit entry attributed to it in the same transaction.
 ///
 /// Operations on accounts refuse administrator accounts unless the actor is the
-/// CLI, so a stolen admin session cannot lock out other administrators.
+/// CLI, so a stolen admin session cannot lock out other administrators. Mutations
+/// recheck an administrator caller inside their own transaction, since the request
+/// may wait for locks after its extractor ran.
 #[derive(Clone)]
 pub struct AdminOperations {
     /// Accounts, sessions, invitations, clients and the audit log.
@@ -44,7 +46,9 @@ impl AdminOperations {
         Self { database, origin }
     }
 
-    /// Locks the account and refuses administrator accounts unless the CLI acts.
+    /// Locks the account, refuses administrator accounts unless the CLI acts, then
+    /// rechecks the caller. Granting rights takes the same account lock, so the
+    /// target cannot become an administrator before this transaction commits.
     async fn lock_target(
         tx: &mut DatabaseTransaction<'_>,
         actor: &Actor,
@@ -57,19 +61,49 @@ impl AdminOperations {
             .ok_or(AdminError::UserNotFound)?;
         match actor {
             Actor::Admin { .. } if tx.administrators().contains(user_id).await? => {
-                Err(AdminError::AdministratorTarget)
+                return Err(AdminError::AdministratorTarget);
             }
-            Actor::Admin { .. } | Actor::Cli { .. } => Ok(user),
+            Actor::Admin { .. } | Actor::Cli { .. } => {}
+        }
+        Self::authorize(tx, actor).await?;
+        Ok(user)
+    }
+
+    /// Requires an administrator caller to still hold its rights and a live passkey
+    /// confirmation on an active session. Both stay locked until the transaction
+    /// ends, so revocation, logout and expiry cannot interleave with the mutation.
+    async fn authorize(tx: &mut DatabaseTransaction<'_>, actor: &Actor) -> Result<(), AdminError> {
+        match actor {
+            Actor::Cli { .. } => Ok(()),
+            Actor::Admin {
+                user_id,
+                session_id,
+            } => {
+                if tx.administrators().contains_for_share(*user_id).await?
+                    && tx.sessions().management_active(*session_id).await?
+                {
+                    Ok(())
+                } else {
+                    Err(AdminError::CallerUnauthorized)
+                }
+            }
         }
     }
 
-    /// Finds the account named `username`, in any status.
+    /// Finds and locks the account named `username`, in any status, so grants and
+    /// revocations serialize with admin API mutations of that account.
     async fn named(
         tx: &mut DatabaseTransaction<'_>,
         username: &str,
     ) -> Result<StoredUser, AdminError> {
-        tx.users()
+        let id = tx
+            .users()
             .find_by_username(username)
+            .await?
+            .ok_or(AdminError::UserNotFound)?
+            .id;
+        tx.users()
+            .find_by_id_for_update(id)
             .await?
             .ok_or(AdminError::UserNotFound)
     }
@@ -255,6 +289,7 @@ impl AdminOperations {
         let id = TokenId::new();
         let expires_at = Utc::now() + expires_in.duration();
         let mut tx = self.database.begin().await?;
+        Self::authorize(&mut tx, actor).await?;
         tx.security()
             .create_invitation(id, secret.digest().as_bytes(), expires_at, actor)
             .await?;
@@ -279,6 +314,7 @@ impl AdminOperations {
         id: TokenId,
     ) -> Result<(), AdminError> {
         let mut tx = self.database.begin().await?;
+        Self::authorize(&mut tx, actor).await?;
         if !tx.security().revoke_invitation(id).await? {
             return Err(AdminError::InvitationNotFound);
         }

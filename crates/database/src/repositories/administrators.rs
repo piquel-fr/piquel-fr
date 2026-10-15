@@ -82,6 +82,24 @@ impl AdministratorRepository<'_> {
         )
     }
 
+    /// Reports whether the account is an administrator and, if so, keeps its rights
+    /// share-locked until the transaction ends, so revocation waits for it to commit.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`DatabaseError`] if the query fails.
+    pub async fn contains_for_share(&mut self, user_id: UserId) -> Result<bool, DatabaseError> {
+        Ok(run!(
+            self,
+            fetch_optional,
+            sqlx::query_scalar!(
+                "SELECT user_id FROM administrators WHERE user_id = $1 FOR SHARE",
+                user_id.as_uuid(),
+            )
+        )?
+        .is_some())
+    }
+
     /// Lists every administrator, oldest grant first.
     ///
     /// # Errors

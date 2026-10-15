@@ -23,6 +23,10 @@ pub enum AdminError {
     /// session cannot lock other administrators out. Only the CLI can.
     #[error("administrator accounts can only be changed with the auth-service CLI")]
     AdministratorTarget,
+    /// The calling administrator lost its rights, session or passkey confirmation
+    /// while the request was in progress.
+    #[error("administrator caller is no longer authorized")]
+    CallerUnauthorized,
     /// The account is already disabled.
     #[error("the account is already disabled")]
     AlreadyDisabled,
@@ -64,6 +68,9 @@ impl From<AdminError> for ApiError {
             AdminError::ClientNotFound => Self::not_found("No OIDC client has this ID."),
             AdminError::AdministratorTarget => Self::forbidden(
                 "Administrator accounts can only be changed with the auth-service CLI.",
+            ),
+            AdminError::CallerUnauthorized => Self::forbidden(
+                "Your admin session or passkey confirmation ended. Confirm with a passkey again.",
             ),
             AdminError::AlreadyDisabled => Self::conflict("This account is already disabled."),
             AdminError::AlreadyActive => Self::conflict("This account is already active."),

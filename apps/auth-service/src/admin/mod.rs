@@ -77,7 +77,16 @@ impl AdminApplication {
                 )
                 .route(routes::admin::INVITATION, delete(Self::revoke_invitation));
         }
-        router.with_state(self)
+        // Applies to the routes above. Without it an unsupported method would answer
+        // 405 before any session check, revealing the path to non-administrators.
+        router
+            .method_not_allowed_fallback(Self::unsupported_method)
+            .with_state(self)
+    }
+
+    /// Answers 405 to administrators only; everyone else gets the admin rejection.
+    fn unsupported_method(_: Admin) -> std::future::Ready<StatusCode> {
+        std::future::ready(StatusCode::METHOD_NOT_ALLOWED)
     }
 
     /// Searches accounts by ID, username, display name or email.

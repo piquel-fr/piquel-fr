@@ -19,7 +19,10 @@ use piquel_repository::{
 use serde_json::{Value, json};
 use std::{
     net::{IpAddr, Ipv6Addr, SocketAddr},
-    sync::Arc,
+    sync::{
+        Arc,
+        atomic::{AtomicBool, Ordering},
+    },
 };
 use tower::ServiceExt;
 
@@ -399,6 +402,21 @@ async fn every_admin_route_enforces_admin_access() {
         }
     }
     assert!(fixture.signed_in(&target).await, "no rejection acted");
+    // Unsupported methods look like unknown paths to non-administrators too.
+    for (method, route) in [
+        (Method::PUT, routes::admin::USERS.to_owned()),
+        (
+            Method::GET,
+            path(routes::admin::USER_DISABLE, target.user_id),
+        ),
+    ] {
+        let response = fixture
+            .request(&method, &route, Some(&user), ADMIN_ORIGIN, true, None)
+            .await;
+        Fixture::rejected(response, StatusCode::NOT_FOUND, "Not found.", &route).await;
+        let response = fixture.admin(method, &route, &confirmed, None).await;
+        assert_eq!(response.status(), StatusCode::METHOD_NOT_ALLOWED, "{route}");
+    }
     // Invitation routes exist only while signup requires invitations.
     let fixture = Fixture::new(false).await;
     for method in [Method::GET, Method::POST] {
@@ -469,6 +487,80 @@ async fn admin_api_cannot_act_on_administrators() {
         .await
         .expect("CLI revokes an administrator's sessions");
     assert!(!fixture.signed_in(&other).await);
+}
+
+/// A grant waits for an admin mutation of the same account, so the mutation's
+/// administrator check stays true until it commits. A mutation that waited also
+/// rechecks its caller, who may have signed out meanwhile.
+#[tokio::test]
+#[ignore = "requires TEST_DATABASE_URL"]
+async fn admin_mutations_serialize_with_grants_and_recheck_the_caller() {
+    /// Long enough for a blocked statement to show that it waits.
+    const WAIT: std::time::Duration = std::time::Duration::from_millis(300);
+    let fixture = Fixture::new(true).await;
+    let admin = fixture.account(Seed::CONFIRMED_ADMIN).await;
+    let target = fixture.account(Seed::USER).await;
+
+    // Hold the account lock an admin mutation takes, as one in progress would.
+    let mut mutation = fixture.database.begin().await.expect("transaction");
+    mutation
+        .users()
+        .find_by_id_for_update(target.user_id)
+        .await
+        .expect("lock");
+    let granted = AtomicBool::new(false);
+    let (grant, ()) = tokio::join!(
+        async {
+            let result = fixture
+                .operations
+                .grant_administrator(&Fixture::operator(), &target.username)
+                .await;
+            granted.store(true, Ordering::SeqCst);
+            result
+        },
+        async {
+            tokio::time::sleep(WAIT).await;
+            assert!(!granted.load(Ordering::SeqCst), "grant waits for the lock");
+            mutation.rollback().await.expect("release");
+        },
+    );
+    grant.expect("grant after the mutation");
+
+    // The caller signs out while its disable request waits for the target's lock.
+    let target = fixture.account(Seed::USER).await;
+    let mut blocker = fixture.database.begin().await.expect("transaction");
+    blocker
+        .users()
+        .find_by_id_for_update(target.user_id)
+        .await
+        .expect("lock");
+    let disable = path(routes::admin::USER_DISABLE, target.user_id);
+    let (response, ()) = tokio::join!(
+        fixture.admin(
+            Method::POST,
+            &disable,
+            &admin,
+            Some(json!({ "reason": "Test" })),
+        ),
+        async {
+            tokio::time::sleep(WAIT).await;
+            fixture
+                .database
+                .sessions()
+                .revoke(admin.session_id)
+                .await
+                .expect("sign out");
+            blocker.rollback().await.expect("release");
+        },
+    );
+    Fixture::rejected(
+        response,
+        StatusCode::FORBIDDEN,
+        "Your admin session or passkey confirmation ended. Confirm with a passkey again.",
+        "disable after sign-out",
+    )
+    .await;
+    assert!(fixture.signed_in(&target).await, "the target is untouched");
 }
 
 /// Administrator rights are granted and revoked by username, once, and never to a
