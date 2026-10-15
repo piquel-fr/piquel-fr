@@ -1,4 +1,4 @@
-// Runs against the production build: `just test-web` builds it first.
+// Runs against the production build: `just web test` builds it first.
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
 import { once } from 'node:events';

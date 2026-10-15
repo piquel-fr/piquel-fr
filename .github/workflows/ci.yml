@@ -67,7 +67,7 @@ jobs:
           predicate-quantifier: every
           filters: |
             rust:
-              - '{Cargo.toml,Cargo.lock,rust-toolchain.toml,justfile,apps/auth-service/**,crates/**,.github/workflows/ci.yml}'
+              - '{Cargo.toml,Cargo.lock,rust-toolchain.toml,justfile,just/**,apps/auth-service/**,crates/**,.github/workflows/ci.yml}'
               - '!**/*.md'
             web:
               - '**'
@@ -78,7 +78,7 @@ jobs:
             deps:
               - '{Cargo.toml,**/Cargo.toml,Cargo.lock,deny.toml,package.json,**/package.json,pnpm-lock.yaml,pnpm-workspace.yaml,.github/workflows/ci.yml}'
             app:
-              - '{Cargo.toml,Cargo.lock,rust-toolchain.toml,justfile,package.json,pnpm-lock.yaml,pnpm-workspace.yaml,playwright.config.ts,apps/**,crates/**,packages/**,tests/browser/**,infra/**,.dockerignore,.github/workflows/ci.yml}'
+              - '{Cargo.toml,Cargo.lock,rust-toolchain.toml,justfile,just/**,package.json,pnpm-lock.yaml,pnpm-workspace.yaml,playwright.config.ts,apps/**,crates/**,packages/**,tests/browser/**,infra/**,.dockerignore,.github/workflows/ci.yml}'
               - '!**/*.md'
               - '!infra/piqueld.toml'
 
@@ -93,9 +93,9 @@ jobs:
       - uses: taiki-e/install-action@3f74d7c16a4242f1c95561e98edc25d36adb4375 # v2
         with:
           tool: just,cargo-deny
-      - run: just fmt-check-rust
+      - run: just rust fmt-check
       - if: needs.changes.outputs.deps == 'true'
-        run: just deny
+        run: just rust audit
 
   web:
     name: web
@@ -118,13 +118,13 @@ jobs:
           node-version: '24'
           cache: pnpm
       - run: just install
-      - run: just fmt-check-web
-      - run: just check-web
-      - run: just lint-web
-      - run: just build-web
-      - run: just test-web
+      - run: just web fmt-check
+      - run: just web check
+      - run: just web lint
+      - run: just web build
+      - run: just web test
       - if: needs.changes.outputs.deps == 'true'
-        run: just audit-web
+        run: just web audit
 
   # Clippy runs first so lint failures report early; the tests then reuse the
   # dependencies it compiled for build scripts and proc macros.
@@ -154,7 +154,7 @@ jobs:
         uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
         with:
           save-if: ${{ github.ref == 'refs/heads/main' }}
-      - run: just lint-rust
+      - run: just rust lint
       - run: just test --workspace --run-ignored all
       - run: just doc-test
 
@@ -183,15 +183,15 @@ jobs:
       - *rust-cache
       - run: just install
       # Embeds the auth pages, as in the deployed image.
-      - run: just build-debug
-      - run: just build-settings-web
+      - run: just rust build
+      - run: just web build-settings
       # The service accepts only HTTPS origins, as in production. Caddy
       # terminates TLS for both servers with its local CA, which the suite is
       # told to accept. The suite signs in through the public OIDC client from
       # tests/browser/README.md.
       - name: Start the auth service and the settings frontend
         run: |
-          just generate-key "$RUNNER_TEMP/key.pem"
+          just auth generate-key "$RUNNER_TEMP/key.pem"
           export AUTH_KEY_PROVIDER="file://$RUNNER_TEMP/key.pem"
           export AUTH_CLIENTS_FILE="$RUNNER_TEMP/clients.json"
           cat > "$AUTH_CLIENTS_FILE" <<'EOF'
@@ -228,7 +228,7 @@ jobs:
       # The headless build matching the pinned Playwright, so runner image
       # updates cannot change the browser under test.
       - run: pnpm exec playwright install --only-shell chromium
-      - run: just test-browser
+      - run: just web test-browser
       - if: failure()
         run: |
           cat "$RUNNER_TEMP"/*.log || true

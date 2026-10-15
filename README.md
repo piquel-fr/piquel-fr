@@ -11,7 +11,7 @@ for repository-driven piqueld deployments.
 
 ## Build
 
-Requires Rust (pinned by `rust-toolchain.toml`), Node 24+, just, and pnpm (the workspace pins its version).
+Requires Rust (pinned by `rust-toolchain.toml`), Node 24+, just 1.42+, and pnpm (the workspace pins its version).
 Building needs no database: SQL is checked against the committed query cache in
 `crates/database/.sqlx/`.
 
@@ -60,7 +60,7 @@ For a local Unix socket, use `localhost` as the URL host and an absolute socket
 directory in the `host` query parameter, e.g.
 `postgres://USER:PASSWORD@localhost/piquel?host=/run/postgresql&sslmode=disable`.
 
-Generate a persistent RSA key with `just generate-key /absolute/path/key.pem` (uses the
+Generate a persistent RSA key with `just auth generate-key /absolute/path/key.pem` (uses the
 OpenSSL CLI; piqueld generates its own, see `infra/README.md`).
 Keep the same key and ID across restarts. Replacing the only configured key
 invalidates issued tokens; overlapping signing-key rotation is not implemented.
@@ -80,7 +80,7 @@ Apply migrations explicitly, then serve. Deployed images run the same
 
 ```sh
 just db migrate
-just serve
+just auth serve
 ```
 
 The schema intentionally replaces the throwaway prototype. Use a fresh database;
@@ -89,7 +89,7 @@ there is no migration path for prototype account data.
 ### Invitations
 
 ```sh
-just invite --expires-in 7d
+just auth invite --expires-in 7d
 ```
 
 This prints one signup link. The database stores a digest, expiry and redemption
@@ -117,7 +117,7 @@ Client IDs must be unique. A minimal public web client looks like:
 ```
 
 For a confidential backend client, add `"client_secret": "env://MY_CLIENT_SECRET"`.
-Generate its random secret with `just secret`. Clients use
+Generate its random secret with `just auth secret`. Clients use
 `client_secret_basic` when confidential and `none` when public; both require S256
 PKCE. Redirect URLs must match exactly and use HTTPS.
 
@@ -178,25 +178,28 @@ client and scope; explicitly trusted clients bypass consent.
 `just` runs `validate` by default.
 `just install-tools` installs `cargo-nextest`, `cargo-deny` and `sqlx-cli`. The
 `db` recipes also need the PostgreSQL 18 server binaries (`initdb`, `pg_ctl`).
+Recipes are grouped into `rust`, `web`, `db`, `auth` and `infra` modules under
+`just/`; `just --list --list-submodules` shows every recipe. The root `fmt`,
+`fmt-check`, `lint`, `check` and `audit` run the same recipe in `rust` and `web`.
 Use individual recipes while iterating:
 
 | Task | Recipe |
 | --- | --- |
 | Full validation (format, Clippy/ESLint, Rust/Svelte checks, unit/web/doc tests, audits) | `just validate` |
-| Format Rust and web / check formatting | `just fmt` / `just fmt-check` (`-rust` / `-web` variants) |
-| Rust / frontend checks (svelte-check, tsc) | `just check-rust` / `just check-web` |
-| Clippy and ESLint, warnings denied | `just lint` (`just lint-rust` / `just lint-web`) |
+| Format Rust and web / check formatting | `just fmt` / `just fmt-check` |
+| Rust / frontend checks (svelte-check, tsc) | `just rust check` / `just web check` |
+| Clippy and ESLint, warnings denied | `just lint` (`just rust lint` / `just web lint`) |
 | Unit tests / focused package tests | `just test` / `just test -p auth-service` |
-| piquel-web server tests (builds it first) | `just test-web` |
+| piquel-web server tests (builds it first) | `just web test` |
 | Documentation tests | `just doc-test` |
 | Database integration tests and query cache check, in a scratch cluster | `just db test` |
 | Regenerate the query cache after changing SQL or migrations | `just db prepare` |
 | Run any command against a scratch cluster | `just db scratch -- psql` |
-| Browser tests against running servers | `just test-browser` |
-| Dependency audits | `just audit` (`deny` + `audit-web`) |
-| SvelteKit generated types/config | `just generate` |
-| Frontends / embedded debug binary / release binary | `just build-web` / `just build-debug` / `just build` |
-| Run with caller-provided auth configuration | `just serve`, `just db migrate`, `just invite --expires-in 7d` |
+| Browser tests against running servers | `just web test-browser` |
+| Dependency audits | `just audit` (`just rust audit` runs cargo-deny, `just web audit` pnpm) |
+| SvelteKit generated types/config | `just web generate` |
+| Frontends / embedded debug binary / release binary | `just web build` / `just rust build` / `just build` |
+| Run with caller-provided auth configuration | `just auth serve`, `just db migrate`, `just auth invite --expires-in 7d` |
 
 CI runs these recipes on every pull request whose changes they can affect,
 including the database and browser tests, and on every push to `main`.
@@ -204,9 +207,8 @@ Require its `ci` check: it summarizes the others.
 
 Web code is formatted by Prettier and linted by type-aware ESLint (typescript-eslint
 `strictTypeChecked`), configured once at the repository root.
-`just --list --list-submodules` shows every recipe. Test recipes forward extra arguments to nextest
-or Playwright, including quoted filter expressions. `just run` forwards arguments
-to the auth binary. `just serve` builds auth assets before compiling and serving.
+Test recipes forward extra arguments to nextest or Playwright, including quoted
+filter expressions. `just auth run` forwards arguments to the auth binary. `just auth serve` builds auth assets before compiling and serving.
 Cargo generates the embedded asset table and embeds migrations during compilation.
 
 Queries in `crates/database` are checked at compile time against
