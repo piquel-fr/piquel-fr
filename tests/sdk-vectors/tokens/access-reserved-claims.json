@@ -1,0 +1,62 @@
+{
+  "description": "act and cnf parse",
+  "now": 1767225600,
+  "input": {
+    "audience": "https://notes.example.com",
+    "issuer": "https://auth.example.com",
+    "jwks": {
+      "keys": [
+        {
+          "alg": "RS256",
+          "e": "AQAB",
+          "kid": "key-2025",
+          "kty": "RSA",
+          "n": "wVpUJ5o9UePaQeyX8a6XFDVyAyN6HSiT6ColCm4AedZEuCaz5mMWQeintQvevJB0fYReqVFmSXr69OSf8d04wUthRmwfMns-wW5rT2LKuZcN02rXaiRsQepuC0nsqY-HaRTike3nvRhuzZlobtl8rxvxG0mzbfN27NSRJWQdOAWTkrzLzi58IAbg2umQB6h7P7g3AYMHRunx7Rc5xaReeWyvK8CPUA2CbGQOzDi468bl0BKMX3y-ibNq4gPCqWzeVZjpY4rP0EYbz3i3bV9PMo4qRFtQd77UNzF6ibxmWL1gX8u348H3ia_Fvug-t9MJO3HqFVvV5REx5O1nIOWz8Q",
+          "use": "sig"
+        },
+        {
+          "alg": "RS256",
+          "e": "AQAB",
+          "kid": "key-2026",
+          "kty": "RSA",
+          "n": "uIyTduvpF-LYSdNmHoK0TI0HtTEEAlE17LrpIGe4t4RmG8pG-Nocs_FXJB0ErRwoCmiIxxW9dxni9MFsnOPpOgj2YVZJnSlFgvXioU3bpOc9xyTmQtXoarWe96RO50W7vHsuuHrMmGuwRFyN_6Uw7w1FK-mS5Jf5TwBYJjwLpvdmyAiqoOwQv0z4zHfZnaN6AY4QocMJOTB8IdOV4-ej0p2xCKSL5FQS8nkMKg9bT9vxdDjp8CTjFh3Yfb-hgyipDvZ-rB8v41NISDsxJ_yjmxFsYdiEGCrgVaRGHtzfHfar-873Ciz8SqjTK-p7dqKd7LfijdoVLZHQEbaKEZvxsw",
+          "use": "sig"
+        }
+      ]
+    },
+    "kind": "access",
+    "token": "eyJhbGciOiJSUzI1NiIsImtpZCI6ImtleS0yMDI1IiwidHlwIjoiYXQrand0In0.eyJpc3MiOiJodHRwczovL2F1dGguZXhhbXBsZS5jb20iLCJzdWIiOiIwMTkzNmYzZS04YzAwLTcwMDAtODAwMC0wMDAwMDAwMDAwMDEiLCJhdWQiOiJodHRwczovL25vdGVzLmV4YW1wbGUuY29tIiwiY2xpZW50X2lkIjoibm90ZXMtd2ViIiwianRpIjoiMDE5MzZmM2UtOGMwMC03MDAwLTgwMDAtMDAwMDAwMDAwMDAzIiwic2NvcGUiOiJub3RlczpyZWFkIG9wZW5pZCBwcm9maWxlIiwiaWF0IjoxNzY3MjI1NTQwLCJleHAiOjE3NjcyMjU4NDAsInNpZCI6IjAxOTM2ZjNlLThjMDAtNzAwMC04MDAwLTAwMDAwMDAwMDAwMiIsImF1dGhfdGltZSI6MTc2NzIyMjAwMCwiYW1yIjpbInBvcCIsIm1mYSIsInVzZXIiXSwiYWNyIjoicGhyIiwiYWN0Ijp7InN1YiI6Im9yZGVycy1hcGkiLCJhY3QiOnsic3ViIjoiZ2F0ZXdheSJ9fSwiY25mIjp7ImprdCI6IjBaY09DT1JaTll5LURXcHFxMzBqWnlKR0hUTjBkMkhnbEJWM3VpZ3VBNEkifSwicHJlZmVycmVkX3VzZXJuYW1lIjoiYWRhIiwibmFtZSI6IkFkYSBMb3ZlbGFjZSIsInByb2ZpbGVfdmVyc2lvbiI6MX0.PczBZ8sjELxkwPAlwR-RoqbVkSZ9SnDw3G6RCZutMNSmbQELQgFzBuLprF3O5HSBw-Obinsh5b_YjHodHhZubJHYbw6cdKjrG8qixGioeZdbX07bEgC9CeVlUlVKZcBulMGqdffuk1LY3qehDNiIYyr8M8ucwcr7rxipW5qYWsEbb6PUD7unLPiRi--V3659p578qv5Mp8Ud3npCyWH_p1K1GbAJ9RTZvvzp_Fcf-wEzXA1sJX8UjMGd-iq9JqnmmoM6dSLAMifO44JeQgpZT81MaiXvccPZfzS7dHULP5Aqo0mO36FdkS9fGIEDh-lRT7jLAHKIuzBS888VzaU7eQ"
+  },
+  "expected": {
+    "ok": {
+      "acr": "phr",
+      "act": {
+        "act": {
+          "sub": "gateway"
+        },
+        "sub": "orders-api"
+      },
+      "amr": [
+        "pop",
+        "mfa",
+        "user"
+      ],
+      "aud": "https://notes.example.com",
+      "auth_time": 1767222000,
+      "client_id": "notes-web",
+      "cnf": {
+        "jkt": "0ZcOCORZNYy-DWpqq30jZyJGHTN0d2HglBV3uiguA4I"
+      },
+      "exp": 1767225840,
+      "iat": 1767225540,
+      "iss": "https://auth.example.com",
+      "jti": "01936f3e-8c00-7000-8000-000000000003",
+      "name": "Ada Lovelace",
+      "preferred_username": "ada",
+      "profile_version": 1,
+      "scope": "notes:read openid profile",
+      "sid": "01936f3e-8c00-7000-8000-000000000002",
+      "sub": "01936f3e-8c00-7000-8000-000000000001"
+    }
+  }
+}

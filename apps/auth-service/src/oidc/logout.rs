@@ -1,6 +1,6 @@
 //! RP-initiated logout.
 
-use super::{Claim, MAX_STATE_BYTES, OAuthCode, OAuthError, OidcApplication};
+use super::{Claim, MAX_STATE_BYTES, OAuthCode, OAuthError, OidcApplication, Reject};
 use crate::{routes, security::Session};
 use axum::{
     Form, Json,

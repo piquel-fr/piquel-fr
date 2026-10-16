@@ -1,0 +1,19 @@
+{
+  "description": "iss naming another issuer is a mix-up attack",
+  "input": {
+    "authorization_response_iss_parameter_supported": true,
+    "issuer": "https://auth.example.com",
+    "parameters": {
+      "code": "pac_v1_01936f3e-8c00-7000-8000-000000000004.c2VjcmV0",
+      "iss": "https://evil.example.com",
+      "state": "af0ifjsldkj"
+    },
+    "state": "af0ifjsldkj"
+  },
+  "expected": {
+    "error": {
+      "code": "callback",
+      "reason": "issuer_mismatch"
+    }
+  }
+}

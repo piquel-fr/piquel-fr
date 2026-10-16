@@ -1,0 +1,38 @@
+{
+  "description": "nbf more than 30 seconds in the future is not yet valid",
+  "now": 1767225600,
+  "input": {
+    "audience": "notes-web",
+    "issuer": "https://auth.example.com",
+    "jwks": {
+      "keys": [
+        {
+          "alg": "RS256",
+          "e": "AQAB",
+          "kid": "key-2025",
+          "kty": "RSA",
+          "n": "wVpUJ5o9UePaQeyX8a6XFDVyAyN6HSiT6ColCm4AedZEuCaz5mMWQeintQvevJB0fYReqVFmSXr69OSf8d04wUthRmwfMns-wW5rT2LKuZcN02rXaiRsQepuC0nsqY-HaRTike3nvRhuzZlobtl8rxvxG0mzbfN27NSRJWQdOAWTkrzLzi58IAbg2umQB6h7P7g3AYMHRunx7Rc5xaReeWyvK8CPUA2CbGQOzDi468bl0BKMX3y-ibNq4gPCqWzeVZjpY4rP0EYbz3i3bV9PMo4qRFtQd77UNzF6ibxmWL1gX8u348H3ia_Fvug-t9MJO3HqFVvV5REx5O1nIOWz8Q",
+          "use": "sig"
+        },
+        {
+          "alg": "RS256",
+          "e": "AQAB",
+          "kid": "key-2026",
+          "kty": "RSA",
+          "n": "uIyTduvpF-LYSdNmHoK0TI0HtTEEAlE17LrpIGe4t4RmG8pG-Nocs_FXJB0ErRwoCmiIxxW9dxni9MFsnOPpOgj2YVZJnSlFgvXioU3bpOc9xyTmQtXoarWe96RO50W7vHsuuHrMmGuwRFyN_6Uw7w1FK-mS5Jf5TwBYJjwLpvdmyAiqoOwQv0z4zHfZnaN6AY4QocMJOTB8IdOV4-ej0p2xCKSL5FQS8nkMKg9bT9vxdDjp8CTjFh3Yfb-hgyipDvZ-rB8v41NISDsxJ_yjmxFsYdiEGCrgVaRGHtzfHfar-873Ciz8SqjTK-p7dqKd7LfijdoVLZHQEbaKEZvxsw",
+          "use": "sig"
+        }
+      ]
+    },
+    "kind": "id",
+    "max_age": 7200,
+    "nonce": "n-0S6_WzA2Mj",
+    "token": "eyJhbGciOiJSUzI1NiIsImtpZCI6ImtleS0yMDI1IiwidHlwIjoiSldUIn0.eyJpc3MiOiJodHRwczovL2F1dGguZXhhbXBsZS5jb20iLCJzdWIiOiIwMTkzNmYzZS04YzAwLTcwMDAtODAwMC0wMDAwMDAwMDAwMDEiLCJhdWQiOiJub3Rlcy13ZWIiLCJpYXQiOjE3NjcyMjU1NDAsImV4cCI6MTc2NzIyNTg0MCwibmJmIjoxNzY3MjI1NjMxLCJub25jZSI6Im4tMFM2X1d6QTJNaiIsInNpZCI6IjAxOTM2ZjNlLThjMDAtNzAwMC04MDAwLTAwMDAwMDAwMDAwMiIsImF1dGhfdGltZSI6MTc2NzIyMjAwMCwiYW1yIjpbInBvcCIsIm1mYSIsInVzZXIiXSwiYWNyIjoicGhyIiwicHJlZmVycmVkX3VzZXJuYW1lIjoiYWRhIiwibmFtZSI6IkFkYSBMb3ZlbGFjZSIsInByb2ZpbGVfdmVyc2lvbiI6MX0.b2wnjEGGRJ1ixQJIq9FXY_ewkf2XQSbHNUFBYwobjRVR5ziVh31pnXPzA-J7iuzr3n7MjJaLQWe-N9r4na-yaomiIQ2b1ix7zdK4tKkHmMg_x2fL_MX7-B_H2ZX9Xj13sr00A2aQNjUAwiHFyv6w9XQE_Q4V1qbHnZ275LniQyfdSa35jtzbb45r2LrZZO4DFF_yVyGG_-1QgSZjCmjI9bRq2-EZtd3t0Ur6SY64LN15R-Ekj6ReWrrMIqashqRBr0yKE-a6dZsBF9CVGLS6Q1Aq7Eql0RqIj9hzOxoRRBDMH_EKTDxSA_8JsQO8je4Tlb3bNn-gK_oVGUUH9SYRAw"
+  },
+  "expected": {
+    "error": {
+      "code": "invalid_token",
+      "reason": "not_yet_valid"
+    }
+  }
+}

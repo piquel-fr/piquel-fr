@@ -1,22 +1,27 @@
 //! Token exchange, refresh rotation, revocation and `UserInfo`.
 
 use super::{
-    ACCESS_TOKEN_SECONDS, AuthScheme, Claim, GrantType, OAuthCode, OAuthError, OidcApplication,
-    OpaqueToken, Scope, Scopes, TokenPrefix, TokenType,
+    ACCESS_TOKEN_SECONDS, AuthScheme, GrantType, OAuthCode, OAuthError, OidcApplication,
+    OpaqueToken, Reject, Scope, Scopes, TokenPrefix, TokenType,
 };
 use axum::{
     Form, Json,
     extract::State,
     http::{HeaderMap, StatusCode, header},
 };
-use chrono::Utc;
-use piquel_auth_protocol::{SessionId, TokenId, UserId};
+use chrono::{Duration, Utc};
+use piquel_auth_protocol::{
+    ClientId, SessionId, TokenId, UserId,
+    claims::{
+        AccessTokenClaims, Audience, AuthenticationClaims, IdTokenClaims, ProfileClaims, UserInfo,
+    },
+    oauth,
+};
 use piquel_repository::{
     AuditAction, CodeRedemptionError, ConsumedAuthorizationCode, DatabaseTransaction,
     InsertRefreshFamily, InsertRefreshToken, RefreshRotationError, SessionAuthentication,
 };
 use serde::{Deserialize, Serialize};
-use serde_json::{Value, json};
 
 /// Untrusted grant parameters; parse grant type after authenticating the client.
 #[derive(Deserialize)]
@@ -63,7 +68,7 @@ pub(super) struct TokenResponse {
     /// Access token lifetime in seconds.
     expires_in: i64,
     /// Space-separated scopes requested or granted.
-    scope: String,
+    scope: oauth::Scopes,
     /// Signed client-bound identity token, present only for openid grants.
     #[serde(skip_serializing_if = "Option::is_none")]
     id_token: Option<String>,
@@ -104,40 +109,56 @@ impl TokenGrant<'_> {
             session,
             authentication,
         } = self;
-        let now = Utc::now().timestamp();
-        let mut claims = json!({(Claim::Issuer.as_str()):app.issuer,(Claim::Subject.as_str()):user.id,(Claim::Session.as_str()):session,(Claim::AuthTime.as_str()):authentication.auth_time.timestamp(),(Claim::Methods.as_str()):authentication.amr,(Claim::AuthenticationClass.as_str()):authentication.acr,(Claim::IssuedAt.as_str()):now,(Claim::ExpiresAt.as_str()):now+ACCESS_TOKEN_SECONDS});
-        for scope in Scope::ALL {
-            if !scopes.contains(scope) {
-                continue;
-            }
-            match scope {
-                Scope::Profile => {
-                    claims[Claim::Username.as_str()] = json!(user.username);
-                    claims[Claim::Name.as_str()] = json!(user.display_name);
-                    claims[Claim::ProfileVersion.as_str()] = json!(user.profile_version);
-                }
-                Scope::Email => {
-                    if let Some(email) = email {
-                        claims[Claim::Email.as_str()] = json!(email);
-                        claims[Claim::EmailVerified.as_str()] = json!(true);
-                    }
-                }
-                // Identity-token and refresh issuance are handled separately below.
-                Scope::OpenId | Scope::OfflineAccess => {}
-            }
-        }
-        let mut access = claims.clone();
-        access[Claim::Audience.as_str()] = json!(audience);
-        access[Claim::Client.as_str()] = json!(client);
-        access[Claim::TokenId.as_str()] = json!(TokenId::new());
-        access[Claim::Scope.as_str()] = json!(scopes.wire());
-        let access_token = app.keys.sign(TokenType::Access, &access)?;
+        let issued_at = Utc::now();
+        let expires_at = issued_at + Duration::seconds(ACCESS_TOKEN_SECONDS);
+        let authentication = AuthenticationClaims {
+            sid: Some(*session),
+            auth_time: Some(authentication.auth_time),
+            amr: authentication.amr.clone(),
+            acr: Some(authentication.acr),
+        };
+        let profile = scopes.release(ProfileClaims {
+            preferred_username: Some(user.username.clone()),
+            name: Some(user.display_name.clone()),
+            profile_version: Some(user.profile_version),
+            email: email.map(str::to_owned),
+            email_verified: email.map(|_| true),
+        });
+        let access_token = app.keys.sign(
+            TokenType::Access,
+            &AccessTokenClaims {
+                iss: app.issuer.clone(),
+                sub: user.id.to_string(),
+                aud: Audience::One((*audience).to_owned()),
+                client_id: ClientId::new(*client),
+                jti: TokenId::new(),
+                scope: scopes.wire().clone(),
+                iat: issued_at,
+                exp: expires_at,
+                nbf: None,
+                authentication: authentication.clone(),
+                act: None,
+                cnf: None,
+                profile: profile.clone(),
+                extra: (),
+            },
+        )?;
         let id_token = if scopes.contains(Scope::OpenId) {
-            claims[Claim::Audience.as_str()] = json!(client);
-            if let Some(nonce) = nonce {
-                claims[Claim::Nonce.as_str()] = json!(nonce);
-            }
-            Some(app.keys.sign(TokenType::Id, &claims)?)
+            Some(app.keys.sign(
+                TokenType::Id,
+                &IdTokenClaims {
+                    iss: app.issuer.clone(),
+                    sub: user.id.to_string(),
+                    aud: Audience::One((*client).to_owned()),
+                    azp: None,
+                    iat: issued_at,
+                    exp: expires_at,
+                    nbf: None,
+                    nonce: nonce.map(str::to_owned),
+                    authentication,
+                    profile,
+                },
+            )?)
         } else {
             None
         };
@@ -145,7 +166,7 @@ impl TokenGrant<'_> {
             access_token,
             token_type: AuthScheme::Bearer,
             expires_in: ACCESS_TOKEN_SECONDS,
-            scope: scopes.wire(),
+            scope: scopes.wire().clone(),
             id_token,
             refresh_token: None,
         })
@@ -402,12 +423,12 @@ impl OidcApplication {
     pub(super) fn userinfo(
         State(app): State<Self>,
         headers: HeaderMap,
-    ) -> std::future::Ready<Result<Json<Value>, OAuthError>> {
+    ) -> std::future::Ready<Result<Json<UserInfo>, OAuthError>> {
         std::future::ready(app.userinfo_response(&headers))
     }
 
-    /// Builds scoped identity JSON after synchronous verification of the supplied bearer token.
-    fn userinfo_response(&self, headers: &HeaderMap) -> Result<Json<Value>, OAuthError> {
+    /// Builds scoped identity claims after synchronous verification of the supplied bearer token.
+    fn userinfo_response(&self, headers: &HeaderMap) -> Result<Json<UserInfo>, OAuthError> {
         let bearer = || format!("send an access token as {} credentials", AuthScheme::Bearer);
         let authorization = headers
             .get(header::AUTHORIZATION)
@@ -417,52 +438,24 @@ impl OidcApplication {
         let token = AuthScheme::Bearer
             .credentials(authorization)
             .ok_or_else(|| OAuthCode::InvalidToken.reject(bearer()))?;
-        let claims = self
+        let claims: AccessTokenClaims = self
             .keys
             .verify(token, TokenType::Access, &self.issuer)
             .map_err(|error| {
                 OAuthCode::InvalidToken
                     .reject_with(format!("access token is invalid: {error}"), error)
             })?;
-        let scopes = Scopes::parse(
-            claims
-                .get(Claim::Scope.as_str())
-                .and_then(Value::as_str)
-                .unwrap_or_default(),
-        )
-        .map_err(|error| {
-            OAuthCode::InvalidToken.reject_with("access token has no valid scope claim", error)
-        })?;
+        let scopes = Scopes::from_wire(claims.scope);
         if !scopes.contains(Scope::OpenId) {
             return Err(OAuthCode::InvalidToken.reject(format!(
                 "access token was not granted the {} scope",
                 Scope::OpenId
             )));
         }
-        let mut response = json!({(Claim::Subject.as_str()):claims.get(Claim::Subject.as_str())});
-        if scopes.contains(Scope::Profile) {
-            response[Claim::Username.as_str()] = claims
-                .get(Claim::Username.as_str())
-                .cloned()
-                .unwrap_or(Value::Null);
-            response[Claim::Name.as_str()] = claims
-                .get(Claim::Name.as_str())
-                .cloned()
-                .unwrap_or(Value::Null);
-            response[Claim::ProfileVersion.as_str()] = claims
-                .get(Claim::ProfileVersion.as_str())
-                .cloned()
-                .unwrap_or(Value::Null);
-        }
-        if scopes.contains(Scope::Email) {
-            for claim in [Claim::Email, Claim::EmailVerified] {
-                let name = claim.as_str();
-                if let Some(value) = claims.get(name) {
-                    response[name] = value.clone();
-                }
-            }
-        }
-        Ok(Json(response))
+        Ok(Json(UserInfo {
+            sub: claims.sub,
+            profile: scopes.release(claims.profile),
+        }))
     }
 
     /// Persists replay/policy rejection before returning the preserved rotation failure.

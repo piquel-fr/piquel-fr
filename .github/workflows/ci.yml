@@ -67,7 +67,7 @@ jobs:
           predicate-quantifier: every
           filters: |
             rust:
-              - '{Cargo.toml,Cargo.lock,rust-toolchain.toml,justfile,just/**,apps/auth-service/**,crates/**,.github/workflows/ci.yml}'
+              - '{Cargo.toml,Cargo.lock,rust-toolchain.toml,justfile,just/**,apps/auth-service/**,crates/**,tests/sdk-vectors/**,.github/workflows/ci.yml}'
               - '!**/*.md'
             web:
               - '**'

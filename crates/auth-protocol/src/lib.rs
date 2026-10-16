@@ -1,6 +1,10 @@
-//! Stable, framework-independent values shared by authentication participants.
+//! Stable, framework-independent values shared by authentication participants: auth
+//! itself, its first-party apps and the SDKs. Auth issues tokens and documents by
+//! serializing these types, and the SDKs read them back with the same types.
 
-/// Values of the authentication claims tokens report: `acr` and `amr`.
+/// `WWW-Authenticate: Bearer` challenges sent by resource servers.
+pub mod challenge;
+/// Access token, ID token and `UserInfo` claims, and the `acr` and `amr` values they report.
 pub mod claims;
 /// JWT claim and JOSE field vocabulary shared by token issuers and verifiers.
 pub mod jwt;
@@ -8,13 +12,31 @@ pub mod jwt;
 pub mod metadata;
 /// OAuth and OpenID Connect vocabulary shared by clients and the provider.
 pub mod oauth;
+/// Error codes shared by the SDKs and their test vectors.
+pub mod sdk;
 /// What a protected operation needs from the user's authentication (RFC 9470).
 pub mod step_up;
 
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Deserializer, Serialize};
 use std::{fmt, str::FromStr};
 use thiserror::Error;
 use uuid::Uuid;
+
+/// Reads a vocabulary list, dropping values this version does not know, so the
+/// issuer can add values without breaking older readers.
+fn known<'de, D: Deserializer<'de>, T: FromStr>(deserializer: D) -> Result<Vec<T>, D::Error> {
+    Ok(Vec::<String>::deserialize(deserializer)?
+        .iter()
+        .filter_map(|value| value.parse().ok())
+        .collect())
+}
+
+/// Reads one optional vocabulary value, as none when this version does not know it.
+fn known_one<'de, D: Deserializer<'de>, T: FromStr>(
+    deserializer: D,
+) -> Result<Option<T>, D::Error> {
+    Ok(Option::<String>::deserialize(deserializer)?.and_then(|value| value.parse().ok()))
+}
 
 piquel_common::str_enum! {
     /// Supported external authentication providers.
@@ -147,6 +169,32 @@ macro_rules! uuid_id {
 uuid_id!(UserId, "Immutable global Piquel account identifier.");
 uuid_id!(SessionId, "Opaque central-session identifier.");
 uuid_id!(TokenId, "Identifier for a token record or JWT.");
+
+/// A registered OAuth client's identifier. Chosen by whoever registers the client,
+/// so any non-empty string.
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+#[serde(transparent)]
+pub struct ClientId(String);
+
+impl ClientId {
+    /// Wraps a client identifier.
+    #[must_use]
+    pub fn new(id: impl Into<String>) -> Self {
+        Self(id.into())
+    }
+    /// The identifier as sent on the wire.
+    #[must_use]
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
+impl fmt::Display for ClientId {
+    /// Writes the identifier unchanged.
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.write_str(&self.0)
+    }
+}
 
 piquel_common::str_enum! {
     /// Account availability state in SQL and JSON.

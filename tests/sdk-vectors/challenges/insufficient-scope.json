@@ -1,0 +1,16 @@
+{
+  "description": "the token lacks a scope; the challenge names every scope required",
+  "input": {
+    "challenge": {
+      "error": "insufficient_scope",
+      "resource_metadata": "https://notes.example.com/.well-known/oauth-protected-resource",
+      "scope": "notes:read notes:write"
+    }
+  },
+  "expected": {
+    "ok": {
+      "header": "Bearer error=\"insufficient_scope\", scope=\"notes:read notes:write\", resource_metadata=\"https://notes.example.com/.well-known/oauth-protected-resource\"",
+      "status": 403
+    }
+  }
+}

@@ -1,0 +1,11 @@
+{
+  "description": "scope tokens are separated by single spaces (RFC 6750 §3), so this header has no valid challenge",
+  "input": {
+    "header": "Bearer error=\"insufficient_scope\", scope=\"notes:read\tnotes:write\""
+  },
+  "expected": {
+    "ok": {
+      "challenge": null
+    }
+  }
+}

@@ -5,14 +5,24 @@
 
 use crate::claims::Acr;
 use chrono::{DateTime, TimeDelta, Utc};
+use serde::{Deserialize, Serialize};
 
 /// What a protected operation needs from the user's authentication: an `acr` to
 /// meet, a maximum age of `auth_time`, or both. The default needs nothing.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+///
+/// It serializes as the parameters that ask for it, `acr_values` and `max_age`, as in
+/// a step-up challenge (RFC 9470 §3).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct StepUpRequirement {
     /// The class the authentication must meet ([`Acr::satisfies`]).
+    #[serde(
+        default,
+        rename = "acr_values",
+        skip_serializing_if = "Option::is_none"
+    )]
     pub acr: Option<Acr>,
     /// The longest time since `auth_time`, in seconds.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub max_age: Option<u32>,
 }
 

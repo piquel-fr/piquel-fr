@@ -1,0 +1,19 @@
+{
+  "description": "iss is checked on error responses too, before the error is trusted",
+  "input": {
+    "authorization_response_iss_parameter_supported": true,
+    "issuer": "https://auth.example.com",
+    "parameters": {
+      "error": "access_denied",
+      "iss": "https://evil.example.com",
+      "state": "af0ifjsldkj"
+    },
+    "state": "af0ifjsldkj"
+  },
+  "expected": {
+    "error": {
+      "code": "callback",
+      "reason": "issuer_mismatch"
+    }
+  }
+}

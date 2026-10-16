@@ -1,0 +1,14 @@
+{
+  "description": "the request sent a token in more than one way",
+  "input": {
+    "challenge": {
+      "error": "invalid_request"
+    }
+  },
+  "expected": {
+    "ok": {
+      "header": "Bearer error=\"invalid_request\"",
+      "status": 400
+    }
+  }
+}

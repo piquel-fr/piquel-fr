@@ -1,5 +1,7 @@
 //! JWT claims and JOSE metadata shared by token issuers and verifiers.
 
+use serde::{Deserialize, Serialize};
+
 piquel_common::str_enum! {
     /// JWT `typ` headers. Distinct types stop an ID token being accepted as an access token.
     pub enum TokenType {
@@ -22,6 +24,8 @@ piquel_common::str_enum! {
         IssuedAt = "iat",
         /// Expiry time, in Unix seconds.
         ExpiresAt = "exp",
+        /// Time before which the token must not be accepted, in Unix seconds.
+        NotBefore = "nbf",
         /// Browser session that authorized the grant.
         Session = "sid",
         /// When the browser session last authenticated at its `acr`.
@@ -30,6 +34,12 @@ piquel_common::str_enum! {
         Methods = "amr",
         /// Authentication context class the browser session reached.
         AuthenticationClass = "acr",
+        /// Delegation chain of a token-exchange token (RFC 8693 §4.1).
+        Actor = "act",
+        /// Proof-of-possession key binding (RFC 7800), such as a `DPoP` key thumbprint.
+        Confirmation = "cnf",
+        /// Client an ID token was issued to, when its audience names several.
+        AuthorizedParty = "azp",
         /// Display name, with the profile scope.
         Name = "name",
         /// Username, with the profile scope.
@@ -70,4 +80,33 @@ piquel_common::str_enum! {
         /// Digital signatures.
         Signature = "sig",
     }
+}
+
+/// A JSON Web Key Set (RFC 7517 §5). Auth publishes `JwkSet<Jwk>`. Verifiers read the
+/// keys as raw JSON and parse each one alone, because RFC 7517 §5 says a key of an
+/// unknown `kty` is skipped rather than failing the whole set.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct JwkSet<K = Jwk> {
+    /// Published keys.
+    pub keys: Vec<K>,
+}
+
+/// One public RSA signing key. Fields are in sorted order, so auth's JWKS keeps the
+/// byte layout it had when it was built with `json!`.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Jwk {
+    /// Algorithm the key signs with. Auth always sends it; other issuers may not.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub alg: Option<Algorithm>,
+    /// Base64url RSA public exponent.
+    pub e: String,
+    /// Key identifier, matching the token header's `kid`.
+    pub kid: String,
+    /// Key family; any value but `RSA` fails parsing.
+    pub kty: KeyType,
+    /// Base64url RSA modulus.
+    pub n: String,
+    /// Key purpose. Auth always sends it; other issuers may not.
+    #[serde(rename = "use", default, skip_serializing_if = "Option::is_none")]
+    pub key_use: Option<KeyUse>,
 }
