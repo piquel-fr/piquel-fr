@@ -10,6 +10,19 @@ serve:
     @just web build-auth
     @just auth run serve
 
+[positional-arguments]
+invite *ARGS:
+    @just auth run invite "$@"
+
+# Grant, revoke or list administrators, e.g. `just auth admin grant alice`.
+[positional-arguments]
+admin *ARGS:
+    @just auth run admin "$@"
+
+# Print a random secret, e.g. for a confidential OIDC client.
+secret:
+    @just auth run secret
+
 # Write a new RSA signing key; refuses to overwrite an existing file.
 generate-key PATH:
     #!/usr/bin/env bash

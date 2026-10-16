@@ -90,7 +90,7 @@ there is no migration path for prototype account data.
 ### Invitations
 
 ```sh
-just auth run invite --expires-in 7d
+just auth invite --expires-in 7d
 ```
 
 This prints one signup link. The database stores a digest, expiry and redemption
@@ -102,9 +102,9 @@ Administrators can also create, list and revoke invitations through the admin AP
 ### Administrators
 
 ```sh
-just auth run admin grant alice
-just auth run admin revoke alice
-just auth run admin list
+just auth admin grant alice
+just auth admin revoke alice
+just auth admin list
 ```
 
 Only these commands grant or revoke administrator rights; no HTTP route can. Each
@@ -153,7 +153,7 @@ Client IDs must be unique. A minimal public web client looks like:
 ```
 
 For a confidential backend client, add `"client_secret": "env://MY_CLIENT_SECRET"`.
-Generate its random secret with `just auth run secret`. Clients use
+Generate its random secret with `just auth secret`. Clients use
 `client_secret_basic` when confidential and `none` when public; both require S256
 PKCE. Redirect URLs must match exactly and use HTTPS.
 
@@ -235,7 +235,7 @@ Use individual recipes while iterating:
 | Dependency audits | `just audit` (`just rust audit` runs cargo-deny, `just web audit` pnpm) |
 | SvelteKit generated types/config | `just web generate` |
 | Frontends / embedded debug binary / release binary | `just web build` / `just rust build` / `just build` |
-| Run with caller-provided auth configuration | `just auth serve`, `just db migrate`, `just auth run invite --expires-in 7d`, `just auth run admin list` |
+| Run with caller-provided auth configuration | `just auth serve`, `just db migrate`, `just auth invite --expires-in 7d`, `just auth admin list` |
 
 CI runs these recipes on every pull request whose changes they can affect,
 including the database and browser tests, and on every push to `main`.
