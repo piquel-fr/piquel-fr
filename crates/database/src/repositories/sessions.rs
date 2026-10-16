@@ -1,4 +1,4 @@
-//! Active browser sessions, cookie digests and short management windows.
+//! Active browser sessions, cookie digests and passkey confirmations.
 
 use super::{JsonArray, RepositoryExecutor, SessionRepository};
 use crate::DatabaseError;
@@ -21,6 +21,8 @@ pub struct InsertSession {
     pub expires_at: DateTime<Utc>,
     /// Coarse user agent family, if recorded; never the raw header.
     pub user_agent_family: Option<String>,
+    /// When the session last proved possession of a passkey, if it did.
+    pub passkey_confirmed_at: Option<DateTime<Utc>>,
 }
 
 /// A browser session row.
@@ -40,6 +42,8 @@ pub struct StoredSession {
     pub last_seen_at: DateTime<Utc>,
     /// When the session was revoked; `None` while it is usable.
     pub revoked_at: Option<DateTime<Utc>>,
+    /// When the session last proved possession of a passkey. Social sign-in never sets it.
+    pub passkey_confirmed_at: Option<DateTime<Utc>>,
 }
 
 impl SessionRepository<'_> {
@@ -68,20 +72,21 @@ impl SessionRepository<'_> {
                 )
                 INSERT INTO sessions (
                     id, user_id, authentication_methods, authenticated_at, expires_at,
-                    last_seen_at, user_agent_family
+                    last_seen_at, user_agent_family, passkey_confirmed_at
                 )
-                SELECT $1, id, $3, $4, $5, $4, $6
+                SELECT $1, id, $3, $4, $5, $4, $6, $7
                 FROM active_user
                 RETURNING
                     id AS "id: SessionId", user_id AS "user_id: UserId",
                     authentication_methods AS "authentication_methods: JsonArray<AuthenticationMethod>",
-                    authenticated_at, expires_at, last_seen_at, revoked_at"#,
+                    authenticated_at, expires_at, last_seen_at, revoked_at, passkey_confirmed_at"#,
                 input.id.as_uuid(),
                 input.user_id.as_uuid(),
                 Json(&input.authentication_methods) as _,
                 input.authenticated_at,
                 input.expires_at,
                 input.user_agent_family,
+                input.passkey_confirmed_at,
             )
         )
     }
@@ -103,7 +108,7 @@ impl SessionRepository<'_> {
                 r#"SELECT
                     id AS "id: SessionId", user_id AS "user_id: UserId",
                     authentication_methods AS "authentication_methods: JsonArray<AuthenticationMethod>",
-                    authenticated_at, expires_at, last_seen_at, revoked_at
+                    authenticated_at, expires_at, last_seen_at, revoked_at, passkey_confirmed_at
                 FROM sessions
                 WHERE id = $1"#,
                 id.as_uuid(),
@@ -128,7 +133,8 @@ impl SessionRepository<'_> {
                 r#"SELECT
                     s.id AS "id: SessionId", s.user_id AS "user_id: UserId",
                     s.authentication_methods AS "authentication_methods: JsonArray<AuthenticationMethod>",
-                    s.authenticated_at, s.expires_at, s.last_seen_at, s.revoked_at
+                    s.authenticated_at, s.expires_at, s.last_seen_at, s.revoked_at,
+                    s.passkey_confirmed_at
                 FROM sessions s
                 JOIN users u ON u.id = s.user_id
                 WHERE s.id = $1
@@ -159,7 +165,8 @@ impl SessionRepository<'_> {
                 r#"SELECT
                     s.id AS "id: SessionId", s.user_id AS "user_id: UserId",
                     s.authentication_methods AS "authentication_methods: JsonArray<AuthenticationMethod>",
-                    s.authenticated_at, s.expires_at, s.last_seen_at, s.revoked_at
+                    s.authenticated_at, s.expires_at, s.last_seen_at, s.revoked_at,
+                    s.passkey_confirmed_at
                 FROM sessions s
                 JOIN users u ON u.id = s.user_id
                 WHERE s.id = $1
@@ -206,7 +213,7 @@ impl SessionRepository<'_> {
             execute,
             sqlx::query!(
                 "UPDATE sessions
-                SET revoked_at = now(), management_expires_at = NULL
+                SET revoked_at = now(), passkey_confirmed_at = NULL
                 WHERE user_id = $1
                 AND id <> $2
                 AND revoked_at IS NULL",
@@ -257,7 +264,8 @@ impl SessionRepository<'_> {
                 r#"SELECT
                     s.id AS "id: SessionId", s.user_id AS "user_id: UserId",
                     s.authentication_methods AS "authentication_methods: JsonArray<AuthenticationMethod>",
-                    s.authenticated_at, s.expires_at, s.last_seen_at, s.revoked_at
+                    s.authenticated_at, s.expires_at, s.last_seen_at, s.revoked_at,
+                    s.passkey_confirmed_at
                 FROM browser_session_secrets b
                 JOIN sessions s ON s.id = b.session_id
                 JOIN users u ON u.id = s.user_id
@@ -270,85 +278,36 @@ impl SessionRepository<'_> {
         )
     }
 
-    /// Reports whether the session holds an unexpired management window.
-    ///
-    /// The session row stays locked until the transaction ends, so logout
-    /// cannot race a settings change.
+    /// Records that the session proved possession of a passkey `at` this time.
+    /// Protected actions accept the confirmation for a fixed time after it, so using
+    /// it never extends it.
     ///
     /// # Errors
     ///
-    /// Returns [`DatabaseError`] if the query fails.
-    pub async fn management_active(&mut self, id: SessionId) -> Result<bool, DatabaseError> {
-        Ok(run!(
+    /// Returns [`DatabaseError::NotFound`] if the session is revoked or expired, or
+    /// another [`DatabaseError`] if the query fails.
+    pub async fn confirm_passkey(
+        &mut self,
+        id: SessionId,
+        at: DateTime<Utc>,
+    ) -> Result<(), DatabaseError> {
+        let updated = run!(
             self,
-            fetch_optional,
-            sqlx::query_scalar!(
-                "SELECT s.id
-                FROM sessions s
-                JOIN users u ON u.id = s.user_id
-                WHERE s.id = $1
-                AND s.revoked_at IS NULL
-                AND s.expires_at > clock_timestamp()
-                AND s.management_expires_at > clock_timestamp()
-                AND u.status = 'active'
-                FOR UPDATE OF s",
+            execute,
+            sqlx::query!(
+                "UPDATE sessions
+                SET passkey_confirmed_at = $2
+                WHERE id = $1
+                AND revoked_at IS NULL
+                AND expires_at > now()",
                 id.as_uuid(),
+                at,
             )
         )?
-        .is_some())
-    }
-
-    /// Returns when the session's management window closes, or `None` if it
-    /// has no open window.
-    ///
-    /// # Errors
-    ///
-    /// Returns [`DatabaseError`] if the query fails or the row is invalid.
-    pub async fn management_expiry(
-        &mut self,
-        id: SessionId,
-    ) -> Result<Option<DateTime<Utc>>, DatabaseError> {
-        run!(
-            self,
-            fetch_optional,
-            sqlx::query_scalar!(
-                r#"SELECT management_expires_at AS "management_expires_at!"
-                FROM sessions
-                WHERE id = $1
-                AND revoked_at IS NULL
-                AND expires_at > now()
-                AND management_expires_at > now()"#,
-                id.as_uuid(),
-            )
-        )
-    }
-
-    /// Opens a two-minute management window, capped at the session expiry,
-    /// and returns when it closes.
-    ///
-    /// # Errors
-    ///
-    /// Returns [`DatabaseError::NotFound`] if the session is revoked or
-    /// expired, or another [`DatabaseError`] if the query fails.
-    pub async fn grant_management(
-        &mut self,
-        id: SessionId,
-    ) -> Result<DateTime<Utc>, DatabaseError> {
-        run!(
-            self,
-            fetch_one,
-            sqlx::query_scalar!(
-                r#"UPDATE sessions
-                SET management_expires_at = LEAST(
-                    expires_at,
-                    clock_timestamp() + interval '2 minutes'
-                )
-                WHERE id = $1
-                AND revoked_at IS NULL
-                AND expires_at > clock_timestamp()
-                RETURNING management_expires_at AS "management_expires_at!""#,
-                id.as_uuid(),
-            )
-        )
+        .rows_affected();
+        if updated == 0 {
+            return Err(DatabaseError::NotFound);
+        }
+        Ok(())
     }
 }

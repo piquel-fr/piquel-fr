@@ -12,8 +12,8 @@ piquel_common::str_enum! {
         AccountCreate = "account.create",
         /// A passkey authenticated the account.
         PasskeyLogin = "passkey.login",
-        /// A passkey opened the settings management window.
-        SettingsUnlock = "settings.unlock",
+        /// A passkey confirmed an existing session for protected actions.
+        SessionPasskeyConfirmed = "session.passkey_confirmed",
         /// A passkey was enrolled.
         PasskeyAdd = "passkey.add",
         /// A passkey was renamed.

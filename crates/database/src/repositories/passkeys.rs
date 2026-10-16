@@ -15,7 +15,7 @@ piquel_common::str_enum! {
         Authentication = "authentication",
         /// Additional passkey enrollment.
         Enrollment = "enrollment",
-        /// Settings management authorization.
+        /// Passkey confirmation of an existing session.
         PurposeAuthentication = "purpose_authentication",
     }
 }

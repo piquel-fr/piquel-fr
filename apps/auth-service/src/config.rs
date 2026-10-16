@@ -8,9 +8,10 @@ use piquel_common::{
 };
 use piquel_crypto::{Digest, Rs256Key, Secret};
 use piquel_repository::{BootstrapOidcClient, DatabaseConfig};
-use serde::Deserialize;
+use serde::{Deserialize, Serialize, Serializer};
 use std::{
-    collections::{BTreeMap, HashSet},
+    collections::{BTreeMap, BTreeSet, HashSet},
+    fmt,
     net::{IpAddr, SocketAddr},
     sync::Arc,
     time::Duration,
@@ -137,13 +138,51 @@ impl ProviderConfig {
     }
 }
 
+/// Origins of the first-party frontends, such as piquel.fr. They may call the account
+/// and login APIs, and sign-in may return to any URL on them.
+#[derive(Clone, Debug)]
+pub(crate) struct FrontendOrigins(Arc<[String]>);
+
+impl FrontendOrigins {
+    /// Collects the distinct origins of the configured frontend URLs, serialized as
+    /// browsers send them in `Origin` headers.
+    pub(crate) fn new<'a>(urls: impl IntoIterator<Item = &'a PublicUrl>) -> Self {
+        let origins: BTreeSet<_> = urls
+            .into_iter()
+            .map(|url| url.as_url().origin().ascii_serialization())
+            .collect();
+        Self(origins.into_iter().collect())
+    }
+
+    /// Whether `origin`, serialized like an `Origin` header, belongs to a frontend.
+    pub(crate) fn contains(&self, origin: &str) -> bool {
+        self.0.iter().any(|allowed| allowed == origin)
+    }
+}
+
+impl fmt::Display for FrontendOrigins {
+    /// Lists the origins for error messages, e.g. `https://piquel.fr`.
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.write_str(&self.0.join(", "))
+    }
+}
+
+impl Serialize for FrontendOrigins {
+    /// Publishes the origins as a JSON array, for the SDK's return validation.
+    fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        serializer.collect_seq(self.0.iter())
+    }
+}
+
 /// Social authentication configuration, keyed by the shared provider vocabulary.
 #[derive(Clone)]
 pub(crate) struct FederationConfig {
     /// Exact provider callback origin.
     pub origin: Origin,
-    /// Only permitted external continuation.
+    /// Account settings, where sign-in returns by default.
     pub settings_url: PublicUrl,
+    /// Frontend origins that sign-in may return to.
+    pub frontends: FrontendOrigins,
     /// Enabled provider credentials.
     pub providers: BTreeMap<Provider, ProviderConfig>,
 }
@@ -163,6 +202,7 @@ impl FederationConfig {
         Ok(Self {
             origin: origin.clone(),
             settings_url: settings_url.clone(),
+            frontends: FrontendOrigins::new([settings_url]),
             providers,
         })
     }

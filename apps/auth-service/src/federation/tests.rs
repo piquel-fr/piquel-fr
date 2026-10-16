@@ -102,15 +102,17 @@ impl TestApp {
             client_secret: SecretReference::parse(&format!("file://{}", secret_file.display()))
                 .expect("secret reference"),
         };
+        let settings_url = "https://piquel.fr/settings"
+            .parse::<piquel_common::PublicUrl>()
+            .expect("settings");
         let mut app = FederationApplication::new(
             database,
             &FederationConfig {
                 origin: "https://auth.piquel.fr/"
                     .parse::<piquel_common::Origin>()
                     .expect("origin"),
-                settings_url: "https://piquel.fr/settings"
-                    .parse::<piquel_common::PublicUrl>()
-                    .expect("settings"),
+                frontends: FrontendOrigins::new([&settings_url]),
+                settings_url,
                 providers: BTreeMap::from([(Provider::GitHub, config)]),
             },
         )
@@ -254,8 +256,8 @@ impl TestApp {
         );
         (pending, headers)
     }
-    /// Creates a browser session and optionally grants passkey management access.
-    async fn session(&self, user_id: UserId, grant: bool) -> (SessionId, String) {
+    /// Creates a social browser session, optionally confirmed with a passkey now.
+    async fn session(&self, user_id: UserId, confirmed: bool) -> (SessionId, String) {
         let mut tx = self.app.database.begin().await.expect("transaction");
         let cookie = security::Session::create(&mut tx, user_id, AuthenticationMethod::Federation)
             .await
@@ -267,13 +269,13 @@ impl TestApp {
         let session = security::Session::required(&self.app.database, &headers)
             .await
             .expect("active session");
-        if grant {
+        if confirmed {
             self.app
                 .database
                 .sessions()
-                .grant_management(session.id)
+                .confirm_passkey(session.id, chrono::Utc::now())
                 .await
-                .expect("grant");
+                .expect("confirm");
         }
         (session.id, raw)
     }
@@ -307,40 +309,62 @@ impl TestApp {
             .expect("JSON")
     }
 }
-/// Rejects unsafe continuations and duplicated pending-browser cookies.
+/// Accepts auth paths and frontend URLs only, and rejects duplicated pending-browser cookies.
 #[test]
 fn return_destinations_and_browser_bindings_are_strict() {
-    let settings = Url::parse("https://preview.example/settings").expect("settings");
-    for path in [
+    let settings: piquel_common::PublicUrl = "https://preview.example/settings"
+        .parse()
+        .expect("settings");
+    let frontends = FrontendOrigins::new([&settings]);
+    for value in [
         "//evil.test",
         "/\\evil.test",
         "https://evil.test",
         "/login#x",
         "/\n/evil",
+        "settings",
+        "javascript:alert(1)",
+        "http://preview.example/settings",
+        "https://preview.example:8443/settings",
+        "https://preview.example.evil.test/settings",
+        "https://evil.test/preview.example/settings",
+        "https://preview.example@evil.test/settings",
+        "https://user:pass@preview.example/settings",
+        "https://user@preview.example/settings",
+        "https:\\\\evil.test",
+        "https://evil.test\\@preview.example/",
+        "https://preview.example/settings#tab",
     ] {
-        assert!(ReturnTo::parse(Some(path), &settings).is_err(), "{path}");
+        assert!(ReturnTo::parse(Some(value), &frontends).is_err(), "{value}");
+    }
+    for (value, expected) in [
+        (
+            "/oauth/authorize?request=abc",
+            "/oauth/authorize?request=abc",
+        ),
+        (
+            "https://preview.example/settings",
+            "https://preview.example/settings",
+        ),
+        (
+            "https://preview.example/developers?tab=apps",
+            "https://preview.example/developers?tab=apps",
+        ),
+        ("https://PREVIEW.example", "https://preview.example/"),
+    ] {
+        assert_eq!(
+            ReturnTo::parse(Some(value), &frontends).expect(value).0,
+            expected
+        );
     }
     assert_eq!(
-        ReturnTo::parse(Some("/oauth/authorize?request=abc"), &settings)
-            .expect("local return")
-            .0,
-        "/oauth/authorize?request=abc"
-    );
-    assert_eq!(
-        ReturnTo::parse(None, &settings).expect("default return").0,
+        ReturnTo::parse(None, &frontends).expect("default return").0,
         DEFAULT_RETURN_TO
     );
-    assert_eq!(
-        ReturnTo::parse(Some(settings.as_str()), &settings)
-            .expect("settings return")
-            .0,
-        settings.as_str()
-    );
-    assert!(ReturnTo::parse(Some("https://piquel.fr/settings"), &settings).is_err());
     assert!(
         ReturnTo::parse(
             Some(&format!("/{}", "x".repeat(MAX_RETURN_TO_BYTES))),
-            &settings
+            &frontends
         )
         .is_err()
     );
@@ -493,10 +517,15 @@ async fn onboarding_commits_only_with_first_key_and_browser_and_never_claims_exi
     tx.rollback().await.expect("rollback");
 }
 
-/// Linking requires the intended account’s grant; unlink frees the subject and preserves email.
+/// Linking and unlinking require the intended account’s recent passkey confirmation;
+/// unlink frees the subject and preserves email.
+#[expect(
+    clippy::too_many_lines,
+    reason = "Keep one pending link from rejection through linking and unlinking together."
+)]
 #[tokio::test]
 #[ignore = "requires TEST_DATABASE_URL"]
-async fn linking_requires_target_grant_and_unlink_releases_subject_without_changing_email() {
+async fn linking_requires_target_confirmation_and_unlink_releases_subject_without_changing_email() {
     let test = TestApp::new().await;
     let email = format!("{}@example.com", TokenId::new());
     let target = test.user(Some(&email), true).await;
@@ -510,25 +539,43 @@ async fn linking_requires_target_grant_and_unlink_releases_subject_without_chang
         .to_str()
         .expect("pending cookie");
     let router = test.app.clone().routes();
-    for cookie in [&other_cookie, &target_cookie] {
+    let response = router
+        .clone()
+        .oneshot(TestApp::request(
+            Method::POST,
+            "/login/social/link",
+            Some(&format!("{other_cookie}; {pending_cookie}")),
+            &serde_json::json!({}),
+        ))
+        .await
+        .expect("link rejection");
+    assert_eq!(
+        response.status(),
+        StatusCode::FORBIDDEN,
+        "another account's confirmation cannot link"
+    );
+    for (method, path) in [
+        (Method::POST, "/login/social/link"),
+        (Method::DELETE, "/account/social-identities/github"),
+    ] {
         let response = router
             .clone()
             .oneshot(TestApp::request(
-                Method::POST,
-                "/login/social/link",
-                Some(&format!("{cookie}; {pending_cookie}")),
+                method,
+                path,
+                Some(&format!("{target_cookie}; {pending_cookie}")),
                 &serde_json::json!({}),
             ))
             .await
-            .expect("link rejection");
-        assert_eq!(response.status(), StatusCode::FORBIDDEN);
+            .expect("unconfirmed rejection");
+        security::tests::assert_step_up_required(response).await;
     }
     test.app
         .database
         .sessions()
-        .grant_management(target_session)
+        .confirm_passkey(target_session, chrono::Utc::now())
         .await
-        .expect("grant");
+        .expect("confirm");
     let response = router
         .clone()
         .oneshot(TestApp::request(
@@ -703,6 +750,10 @@ async fn google_mock_validates_signature_audience_nonce_and_expiry_without_requi
 }
 
 /// Stable provider subjects take priority over email observations and require an existing passkey.
+#[expect(
+    clippy::too_many_lines,
+    reason = "Keep the callback precedence scenario and the session it yields together."
+)]
 #[tokio::test]
 #[ignore = "requires TEST_DATABASE_URL"]
 async fn callback_email_collision_never_links_and_known_subject_never_bootstraps_a_missing_key() {
@@ -774,10 +825,22 @@ async fn callback_email_collision_never_links_and_known_subject_never_bootstraps
         "stable subject takes priority over email observation"
     );
     assert!(
-        security::Session::management(&test.app.database, &headers)
-            .await
-            .is_err()
+        session.passkey_confirmed_at.is_none(),
+        "social sign-in never confirms a passkey"
     );
+    let response = test
+        .app
+        .clone()
+        .routes()
+        .oneshot(TestApp::request(
+            Method::DELETE,
+            "/account/social-identities/github",
+            Some(session_cookie),
+            &serde_json::json!({}),
+        ))
+        .await
+        .expect("unlink");
+    security::tests::assert_step_up_required(response).await;
     assert_eq!(
         test.app
             .database

@@ -3,6 +3,7 @@
   import {
     AuthApi,
     Passkeys,
+    StepUp,
     errorMessage,
     passkeysAvailable,
     providerName,
@@ -12,7 +13,8 @@
     type Provider,
     type Session
   } from '@piquel/auth-sdk';
-  let { mode = 'login' }: { mode?: 'login' | 'register' | 'manage' | 'enroll' | 'link' } = $props();
+  let { mode = 'login' }: { mode?: 'login' | 'register' | 'confirm' | 'enroll' | 'link' } =
+    $props();
   const api = new AuthApi();
   const passkeys = new Passkeys(api);
   let config = $state<Configuration | null>(null);
@@ -40,7 +42,8 @@
   let passkeyKind = $state<PasskeyKind>('standard');
   const registration = $derived(mode === 'register' || pending?.kind === 'signup');
   const linking = $derived(pending?.kind === 'link' || pending?.kind === 'explicit_link');
-  const management = $derived(mode === 'manage' || mode === 'enroll');
+  // Pages that act on the signed-in account rather than sign someone in.
+  const security = $derived(mode === 'confirm' || mode === 'enroll');
   const title = $derived(
     linking
       ? 'Add this sign-in method?'
@@ -48,7 +51,7 @@
         ? 'Your account starts here.'
         : mode === 'enroll'
           ? 'Add a passkey.'
-          : mode === 'manage'
+          : mode === 'confirm'
             ? 'Confirm it’s you.'
             : 'Welcome back.'
   );
@@ -71,7 +74,7 @@
       config = await api.request<Configuration>('/config');
       if (query.has('social') || mode === 'link')
         pending = await api.request('/login/social/pending');
-      if (management || linking) session = await api.request<Session>('/session').catch(() => null);
+      if (security || linking) session = await api.request<Session>('/session').catch(() => null);
       ready = true;
     } catch (cause) {
       error = errorMessage(cause);
@@ -81,7 +84,7 @@
     if (transaction)
       return `/oauth/authorize/resume?transaction=${encodeURIComponent(transaction)}`;
     if (!config) throw new Error('Sign-in options are still loading. Please try again.');
-    return safeDestination(pending?.return_to ?? returnTo, config.settings_url);
+    return safeDestination(pending?.return_to ?? returnTo, config);
   }
   async function run(action: () => Promise<void>) {
     if (busy) return;
@@ -95,13 +98,17 @@
       busy = false;
     }
   }
-  async function unlock() {
-    if (!session) {
-      await passkeys.authenticate(username.trim() || undefined);
-      session = await api.request('/session');
-    }
-    if (!session?.management_expires_at || Date.parse(session.management_expires_at) <= Date.now())
-      await passkeys.authenticate(undefined, true);
+  // On this origin, actions needing a recent passkey confirmation confirm inline.
+  const stepUp = new StepUp(passkeys, () => session?.user.id, {
+    enroll: () => passkeys.register(friendlyName.trim(), undefined, passkeyKind),
+    link: () => api.request('/login/social/link', 'POST', {})
+  });
+  // Signs in when this browser has no session. A passkey sign-in also confirms the
+  // session, so the action after it prompts no more.
+  async function signIn() {
+    if (session) return;
+    await passkeys.authenticate(username.trim() || undefined);
+    session = await api.request<Session>('/session');
   }
   async function submit() {
     await run(async () => {
@@ -119,12 +126,11 @@
           passkeyKind
         );
         sessionStorage.removeItem('piquel.invitation');
-      } else if (linking) {
-        await unlock();
-        await api.request('/login/social/link', 'POST', {});
-      } else if (management) {
-        await unlock();
-        if (mode === 'enroll') await passkeys.register(friendlyName.trim(), undefined, passkeyKind);
+      } else if (linking || mode === 'enroll') {
+        await signIn();
+        await stepUp.run(linking ? 'link' : 'enroll');
+      } else if (mode === 'confirm' && session) {
+        await passkeys.confirm();
       } else {
         await passkeys.authenticate(username.trim() || undefined);
       }
@@ -171,14 +177,14 @@
       ? 'Link social sign-in'
       : registration
         ? 'Create your account'
-        : management
+        : security
           ? 'Verify your passkey'
           : 'Sign in'} · Piquel</title
   ></svelte:head
 >
 <section class="auth-shell">
   <p class="eyebrow">
-    {management
+    {security
       ? 'Account security'
       : linking
         ? 'Social sign-in'
@@ -205,10 +211,13 @@
     {#if pending}<p class="notice">
         Finish creating your account to add {providerName(pending.provider)} sign-in.
       </p>{/if}
-  {:else if mode === 'manage'}
-    <p>Use a passkey to unlock changes to your security settings for two minutes.</p>
+  {:else if mode === 'confirm'}
+    <p>Verify your passkey to continue with your change.</p>
   {:else if mode === 'enroll'}
-    <p>Verify an existing passkey, then save another with your device or password manager.</p>
+    <p>
+      Save another passkey with your device or password manager. You may need to verify an existing
+      passkey first.
+    </p>
   {:else}<p>Sign in with a passkey, or use a linked social account.</p>{/if}
   {#if error}<p class="notice error" role="alert">{error}</p>{/if}
   {#if !ready && !error}<p role="status">Loading your sign-in options…</p>{/if}
@@ -271,8 +280,8 @@
                 : registration
                   ? 'Create account with a passkey'
                   : mode === 'enroll'
-                    ? 'Verify and add passkey'
-                    : mode === 'manage'
+                    ? 'Add passkey'
+                    : mode === 'confirm'
                       ? 'Verify with a passkey'
                       : 'Sign in with a passkey'}</button
           >
@@ -286,7 +295,7 @@
           Passkeys need a supported browser and a secure connection. Open this page in Safari,
           Chrome, or another browser with passkey support.
         </p>{/if}
-      {#if !registration && !management && !linking}
+      {#if !registration && !security && !linking}
         {#if config.providers.length}<div class="divider">or continue with</div>{/if}
         {#each config.providers as provider (provider)}<button
             class="secondary full"
@@ -305,7 +314,7 @@
       {/if}
     </div>
     <footer>
-      {#if management}<a href={config.settings_url}>Back to account settings</a>
+      {#if security}<a href={safeDestination(returnTo, config)}>Go back</a>
       {:else if registration}<p class="help">
           Already have an account? <a
             href={`/login?${new URLSearchParams({ ...(transaction ? { transaction } : {}), ...(returnTo ? { return_to: returnTo } : {}) })}`}

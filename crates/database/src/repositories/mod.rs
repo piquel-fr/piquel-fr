@@ -78,7 +78,7 @@ repositories! {
     users: UserRepository;
     /// Verified email addresses and their cross-account ownership.
     emails: EmailRepository;
-    /// Browser sessions, their cookie digests and management windows.
+    /// Browser sessions, their cookie digests and passkey confirmations.
     sessions: SessionRepository;
     /// The append-only security audit log.
     audit_events: AuditEventRepository;
@@ -177,7 +177,7 @@ pub(crate) mod oidc;
 pub(crate) mod passkeys;
 /// Signup invitations and shared request budgets.
 pub(crate) mod security;
-/// Browser sessions, cookie digests and management windows.
+/// Browser sessions, cookie digests and passkey confirmations.
 pub(crate) mod sessions;
 /// Focused tests for the column types shared by every repository.
 #[cfg(test)]

@@ -26,8 +26,9 @@ startup validation.
 
 Settings call the public auth API with credentialed requests and a CSRF header.
 The auth service must allow this exact settings origin and configure its complete
-settings URL. All WebAuthn operations redirect to the auth origin; the two-minute
-management authorization remains in PostgreSQL and is checked by the API.
+settings URL. All WebAuthn operations redirect to the auth origin. When an action needs a recent
+passkey confirmation, the SDK's `StepUp` sends the user to auth's `/confirm` page and
+finishes the action on return; the API checks the confirmation in PostgreSQL.
 This frontend never stores access or refresh tokens. It uses the shared
 `packages/auth-sdk` SDK; `just web fmt`, `just web lint` and `just web check`
 format, lint and type-check all web code.

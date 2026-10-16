@@ -2,4 +2,4 @@
   import AuthPage from '$lib/AuthPage.svelte';
 </script>
 
-<AuthPage mode="manage" />
+<AuthPage mode="confirm" />

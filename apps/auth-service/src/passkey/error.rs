@@ -44,7 +44,7 @@ pub(super) enum PasskeyError {
     /// The stored ceremony payload does not match its expected purpose.
     #[error("wrong ceremony payload")]
     WrongCeremony,
-    /// The management or enrollment proof belongs to another session.
+    /// The confirmation or enrollment proof belongs to another session.
     #[error("ceremony session changed")]
     SessionChanged,
     /// The Google-only registration workaround was selected outside Android.
@@ -86,9 +86,6 @@ pub(super) enum PasskeyError {
     /// Renaming found no active passkey owned by the account.
     #[error("passkey not found")]
     PasskeyNotFound,
-    /// Settings authorization expired before the transaction acquired its lock.
-    #[error("passkey management window expired")]
-    ManagementExpired,
     /// A persisted credential cannot be decoded.
     #[error("stored passkey credential is corrupt")]
     StoredCredential(#[source] serde_json::Error),
@@ -146,9 +143,6 @@ impl From<PasskeyError> for ApiError {
             ),
             PasskeyError::AccountInactive => {
                 Self::unauthorized("This account is disabled, or this passkey was removed from it.")
-            }
-            PasskeyError::ManagementExpired => {
-                Self::forbidden("Your management window expired. Confirm with a passkey again.")
             }
             PasskeyError::PasskeyNotFound => Self::bad_request("Passkey not found."),
             PasskeyError::LastPasskey => {

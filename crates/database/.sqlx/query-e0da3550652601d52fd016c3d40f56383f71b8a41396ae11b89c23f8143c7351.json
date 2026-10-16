@@ -1,0 +1,70 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "WITH active_user AS (\n                    SELECT id\n                    FROM users\n                    WHERE id = $2\n                    AND status = 'active'\n                    FOR NO KEY UPDATE\n                )\n                INSERT INTO sessions (\n                    id, user_id, authentication_methods, authenticated_at, expires_at,\n                    last_seen_at, user_agent_family, passkey_confirmed_at\n                )\n                SELECT $1, id, $3, $4, $5, $4, $6, $7\n                FROM active_user\n                RETURNING\n                    id AS \"id: SessionId\", user_id AS \"user_id: UserId\",\n                    authentication_methods AS \"authentication_methods: JsonArray<AuthenticationMethod>\",\n                    authenticated_at, expires_at, last_seen_at, revoked_at, passkey_confirmed_at",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id: SessionId",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "user_id: UserId",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 2,
+        "name": "authentication_methods: JsonArray<AuthenticationMethod>",
+        "type_info": "Jsonb"
+      },
+      {
+        "ordinal": 3,
+        "name": "authenticated_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 4,
+        "name": "expires_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 5,
+        "name": "last_seen_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 6,
+        "name": "revoked_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 7,
+        "name": "passkey_confirmed_at",
+        "type_info": "Timestamptz"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid",
+        "Jsonb",
+        "Timestamptz",
+        "Timestamptz",
+        "Text",
+        "Timestamptz"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      true,
+      true
+    ]
+  },
+  "hash": "e0da3550652601d52fd016c3d40f56383f71b8a41396ae11b89c23f8143c7351"
+}

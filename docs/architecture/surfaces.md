@@ -36,8 +36,7 @@ require the CSRF header. No access token is held by these pages.
 Passkeys are bound to the `auth.piquel.fr` RP ID, so passkey ceremonies always
 run on auth. When an API call needs a recent passkey confirmation, auth answers
 with a step-up error, and the frontend sends the user to auth to confirm and
-back. Users never unlock settings explicitly. Today, settings still opens the
-two-minute management window explicitly before sensitive changes.
+back. Users never unlock settings explicitly.
 
 The admin API *(planned)* additionally requires an administrator account and
 accepts only the admin origin. Administrators can change the settings of users

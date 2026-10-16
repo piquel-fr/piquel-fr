@@ -21,10 +21,10 @@ pub(crate) mod passkey {
     pub(crate) const AUTHENTICATE_START: &str = "/webauthn/authenticate/start";
     /// Finishes passkey sign-in.
     pub(crate) const AUTHENTICATE_FINISH: &str = "/webauthn/authenticate/finish";
-    /// Starts the passkey check that unlocks settings.
-    pub(crate) const AUTHORIZE_START: &str = "/account/passkeys/authorize/start";
-    /// Finishes the passkey check that unlocks settings.
-    pub(crate) const AUTHORIZE_FINISH: &str = "/account/passkeys/authorize/finish";
+    /// Starts the passkey check that confirms the current session.
+    pub(crate) const CONFIRM_START: &str = "/account/passkeys/confirm/start";
+    /// Finishes the passkey check that confirms the current session.
+    pub(crate) const CONFIRM_FINISH: &str = "/account/passkeys/confirm/finish";
     /// Starts adding another passkey.
     pub(crate) const ENROLL_START: &str = "/account/passkeys/enroll/start";
     /// Finishes adding another passkey.

@@ -1,6 +1,6 @@
 //! Browser-bound social authentication. Email suggests linking; it never authorizes it.
 
-use crate::config::{FederationConfig, ProviderConfig};
+use crate::config::{FederationConfig, FrontendOrigins, ProviderConfig};
 use crate::routes;
 use crate::security::{self, ApiError, BrowserCookie, OptionalSession, SessionError};
 use axum::{
@@ -70,21 +70,16 @@ piquel_common::str_enum! {
     }
 }
 
-/// A validated `return_to`: the settings URL or a path on the auth origin.
+/// A validated `return_to`: a path on the auth origin or a URL on a frontend origin.
 struct ReturnTo(String);
 impl ReturnTo {
-    /// Accepts the exact settings URL, or a path that cannot leave the auth origin.
-    fn parse(value: Option<&str>, settings_url: &Url) -> Result<Self, InvalidReturnTo> {
+    /// Accepts a path that cannot leave the auth origin, or an absolute URL on one of
+    /// `frontends` without credentials. URLs are kept as parsed, so the browser goes
+    /// exactly where validation looked.
+    fn parse(value: Option<&str>, frontends: &FrontendOrigins) -> Result<Self, InvalidReturnTo> {
         let value = value.unwrap_or(DEFAULT_RETURN_TO);
-        if value == settings_url.as_str() {
-            return Ok(Self(value.into()));
-        }
-        // One leading `/` makes this a path on the current origin.
-        if !value.starts_with('/') {
-            return Err(InvalidReturnTo::External(settings_url.clone()));
-        }
-        if value.starts_with("//") {
-            return Err(InvalidReturnTo::ProtocolRelative);
+        if value.len() > MAX_RETURN_TO_BYTES {
+            return Err(InvalidReturnTo::TooLong(value.len()));
         }
         if value.contains('\\') {
             return Err(InvalidReturnTo::Backslash);
@@ -95,10 +90,21 @@ impl ReturnTo {
         if value.chars().any(char::is_control) {
             return Err(InvalidReturnTo::ControlCharacter);
         }
-        if value.len() > MAX_RETURN_TO_BYTES {
-            return Err(InvalidReturnTo::TooLong(value.len()));
+        // One leading `/` makes this a path on the current origin.
+        if value.starts_with("//") {
+            return Err(InvalidReturnTo::ProtocolRelative);
         }
-        Ok(Self(value.into()))
+        if value.starts_with('/') {
+            return Ok(Self(value.into()));
+        }
+        let url = Url::parse(value)
+            .ok()
+            .filter(|url| frontends.contains(&url.origin().ascii_serialization()))
+            .ok_or_else(|| InvalidReturnTo::External(frontends.clone()))?;
+        if !url.username().is_empty() || url.password().is_some() {
+            return Err(InvalidReturnTo::Credentials);
+        }
+        Ok(Self(url.into()))
     }
 }
 
@@ -140,8 +146,8 @@ pub struct FederationApplication {
     client: reqwest::Client,
     /// Exhaustive provider facts; back-channel endpoints can be replaced by test fixtures.
     endpoints: BTreeMap<Provider, ProviderEndpoints>,
-    /// Only allowed external continuation.
-    settings_url: Url,
+    /// Origins that sign-in may return to, besides auth's own paths.
+    frontends: FrontendOrigins,
 }
 
 impl FederationApplication {
@@ -163,7 +169,7 @@ impl FederationApplication {
                 .into_iter()
                 .map(|provider| (provider, ProviderEndpoints::new(provider)))
                 .collect(),
-            settings_url: config.settings_url.as_url().clone(),
+            frontends: config.frontends.clone(),
             client: reqwest::Client::builder()
                 .timeout(HTTP_TIMEOUT)
                 .connect_timeout(HTTP_CONNECT_TIMEOUT)
@@ -251,21 +257,16 @@ impl FederationApplication {
             .get(&provider)
             .ok_or(FederationError::ProviderNotConfigured)?;
         let endpoints = &self.endpoints[&provider];
+        // Linking needs only a session here: confirming the pending link needs the passkey.
         let session = match input.mode {
             StartMode::Login => None,
-            StartMode::Link => Some(
-                security::Session::authorize_management(
-                    &self.database,
-                    session.ok_or(SessionError::Missing)?,
-                )
-                .await?,
-            ),
+            StartMode::Link => Some(session.ok_or(SessionError::Missing)?),
         };
         let state = Secret::generate()?;
         let nonce = Secret::generate()?.encoded();
         let verifier = Secret::generate()?.encoded();
         let browser = Secret::generate()?;
-        let return_to = ReturnTo::parse(input.return_to.as_deref(), &self.settings_url)?;
+        let return_to = ReturnTo::parse(input.return_to.as_deref(), &self.frontends)?;
         self.database
             .federation()
             .insert_transaction(&InsertFederationTransaction {
@@ -503,7 +504,7 @@ enum StartMode {
     /// Authenticate a provider subject without assuming an existing session.
     #[default]
     Login,
-    /// Bind the verified provider subject to the initiating management session.
+    /// Bind the verified provider subject to the initiating session.
     Link,
 }
 

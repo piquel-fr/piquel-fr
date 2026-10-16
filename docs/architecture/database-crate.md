@@ -66,8 +66,9 @@ Important invariants:
   and stays server-side; do not log it.
 - Account, initial credential, optional social identity, invitation redemption and
   initial session commit in one transaction.
-- A session-bound management expiry is checked inside the mutation transaction.
-  It permits repeated changes for two minutes and does not outlive the session.
+- A session's passkey confirmation time is rechecked inside the mutation
+  transaction, under the session row lock, against the action's maximum age. It
+  belongs to one session and ends with it.
 - Account locking protects the last-passkey guard from concurrent removals.
 - Active provider subjects and active provider-per-account links are unique.
   Unlink marks the identity revoked and releases both constraints.
