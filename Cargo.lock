@@ -1457,8 +1457,13 @@ checksum = "a89322df9ebe1c1578d689c92318e070967d1042b512afbe49518723f4e6d5cd"
 name = "piquel-auth-protocol"
 version = "0.1.0"
 dependencies = [
+ "base64 0.22.1",
+ "chrono",
+ "openssl",
  "piquel-common",
+ "piquel-crypto",
  "serde",
+ "serde_json",
  "sqlx",
  "thiserror 2.0.18",
  "url",

@@ -8,8 +8,8 @@ use openssl::{
     rsa::Rsa,
     sign::{Signer, Verifier},
 };
-use piquel_auth_protocol::jwt::{Algorithm, Claim, KeyType, KeyUse, TokenType};
-use serde::{Deserialize, Serialize};
+use piquel_auth_protocol::jwt::{Algorithm, Claim, Jwk, JwkSet, KeyType, KeyUse, TokenType};
+use serde::{Deserialize, Serialize, de::DeserializeOwned};
 use serde_json::Value;
 use std::borrow::Cow;
 
@@ -37,32 +37,6 @@ struct Header<'a> {
     typ: TokenType,
 }
 
-/// Public JSON Web Key Set published for this key. Fields are in sorted order, matching
-/// the earlier `json!` output byte for byte.
-#[derive(Serialize)]
-struct JwkSet<'a> {
-    /// The single signing key.
-    keys: [Jwk<'a>; 1],
-}
-
-/// One public RSA signing key.
-#[derive(Serialize)]
-struct Jwk<'a> {
-    /// Algorithm the key signs with.
-    alg: Algorithm,
-    /// Base64url RSA public exponent.
-    e: String,
-    /// Key identifier, matching the token header's `kid`.
-    kid: &'a str,
-    /// Key family.
-    kty: KeyType,
-    /// Base64url RSA modulus.
-    n: String,
-    /// Key purpose.
-    #[serde(rename = "use")]
-    key_use: KeyUse,
-}
-
 /// A configured RSA private key. Keep its stable key identifier with the PEM.
 pub struct Rs256Key {
     /// Stable public key identifier.
@@ -70,7 +44,7 @@ pub struct Rs256Key {
     /// Validated RSA private key.
     key: PKey<Private>,
     /// Public key set derived once from validated RSA material.
-    public_keys: Value,
+    public_keys: JwkSet,
 }
 
 impl Rs256Key {
@@ -102,16 +76,16 @@ impl Rs256Key {
         if kid.is_empty() || kid.len() > MAX_KEY_ID_LENGTH || kid.chars().any(char::is_whitespace) {
             return Err(CryptoError::KeyId);
         }
-        let public_keys = serde_json::to_value(JwkSet {
-            keys: [Jwk {
-                alg: Algorithm::Rs256,
+        let public_keys = JwkSet {
+            keys: vec![Jwk {
+                alg: Some(Algorithm::Rs256),
                 e: URL_SAFE_NO_PAD.encode(rsa.e().to_vec()),
-                kid: &kid,
+                kid: kid.clone(),
                 kty: KeyType::Rsa,
                 n: URL_SAFE_NO_PAD.encode(rsa.n().to_vec()),
-                key_use: KeyUse::Signature,
+                key_use: Some(KeyUse::Signature),
             }],
-        })?;
+        };
         Ok(Self {
             kid,
             key,
@@ -166,11 +140,15 @@ impl Rs256Key {
         Ok(claims)
     }
 
-    /// Signs JSON claims as a compact RS256 token whose `typ` header is `token_type`.
+    /// Signs claims as a compact RS256 token whose `typ` header is `token_type`.
     ///
     /// # Errors
-    /// Preserves provider and decoding failures; rejects invalid signatures or claims.
-    pub fn sign(&self, token_type: TokenType, claims: &Value) -> Result<String, CryptoError> {
+    /// Preserves provider and serialization failures.
+    pub fn sign(
+        &self,
+        token_type: TokenType,
+        claims: &impl Serialize,
+    ) -> Result<String, CryptoError> {
         let header = URL_SAFE_NO_PAD.encode(serde_json::to_vec(&Header {
             alg: Algorithm::Rs256,
             kid: Cow::Borrowed(&self.kid),
@@ -188,20 +166,20 @@ impl Rs256Key {
 
     /// Returns the public key as a JSON Web Key Set.
     #[must_use]
-    pub fn jwks(&self) -> Value {
-        self.public_keys.clone()
+    pub fn jwks(&self) -> &JwkSet {
+        &self.public_keys
     }
 
-    /// Verifies a compact token, including its expiry.
+    /// Verifies a compact token, including its expiry, and decodes its claims as `T`.
     ///
     /// # Errors
     /// Preserves provider and decoding failures; rejects invalid signatures or claims.
-    pub fn verify(
+    pub fn verify<T: DeserializeOwned>(
         &self,
         token: &str,
         token_type: TokenType,
         issuer: &str,
-    ) -> Result<Value, CryptoError> {
+    ) -> Result<T, CryptoError> {
         let claims = self.verified(token, token_type, issuer)?;
         if claims
             .get(Claim::ExpiresAt.as_str())
@@ -210,7 +188,7 @@ impl Rs256Key {
         {
             return Err(CryptoError::Expired);
         }
-        Ok(claims)
+        Ok(serde_json::from_value(claims)?)
     }
 
     /// Verifies an ID token hint without requiring it to be unexpired.
@@ -237,7 +215,7 @@ mod tests {
             .sign(TokenType::Id, &claims)
             .expect("sign expired ID token hint");
         assert!(
-            key.verify(&expired, TokenType::Id, "https://auth.example")
+            key.verify::<Value>(&expired, TokenType::Id, "https://auth.example")
                 .is_err()
         );
         assert!(
@@ -254,25 +232,25 @@ mod tests {
             .sign(TokenType::Access, &valid)
             .expect("sign access token");
         assert!(
-            key.verify(&token, TokenType::Access, "https://auth.example")
+            key.verify::<Value>(&token, TokenType::Access, "https://auth.example")
                 .is_ok()
         );
         assert!(
-            key.verify(&token, TokenType::Id, "https://auth.example")
+            key.verify::<Value>(&token, TokenType::Id, "https://auth.example")
                 .is_err()
         );
         let mut bytes = token.into_bytes();
         let n = bytes.len();
         bytes[n - 10] = if bytes[n - 10] == b'A' { b'B' } else { b'A' };
         assert!(
-            key.verify(
+            key.verify::<Value>(
                 std::str::from_utf8(&bytes).expect("modified compact token remains ASCII"),
                 TokenType::Access,
                 "https://auth.example"
             )
             .is_err()
         );
-        assert_eq!(key.jwks()["keys"][0]["kty"], "RSA");
+        assert_eq!(key.jwks().keys[0].kty, KeyType::Rsa);
     }
 
     /// Even correctly RSA-signed inputs cannot choose an algorithm, type, key or critical extension.
@@ -306,7 +284,7 @@ mod tests {
             );
             assert!(
                 matches!(
-                    key.verify(&token, TokenType::Id, "https://auth.example"),
+                    key.verify::<Value>(&token, TokenType::Id, "https://auth.example"),
                     Err(CryptoError::InvalidToken | CryptoError::Json(_))
                 ),
                 "accepted {field}"
@@ -322,7 +300,7 @@ mod tests {
                 .encoded();
         let token = format!("{input}.{signature}");
         assert!(matches!(
-            key.verify(&token, TokenType::Id, "https://auth.example"),
+            key.verify::<Value>(&token, TokenType::Id, "https://auth.example"),
             Err(CryptoError::Json(_))
         ));
     }

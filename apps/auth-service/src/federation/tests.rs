@@ -667,7 +667,7 @@ async fn google_mock_validates_signature_audience_nonce_and_expiry_without_requi
     claims["exp"] = serde_json::json!(Utc::now().timestamp() + 300);
     let wrong_signature =
         encode(&header, &claims, &other_encoding).expect("untrusted signed token");
-    let keys = rsa.jwks();
+    let keys = rsa.jwks().clone();
     let tokens = Arc::new(HashMap::from([
         ("valid".to_owned(), valid),
         ("wrong-audience".to_owned(), wrong_audience),
@@ -948,7 +948,7 @@ impl GoogleKeysMock {
         let keys = |kids: &[&str]| {
             let keys: Vec<_> = kids
                 .iter()
-                .map(|kid| Rs256Key::generate(*kid).expect("RSA key").jwks()["keys"][0].clone())
+                .map(|kid| Rs256Key::generate(*kid).expect("RSA key").jwks().keys[0].clone())
                 .collect();
             serde_json::json!({ "keys": keys })
         };

@@ -7,95 +7,51 @@ use axum::{
     http::{HeaderValue, StatusCode, header},
     response::{IntoResponse, Redirect, Response},
 };
+use piquel_auth_protocol::{
+    challenge::{BearerChallenge, BearerError},
+    oauth::{ErrorDescription, ErrorResponse},
+};
 use piquel_common::ErrorChain;
 use piquel_crypto::CryptoError;
 use piquel_repository::DatabaseError;
-use serde_json::json;
 use std::{borrow::Cow, error::Error as StdError};
 use thiserror::Error;
 use url::Url;
 
-piquel_common::str_enum! {
-    /// OAuth and OIDC error codes, read by clients and by the auth frontend's consent page.
-    pub(super) enum OAuthCode {
-        /// Request parameters break the endpoint's contract.
-        InvalidRequest = "invalid_request",
-        /// Client authentication failed.
-        InvalidClient = "invalid_client",
-        /// An authorization code or refresh token is unusable.
-        InvalidGrant = "invalid_grant",
-        /// Requested scopes exceed the grant or the client's policy.
-        InvalidScope = "invalid_scope",
-        /// The requested audience is not registered for the client.
-        InvalidTarget = "invalid_target",
-        /// Bearer or browser authentication failed.
-        InvalidToken = "invalid_token",
-        /// The token endpoint does not support the requested grant.
-        UnsupportedGrantType = "unsupported_grant_type",
-        /// A `prompt=none` request needs the user to sign in.
-        LoginRequired = "login_required",
-        /// A `prompt=none` request needs the user's consent.
-        ConsentRequired = "consent_required",
-        /// Signed `request` objects are not supported.
-        RequestNotSupported = "request_not_supported",
-        /// `request_uri` references are not supported.
-        RequestUriNotSupported = "request_uri_not_supported",
-        /// The user declined consent.
-        AccessDenied = "access_denied",
-        /// An internal operation failed.
-        ServerError = "server_error",
-    }
-}
+/// OAuth and OIDC error codes, shared with the SDKs through auth-protocol and read by
+/// the auth frontend's consent page.
+pub(super) use piquel_auth_protocol::oauth::ErrorCode as OAuthCode;
 
-impl OAuthCode {
-    /// HTTP status of the JSON error response.
-    const fn status(self) -> StatusCode {
-        match self {
-            Self::InvalidClient | Self::InvalidToken => StatusCode::UNAUTHORIZED,
-            Self::ServerError => StatusCode::INTERNAL_SERVER_ERROR,
-            Self::InvalidRequest
-            | Self::InvalidGrant
-            | Self::InvalidScope
-            | Self::InvalidTarget
-            | Self::UnsupportedGrantType
-            | Self::LoginRequired
-            | Self::ConsentRequired
-            | Self::RequestNotSupported
-            | Self::RequestUriNotSupported
-            | Self::AccessDenied => StatusCode::BAD_REQUEST,
-        }
-    }
-
-    /// `WWW-Authenticate` challenge sent with failed client or bearer authentication.
-    const fn challenge(self) -> Option<&'static str> {
-        match self {
-            Self::InvalidClient => Some("Basic realm=\"token\""),
-            Self::InvalidToken => Some("Bearer error=\"invalid_token\""),
-            Self::InvalidRequest
-            | Self::InvalidGrant
-            | Self::InvalidScope
-            | Self::InvalidTarget
-            | Self::UnsupportedGrantType
-            | Self::LoginRequired
-            | Self::ConsentRequired
-            | Self::RequestNotSupported
-            | Self::RequestUriNotSupported
-            | Self::AccessDenied
-            | Self::ServerError => None,
-        }
-    }
-
+/// Builds rejections from an [`OAuthCode`]. A trait because the code type lives in
+/// auth-protocol; import it wherever rejections are built.
+pub(super) trait Reject {
     /// Client redirect carrying this error code and its description.
-    pub(super) fn redirect_url(self, to: &ClientRedirect<'_>, description: &str) -> Url {
-        to.url(&[
-            ("error", self.as_str()),
-            ("error_description", &OAuthError::wire_text(description)),
-        ])
-    }
+    fn redirect_url(self, to: &ClientRedirect<'_>, description: &str) -> Url;
 
     /// Rejects the request with this code. `description` tells the client what to fix;
     /// it must not reveal secrets or whether a credential exists.
-    pub(super) fn reject(self, description: impl Into<Cow<'static, str>>) -> OAuthError {
+    fn reject(self, description: impl Into<Cow<'static, str>>) -> OAuthError;
+
+    /// Like [`Self::reject`], keeping the parse or verification error for logs.
+    fn reject_with(
+        self,
+        description: impl Into<Cow<'static, str>>,
+        error: impl StdError + Send + Sync + 'static,
+    ) -> OAuthError;
+}
+
+impl Reject for OAuthCode {
+    fn redirect_url(self, to: &ClientRedirect<'_>, description: &str) -> Url {
+        to.url(&[
+            ("error", self.as_str()),
+            (
+                "error_description",
+                ErrorDescription::lossy(description).as_str(),
+            ),
+        ])
+    }
+
+    fn reject(self, description: impl Into<Cow<'static, str>>) -> OAuthError {
         OAuthError::Protocol {
             code: self,
             description: description.into(),
@@ -104,8 +60,7 @@ impl OAuthCode {
         }
     }
 
-    /// Like [`Self::reject`], keeping the parse or verification error for logs.
-    pub(super) fn reject_with(
+    fn reject_with(
         self,
         description: impl Into<Cow<'static, str>>,
         error: impl StdError + Send + Sync + 'static,
@@ -153,6 +108,45 @@ pub(super) enum OAuthError {
 }
 
 impl OAuthError {
+    /// HTTP status of the JSON error response for `code`.
+    const fn status(code: OAuthCode) -> StatusCode {
+        match code {
+            OAuthCode::InvalidClient | OAuthCode::InvalidToken => StatusCode::UNAUTHORIZED,
+            OAuthCode::ServerError => StatusCode::INTERNAL_SERVER_ERROR,
+            OAuthCode::InvalidRequest
+            | OAuthCode::InvalidGrant
+            | OAuthCode::InvalidScope
+            | OAuthCode::InvalidTarget
+            | OAuthCode::UnsupportedGrantType
+            | OAuthCode::LoginRequired
+            | OAuthCode::ConsentRequired
+            | OAuthCode::RequestNotSupported
+            | OAuthCode::RequestUriNotSupported
+            | OAuthCode::AccessDenied => StatusCode::BAD_REQUEST,
+        }
+    }
+
+    /// `WWW-Authenticate` challenge sent with failed client or bearer authentication.
+    fn challenge(code: OAuthCode) -> Option<String> {
+        match code {
+            OAuthCode::InvalidClient => Some("Basic realm=\"token\"".into()),
+            OAuthCode::InvalidToken => {
+                Some(BearerChallenge::error(BearerError::InvalidToken).to_string())
+            }
+            OAuthCode::InvalidRequest
+            | OAuthCode::InvalidGrant
+            | OAuthCode::InvalidScope
+            | OAuthCode::InvalidTarget
+            | OAuthCode::UnsupportedGrantType
+            | OAuthCode::LoginRequired
+            | OAuthCode::ConsentRequired
+            | OAuthCode::RequestNotSupported
+            | OAuthCode::RequestUriNotSupported
+            | OAuthCode::AccessDenied
+            | OAuthCode::ServerError => None,
+        }
+    }
+
     /// Turns a missing or already consumed record into `expected` with `description`;
     /// other failures stay internal.
     pub(super) fn database(
@@ -188,19 +182,6 @@ impl OAuthError {
             @ (Self::Database(_) | Self::Crypto(_) | Self::Url(_) | Self::CookieHeader(_)) => error,
         }
     }
-
-    /// Restricts a description to the characters RFC 6749 allows in `error_description`:
-    /// printable ASCII without `"` or `\`. Descriptions may quote library errors.
-    fn wire_text(description: &str) -> String {
-        description
-            .chars()
-            .map(|character| match character {
-                '"' => '\'',
-                ' '..='~' if character != '\\' => character,
-                _ => '?',
-            })
-            .collect()
-    }
 }
 
 impl IntoResponse for OAuthError {
@@ -231,13 +212,17 @@ impl IntoResponse for OAuthError {
         if let Some(location) = redirect {
             return Redirect::to(location.as_str()).into_response();
         }
-        let body = json!({"error": code, "error_description": Self::wire_text(description)});
-        let mut response = (code.status(), Json(body)).into_response();
-        if let Some(challenge) = code.challenge() {
-            response.headers_mut().insert(
-                header::WWW_AUTHENTICATE,
-                HeaderValue::from_static(challenge),
-            );
+        let body = ErrorResponse {
+            error: code,
+            error_description: Some(ErrorDescription::lossy(description)),
+        };
+        let mut response = (Self::status(code), Json(body)).into_response();
+        if let Some(challenge) =
+            Self::challenge(code).and_then(|challenge| HeaderValue::try_from(challenge).ok())
+        {
+            response
+                .headers_mut()
+                .insert(header::WWW_AUTHENTICATE, challenge);
         }
         response
     }

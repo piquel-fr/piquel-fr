@@ -1,0 +1,20 @@
+{
+  "description": "the user must confirm with a passkey within the last five minutes",
+  "input": {
+    "challenge": {
+      "acr_values": [
+        "phr"
+      ],
+      "error": "insufficient_user_authentication",
+      "error_description": "A passkey confirmation is required",
+      "max_age": 300,
+      "resource_metadata": "https://notes.example.com/.well-known/oauth-protected-resource"
+    }
+  },
+  "expected": {
+    "ok": {
+      "header": "Bearer error=\"insufficient_user_authentication\", error_description=\"A passkey confirmation is required\", acr_values=\"phr\", max_age=\"300\", resource_metadata=\"https://notes.example.com/.well-known/oauth-protected-resource\"",
+      "status": 401
+    }
+  }
+}

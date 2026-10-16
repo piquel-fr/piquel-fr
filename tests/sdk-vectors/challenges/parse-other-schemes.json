@@ -1,0 +1,14 @@
+{
+  "description": "the Bearer challenge is found among others, including token68 credentials; escapes resolve and unknown parameters are ignored",
+  "input": {
+    "header": "Negotiate YWJjZA==, DPoP algs=\"ES256 PS256\", bearer realm=\"no\\tes\", error=\"invalid_token\", error_description=\"token 'abc' expired\""
+  },
+  "expected": {
+    "ok": {
+      "challenge": {
+        "error": "invalid_token",
+        "error_description": "token 'abc' expired"
+      }
+    }
+  }
+}

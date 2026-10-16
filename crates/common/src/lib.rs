@@ -461,6 +461,54 @@ macro_rules! str_enum {
     (@unit $variant:ident) => { () };
 }
 
+/// Declares an open string vocabulary for values a newer peer may extend, such as
+/// `amr` or `acr`. Known spellings parse to their variant; anything else is kept
+/// verbatim in `Other` instead of failing. Build values with `From<&str>` or
+/// `parse`, never `Other` directly, so a known spelling cannot hide in `Other`.
+#[macro_export]
+macro_rules! open_str_enum {
+    ($(#[$meta:meta])* $vis:vis enum $name:ident { $($(#[$variant_meta:meta])* $variant:ident = $value:literal),+ $(,)? }) => {
+        $(#[$meta])*
+        #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+        $vis enum $name {
+            $($(#[$variant_meta])* $variant,)+
+            /// A value this version does not know, kept verbatim.
+            Other(String),
+        }
+        impl $name {
+            /// Every known value in declaration order.
+            pub const KNOWN: [Self; $crate::str_enum!(@count $($variant),+)] = [$(Self::$variant),+];
+            /// Returns the wire spelling.
+            #[must_use]
+            pub fn as_str(&self) -> &str { match self { $(Self::$variant => $value,)+ Self::Other(value) => value } }
+        }
+        impl From<&str> for $name {
+            /// Maps a known spelling to its variant and keeps any other value in `Other`.
+            fn from(value: &str) -> Self { match value { $($value => Self::$variant,)+ other => Self::Other(other.to_owned()) } }
+        }
+        impl ::std::str::FromStr for $name {
+            type Err = ::std::convert::Infallible;
+            /// Never fails: unknown values parse to `Other`.
+            fn from_str(value: &str) -> Result<Self, Self::Err> { Ok(Self::from(value)) }
+        }
+        impl ::std::fmt::Display for $name {
+            /// Formats the wire spelling.
+            fn fmt(&self, f: &mut ::std::fmt::Formatter<'_>) -> ::std::fmt::Result { f.write_str(self.as_str()) }
+        }
+        impl $crate::__serde::Serialize for $name {
+            /// Writes the wire spelling.
+            fn serialize<S: $crate::__serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> { serializer.serialize_str(self.as_str()) }
+        }
+        impl<'de> $crate::__serde::Deserialize<'de> for $name {
+            /// Reads any string, keeping unknown values in `Other`.
+            fn deserialize<D: $crate::__serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+                let value = <::std::borrow::Cow<'de, str> as $crate::__serde::Deserialize>::deserialize(deserializer)?;
+                Ok(Self::from(value.as_ref()))
+            }
+        }
+    };
+}
+
 /// Focused tests for this module and its security contracts.
 #[cfg(test)]
 mod tests;

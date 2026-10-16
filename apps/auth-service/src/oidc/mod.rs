@@ -13,7 +13,7 @@ use crate::config::OidcConfig;
 use crate::routes;
 use crate::security::CSRF_HEADER;
 pub use error::OidcConfigError;
-use error::{OAuthCode, OAuthError};
+use error::{OAuthCode, OAuthError, Reject};
 use piquel_crypto::{Digest, Rs256Key, Secret};
 
 use axum::{
@@ -27,16 +27,17 @@ use axum::{
 use base64::Engine;
 use piquel_auth_protocol::{
     TokenId,
+    claims::ProfileClaims,
     jwt::{Algorithm, Claim, TokenType},
     metadata::ServerMetadata,
     oauth::{
-        ClientAuthMethod, CodeChallengeMethod, GrantType, Prompt, ResponseMode, ResponseType,
+        self, ClientAuthMethod, CodeChallengeMethod, GrantType, Prompt, ResponseMode, ResponseType,
         Scope, SubjectType,
     },
 };
 use piquel_repository::{Database, StoredOidcClient};
 use serde::Serialize;
-use std::{collections::BTreeSet, sync::Arc};
+use std::sync::Arc;
 use url::Url;
 
 /// Value the auth frontend sends in the CSRF header.
@@ -174,15 +175,18 @@ impl OpaqueToken {
     }
 }
 
-/// A deduplicated scope set, sorted so its wire form is stable. Holds plain strings
-/// because clients may be granted registered extension scopes besides [`Scope`].
+/// A requested or granted scope set: the shared wire type, plus auth's request limits.
+/// Holds plain strings because clients may be granted registered extension scopes
+/// besides [`Scope`].
 #[derive(Clone, Debug, PartialEq, Eq)]
-struct Scopes(BTreeSet<String>);
+struct Scopes(oauth::Scopes);
 
 impl Scopes {
     /// Parses a space-separated scope list, which must be non-empty and bounded.
     fn parse(value: &str) -> Result<Self, OAuthError> {
-        let scopes: BTreeSet<_> = value.split_ascii_whitespace().map(str::to_owned).collect();
+        let scopes: oauth::Scopes = value.parse().map_err(|error| {
+            OAuthCode::InvalidScope.reject_with("scope has an invalid scope token", error)
+        })?;
         if scopes.is_empty() {
             return Err(OAuthCode::InvalidScope.reject("scope is required"));
         }
@@ -198,9 +202,41 @@ impl Scopes {
         Self(scopes.iter().cloned().collect())
     }
 
+    /// Wraps the scopes of a token auth signed, which were limited when it was issued.
+    const fn from_wire(scopes: oauth::Scopes) -> Self {
+        Self(scopes)
+    }
+
+    /// Keeps only the claims these scopes release: profile claims with `profile`, and
+    /// email claims with `email`.
+    fn release(&self, mut claims: ProfileClaims) -> ProfileClaims {
+        let mut released = ProfileClaims::default();
+        for scope in Scope::ALL {
+            if !self.contains(scope) {
+                continue;
+            }
+            match scope {
+                Scope::Profile => {
+                    released.preferred_username = claims.preferred_username.take();
+                    released.name = claims.name.take();
+                    released.profile_version = claims.profile_version.take();
+                }
+                Scope::Email => {
+                    released.email = claims.email.take();
+                    released.email_verified = claims.email_verified.take();
+                }
+                // These scopes release no claims.
+                Scope::OpenId | Scope::OfflineAccess => {}
+            }
+        }
+        released
+    }
+
     /// Whether every scope is in `allowed`.
     fn allowed_by(&self, allowed: &[String]) -> bool {
-        self.0.iter().all(|scope| allowed.contains(scope))
+        self.0
+            .iter()
+            .all(|scope| allowed.iter().any(|value| value == scope))
     }
 
     /// Whether the set contains a standard scope.
@@ -213,13 +249,9 @@ impl Scopes {
         self.0.into_iter().collect()
     }
 
-    /// Space-separated form used in responses and the access token's `scope` claim.
-    fn wire(&self) -> String {
-        self.0
-            .iter()
-            .map(String::as_str)
-            .collect::<Vec<_>>()
-            .join(" ")
+    /// The shared wire type, as sent in responses and the access token's `scope` claim.
+    fn wire(&self) -> &oauth::Scopes {
+        &self.0
     }
 }
 

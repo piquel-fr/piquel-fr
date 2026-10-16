@@ -1,0 +1,11 @@
+{
+  "description": "parameters follow the scheme after a space (RFC 9110 §11), so this header has no valid challenge",
+  "input": {
+    "header": "Bearer,error=invalid_token"
+  },
+  "expected": {
+    "ok": {
+      "challenge": null
+    }
+  }
+}

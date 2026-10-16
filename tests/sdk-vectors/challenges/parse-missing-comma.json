@@ -1,0 +1,11 @@
+{
+  "description": "parameters must be separated by commas, so this header has no valid challenge",
+  "input": {
+    "header": "Bearer error=\"invalid_token\"scope=\"notes:write\""
+  },
+  "expected": {
+    "ok": {
+      "challenge": null
+    }
+  }
+}

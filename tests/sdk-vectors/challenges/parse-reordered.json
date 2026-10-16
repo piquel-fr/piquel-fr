@@ -1,0 +1,18 @@
+{
+  "description": "parameters in any order, with token values and an unknown acr",
+  "input": {
+    "header": "Bearer max_age=300, acr_values=\"urn:example:gold phr\", error=insufficient_user_authentication"
+  },
+  "expected": {
+    "ok": {
+      "challenge": {
+        "acr_values": [
+          "urn:example:gold",
+          "phr"
+        ],
+        "error": "insufficient_user_authentication",
+        "max_age": 300
+      }
+    }
+  }
+}
