@@ -92,6 +92,8 @@ repositories! {
     federation: FederationRepository;
     /// Invitations and shared request rate limits.
     security: SecurityRepository;
+    /// Administrator rights.
+    administrators: AdministratorRepository;
 }
 
 /// Runs a checked query on the repository's pool or transaction connection and
@@ -165,6 +167,8 @@ impl From<Unsigned> for u64 {
     }
 }
 
+/// Administrator rights and who granted them.
+pub(crate) mod administrators;
 /// Append-only security history with typed actions and outcomes.
 pub(crate) mod audit;
 /// Verified email ownership and primary-address persistence.

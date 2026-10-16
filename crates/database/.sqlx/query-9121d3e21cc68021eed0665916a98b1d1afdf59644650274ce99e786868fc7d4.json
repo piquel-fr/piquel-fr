@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE invitations\n                SET redeemed_at = clock_timestamp()\n                WHERE secret_digest = $1\n                AND redeemed_at IS NULL\n                AND revoked_at IS NULL\n                AND expires_at > clock_timestamp()",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Bytea"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "9121d3e21cc68021eed0665916a98b1d1afdf59644650274ce99e786868fc7d4"
+}

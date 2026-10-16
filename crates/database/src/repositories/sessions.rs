@@ -4,6 +4,7 @@ use super::{JsonArray, RepositoryExecutor, SessionRepository};
 use crate::DatabaseError;
 use chrono::{DateTime, Utc};
 use piquel_auth_protocol::{AuthenticationMethod, SessionId, UserId};
+use serde::Serialize;
 use sqlx::types::Json;
 
 /// A new browser session.
@@ -24,7 +25,7 @@ pub struct InsertSession {
 }
 
 /// A browser session row.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Serialize)]
 pub struct StoredSession {
     /// Session identifier.
     pub id: SessionId,
@@ -212,6 +213,55 @@ impl SessionRepository<'_> {
                 AND revoked_at IS NULL",
                 user_id.as_uuid(),
                 except_session.as_uuid(),
+            )
+        )?
+        .rows_affected())
+    }
+
+    /// Lists the account's unrevoked, unexpired sessions, newest first.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`DatabaseError`] if the query fails or a row is invalid.
+    pub async fn list_active_for_user(
+        &mut self,
+        user_id: UserId,
+    ) -> Result<Vec<StoredSession>, DatabaseError> {
+        run!(
+            self,
+            fetch_all,
+            sqlx::query_as!(
+                StoredSession,
+                r#"SELECT
+                    id AS "id: SessionId", user_id AS "user_id: UserId",
+                    authentication_methods AS "authentication_methods: JsonArray<AuthenticationMethod>",
+                    authenticated_at, expires_at, last_seen_at, revoked_at
+                FROM sessions
+                WHERE user_id = $1
+                AND revoked_at IS NULL
+                AND expires_at > now()
+                ORDER BY authenticated_at DESC"#,
+                user_id.as_uuid(),
+            )
+        )
+    }
+
+    /// Revokes every unrevoked session of the account and returns how many were
+    /// revoked. Callers lock the account first.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`DatabaseError`] if the query fails.
+    pub async fn revoke_all_for_user(&mut self, user_id: UserId) -> Result<u64, DatabaseError> {
+        Ok(run!(
+            self,
+            execute,
+            sqlx::query!(
+                "UPDATE sessions
+                SET revoked_at = now(), management_expires_at = NULL
+                WHERE user_id = $1
+                AND revoked_at IS NULL",
+                user_id.as_uuid(),
             )
         )?
         .rows_affected())

@@ -49,6 +49,8 @@ when an existing type can own the operations.
 `apps/auth-service/src/routes.rs` owns HTTP paths used by routers, discovery,
 redirects and endpoint policy. Browser handlers use `Session`, `OptionalSession`
 or `ManagementSession` extractors, with `FromRef<Application> for Database`.
+Admin API reads take `Admin` and mutations `ConfirmedAdmin`; both delegate to
+`AdminOperations`, which the CLI shares.
 Protocol and conditional flows may use `Session` methods directly. Create sessions
 inside the account transaction; set cookies after commit with `BrowserCookie::set_on`
 and clear them with `clear_on`. Both preserve other Set-Cookie headers.
@@ -84,7 +86,8 @@ variants. Limits and lifetimes are named constants. Preserve existing wire spell
 Shared authentication vocabulary lives in auth-protocol; JWT/JWK vocabulary lives
 in crypto. Storage vocabulary (`AuditAction`, `AuditOutcome`, `CeremonyKind`,
 `OidcRedirectKind`) lives in the repository. Record successful account operations
-with `tx.audit_events().record(user_id, action, provider)`. Record rejections that
+with `tx.audit_events().record(user_id, action, provider)`, and administrative ones
+with `record_by(actor, user_id, action, reason)`. Record rejections that
 implicate an account with `record_rejection(user_id, action)`, committed even though
 the operation fails; never store challenges, cookies or tokens. Keep digests typed until
 their persistence boundary. SQL, rows and connections stay inside the repository.

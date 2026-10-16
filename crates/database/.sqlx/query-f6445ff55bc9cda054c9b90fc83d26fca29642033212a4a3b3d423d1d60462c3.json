@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO administrators (user_id, granted_by)\n                VALUES ($1, $2)\n                ON CONFLICT (user_id) DO NOTHING",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Jsonb"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "f6445ff55bc9cda054c9b90fc83d26fca29642033212a4a3b3d423d1d60462c3"
+}

@@ -47,6 +47,7 @@ piquel-web with Vite against an auth service on `http://localhost:3000`.
 | `AUTH_DATABASE_PASSWORD` | Optional env/file reference for the database password, when omitted from the URL |
 | `AUTH_PUBLIC_BASE_URL` | Exact auth origin, normally `https://auth.piquel.fr` |
 | `AUTH_SETTINGS_URL` | Exact settings destination; defaults to `https://piquel.fr/settings` |
+| `AUTH_ADMIN_URL` | Optional exact admin site origin, e.g. `https://admin.piquel.fr`, distinct from the auth and settings origins. Unset turns the admin API off: its routes answer 404 |
 | `AUTH_TRUSTED_PROXIES` | Optional comma-separated proxy peer IPs or CIDRs; these peers must overwrite `X-Forwarded-For` with one client IP. Defaults to piqueld's `PIQUELD_INGRESS_PROXIES` |
 | `AUTH_PUBLIC_LISTENER` | Listener address; defaults to `127.0.0.1:8080` |
 | `AUTH_KEY_PROVIDER` | Required persistent RSA private-key reference, `file:///absolute/path/key.pem` or `env://VARIABLE_NAME` |
@@ -96,6 +97,41 @@ This prints one signup link. The database stores a digest, expiry and redemption
 time. Tokens expire after seven days by default; `h` and `d` are supported. A token
 is redeemed atomically with account creation, so a failed signup does not spend it.
 Disabling invitation enforcement affects signup only; existing users keep access.
+Administrators can also create, list and revoke invitations through the admin API.
+
+### Administrators
+
+```sh
+just auth admin grant alice
+just auth admin revoke alice
+just auth admin list
+```
+
+Only these commands grant or revoke administrator rights; no HTTP route can. Each
+change is audited with the operator's OS user and host. Rights live in their own
+table and never appear in tokens.
+
+With `AUTH_ADMIN_URL` set, administrators use the admin API under `/admin/`:
+
+| Method and path | Operation |
+| --- | --- |
+| `GET /admin/users?q=&cursor=` | Search accounts by ID, or part of a username, display name or email |
+| `GET /admin/users/{id}` | Profile, status, emails, passkey labels, identities, sessions and consents; recorded as `admin.user_viewed` |
+| `POST /admin/users/{id}/disable` `{"reason"}` | Disable the account and revoke its sessions and refresh tokens at once |
+| `POST /admin/users/{id}/enable` | Reactivate; fails if another active account claimed one of its verified emails |
+| `POST /admin/users/{id}/sessions/revoke` | Revoke every session and refresh token |
+| `DELETE /admin/sessions/{id}` | Revoke one session and its refresh tokens |
+| `GET`/`POST /admin/invitations`, `DELETE /admin/invitations/{id}` | List, create (`{"expires_in": "7d"}`; the link is shown once) and revoke invitations, while `AUTH_INVITE_REQUIRED` is on |
+| `GET /admin/clients`, `GET /admin/clients/{id}` | OIDC clients, without secret digests |
+| `GET /admin/audit?user=&action=&before=` | Audit log, newest first; `before` takes the previous page's `next` |
+
+Only the admin origin may call it, with the CSRF header on mutations. Callers must
+be administrators signed in with a passkey within the last 12 hours; anyone else
+gets the 404 of an unknown path, or 401 without a session. Mutations also need the
+two-minute passkey confirmation (the settings management window). The API refuses
+to change administrator accounts, the caller's included, so a stolen admin session
+cannot lock other administrators out; the CLI can. Every mutation is audited with
+the administrator's account and session, and disabling with its reason.
 
 ### OIDC clients
 
@@ -165,7 +201,7 @@ client and scope; explicitly trusted clients bypass consent.
   bound to the initiating browser. Auth cookies are host-only, Secure and HttpOnly.
   Mutations require an exact allowed origin and CSRF header; OIDC back-channel
   endpoints instead validate their protocol credentials.
-- Request throttling and expiring-state cleanup use PostgreSQL. Throttling uses separate login, token, userinfo and account budgets per client IP, and covers every API route except health probes and discovery.
+- Request throttling and expiring-state cleanup use PostgreSQL. Throttling uses separate login, token, userinfo, account and admin budgets per client IP, and covers every API route except health probes and discovery.
   By default it uses the direct peer IP; only peers in `AUTH_TRUSTED_PROXIES`
   may supply a single overwritten `X-Forwarded-For`. Configure this when terminating TLS
   at a reverse proxy so users do not share the proxy’s budget. Untrusted headers
@@ -199,7 +235,7 @@ Use individual recipes while iterating:
 | Dependency audits | `just audit` (`just rust audit` runs cargo-deny, `just web audit` pnpm) |
 | SvelteKit generated types/config | `just web generate` |
 | Frontends / embedded debug binary / release binary | `just web build` / `just rust build` / `just build` |
-| Run with caller-provided auth configuration | `just auth serve`, `just db migrate`, `just auth invite --expires-in 7d` |
+| Run with caller-provided auth configuration | `just auth serve`, `just db migrate`, `just auth invite --expires-in 7d`, `just auth admin list` |
 
 CI runs these recipes on every pull request whose changes they can affect,
 including the database and browser tests, and on every push to `main`.

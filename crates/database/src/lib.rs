@@ -15,9 +15,11 @@ mod transaction;
 pub use connection::{Database, DatabaseConfig};
 pub use error::{DatabaseConnectionError, DatabaseError};
 pub use repositories::{
-    AuditEventRepository, EmailRepository, FederationRepository, OidcRepository, PasskeyRepository,
-    SecurityRepository, SessionRepository, TokenRepository, UserRepository,
-    audit::{AuditAction, AuditOutcome},
+    AdministratorRepository, AuditEventRepository, EmailRepository, FederationRepository,
+    OidcRepository, PasskeyRepository, SecurityRepository, SessionRepository, TokenRepository,
+    UserRepository,
+    administrators::StoredAdministrator,
+    audit::{Actor, AuditAction, AuditFilter, AuditMetadata, AuditOutcome, StoredAuditEntry},
     emails::{InsertVerifiedEmail, StoredEmail},
     federation::{
         ConsumedFederationTransaction, InsertExternalIdentity, InsertFederationTransaction,
@@ -26,9 +28,10 @@ pub use repositories::{
     oidc::{
         BootstrapOidcClient, ClientConfigurationError, CodeRedemptionError,
         ConsumedAuthorizationCode, InsertAuthorizationCode, InsertAuthorizationRequest,
-        OidcRedirectKind, StoredAuthorizationRequest, StoredOidcClient,
+        OidcRedirectKind, StoredAuthorizationRequest, StoredConsent, StoredOidcClient,
     },
     passkeys::{CeremonyKind, ConsumedCeremony, InsertCeremony, InsertPasskey, StoredPasskey},
+    security::StoredInvitation,
     sessions::{InsertSession, StoredSession},
     tokens::{InsertRefreshFamily, InsertRefreshToken, RefreshRotationError, RotatedRefreshToken},
     users::{InsertUser, StoredUser},

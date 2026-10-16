@@ -4,6 +4,7 @@ use super::{JsonArray, OidcRepository, RepositoryExecutor};
 use crate::DatabaseError;
 use chrono::{DateTime, Utc};
 use piquel_auth_protocol::{SessionId, TokenId, UserId};
+use serde::Serialize;
 use sqlx::types::Json;
 
 /// Largest identifier, scope or audience accepted by provisioning.
@@ -95,6 +96,17 @@ pub struct StoredOidcClient {
     pub trusted: bool,
     /// SHA-256 hash of the client secret; `None` for public clients.
     pub client_secret_hash: Option<Vec<u8>>,
+}
+
+/// The scopes an account consented to for one client and audience.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+pub struct StoredConsent {
+    /// Client the consent was given to.
+    pub client_id: String,
+    /// Audience of the tokens the client receives.
+    pub audience: String,
+    /// Consented scopes.
+    pub scopes: Vec<String>,
 }
 
 /// Statically reviewed client configuration provisioned at startup.
@@ -463,6 +475,38 @@ impl OidcRepository<'_> {
         )
     }
 
+    /// Lists every client, enabled or not, with its URI allowlists, by ID.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`DatabaseError`] if the query fails or a row is invalid.
+    pub async fn list_clients(&mut self) -> Result<Vec<StoredOidcClient>, DatabaseError> {
+        run!(
+            self,
+            fetch_all,
+            sqlx::query_as!(
+                StoredOidcClient,
+                r#"SELECT
+                    c.id, c.display_name, c.enabled,
+                    c.allowed_scopes AS "allowed_scopes: JsonArray<String>",
+                    c.allowed_audiences AS "allowed_audiences: JsonArray<String>",
+                    c.allow_refresh, c.trusted, c.client_secret_hash,
+                    COALESCE(
+                        jsonb_agg(r.uri) FILTER (WHERE r.kind = 'authorization'),
+                        '[]'::jsonb
+                    ) AS "redirect_uris!: JsonArray<String>",
+                    COALESCE(
+                        jsonb_agg(r.uri) FILTER (WHERE r.kind = 'post_logout'),
+                        '[]'::jsonb
+                    ) AS "post_logout_uris!: JsonArray<String>"
+                FROM oidc_clients c
+                LEFT JOIN oidc_redirect_uris r ON r.client_id = c.id
+                GROUP BY c.id
+                ORDER BY c.id"#
+            )
+        )
+    }
+
     /// Stores an authorization request.
     ///
     /// # Errors
@@ -766,6 +810,29 @@ impl OidcRepository<'_> {
                 client,
                 audience,
                 Json(scopes) as _,
+            )
+        )
+    }
+
+    /// Lists the user's remembered consents, by client and audience.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`DatabaseError`] if the query fails or a row is invalid.
+    pub async fn list_consents(
+        &mut self,
+        user: UserId,
+    ) -> Result<Vec<StoredConsent>, DatabaseError> {
+        run!(
+            self,
+            fetch_all,
+            sqlx::query_as!(
+                StoredConsent,
+                r#"SELECT client_id, audience, scopes AS "scopes: JsonArray<String>"
+                FROM oidc_consents
+                WHERE user_id = $1
+                ORDER BY client_id, audience"#,
+                user.as_uuid(),
             )
         )
     }

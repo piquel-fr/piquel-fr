@@ -246,6 +246,7 @@ impl Database {
                 FROM invitations
                 WHERE expires_at < now()
                 OR redeemed_at < now() - interval '1 day'
+                OR revoked_at < now() - interval '1 day'
                 LIMIT $1
                 FOR UPDATE SKIP LOCKED
             )",

@@ -596,6 +596,59 @@ async fn code_replay_revokes_its_refresh_family() {
     );
 }
 
+/// Disabling an account ends its browser session and refresh grants at once: the next
+/// refresh fails, and reactivating the account does not revive the grant.
+#[tokio::test]
+#[ignore = "requires TEST_DATABASE_URL"]
+async fn disabling_an_account_ends_its_sessions_and_refresh_grants() {
+    let flow = Flow::new(true, true).await;
+    let code = flow.code(REFRESH_SCOPES).await;
+    let response = flow
+        .exchange(&code, Flow::verifier(), flow.basic.as_deref())
+        .await;
+    assert_eq!(response.status(), StatusCode::OK);
+    let token = Flow::json(response).await["refresh_token"]
+        .as_str()
+        .expect("token response contains a refresh token")
+        .to_owned();
+    let operations = crate::AdminOperations::new(
+        flow.app.database.clone(),
+        "https://auth.example.com".parse().expect("origin"),
+    );
+    let operator = piquel_repository::Actor::Cli {
+        os_user: "test".into(),
+        host: "test".into(),
+    };
+    operations
+        .disable_user(
+            &operator,
+            flow.user_id,
+            &crate::admin::Reason::parse("Compromised".into()).expect("reason"),
+        )
+        .await
+        .expect("disable");
+    assert!(
+        flow.app
+            .database
+            .sessions()
+            .list_active_for_user(flow.user_id)
+            .await
+            .expect("sessions")
+            .is_empty()
+    );
+    let refresh = flow.refresh(&token).await;
+    assert_eq!(refresh.status(), StatusCode::BAD_REQUEST);
+    assert_eq!(
+        Flow::json(refresh).await["error"],
+        OAuthCode::InvalidGrant.as_str()
+    );
+    operations
+        .enable_user(&operator, flow.user_id)
+        .await
+        .expect("enable");
+    assert_eq!(flow.refresh(&token).await.status(), StatusCode::BAD_REQUEST);
+}
+
 /// Checks that policy reductions reject new requests and invalidate outstanding grants,
 /// and that unsafe logout redirects are refused.
 #[tokio::test]

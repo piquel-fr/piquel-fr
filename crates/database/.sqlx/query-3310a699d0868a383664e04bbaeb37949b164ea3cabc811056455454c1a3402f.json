@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE invitations\n                SET revoked_at = now()\n                WHERE id = $1\n                AND redeemed_at IS NULL\n                AND revoked_at IS NULL",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "3310a699d0868a383664e04bbaeb37949b164ea3cabc811056455454c1a3402f"
+}
