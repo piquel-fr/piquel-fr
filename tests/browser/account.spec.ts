@@ -230,8 +230,9 @@ test('passkey lifecycle, passkey confirmation and browser OIDC consent with SSO'
         automaticPresenceSimulation: true
       }
     });
-    // Signup confirmed this session, so enrollment asks for no other passkey: the first
-    // authenticator no longer answers, and the second has no credential to confirm with.
+    // The step-up above confirmed this session, so enrollment asks for no other passkey:
+    // the first authenticator no longer answers, and the second has no credential to
+    // confirm with.
     await page.getByRole('link', { name: 'Add a passkey', exact: true }).click();
     await page.getByLabel('Passkey name', { exact: true }).fill('Second passkey');
     await page.getByRole('button', { name: 'Add passkey', exact: true }).click();

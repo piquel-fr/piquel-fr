@@ -64,7 +64,10 @@ When an API answers with `insufficient_user_authentication`:
 
 Auth signs the user in again on the same session. The new tokens keep the same
 `sid` and carry a newer `auth_time`, so session-based logout and other
-applications are unaffected.
+applications are unaffected. That holds only if the user signs in as the same
+account: signing in as another one ends the previous session. Send the current
+ID token as `id_token_hint`, so auth issues tokens only for that account, and
+check that the new token's `sub` is unchanged before retrying.
 
 Server-rendered apps should do this in their server hook: a challenge from an
 API becomes a redirect to the app's login route, with the requirement attached.
