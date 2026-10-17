@@ -156,6 +156,7 @@ jobs:
           save-if: ${{ github.ref == 'refs/heads/main' }}
       - run: just rust lint
       - run: just test --workspace --run-ignored all
+      - run: just doc
       - run: just doc-test
 
   e2e:

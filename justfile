@@ -21,7 +21,7 @@ alias dev := web::dev
 alias preview := infra::preview
 alias preview-delete := infra::preview-delete
 
-validate: fmt-check lint check test web::test doc-test audit
+validate: fmt-check lint check test web::test doc doc-test audit
 
 install:
     @pnpm install --frozen-lockfile
@@ -47,6 +47,10 @@ check: rust::check web::check
 [positional-arguments]
 test *ARGS='--workspace':
     @cargo nextest run --locked "$@"
+
+# Rustdoc warnings, such as broken or private intra-doc links, fail the build.
+doc:
+    @RUSTDOCFLAGS='-D warnings' cargo doc --locked --workspace --no-deps
 
 doc-test:
     @cargo test --locked --doc --workspace

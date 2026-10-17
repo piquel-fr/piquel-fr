@@ -69,7 +69,7 @@ impl Jobs {
         }
     }
 
-    /// Stops starting runs, waits up to [`SHUTDOWN_GRACE`] for running ones, then
+    /// Stops starting runs, waits up to the `SHUTDOWN_GRACE` period for running ones, then
     /// cancels the rest. Cancelling a job drops its connection, which releases its lock.
     ///
     /// # Errors
