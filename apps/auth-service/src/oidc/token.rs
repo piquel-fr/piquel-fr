@@ -10,10 +10,10 @@ use axum::{
     http::{HeaderMap, StatusCode, header},
 };
 use chrono::Utc;
-use piquel_auth_protocol::{TokenId, UserId};
+use piquel_auth_protocol::{SessionId, TokenId, UserId};
 use piquel_repository::{
     AuditAction, CodeRedemptionError, ConsumedAuthorizationCode, DatabaseTransaction,
-    InsertRefreshFamily, InsertRefreshToken, RefreshRotationError, StoredSession,
+    InsertRefreshFamily, InsertRefreshToken, RefreshRotationError, SessionAuthentication,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
@@ -82,6 +82,10 @@ struct TokenGrant<'a> {
     scopes: &'a Scopes,
     /// Client nonce echoed only in the ID token.
     nonce: Option<&'a str>,
+    /// Browser session that authorized the grant.
+    session: SessionId,
+    /// How that session had authenticated when the grant's code was issued.
+    authentication: &'a SessionAuthentication,
 }
 
 impl TokenGrant<'_> {
@@ -90,7 +94,6 @@ impl TokenGrant<'_> {
         &self,
         app: &OidcApplication,
         user: &piquel_repository::StoredUser,
-        session: &StoredSession,
         email: Option<&str>,
     ) -> Result<TokenResponse, OAuthError> {
         let Self {
@@ -98,9 +101,11 @@ impl TokenGrant<'_> {
             audience,
             scopes,
             nonce,
+            session,
+            authentication,
         } = self;
         let now = Utc::now().timestamp();
-        let mut claims = json!({(Claim::Issuer.as_str()):app.issuer,(Claim::Subject.as_str()):user.id,(Claim::Session.as_str()):session.id,(Claim::AuthTime.as_str()):session.authenticated_at.timestamp(),(Claim::Methods.as_str()):session.authentication_methods,(Claim::IssuedAt.as_str()):now,(Claim::ExpiresAt.as_str()):now+ACCESS_TOKEN_SECONDS});
+        let mut claims = json!({(Claim::Issuer.as_str()):app.issuer,(Claim::Subject.as_str()):user.id,(Claim::Session.as_str()):session,(Claim::AuthTime.as_str()):authentication.auth_time.timestamp(),(Claim::Methods.as_str()):authentication.amr,(Claim::AuthenticationClass.as_str()):authentication.acr,(Claim::IssuedAt.as_str()):now,(Claim::ExpiresAt.as_str()):now+ACCESS_TOKEN_SECONDS});
         for scope in Scope::ALL {
             if !scopes.contains(scope) {
                 continue;
@@ -243,8 +248,10 @@ impl OidcApplication {
             audience: &code.audience,
             scopes: &scopes,
             nonce: code.nonce.as_deref(),
+            session: session.id,
+            authentication: &code.authentication,
         }
-        .issue(self, &user, &session, email.as_deref())?;
+        .issue(self, &user, email.as_deref())?;
         let refresh = if client.allow_refresh && scopes.contains(Scope::OfflineAccess) {
             Some(self.create_refresh(&mut tx, code).await?)
         } else {
@@ -258,7 +265,8 @@ impl OidcApplication {
     }
 
     /// Rotates the authenticated client's valid token, and commits replay or policy
-    /// revocation before rejecting it.
+    /// revocation before rejecting it. The new tokens report the grant's original
+    /// authentication, not the session's current one (OIDC Core §12.2).
     async fn rotate_refresh(
         &self,
         form: TokenForm,
@@ -313,8 +321,10 @@ impl OidcApplication {
             audience: &rotated.audience,
             scopes: &scopes,
             nonce: None,
+            session: session.id,
+            authentication: &rotated.authentication,
         }
-        .issue(self, &user, &session, email.as_deref())?;
+        .issue(self, &user, email.as_deref())?;
         tokens.refresh_token = Some(raw);
         tx.commit().await?;
         Ok(tokens)
@@ -346,6 +356,7 @@ impl OidcApplication {
                     authorization_code_id: code.id,
                     audience: code.audience,
                     scopes: code.scopes,
+                    authentication: code.authentication,
                 },
                 &InsertRefreshToken {
                     id: opaque.id,

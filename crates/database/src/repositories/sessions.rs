@@ -3,8 +3,18 @@
 use super::{JsonArray, RepositoryExecutor, SessionRepository};
 use crate::DatabaseError;
 use chrono::{DateTime, Utc};
-use piquel_auth_protocol::{AuthenticationMethod, SessionId, UserId};
-use sqlx::types::Json;
+use piquel_auth_protocol::{
+    AuthenticationMethod, SessionId, UserId,
+    claims::{Acr, Amr},
+};
+use serde::{Deserialize, Serialize};
+use sqlx::{
+    Decode, Postgres, Type,
+    error::BoxDynError,
+    postgres::{PgTypeInfo, PgValueRef},
+    types::Json,
+};
+use std::collections::BTreeSet;
 
 /// A new browser session.
 #[derive(Clone, Debug)]
@@ -13,7 +23,7 @@ pub struct InsertSession {
     pub id: SessionId,
     /// Authenticated account; it must be active.
     pub user_id: UserId,
-    /// Methods that authenticated this session, reported as `amr`.
+    /// Methods that authenticated this session.
     pub authentication_methods: Vec<AuthenticationMethod>,
     /// When authentication happened; also the initial `last_seen_at`.
     pub authenticated_at: DateTime<Utc>,
@@ -44,6 +54,58 @@ pub struct StoredSession {
     pub revoked_at: Option<DateTime<Utc>>,
     /// When the session last proved possession of a passkey. Social sign-in never sets it.
     pub passkey_confirmed_at: Option<DateTime<Utc>>,
+}
+
+/// How and when a session authenticated, as tokens report it. Token issuance,
+/// authorization requirements and passkey confirmation checks all read this.
+/// Authorization codes and refresh families store it as JSON when the code is
+/// issued, so a grant keeps reporting its original authentication.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SessionAuthentication {
+    /// Phishing-resistant once a passkey confirmed the session, social before.
+    pub acr: Acr,
+    /// The latest authentication at `acr`: the passkey confirmation, or else the sign-in.
+    pub auth_time: DateTime<Utc>,
+    /// Union of the `amr` values of every method used in the session.
+    pub amr: Vec<Amr>,
+}
+
+impl From<&StoredSession> for SessionAuthentication {
+    /// Derives the claims from the session's methods and authentication times.
+    fn from(session: &StoredSession) -> Self {
+        Self {
+            acr: if session.passkey_confirmed_at.is_some() {
+                Acr::PhishingResistant
+            } else {
+                Acr::Social
+            },
+            auth_time: session
+                .passkey_confirmed_at
+                .unwrap_or(session.authenticated_at),
+            amr: session
+                .authentication_methods
+                .iter()
+                .flat_map(|method| method.amr())
+                .copied()
+                .collect::<BTreeSet<_>>()
+                .into_iter()
+                .collect(),
+        }
+    }
+}
+
+impl Type<Postgres> for SessionAuthentication {
+    /// Stored as `JSONB`.
+    fn type_info() -> PgTypeInfo {
+        Json::<Self>::type_info()
+    }
+}
+
+impl<'r> Decode<'r, Postgres> for SessionAuthentication {
+    /// Deserializes the stored snapshot.
+    fn decode(value: PgValueRef<'r>) -> Result<Self, BoxDynError> {
+        Json::<Self>::decode(value).map(|Json(value)| value)
+    }
 }
 
 impl SessionRepository<'_> {
@@ -278,9 +340,9 @@ impl SessionRepository<'_> {
         )
     }
 
-    /// Records that the session proved possession of a passkey `at` this time.
-    /// Protected actions accept the confirmation for a fixed time after it, so using
-    /// it never extends it.
+    /// Records that the session proved possession of a passkey `at` this time, adding
+    /// passkeys to its methods. Protected actions accept the confirmation for a fixed
+    /// time after it, so using it never extends it.
     ///
     /// # Errors
     ///
@@ -291,17 +353,85 @@ impl SessionRepository<'_> {
         id: SessionId,
         at: DateTime<Utc>,
     ) -> Result<(), DatabaseError> {
+        let passkey = Json([AuthenticationMethod::Passkey]);
         let updated = run!(
             self,
             execute,
             sqlx::query!(
                 "UPDATE sessions
-                SET passkey_confirmed_at = $2
+                SET passkey_confirmed_at = $2,
+                    authentication_methods = CASE
+                        WHEN authentication_methods @> $3 THEN authentication_methods
+                        ELSE authentication_methods || $3
+                    END
                 WHERE id = $1
                 AND revoked_at IS NULL
                 AND expires_at > now()",
                 id.as_uuid(),
                 at,
+                passkey as _,
+            )
+        )?
+        .rows_affected();
+        if updated == 0 {
+            return Err(DatabaseError::NotFound);
+        }
+        Ok(())
+    }
+
+    /// Records a social re-authentication of a session `at` this time. Only a session
+    /// without a passkey confirmation qualifies: social sign-in would lower its `acr`.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`DatabaseError::NotFound`] if the session is revoked, expired or
+    /// confirmed by a passkey, or another [`DatabaseError`] if the query fails.
+    pub async fn reauthenticate_social(
+        &mut self,
+        id: SessionId,
+        at: DateTime<Utc>,
+    ) -> Result<(), DatabaseError> {
+        let updated = run!(
+            self,
+            execute,
+            sqlx::query!(
+                "UPDATE sessions
+                SET authenticated_at = $2
+                WHERE id = $1
+                AND passkey_confirmed_at IS NULL
+                AND revoked_at IS NULL
+                AND expires_at > $2",
+                id.as_uuid(),
+                at,
+            )
+        )?
+        .rows_affected();
+        if updated == 0 {
+            return Err(DatabaseError::NotFound);
+        }
+        Ok(())
+    }
+
+    /// Replaces the digest of a session's browser cookie secret, so the cookie from
+    /// before a re-authentication stops working.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`DatabaseError::NotFound`] if the session has no secret,
+    /// [`DatabaseError::Conflict`] if the digest is reused, or another
+    /// [`DatabaseError`] if the query fails.
+    pub async fn replace_browser_secret(
+        &mut self,
+        session_id: SessionId,
+        digest: &[u8],
+    ) -> Result<(), DatabaseError> {
+        let updated = run!(
+            self,
+            execute,
+            sqlx::query!(
+                "UPDATE browser_session_secrets SET secret_digest = $2 WHERE session_id = $1",
+                session_id.as_uuid(),
+                digest,
             )
         )?
         .rows_affected();

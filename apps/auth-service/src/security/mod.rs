@@ -15,11 +15,12 @@ use axum::{
 };
 use chrono::{Duration, Utc};
 use ipnet::IpNet;
-use piquel_auth_protocol::{AuthenticationMethod, SessionId, UserId};
+use piquel_auth_protocol::{AuthenticationMethod, SessionId, UserId, claims::Acr};
 use piquel_common::ErrorChain;
 use piquel_crypto::{CryptoError, Digest, Secret};
 use piquel_repository::{
-    Database, DatabaseError, DatabaseTransaction, InsertSession, StoredSession,
+    Database, DatabaseError, DatabaseTransaction, InsertSession, SessionAuthentication,
+    StoredSession,
 };
 use serde::Serialize;
 use std::{
@@ -251,6 +252,10 @@ pub(crate) enum SessionError {
         /// Maximum confirmation age the action accepts, in seconds.
         max_age: u32,
     },
+    /// A social sign-in tried to re-authenticate a session a passkey confirmed,
+    /// which would lower its `acr`.
+    #[error("this session was confirmed with a passkey; sign in again with a passkey")]
+    PasskeyRequired,
     /// Session persistence failed.
     #[error(transparent)]
     Database(#[from] DatabaseError),
@@ -268,6 +273,9 @@ impl From<SessionError> for ApiError {
                 code: Some(ErrorCode::StepUpRequired { max_age }),
                 ..Self::forbidden("Confirm with your passkey to continue.")
             },
+            SessionError::PasskeyRequired => {
+                Self::forbidden("Sign in with your passkey to continue.")
+            }
             SessionError::Database(error) => error.into(),
             error @ SessionError::Crypto(_) => Self::internal(error),
         }
@@ -317,9 +325,55 @@ impl Session {
             .ok_or(SessionError::Missing)
     }
 
+    /// Signs `user_id` in on this browser inside the caller's transaction and returns
+    /// the secret for its session cookie. Callers set the cookie only after the
+    /// transaction commits.
+    ///
+    /// A browser already signed in as `user_id` re-authenticates that session and
+    /// keeps its `sid`, with a new cookie: a passkey confirms it, and a social sign-in
+    /// renews it unless a passkey confirmed it, since that would lower its `acr`. A
+    /// browser signed in as someone else has that session revoked, then gets a new one.
+    pub(crate) async fn sign_in(
+        tx: &mut DatabaseTransaction<'_>,
+        headers: &HeaderMap,
+        user_id: UserId,
+        method: AuthenticationMethod,
+    ) -> Result<Secret, SessionError> {
+        let current = match BrowserCookie::Session.read(headers) {
+            Some(cookie) => {
+                tx.sessions()
+                    .find_active_by_browser_secret(cookie.digest().as_bytes())
+                    .await?
+            }
+            None => None,
+        };
+        let Some(current) = current else {
+            return Self::create(tx, user_id, method).await;
+        };
+        if current.user_id != user_id {
+            tx.sessions().revoke(current.id).await?;
+            return Self::create(tx, user_id, method).await;
+        }
+        let now = Utc::now();
+        match method {
+            AuthenticationMethod::Passkey => tx.sessions().confirm_passkey(current.id, now).await?,
+            AuthenticationMethod::Federation => {
+                if current.passkey_confirmed_at.is_some() {
+                    return Err(SessionError::PasskeyRequired);
+                }
+                tx.sessions().reauthenticate_social(current.id, now).await?;
+            }
+        }
+        let secret = Secret::generate()?;
+        tx.sessions()
+            .replace_browser_secret(current.id, secret.digest().as_bytes())
+            .await?;
+        Ok(secret)
+    }
+
     /// Creates a session inside the caller's transaction and returns the secret for
-    /// its cookie. Callers set the cookie only after the transaction commits. A passkey
-    /// sign-in also confirms the session, so an action right after it prompts no more.
+    /// its cookie. A passkey sign-in also confirms the session, so an action right
+    /// after it prompts no more.
     pub(crate) async fn create(
         tx: &mut DatabaseTransaction<'_>,
         user_id: UserId,
@@ -351,18 +405,19 @@ impl Session {
 pub(crate) struct Session(pub StoredSession);
 /// Optional browser session for anonymous or signed-in requests.
 pub(crate) struct OptionalSession(pub Option<StoredSession>);
-/// Browser session whose passkey confirmation is at most `MAX_AGE` seconds old. The
-/// age counts from the confirmation itself, so using it never extends it. Handlers
-/// re-check it with [`Self::lock`] inside their transaction.
+/// Browser session whose passkey confirmation is at most `MAX_AGE` seconds old: its
+/// `acr` is phishing-resistant and its `auth_time` at most `MAX_AGE` seconds ago, as
+/// tokens would report them. The age counts from the confirmation itself, so using
+/// it never extends it. Handlers re-check it with [`Self::lock`] inside their transaction.
 pub(crate) struct Confirmed<const MAX_AGE: u32 = CONFIRMATION_MAX_AGE>(pub StoredSession);
 
 impl<const MAX_AGE: u32> Confirmed<MAX_AGE> {
     /// Rejects a session without a recent enough passkey confirmation.
     fn check(session: &StoredSession) -> Result<(), SessionError> {
         let max_age = Duration::seconds(i64::from(MAX_AGE));
-        if session
-            .passkey_confirmed_at
-            .is_some_and(|confirmed| Utc::now() - confirmed <= max_age)
+        let authentication = SessionAuthentication::from(session);
+        if authentication.acr == Acr::PhishingResistant
+            && Utc::now() - authentication.auth_time <= max_age
         {
             Ok(())
         } else {

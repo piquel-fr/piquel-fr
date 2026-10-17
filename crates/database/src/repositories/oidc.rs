@@ -1,9 +1,9 @@
 //! Static client provisioning, authorization requests, codes and consent.
 
 use super::{JsonArray, OidcRepository, RepositoryExecutor};
-use crate::DatabaseError;
+use crate::{DatabaseError, SessionAuthentication};
 use chrono::{DateTime, Utc};
-use piquel_auth_protocol::{SessionId, TokenId, UserId};
+use piquel_auth_protocol::{SessionId, TokenId, UserId, claims::Acr};
 use sqlx::types::Json;
 
 /// Largest identifier, scope or audience accepted by provisioning.
@@ -230,6 +230,8 @@ pub struct InsertAuthorizationRequest {
     pub max_age: Option<i64>,
     /// Account the client asked for, kept across login and consent.
     pub hinted_user_id: Option<UserId>,
+    /// Class the session must reach, chosen from `acr_values`.
+    pub target_acr: Option<Acr>,
     /// When the request stops being accepted.
     pub expires_at: DateTime<Utc>,
 }
@@ -263,6 +265,8 @@ pub struct StoredAuthorizationRequest {
     pub max_age: Option<i64>,
     /// Account the client asked for.
     pub hinted_user_id: Option<UserId>,
+    /// Class the session must reach, chosen from `acr_values`.
+    pub target_acr: Option<Acr>,
     /// When the request was stored.
     pub created_at: DateTime<Utc>,
 }
@@ -291,6 +295,8 @@ pub struct InsertAuthorizationCode {
     pub scopes: Vec<String>,
     /// Granted token audience.
     pub audience: String,
+    /// How the session had authenticated when the code was issued.
+    pub authentication: SessionAuthentication,
     /// When the code stops being accepted.
     pub expires_at: DateTime<Utc>,
 }
@@ -317,6 +323,8 @@ pub struct ConsumedAuthorizationCode {
     pub scopes: Vec<String>,
     /// Granted token audience.
     pub audience: String,
+    /// How the session had authenticated when the code was issued.
+    pub authentication: SessionAuthentication,
 }
 
 /// Why [`OidcRepository::consume_code`] could not redeem a code.
@@ -479,8 +487,8 @@ impl OidcRepository<'_> {
                 "INSERT INTO authorization_requests (
                     id, secret_digest, client_id, redirect_uri, client_state,
                     nonce, pkce_challenge, scopes, audience, force_login,
-                    max_age, expires_at, force_consent, hinted_user_id
-                ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)",
+                    max_age, expires_at, force_consent, hinted_user_id, target_acr
+                ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)",
                 input.id.as_uuid(),
                 input.secret_digest,
                 input.client_id,
@@ -495,6 +503,7 @@ impl OidcRepository<'_> {
                 input.expires_at,
                 input.force_consent,
                 input.hinted_user_id.map(UserId::as_uuid),
+                input.target_acr.map(Acr::as_str),
             )
         )?;
         Ok(())
@@ -521,7 +530,7 @@ impl OidcRepository<'_> {
                     r.redirect_uri, r.client_state, r.nonce, r.pkce_challenge,
                     r.scopes AS "scopes: JsonArray<String>", r.audience, r.force_login,
                     r.force_consent, r.max_age, r.hinted_user_id AS "hinted_user_id: UserId",
-                    r.created_at
+                    r.target_acr AS "target_acr: Acr", r.created_at
                 FROM authorization_requests r
                 JOIN oidc_clients c ON c.id = r.client_id
                 WHERE r.id = $1
@@ -575,7 +584,7 @@ impl OidcRepository<'_> {
                     r.redirect_uri, r.client_state, r.nonce, r.pkce_challenge,
                     r.scopes AS "scopes: JsonArray<String>", r.audience, r.force_login,
                     r.force_consent, r.max_age, r.hinted_user_id AS "hinted_user_id: UserId",
-                    r.created_at"#,
+                    r.target_acr AS "target_acr: Acr", r.created_at"#,
                 id.as_uuid(),
                 digest,
             )
@@ -597,8 +606,8 @@ impl OidcRepository<'_> {
             sqlx::query!(
                 "INSERT INTO authorization_codes (
                     id, secret_digest, client_id, user_id, session_id, redirect_uri,
-                    pkce_challenge, nonce, scopes, audience, expires_at
-                ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)",
+                    pkce_challenge, nonce, scopes, audience, expires_at, authentication
+                ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)",
                 input.id.as_uuid(),
                 input.secret_digest,
                 input.client_id,
@@ -610,6 +619,7 @@ impl OidcRepository<'_> {
                 Json(&input.scopes) as _,
                 input.audience,
                 input.expires_at,
+                Json(&input.authentication) as _,
             )
         )?;
         Ok(())
@@ -670,7 +680,8 @@ impl OidcRepository<'_> {
                 RETURNING
                     c.id AS "id: TokenId", c.client_id, c.user_id AS "user_id: UserId",
                     c.session_id AS "session_id: SessionId", c.redirect_uri, c.pkce_challenge,
-                    c.nonce, c.scopes AS "scopes: JsonArray<String>", c.audience"#,
+                    c.nonce, c.scopes AS "scopes: JsonArray<String>", c.audience,
+                    c.authentication AS "authentication: SessionAuthentication""#,
                 id.as_uuid(),
                 digest,
             )

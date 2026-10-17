@@ -27,6 +27,7 @@ use axum::{
 use base64::Engine;
 use piquel_auth_protocol::{
     TokenId,
+    claims::Acr,
     jwt::{Algorithm, Claim, TokenType},
     metadata::ServerMetadata,
     oauth::{
@@ -224,7 +225,7 @@ impl Scopes {
 }
 
 /// Claims listed in the metadata, in their published order.
-const SUPPORTED_CLAIMS: [Claim; 9] = [
+const SUPPORTED_CLAIMS: [Claim; 10] = [
     Claim::Subject,
     Claim::Name,
     Claim::Username,
@@ -233,6 +234,7 @@ const SUPPORTED_CLAIMS: [Claim; 9] = [
     Claim::ProfileVersion,
     Claim::AuthTime,
     Claim::Methods,
+    Claim::AuthenticationClass,
     Claim::Session,
 ];
 
@@ -340,6 +342,7 @@ impl OidcApplication {
             subject_types_supported: SubjectType::ALL.into(),
             id_token_signing_alg_values_supported: Algorithm::ALL.into(),
             claims_supported: SUPPORTED_CLAIMS.into(),
+            acr_values_supported: Acr::ALL.into(),
             claims_parameter_supported: false,
             request_parameter_supported: false,
             request_uri_parameter_supported: false,

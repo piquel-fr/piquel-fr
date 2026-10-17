@@ -250,7 +250,7 @@ impl From<SessionError> for OAuthError {
             SessionError::Missing => {
                 OAuthCode::InvalidToken.reject_with("sign in to continue", error)
             }
-            SessionError::StepUpRequired { .. } => {
+            SessionError::StepUpRequired { .. } | SessionError::PasskeyRequired => {
                 OAuthCode::InvalidToken.reject_with("confirm with a passkey to continue", error)
             }
             SessionError::Database(error) => Self::Database(error),

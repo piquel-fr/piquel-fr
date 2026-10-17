@@ -74,6 +74,10 @@ Important invariants:
   Unlink marks the identity revoked and releases both constraints.
 - Verified email ownership is unique across active accounts. Email is optional;
   explicit provider linking never transfers ownership of another account's email.
+- A session's `acr`, `amr` and `auth_time` are derived from its methods,
+  `authenticated_at` and `passkey_confirmed_at` (`SessionAuthentication`). Codes
+  copy them when issued, and refresh families copy them from the code, so a grant
+  keeps reporting its original authentication.
 - Authorization codes are single-use and bound to client, redirect and PKCE.
   Refresh tokens rotate transactionally, remain bound to their client/session,
   and reuse revokes the family.

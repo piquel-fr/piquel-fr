@@ -3,6 +3,7 @@
 //! so one document serves both well-known paths.
 
 use crate::{
+    claims::Acr,
     jwt::{Algorithm, Claim},
     oauth::{
         ClientAuthMethod, CodeChallengeMethod, GrantType, ResponseMode, ResponseType, Scope,
@@ -63,6 +64,8 @@ pub struct ServerMetadata {
     pub id_token_signing_alg_values_supported: Vec<Algorithm>,
     /// Claims tokens may contain.
     pub claims_supported: Vec<Claim>,
+    /// Authentication context classes `acr_values` may request and `acr` reports.
+    pub acr_values_supported: Vec<Acr>,
     /// Whether the `claims` request parameter is honoured.
     pub claims_parameter_supported: bool,
     /// Whether the `request` parameter is accepted.

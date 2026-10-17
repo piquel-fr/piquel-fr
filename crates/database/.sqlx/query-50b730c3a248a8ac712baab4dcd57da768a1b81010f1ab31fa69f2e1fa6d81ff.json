@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "SELECT\n                    r.id AS \"id: TokenId\", r.client_id, c.display_name AS client_display_name,\n                    r.redirect_uri, r.client_state, r.nonce, r.pkce_challenge,\n                    r.scopes AS \"scopes: JsonArray<String>\", r.audience, r.force_login,\n                    r.force_consent, r.max_age, r.hinted_user_id AS \"hinted_user_id: UserId\",\n                    r.created_at\n                FROM authorization_requests r\n                JOIN oidc_clients c ON c.id = r.client_id\n                WHERE r.id = $1\n                AND r.secret_digest = $2\n                AND r.consumed_at IS NULL\n                AND r.expires_at > now()\n                AND c.enabled",
+  "query": "SELECT\n                    r.id AS \"id: TokenId\", r.client_id, c.display_name AS client_display_name,\n                    r.redirect_uri, r.client_state, r.nonce, r.pkce_challenge,\n                    r.scopes AS \"scopes: JsonArray<String>\", r.audience, r.force_login,\n                    r.force_consent, r.max_age, r.hinted_user_id AS \"hinted_user_id: UserId\",\n                    r.target_acr AS \"target_acr: Acr\", r.created_at\n                FROM authorization_requests r\n                JOIN oidc_clients c ON c.id = r.client_id\n                WHERE r.id = $1\n                AND r.secret_digest = $2\n                AND r.consumed_at IS NULL\n                AND r.expires_at > now()\n                AND c.enabled",
   "describe": {
     "columns": [
       {
@@ -70,6 +70,11 @@
       },
       {
         "ordinal": 13,
+        "name": "target_acr: Acr",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 14,
         "name": "created_at",
         "type_info": "Timestamptz"
       }
@@ -94,8 +99,9 @@
       false,
       true,
       true,
+      true,
       false
     ]
   },
-  "hash": "2af18e38c52499e58b1670ff4dc7b8893946e221a16b114fb11ce8aef6a64d8c"
+  "hash": "50b730c3a248a8ac712baab4dcd57da768a1b81010f1ab31fa69f2e1fa6d81ff"
 }

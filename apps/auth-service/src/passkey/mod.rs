@@ -149,14 +149,17 @@ impl PasskeyApplication {
         Ok(())
     }
 
-    /// Commits the account operation, its audit event and the passkey-authenticated session together.
+    /// Commits the account operation, its audit event and the passkey sign-in together.
+    /// A browser already signed in as `user_id` keeps its session, now confirmed.
     async fn complete_sign_in(
         mut tx: DatabaseTransaction<'_>,
+        headers: &HeaderMap,
         user_id: UserId,
         action: AuditAction,
     ) -> Result<Response, PasskeyError> {
         let session =
-            security::Session::create(&mut tx, user_id, AuthenticationMethod::Passkey).await?;
+            security::Session::sign_in(&mut tx, headers, user_id, AuthenticationMethod::Passkey)
+                .await?;
         tx.audit_events().record(user_id, action, None).await?;
         tx.commit().await?;
         let mut response = StatusCode::NO_CONTENT.into_response();
@@ -426,7 +429,8 @@ impl PasskeyApplication {
         if let Some(pending) = pending {
             FederationApplication::attach_signup(&mut tx, pending, &headers, user_id).await?;
         }
-        let mut response = Self::complete_sign_in(tx, user_id, AuditAction::AccountCreate).await?;
+        let mut response =
+            Self::complete_sign_in(tx, &headers, user_id, AuditAction::AccountCreate).await?;
         // Ordinary registration leaves any unrelated pending social flow untouched.
         if pending.is_some() {
             BrowserCookie::FederationPending
@@ -480,7 +484,7 @@ impl PasskeyApplication {
         Ok(app.start(&headers, ceremony, challenge).await?)
     }
 
-    /// Verifies the assertion and latest credential state before creating a signed-in session.
+    /// Verifies the assertion and latest credential state before signing the browser in.
     async fn finish_login(
         State(app): State<Self>,
         headers: HeaderMap,
@@ -519,7 +523,7 @@ impl PasskeyApplication {
             }
         };
         let tx = app.accept_credential(user_id, verified).await?;
-        Ok(Self::complete_sign_in(tx, user_id, AuditAction::PasskeyLogin).await?)
+        Ok(Self::complete_sign_in(tx, &headers, user_id, AuditAction::PasskeyLogin).await?)
     }
 
     /// Starts a passkey proof tied to the current signed-in session.

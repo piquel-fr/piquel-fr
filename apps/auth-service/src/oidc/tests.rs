@@ -7,7 +7,7 @@ use axum::{
     response::Response,
 };
 use chrono::Utc;
-use piquel_auth_protocol::{AuthenticationMethod, UserId};
+use piquel_auth_protocol::{AuthenticationMethod, UserId, claims::Acr};
 use piquel_crypto::Secret;
 use piquel_repository::{BootstrapOidcClient, DatabaseConfig, InsertUser, InsertVerifiedEmail};
 use serde_json::{Value, json};
@@ -293,6 +293,22 @@ impl Flow {
         )
         .await
     }
+    /// Verifies the ID token of a successful token response and returns the response
+    /// with the token's claims.
+    async fn id_token(&self, response: Response) -> (Value, Value) {
+        assert_eq!(response.status(), StatusCode::OK);
+        let tokens = Self::json(response).await;
+        let claims = self
+            .app
+            .keys
+            .verify(
+                tokens["id_token"].as_str().expect("ID token"),
+                TokenType::Id,
+                &self.app.issuer,
+            )
+            .expect("verify ID token");
+        (tokens, claims)
+    }
     /// Rotates a scenario refresh token using its registered client credentials.
     async fn refresh(&self, token: &str) -> Response {
         self.request(
@@ -332,6 +348,7 @@ async fn metadata_is_one_document_whose_endpoints_are_routed() {
     assert_eq!(documents[0], documents[1]);
     let metadata: ServerMetadata = serde_json::from_slice(&documents[0]).expect("typed metadata");
     assert_eq!(metadata.issuer, flow.app.issuer);
+    assert_eq!(metadata.acr_values_supported, Acr::ALL);
     let Value::Object(fields) = serde_json::from_slice(&documents[0]).expect("metadata JSON")
     else {
         panic!("metadata is not a JSON object");
@@ -750,6 +767,96 @@ async fn authorization_hints_bind_initial_resumed_and_consent_requests() {
         )
         .await;
     assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+}
+
+/// Tokens report the class and time of the grant's authentication: a refresh keeps
+/// them after the session re-authenticates, and `acr_values` makes a weaker session
+/// sign in again while unknown values are ignored.
+#[tokio::test]
+#[ignore = "requires TEST_DATABASE_URL"]
+async fn acr_targets_and_grants_keep_their_authentication() {
+    let mut flow = Flow::new(true, true).await;
+    let code = flow.code(REFRESH_SCOPES).await;
+    let (tokens, claims) = flow
+        .id_token(
+            flow.exchange(&code, Flow::verifier(), flow.basic.as_deref())
+                .await,
+        )
+        .await;
+    assert_eq!(claims["acr"], Acr::PhishingResistant.as_str());
+    assert_eq!(claims["amr"], json!(["pop", "mfa", "user"]));
+    let session = claims["sid"]
+        .as_str()
+        .expect("sid")
+        .parse()
+        .expect("session ID");
+    flow.app
+        .database
+        .sessions()
+        .confirm_passkey(session, Utc::now() + chrono::Duration::minutes(5))
+        .await
+        .expect("re-authenticate");
+    let (_, refreshed) = flow
+        .id_token(
+            flow.refresh(tokens["refresh_token"].as_str().expect("refresh token"))
+                .await,
+        )
+        .await;
+    assert_eq!(refreshed["auth_time"], claims["auth_time"]);
+    assert_eq!(refreshed["acr"], claims["acr"]);
+
+    let mut tx = flow.app.database.begin().await.expect("transaction");
+    let social =
+        crate::security::Session::create(&mut tx, flow.user_id, AuthenticationMethod::Federation)
+            .await
+            .expect("social session");
+    tx.commit().await.expect("commit");
+    flow.cookie = format!(
+        "{}={}",
+        crate::security::BrowserCookie::Session.as_str(),
+        social.encoded()
+    );
+    let phr = [("acr_values", "urn:example:gold phr")];
+    let response = flow
+        .authorize_with(
+            Method::GET,
+            Scope::OpenId.as_str(),
+            Some(Prompt::None.as_str()),
+            &phr,
+        )
+        .await;
+    assert_eq!(
+        Flow::parameter(&flow.client_redirect(&response), "error"),
+        OAuthCode::LoginRequired.as_str()
+    );
+    let response = flow
+        .authorize_with(Method::GET, Scope::OpenId.as_str(), None, &phr)
+        .await;
+    let login = Flow::location(&response);
+    assert_eq!(login.path(), routes::page::LOGIN);
+    assert_eq!(
+        Flow::parameter(&login, "acr"),
+        Acr::PhishingResistant.as_str()
+    );
+    for acr_values in ["urn:example:gold", "urn:piquel:acr:social phr"] {
+        let response = flow
+            .authorize_with(
+                Method::GET,
+                Scope::OpenId.as_str(),
+                Some(Prompt::None.as_str()),
+                &[("acr_values", acr_values)],
+            )
+            .await;
+        let code = Flow::parameter(&flow.client_redirect(&response), "code");
+        let (_, claims) = flow
+            .id_token(
+                flow.exchange(&code, Flow::verifier(), flow.basic.as_deref())
+                    .await,
+            )
+            .await;
+        assert_eq!(claims["acr"], Acr::Social.as_str(), "{acr_values}");
+        assert_eq!(claims["amr"], json!(["fed"]));
+    }
 }
 
 /// Checks protocol POST parity and existing OAuth error and challenge formats.
