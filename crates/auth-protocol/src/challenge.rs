@@ -17,8 +17,9 @@ use std::{fmt, str::FromStr};
 use thiserror::Error;
 use url::Url;
 
-piquel_common::str_enum! {
-    /// Bearer `error` codes.
+piquel_common::open_str_enum! {
+    /// Bearer `error` codes. Open, since the OAuth Extensions Error Registry grows
+    /// (RFC 9470 added one): an unknown code must not hide the rest of a challenge.
     pub enum BearerError {
         /// The request is malformed (RFC 6750 §3.1).
         InvalidRequest = "invalid_request",
@@ -32,12 +33,12 @@ piquel_common::str_enum! {
 }
 
 impl BearerError {
-    /// HTTP status sent with this error.
+    /// HTTP status sent with this error; 401 for a code this version does not know.
     #[must_use]
-    pub const fn status(self) -> u16 {
+    pub const fn status(&self) -> u16 {
         match self {
             Self::InvalidRequest => 400,
-            Self::InvalidToken | Self::InsufficientUserAuthentication => 401,
+            Self::InvalidToken | Self::InsufficientUserAuthentication | Self::Other(_) => 401,
             Self::InsufficientScope => 403,
         }
     }
@@ -107,7 +108,7 @@ impl BearerChallenge {
     /// HTTP status sent with this challenge: 401 when no token was sent.
     #[must_use]
     pub fn status(&self) -> u16 {
-        self.error.map_or(401, BearerError::status)
+        self.error.as_ref().map_or(401, BearerError::status)
     }
 
     /// Appends one parameter, quoting and escaping its value. Every value comes from a
@@ -140,13 +141,7 @@ impl BearerChallenge {
                 return Err(ChallengeError::Duplicate(name));
             }
             match name.as_str() {
-                "error" => {
-                    challenge.error = Some(
-                        value
-                            .parse()
-                            .map_err(|_| ChallengeError::InvalidValue("error"))?,
-                    );
-                }
+                "error" => challenge.error = Some(BearerError::from(value.as_str())),
                 "error_description" => {
                     challenge.error_description = Some(
                         value
@@ -195,7 +190,7 @@ impl fmt::Display for BearerChallenge {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         formatter.write_str(SCHEME)?;
         let mut first = true;
-        if let Some(error) = self.error {
+        if let Some(error) = &self.error {
             Self::write_parameter(formatter, &mut first, "error", error.as_str())?;
         }
         if let Some(description) = &self.error_description {

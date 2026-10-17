@@ -214,6 +214,10 @@ they do not fail the token: an `amr` value the SDK does not know is dropped, and
 unknown `acr` reads as none, which meets no requirement. Discovery lists drop unknown
 values the same way.
 
+OAuth error codes and Bearer `error` codes are open instead, since their registries
+keep growing: a code a parser does not know becomes an "other" variant holding the
+string, so it still yields the rest of the error body or challenge.
+
 ## Test vectors
 
 `tests/sdk-vectors` holds one JSON file per case: inputs, a fixed `now`, and either

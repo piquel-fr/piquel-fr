@@ -1,11 +1,11 @@
 {
-  "description": "state from another login attempt is rejected first",
+  "description": "state from another login attempt is rejected before iss is checked",
   "input": {
     "authorization_response_iss_parameter_supported": true,
     "issuer": "https://auth.example.com",
     "parameters": {
       "code": "pac_v1_01936f3e-8c00-7000-8000-000000000004.c2VjcmV0",
-      "iss": "https://auth.example.com",
+      "iss": "https://evil.example.com",
       "state": "another-state"
     },
     "state": "af0ifjsldkj"

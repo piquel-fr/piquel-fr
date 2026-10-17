@@ -849,6 +849,13 @@ impl Vectors {
                 BearerChallenge::error(BearerError::InvalidRequest),
             ),
         ] {
+            // Format cases go both ways, so the canonical header must parse back.
+            let header = challenge.to_string();
+            assert_eq!(
+                header.parse::<BearerChallenge>().as_ref(),
+                Ok(&challenge),
+                "{name}: the header does not parse back to the challenge"
+            );
             self.case(
                 &format!("challenges/{name}.json"),
                 &Case {
@@ -857,12 +864,18 @@ impl Vectors {
                     input: json!({ "challenge": challenge }),
                     expected: Expected::Ok(json!({
                         "status": challenge.status(),
-                        "header": challenge.to_string(),
+                        "header": header,
                     })),
                 },
             );
         }
         for (name, description, header) in [
+            (
+                "parse-unknown-error",
+                "an error code this version does not know is kept, with the rest of \
+                 the challenge",
+                "Bearer error=\"invalid_dpop_proof\", scope=\"notes:read\"",
+            ),
             (
                 "parse-reordered",
                 "parameters in any order, with token values; the first known acr is the target",
@@ -948,9 +961,9 @@ impl Vectors {
             ),
             (
                 "state-mismatch",
-                "state from another login attempt is rejected first",
+                "state from another login attempt is rejected before iss is checked",
                 true,
-                json!({ "code": CODE, "state": "another-state", "iss": ISSUER }),
+                json!({ "code": CODE, "state": "another-state", "iss": other }),
                 Expected::error(ErrorCategory::Callback, ErrorReason::StateMismatch),
             ),
             (
