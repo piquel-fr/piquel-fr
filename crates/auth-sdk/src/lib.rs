@@ -31,6 +31,47 @@
 //! # Ok(()) }
 //! ```
 //!
+//! # Validating access tokens
+//!
+//! A resource server builds one [`ResourceValidator`] per API from its [`Resource`]
+//! identifier, the `aud` its tokens carry. [`ResourceValidator::validate`] runs every
+//! check of the SDK design, in order: framing, `crit`, `typ`, algorithm, key,
+//! signature, claims, issuer, audience and times, with a 30-second leeway. It returns
+//! an [`AccessToken`] whose `S` parameter proves the scopes it holds. Declare scopes
+//! with [`scopes!`]; [`AccessToken::require`] checks more later.
+//!
+//! # Signing users in
+//!
+//! [`Client`] runs the authorization code flow with PKCE:
+//!
+//! 1. [`Client::authorize`] gives the URL to redirect to and a [`PendingLogin`] to
+//!    keep server-side.
+//! 2. [`Client::complete`] checks the callback, `state` then the RFC 9207 `iss`,
+//!    before the code goes anywhere. It then validates the ID token against the
+//!    pending login.
+//! 3. [`Client::refresh`], [`Client::revoke`], [`Client::userinfo`] and
+//!    [`Client::logout_url`] cover the rest of a session.
+//!
+//! # Signing keys
+//!
+//! [`KeyCache`] caches a JWKS for any issuer. An unknown `kid` triggers one refetch,
+//! fetches happen at most every 30 seconds, and the last good keys survive an outage.
+//! Each [`Issuer`] holds one for its own keys. [`Jws`] parses a token so it can be
+//! checked by hand, as for Google ID tokens.
+//!
+//! # Errors
+//!
+//! Every error type has a `code()` returning the [`SdkError`] both SDKs share: a
+//! category, and for most categories the check that failed. A resource server answers
+//! a [`TokenError`] with [`TokenError::challenge`], the RFC 6750 or RFC 9470
+//! `WWW-Authenticate` value.
+//!
+//! # Time and HTTP
+//!
+//! [`IssuerBuilder::clock`] injects a [`Clock`], so tests can pin time.
+//! [`IssuerBuilder::http_client`] injects the `reqwest` client, for timeouts, proxies
+//! or extra trusted roots.
+//!
 //! The behavior follows `docs/architecture/sdk.md` in the piquel-fr repository, and is
 //! tested against the shared vectors in `tests/sdk-vectors`.
 
@@ -79,6 +120,25 @@ const LEEWAY: TimeDelta = TimeDelta::seconds(30);
 
 /// The time source for every expiry and cache check. Inject one with
 /// [`IssuerBuilder::clock`] to pin time in tests.
+///
+/// ```
+/// use chrono::{DateTime, TimeDelta, Utc};
+/// use piquel_auth::Clock;
+///
+/// /// A clock pinned to one instant, for tests.
+/// struct Fixed(DateTime<Utc>);
+///
+/// impl Clock for Fixed {
+///     fn now(&self) -> DateTime<Utc> {
+///         self.0
+///     }
+/// }
+///
+/// let start = Utc::now();
+/// let clock = Fixed(start + TimeDelta::minutes(5));
+/// assert_eq!(clock.now() - start, TimeDelta::minutes(5));
+/// // Inject it with `Issuer::builder().clock(clock)`.
+/// ```
 pub trait Clock: Send + Sync + 'static {
     /// The current time.
     fn now(&self) -> DateTime<Utc>;

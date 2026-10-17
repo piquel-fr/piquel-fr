@@ -58,6 +58,25 @@ impl JwsHeader {
 
 /// A compact JWS, decoded but not yet verified. Parse a token, check its header, then
 /// verify it with a [`KeyCache`] before reading the payload.
+///
+/// ```
+/// use piquel_auth::{
+///     Jws, TokenError,
+///     protocol::jwt::{Algorithm, TokenType},
+/// };
+///
+/// let token = "eyJhbGciOiJSUzI1NiIsImtpZCI6ImtleS0yMDI2IiwidHlwIjoiYXQrand0In0.e30.c2lnbmF0dXJl";
+/// let jws = Jws::parse(token)?;
+/// assert_eq!(jws.header().kid.as_deref(), Some("key-2026"));
+/// jws.require_type(TokenType::Access)?;
+/// assert_eq!(jws.require_algorithm(&[Algorithm::Rs256])?, Algorithm::Rs256);
+/// assert!(matches!(
+///     jws.require_type(TokenType::Id),
+///     Err(TokenError::WrongType { .. })
+/// ));
+/// assert!(matches!(Jws::parse("two.segments"), Err(TokenError::Malformed(_))));
+/// # Ok::<(), TokenError>(())
+/// ```
 #[derive(Clone)]
 pub struct Jws<'a> {
     /// Decoded protected header.
@@ -214,6 +233,25 @@ struct Key {
 }
 
 /// The usable keys of a JSON Web Key Set.
+///
+/// ```
+/// use piquel_auth::{KeyError, KeySet};
+///
+/// let keys = KeySet::parse(br#"{"keys": [
+///     {"kty": "RSA", "kid": "key-2026", "use": "sig", "alg": "RS256", "n": "AQAB", "e": "AQAB"},
+///     {"kty": "RSA", "kid": "encryption", "use": "enc", "n": "AQAB", "e": "AQAB"},
+///     {"kty": "OKP", "kid": "future", "crv": "Ed25519", "x": "AQAB"}
+/// ]}"#)?;
+/// // Keys for encryption, or of a type the SDK does not know, are skipped.
+/// assert_eq!(keys.kids().collect::<Vec<_>>(), ["key-2026"]);
+///
+/// let duplicated = br#"{"keys": [
+///     {"kty": "RSA", "kid": "a", "n": "AQAB", "e": "AQAB"},
+///     {"kty": "RSA", "kid": "a", "n": "AQAB", "e": "AQAB"}
+/// ]}"#;
+/// assert!(matches!(KeySet::parse(duplicated), Err(KeyError::DuplicateKeyId(_))));
+/// # Ok::<(), KeyError>(())
+/// ```
 #[derive(Clone, Default)]
 pub struct KeySet {
     /// Keys in document order.
@@ -311,6 +349,23 @@ struct KeyCacheInner {
 /// - Keys stay fresh for the response's `max-age`, bounded to 30 seconds through 24
 ///   hours, or one hour without one.
 /// - A failed fetch keeps the last good keys.
+///
+/// ```no_run
+/// # async fn run(token: &str) -> Result<(), Box<dyn std::error::Error>> {
+/// use piquel_auth::{Jws, KeyCache, protocol::jwt::Algorithm};
+///
+/// // One cache per issuer, shared by every request: clones share keys and fetch spacing.
+/// let keys = KeyCache::new(
+///     "https://www.googleapis.com/oauth2/v3/certs".parse()?,
+///     reqwest::Client::new(),
+/// );
+/// let jws = Jws::parse(token)?;
+/// let algorithm = jws.require_algorithm(&[Algorithm::Rs256])?;
+/// keys.verify(&jws, algorithm).await?;
+/// // Only now can the payload be trusted.
+/// let claims: serde_json::Value = serde_json::from_slice(jws.payload())?;
+/// # Ok(()) }
+/// ```
 #[derive(Clone)]
 pub struct KeyCache(Arc<KeyCacheInner>);
 
@@ -338,6 +393,16 @@ impl KeyCache {
     }
 
     /// Keys that never change and are never fetched, for tests and pinned keys.
+    ///
+    /// ```
+    /// use piquel_auth::{KeyCache, KeySet};
+    ///
+    /// let pinned = KeySet::parse(
+    ///     br#"{"keys": [{"kty": "RSA", "kid": "key-2026", "n": "AQAB", "e": "AQAB"}]}"#,
+    /// )?;
+    /// let keys = KeyCache::fixed(pinned);
+    /// # Ok::<(), piquel_auth::KeyError>(())
+    /// ```
     #[must_use]
     pub fn fixed(keys: KeySet) -> Self {
         Self(Arc::new(KeyCacheInner {

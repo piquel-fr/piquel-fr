@@ -18,6 +18,31 @@ use thiserror::Error;
 
 /// Why a token was rejected. [`Self::code`] gives the shared SDK code, and
 /// [`Self::challenge`] the `WWW-Authenticate` value a resource server answers with.
+///
+/// ```
+/// use chrono::Utc;
+/// use piquel_auth::{
+///     KeyError, TokenError,
+///     protocol::sdk::{ErrorCategory, ErrorReason, SdkError},
+/// };
+///
+/// let expired = TokenError::Expired(Utc::now());
+/// assert_eq!(
+///     expired.code(),
+///     SdkError::new(ErrorCategory::InvalidToken, ErrorReason::Expired)
+/// );
+/// let challenge = expired.challenge().expect("the client's fault");
+/// assert_eq!((challenge.status(), challenge.to_string().as_str()), (401, r#"Bearer error="invalid_token""#));
+///
+/// let missing = TokenError::InsufficientScope { required: "notes:write".parse()? };
+/// let challenge = missing.challenge().expect("the client's fault");
+/// assert_eq!(challenge.status(), 403);
+/// assert_eq!(challenge.to_string(), r#"Bearer error="insufficient_scope", scope="notes:write""#);
+///
+/// // Keys that cannot be fetched are the server's failure: answer 503, not a challenge.
+/// assert!(TokenError::Keys(KeyError::Unavailable).challenge().is_none());
+/// # Ok::<(), piquel_auth::protocol::oauth::InvalidScope>(())
+/// ```
 #[derive(Debug, Error)]
 pub enum TokenError {
     /// The token is not a compact JWS.
@@ -160,6 +185,41 @@ pub enum Subject {
 /// A validated access token. `S` proves which scopes it holds: [`Scopes`] keeps the
 /// granted list, while a [`scopes!`](crate::scopes) marker or tuple proves those
 /// scopes are present. `X` holds application claims.
+///
+/// ```
+/// use chrono::{TimeDelta, Utc};
+/// use piquel_auth::{AccessToken, ClientId, ProfileClaims, Scopes, Subject};
+///
+/// piquel_auth::scopes! {
+///     /// Scopes of the notes API.
+///     pub mod notes {
+///         Read = "notes:read",
+///         Write = "notes:write",
+///     }
+/// }
+///
+/// // Normally returned by `ResourceValidator::validate`.
+/// let token: AccessToken = AccessToken {
+///     subject: Subject::User("01936f3e-8c00-7000-8000-000000000001".parse()?),
+///     client_id: ClientId::new("notes-web"),
+///     scopes: "openid notes:read".parse()?,
+///     token_id: "01936f3e-8c00-7000-8000-000000000003".parse()?,
+///     session_id: None,
+///     auth_time: None,
+///     amr: Vec::new(),
+///     acr: None,
+///     actor: None,
+///     confirmation: None,
+///     profile: ProfileClaims::default(),
+///     issued_at: Utc::now(),
+///     expires_at: Utc::now() + TimeDelta::minutes(5),
+///     extra: (),
+/// };
+/// let readable = token.require::<notes::Read>()?;
+/// assert_eq!(readable.scopes, notes::Read);
+/// assert!(token.require::<(notes::Read, notes::Write)>().is_err());
+/// # Ok::<(), Box<dyn std::error::Error>>(())
+/// ```
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct AccessToken<S = Scopes, X = ()> {
     /// Who the token acts for.

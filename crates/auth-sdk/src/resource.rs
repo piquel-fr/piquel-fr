@@ -15,6 +15,16 @@ pub struct ResourceError;
 /// registers audiences such as `notes-api` today; RFC 8707 resource URIs such as
 /// `https://notes.piquel.fr` work the same way. The identifier is kept exactly as
 /// given, since `aud` is compared exactly.
+///
+/// ```
+/// use piquel_auth::Resource;
+///
+/// let notes = Resource::new("notes-api")?;
+/// assert_eq!(notes.identifier(), "notes-api");
+/// assert!("https://notes.piquel.fr".parse::<Resource>().is_ok());
+/// assert!(Resource::new("has space").is_err());
+/// # Ok::<(), piquel_auth::ResourceError>(())
+/// ```
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct Resource {
     /// The resource identifier.
@@ -59,6 +69,24 @@ impl fmt::Display for Resource {
 
 /// Validates access tokens for one resource. `X` is the type of the application
 /// claims, `()` by default; choose another with [`Self::with_claims`].
+///
+/// ```no_run
+/// # async fn run(issuer: piquel_auth::Issuer, token: &str) -> Result<(), Box<dyn std::error::Error>> {
+/// use piquel_auth::{Resource, Scopes};
+///
+/// /// An application claim the tokens carry.
+/// #[derive(Clone, serde::Deserialize)]
+/// struct Tenant {
+///     tenant: String,
+/// }
+///
+/// let notes = issuer
+///     .resource(Resource::new("notes-api")?)
+///     .with_claims::<Tenant>();
+/// let token = notes.validate::<Scopes>(token).await?;
+/// println!("{} for tenant {}", token.scopes, token.extra.tenant);
+/// # Ok(()) }
+/// ```
 pub struct ResourceValidator<X = ()> {
     /// Issuer whose tokens are accepted.
     issuer: Issuer,
@@ -130,6 +158,27 @@ impl<X: DeserializeOwned> ResourceValidator<X> {
     ///
     /// # Errors
     /// See [`TokenError`]; checks run in the order of the SDK design.
+    ///
+    /// ```no_run
+    /// # async fn run(issuer: piquel_auth::Issuer, token: &str) -> Result<(), Box<dyn std::error::Error>> {
+    /// piquel_auth::scopes! {
+    ///     /// Scopes of the notes API.
+    ///     pub mod notes {
+    ///         Read = "notes:read",
+    ///     }
+    /// }
+    ///
+    /// let notes_api = issuer.resource(piquel_auth::Resource::new("notes-api")?);
+    /// match notes_api.validate::<notes::Read>(token).await {
+    ///     Ok(token) => println!("{:?} may read notes", token.subject),
+    ///     Err(error) => {
+    ///         // Answer with the challenge, or 503 when the keys are unavailable.
+    ///         let challenge = error.challenge().map(|challenge| challenge.to_string());
+    ///         println!("{}: {challenge:?}", error.code().code);
+    ///     }
+    /// }
+    /// # Ok(()) }
+    /// ```
     pub async fn validate<S: ScopeSet>(
         &self,
         token: &str,

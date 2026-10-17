@@ -15,6 +15,19 @@ use thiserror::Error;
 use url::Url;
 
 /// The issuer's metadata could not be fetched or used.
+///
+/// ```
+/// use piquel_auth::{
+///     DiscoveryError,
+///     protocol::sdk::{ErrorCategory, ErrorReason, SdkError},
+/// };
+///
+/// let error = DiscoveryError::PkceUnsupported;
+/// assert_eq!(
+///     error.code(),
+///     SdkError::new(ErrorCategory::Discovery, ErrorReason::PkceUnsupported)
+/// );
+/// ```
 #[derive(Debug, Error)]
 pub enum DiscoveryError {
     /// The configured issuer is not an `https` URL without query or fragment.
@@ -77,6 +90,18 @@ struct IssuerInner {
 
 /// A discovered issuer: its metadata, signing keys, HTTP client and clock. Cheap to
 /// clone; share one per process.
+///
+/// ```no_run
+/// # async fn run() -> Result<(), Box<dyn std::error::Error>> {
+/// use piquel_auth::{Issuer, Resource};
+///
+/// let issuer = Issuer::discover("https://auth.piquel.fr").await?;
+/// assert_eq!(issuer.issuer(), "https://auth.piquel.fr");
+/// println!("signs in at {}", issuer.metadata().authorization_endpoint);
+/// // Validators and clients share the handle and its key cache.
+/// let notes = issuer.resource(Resource::new("notes-api")?);
+/// # Ok(()) }
+/// ```
 #[derive(Clone)]
 pub struct Issuer(Arc<IssuerInner>);
 
@@ -91,6 +116,22 @@ impl fmt::Debug for Issuer {
 }
 
 /// Configures discovery: an HTTP client and a clock.
+///
+/// ```no_run
+/// # async fn run() -> Result<(), Box<dyn std::error::Error>> {
+/// use std::time::Duration;
+///
+/// // Auth's endpoints never redirect, so a redirect is refused.
+/// let http = reqwest::Client::builder()
+///     .timeout(Duration::from_secs(5))
+///     .redirect(reqwest::redirect::Policy::none())
+///     .build()?;
+/// let issuer = piquel_auth::Issuer::builder()
+///     .http_client(http)
+///     .discover("https://auth.piquel.fr")
+///     .await?;
+/// # Ok(()) }
+/// ```
 #[derive(Clone)]
 pub struct IssuerBuilder {
     /// Client for every request, or `None` for the default.

@@ -28,6 +28,19 @@ use url::Url;
 const RANDOM_BYTES: usize = 32;
 
 /// An auth endpoint failed or answered with an OAuth error.
+///
+/// ```no_run
+/// # async fn run(client: piquel_auth::Client, refresh: piquel_auth::RefreshToken) {
+/// use piquel_auth::{OAuthError, protocol::oauth::ErrorCode};
+///
+/// match client.refresh(&refresh).await {
+///     Ok(tokens) => println!("access token valid until {}", tokens.expires_at),
+///     // The grant is over: sign the user in again.
+///     Err(OAuthError::Rejected { response, .. }) if response.error == ErrorCode::InvalidGrant => {}
+///     Err(error) => eprintln!("refresh failed: {error}"),
+/// }
+/// # }
+/// ```
 #[derive(Debug, Error)]
 pub enum OAuthError {
     /// The endpoint could not be reached.
@@ -74,6 +87,22 @@ impl OAuthError {
 }
 
 /// An authorization response failed, or its code could not be exchanged.
+///
+/// ```
+/// use piquel_auth::{
+///     LoginError,
+///     protocol::sdk::{ErrorCategory, ErrorReason, SdkError},
+/// };
+///
+/// let mixed_up = LoginError::IssuerMismatch {
+///     expected: "https://auth.piquel.fr".into(),
+///     found: "https://evil.example".into(),
+/// };
+/// assert_eq!(
+///     mixed_up.code(),
+///     SdkError::new(ErrorCategory::Callback, ErrorReason::IssuerMismatch)
+/// );
+/// ```
 #[derive(Debug, Error)]
 pub enum LoginError {
     /// `state` is not the pending login's: the response belongs to another attempt.
@@ -127,6 +156,14 @@ impl LoginError {
 }
 
 /// How the client authenticates at the token and revocation endpoints.
+///
+/// ```
+/// use piquel_auth::Credentials;
+///
+/// let secret = Credentials::Secret("a-confidential-client-secret".to_owned().into());
+/// // Secrets are never printed.
+/// assert_eq!(format!("{secret:?}"), "Secret(REDACTED)");
+/// ```
 #[derive(Clone)]
 #[non_exhaustive]
 pub enum Credentials {
@@ -158,6 +195,19 @@ pub struct ClientConfig {
 }
 
 /// What to ask for in an authorization request. `openid` is always requested.
+///
+/// ```
+/// use piquel_auth::{AuthorizeRequest, protocol::oauth::Prompt};
+///
+/// // Profile claims, a refresh token, and a sign-in within the last five minutes.
+/// let request = AuthorizeRequest {
+///     scopes: "profile offline_access".parse()?,
+///     max_age: Some(300),
+///     prompt: Some(Prompt::Login),
+///     ..AuthorizeRequest::default()
+/// };
+/// # Ok::<(), piquel_auth::protocol::oauth::InvalidScope>(())
+/// ```
 #[derive(Clone, Debug, Default)]
 pub struct AuthorizeRequest {
     /// Scopes to request besides `openid`.
@@ -217,10 +267,28 @@ macro_rules! credential {
 
 credential!(
     /// An access token as issued, to send as a bearer credential.
+    ///
+    /// ```
+    /// use piquel_auth::BearerToken;
+    ///
+    /// let token = BearerToken::new("eyJ...".into());
+    /// assert_eq!(token.expose(), "eyJ...");
+    /// assert_eq!(format!("{token:?}"), "BearerToken(REDACTED)");
+    /// ```
     BearerToken
 );
 credential!(
     /// A refresh token. Keep it server-side: it must never reach a browser.
+    ///
+    /// ```
+    /// use piquel_auth::RefreshToken;
+    ///
+    /// let token = RefreshToken::new("prt_v1_example".into());
+    /// // Serializes as itself, for a server-side session store, and never prints.
+    /// assert_eq!(serde_json::to_string(&token)?, r#""prt_v1_example""#);
+    /// assert_eq!(format!("{token:?}"), "RefreshToken(REDACTED)");
+    /// # Ok::<(), serde_json::Error>(())
+    /// ```
     RefreshToken
 );
 
@@ -310,6 +378,19 @@ impl PendingLogin {
 }
 
 /// The query parameters of an authorization response.
+///
+/// ```
+/// use piquel_auth::CallbackParams;
+///
+/// let callback = CallbackParams::from_query(
+///     "code=pac_v1_abc&state=af0ifjsldkj&iss=https%3A%2F%2Fauth.piquel.fr",
+/// )
+/// .expect("no parameter repeats");
+/// assert_eq!(callback.iss.as_deref(), Some("https://auth.piquel.fr"));
+/// // The code is a credential until redeemed, so it is never printed.
+/// assert!(!format!("{callback:?}").contains("pac_v1_abc"));
+/// assert!(CallbackParams::from_query("state=a&state=b").is_none());
+/// ```
 #[derive(Clone, Default, Deserialize)]
 pub struct CallbackParams {
     /// The authorization code, on success.
@@ -322,6 +403,29 @@ pub struct CallbackParams {
     pub error: Option<String>,
     /// What went wrong, on failure.
     pub error_description: Option<String>,
+}
+
+impl CallbackParams {
+    /// Reads the parameters from a callback URL's query string. Returns `None` if a
+    /// parameter repeats, which RFC 6749 §3.1 forbids: treat that as a failed login.
+    #[must_use]
+    pub fn from_query(query: &str) -> Option<Self> {
+        let mut callback = Self::default();
+        for (name, value) in url::form_urlencoded::parse(query.as_bytes()) {
+            let field = match name.as_ref() {
+                "code" => &mut callback.code,
+                "state" => &mut callback.state,
+                "iss" => &mut callback.iss,
+                "error" => &mut callback.error,
+                "error_description" => &mut callback.error_description,
+                _ => continue,
+            };
+            if field.replace(value.into_owned()).is_some() {
+                return None;
+            }
+        }
+        Some(callback)
+    }
 }
 
 impl fmt::Debug for CallbackParams {
@@ -363,6 +467,35 @@ struct ClientInner {
 }
 
 /// Signs users in with one issuer as one client. Cheap to clone.
+///
+/// A whole login, from the redirect to the signed-in user:
+///
+/// ```no_run
+/// # async fn run(issuer: piquel_auth::Issuer, callback_query: &str) -> Result<(), Box<dyn std::error::Error>> {
+/// use piquel_auth::{AuthorizeRequest, CallbackParams, ClientConfig, ClientId, Credentials, PendingLogin};
+///
+/// let client = issuer.client(ClientConfig {
+///     client_id: ClientId::new("notes-web"),
+///     credentials: Credentials::Secret(std::env::var("NOTES_CLIENT_SECRET")?.into()),
+///     redirect_uri: "https://notes.piquel.fr/auth/callback".parse()?,
+/// });
+///
+/// // 1. Send the browser to `url`, and keep the pending login server-side under its
+/// //    state, never in the browser: it holds the PKCE verifier.
+/// let (url, pending) = client.authorize(&AuthorizeRequest {
+///     scopes: "profile offline_access".parse()?,
+///     ..AuthorizeRequest::default()
+/// })?;
+/// let saved = (pending.state().to_owned(), serde_json::to_string(&pending)?);
+///
+/// // 2. On the callback, take the pending login back, once, and complete it.
+/// let callback = CallbackParams::from_query(callback_query).ok_or("repeated parameter")?;
+/// let pending: PendingLogin = serde_json::from_str(&saved.1)?;
+/// let tokens = client.complete(pending, &callback).await?;
+/// let id_token = tokens.id_token.as_ref().expect("login always returns one");
+/// println!("signed in as {}", id_token.user_id()?);
+/// # Ok(()) }
+/// ```
 #[derive(Clone)]
 pub struct Client(Arc<ClientInner>);
 
@@ -498,6 +631,14 @@ impl Client {
     ///
     /// # Errors
     /// See [`OAuthError`].
+    ///
+    /// ```no_run
+    /// # async fn run(client: piquel_auth::Client, stored: piquel_auth::RefreshToken) -> Result<(), Box<dyn std::error::Error>> {
+    /// let tokens = client.refresh(&stored).await?;
+    /// // Store the rotated token in place of the old one, which auth now refuses.
+    /// let rotated = tokens.refresh_token.unwrap_or(stored);
+    /// # Ok(()) }
+    /// ```
     pub async fn refresh(&self, refresh: &RefreshToken) -> Result<Tokens, OAuthError> {
         let response = self
             .token_request(&[
@@ -512,6 +653,12 @@ impl Client {
     ///
     /// # Errors
     /// See [`OAuthError`].
+    ///
+    /// ```no_run
+    /// # async fn run(client: piquel_auth::Client, refresh: piquel_auth::RefreshToken) -> Result<(), piquel_auth::OAuthError> {
+    /// client.revoke(&refresh).await?;
+    /// # Ok(()) }
+    /// ```
     pub async fn revoke(&self, refresh: &RefreshToken) -> Result<(), OAuthError> {
         let url = &self.issuer().metadata().revocation_endpoint;
         let reply = self.post(url, &[("token", refresh.expose())]).await?;
@@ -522,6 +669,13 @@ impl Client {
     ///
     /// # Errors
     /// See [`OAuthError`].
+    ///
+    /// ```no_run
+    /// # async fn run(client: piquel_auth::Client, tokens: piquel_auth::Tokens) -> Result<(), piquel_auth::OAuthError> {
+    /// let user = client.userinfo(&tokens.access_token).await?;
+    /// println!("{} <{:?}>", user.sub, user.profile.email);
+    /// # Ok(()) }
+    /// ```
     pub async fn userinfo(&self, access: &BearerToken) -> Result<UserInfo, OAuthError> {
         let url = &self.issuer().metadata().userinfo_endpoint;
         let reply = self
@@ -534,6 +688,14 @@ impl Client {
 
     /// The RP-initiated logout URL: auth ends the browser session, then sends the
     /// browser to `post_logout`, which must be registered for this client.
+    ///
+    /// ```no_run
+    /// # fn run(client: piquel_auth::Client, id_token: piquel_auth::IdToken) -> Result<(), url::ParseError> {
+    /// // Redirect the browser here once the app's own session is gone.
+    /// let after: url::Url = "https://notes.piquel.fr/".parse()?;
+    /// let logout = client.logout_url(&id_token, &after);
+    /// # Ok(()) }
+    /// ```
     #[must_use]
     pub fn logout_url(&self, id_token: &IdToken, post_logout: &Url) -> Url {
         let mut url = self.issuer().metadata().end_session_endpoint.clone();

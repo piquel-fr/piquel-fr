@@ -12,6 +12,28 @@ pub trait Scope: Copy + Default + Send + Sync + 'static {
 /// Scopes a token must hold. Implemented by every [`Scope`], by tuples of scope sets
 /// such as `(notes::Read, notes::Write)`, by each [`scopes!`](crate::scopes) module's
 /// `All`, and by [`Scopes`], which requires nothing and keeps the granted list.
+///
+/// ```
+/// use piquel_auth::{ScopeSet, Scopes};
+///
+/// piquel_auth::scopes! {
+///     /// Scopes of the notes API.
+///     pub mod notes {
+///         Read = "notes:read",
+///         Write = "notes:write",
+///     }
+/// }
+///
+/// let granted: Scopes = "openid notes:read notes:write".parse()?;
+/// // Proofs: a marker, a tuple, the whole module, or the granted list itself.
+/// assert!(notes::Read::from_granted(&granted).is_some());
+/// assert!(<(notes::Read, notes::Write)>::from_granted(&granted).is_some());
+/// assert!(notes::All::from_granted(&granted).is_some());
+/// assert_eq!(Scopes::from_granted(&granted), Some(granted.clone()));
+/// // What a challenge names when the scopes are missing.
+/// assert_eq!(<(notes::Write, notes::Read)>::required().to_string(), "notes:read notes:write");
+/// # Ok::<(), piquel_auth::protocol::oauth::InvalidScope>(())
+/// ```
 pub trait ScopeSet: Sized + Send + Sync + 'static {
     /// Appends the names of every required scope to `names`.
     fn collect(names: &mut Vec<&'static str>);
