@@ -161,22 +161,23 @@ impl FederationApplication {
             .iter()
             .map(|(&provider, config)| config.resolve(provider).map(|config| (provider, config)))
             .collect::<Result<_, _>>()?;
+        let client = reqwest::Client::builder()
+            .timeout(HTTP_TIMEOUT)
+            .connect_timeout(HTTP_CONNECT_TIMEOUT)
+            .redirect(reqwest::redirect::Policy::none())
+            .user_agent(HTTP_USER_AGENT)
+            .build()
+            .map_err(FederationConfigError::Http)?;
         Ok(Self {
             database,
             origin: config.origin.clone(),
             providers: Arc::new(providers),
             endpoints: Provider::ALL
                 .into_iter()
-                .map(|provider| (provider, ProviderEndpoints::new(provider)))
-                .collect(),
+                .map(|provider| Ok((provider, ProviderEndpoints::new(provider, &client)?)))
+                .collect::<Result<_, FederationConfigError>>()?,
             frontends: config.frontends.clone(),
-            client: reqwest::Client::builder()
-                .timeout(HTTP_TIMEOUT)
-                .connect_timeout(HTTP_CONNECT_TIMEOUT)
-                .redirect(reqwest::redirect::Policy::none())
-                .user_agent(HTTP_USER_AGENT)
-                .build()
-                .map_err(FederationConfigError::Http)?,
+            client,
         })
     }
 
