@@ -23,13 +23,14 @@ sources. Client provisioning validates fields and allowlists through
 `ClientConfigurationError` before writing any SQL.
 
 Each repository has its own module under `src/repositories/` (`users`, `emails`,
-`sessions`, `audit`, `passkeys`, `oidc`, `tokens`, `federation`, `security`),
-holding its methods and the records they take and return. `repositories/mod.rs`
-holds only shared plumbing: the executor, the `repositories!` macro that declares
-every handle and its accessors on both `Database` and `DatabaseTransaction`, the
-`run!` query macro and the column types that queries decode into.
-`run!(self, fetch_one, query)` (or `execute`, `fetch_optional`, `fetch_all`)
-dispatches to the pool or transaction and converts SQLx errors once. Dropping an
+`sessions`, `audit`, `passkeys`, `oidc`, `tokens`, `federation`, `security`,
+`maintenance`), holding its methods and the records they take and return.
+`repositories/mod.rs` holds only shared plumbing: the executor, the
+`repositories!` macro that declares every handle and its accessors on `Database`,
+`DatabaseTransaction` and `ExclusiveConnection`, the `run!` query macro and the
+column types that queries decode into. `run!(self, fetch_one, query)` (or
+`execute`, `fetch_optional`, `fetch_all`) dispatches to the pool or the bound
+connection and converts SQLx errors once. Dropping an
 unfinished `DatabaseTransaction` rolls it back.
 
 Every query is a checked SQLx macro: `query!`, `query_as!` or `query_scalar!`.
