@@ -1,7 +1,7 @@
 //! Transactional refresh-token families, rotation and replay revocation.
 
 use super::{RepositoryExecutor, TokenRepository};
-use crate::DatabaseError;
+use crate::{DatabaseError, SessionAuthentication};
 use chrono::{DateTime, Utc};
 use piquel_auth_protocol::{SessionId, TokenId, UserId};
 use sqlx::types::Json;
@@ -25,6 +25,9 @@ pub struct InsertRefreshFamily {
     pub audience: String,
     /// Granted scopes.
     pub scopes: Vec<String>,
+    /// How the session had authenticated when the code was issued. Every token
+    /// of the family reports it (OIDC Core §12.2).
+    pub authentication: SessionAuthentication,
 }
 
 /// A new refresh token within a family.
@@ -56,6 +59,8 @@ pub struct RotatedRefreshToken {
     pub audience: String,
     /// Granted scopes.
     pub scopes: Vec<String>,
+    /// How the session had authenticated when the grant's code was issued.
+    pub authentication: SessionAuthentication,
 }
 
 /// Why a refresh token could not be rotated.
@@ -98,8 +103,9 @@ impl TokenRepository<'_> {
             execute,
             sqlx::query!(
                 "INSERT INTO refresh_token_families (
-                    id, user_id, client_id, session_id, authorization_code_id, audience, scopes
-                ) VALUES ($1, $2, $3, $4, $5, $6, $7)",
+                    id, user_id, client_id, session_id, authorization_code_id, audience, scopes,
+                    authentication
+                ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)",
                 family.id.as_uuid(),
                 family.user_id.as_uuid(),
                 family.client_id,
@@ -107,6 +113,7 @@ impl TokenRepository<'_> {
                 family.authorization_code_id.as_uuid(),
                 family.audience,
                 Json(&family.scopes) as _,
+                Json(&family.authentication) as _,
             )
         )?;
         self.insert_token(token).await
@@ -256,6 +263,16 @@ impl TokenRepository<'_> {
         digest: &[u8],
         client: &str,
     ) -> Result<RotatedRefreshToken, RefreshRotationError> {
+        /// Decodes a JSONB column of the grant, naming it if invalid.
+        fn decode<T: serde::de::DeserializeOwned>(
+            column: &str,
+            value: serde_json::Value,
+        ) -> Result<T, DatabaseError> {
+            serde_json::from_value(value).map_err(|source| DatabaseError::InvalidStoredData {
+                column: column.into(),
+                source: source.into(),
+            })
+        }
         self.lock_rotation(id, digest, client).await?;
         let row = run!(
             self,
@@ -265,7 +282,7 @@ impl TokenRepository<'_> {
                     t.family_id AS "family_id: TokenId", t.consumed_at,
                     f.user_id AS "user_id: UserId", f.client_id,
                     f.session_id AS "session_id: SessionId", f.audience, f.scopes,
-                    c.allow_refresh, c.allowed_scopes, c.allowed_audiences
+                    f.authentication, c.allow_refresh, c.allowed_scopes, c.allowed_audiences
                 FROM refresh_tokens t
                 JOIN refresh_token_families f ON f.id = t.family_id
                 JOIN oidc_clients c ON c.id = f.client_id
@@ -295,14 +312,7 @@ impl TokenRepository<'_> {
         }
         // The grant's JSON is decoded only after the replay check, so a replayed
         // token revokes its family even if that JSON is invalid.
-        let strings = |column: &str, value| {
-            serde_json::from_value::<Vec<String>>(value).map_err(|source| {
-                DatabaseError::InvalidStoredData {
-                    column: column.into(),
-                    source: source.into(),
-                }
-            })
-        };
+        let strings = decode::<Vec<String>>;
         let scopes = strings("scopes", row.scopes)?;
         let allowed_scopes = strings("allowed_scopes", row.allowed_scopes)?;
         let policy_valid = row.allow_refresh
@@ -332,6 +342,7 @@ impl TokenRepository<'_> {
             session_id: row.session_id,
             audience: row.audience,
             scopes,
+            authentication: decode("authentication", row.authentication)?,
         })
     }
 

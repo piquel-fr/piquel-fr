@@ -32,6 +32,8 @@
   let friendlyName = $state('My passkey');
   let invitation = $state('');
   let transaction = $state('');
+  // The authorization asked for phishing-resistant sign-in, which only a passkey gives.
+  let passkeyOnly = $state(false);
   let returnTo = $state('');
   let busy = $state(false);
   let error = $state('');
@@ -63,7 +65,10 @@
       error = 'Social sign-in was cancelled. You can try again or use a passkey.';
     if (query.get('error') === 'social_failed')
       error = 'Social sign-in could not be verified. Please try again or use a passkey.';
+    if (query.get('error') === 'passkey_required')
+      error = 'You last confirmed this session with a passkey. Use your passkey to sign in again.';
     transaction = query.get('transaction') ?? '';
+    passkeyOnly = query.get('acr') === 'phr';
     invitation =
       query.get('invitation') ??
       query.get('invite') ??
@@ -218,6 +223,7 @@
       Save another passkey with your device or password manager. You may need to verify an existing
       passkey first.
     </p>
+  {:else if passkeyOnly}<p>This app asks you to sign in with a passkey.</p>
   {:else}<p>Sign in with a passkey, or use a linked social account.</p>{/if}
   {#if error}<p class="notice error" role="alert">{error}</p>{/if}
   {#if !ready && !error}<p role="status">Loading your sign-in options…</p>{/if}
@@ -295,7 +301,7 @@
           Passkeys need a supported browser and a secure connection. Open this page in Safari,
           Chrome, or another browser with passkey support.
         </p>{/if}
-      {#if !registration && !security && !linking}
+      {#if !registration && !security && !linking && !passkeyOnly}
         {#if config.providers.length}<div class="divider">or continue with</div>{/if}
         {#each config.providers as provider (provider)}<button
             class="secondary full"
@@ -317,13 +323,13 @@
       {#if security}<a href={safeDestination(returnTo, config)}>Go back</a>
       {:else if registration}<p class="help">
           Already have an account? <a
-            href={`/login?${new URLSearchParams({ ...(transaction ? { transaction } : {}), ...(returnTo ? { return_to: returnTo } : {}) })}`}
+            href={`/login?${new URLSearchParams({ ...(transaction ? { transaction } : {}), ...(passkeyOnly ? { acr: 'phr' } : {}), ...(returnTo ? { return_to: returnTo } : {}) })}`}
             >Sign in</a
           >
         </p>
       {:else if !linking}<p class="help">
           New to Piquel? <a
-            href={`/register?${new URLSearchParams({ ...(invitation ? { invitation } : {}), ...(transaction ? { transaction } : {}), ...(returnTo ? { return_to: returnTo } : {}) })}`}
+            href={`/register?${new URLSearchParams({ ...(invitation ? { invitation } : {}), ...(transaction ? { transaction } : {}), ...(passkeyOnly ? { acr: 'phr' } : {}), ...(returnTo ? { return_to: returnTo } : {}) })}`}
             >Create an account</a
           >
         </p>{/if}

@@ -29,7 +29,7 @@ pub use repositories::{
         OidcRedirectKind, StoredAuthorizationRequest, StoredOidcClient,
     },
     passkeys::{CeremonyKind, ConsumedCeremony, InsertCeremony, InsertPasskey, StoredPasskey},
-    sessions::{InsertSession, StoredSession},
+    sessions::{InsertSession, SessionAuthentication, StoredSession},
     tokens::{InsertRefreshFamily, InsertRefreshToken, RefreshRotationError, RotatedRefreshToken},
     users::{InsertUser, StoredUser},
 };

@@ -24,10 +24,12 @@ piquel_common::str_enum! {
         ExpiresAt = "exp",
         /// Browser session that authorized the grant.
         Session = "sid",
-        /// When the browser session signed in.
+        /// When the browser session last authenticated at its `acr`.
         AuthTime = "auth_time",
-        /// How the browser session signed in.
+        /// How the browser session authenticated (RFC 8176 values).
         Methods = "amr",
+        /// Authentication context class the browser session reached.
+        AuthenticationClass = "acr",
         /// Display name, with the profile scope.
         Name = "name",
         /// Username, with the profile scope.

@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "UPDATE authorization_requests r\n                SET consumed_at = now()\n                FROM oidc_clients c\n                WHERE r.id = $1\n                AND r.secret_digest = $2\n                AND r.consumed_at IS NULL\n                AND r.expires_at > now()\n                AND c.id = r.client_id\n                AND c.enabled\n                AND c.allowed_scopes @> r.scopes\n                AND c.allowed_audiences ? r.audience\n                AND EXISTS (\n                    SELECT 1\n                    FROM oidc_redirect_uris d\n                    WHERE d.client_id = c.id\n                    AND d.kind = 'authorization'\n                    AND d.uri = r.redirect_uri\n                )\n                RETURNING\n                    r.id AS \"id: TokenId\", r.client_id, c.display_name AS client_display_name,\n                    r.redirect_uri, r.client_state, r.nonce, r.pkce_challenge,\n                    r.scopes AS \"scopes: JsonArray<String>\", r.audience, r.force_login,\n                    r.force_consent, r.max_age, r.hinted_user_id AS \"hinted_user_id: UserId\",\n                    r.created_at",
+  "query": "UPDATE authorization_requests r\n                SET consumed_at = now()\n                FROM oidc_clients c\n                WHERE r.id = $1\n                AND r.secret_digest = $2\n                AND r.consumed_at IS NULL\n                AND r.expires_at > now()\n                AND c.id = r.client_id\n                AND c.enabled\n                AND c.allowed_scopes @> r.scopes\n                AND c.allowed_audiences ? r.audience\n                AND EXISTS (\n                    SELECT 1\n                    FROM oidc_redirect_uris d\n                    WHERE d.client_id = c.id\n                    AND d.kind = 'authorization'\n                    AND d.uri = r.redirect_uri\n                )\n                RETURNING\n                    r.id AS \"id: TokenId\", r.client_id, c.display_name AS client_display_name,\n                    r.redirect_uri, r.client_state, r.nonce, r.pkce_challenge,\n                    r.scopes AS \"scopes: JsonArray<String>\", r.audience, r.force_login,\n                    r.force_consent, r.max_age, r.hinted_user_id AS \"hinted_user_id: UserId\",\n                    r.target_acr AS \"target_acr: Acr\", r.created_at",
   "describe": {
     "columns": [
       {
@@ -70,6 +70,11 @@
       },
       {
         "ordinal": 13,
+        "name": "target_acr: Acr",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 14,
         "name": "created_at",
         "type_info": "Timestamptz"
       }
@@ -94,8 +99,9 @@
       false,
       true,
       true,
+      true,
       false
     ]
   },
-  "hash": "c333c0a5c622e15adbeace3cfa132ff096c456aad84ca5f6e35fc2714bd860c3"
+  "hash": "22505ec16a2ef1f061fa678e8badce428654a606a34116c3e53cb94696a6c2e9"
 }

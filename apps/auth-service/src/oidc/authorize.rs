@@ -16,9 +16,10 @@ use axum::{
     response::Redirect,
 };
 use chrono::{DateTime, Duration, Utc};
-use piquel_auth_protocol::UserId;
+use piquel_auth_protocol::{UserId, claims::Acr};
 use piquel_repository::{
-    InsertAuthorizationCode, InsertAuthorizationRequest, StoredAuthorizationRequest, StoredSession,
+    InsertAuthorizationCode, InsertAuthorizationRequest, SessionAuthentication,
+    StoredAuthorizationRequest, StoredSession,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
@@ -56,6 +57,8 @@ pub(super) struct AuthorizeQuery {
     prompt: Option<String>,
     /// Maximum seconds since sign-in; zero forces a fresh sign-in.
     max_age: Option<i64>,
+    /// Space-separated [`Acr`] values, most preferred first; unknown ones are ignored.
+    acr_values: Option<String>,
     /// Previously issued ID token naming the expected account.
     id_token_hint: Option<String>,
     /// Signed request object; rejected as unsupported.
@@ -269,6 +272,7 @@ impl OidcApplication {
                 back(OAuthCode::InvalidTarget.reject("audience is not registered for this client"))
             })?;
         let prompts = q.prompts().map_err(back)?;
+        let target_acr = q.acr_values.as_deref().and_then(Acr::select);
         let session = Session::optional(&app.database, &headers).await?;
         let requires_login = session.as_ref().is_none_or(|session| {
             !Self::session_satisfies(
@@ -276,6 +280,7 @@ impl OidcApplication {
                 prompts.force_login,
                 q.max_age,
                 hinted_user_id,
+                target_acr,
                 None,
             )
         });
@@ -300,11 +305,12 @@ impl OidcApplication {
                 force_login: prompts.force_login,
                 max_age: q.max_age,
                 hinted_user_id,
+                target_acr,
                 expires_at: Utc::now() + Duration::minutes(AUTHORIZATION_REQUEST_MINUTES),
             })
             .await?;
         if requires_login {
-            return Ok(app.continuation_page(routes::page::LOGIN, &transaction));
+            return Ok(app.continuation_page(routes::page::LOGIN, &transaction, target_acr));
         }
         app.continue_authorization(&headers, transaction, prompts.silent)
             .await
@@ -423,6 +429,7 @@ impl OidcApplication {
                         nonce: request.nonce,
                         scopes: request.scopes,
                         audience: request.audience,
+                        authentication: SessionAuthentication::from(&session),
                         expires_at: Utc::now() + Duration::minutes(AUTHORIZATION_CODE_MINUTES),
                     })
                     .await?;
@@ -457,6 +464,7 @@ impl OidcApplication {
             request.force_login,
             request.max_age,
             request.hinted_user_id,
+            request.target_acr,
             Some(request.created_at),
         ) {
             Ok(())
@@ -468,34 +476,50 @@ impl OidcApplication {
     }
 
     /// Whether a session meets an authorization's sign-in requirements: the hinted
-    /// account, `max_age`, and a fresh sign-in for `prompt=login` or `max_age=0`.
-    /// Only signing in after the request was stored (`created_at`) counts as fresh.
+    /// account, the target `acr`, `max_age`, and a fresh authentication for
+    /// `prompt=login` or `max_age=0`. Ages count from the session's `auth_time`, and
+    /// only authenticating after the request was stored (`created_at`) counts as fresh.
     fn session_satisfies(
         session: &StoredSession,
         force_login: bool,
         max_age: Option<i64>,
         hinted_user_id: Option<UserId>,
+        target_acr: Option<Acr>,
         created_at: Option<DateTime<Utc>>,
     ) -> bool {
-        let fresh = created_at.is_some_and(|created_at| session.authenticated_at >= created_at);
+        let authentication = SessionAuthentication::from(session);
+        let fresh = created_at.is_some_and(|created_at| authentication.auth_time >= created_at);
         let within_max_age = max_age.is_none_or(|age| {
             if age == 0 {
                 return fresh;
             }
             age >= 0
                 && Utc::now()
-                    .signed_duration_since(session.authenticated_at)
+                    .signed_duration_since(authentication.auth_time)
                     .num_seconds()
                     <= age
         });
         (fresh || !force_login)
             && within_max_age
+            && target_acr.is_none_or(|target| authentication.acr.satisfies(target))
             && hinted_user_id.is_none_or(|subject| subject == session.user_id)
     }
 
     /// Redirects to an auth frontend page, passing the pending authorization along.
-    fn continuation_page(&self, page: &str, transaction: &str) -> Redirect {
-        Redirect::to(&format!("{}{page}?transaction={transaction}", self.issuer))
+    /// A target `acr` is named too, so the login page offers only methods reaching it.
+    fn continuation_page(
+        &self,
+        page: &str,
+        transaction: &str,
+        target_acr: Option<Acr>,
+    ) -> Redirect {
+        let target = target_acr
+            .map(|acr| format!("&acr={acr}"))
+            .unwrap_or_default();
+        Redirect::to(&format!(
+            "{}{page}?transaction={transaction}{target}",
+            self.issuer
+        ))
     }
 
     /// Sends the browser on from a stored authorization: to login if the session falls
@@ -519,7 +543,11 @@ impl OidcApplication {
             if silent {
                 return Err(back(OAuthCode::LoginRequired, SILENT_LOGIN_REQUIRED));
             }
-            return Ok(self.continuation_page(routes::page::LOGIN, &transaction));
+            return Ok(self.continuation_page(
+                routes::page::LOGIN,
+                &transaction,
+                request.target_acr,
+            ));
         };
         if self.can_authorize(&request, &session).await? {
             let input = AuthorizationDecision {
@@ -535,7 +563,7 @@ impl OidcApplication {
                 "prompt=none was requested, but the user must consent first",
             ));
         }
-        Ok(self.continuation_page(routes::page::CONSENT, &transaction))
+        Ok(self.continuation_page(routes::page::CONSENT, &transaction, None))
     }
 
     /// Whether the authorization may skip the consent page: the client is trusted or

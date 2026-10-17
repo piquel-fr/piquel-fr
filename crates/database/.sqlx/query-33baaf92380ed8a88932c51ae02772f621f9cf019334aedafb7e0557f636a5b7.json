@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE browser_session_secrets SET secret_digest = $2 WHERE session_id = $1",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Bytea"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "33baaf92380ed8a88932c51ae02772f621f9cf019334aedafb7e0557f636a5b7"
+}

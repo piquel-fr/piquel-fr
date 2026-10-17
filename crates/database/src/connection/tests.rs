@@ -179,13 +179,14 @@ async fn cleanup_keeps_redeemed_codes_while_their_session_is_live() {
         ), redeemed AS (
             INSERT INTO authorization_codes (
                 id, secret_digest, client_id, user_id, session_id, redirect_uri,
-                pkce_challenge, scopes, audience, expires_at, consumed_at
+                pkce_challenge, scopes, audience, expires_at, consumed_at, authentication
             ) VALUES ($3, convert_to($3::text, 'UTF8'), $5, $1, $2, 'https://client.example',
-                'challenge', '[]', 'test', now() - interval '2 days', now() - interval '2 days')
+                'challenge', '[]', 'test', now() - interval '2 days', now() - interval '2 days', '{}')
         )
         INSERT INTO refresh_token_families (
-            id, user_id, client_id, session_id, authorization_code_id, audience, scopes
-        ) VALUES ($4, $1, $5, $2, $3, 'test', '[]')",
+            id, user_id, client_id, session_id, authorization_code_id, audience, scopes,
+            authentication
+        ) VALUES ($4, $1, $5, $2, $3, 'test', '[]', '{}')",
     )
     .bind(user)
     .bind(session)

@@ -57,6 +57,9 @@ piquel_common::str_enum! {
         Cancelled = "social_cancelled",
         /// The returned authorization could not be verified.
         Failed = "social_failed",
+        /// The browser's session was confirmed with a passkey, which social sign-in
+        /// cannot re-authenticate.
+        PasskeyRequired = "passkey_required",
     }
 }
 piquel_common::str_enum! {
@@ -389,12 +392,14 @@ impl FederationApplication {
                 )
                 .await;
         }
-        self.finish_login(provider, identity, flow.return_to).await
+        self.finish_login(headers, provider, identity, flow.return_to)
+            .await
     }
 
     /// Logs in a known subject or retains verified evidence for explicit onboarding/linking.
     async fn finish_login(
         &self,
+        headers: &HeaderMap,
         provider: Provider,
         identity: VerifiedIdentity,
         return_to: String,
@@ -425,12 +430,20 @@ impl FederationApplication {
             {
                 return Err(FederationError::LinkedAccountUnavailable);
             }
-            let session = security::Session::create(
+            let session = match security::Session::sign_in(
                 &mut tx,
+                headers,
                 existing.user_id,
                 AuthenticationMethod::Federation,
             )
-            .await?;
+            .await
+            {
+                Ok(session) => session,
+                Err(SessionError::PasskeyRequired) => {
+                    return self.failed_callback(CallbackError::PasskeyRequired, &return_to);
+                }
+                Err(error) => return Err(error.into()),
+            };
             tx.federation().record_login(existing.id).await?;
             tx.audit_events()
                 .record(

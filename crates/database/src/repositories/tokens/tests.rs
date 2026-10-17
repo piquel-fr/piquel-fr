@@ -3,9 +3,12 @@ use crate::Database;
 
 use super::{InsertRefreshFamily, InsertRefreshToken, RefreshRotationError};
 use crate::repositories::{OidcRepository, TokenRepository};
-use crate::{CodeRedemptionError, DatabaseTransaction};
+use crate::{CodeRedemptionError, DatabaseTransaction, SessionAuthentication};
 use chrono::{Duration, Utc};
-use piquel_auth_protocol::{SessionId, TokenId, UserId};
+use piquel_auth_protocol::{
+    SessionId, TokenId, UserId,
+    claims::{Acr, Amr},
+};
 use sqlx::{PgConnection, PgPool};
 use std::time::Duration as Wait;
 
@@ -33,6 +36,15 @@ async fn client(pool: &PgPool) -> String {
     .await
     .expect("redirect");
     client
+}
+
+/// Authentication recorded on every fixture grant.
+fn authentication() -> SessionAuthentication {
+    SessionAuthentication {
+        acr: Acr::PhishingResistant,
+        auth_time: Utc::now(),
+        amr: vec![Amr::Pop],
+    }
 }
 
 /// Returns the server process of a connection, to observe its lock waits.
@@ -110,9 +122,9 @@ impl Grant {
         sqlx::query(
             "INSERT INTO authorization_codes (
                 id, secret_digest, client_id, user_id, session_id, redirect_uri,
-                pkce_challenge, scopes, audience, expires_at
+                pkce_challenge, scopes, audience, expires_at, authentication
             ) VALUES ($1, $2, $3, $4, $5, $6, 'challenge', '[\"openid\"]', 'test',
-                now() + interval '1 minute')",
+                now() + interval '1 minute', $7)",
         )
         .bind(grant.code.as_uuid())
         .bind(&grant.code_digest)
@@ -120,6 +132,7 @@ impl Grant {
         .bind(grant.user.as_uuid())
         .bind(grant.session.as_uuid())
         .bind(REDIRECT_URI)
+        .bind(sqlx::types::Json(authentication()))
         .execute(&mut *tx)
         .await
         .expect("code");
@@ -143,6 +156,7 @@ impl Grant {
                     authorization_code_id: self.code,
                     audience: "test".into(),
                     scopes: vec!["openid".into()],
+                    authentication: authentication(),
                 },
                 &InsertRefreshToken {
                     id: token,

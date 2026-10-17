@@ -1,5 +1,7 @@
 //! Stable, framework-independent values shared by authentication participants.
 
+/// Values of the authentication claims tokens report: `acr` and `amr`.
+pub mod claims;
 /// JWT claim and JOSE field vocabulary shared by token issuers and verifiers.
 pub mod jwt;
 /// Authorization server metadata, as published at both well-known discovery paths.
@@ -162,6 +164,18 @@ pub enum AuthenticationMethod {
     Passkey,
     /// An approved external identity provider authenticated the user.
     Federation,
+}
+
+impl AuthenticationMethod {
+    /// The `amr` values (RFC 8176) this method stands for. A passkey requires user
+    /// verification, so it proves possession and the user's presence: two factors.
+    #[must_use]
+    pub const fn amr(self) -> &'static [claims::Amr] {
+        match self {
+            Self::Passkey => &[claims::Amr::Pop, claims::Amr::Mfa, claims::Amr::User],
+            Self::Federation => &[claims::Amr::Fed],
+        }
+    }
 }
 
 #[cfg(test)]

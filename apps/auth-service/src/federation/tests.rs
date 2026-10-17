@@ -138,6 +138,10 @@ impl TestApp {
     }
     /// Runs a complete GitHub authorization start and bound callback.
     async fn callback(&self) -> Response {
+        self.callback_from(None).await
+    }
+    /// Runs [`Self::callback`] in a browser that may hold a `session` cookie pair.
+    async fn callback_from(&self, session: Option<&str>) -> Response {
         let router = self.app.clone().routes();
         let response = router
             .clone()
@@ -149,13 +153,16 @@ impl TestApp {
             ))
             .await
             .expect("start");
-        let cookie = response.headers()[header::SET_COOKIE]
+        let mut cookie = response.headers()[header::SET_COOKIE]
             .to_str()
             .expect("cookie")
             .split(';')
             .next()
             .expect("pair")
             .to_owned();
+        if let Some(session) = session {
+            cookie = format!("{cookie}; {session}");
+        }
         let body = TestApp::json(response).await;
         let url = Url::parse(body["redirect_url"].as_str().expect("redirect")).expect("url");
         let state = url
@@ -278,6 +285,33 @@ impl TestApp {
                 .expect("confirm");
         }
         (session.id, raw)
+    }
+    /// Links this fixture's provider subject to `user_id`.
+    async fn link(&self, user_id: UserId) {
+        self.app
+            .database
+            .federation()
+            .insert_identity(&InsertExternalIdentity {
+                id: TokenId::new(),
+                user_id,
+                provider: piquel_auth_protocol::Provider::GitHub,
+                issuer: ProviderEndpoints::new(Provider::GitHub).issuer.into(),
+                subject: self.subject.clone(),
+                linked_email: None,
+            })
+            .await
+            .expect("known identity");
+    }
+    /// Finds the active session a cookie pair names.
+    async fn active(&self, cookie: &str) -> Option<StoredSession> {
+        let mut headers = HeaderMap::new();
+        headers.insert(
+            header::COOKIE,
+            HeaderValue::from_str(cookie).expect("cookie"),
+        );
+        security::Session::optional(&self.app.database, &headers)
+            .await
+            .expect("session lookup")
     }
     /// Borrows Google's replaceable verification facts from the fixture.
     fn google_protocol(&self) -> &GoogleProtocol {
@@ -1199,4 +1233,76 @@ async fn failed_provider_preserves_stored_continuation_and_consumes_state() {
             .expect("replay");
         assert_eq!(response.status(), StatusCode::BAD_REQUEST);
     }
+}
+
+/// Social sign-in re-authenticates the browser's own unconfirmed session in place,
+/// refuses to re-authenticate one a passkey confirmed, and replaces another
+/// account's session.
+#[tokio::test]
+#[ignore = "requires TEST_DATABASE_URL"]
+async fn social_sign_in_reauthenticates_only_unconfirmed_sessions() {
+    let test = TestApp::new().await;
+    let owner = test.user(None, true).await;
+    test.link(owner).await;
+    let session_cookie = |response: &Response| {
+        response
+            .headers()
+            .get_all(header::SET_COOKIE)
+            .iter()
+            .map(|value| value.to_str().expect("cookie"))
+            .find(|cookie| cookie.starts_with(BrowserCookie::Session.as_str()))
+            .expect("session cookie")
+            .split(';')
+            .next()
+            .expect("cookie pair")
+            .to_owned()
+    };
+
+    let (social, cookie) = test.session(owner, false).await;
+    let before = test.active(&cookie).await.expect("social session");
+    let response = test.callback_from(Some(&cookie)).await;
+    assert_eq!(response.status(), StatusCode::SEE_OTHER);
+    let renewed = test
+        .active(&session_cookie(&response))
+        .await
+        .expect("renewed session");
+    assert_eq!(renewed.id, social, "the session ID is kept");
+    assert!(renewed.authenticated_at > before.authenticated_at);
+    assert!(test.active(&cookie).await.is_none(), "old cookie ends");
+
+    let (confirmed, cookie) = test.session(owner, true).await;
+    let response = test.callback_from(Some(&cookie)).await;
+    assert_eq!(response.status(), StatusCode::SEE_OTHER);
+    assert!(
+        response.headers()[header::LOCATION]
+            .to_str()
+            .expect("location")
+            .contains("error=passkey_required")
+    );
+    assert_eq!(
+        test.active(&cookie).await.expect("untouched session").id,
+        confirmed
+    );
+
+    let other = test.user(None, true).await;
+    let (replaced, cookie) = test.session(other, false).await;
+    let response = test.callback_from(Some(&cookie)).await;
+    let session = test
+        .active(&session_cookie(&response))
+        .await
+        .expect("new session");
+    assert_eq!(session.user_id, owner);
+    assert_ne!(session.id, replaced);
+    assert!(
+        test.app
+            .database
+            .sessions()
+            .find_by_id(replaced)
+            .await
+            .expect("lookup")
+            .expect("session")
+            .revoked_at
+            .is_some(),
+        "the other account's session is revoked"
+    );
 }

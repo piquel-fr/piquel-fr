@@ -6,8 +6,11 @@ use axum::{
     http::{Method, Request},
 };
 use chrono::{Duration, Utc};
+use piquel_auth_protocol::claims::{Acr, Amr};
 use piquel_crypto::Secret;
-use piquel_repository::{AuditOutcome, DatabaseConfig, PendingFederation};
+use piquel_repository::{
+    AuditOutcome, DatabaseConfig, PendingFederation, SessionAuthentication, StoredSession,
+};
 use serde_json::json;
 use tower::ServiceExt;
 use url::Url;
@@ -251,6 +254,11 @@ impl Fixture {
     }
     /// Completes an identified login and returns the new session cookie.
     async fn login(&mut self) -> String {
+        self.login_from("").await
+    }
+    /// Completes an identified login in a browser holding the `session` cookie pair,
+    /// if any, and returns the session cookie it sets.
+    async fn login_from(&mut self, session: &str) -> String {
         let (started, browser) = self
             .start(
                 "/webauthn/authenticate/start",
@@ -263,12 +271,25 @@ impl Fixture {
             .request(
                 "/webauthn/authenticate/finish",
                 Method::POST,
-                &browser,
+                &format!("{session}; {browser}"),
                 json!({"ceremony_id":started["ceremony_id"],"credential":assertion}),
             )
             .await;
         assert_eq!(response.status(), StatusCode::NO_CONTENT);
         Self::cookie(&response)
+    }
+    /// Finds the active session a cookie pair names.
+    async fn session(&self, cookie: &str) -> Option<StoredSession> {
+        let secret = cookie
+            .split_once('=')
+            .and_then(|(_, value)| Secret::parse(value).ok())
+            .expect("session cookie");
+        self.app
+            .database
+            .sessions()
+            .find_active_by_browser_secret(secret.digest().as_bytes())
+            .await
+            .expect("session lookup")
     }
     /// Lists the seeded account's audit actions and outcomes, newest first.
     async fn audit(&self) -> Vec<(AuditAction, AuditOutcome)> {
@@ -603,6 +624,14 @@ async fn ceremonies_require_browser_binding_and_confirmation_belongs_to_one_sess
         )
         .await;
     assert_eq!(response.status(), StatusCode::NO_CONTENT);
+    // The confirmation replaces the cookie, so a copy of the old one gains nothing.
+    let stale = social;
+    let social = Fixture::cookie(&response);
+    assert!(fixture.session(&stale).await.is_none());
+    assert_eq!(
+        fixture.session(&social).await.expect("same session").id,
+        session_id
+    );
     assert_eq!(
         fixture.audit().await.first(),
         Some(&(AuditAction::SessionPasskeyConfirmed, AuditOutcome::Success))
@@ -775,4 +804,37 @@ async fn unknown_usernames_get_stable_decoys_that_fail_like_unregistered_passkey
     }
     assert_eq!(failures[0].0, StatusCode::BAD_REQUEST);
     assert_eq!(failures[0], failures[1]);
+}
+
+/// Signing in with a passkey in a browser holding a social session of the same
+/// account confirms that session, keeping its ID but replacing its cookie.
+#[tokio::test]
+#[ignore = "requires TEST_DATABASE_URL"]
+async fn passkey_sign_in_confirms_the_browsers_session() {
+    let mut fixture = Fixture::new().await;
+    let mut tx = fixture.app.database.begin().await.expect("transaction");
+    let secret =
+        security::Session::create(&mut tx, fixture.user_id, AuthenticationMethod::Federation)
+            .await
+            .expect("social session");
+    tx.commit().await.expect("commit");
+    let social = format!("{}={}", BrowserCookie::Session.as_str(), secret.encoded());
+    let before = fixture.session(&social).await.expect("social session");
+    assert_eq!(
+        SessionAuthentication::from(&before).acr,
+        Acr::Social,
+        "social sign-in is not phishing-resistant"
+    );
+    let cookie = fixture.login_from(&social).await;
+    assert!(fixture.session(&social).await.is_none(), "old cookie ends");
+    let after = fixture.session(&cookie).await.expect("same session");
+    assert_eq!(after.id, before.id);
+    let authentication = SessionAuthentication::from(&after);
+    assert_eq!(authentication.acr, Acr::PhishingResistant);
+    assert_eq!(
+        authentication.amr,
+        [Amr::Pop, Amr::Mfa, Amr::User, Amr::Fed],
+        "both methods are reported"
+    );
+    assert!(authentication.auth_time > before.authenticated_at);
 }

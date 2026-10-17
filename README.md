@@ -136,6 +136,33 @@ memory and use SSO again after reload. Refresh permission is off unless explicit
 enabled and `offline_access` is allowed/requested. Consent is remembered per user,
 client and scope; explicitly trusted clients bypass consent.
 
+### Authentication claims
+
+ID and access tokens report how the browser session behind the grant
+authenticated:
+
+| Claim | Values |
+| --- | --- |
+| `acr` | `phr` once a passkey signed in or confirmed the session: phishing-resistant multi-factor authentication ([OpenID Connect EAP ACR Values](https://openid.net/specs/openid-connect-eap-acr-values-1_0.html)). `urn:piquel:acr:social` for a session signed in with GitHub or Google only: the provider's authentication, whatever it was |
+| `amr` | Every method the session used (RFC 8176): `pop`, `mfa` and `user` for a passkey, which proves possession of a key and requires user verification; `fed` for a provider sign-in. RFC 8176 registers no value for federation, so `fed` is Piquel's own |
+| `auth_time` | The latest authentication at the session's `acr`: its last passkey confirmation, or else its sign-in |
+
+`phr` satisfies a `urn:piquel:acr:social` requirement, not the reverse. Both values
+are listed in discovery's `acr_values_supported`. An authorization request may send
+`acr_values` in order of preference: the first known value becomes its target, and
+unknown values are ignored. A session below the target signs in again, on a login
+page offering only passkeys for `phr`; with `prompt=none` the request fails with
+`login_required`. With no known value, the tokens report what the session reached.
+
+Signing in again (`prompt=login`, `max_age`, a target) re-authenticates the
+browser's session rather than starting another, so `sid` stays the same: a passkey
+confirms it, and a social sign-in renews it only before any passkey confirmation,
+since it would lower `acr`. Every re-authentication, including a passkey
+confirmation for a settings change, replaces the session cookie, so a copied cookie
+never gains the new authentication. Signing in as another account revokes the previous
+session. A refresh token keeps reporting the authentication of the code it came
+from, even after the session re-authenticates.
+
 ## Security behavior
 
 - Passkeys require user verification and prefer resident credentials. Synced
