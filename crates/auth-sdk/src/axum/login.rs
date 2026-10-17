@@ -8,7 +8,7 @@ use super::{
 };
 use crate::{
     Acr, AuthenticationPolicy, AuthorizeRequest, CallbackParams, Client, IdToken, Scopes,
-    TokenError, UserId,
+    StepUpRequirement, TokenError, UserId,
 };
 use axum::{
     Extension, Router,
@@ -17,6 +17,7 @@ use axum::{
     response::{IntoResponse, Redirect, Response},
     routing::{get, post},
 };
+use base64::{Engine, engine::general_purpose::URL_SAFE_NO_PAD};
 use chrono::{DateTime, TimeDelta, Utc};
 use serde::{Deserialize, Serialize};
 use std::{
@@ -34,6 +35,11 @@ use url::Url;
 const SESSION_COOKIE: &str = "__Host-piquel-session";
 /// Cookie holding the pending login's key while the browser is at auth.
 const LOGIN_COOKIE: &str = "__Host-piquel-login";
+/// Cookie naming, in base64url, the page a step-up login returns to, so that page's
+/// request is known to be the retry.
+const STEP_UP_COOKIE: &str = "__Host-piquel-step-up";
+/// How long the browser has to follow the redirect back after a step-up login.
+const STEP_UP_RETURN: TimeDelta = TimeDelta::minutes(1);
 /// How long a login may take at auth.
 const PENDING_LIFETIME: TimeDelta = TimeDelta::minutes(10);
 /// Default session lifetime.
@@ -270,9 +276,13 @@ struct StartQuery {
     /// Where to go once signed in.
     return_to: Option<String>,
     /// Longest acceptable time since the user authenticated, for step-up.
-    max_age: Option<u64>,
-    /// Required authentication context classes, for step-up.
+    max_age: Option<u32>,
+    /// Required authentication context class, for step-up.
     acr_values: Option<String>,
+    /// Whether the login steps up, even with no requirement to ask for, as a bare
+    /// `insufficient_user_authentication` challenge leaves it (RFC 9470 §4).
+    #[serde(default)]
+    step_up: bool,
 }
 
 impl Login {
@@ -311,19 +321,22 @@ impl Login {
         self.client.issuer().now()
     }
 
-    /// The login route's URL, returning to `return_to`, and asking for `step_up`.
-    fn login_url(&self, return_to: Option<&ReturnTo>, step_up: Option<&StepUp>) -> String {
+    /// The login route's URL, returning to `return_to`, and stepping up for
+    /// `step_up` when given.
+    fn login_url(
+        &self,
+        return_to: Option<&ReturnTo>,
+        step_up: Option<StepUpRequirement>,
+    ) -> String {
         let mut query = url::form_urlencoded::Serializer::new(String::new());
         if let Some(path) = return_to {
             query.append_pair("return_to", path.as_str());
         }
-        if let Some(step_up) = step_up {
-            if let Some(max_age) = step_up.max_age {
-                query.append_pair("max_age", &max_age.to_string());
+        if let Some(requirement) = step_up {
+            for (name, value) in requirement.authorize_params() {
+                query.append_pair(name, &value);
             }
-            if let Some(acr) = &step_up.acr {
-                query.append_pair("acr_values", acr.as_str());
-            }
+            query.append_pair("step_up", "true");
         }
         format!(
             "{}/login?{}",
@@ -338,15 +351,13 @@ impl Login {
             .return_to
             .and_then(|path| path.parse().ok())
             .unwrap_or_else(|| login.home.clone());
+        let step_up = StepUpRequirement {
+            acr: query.acr_values.as_deref().and_then(Acr::select),
+            max_age: query.max_age,
+        };
         let request = AuthorizeRequest {
             scopes: login.scopes.clone(),
-            max_age: query.max_age,
-            acr_values: query
-                .acr_values
-                .iter()
-                .flat_map(|values| values.split_ascii_whitespace())
-                .map(Acr::from)
-                .collect(),
+            step_up,
             ..AuthorizeRequest::default()
         };
         let (Ok((url, pending)), Ok(key)) =
@@ -358,6 +369,7 @@ impl Login {
         let pending = PendingAuthorization {
             login: pending,
             return_to,
+            step_up: query.step_up,
         };
         let expires = login.now() + PENDING_LIFETIME;
         if let Err(error) = login.sessions.insert_pending(&key, &pending, expires).await {
@@ -433,6 +445,18 @@ impl Login {
             header::SET_COOKIE,
             Self::set_cookie(LOGIN_COOKIE, "", TimeDelta::zero()),
         );
+        // A step-up marks its return; any other sign-in drops an unused marker, which
+        // belonged to the session this one replaces.
+        let marker = if pending.step_up {
+            Self::set_cookie(
+                STEP_UP_COOKIE,
+                &URL_SAFE_NO_PAD.encode(pending.return_to.as_str()),
+                STEP_UP_RETURN,
+            )
+        } else {
+            Self::set_cookie(STEP_UP_COOKIE, "", TimeDelta::zero())
+        };
+        cookies.append(header::SET_COOKIE, marker);
         response
     }
 
@@ -485,16 +509,23 @@ impl Login {
             }
         }
         let mut response = Redirect::to(&destination).into_response();
-        response.headers_mut().append(
-            header::SET_COOKIE,
-            Self::set_cookie(SESSION_COOKIE, "", TimeDelta::zero()),
-        );
+        for cookie in [SESSION_COOKIE, STEP_UP_COOKIE] {
+            response.headers_mut().append(
+                header::SET_COOKIE,
+                Self::set_cookie(cookie, "", TimeDelta::zero()),
+            );
+        }
         response
     }
 
     /// The signed-in session the request's cookie names, its access token refreshed
     /// when it is about to expire.
-    async fn session(&self, headers: &HeaderMap) -> Result<Option<SignedIn>, BackendError> {
+    /// `retry` marks a request returning from a step-up login.
+    async fn session(
+        &self,
+        headers: &HeaderMap,
+        retry: bool,
+    ) -> Result<Option<SignedIn>, BackendError> {
         let Some(key) = Self::cookie(headers, SESSION_COOKIE).and_then(SessionKey::parse) else {
             return Ok(None);
         };
@@ -511,6 +542,7 @@ impl Login {
         Ok(Some(SignedIn {
             login: current.login,
             checked_at: self.now(),
+            retry,
         }))
     }
 
@@ -663,7 +695,7 @@ impl Login {
     fn step_up(&self, response: Response, method: &Method, path: &str) -> Response {
         match response.extensions().get::<StepUp>() {
             Some(step_up) if method == Method::GET => {
-                Redirect::to(&self.login_url(path.parse().ok().as_ref(), Some(step_up)))
+                Redirect::to(&self.login_url(path.parse().ok().as_ref(), Some(step_up.requirement)))
                     .into_response()
             }
             _ => response,
@@ -732,10 +764,25 @@ where
             .uri()
             .path_and_query()
             .map_or_else(|| "/".to_owned(), ToString::to_string);
+        // The `GET` a step-up login returns to is its retry, and uses up the marker.
+        // Another tab loading the same page within the minute would use it instead.
+        let retry = method == Method::GET
+            && Login::cookie(request.headers(), STEP_UP_COOKIE)
+                .and_then(|page| URL_SAFE_NO_PAD.decode(page).ok())
+                .is_some_and(|page| page == path.as_bytes());
+        if retry {
+            request.extensions_mut().insert(StepUpRetry);
+        }
         request.extensions_mut().insert(login.clone());
         Box::pin(async move {
-            let response = inner.call(request).await?;
-            Ok(login.step_up(response, &method, &path))
+            let mut response = login.step_up(inner.call(request).await?, &method, &path);
+            if retry {
+                response.headers_mut().append(
+                    header::SET_COOKIE,
+                    Login::set_cookie(STEP_UP_COOKIE, "", TimeDelta::zero()),
+                );
+            }
+            Ok(response)
         })
     }
 }
@@ -756,7 +803,13 @@ pub struct SignedIn {
     login: StoredLogin,
     /// When the session was read, by the issuer's clock.
     checked_at: DateTime<Utc>,
+    /// Whether the request returns from a step-up login, so it is the retry.
+    retry: bool,
 }
+
+/// Marks a request returning from a step-up login.
+#[derive(Clone, Copy)]
+struct StepUpRetry;
 
 impl SignedIn {
     /// The user's name: the display name, else the username, else the account ID.
@@ -795,11 +848,16 @@ impl SignedIn {
     /// user through login again and back to the same page.
     ///
     /// ```no_run
-    /// use piquel_auth::{Acr, AuthenticationPolicy, axum::{SignedIn, StepUp}};
+    /// use piquel_auth::{AuthenticationPolicy, StepUpRequirement, axum::{SignedIn, StepUp}};
     ///
+    /// /// A sign-in within the last five minutes, however it was made.
     /// struct RecentLogin;
+    ///
     /// impl AuthenticationPolicy for RecentLogin {
-    ///     const MAX_AGE: Option<u64> = Some(300);
+    ///     const REQUIREMENT: StepUpRequirement = StepUpRequirement {
+    ///         acr: None,
+    ///         max_age: Some(300),
+    ///     };
     /// }
     ///
     /// async fn settings(user: SignedIn) -> Result<String, StepUp> {
@@ -809,12 +867,62 @@ impl SignedIn {
     /// ```
     ///
     /// # Errors
-    /// The [`StepUp`] meeting `P`.
+    /// The [`StepUp`] asking for `P`'s requirement.
     pub fn require<P: AuthenticationPolicy>(&self) -> Result<(), StepUp> {
-        self.login
-            .id_token
-            .require_authentication::<P>(self.checked_at)
-            .map_err(|_| StepUp::required::<P>())
+        let signed_in = &self.login.id_token;
+        if signed_in
+            .require_authentication(P::REQUIREMENT, self.checked_at)
+            .is_ok()
+        {
+            Ok(())
+        } else {
+            Err(self.step_up(P::REQUIREMENT))
+        }
+    }
+
+    /// Answers an API's `insufficient_user_authentication` challenge (RFC 9470) with
+    /// the [`StepUp`] that signs the user in again as it asks, and comes back to the
+    /// same page to call the API again. On that return the retry is spent: if the API
+    /// still refuses, the step-up is [exhausted](StepUp::exhausted) and answers 403
+    /// instead of redirecting again.
+    ///
+    /// The return is the first `GET` of that page within a minute of the login. A
+    /// later return counts as a new action and may step up again, and another tab
+    /// loading the same page in that minute uses up the retry instead.
+    ///
+    /// ```no_run
+    /// use axum::response::{IntoResponse, Response};
+    /// use piquel_auth::{axum::SignedIn, protocol::challenge::BearerChallenge};
+    ///
+    /// async fn settings(user: SignedIn) -> Response {
+    ///     let http = reqwest::Client::new();
+    ///     let Ok(answer) = http
+    ///         .get("https://api.example.com/settings")
+    ///         .bearer_auth(user.login().access_token.expose())
+    ///         .send()
+    ///         .await
+    ///     else {
+    ///         return "The API is unreachable.".into_response();
+    ///     };
+    ///     let challenge = answer
+    ///         .headers()
+    ///         .get(reqwest::header::WWW_AUTHENTICATE)
+    ///         .and_then(|value| value.to_str().ok())
+    ///         .and_then(|value| value.parse::<BearerChallenge>().ok());
+    ///     match challenge {
+    ///         Some(challenge) if answer.status() == 401 => {
+    ///             user.step_up(challenge.step_up).into_response()
+    ///         }
+    ///         _ => answer.text().await.unwrap_or_default().into_response(),
+    ///     }
+    /// }
+    /// ```
+    #[must_use]
+    pub const fn step_up(&self, requirement: StepUpRequirement) -> StepUp {
+        StepUp {
+            requirement,
+            exhausted: self.retry,
+        }
     }
 }
 
@@ -864,63 +972,74 @@ impl<St: Send + Sync> FromRequestParts<St> for MaybeSignedIn {
             tracing::error!("SignedIn needs LoginRoutes::layer around the route");
             return Err(StatusCode::INTERNAL_SERVER_ERROR.into_response());
         };
+        let retry = parts.extensions.get::<StepUpRetry>().is_some();
         login
-            .session(&parts.headers)
+            .session(&parts.headers, retry)
             .await
             .map(Self)
             .map_err(|error| Login::store_failure(&error))
     }
 }
 
-/// A response asking the user to sign in again, more strongly or more recently. With
-/// [`LoginRoutes::layer`] around the route, a `GET` is redirected through login with
-/// `max_age` and `acr_values`, and comes back to the same page; other requests get
-/// 401.
+/// A response asking the user to sign in again, more strongly or more recently, from
+/// [`SignedIn::require`] or [`SignedIn::step_up`]. With [`LoginRoutes::layer`] around
+/// the route, a `GET` is redirected through login with `acr_values` and `max_age`,
+/// and comes back to the same page; other requests get 401. The login fails unless
+/// the new sign-in meets the requirement, and a step-up asked for again on the page's
+/// return is [exhausted](Self::exhausted), so each action signs in again at most once,
+/// as long as the browser returns within a minute ([`SignedIn::step_up`]).
 ///
 /// ```no_run
 /// use piquel_auth::{
-///     Acr, AuthenticationPolicy,
+///     AuthenticationPolicy, StepUpRequirement,
 ///     axum::{SignedIn, StepUp},
 /// };
 ///
-/// /// A passkey sign-in within the last five minutes.
+/// /// A passkey confirmation within the last five minutes.
 /// struct RecentPasskey;
 ///
 /// impl AuthenticationPolicy for RecentPasskey {
-///     const ACR: Option<Acr> = Some(Acr::PhishingResistant);
-///     const MAX_AGE: Option<u64> = Some(300);
+///     const REQUIREMENT: StepUpRequirement = StepUpRequirement::passkey_within(300);
 /// }
 ///
 /// async fn delete_account(user: SignedIn) -> Result<&'static str, StepUp> {
-///     // Equivalent to `user.require::<RecentPasskey>()?`.
-///     if user.require::<RecentPasskey>().is_err() {
-///         return Err(StepUp::required::<RecentPasskey>());
-///     }
+///     user.require::<RecentPasskey>()?;
 ///     Ok("deleted")
 /// }
 /// ```
-#[derive(Clone, Debug)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct StepUp {
-    /// The authentication context class required.
-    acr: Option<Acr>,
-    /// The longest acceptable time since authentication, in seconds.
-    max_age: Option<u64>,
+    /// What the new sign-in must meet.
+    requirement: StepUpRequirement,
+    /// Whether this request already returns from a step-up, so another would not help.
+    exhausted: bool,
 }
 
 impl StepUp {
-    /// The step-up meeting `P`.
+    /// What the new sign-in must meet.
     #[must_use]
-    pub fn required<P: AuthenticationPolicy>() -> Self {
-        Self {
-            acr: P::ACR,
-            max_age: P::MAX_AGE,
-        }
+    pub const fn requirement(&self) -> StepUpRequirement {
+        self.requirement
+    }
+
+    /// Whether the user already stepped up for this action and is still refused. An
+    /// exhausted step-up answers 403 instead of redirecting.
+    #[must_use]
+    pub const fn exhausted(&self) -> bool {
+        self.exhausted
     }
 }
 
 impl IntoResponse for StepUp {
-    /// 401, marked for the layer to redirect.
+    /// 401, marked for the layer to redirect; 403 once exhausted.
     fn into_response(self) -> Response {
+        if self.exhausted {
+            return (
+                StatusCode::FORBIDDEN,
+                "Signing in again did not give access to this page.",
+            )
+                .into_response();
+        }
         (StatusCode::UNAUTHORIZED, Extension(self)).into_response()
     }
 }

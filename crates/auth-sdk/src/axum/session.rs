@@ -378,6 +378,8 @@ pub(super) struct PendingAuthorization {
     pub(super) login: PendingLogin,
     /// Where the user goes once signed in.
     pub(super) return_to: ReturnTo,
+    /// Whether the login steps up, so the return to `return_to` is its retry.
+    pub(super) step_up: bool,
 }
 
 /// A refresh lease: which attempt holds it, and until when.

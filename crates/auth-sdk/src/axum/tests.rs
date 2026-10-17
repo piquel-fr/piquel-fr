@@ -4,8 +4,8 @@
 use super::session::{Lease, LeaseId, Session, SessionKey, Sessions};
 use super::*;
 use crate::{
-    Acr, AuthenticationPolicy, ClientConfig, ClientId, Credentials, Issuer, KeyCache, KeySet,
-    Resource, SessionId, SystemClock,
+    AuthenticationPolicy, ClientConfig, ClientId, Credentials, Issuer, KeyCache, KeySet, Resource,
+    SessionId, StepUpRequirement, SystemClock,
     http::Http,
     tests::{Case, issuer, vector_token},
 };
@@ -43,8 +43,7 @@ crate::scopes! {
 struct RecentPasskey;
 
 impl AuthenticationPolicy for RecentPasskey {
-    const ACR: Option<Acr> = Some(Acr::PhishingResistant);
-    const MAX_AGE: Option<u64> = Some(300);
+    const REQUIREMENT: StepUpRequirement = StepUpRequirement::passkey_within(300);
 }
 
 /// Resource identifier of the token vectors.

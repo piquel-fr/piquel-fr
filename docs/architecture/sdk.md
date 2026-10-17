@@ -231,8 +231,10 @@ runs authorization again with those values.
 
 A client retries at most once per user action. It signs the user in again with the
 challenge's values and returns to the same page. If the resource still refuses on
-that return, the client reports the error instead of redirecting again. The login
-check above also means a step-up sign-in never completes below its requirement.
+that return, the client reports the error instead of redirecting again. A server-side
+client recognizes the return by a short-lived marker, so a much later return counts
+as a new action. The login check above also means a step-up sign-in never completes
+below its requirement.
 
 ## Forward compatibility
 

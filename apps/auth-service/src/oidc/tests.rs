@@ -11,6 +11,7 @@ use chrono::Utc;
 use piquel_auth_protocol::{
     AuthenticationMethod, UserId,
     claims::{Acr, IdTokenClaims},
+    step_up::StepUpRequirement,
 };
 use piquel_crypto::Secret;
 use piquel_repository::{BootstrapOidcClient, DatabaseConfig, InsertUser, InsertVerifiedEmail};
@@ -1361,8 +1362,9 @@ impl LoginApp {
     /// Serves the provider over TLS and builds the app.
     async fn start() -> Self {
         use piquel_auth::{
-            ClientConfig, ClientId, Credentials,
-            axum::{LoginRoutes, MemoryBackend, SignedIn},
+            ClientConfig, ClientId, Credentials, Resource,
+            axum::{BearerLayer, LoginRoutes, MemoryBackend, RequireAuthentication, SignedIn},
+            protocol::challenge::BearerChallenge,
         };
         let tcp = tokio::net::TcpListener::bind("127.0.0.1:0")
             .await
@@ -1388,6 +1390,49 @@ impl LoginApp {
             credentials: Credentials::Secret(CLIENT_SECRET.into()),
             redirect_uri: flow.client.redirect_uris[0].parse().expect("callback"),
         });
+        // An API the app calls with the user's token: `/settings` needs a recent
+        // passkey, and `/stubborn` asks for a step-up, naming nothing, whatever the
+        // token holds.
+        let api = Router::new()
+            .route(
+                "/settings",
+                axum::routing::get(|_: RequireAuthentication<RecentPasskey>| async { "settings" }),
+            )
+            .route(
+                "/stubborn",
+                axum::routing::get(|| async {
+                    let challenge = BearerChallenge::step_up(StepUpRequirement::default());
+                    (
+                        StatusCode::UNAUTHORIZED,
+                        [(header::WWW_AUTHENTICATE, challenge.to_string())],
+                    )
+                }),
+            )
+            .layer(BearerLayer::new(
+                issuer.resource(Resource::new(SDK_RESOURCE).expect("resource")),
+            ));
+        let call_api = move |path: &'static str| {
+            let api = api.clone();
+            move |user: SignedIn| async move {
+                let request = Request::get(path)
+                    .header(
+                        header::AUTHORIZATION,
+                        format!("Bearer {}", user.login().access_token.expose()),
+                    )
+                    .body(Body::empty())
+                    .expect("API request");
+                let answer = api.oneshot(request).await.expect("API response");
+                let challenge = answer
+                    .headers()
+                    .get(header::WWW_AUTHENTICATE)
+                    .and_then(|value| value.to_str().ok())
+                    .and_then(|value| value.parse::<BearerChallenge>().ok());
+                match challenge {
+                    Some(challenge) => user.step_up(challenge.step_up).into_response(),
+                    None => answer,
+                }
+            }
+        };
         let auth = LoginRoutes::new(client, MemoryBackend::default())
             .scopes("profile offline_access".parse().expect("scopes"))
             .after_logout(flow.client.post_logout_uris[0].parse().expect("logout URI"));
@@ -1398,6 +1443,8 @@ impl LoginApp {
                     user.login().access_token.expose().to_owned()
                 }),
             )
+            .route("/settings", axum::routing::get(call_api("/settings")))
+            .route("/stubborn", axum::routing::get(call_api("/stubborn")))
             .nest("/auth", auth.router())
             .layer(auth.layer());
         Self { flow, app, clock }
@@ -1449,27 +1496,41 @@ impl LoginApp {
             .to_owned()
     }
 
-    /// Starts login at `login` (the app's login path and query), signs in at the
-    /// provider, and returns the callback's response.
-    async fn sign_in(&self, login: &str, session: Option<&str>) -> Response {
+    /// Starts login at `login` (the app's login path and query): the pending login's
+    /// cookie, and the provider's authorization URL.
+    async fn start_login(&self, login: &str, session: Option<&str>) -> (String, Url) {
         let start = self.send(Method::GET, login, session).await;
-        let pending = Self::cookie(&start, "__Host-piquel-login");
         for cookie in Self::cookies(&start) {
             assert!(
                 cookie.ends_with("; Path=/; Secure; HttpOnly; SameSite=Lax; Max-Age=600"),
                 "{cookie}"
             );
         }
-        let authorize = Url::parse(&Self::location(&start)).expect("authorization URL");
-        let browser = self
-            .flow
+        (
+            Self::cookie(&start, "__Host-piquel-login"),
+            Url::parse(&Self::location(&start)).expect("authorization URL"),
+        )
+    }
+
+    /// The provider's answer to the browser following `authorize`.
+    async fn authorize(&self, authorize: &Url) -> Response {
+        self.flow
             .request(
                 Method::GET,
                 &format!("{}?{}", authorize.path(), authorize.query().expect("query")),
                 &[],
                 None,
             )
-            .await;
+            .await
+    }
+
+    /// Consents at the provider and returns the app callback's response.
+    async fn finish_login(
+        &self,
+        browser: Response,
+        pending: String,
+        session: Option<&str>,
+    ) -> Response {
         let callback = self.flow.consent(browser).await;
         let cookies = match session {
             Some(session) => format!("{pending}; {session}"),
@@ -1481,6 +1542,14 @@ impl LoginApp {
             Some(&cookies),
         )
         .await
+    }
+
+    /// Starts login at `login`, signs in at the provider, and returns the callback's
+    /// response.
+    async fn sign_in(&self, login: &str, session: Option<&str>) -> Response {
+        let (pending, authorize) = self.start_login(login, session).await;
+        let browser = self.authorize(&authorize).await;
+        self.finish_login(browser, pending, session).await
     }
 }
 
@@ -1547,4 +1616,123 @@ async fn sdk_login_routes_run_against_the_provider() {
     );
     let after = app.send(Method::GET, "/notes", Some(&second)).await;
     assert_eq!(after.status(), StatusCode::SEE_OTHER);
+}
+
+/// A passkey confirmation within five minutes.
+struct RecentPasskey;
+
+impl piquel_auth::AuthenticationPolicy for RecentPasskey {
+    const REQUIREMENT: StepUpRequirement = StepUpRequirement::passkey_within(300);
+}
+
+/// An app whose API needs a recent passkey sends a socially signed-in user through
+/// the provider with the API's `acr_values` and `max_age`, then back to the page,
+/// which now works. An API that still refuses after one step-up gets an error, not
+/// another sign-in.
+#[tokio::test]
+#[ignore = "requires TEST_DATABASE_URL"]
+async fn sdk_step_up_runs_against_the_provider() {
+    let mut app = LoginApp::start().await;
+    let mut tx = app.flow.app.database.begin().await.expect("transaction");
+    let social = crate::security::Session::create(
+        &mut tx,
+        app.flow.user_id,
+        AuthenticationMethod::Federation,
+    )
+    .await
+    .expect("social session");
+    tx.commit().await.expect("commit");
+    app.flow.cookie = format!(
+        "{}={}",
+        crate::security::BrowserCookie::Session.as_str(),
+        social.encoded()
+    );
+    let callback = app.sign_in("/auth/login", None).await;
+    let first = LoginApp::cookie(&callback, "__Host-piquel-session");
+
+    let page = app.send(Method::GET, "/settings", Some(&first)).await;
+    let login = LoginApp::location(&page);
+    assert_eq!(
+        login,
+        "/auth/login?return_to=%2Fsettings&acr_values=phr&max_age=300&step_up=true"
+    );
+    let (pending, authorize) = app.start_login(&login, Some(&first)).await;
+    assert_eq!(Flow::parameter(&authorize, "acr_values"), "phr");
+    assert_eq!(Flow::parameter(&authorize, "max_age"), "300");
+    // The social session is too weak, so the provider asks for a passkey.
+    let prompt = app.authorize(&authorize).await;
+    assert_eq!(Flow::location(&prompt).path(), routes::page::LOGIN);
+
+    let access = app.send(Method::GET, "/notes", Some(&first)).await;
+    let access = Flow::text(access).await;
+    let payload = access.split('.').nth(1).expect("JWT payload");
+    let claims: Value = serde_json::from_slice(
+        &base64::engine::general_purpose::URL_SAFE_NO_PAD
+            .decode(payload)
+            .expect("base64url payload"),
+    )
+    .expect("claims");
+    let session = claims["sid"]
+        .as_str()
+        .expect("sid")
+        .parse()
+        .expect("session ID");
+    app.flow
+        .app
+        .database
+        .sessions()
+        .confirm_passkey(session, Utc::now())
+        .await
+        .expect("passkey confirmation");
+    let browser = app.authorize(&authorize).await;
+    let callback = app.finish_login(browser, pending, Some(&first)).await;
+    assert_eq!(LoginApp::location(&callback), "/settings");
+    let second = LoginApp::cookie(&callback, "__Host-piquel-session");
+    let retry = LoginApp::cookie(&callback, "__Host-piquel-step-up");
+
+    let page = app
+        .send(
+            Method::GET,
+            "/settings",
+            Some(&format!("{second}; {retry}")),
+        )
+        .await;
+    assert!(
+        LoginApp::cookies(&page)
+            .iter()
+            .any(|cookie| cookie.starts_with("__Host-piquel-step-up=;")),
+        "the retry marker is used up"
+    );
+    assert_eq!(page.status(), StatusCode::OK);
+    assert_eq!(Flow::text(page).await, "settings");
+
+    // An API that refuses whatever the token holds gets one step-up sign-in, then an
+    // error on the retry instead of another redirect, even when its challenge names
+    // no requirement.
+    let page = app.send(Method::GET, "/stubborn", Some(&second)).await;
+    let login = LoginApp::location(&page);
+    assert_eq!(login, "/auth/login?return_to=%2Fstubborn&step_up=true");
+    let callback = app.sign_in(&login, Some(&second)).await;
+    assert_eq!(LoginApp::location(&callback), "/stubborn");
+    let third = LoginApp::cookie(&callback, "__Host-piquel-session");
+    let retry = LoginApp::cookie(&callback, "__Host-piquel-step-up");
+    let cookies = format!("{third}; {retry}");
+    // Only the returning `GET` is the retry.
+    let other = app.send(Method::POST, "/stubborn", Some(&cookies)).await;
+    assert_eq!(LoginApp::cookies(&other), Vec::<String>::new());
+    let refused = app.send(Method::GET, "/stubborn", Some(&cookies)).await;
+    assert_eq!(refused.status(), StatusCode::FORBIDDEN);
+
+    // An ordinary sign-in drops a marker its return never used.
+    let page = app.send(Method::GET, "/stubborn", Some(&third)).await;
+    let callback = app.sign_in(&LoginApp::location(&page), Some(&third)).await;
+    let fourth = LoginApp::cookie(&callback, "__Host-piquel-session");
+    let unused = LoginApp::cookie(&callback, "__Host-piquel-step-up");
+    let callback = app.sign_in("/auth/login", Some(&fourth)).await;
+    assert!(
+        LoginApp::cookies(&callback)
+            .iter()
+            .any(|cookie| cookie.starts_with("__Host-piquel-step-up=;")),
+        "the unused marker {unused} is dropped"
+    );
 }

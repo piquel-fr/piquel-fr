@@ -383,15 +383,17 @@ impl<St: Send + Sync, S: ScopeSet, X: Clone + Send + Sync + 'static> FromRequest
 
 /// A validated access token whose authentication meets the policy `P`. Rejects with
 /// 401 `insufficient_user_authentication`, naming `P`'s `acr_values` and `max_age`,
-/// so the client can sign the user in again (RFC 9470).
+/// so the client can sign the user in again (RFC 9470). `phr` meets a social
+/// requirement, as auth judges it.
 ///
 /// ```no_run
-/// use piquel_auth::{Acr, AuthenticationPolicy, axum::RequireAuthentication};
+/// use piquel_auth::{AuthenticationPolicy, StepUpRequirement, axum::RequireAuthentication};
 ///
+/// /// A passkey confirmation within the last five minutes.
 /// struct RecentPasskey;
+///
 /// impl AuthenticationPolicy for RecentPasskey {
-///     const ACR: Option<Acr> = Some(Acr::PhishingResistant);
-///     const MAX_AGE: Option<u64> = Some(300);
+///     const REQUIREMENT: StepUpRequirement = StepUpRequirement::passkey_within(300);
 /// }
 ///
 /// async fn delete_account(RequireAuthentication(token, ..): RequireAuthentication<RecentPasskey>) {}
@@ -413,7 +415,7 @@ where
     ) -> impl Future<Output = Result<Self, AuthRejection>> + Send {
         std::future::ready(token(parts, None).and_then(|(token, validator)| {
             token
-                .require_authentication::<P>(validator.now())
+                .require_authentication(P::REQUIREMENT, validator.now())
                 .map_err(|error| {
                     AuthRejection::new(Reason::Token(Arc::new(error)), Some(validator))
                 })?;
