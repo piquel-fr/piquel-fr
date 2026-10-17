@@ -177,9 +177,27 @@ client's default resource. They will send `resource` (RFC 8707) once auth suppor
 it.
 
 Browser tokens stay in memory. Server-side apps keep tokens in a server-side session
-and give the browser only a random session ID. Refresh tokens never reach the
-browser. Auth rotates refresh tokens and revokes the whole family on reuse, so
-concurrent refreshes of one session must be serialized.
+and give the browser only a random session key, in a `__Host-` cookie that is
+`Secure`, `HttpOnly` and `SameSite=Lax`; stores keep only the key's SHA-256. Every
+sign-in starts a session under a fresh key. Refresh tokens never reach the browser.
+Auth rotates refresh tokens and revokes the whole family on reuse, so concurrent
+refreshes of one session are serialized through a lease in the session store, shared
+by every replica. The lease is taken only at the session version the request read,
+so a request that read the session before another refresh reloads it instead of
+redeeming the rotated token. Each lease has an ID, and only its holder can save the
+result, so a slow attempt cannot overwrite a later one or resurrect a logged-out
+session. Once a refresh may have reached auth without its answer being saved (a
+timeout, a lost response, a lease that expired unreleased), the stored token may be
+spent, so the session ends and the user signs in again rather than risk a reuse
+that would revoke the family. `invalid_grant` ends the session too; any other error
+answer from auth keeps it. Logout accepts only requests from the app's own origin.
+
+Apps also receive back-channel logout tokens (OIDC Back-Channel Logout 1.0): checked
+like ID tokens with `typ` `logout+jwt`, they must be at most five minutes old, carry
+the back-channel logout event and `sub` or `sid`, have no `nonce`, and not reuse a
+`jti`: the store records the `jti` and deletes the sessions in one step, shared by
+every replica. A token with `sid` ends that session; one with only `sub` ends all of
+the user's sessions at the app.
 
 ## Step-up
 

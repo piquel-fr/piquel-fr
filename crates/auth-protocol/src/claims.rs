@@ -5,6 +5,7 @@
 use crate::{ClientId, SessionId, TokenId, known, known_one, oauth::Scopes};
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
+use std::collections::BTreeMap;
 
 piquel_common::str_enum! {
     /// `amr` values (RFC 8176): how the user authenticated. This is the wire view,
@@ -266,6 +267,79 @@ pub struct UserInfo {
     /// Profile and email claims allowed by the access token's scopes.
     #[serde(flatten)]
     pub profile: ProfileClaims,
+}
+
+/// The `events` member a logout token must carry (OIDC Back-Channel Logout 1.0 §2.4).
+pub const BACKCHANNEL_LOGOUT_EVENT: &str = "http://schemas.openid.net/event/backchannel-logout";
+
+/// An event's payload: a JSON object, empty for back-channel logout. Members are
+/// ignored, but anything other than an object is refused.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize)]
+pub struct Event {}
+
+impl<'de> Deserialize<'de> for Event {
+    /// Requires an object.
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        BTreeMap::<String, serde::de::IgnoredAny>::deserialize(deserializer).map(|_| Self {})
+    }
+}
+
+/// A claim whose presence alone matters, whatever its value, such as a logout
+/// token's forbidden `nonce`. Present even as `null`; serialized as `null`.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct Present;
+
+impl Present {
+    /// Reads a claim as present whenever it appears.
+    fn some<'de, D: serde::Deserializer<'de>>(deserializer: D) -> Result<Option<Self>, D::Error> {
+        serde::de::IgnoredAny::deserialize(deserializer).map(|_| Some(Self))
+    }
+}
+
+impl Serialize for Present {
+    /// Writes `null`.
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        serializer.serialize_unit()
+    }
+}
+
+/// Claims of a back-channel logout token (OIDC Back-Channel Logout 1.0 §2.4), signed
+/// with `typ: logout+jwt`. It ends one session (`sid`) or every session of a user at
+/// one client (`sub` alone).
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct LogoutTokenClaims {
+    /// Issuer, exactly as in discovery.
+    pub iss: String,
+    /// The client being told.
+    pub aud: Audience,
+    /// Issue time.
+    #[serde(with = "chrono::serde::ts_seconds")]
+    pub iat: DateTime<Utc>,
+    /// Expiry time.
+    #[serde(with = "chrono::serde::ts_seconds")]
+    pub exp: DateTime<Utc>,
+    /// Unique token ID, for replay detection.
+    pub jti: String,
+    /// The user whose sessions end.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sub: Option<String>,
+    /// The session that ends.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sid: Option<SessionId>,
+    /// Must contain [`BACKCHANNEL_LOGOUT_EVENT`].
+    #[expect(
+        clippy::zero_sized_map_values,
+        reason = "The wire format is a JSON object of event URIs to empty objects."
+    )]
+    pub events: BTreeMap<String, Event>,
+    /// Must be absent, even as `null`, so an ID token can never pass as a logout
+    /// token.
+    #[serde(
+        default,
+        deserialize_with = "Present::some",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub nonce: Option<Present>,
 }
 
 #[cfg(test)]
