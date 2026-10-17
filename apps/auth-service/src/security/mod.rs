@@ -327,18 +327,22 @@ impl Session {
 
     /// Signs `user_id` in on this browser inside the caller's transaction and returns
     /// the secret for its session cookie. Callers set the cookie only after the
-    /// transaction commits.
+    /// transaction commits. Locks the account first, so sign-in serializes with its
+    /// disablement and with other changes to its sessions.
     ///
-    /// A browser already signed in as `user_id` re-authenticates that session and
-    /// keeps its `sid`, with a new cookie: a passkey confirms it, and a social sign-in
-    /// renews it unless a passkey confirmed it, since that would lower its `acr`. A
-    /// browser signed in as someone else has that session revoked, then gets a new one.
+    /// A browser already signed in as `user_id` re-authenticates that session (see
+    /// [`Self::reauthenticate`]). A browser signed in as someone else has that session
+    /// revoked, then gets a new one.
     pub(crate) async fn sign_in(
         tx: &mut DatabaseTransaction<'_>,
         headers: &HeaderMap,
         user_id: UserId,
         method: AuthenticationMethod,
     ) -> Result<Secret, SessionError> {
+        tx.users()
+            .find_active_by_id_for_update(user_id)
+            .await?
+            .ok_or(SessionError::Missing)?;
         let current = match BrowserCookie::Session.read(headers) {
             Some(cookie) => {
                 tx.sessions()
@@ -347,26 +351,43 @@ impl Session {
             }
             None => None,
         };
-        let Some(current) = current else {
-            return Self::create(tx, user_id, method).await;
-        };
-        if current.user_id != user_id {
-            tx.sessions().revoke(current.id).await?;
-            return Self::create(tx, user_id, method).await;
+        match current {
+            Some(current) if current.user_id == user_id => {
+                Self::reauthenticate(tx, &current, method).await
+            }
+            Some(other) => {
+                tx.sessions().revoke(other.id).await?;
+                Self::create(tx, user_id, method).await
+            }
+            None => Self::create(tx, user_id, method).await,
         }
+    }
+
+    /// Records a new authentication of `session` with `method` inside the caller's
+    /// transaction, keeping its `sid`, and returns the secret for its new cookie. A
+    /// passkey confirms the session. A social sign-in renews it unless a passkey
+    /// confirmed it, since that would lower its `acr`.
+    ///
+    /// The old cookie stops working, so a copy of it never gains the new
+    /// authentication. Callers set the new cookie only after the transaction commits.
+    pub(crate) async fn reauthenticate(
+        tx: &mut DatabaseTransaction<'_>,
+        session: &StoredSession,
+        method: AuthenticationMethod,
+    ) -> Result<Secret, SessionError> {
         let now = Utc::now();
         match method {
-            AuthenticationMethod::Passkey => tx.sessions().confirm_passkey(current.id, now).await?,
+            AuthenticationMethod::Passkey => tx.sessions().confirm_passkey(session.id, now).await?,
             AuthenticationMethod::Federation => {
-                if current.passkey_confirmed_at.is_some() {
+                if session.passkey_confirmed_at.is_some() {
                     return Err(SessionError::PasskeyRequired);
                 }
-                tx.sessions().reauthenticate_social(current.id, now).await?;
+                tx.sessions().reauthenticate_social(session.id, now).await?;
             }
         }
         let secret = Secret::generate()?;
         tx.sessions()
-            .replace_browser_secret(current.id, secret.digest().as_bytes())
+            .replace_browser_secret(session.id, secret.digest().as_bytes())
             .await?;
         Ok(secret)
     }

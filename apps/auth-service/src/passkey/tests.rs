@@ -624,6 +624,14 @@ async fn ceremonies_require_browser_binding_and_confirmation_belongs_to_one_sess
         )
         .await;
     assert_eq!(response.status(), StatusCode::NO_CONTENT);
+    // The confirmation replaces the cookie, so a copy of the old one gains nothing.
+    let stale = social;
+    let social = Fixture::cookie(&response);
+    assert!(fixture.session(&stale).await.is_none());
+    assert_eq!(
+        fixture.session(&social).await.expect("same session").id,
+        session_id
+    );
     assert_eq!(
         fixture.audit().await.first(),
         Some(&(AuditAction::SessionPasskeyConfirmed, AuditOutcome::Success))

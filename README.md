@@ -157,7 +157,9 @@ page offering only passkeys for `phr`; with `prompt=none` the request fails with
 Signing in again (`prompt=login`, `max_age`, a target) re-authenticates the
 browser's session rather than starting another, so `sid` stays the same: a passkey
 confirms it, and a social sign-in renews it only before any passkey confirmation,
-since it would lower `acr`. Signing in as another account revokes the previous
+since it would lower `acr`. Every re-authentication, including a passkey
+confirmation for a settings change, replaces the session cookie, so a copied cookie
+never gains the new authentication. Signing in as another account revokes the previous
 session. A refresh token keeps reporting the authentication of the code it came
 from, even after the session re-authenticates.
 

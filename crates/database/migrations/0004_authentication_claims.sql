@@ -45,7 +45,8 @@ ALTER TABLE refresh_token_families ALTER COLUMN authentication SET NOT NULL;
 UPDATE sessions
 SET passkey_confirmed_at = authenticated_at
 WHERE passkey_confirmed_at IS NULL
-AND authentication_methods ? 'passkey';
+AND authentication_methods ? 'passkey'
+AND revoked_at IS NULL;
 UPDATE sessions
 SET authentication_methods = authentication_methods || '["passkey"]'
 WHERE passkey_confirmed_at IS NOT NULL

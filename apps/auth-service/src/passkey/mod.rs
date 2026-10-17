@@ -549,13 +549,14 @@ impl PasskeyApplication {
             .await?)
     }
 
-    /// Confirms the session after a fresh passkey proof started by that same session.
+    /// Confirms the session after a fresh passkey proof started by that same session,
+    /// replacing its cookie like any re-authentication.
     async fn finish_confirmation(
         State(app): State<Self>,
         security::Session(session): security::Session,
         headers: HeaderMap,
         Json(input): Json<AuthenticationFinish>,
-    ) -> Result<StatusCode, ApiError> {
+    ) -> Result<Response, ApiError> {
         let ConfirmationCeremony {
             user_id,
             session_id,
@@ -570,14 +571,18 @@ impl PasskeyApplication {
             .webauthn
             .finish_passkey_authentication(&input.credential, &state);
         let mut tx = app.accept_credential(user_id, verified).await?;
-        tx.sessions()
-            .confirm_passkey(session_id, chrono::Utc::now())
-            .await?;
+        let secret =
+            security::Session::reauthenticate(&mut tx, &session, AuthenticationMethod::Passkey)
+                .await?;
         tx.audit_events()
             .record(user_id, AuditAction::SessionPasskeyConfirmed, None)
             .await?;
         tx.commit().await?;
-        Ok(StatusCode::NO_CONTENT)
+        let mut response = StatusCode::NO_CONTENT.into_response();
+        BrowserCookie::Session
+            .set_on(&mut response, &secret)
+            .map_err(PasskeyError::CookieHeader)?;
+        Ok(response)
     }
 
     /// Starts another passkey registration, excluding the account's current credentials.
