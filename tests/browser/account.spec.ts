@@ -45,6 +45,8 @@ test('passkey lifecycle, passkey confirmation and browser OIDC consent with SSO'
     await expect(page.getByText(`@${username}`, { exact: true })).toBeVisible();
 
     const redirectUri = new URL('/callback', settingsUrl).href;
+    const atCallback = (url: URL) =>
+      url.origin === new URL(redirectUri).origin && url.pathname === '/callback';
     const oidc = await page.evaluate(async () => {
       const encode = (bytes: Uint8Array) =>
         btoa(String.fromCharCode(...bytes))
@@ -75,9 +77,7 @@ test('passkey lifecycle, passkey confirmation and browser OIDC consent with SSO'
     await page.goto(authorization.href);
     await expect(page.getByRole('heading', { name: /^Continue to / })).toBeVisible();
     await page.getByRole('button', { name: 'Continue', exact: true }).click();
-    await page.waitForURL(
-      (url) => url.origin === new URL(redirectUri).origin && url.pathname === '/callback'
-    );
+    await page.waitForURL(atCallback);
     const callback = new URL(page.url());
     expect(callback.searchParams.get('state')).toBe(oidc.state);
     expect(callback.searchParams.get('iss')).toBe(authUrl);
@@ -141,6 +141,8 @@ test('passkey lifecycle, passkey confirmation and browser OIDC consent with SSO'
             claims.aud === 'browser-e2e' &&
             claims.nonce === nonce &&
             claims.sub === session.user.id,
+          sid: claims.sid,
+          authTime: claims.auth_time,
           hasRefreshToken: 'refresh_token' in tokens,
           userinfoStatus: userinfoResponse.status,
           sameUser: userinfo.sub === session.user.id,
@@ -159,6 +161,8 @@ test('passkey lifecycle, passkey confirmation and browser OIDC consent with SSO'
       status: 200,
       signatureValid: true,
       correctClaims: true,
+      sid: expect.any(String),
+      authTime: expect.any(Number),
       hasRefreshToken: false,
       userinfoStatus: 200,
       sameUser: true,
@@ -170,15 +174,44 @@ test('passkey lifecycle, passkey confirmation and browser OIDC consent with SSO'
     authorization.searchParams.set('prompt', 'none');
     authorization.searchParams.set('state', `${oidc.state}-sso`);
     await page.goto(authorization.href);
-    await page.waitForURL(
-      (url) => url.origin === new URL(redirectUri).origin && url.pathname === '/callback'
-    );
+    await page.waitForURL(atCallback);
     const sso = new URL(page.url());
     expect(sso.searchParams.get('state')).toBe(`${oidc.state}-sso`);
     expect(sso.searchParams.get('iss')).toBe(authUrl);
     expect(sso.searchParams.has('error')).toBe(false);
     expect(sso.searchParams.get('code')).toBeTruthy();
     expect(sso.searchParams.get('code')).not.toBe(code);
+
+    // An application stepping up (RFC 9470) asks for a fresh passkey with `acr_values`
+    // and `max_age`. Auth re-authenticates the same session: `sid` stays and
+    // `auth_time` moves. It counts whole seconds, so let one pass first.
+    await page.waitForTimeout(1_100);
+    authorization.searchParams.delete('prompt');
+    authorization.searchParams.set('state', `${oidc.state}-step-up`);
+    authorization.searchParams.set('acr_values', 'phr');
+    authorization.searchParams.set('max_age', '0');
+    await page.goto(authorization.href);
+    await expect(page.getByText('This app asks you to sign in with a passkey.')).toBeVisible();
+    await page.getByRole('button', { name: 'Sign in with a passkey', exact: true }).click();
+    await page.waitForURL(atCallback);
+    const stepUp = new URL(page.url());
+    expect(stepUp.searchParams.get('state')).toBe(`${oidc.state}-step-up`);
+    // A public client redeems without an origin, so the test runner can.
+    const stepUpTokens = await page.request.post(new URL('/oauth/token', authUrl).href, {
+      form: {
+        grant_type: 'authorization_code',
+        client_id: 'browser-e2e',
+        redirect_uri: redirectUri,
+        code: stepUp.searchParams.get('code') ?? '',
+        code_verifier: oidc.verifier
+      }
+    });
+    expect(stepUpTokens.status()).toBe(200);
+    const { id_token } = (await stepUpTokens.json()) as Tokens;
+    const stepped = JSON.parse(Buffer.from(id_token.split('.')[1], 'base64url').toString()) as Json;
+    expect(stepped.sid).toBe(exchange.sid);
+    expect(stepped.acr).toBe('phr');
+    expect(stepped.auth_time).toBeGreaterThan(Number(exchange.authTime));
     // Settings have no unlock step, and renaming needs no passkey confirmation.
     await page.goto(settingsUrl);
     await page.getByRole('button', { name: 'Rename Synced passkey' }).click();

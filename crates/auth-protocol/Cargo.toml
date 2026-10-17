@@ -11,6 +11,7 @@ sqlx = ["dep:sqlx", "piquel-common/sqlx"]
 
 [dependencies]
 piquel-common.workspace = true
+chrono.workspace = true
 serde.workspace = true
 sqlx = { workspace = true, optional = true }
 thiserror.workspace = true

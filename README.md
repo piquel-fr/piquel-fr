@@ -163,6 +163,11 @@ never gains the new authentication. Signing in as another account revokes the pr
 session. A refresh token keeps reporting the authentication of the code it came
 from, even after the session re-authenticates.
 
+An API that needs a stronger or more recent sign-in answers with an RFC 9470
+step-up challenge, and its client signs the user in again with that challenge's
+`acr_values` and `max_age`. [Step-up authentication](docs/guides/step-up-authentication.md)
+explains how to choose a requirement and handle the challenge.
+
 ## Security behavior
 
 - Passkeys require user verification and prefer resident credentials. Synced

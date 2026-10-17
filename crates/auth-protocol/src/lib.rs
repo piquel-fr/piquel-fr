@@ -8,6 +8,8 @@ pub mod jwt;
 pub mod metadata;
 /// OAuth and OpenID Connect vocabulary shared by clients and the provider.
 pub mod oauth;
+/// What a protected operation needs from the user's authentication (RFC 9470).
+pub mod step_up;
 
 use serde::{Deserialize, Serialize};
 use std::{fmt, str::FromStr};

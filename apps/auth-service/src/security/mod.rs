@@ -15,7 +15,7 @@ use axum::{
 };
 use chrono::{Duration, Utc};
 use ipnet::IpNet;
-use piquel_auth_protocol::{AuthenticationMethod, SessionId, UserId, claims::Acr};
+use piquel_auth_protocol::{AuthenticationMethod, SessionId, UserId, step_up::StepUpRequirement};
 use piquel_common::ErrorChain;
 use piquel_crypto::{CryptoError, Digest, Secret};
 use piquel_repository::{
@@ -426,24 +426,27 @@ impl Session {
 pub(crate) struct Session(pub StoredSession);
 /// Optional browser session for anonymous or signed-in requests.
 pub(crate) struct OptionalSession(pub Option<StoredSession>);
-/// Browser session whose passkey confirmation is at most `MAX_AGE` seconds old: its
-/// `acr` is phishing-resistant and its `auth_time` at most `MAX_AGE` seconds ago, as
-/// tokens would report them. The age counts from the confirmation itself, so using
-/// it never extends it. Handlers re-check it with [`Self::lock`] inside their transaction.
+/// Browser session whose passkey confirmation is at most `MAX_AGE` seconds old: it
+/// meets [`StepUpRequirement::passkey_within`], checked against the `acr` and
+/// `auth_time` tokens would report, as bearer-protected resources check them. The
+/// age counts from the confirmation itself, so using it never extends it. Handlers
+/// re-check it with [`Self::lock`] inside their transaction.
 pub(crate) struct Confirmed<const MAX_AGE: u32 = CONFIRMATION_MAX_AGE>(pub StoredSession);
 
 impl<const MAX_AGE: u32> Confirmed<MAX_AGE> {
+    /// What the session's authentication must meet.
+    const REQUIREMENT: StepUpRequirement = StepUpRequirement::passkey_within(MAX_AGE);
+
     /// Rejects a session without a recent enough passkey confirmation.
     fn check(session: &StoredSession) -> Result<(), SessionError> {
-        let max_age = Duration::seconds(i64::from(MAX_AGE));
         let authentication = SessionAuthentication::from(session);
-        if authentication.acr == Acr::PhishingResistant
-            && Utc::now() - authentication.auth_time <= max_age
-        {
-            Ok(())
-        } else {
-            Err(SessionError::StepUpRequired { max_age: MAX_AGE })
-        }
+        Self::REQUIREMENT
+            .check(
+                Some(&authentication.acr),
+                Some(authentication.auth_time),
+                Utc::now(),
+            )
+            .map_err(|_| SessionError::StepUpRequired { max_age: MAX_AGE })
     }
 
     /// Re-checks the confirmation inside `tx` under [`Session::lock`].

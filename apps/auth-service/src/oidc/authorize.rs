@@ -16,7 +16,7 @@ use axum::{
     response::Redirect,
 };
 use chrono::{DateTime, Duration, Utc};
-use piquel_auth_protocol::{UserId, claims::Acr};
+use piquel_auth_protocol::{UserId, claims::Acr, step_up::StepUpRequirement};
 use piquel_repository::{
     InsertAuthorizationCode, InsertAuthorizationRequest, SessionAuthentication,
     StoredAuthorizationRequest, StoredSession,
@@ -476,9 +476,11 @@ impl OidcApplication {
     }
 
     /// Whether a session meets an authorization's sign-in requirements: the hinted
-    /// account, the target `acr`, `max_age`, and a fresh authentication for
-    /// `prompt=login` or `max_age=0`. Ages count from the session's `auth_time`, and
-    /// only authenticating after the request was stored (`created_at`) counts as fresh.
+    /// account, a fresh authentication for `prompt=login` or `max_age=0`, and the
+    /// target `acr` and a positive `max_age` as a [`StepUpRequirement`], the rule
+    /// resources and auth's own settings apply. Ages count from the session's
+    /// `auth_time`, and only authenticating after the request was stored
+    /// (`created_at`) counts as fresh.
     fn session_satisfies(
         session: &StoredSession,
         force_login: bool,
@@ -489,19 +491,21 @@ impl OidcApplication {
     ) -> bool {
         let authentication = SessionAuthentication::from(session);
         let fresh = created_at.is_some_and(|created_at| authentication.auth_time >= created_at);
-        let within_max_age = max_age.is_none_or(|age| {
-            if age == 0 {
-                return fresh;
-            }
-            age >= 0
-                && Utc::now()
-                    .signed_duration_since(authentication.auth_time)
-                    .num_seconds()
-                    <= age
-        });
-        (fresh || !force_login)
-            && within_max_age
-            && target_acr.is_none_or(|target| authentication.acr.satisfies(target))
+        let requirement = StepUpRequirement {
+            acr: target_acr,
+            // Requests reject negative ages; an age past `u32` excludes no sign-in.
+            max_age: max_age
+                .filter(|&age| age > 0)
+                .map(|age| u32::try_from(age).unwrap_or(u32::MAX)),
+        };
+        (fresh || !(force_login || max_age == Some(0)))
+            && requirement
+                .check(
+                    Some(&authentication.acr),
+                    Some(authentication.auth_time),
+                    Utc::now(),
+                )
+                .is_ok()
             && hinted_user_id.is_none_or(|subject| subject == session.user_id)
     }
 
