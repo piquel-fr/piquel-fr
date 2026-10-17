@@ -4,6 +4,7 @@ use super::{
     ACCESS_TOKEN_SECONDS, AuthScheme, GrantType, OAuthCode, OAuthError, OidcApplication,
     OpaqueToken, Reject, Scope, Scopes, TokenPrefix, TokenType,
 };
+use crate::security::RequestContext;
 use axum::{
     Form, Json,
     extract::State,
@@ -18,8 +19,9 @@ use piquel_auth_protocol::{
     oauth,
 };
 use piquel_repository::{
-    AuditAction, CodeRedemptionError, ConsumedAuthorizationCode, DatabaseTransaction,
-    InsertRefreshFamily, InsertRefreshToken, RefreshRotationError, SessionAuthentication,
+    CodeRedemptionError, ConsumedAuthorizationCode, DatabaseTransaction, DomainEvent, EventContext,
+    GrantRevocation, InsertRefreshFamily, InsertRefreshToken, RefreshRotationError,
+    SessionAuthentication,
 };
 use serde::{Deserialize, Serialize};
 
@@ -186,6 +188,7 @@ impl OidcApplication {
     /// Authenticates the client and dispatches an exhaustively matched token grant.
     pub(super) async fn token(
         State(app): State<Self>,
+        context: RequestContext,
         headers: HeaderMap,
         form: Result<Form<TokenForm>, axum::extract::rejection::FormRejection>,
     ) -> Result<Json<TokenResponse>, OAuthError> {
@@ -201,18 +204,25 @@ impl OidcApplication {
             OAuthCode::UnsupportedGrantType
                 .reject_with(format!("grant_type must be one of: {supported}"), error)
         })? {
-            GrantType::AuthorizationCode => app.exchange_code(form, &client.id).await.map(Json),
-            GrantType::RefreshToken => app.rotate_refresh(form, &client.id).await.map(Json),
+            GrantType::AuthorizationCode => app
+                .exchange_code(form, &client.id, &context.client(&client.id))
+                .await
+                .map(Json),
+            GrantType::RefreshToken => app
+                .rotate_refresh(form, &client.id, &context.client(&client.id))
+                .await
+                .map(Json),
         }
     }
 
     /// Exchanges a one-use code for the authenticated client after checking its client,
-    /// redirect and PKCE binding. A replayed code has its refresh family revoked and
-    /// committed before the rejection.
+    /// redirect and PKCE binding, and records the grant. A replayed code has its
+    /// refresh family revoked and committed before the rejection.
     async fn exchange_code(
         &self,
         form: TokenForm,
         client_id: &str,
+        context: &EventContext,
     ) -> Result<TokenResponse, OAuthError> {
         let opaque = OpaqueToken::parse(
             TokenPrefix::AuthorizationCode,
@@ -228,7 +238,7 @@ impl OidcApplication {
             .await
         {
             Ok(code) => code,
-            Err(error) => return Err(Self::code_rejection(tx, error).await),
+            Err(error) => return Err(Self::code_rejection(tx, context, client_id, error).await),
         };
         if code.client_id != client_id {
             return Err(OAuthCode::InvalidGrant.reject("code was issued to another client"));
@@ -273,11 +283,23 @@ impl OidcApplication {
             authentication: &code.authentication,
         }
         .issue(self, &user, email.as_deref())?;
-        let refresh = if client.allow_refresh && scopes.contains(Scope::OfflineAccess) {
-            Some(self.create_refresh(&mut tx, code).await?)
+        let (family_id, refresh) = if client.allow_refresh && scopes.contains(Scope::OfflineAccess)
+        {
+            let (family_id, refresh) = self.create_refresh(&mut tx, code).await?;
+            (Some(family_id), Some(refresh))
         } else {
-            None
+            (None, None)
         };
+        tx.record(
+            context,
+            Some(user.id),
+            DomainEvent::GrantIssued {
+                client_id: ClientId::new(client.id),
+                family_id,
+                scopes: scopes.into_stored(),
+            },
+        )
+        .await?;
         tx.commit().await?;
         Ok(TokenResponse {
             refresh_token: refresh,
@@ -292,6 +314,7 @@ impl OidcApplication {
         &self,
         form: TokenForm,
         client_id: &str,
+        context: &EventContext,
     ) -> Result<TokenResponse, OAuthError> {
         let opaque = OpaqueToken::parse(
             TokenPrefix::RefreshToken,
@@ -307,7 +330,9 @@ impl OidcApplication {
             .await
         {
             Ok(value) => value,
-            Err(error) => return Err(Self::refresh_rejection(tx, error).await),
+            Err(error) => {
+                return Err(Self::refresh_rejection(tx, context, client_id, error).await);
+            }
         };
         if rotated.client_id != client_id {
             return Err(
@@ -353,11 +378,12 @@ impl OidcApplication {
 
     /// Creates the refresh family of a redeemed code, linked to the code so a replay
     /// can revoke it, and its first token bounded by the browser session lifetime.
+    /// Returns the family and the encoded token.
     async fn create_refresh(
         &self,
         tx: &mut DatabaseTransaction<'_>,
         code: ConsumedAuthorizationCode,
-    ) -> Result<String, OAuthError> {
+    ) -> Result<(TokenId, String), OAuthError> {
         let session = tx
             .sessions()
             .find_active_by_id(code.session_id)
@@ -387,12 +413,13 @@ impl OidcApplication {
                 },
             )
             .await?;
-        Ok(raw)
+        Ok((family_id, raw))
     }
 
     /// Revokes the authenticated client’s refresh family, concealing invalid-token existence.
     pub(super) async fn revoke(
         State(app): State<Self>,
+        context: RequestContext,
         headers: HeaderMap,
         form: Result<Form<RevokeForm>, axum::extract::rejection::FormRejection>,
     ) -> Result<StatusCode, OAuthError> {
@@ -407,9 +434,22 @@ impl OidcApplication {
         if let Ok(opaque) = OpaqueToken::parse(TokenPrefix::RefreshToken, &form.token) {
             let digest = app.token_digest(&opaque)?;
             let mut tx = app.database.begin().await?;
-            tx.tokens()
+            if let Some(family) = tx
+                .tokens()
                 .revoke_family_for_client_token(opaque.id, digest.as_bytes(), &client.id)
+                .await?
+            {
+                tx.record(
+                    &context.client(&client.id),
+                    Some(family.user_id),
+                    DomainEvent::GrantRevoked {
+                        client_id: ClientId::new(client.id),
+                        family_id: family.id,
+                        reason: GrantRevocation::ClientRevoked,
+                    },
+                )
                 .await?;
+            }
             tx.commit().await?;
         }
         Ok(StatusCode::OK)
@@ -458,44 +498,60 @@ impl OidcApplication {
         }))
     }
 
-    /// Persists replay/policy rejection before returning the preserved rotation failure.
+    /// Persists replay/policy revocation, recorded as a revoked grant, before
+    /// returning the preserved rotation failure.
     async fn refresh_rejection(
         tx: DatabaseTransaction<'_>,
+        context: &EventContext,
+        client_id: &str,
         error: RefreshRotationError,
     ) -> OAuthError {
-        let (user_id, action) = match error {
-            RefreshRotationError::Replay { user_id } => (user_id, AuditAction::RefreshReplay),
-            RefreshRotationError::Policy { user_id } => {
-                (user_id, AuditAction::RefreshPolicyRejected)
+        let (user_id, family_id, reason) = match error {
+            RefreshRotationError::Replay { user_id, family_id } => {
+                (user_id, family_id, GrantRevocation::RefreshReplay)
+            }
+            RefreshRotationError::Policy { user_id, family_id } => {
+                (user_id, family_id, GrantRevocation::PolicyRejected)
             }
             RefreshRotationError::Invalid | RefreshRotationError::Database(_) => {
                 return error.into();
             }
         };
         // Logged first so the signal survives a database failure.
-        if action == AuditAction::RefreshReplay {
+        if reason == GrantRevocation::RefreshReplay {
             tracing::warn!(
                 event = REFRESH_REPLAY_EVENT,
                 %user_id,
                 "refresh token replay rejected"
             );
         }
-        Self::commit_rejection(tx, user_id, action, error).await
+        let revoked = DomainEvent::GrantRevoked {
+            client_id: ClientId::new(client_id),
+            family_id,
+            reason,
+        };
+        Self::commit_rejection(tx, context, user_id, [revoked], error).await
     }
 
-    /// Persists the family revocation of a replayed code before returning the
-    /// preserved redemption failure. Access tokens already issued from the code
-    /// cannot be revoked and simply expire.
+    /// Persists the family revocation of a replayed code, recording the replay and
+    /// each revoked grant, before returning the preserved redemption failure. Access
+    /// tokens already issued from the code cannot be revoked and simply expire.
     ///
     /// The browser session behind the code stays signed in: a leaked code exposes
     /// the client's callback, not the session cookie, and anyone holding the code
     /// could otherwise sign the user out of every application.
-    async fn code_rejection(tx: DatabaseTransaction<'_>, error: CodeRedemptionError) -> OAuthError {
-        let user_id = match error {
-            CodeRedemptionError::Replay { user_id } => user_id,
-            CodeRedemptionError::Invalid | CodeRedemptionError::Database(_) => {
-                return error.into();
-            }
+    async fn code_rejection(
+        tx: DatabaseTransaction<'_>,
+        context: &EventContext,
+        client_id: &str,
+        error: CodeRedemptionError,
+    ) -> OAuthError {
+        let CodeRedemptionError::Replay {
+            user_id,
+            ref revoked_families,
+        } = error
+        else {
+            return error.into();
         };
         // Logged first so the signal survives a database failure.
         tracing::warn!(
@@ -503,20 +559,37 @@ impl OidcApplication {
             %user_id,
             "authorization code replay rejected"
         );
-        Self::commit_rejection(tx, user_id, AuditAction::AuthorizationCodeReplay, error).await
+        let client_id = ClientId::new(client_id);
+        let events: Vec<_> = std::iter::once(DomainEvent::CodeReplayed {
+            client_id: client_id.clone(),
+        })
+        .chain(
+            revoked_families
+                .iter()
+                .map(|&family_id| DomainEvent::GrantRevoked {
+                    client_id: client_id.clone(),
+                    family_id,
+                    reason: GrantRevocation::CodeReplay,
+                }),
+        )
+        .collect();
+        Self::commit_rejection(tx, context, user_id, events, error).await
     }
 
     /// Commits the revocation a rejected grant already made in `tx`, together with
-    /// its rejected audit event, then returns the grant's `error`, or the database
+    /// the `events` recording it, then returns the grant's `error`, or the database
     /// failure that prevented the commit.
     async fn commit_rejection(
         mut tx: DatabaseTransaction<'_>,
+        context: &EventContext,
         user_id: UserId,
-        action: AuditAction,
+        events: impl IntoIterator<Item = DomainEvent>,
         error: impl Into<OAuthError>,
     ) -> OAuthError {
         let committed = async {
-            tx.audit_events().record_rejection(user_id, action).await?;
+            for event in events {
+                tx.record(context, Some(user_id), event).await?;
+            }
             tx.commit().await
         }
         .await;

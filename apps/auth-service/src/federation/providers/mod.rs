@@ -7,6 +7,7 @@ use crate::email::NormalizedEmail;
 use axum::http::{StatusCode, header};
 use piquel_auth_protocol::oauth::GrantType;
 use piquel_common::ConfigurationError;
+use piquel_repository::SignInFailure;
 use serde::{Deserialize, de::DeserializeOwned};
 use thiserror::Error;
 use url::Url;
@@ -69,6 +70,27 @@ pub(super) enum ProviderError {
     /// Google's ID token failed verification.
     #[error(transparent)]
     Google(#[from] google::GoogleError),
+}
+
+impl ProviderError {
+    /// How a rejected provider sign-in is recorded, or `None` when the provider or
+    /// this service failed rather than the evidence the browser brought back.
+    pub(super) fn sign_in_failure(&self) -> Option<SignInFailure> {
+        match self {
+            Self::Status { status, .. } if status.is_client_error() => {
+                Some(SignInFailure::InvalidCredential)
+            }
+            Self::EmptySubject | Self::SubjectTooLong(_) | Self::GitHub(_) | Self::Google(_) => {
+                Some(SignInFailure::InvalidCredential)
+            }
+            Self::NotConfigured
+            | Self::Secret(_)
+            | Self::Http(_)
+            | Self::Status { .. }
+            | Self::Json(_)
+            | Self::ResponseTooLarge => None,
+        }
+    }
 }
 
 /// An OAuth error body (RFC 6749 section 5.2) returned by a provider.

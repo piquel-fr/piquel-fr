@@ -86,7 +86,7 @@ impl UserRepository<'_> {
     /// Finds an active account and locks it until the transaction ends.
     ///
     /// Account mutations serialize on this lock. `FOR NO KEY UPDATE` still
-    /// lets logout and audit inserts check their foreign keys concurrently.
+    /// lets inserts that reference the account check their foreign keys concurrently.
     ///
     /// # Errors
     ///

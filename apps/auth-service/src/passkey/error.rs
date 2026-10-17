@@ -4,7 +4,7 @@ use super::ApiError;
 use crate::security::SessionError;
 use piquel_auth_protocol::InvalidValue;
 use piquel_crypto::CryptoError;
-use piquel_repository::DatabaseError;
+use piquel_repository::{DatabaseError, SignInFailure};
 use std::borrow::Cow;
 use webauthn_rs::prelude::WebauthnError;
 
@@ -70,7 +70,7 @@ pub(super) enum PasskeyError {
     MissingCounter,
     /// A counter-capable authenticator reused or decreased its counter, compared with
     /// the ceremony's credential snapshot or the latest stored value. Only a holder of
-    /// the credential, or of a copy, can cause this, so it is audited against the account.
+    /// the credential, or of a copy, can cause this, so it is recorded against the account.
     #[error("passkey signature counter did not increase")]
     CounterRegression,
     /// The stored credential's ID differs from the row it was looked up by, so the
@@ -187,10 +187,48 @@ impl From<PasskeyError> for ApiError {
 }
 
 impl PasskeyError {
+    /// How a rejected passkey authentication is recorded, or `None` for failures
+    /// that say nothing about the attempt, such as a database error.
+    pub(super) const fn sign_in_failure(&self) -> Option<SignInFailure> {
+        match self {
+            Self::CounterRegression => Some(SignInFailure::CounterRegression),
+            Self::AccountInactive => Some(SignInFailure::AccountUnavailable),
+            Self::AccountUnavailable => Some(SignInFailure::UnknownAccount),
+            Self::Webauthn(_)
+            | Self::InvalidUserHandle(_)
+            | Self::UserVerificationRequired
+            | Self::CredentialRevoked => Some(SignInFailure::InvalidCredential),
+            Self::InvalidUsername
+            | Self::UsernameTaken(_)
+            | Self::PasskeyAlreadyRegistered(_)
+            | Self::InvalidDisplayName
+            | Self::InvalidPasskeyName
+            | Self::InvitationRequired
+            | Self::InvitationMissingAtFinish
+            | Self::InvitationExpired
+            | Self::CeremonyBrowserMissing
+            | Self::BrowserMismatch
+            | Self::WrongCeremony
+            | Self::SessionChanged
+            | Self::GooglePasswordManagerRequiresAndroid
+            | Self::MissingCounter
+            | Self::CredentialMismatch
+            | Self::LastPasskey
+            | Self::PasskeyNotFound
+            | Self::StoredCredential(_)
+            | Self::StoredCeremony(_)
+            | Self::Serialization(_)
+            | Self::CookieHeader(_)
+            | Self::Database(_)
+            | Self::Session(_)
+            | Self::Crypto(_) => None,
+        }
+    }
+
     /// Rejects a passkey ceremony with `message`. The reason is logged at debug level:
     /// any browser can trigger most of these up to the rate limit, so a higher level
     /// would let it flood the logs. Only a credential holder can cause a
-    /// [`CounterRegression`](Self::CounterRegression), so it is also audited and logged
+    /// [`CounterRegression`](Self::CounterRegression), so it is also logged
     /// as a warning. The Display holds no challenge or credential.
     fn rejected(&self, message: impl Into<Cow<'static, str>>) -> ApiError {
         tracing::debug!(error = %piquel_common::ErrorChain(self), "WebAuthn request rejected");

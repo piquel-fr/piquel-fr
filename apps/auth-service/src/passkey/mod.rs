@@ -2,7 +2,7 @@
 use crate::config::PasskeyConfig;
 use crate::federation::FederationApplication;
 use crate::routes;
-use crate::security::{self, ApiError, BrowserCookie};
+use crate::security::{self, ApiError, BrowserCookie, RequestContext};
 use axum::{
     Json, Router,
     extract::{Path, State},
@@ -10,11 +10,11 @@ use axum::{
     response::{IntoResponse, Response},
     routing::{get, patch, post},
 };
-use piquel_auth_protocol::{AuthenticationMethod, TokenId, UserId};
+use piquel_auth_protocol::{AuthenticationMethod, PasskeyId, UserId};
 use piquel_crypto::Secret;
 use piquel_repository::{
-    AuditAction, Database, DatabaseError, DatabaseTransaction, InsertPasskey, InsertUser,
-    StoredPasskey,
+    Actor, Database, DatabaseError, DatabaseTransaction, DomainEvent, EventContext, InsertPasskey,
+    InsertUser, RevocationReason, StoredPasskey,
 };
 use serde_json::Value;
 use std::sync::Arc;
@@ -123,16 +123,19 @@ impl PasskeyApplication {
             .with_state(self)
     }
 
-    /// Stores a verified credential with its validated label inside the account transaction.
+    /// Stores a verified credential with its validated label inside the account
+    /// transaction, and records its addition.
     async fn insert_passkey(
         tx: &mut DatabaseTransaction<'_>,
+        context: &EventContext,
         user_id: UserId,
         key: Passkey,
         friendly_name: PasskeyName,
     ) -> Result<(), PasskeyError> {
+        let passkey_id = PasskeyId::new();
         tx.passkeys()
             .insert(&InsertPasskey {
-                id: TokenId::new(),
+                id: passkey_id,
                 credential_id: key.cred_id().as_ref().to_vec(),
                 user_id,
                 credential: serde_json::to_value(key).map_err(PasskeyError::Serialization)?,
@@ -146,21 +149,31 @@ impl PasskeyApplication {
                 | DatabaseError::InvalidStoredData { .. }
                 | DatabaseError::Operation(_) => error.into(),
             })?;
+        tx.record(
+            context,
+            Some(user_id),
+            DomainEvent::PasskeyAdded { passkey_id },
+        )
+        .await?;
         Ok(())
     }
 
-    /// Commits the account operation, its audit event and the passkey sign-in together.
-    /// A browser already signed in as `user_id` keeps its session, now confirmed.
+    /// Commits the account operation together with the passkey sign-in. A browser
+    /// already signed in as `user_id` keeps its session, now confirmed.
     async fn complete_sign_in(
         mut tx: DatabaseTransaction<'_>,
+        context: RequestContext,
         headers: &HeaderMap,
         user_id: UserId,
-        action: AuditAction,
     ) -> Result<Response, PasskeyError> {
-        let session =
-            security::Session::sign_in(&mut tx, headers, user_id, AuthenticationMethod::Passkey)
-                .await?;
-        tx.audit_events().record(user_id, action, None).await?;
+        let session = security::Session::sign_in(
+            &mut tx,
+            context,
+            headers,
+            user_id,
+            AuthenticationMethod::Passkey,
+        )
+        .await?;
         tx.commit().await?;
         let mut response = StatusCode::NO_CONTENT.into_response();
         BrowserCookie::Session.set_on(&mut response, &session)?;
@@ -277,11 +290,13 @@ impl PasskeyApplication {
 
     /// Takes `WebAuthn`'s verdict on an assertion for `user_id` and, once the latest
     /// credential state also accepts it, opens the transaction that completes the
-    /// authentication. The ceremony was already consumed. A
-    /// [`PasskeyError::CounterRegression`] rolls back any transaction it opened, then
-    /// commits its audit entry on the pool so the record outlives the rejection.
+    /// authentication. The ceremony was already consumed. A rejection rolls back any
+    /// transaction it opened, then is recorded as `actor`'s failed sign-in in a
+    /// transaction of its own, so the record outlives the rejection.
     async fn accept_credential(
         &self,
+        context: RequestContext,
+        actor: Actor,
         user_id: UserId,
         verified: Result<AuthenticationResult, WebauthnError>,
     ) -> Result<DatabaseTransaction<'_>, PasskeyError> {
@@ -295,16 +310,15 @@ impl PasskeyApplication {
             }
             Err(error) => (error.into(), None),
         };
-        let PasskeyError::CounterRegression = error else {
-            return Err(error);
-        };
-        // Logged first so the signal survives a database failure.
-        tracing::warn!(
-            event = COUNTER_REGRESSION_EVENT,
-            %user_id,
-            "passkey signature counter regression rejected"
-        );
-        // A failed rollback is only logged: the audit entry matters more, and a broken
+        if let PasskeyError::CounterRegression = error {
+            // Logged first so the signal survives a database failure.
+            tracing::warn!(
+                event = COUNTER_REGRESSION_EVENT,
+                %user_id,
+                "passkey signature counter regression rejected"
+            );
+        }
+        // A failed rollback is only logged: the record matters more, and a broken
         // connection releases its locks anyway.
         if let Some(tx) = tx
             && let Err(rollback) = tx.rollback().await
@@ -314,11 +328,35 @@ impl PasskeyApplication {
                 "passkey authentication rollback failed"
             );
         }
-        self.database
-            .audit_events()
-            .record_rejection(user_id, AuditAction::PasskeyCounterRegression)
-            .await?;
-        Err(error)
+        Err(self.reject(context, actor, Some(user_id), error).await)
+    }
+
+    /// Records `error` as `actor`'s failed passkey authentication of `subject`, when
+    /// it describes the attempt, then returns it, or the database failure that
+    /// prevented recording it.
+    async fn reject(
+        &self,
+        context: RequestContext,
+        actor: Actor,
+        subject: Option<UserId>,
+        error: PasskeyError,
+    ) -> PasskeyError {
+        let Some(reason) = error.sign_in_failure() else {
+            return error;
+        };
+        match context
+            .record_sign_in_failure(
+                &self.database,
+                actor,
+                subject,
+                AuthenticationMethod::Passkey,
+                reason,
+            )
+            .await
+        {
+            Ok(()) => error,
+            Err(database) => database.into(),
+        }
     }
 
     /// Validates signup and starts the first passkey ceremony without creating an account.
@@ -380,6 +418,7 @@ impl PasskeyApplication {
     /// Verifies the first passkey and atomically creates the account, invitation claim and session.
     async fn finish_registration(
         State(app): State<Self>,
+        context: RequestContext,
         headers: HeaderMap,
         Json(input): Json<RegistrationFinish>,
     ) -> Result<Response, ApiError> {
@@ -425,12 +464,29 @@ impl PasskeyApplication {
                 | DatabaseError::InvalidStoredData { .. }
                 | DatabaseError::Operation(_) => error.into(),
             })?;
-        Self::insert_passkey(&mut tx, user_id, key, friendly_name).await?;
+        let actor = context.actor(Actor::User {
+            user_id,
+            session_id: None,
+        });
+        tx.record(
+            &actor,
+            Some(user_id),
+            DomainEvent::AccountCreated {
+                method: if pending.is_some() {
+                    AuthenticationMethod::Federation
+                } else {
+                    AuthenticationMethod::Passkey
+                },
+                invited: app.invite_required,
+            },
+        )
+        .await?;
+        Self::insert_passkey(&mut tx, &actor, user_id, key, friendly_name).await?;
         if let Some(pending) = pending {
-            FederationApplication::attach_signup(&mut tx, pending, &headers, user_id).await?;
+            FederationApplication::attach_signup(&mut tx, &actor, pending, &headers, user_id)
+                .await?;
         }
-        let mut response =
-            Self::complete_sign_in(tx, &headers, user_id, AuditAction::AccountCreate).await?;
+        let mut response = Self::complete_sign_in(tx, context, &headers, user_id).await?;
         // Ordinary registration leaves any unrelated pending social flow untouched.
         if pending.is_some() {
             BrowserCookie::FederationPending
@@ -487,6 +543,7 @@ impl PasskeyApplication {
     /// Verifies the assertion and latest credential state before signing the browser in.
     async fn finish_login(
         State(app): State<Self>,
+        context: RequestContext,
         headers: HeaderMap,
         Json(input): Json<AuthenticationFinish>,
     ) -> Result<Response, ApiError> {
@@ -499,19 +556,27 @@ impl PasskeyApplication {
                 app.webauthn
                     .finish_passkey_authentication(&input.credential, &state),
             ),
-            AuthenticationCeremony::Decoy => return Err(PasskeyError::AccountUnavailable.into()),
+            AuthenticationCeremony::Decoy => {
+                return Err(app
+                    .reject(
+                        context,
+                        Actor::Anonymous,
+                        None,
+                        PasskeyError::AccountUnavailable,
+                    )
+                    .await
+                    .into());
+            }
             AuthenticationCeremony::Discover(DiscoverCeremony { state }) => {
-                let (uuid, _) = app
-                    .webauthn
-                    .identify_discoverable_authentication(&input.credential)
-                    .map_err(PasskeyError::from)?;
-                let user_id = UserId::from_uuid(uuid).map_err(PasskeyError::InvalidUserHandle)?;
-                let keys: Vec<DiscoverableKey> = app
-                    .keys(user_id)
-                    .await?
-                    .iter()
-                    .map(DiscoverableKey::from)
-                    .collect();
+                let (user_id, keys) = match app.discover(&input.credential).await {
+                    Ok(discovered) => discovered,
+                    Err(error) => {
+                        return Err(app
+                            .reject(context, Actor::Anonymous, None, error)
+                            .await
+                            .into());
+                    }
+                };
                 (
                     user_id,
                     app.webauthn.finish_discoverable_authentication(
@@ -522,8 +587,28 @@ impl PasskeyApplication {
                 )
             }
         };
-        let tx = app.accept_credential(user_id, verified).await?;
-        Ok(Self::complete_sign_in(tx, &headers, user_id, AuditAction::PasskeyLogin).await?)
+        let tx = app
+            .accept_credential(context, Actor::Anonymous, user_id, verified)
+            .await?;
+        Ok(Self::complete_sign_in(tx, context, &headers, user_id).await?)
+    }
+
+    /// Reads the account a discoverable credential names, and that account's keys.
+    async fn discover(
+        &self,
+        credential: &PublicKeyCredential,
+    ) -> Result<(UserId, Vec<DiscoverableKey>), PasskeyError> {
+        let (uuid, _) = self
+            .webauthn
+            .identify_discoverable_authentication(credential)?;
+        let user_id = UserId::from_uuid(uuid).map_err(PasskeyError::InvalidUserHandle)?;
+        let keys = self
+            .keys(user_id)
+            .await?
+            .iter()
+            .map(DiscoverableKey::from)
+            .collect();
+        Ok((user_id, keys))
     }
 
     /// Starts a passkey proof tied to the current signed-in session.
@@ -553,6 +638,7 @@ impl PasskeyApplication {
     /// replacing its cookie like any re-authentication.
     async fn finish_confirmation(
         State(app): State<Self>,
+        context: RequestContext,
         security::Session(session): security::Session,
         headers: HeaderMap,
         Json(input): Json<AuthenticationFinish>,
@@ -570,13 +656,22 @@ impl PasskeyApplication {
         let verified = app
             .webauthn
             .finish_passkey_authentication(&input.credential, &state);
-        let mut tx = app.accept_credential(user_id, verified).await?;
+        let actor = Actor::User {
+            user_id,
+            session_id: Some(session_id),
+        };
+        let mut tx = app
+            .accept_credential(context, actor, user_id, verified)
+            .await?;
         let secret =
             security::Session::reauthenticate(&mut tx, &session, AuthenticationMethod::Passkey)
                 .await?;
-        tx.audit_events()
-            .record(user_id, AuditAction::SessionPasskeyConfirmed, None)
-            .await?;
+        tx.record(
+            &context.user(&session),
+            Some(user_id),
+            DomainEvent::PasskeyConfirmed { session_id },
+        )
+        .await?;
         tx.commit().await?;
         let mut response = StatusCode::NO_CONTENT.into_response();
         BrowserCookie::Session
@@ -633,6 +728,7 @@ impl PasskeyApplication {
     /// credential.
     async fn finish_enrollment(
         State(app): State<Self>,
+        context: RequestContext,
         security::Session(session): security::Session,
         headers: HeaderMap,
         Json(input): Json<RegistrationFinish>,
@@ -655,10 +751,14 @@ impl PasskeyApplication {
             .map_err(PasskeyError::from)?;
         let mut tx = app.database.begin().await?;
         security::Session::lock(&mut tx, &session).await?;
-        Self::insert_passkey(&mut tx, user_id, key, friendly_name).await?;
-        tx.audit_events()
-            .record(user_id, AuditAction::PasskeyAdd, None)
-            .await?;
+        Self::insert_passkey(
+            &mut tx,
+            &context.user(&session),
+            user_id,
+            key,
+            friendly_name,
+        )
+        .await?;
         tx.commit().await?;
         Ok(StatusCode::NO_CONTENT)
     }
@@ -685,8 +785,9 @@ impl PasskeyApplication {
     /// Changes a credential label. A name grants nothing, so a session is enough.
     async fn rename(
         State(app): State<Self>,
+        context: RequestContext,
         security::Session(session): security::Session,
-        Path(id): Path<TokenId>,
+        Path(id): Path<PasskeyId>,
         Json(input): Json<Rename>,
     ) -> Result<StatusCode, ApiError> {
         let friendly_name = PasskeyName::parse(input.friendly_name)?;
@@ -699,9 +800,12 @@ impl PasskeyApplication {
         {
             return Err(PasskeyError::PasskeyNotFound.into());
         }
-        tx.audit_events()
-            .record(session.user_id, AuditAction::PasskeyRename, None)
-            .await?;
+        tx.record(
+            &context.user(&session),
+            Some(session.user_id),
+            DomainEvent::PasskeyRenamed { passkey_id: id },
+        )
+        .await?;
         tx.commit().await?;
         Ok(StatusCode::NO_CONTENT)
     }
@@ -709,8 +813,9 @@ impl PasskeyApplication {
     /// Removes a passkey while retaining another and revoking the account's other sessions.
     async fn revoke(
         State(app): State<Self>,
+        context: RequestContext,
         confirmed: security::Confirmed,
-        Path(id): Path<TokenId>,
+        Path(id): Path<PasskeyId>,
     ) -> Result<StatusCode, ApiError> {
         let session = &confirmed.0;
         let mut tx = app.database.begin().await?;
@@ -722,12 +827,19 @@ impl PasskeyApplication {
         {
             return Err(PasskeyError::LastPasskey.into());
         }
-        tx.sessions()
-            .revoke_other(session.user_id, session.id)
-            .await?;
-        tx.audit_events()
-            .record(session.user_id, AuditAction::PasskeyRemove, None)
-            .await?;
+        tx.record(
+            &context.user(session),
+            Some(session.user_id),
+            DomainEvent::PasskeyRemoved { passkey_id: id },
+        )
+        .await?;
+        security::Session::revoke_other(
+            &mut tx,
+            context,
+            session,
+            RevocationReason::CredentialRemoved,
+        )
+        .await?;
         tx.commit().await?;
         Ok(StatusCode::NO_CONTENT)
     }
@@ -755,10 +867,23 @@ impl PasskeyApplication {
     /// Revokes the current session if present and clears its browser cookie.
     async fn logout(
         State(app): State<Self>,
+        context: RequestContext,
         security::OptionalSession(session): security::OptionalSession,
     ) -> Result<Response, ApiError> {
         if let Some(session) = session {
-            app.database.sessions().revoke(session.id).await?;
+            let mut tx = app.database.begin().await?;
+            if tx.sessions().revoke(session.id).await? {
+                tx.record(
+                    &context.user(&session),
+                    Some(session.user_id),
+                    DomainEvent::SessionRevoked {
+                        session_id: session.id,
+                        reason: RevocationReason::Logout,
+                    },
+                )
+                .await?;
+            }
+            tx.commit().await?;
         }
         let mut response = StatusCode::NO_CONTENT.into_response();
         BrowserCookie::Session

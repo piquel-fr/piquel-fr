@@ -18,11 +18,13 @@ pub use connection::{Database, DatabaseConfig};
 pub use error::{DatabaseConnectionError, DatabaseError};
 pub use exclusive::{ExclusiveConnection, LockKey};
 pub use repositories::{
-    AuditEventRepository, EmailRepository, FederationRepository, MaintenanceRepository,
-    OidcRepository, PasskeyRepository, SecurityRepository, SessionRepository, TokenRepository,
-    UserRepository,
-    audit::{AuditAction, AuditOutcome},
+    EmailRepository, EventRepository, FederationRepository, MaintenanceRepository, OidcRepository,
+    PasskeyRepository, SecurityRepository, SessionRepository, TokenRepository, UserRepository,
     emails::{InsertVerifiedEmail, StoredEmail},
+    events::{
+        Actor, DomainEvent, EventContext, EventCursor, GrantRevocation, ImportedAudit, JobName,
+        Personal, RequestOrigin, RevocationReason, SignInFailure, StoredEvent, UserAgentFamily,
+    },
     federation::{
         ConsumedFederationTransaction, InsertExternalIdentity, InsertFederationTransaction,
         PendingFederation, StoredExternalIdentity,
@@ -34,7 +36,10 @@ pub use repositories::{
     },
     passkeys::{CeremonyKind, ConsumedCeremony, InsertCeremony, InsertPasskey, StoredPasskey},
     sessions::{InsertSession, SessionAuthentication, StoredSession},
-    tokens::{InsertRefreshFamily, InsertRefreshToken, RefreshRotationError, RotatedRefreshToken},
+    tokens::{
+        InsertRefreshFamily, InsertRefreshToken, RefreshRotationError, RevokedFamily,
+        RotatedRefreshToken,
+    },
     users::{InsertUser, StoredUser},
 };
 pub use transaction::DatabaseTransaction;

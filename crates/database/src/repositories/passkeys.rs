@@ -3,7 +3,7 @@
 use super::{PasskeyRepository, RepositoryExecutor};
 use crate::DatabaseError;
 use chrono::{DateTime, Utc};
-use piquel_auth_protocol::{SessionId, TokenId, UserId};
+use piquel_auth_protocol::{PasskeyId, SessionId, TokenId, UserId};
 use serde_json::Value;
 
 piquel_common::str_enum! {
@@ -24,7 +24,7 @@ piquel_common::str_enum! {
 #[derive(Clone, Debug)]
 pub struct InsertPasskey {
     /// Row identifier.
-    pub id: TokenId,
+    pub id: PasskeyId,
     /// `WebAuthn` credential ID; unique across all accounts.
     pub credential_id: Vec<u8>,
     /// Owning account.
@@ -39,7 +39,7 @@ pub struct InsertPasskey {
 #[derive(Clone, Debug)]
 pub struct StoredPasskey {
     /// Row identifier.
-    pub id: TokenId,
+    pub id: PasskeyId,
     /// `WebAuthn` credential ID.
     pub credential_id: Vec<u8>,
     /// Owning account.
@@ -100,7 +100,7 @@ impl PasskeyRepository<'_> {
                     id, credential_id, user_id, credential, friendly_name
                 ) VALUES ($1, $2, $3, $4, $5)
                 RETURNING
-                    id AS "id: TokenId", credential_id, user_id AS "user_id: UserId", credential,
+                    id AS "id: PasskeyId", credential_id, user_id AS "user_id: UserId", credential,
                     friendly_name, revoked_at"#,
                 input.id.as_uuid(),
                 input.credential_id,
@@ -126,7 +126,7 @@ impl PasskeyRepository<'_> {
             sqlx::query_as!(
                 StoredPasskey,
                 r#"SELECT
-                    id AS "id: TokenId", credential_id, user_id AS "user_id: UserId", credential,
+                    id AS "id: PasskeyId", credential_id, user_id AS "user_id: UserId", credential,
                     friendly_name, revoked_at
                 FROM passkey_credentials
                 WHERE user_id = $1
@@ -154,7 +154,7 @@ impl PasskeyRepository<'_> {
             sqlx::query_as!(
                 StoredPasskey,
                 r#"SELECT
-                    p.id AS "id: TokenId", p.credential_id, p.user_id AS "user_id: UserId",
+                    p.id AS "id: PasskeyId", p.credential_id, p.user_id AS "user_id: UserId",
                     p.credential, p.friendly_name, p.revoked_at
                 FROM passkey_credentials p
                 JOIN users u ON u.id = p.user_id
@@ -183,7 +183,7 @@ impl PasskeyRepository<'_> {
             sqlx::query_as!(
                 StoredPasskey,
                 r#"SELECT
-                    id AS "id: TokenId", credential_id, user_id AS "user_id: UserId", credential,
+                    id AS "id: PasskeyId", credential_id, user_id AS "user_id: UserId", credential,
                     friendly_name, revoked_at
                 FROM passkey_credentials
                 WHERE credential_id = $1
@@ -229,7 +229,7 @@ impl PasskeyRepository<'_> {
     /// Returns [`DatabaseError`] if the query fails.
     pub async fn rename(
         &mut self,
-        id: TokenId,
+        id: PasskeyId,
         user_id: UserId,
         name: &str,
     ) -> Result<bool, DatabaseError> {
@@ -262,7 +262,7 @@ impl PasskeyRepository<'_> {
     /// Returns [`DatabaseError`] if the query fails.
     pub async fn revoke_if_not_last(
         &mut self,
-        id: TokenId,
+        id: PasskeyId,
         user_id: UserId,
     ) -> Result<bool, DatabaseError> {
         Ok(run!(
@@ -302,7 +302,7 @@ impl PasskeyRepository<'_> {
     /// # Errors
     ///
     /// Returns [`DatabaseError`] if the query fails.
-    pub async fn revoke(&mut self, id: TokenId, user_id: UserId) -> Result<bool, DatabaseError> {
+    pub async fn revoke(&mut self, id: PasskeyId, user_id: UserId) -> Result<bool, DatabaseError> {
         Ok(run!(
             self,
             execute,
@@ -382,7 +382,7 @@ impl PasskeyRepository<'_> {
 mod tests {
     use super::{InsertPasskey, PasskeyRepository};
     use crate::Database;
-    use piquel_auth_protocol::{TokenId, UserId};
+    use piquel_auth_protocol::{PasskeyId, UserId};
 
     /// A disabled account and an account whose only passkey is revoked list no
     /// credentials, like a username nobody holds.
@@ -402,7 +402,7 @@ mod tests {
                 .expect("user");
             let key = passkeys
                 .insert(&InsertPasskey {
-                    id: TokenId::new(),
+                    id: PasskeyId::new(),
                     credential_id: user.as_uuid().as_bytes().to_vec(),
                     user_id: user,
                     credential: serde_json::json!({}),

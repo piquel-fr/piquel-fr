@@ -32,10 +32,24 @@ fn session_for(user: UserId) -> InsertSession {
         passkey_confirmed_at: None,
     }
 }
-/// Account locks allow logout to insert audit records without a foreign-key deadlock.
+/// Inserts a passkey row, which references the account through a foreign key.
+async fn insert_reference(connection: &mut sqlx::PgConnection, user: UserId) {
+    sqlx::query(
+        "INSERT INTO passkey_credentials(id,credential_id,user_id,credential,friendly_name)
+        VALUES($1,$2,$3,'{}','Lock test')",
+    )
+    .bind(uuid::Uuid::now_v7())
+    .bind(uuid::Uuid::now_v7().as_bytes().to_vec())
+    .bind(user.as_uuid())
+    .execute(connection)
+    .await
+    .expect("reference");
+}
+
+/// Account locks let other transactions insert rows referencing the account.
 #[tokio::test]
 #[ignore = "requires a disposable TEST_DATABASE_URL"]
-async fn account_locks_allow_logout_audit_foreign_keys() {
+async fn account_locks_allow_foreign_key_checks() {
     let pool = Database::test_pool().await;
     let user = insert_user(&pool).await;
     let mut account = pool.begin().await.expect("account transaction");
@@ -44,12 +58,14 @@ async fn account_locks_allow_logout_audit_foreign_keys() {
         .await
         .expect("account lock")
         .expect("active account");
-    let mut logout = pool.begin().await.expect("logout transaction");
-    tokio::time::timeout(Duration::from_secs(2),sqlx::query(
-        "INSERT INTO security_audit_log(id,user_id,action,outcome) VALUES($1,$2,'logout','success')"
-    ).bind(uuid::Uuid::now_v7()).bind(user.as_uuid()).execute(&mut *logout))
-        .await.expect("account lock must allow logout foreign-key checks").expect("audit");
-    logout.rollback().await.expect("rollback logout");
+    let mut reference = pool.begin().await.expect("reference transaction");
+    tokio::time::timeout(
+        Duration::from_secs(2),
+        insert_reference(&mut reference, user),
+    )
+    .await
+    .expect("account lock must allow foreign-key checks");
+    reference.rollback().await.expect("rollback reference");
     account.rollback().await.expect("rollback account");
 }
 
@@ -61,14 +77,7 @@ async fn account_locks_do_not_wait_on_foreign_key_checks() {
     let pool = Database::test_pool().await;
     let user = insert_user(&pool).await;
     let mut reference = pool.begin().await.expect("reference transaction");
-    sqlx::query(
-        "INSERT INTO security_audit_log(id,user_id,action,outcome) VALUES($1,$2,'login','success')",
-    )
-    .bind(uuid::Uuid::now_v7())
-    .bind(user.as_uuid())
-    .execute(&mut *reference)
-    .await
-    .expect("audit");
+    insert_reference(&mut reference, user).await;
     let mut account = pool.begin().await.expect("account transaction");
     tokio::time::timeout(
         Duration::from_secs(2),

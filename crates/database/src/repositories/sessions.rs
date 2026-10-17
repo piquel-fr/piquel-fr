@@ -259,8 +259,8 @@ impl SessionRepository<'_> {
             == 1)
     }
 
-    /// Revokes every other unrevoked session of the account and returns how
-    /// many were revoked.
+    /// Revokes every other unrevoked session of the account and returns their
+    /// IDs, so the caller can record each revocation.
     ///
     /// # Errors
     ///
@@ -269,21 +269,21 @@ impl SessionRepository<'_> {
         &mut self,
         user_id: UserId,
         except_session: SessionId,
-    ) -> Result<u64, DatabaseError> {
-        Ok(run!(
+    ) -> Result<Vec<SessionId>, DatabaseError> {
+        run!(
             self,
-            execute,
-            sqlx::query!(
-                "UPDATE sessions
+            fetch_all,
+            sqlx::query_scalar!(
+                r#"UPDATE sessions
                 SET revoked_at = now(), passkey_confirmed_at = NULL
                 WHERE user_id = $1
                 AND id <> $2
-                AND revoked_at IS NULL",
+                AND revoked_at IS NULL
+                RETURNING id AS "id: SessionId""#,
                 user_id.as_uuid(),
                 except_session.as_uuid(),
             )
-        )?
-        .rows_affected())
+        )
     }
 
     /// Stores the digest of a session's browser cookie secret.

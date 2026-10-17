@@ -1,7 +1,7 @@
 //! Validated names and the browser API's request and response bodies.
 
 use super::PasskeyError;
-use piquel_auth_protocol::{TokenId, UserId};
+use piquel_auth_protocol::{PasskeyId, TokenId, UserId};
 use serde::{Deserialize, Serialize};
 use webauthn_rs::prelude::{PublicKeyCredential, RegisterPublicKeyCredential};
 
@@ -175,7 +175,7 @@ pub(super) struct PasskeyView {
     /// User-chosen credential label.
     pub(super) friendly_name: String,
     /// Credential row identifier used for rename and removal.
-    pub(super) id: TokenId,
+    pub(super) id: PasskeyId,
 }
 
 /// Account identity shown in the browser session view.
