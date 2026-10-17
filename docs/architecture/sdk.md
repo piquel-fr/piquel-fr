@@ -156,8 +156,8 @@ the grammar, or a Bearer challenge with an invalid parameter, holds no challenge
 Login uses the authorization code flow with S256 PKCE, `state` and `nonce`:
 
 1. `authorize` returns the authorization URL and a pending login holding the PKCE
-   verifier, `state`, `nonce`, the expected issuer, the redirect URI and any
-   `max_age`. The pending login is stored server-side and consumed by the callback,
+   verifier, `state`, `nonce`, the expected issuer, the redirect URI and any step-up
+   requirement it asks for with `acr_values` and `max_age`. The pending login is stored server-side and consumed by the callback,
    so a callback completes at most once.
 2. The callback is checked before the code goes anywhere:
    1. `state` equals the pending login's (`state_mismatch`).
@@ -168,7 +168,9 @@ Login uses the authorization code flow with S256 PKCE, `state` and `nonce`:
    3. An `error` parameter becomes an `oauth` error.
    4. Otherwise `code` must be present (`missing_code`).
 3. The code is exchanged with the verifier and redirect URI, and the ID token is
-   validated against the pending login's `nonce` and `max_age`.
+   validated against the pending login's `nonce` and `max_age`. It must also meet
+   the login's step-up requirement (`insufficient_user_authentication`), so a
+   step-up login that falls short fails instead of being asked for again.
 
 The SDKs never send the `audience` parameter auth accepts today; auth then uses the
 client's default resource. They will send `resource` (RFC 8707) once auth supports
@@ -197,8 +199,13 @@ A resource whose requirement is not met answers with
 `insufficient_user_authentication`, the requirement's `acr_values` and `max_age`
 (RFC 9470). A challenge names at most one class. A client parses the challenge back
 into a requirement, taking the first `acr_values` entry it knows, as auth does, and
-runs authorization again with those values. It retries at most once per user action,
-and surfaces the error if the new token still fails.
+runs authorization again with those values.
+
+A client retries at most once per user action. It signs the user in again only when
+the current sign-in falls short of the requirement. When the sign-in already meets
+it, the user has stepped up and the resource still refuses, so the client reports the
+error instead of redirecting again. With the login check above, a step-up sign-in
+either reaches the requirement or fails, so the two never loop.
 
 ## Forward compatibility
 

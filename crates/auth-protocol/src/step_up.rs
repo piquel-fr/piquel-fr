@@ -12,6 +12,23 @@ use serde::{Deserialize, Serialize};
 ///
 /// It serializes as the parameters that ask for it, `acr_values` and `max_age`, as in
 /// a step-up challenge (RFC 9470 §3).
+///
+/// ```
+/// use chrono::{TimeDelta, Utc};
+/// use piquel_auth_protocol::{claims::Acr, step_up::StepUpRequirement};
+///
+/// let recent_passkey = StepUpRequirement::passkey_within(300);
+/// let now = Utc::now();
+/// let a_minute_ago = Some(now - TimeDelta::minutes(1));
+///
+/// assert!(recent_passkey.check(Some(&Acr::PhishingResistant), a_minute_ago, now).is_ok());
+/// // A social sign-in is too weak, however recent.
+/// assert!(recent_passkey.check(Some(&Acr::Social), a_minute_ago, now).is_err());
+///
+/// // A client asks for it again with these parameters.
+/// let params: Vec<_> = recent_passkey.authorize_params().collect();
+/// assert_eq!(params, [("acr_values", "phr".into()), ("max_age", "300".into())]);
+/// ```
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct StepUpRequirement {
     /// The class the authentication must meet ([`Acr::satisfies`]).

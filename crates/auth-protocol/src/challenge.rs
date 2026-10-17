@@ -9,27 +9,26 @@
 //!
 //! ```
 //! use piquel_auth_protocol::{
-//!     challenge::{BearerChallenge, BearerError},
+//!     challenge::BearerChallenge,
 //!     claims::Acr,
+//!     step_up::StepUpRequirement,
 //! };
 //!
 //! // A resource server asking for a recent passkey confirmation (RFC 9470).
-//! let step_up = BearerChallenge {
-//!     acr_values: vec![Acr::PhishingResistant],
-//!     max_age: Some(300),
-//!     ..BearerChallenge::error(BearerError::InsufficientUserAuthentication)
-//! };
+//! let step_up = BearerChallenge::step_up(StepUpRequirement::passkey_within(300));
 //! let header = step_up.to_string();
 //! assert_eq!(
 //!     header,
 //!     r#"Bearer error="insufficient_user_authentication", acr_values="phr", max_age="300""#
 //! );
 //!
-//! // A client reads it back, whatever the order, alongside other schemes.
+//! // A client reads it back, whatever the order, alongside other schemes. The
+//! // requirement's class is the first `acr_values` entry this version knows.
 //! let parsed: BearerChallenge =
-//!     r#"Basic realm="api", Bearer max_age=300, acr_values="phr", error=insufficient_user_authentication"#
+//!     r#"Basic realm="api", Bearer max_age=300, acr_values="phrh phr", error=insufficient_user_authentication"#
 //!         .parse()?;
 //! assert_eq!(parsed, step_up);
+//! assert_eq!(parsed.step_up.acr, Some(Acr::PhishingResistant));
 //! # Ok::<(), piquel_auth_protocol::challenge::ChallengeError>(())
 //! ```
 

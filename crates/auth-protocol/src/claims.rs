@@ -24,6 +24,17 @@ piquel_common::str_enum! {
 
 piquel_common::str_enum! {
     /// `acr` values: the authentication context class a session reached, strongest first.
+    ///
+    /// ```
+    /// use piquel_auth_protocol::claims::Acr;
+    ///
+    /// // A passkey meets a social requirement, but not the other way around.
+    /// assert!(Acr::PhishingResistant.satisfies(Acr::Social));
+    /// assert!(!Acr::Social.satisfies(Acr::PhishingResistant));
+    ///
+    /// // The target of `acr_values` is the first value this version knows.
+    /// assert_eq!(Acr::select("phrh phr"), Some(Acr::PhishingResistant));
+    /// ```
     pub enum Acr {
         /// Phishing-resistant authentication, such as a passkey with user
         /// verification (OpenID Connect EAP ACR Values).
