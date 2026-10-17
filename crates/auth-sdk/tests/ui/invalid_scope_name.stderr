@@ -1,0 +1,11 @@
+error[E0080]: evaluation panicked: `notes read` is not a valid scope (RFC 6749 §3.3)
+ --> tests/ui/invalid_scope_name.rs:1:1
+  |
+1 | / piquel_auth::scopes! {
+2 | |     pub mod notes {
+3 | |         Read = "notes read",
+4 | |     }
+5 | | }
+  | |_^ evaluation of `notes::_` failed here
+  |
+  = note: this error originates in the macro `$crate::panic::panic_2021` which comes from the expansion of the macro `piquel_auth::scopes` (in Nightly builds, run with -Z macro-backtrace for more info)

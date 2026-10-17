@@ -1,0 +1,30 @@
+[package]
+name = "piquel-auth"
+description = "Validate auth.piquel.fr tokens, declare typed scopes and sign users in"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+piquel-auth-protocol.workspace = true
+
+base64.workspace = true
+chrono.workspace = true
+jsonwebtoken.workspace = true
+rand.workspace = true
+reqwest.workspace = true
+secrecy.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+sha2.workspace = true
+thiserror.workspace = true
+tokio.workspace = true
+url.workspace = true
+
+[dev-dependencies]
+axum.workspace = true
+trybuild.workspace = true
+
+[lints]
+workspace = true

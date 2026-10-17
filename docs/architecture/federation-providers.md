@@ -24,8 +24,9 @@ Pick how the provider proves identity:
 - **`OpenID` Connect** (like Google): take the identity only from a signed ID token.
   Verify its signature against the provider's published keys, then its issuer,
   exclusive audience, nonce and expiry. Cache the keys rather than fetching them on
-  every sign-in: `GoogleProtocol` keeps them for the response's `max-age`, refetches
-  once when a token names an unknown key, and fetches at most once a minute.
+  every sign-in: `GoogleProtocol` holds the Rust SDK's `piquel_auth::KeyCache`, which
+  keeps them for the response's `max-age`, refetches once when a token names an
+  unknown key, and fetches at most once every 30 seconds.
 - **OAuth only** (like GitHub): fetch the profile with the access token.
 
 Either way, the subject must be the provider's stable account ID, never an email.
@@ -77,8 +78,7 @@ specific to the provider:
   each subject, the authorization and token URLs, the scopes and the identity
   strategy.
 - **`GitLabProtocol`:** the back-channel URLs the identity step calls, such as the
-  key set or profile endpoint. They are `String`s so tests can point them at a
-  local fixture.
+  key set or profile endpoint. Tests replace them to point at a local fixture.
 - **`GitLabError`:** one variant per provider-specific check, each with a message
   that says what failed.
 - **`impl FederationApplication { async fn gitlab_identity(...) }`:** turns the
