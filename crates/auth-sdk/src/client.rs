@@ -9,7 +9,7 @@ use base64::{Engine, engine::general_purpose::URL_SAFE_NO_PAD};
 use chrono::{DateTime, TimeDelta, Utc};
 use piquel_auth_protocol::{
     ClientId,
-    claims::{LogoutTokenClaims, UserInfo},
+    claims::UserInfo,
     oauth::{CodeChallengeMethod, ErrorResponse, GrantType, Prompt, ResponseType, Scope, Scopes},
     sdk::{ErrorCategory, ErrorReason, SdkError},
     step_up::StepUpRequirement,
@@ -670,17 +670,6 @@ impl Client {
         let url = &self.issuer().metadata().revocation_endpoint;
         let reply = self.post(url, &[("token", refresh.expose())]).await?;
         Self::read::<serde::de::IgnoredAny>("revocation", &reply).map(|_| ())
-    }
-
-    /// Validates a back-channel logout token sent to this client (OIDC Back-Channel
-    /// Logout 1.0 §2.6), returning the `sub` or `sid` whose sessions to end.
-    ///
-    /// # Errors
-    /// See [`TokenError`]; a broken logout rule is [`TokenError::InvalidLogoutToken`].
-    pub async fn logout_token(&self, token: &str) -> Result<LogoutTokenClaims, TokenError> {
-        self.issuer()
-            .logout_token(token, &self.config().client_id)
-            .await
     }
 
     /// Reads the user's claims with an access token.

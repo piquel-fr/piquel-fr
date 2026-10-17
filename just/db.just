@@ -7,8 +7,7 @@ test *ARGS:
     #!/usr/bin/env bash
     set -euo pipefail
     if [[ -z "${TEST_DATABASE_URL:-}" ]]; then exec just db scratch just db test "$@"; fi
-    cargo nextest run --locked -p auth-service -p piquel-repository -p piquel-auth \
-        --features piquel-auth/postgres --run-ignored all "$@"
+    cargo nextest run --locked -p auth-service -p piquel-repository --run-ignored all "$@"
     DATABASE_URL="$TEST_DATABASE_URL" just db _prepare --check
 
 # Regenerate crates/database/.sqlx from a scratch cluster; commit the result.

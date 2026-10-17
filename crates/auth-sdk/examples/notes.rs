@@ -12,7 +12,7 @@
 use axum::{Json, Router, extract::State, http::StatusCode, routing::get};
 use piquel_auth::{
     ClientConfig, ClientId, Credentials, Issuer, Resource,
-    axum::{BearerLayer, LoginRoutes, MemorySessions, Scoped, SignedIn},
+    axum::{BearerLayer, LoginRoutes, MemoryBackend, Scoped, SignedIn},
 };
 use std::{
     env,
@@ -73,7 +73,9 @@ async fn main() -> Result<(), Box<dyn Error>> {
         credentials: Credentials::Secret(env::var("NOTES_CLIENT_SECRET")?.into()),
         redirect_uri: env::var("NOTES_REDIRECT_URI")?.parse()?,
     };
-    let auth = LoginRoutes::new(issuer.client(config), MemorySessions::default())
+    // Sessions in memory, lost on restart: a real deployment implements
+    // `SessionBackend` over its own database.
+    let auth = LoginRoutes::new(issuer.client(config), MemoryBackend::default())
         .scopes("profile".parse()?);
 
     let app = Router::new()

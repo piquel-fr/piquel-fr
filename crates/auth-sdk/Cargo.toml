@@ -9,8 +9,8 @@ repository.workspace = true
 [features]
 # Extractors, layers and login routes for axum.
 axum = ["dep:axum", "dep:tower", "dep:tracing"]
-# A PostgreSQL session store for the axum login routes.
-postgres = ["axum", "dep:sqlx"]
+# `axum::check_backend`, to test an application's session backend.
+test-util = ["axum"]
 
 [dependencies]
 piquel-auth-protocol.workspace = true
@@ -25,7 +25,6 @@ secrecy.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 sha2.workspace = true
-sqlx = { workspace = true, optional = true }
 thiserror.workspace = true
 tokio.workspace = true
 tower = { workspace = true, optional = true }
@@ -34,7 +33,6 @@ url.workspace = true
 
 [dev-dependencies]
 axum.workspace = true
-piquel-crypto.workspace = true
 trybuild.workspace = true
 
 [[example]]

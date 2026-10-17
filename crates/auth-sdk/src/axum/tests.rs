@@ -1,6 +1,7 @@
-//! Bearer rejections against the shared challenge vectors, refresh serialization on
-//! both session stores, and back-channel logout.
+//! Bearer rejections against the shared challenge vectors, the session layer's
+//! refresh lease, and logout.
 
+use super::session::{Lease, LeaseId, Session, SessionKey, Sessions};
 use super::*;
 use crate::{
     Acr, AuthenticationPolicy, ClientConfig, ClientId, Credentials, Issuer, KeyCache, KeySet,
@@ -15,17 +16,12 @@ use ::axum::{
     response::Response,
     routing::get,
 };
+use base64::Engine as _;
 use chrono::{TimeDelta, Utc};
-use piquel_auth_protocol::{
-    challenge::BearerChallenge,
-    claims::{Audience, BACKCHANNEL_LOGOUT_EVENT, Event, LogoutTokenClaims},
-    jwt::TokenType,
-    metadata::ServerMetadata,
-};
-use piquel_crypto::Rs256Key;
-use serde_json::{Value, json};
+use piquel_auth_protocol::{challenge::BearerChallenge, metadata::ServerMetadata};
+use serde_json::json;
+use sha2::Digest as _;
 use std::{
-    path::Path,
     sync::{
         Arc,
         atomic::{AtomicUsize, Ordering},
@@ -281,7 +277,7 @@ fn issuer_with_token_endpoint(token_endpoint: Url) -> Issuer {
 }
 
 /// An app whose home page shows the session's access token.
-fn login_app(issuer: &Issuer, store: impl SessionStore) -> (Router, LoginRoutes) {
+fn login_app(issuer: &Issuer, backend: &MemoryBackend) -> (Router, LoginRoutes) {
     let client = issuer.client(ClientConfig {
         client_id: ClientId::new(CLIENT),
         credentials: Credentials::None,
@@ -289,7 +285,7 @@ fn login_app(issuer: &Issuer, store: impl SessionStore) -> (Router, LoginRoutes)
             .parse()
             .expect("callback"),
     });
-    let auth = LoginRoutes::new(client, store);
+    let auth = LoginRoutes::new(client, backend.clone());
     let app = Router::new()
         .route(
             "/",
@@ -299,6 +295,9 @@ fn login_app(issuer: &Issuer, store: impl SessionStore) -> (Router, LoginRoutes)
         .layer(auth.layer());
     (app, auth)
 }
+
+/// The fixture user's account ID.
+const USER: &str = "01936f3e-8c00-7000-8000-000000000001";
 
 /// A stored login whose ID token names `sub` and `sid`, its access token `expires_in`
 /// seconds from now.
@@ -317,15 +316,23 @@ fn stored_login(sub: &str, sid: SessionId, expires_in: i64) -> StoredLogin {
     .expect("stored login")
 }
 
-/// Stores a session for `login` and returns its cookie header.
-async fn session(store: &impl SessionStore, login: &StoredLogin) -> (SessionKey, String) {
+/// Starts a session for `login` in `backend`; returns its key and cookie header.
+async fn session(backend: &MemoryBackend, login: &StoredLogin) -> (SessionKey, String) {
     let key = SessionKey::generate().expect("key");
-    store
+    Sessions::new(backend.clone())
         .insert(&key, login, Utc::now() + TimeDelta::hours(1))
         .await
         .expect("insert session");
     let cookie = format!("__Host-piquel-session={}", key.as_cookie());
     (key, cookie)
+}
+
+/// The session under `key`, as the SDK reads it.
+async fn load(backend: &MemoryBackend, key: &SessionKey) -> Option<Session> {
+    Sessions::new(backend.clone())
+        .load(key, Utc::now())
+        .await
+        .expect("load")
 }
 
 /// The response body as text.
@@ -341,105 +348,113 @@ async fn text(response: Response) -> String {
 
 /// Two requests with an expired access token make one refresh and both succeed, and
 /// a logout during a refresh leaves the session deleted.
-async fn refresh_is_serialized(store: impl SessionStore) {
+#[tokio::test]
+async fn refreshes_are_serialized() {
+    let backend = MemoryBackend::default();
     let endpoint = TokenEndpoint::start(Duration::from_millis(300)).await;
     let issuer = issuer_with_token_endpoint(endpoint.url.clone());
-    let (app, _) = login_app(&issuer, store.clone());
-    let login = stored_login(
-        "01936f3e-8c00-7000-8000-000000000001",
-        SessionId::new(),
-        -60,
-    );
-    let (key, cookie) = session(&store, &login).await;
+    let (app, _) = login_app(&issuer, &backend);
+    let login = stored_login(USER, SessionId::new(), -60);
+    let (key, cookie) = session(&backend, &login).await;
     let headers = [(header::COOKIE, cookie.as_str())];
     let (first, second) =
-        tokio::join!(get_with(&app, "/", &headers), get_with(&app, "/", &headers),);
+        tokio::join!(get_with(&app, "/", &headers), get_with(&app, "/", &headers));
     assert_eq!(first.status(), StatusCode::OK);
     assert_eq!(second.status(), StatusCode::OK);
     assert_eq!(text(first).await, "access-1");
     assert_eq!(text(second).await, "access-1");
     assert_eq!(endpoint.calls.load(Ordering::SeqCst), 1, "one refresh");
-    let stored = store.load(&key).await.expect("load").expect("session");
-    assert_eq!(stored.version, 2);
+    let stored = load(&backend, &key).await.expect("session");
+    // Inserted at 1, leased at 2, saved at 3.
+    assert_eq!((stored.version, stored.leased), (3, false));
     assert_eq!(
         stored
-            .value
+            .login
             .refresh_token
             .as_ref()
             .map(crate::RefreshToken::expose),
         Some("refresh-1")
     );
 
-    let (key, cookie) = session(&store, &login).await;
+    let (key, cookie) = session(&backend, &login).await;
     let refreshing = tokio::spawn({
         let app = app.clone();
         async move { get_with(&app, "/", &[(header::COOKIE, &cookie)]).await }
     });
     tokio::time::sleep(Duration::from_millis(100)).await;
-    store.delete(&key).await.expect("logout");
+    Sessions::new(backend.clone())
+        .delete(&key)
+        .await
+        .expect("logout");
     let response = refreshing.await.expect("request");
     assert_eq!(response.status(), StatusCode::SEE_OTHER, "signed out");
-    assert!(
-        store.load(&key).await.expect("load").is_none(),
-        "not resurrected"
-    );
+    assert!(load(&backend, &key).await.is_none(), "not resurrected");
 }
 
 /// The lease is taken only at the version read, by one attempt at a time; only that
 /// attempt can save; and a lease that expires unreleased marks the session abandoned.
-async fn lease_is_fenced(store: impl SessionStore) {
-    let login = stored_login(
-        "01936f3e-8c00-7000-8000-000000000001",
-        SessionId::new(),
-        300,
-    );
-    let (key, _) = session(&store, &login).await;
+#[tokio::test]
+async fn leases_are_fenced() {
+    let backend = MemoryBackend::default();
+    let sessions = Sessions::new(backend.clone());
+    let login = stored_login(USER, SessionId::new(), 300);
+    let (key, _) = session(&backend, &login).await;
     let (first, second) = (
         LeaseId::generate().expect("lease"),
         LeaseId::generate().expect("lease"),
     );
     let minute = Duration::from_secs(60);
-    let lease = |version, id, ttl| store.lease_refresh(&key, version, id, ttl);
+    let lease = |version, id, ttl| sessions.lease(&key, version, id, ttl, Utc::now());
+    let save = |id| sessions.save(&key, id, login.clone(), Utc::now());
     assert_eq!(
         lease(1, &first, minute).await.expect("lease"),
         Lease::Acquired
     );
-    assert_eq!(lease(1, &second, minute).await.expect("lease"), Lease::Busy);
+    assert_eq!(lease(2, &second, minute).await.expect("lease"), Lease::Busy);
     assert!(
-        !store.save_if(&key, &second, &login).await.expect("save"),
+        save(&second).await.expect("save").is_none(),
         "not the holder"
     );
-    assert!(store.save_if(&key, &first, &login).await.expect("save"));
-    assert!(
-        !store.save_if(&key, &first, &login).await.expect("save"),
-        "given back"
-    );
-    // A request that read version 1 must not redeem the token version 2 replaced.
+    let saved = save(&first).await.expect("save").expect("the holder saves");
+    assert_eq!((saved.version, saved.leased), (3, false));
+    assert!(save(&first).await.expect("save").is_none(), "given back");
+    // A request that read version 1 must not redeem the token version 3 replaced.
     assert_eq!(
         lease(1, &second, minute).await.expect("lease"),
         Lease::Changed
     );
     assert_eq!(
-        lease(2, &second, Duration::ZERO).await.expect("lease"),
+        lease(3, &second, Duration::ZERO).await.expect("lease"),
         Lease::Acquired
     );
     tokio::time::sleep(Duration::from_millis(20)).await;
     assert_eq!(
-        lease(2, &first, minute).await.expect("lease"),
+        lease(4, &first, minute).await.expect("lease"),
         Lease::Abandoned
     );
-    store.delete(&key).await.expect("delete");
+    sessions.delete(&key).await.expect("delete");
     assert_eq!(
-        lease(2, &first, minute).await.expect("lease"),
+        lease(4, &first, minute).await.expect("lease"),
         Lease::Missing
     );
 }
 
-/// Refresh serialization on the memory store.
+/// The memory backend keeps the backend contract, and a record the SDK cannot read
+/// is a missing session, not a trusted one.
 #[tokio::test]
-async fn memory_sessions_serialize_refreshes() {
-    lease_is_fenced(MemorySessions::default()).await;
-    refresh_is_serialized(MemorySessions::default()).await;
+async fn memory_backend_keeps_the_contract() {
+    let backend = MemoryBackend::default();
+    check_backend(&backend).await.expect("a sound backend");
+    let (key, _) = session(&backend, &stored_login(USER, SessionId::new(), 300)).await;
+    let name = format!(
+        "session:{}",
+        base64::engine::general_purpose::URL_SAFE_NO_PAD
+            .encode(sha2::Sha256::digest(key.as_cookie().as_bytes()))
+    );
+    let mut record = backend.load(&name).await.expect("load").expect("record");
+    record.data = r#"{"not":"a session"}"#.into();
+    assert!(backend.replace(&name, 1, &record).await.expect("replace"));
+    assert!(load(&backend, &key).await.is_none());
 }
 
 /// A refused grant ends the session, as does a refresh whose outcome is unknown,
@@ -447,37 +462,27 @@ async fn memory_sessions_serialize_refreshes() {
 #[tokio::test]
 async fn refresh_failures_end_sessions_only_when_the_token_may_be_spent() {
     let unreachable: Url = "http://127.0.0.1:9/token".parse().expect("URL");
+    let failing = |status, error| async move { TokenEndpoint::failing(status, error).await.url };
     for (endpoint, kept) in [
         (
-            TokenEndpoint::failing(StatusCode::INTERNAL_SERVER_ERROR, "server_error")
-                .await
-                .url,
+            failing(StatusCode::INTERNAL_SERVER_ERROR, "server_error").await,
             true,
         ),
         (
-            TokenEndpoint::failing(StatusCode::BAD_REQUEST, "invalid_client")
-                .await
-                .url,
+            failing(StatusCode::BAD_REQUEST, "invalid_client").await,
             true,
         ),
         (
-            TokenEndpoint::failing(StatusCode::BAD_REQUEST, "invalid_grant")
-                .await
-                .url,
+            failing(StatusCode::BAD_REQUEST, "invalid_grant").await,
             false,
         ),
         (unreachable, false),
     ] {
-        let store = MemorySessions::default();
-        let (app, _) = login_app(&issuer_with_token_endpoint(endpoint.clone()), store.clone());
-        let login = stored_login(
-            "01936f3e-8c00-7000-8000-000000000001",
-            SessionId::new(),
-            -60,
-        );
-        let (key, cookie) = session(&store, &login).await;
+        let backend = MemoryBackend::default();
+        let (app, _) = login_app(&issuer_with_token_endpoint(endpoint.clone()), &backend);
+        let (key, cookie) = session(&backend, &stored_login(USER, SessionId::new(), -60)).await;
         let response = get_with(&app, "/", &[(header::COOKIE, &cookie)]).await;
-        let stored = store.load(&key).await.expect("load");
+        let stored = load(&backend, &key).await;
         assert_eq!(stored.is_some(), kept, "{endpoint}");
         let expected = if kept {
             StatusCode::OK
@@ -487,28 +492,23 @@ async fn refresh_failures_end_sessions_only_when_the_token_may_be_spent() {
         assert_eq!(response.status(), expected, "{endpoint}");
         if let Some(stored) = stored {
             // The lease was given back, so the next request may refresh again.
-            let lease = LeaseId::generate().expect("lease");
-            let next = store.lease_refresh(&key, stored.version, &lease, REFRESH_TTL);
-            assert_eq!(next.await.expect("lease"), Lease::Acquired, "{endpoint}");
+            assert!(!stored.leased, "{endpoint}");
         }
     }
 }
 
-/// A lease used by the refresh outcome test.
-const REFRESH_TTL: Duration = Duration::from_secs(60);
-
 /// Logout is accepted only from the app's own pages.
 #[tokio::test]
 async fn logout_refuses_other_origins() {
-    let store = MemorySessions::default();
+    let backend = MemoryBackend::default();
     let issuer = issuer_with_token_endpoint("http://127.0.0.1:9/token".parse().expect("URL"));
-    let (app, _) = login_app(&issuer, store.clone());
+    let (app, _) = login_app(&issuer, &backend);
     let login = stored_login(
         "01936f3e-8c00-7000-8000-000000000001",
         SessionId::new(),
         300,
     );
-    let (key, cookie) = session(&store, &login).await;
+    let (key, cookie) = session(&backend, &login).await;
     let logout = |origin: Option<&'static str>| {
         let (app, cookie) = (app.clone(), cookie.clone());
         async move {
@@ -524,138 +524,11 @@ async fn logout_refuses_other_origins() {
     };
     for origin in [Some("https://evil.notes.example.com"), None] {
         assert_eq!(logout(origin).await, StatusCode::FORBIDDEN, "{origin:?}");
-        assert!(store.load(&key).await.expect("load").is_some());
+        assert!(load(&backend, &key).await.is_some());
     }
     assert_eq!(
         logout(Some("https://notes.example.com")).await,
         StatusCode::SEE_OTHER
     );
-    assert!(store.load(&key).await.expect("load").is_none());
-}
-
-/// Refresh serialization on the PostgreSQL store.
-#[cfg(feature = "postgres")]
-#[tokio::test]
-#[ignore = "requires TEST_DATABASE_URL"]
-async fn postgres_sessions_serialize_refreshes() {
-    let url = std::env::var("TEST_DATABASE_URL").expect("TEST_DATABASE_URL");
-    let pool = sqlx::PgPool::connect(&url).await.expect("connect");
-    let store = PostgresSessions::new(pool);
-    store.migrate().await.expect("migrate");
-    lease_is_fenced(store.clone()).await;
-    refresh_is_serialized(store).await;
-}
-
-/// Signs logout claims with the vectors' old key.
-fn logout_token(claims: &Value) -> String {
-    let pem = std::fs::read_to_string(
-        Path::new(env!("CARGO_MANIFEST_DIR")).join("../../tests/sdk-vectors/keys/key-2025.pem"),
-    )
-    .expect("test key");
-    Rs256Key::from_pem("key-2025", &pem)
-        .expect("key")
-        .sign(TokenType::Logout, claims)
-        .expect("sign")
-}
-
-/// Back-channel logout deletes sessions by `sid`, or by `sub` without one, and
-/// rejects replayed, expired or incomplete tokens.
-#[tokio::test]
-async fn backchannel_logout_deletes_the_named_sessions() {
-    let store = MemorySessions::default();
-    let issuer = issuer_with_token_endpoint("http://127.0.0.1:9/token".parse().expect("URL"));
-    let (app, _) = login_app(&issuer, store.clone());
-    let user = "01936f3e-8c00-7000-8000-000000000001";
-    let (first_sid, second_sid) = (SessionId::new(), SessionId::new());
-    let (first, _) = session(&store, &stored_login(user, first_sid, 300)).await;
-    let (second, _) = session(&store, &stored_login(user, second_sid, 300)).await;
-    let other = "01936f3e-8c00-7000-8000-000000000009";
-    let (third, _) = session(&store, &stored_login(other, SessionId::new(), 300)).await;
-    let now = Utc::now();
-    let claims = |sid: Option<SessionId>, sub: Option<&str>| {
-        serde_json::to_value(LogoutTokenClaims {
-            iss: "https://auth.example.com".into(),
-            aud: Audience::One(CLIENT.into()),
-            iat: now,
-            exp: now + TimeDelta::minutes(2),
-            jti: SessionId::new().to_string(),
-            sub: sub.map(str::to_owned),
-            sid,
-            events: [(BACKCHANNEL_LOGOUT_EVENT.to_owned(), Event {})].into(),
-            nonce: None,
-        })
-        .expect("claims")
-    };
-    let post = |token: String| {
-        let app = app.clone();
-        async move {
-            let body = format!("logout_token={token}");
-            app.oneshot(
-                Request::post("/auth/backchannel-logout")
-                    .header(header::CONTENT_TYPE, "application/x-www-form-urlencoded")
-                    .body(Body::from(body))
-                    .expect("request"),
-            )
-            .await
-            .expect("response")
-            .status()
-        }
-    };
-    let alive = |key: SessionKey| {
-        let store = store.clone();
-        async move { store.load(&key).await.expect("load").is_some() }
-    };
-
-    let by_sid = logout_token(&claims(Some(first_sid), Some(user)));
-    assert_eq!(post(by_sid.clone()).await, StatusCode::OK);
-    assert!(!alive(first.clone()).await);
-    assert!(alive(second.clone()).await);
-    assert_eq!(
-        post(by_sid.clone()).await,
-        StatusCode::BAD_REQUEST,
-        "replayed"
-    );
-    // Another replica sharing the store refuses the replay too.
-    let (replica, _) = login_app(&issuer, store.clone());
-    let replayed = replica
-        .oneshot(
-            Request::post("/auth/backchannel-logout")
-                .header(header::CONTENT_TYPE, "application/x-www-form-urlencoded")
-                .body(Body::from(format!("logout_token={by_sid}")))
-                .expect("request"),
-        )
-        .await
-        .expect("response");
-    assert_eq!(replayed.status(), StatusCode::BAD_REQUEST);
-
-    assert_eq!(
-        post(logout_token(&claims(None, Some(user)))).await,
-        StatusCode::OK
-    );
-    assert!(!alive(second).await);
-    assert!(alive(third).await, "other users keep their sessions");
-
-    for field in ["exp", "iat"] {
-        let mut incomplete = claims(None, Some(other));
-        incomplete.as_object_mut().expect("object").remove(field);
-        assert_eq!(
-            post(logout_token(&incomplete)).await,
-            StatusCode::BAD_REQUEST
-        );
-    }
-    let mut expired = claims(None, Some(other));
-    expired["exp"] = json!((now - TimeDelta::minutes(2)).timestamp());
-    assert_eq!(post(logout_token(&expired)).await, StatusCode::BAD_REQUEST);
-    let mut neither = claims(None, None);
-    neither["jti"] = json!("fresh");
-    assert_eq!(post(logout_token(&neither)).await, StatusCode::BAD_REQUEST);
-    let mut null_nonce = claims(None, Some(other));
-    null_nonce["nonce"] = Value::Null;
-    assert_eq!(
-        post(logout_token(&null_nonce)).await,
-        StatusCode::BAD_REQUEST
-    );
-    let mut listed = claims(None, Some(other));
-    listed["events"][BACKCHANNEL_LOGOUT_EVENT] = json!([]);
-    assert_eq!(post(logout_token(&listed)).await, StatusCode::BAD_REQUEST);
+    assert!(load(&backend, &key).await.is_none());
 }

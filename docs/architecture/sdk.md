@@ -178,11 +178,20 @@ it.
 
 Browser tokens stay in memory. Server-side apps keep tokens in a server-side session
 and give the browser only a random session key, in a `__Host-` cookie that is
-`Secure`, `HttpOnly` and `SameSite=Lax`; stores keep only the key's SHA-256. Every
-sign-in starts a session under a fresh key. Refresh tokens never reach the browser.
+`Secure`, `HttpOnly` and `SameSite=Lax`. Every sign-in starts a session under a
+fresh key. Refresh tokens never reach the browser.
+
+Applications choose where sessions live by implementing a small storage backend:
+load, insert, a compare-and-swap replace, and a remove that reports whether the
+record existed. The SDK keeps everything else: the record format and its validation,
+expiry, pending logins, and the refresh lease. Backends see only opaque records under
+the SHA-256 of each session key, so reading the backend does not give access to
+sessions. The SDK ships an in-memory backend for development and tests, and a check
+applications run against their own backend.
+
 Auth rotates refresh tokens and revokes the whole family on reuse, so concurrent
-refreshes of one session are serialized through a lease in the session store, shared
-by every replica. The lease is taken only at the session version the request read,
+refreshes of one session are serialized through a lease the SDK keeps in the session
+record, shared by every replica through the backend's compare-and-swap. The lease is taken only at the session version the request read,
 so a request that read the session before another refresh reloads it instead of
 redeeming the rotated token. Each lease has an ID, and only its holder can save the
 result, so a slow attempt cannot overwrite a later one or resurrect a logged-out
@@ -192,12 +201,7 @@ spent, so the session ends and the user signs in again rather than risk a reuse
 that would revoke the family. `invalid_grant` ends the session too; any other error
 answer from auth keeps it. Logout accepts only requests from the app's own origin.
 
-Apps also receive back-channel logout tokens (OIDC Back-Channel Logout 1.0): checked
-like ID tokens with `typ` `logout+jwt`, they must be at most five minutes old, carry
-the back-channel logout event and `sub` or `sid`, have no `nonce`, and not reuse a
-`jti`: the store records the `jti` and deletes the sessions in one step, shared by
-every replica. A token with `sid` ends that session; one with only `sub` ends all of
-the user's sessions at the app.
+Back-channel logout is added to the SDKs together with auth's side (#65).
 
 ## Step-up
 

@@ -1,16 +1,17 @@
-//! Server-side login: the `/login`, `/callback`, `/logout` and
-//! `/backchannel-logout` routes, the session layer, and the session extractors.
+//! Server-side login: the `/login`, `/callback` and `/logout` routes, the session
+//! layer, and the session extractors.
 
 use super::{
-    BackchannelLogout, BoxFuture, Lease, LeaseId, LogoutTarget, PendingAuthorization, SessionKey,
-    SessionStore, StoredLogin, Versioned, bearer::ErrorChain,
+    BoxFuture, SessionBackend, StoredLogin,
+    bearer::ErrorChain,
+    session::{BackendError, Lease, LeaseId, PendingAuthorization, Session, SessionKey, Sessions},
 };
 use crate::{
     Acr, AuthenticationPolicy, AuthorizeRequest, CallbackParams, Client, IdToken, Scopes,
     TokenError, UserId,
 };
 use axum::{
-    Extension, Form, Router,
+    Extension, Router,
     extract::{FromRequestParts, Query, Request, State},
     http::{HeaderMap, HeaderValue, Method, StatusCode, header, request::Parts},
     response::{IntoResponse, Redirect, Response},
@@ -20,8 +21,6 @@ use chrono::{DateTime, TimeDelta, Utc};
 use serde::{Deserialize, Serialize};
 use std::{
     fmt,
-    future::Future,
-    pin::Pin,
     str::FromStr,
     sync::Arc,
     task::{Context, Poll},
@@ -50,14 +49,22 @@ const REFRESH_LEASE: Duration = Duration::from_secs(60);
 const REFRESH_WAIT: Duration = Duration::from_secs(25);
 /// How often a request waiting for another's refresh reloads the session.
 const REFRESH_POLL: Duration = Duration::from_millis(50);
-/// How long past `exp` a logout token's ID is remembered: the validation leeway.
-const LOGOUT_REPLAY_LEEWAY: TimeDelta = TimeDelta::seconds(30);
 /// Most bytes in a `return_to` path.
 const MAX_RETURN_TO_BYTES: usize = 2048;
 
 /// A path on this app to send the user back to: same-origin and relative, so login
 /// cannot be turned into an open redirect. It starts with one `/` (not `//` or
 /// `/\`), and has no `\`, `#` or control characters.
+///
+/// ```
+/// use piquel_auth::axum::ReturnTo;
+///
+/// assert!("/notes?page=2".parse::<ReturnTo>().is_ok());
+/// // Another site, protocol-relative or not, is refused.
+/// assert!("https://evil.example".parse::<ReturnTo>().is_err());
+/// assert!("//evil.example".parse::<ReturnTo>().is_err());
+/// assert!("/\\evil.example".parse::<ReturnTo>().is_err());
+/// ```
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(try_from = "String", into = "String")]
 pub struct ReturnTo(String);
@@ -110,53 +117,13 @@ impl From<ReturnTo> for String {
     }
 }
 
-/// Any store's failure, once erased.
-type StoreError = Box<dyn std::error::Error + Send + Sync>;
-/// A store operation, once erased.
-type StoreFuture<'a, T> = Pin<Box<dyn Future<Output = Result<T, StoreError>> + Send + 'a>>;
-
-/// Declares [`ErasedStore`], an object-safe copy of [`SessionStore`], and implements
-/// it for every store, so the routes and extractors need no store type parameter.
-macro_rules! erased_store {
-    ($($method:ident($($argument:ident: $type:ty),*) -> $output:ty;)+) => {
-        /// [`SessionStore`] with boxed futures and errors.
-        trait ErasedStore: Send + Sync {
-            $(
-                #[doc = concat!("Erased [`SessionStore::", stringify!($method), "`].")]
-                fn $method<'a>(&'a self, $($argument: $type),*) -> StoreFuture<'a, $output>;
-            )+
-        }
-
-        impl<St: SessionStore> ErasedStore for St {
-            $(
-                fn $method<'a>(&'a self, $($argument: $type),*) -> StoreFuture<'a, $output> {
-                    Box::pin(async move {
-                        SessionStore::$method(self, $($argument),*).await.map_err(Into::into)
-                    })
-                }
-            )+
-        }
-    };
-}
-
-erased_store! {
-    load(id: &'a SessionKey) -> Option<Versioned<StoredLogin>>;
-    insert(id: &'a SessionKey, login: &'a StoredLogin, expires: DateTime<Utc>) -> ();
-    lease_refresh(id: &'a SessionKey, version: u64, lease: &'a LeaseId, ttl: Duration) -> Lease;
-    save_if(id: &'a SessionKey, lease: &'a LeaseId, login: &'a StoredLogin) -> bool;
-    delete(id: &'a SessionKey) -> ();
-    logout(logout: &'a BackchannelLogout) -> bool;
-    insert_pending(id: &'a SessionKey, pending: &'a PendingAuthorization, expires: DateTime<Utc>) -> ();
-    take_pending(id: &'a SessionKey) -> Option<PendingAuthorization>;
-}
-
 /// Everything the routes, the layer and the extractors share.
 #[derive(Clone)]
 struct Login {
     /// The client users sign in with.
     client: Client,
     /// Where sessions live.
-    store: Arc<dyn ErasedStore>,
+    sessions: Sessions,
     /// Scopes requested besides `openid`.
     scopes: Scopes,
     /// Where users go after login when no `return_to` was given, and after logout
@@ -177,11 +144,41 @@ struct Login {
 /// - `GET /callback` completes it, then starts a session under another fresh key,
 ///   ending any session the browser already had.
 /// - `POST /logout` deletes the session and redirects to RP-initiated logout.
-/// - `POST /backchannel-logout` receives auth's logout tokens and deletes the
-///   sessions they name.
 ///
 /// Mount the router at `/auth`, or tell [`Self::mounted_at`], and add
 /// [`Self::layer`] around every route that uses [`SignedIn`] or [`MaybeSignedIn`].
+///
+/// ```no_run
+/// # async fn run(issuer: piquel_auth::Issuer, backend: piquel_auth::axum::MemoryBackend) -> Result<(), Box<dyn std::error::Error>> {
+/// use axum::{Router, routing::get};
+/// use chrono::TimeDelta;
+/// use piquel_auth::{
+///     ClientConfig, ClientId, Credentials,
+///     axum::{LoginRoutes, SignedIn},
+/// };
+///
+/// async fn home(user: SignedIn) -> String {
+///     format!("Hello {}", user.name())
+/// }
+///
+/// let client = issuer.client(ClientConfig {
+///     client_id: ClientId::new("notes-web"),
+///     credentials: Credentials::Secret(std::env::var("NOTES_CLIENT_SECRET")?.into()),
+///     // The callback route below, as registered with auth.
+///     redirect_uri: "https://notes.piquel.fr/account/callback".parse()?,
+/// });
+/// let auth = LoginRoutes::new(client, backend)
+///     .scopes("profile offline_access".parse()?)
+///     .after_login("/notes".parse()?)
+///     .after_logout("https://notes.piquel.fr/".parse()?)
+///     .mounted_at("/account")
+///     .session_lifetime(TimeDelta::days(7));
+/// let app: Router = Router::new()
+///     .route("/notes", get(home))
+///     .nest("/account", auth.router())
+///     .layer(auth.layer());
+/// # Ok(()) }
+/// ```
 #[derive(Clone)]
 pub struct LoginRoutes(Login);
 
@@ -197,12 +194,12 @@ impl fmt::Debug for LoginRoutes {
 }
 
 impl LoginRoutes {
-    /// Login with `client`, keeping sessions in `store`.
+    /// Login with `client`, keeping sessions in `backend`.
     #[must_use]
-    pub fn new(client: Client, store: impl SessionStore) -> Self {
+    pub fn new(client: Client, backend: impl SessionBackend) -> Self {
         Self(Login {
             client,
-            store: Arc::new(store),
+            sessions: Sessions::new(backend),
             scopes: Scopes::default(),
             home: ReturnTo::root(),
             after_logout: None,
@@ -212,7 +209,7 @@ impl LoginRoutes {
     }
 
     /// Requests `scopes` besides `openid`. Add `offline_access` to refresh access
-    /// tokens in the store.
+    /// tokens in the session.
     #[must_use]
     pub fn scopes(mut self, scopes: Scopes) -> Self {
         self.0.scopes = scopes;
@@ -254,7 +251,6 @@ impl LoginRoutes {
             .route("/login", get(Login::start))
             .route("/callback", get(Login::callback))
             .route("/logout", post(Login::logout))
-            .route("/backchannel-logout", post(Login::backchannel_logout))
             .with_state(Arc::new(self.0.clone()))
     }
 
@@ -275,13 +271,6 @@ struct StartQuery {
     max_age: Option<u64>,
     /// Required authentication context classes, for step-up.
     acr_values: Option<String>,
-}
-
-/// The form of `POST /backchannel-logout`.
-#[derive(Deserialize)]
-struct BackchannelForm {
-    /// The signed logout token.
-    logout_token: String,
 }
 
 impl Login {
@@ -309,10 +298,15 @@ impl Login {
         HeaderValue::try_from(cookie).unwrap_or(HeaderValue::from_static(""))
     }
 
-    /// Logs a store failure and answers 500.
-    fn store_failure(error: &StoreError) -> Response {
-        tracing::error!(error = %ErrorChain(error.as_ref()), "session store failed");
+    /// Logs a backend failure and answers 500.
+    fn store_failure(error: &BackendError) -> Response {
+        tracing::error!(error = %ErrorChain(error.as_ref()), "session backend failed");
         StatusCode::INTERNAL_SERVER_ERROR.into_response()
+    }
+
+    /// The current time by the issuer's clock.
+    fn now(&self) -> DateTime<Utc> {
+        self.client.issuer().now()
     }
 
     /// The login route's URL, returning to `return_to`, and asking for `step_up`.
@@ -363,8 +357,8 @@ impl Login {
             login: pending,
             return_to,
         };
-        let expires = login.client.issuer().now() + PENDING_LIFETIME;
-        if let Err(error) = login.store.insert_pending(&key, &pending, expires).await {
+        let expires = login.now() + PENDING_LIFETIME;
+        if let Err(error) = login.sessions.insert_pending(&key, &pending, expires).await {
             return Self::store_failure(&error);
         }
         let mut response = Redirect::to(url.as_str()).into_response();
@@ -388,7 +382,7 @@ impl Login {
             )
                 .into_response();
         };
-        let pending = match login.store.take_pending(&key).await {
+        let pending = match login.sessions.take_pending(&key, login.now()).await {
             Ok(Some(pending)) => pending,
             Ok(None) => {
                 return (
@@ -419,12 +413,12 @@ impl Login {
         };
         // A fresh key on every sign-in: a key planted before login is worthless after.
         if let Some(previous) = Self::cookie(&headers, SESSION_COOKIE).and_then(SessionKey::parse)
-            && let Err(error) = login.store.delete(&previous).await
+            && let Err(error) = login.sessions.delete(&previous).await
         {
             return Self::store_failure(&error);
         }
-        let expires = login.client.issuer().now() + login.lifetime;
-        if let Err(error) = login.store.insert(&session, &stored, expires).await {
+        let expires = login.now() + login.lifetime;
+        if let Err(error) = login.sessions.insert(&session, &stored, expires).await {
             return Self::store_failure(&error);
         }
         let mut response = Redirect::to(pending.return_to.as_str()).into_response();
@@ -474,17 +468,17 @@ impl Login {
         }
         let mut destination = login.home.as_str().to_owned();
         if let Some(key) = Self::cookie(&headers, SESSION_COOKIE).and_then(SessionKey::parse) {
-            match login.store.load(&key).await {
+            match login.sessions.load(&key, login.now()).await {
                 Ok(Some(session)) => {
                     destination = login
                         .client
-                        .logout_url(&session.value.id_token, login.after_logout.as_ref())
+                        .logout_url(&session.login.id_token, login.after_logout.as_ref())
                         .into();
                 }
                 Ok(None) => {}
                 Err(error) => return Self::store_failure(&error),
             }
-            if let Err(error) = login.store.delete(&key).await {
+            if let Err(error) = login.sessions.delete(&key).await {
                 return Self::store_failure(&error);
             }
         }
@@ -496,81 +490,31 @@ impl Login {
         response
     }
 
-    /// `POST /backchannel-logout`: validates auth's logout token and deletes the
-    /// sessions it names (OIDC Back-Channel Logout 1.0 §2.8).
-    async fn backchannel_logout(
-        State(login): State<Arc<Self>>,
-        form: Result<Form<BackchannelForm>, axum::extract::rejection::FormRejection>,
-    ) -> Response {
-        let rejected = |description: String| {
-            let body = serde_json::json!({
-                "error": "invalid_request",
-                "error_description": description,
-            });
-            (
-                StatusCode::BAD_REQUEST,
-                [(header::CACHE_CONTROL, "no-store")],
-                axum::Json(body),
-            )
-                .into_response()
-        };
-        let Ok(Form(form)) = form else {
-            return rejected("send logout_token as a form field".into());
-        };
-        let claims = match login.client.logout_token(&form.logout_token).await {
-            Ok(claims) => claims,
-            Err(error) => return rejected(error.to_string()),
-        };
-        let target = match (claims.sid, claims.sub) {
-            (Some(sid), _) => LogoutTarget::Session(sid),
-            (None, Some(sub)) => LogoutTarget::Subject(sub),
-            // `logout_token` requires one of them.
-            (None, None) => return rejected("neither sub nor sid is present".into()),
-        };
-        let logout = BackchannelLogout {
-            issuer: login.client.issuer().issuer().to_owned(),
-            remember_until: claims
-                .exp
-                .checked_add_signed(LOGOUT_REPLAY_LEEWAY)
-                .unwrap_or(claims.exp),
-            jti: claims.jti,
-            target,
-        };
-        // The store remembers the `jti` and deletes the sessions together, for every
-        // replica, or does neither, so auth's retry after a failure is accepted.
-        match login.store.logout(&logout).await {
-            Ok(true) => ([(header::CACHE_CONTROL, "no-store")], StatusCode::OK).into_response(),
-            Ok(false) => rejected("logout token was already used".into()),
-            Err(error) => Self::store_failure(&error),
-        }
-    }
-
     /// The signed-in session the request's cookie names, its access token refreshed
     /// when it is about to expire.
-    async fn session(&self, headers: &HeaderMap) -> Result<Option<SignedIn>, StoreError> {
+    async fn session(&self, headers: &HeaderMap) -> Result<Option<SignedIn>, BackendError> {
         let Some(key) = Self::cookie(headers, SESSION_COOKIE).and_then(SessionKey::parse) else {
             return Ok(None);
         };
-        let Some(mut current) = self.store.load(&key).await? else {
+        let Some(mut current) = self.sessions.load(&key, self.now()).await? else {
             return Ok(None);
         };
-        let now = self.client.issuer().now();
-        if current.value.refresh_token.is_some() && current.value.expires_at <= now + REFRESH_MARGIN
-        {
+        let login = &current.login;
+        if login.refresh_token.is_some() && login.expires_at <= self.now() + REFRESH_MARGIN {
             match self.refresh(&key, current).await? {
                 Some(refreshed) => current = refreshed,
                 None => return Ok(None),
             }
         }
         Ok(Some(SignedIn {
-            login: current.value,
-            checked_at: self.client.issuer().now(),
+            login: current.login,
+            checked_at: self.now(),
         }))
     }
 
-    /// Refreshes the session's access token, serialized through the store's lease:
-    /// only the lease holder calls auth, and other requests wait for its result.
-    /// Returns `None` once the session is gone.
+    /// Refreshes the session's access token, serialized through the lease the SDK
+    /// keeps in the session record: only the lease holder calls auth, and other
+    /// requests wait for its result. Returns `None` once the session is gone.
     ///
     /// Auth rotates the refresh token as it answers, so once a refresh may have
     /// reached auth without its answer being saved, the stored token may be spent and
@@ -578,37 +522,46 @@ impl Login {
     async fn refresh(
         &self,
         key: &SessionKey,
-        current: Versioned<StoredLogin>,
-    ) -> Result<Option<Versioned<StoredLogin>>, StoreError> {
+        current: Session,
+    ) -> Result<Option<Session>, BackendError> {
         let Ok(lease) = LeaseId::generate() else {
             tracing::error!("operating system randomness is unavailable");
             return Ok(Some(current));
         };
         match self
-            .store
-            .lease_refresh(key, current.version, &lease, REFRESH_LEASE)
+            .sessions
+            .lease(key, current.version, &lease, REFRESH_LEASE, self.now())
             .await?
         {
             Lease::Missing => Ok(None),
-            // Another request refreshed since this one read the session.
-            Lease::Changed => self.store.load(key).await,
             Lease::Abandoned => {
                 tracing::warn!("a refresh never finished; ending the session");
                 self.end(key).await
             }
-            Lease::Busy => {
-                let deadline = tokio::time::Instant::now() + REFRESH_WAIT;
-                while tokio::time::Instant::now() < deadline {
-                    tokio::time::sleep(REFRESH_POLL).await;
-                    match self.store.load(key).await? {
-                        Some(reloaded) if reloaded.version == current.version => {}
-                        other => return Ok(other),
-                    }
-                }
-                // The holder has not finished; the current token is still the best known.
-                Ok(Some(current))
-            }
+            // Another request refreshed since this one read the session, or is
+            // refreshing now: use its result.
+            Lease::Changed | Lease::Busy => self.wait(key, current).await,
             Lease::Acquired => self.refresh_leased(key, &lease, current).await,
+        }
+    }
+
+    /// Waits for another request's refresh to finish, then returns its result. After
+    /// [`REFRESH_WAIT`], the session as last read is the best known.
+    async fn wait(
+        &self,
+        key: &SessionKey,
+        current: Session,
+    ) -> Result<Option<Session>, BackendError> {
+        let deadline = tokio::time::Instant::now() + REFRESH_WAIT;
+        loop {
+            match self.sessions.load(key, self.now()).await? {
+                Some(reloaded) if reloaded.leased => {}
+                other => return Ok(other),
+            }
+            if tokio::time::Instant::now() >= deadline {
+                return Ok(Some(current));
+            }
+            tokio::time::sleep(REFRESH_POLL).await;
         }
     }
 
@@ -617,10 +570,10 @@ impl Login {
         &self,
         key: &SessionKey,
         lease: &LeaseId,
-        current: Versioned<StoredLogin>,
-    ) -> Result<Option<Versioned<StoredLogin>>, StoreError> {
-        let Some(refresh) = &current.value.refresh_token else {
-            return self.save(key, lease, current).await;
+        current: Session,
+    ) -> Result<Option<Session>, BackendError> {
+        let Some(refresh) = &current.login.refresh_token else {
+            return self.save(key, lease, current.login).await;
         };
         let Ok(refreshed) =
             tokio::time::timeout(REFRESH_DEADLINE, self.client.refresh(refresh)).await
@@ -630,19 +583,11 @@ impl Login {
         };
         match refreshed {
             Ok(tokens) => {
-                let Some(refreshed) = current.value.refreshed(tokens) else {
+                let Some(refreshed) = current.login.refreshed(tokens) else {
                     tracing::warn!("refresh returned an ID token for another user");
                     return self.end(key).await;
                 };
-                self.save(
-                    key,
-                    lease,
-                    Versioned {
-                        value: refreshed,
-                        version: current.version,
-                    },
-                )
-                .await
+                self.save(key, lease, refreshed).await
             }
             // Auth refused the refresh token: the grant is over.
             Err(
@@ -662,7 +607,7 @@ impl Login {
             // session and give the lease back.
             Err(error @ crate::OAuthError::Rejected { .. }) => {
                 tracing::warn!(error = %ErrorChain(&error), "session refresh failed");
-                self.save(key, lease, current).await
+                self.save(key, lease, current.login).await
             }
             // No usable answer: auth may have rotated the token.
             Err(error) => {
@@ -678,21 +623,14 @@ impl Login {
         &self,
         key: &SessionKey,
         lease: &LeaseId,
-        login: Versioned<StoredLogin>,
-    ) -> Result<Option<Versioned<StoredLogin>>, StoreError> {
-        if self.store.save_if(key, lease, &login.value).await? {
-            Ok(Some(Versioned {
-                value: login.value,
-                version: login.version + 1,
-            }))
-        } else {
-            self.store.load(key).await
-        }
+        login: StoredLogin,
+    ) -> Result<Option<Session>, BackendError> {
+        self.sessions.save(key, lease, login, self.now()).await
     }
 
     /// Ends the session.
-    async fn end(&self, key: &SessionKey) -> Result<Option<Versioned<StoredLogin>>, StoreError> {
-        self.store.delete(key).await?;
+    async fn end(&self, key: &SessionKey) -> Result<Option<Session>, BackendError> {
+        self.sessions.delete(key).await?;
         Ok(None)
     }
 
@@ -879,7 +817,18 @@ impl<St: Send + Sync> FromRequestParts<St> for SignedIn {
 }
 
 /// The signed-in user, if any. Never rejects, except with 500 when the session
-/// store fails or [`LoginRoutes::layer`] is missing.
+/// backend fails or [`LoginRoutes::layer`] is missing.
+///
+/// ```no_run
+/// use piquel_auth::axum::MaybeSignedIn;
+///
+/// async fn landing(MaybeSignedIn(user): MaybeSignedIn) -> String {
+///     match user {
+///         Some(user) => format!("Welcome back, {}", user.name()),
+///         None => "Welcome! Sign in at /auth/login".into(),
+///     }
+/// }
+/// ```
 #[derive(Clone, Debug)]
 pub struct MaybeSignedIn(pub Option<SignedIn>);
 
@@ -903,6 +852,29 @@ impl<St: Send + Sync> FromRequestParts<St> for MaybeSignedIn {
 /// [`LoginRoutes::layer`] around the route, a `GET` is redirected through login with
 /// `max_age` and `acr_values`, and comes back to the same page; other requests get
 /// 401.
+///
+/// ```no_run
+/// use piquel_auth::{
+///     Acr, AuthenticationPolicy,
+///     axum::{SignedIn, StepUp},
+/// };
+///
+/// /// A passkey sign-in within the last five minutes.
+/// struct RecentPasskey;
+///
+/// impl AuthenticationPolicy for RecentPasskey {
+///     const ACR: Option<Acr> = Some(Acr::PhishingResistant);
+///     const MAX_AGE: Option<u64> = Some(300);
+/// }
+///
+/// async fn delete_account(user: SignedIn) -> Result<&'static str, StepUp> {
+///     // Equivalent to `user.require::<RecentPasskey>()?`.
+///     if user.require::<RecentPasskey>().is_err() {
+///         return Err(StepUp::required::<RecentPasskey>());
+///     }
+///     Ok("deleted")
+/// }
+/// ```
 #[derive(Clone, Debug)]
 pub struct StepUp {
     /// The authentication context class required.

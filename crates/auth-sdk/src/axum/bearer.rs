@@ -31,6 +31,38 @@ struct Bearer<X> {
 /// without a token passes through, so public routes can share the router; only the
 /// extractors reject. Tokens are read from `Authorization: Bearer` only, never from
 /// the query string.
+///
+/// ```no_run
+/// # async fn run(issuer: piquel_auth::Issuer) -> Result<(), Box<dyn std::error::Error>> {
+/// use axum::{Router, routing::get};
+/// use piquel_auth::{
+///     Resource,
+///     axum::{Authenticated, BearerLayer},
+/// };
+///
+/// /// Application claims some tokens carry.
+/// #[derive(Clone, serde::Deserialize)]
+/// struct Tenant {
+///     tenant: String,
+/// }
+///
+/// async fn status() -> &'static str {
+///     "public: no token needed"
+/// }
+///
+/// async fn whoami(Authenticated(token): Authenticated<Tenant>) -> String {
+///     format!("{:?} in {}", token.subject, token.extra.tenant)
+/// }
+///
+/// let validator = issuer
+///     .resource(Resource::new("notes-api")?)
+///     .with_claims::<Tenant>();
+/// let app: Router = Router::new()
+///     .route("/status", get(status))
+///     .route("/me", get(whoami))
+///     .layer(BearerLayer::new(validator));
+/// # Ok(()) }
+/// ```
 pub struct BearerLayer<X = ()>(ResourceValidator<X>);
 
 impl<X> Clone for BearerLayer<X> {
@@ -151,6 +183,25 @@ enum Reason {
 /// [`Resource`](crate::Resource) names it, and an empty body. When signing keys
 /// cannot be fetched it answers 503 without a challenge: that failure is the
 /// server's, not the client's.
+///
+/// Take the extractor as a `Result` to see a rejection before answering with it:
+///
+/// ```no_run
+/// use axum::response::{IntoResponse, Response};
+/// use piquel_auth::axum::{AuthRejection, Authenticated};
+///
+/// async fn audited(token: Result<Authenticated, AuthRejection>) -> Response {
+///     match token {
+///         Ok(Authenticated(token)) => format!("{:?}", token.subject).into_response(),
+///         Err(rejection) => {
+///             if let Some(error) = rejection.token_error() {
+///                 eprintln!("refused a token: {error}");
+///             }
+///             rejection.into_response()
+///         }
+///     }
+/// }
+/// ```
 #[derive(Debug)]
 pub struct AuthRejection {
     /// Why the request was rejected.

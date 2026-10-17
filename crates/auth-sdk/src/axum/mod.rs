@@ -30,12 +30,12 @@
 //! ```
 //!
 //! **Apps that sign users in** mount [`LoginRoutes`] and its layer, then take
-//! [`SignedIn`] or [`MaybeSignedIn`]. Tokens stay in a server-side
-//! [`SessionStore`]; the browser holds only a random session key.
+//! [`SignedIn`] or [`MaybeSignedIn`]. Tokens stay server-side, in the application's
+//! [`SessionBackend`]; the browser holds only a random session key.
 //!
 //! ```no_run
 //! use axum::{Router, routing::get};
-//! use piquel_auth::axum::{LoginRoutes, MemorySessions, SignedIn};
+//! use piquel_auth::axum::{LoginRoutes, MemoryBackend, SignedIn};
 //! # use piquel_auth::{ClientConfig, ClientId, Credentials, Issuer};
 //!
 //! async fn home(user: SignedIn) -> String {
@@ -49,7 +49,8 @@
 //! #     credentials: Credentials::None,
 //! #     redirect_uri: "https://notes.piquel.fr/auth/callback".parse()?,
 //! # };
-//! let auth = LoginRoutes::new(issuer.client(config), MemorySessions::default())
+//! // `MemoryBackend` is for development: implement `SessionBackend` to persist sessions.
+//! let auth = LoginRoutes::new(issuer.client(config), MemoryBackend::default())
 //!     .scopes("profile".parse()?)
 //!     .after_login("/notes".parse()?);
 //! let app: Router = Router::new()
@@ -63,9 +64,6 @@
 mod bearer;
 /// Server-side login routes and session extractors.
 mod login;
-/// The PostgreSQL session store.
-#[cfg(feature = "postgres")]
-mod postgres;
 /// Session storage.
 mod session;
 #[cfg(test)]
@@ -78,12 +76,9 @@ pub use login::{
     InvalidReturnTo, LoginLayer, LoginRoutes, LoginService, MaybeSignedIn, ReturnTo, SignedIn,
     StepUp,
 };
-#[cfg(feature = "postgres")]
-pub use postgres::PostgresSessions;
-pub use session::{
-    BackchannelLogout, Lease, LeaseId, LogoutTarget, MemorySessions, PendingAuthorization,
-    SessionKey, SessionStore, StoredLogin, Versioned,
-};
+#[cfg(any(test, feature = "test-util"))]
+pub use session::{BackendCheckError, check_backend};
+pub use session::{MemoryBackend, SessionBackend, SessionRecord, StoredLogin};
 
 use std::{future::Future, pin::Pin};
 

@@ -1362,7 +1362,7 @@ impl LoginApp {
     async fn start() -> Self {
         use piquel_auth::{
             ClientConfig, ClientId, Credentials,
-            axum::{LoginRoutes, MemorySessions, SignedIn},
+            axum::{LoginRoutes, MemoryBackend, SignedIn},
         };
         let tcp = tokio::net::TcpListener::bind("127.0.0.1:0")
             .await
@@ -1388,7 +1388,7 @@ impl LoginApp {
             credentials: Credentials::Secret(CLIENT_SECRET.into()),
             redirect_uri: flow.client.redirect_uris[0].parse().expect("callback"),
         });
-        let auth = LoginRoutes::new(client, MemorySessions::default())
+        let auth = LoginRoutes::new(client, MemoryBackend::default())
             .scopes("profile offline_access".parse().expect("scopes"))
             .after_logout(flow.client.post_logout_uris[0].parse().expect("logout URI"));
         let app = Router::new()
