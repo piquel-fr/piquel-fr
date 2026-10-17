@@ -1,0 +1,12 @@
+{
+  "description": "no token was sent and the resource has no metadata",
+  "input": {
+    "challenge": {}
+  },
+  "expected": {
+    "ok": {
+      "header": "Bearer",
+      "status": 401
+    }
+  }
+}

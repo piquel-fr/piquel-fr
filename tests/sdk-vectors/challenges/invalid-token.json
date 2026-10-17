@@ -1,0 +1,16 @@
+{
+  "description": "the token failed validation",
+  "input": {
+    "challenge": {
+      "error": "invalid_token",
+      "error_description": "the access token expired",
+      "resource_metadata": "https://notes.example.com/.well-known/oauth-protected-resource"
+    }
+  },
+  "expected": {
+    "ok": {
+      "header": "Bearer error=\"invalid_token\", error_description=\"the access token expired\", resource_metadata=\"https://notes.example.com/.well-known/oauth-protected-resource\"",
+      "status": 401
+    }
+  }
+}

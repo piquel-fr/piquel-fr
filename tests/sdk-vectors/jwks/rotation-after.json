@@ -1,0 +1,24 @@
+{
+  "description": "after a rotation only the new key is published",
+  "input": {
+    "jwks": {
+      "keys": [
+        {
+          "alg": "RS256",
+          "e": "AQAB",
+          "kid": "key-2026",
+          "kty": "RSA",
+          "n": "uIyTduvpF-LYSdNmHoK0TI0HtTEEAlE17LrpIGe4t4RmG8pG-Nocs_FXJB0ErRwoCmiIxxW9dxni9MFsnOPpOgj2YVZJnSlFgvXioU3bpOc9xyTmQtXoarWe96RO50W7vHsuuHrMmGuwRFyN_6Uw7w1FK-mS5Jf5TwBYJjwLpvdmyAiqoOwQv0z4zHfZnaN6AY4QocMJOTB8IdOV4-ej0p2xCKSL5FQS8nkMKg9bT9vxdDjp8CTjFh3Yfb-hgyipDvZ-rB8v41NISDsxJ_yjmxFsYdiEGCrgVaRGHtzfHfar-873Ciz8SqjTK-p7dqKd7LfijdoVLZHQEbaKEZvxsw",
+          "use": "sig"
+        }
+      ]
+    }
+  },
+  "expected": {
+    "ok": {
+      "kids": [
+        "key-2026"
+      ]
+    }
+  }
+}

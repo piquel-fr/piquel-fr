@@ -2,8 +2,8 @@
 
 use super::{
     AUTHORIZATION_CODE_MINUTES, AUTHORIZATION_REQUEST_MINUTES, Claim, CodeChallengeMethod,
-    MAX_STATE_BYTES, OAuthCode, OAuthError, OidcApplication, OpaqueToken, Prompt, ResponseMode,
-    ResponseType, Scopes, TokenPrefix,
+    MAX_STATE_BYTES, OAuthCode, OAuthError, OidcApplication, OpaqueToken, Prompt, Reject,
+    ResponseMode, ResponseType, Scopes, TokenPrefix,
 };
 use crate::{routes, security::Session};
 use axum::{

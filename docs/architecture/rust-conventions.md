@@ -7,9 +7,10 @@ Keep implementations simple. Follow neighbouring modules and share repeated logi
 - `piquel-common` (`crates/common`): environment variables, validated URLs,
   secret references, error-chain formatting and `str_enum!`.
 - `piquel-crypto` (`crates/crypto`): random secrets, digests, HMAC, constant-time
-  comparison, PKCE, RS256 signing and JWT/JWK vocabulary.
+  comparison, PKCE and RS256 signing.
 - `piquel-auth-protocol` (`crates/auth-protocol`): IDs, account status,
-  authentication methods, providers and shared OAuth/OIDC vocabulary.
+  authentication methods, providers, and the wire types shared with the SDKs: token
+  claims, metadata, JWK sets, OAuth/OIDC vocabulary and errors, bearer challenges.
 - `piquel-repository` (`crates/database`): the only SQLx consumer; typed
   repositories, transactions and storage vocabulary.
 - `piquel-telemetry` (`crates/telemetry`): tracing setup.
@@ -91,8 +92,10 @@ Use `str_enum!` for closed stored or wire strings and serde enums for JSON-only
 choices. Match domain enums exhaustively; use their `ALL` list rather than repeating
 variants. Limits and lifetimes are named constants. Preserve existing wire spellings.
 
-Shared authentication vocabulary lives in auth-protocol; JWT/JWK vocabulary lives
-in crypto. Storage vocabulary (`AuditAction`, `AuditOutcome`, `CeremonyKind`,
+Shared authentication vocabulary, JWT/JWK vocabulary and wire types live in
+auth-protocol. Build tokens and protocol documents from its structs, never with
+`json!`, so auth and the SDKs share one definition. Use `open_str_enum!` for wire
+values a newer peer may extend, such as `amr`. Storage vocabulary (`AuditAction`, `AuditOutcome`, `CeremonyKind`,
 `OidcRedirectKind`) lives in the repository. Record successful account operations
 with `tx.audit_events().record(user_id, action, provider)`. Record rejections that
 implicate an account with `record_rejection(user_id, action)`, committed even though

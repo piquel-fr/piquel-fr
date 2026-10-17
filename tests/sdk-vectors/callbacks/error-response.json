@@ -1,0 +1,19 @@
+{
+  "description": "an error from the issuer is reported as an OAuth error",
+  "input": {
+    "authorization_response_iss_parameter_supported": true,
+    "issuer": "https://auth.example.com",
+    "parameters": {
+      "error": "access_denied",
+      "error_description": "the user denied the request",
+      "iss": "https://auth.example.com",
+      "state": "af0ifjsldkj"
+    },
+    "state": "af0ifjsldkj"
+  },
+  "expected": {
+    "error": {
+      "code": "oauth"
+    }
+  }
+}

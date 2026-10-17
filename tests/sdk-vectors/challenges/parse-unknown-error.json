@@ -1,0 +1,14 @@
+{
+  "description": "an error code this version does not know is kept, with the rest of the challenge",
+  "input": {
+    "header": "Bearer error=\"invalid_dpop_proof\", scope=\"notes:read\""
+  },
+  "expected": {
+    "ok": {
+      "challenge": {
+        "error": "invalid_dpop_proof",
+        "scope": "notes:read"
+      }
+    }
+  }
+}

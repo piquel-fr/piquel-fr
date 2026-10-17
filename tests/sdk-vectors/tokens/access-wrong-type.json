@@ -1,0 +1,36 @@
+{
+  "description": "an ID token's typ is rejected where an access token is expected",
+  "now": 1767225600,
+  "input": {
+    "audience": "https://notes.example.com",
+    "issuer": "https://auth.example.com",
+    "jwks": {
+      "keys": [
+        {
+          "alg": "RS256",
+          "e": "AQAB",
+          "kid": "key-2025",
+          "kty": "RSA",
+          "n": "wVpUJ5o9UePaQeyX8a6XFDVyAyN6HSiT6ColCm4AedZEuCaz5mMWQeintQvevJB0fYReqVFmSXr69OSf8d04wUthRmwfMns-wW5rT2LKuZcN02rXaiRsQepuC0nsqY-HaRTike3nvRhuzZlobtl8rxvxG0mzbfN27NSRJWQdOAWTkrzLzi58IAbg2umQB6h7P7g3AYMHRunx7Rc5xaReeWyvK8CPUA2CbGQOzDi468bl0BKMX3y-ibNq4gPCqWzeVZjpY4rP0EYbz3i3bV9PMo4qRFtQd77UNzF6ibxmWL1gX8u348H3ia_Fvug-t9MJO3HqFVvV5REx5O1nIOWz8Q",
+          "use": "sig"
+        },
+        {
+          "alg": "RS256",
+          "e": "AQAB",
+          "kid": "key-2026",
+          "kty": "RSA",
+          "n": "uIyTduvpF-LYSdNmHoK0TI0HtTEEAlE17LrpIGe4t4RmG8pG-Nocs_FXJB0ErRwoCmiIxxW9dxni9MFsnOPpOgj2YVZJnSlFgvXioU3bpOc9xyTmQtXoarWe96RO50W7vHsuuHrMmGuwRFyN_6Uw7w1FK-mS5Jf5TwBYJjwLpvdmyAiqoOwQv0z4zHfZnaN6AY4QocMJOTB8IdOV4-ej0p2xCKSL5FQS8nkMKg9bT9vxdDjp8CTjFh3Yfb-hgyipDvZ-rB8v41NISDsxJ_yjmxFsYdiEGCrgVaRGHtzfHfar-873Ciz8SqjTK-p7dqKd7LfijdoVLZHQEbaKEZvxsw",
+          "use": "sig"
+        }
+      ]
+    },
+    "kind": "access",
+    "token": "eyJhbGciOiJSUzI1NiIsImtpZCI6ImtleS0yMDI1IiwidHlwIjoiSldUIn0.eyJpc3MiOiJodHRwczovL2F1dGguZXhhbXBsZS5jb20iLCJzdWIiOiIwMTkzNmYzZS04YzAwLTcwMDAtODAwMC0wMDAwMDAwMDAwMDEiLCJhdWQiOiJodHRwczovL25vdGVzLmV4YW1wbGUuY29tIiwiY2xpZW50X2lkIjoibm90ZXMtd2ViIiwianRpIjoiMDE5MzZmM2UtOGMwMC03MDAwLTgwMDAtMDAwMDAwMDAwMDAzIiwic2NvcGUiOiJub3RlczpyZWFkIG9wZW5pZCBwcm9maWxlIiwiaWF0IjoxNzY3MjI1NTQwLCJleHAiOjE3NjcyMjU4NDAsInNpZCI6IjAxOTM2ZjNlLThjMDAtNzAwMC04MDAwLTAwMDAwMDAwMDAwMiIsImF1dGhfdGltZSI6MTc2NzIyMjAwMCwiYW1yIjpbInBvcCIsIm1mYSIsInVzZXIiXSwiYWNyIjoicGhyIiwicHJlZmVycmVkX3VzZXJuYW1lIjoiYWRhIiwibmFtZSI6IkFkYSBMb3ZlbGFjZSIsInByb2ZpbGVfdmVyc2lvbiI6MX0.PBfNevXxSOl303PWTzRou0jmY_NXG4zfp09qaPe2PFBBt3rJzFDje5g5SaBYk6QHT18Or9zIhhSigG_RNuX9bD2xrpRcmDvOKVUL0-dHmD9cMqHyLt7tyXg6-bsk_zGm6CUAS99wZUkHvWu4L6G5kysfEDJBeU1Ye0iH7g2SPfKqLkLwePGBItvN6OlYDH5eO98fYwHpIFRXKFL0XzZrx8PXKX_8H5OVLcoNU8wdU5xYvMUfQNlEo-COaehkZw_3DvfB8aLluZc709ot3t2qFXQ7gQlaglvedBlGTE1Pwz1lu6Chb_f0ojvOb6JvDYe77f13XnAKAY7mTc4DPRhYyg"
+  },
+  "expected": {
+    "error": {
+      "code": "invalid_token",
+      "reason": "wrong_type"
+    }
+  }
+}
