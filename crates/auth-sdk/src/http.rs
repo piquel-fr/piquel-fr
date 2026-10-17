@@ -43,6 +43,18 @@ pub enum NetworkError {
     },
 }
 
+impl NetworkError {
+    /// Whether the request never reached the server: the client could not be built,
+    /// or the connection could not be opened.
+    pub(crate) fn unsent(&self) -> bool {
+        match self {
+            Self::Client(_) => true,
+            Self::Request { source, .. } => source.is_connect(),
+            Self::Status { .. } | Self::TooLarge { .. } => false,
+        }
+    }
+}
+
 /// A response read in full.
 pub(crate) struct Reply {
     /// HTTP status.

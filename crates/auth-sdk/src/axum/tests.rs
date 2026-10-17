@@ -103,6 +103,7 @@ fn bearer_app(resource: Resource) -> Router {
     let validator = issuer(&token_case("access-valid")).resource(resource);
     Router::new()
         .route("/me", get(|_: Authenticated| async {}))
+        .route("/public", get(|| async {}))
         .route("/read", get(|_: Scoped<notes::Read>| async {}))
         .route("/write", get(|_: Scoped<notes::Write>| async {}))
         .route(
@@ -157,6 +158,11 @@ async fn bearer_rejections_match_the_challenge_vectors() {
     assert_eq!(challenge(&response), expected("invalid-request"));
     let response = get_with(&plain, "/me", &[(header::AUTHORIZATION, "Bearer")]).await;
     assert_eq!(challenge(&response), expected("invalid-request"));
+    // Only the extractors reject a malformed header: public routes still answer.
+    for headers in [&twice[..], &[(header::AUTHORIZATION, "Bearer")]] {
+        let response = get_with(&plain, "/public", headers).await;
+        assert_eq!(response.status(), StatusCode::OK);
+    }
     // Other schemes are not bearer tokens: the request has none.
     let response = get_with(&plain, "/me", &[(header::AUTHORIZATION, "Basic abc")]).await;
     assert_eq!(challenge(&response), expected("missing-token"));
@@ -290,9 +296,27 @@ fn login_app(issuer: &Issuer, backend: &MemoryBackend) -> (Router, LoginRoutes) 
             "/",
             get(|user: SignedIn| async move { user.login().access_token.expose().to_owned() }),
         )
+        .nest(
+            "/app",
+            Router::new().route("/notes", get(|_: SignedIn| async {})),
+        )
         .nest("/auth", auth.router())
         .layer(auth.layer());
     (app, auth)
+}
+
+/// Without a session, a page is redirected through login and back to its full path,
+/// prefix included when it sits in a nested router.
+#[tokio::test]
+async fn signed_in_redirects_back_to_the_full_path() {
+    let backend = MemoryBackend::default();
+    let issuer = issuer_with_token_endpoint("http://127.0.0.1:9/token".parse().expect("URL"));
+    let (app, _) = login_app(&issuer, &backend);
+    let response = get_with(&app, "/app/notes?page=2", &[]).await;
+    assert_eq!(
+        response.headers()[header::LOCATION],
+        "/auth/login?return_to=%2Fapp%2Fnotes%3Fpage%3D2"
+    );
 }
 
 /// The fixture user's account ID.
@@ -619,10 +643,24 @@ async fn memory_backend_keeps_the_contract() {
 }
 
 /// A refused grant ends the session, as does a refresh whose outcome is unknown,
-/// since auth may have rotated the token; an error answer from auth keeps it.
+/// since auth may have rotated the token. An error answer from auth keeps it, and so
+/// does a refresh that could not even connect.
 #[tokio::test]
 async fn refresh_failures_end_sessions_only_when_the_token_may_be_spent() {
     let unreachable: Url = "http://127.0.0.1:9/token".parse().expect("URL");
+    // Accepts the request, then hangs up without answering.
+    let hangup = tokio::net::TcpListener::bind("127.0.0.1:0")
+        .await
+        .expect("bind");
+    let silent: Url = format!("http://{}/token", hangup.local_addr().expect("address"))
+        .parse()
+        .expect("URL");
+    tokio::spawn(async move {
+        while let Ok((mut stream, _)) = hangup.accept().await {
+            let mut request = [0; 4096];
+            let _read = tokio::io::AsyncReadExt::read(&mut stream, &mut request).await;
+        }
+    });
     let failing = |status, error| async move { TokenEndpoint::failing(status, error).await.url };
     for (endpoint, kept) in [
         (
@@ -637,7 +675,8 @@ async fn refresh_failures_end_sessions_only_when_the_token_may_be_spent() {
             failing(StatusCode::BAD_REQUEST, "invalid_grant").await,
             false,
         ),
-        (unreachable, false),
+        (unreachable, true),
+        (silent, false),
     ] {
         let backend = MemoryBackend::default();
         let (app, _) = login_app(&issuer_with_token_endpoint(endpoint.clone()), &backend);

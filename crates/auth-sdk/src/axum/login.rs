@@ -12,7 +12,7 @@ use crate::{
 };
 use axum::{
     Extension, Router,
-    extract::{FromRequestParts, Query, Request, State},
+    extract::{FromRequestParts, OriginalUri, Query, Request, State},
     http::{HeaderMap, HeaderValue, Method, StatusCode, header, request::Parts},
     response::{IntoResponse, Redirect, Response},
     routing::{get, post},
@@ -653,6 +653,11 @@ impl Login {
                 tracing::warn!(error = %ErrorChain(&error), "session refresh failed");
                 self.save(key, lease, until, current.login).await
             }
+            // The request never reached auth, so nothing was rotated either.
+            Err(crate::OAuthError::Network(error)) if error.unsent() => {
+                tracing::warn!(error = %ErrorChain(&error), "session refresh could not reach auth");
+                self.save(key, lease, until, current.login).await
+            }
             // No usable answer: auth may have rotated the token.
             Err(error) => {
                 tracing::warn!(error = %ErrorChain(&error), "session refresh failed; ending the session");
@@ -940,8 +945,12 @@ impl<St: Send + Sync> FromRequestParts<St> for SignedIn {
             .extensions
             .get::<Arc<Login>>()
             .ok_or_else(|| StatusCode::INTERNAL_SERVER_ERROR.into_response())?;
-        let return_to = parts
-            .uri
+        // A nested router strips its prefix from `uri`; the original keeps it.
+        let uri = parts
+            .extensions
+            .get::<OriginalUri>()
+            .map_or(&parts.uri, |original| &original.0);
+        let return_to = uri
             .path_and_query()
             .and_then(|path| path.as_str().parse().ok());
         Err(Redirect::to(&login.login_url(return_to.as_ref(), None)).into_response())

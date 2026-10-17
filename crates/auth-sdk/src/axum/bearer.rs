@@ -23,8 +23,18 @@ use url::Url;
 struct Bearer<X> {
     /// Validator for the resource, for checks that need its clock.
     validator: ResourceValidator<X>,
-    /// `None` without a bearer token; otherwise the validation result.
-    outcome: Option<Result<AccessToken<Scopes, X>, Arc<TokenError>>>,
+    /// What `Authorization` held.
+    outcome: Outcome<X>,
+}
+
+/// What `Authorization` held, for the extractors to judge.
+enum Outcome<X> {
+    /// No bearer token; other schemes count as none.
+    Missing,
+    /// A Bearer header with no credentials, or several `Authorization` headers.
+    Malformed,
+    /// A bearer token, and its validation result.
+    Validated(Result<Box<AccessToken<Scopes, X>>, Arc<TokenError>>),
 }
 
 /// Validates the request's bearer token once, for the extractors to read. A request
@@ -130,31 +140,32 @@ where
         let validator = self.validator.clone();
         Box::pin(async move {
             let mut values = request.headers().get_all(header::AUTHORIZATION).iter();
-            let invalid =
-                || AuthRejection::new(Reason::InvalidRequest, Some(&validator)).into_response();
             // Other schemes pass through as no token; a malformed Bearer header, or
-            // several headers, is a bad request.
-            let token = match (values.next(), values.next()) {
-                (Some(value), None) => {
-                    let Ok(value) = value.to_str() else {
-                        return Ok(invalid());
-                    };
-                    let (scheme, credentials) = value.split_once(' ').unwrap_or((value, ""));
-                    match scheme
-                        .eq_ignore_ascii_case("Bearer")
-                        .then(|| credentials.trim())
-                    {
-                        Some("") => return Ok(invalid()),
-                        Some(token) => Some(token.to_owned()),
-                        None => None,
+            // several headers, is a bad request to the extractors only, so public
+            // routes still answer.
+            let outcome = match (values.next(), values.next()) {
+                (Some(value), None) => match value.to_str() {
+                    Err(_) => Outcome::Malformed,
+                    Ok(value) => {
+                        let (scheme, credentials) = value.split_once(' ').unwrap_or((value, ""));
+                        match scheme
+                            .eq_ignore_ascii_case("Bearer")
+                            .then(|| credentials.trim())
+                        {
+                            None => Outcome::Missing,
+                            Some("") => Outcome::Malformed,
+                            Some(token) => Outcome::Validated(
+                                validator
+                                    .validate::<Scopes>(token)
+                                    .await
+                                    .map(Box::new)
+                                    .map_err(Arc::new),
+                            ),
+                        }
                     }
-                }
-                (None, _) => None,
-                (Some(_), Some(_)) => return Ok(invalid()),
-            };
-            let outcome = match token {
-                Some(token) => Some(validator.validate::<Scopes>(&token).await.map_err(Arc::new)),
-                None => None,
+                },
+                (None, _) => Outcome::Missing,
+                (Some(_), Some(_)) => Outcome::Malformed,
             };
             request
                 .extensions_mut()
@@ -172,7 +183,7 @@ enum Reason {
     /// The token failed validation, lacks a scope, or its authentication is too weak
     /// or too old.
     Token(Arc<TokenError>),
-    /// `Authorization` was sent more than once.
+    /// `Authorization` was malformed, or sent more than once.
     InvalidRequest,
     /// The handler uses a bearer extractor on a route without [`BearerLayer`].
     MissingLayer,
@@ -312,12 +323,13 @@ fn token<X: Clone + Send + Sync + 'static>(
         .ok_or_else(|| AuthRejection::new::<X>(Reason::MissingLayer, None))?;
     let validator = &bearer.validator;
     match &bearer.outcome {
-        None => Err(AuthRejection::new(Reason::Missing(scope), Some(validator))),
-        Some(Err(error)) => Err(AuthRejection::new(
+        Outcome::Missing => Err(AuthRejection::new(Reason::Missing(scope), Some(validator))),
+        Outcome::Malformed => Err(AuthRejection::new(Reason::InvalidRequest, Some(validator))),
+        Outcome::Validated(Err(error)) => Err(AuthRejection::new(
             Reason::Token(error.clone()),
             Some(validator),
         )),
-        Some(Ok(token)) => Ok((token.clone(), validator)),
+        Outcome::Validated(Ok(token)) => Ok((token.as_ref().clone(), validator)),
     }
 }
 
