@@ -16,7 +16,9 @@ A requirement has two optional parts.
 - **`max_age`: how recently.** Ask for a number of seconds when the user should
   be present right now, for example before showing a recovery code or
   exporting their data. Five minutes (`300`) is what auth's own settings use.
-  `0` means "sign in again now".
+  An API should ask for a positive age: by the time a token reaches it,
+  `auth_time` is already in the past. `0` only makes sense in an authorization
+  request, where it means "sign in again now".
 
 Most sensitive actions want both: `phr` within `300` seconds. A `max_age`
 alone accepts a recent social sign-in.

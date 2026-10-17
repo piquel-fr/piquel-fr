@@ -87,10 +87,17 @@ mod tests {
         }
     }
 
-    /// An authentication older than `max_age`, or with no `auth_time`, fails.
+    /// An authentication older than `max_age`, even by part of a second, or with no
+    /// `auth_time`, fails.
     #[test]
     fn old_authentication_fails() {
         let acr = Some(&Acr::PhishingResistant);
+        let (auth_time, now) = ago(300);
+        let late = now + TimeDelta::milliseconds(500);
+        assert_eq!(
+            RECENT_PASSKEY.check(acr, auth_time, late),
+            Err(RECENT_PASSKEY)
+        );
         let (auth_time, now) = ago(301);
         assert_eq!(
             RECENT_PASSKEY.check(acr, auth_time, now),
