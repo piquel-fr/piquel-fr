@@ -21,6 +21,8 @@ branch = "main"
 # instead of competing for another one's.
 [spec.variables]
 invite_required = "true"
+# See "Running several replicas" in infra/README.md before raising it.
+auth_replicas = 1
 
 [spec.environments.production]
 promote_from = "staging"
@@ -89,6 +91,7 @@ run = "before-rollout"
 [[spec.services]]
 name = "auth"
 depends_on = ["postgres"]
+replicas = "${{ vars.auth_replicas }}"
 
 [spec.services.source]
 type = "git"

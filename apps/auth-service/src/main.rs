@@ -6,6 +6,7 @@ use piquel_common::{ConfigurationError, ErrorChain, Origin};
 use piquel_crypto::{CryptoError, Secret};
 use piquel_repository::{Database, DatabaseConnectionError, DatabaseError};
 use thiserror::Error;
+use tokio::sync::oneshot;
 
 use std::{net::SocketAddr, process::ExitCode, str::FromStr, time::Duration as StdDuration};
 
@@ -47,6 +48,9 @@ enum CliError {
     /// The service listener could not be bound or served.
     #[error("authentication HTTP listener failed")]
     Listener(#[from] std::io::Error),
+    /// Expired-state cleanup panicked.
+    #[error("expired authentication state cleanup panicked")]
+    Cleanup(#[from] tokio::task::JoinError),
 }
 
 /// Piquel authentication service. Runs `serve` when no command is given.
@@ -152,10 +156,16 @@ impl DatabaseCommand {
     /// Every five minutes, drains expired auth state in bounded batches until a
     /// pass finds nothing or a one-minute budget runs out. Short pauses between
     /// batches keep cleanup from monopolizing the database under heavy churn.
-    async fn purge_expired_state(database: Database) {
+    /// Returns once `stop` resolves, which its sender's drop triggers, after
+    /// finishing the batch in progress.
+    async fn purge_expired_state(database: Database, mut stop: oneshot::Receiver<()>) {
         let mut interval = tokio::time::interval(CLEANUP_INTERVAL);
         loop {
-            interval.tick().await;
+            tokio::select! {
+                biased;
+                _ = &mut stop => return,
+                _ = interval.tick() => {}
+            }
             let deadline = tokio::time::Instant::now() + CLEANUP_BUDGET;
             loop {
                 match database.purge_expired_auth_state(CLEANUP_BATCH_SIZE).await {
@@ -164,7 +174,11 @@ impl DatabaseCommand {
                         tracing::warn!("expired authentication state cleanup is falling behind");
                         break;
                     }
-                    Ok(_) => tokio::time::sleep(CLEANUP_PAUSE).await,
+                    Ok(_) => tokio::select! {
+                        biased;
+                        _ = &mut stop => return,
+                        () = tokio::time::sleep(CLEANUP_PAUSE) => {}
+                    },
                     Err(error) => {
                         tracing::error!(?error, "expired authentication state cleanup failed");
                         break;
@@ -174,21 +188,30 @@ impl DatabaseCommand {
         }
     }
 
-    /// Builds the configured service, starts cleanup and serves until a shutdown signal.
+    /// Builds the configured service, provisions clients, starts cleanup and serves
+    /// until a shutdown signal. Cleanup then finishes its current batch while
+    /// in-flight requests drain.
     async fn serve(database: Database) -> Result<(), CliError> {
         let config = AuthConfig::from_environment()?;
         let listener = tokio::net::TcpListener::bind(config.public_listener).await?;
-        let router = config.router(database.clone()).await?;
-        let cleanup = tokio::spawn(Self::purge_expired_state(database));
+        let router = config.router(database.clone())?;
+        config.provision_clients(&database).await?;
+        let (stop, stopped) = oneshot::channel();
+        let cleanup = tokio::spawn(Self::purge_expired_state(database, stopped));
         tracing::info!(address=%config.public_listener,"authentication service listening");
         let result = axum::serve(
             listener,
             router.into_make_service_with_connect_info::<SocketAddr>(),
         )
-        .with_graceful_shutdown(Self::shutdown_signal())
+        .with_graceful_shutdown(async move {
+            Self::shutdown_signal().await;
+            drop(stop);
+        })
         .await;
-        cleanup.abort();
-        Ok(result?)
+        // A listener failure drops `stop` with the shutdown future, so cleanup ends too.
+        let cleanup = cleanup.await;
+        result?;
+        Ok(cleanup?)
     }
 }
 

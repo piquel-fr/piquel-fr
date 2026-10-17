@@ -1,6 +1,7 @@
 //! Focused parsing checks and database-backed OAuth/OIDC scenarios.
 
 use super::*;
+use crate::tests::{AUTH_ORIGIN, Replicas};
 use axum::{
     body::{Body, to_bytes},
     http::{Method, Request, StatusCode},
@@ -15,9 +16,12 @@ use tower::ServiceExt;
 use url::Url;
 
 /// Database-backed OIDC scenario with a provisioned client and authenticated browser.
+#[derive(Clone)]
 struct Flow {
     /// Application under test, sharing the scenario database.
     app: OidcApplication,
+    /// Where requests go: the OIDC routes, or a replica of the whole service.
+    router: axum::Router,
     /// Client identifier bound into the token claims.
     client: BootstrapOidcClient,
     /// Authenticated browser cookie pair sent by the scenario.
@@ -109,7 +113,7 @@ impl Flow {
         let app = OidcApplication::new(
             db,
             &OidcConfig {
-                origin: "https://auth.example.com"
+                origin: AUTH_ORIGIN
                     .parse::<piquel_common::Origin>()
                     .expect("issuer"),
                 keys: Arc::new(Rs256Key::generate("oidc-tests").expect("RSA signing key")),
@@ -120,11 +124,19 @@ impl Flow {
         )
         .expect("OIDC application");
         Self {
+            router: app.clone().routes(),
             app,
             client,
             cookie,
             user_id,
             basic,
+        }
+    }
+    /// The same scenario, sending its requests to `router`, such as one of [`Replicas`].
+    fn on(&self, router: &axum::Router) -> Self {
+        Self {
+            router: router.clone(),
+            ..self.clone()
         }
     }
     /// Dispatches an encoded protocol request through the OIDC routes.
@@ -139,7 +151,7 @@ impl Flow {
             .method(method)
             .uri(uri)
             .header(header::COOKIE, &self.cookie)
-            .header(header::ORIGIN, "https://auth.example.com")
+            .header(header::ORIGIN, AUTH_ORIGIN)
             .header("x-piquel-csrf", "1");
         if let Some(basic) = basic {
             builder = builder.header(header::AUTHORIZATION, basic);
@@ -151,9 +163,8 @@ impl Flow {
             .header(header::CONTENT_TYPE, "application/x-www-form-urlencoded")
             .body(Body::from(body))
             .expect("build test HTTP request");
-        self.app
+        self.router
             .clone()
-            .routes()
             .oneshot(request)
             .await
             .expect("dispatch OIDC HTTP request")
@@ -170,7 +181,7 @@ impl Flow {
         prompt: Option<&str>,
         extra: &[(&str, &str)],
     ) -> Response {
-        let mut url = Url::parse("https://auth.example.com/oauth/authorize")
+        let mut url = Url::parse(&format!("{AUTH_ORIGIN}/oauth/authorize"))
             .expect("parse authorization endpoint URL");
         url.query_pairs_mut().extend_pairs([
             ("response_type", ResponseType::Code.as_str()),
@@ -610,6 +621,42 @@ async fn code_replay_revokes_its_refresh_family() {
     assert_eq!(
         flow.refresh(&rotated).await.status(),
         StatusCode::BAD_REQUEST
+    );
+}
+
+/// The same refresh token, rotated on two replicas at once, rotates exactly once. The
+/// other attempt is a replay, which revokes the family.
+#[tokio::test]
+#[ignore = "requires TEST_DATABASE_URL"]
+async fn concurrent_refresh_across_replicas_rotates_once() {
+    let flow = Flow::new(true, true).await;
+    let replicas = Replicas::new().await;
+    let (a, b) = (flow.on(&replicas.a), flow.on(&replicas.b));
+    let code = a.code(REFRESH_SCOPES).await;
+    let response = b
+        .exchange(&code, Flow::verifier(), b.basic.as_deref())
+        .await;
+    assert_eq!(response.status(), StatusCode::OK);
+    let token = Flow::json(response).await["refresh_token"]
+        .as_str()
+        .expect("token response contains a refresh token")
+        .to_owned();
+    let (first, second) = tokio::join!(a.refresh(&token), b.refresh(&token));
+    let (rotated, replayed) = if first.status() == StatusCode::OK {
+        (first, second)
+    } else {
+        (second, first)
+    };
+    assert_eq!(rotated.status(), StatusCode::OK);
+    assert_eq!(replayed.status(), StatusCode::BAD_REQUEST);
+    let rotated = Flow::json(rotated).await["refresh_token"]
+        .as_str()
+        .expect("refresh response contains the rotated token")
+        .to_owned();
+    assert_eq!(
+        a.refresh(&rotated).await.status(),
+        StatusCode::BAD_REQUEST,
+        "the replay revoked the family"
     );
 }
 

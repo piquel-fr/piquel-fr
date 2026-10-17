@@ -2,6 +2,7 @@
 
 use super::*;
 use crate::routes::federation;
+use crate::tests::Replicas;
 use axum::{Router, body::Body, http::Request as HttpRequest, middleware, routing::any};
 use piquel_auth_protocol::TokenId;
 use piquel_crypto::Secret;
@@ -491,6 +492,33 @@ async fn reads_exhaust_their_own_budget() {
             .status(),
         StatusCode::ACCEPTED
     );
+}
+/// One client's budget is shared across replicas: alternating between them, the
+/// request after the budget is still rejected.
+#[tokio::test]
+#[ignore = "requires TEST_DATABASE_URL"]
+async fn replicas_share_one_budget() {
+    let replicas = Replicas::new().await;
+    let status = async |router: &Router| {
+        let request = HttpRequest::get("/session")
+            .body(Body::empty())
+            .expect("request");
+        router
+            .clone()
+            .oneshot(request)
+            .await
+            .expect("response")
+            .status()
+    };
+    for index in 0..REQUESTS_PER_MINUTE {
+        let router = if index % 2 == 0 {
+            &replicas.a
+        } else {
+            &replicas.b
+        };
+        assert_eq!(status(router).await, StatusCode::UNAUTHORIZED);
+    }
+    assert_eq!(status(&replicas.a).await, StatusCode::TOO_MANY_REQUESTS);
 }
 /// A trusted proxy shares each budget by forwarded client IP rather than ingress IP.
 #[tokio::test]

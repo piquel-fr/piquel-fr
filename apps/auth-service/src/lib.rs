@@ -17,6 +17,9 @@ mod routes;
 mod security;
 /// Built-in public configuration, liveness and readiness.
 mod service;
+/// Fixtures shared by the applications' tests.
+#[cfg(test)]
+mod tests;
 
 pub use config::{AuthConfig, PUBLIC_BASE_URL};
 use federation::FederationApplication;
@@ -56,24 +59,17 @@ pub enum StartupError {
 
 impl AuthConfig {
     /// Builds uniformly constructed applications under shared browser-origin protection.
+    /// It changes nothing in the database, so tests build several to act as replicas.
     ///
     /// # Errors
-    /// Fails when the frontend is not embedded, an application cannot initialize, or
-    /// client provisioning fails.
-    pub async fn router(&self, database: Database) -> Result<Router, StartupError> {
-        // Finish fallible application initialization before changing client registrations.
+    /// Fails when the frontend is not embedded or an application cannot initialize.
+    pub fn router(&self, database: Database) -> Result<Router, StartupError> {
         let assets = EmbeddedAssets::new()?;
         let application = Router::new()
             .merge(ServiceApplication::new(database.clone(), self).routes())
             .merge(PasskeyApplication::new(database.clone(), &self.passkey)?.routes())
             .merge(FederationApplication::new(database.clone(), &self.federation)?.routes())
             .merge(OidcApplication::new(database.clone(), &self.oidc)?.routes());
-        let mut tx = database.begin().await?;
-        tx.oidc().disable_all_clients().await?;
-        for client in &self.oidc.clients {
-            tx.oidc().bootstrap_client(client).await?;
-        }
-        tx.commit().await?;
         let policy = security::HttpSecurity::new(self, database);
         Ok(application
             .fallback(move |uri: Uri| async move { assets.serve(uri.path()) })
@@ -82,5 +78,20 @@ impl AuthConfig {
                 policy,
                 security::HttpSecurity::protect,
             )))
+    }
+
+    /// Replaces every client registration with the clients file, atomically. Every
+    /// replica runs this at startup, after [`Self::router`] has initialized.
+    ///
+    /// # Errors
+    /// Fails when the database rejects the registrations.
+    pub async fn provision_clients(&self, database: &Database) -> Result<(), StartupError> {
+        let mut tx = database.begin().await?;
+        tx.oidc().disable_all_clients().await?;
+        for client in &self.oidc.clients {
+            tx.oidc().bootstrap_client(client).await?;
+        }
+        tx.commit().await?;
+        Ok(())
     }
 }

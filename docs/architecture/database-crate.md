@@ -93,8 +93,19 @@ prototype schema is disposable and the release requires a fresh database. Releas
 migrations are immutable; later schema changes go in new numbered files. Run
 migrations with `just db migrate` (`auth-service migrate` in deployed images); startup does not silently mutate the schema.
 
-Every five minutes the service drains expired ephemeral state in bounded batches,
-for up to one minute per pass.
+Migrations expand, then contract. A deploy runs `migrate` first, and the previous
+release keeps serving against the new schema until its replacement is healthy, so
+every migration must keep the previous release working. Add tables, and columns
+that are nullable or have a default. Drop or rename a column or table, or add a
+constraint the previous release could violate, only in a later release, once no
+deployed code uses the old shape. Migration `0003` dropped
+`sessions.management_expires_at` in the release that stopped reading it: a one-time
+exception while there were few users, not a precedent. SQLx's migrator takes an
+advisory lock, so concurrent `migrate` runs are safe.
+
+Every five minutes each replica drains expired ephemeral state in bounded batches,
+for up to one minute per pass. Overlapping passes skip each other's locked rows.
+On shutdown, a pass finishes its current batch and stops.
 Security audit history is retained. Tests that use `TEST_DATABASE_URL` are explicitly
 marked ignored by the ordinary unit test runner; other crates' tests read stored state
 through helpers behind the `test-support` feature. `just db test` runs them in a
