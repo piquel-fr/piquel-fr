@@ -41,8 +41,10 @@ const DEFAULT_SESSION_LIFETIME: TimeDelta = TimeDelta::hours(12);
 /// Access tokens this close to expiry are refreshed first.
 const REFRESH_MARGIN: TimeDelta = TimeDelta::seconds(30);
 /// Longest a refresh may take, auth's response and its ID token check included.
-/// Shorter than the lease, so a lease never expires while its holder still refreshes.
 const REFRESH_DEADLINE: Duration = Duration::from_secs(20);
+/// Time kept back from a lease for saving its result, so the save lands before the
+/// lease expires even when the backend is slow.
+const SAVE_MARGIN: TimeDelta = TimeDelta::seconds(10);
 /// How long a refresh lease lasts if its holder never releases it.
 const REFRESH_LEASE: Duration = Duration::from_secs(60);
 /// How long a request waits for another's refresh before using what it has.
@@ -541,7 +543,7 @@ impl Login {
             // Another request refreshed since this one read the session, or is
             // refreshing now: use its result.
             Lease::Changed | Lease::Busy => self.wait(key, current).await,
-            Lease::Acquired => self.refresh_leased(key, &lease, current).await,
+            Lease::Acquired(until) => self.refresh_leased(key, &lease, until, current).await,
         }
     }
 
@@ -565,18 +567,28 @@ impl Login {
         }
     }
 
-    /// Refreshes while holding `lease`, then saves the result or gives the lease back.
+    /// Refreshes while holding `lease` until `until`, then saves the result or gives
+    /// the lease back. The refresh must finish while enough of the lease is left to
+    /// save: the time is measured after acquiring the lease, since the backend calls
+    /// that acquired it may have been slow.
     async fn refresh_leased(
         &self,
         key: &SessionKey,
         lease: &LeaseId,
+        until: DateTime<Utc>,
         current: Session,
     ) -> Result<Option<Session>, BackendError> {
-        let Some(refresh) = &current.login.refresh_token else {
+        let budget = (until - self.now() - SAVE_MARGIN)
+            .to_std()
+            .ok()
+            .filter(|budget| !budget.is_zero());
+        let (Some(refresh), Some(budget)) = (&current.login.refresh_token, budget) else {
+            // Nothing to refresh, or no time left to do it safely: auth was not
+            // called, so give the lease back with the session unchanged.
             return self.save(key, lease, current.login).await;
         };
         let Ok(refreshed) =
-            tokio::time::timeout(REFRESH_DEADLINE, self.client.refresh(refresh)).await
+            tokio::time::timeout(budget.min(REFRESH_DEADLINE), self.client.refresh(refresh)).await
         else {
             tracing::warn!("session refresh timed out; ending the session");
             return self.end(key).await;

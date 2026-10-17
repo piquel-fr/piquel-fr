@@ -406,10 +406,10 @@ async fn leases_are_fenced() {
     let minute = Duration::from_secs(60);
     let lease = |version, id, ttl| sessions.lease(&key, version, id, ttl, Utc::now());
     let save = |id| sessions.save(&key, id, login.clone(), Utc::now());
-    assert_eq!(
+    assert!(matches!(
         lease(1, &first, minute).await.expect("lease"),
-        Lease::Acquired
-    );
+        Lease::Acquired(_)
+    ));
     assert_eq!(lease(2, &second, minute).await.expect("lease"), Lease::Busy);
     assert!(
         save(&second).await.expect("save").is_none(),
@@ -423,11 +423,13 @@ async fn leases_are_fenced() {
         lease(1, &second, minute).await.expect("lease"),
         Lease::Changed
     );
-    assert_eq!(
+    assert!(matches!(
         lease(3, &second, Duration::ZERO).await.expect("lease"),
-        Lease::Acquired
-    );
+        Lease::Acquired(_)
+    ));
     tokio::time::sleep(Duration::from_millis(20)).await;
+    // Past its expiry, even the holder cannot save: the lease may be found abandoned.
+    assert!(save(&second).await.expect("save").is_none(), "expired");
     assert_eq!(
         lease(4, &first, minute).await.expect("lease"),
         Lease::Abandoned
@@ -439,9 +441,108 @@ async fn leases_are_fenced() {
     );
 }
 
+/// A backend whose `replace` reads, pauses, then writes: not atomic.
+#[derive(Clone, Default)]
+struct ReadThenWrite(MemoryBackend);
+
+impl SessionBackend for ReadThenWrite {
+    type Error = std::convert::Infallible;
+
+    async fn load(&self, key: &str) -> Result<Option<SessionRecord>, Self::Error> {
+        self.0.load(key).await
+    }
+
+    async fn insert(&self, key: &str, record: &SessionRecord) -> Result<(), Self::Error> {
+        self.0.insert(key, record).await
+    }
+
+    async fn replace(
+        &self,
+        key: &str,
+        expected: u64,
+        record: &SessionRecord,
+    ) -> Result<bool, Self::Error> {
+        let current = self.0.load(key).await?;
+        std::thread::sleep(Duration::from_millis(2));
+        match current {
+            Some(stored) if stored.version == expected => {
+                self.0.insert(key, record).await?;
+                Ok(true)
+            }
+            _ => Ok(false),
+        }
+    }
+
+    async fn remove(&self, key: &str) -> Result<bool, Self::Error> {
+        self.0.remove(key).await
+    }
+}
+
+/// A backend whose `replace` inserts a missing record, which could resurrect a
+/// logged-out session.
+#[derive(Clone, Default)]
+struct Upserting(MemoryBackend);
+
+impl SessionBackend for Upserting {
+    type Error = std::convert::Infallible;
+
+    async fn load(&self, key: &str) -> Result<Option<SessionRecord>, Self::Error> {
+        self.0.load(key).await
+    }
+
+    async fn insert(&self, key: &str, record: &SessionRecord) -> Result<(), Self::Error> {
+        self.0.insert(key, record).await
+    }
+
+    async fn replace(
+        &self,
+        key: &str,
+        expected: u64,
+        record: &SessionRecord,
+    ) -> Result<bool, Self::Error> {
+        if self.0.load(key).await?.is_none() {
+            self.0.insert(key, record).await?;
+            return Ok(true);
+        }
+        self.0.replace(key, expected, record).await
+    }
+
+    async fn remove(&self, key: &str) -> Result<bool, Self::Error> {
+        self.0.remove(key).await
+    }
+}
+
+/// The check refuses a non-atomic backend, one that creates records on `replace`,
+/// and a runtime on which racing calls cannot overlap.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn check_backend_catches_broken_backends() {
+    assert!(matches!(
+        check_backend(&ReadThenWrite::default()).await,
+        Err(BackendCheckError::Contract(
+            "of racing replaces at one version, exactly one must write"
+        ))
+    ));
+    assert!(matches!(
+        check_backend(&Upserting::default()).await,
+        Err(BackendCheckError::Contract(
+            "replace wrote a record that does not exist"
+        ))
+    ));
+    let single = tokio::task::spawn_blocking(|| {
+        tokio::runtime::Builder::new_current_thread()
+            .build()
+            .expect("runtime")
+            .block_on(check_backend(&MemoryBackend::default()))
+    });
+    assert!(matches!(
+        single.await.expect("task"),
+        Err(BackendCheckError::Contract(_))
+    ));
+}
+
 /// The memory backend keeps the backend contract, and a record the SDK cannot read
 /// is a missing session, not a trusted one.
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn memory_backend_keeps_the_contract() {
     let backend = MemoryBackend::default();
     check_backend(&backend).await.expect("a sound backend");

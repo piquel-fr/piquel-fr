@@ -27,7 +27,8 @@ const LEASE_BYTES: usize = 16;
 
 /// A record a [`SessionBackend`] stores. The SDK writes `data` and reads it back
 /// through its own validated types, so a backend stores it as an opaque string.
-#[derive(Clone, Debug, PartialEq, Eq)]
+/// `Debug` never prints `data`, which holds the user's tokens.
+#[derive(Clone, PartialEq, Eq)]
 pub struct SessionRecord {
     /// Increases with every write, for [`SessionBackend::replace`].
     pub version: u64,
@@ -36,6 +37,17 @@ pub struct SessionRecord {
     /// When the record stops being valid. The SDK ignores expired records, so a
     /// backend may delete them whenever it likes, or never.
     pub expires_at: DateTime<Utc>,
+}
+
+impl fmt::Debug for SessionRecord {
+    /// Shows the version and expiry, never the tokens in `data`.
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("SessionRecord")
+            .field("version", &self.version)
+            .field("expires_at", &self.expires_at)
+            .finish_non_exhaustive()
+    }
 }
 
 /// Where the login routes keep sessions: four operations on [`SessionRecord`]s under
@@ -47,9 +59,14 @@ pub struct SessionRecord {
 /// `test-util` feature) against a real database.
 ///
 /// The SDK keeps all the logic, so a backend needs no knowledge of sessions. It
-/// only has to make [`Self::replace`] atomic: two replicas refreshing one session at
-/// once would otherwise both redeem its refresh token, and auth answers a reused
-/// refresh token by revoking the whole family, signing the user out.
+/// only has to make [`Self::replace`] and [`Self::remove`] atomic: two replicas
+/// refreshing one session at once would otherwise both redeem its refresh token, and
+/// auth answers a reused refresh token by revoking the whole family, signing the user
+/// out.
+///
+/// Refresh leases expire by the issuer clock, the system clock by default, which
+/// replicas compare with each other: keep their clocks synchronized, for example with
+/// NTP. A lease lasts a minute, so a few seconds of skew are harmless.
 ///
 /// # Example: PostgreSQL
 ///
@@ -65,7 +82,8 @@ pub struct SessionRecord {
 /// ```
 ///
 /// Each operation is one statement, which an application writes with its own
-/// database layer, for example `SQLx`'s checked `query!` macros:
+/// database layer, for example `SQLx`'s checked `query!` macros. `BIGINT` is signed,
+/// so convert versions with `i64::try_from` rather than `as`:
 ///
 /// | Operation | Statement |
 /// | --- | --- |
@@ -394,8 +412,9 @@ pub(super) struct Session {
 /// The outcome of [`Sessions::lease`].
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) enum Lease {
-    /// This attempt holds the lease and must refresh.
-    Acquired,
+    /// This attempt holds the lease until the given time, and must refresh, save and
+    /// give it back before then.
+    Acquired(DateTime<Utc>),
     /// Another attempt, possibly on another replica, is refreshing.
     Busy,
     /// The session was saved since it was read: reload it.
@@ -564,13 +583,14 @@ impl Sessions {
             return Ok(Lease::Changed);
         }
         let ttl = TimeDelta::from_std(ttl).unwrap_or(TimeDelta::MAX);
+        let until = now.checked_add_signed(ttl).unwrap_or(now);
         data.lease = Some(LeaseState {
             id: lease.0.clone(),
-            until: now.checked_add_signed(ttl).unwrap_or(now),
+            until,
         });
         let leased = Self::record(&data, version + 1, record.expires_at)?;
         Ok(if self.0.replace(&name, version, &leased).await? {
-            Lease::Acquired
+            Lease::Acquired(until)
         } else {
             // Another request wrote between the read and the write, most likely
             // taking the lease: wait for its result.
@@ -578,9 +598,10 @@ impl Sessions {
         })
     }
 
-    /// Writes `login` and gives the lease back, but only if `lease` still holds it.
-    /// Returns the saved session, or `None` if the lease was lost, as when the
-    /// session was logged out meanwhile.
+    /// Writes `login` and gives the lease back, but only if `lease` still holds it and
+    /// has not expired: past its expiry, another request may already have found it
+    /// abandoned. Returns the saved session, or `None` if the lease was lost, as when
+    /// the session was logged out meanwhile.
     pub(super) async fn save(
         &self,
         key: &SessionKey,
@@ -592,7 +613,11 @@ impl Sessions {
         let Some((record, data)) = self.read::<SessionData>(&name, now).await? else {
             return Ok(None);
         };
-        if data.lease.as_ref().is_none_or(|held| held.id != lease.0) {
+        if data
+            .lease
+            .as_ref()
+            .is_none_or(|held| held.id != lease.0 || held.until <= now)
+        {
             return Ok(None);
         }
         let version = record.version + 1;
@@ -647,73 +672,176 @@ pub enum BackendCheckError {
     Contract(&'static str),
 }
 
+/// Rounds of contention [`check_backend`] runs.
+#[cfg(any(test, feature = "test-util"))]
+const CHECK_ROUNDS: usize = 25;
+/// Concurrent callers in each round of contention.
+#[cfg(any(test, feature = "test-util"))]
+const CHECK_COMPETITORS: usize = 4;
+
 /// Checks that `backend` keeps the [`SessionBackend`] contract the login routes rely
-/// on, above all that [`SessionBackend::replace`] and [`SessionBackend::remove`] are
-/// atomic. Run it in a test against the real database:
+/// on. Run it in a test against the real database, on a multi-threaded runtime:
 ///
 /// ```
-/// # tokio::runtime::Runtime::new().unwrap().block_on(async {
 /// use piquel_auth::axum::{MemoryBackend, check_backend};
 ///
+/// # let runtime = tokio::runtime::Builder::new_multi_thread().enable_all().build().unwrap();
+/// # runtime.block_on(async {
+/// // In a `#[tokio::test(flavor = "multi_thread")]`:
 /// check_backend(&MemoryBackend::default()).await.expect("a sound backend");
 /// # });
 /// ```
 ///
-/// It writes and removes a few records under random keys.
+/// It checks that records round-trip, that `replace` and `remove` refuse missing
+/// records and never create one, and that of several callers racing `replace` at
+/// one version, or `remove`, exactly one wins, and the stored record is the winner's.
+/// The races run on separate tasks over 25 rounds, which catches a
+/// read-then-write backend in practice but cannot prove atomicity: keep each
+/// operation a single atomic statement. It writes and removes records under random
+/// keys.
 ///
 /// # Errors
-/// [`BackendCheckError`] naming the first failed check.
+/// [`BackendCheckError`] naming the first failed check, or saying the runtime is not
+/// multi-threaded, since racing calls could not overlap.
 #[cfg(any(test, feature = "test-util"))]
 pub async fn check_backend<B: SessionBackend>(backend: &B) -> Result<(), BackendCheckError> {
     use BackendCheckError::Contract;
+    use tokio::runtime::{Handle, RuntimeFlavor};
+    if Handle::current().runtime_flavor() != RuntimeFlavor::MultiThread {
+        return Err(Contract(
+            "run check_backend on a multi-threaded runtime, so racing calls overlap",
+        ));
+    }
     let failed = |error: B::Error| BackendCheckError::Backend(Box::new(error));
-    let key = format!(
-        "check:{}",
-        random(KEY_BYTES).map_err(|error| BackendCheckError::Backend(Box::new(error)))?
-    );
-    let record = |version, data: &str| SessionRecord {
+    let record = |version, data: String| SessionRecord {
         version,
-        data: data.to_owned(),
+        data,
         expires_at: Utc::now() + TimeDelta::minutes(5),
     };
+    let key = check_key()?;
     if backend.load(&key).await.map_err(failed)?.is_some() {
         return Err(Contract("load found a record that was never inserted"));
     }
-    let first = record(1, r#"{"check":1}"#);
+    let missing = record(2, "missing".into());
+    if backend.replace(&key, 1, &missing).await.map_err(failed)?
+        || backend.load(&key).await.map_err(failed)?.is_some()
+    {
+        return Err(Contract("replace wrote a record that does not exist"));
+    }
+    if backend.remove(&key).await.map_err(failed)? {
+        return Err(Contract("remove reported a record that does not exist"));
+    }
+    let first = record(1, "first".into());
     backend.insert(&key, &first).await.map_err(failed)?;
     if backend.load(&key).await.map_err(failed)?.as_ref() != Some(&first) {
         return Err(Contract(
             "load did not return the inserted record unchanged",
         ));
     }
-    let second = record(2, r#"{"check":2}"#);
+    let second = record(2, "second".into());
     if backend.replace(&key, 7, &second).await.map_err(failed)? {
         return Err(Contract("replace wrote although the version did not match"));
     }
-    if !backend.replace(&key, 1, &second).await.map_err(failed)? {
-        return Err(Contract("replace refused the matching version"));
+    if !backend.replace(&key, 1, &second).await.map_err(failed)?
+        || backend.load(&key).await.map_err(failed)?.as_ref() != Some(&second)
+    {
+        return Err(Contract("replace did not write at the matching version"));
     }
-    if backend.load(&key).await.map_err(failed)?.as_ref() != Some(&second) {
-        return Err(Contract("load did not return the replaced record"));
+    if !backend.remove(&key).await.map_err(failed)?
+        || backend.load(&key).await.map_err(failed)?.is_some()
+        || backend.replace(&key, 2, &second).await.map_err(failed)?
+        || backend.load(&key).await.map_err(failed)?.is_some()
+    {
+        return Err(Contract("a removed record came back"));
     }
-    let (left, right) = (record(3, r#"{"check":3}"#), record(3, r#"{"check":4}"#));
-    let (left, right) = tokio::join!(
-        backend.replace(&key, 2, &left),
-        backend.replace(&key, 2, &right)
-    );
-    if left.map_err(failed)? == right.map_err(failed)? {
+    for _ in 0..CHECK_ROUNDS {
+        race(backend).await?;
+    }
+    Ok(())
+}
+
+/// A fresh random key for [`check_backend`].
+#[cfg(any(test, feature = "test-util"))]
+fn check_key() -> Result<String, BackendCheckError> {
+    random(KEY_BYTES)
+        .map(|key| format!("check:{key}"))
+        .map_err(|error| BackendCheckError::Backend(Box::new(error)))
+}
+
+/// One round of contention: racing `replace` calls at one version, then racing
+/// `remove` calls, each on its own task, released together.
+#[cfg(any(test, feature = "test-util"))]
+async fn race<B: SessionBackend>(backend: &B) -> Result<(), BackendCheckError> {
+    use BackendCheckError::{Backend, Contract};
+    use tokio::sync::Barrier;
+    let key = Arc::new(check_key()?);
+    let expires_at = Utc::now() + TimeDelta::minutes(5);
+    let initial = SessionRecord {
+        version: 1,
+        data: "initial".into(),
+        expires_at,
+    };
+    backend
+        .insert(&key, &initial)
+        .await
+        .map_err(|error| Backend(Box::new(error)))?;
+    // Every competitor starts its call at once, on its own task.
+    let spawn = |call: fn(B, Arc<String>, usize) -> _| {
+        let barrier = Arc::new(Barrier::new(CHECK_COMPETITORS));
+        (0..CHECK_COMPETITORS)
+            .map(|competitor| {
+                let (backend, key, barrier) = (backend.clone(), key.clone(), barrier.clone());
+                tokio::spawn(async move {
+                    barrier.wait().await;
+                    call(backend, key, competitor).await
+                })
+            })
+            .collect::<Vec<_>>()
+    };
+    let winners = |tasks: Vec<tokio::task::JoinHandle<Result<bool, B::Error>>>| async move {
+        let mut winners = Vec::new();
+        for (competitor, task) in tasks.into_iter().enumerate() {
+            if task
+                .await
+                .map_err(|error| Backend(Box::new(error)))?
+                .map_err(|error| Backend(Box::new(error)))?
+            {
+                winners.push(competitor);
+            }
+        }
+        Ok::<_, BackendCheckError>(winners)
+    };
+    let replaces = spawn(|backend, key, competitor| {
+        Box::pin(async move {
+            let record = SessionRecord {
+                version: 2,
+                data: format!("competitor {competitor}"),
+                expires_at: Utc::now() + TimeDelta::minutes(5),
+            };
+            backend.replace(&key, 1, &record).await
+        }) as Pin<Box<dyn Future<Output = Result<bool, B::Error>> + Send>>
+    });
+    let won = winners(replaces).await?;
+    let [winner] = won[..] else {
         return Err(Contract(
-            "of two concurrent replaces at one version, exactly one must write",
+            "of racing replaces at one version, exactly one must write",
         ));
+    };
+    let stored = backend
+        .load(&key)
+        .await
+        .map_err(|error| Backend(Box::new(error)))?;
+    if stored.map(|record| record.data) != Some(format!("competitor {winner}")) {
+        return Err(Contract("the stored record is not the winning replace's"));
     }
-    let (left, right) = tokio::join!(backend.remove(&key), backend.remove(&key));
-    if left.map_err(failed)? == right.map_err(failed)? {
+    let removes = spawn(|backend, key, _| {
+        Box::pin(async move { backend.remove(&key).await })
+            as Pin<Box<dyn Future<Output = Result<bool, B::Error>> + Send>>
+    });
+    if winners(removes).await?.len() != 1 {
         return Err(Contract(
-            "of two concurrent removes, exactly one must report the record",
+            "of racing removes, exactly one must report the record",
         ));
-    }
-    if backend.load(&key).await.map_err(failed)?.is_some() {
-        return Err(Contract("load found a removed record"));
     }
     Ok(())
 }

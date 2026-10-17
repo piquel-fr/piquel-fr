@@ -191,7 +191,9 @@ applications run against their own backend.
 
 Auth rotates refresh tokens and revokes the whole family on reuse, so concurrent
 refreshes of one session are serialized through a lease the SDK keeps in the session
-record, shared by every replica through the backend's compare-and-swap. The lease is taken only at the session version the request read,
+record, shared by every replica through the backend's compare-and-swap. Leases
+expire by wall-clock time, so replicas need synchronized clocks; a lease lasts a
+minute, and its holder must refresh and save before it expires, or give it back. The lease is taken only at the session version the request read,
 so a request that read the session before another refresh reloads it instead of
 redeeming the rotated token. Each lease has an ID, and only its holder can save the
 result, so a slow attempt cannot overwrite a later one or resurrect a logged-out
