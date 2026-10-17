@@ -64,3 +64,6 @@ webauthn-rs-proto = "0.5.5"
 # tests, which inherit this profile.
 [profile.dev]
 debug = "line-tables-only"
+
+[profile.dev.package."*"]
+debug = false
