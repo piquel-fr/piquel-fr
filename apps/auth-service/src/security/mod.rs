@@ -15,12 +15,15 @@ use axum::{
 };
 use chrono::{Duration, Utc};
 use ipnet::IpNet;
-use piquel_auth_protocol::{AuthenticationMethod, SessionId, UserId, step_up::StepUpRequirement};
+use piquel_auth_protocol::{
+    AuthenticationMethod, ClientId, SessionId, UserId, step_up::StepUpRequirement,
+};
 use piquel_common::ErrorChain;
 use piquel_crypto::{CryptoError, Digest, Secret};
 use piquel_repository::{
-    Database, DatabaseError, DatabaseTransaction, InsertSession, SessionAuthentication,
-    StoredSession,
+    Actor, Database, DatabaseError, DatabaseTransaction, DomainEvent, EventContext, InsertSession,
+    RequestOrigin, RevocationReason, SessionAuthentication, SignInFailure, StoredSession,
+    UserAgentFamily,
 };
 use serde::Serialize;
 use std::{
@@ -325,16 +328,17 @@ impl Session {
             .ok_or(SessionError::Missing)
     }
 
-    /// Signs `user_id` in on this browser inside the caller's transaction and returns
-    /// the secret for its session cookie. Callers set the cookie only after the
-    /// transaction commits. Locks the account first, so sign-in serializes with its
-    /// disablement and with other changes to its sessions.
+    /// Signs `user_id` in on this browser inside the caller's transaction, records the
+    /// sign-in, and returns the secret for its session cookie. Callers set the cookie
+    /// only after the transaction commits. Locks the account first, so sign-in
+    /// serializes with its disablement and with other changes to its sessions.
     ///
     /// A browser already signed in as `user_id` re-authenticates that session (see
     /// [`Self::reauthenticate`]). A browser signed in as someone else has that session
     /// revoked, then gets a new one.
     pub(crate) async fn sign_in(
         tx: &mut DatabaseTransaction<'_>,
+        context: RequestContext,
         headers: &HeaderMap,
         user_id: UserId,
         method: AuthenticationMethod,
@@ -353,20 +357,41 @@ impl Session {
         };
         match current {
             Some(current) if current.user_id == user_id => {
-                Self::reauthenticate(tx, &current, method).await
+                let secret = Self::reauthenticate(tx, &current, method).await?;
+                tx.record(
+                    &context.user(&current),
+                    Some(user_id),
+                    DomainEvent::SignedIn {
+                        session_id: current.id,
+                        method,
+                    },
+                )
+                .await?;
+                Ok(secret)
             }
             Some(other) => {
-                tx.sessions().revoke(other.id).await?;
-                Self::create(tx, user_id, method).await
+                if tx.sessions().revoke(other.id).await? {
+                    tx.record(
+                        &context.user(&other),
+                        Some(other.user_id),
+                        DomainEvent::SessionRevoked {
+                            session_id: other.id,
+                            reason: RevocationReason::AccountSwitched,
+                        },
+                    )
+                    .await?;
+                }
+                Self::create(tx, context, user_id, method).await
             }
-            None => Self::create(tx, user_id, method).await,
+            None => Self::create(tx, context, user_id, method).await,
         }
     }
 
     /// Records a new authentication of `session` with `method` inside the caller's
     /// transaction, keeping its `sid`, and returns the secret for its new cookie. A
     /// passkey confirms the session. A social sign-in renews it unless a passkey
-    /// confirmed it, since that would lower its `acr`.
+    /// confirmed it, since that would lower its `acr`. Callers record the event that
+    /// says why.
     ///
     /// The old cookie stops working, so a copy of it never gains the new
     /// authentication. Callers set the new cookie only after the transaction commits.
@@ -392,11 +417,12 @@ impl Session {
         Ok(secret)
     }
 
-    /// Creates a session inside the caller's transaction and returns the secret for
-    /// its cookie. A passkey sign-in also confirms the session, so an action right
-    /// after it prompts no more.
+    /// Creates a session inside the caller's transaction, records the sign-in, and
+    /// returns the secret for its cookie. A passkey sign-in also confirms the session,
+    /// so an action right after it prompts no more.
     pub(crate) async fn create(
         tx: &mut DatabaseTransaction<'_>,
+        context: RequestContext,
         user_id: UserId,
         method: AuthenticationMethod,
     ) -> Result<Secret, SessionError> {
@@ -418,7 +444,126 @@ impl Session {
         tx.sessions()
             .insert_browser_secret(id, secret.digest().as_bytes())
             .await?;
+        tx.record(
+            &context.actor(Actor::User {
+                user_id,
+                session_id: Some(id),
+            }),
+            Some(user_id),
+            DomainEvent::SignedIn {
+                session_id: id,
+                method,
+            },
+        )
+        .await?;
         Ok(secret)
+    }
+
+    /// Revokes every other session of `session`'s account inside the caller's
+    /// transaction, recording one revocation per session.
+    pub(crate) async fn revoke_other(
+        tx: &mut DatabaseTransaction<'_>,
+        context: RequestContext,
+        session: &StoredSession,
+        reason: RevocationReason,
+    ) -> Result<(), DatabaseError> {
+        let context = context.user(session);
+        for revoked in tx
+            .sessions()
+            .revoke_other(session.user_id, session.id)
+            .await?
+        {
+            tx.record(
+                &context,
+                Some(session.user_id),
+                DomainEvent::SessionRevoked {
+                    session_id: revoked,
+                    reason: reason.clone(),
+                },
+            )
+            .await?;
+        }
+        Ok(())
+    }
+}
+
+/// Where a request came from, attached by [`HttpSecurity::protect`] to every
+/// rate-limited route and extracted by handlers that record events.
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct RequestContext(RequestOrigin);
+
+impl RequestContext {
+    /// The client IP and the coarse browser family of its `User-Agent` header.
+    fn new(client_ip: IpAddr, headers: &HeaderMap) -> Self {
+        Self(RequestOrigin {
+            client_ip: Some(client_ip),
+            user_agent_family: Some(
+                headers
+                    .get(header::USER_AGENT)
+                    .and_then(|value| value.to_str().ok())
+                    .map_or(UserAgentFamily::Other, UserAgentFamily::classify),
+            ),
+        })
+    }
+
+    /// Attributes events of this request to `actor`.
+    pub(crate) fn actor(self, actor: Actor) -> EventContext {
+        EventContext {
+            actor,
+            origin: self.0,
+        }
+    }
+
+    /// Attributes events of this request to the user signed in with `session`.
+    pub(crate) fn user(self, session: &StoredSession) -> EventContext {
+        self.actor(Actor::User {
+            user_id: session.user_id,
+            session_id: Some(session.id),
+        })
+    }
+
+    /// Attributes events of this request to an authenticated client.
+    pub(crate) fn client(self, client_id: &str) -> EventContext {
+        self.actor(Actor::Client {
+            client_id: ClientId::from(client_id),
+        })
+    }
+
+    /// Records a rejected authentication in a transaction of its own, since the
+    /// attempt changed nothing. `subject` is the account it targeted, when known.
+    pub(crate) async fn record_sign_in_failure(
+        self,
+        database: &Database,
+        actor: Actor,
+        subject: Option<UserId>,
+        method: AuthenticationMethod,
+        reason: SignInFailure,
+    ) -> Result<(), DatabaseError> {
+        let mut tx = database.begin().await?;
+        tx.record(
+            &self.actor(actor),
+            subject,
+            DomainEvent::SignInFailed { method, reason },
+        )
+        .await?;
+        tx.commit().await
+    }
+}
+
+impl<S: Send + Sync> FromRequestParts<S> for RequestContext {
+    type Rejection = ApiError;
+    /// Reads the context [`HttpSecurity::protect`] attached.
+    fn from_request_parts(
+        parts: &mut Parts,
+        _: &S,
+    ) -> impl Future<Output = Result<Self, Self::Rejection>> + Send {
+        std::future::ready(
+            parts
+                .extensions
+                .get::<Self>()
+                .copied()
+                .ok_or_else(|| HttpSecurityError::MissingContext.into()),
+        )
     }
 }
 
@@ -588,6 +733,10 @@ enum HttpSecurityError {
     /// The listener did not attach its peer connection metadata.
     #[error("HTTP peer address missing")]
     MissingPeer,
+    /// A handler that records events runs on a route without a rate budget, so the
+    /// middleware attached no request context.
+    #[error("request context missing")]
+    MissingContext,
     /// A browser preflight came from an unapproved origin.
     #[error("preflight origin is not allowed")]
     ForbiddenPreflight,
@@ -656,7 +805,9 @@ impl From<HttpSecurityError> for ApiError {
                 Self::new(StatusCode::GATEWAY_TIMEOUT, "Request timed out.")
             }
             HttpSecurityError::Database(error) => error.into(),
-            error @ HttpSecurityError::MissingPeer => Self::internal(error),
+            error @ (HttpSecurityError::MissingPeer | HttpSecurityError::MissingContext) => {
+                Self::internal(error)
+            }
         }
     }
 }
@@ -768,10 +919,11 @@ impl HttpSecurity {
         response
     }
 
-    /// Answers preflights, then checks browser proof and the request budget before the route.
+    /// Answers preflights, then checks browser proof and the request budget before the
+    /// route, and attaches the [`RequestContext`] of rate-limited routes.
     async fn dispatch(
         &self,
-        request: Request,
+        mut request: Request,
         next: Next,
         endpoint: Endpoint,
         allowed: bool,
@@ -789,8 +941,8 @@ impl HttpSecurity {
         if request.extensions().get::<MatchedPath>().is_some()
             && let Some(category) = endpoint.rate_category()
         {
-            let bucket =
-                Digest::sha256(format!("{category}:{}", self.client_ip(&request)?).as_bytes());
+            let client_ip = self.client_ip(&request)?;
+            let bucket = Digest::sha256(format!("{category}:{client_ip}").as_bytes());
             if !self
                 .database
                 .security()
@@ -799,6 +951,8 @@ impl HttpSecurity {
             {
                 return Err(HttpSecurityError::RateLimited);
             }
+            let context = RequestContext::new(client_ip, request.headers());
+            request.extensions_mut().insert(context);
         }
         Ok(next.run(request).await)
     }

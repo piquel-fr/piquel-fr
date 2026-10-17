@@ -2,7 +2,9 @@
 
 use crate::config::{FederationConfig, FrontendOrigins, ProviderConfig};
 use crate::routes;
-use crate::security::{self, ApiError, BrowserCookie, OptionalSession, SessionError};
+use crate::security::{
+    self, ApiError, BrowserCookie, OptionalSession, RequestContext, SessionError,
+};
 use axum::{
     Json, Router,
     extract::{Path, Query, State},
@@ -19,7 +21,8 @@ use piquel_common::{ConfigurationError, ErrorChain, Origin, SecretBytes};
 use piquel_crypto::Pkce;
 use piquel_crypto::Secret;
 use piquel_repository::{
-    AuditAction, Database, InsertFederationTransaction, PendingFederation, StoredSession,
+    Actor, Database, DatabaseTransaction, InsertFederationTransaction, PendingFederation,
+    SignInFailure, StoredExternalIdentity, StoredSession,
 };
 use serde::{Deserialize, Serialize};
 use std::{collections::BTreeMap, sync::Arc, time::Duration as StdDuration};
@@ -306,6 +309,7 @@ impl FederationApplication {
     /// Converts provider callbacks into a verified login or pending identity.
     async fn callback(
         State(app): State<Self>,
+        context: RequestContext,
         Path(provider): Path<String>,
         OptionalSession(session): OptionalSession,
         headers: HeaderMap,
@@ -313,6 +317,7 @@ impl FederationApplication {
     ) -> Result<Response, ApiError> {
         Ok(app
             .complete_callback(
+                context,
                 provider
                     .parse()
                     .map_err(FederationError::UnsupportedProvider)?,
@@ -326,6 +331,7 @@ impl FederationApplication {
     /// Consumes state before exchange or cancellation so every callback is single-use.
     async fn complete_callback(
         &self,
+        context: RequestContext,
         provider: Provider,
         headers: &HeaderMap,
         query: CallbackQuery,
@@ -365,6 +371,17 @@ impl FederationApplication {
             Ok(identity) => identity,
             Err(error) => {
                 tracing::warn!(error = %ErrorChain(&error), provider = provider.as_str(), "provider sign-in failed");
+                if let Some(reason) = error.sign_in_failure() {
+                    context
+                        .record_sign_in_failure(
+                            &self.database,
+                            Actor::Anonymous,
+                            None,
+                            AuthenticationMethod::Federation,
+                            reason,
+                        )
+                        .await?;
+                }
                 return self.failed_callback(CallbackError::Failed, &flow.return_to);
             }
         };
@@ -392,13 +409,14 @@ impl FederationApplication {
                 )
                 .await;
         }
-        self.finish_login(headers, provider, identity, flow.return_to)
+        self.finish_login(context, headers, provider, identity, flow.return_to)
             .await
     }
 
     /// Logs in a known subject or retains verified evidence for explicit onboarding/linking.
     async fn finish_login(
         &self,
+        context: RequestContext,
         headers: &HeaderMap,
         provider: Provider,
         identity: VerifiedIdentity,
@@ -411,48 +429,26 @@ impl FederationApplication {
             .find_active(issuer, &identity.subject)
             .await?
         {
-            tx.users()
-                .find_active_by_id_for_update(existing.user_id)
-                .await?
-                .ok_or(FederationError::LinkedAccountUnavailable)?;
-            // Unlink takes this same account lock; recheck after acquiring it.
-            let current = tx
-                .federation()
-                .find_active(issuer, &identity.subject)
-                .await?
-                .ok_or(FederationError::LinkedAccountUnavailable)?;
-            if current.id != existing.id
-                || tx
-                    .passkeys()
-                    .list_active(existing.user_id)
-                    .await?
-                    .is_empty()
-            {
-                return Err(FederationError::LinkedAccountUnavailable);
-            }
-            let session = match security::Session::sign_in(
-                &mut tx,
-                headers,
-                existing.user_id,
-                AuthenticationMethod::Federation,
-            )
-            .await
-            {
+            let user_id = existing.user_id;
+            let session = match Self::sign_in_linked(tx, context, headers, existing).await {
                 Ok(session) => session,
-                Err(SessionError::PasskeyRequired) => {
+                Err(FederationError::Session(SessionError::PasskeyRequired)) => {
                     return self.failed_callback(CallbackError::PasskeyRequired, &return_to);
                 }
-                Err(error) => return Err(error.into()),
+                Err(error @ FederationError::LinkedAccountUnavailable) => {
+                    context
+                        .record_sign_in_failure(
+                            &self.database,
+                            Actor::Anonymous,
+                            Some(user_id),
+                            AuthenticationMethod::Federation,
+                            SignInFailure::AccountUnavailable,
+                        )
+                        .await?;
+                    return Err(error);
+                }
+                Err(error) => return Err(error),
             };
-            tx.federation().record_login(existing.id).await?;
-            tx.audit_events()
-                .record(
-                    existing.user_id,
-                    AuditAction::FederationLogin,
-                    Some(provider),
-                )
-                .await?;
-            tx.commit().await?;
             let mut response = Redirect::to(&return_to).into_response();
             BrowserCookie::Session.set_on(&mut response, &session)?;
             BrowserCookie::Federation.clear_on(&mut response)?;
@@ -469,6 +465,46 @@ impl FederationApplication {
         tx.rollback().await?;
         self.pending_response(provider, identity, return_to, owner, None)
             .await
+    }
+
+    /// Signs this browser in to the account `existing` is linked to and returns the
+    /// session's cookie secret. The account must still be active, linked and hold a passkey, which is
+    /// rechecked under the account lock that unlinking also takes.
+    async fn sign_in_linked(
+        mut tx: DatabaseTransaction<'_>,
+        context: RequestContext,
+        headers: &HeaderMap,
+        existing: StoredExternalIdentity,
+    ) -> Result<Secret, FederationError> {
+        tx.users()
+            .find_active_by_id_for_update(existing.user_id)
+            .await?
+            .ok_or(FederationError::LinkedAccountUnavailable)?;
+        let current = tx
+            .federation()
+            .find_active(&existing.issuer, &existing.subject)
+            .await?
+            .ok_or(FederationError::LinkedAccountUnavailable)?;
+        if current.id != existing.id
+            || tx
+                .passkeys()
+                .list_active(existing.user_id)
+                .await?
+                .is_empty()
+        {
+            return Err(FederationError::LinkedAccountUnavailable);
+        }
+        let session = security::Session::sign_in(
+            &mut tx,
+            context,
+            headers,
+            existing.user_id,
+            AuthenticationMethod::Federation,
+        )
+        .await?;
+        tx.federation().record_login(existing.id).await?;
+        tx.commit().await?;
+        Ok(session)
     }
 
     /// Retains verified evidence without creating an account or authentication session.

@@ -2,9 +2,12 @@
 use auth_service::{AuthConfig, Jobs, PUBLIC_BASE_URL};
 use chrono::{Duration, Utc};
 use clap::{Parser, Subcommand};
-use piquel_common::{ConfigurationError, ErrorChain, Origin};
+use piquel_common::{ConfigurationError, ErrorChain, Origin, Variable};
 use piquel_crypto::{CryptoError, Secret};
-use piquel_repository::{Database, DatabaseConnectionError, DatabaseError};
+use piquel_repository::{
+    Actor, Database, DatabaseConnectionError, DatabaseError, DomainEvent, EventContext,
+    RequestOrigin,
+};
 use thiserror::Error;
 
 use std::{net::SocketAddr, process::ExitCode, str::FromStr};
@@ -17,6 +20,14 @@ const INVITE_EXPIRY_HELP: &str = "expiry must be 1 to 365 followed by h or d, e.
 const REGISTRATION_PATH: &str = "/register";
 /// Invitation proof sent to the registration page.
 const INVITATION_PARAMETER: &str = "invitation";
+/// The operating system user running a command, recorded on the events it causes.
+const OS_USER: Variable = Variable::new("USER");
+/// The machine's host name, for systems without `/proc`.
+const HOST_NAME: Variable = Variable::new("HOSTNAME");
+/// Where Linux exposes the host name.
+const HOST_NAME_FILE: &str = "/proc/sys/kernel/hostname";
+/// Recorded when the operator's user or host name cannot be read.
+const UNKNOWN_OPERATOR: &str = "unknown";
 
 /// Failures of startup and administrative commands, preserving their original causes.
 #[derive(Debug, Error)]
@@ -105,16 +116,43 @@ impl DatabaseCommand {
     /// Prints a single-use signup link; only the secret's digest is stored.
     async fn invite(database: &Database, expires_in: InviteExpiry) -> Result<(), CliError> {
         let secret = Secret::generate()?;
-        database
-            .security()
-            .create_invitation(secret.digest().as_bytes(), Utc::now() + expires_in.0)
+        let expires_at = Utc::now() + expires_in.0;
+        let mut tx = database.begin().await?;
+        tx.security()
+            .create_invitation(secret.digest().as_bytes(), expires_at)
             .await?;
+        tx.record(
+            &Self::operator()?,
+            None,
+            DomainEvent::InvitationCreated { expires_at },
+        )
+        .await?;
+        tx.commit().await?;
         let mut url = PUBLIC_BASE_URL.parse::<Origin>()?.as_url().clone();
         url.set_path(REGISTRATION_PATH);
         url.query_pairs_mut()
             .append_pair(INVITATION_PARAMETER, &secret.encoded());
         println!("{url}");
         Ok(())
+    }
+
+    /// Attributes events of a command to the operator running it: `$USER` and the
+    /// host name, or `unknown` where they cannot be read, as in some containers.
+    fn operator() -> Result<EventContext, CliError> {
+        let host = std::fs::read_to_string(HOST_NAME_FILE)
+            .ok()
+            .map(|host| host.trim().to_owned())
+            .or(HOST_NAME.optional()?)
+            .filter(|host| !host.is_empty());
+        Ok(EventContext {
+            actor: Actor::Cli {
+                os_user: OS_USER
+                    .optional()?
+                    .unwrap_or_else(|| UNKNOWN_OPERATOR.to_owned()),
+                host: host.unwrap_or_else(|| UNKNOWN_OPERATOR.to_owned()),
+            },
+            origin: RequestOrigin::default(),
+        })
     }
 
     /// Resolves on Ctrl+C or SIGTERM, the signal container runtimes send on stop.

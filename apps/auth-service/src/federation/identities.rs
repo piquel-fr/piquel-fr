@@ -1,7 +1,7 @@
 //! Pending and linked social identities: signup, linking, listing and unlinking.
 
 use super::{FederationApplication, FederationError, Provider};
-use crate::security::{self, ApiError, BrowserCookie};
+use crate::security::{self, ApiError, BrowserCookie, RequestContext};
 use axum::{
     Json,
     extract::{Path, State},
@@ -10,7 +10,8 @@ use axum::{
 };
 use piquel_auth_protocol::{TokenId, UserId};
 use piquel_repository::{
-    AuditAction, Database, DatabaseTransaction, InsertExternalIdentity, PendingFederation,
+    Database, DatabaseTransaction, DomainEvent, EventContext, InsertExternalIdentity,
+    PendingFederation, Personal, RevocationReason,
 };
 use serde::Serialize;
 
@@ -40,6 +41,7 @@ impl FederationApplication {
     /// Attaches verified signup evidence only inside account-and-first-passkey creation.
     pub(crate) async fn attach_signup(
         tx: &mut DatabaseTransaction<'_>,
+        context: &EventContext,
         pending_id: TokenId,
         headers: &HeaderMap,
         user_id: UserId,
@@ -67,9 +69,16 @@ impl FederationApplication {
             tx.federation().set_first_email(user_id, email).await?;
         }
         Ok(tx
-            .audit_events()
-            .record(user_id, AuditAction::FederationLink, Some(pending.provider))
+            .record(context, Some(user_id), Self::linked(&pending))
             .await?)
+    }
+
+    /// The event recording that `pending`'s identity was linked.
+    fn linked(pending: &PendingFederation) -> DomainEvent {
+        DomainEvent::IdentityLinked {
+            provider: pending.provider,
+            subject: Personal::Value(pending.subject.clone()),
+        }
     }
 
     /// Builds a new link from already verified, browser-bound provider evidence.
@@ -120,15 +129,17 @@ impl FederationApplication {
     /// Confirms a pending identity using a passkey-confirmed account session.
     pub(super) async fn confirm_link(
         State(app): State<Self>,
+        context: RequestContext,
         confirmed: security::Confirmed,
         headers: HeaderMap,
     ) -> Result<Response, ApiError> {
-        Ok(app.link(&confirmed, &headers).await?)
+        Ok(app.link(context, &confirmed, &headers).await?)
     }
 
     /// Claims an identity atomically after rechecking the session's confirmation.
     async fn link(
         &self,
+        context: RequestContext,
         confirmed: &security::Confirmed,
         headers: &HeaderMap,
     ) -> Result<Response, FederationError> {
@@ -167,6 +178,12 @@ impl FederationApplication {
                 tx.federation()
                     .insert_identity(&Self::identity(&pending, session.user_id))
                     .await?;
+                tx.record(
+                    &context.user(session),
+                    Some(session.user_id),
+                    Self::linked(&pending),
+                )
+                .await?;
             }
         }
         if let Some(email) = &pending.email {
@@ -174,13 +191,6 @@ impl FederationApplication {
                 .set_first_email(session.user_id, email)
                 .await?;
         }
-        tx.audit_events()
-            .record(
-                session.user_id,
-                AuditAction::FederationLink,
-                Some(pending.provider),
-            )
-            .await?;
         tx.commit().await?;
         let mut response = Json(LinkResponse {
             return_to: pending.return_to,
@@ -234,10 +244,12 @@ impl FederationApplication {
     /// Removes an account's provider link after a recent passkey confirmation.
     pub(super) async fn unlink(
         State(app): State<Self>,
+        context: RequestContext,
         Path(provider): Path<String>,
         confirmed: security::Confirmed,
     ) -> Result<StatusCode, ApiError> {
         app.unlink_identity(
+            context,
             &confirmed,
             provider
                 .parse()
@@ -250,6 +262,7 @@ impl FederationApplication {
     /// Serializes unlink against sign-in and linking, then revokes other browser sessions.
     async fn unlink_identity(
         &self,
+        context: RequestContext,
         confirmed: &security::Confirmed,
         provider: Provider,
     ) -> Result<(), FederationError> {
@@ -259,16 +272,19 @@ impl FederationApplication {
         if !tx.federation().unlink(session.user_id, provider).await? {
             return Err(FederationError::IdentityNotLinked);
         }
-        tx.sessions()
-            .revoke_other(session.user_id, session.id)
-            .await?;
-        tx.audit_events()
-            .record(
-                session.user_id,
-                AuditAction::FederationUnlink,
-                Some(provider),
-            )
-            .await?;
+        tx.record(
+            &context.user(session),
+            Some(session.user_id),
+            DomainEvent::IdentityUnlinked { provider },
+        )
+        .await?;
+        security::Session::revoke_other(
+            &mut tx,
+            context,
+            session,
+            RevocationReason::IdentityUnlinked,
+        )
+        .await?;
         Ok(tx.commit().await?)
     }
 }

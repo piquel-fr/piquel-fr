@@ -1,4 +1,4 @@
-//! Bounded deletion of expired ephemeral authentication state.
+//! Bounded deletion of expired ephemeral authentication state and event personal data.
 
 use super::{MaintenanceRepository, RepositoryExecutor};
 use crate::DatabaseError;
@@ -7,9 +7,9 @@ use crate::DatabaseError;
 const MAX_PURGE_BATCH: u32 = 1_000;
 
 impl MaintenanceRepository<'_> {
-    /// Purges a bounded batch of expired ephemeral authentication state and
-    /// returns how many rows were deleted. `batch_size` is clamped to 1..=1000
-    /// rows per table.
+    /// Purges a bounded batch of expired ephemeral authentication state, and of
+    /// event personal data older than 90 days, and returns how many rows were
+    /// deleted. `batch_size` is clamped to 1..=1000 rows per table.
     ///
     /// Each batch skips rows that live requests have locked. Outside a transaction,
     /// each table's batch commits on its own, so cleanup never holds locks across
@@ -94,7 +94,7 @@ impl MaintenanceRepository<'_> {
             // A redeemed code stays while a replay could still revoke something: an
             // unrevoked family it produced whose session is live (refresh tokens expire
             // with the session). The first day after redemption is kept regardless, so
-            // replays are still audited even for codes that produced no refresh family.
+            // replays are still recorded even for codes that produced no refresh family.
             // Retained codes are rechecked on every pass, so this scan grows with
             // every redeemed code past its first day, not only with purgeable ones.
             "DELETE FROM authorization_codes c
@@ -152,6 +152,15 @@ impl MaintenanceRepository<'_> {
                 OR session.revoked_at < now() - interval '1 day'
                 LIMIT $1
                 FOR UPDATE OF secret SKIP LOCKED
+            )",
+            // Events are kept indefinitely; the personal data beside them is not.
+            "DELETE FROM event_personal_data
+            WHERE ctid IN (
+                SELECT ctid
+                FROM event_personal_data
+                WHERE created_at < now() - interval '90 days'
+                LIMIT $1
+                FOR UPDATE SKIP LOCKED
             )",
             "DELETE FROM sessions s
             WHERE s.ctid IN (

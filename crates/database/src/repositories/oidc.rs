@@ -343,6 +343,9 @@ pub enum CodeRedemptionError {
     Replay {
         /// Account whose grant was revoked.
         user_id: UserId,
+        /// The refresh families this replay revoked; empty if the code produced
+        /// none, or they were already revoked.
+        revoked_families: Vec<TokenId>,
     },
 }
 
@@ -690,7 +693,10 @@ impl OidcRepository<'_> {
             Some(code) => Ok(code),
             None => Err(
                 match self.revoke_replayed_code(id, digest, client_id).await? {
-                    Some(user_id) => CodeRedemptionError::Replay { user_id },
+                    Some((user_id, revoked_families)) => CodeRedemptionError::Replay {
+                        user_id,
+                        revoked_families,
+                    },
                     None => CodeRedemptionError::Invalid,
                 },
             ),
@@ -698,7 +704,8 @@ impl OidcRepository<'_> {
     }
 
     /// Revokes the refresh families issued from an already consumed code and
-    /// returns its account, or `None` if `id`, `digest` and `client_id` match no
+    /// returns its account and the families it revoked, or `None` if `id`,
+    /// `digest` and `client_id` match no
     /// consumed code. Matching the secret digest and client means neither a guessed
     /// code ID nor a leaked code presented by another client can revoke a grant.
     async fn revoke_replayed_code(
@@ -706,7 +713,7 @@ impl OidcRepository<'_> {
         id: TokenId,
         digest: &[u8],
         client_id: &str,
-    ) -> Result<Option<UserId>, DatabaseError> {
+    ) -> Result<Option<(UserId, Vec<TokenId>)>, DatabaseError> {
         // The row qualifies whether or not it is consumed, so FOR SHARE waits for
         // an in-flight first redemption and then reads the committed row, together
         // with its family. Filtering on `consumed_at` would test this statement's
@@ -734,18 +741,19 @@ impl OidcRepository<'_> {
         // A separate statement takes a fresh snapshot, which includes a family
         // committed while the lock above waited. Only the family lock is taken, so
         // this stays within the user -> session -> family order of rotation.
-        run!(
+        let revoked = run!(
             self,
-            execute,
-            sqlx::query!(
-                "UPDATE refresh_token_families
+            fetch_all,
+            sqlx::query_scalar!(
+                r#"UPDATE refresh_token_families
                 SET revoked_at = now()
                 WHERE authorization_code_id = $1
-                AND revoked_at IS NULL",
+                AND revoked_at IS NULL
+                RETURNING id AS "id: TokenId""#,
                 id.as_uuid(),
             )
         )?;
-        Ok(Some(code.user_id))
+        Ok(Some((code.user_id, revoked)))
     }
 
     /// Reports whether the user already consented to all of `scopes` for this
@@ -836,20 +844,22 @@ impl OidcRepository<'_> {
     }
 
     /// Revokes a session (OIDC logout) and every refresh token family issued
-    /// from it.
+    /// from it. Returns `false` if the session was already revoked or unknown.
     ///
     /// # Errors
     ///
     /// Returns [`DatabaseError`] if a query fails.
-    pub async fn revoke_session(&mut self, session: SessionId) -> Result<(), DatabaseError> {
-        run!(
+    pub async fn revoke_session(&mut self, session: SessionId) -> Result<bool, DatabaseError> {
+        let revoked = run!(
             self,
             execute,
             sqlx::query!(
-                "UPDATE sessions SET revoked_at=COALESCE(revoked_at,now()) WHERE id=$1",
+                "UPDATE sessions SET revoked_at=now() WHERE id=$1 AND revoked_at IS NULL",
                 session.as_uuid(),
             )
-        )?;
+        )?
+        .rows_affected()
+            == 1;
         run!(
             self,
             execute,
@@ -860,7 +870,7 @@ impl OidcRepository<'_> {
                 session.as_uuid(),
             )
         )?;
-        Ok(())
+        Ok(revoked)
     }
 }
 #[cfg(test)]

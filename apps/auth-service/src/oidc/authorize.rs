@@ -5,7 +5,10 @@ use super::{
     MAX_STATE_BYTES, OAuthCode, OAuthError, OidcApplication, OpaqueToken, Prompt, ResponseMode,
     ResponseType, Scopes, TokenPrefix,
 };
-use crate::{routes, security::Session};
+use crate::{
+    routes,
+    security::{RequestContext, Session},
+};
 use axum::{
     Form, Json,
     extract::{
@@ -16,9 +19,9 @@ use axum::{
     response::Redirect,
 };
 use chrono::{DateTime, Duration, Utc};
-use piquel_auth_protocol::{UserId, claims::Acr, step_up::StepUpRequirement};
+use piquel_auth_protocol::{ClientId, UserId, claims::Acr, step_up::StepUpRequirement};
 use piquel_repository::{
-    InsertAuthorizationCode, InsertAuthorizationRequest, SessionAuthentication,
+    DomainEvent, InsertAuthorizationCode, InsertAuthorizationRequest, SessionAuthentication,
     StoredAuthorizationRequest, StoredSession,
 };
 use serde::{Deserialize, Serialize};
@@ -349,6 +352,7 @@ impl OidcApplication {
     /// Records the consent page's decision and returns the client redirect as JSON.
     pub(super) async fn authorization_decision(
         State(app): State<Self>,
+        context: RequestContext,
         headers: HeaderMap,
         form: Result<Form<AuthorizationDecision>, FormRejection>,
     ) -> Result<Json<Value>, OAuthError> {
@@ -357,22 +361,23 @@ impl OidcApplication {
             OAuthCode::InvalidRequest
                 .reject_with(format!("consent decision is malformed: {error}"), error)
         })?;
-        let redirect = app.decide(&headers, input, true).await?;
+        let redirect = app.decide(&headers, input, Some(context)).await?;
         Ok(Json(json!({"redirect_url":redirect.as_str()})))
     }
 
     /// Consumes the pending authorization and returns the client redirect: an error
-    /// for a denial, or a new authorization code. `explicit` decisions come from the
-    /// consent page and save consent; implicit ones must already be allowed.
+    /// for a denial, or a new authorization code. Explicit decisions come from the
+    /// consent page, whose request is `consent`, and save and record consent;
+    /// implicit ones must already be allowed.
     async fn decide(
         &self,
         headers: &HeaderMap,
         input: AuthorizationDecision,
-        explicit: bool,
+        consent: Option<RequestContext>,
     ) -> Result<Url, OAuthError> {
         let session = Session::required(&self.database, headers).await?;
         let pending = self.find_authorization_request(&input.transaction).await?;
-        if !explicit && !self.can_authorize(&pending, &session).await? {
+        if consent.is_none() && !self.can_authorize(&pending, &session).await? {
             return Err(
                 OAuthCode::InvalidRequest.reject("this authorization needs the user's consent")
             );
@@ -404,7 +409,7 @@ impl OidcApplication {
                     .find_active_by_id_for_update(session.user_id)
                     .await?
                     .ok_or_else(|| OAuthCode::InvalidToken.reject("this account is disabled"))?;
-                if explicit {
+                if let Some(context) = consent {
                     transaction
                         .oidc()
                         .save_consent(
@@ -412,6 +417,16 @@ impl OidcApplication {
                             &request.client_id,
                             &request.audience,
                             &request.scopes,
+                        )
+                        .await?;
+                    transaction
+                        .record(
+                            &context.user(&session),
+                            Some(session.user_id),
+                            DomainEvent::ConsentGranted {
+                                client_id: ClientId::from(request.client_id.as_str()),
+                                scopes: request.scopes.clone(),
+                            },
                         )
                         .await?;
                 }
@@ -566,7 +581,7 @@ impl OidcApplication {
                 transaction,
                 decision: ConsentDecision::Approve,
             };
-            let redirect = self.decide(headers, input, false).await?;
+            let redirect = self.decide(headers, input, None).await?;
             return Ok(Redirect::to(redirect.as_str()));
         }
         if silent {

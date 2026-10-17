@@ -216,7 +216,7 @@ impl TestApp {
         // Federation only checks key presence; cryptographic ceremony coverage lives in passkey tests.
         tx.passkeys()
             .insert(&InsertPasskey {
-                id: TokenId::new(),
+                id: piquel_auth_protocol::PasskeyId::new(),
                 credential_id: TokenId::new().to_string().into_bytes(),
                 user_id,
                 credential: serde_json::json!({}),
@@ -266,9 +266,14 @@ impl TestApp {
     /// Creates a social browser session, optionally confirmed with a passkey now.
     async fn session(&self, user_id: UserId, confirmed: bool) -> (SessionId, String) {
         let mut tx = self.app.database.begin().await.expect("transaction");
-        let cookie = security::Session::create(&mut tx, user_id, AuthenticationMethod::Federation)
-            .await
-            .expect("session");
+        let cookie = security::Session::create(
+            &mut tx,
+            security::RequestContext::TEST,
+            user_id,
+            AuthenticationMethod::Federation,
+        )
+        .await
+        .expect("session");
         let raw = format!("{}={}", BrowserCookie::Session.as_str(), cookie.encoded());
         tx.commit().await.expect("commit");
         let mut headers = HeaderMap::new();
@@ -329,6 +334,7 @@ impl TestApp {
         body: &serde_json::Value,
     ) -> Request<Body> {
         let mut request = Request::builder()
+            .extension(crate::security::RequestContext::TEST)
             .method(method)
             .uri(path)
             .header(header::CONTENT_TYPE, "application/json");
@@ -512,21 +518,39 @@ async fn onboarding_commits_only_with_first_key_and_browser_and_never_claims_exi
     let user = test.user(None, false).await;
     let mut tx = test.app.database.begin().await.expect("tx");
     assert!(
-        FederationApplication::attach_signup(&mut tx, pending.id, &headers, user)
-            .await
-            .is_err()
+        FederationApplication::attach_signup(
+            &mut tx,
+            &security::RequestContext::TEST.actor(piquel_repository::Actor::Anonymous),
+            pending.id,
+            &headers,
+            user
+        )
+        .await
+        .is_err()
     );
     tx.rollback().await.expect("rollback");
     let mut tx = test.app.database.begin().await.expect("tx");
     test.key(&mut tx, user).await;
     assert!(
-        FederationApplication::attach_signup(&mut tx, pending.id, &HeaderMap::new(), user)
-            .await
-            .is_err()
-    );
-    FederationApplication::attach_signup(&mut tx, pending.id, &headers, user)
+        FederationApplication::attach_signup(
+            &mut tx,
+            &security::RequestContext::TEST.actor(piquel_repository::Actor::Anonymous),
+            pending.id,
+            &HeaderMap::new(),
+            user
+        )
         .await
-        .expect("first key authorizes signup");
+        .is_err()
+    );
+    FederationApplication::attach_signup(
+        &mut tx,
+        &security::RequestContext::TEST.actor(piquel_repository::Actor::Anonymous),
+        pending.id,
+        &headers,
+        user,
+    )
+    .await
+    .expect("first key authorizes signup");
     tx.commit().await.expect("commit");
     assert_eq!(
         test.app
@@ -544,9 +568,15 @@ async fn onboarding_commits_only_with_first_key_and_browser_and_never_claims_exi
     let (pending, headers) = test.pending(None, Some(&email)).await;
     let mut tx = test.app.database.begin().await.expect("tx");
     assert!(
-        FederationApplication::attach_signup(&mut tx, pending.id, &headers, user)
-            .await
-            .is_err()
+        FederationApplication::attach_signup(
+            &mut tx,
+            &security::RequestContext::TEST.actor(piquel_repository::Actor::Anonymous),
+            pending.id,
+            &headers,
+            user
+        )
+        .await
+        .is_err()
     );
     tx.rollback().await.expect("rollback");
 }

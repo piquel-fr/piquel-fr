@@ -147,6 +147,42 @@ macro_rules! uuid_id {
 uuid_id!(UserId, "Immutable global Piquel account identifier.");
 uuid_id!(SessionId, "Opaque central-session identifier.");
 uuid_id!(TokenId, "Identifier for a token record or JWT.");
+uuid_id!(PasskeyId, "Identifier of a stored passkey credential.");
+uuid_id!(EventId, "Identifier of a recorded domain event.");
+
+/// A registered OIDC client's identifier, as provisioned from configuration.
+#[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(transparent)]
+pub struct ClientId(String);
+
+impl ClientId {
+    /// The identifier as provisioned.
+    #[must_use]
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
+impl From<&str> for ClientId {
+    /// Wraps an identifier the service already resolved to a registered client.
+    fn from(value: &str) -> Self {
+        Self(value.to_owned())
+    }
+}
+
+impl From<String> for ClientId {
+    /// Wraps an identifier the service already resolved to a registered client.
+    fn from(value: String) -> Self {
+        Self(value)
+    }
+}
+
+impl fmt::Display for ClientId {
+    /// Formats the identifier unchanged.
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.write_str(&self.0)
+    }
+}
 
 piquel_common::str_enum! {
     /// Account availability state in SQL and JSON.

@@ -7,10 +7,14 @@ use axum::{
     http::{Method, Request},
 };
 use chrono::{Duration, Utc};
-use piquel_auth_protocol::claims::{Acr, Amr};
+use piquel_auth_protocol::{
+    TokenId,
+    claims::{Acr, Amr},
+};
 use piquel_crypto::Secret;
 use piquel_repository::{
-    AuditOutcome, DatabaseConfig, PendingFederation, SessionAuthentication, StoredSession,
+    DatabaseConfig, PendingFederation, RevocationReason, SessionAuthentication, SignInFailure,
+    StoredSession,
 };
 use serde_json::json;
 use tower::ServiceExt;
@@ -128,7 +132,7 @@ struct Fixture {
     /// Seeded account owning the software credential.
     user_id: UserId,
     /// Seeded passkey row used for rename and last-key removal checks.
-    key_id: TokenId,
+    key_id: PasskeyId,
     /// Unique seeded username for identified authentication.
     username: String,
 }
@@ -159,7 +163,7 @@ impl Fixture {
         .expect("passkey app");
         let user_id = UserId::new();
         let username = format!("key_{}", &TokenId::new().to_string()[24..]);
-        let key_id = TokenId::new();
+        let key_id = PasskeyId::new();
         // This software authenticator supports UV and signed counters, but not
         // resident credentials. Browser tests cover production resident signup;
         // use the library's normal registration to seed this assertion fixture.
@@ -216,6 +220,7 @@ impl Fixture {
             .clone()
             .oneshot(
                 Request::builder()
+                    .extension(crate::security::RequestContext::TEST)
                     .method(method)
                     .uri(path)
                     .header(header::ORIGIN, AUTH_ORIGIN)
@@ -301,14 +306,17 @@ impl Fixture {
             .await
             .expect("session lookup")
     }
-    /// Lists the seeded account's audit actions and outcomes, newest first.
-    async fn audit(&self) -> Vec<(AuditAction, AuditOutcome)> {
+    /// Lists the events recorded about the seeded account, newest first.
+    async fn events(&self) -> Vec<DomainEvent> {
         self.app
             .database
-            .audit_events()
-            .list_for_user(self.user_id)
+            .events()
+            .history_for_user(self.user_id, 100)
             .await
-            .expect("audit log")
+            .expect("history")
+            .into_iter()
+            .map(|stored| stored.event)
+            .collect()
     }
     /// Registers a new account with a fresh software credential; returns the finish response.
     async fn register(&self, cookies: &str, body: Value) -> Response {
@@ -392,8 +400,8 @@ async fn registration_attaches_a_pending_social_signup_only_when_it_names_it() {
     }
 }
 
-/// Checks counter ordering under concurrent ceremony snapshots, audits the regression
-/// and prevents replay.
+/// Checks counter ordering under concurrent ceremony snapshots, records the
+/// regression and prevents replay.
 #[tokio::test]
 #[ignore = "requires TEST_DATABASE_URL"]
 async fn overlapping_assertions_reject_old_counter_after_new_counter_commits() {
@@ -458,24 +466,30 @@ async fn overlapping_assertions_reject_old_counter_after_new_counter_commits() {
         keys[0].credential.pointer(CREDENTIAL_COUNTER_POINTER),
         Some(&json!(2))
     );
-    assert_eq!(
-        fixture.audit().await,
-        [
-            (
-                AuditAction::PasskeyCounterRegression,
-                AuditOutcome::Rejected
-            ),
-            (AuditAction::PasskeyLogin, AuditOutcome::Success),
-        ],
-        "the regression outlives its rolled-back authentication transaction; the replay is not audited"
+    let events = fixture.events().await;
+    assert!(
+        matches!(
+            events.as_slice(),
+            [
+                DomainEvent::SignInFailed {
+                    method: AuthenticationMethod::Passkey,
+                    reason: SignInFailure::CounterRegression,
+                },
+                DomainEvent::SignedIn {
+                    method: AuthenticationMethod::Passkey,
+                    ..
+                },
+            ]
+        ),
+        "the regression outlives its rolled-back authentication transaction; the replay is not recorded: {events:?}"
     );
 }
 
 /// A copy of a passkey that signs behind the stored counter is rejected by `WebAuthn`'s
-/// snapshot check, and the rejection is audited like the locked check.
+/// snapshot check, and the rejection is recorded like the locked check.
 #[tokio::test]
 #[ignore = "requires TEST_DATABASE_URL"]
-async fn lagging_counter_copy_is_rejected_and_audited() {
+async fn lagging_counter_copy_is_rejected_and_recorded() {
     let mut fixture = Fixture::new().await;
     // Simulate the original authenticator having signed far ahead of this copy.
     let mut passkeys = fixture.app.database.passkeys();
@@ -512,11 +526,11 @@ async fn lagging_counter_copy_is_rejected_and_audited() {
     assert_eq!(response.status(), StatusCode::BAD_REQUEST);
     assert!(response.headers().get(header::SET_COOKIE).is_none());
     assert_eq!(
-        fixture.audit().await,
-        [(
-            AuditAction::PasskeyCounterRegression,
-            AuditOutcome::Rejected
-        )]
+        fixture.events().await,
+        [DomainEvent::SignInFailed {
+            method: AuthenticationMethod::Passkey,
+            reason: SignInFailure::CounterRegression,
+        }]
     );
 }
 
@@ -565,10 +579,14 @@ async fn ceremonies_require_browser_binding_and_confirmation_belongs_to_one_sess
         .await;
     // Another session of the same account, from social sign-in, is not confirmed.
     let mut tx = fixture.app.database.begin().await.expect("transaction");
-    let secret =
-        security::Session::create(&mut tx, fixture.user_id, AuthenticationMethod::Federation)
-            .await
-            .expect("social session");
+    let secret = security::Session::create(
+        &mut tx,
+        security::RequestContext::TEST,
+        fixture.user_id,
+        AuthenticationMethod::Federation,
+    )
+    .await
+    .expect("social session");
     tx.commit().await.expect("commit");
     let social = format!("{}={}", BrowserCookie::Session.as_str(), secret.encoded());
     let session_id = fixture
@@ -643,8 +661,8 @@ async fn ceremonies_require_browser_binding_and_confirmation_belongs_to_one_sess
         session_id
     );
     assert_eq!(
-        fixture.audit().await.first(),
-        Some(&(AuditAction::SessionPasskeyConfirmed, AuditOutcome::Success))
+        fixture.events().await.first(),
+        Some(&DomainEvent::PasskeyConfirmed { session_id })
     );
     let confirmed_at = || async {
         fixture
@@ -693,11 +711,45 @@ async fn ceremonies_require_browser_binding_and_confirmation_belongs_to_one_sess
         .confirm_passkey(session_id, confirmed)
         .await
         .expect("restore confirmation");
+    // Removal revokes both other sessions, the passkey sign-in and this one.
+    let mut tx = fixture.app.database.begin().await.expect("transaction");
+    security::Session::create(
+        &mut tx,
+        security::RequestContext::TEST,
+        fixture.user_id,
+        AuthenticationMethod::Federation,
+    )
+    .await
+    .expect("third session");
+    tx.commit().await.expect("commit");
     let response = fixture
         .request(&path, Method::DELETE, &social, json!({}))
         .await;
     assert_eq!(response.status(), StatusCode::NO_CONTENT);
     assert_eq!(confirmed_at().await, confirmed);
+    let events = fixture.events().await;
+    let removed = events
+        .iter()
+        .position(|event| {
+            *event
+                == DomainEvent::PasskeyRemoved {
+                    passkey_id: fixture.key_id,
+                }
+        })
+        .expect("removal recorded");
+    let mut revoked: Vec<_> = events[..removed]
+        .iter()
+        .map(|event| match event {
+            DomainEvent::SessionRevoked {
+                session_id,
+                reason: RevocationReason::CredentialRemoved,
+            } => *session_id,
+            event => panic!("unexpected {event:?}"),
+        })
+        .collect();
+    revoked.dedup();
+    assert_eq!(revoked.len(), 2, "one revocation per other session");
+    assert!(!revoked.contains(&session_id), "the acting session stays");
     let keys = fixture
         .app
         .database
@@ -814,6 +866,14 @@ async fn unknown_usernames_get_stable_decoys_that_fail_like_unregistered_passkey
     }
     assert_eq!(failures[0].0, StatusCode::BAD_REQUEST);
     assert_eq!(failures[0], failures[1]);
+    assert_eq!(
+        fixture.events().await,
+        [DomainEvent::SignInFailed {
+            method: AuthenticationMethod::Passkey,
+            reason: SignInFailure::InvalidCredential,
+        }],
+        "the decoy's failure concerns no account"
+    );
 }
 
 /// Signing in with a passkey in a browser holding a social session of the same
@@ -823,10 +883,14 @@ async fn unknown_usernames_get_stable_decoys_that_fail_like_unregistered_passkey
 async fn passkey_sign_in_confirms_the_browsers_session() {
     let mut fixture = Fixture::new().await;
     let mut tx = fixture.app.database.begin().await.expect("transaction");
-    let secret =
-        security::Session::create(&mut tx, fixture.user_id, AuthenticationMethod::Federation)
-            .await
-            .expect("social session");
+    let secret = security::Session::create(
+        &mut tx,
+        security::RequestContext::TEST,
+        fixture.user_id,
+        AuthenticationMethod::Federation,
+    )
+    .await
+    .expect("social session");
     tx.commit().await.expect("commit");
     let social = format!("{}={}", BrowserCookie::Session.as_str(), secret.encoded());
     let before = fixture.session(&social).await.expect("social session");

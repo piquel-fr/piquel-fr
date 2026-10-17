@@ -1,11 +1,11 @@
 {
   "db_name": "PostgreSQL",
-  "query": "SELECT\n                    p.id AS \"id: TokenId\", p.credential_id, p.user_id AS \"user_id: UserId\",\n                    p.credential, p.friendly_name, p.revoked_at\n                FROM passkey_credentials p\n                JOIN users u ON u.id = p.user_id\n                WHERE u.username = $1\n                AND u.status = 'active'\n                AND p.revoked_at IS NULL\n                ORDER BY p.created_at",
+  "query": "SELECT\n                    id AS \"id: PasskeyId\", credential_id, user_id AS \"user_id: UserId\", credential,\n                    friendly_name, revoked_at\n                FROM passkey_credentials\n                WHERE user_id = $1\n                AND revoked_at IS NULL\n                ORDER BY created_at",
   "describe": {
     "columns": [
       {
         "ordinal": 0,
-        "name": "id: TokenId",
+        "name": "id: PasskeyId",
         "type_info": "Uuid"
       },
       {
@@ -36,7 +36,7 @@
     ],
     "parameters": {
       "Left": [
-        "Text"
+        "Uuid"
       ]
     },
     "nullable": [
@@ -48,5 +48,5 @@
       true
     ]
   },
-  "hash": "d9952c239924fe4e4600dd84197e70ee6288e5d14ae6039e00d1434839217d39"
+  "hash": "3b8fb9eee3895f4a2eb3f14edb41c6bffe1246df441bbfcb4a319ace3ad96415"
 }
