@@ -136,8 +136,10 @@ impl BearerChallenge {
         self.error.as_ref().map_or(401, BearerError::status)
     }
 
-    /// Appends one parameter, quoting and escaping its value. Every value comes from a
-    /// validated type, so none holds a control character that could break the header.
+    /// Appends one parameter, quoting and escaping its value. A control character
+    /// cannot appear in a header at all, so it is written as `?`: every value but an
+    /// unknown [`BearerError`] comes from a validated type, and that one can be built
+    /// from any string.
     fn write_parameter(
         formatter: &mut fmt::Formatter<'_>,
         first: &mut bool,
@@ -150,6 +152,7 @@ impl BearerChallenge {
         for character in value.chars() {
             match character {
                 '"' | '\\' => write!(formatter, "\\{character}")?,
+                _ if character.is_control() && character != '\t' => formatter.write_str("?")?,
                 _ => write!(formatter, "{character}")?,
             }
         }
@@ -462,6 +465,16 @@ mod tests {
         assert_eq!(
             challenge.to_string(),
             r#"Bearer error="invalid_token", error_description="say 'hi'""#
+        );
+    }
+
+    /// No value can break the header: control characters are written as `?`.
+    #[test]
+    fn formatting_never_emits_control_characters() {
+        let challenge = BearerChallenge::error(BearerError::from("new_error\r\nX-Test: yes"));
+        assert_eq!(
+            challenge.to_string(),
+            r#"Bearer error="new_error??X-Test: yes""#
         );
     }
 

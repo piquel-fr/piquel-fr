@@ -185,9 +185,8 @@ concurrent refreshes of one session must be serialized.
 
 What an operation needs from the user's authentication is a
 `step_up::StepUpRequirement`: an `acr` to meet, a maximum age of `auth_time`, or
-both. Auth checks its own account APIs and authorization requests with the same type,
-so a token meets a requirement in the SDKs exactly when auth would accept the session
-for it:
+both. Auth checks its own account APIs and authorization requests with the same
+type's `check`, and the SDKs check tokens with it too:
 
 - `acr` classes are ordered: `phr` meets every class, and
   `urn:piquel:acr:social` meets only itself. A token without `acr`, or with one the
@@ -195,17 +194,21 @@ for it:
 - `max_age` needs `auth_time`, and holds while `now - 30 <= auth_time + max_age`,
   with the same leeway as the other time checks.
 
+Auth itself applies no leeway, and at its authorize endpoint `max_age=0` means a
+sign-in after the request, like `prompt=login`. So a token up to 30 seconds past a
+`max_age` still passes an SDK, while auth asks for a new sign-in; the leeway only
+absorbs clock skew between auth and the resource.
+
 A resource whose requirement is not met answers with
 `insufficient_user_authentication`, the requirement's `acr_values` and `max_age`
 (RFC 9470). A challenge names at most one class. A client parses the challenge back
 into a requirement, taking the first `acr_values` entry it knows, as auth does, and
 runs authorization again with those values.
 
-A client retries at most once per user action. It signs the user in again only when
-the current sign-in falls short of the requirement. When the sign-in already meets
-it, the user has stepped up and the resource still refuses, so the client reports the
-error instead of redirecting again. With the login check above, a step-up sign-in
-either reaches the requirement or fails, so the two never loop.
+A client retries at most once per user action. It signs the user in again with the
+challenge's values and returns to the same page. If the resource still refuses on
+that return, the client reports the error instead of redirecting again. The login
+check above also means a step-up sign-in never completes below its requirement.
 
 ## Forward compatibility
 
