@@ -16,7 +16,7 @@ use axum::{
     response::Redirect,
 };
 use chrono::{DateTime, Duration, Utc};
-use piquel_auth_protocol::{UserId, claims::Acr};
+use piquel_auth_protocol::{UserId, claims::Acr, step_up::StepUpRequirement};
 use piquel_repository::{
     InsertAuthorizationCode, InsertAuthorizationRequest, SessionAuthentication,
     StoredAuthorizationRequest, StoredSession,
@@ -476,9 +476,11 @@ impl OidcApplication {
     }
 
     /// Whether a session meets an authorization's sign-in requirements: the hinted
-    /// account, the target `acr`, `max_age`, and a fresh authentication for
-    /// `prompt=login` or `max_age=0`. Ages count from the session's `auth_time`, and
-    /// only authenticating after the request was stored (`created_at`) counts as fresh.
+    /// account, a fresh authentication for `prompt=login` or `max_age=0`, and the
+    /// target `acr` and a positive `max_age` as a [`StepUpRequirement`], the rule
+    /// resources and auth's own settings apply. Ages count from the session's
+    /// `auth_time`, and only authenticating after the request was stored
+    /// (`created_at`) counts as fresh. A negative `max_age` is never met.
     fn session_satisfies(
         session: &StoredSession,
         force_login: bool,
@@ -489,19 +491,29 @@ impl OidcApplication {
     ) -> bool {
         let authentication = SessionAuthentication::from(session);
         let fresh = created_at.is_some_and(|created_at| authentication.auth_time >= created_at);
-        let within_max_age = max_age.is_none_or(|age| {
-            if age == 0 {
-                return fresh;
-            }
-            age >= 0
-                && Utc::now()
-                    .signed_duration_since(authentication.auth_time)
-                    .num_seconds()
-                    <= age
-        });
+        let (force_login, max_age) = match max_age {
+            // Requests reject negative ages, so one stored anyway is never met.
+            Some(age) if age < 0 => return false,
+            // `max_age=0` asks for a sign-in after the request, as `prompt=login` does.
+            Some(0) => (true, None),
+            // An age past `u32` excludes no sign-in.
+            age => (
+                force_login,
+                age.map(|age| u32::try_from(age).unwrap_or(u32::MAX)),
+            ),
+        };
+        let requirement = StepUpRequirement {
+            acr: target_acr,
+            max_age,
+        };
         (fresh || !force_login)
-            && within_max_age
-            && target_acr.is_none_or(|target| authentication.acr.satisfies(target))
+            && requirement
+                .check(
+                    Some(&authentication.acr),
+                    Some(authentication.auth_time),
+                    Utc::now(),
+                )
+                .is_ok()
             && hinted_user_id.is_none_or(|subject| subject == session.user_id)
     }
 
@@ -634,8 +646,9 @@ impl Prompts {
 
 #[cfg(test)]
 mod tests {
-    //! Prompt and consent decision parsing.
+    //! Prompt, `max_age` and consent decision parsing.
     use super::*;
+    use piquel_auth_protocol::{AuthenticationMethod, SessionId};
     /// Duplicates are allowed, flags follow the values, and `none` stands alone.
     #[test]
     fn prompts_enforce_interaction_policy() {
@@ -649,6 +662,39 @@ mod tests {
         assert!(Prompts::parse("none login").is_err());
         assert!(Prompts::parse("unrecognized").is_err());
         assert!(Prompts::parse("").is_ok());
+    }
+    /// `max_age` holds up to its boundary at authorize too. `0` needs a sign-in after
+    /// the request, a negative age is never met, and one past `u32` limits nothing.
+    #[test]
+    fn max_age_bounds_the_session_authentication() {
+        let now = Utc::now();
+        let session = StoredSession {
+            id: SessionId::new(),
+            user_id: UserId::new(),
+            authentication_methods: vec![AuthenticationMethod::Passkey],
+            authenticated_at: now - Duration::days(1),
+            expires_at: now + Duration::days(1),
+            last_seen_at: now,
+            revoked_at: None,
+            passkey_confirmed_at: Some(now - Duration::seconds(300)),
+        };
+        let satisfies = |max_age, created_at| {
+            OidcApplication::session_satisfies(
+                &session,
+                false,
+                Some(max_age),
+                None,
+                None,
+                created_at,
+            )
+        };
+        assert!(satisfies(310, None));
+        assert!(!satisfies(290, None));
+        assert!(satisfies(i64::MAX, None));
+        assert!(!satisfies(-1, None));
+        assert!(!satisfies(0, None));
+        assert!(!satisfies(0, Some(now - Duration::seconds(200))));
+        assert!(satisfies(0, Some(now - Duration::seconds(400))));
     }
     /// Known decisions parse; unknown ones become `Unsupported` instead of failing.
     #[test]
