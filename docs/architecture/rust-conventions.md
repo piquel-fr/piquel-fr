@@ -62,6 +62,10 @@ runs `AuthConfig::provision_clients`, which replaces client registrations atomic
 The router installs origin/CSRF checks, rate limits, a deadline and browser
 isolation headers.
 
+Periodic work implements `ExclusiveJob` in `apps/auth-service/src/jobs.rs`, and
+`Jobs::start` schedules it. A job receives only its locked `ExclusiveConnection`,
+never the `Database`, so everything it does happens while it holds the lock.
+
 ## Errors
 
 Return explicit `thiserror` errors. Preserve sources with `#[source]` or `#[from]`;

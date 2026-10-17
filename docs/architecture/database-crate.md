@@ -23,13 +23,14 @@ sources. Client provisioning validates fields and allowlists through
 `ClientConfigurationError` before writing any SQL.
 
 Each repository has its own module under `src/repositories/` (`users`, `emails`,
-`sessions`, `audit`, `passkeys`, `oidc`, `tokens`, `federation`, `security`),
-holding its methods and the records they take and return. `repositories/mod.rs`
-holds only shared plumbing: the executor, the `repositories!` macro that declares
-every handle and its accessors on both `Database` and `DatabaseTransaction`, the
-`run!` query macro and the column types that queries decode into.
-`run!(self, fetch_one, query)` (or `execute`, `fetch_optional`, `fetch_all`)
-dispatches to the pool or transaction and converts SQLx errors once. Dropping an
+`sessions`, `audit`, `passkeys`, `oidc`, `tokens`, `federation`, `security`,
+`maintenance`), holding its methods and the records they take and return.
+`repositories/mod.rs` holds only shared plumbing: the executor, the
+`repositories!` macro that declares every handle and its accessors on `Database`,
+`DatabaseTransaction` and `ExclusiveConnection`, the `run!` query macro and the
+column types that queries decode into. `run!(self, fetch_one, query)` (or
+`execute`, `fetch_optional`, `fetch_all`) dispatches to the pool or the bound
+connection and converts SQLx errors once. Dropping an
 unfinished `DatabaseTransaction` rolls it back.
 
 Every query is a checked SQLx macro: `query!`, `query_as!` or `query_scalar!`.
@@ -103,9 +104,13 @@ deployed code uses the old shape. Migration `0003` dropped
 exception while there were few users, not a precedent. SQLx's migrator takes an
 advisory lock, so concurrent `migrate` runs are safe.
 
-Every five minutes each replica drains expired ephemeral state in bounded batches,
-for up to one minute per pass. Overlapping passes skip each other's locked rows.
-On shutdown, a pass finishes its current batch and stops.
+Every five minutes, one replica drains expired ephemeral state in bounded batches
+through `maintenance()`, for up to one minute per pass. Jobs like it that must run
+on one replica at a time call `Database::try_exclusive(LockKey)`, which takes a
+session-level advisory lock on a dedicated connection outside the pool. The lock
+ends with that connection, even when the job is cancelled or the process dies, so
+it needs no lease or expiry, and a lock holder never returns to the pool. Give each
+job its own `LockKey` value and never reuse one.
 Security audit history is retained. Tests that use `TEST_DATABASE_URL` are explicitly
 marked ignored by the ordinary unit test runner; other crates' tests read stored state
 through helpers behind the `test-support` feature. `just db test` runs them in a

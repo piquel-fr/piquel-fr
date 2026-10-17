@@ -131,9 +131,14 @@ removes the restart gap after a crash; it adds no capacity.
   `AUTH_CLIENTS_FILE` at startup: it re-registers them in the database and keeps
   their origins for CORS until it restarts (#42 moves clients into the database).
   Google's signing keys are cached per replica.
-- **Background work.** Expired-state cleanup runs on every replica every five
-  minutes. Overlapping passes are safe, only redundant. On shutdown, a pass
-  finishes its current batch.
+- **Background work.** Jobs run through one runner
+  (`apps/auth-service/src/jobs.rs`). An exclusive job, such as expired-state
+  cleanup every five minutes, holds a PostgreSQL advisory lock while it runs, so
+  one replica at a time runs it and the others skip that run. A run that fails
+  or panics is logged and retried at the next interval. On shutdown, once
+  in-flight requests drain, running jobs get 10 seconds to finish (cleanup stops
+  after its current batch), then are cancelled, which closes their connection and
+  releases the lock.
 - **Migrations.** During a deploy the previous release runs against the new
   schema, so migrations expand, then contract
   (`docs/architecture/database-crate.md`).

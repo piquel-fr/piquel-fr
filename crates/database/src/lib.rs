@@ -7,6 +7,8 @@
 mod connection;
 /// Typed persistence and connection failures.
 mod error;
+/// Advisory locks for jobs that run on one replica at a time.
+mod exclusive;
 /// Typed repository families with private SQL execution.
 mod repositories;
 /// Explicit transactions spanning typed repository operations.
@@ -14,9 +16,11 @@ mod transaction;
 
 pub use connection::{Database, DatabaseConfig};
 pub use error::{DatabaseConnectionError, DatabaseError};
+pub use exclusive::{ExclusiveConnection, LockKey};
 pub use repositories::{
-    AuditEventRepository, EmailRepository, FederationRepository, OidcRepository, PasskeyRepository,
-    SecurityRepository, SessionRepository, TokenRepository, UserRepository,
+    AuditEventRepository, EmailRepository, FederationRepository, MaintenanceRepository,
+    OidcRepository, PasskeyRepository, SecurityRepository, SessionRepository, TokenRepository,
+    UserRepository,
     audit::{AuditAction, AuditOutcome},
     emails::{InsertVerifiedEmail, StoredEmail},
     federation::{

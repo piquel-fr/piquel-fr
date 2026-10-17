@@ -142,7 +142,7 @@ async fn cleanup_skips_rows_locked_by_requests() {
     let database = Database { pool: pool.clone() };
     tokio::time::timeout(
         Duration::from_secs(2),
-        database.purge_expired_auth_state(1000),
+        database.maintenance().purge_expired_auth_state(1000),
     )
     .await
     .expect("cleanup must not wait on a locked row")
@@ -206,6 +206,7 @@ async fn cleanup_keeps_redeemed_codes_while_their_session_is_live() {
         .expect("family link")
     };
     database
+        .maintenance()
         .purge_expired_auth_state(1000)
         .await
         .expect("purge");
@@ -216,6 +217,7 @@ async fn cleanup_keeps_redeemed_codes_while_their_session_is_live() {
         .await
         .expect("end session");
     database
+        .maintenance()
         .purge_expired_auth_state(1000)
         .await
         .expect("purge");
