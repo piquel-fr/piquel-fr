@@ -178,4 +178,7 @@ pub enum FederationConfigError {
     /// The bounded HTTP client could not be initialized.
     #[error("could not initialize federation HTTP client")]
     Http(#[source] reqwest::Error),
+    /// A provider's built-in endpoint is not a URL.
+    #[error("a built-in provider endpoint is not a URL")]
+    ProviderEndpoint(#[source] url::ParseError),
 }

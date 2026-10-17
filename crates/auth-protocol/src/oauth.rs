@@ -110,12 +110,18 @@ pub struct InvalidScope;
 impl Scopes {
     /// Whether `scope` is a valid scope token: one or more printable ASCII characters
     /// other than space, `"` and `\`.
+    /// A `const fn`, so macros can reject invalid scope names at compile time.
     #[must_use]
-    pub fn is_token(scope: &str) -> bool {
-        !scope.is_empty()
-            && scope
-                .bytes()
-                .all(|byte| matches!(byte, 0x21 | 0x23..=0x5B | 0x5D..=0x7E))
+    pub const fn is_token(scope: &str) -> bool {
+        let bytes = scope.as_bytes();
+        let mut index = 0;
+        while index < bytes.len() {
+            if !matches!(bytes[index], 0x21 | 0x23..=0x5B | 0x5D..=0x7E) {
+                return false;
+            }
+            index += 1;
+        }
+        !bytes.is_empty()
     }
 
     /// Whether the set contains `scope`.

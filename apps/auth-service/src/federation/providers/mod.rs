@@ -2,7 +2,7 @@
 //! protocol facts and identity checks live in its own module; see
 //! `docs/architecture/federation-providers.md` to add one.
 
-use super::{FederationApplication, Provider};
+use super::{FederationApplication, FederationConfigError, Provider};
 use crate::email::NormalizedEmail;
 use axum::http::{StatusCode, header};
 use piquel_auth_protocol::oauth::GrantType;
@@ -98,12 +98,19 @@ pub(super) struct ProviderEndpoints {
 }
 
 impl ProviderEndpoints {
-    /// Looks up a provider's facts, defined in its module. A new `Provider` fails to
-    /// compile here until it has a module.
-    pub(super) fn new(provider: Provider) -> Self {
+    /// Looks up a provider's facts, defined in its module. `client` makes any
+    /// requests the facts need, such as fetching signing keys. A new `Provider` fails
+    /// to compile here until it has a module.
+    ///
+    /// # Errors
+    /// Fails if a built-in endpoint does not parse.
+    pub(super) fn new(
+        provider: Provider,
+        client: &reqwest::Client,
+    ) -> Result<Self, FederationConfigError> {
         match provider {
-            Provider::GitHub => Self::github(),
-            Provider::Google => Self::google(),
+            Provider::GitHub => Ok(Self::github()),
+            Provider::Google => Self::google(client),
         }
     }
 }

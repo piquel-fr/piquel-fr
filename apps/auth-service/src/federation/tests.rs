@@ -9,7 +9,8 @@ use axum::{
     http::{HeaderValue, Method, Request, StatusCode, header},
     routing::post,
 };
-use jsonwebtoken::{Algorithm, DecodingKey};
+use piquel_auth::{KeyCache, KeySet};
+use piquel_auth_protocol::jwt::TokenType;
 use piquel_common::SecretReference;
 use piquel_crypto::Rs256Key;
 use piquel_crypto::Secret;
@@ -236,7 +237,10 @@ impl TestApp {
             id: TokenId::new(),
             browser_digest: secret.digest().as_bytes().to_vec(),
             provider: piquel_auth_protocol::Provider::GitHub,
-            issuer: ProviderEndpoints::new(Provider::GitHub).issuer.into(),
+            issuer: ProviderEndpoints::new(Provider::GitHub, &reqwest::Client::new())
+                .expect("GitHub facts")
+                .issuer
+                .into(),
             subject: TokenId::new().to_string(),
             email: email.map(str::to_owned),
             display_name: "New social account".into(),
@@ -295,7 +299,10 @@ impl TestApp {
                 id: TokenId::new(),
                 user_id,
                 provider: piquel_auth_protocol::Provider::GitHub,
-                issuer: ProviderEndpoints::new(Provider::GitHub).issuer.into(),
+                issuer: ProviderEndpoints::new(Provider::GitHub, &reqwest::Client::new())
+                    .expect("GitHub facts")
+                    .issuer
+                    .into(),
                 subject: self.subject.clone(),
                 linked_email: None,
             })
@@ -681,26 +688,21 @@ async fn linking_requires_target_confirmation_and_unlink_releases_subject_withou
 #[tokio::test]
 #[ignore = "requires TEST_DATABASE_URL"]
 async fn google_mock_validates_signature_audience_nonce_and_expiry_without_requiring_email() {
-    use jsonwebtoken::{EncodingKey, Header, encode};
     let mut test = TestApp::new().await;
     let rsa = Rs256Key::generate("google-test").expect("RSA test key");
-    let encoding =
-        EncodingKey::from_rsa_pem(&rsa.private_key_pem().expect("PEM")).expect("JWT key");
-    let mut header = Header::new(Algorithm::RS256);
-    header.kid = Some("google-test".into());
+    let sign = |key: &Rs256Key, claims: &serde_json::Value| {
+        key.sign(TokenType::Id, claims).expect("signed token")
+    };
     let mut claims = serde_json::json!({"iss":"https://accounts.google.com","sub":"12345","aud":"test-client","iat":Utc::now().timestamp(),"exp":Utc::now().timestamp()+300,"nonce":"test-nonce"});
-    let valid = encode(&header, &claims, &encoding).expect("signed token");
+    let valid = sign(&rsa, &claims);
     claims["aud"] = serde_json::json!("another-client");
-    let wrong_audience = encode(&header, &claims, &encoding).expect("signed token");
+    let wrong_audience = sign(&rsa, &claims);
     claims["aud"] = serde_json::json!("test-client");
     claims["exp"] = serde_json::json!(Utc::now().timestamp() - 120);
-    let expired = encode(&header, &claims, &encoding).expect("signed token");
+    let expired = sign(&rsa, &claims);
     let other_rsa = Rs256Key::generate("google-test").expect("untrusted key");
-    let other_encoding =
-        EncodingKey::from_rsa_pem(&other_rsa.private_key_pem().expect("PEM")).expect("JWT key");
     claims["exp"] = serde_json::json!(Utc::now().timestamp() + 300);
-    let wrong_signature =
-        encode(&header, &claims, &other_encoding).expect("untrusted signed token");
+    let wrong_signature = sign(&other_rsa, &claims);
     let keys = rsa.jwks().clone();
     let tokens = Arc::new(HashMap::from([
         ("valid".to_owned(), valid),
@@ -737,7 +739,12 @@ async fn google_mock_validates_signature_audience_nonce_and_expiry_without_requi
         .expect("Google facts")
         .identity
     {
-        IdentityStrategy::Google(protocol) => protocol.keys = format!("{base}/keys"),
+        IdentityStrategy::Google(protocol) => {
+            protocol.keys = KeyCache::new(
+                format!("{base}/keys").parse().expect("mock key URL"),
+                reqwest::Client::new(),
+            );
+        }
         IdentityStrategy::GitHub(_) => panic!("Google must use signed ID tokens"),
     }
     let response = test
@@ -761,8 +768,8 @@ async fn google_mock_validates_signature_audience_nonce_and_expiry_without_requi
     assert!(identity.email.is_none());
     for (kind, nonce, expected) in [
         ("valid", "wrong-nonce", "nonce does not match"),
-        ("wrong-audience", "test-nonce", "failed verification"),
-        ("expired", "test-nonce", "failed verification"),
+        ("wrong-audience", "test-nonce", "not for this client"),
+        ("expired", "test-nonce", "has expired"),
         ("wrong-signature", "test-nonce", "failed verification"),
     ] {
         let response = test
@@ -803,7 +810,9 @@ async fn callback_email_collision_never_links_and_known_subject_never_bootstraps
             .database
             .federation()
             .find_active(
-                ProviderEndpoints::new(Provider::GitHub).issuer,
+                ProviderEndpoints::new(Provider::GitHub, &reqwest::Client::new())
+                    .expect("GitHub facts")
+                    .issuer,
                 &test.subject
             )
             .await
@@ -818,7 +827,10 @@ async fn callback_email_collision_never_links_and_known_subject_never_bootstraps
             id: TokenId::new(),
             user_id: subject_owner,
             provider: piquel_auth_protocol::Provider::GitHub,
-            issuer: ProviderEndpoints::new(Provider::GitHub).issuer.into(),
+            issuer: ProviderEndpoints::new(Provider::GitHub, &reqwest::Client::new())
+                .expect("GitHub facts")
+                .issuer
+                .into(),
             subject: test.subject.clone(),
             linked_email: Some(original.clone()),
         })
@@ -900,33 +912,29 @@ async fn callback_email_collision_never_links_and_known_subject_never_bootstraps
 }
 
 /// ID-token verification rejects malformed claims, untrusted issuers and additional audiences.
-#[test]
-fn google_signed_tokens_require_well_typed_trusted_issuer_and_audience() {
-    use jsonwebtoken::{EncodingKey, Header, encode};
+#[tokio::test]
+async fn google_signed_tokens_require_well_typed_trusted_issuer_and_audience() {
     let rsa = Rs256Key::generate("google-test").expect("RSA key");
-    let encoding =
-        EncodingKey::from_rsa_pem(&rsa.private_key_pem().expect("PEM")).expect("encoding key");
-    let decoding =
-        DecodingKey::from_rsa_pem(&rsa.public_key_pem().expect("PEM")).expect("decoding key");
-    let header = Header::new(Algorithm::RS256);
-    let valid = serde_json::json!({"iss":"https://accounts.google.com","aud":"client","sub":"subject","iat":Utc::now().timestamp(),"exp":Utc::now().timestamp()+300,"nonce":"nonce"});
-    let verify = |claims: &serde_json::Value| {
-        GoogleClaims::verify(
-            &encode(&header, claims, &encoding).expect("signed token"),
-            &decoding,
-            "client",
-            "nonce",
-            match &ProviderEndpoints::new(Provider::Google).identity {
-                IdentityStrategy::Google(protocol) => protocol.issuers,
-                IdentityStrategy::GitHub(_) => panic!("Google must use signed ID tokens"),
-            },
-        )
+    let IdentityStrategy::Google(mut protocol) =
+        ProviderEndpoints::new(Provider::Google, &reqwest::Client::new())
+            .expect("Google facts")
+            .identity
+    else {
+        panic!("Google must use signed ID tokens");
     };
-    assert!(verify(&valid).is_ok());
+    protocol.keys = KeyCache::fixed(
+        KeySet::parse(&serde_json::to_vec(rsa.jwks()).expect("JWKS")).expect("key set"),
+    );
+    let valid = serde_json::json!({"iss":"https://accounts.google.com","aud":"client","sub":"subject","iat":Utc::now().timestamp(),"exp":Utc::now().timestamp()+300,"nonce":"nonce"});
+    let verify = async |claims: &serde_json::Value| {
+        let token = rsa.sign(TokenType::Id, claims).expect("signed token");
+        GoogleClaims::verify(&token, &protocol, "client", "nonce").await
+    };
+    assert!(verify(&valid).await.is_ok());
     for field in ["iss", "aud", "exp", "sub"] {
         let mut claims = valid.clone();
         claims.as_object_mut().expect("object").remove(field);
-        assert!(verify(&claims).is_err(), "missing {field}");
+        assert!(verify(&claims).await.is_err(), "missing {field}");
         for value in [
             serde_json::Value::Null,
             serde_json::json!(123),
@@ -934,7 +942,7 @@ fn google_signed_tokens_require_well_typed_trusted_issuer_and_audience() {
         ] {
             claims[field] = value;
             // Numeric expiry is valid only while it lies in the future; 123 is expired.
-            assert!(verify(&claims).is_err(), "invalid {field}");
+            assert!(verify(&claims).await.is_err(), "invalid {field}");
         }
     }
     for audience in [
@@ -945,176 +953,16 @@ fn google_signed_tokens_require_well_typed_trusted_issuer_and_audience() {
     ] {
         let mut claims = valid.clone();
         claims["aud"] = audience;
-        assert!(verify(&claims).is_err());
+        assert!(verify(&claims).await.is_err());
     }
     let mut claims = valid.clone();
     claims["aud"] = serde_json::json!(["client"]);
-    assert!(verify(&claims).is_ok());
+    assert!(verify(&claims).await.is_ok());
     claims["iss"] = serde_json::json!("https://untrusted.example");
-    assert!(verify(&claims).is_err());
+    assert!(verify(&claims).await.is_err());
     claims = valid;
     claims["azp"] = serde_json::json!("other");
-    assert!(verify(&claims).is_err());
-}
-
-/// Local Google key endpoint: the first response publishes key `a`, the second keys `a`
-/// and `b` (a rotation), and later ones fail as an outage would.
-struct GoogleKeysMock {
-    /// Google facts whose key endpoint is this mock.
-    protocol: GoogleProtocol,
-    /// Number of key requests served so far.
-    requests: Arc<std::sync::atomic::AtomicUsize>,
-    /// Mock server, stopped when the fixture is dropped.
-    task: tokio::task::JoinHandle<()>,
-}
-impl Drop for GoogleKeysMock {
-    /// Stops the mock server.
-    fn drop(&mut self) {
-        self.task.abort();
-    }
-}
-impl GoogleKeysMock {
-    /// How long the mock's responses let keys stay fresh.
-    const MAX_AGE: StdDuration = StdDuration::from_secs(600);
-
-    /// Serves the key endpoint on a local port.
-    async fn start() -> Self {
-        let keys = |kids: &[&str]| {
-            let keys: Vec<_> = kids
-                .iter()
-                .map(|kid| Rs256Key::generate(*kid).expect("RSA key").jwks().keys[0].clone())
-                .collect();
-            serde_json::json!({ "keys": keys })
-        };
-        let responses = Arc::new([keys(&["a"]), keys(&["a", "b"])]);
-        let requests = Arc::new(std::sync::atomic::AtomicUsize::new(0));
-        let served = requests.clone();
-        let mock = Router::new().route(
-            "/keys",
-            get(move || async move {
-                let request = served.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
-                let cache_control = format!("public, max-age={}", Self::MAX_AGE.as_secs());
-                match responses.get(request) {
-                    Some(keys) => ([(header::CACHE_CONTROL, cache_control)], Json(keys.clone()))
-                        .into_response(),
-                    None => StatusCode::SERVICE_UNAVAILABLE.into_response(),
-                }
-            }),
-        );
-        let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
-            .await
-            .expect("mock listener");
-        let base = format!("http://{}", listener.local_addr().expect("address"));
-        let task = tokio::spawn(async move {
-            axum::serve(listener, mock).await.expect("mock server");
-        });
-        let IdentityStrategy::Google(mut protocol) =
-            ProviderEndpoints::new(Provider::Google).identity
-        else {
-            panic!("Google must use signed ID tokens");
-        };
-        protocol.keys = format!("{base}/keys");
-        Self {
-            protocol,
-            requests,
-            task,
-        }
-    }
-
-    /// Number of key requests served so far.
-    fn requests(&self) -> usize {
-        self.requests.load(std::sync::atomic::Ordering::SeqCst)
-    }
-
-    /// Looks up `kid` at `elapsed` after `start`, as one sign-in would.
-    async fn key(
-        &self,
-        kid: &str,
-        start: std::time::Instant,
-        elapsed: u64,
-    ) -> Result<DecodingKey, providers::ProviderError> {
-        self.protocol
-            .signing_key(
-                &reqwest::Client::new(),
-                kid.into(),
-                start + StdDuration::from_secs(elapsed),
-            )
-            .await
-    }
-}
-
-/// Concurrent and later sign-ins share one key fetch until `max-age` runs out, and an
-/// outage keeps the cached keys instead of retrying on every sign-in.
-#[tokio::test]
-async fn google_keys_are_cached_until_max_age_and_survive_an_outage() {
-    let mock = GoogleKeysMock::start().await;
-    let start = std::time::Instant::now();
-    let max_age = GoogleKeysMock::MAX_AGE.as_secs();
-    let mut sign_ins = tokio::task::JoinSet::new();
-    for _ in 0..5 {
-        let protocol = mock.protocol.clone();
-        sign_ins.spawn(async move {
-            protocol
-                .signing_key(&reqwest::Client::new(), "a".into(), start)
-                .await
-                .map(drop)
-        });
-    }
-    while let Some(result) = sign_ins.join_next().await {
-        result.expect("sign-in task").expect("key a");
-    }
-    assert_eq!(mock.requests(), 1, "concurrent sign-ins share one fetch");
-    mock.key("a", start, max_age - 1)
-        .await
-        .expect("cached key a");
-    assert_eq!(mock.requests(), 1, "fresh keys are reused");
-    mock.key("a", start, max_age)
-        .await
-        .expect("refetched key a");
-    assert_eq!(mock.requests(), 2, "expired keys are refetched");
-    mock.key("a", start, 2 * max_age)
-        .await
-        .expect("stale key a during an outage");
-    assert_eq!(mock.requests(), 3, "expired keys are refetched");
-    mock.key("a", start, 2 * max_age + 1)
-        .await
-        .expect("stale key a during an outage");
-    assert_eq!(mock.requests(), 3, "a failed fetch is not retried at once");
-}
-
-/// An unknown key ID refetches once, so rotated keys are found, but never more than once
-/// a minute, so bogus key IDs cannot make every sign-in call Google.
-#[tokio::test]
-async fn unknown_google_key_ids_refetch_at_most_once_a_minute() {
-    let mock = GoogleKeysMock::start().await;
-    let start = std::time::Instant::now();
-    mock.key("a", start, 0).await.expect("key a");
-    let error = mock
-        .key("b", start, 59)
-        .await
-        .err()
-        .expect("b not fetched yet");
-    assert!(error.to_string().contains("no RSA signing key"), "{error}");
-    assert_eq!(mock.requests(), 1, "refetches wait a minute");
-    mock.key("b", start, 60).await.expect("rotated key b");
-    assert_eq!(mock.requests(), 2, "an unknown key ID refetches once");
-    for elapsed in [60, 90, 119] {
-        mock.key("bogus", start, elapsed)
-            .await
-            .err()
-            .expect("bogus key");
-    }
-    assert_eq!(mock.requests(), 2, "bogus key IDs wait for the interval");
-    mock.key("bogus", start, 120)
-        .await
-        .err()
-        .expect("bogus key");
-    mock.key("bogus", start, 121)
-        .await
-        .err()
-        .expect("bogus key");
-    assert_eq!(mock.requests(), 3, "at most one refetch per interval");
-    mock.key("a", start, 121).await.expect("cached key a");
+    assert!(verify(&claims).await.is_err());
 }
 
 /// Resolved credentials fail at startup with variable context and the original source.

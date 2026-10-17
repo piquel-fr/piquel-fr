@@ -1,0 +1,5 @@
+error[E0425]: cannot find type `Delete` in module `notes`
+ --> tests/ui/undeclared_scope.rs:8:36
+  |
+8 |     let _ = token.require::<notes::Delete>();
+  |                                    ^^^^^^ not found in `notes`
