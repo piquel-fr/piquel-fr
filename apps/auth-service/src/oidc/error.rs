@@ -26,7 +26,7 @@ pub(super) use piquel_auth_protocol::oauth::ErrorCode as OAuthCode;
 /// auth-protocol; import it wherever rejections are built.
 pub(super) trait Reject {
     /// Client redirect carrying this error code and its description.
-    fn redirect_url(self, to: &ClientRedirect<'_>, description: &str) -> Url;
+    fn redirect_url(&self, to: &ClientRedirect<'_>, description: &str) -> Url;
 
     /// Rejects the request with this code. `description` tells the client what to fix;
     /// it must not reveal secrets or whether a credential exists.
@@ -41,7 +41,7 @@ pub(super) trait Reject {
 }
 
 impl Reject for OAuthCode {
-    fn redirect_url(self, to: &ClientRedirect<'_>, description: &str) -> Url {
+    fn redirect_url(&self, to: &ClientRedirect<'_>, description: &str) -> Url {
         to.url(&[
             ("error", self.as_str()),
             (
@@ -109,7 +109,9 @@ pub(super) enum OAuthError {
 
 impl OAuthError {
     /// HTTP status of the JSON error response for `code`.
-    const fn status(code: OAuthCode) -> StatusCode {
+    /// Auth never sends a code it does not know, but the open vocabulary needs an
+    /// answer for one.
+    const fn status(code: &OAuthCode) -> StatusCode {
         match code {
             OAuthCode::InvalidClient | OAuthCode::InvalidToken => StatusCode::UNAUTHORIZED,
             OAuthCode::ServerError => StatusCode::INTERNAL_SERVER_ERROR,
@@ -122,12 +124,13 @@ impl OAuthError {
             | OAuthCode::ConsentRequired
             | OAuthCode::RequestNotSupported
             | OAuthCode::RequestUriNotSupported
-            | OAuthCode::AccessDenied => StatusCode::BAD_REQUEST,
+            | OAuthCode::AccessDenied
+            | OAuthCode::Other(_) => StatusCode::BAD_REQUEST,
         }
     }
 
     /// `WWW-Authenticate` challenge sent with failed client or bearer authentication.
-    fn challenge(code: OAuthCode) -> Option<String> {
+    fn challenge(code: &OAuthCode) -> Option<String> {
         match code {
             OAuthCode::InvalidClient => Some("Basic realm=\"token\"".into()),
             OAuthCode::InvalidToken => {
@@ -143,7 +146,8 @@ impl OAuthError {
             | OAuthCode::RequestNotSupported
             | OAuthCode::RequestUriNotSupported
             | OAuthCode::AccessDenied
-            | OAuthCode::ServerError => None,
+            | OAuthCode::ServerError
+            | OAuthCode::Other(_) => None,
         }
     }
 
@@ -173,8 +177,8 @@ impl OAuthError {
                 source,
                 ..
             } => Self::Protocol {
-                code,
                 redirect: Some(Box::new(code.redirect_url(to, &description))),
+                code,
                 description,
                 source,
             },
@@ -198,7 +202,7 @@ impl IntoResponse for OAuthError {
                 if source.is_some() {
                     tracing::debug!(error = %ErrorChain(&self), "OAuth request rejected");
                 }
-                (*code, description.as_ref(), redirect.as_ref())
+                (code.clone(), description.as_ref(), redirect.as_ref())
             }
             Self::Database(_) | Self::Crypto(_) | Self::Url(_) | Self::CookieHeader(_) => {
                 ApiError::log_error(&self);
@@ -212,13 +216,15 @@ impl IntoResponse for OAuthError {
         if let Some(location) = redirect {
             return Redirect::to(location.as_str()).into_response();
         }
+        let status = Self::status(&code);
+        let challenge = Self::challenge(&code);
         let body = ErrorResponse {
             error: code,
             error_description: Some(ErrorDescription::lossy(description)),
         };
-        let mut response = (Self::status(code), Json(body)).into_response();
+        let mut response = (status, Json(body)).into_response();
         if let Some(challenge) =
-            Self::challenge(code).and_then(|challenge| HeaderValue::try_from(challenge).ok())
+            challenge.and_then(|challenge| HeaderValue::try_from(challenge).ok())
         {
             response
                 .headers_mut()

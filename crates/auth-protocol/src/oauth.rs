@@ -199,9 +199,10 @@ impl<'de> Deserialize<'de> for Scopes {
     }
 }
 
-piquel_common::str_enum! {
+piquel_common::open_str_enum! {
     /// OAuth and OIDC error codes auth returns from its endpoints and in authorization
-    /// error redirects (RFC 6749 §4.1.2.1 and §5.2, OIDC Core §3.1.2.6).
+    /// error redirects (RFC 6749 §4.1.2.1 and §5.2, OIDC Core §3.1.2.6). Open, so an
+    /// SDK still reads an error body carrying a code added after it was built.
     pub enum ErrorCode {
         /// Request parameters break the endpoint's contract.
         InvalidRequest = "invalid_request",

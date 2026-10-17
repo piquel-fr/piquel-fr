@@ -196,7 +196,9 @@ against them now:
 - `cnf.jkt` (`Confirmation`), for `DPoP`-bound tokens (RFC 9449).
 
 `amr` and `acr` values a parser does not know become an "other" variant holding the
-string, instead of failing the token.
+string, instead of failing the token. So do OAuth error codes and Bearer `error`
+codes, which their registry keeps extending: an unknown code still yields the rest of
+the error body or challenge.
 
 ## Test vectors
 
