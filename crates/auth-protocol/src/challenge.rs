@@ -6,6 +6,32 @@
 //! produce byte-identical headers. Parsing follows the RFC 9110 §11 grammar: any
 //! parameter order, token or quoted values, and other challenges in the same header,
 //! including ones carrying `token68` credentials.
+//!
+//! ```
+//! use piquel_auth_protocol::{
+//!     challenge::{BearerChallenge, BearerError},
+//!     claims::Acr,
+//! };
+//!
+//! // A resource server asking for a recent passkey confirmation (RFC 9470).
+//! let step_up = BearerChallenge {
+//!     acr_values: vec![Acr::PhishingResistant],
+//!     max_age: Some(300),
+//!     ..BearerChallenge::error(BearerError::InsufficientUserAuthentication)
+//! };
+//! let header = step_up.to_string();
+//! assert_eq!(
+//!     header,
+//!     r#"Bearer error="insufficient_user_authentication", acr_values="phr", max_age="300""#
+//! );
+//!
+//! // A client reads it back, whatever the order, alongside other schemes.
+//! let parsed: BearerChallenge =
+//!     r#"Basic realm="api", Bearer max_age=300, acr_values="phr", error=insufficient_user_authentication"#
+//!         .parse()?;
+//! assert_eq!(parsed, step_up);
+//! # Ok::<(), piquel_auth_protocol::challenge::ChallengeError>(())
+//! ```
 
 use crate::{
     claims::Acr,

@@ -85,6 +85,23 @@ piquel_common::str_enum! {
 /// A JSON Web Key Set (RFC 7517 §5). Auth publishes `JwkSet<Jwk>`. Verifiers read the
 /// keys as raw JSON and parse each one alone, because RFC 7517 §5 says a key of an
 /// unknown `kty` is skipped rather than failing the whole set.
+///
+/// ```
+/// use piquel_auth_protocol::jwt::{Jwk, JwkSet, KeyType};
+///
+/// let set: JwkSet<serde_json::Value> = serde_json::from_str(r#"{"keys": [
+///     {"kty": "RSA", "kid": "key-2026", "use": "sig", "alg": "RS256", "n": "AQAB", "e": "AQAB"},
+///     {"kty": "OKP", "kid": "future", "crv": "Ed25519", "x": "AQAB"}
+/// ]}"#)?;
+/// let usable: Vec<Jwk> = set
+///     .keys
+///     .into_iter()
+///     .filter_map(|key| serde_json::from_value(key).ok())
+///     .collect();
+/// assert_eq!(usable.len(), 1);
+/// assert_eq!((usable[0].kid.as_str(), usable[0].kty), ("key-2026", KeyType::Rsa));
+/// # Ok::<(), serde_json::Error>(())
+/// ```
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct JwkSet<K = Jwk> {
     /// Published keys.

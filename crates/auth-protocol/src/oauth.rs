@@ -88,6 +88,17 @@ piquel_common::str_enum! {
 /// A set of scope tokens (RFC 6749 §3.3), deduplicated and sorted so its space-separated
 /// wire form is stable. Holds strings because applications declare their own scopes
 /// besides the standard [`Scope`] values.
+///
+/// ```
+/// use piquel_auth_protocol::oauth::{InvalidScope, Scopes};
+///
+/// let granted: Scopes = "profile openid notes:read profile".parse()?;
+/// assert_eq!(granted.to_string(), "notes:read openid profile");
+/// assert!(granted.contains("notes:read"));
+/// assert!("openid".parse::<Scopes>()?.is_subset(&granted));
+/// assert_eq!(r#"say"hi""#.parse::<Scopes>(), Err(InvalidScope));
+/// # Ok::<(), InvalidScope>(())
+/// ```
 #[derive(Clone, Debug, Default, PartialEq, Eq, Hash)]
 pub struct Scopes(BTreeSet<String>);
 
@@ -236,6 +247,16 @@ piquel_common::open_str_enum! {
 /// An `error_description` (RFC 6749 §5.2, RFC 6750 §3): printable ASCII without `"`
 /// or `\`. The restriction keeps it valid inside a `WWW-Authenticate` quoted string,
 /// so no description can break or inject a header.
+///
+/// ```
+/// use piquel_auth_protocol::oauth::ErrorDescription;
+///
+/// assert!("the code expired".parse::<ErrorDescription>().is_ok());
+/// assert!("line\nbreak".parse::<ErrorDescription>().is_err());
+/// // Text quoting a library error becomes a valid description.
+/// let quoted = ErrorDescription::lossy("expected \"S256\" here\n");
+/// assert_eq!(quoted.as_str(), "expected 'S256' here?");
+/// ```
 #[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(try_from = "String", into = "String")]
 pub struct ErrorDescription(String);
@@ -308,6 +329,18 @@ impl fmt::Display for ErrorDescription {
 }
 
 /// JSON error body of auth's OAuth endpoints (RFC 6749 §5.2).
+///
+/// ```
+/// use piquel_auth_protocol::oauth::{ErrorCode, ErrorResponse};
+///
+/// let body: ErrorResponse =
+///     serde_json::from_str(r#"{"error":"invalid_grant","error_description":"code expired"}"#)?;
+/// assert_eq!(body.error, ErrorCode::InvalidGrant);
+/// // A code added after this version is kept rather than failing the body.
+/// let newer: ErrorResponse = serde_json::from_str(r#"{"error":"temporarily_unavailable"}"#)?;
+/// assert_eq!(newer.error, ErrorCode::Other("temporarily_unavailable".into()));
+/// # Ok::<(), serde_json::Error>(())
+/// ```
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ErrorResponse {
     /// What went wrong.

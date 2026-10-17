@@ -59,6 +59,16 @@ impl Acr {
 }
 
 /// `aud`: one string or an array (RFC 7519 §4.1.3). Auth always sends one string.
+///
+/// ```
+/// use piquel_auth_protocol::claims::Audience;
+///
+/// let one: Audience = serde_json::from_str(r#""notes-api""#)?;
+/// let many: Audience = serde_json::from_str(r#"["notes-api", "files-api"]"#)?;
+/// assert!(one.contains("notes-api") && many.contains("files-api"));
+/// assert_eq!(many.iter().count(), 2);
+/// # Ok::<(), serde_json::Error>(())
+/// ```
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(untagged)]
 pub enum Audience {

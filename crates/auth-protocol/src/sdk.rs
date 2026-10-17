@@ -77,7 +77,20 @@ piquel_common::str_enum! {
 }
 
 /// The shared code of an SDK error: a category, and for most categories the check
-/// that failed.
+/// that failed. It serializes as the vectors' expected errors do:
+///
+/// ```
+/// use piquel_auth_protocol::sdk::{ErrorCategory, ErrorReason, SdkError};
+///
+/// let expired = SdkError::new(ErrorCategory::InvalidToken, ErrorReason::Expired);
+/// assert_eq!(
+///     serde_json::to_string(&expired)?,
+///     r#"{"code":"invalid_token","reason":"expired"}"#
+/// );
+/// let unreachable = SdkError::category(ErrorCategory::Network);
+/// assert_eq!(serde_json::to_string(&unreachable)?, r#"{"code":"network"}"#);
+/// # Ok::<(), serde_json::Error>(())
+/// ```
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SdkError {
     /// What kind of operation failed.

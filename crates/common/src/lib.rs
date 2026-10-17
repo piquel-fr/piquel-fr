@@ -465,6 +465,23 @@ macro_rules! str_enum {
 /// `amr` or `acr`. Known spellings parse to their variant; anything else is kept
 /// verbatim in `Other` instead of failing. Build values with `From<&str>` or
 /// `parse`, never `Other` directly, so a known spelling cannot hide in `Other`.
+///
+/// ```
+/// piquel_common::open_str_enum! {
+///     /// How a user authenticated.
+///     pub enum Method {
+///         /// A passkey.
+///         Passkey = "passkey",
+///     }
+/// }
+///
+/// assert_eq!(Method::from("passkey"), Method::Passkey);
+/// // A value a newer peer sends is kept, not rejected.
+/// let newer: Method = serde_json::from_str(r#""face""#).unwrap();
+/// assert_eq!(newer, Method::Other("face".into()));
+/// assert_eq!(newer.as_str(), "face");
+/// assert_eq!(Method::KNOWN, [Method::Passkey]);
+/// ```
 #[macro_export]
 macro_rules! open_str_enum {
     ($(#[$meta:meta])* $vis:vis enum $name:ident { $($(#[$variant_meta:meta])* $variant:ident = $value:literal),+ $(,)? }) => {
