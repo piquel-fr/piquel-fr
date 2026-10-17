@@ -602,17 +602,21 @@ impl Sessions {
     /// has not expired: past its expiry, another request may already have found it
     /// abandoned. Returns the saved session, or `None` if the lease was lost, as when
     /// the session was logged out meanwhile.
+    ///
+    /// `now` is read again after the backend read, so a slow read cannot make an
+    /// expired lease look current. The caller bounds the whole save by the lease.
     pub(super) async fn save(
         &self,
         key: &SessionKey,
         lease: &LeaseId,
         login: StoredLogin,
-        now: DateTime<Utc>,
+        now: impl Fn() -> DateTime<Utc> + Send + Sync,
     ) -> Result<Option<Session>, BackendError> {
         let name = key.record(SESSION);
-        let Some((record, data)) = self.read::<SessionData>(&name, now).await? else {
+        let Some((record, data)) = self.read::<SessionData>(&name, now()).await? else {
             return Ok(None);
         };
+        let now = now();
         if data
             .lease
             .as_ref()
@@ -680,7 +684,8 @@ const CHECK_ROUNDS: usize = 25;
 const CHECK_COMPETITORS: usize = 4;
 
 /// Checks that `backend` keeps the [`SessionBackend`] contract the login routes rely
-/// on. Run it in a test against the real database, on a multi-threaded runtime:
+/// on. Run it in a test against the real database, on a multi-threaded runtime with
+/// at least two workers:
 ///
 /// ```
 /// use piquel_auth::axum::{MemoryBackend, check_backend};
@@ -701,15 +706,18 @@ const CHECK_COMPETITORS: usize = 4;
 /// keys.
 ///
 /// # Errors
-/// [`BackendCheckError`] naming the first failed check, or saying the runtime is not
-/// multi-threaded, since racing calls could not overlap.
+/// [`BackendCheckError`] naming the first failed check, or saying the runtime has
+/// fewer than two workers, since racing calls could not overlap.
 #[cfg(any(test, feature = "test-util"))]
 pub async fn check_backend<B: SessionBackend>(backend: &B) -> Result<(), BackendCheckError> {
     use BackendCheckError::Contract;
     use tokio::runtime::{Handle, RuntimeFlavor};
-    if Handle::current().runtime_flavor() != RuntimeFlavor::MultiThread {
+    let runtime = Handle::current();
+    if runtime.runtime_flavor() != RuntimeFlavor::MultiThread || runtime.metrics().num_workers() < 2
+    {
         return Err(Contract(
-            "run check_backend on a multi-threaded runtime, so racing calls overlap",
+            "run check_backend on a multi-threaded runtime with at least two workers, \
+             so racing calls overlap",
         ));
     }
     let failed = |error: B::Error| BackendCheckError::Backend(Box::new(error));
@@ -842,6 +850,14 @@ async fn race<B: SessionBackend>(backend: &B) -> Result<(), BackendCheckError> {
         return Err(Contract(
             "of racing removes, exactly one must report the record",
         ));
+    }
+    if backend
+        .load(&key)
+        .await
+        .map_err(|error| Backend(Box::new(error)))?
+        .is_some()
+    {
+        return Err(Contract("a record survived the racing removes"));
     }
     Ok(())
 }

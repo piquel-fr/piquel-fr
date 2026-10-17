@@ -405,7 +405,7 @@ async fn leases_are_fenced() {
     );
     let minute = Duration::from_secs(60);
     let lease = |version, id, ttl| sessions.lease(&key, version, id, ttl, Utc::now());
-    let save = |id| sessions.save(&key, id, login.clone(), Utc::now());
+    let save = |id| sessions.save(&key, id, login.clone(), Utc::now);
     assert!(matches!(
         lease(1, &first, minute).await.expect("lease"),
         Lease::Acquired(_)
@@ -439,6 +439,61 @@ async fn leases_are_fenced() {
         lease(4, &first, minute).await.expect("lease"),
         Lease::Missing
     );
+}
+
+/// A backend whose reads are slow.
+#[derive(Clone, Default)]
+struct SlowReads(MemoryBackend);
+
+impl SessionBackend for SlowReads {
+    type Error = std::convert::Infallible;
+
+    async fn load(&self, key: &str) -> Result<Option<SessionRecord>, Self::Error> {
+        tokio::time::sleep(Duration::from_millis(150)).await;
+        self.0.load(key).await
+    }
+
+    async fn insert(&self, key: &str, record: &SessionRecord) -> Result<(), Self::Error> {
+        self.0.insert(key, record).await
+    }
+
+    async fn replace(
+        &self,
+        key: &str,
+        expected: u64,
+        record: &SessionRecord,
+    ) -> Result<bool, Self::Error> {
+        self.0.replace(key, expected, record).await
+    }
+
+    async fn remove(&self, key: &str) -> Result<bool, Self::Error> {
+        self.0.remove(key).await
+    }
+}
+
+/// A lease that expires while its save reads the session cannot save: the clock is
+/// read again after the backend answers.
+#[tokio::test]
+async fn saves_recheck_expiry_after_slow_reads() {
+    let sessions = Sessions::new(SlowReads::default());
+    let login = stored_login(USER, SessionId::new(), 300);
+    let key = SessionKey::generate().expect("key");
+    sessions
+        .insert(&key, &login, Utc::now() + TimeDelta::hours(1))
+        .await
+        .expect("insert");
+    let lease = LeaseId::generate().expect("lease");
+    let acquired = sessions
+        .lease(&key, 1, &lease, Duration::from_millis(250), Utc::now())
+        .await
+        .expect("lease");
+    assert!(matches!(acquired, Lease::Acquired(_)));
+    // The lease is still valid when the save starts, but not once its read returns.
+    let saved = sessions
+        .save(&key, &lease, login, Utc::now)
+        .await
+        .expect("save");
+    assert!(saved.is_none(), "an expired lease must not save");
 }
 
 /// A backend whose `replace` reads, pauses, then writes: not atomic.
@@ -528,16 +583,22 @@ async fn check_backend_catches_broken_backends() {
             "replace wrote a record that does not exist"
         ))
     ));
-    let single = tokio::task::spawn_blocking(|| {
-        tokio::runtime::Builder::new_current_thread()
-            .build()
-            .expect("runtime")
-            .block_on(check_backend(&MemoryBackend::default()))
-    });
-    assert!(matches!(
-        single.await.expect("task"),
-        Err(BackendCheckError::Contract(_))
-    ));
+    // Neither a current-thread runtime nor a single worker lets racing calls overlap.
+    for runtime in [
+        tokio::runtime::Builder::new_current_thread().build(),
+        tokio::runtime::Builder::new_multi_thread()
+            .worker_threads(1)
+            .build(),
+    ] {
+        let runtime = runtime.expect("runtime");
+        let checked = tokio::task::spawn_blocking(move || {
+            runtime.block_on(check_backend(&ReadThenWrite::default()))
+        });
+        assert!(matches!(
+            checked.await.expect("task"),
+            Err(BackendCheckError::Contract(message)) if message.contains("two workers")
+        ));
+    }
 }
 
 /// The memory backend keeps the backend contract, and a record the SDK cannot read

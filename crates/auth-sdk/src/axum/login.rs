@@ -585,7 +585,7 @@ impl Login {
         let (Some(refresh), Some(budget)) = (&current.login.refresh_token, budget) else {
             // Nothing to refresh, or no time left to do it safely: auth was not
             // called, so give the lease back with the session unchanged.
-            return self.save(key, lease, current.login).await;
+            return self.save(key, lease, until, current.login).await;
         };
         let Ok(refreshed) =
             tokio::time::timeout(budget.min(REFRESH_DEADLINE), self.client.refresh(refresh)).await
@@ -599,7 +599,7 @@ impl Login {
                     tracing::warn!("refresh returned an ID token for another user");
                     return self.end(key).await;
                 };
-                self.save(key, lease, refreshed).await
+                self.save(key, lease, until, refreshed).await
             }
             // Auth refused the refresh token: the grant is over.
             Err(
@@ -619,7 +619,7 @@ impl Login {
             // session and give the lease back.
             Err(error @ crate::OAuthError::Rejected { .. }) => {
                 tracing::warn!(error = %ErrorChain(&error), "session refresh failed");
-                self.save(key, lease, current.login).await
+                self.save(key, lease, until, current.login).await
             }
             // No usable answer: auth may have rotated the token.
             Err(error) => {
@@ -631,13 +631,25 @@ impl Login {
 
     /// Saves `login` under `lease`, giving the lease back. If the session no longer
     /// holds the lease, it was logged out meanwhile and must stay that way.
+    ///
+    /// The save must land before the lease expires, since afterwards another request
+    /// may find it abandoned and delete the session. A save still running at expiry
+    /// may or may not have landed, so the session ends.
     async fn save(
         &self,
         key: &SessionKey,
         lease: &LeaseId,
+        until: DateTime<Utc>,
         login: StoredLogin,
     ) -> Result<Option<Session>, BackendError> {
-        self.sessions.save(key, lease, login, self.now()).await
+        let remaining = (until - self.now()).to_std().unwrap_or_default();
+        let saving = self.sessions.save(key, lease, login, || self.now());
+        if let Ok(saved) = tokio::time::timeout(remaining, saving).await {
+            saved
+        } else {
+            tracing::warn!("saving a refresh outlasted its lease; ending the session");
+            self.end(key).await
+        }
     }
 
     /// Ends the session.
