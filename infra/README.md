@@ -112,6 +112,32 @@ the gateway ranges in `PIQUELD_INGRESS_PROXIES` to trust ingress's overwritten
 `X-Forwarded-For` address and throttle each client separately.
 `AUTH_TRUSTED_PROXIES` overrides those ranges when set.
 
+### Running several replicas
+
+`auth_replicas` sets how many auth replicas run (default 1). Two already overlap
+on every deploy: auth mounts no volume, so piqueld starts the new replica before
+stopping the old one, after the `migrate` job. On one node, a second replica
+removes the restart gap after a crash; it adds no capacity.
+
+- **Shared state.** Sessions, ceremonies, federation state, rate-limit budgets and
+  refresh-token rotation live in PostgreSQL. Database tests build two instances
+  on one database to check that sign-in, logout, budgets and refresh rotation
+  span them.
+- **Configuration.** Replicas must run with the same `AUTH_*` settings. Signing
+  keys, refresh-token digests and passkey decoys all derive from the
+  `signing-key` secret (`AUTH_KEY_PROVIDER`), which the manifest gives every
+  replica.
+- **Per-replica state.** Each replica reads OIDC clients from
+  `AUTH_CLIENTS_FILE` at startup: it re-registers them in the database and keeps
+  their origins for CORS until it restarts (#42 moves clients into the database).
+  Google's signing keys are cached per replica.
+- **Background work.** Expired-state cleanup runs on every replica every five
+  minutes. Overlapping passes are safe, only redundant. On shutdown, a pass
+  finishes its current batch.
+- **Migrations.** During a deploy the previous release runs against the new
+  schema, so migrations expand, then contract
+  (`docs/architecture/database-crate.md`).
+
 ## Web
 
 The web service is the piquel-web SvelteKit server on Node (`node build`, port

@@ -1,6 +1,7 @@
 //! Focused name validation and database-backed `WebAuthn` ceremony invariants.
 
 use super::*;
+use crate::tests::{AUTH_ORIGIN, Replicas};
 use axum::{
     body::{Body, to_bytes},
     http::{Method, Request},
@@ -118,6 +119,8 @@ fn typed_ceremonies_preserve_persistence_and_check_the_expected_payload() {
 struct Fixture {
     /// Routes and persistence under test.
     app: PasskeyApplication,
+    /// Where requests go: the passkey routes, or a replica of the whole service.
+    router: axum::Router,
     /// Software credential capable of user verification and monotonic counters.
     authenticator: WebauthnAuthenticator<SoftPasskey>,
     /// HTTPS origin passed to the authenticator.
@@ -141,7 +144,7 @@ impl Fixture {
         .await
         .expect("database");
         database.run_migrations().await.expect("migrations");
-        let origin = Url::parse("https://auth.piquel.fr/").expect("origin");
+        let origin = Url::parse(AUTH_ORIGIN).expect("origin");
         let app = PasskeyApplication::new(
             database,
             &PasskeyConfig {
@@ -193,6 +196,7 @@ impl Fixture {
             .expect("stored key");
         tx.commit().await.expect("commit");
         Self {
+            router: app.clone().routes(),
             app,
             authenticator,
             origin,
@@ -201,15 +205,21 @@ impl Fixture {
             username,
         }
     }
-    /// Sends a JSON request through the passkey routes with the supplied cookies.
+    /// Sends the next requests to `router`, such as one of [`Replicas`].
+    fn on(&mut self, router: &axum::Router) -> &mut Self {
+        self.router = router.clone();
+        self
+    }
+    /// Sends a JSON request from the auth origin with the supplied cookies.
     async fn request(&self, path: &str, method: Method, cookies: &str, body: Value) -> Response {
-        self.app
+        self.router
             .clone()
-            .routes()
             .oneshot(
                 Request::builder()
                     .method(method)
                     .uri(path)
+                    .header(header::ORIGIN, AUTH_ORIGIN)
+                    .header("x-piquel-csrf", "1")
                     .header(header::CONTENT_TYPE, "application/json")
                     .header(header::COOKIE, cookies)
                     .body(Body::from(body.to_string()))
@@ -837,4 +847,38 @@ async fn passkey_sign_in_confirms_the_browsers_session() {
         "both methods are reported"
     );
     assert!(authentication.auth_time > before.authenticated_at);
+}
+
+/// A sign-in started on one replica finishes on the other, and logging out on one
+/// ends the session on both.
+#[tokio::test]
+#[ignore = "requires TEST_DATABASE_URL"]
+async fn sign_in_and_logout_span_replicas() {
+    let mut fixture = Fixture::new().await;
+    let replicas = Replicas::new().await;
+    let username = json!({"username":fixture.username});
+    let (started, browser) = fixture
+        .on(&replicas.a)
+        .start("/webauthn/authenticate/start", "", username)
+        .await;
+    let assertion = fixture.assertion(&started);
+    let finished = fixture
+        .on(&replicas.b)
+        .request(
+            "/webauthn/authenticate/finish",
+            Method::POST,
+            &browser,
+            json!({"ceremony_id":started["ceremony_id"],"credential":assertion}),
+        )
+        .await;
+    assert_eq!(finished.status(), StatusCode::NO_CONTENT);
+    let session = Fixture::cookie(&finished);
+    fixture.on(&replicas.a);
+    let read = fixture.request("/session", Method::GET, &session, json!({}));
+    assert_eq!(read.await.status(), StatusCode::OK);
+    let logout = fixture.request("/session/logout", Method::POST, &session, json!({}));
+    assert!(logout.await.status().is_success());
+    fixture.on(&replicas.b);
+    let read = fixture.request("/session", Method::GET, &session, json!({}));
+    assert_eq!(read.await.status(), StatusCode::UNAUTHORIZED);
 }

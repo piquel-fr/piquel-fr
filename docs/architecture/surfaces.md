@@ -19,8 +19,8 @@ verification *(planned)*). It never hosts settings, developer or admin pages.
 
 The account and admin APIs are routes in the same executable. They are small
 next to the pages that use them, and keeping them there keeps one binary, one
-database owner and one policy layer. Auth stores no state outside PostgreSQL, so
-replicas scale horizontally. Its pages are static assets embedded at build time
+database owner and one policy layer. Auth keeps its state in PostgreSQL, so it runs
+as several replicas (see "Running several replicas" in `infra/README.md`). Its pages are static assets embedded at build time
 and are cacheable.
 
 ## piquel.fr and admin.piquel.fr

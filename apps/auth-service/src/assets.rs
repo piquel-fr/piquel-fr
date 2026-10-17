@@ -37,8 +37,9 @@ impl From<AssetError> for ApiError {
 pub(crate) struct EmbeddedAssets(&'static [(&'static str, &'static [u8])]);
 impl EmbeddedAssets {
     /// Takes the embedded frontend, rejecting executables compiled before it was built.
+    /// Tests accept an empty frontend: they build routers but never request a page.
     pub(crate) fn new() -> Result<Self, StartupError> {
-        if FILES.is_empty() {
+        if FILES.is_empty() && !cfg!(test) {
             Err(StartupError::MissingAssets)
         } else {
             Ok(Self(FILES))

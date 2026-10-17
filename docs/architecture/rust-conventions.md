@@ -56,8 +56,11 @@ Protocol and conditional flows may use `Session` methods directly. Create sessio
 inside the account transaction; set cookies after commit with `BrowserCookie::set_on`
 and clear them with `clear_on`. Both preserve other Set-Cookie headers.
 
-`AuthConfig::router` builds applications, provisions clients atomically and installs
-origin/CSRF checks, rate limits, a deadline and browser isolation headers.
+`AuthConfig::router` builds applications without writing to the database, so tests
+build two on one database as replicas (`Replicas` in `src/tests.rs`). Startup then
+runs `AuthConfig::provision_clients`, which replaces client registrations atomically.
+The router installs origin/CSRF checks, rate limits, a deadline and browser
+isolation headers.
 
 ## Errors
 
