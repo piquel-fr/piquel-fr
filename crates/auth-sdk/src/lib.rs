@@ -40,6 +40,12 @@
 //! an [`AccessToken`] whose `S` parameter proves the scopes it holds. Declare scopes
 //! with [`scopes!`]; [`AccessToken::require`] checks more later.
 //!
+//! An operation that needs a stronger or more recent sign-in checks a
+//! [`StepUpRequirement`] with [`AccessToken::require_authentication`], by the same rule
+//! auth applies. The resulting error's challenge asks the client to step up (RFC 9470),
+//! and a client reads the requirement back from the challenge into its next
+//! [`AuthorizeRequest`].
+//!
 //! # Signing users in
 //!
 //! [`Client`] runs the authorization code flow with PKCE:
@@ -102,7 +108,7 @@ pub use issuer::{DiscoveryError, Issuer, IssuerBuilder};
 pub use keys::{Jws, JwsHeader, KeyCache, KeyError, KeySet};
 pub use resource::{Resource, ResourceError, ResourceValidator};
 pub use scope::{Scope, ScopeSet};
-pub use token::{AccessToken, IdToken, Subject, TokenError};
+pub use token::{AccessToken, AuthenticationPolicy, IdToken, Subject, TokenError};
 
 /// The wire types this SDK reads, shared with auth itself.
 pub use piquel_auth_protocol as protocol;
@@ -111,6 +117,7 @@ pub use piquel_auth_protocol::{
     claims::{Acr, Actor, Amr, Confirmation, IdTokenClaims, ProfileClaims, UserInfo},
     oauth::Scopes,
     sdk::SdkError,
+    step_up::StepUpRequirement,
 };
 
 use chrono::{DateTime, TimeDelta, Utc};

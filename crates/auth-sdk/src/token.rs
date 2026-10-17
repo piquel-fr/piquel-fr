@@ -121,6 +121,9 @@ pub enum TokenError {
         /// The longest acceptable age, in seconds.
         max_age: u32,
     },
+    /// The user's authentication is too weak or too old for the request (RFC 9470).
+    #[error("authentication does not meet {0:?}")]
+    InsufficientUserAuthentication(StepUpRequirement),
     /// A valid token lacks scopes the request needs.
     #[error("token lacks the scopes {required}")]
     InsufficientScope {
@@ -137,6 +140,9 @@ impl TokenError {
             Self::Keys(error) => return error.code(),
             Self::InsufficientScope { .. } => {
                 return SdkError::category(ErrorCategory::InsufficientScope);
+            }
+            Self::InsufficientUserAuthentication(_) => {
+                return SdkError::category(ErrorCategory::InsufficientUserAuthentication);
             }
             Self::Malformed(_) => ErrorReason::Malformed,
             Self::UnsupportedCriticalHeader => ErrorReason::UnsupportedCriticalHeader,
@@ -168,9 +174,54 @@ impl TokenError {
                 scope: Some(required.clone()),
                 ..BearerChallenge::error(BearerError::InsufficientScope)
             }),
+            Self::InsufficientUserAuthentication(requirement) => {
+                Some(BearerChallenge::step_up(*requirement))
+            }
             _ => Some(BearerChallenge::error(BearerError::InvalidToken)),
         }
     }
+
+    /// Requires the authentication `acr` and `auth_time` describe to meet
+    /// `requirement` at `now`, allowing the leeway on `auth_time`.
+    fn require_authentication(
+        requirement: StepUpRequirement,
+        acr: Option<&Acr>,
+        auth_time: Option<DateTime<Utc>>,
+        now: DateTime<Utc>,
+    ) -> Result<(), Self> {
+        requirement
+            .check(acr, auth_time, now - LEEWAY)
+            .map_err(Self::InsufficientUserAuthentication)
+    }
+}
+
+/// What an operation needs from the user's authentication, named as a type so
+/// extractors can require it. Declare one per policy:
+///
+/// ```
+/// use chrono::{TimeDelta, Utc};
+/// use piquel_auth::{Acr, AuthenticationPolicy, StepUpRequirement, TokenError};
+///
+/// /// A passkey confirmation within the last five minutes.
+/// struct RecentPasskey;
+///
+/// impl AuthenticationPolicy for RecentPasskey {
+///     const REQUIREMENT: StepUpRequirement = StepUpRequirement::passkey_within(300);
+/// }
+///
+/// let error = TokenError::InsufficientUserAuthentication(RecentPasskey::REQUIREMENT);
+/// assert_eq!(
+///     error.challenge().map(|challenge| challenge.to_string()).as_deref(),
+///     Some(r#"Bearer error="insufficient_user_authentication", acr_values="phr", max_age="300""#)
+/// );
+/// ```
+///
+/// A token meets the policy as auth would judge the session behind it
+/// ([`StepUpRequirement::check`]), with the 30-second leeway on `auth_time`: `phr`
+/// meets a social requirement too.
+pub trait AuthenticationPolicy: Send + Sync + 'static {
+    /// What the operation needs.
+    const REQUIREMENT: StepUpRequirement;
 }
 
 /// Who an access token acts for.
@@ -234,9 +285,11 @@ pub struct AccessToken<S = Scopes, X = ()> {
     pub session_id: Option<SessionId>,
     /// When the user authenticated.
     pub auth_time: Option<DateTime<Utc>>,
-    /// How the user authenticated (RFC 8176); unknown values are kept as `Other`.
+    /// How the user authenticated (RFC 8176); values this version does not know are
+    /// dropped.
     pub amr: Vec<Amr>,
-    /// The authentication context class reached; unknown values are kept as `Other`.
+    /// The authentication context class reached; a class this version does not know
+    /// reads as none.
     pub acr: Option<Acr>,
     /// Who is acting for the subject, for exchanged tokens.
     pub actor: Option<Actor>,
@@ -250,6 +303,23 @@ pub struct AccessToken<S = Scopes, X = ()> {
     pub expires_at: DateTime<Utc>,
     /// Application claims.
     pub extra: X,
+}
+
+impl<S, X> AccessToken<S, X> {
+    /// Requires the token's authentication to meet `requirement` at `now`; use the
+    /// issuer's clock, as [`ResourceValidator::now`](crate::ResourceValidator::now)
+    /// gives.
+    ///
+    /// # Errors
+    /// [`TokenError::InsufficientUserAuthentication`], whose challenge asks the
+    /// client to sign the user in again (RFC 9470).
+    pub fn require_authentication(
+        &self,
+        requirement: StepUpRequirement,
+        now: DateTime<Utc>,
+    ) -> Result<(), TokenError> {
+        TokenError::require_authentication(requirement, self.acr.as_ref(), self.auth_time, now)
+    }
 }
 
 impl<X> AccessToken<Scopes, X> {
@@ -353,6 +423,25 @@ impl IdToken {
     #[must_use]
     pub fn as_str(&self) -> &str {
         &self.raw
+    }
+
+    /// Requires the sign-in to meet `requirement` at `now`, with the leeway on
+    /// `auth_time`.
+    ///
+    /// # Errors
+    /// [`TokenError::InsufficientUserAuthentication`].
+    pub fn require_authentication(
+        &self,
+        requirement: StepUpRequirement,
+        now: DateTime<Utc>,
+    ) -> Result<(), TokenError> {
+        let authentication = &self.claims.authentication;
+        TokenError::require_authentication(
+            requirement,
+            authentication.acr.as_ref(),
+            authentication.auth_time,
+            now,
+        )
     }
 
     /// The signed-in account.

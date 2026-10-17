@@ -197,16 +197,19 @@ pub struct ClientConfig {
 /// What to ask for in an authorization request. `openid` is always requested.
 ///
 /// ```
-/// use piquel_auth::{AuthorizeRequest, protocol::oauth::Prompt};
+/// use piquel_auth::{AuthorizeRequest, protocol::challenge::BearerChallenge};
 ///
-/// // Profile claims, a refresh token, and a sign-in within the last five minutes.
+/// // An API answered with a step-up challenge: ask auth for what it names, with
+/// // profile claims and a refresh token.
+/// let challenge: BearerChallenge = r#"Bearer error="insufficient_user_authentication", acr_values="phr", max_age="300""#
+///     .parse()?;
 /// let request = AuthorizeRequest {
 ///     scopes: "profile offline_access".parse()?,
-///     max_age: Some(300),
-///     prompt: Some(Prompt::Login),
+///     step_up: challenge.step_up,
 ///     ..AuthorizeRequest::default()
 /// };
-/// # Ok::<(), piquel_auth::protocol::oauth::InvalidScope>(())
+/// assert_eq!(request.step_up.max_age, Some(300));
+/// # Ok::<(), Box<dyn std::error::Error>>(())
 /// ```
 #[derive(Clone, Debug, Default)]
 pub struct AuthorizeRequest {
@@ -215,8 +218,8 @@ pub struct AuthorizeRequest {
     /// `prompt`, such as [`Prompt::Login`] to force a fresh sign-in.
     pub prompt: Option<Prompt>,
     /// The authentication to ask for, sent as `acr_values` and `max_age`, such as the
-    /// one a step-up challenge names. Its `max_age` is checked against the ID token's
-    /// `auth_time`.
+    /// one a step-up challenge names. [`Client::complete`] fails unless the ID token
+    /// meets it.
     pub step_up: StepUpRequirement,
 }
 
@@ -325,8 +328,8 @@ pub struct PendingLogin {
     verifier: String,
     /// The callback the code is bound to.
     redirect_uri: Url,
-    /// `max_age` sent, checked against the ID token's `auth_time`.
-    max_age: Option<u32>,
+    /// The authentication asked for, which the ID token must meet.
+    step_up: StepUpRequirement,
 }
 
 impl fmt::Debug for PendingLogin {
@@ -549,7 +552,7 @@ impl Client {
             nonce: random()?,
             verifier: random()?,
             redirect_uri: self.config().redirect_uri.clone(),
-            max_age: request.step_up.max_age,
+            step_up: request.step_up,
         };
         let scopes: Scopes = request
             .scopes
@@ -610,17 +613,21 @@ impl Client {
             ])
             .await?;
         let tokens = self
-            .tokens(response, Some(&pending.nonce), pending.max_age)
+            .tokens(response, Some(&pending.nonce), pending.step_up.max_age)
             .await?;
         // `openid` was requested, so a response without an ID token names no user.
-        if tokens.id_token.is_none() {
+        let Some(id_token) = &tokens.id_token else {
             return Err(OAuthError::UnexpectedResponse {
                 endpoint: "token",
                 status: StatusCode::OK.as_u16(),
                 source: None,
             }
             .into());
-        }
+        };
+        // A step-up login that fell short would only be asked for again.
+        id_token
+            .require_authentication(pending.step_up, self.issuer().now())
+            .map_err(OAuthError::IdToken)?;
         Ok(tokens)
     }
 

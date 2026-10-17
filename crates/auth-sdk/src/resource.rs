@@ -1,6 +1,7 @@
 //! Resource identifiers and access token validation.
 
 use crate::{AccessToken, Issuer, ScopeSet, TokenError};
+use chrono::{DateTime, Utc};
 use piquel_auth_protocol::{claims::AccessTokenClaims, jwt::TokenType};
 use serde::de::DeserializeOwned;
 use std::{fmt, marker::PhantomData, str::FromStr};
@@ -129,18 +130,7 @@ impl ResourceValidator {
     }
 }
 
-impl<X: DeserializeOwned> ResourceValidator<X> {
-    /// Reads application claims into `Y`, which must deserialize from the token's
-    /// claims object.
-    #[must_use]
-    pub fn with_claims<Y: DeserializeOwned>(self) -> ResourceValidator<Y> {
-        ResourceValidator {
-            issuer: self.issuer,
-            resource: self.resource,
-            claims: PhantomData,
-        }
-    }
-
+impl<X> ResourceValidator<X> {
     /// The resource tokens must be for.
     #[must_use]
     pub const fn resource(&self) -> &Resource {
@@ -151,6 +141,26 @@ impl<X: DeserializeOwned> ResourceValidator<X> {
     #[must_use]
     pub const fn issuer(&self) -> &Issuer {
         &self.issuer
+    }
+
+    /// The current time by the issuer's clock, for
+    /// [`AccessToken::require_authentication`].
+    #[must_use]
+    pub fn now(&self) -> DateTime<Utc> {
+        self.issuer.now()
+    }
+}
+
+impl<X: DeserializeOwned> ResourceValidator<X> {
+    /// Reads application claims into `Y`, which must deserialize from the token's
+    /// claims object.
+    #[must_use]
+    pub fn with_claims<Y: DeserializeOwned>(self) -> ResourceValidator<Y> {
+        ResourceValidator {
+            issuer: self.issuer,
+            resource: self.resource,
+            claims: PhantomData,
+        }
     }
 
     /// Validates an access token and requires the scopes `S`. Use

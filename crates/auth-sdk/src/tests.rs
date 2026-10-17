@@ -224,6 +224,77 @@ fn challenge_vectors() {
     }
 }
 
+/// The step-up vector's challenge parses back into its requirement, and a token
+/// failing that requirement answers with the same header.
+#[test]
+fn step_up_challenge_round_trips() {
+    let case = Case::all("challenges")
+        .into_iter()
+        .find(|case| case.name.ends_with("insufficient-user-authentication.json"))
+        .expect("step-up vector");
+    let header = case.json["expected"]["ok"]["header"]
+        .as_str()
+        .expect("header");
+    let parsed: BearerChallenge = header.parse().expect("challenge");
+    assert_eq!(parsed.step_up, StepUpRequirement::passkey_within(300));
+    let answer = TokenError::InsufficientUserAuthentication(parsed.step_up)
+        .challenge()
+        .expect("a challenge");
+    let answer = BearerChallenge {
+        error_description: parsed.error_description.clone(),
+        resource_metadata: parsed.resource_metadata.clone(),
+        ..answer
+    };
+    assert_eq!(answer.to_string(), header);
+}
+
+/// A token's authentication meets a requirement as auth judges it: `phr` meets a
+/// social requirement, and `auth_time` gets the leeway.
+#[test]
+fn authentication_requirements_follow_auth() {
+    let now = Utc::now();
+    let token = |acr, age: i64| AccessToken {
+        subject: Subject::User(UserId::new()),
+        client_id: ClientId::new("notes-web"),
+        scopes: Scopes::default(),
+        token_id: TokenId::new(),
+        session_id: None,
+        auth_time: Some(now - TimeDelta::seconds(age)),
+        amr: Vec::new(),
+        acr: Some(acr),
+        actor: None,
+        confirmation: None,
+        profile: ProfileClaims::default(),
+        issued_at: now,
+        expires_at: now,
+        extra: (),
+    };
+    let social = StepUpRequirement {
+        acr: Some(Acr::Social),
+        max_age: None,
+    };
+    assert!(
+        token(Acr::PhishingResistant, 0)
+            .require_authentication(social, now)
+            .is_ok()
+    );
+    let recent = StepUpRequirement::passkey_within(300);
+    assert!(
+        token(Acr::PhishingResistant, 330)
+            .require_authentication(recent, now)
+            .is_ok()
+    );
+    assert!(matches!(
+        token(Acr::PhishingResistant, 331).require_authentication(recent, now),
+        Err(TokenError::InsufficientUserAuthentication(requirement)) if requirement == recent
+    ));
+    assert!(
+        token(Acr::Social, 0)
+            .require_authentication(recent, now)
+            .is_err()
+    );
+}
+
 /// Callbacks are checked before any code exchange.
 #[test]
 fn callback_vectors() {
@@ -235,7 +306,7 @@ fn callback_vectors() {
             "nonce": "unused",
             "verifier": "unused",
             "redirect_uri": "https://client.example.com/callback",
-            "max_age": null,
+            "step_up": {},
         }))
         .expect("pending login");
         let parameters: CallbackParams =
