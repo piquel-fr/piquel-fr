@@ -6,6 +6,7 @@ use piquel_auth_protocol::{claims::AccessTokenClaims, jwt::TokenType};
 use serde::de::DeserializeOwned;
 use std::{fmt, marker::PhantomData, str::FromStr};
 use thiserror::Error;
+use url::Url;
 
 /// A resource identifier that is empty or holds spaces or control characters.
 #[derive(Debug, Error)]
@@ -30,6 +31,8 @@ pub struct ResourceError;
 pub struct Resource {
     /// The resource identifier.
     identifier: String,
+    /// Where the resource's protected resource metadata is served (RFC 9728).
+    metadata: Option<Url>,
 }
 
 impl Resource {
@@ -43,13 +46,28 @@ impl Resource {
         }
         Ok(Self {
             identifier: identifier.to_owned(),
+            metadata: None,
         })
+    }
+
+    /// Names where the resource serves its protected resource metadata (RFC 9728), so
+    /// every challenge carries it as `resource_metadata` (§5.1).
+    #[must_use]
+    pub fn with_metadata(mut self, url: Url) -> Self {
+        self.metadata = Some(url);
+        self
     }
 
     /// The identifier, the `aud` its access tokens must contain.
     #[must_use]
     pub fn identifier(&self) -> &str {
         &self.identifier
+    }
+
+    /// Where the resource's protected resource metadata is served, if configured.
+    #[must_use]
+    pub const fn metadata(&self) -> Option<&Url> {
+        self.metadata.as_ref()
     }
 }
 

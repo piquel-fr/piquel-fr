@@ -694,22 +694,28 @@ impl Client {
     }
 
     /// The RP-initiated logout URL: auth ends the browser session, then sends the
-    /// browser to `post_logout`, which must be registered for this client.
+    /// browser to `post_logout`, which must be registered for this client. Without
+    /// one, auth shows its own page.
     ///
     /// ```no_run
     /// # fn run(client: piquel_auth::Client, id_token: piquel_auth::IdToken) -> Result<(), url::ParseError> {
     /// // Redirect the browser here once the app's own session is gone.
     /// let after: url::Url = "https://notes.piquel.fr/".parse()?;
-    /// let logout = client.logout_url(&id_token, &after);
+    /// let logout = client.logout_url(&id_token, Some(&after));
     /// # Ok(()) }
     /// ```
     #[must_use]
-    pub fn logout_url(&self, id_token: &IdToken, post_logout: &Url) -> Url {
+    pub fn logout_url(&self, id_token: &IdToken, post_logout: Option<&Url>) -> Url {
         let mut url = self.issuer().metadata().end_session_endpoint.clone();
-        url.query_pairs_mut()
-            .append_pair("id_token_hint", id_token.as_str())
-            .append_pair("post_logout_redirect_uri", post_logout.as_str())
-            .append_pair("client_id", self.config().client_id.as_str());
+        {
+            let mut query = url.query_pairs_mut();
+            query
+                .append_pair("id_token_hint", id_token.as_str())
+                .append_pair("client_id", self.config().client_id.as_str());
+            if let Some(post_logout) = post_logout {
+                query.append_pair("post_logout_redirect_uri", post_logout.as_str());
+            }
+        }
         url
     }
 

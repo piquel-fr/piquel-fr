@@ -2,7 +2,7 @@
 
 use super::*;
 use crate::{client::PendingLogin, http::Http};
-use axum::{Router, http::StatusCode, routing::get};
+use ::axum::{Router, http::StatusCode, routing::get};
 use base64::{Engine, engine::general_purpose::URL_SAFE_NO_PAD};
 use piquel_auth_protocol::{challenge::BearerChallenge, claims::AccessTokenClaims, jwt::TokenType};
 use serde_json::Value;
@@ -18,18 +18,18 @@ use url::Url;
 
 /// A clock tests move by hand.
 #[derive(Clone)]
-struct ManualClock(Arc<Mutex<DateTime<Utc>>>);
+pub(crate) struct ManualClock(Arc<Mutex<DateTime<Utc>>>);
 
 impl ManualClock {
     /// A clock showing `timestamp`.
-    fn at(timestamp: i64) -> Self {
+    pub(crate) fn at(timestamp: i64) -> Self {
         Self(Arc::new(Mutex::new(
             DateTime::from_timestamp(timestamp, 0).expect("test time"),
         )))
     }
 
     /// Moves the clock forward.
-    fn advance(&self, seconds: i64) {
+    pub(crate) fn advance(&self, seconds: i64) {
         *self.0.lock().expect("clock lock") += TimeDelta::seconds(seconds);
     }
 }
@@ -41,16 +41,16 @@ impl Clock for ManualClock {
 }
 
 /// One vector file.
-struct Case {
+pub(crate) struct Case {
     /// File name, for assertion messages.
-    name: String,
+    pub(crate) name: String,
     /// The parsed case.
-    json: Value,
+    pub(crate) json: Value,
 }
 
 impl Case {
     /// Every case of `category`, in file name order.
-    fn all(category: &str) -> Vec<Self> {
+    pub(crate) fn all(category: &str) -> Vec<Self> {
         let directory = Path::new(env!("CARGO_MANIFEST_DIR"))
             .join("../../tests/sdk-vectors")
             .join(category);
@@ -73,17 +73,17 @@ impl Case {
     }
 
     /// An input field.
-    fn input(&self, field: &str) -> &Value {
+    pub(crate) fn input(&self, field: &str) -> &Value {
         &self.json["input"][field]
     }
 
     /// An input string.
-    fn text(&self, field: &str) -> &str {
+    pub(crate) fn text(&self, field: &str) -> &str {
         self.input(field).as_str().expect("string input")
     }
 
     /// The case's clock.
-    fn clock(&self) -> ManualClock {
+    pub(crate) fn clock(&self) -> ManualClock {
         ManualClock::at(self.json["now"].as_i64().expect("now"))
     }
 
@@ -108,7 +108,7 @@ impl Case {
 }
 
 /// The issuer every token case is validated against, with the case's keys and clock.
-fn issuer(case: &Case) -> Issuer {
+pub(crate) fn issuer(case: &Case) -> Issuer {
     let discovery = Case::all("discovery")
         .into_iter()
         .find(|case| case.name.ends_with("valid.json"))
@@ -348,7 +348,7 @@ impl KeyServer {
                 let document = documents.get(current.load(Ordering::SeqCst)).cloned();
                 async move {
                     document
-                        .map(axum::Json)
+                        .map(::axum::Json)
                         .ok_or(StatusCode::SERVICE_UNAVAILABLE)
                 }
             }),
@@ -357,7 +357,7 @@ impl KeyServer {
             .await
             .expect("bind key server");
         let address = listener.local_addr().expect("key server address");
-        tokio::spawn(async move { axum::serve(listener, router).await });
+        tokio::spawn(async move { ::axum::serve(listener, router).await });
         Self {
             url: format!("http://{address}/jwks").parse().expect("JWKS URL"),
             requests,
@@ -372,7 +372,7 @@ impl KeyServer {
 }
 
 /// A token from a vector file.
-fn vector_token(name: &str) -> String {
+pub(crate) fn vector_token(name: &str) -> String {
     Case::all("tokens")
         .into_iter()
         .find(|case| case.name.ends_with(&format!("/{name}.json")))

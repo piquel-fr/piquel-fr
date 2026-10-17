@@ -10,7 +10,7 @@ is authentication and the piquel.fr account settings frontend.
 | `apps/piquel-web` | piquel.fr's SvelteKit server on Node: account settings calling the auth API |
 | `packages/auth-sdk` | Browser auth SDK: API client, WebAuthn passkey ceremonies, redirect helpers, shared styles; `/server`: auth origin validation and security headers for SvelteKit servers |
 | `crates/database` | `piquel-repository`: PostgreSQL connections, migrations and typed persistence operations |
-| `crates/auth-sdk` | `piquel-auth`, the public Rust SDK: token validation, typed scopes, login and the JWKS cache auth also uses for Google |
+| `crates/auth-sdk` | `piquel-auth`, the public Rust SDK: token validation, typed scopes, login and the JWKS cache auth also uses for Google; `axum` feature: extractors, bearer layer, login routes over an application's own session backend |
 | `crates/auth-protocol` | Wire types shared by auth and the SDKs: IDs, token claims, discovery metadata, JWK sets, OAuth/OIDC vocabulary and errors, bearer challenges, SDK error codes |
 | `crates/common` | Named environment variables, validated URLs, secret references and string enums |
 | `crates/crypto` | Random secrets, SHA-256, HMAC, PKCE and RS256 signing |
