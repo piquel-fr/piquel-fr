@@ -1,0 +1,24 @@
+{
+  "description": "before a rotation only the old key is published",
+  "input": {
+    "jwks": {
+      "keys": [
+        {
+          "alg": "RS256",
+          "e": "AQAB",
+          "kid": "key-2025",
+          "kty": "RSA",
+          "n": "wVpUJ5o9UePaQeyX8a6XFDVyAyN6HSiT6ColCm4AedZEuCaz5mMWQeintQvevJB0fYReqVFmSXr69OSf8d04wUthRmwfMns-wW5rT2LKuZcN02rXaiRsQepuC0nsqY-HaRTike3nvRhuzZlobtl8rxvxG0mzbfN27NSRJWQdOAWTkrzLzi58IAbg2umQB6h7P7g3AYMHRunx7Rc5xaReeWyvK8CPUA2CbGQOzDi468bl0BKMX3y-ibNq4gPCqWzeVZjpY4rP0EYbz3i3bV9PMo4qRFtQd77UNzF6ibxmWL1gX8u348H3ia_Fvug-t9MJO3HqFVvV5REx5O1nIOWz8Q",
+          "use": "sig"
+        }
+      ]
+    }
+  },
+  "expected": {
+    "ok": {
+      "kids": [
+        "key-2025"
+      ]
+    }
+  }
+}

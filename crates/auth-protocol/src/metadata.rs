@@ -5,6 +5,7 @@
 use crate::{
     claims::Acr,
     jwt::{Algorithm, Claim},
+    known,
     oauth::{
         ClientAuthMethod, CodeChallengeMethod, GrantType, ResponseMode, ResponseType, Scope,
         SubjectType,
@@ -18,8 +19,10 @@ pub const OAUTH_AUTHORIZATION_SERVER_PATH: &str = "/.well-known/oauth-authorizat
 /// Path of the OIDC Discovery document.
 pub const OPENID_CONFIGURATION_PATH: &str = "/.well-known/openid-configuration";
 
-/// The metadata Piquel auth publishes. Every field it sends is required, so a client
-/// parsing it learns of a missing capability at once. Later capabilities add fields
+/// The metadata Piquel auth publishes. Every field it sends is required, except the
+/// PKCE methods, so a client parsing it learns of a missing capability at once. Lists
+/// keep only the values this version knows, so a newer auth advertising more does not
+/// break older clients. Later capabilities add fields
 /// here, optional ones skipped when `None`.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[expect(
@@ -45,26 +48,38 @@ pub struct ServerMetadata {
     /// Human-readable documentation for client developers.
     pub service_documentation: Url,
     /// Standard scopes clients may request.
+    #[serde(deserialize_with = "known")]
     pub scopes_supported: Vec<Scope>,
     /// Accepted `response_type` values.
+    #[serde(deserialize_with = "known")]
     pub response_types_supported: Vec<ResponseType>,
     /// Accepted `response_mode` values.
+    #[serde(deserialize_with = "known")]
     pub response_modes_supported: Vec<ResponseMode>,
     /// Accepted `grant_type` values.
+    #[serde(deserialize_with = "known")]
     pub grant_types_supported: Vec<GrantType>,
     /// Client authentication methods at the token endpoint.
+    #[serde(deserialize_with = "known")]
     pub token_endpoint_auth_methods_supported: Vec<ClientAuthMethod>,
     /// Client authentication methods at the revocation endpoint.
+    #[serde(deserialize_with = "known")]
     pub revocation_endpoint_auth_methods_supported: Vec<ClientAuthMethod>,
-    /// Accepted PKCE methods.
+    /// Accepted PKCE methods. Defaults to empty when absent, which RFC 8414 §2 says
+    /// means no PKCE support, so clients can refuse the issuer with a precise reason.
+    #[serde(default, deserialize_with = "known")]
     pub code_challenge_methods_supported: Vec<CodeChallengeMethod>,
     /// Subject identifier types.
+    #[serde(deserialize_with = "known")]
     pub subject_types_supported: Vec<SubjectType>,
     /// ID token signing algorithms.
+    #[serde(deserialize_with = "known")]
     pub id_token_signing_alg_values_supported: Vec<Algorithm>,
     /// Claims tokens may contain.
+    #[serde(deserialize_with = "known")]
     pub claims_supported: Vec<Claim>,
     /// Authentication context classes `acr_values` may request and `acr` reports.
+    #[serde(default, deserialize_with = "known")]
     pub acr_values_supported: Vec<Acr>,
     /// Whether the `claims` request parameter is honoured.
     pub claims_parameter_supported: bool,

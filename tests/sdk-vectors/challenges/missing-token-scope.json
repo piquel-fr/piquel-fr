@@ -1,0 +1,15 @@
+{
+  "description": "no token was sent; the challenge names the scope the handler enforces",
+  "input": {
+    "challenge": {
+      "resource_metadata": "https://notes.example.com/.well-known/oauth-protected-resource",
+      "scope": "notes:read"
+    }
+  },
+  "expected": {
+    "ok": {
+      "header": "Bearer scope=\"notes:read\", resource_metadata=\"https://notes.example.com/.well-known/oauth-protected-resource\"",
+      "status": 401
+    }
+  }
+}

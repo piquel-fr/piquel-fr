@@ -1,0 +1,36 @@
+{
+  "description": "a token without a required claim is rejected",
+  "now": 1767225600,
+  "input": {
+    "audience": "https://notes.example.com",
+    "issuer": "https://auth.example.com",
+    "jwks": {
+      "keys": [
+        {
+          "alg": "RS256",
+          "e": "AQAB",
+          "kid": "key-2025",
+          "kty": "RSA",
+          "n": "wVpUJ5o9UePaQeyX8a6XFDVyAyN6HSiT6ColCm4AedZEuCaz5mMWQeintQvevJB0fYReqVFmSXr69OSf8d04wUthRmwfMns-wW5rT2LKuZcN02rXaiRsQepuC0nsqY-HaRTike3nvRhuzZlobtl8rxvxG0mzbfN27NSRJWQdOAWTkrzLzi58IAbg2umQB6h7P7g3AYMHRunx7Rc5xaReeWyvK8CPUA2CbGQOzDi468bl0BKMX3y-ibNq4gPCqWzeVZjpY4rP0EYbz3i3bV9PMo4qRFtQd77UNzF6ibxmWL1gX8u348H3ia_Fvug-t9MJO3HqFVvV5REx5O1nIOWz8Q",
+          "use": "sig"
+        },
+        {
+          "alg": "RS256",
+          "e": "AQAB",
+          "kid": "key-2026",
+          "kty": "RSA",
+          "n": "uIyTduvpF-LYSdNmHoK0TI0HtTEEAlE17LrpIGe4t4RmG8pG-Nocs_FXJB0ErRwoCmiIxxW9dxni9MFsnOPpOgj2YVZJnSlFgvXioU3bpOc9xyTmQtXoarWe96RO50W7vHsuuHrMmGuwRFyN_6Uw7w1FK-mS5Jf5TwBYJjwLpvdmyAiqoOwQv0z4zHfZnaN6AY4QocMJOTB8IdOV4-ej0p2xCKSL5FQS8nkMKg9bT9vxdDjp8CTjFh3Yfb-hgyipDvZ-rB8v41NISDsxJ_yjmxFsYdiEGCrgVaRGHtzfHfar-873Ciz8SqjTK-p7dqKd7LfijdoVLZHQEbaKEZvxsw",
+          "use": "sig"
+        }
+      ]
+    },
+    "kind": "access",
+    "token": "eyJhbGciOiJSUzI1NiIsImtpZCI6ImtleS0yMDI1IiwidHlwIjoiYXQrand0In0.eyJhY3IiOiJwaHIiLCJhbXIiOlsicG9wIiwibWZhIiwidXNlciJdLCJhdWQiOiJodHRwczovL25vdGVzLmV4YW1wbGUuY29tIiwiYXV0aF90aW1lIjoxNzY3MjIyMDAwLCJjbGllbnRfaWQiOiJub3Rlcy13ZWIiLCJpYXQiOjE3NjcyMjU1NDAsImlzcyI6Imh0dHBzOi8vYXV0aC5leGFtcGxlLmNvbSIsImp0aSI6IjAxOTM2ZjNlLThjMDAtNzAwMC04MDAwLTAwMDAwMDAwMDAwMyIsIm5hbWUiOiJBZGEgTG92ZWxhY2UiLCJwcmVmZXJyZWRfdXNlcm5hbWUiOiJhZGEiLCJwcm9maWxlX3ZlcnNpb24iOjEsInNjb3BlIjoibm90ZXM6cmVhZCBvcGVuaWQgcHJvZmlsZSIsInNpZCI6IjAxOTM2ZjNlLThjMDAtNzAwMC04MDAwLTAwMDAwMDAwMDAwMiIsInN1YiI6IjAxOTM2ZjNlLThjMDAtNzAwMC04MDAwLTAwMDAwMDAwMDAwMSJ9.njcj5lnl2NQIU-3Cumyoh1CrMM1itk_AsKlmzek0bk37bNykDXXjAOEyaEc7CeDKu2I-RSL8EUo4azwnyJI8LM3ocsxXk-F37Aj_8tCLbyancZbou8R8TXtrQ25IjldxczzBJdPvLqaXuuTY8ezMMUwl1D1pOpkkiVn52zEbQTXax_1TC7kNmg_ZxnwJfD-7IM0H3VHaP0tl9d4WGzaEOtZhWnLaL4dKO5SDOXxUzENpOLaQA86SDCxthnzQ_p94ktTOy8WtU6D-YFE-525bfbphnE2LKXnKeC0Phn_3efFGP9L_DIiFuTBJcAuOBZ0OmPqJyOajv8ToyZM7OLrcrA"
+  },
+  "expected": {
+    "error": {
+      "code": "invalid_token",
+      "reason": "invalid_claims"
+    }
+  }
+}

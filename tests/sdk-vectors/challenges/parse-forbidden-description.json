@@ -1,0 +1,11 @@
+{
+  "description": "error_description may not contain a quote (RFC 6750 §3), so this header has no valid challenge",
+  "input": {
+    "header": "Bearer error=\"invalid_token\", error_description=\"say \\\"hi\\\"\""
+  },
+  "expected": {
+    "ok": {
+      "challenge": null
+    }
+  }
+}

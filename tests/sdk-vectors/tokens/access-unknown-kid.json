@@ -1,0 +1,28 @@
+{
+  "description": "a kid absent from the published set is rejected",
+  "now": 1767225600,
+  "input": {
+    "audience": "https://notes.example.com",
+    "issuer": "https://auth.example.com",
+    "jwks": {
+      "keys": [
+        {
+          "alg": "RS256",
+          "e": "AQAB",
+          "kid": "key-2025",
+          "kty": "RSA",
+          "n": "wVpUJ5o9UePaQeyX8a6XFDVyAyN6HSiT6ColCm4AedZEuCaz5mMWQeintQvevJB0fYReqVFmSXr69OSf8d04wUthRmwfMns-wW5rT2LKuZcN02rXaiRsQepuC0nsqY-HaRTike3nvRhuzZlobtl8rxvxG0mzbfN27NSRJWQdOAWTkrzLzi58IAbg2umQB6h7P7g3AYMHRunx7Rc5xaReeWyvK8CPUA2CbGQOzDi468bl0BKMX3y-ibNq4gPCqWzeVZjpY4rP0EYbz3i3bV9PMo4qRFtQd77UNzF6ibxmWL1gX8u348H3ia_Fvug-t9MJO3HqFVvV5REx5O1nIOWz8Q",
+          "use": "sig"
+        }
+      ]
+    },
+    "kind": "access",
+    "token": "eyJhbGciOiJSUzI1NiIsImtpZCI6ImtleS0yMDI2IiwidHlwIjoiYXQrand0In0.eyJpc3MiOiJodHRwczovL2F1dGguZXhhbXBsZS5jb20iLCJzdWIiOiIwMTkzNmYzZS04YzAwLTcwMDAtODAwMC0wMDAwMDAwMDAwMDEiLCJhdWQiOiJodHRwczovL25vdGVzLmV4YW1wbGUuY29tIiwiY2xpZW50X2lkIjoibm90ZXMtd2ViIiwianRpIjoiMDE5MzZmM2UtOGMwMC03MDAwLTgwMDAtMDAwMDAwMDAwMDAzIiwic2NvcGUiOiJub3RlczpyZWFkIG9wZW5pZCBwcm9maWxlIiwiaWF0IjoxNzY3MjI1NTQwLCJleHAiOjE3NjcyMjU4NDAsInNpZCI6IjAxOTM2ZjNlLThjMDAtNzAwMC04MDAwLTAwMDAwMDAwMDAwMiIsImF1dGhfdGltZSI6MTc2NzIyMjAwMCwiYW1yIjpbInBvcCIsIm1mYSIsInVzZXIiXSwiYWNyIjoicGhyIiwicHJlZmVycmVkX3VzZXJuYW1lIjoiYWRhIiwibmFtZSI6IkFkYSBMb3ZlbGFjZSIsInByb2ZpbGVfdmVyc2lvbiI6MX0.YCtn2APetWIgCSBV9zE3p7hbpE6NgRjq_n9l1SWBXzeB_rPFk43lSFAwqCBBJWCM-OO56dVLl__AjiJgUQ9gXveHPdgc9Q3KL0TwDqD_ckZeHlqjTmpk9JdgZDA_x541MtfbfpIGIxvTNcd-oQj6-uyGziEMrhWIu6mJXktjZvmLa3DRRYbt1Bo4rYIRy0-Sog9ZsD4rlbnOJfjaG58QR-2jEIfYSO14YxMCcLhBg1rtKfcn_YeecV0k7PCHWOiJPpyUknOAfKs-xJ6-t6rPyb9C_frHudRJJfgfkkUn0W_wPL9L1GR-5dUL0QCkDj1X2uV9Qp_hisVty_UI8tfp6A"
+  },
+  "expected": {
+    "error": {
+      "code": "invalid_token",
+      "reason": "unknown_key"
+    }
+  }
+}

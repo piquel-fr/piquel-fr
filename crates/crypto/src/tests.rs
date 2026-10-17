@@ -99,14 +99,14 @@ fn jwt_persistence_and_trust_boundaries() {
     let token = key.sign(TokenType::Id, &claims).expect("sign");
     assert_eq!(
         restored
-            .verify(&token, TokenType::Id, "https://auth.example")
+            .verify::<serde_json::Value>(&token, TokenType::Id, "https://auth.example")
             .expect("verify"),
         claims
     );
     let unrelated = Rs256Key::generate("persistent").expect("different RSA key with the same ID");
     assert!(
         unrelated
-            .verify(&token, TokenType::Id, "https://auth.example")
+            .verify::<serde_json::Value>(&token, TokenType::Id, "https://auth.example")
             .is_err()
     );
     for token in [
@@ -116,7 +116,7 @@ fn jwt_persistence_and_trust_boundaries() {
         "x".repeat(16385),
     ] {
         assert!(
-            key.verify(&token, TokenType::Id, "https://auth.example")
+            key.verify::<serde_json::Value>(&token, TokenType::Id, "https://auth.example")
                 .is_err()
         );
     }
@@ -133,7 +133,7 @@ fn jwt_persistence_and_trust_boundaries() {
             .sign(TokenType::Id, &invalid_claims)
             .expect("sign malformed claims");
         assert!(
-            key.verify(&token, TokenType::Id, "https://auth.example")
+            key.verify::<serde_json::Value>(&token, TokenType::Id, "https://auth.example")
                 .is_err()
         );
     }

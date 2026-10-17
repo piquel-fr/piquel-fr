@@ -34,6 +34,27 @@ fn vocabulary_round_trips() {
     assert!(serde_json::from_str::<Example>("\"unknown\"").is_err());
 }
 
+open_str_enum! {
+    /// Test vocabulary proving open-vocabulary expansion.
+    enum OpenExample {
+        /// Known value.
+        Known = "known",
+    }
+}
+
+/// Open vocabularies parse known spellings to variants and keep others verbatim.
+#[test]
+fn open_vocabulary_keeps_unknown_values() {
+    assert_eq!(OpenExample::from("known"), OpenExample::Known);
+    let other: OpenExample = serde_json::from_str("\"later\"").expect("deserialize");
+    assert_eq!(other, OpenExample::Other("later".into()));
+    assert_eq!(
+        serde_json::to_string(&other).expect("serialize"),
+        "\"later\""
+    );
+    assert_eq!(OpenExample::KNOWN.len(), 1);
+}
+
 /// Public URLs reject every insecure or ambiguous component.
 #[test]
 fn urls_validate_once() {

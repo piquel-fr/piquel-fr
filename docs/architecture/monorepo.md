@@ -10,10 +10,11 @@ is authentication and the piquel.fr account settings frontend.
 | `apps/piquel-web` | piquel.fr's SvelteKit server on Node: account settings calling the auth API |
 | `packages/auth-sdk` | Browser auth SDK: API client, WebAuthn passkey ceremonies, redirect helpers, shared styles; `/server`: auth origin validation and security headers for SvelteKit servers |
 | `crates/database` | `piquel-repository`: PostgreSQL connections, migrations and typed persistence operations |
-| `crates/auth-protocol` | Shared identity/session/token IDs, providers, OAuth/OIDC vocabulary, account status and authentication methods |
+| `crates/auth-protocol` | Wire types shared by auth and the SDKs: IDs, token claims, discovery metadata, JWK sets, OAuth/OIDC vocabulary and errors, bearer challenges, SDK error codes |
 | `crates/common` | Named environment variables, validated URLs, secret references and string enums |
-| `crates/crypto` | Random secrets, SHA-256, HMAC, PKCE, JWT/JWK vocabulary and RS256 signing |
+| `crates/crypto` | Random secrets, SHA-256, HMAC, PKCE and RS256 signing |
 | `crates/telemetry` | Structured tracing initialization |
+| `tests/sdk-vectors` | Generated cases both SDKs must pass; see [sdk.md](sdk.md) |
 
 Prettier and type-aware ESLint cover all web code from the root configuration, as
 rustfmt and Clippy cover Rust; `just fmt`, `just lint` and `just check` run both.
@@ -39,5 +40,6 @@ HTTP API. External applications consume standard OIDC with static client registr
 
 [surfaces.md](surfaces.md) sets out what auth.piquel.fr, piquel.fr and
 admin.piquel.fr each serve. Build/configuration and testing instructions are in
-the root README; every task runs through `just`. Deployment uses piqueld (`infra/README.md`). Public application
-registration, SDKs and account recovery are outside this release.
+the root README; every task runs through `just`. Deployment uses piqueld (`infra/README.md`). The SDKs for
+applications follow [sdk.md](sdk.md). Public application registration and account
+recovery are outside this release.

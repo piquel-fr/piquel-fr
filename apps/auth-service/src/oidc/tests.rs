@@ -8,7 +8,10 @@ use axum::{
     response::Response,
 };
 use chrono::Utc;
-use piquel_auth_protocol::{AuthenticationMethod, UserId, claims::Acr};
+use piquel_auth_protocol::{
+    AuthenticationMethod, UserId,
+    claims::{Acr, IdTokenClaims},
+};
 use piquel_crypto::Secret;
 use piquel_repository::{BootstrapOidcClient, DatabaseConfig, InsertUser, InsertVerifiedEmail};
 use serde_json::{Value, json};
@@ -399,7 +402,7 @@ async fn public_consent_pkce_claim_scoping_and_replay() {
     let response = flow.exchange(&code, Flow::verifier(), None).await;
     assert_eq!(response.status(), StatusCode::OK);
     let tokens = Flow::json(response).await;
-    let claims = flow
+    let claims: IdTokenClaims = flow
         .app
         .keys
         .verify(
@@ -410,9 +413,9 @@ async fn public_consent_pkce_claim_scoping_and_replay() {
             &flow.app.issuer,
         )
         .expect("verify scoped ID token");
-    assert_eq!(claims["nonce"], "test-nonce");
-    assert!(claims.get("name").is_none());
-    assert!(claims.get("email").is_none());
+    assert_eq!(claims.nonce.as_deref(), Some("test-nonce"));
+    assert!(claims.profile.name.is_none());
+    assert!(claims.profile.email.is_none());
     assert_eq!(
         flow.exchange(&code, Flow::verifier(), None).await.status(),
         StatusCode::BAD_REQUEST
@@ -457,7 +460,7 @@ async fn confidential_refresh_rotation_logout_and_client_binding() {
         .await;
     assert_eq!(response.status(), StatusCode::OK);
     let tokens = Flow::json(response).await;
-    let claims = flow
+    let claims: IdTokenClaims = flow
         .app
         .keys
         .verify(
@@ -468,8 +471,11 @@ async fn confidential_refresh_rotation_logout_and_client_binding() {
             &flow.app.issuer,
         )
         .expect("verify confidential client ID token");
-    assert_eq!(claims["email"], format!("{}@example.com", flow.user_id));
-    assert_eq!(claims["email_verified"], true);
+    assert_eq!(
+        claims.profile.email,
+        Some(format!("{}@example.com", flow.user_id))
+    );
+    assert_eq!(claims.profile.email_verified, Some(true));
     let old = tokens["refresh_token"]
         .as_str()
         .expect("token response contains a refresh token");
@@ -509,7 +515,7 @@ async fn confidential_refresh_rotation_logout_and_client_binding() {
     assert_eq!(response.status(), StatusCode::OK);
     let narrowed = Flow::json(response).await;
     assert_eq!(narrowed["scope"], Scope::OpenId.as_str());
-    let narrowed_claims = flow
+    let narrowed_claims: IdTokenClaims = flow
         .app
         .keys
         .verify(
@@ -520,7 +526,7 @@ async fn confidential_refresh_rotation_logout_and_client_binding() {
             &flow.app.issuer,
         )
         .expect("verify narrowed ID token");
-    assert!(narrowed_claims.get("email").is_none());
+    assert!(narrowed_claims.profile.email.is_none());
     let fresh = narrowed["refresh_token"]
         .as_str()
         .expect("refresh response contains the rotated token")
@@ -1039,7 +1045,10 @@ const UNGRANTED_SCOPES: &str = "openid admin";
 fn scope_sets_preserve_existing_wire_semantics() {
     let scopes = Scopes::parse("profile openid profile custom.read email").expect("scope set");
     assert!(scopes.contains(Scope::OpenId));
-    assert_eq!(scopes.wire(), "custom.read email openid profile");
+    assert_eq!(
+        scopes.wire().to_string(),
+        "custom.read email openid profile"
+    );
     let stored = scopes.clone().into_stored();
     assert!(scopes.allowed_by(&stored));
     assert!(!scopes.allowed_by(&[Scope::OpenId.as_str().into()]));
