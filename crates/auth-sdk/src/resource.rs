@@ -1,10 +1,12 @@
 //! Resource identifiers and access token validation.
 
 use crate::{AccessToken, Issuer, ScopeSet, TokenError};
+use chrono::{DateTime, Utc};
 use piquel_auth_protocol::{claims::AccessTokenClaims, jwt::TokenType};
 use serde::de::DeserializeOwned;
 use std::{fmt, marker::PhantomData, str::FromStr};
 use thiserror::Error;
+use url::Url;
 
 /// A resource identifier that is empty or holds spaces or control characters.
 #[derive(Debug, Error)]
@@ -19,6 +21,8 @@ pub struct ResourceError;
 pub struct Resource {
     /// The resource identifier.
     identifier: String,
+    /// Where the resource's protected resource metadata is served (RFC 9728).
+    metadata: Option<Url>,
 }
 
 impl Resource {
@@ -32,13 +36,28 @@ impl Resource {
         }
         Ok(Self {
             identifier: identifier.to_owned(),
+            metadata: None,
         })
+    }
+
+    /// Names where the resource serves its protected resource metadata (RFC 9728), so
+    /// every challenge carries it as `resource_metadata` (§5.1).
+    #[must_use]
+    pub fn with_metadata(mut self, url: Url) -> Self {
+        self.metadata = Some(url);
+        self
     }
 
     /// The identifier, the `aud` its access tokens must contain.
     #[must_use]
     pub fn identifier(&self) -> &str {
         &self.identifier
+    }
+
+    /// Where the resource's protected resource metadata is served, if configured.
+    #[must_use]
+    pub const fn metadata(&self) -> Option<&Url> {
+        self.metadata.as_ref()
     }
 }
 
@@ -101,18 +120,7 @@ impl ResourceValidator {
     }
 }
 
-impl<X: DeserializeOwned> ResourceValidator<X> {
-    /// Reads application claims into `Y`, which must deserialize from the token's
-    /// claims object.
-    #[must_use]
-    pub fn with_claims<Y: DeserializeOwned>(self) -> ResourceValidator<Y> {
-        ResourceValidator {
-            issuer: self.issuer,
-            resource: self.resource,
-            claims: PhantomData,
-        }
-    }
-
+impl<X> ResourceValidator<X> {
     /// The resource tokens must be for.
     #[must_use]
     pub const fn resource(&self) -> &Resource {
@@ -123,6 +131,26 @@ impl<X: DeserializeOwned> ResourceValidator<X> {
     #[must_use]
     pub const fn issuer(&self) -> &Issuer {
         &self.issuer
+    }
+
+    /// The current time by the issuer's clock, for
+    /// [`AccessToken::require_authentication`].
+    #[must_use]
+    pub fn now(&self) -> DateTime<Utc> {
+        self.issuer.now()
+    }
+}
+
+impl<X: DeserializeOwned> ResourceValidator<X> {
+    /// Reads application claims into `Y`, which must deserialize from the token's
+    /// claims object.
+    #[must_use]
+    pub fn with_claims<Y: DeserializeOwned>(self) -> ResourceValidator<Y> {
+        ResourceValidator {
+            issuer: self.issuer,
+            resource: self.resource,
+            claims: PhantomData,
+        }
     }
 
     /// Validates an access token and requires the scopes `S`. Use

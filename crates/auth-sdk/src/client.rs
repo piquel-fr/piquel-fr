@@ -9,7 +9,7 @@ use base64::{Engine, engine::general_purpose::URL_SAFE_NO_PAD};
 use chrono::{DateTime, TimeDelta, Utc};
 use piquel_auth_protocol::{
     ClientId,
-    claims::{Acr, UserInfo},
+    claims::{Acr, LogoutTokenClaims, UserInfo},
     oauth::{CodeChallengeMethod, ErrorResponse, GrantType, Prompt, ResponseType, Scope, Scopes},
     sdk::{ErrorCategory, ErrorReason, SdkError},
 };
@@ -522,6 +522,17 @@ impl Client {
         Self::read::<serde::de::IgnoredAny>("revocation", &reply).map(|_| ())
     }
 
+    /// Validates a back-channel logout token sent to this client (OIDC Back-Channel
+    /// Logout 1.0 §2.6), returning the `sub` or `sid` whose sessions to end.
+    ///
+    /// # Errors
+    /// See [`TokenError`]; a broken logout rule is [`TokenError::InvalidLogoutToken`].
+    pub async fn logout_token(&self, token: &str) -> Result<LogoutTokenClaims, TokenError> {
+        self.issuer()
+            .logout_token(token, &self.config().client_id)
+            .await
+    }
+
     /// Reads the user's claims with an access token.
     ///
     /// # Errors
@@ -537,14 +548,20 @@ impl Client {
     }
 
     /// The RP-initiated logout URL: auth ends the browser session, then sends the
-    /// browser to `post_logout`, which must be registered for this client.
+    /// browser to `post_logout`, which must be registered for this client. Without
+    /// one, auth shows its own page.
     #[must_use]
-    pub fn logout_url(&self, id_token: &IdToken, post_logout: &Url) -> Url {
+    pub fn logout_url(&self, id_token: &IdToken, post_logout: Option<&Url>) -> Url {
         let mut url = self.issuer().metadata().end_session_endpoint.clone();
-        url.query_pairs_mut()
-            .append_pair("id_token_hint", id_token.as_str())
-            .append_pair("post_logout_redirect_uri", post_logout.as_str())
-            .append_pair("client_id", self.config().client_id.as_str());
+        {
+            let mut query = url.query_pairs_mut();
+            query
+                .append_pair("id_token_hint", id_token.as_str())
+                .append_pair("client_id", self.config().client_id.as_str());
+            if let Some(post_logout) = post_logout {
+                query.append_pair("post_logout_redirect_uri", post_logout.as_str());
+            }
+        }
         url
     }
 

@@ -1,12 +1,13 @@
 //! Validated tokens, the checks they pass, and why a token is rejected.
 
 use crate::{Issuer, KeyError, LEEWAY, keys::Jws, scope::ScopeSet};
-use chrono::{DateTime, Utc};
+use chrono::{DateTime, TimeDelta, Utc};
 use piquel_auth_protocol::{
     ClientId, SessionId, TokenId, UserId,
     challenge::{BearerChallenge, BearerError},
     claims::{
-        AccessTokenClaims, Acr, Actor, Amr, Audience, Confirmation, IdTokenClaims, ProfileClaims,
+        AccessTokenClaims, Acr, Actor, Amr, Audience, BACKCHANNEL_LOGOUT_EVENT, Confirmation,
+        IdTokenClaims, LogoutTokenClaims, ProfileClaims,
     },
     jwt::{Algorithm, TokenType},
     oauth::Scopes,
@@ -95,6 +96,17 @@ pub enum TokenError {
         /// The longest acceptable age, in seconds.
         max_age: u64,
     },
+    /// A logout token breaks a back-channel logout rule.
+    #[error("logout token is invalid: {0}")]
+    InvalidLogoutToken(&'static str),
+    /// The user's authentication is too weak or too old for the request (RFC 9470).
+    #[error("authentication does not meet acr {acr:?} within {max_age:?} seconds")]
+    InsufficientUserAuthentication {
+        /// The authentication context class required.
+        acr: Option<Acr>,
+        /// The longest acceptable time since authentication, in seconds.
+        max_age: Option<u64>,
+    },
     /// A valid token lacks scopes the request needs.
     #[error("token lacks the scopes {required}")]
     InsufficientScope {
@@ -112,13 +124,18 @@ impl TokenError {
             Self::InsufficientScope { .. } => {
                 return SdkError::category(ErrorCategory::InsufficientScope);
             }
+            Self::InsufficientUserAuthentication { .. } => {
+                return SdkError::category(ErrorCategory::InsufficientUserAuthentication);
+            }
             Self::Malformed(_) => ErrorReason::Malformed,
             Self::UnsupportedCriticalHeader => ErrorReason::UnsupportedCriticalHeader,
             Self::WrongType { .. } => ErrorReason::WrongType,
             Self::UnsupportedAlgorithm(_) => ErrorReason::UnsupportedAlgorithm,
             Self::UnknownKey(_) => ErrorReason::UnknownKey,
             Self::BadSignature => ErrorReason::BadSignature,
-            Self::InvalidClaims(_) | Self::InvalidSubject(_) => ErrorReason::InvalidClaims,
+            Self::InvalidClaims(_) | Self::InvalidSubject(_) | Self::InvalidLogoutToken(_) => {
+                ErrorReason::InvalidClaims
+            }
             Self::WrongIssuer { .. } => ErrorReason::IssuerMismatch,
             Self::WrongAudience { .. } => ErrorReason::WrongAudience,
             Self::Expired(_) => ErrorReason::Expired,
@@ -142,9 +159,71 @@ impl TokenError {
                 scope: Some(required.clone()),
                 ..BearerChallenge::error(BearerError::InsufficientScope)
             }),
+            Self::InsufficientUserAuthentication { acr, max_age } => Some(BearerChallenge {
+                acr_values: acr.iter().cloned().collect(),
+                max_age: *max_age,
+                ..BearerChallenge::error(BearerError::InsufficientUserAuthentication)
+            }),
             _ => Some(BearerChallenge::error(BearerError::InvalidToken)),
         }
     }
+}
+
+impl TokenError {
+    /// Whether `auth_time` is at most `max_age` seconds, plus the leeway, before `now`.
+    /// A `max_age` too large to add to `auth_time` cannot be exceeded.
+    fn recent(auth_time: Option<DateTime<Utc>>, max_age: u64, now: DateTime<Utc>) -> bool {
+        auth_time.is_some_and(|auth_time| {
+            i64::try_from(max_age)
+                .ok()
+                .and_then(TimeDelta::try_seconds)
+                .and_then(|age| age.checked_add(&LEEWAY))
+                .and_then(|age| auth_time.checked_add_signed(age))
+                .is_none_or(|deadline| now <= deadline)
+        })
+    }
+
+    /// Requires the authentication `acr` and `auth_time` describe to meet `P` at `now`.
+    fn require_authentication<P: AuthenticationPolicy>(
+        acr: Option<&Acr>,
+        auth_time: Option<DateTime<Utc>>,
+        now: DateTime<Utc>,
+    ) -> Result<(), Self> {
+        let strong = P::ACR.as_ref().is_none_or(|required| acr == Some(required));
+        let fresh = P::MAX_AGE.is_none_or(|max_age| Self::recent(auth_time, max_age, now));
+        if strong && fresh {
+            Ok(())
+        } else {
+            Err(Self::InsufficientUserAuthentication {
+                acr: P::ACR,
+                max_age: P::MAX_AGE,
+            })
+        }
+    }
+}
+
+/// What an operation needs from the user's authentication (RFC 9470): an
+/// authentication context class, a maximum age, or both. Declare one per policy:
+///
+/// ```
+/// use piquel_auth::{Acr, AuthenticationPolicy};
+///
+/// /// A passkey confirmation within the last five minutes.
+/// struct RecentPasskey;
+///
+/// impl AuthenticationPolicy for RecentPasskey {
+///     const ACR: Option<Acr> = Some(Acr::PhishingResistant);
+///     const MAX_AGE: Option<u64> = Some(300);
+/// }
+/// ```
+///
+/// A token meets the policy when its `acr` equals `ACR` and its `auth_time` is at
+/// most `MAX_AGE` seconds old, with the 30-second leeway.
+pub trait AuthenticationPolicy: Send + Sync + 'static {
+    /// The authentication context class required, if any.
+    const ACR: Option<Acr> = None;
+    /// The longest acceptable time since the user authenticated, in seconds, if any.
+    const MAX_AGE: Option<u64> = None;
 }
 
 /// Who an access token acts for.
@@ -224,6 +303,19 @@ impl<X> AccessToken<Scopes, X> {
         })
     }
 
+    /// Requires the token's authentication to meet `P` at `now`; use the issuer's
+    /// clock, as [`ResourceValidator::now`](crate::ResourceValidator::now) gives.
+    ///
+    /// # Errors
+    /// [`TokenError::InsufficientUserAuthentication`], whose challenge asks the
+    /// client to sign the user in again (RFC 9470).
+    pub fn require_authentication<P: AuthenticationPolicy>(
+        &self,
+        now: DateTime<Utc>,
+    ) -> Result<(), TokenError> {
+        TokenError::require_authentication::<P>(self.acr.as_ref(), self.auth_time, now)
+    }
+
     /// Requires the scopes `S`, returning the token with their proof.
     ///
     /// # Errors
@@ -294,6 +386,22 @@ impl IdToken {
         &self.raw
     }
 
+    /// Requires the sign-in to meet `P` at `now`.
+    ///
+    /// # Errors
+    /// [`TokenError::InsufficientUserAuthentication`].
+    pub fn require_authentication<P: AuthenticationPolicy>(
+        &self,
+        now: DateTime<Utc>,
+    ) -> Result<(), TokenError> {
+        let authentication = &self.claims.authentication;
+        TokenError::require_authentication::<P>(
+            authentication.acr.as_ref(),
+            authentication.auth_time,
+            now,
+        )
+    }
+
     /// The signed-in account.
     ///
     /// # Errors
@@ -319,9 +427,9 @@ pub(crate) trait RegisteredClaims: DeserializeOwned {
     /// `iat`.
     fn issued_at(&self) -> DateTime<Utc>;
 
-    /// Whether `aud` must name the expected audience alone. ID tokens trust no other
-    /// audience (OIDC Core §3.1.3.7), so `azp` can only confirm this client; access
-    /// tokens may name several.
+    /// Whether `aud` must name the expected audience alone. ID and logout tokens trust
+    /// no other audience (OIDC Core §3.1.3.7), so `azp` can only confirm this client;
+    /// access tokens may name several.
     const EXCLUSIVE_AUDIENCE: bool;
 
     /// Checks `iss`, `aud` and the times, in the documented order.
@@ -372,6 +480,26 @@ impl<X: DeserializeOwned> RegisteredClaims for AccessTokenClaims<X> {
     }
     fn not_before(&self) -> Option<DateTime<Utc>> {
         self.nbf
+    }
+    fn issued_at(&self) -> DateTime<Utc> {
+        self.iat
+    }
+}
+
+impl RegisteredClaims for LogoutTokenClaims {
+    const EXCLUSIVE_AUDIENCE: bool = true;
+
+    fn issuer(&self) -> &str {
+        &self.iss
+    }
+    fn audience(&self) -> &Audience {
+        &self.aud
+    }
+    fn expires_at(&self) -> DateTime<Utc> {
+        self.exp
+    }
+    fn not_before(&self) -> Option<DateTime<Utc>> {
+        None
     }
     fn issued_at(&self) -> DateTime<Utc> {
         self.iat
@@ -447,26 +575,52 @@ impl Issuer {
                 found: azp.clone(),
             });
         }
-        if let Some(max_age) = max_age {
-            // A `max_age` too large to add to `auth_time` cannot be exceeded.
-            let recent = claims.authentication.auth_time.is_some_and(|auth_time| {
-                i64::try_from(max_age)
-                    .ok()
-                    .and_then(chrono::TimeDelta::try_seconds)
-                    .and_then(|age| age.checked_add(&LEEWAY))
-                    .and_then(|age| auth_time.checked_add_signed(age))
-                    .is_none_or(|deadline| self.now() <= deadline)
+        if let Some(max_age) = max_age
+            && !TokenError::recent(claims.authentication.auth_time, max_age, self.now())
+        {
+            return Err(TokenError::AuthenticationTooOld {
+                auth_time: claims.authentication.auth_time,
+                max_age,
             });
-            if !recent {
-                return Err(TokenError::AuthenticationTooOld {
-                    auth_time: claims.authentication.auth_time,
-                    max_age,
-                });
-            }
         }
         Ok(IdToken {
             claims,
             raw: token.to_owned(),
         })
     }
+
+    /// Validates a back-channel logout token for `client`: checked like an ID token,
+    /// then required to be recent, to carry the logout event and `sub` or `sid`, and
+    /// to have no `nonce` (OIDC Back-Channel Logout 1.0 §2.6).
+    pub(crate) async fn logout_token(
+        &self,
+        token: &str,
+        client: &ClientId,
+    ) -> Result<LogoutTokenClaims, TokenError> {
+        let claims: LogoutTokenClaims = self
+            .decode(token, TokenType::Logout, client.as_str())
+            .await?;
+        let invalid = |rule| Err(TokenError::InvalidLogoutToken(rule));
+        if claims
+            .iat
+            .checked_add_signed(MAX_LOGOUT_TOKEN_AGE + LEEWAY)
+            .is_some_and(|deadline| deadline < self.now())
+        {
+            return invalid("iat is more than five minutes ago");
+        }
+        if !claims.events.contains_key(BACKCHANNEL_LOGOUT_EVENT) {
+            return invalid("events lacks the back-channel logout event");
+        }
+        if claims.nonce.is_some() {
+            return invalid("nonce must be absent");
+        }
+        if claims.sub.is_none() && claims.sid.is_none() {
+            return invalid("neither sub nor sid is present");
+        }
+        Ok(claims)
+    }
 }
+
+/// Oldest `iat` a logout token may have. Auth signs each delivery attempt afresh, so
+/// an older token is a replay.
+const MAX_LOGOUT_TOKEN_AGE: TimeDelta = TimeDelta::minutes(5);

@@ -34,6 +34,9 @@
 //! The behavior follows `docs/architecture/sdk.md` in the piquel-fr repository, and is
 //! tested against the shared vectors in `tests/sdk-vectors`.
 
+/// axum extractors, layers and login routes.
+#[cfg(feature = "axum")]
+pub mod axum;
 /// Login: authorization, callbacks, refresh, revocation and logout.
 mod client;
 /// HTTP requests with bounded bodies.
@@ -61,7 +64,7 @@ pub use issuer::{DiscoveryError, Issuer, IssuerBuilder};
 pub use keys::{Jws, JwsHeader, KeyCache, KeyError, KeySet};
 pub use resource::{Resource, ResourceError, ResourceValidator};
 pub use scope::{Scope, ScopeSet};
-pub use token::{AccessToken, IdToken, Subject, TokenError};
+pub use token::{AccessToken, AuthenticationPolicy, IdToken, Subject, TokenError};
 
 /// The wire types this SDK reads, shared with auth itself.
 pub use piquel_auth_protocol as protocol;

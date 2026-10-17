@@ -256,6 +256,16 @@ impl Flow {
             .1
             .into_owned()
     }
+    /// Reads the scenario's text response.
+    async fn text(response: Response) -> String {
+        String::from_utf8(
+            to_bytes(response.into_body(), 1024 * 1024)
+                .await
+                .expect("read complete HTTP response body")
+                .to_vec(),
+        )
+        .expect("UTF-8 response")
+    }
     /// Reads and decodes the scenario’s JSON response.
     async fn json(response: Response) -> Value {
         serde_json::from_slice(
@@ -1144,7 +1154,7 @@ async fn sdk_login_client_runs_against_the_provider() {
     let post_logout: Url = flow.client.post_logout_uris[0]
         .parse()
         .expect("post-logout URI");
-    let logout = client.logout_url(id_token, &post_logout);
+    let logout = client.logout_url(id_token, Some(&post_logout));
     let confirmation = flow
         .request(
             Method::GET,
@@ -1167,4 +1177,223 @@ async fn sdk_login_client_runs_against_the_provider() {
         Flow::json(confirmed).await["redirect_url"],
         post_logout.as_str()
     );
+}
+
+/// A clock the SDK scenarios move by hand, to reach access token expiry.
+#[derive(Clone)]
+struct ManualClock(Arc<std::sync::Mutex<chrono::DateTime<Utc>>>);
+
+impl ManualClock {
+    /// Moves the clock forward.
+    fn advance(&self, seconds: i64) {
+        *self.0.lock().expect("clock") += chrono::TimeDelta::seconds(seconds);
+    }
+}
+
+impl piquel_auth::Clock for ManualClock {
+    fn now(&self) -> chrono::DateTime<Utc> {
+        *self.0.lock().expect("clock")
+    }
+}
+
+/// An app using the SDK's login routes against the provider, served in-process.
+struct LoginApp {
+    /// The provider scenario.
+    flow: Flow,
+    /// The app's routes; `/` shows the session's access token.
+    app: Router,
+    /// The SDK's clock.
+    clock: ManualClock,
+}
+
+impl LoginApp {
+    /// Serves the provider over TLS and builds the app.
+    async fn start() -> Self {
+        use piquel_auth::{
+            ClientConfig, ClientId, Credentials,
+            axum::{LoginRoutes, MemorySessions, SignedIn},
+        };
+        let tcp = tokio::net::TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("bind provider");
+        let port = tcp.local_addr().expect("provider address").port();
+        let origin = format!("https://localhost:{port}");
+        let flow = Flow::at(&origin, SDK_RESOURCE, true, false).await;
+        let certificate = TlsListener::serve(tcp, flow.app.clone().routes());
+        let http = reqwest::Client::builder()
+            .add_root_certificate(certificate)
+            .redirect(reqwest::redirect::Policy::none())
+            .build()
+            .expect("HTTP client");
+        let clock = ManualClock(Arc::new(std::sync::Mutex::new(Utc::now())));
+        let issuer = piquel_auth::Issuer::builder()
+            .http_client(http)
+            .clock(clock.clone())
+            .discover(&origin)
+            .await
+            .expect("discover the provider");
+        let client = issuer.client(ClientConfig {
+            client_id: ClientId::new(flow.client.id.clone()),
+            credentials: Credentials::Secret(CLIENT_SECRET.into()),
+            redirect_uri: flow.client.redirect_uris[0].parse().expect("callback"),
+        });
+        let auth = LoginRoutes::new(client, MemorySessions::default())
+            .scopes("profile offline_access".parse().expect("scopes"))
+            .after_logout(flow.client.post_logout_uris[0].parse().expect("logout URI"));
+        let app = Router::new()
+            .route(
+                "/notes",
+                axum::routing::get(|user: SignedIn| async move {
+                    user.login().access_token.expose().to_owned()
+                }),
+            )
+            .nest("/auth", auth.router())
+            .layer(auth.layer());
+        Self { flow, app, clock }
+    }
+
+    /// Sends a request to the app with an optional cookie. Posts carry the app's
+    /// `Origin`, as a browser on its pages sends.
+    async fn send(&self, method: Method, uri: &str, cookie: Option<&str>) -> Response {
+        let mut request = Request::builder().method(method.clone()).uri(uri);
+        if method == Method::POST {
+            let callback = Url::parse(&self.flow.client.redirect_uris[0]).expect("callback");
+            request = request.header(header::ORIGIN, callback.origin().ascii_serialization());
+        }
+        if let Some(cookie) = cookie {
+            request = request.header(header::COOKIE, cookie);
+        }
+        self.app
+            .clone()
+            .oneshot(request.body(Body::empty()).expect("request"))
+            .await
+            .expect("response")
+    }
+
+    /// The `Set-Cookie` values of a response.
+    fn cookies(response: &Response) -> Vec<String> {
+        response
+            .headers()
+            .get_all(header::SET_COOKIE)
+            .iter()
+            .map(|value| value.to_str().expect("cookie").to_owned())
+            .collect()
+    }
+
+    /// The `name=value` pair of the cookie `name` that `response` sets.
+    fn cookie(response: &Response, name: &str) -> String {
+        Self::cookies(response)
+            .into_iter()
+            .find(|cookie| cookie.starts_with(&format!("{name}=")))
+            .and_then(|cookie| cookie.split(';').next().map(str::to_owned))
+            .expect("cookie set")
+    }
+
+    /// The relative `Location` of an app redirect.
+    fn location(response: &Response) -> String {
+        assert_eq!(response.status(), StatusCode::SEE_OTHER);
+        response.headers()[header::LOCATION]
+            .to_str()
+            .expect("location")
+            .to_owned()
+    }
+
+    /// Starts login at `login` (the app's login path and query), signs in at the
+    /// provider, and returns the callback's response.
+    async fn sign_in(&self, login: &str, session: Option<&str>) -> Response {
+        let start = self.send(Method::GET, login, session).await;
+        let pending = Self::cookie(&start, "__Host-piquel-login");
+        for cookie in Self::cookies(&start) {
+            assert!(
+                cookie.ends_with("; Path=/; Secure; HttpOnly; SameSite=Lax; Max-Age=600"),
+                "{cookie}"
+            );
+        }
+        let authorize = Url::parse(&Self::location(&start)).expect("authorization URL");
+        let browser = self
+            .flow
+            .request(
+                Method::GET,
+                &format!("{}?{}", authorize.path(), authorize.query().expect("query")),
+                &[],
+                None,
+            )
+            .await;
+        let callback = self.flow.consent(browser).await;
+        let cookies = match session {
+            Some(session) => format!("{pending}; {session}"),
+            None => pending,
+        };
+        self.send(
+            Method::GET,
+            &format!("/auth/callback?{}", callback.query().expect("query")),
+            Some(&cookies),
+        )
+        .await
+    }
+}
+
+/// The SDK's login routes sign a user in through the provider, keep tokens in the
+/// store, refresh them there, rotate the session on every sign-in, refuse open
+/// redirects, and log out through the provider.
+#[tokio::test]
+#[ignore = "requires TEST_DATABASE_URL"]
+async fn sdk_login_routes_run_against_the_provider() {
+    let app = LoginApp::start().await;
+    let page = app.send(Method::GET, "/notes?page=2", None).await;
+    assert_eq!(
+        LoginApp::location(&page),
+        "/auth/login?return_to=%2Fnotes%3Fpage%3D2"
+    );
+
+    let callback = app.sign_in(&LoginApp::location(&page), None).await;
+    assert_eq!(LoginApp::location(&callback), "/notes?page=2");
+    let cookies = LoginApp::cookies(&callback);
+    assert!(
+        cookies
+            .iter()
+            .any(|cookie| cookie.starts_with("__Host-piquel-session=")
+                && cookie.ends_with("; Path=/; Secure; HttpOnly; SameSite=Lax; Max-Age=43200"))
+    );
+    assert!(cookies.iter().any(|cookie| cookie
+        == "__Host-piquel-login=; Path=/; Secure; HttpOnly; SameSite=Lax; Max-Age=0"));
+    let first = LoginApp::cookie(&callback, "__Host-piquel-session");
+    let shown = app.send(Method::GET, "/notes", Some(&first)).await;
+    assert_eq!(shown.status(), StatusCode::OK);
+    let access = Flow::text(shown).await;
+
+    // A second sign-in rotates the session and ends the first one.
+    let callback = app.sign_in("/auth/login", Some(&first)).await;
+    assert_eq!(LoginApp::location(&callback), "/");
+    let second = LoginApp::cookie(&callback, "__Host-piquel-session");
+    assert_ne!(first, second);
+    let stale = app.send(Method::GET, "/notes", Some(&first)).await;
+    assert_eq!(LoginApp::location(&stale), "/auth/login?return_to=%2Fnotes");
+
+    // Near expiry, the access token is refreshed in the store.
+    app.clock.advance(290);
+    let refreshed = app.send(Method::GET, "/notes", Some(&second)).await;
+    assert_eq!(refreshed.status(), StatusCode::OK);
+    assert_ne!(Flow::text(refreshed).await, access);
+
+    // Open redirects are refused: login falls back to the home page.
+    let callback = app
+        .sign_in("/auth/login?return_to=%2F%2Fevil.example", None)
+        .await;
+    assert_eq!(LoginApp::location(&callback), "/");
+
+    let logout = app.send(Method::POST, "/auth/logout", Some(&second)).await;
+    let destination = Url::parse(&LoginApp::location(&logout)).expect("logout URL");
+    assert_eq!(destination.path(), "/oidc/logout");
+    assert_eq!(
+        Flow::parameter(&destination, "post_logout_redirect_uri"),
+        app.flow.client.post_logout_uris[0]
+    );
+    assert!(
+        LoginApp::cookies(&logout)
+            .iter()
+            .any(|cookie| cookie.starts_with("__Host-piquel-session=;"))
+    );
+    let after = app.send(Method::GET, "/notes", Some(&second)).await;
+    assert_eq!(after.status(), StatusCode::SEE_OTHER);
 }
