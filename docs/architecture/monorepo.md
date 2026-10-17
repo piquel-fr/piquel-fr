@@ -32,7 +32,7 @@ hostname, never a wildcard over piquel.fr subdomains.
 
 The auth binary also runs explicit migrations and generates invitations. PostgreSQL
 stores sessions, WebAuthn challenges, OAuth state, pending social identities,
-invitations, consent, refresh tokens, rate limits and security audit records.
+invitations, consent, refresh tokens, rate limits and security events.
 Auth needs no separate cache, RPC service, event bus or key-management service.
 piquel.fr's Node server holds no state and reads everything it renders from auth's
 HTTP API. External applications consume standard OIDC with static client registration.

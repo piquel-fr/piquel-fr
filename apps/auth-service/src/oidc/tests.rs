@@ -1,6 +1,7 @@
 //! Focused parsing checks and database-backed OAuth/OIDC scenarios.
 
 use super::*;
+use crate::security::{BrowserCookie, RequestContext, Session};
 use crate::tests::{AUTH_ORIGIN, Replicas};
 use axum::{
     body::{Body, to_bytes},
@@ -10,7 +11,10 @@ use axum::{
 use chrono::Utc;
 use piquel_auth_protocol::{AuthenticationMethod, UserId, claims::Acr};
 use piquel_crypto::Secret;
-use piquel_repository::{BootstrapOidcClient, DatabaseConfig, InsertUser, InsertVerifiedEmail};
+use piquel_repository::{
+    BootstrapOidcClient, DatabaseConfig, DomainEvent, GrantRevocation, InsertUser,
+    InsertVerifiedEmail, RevocationReason,
+};
 use serde_json::{Value, json};
 use tower::ServiceExt;
 use url::Url;
@@ -66,15 +70,15 @@ impl Flow {
             })
             .await
             .expect("insert verified test email");
-        let cookie =
-            crate::security::Session::create(&mut tx, user_id, AuthenticationMethod::Passkey)
-                .await
-                .expect("create test browser session");
-        let cookie = format!(
-            "{}={}",
-            crate::security::BrowserCookie::Session.as_str(),
-            cookie.encoded()
-        );
+        let cookie = Session::create(
+            &mut tx,
+            RequestContext::TEST,
+            user_id,
+            AuthenticationMethod::Passkey,
+        )
+        .await
+        .expect("create test browser session");
+        let cookie = format!("{}={}", BrowserCookie::Session.as_str(), cookie.encoded());
         tx.commit().await.expect("commit test account transaction");
         let secret = "randomly-generated-example-secret-for-testing-0123456789";
         let client = BootstrapOidcClient {
@@ -139,6 +143,19 @@ impl Flow {
             ..self.clone()
         }
     }
+    /// Lists the events recorded about the scenario account, newest first.
+    async fn events(&self) -> Vec<DomainEvent> {
+        self.app
+            .database
+            .events()
+            .history_for_user(self.user_id, 100)
+            .await
+            .expect("history")
+            .into_iter()
+            .map(|stored| stored.event)
+            .collect()
+    }
+
     /// Dispatches an encoded protocol request through the OIDC routes.
     async fn request(
         &self,
@@ -148,6 +165,7 @@ impl Flow {
         basic: Option<&str>,
     ) -> Response {
         let mut builder = Request::builder()
+            .extension(RequestContext::TEST)
             .method(method)
             .uri(uri)
             .header(header::COOKIE, &self.cookie)
@@ -436,6 +454,25 @@ async fn public_consent_pkce_claim_scoping_and_replay() {
         .authorize(Scope::OpenId.as_str(), Some(Prompt::Login.as_str()))
         .await;
     assert_eq!(Flow::location(&response).path(), "/login");
+    let client_id = piquel_auth_protocol::ClientId::from(flow.client.id.as_str());
+    assert_eq!(
+        flow.events().await[..3],
+        [
+            DomainEvent::CodeReplayed {
+                client_id: client_id.clone(),
+            },
+            DomainEvent::GrantIssued {
+                client_id: client_id.clone(),
+                family_id: None,
+                scopes: vec![Scope::OpenId.as_str().into()],
+            },
+            DomainEvent::ConsentGranted {
+                client_id,
+                scopes: vec![Scope::OpenId.as_str().into()],
+            },
+        ],
+        "a failed exchange records nothing"
+    );
 }
 
 /// Checks refresh narrowing, replay revocation, client binding and logout.
@@ -571,6 +608,24 @@ async fn confidential_refresh_rotation_logout_and_client_binding() {
         ),
         OAuthCode::LoginRequired.as_str()
     );
+    let events = flow.events().await;
+    assert!(
+        matches!(
+            &events[0],
+            DomainEvent::SessionRevoked {
+                reason: RevocationReason::RelyingPartyLogout { client_id },
+                ..
+            } if client_id.as_str() == flow.client.id
+        ),
+        "{events:?}"
+    );
+    assert!(events.iter().any(|event| matches!(
+        event,
+        DomainEvent::GrantRevoked {
+            reason: GrantRevocation::RefreshReplay,
+            ..
+        }
+    )));
 }
 
 /// Replaying a redeemed code revokes the refresh family it produced, while the same
@@ -622,6 +677,24 @@ async fn code_replay_revokes_its_refresh_family() {
         flow.refresh(&rotated).await.status(),
         StatusCode::BAD_REQUEST
     );
+    let events = flow.events().await;
+    let [
+        DomainEvent::GrantRevoked {
+            family_id: revoked,
+            reason: GrantRevocation::CodeReplay,
+            ..
+        },
+        DomainEvent::CodeReplayed { .. },
+        DomainEvent::GrantIssued {
+            family_id: Some(issued),
+            ..
+        },
+        ..,
+    ] = events.as_slice()
+    else {
+        panic!("{events:?}");
+    };
+    assert_eq!(revoked, issued, "the replay revoked the code's own family");
 }
 
 /// The same refresh token, rotated on two replicas at once, rotates exactly once. The
@@ -853,10 +926,14 @@ async fn acr_targets_and_grants_keep_their_authentication() {
     assert_eq!(refreshed["acr"], claims["acr"]);
 
     let mut tx = flow.app.database.begin().await.expect("transaction");
-    let social =
-        crate::security::Session::create(&mut tx, flow.user_id, AuthenticationMethod::Federation)
-            .await
-            .expect("social session");
+    let social = crate::security::Session::create(
+        &mut tx,
+        RequestContext::TEST,
+        flow.user_id,
+        AuthenticationMethod::Federation,
+    )
+    .await
+    .expect("social session");
     tx.commit().await.expect("commit");
     flow.cookie = format!(
         "{}={}",

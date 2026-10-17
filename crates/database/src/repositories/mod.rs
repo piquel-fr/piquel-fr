@@ -91,8 +91,8 @@ repositories! {
     emails: EmailRepository;
     /// Browser sessions, their cookie digests and passkey confirmations.
     sessions: SessionRepository;
-    /// The append-only security audit log.
-    audit_events: AuditEventRepository;
+    /// Typed domain events, their personal data and consumer cursors.
+    events: EventRepository;
     /// Passkey credentials and `WebAuthn` ceremony state.
     passkeys: PasskeyRepository;
     /// OIDC clients, authorization requests, codes and consent.
@@ -178,10 +178,10 @@ impl From<Unsigned> for u64 {
     }
 }
 
-/// Append-only security history with typed actions and outcomes.
-pub(crate) mod audit;
 /// Verified email ownership and primary-address persistence.
 pub(crate) mod emails;
+/// Typed domain events, personal data and the consumer cursor.
+pub(crate) mod events;
 /// Provider transactions, pending signups and external identity links.
 pub(crate) mod federation;
 /// Expired-state cleanup.

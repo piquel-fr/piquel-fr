@@ -29,7 +29,7 @@ pub enum DatabaseError {
         #[source]
         source: Source,
     },
-    /// Any other driver, query or migration failure.
+    /// Any other driver, query, migration or event serialization failure.
     #[error("database operation failed")]
     Operation(#[source] Source),
 }

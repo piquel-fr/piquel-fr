@@ -10,10 +10,9 @@ IDs, account status, authentication methods and providers. Their `sqlx` feature,
 enabled only here, lets IDs decode from `UUID` columns (rejecting anything but
 `UUIDv7`) and vocabularies from `TEXT` columns. Cryptographic material
 is generated and hashed in `piquel-crypto`; the repository persists its digests.
-Ceremony kinds, audit actions/outcomes and OIDC redirect kinds are typed storage
-vocabulary. Successful account operations use `audit_events().record`; rejections
-that implicate an account, such as refresh replay or a passkey counter regression,
-use `audit_events().record_rejection`.
+Ceremony kinds, OIDC redirect kinds and user agent families are typed storage
+vocabulary. Account and security changes are recorded as typed domain events; see
+[Domain events](#domain-events).
 
 `DatabaseConfig` rejects zero pool bounds, ambiguous TLS/socket options and host
 overrides with actionable `DatabaseConnectionError` variants. TCP requires
@@ -23,7 +22,7 @@ sources. Client provisioning validates fields and allowlists through
 `ClientConfigurationError` before writing any SQL.
 
 Each repository has its own module under `src/repositories/` (`users`, `emails`,
-`sessions`, `audit`, `passkeys`, `oidc`, `tokens`, `federation`, `security`,
+`sessions`, `events`, `passkeys`, `oidc`, `tokens`, `federation`, `security`,
 `maintenance`), holding its methods and the records they take and return.
 `repositories/mod.rs` holds only shared plumbing: the executor, the
 `repositories!` macro that declares every handle and its accessors on `Database`,
@@ -83,7 +82,7 @@ Important invariants:
   Refresh tokens rotate transactionally, remain bound to their client/session,
   and reuse revokes the family.
 - Each refresh family records the code it was redeemed from. Redeeming that code
-  again with its secret, as the same client, revokes the family and audits the
+  again with its secret, as the same client, revokes the family and records the
   replay; a wrong secret or client revokes nothing. The browser session stays
   signed in. Cleanup keeps a redeemed code for at least a day, and for as long as
   a family it produced is unrevoked and its session live, so a replay is detected
@@ -105,13 +104,63 @@ exception while there were few users, not a precedent. SQLx's migrator takes an
 advisory lock, so concurrent `migrate` runs are safe.
 
 Every five minutes, one replica drains expired ephemeral state in bounded batches
-through `maintenance()`, for up to one minute per pass. Jobs like it that must run
+through `maintenance()`, for up to one minute per pass. The same pass deletes event
+personal data older than 90 days; the events themselves are kept indefinitely. Jobs like it that must run
 on one replica at a time call `Database::try_exclusive(LockKey)`, which takes a
 session-level advisory lock on a dedicated connection outside the pool. The lock
 ends with that connection, even when the job is cancelled or the process dies, so
 it needs no lease or expiry, and a lock holder never returns to the pool. Give each
 job its own `LockKey` value and never reuse one.
-Security audit history is retained. Tests that use `TEST_DATABASE_URL` are explicitly
+Tests that use `TEST_DATABASE_URL` are explicitly
 marked ignored by the ordinary unit test runner; other crates' tests read stored state
 through helpers behind the `test-support` feature. `just db test` runs them in a
 throwaway PostgreSQL cluster, or against an explicit, disposable `TEST_DATABASE_URL`.
+
+## Domain events
+
+`repositories/events/` defines `DomainEvent`, one variant per account or security
+change, and `Actor`, the one type every feature uses to say who caused it: a user,
+an administrator, an operator at the CLI (`$USER` and host name), a client, a
+background job, or an anonymous browser. Handlers record an event with
+`tx.record(&context, subject, event)` in the transaction that makes the change, so a
+rolled-back change leaves no event. Failed sign-ins change nothing, so they record
+theirs in a short transaction of their own. A revocation that ends several sessions
+records one `SessionRevoked` per session. Refresh rotations are too frequent to be
+events. `Imported` holds the rows of `security_audit_log`, the log events replace,
+verbatim; only migrations write it, and its fields are private to this crate.
+Migration `0005` imports the log but keeps the table, which the previous release
+writes to during a deploy; a later release imports the rows written since and
+drops it.
+
+Variants hold only typed IDs, enums, scopes, timestamps and counts, so a secret,
+token, `WebAuthn` state or raw header cannot end up in one. Anything that identifies
+a person outside auth is wrapped in `Personal<T>`. Adding a variant is a
+compile-time change that every `match` must handle.
+
+### Personal data
+
+- `domain_events` holds only non-identifying content: kind, versioned payload,
+  actor, subject, client and session IDs, and timestamps. Operator attribution
+  (`os_user`, `host`) is accountability data and stays there too. This is the
+  content a hash chain (#31) covers.
+- `event_personal_data`, one row per event, holds the client IP, the user agent
+  family and every `Personal` payload value, keyed by its JSON pointer. On write
+  the repository moves each `Personal` value there and leaves `"$erased"` in the
+  payload; on read it merges them back. Once the row is gone, they and the request
+  origin read as `Personal::Erased`. Deleting it never breaks the event.
+- The cleanup pass deletes personal data after 90 days. Account purge (#84) deletes
+  it earlier for every event whose subject or actor is the purged account.
+- `subject_user_id` has no foreign key: history outlives the account. Subject and
+  actor UUIDs are pseudonymous, not anonymous: applications hold the same `sub`.
+
+### Consumers
+
+`events().read_after(consumer, limit)` returns the events after a consumer's cursor,
+and `acknowledge(consumer, cursor)` moves it, in the transaction that applies the
+consumer's effects. A sequence number alone is not a safe cursor: a transaction can
+take sequence 10 and commit after another one took 11, and a reader that saw 11
+would skip 10. Consumers therefore read in `(txid, sequence)` order, and only events
+of transactions older than every running one (`txid < pg_snapshot_xmin(...)`), which
+have all finished. A long-running transaction holds back every consumer until it
+ends, so keep transactions short. `history_for_user` lists an account's events,
+newest first.

@@ -205,8 +205,9 @@ explains how to choose a requirement and handle the challenge.
   By default it uses the direct peer IP; only peers in `AUTH_TRUSTED_PROXIES`
   may supply a single overwritten `X-Forwarded-For`. Configure this when terminating TLS
   at a reverse proxy so users do not share the proxy’s budget. Untrusted headers
-  are ignored; missing/ambiguous headers from a trusted proxy fail closed. Security audit records are
-  retained. Readiness checks PostgreSQL; startup validates configured signing/provider
+  are ignored; missing/ambiguous headers from a trusted proxy fail closed. Security events are
+  retained; the IP addresses, browser families and provider subjects recorded with
+  them are deleted after 90 days. Readiness checks PostgreSQL; startup validates configured signing/provider
   secrets. Request and provider calls have bounded timeouts.
 
 ## Validation

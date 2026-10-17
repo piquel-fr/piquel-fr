@@ -1,13 +1,18 @@
 //! RP-initiated logout.
 
 use super::{Claim, MAX_STATE_BYTES, OAuthCode, OAuthError, OidcApplication};
-use crate::{routes, security::Session};
+use crate::{
+    routes,
+    security::{RequestContext, Session},
+};
 use axum::{
     Form, Json,
     extract::{State, rejection::FormRejection},
     http::HeaderMap,
     response::{IntoResponse, Redirect, Response},
 };
+use piquel_auth_protocol::ClientId;
+use piquel_repository::{DomainEvent, RevocationReason};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use url::Url;
@@ -36,8 +41,13 @@ impl LogoutQuery {
 }
 
 impl OidcApplication {
-    /// Validates the client, hint and exact registered post-logout redirect.
-    async fn logout_destination(&self, q: &LogoutQuery) -> Result<String, OAuthError> {
+    /// Validates the client, hint and exact registered post-logout redirect. Returns
+    /// the destination, and the client that asked for the logout when a verified
+    /// `id_token_hint` or a registered `post_logout_redirect_uri` names it.
+    async fn logout_destination(
+        &self,
+        q: &LogoutQuery,
+    ) -> Result<(String, Option<ClientId>), OAuthError> {
         if q.state.as_ref().is_some_and(|s| s.len() > MAX_STATE_BYTES) {
             return Err(OAuthCode::InvalidRequest
                 .reject(format!("state must be at most {MAX_STATE_BYTES} bytes")));
@@ -67,7 +77,10 @@ impl OidcApplication {
                 .reject("client_id does not match the id_token_hint audience"));
         }
         let Some(uri) = q.post_logout_redirect_uri.as_ref() else {
-            return Ok(format!("{}{}", self.issuer, routes::page::LOGIN));
+            return Ok((
+                format!("{}{}", self.issuer, routes::page::LOGIN),
+                hinted_client.map(ClientId::from),
+            ));
         };
         let id = q.client_id.as_deref().or(hinted_client).ok_or_else(|| {
             OAuthCode::InvalidRequest
@@ -94,7 +107,7 @@ impl OidcApplication {
         if let Some(state) = &q.state {
             url.query_pairs_mut().append_pair("state", state);
         }
-        Ok(url.into())
+        Ok((url.into(), Some(ClientId::from(client.id))))
     }
 
     /// Validates RP logout parameters before sending the browser to confirmation.
@@ -126,6 +139,7 @@ impl OidcApplication {
     /// Confirms same-origin logout, revokes the session and expires its browser cookie.
     pub(super) async fn logout(
         State(app): State<Self>,
+        context: RequestContext,
         headers: HeaderMap,
         form: Result<Form<LogoutQuery>, FormRejection>,
     ) -> Result<Response, OAuthError> {
@@ -138,10 +152,23 @@ impl OidcApplication {
                 .await
                 .map(IntoResponse::into_response);
         }
-        let destination = app.logout_destination(&q).await?;
+        let (destination, client) = app.logout_destination(&q).await?;
         if let Some(session) = Session::optional(&app.database, &headers).await? {
             let mut tx = app.database.begin().await?;
-            tx.oidc().revoke_session(session.id).await?;
+            if tx.oidc().revoke_session(session.id).await? {
+                let reason = client.map_or(RevocationReason::Logout, |client_id| {
+                    RevocationReason::RelyingPartyLogout { client_id }
+                });
+                tx.record(
+                    &context.user(&session),
+                    Some(session.user_id),
+                    DomainEvent::SessionRevoked {
+                        session_id: session.id,
+                        reason,
+                    },
+                )
+                .await?;
+            }
             tx.commit().await?;
         }
         let mut response = Json(json!({"redirect_url":destination})).into_response();

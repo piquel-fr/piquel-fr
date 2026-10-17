@@ -43,7 +43,7 @@ serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 sha2 = "0.10"
 rand = "0.8"
-sqlx = { version = "0.8", default-features = false, features = ["runtime-tokio-rustls", "postgres", "chrono", "uuid", "json", "migrate", "macros"] }
+sqlx = { version = "0.8", default-features = false, features = ["runtime-tokio-rustls", "postgres", "chrono", "uuid", "json", "ipnet", "migrate", "macros"] }
 thiserror = "2.0"
 tokio = { version = "1.48", features = ["macros", "rt-multi-thread", "signal", "net", "sync", "time"] }
 tower = { version = "0.5", features = ["util"] }

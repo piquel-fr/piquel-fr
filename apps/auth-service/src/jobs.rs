@@ -161,9 +161,10 @@ impl Jobs {
     }
 }
 
-/// Drains expired authentication state in bounded batches until a pass finds
-/// nothing or a one-minute budget runs out. Short pauses between batches keep
-/// cleanup from monopolizing the database under heavy churn.
+/// Drains expired authentication state, and event personal data past its retention,
+/// in bounded batches until a pass finds nothing or a one-minute budget runs out.
+/// Short pauses between batches keep cleanup from monopolizing the database under
+/// heavy churn.
 struct Cleanup;
 
 impl Cleanup {

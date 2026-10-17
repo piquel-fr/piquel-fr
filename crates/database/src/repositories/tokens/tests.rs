@@ -322,7 +322,7 @@ async fn code_replay_waits_for_first_redemption_and_revokes_its_family() {
         first.commit().await.expect("commit first redemption");
         let result = replay_task.await.expect("replay task");
         assert!(
-            matches!(result, Err(CodeRedemptionError::Replay { user_id }) if user_id == grant.user),
+            matches!(result, Err(CodeRedemptionError::Replay { user_id, .. }) if user_id == grant.user),
             "redeemable {redeemable}: {result:?}"
         );
         let mut rotation = pool.begin().await.expect("rotation transaction");
