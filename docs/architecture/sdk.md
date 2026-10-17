@@ -177,9 +177,35 @@ client's default resource. They will send `resource` (RFC 8707) once auth suppor
 it.
 
 Browser tokens stay in memory. Server-side apps keep tokens in a server-side session
-and give the browser only a random session ID. Refresh tokens never reach the
-browser. Auth rotates refresh tokens and revokes the whole family on reuse, so
-concurrent refreshes of one session must be serialized.
+and give the browser only a random session key, in a `__Host-` cookie that is
+`Secure`, `HttpOnly` and `SameSite=Lax`. Every sign-in starts a session under a
+fresh key. Refresh tokens never reach the browser.
+
+Applications choose where sessions live by implementing a small storage backend:
+load, insert, a compare-and-swap replace, and a remove that reports whether the
+record existed. The SDK keeps everything else: the record format and its validation,
+expiry, pending logins, and the refresh lease. Backends see only opaque records under
+the SHA-256 of each session key, so reading the backend does not give access to
+sessions. The SDK ships an in-memory backend for development and tests, and a check
+applications run against their own backend.
+
+Auth rotates refresh tokens and revokes the whole family on reuse, so concurrent
+refreshes of one session are serialized through a lease the SDK keeps in the session
+record, shared by every replica through the backend's compare-and-swap. Leases
+expire by wall-clock time, so replicas need synchronized clocks; a lease lasts a
+minute, and its holder must refresh and save before it expires, or give it back.
+The lease is taken only at the session version the request read, so a request that
+read the session before another refresh reloads it instead of redeeming the rotated
+token. Each lease has an ID, and only its holder can save the result, so a slow
+attempt cannot overwrite a later one or resurrect a logged-out session. Once a
+refresh may have reached auth without its answer being saved (a timeout, a lost
+response, a lease that expired unreleased), the stored token may be spent, so the
+session ends and the user signs in again rather than risk a reuse that would revoke
+the family. `invalid_grant` ends the session too. Any other error answer from auth
+keeps it, as does a refresh that could not connect to auth. Logout accepts only
+requests from the app's own origin.
+
+Back-channel logout is added to the SDKs together with auth's side (#65).
 
 ## Step-up
 
@@ -207,8 +233,10 @@ runs authorization again with those values.
 
 A client retries at most once per user action. It signs the user in again with the
 challenge's values and returns to the same page. If the resource still refuses on
-that return, the client reports the error instead of redirecting again. The login
-check above also means a step-up sign-in never completes below its requirement.
+that return, the client reports the error instead of redirecting again. A server-side
+client recognizes the return by a short-lived marker, so a much later return counts
+as a new action. The login check above also means a step-up sign-in never completes
+below its requirement.
 
 ## Forward compatibility
 

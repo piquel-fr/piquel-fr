@@ -81,6 +81,9 @@
 //! The behavior follows `docs/architecture/sdk.md` in the piquel-fr repository, and is
 //! tested against the shared vectors in `tests/sdk-vectors`.
 
+// Documented by its own inner docs, so their links resolve inside the module.
+#[cfg(feature = "axum")]
+pub mod axum;
 /// Login: authorization, callbacks, refresh, revocation and logout.
 mod client;
 /// HTTP requests with bounded bodies.
