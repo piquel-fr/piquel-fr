@@ -7,6 +7,8 @@ mod config;
 mod email;
 /// External identity provider applications and linking.
 mod federation;
+/// Periodic background work, coordinated across replicas.
+mod jobs;
 /// OAuth and `OpenID` Connect protocol application.
 mod oidc;
 /// `WebAuthn` ceremonies and account/session management.
@@ -23,6 +25,7 @@ mod tests;
 
 pub use config::{AuthConfig, PUBLIC_BASE_URL};
 use federation::FederationApplication;
+pub use jobs::Jobs;
 use oidc::OidcApplication;
 use passkey::PasskeyApplication;
 use service::ServiceApplication;

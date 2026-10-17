@@ -5,7 +5,7 @@
 //! queries decode into. Each submodule owns one repository together with the
 //! records it accepts and returns.
 
-use crate::{Database, DatabaseTransaction};
+use crate::{Database, DatabaseTransaction, ExclusiveConnection};
 use serde::de::DeserializeOwned;
 use sqlx::{
     Decode, PgConnection, PgPool, Postgres, Type,
@@ -23,9 +23,9 @@ pub(crate) enum RepositoryExecutor<'a> {
     Connection(&'a mut PgConnection),
 }
 
-/// Declares each repository handle and its accessor on both [`Database`] and
-/// [`DatabaseTransaction`], so the two always expose the same families. Each entry
-/// reads `/// Doc comment` then `accessor: HandleName;`.
+/// Declares each repository handle and its accessor on [`Database`],
+/// [`DatabaseTransaction`] and [`ExclusiveConnection`], so all three always expose
+/// the same families. Each entry reads `/// Doc comment` then `accessor: HandleName;`.
 macro_rules! repositories {
     ($($(#[doc = $doc:literal])* $accessor:ident: $name:ident;)*) => {
         $(
@@ -70,6 +70,17 @@ macro_rules! repositories {
                 }
             )*
         }
+
+        impl ExclusiveConnection {
+            $(
+                #[doc = concat!(
+                    "Returns a [`", stringify!($name), "`] bound to the locked connection."
+                )]
+                pub fn $accessor(&mut self) -> $name<'_> {
+                    $name::from_connection(&mut self.connection)
+                }
+            )*
+        }
     };
 }
 
@@ -92,6 +103,8 @@ repositories! {
     federation: FederationRepository;
     /// Invitations and shared request rate limits.
     security: SecurityRepository;
+    /// Deletion of expired ephemeral state.
+    maintenance: MaintenanceRepository;
 }
 
 /// Runs a checked query on the repository's pool or transaction connection and
@@ -171,6 +184,8 @@ pub(crate) mod audit;
 pub(crate) mod emails;
 /// Provider transactions, pending signups and external identity links.
 pub(crate) mod federation;
+/// Expired-state cleanup.
+pub(crate) mod maintenance;
 /// Client provisioning, authorization requests, codes and consent.
 pub(crate) mod oidc;
 /// Passkey credentials and single-use ceremony records.
