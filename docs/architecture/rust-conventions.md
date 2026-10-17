@@ -11,6 +11,9 @@ Keep implementations simple. Follow neighbouring modules and share repeated logi
 - `piquel-auth-protocol` (`crates/auth-protocol`): IDs, account status,
   authentication methods, providers, and the wire types shared with the SDKs: token
   claims, metadata, JWK sets, OAuth/OIDC vocabulary and errors, bearer challenges.
+- `piquel-auth` (`crates/auth-sdk`): the public Rust SDK, following
+  [sdk.md](sdk.md). It depends only on auth-protocol among the workspace crates,
+  since it is published.
 - `piquel-repository` (`crates/database`): the only SQLx consumer; typed
   repositories, transactions and storage vocabulary.
 - `piquel-telemetry` (`crates/telemetry`): tracing setup.
