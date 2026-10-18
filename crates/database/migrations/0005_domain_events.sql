@@ -48,8 +48,10 @@ CREATE TABLE event_consumers (
 -- keeping their action, outcome and metadata verbatim. The metadata holds only
 -- provider names, which are not personal data. The log never recorded who acted.
 --
--- security_audit_log stays: the previous release writes to it until this one
--- replaces it. A later release imports the rows written since, by ID, then drops it.
+-- PENDING CONTRACT: security_audit_log stays, because the previous release writes to
+-- it until this one replaces it. Once no deployed release writes to it, a new
+-- migration must import the rows written since, skipping IDs already in
+-- domain_events, then DROP TABLE security_audit_log.
 INSERT INTO domain_events (id, occurred_at, kind, version, payload, actor, subject_user_id)
 SELECT
     id,
