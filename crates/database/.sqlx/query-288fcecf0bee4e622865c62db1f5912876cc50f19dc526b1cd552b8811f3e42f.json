@@ -1,11 +1,11 @@
 {
   "db_name": "PostgreSQL",
-  "query": "SELECT\n                    id AS \"id: TokenId\", credential_id, user_id AS \"user_id: UserId\", credential,\n                    friendly_name, revoked_at\n                FROM passkey_credentials\n                WHERE user_id = $1\n                AND revoked_at IS NULL\n                ORDER BY created_at",
+  "query": "SELECT\n                    id AS \"id: PasskeyId\", credential_id, user_id AS \"user_id: UserId\", credential,\n                    friendly_name, revoked_at\n                FROM passkey_credentials\n                WHERE credential_id = $1\n                AND revoked_at IS NULL\n                FOR UPDATE",
   "describe": {
     "columns": [
       {
         "ordinal": 0,
-        "name": "id: TokenId",
+        "name": "id: PasskeyId",
         "type_info": "Uuid"
       },
       {
@@ -36,7 +36,7 @@
     ],
     "parameters": {
       "Left": [
-        "Uuid"
+        "Bytea"
       ]
     },
     "nullable": [
@@ -48,5 +48,5 @@
       true
     ]
   },
-  "hash": "8fd2836f2cbb7702fc5c193db05ecfcf7a9db88d3837b91cb88acf7095cdf501"
+  "hash": "288fcecf0bee4e622865c62db1f5912876cc50f19dc526b1cd552b8811f3e42f"
 }

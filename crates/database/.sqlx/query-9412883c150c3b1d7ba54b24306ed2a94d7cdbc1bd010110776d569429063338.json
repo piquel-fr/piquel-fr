@@ -1,0 +1,16 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO event_consumers (name, txid, sequence)\n                VALUES ($1, $2::bigint::text::xid8, $3)\n                ON CONFLICT (name) DO UPDATE\n                SET txid = EXCLUDED.txid, sequence = EXCLUDED.sequence\n                WHERE (event_consumers.txid, event_consumers.sequence)\n                    < (EXCLUDED.txid, EXCLUDED.sequence)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Int8",
+        "Int8"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "9412883c150c3b1d7ba54b24306ed2a94d7cdbc1bd010110776d569429063338"
+}

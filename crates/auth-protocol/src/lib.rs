@@ -206,6 +206,8 @@ macro_rules! uuid_id {
 uuid_id!(UserId, "Immutable global Piquel account identifier.");
 uuid_id!(SessionId, "Opaque central-session identifier.");
 uuid_id!(TokenId, "Identifier for a token record or JWT.");
+uuid_id!(PasskeyId, "Identifier of a stored passkey credential.");
+uuid_id!(EventId, "Identifier of a recorded domain event.");
 
 /// A registered OAuth client's identifier. Chosen by whoever registers the client,
 /// so any non-empty string.

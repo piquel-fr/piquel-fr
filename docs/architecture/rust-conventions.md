@@ -98,11 +98,15 @@ variants. Limits and lifetimes are named constants. Preserve existing wire spell
 Shared authentication vocabulary, JWT/JWK vocabulary and wire types live in
 auth-protocol. Build tokens and protocol documents from its structs, never with
 `json!`, so auth and the SDKs share one definition. Use `open_str_enum!` for wire
-values a newer peer may extend, such as `amr`. Storage vocabulary (`AuditAction`, `AuditOutcome`, `CeremonyKind`,
-`OidcRedirectKind`) lives in the repository. Record successful account operations
-with `tx.audit_events().record(user_id, action, provider)`. Record rejections that
-implicate an account with `record_rejection(user_id, action)`, committed even though
-the operation fails; never store challenges, cookies or tokens. Keep digests typed until
+values a newer peer may extend, such as `amr`. Storage vocabulary (`CeremonyKind`,
+`OidcRedirectKind`, `UserAgentFamily`) and domain events live in the repository.
+Record each account or security change with `tx.record(&context, subject, event)`
+in the transaction that makes it. Handlers extract `RequestContext`, which
+`HttpSecurity::protect` attaches to rate-limited routes, and attribute it with
+`context.user(&session)`, `context.client(id)` or `context.actor(actor)`. Record
+failed sign-ins with `RequestContext::record_sign_in_failure`, which commits even
+though the operation fails. Wrap values that identify a person in `Personal`; never
+store challenges, cookies or tokens. Keep digests typed until
 their persistence boundary. SQL, rows and connections stay inside the repository.
 Write queries with SQLx's checked macros and refresh the cache with
 `just db prepare`. `just db test` runs the database integration tests in a scratch

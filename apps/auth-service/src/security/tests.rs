@@ -9,6 +9,16 @@ use piquel_crypto::Secret;
 use piquel_repository::{DatabaseConfig, InsertSession, InsertUser};
 use std::net::{IpAddr, Ipv6Addr};
 use tower::ServiceExt;
+
+impl RequestContext {
+    /// The context of a request from a documentation address, for handler tests
+    /// that bypass [`HttpSecurity::protect`].
+    pub(crate) const TEST: Self = Self(RequestOrigin {
+        client_ip: Some(IpAddr::V4(std::net::Ipv4Addr::new(192, 0, 2, 1))),
+        user_agent_family: Some(UserAgentFamily::Firefox),
+    });
+}
+
 /// Asserts that `response` asks the frontend to confirm the session with a passkey
 /// at most [`CONFIRMATION_MAX_AGE`] seconds old, in the stable JSON shape.
 pub(crate) async fn assert_step_up_required(response: Response) {
@@ -718,9 +728,14 @@ async fn confirmed_changes_serialize_with_logout() {
         })
         .await
         .expect("user");
-    let secret = Session::create(&mut tx, user_id, AuthenticationMethod::Passkey)
-        .await
-        .expect("session");
+    let secret = Session::create(
+        &mut tx,
+        RequestContext::TEST,
+        user_id,
+        AuthenticationMethod::Passkey,
+    )
+    .await
+    .expect("session");
     tx.commit().await.expect("commit");
     let session = database
         .sessions()

@@ -63,6 +63,15 @@ pub struct RotatedRefreshToken {
     pub authentication: SessionAuthentication,
 }
 
+/// A refresh family that a revocation ended.
+#[derive(Clone, Copy, Debug)]
+pub struct RevokedFamily {
+    /// The revoked family.
+    pub id: TokenId,
+    /// Account the grant belonged to.
+    pub user_id: UserId,
+}
+
 /// Why a refresh token could not be rotated.
 #[derive(Debug, Error)]
 pub enum RefreshRotationError {
@@ -78,12 +87,16 @@ pub enum RefreshRotationError {
     Replay {
         /// Account whose grant was revoked.
         user_id: UserId,
+        /// The revoked family.
+        family_id: TokenId,
     },
     /// The client no longer allows the grant; its family is now revoked.
     #[error("the client policy no longer allows the refresh grant")]
     Policy {
         /// Account whose grant was revoked.
         user_id: UserId,
+        /// The revoked family.
+        family_id: TokenId,
     },
 }
 
@@ -172,8 +185,8 @@ impl TokenRepository<'_> {
             )
         )?
         .ok_or(RefreshRotationError::Invalid)?;
-        // The user key never changes: NO KEY UPDATE permits concurrent logout
-        // audit/session foreign-key checks while we wait for its session lock.
+        // The user key never changes: NO KEY UPDATE permits concurrent session
+        // foreign-key checks while we wait for its session lock.
         run!(
             self,
             fetch_optional,
@@ -308,7 +321,7 @@ impl TokenRepository<'_> {
         let (family_id, user_id) = (row.family_id, row.user_id);
         if row.consumed_at.is_some() {
             self.revoke_family(family_id).await?;
-            return Err(RefreshRotationError::Replay { user_id });
+            return Err(RefreshRotationError::Replay { user_id, family_id });
         }
         // The grant's JSON is decoded only after the replay check, so a replayed
         // token revokes its family even if that JSON is invalid.
@@ -320,7 +333,7 @@ impl TokenRepository<'_> {
             && scopes.iter().all(|scope| allowed_scopes.contains(scope));
         if !policy_valid {
             self.revoke_family(family_id).await?;
-            return Err(RefreshRotationError::Policy { user_id });
+            return Err(RefreshRotationError::Policy { user_id, family_id });
         }
         if run!(
             self,
@@ -374,7 +387,8 @@ impl TokenRepository<'_> {
     }
 
     /// Like [`Self::revoke_family_for_token`], but only for a family issued to
-    /// `client` (token revocation by that client).
+    /// `client` (token revocation by that client). Returns the family if this
+    /// call revoked it.
     ///
     /// # Errors
     ///
@@ -384,24 +398,26 @@ impl TokenRepository<'_> {
         id: TokenId,
         digest: &[u8],
         client: &str,
-    ) -> Result<(), DatabaseError> {
+    ) -> Result<Option<RevokedFamily>, DatabaseError> {
         run!(
             self,
-            execute,
-            sqlx::query!(
-                "UPDATE refresh_token_families f
-                SET revoked_at = COALESCE(revoked_at, now())
+            fetch_optional,
+            sqlx::query_as!(
+                RevokedFamily,
+                r#"UPDATE refresh_token_families f
+                SET revoked_at = now()
                 FROM refresh_tokens t
                 WHERE t.id = $1
                 AND t.secret_digest = $2
                 AND t.family_id = f.id
-                AND f.client_id = $3",
+                AND f.client_id = $3
+                AND f.revoked_at IS NULL
+                RETURNING f.id AS "id: TokenId", f.user_id AS "user_id: UserId""#,
                 id.as_uuid(),
                 digest,
                 client,
             )
-        )?;
-        Ok(())
+        )
     }
 
     /// Revokes every active family of the account and returns how many were
