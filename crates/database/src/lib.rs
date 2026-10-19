@@ -18,8 +18,12 @@ pub use connection::{Database, DatabaseConfig};
 pub use error::{DatabaseConnectionError, DatabaseError};
 pub use exclusive::{ExclusiveConnection, LockKey};
 pub use repositories::{
-    EmailRepository, EventRepository, FederationRepository, MaintenanceRepository, OidcRepository,
-    PasskeyRepository, SecurityRepository, SessionRepository, TokenRepository, UserRepository,
+    DeliveryRepository, EmailRepository, EventRepository, FederationRepository,
+    MaintenanceRepository, OidcRepository, PasskeyRepository, SecurityRepository,
+    SessionRepository, TokenRepository, UserRepository,
+    deliveries::{
+        Channel, Delivery, DeliveryOutcome, DeliveryStatus, DeliverySummary, NewDelivery,
+    },
     emails::{InsertVerifiedEmail, StoredEmail},
     events::{
         Actor, DomainEvent, EventContext, EventCursor, GrantRevocation, ImportedAudit, JobName,

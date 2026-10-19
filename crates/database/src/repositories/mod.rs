@@ -93,6 +93,8 @@ repositories! {
     sessions: SessionRepository;
     /// Typed domain events, their personal data and consumer cursors.
     events: EventRepository;
+    /// Outbound deliveries, their leases and ordering.
+    deliveries: DeliveryRepository;
     /// Passkey credentials and `WebAuthn` ceremony state.
     passkeys: PasskeyRepository;
     /// OIDC clients, authorization requests, codes and consent.
@@ -178,6 +180,8 @@ impl From<Unsigned> for u64 {
     }
 }
 
+/// The outbound delivery queue.
+pub(crate) mod deliveries;
 /// Verified email ownership and primary-address persistence.
 pub(crate) mod emails;
 /// Typed domain events, personal data and the consumer cursor.

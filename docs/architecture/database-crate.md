@@ -22,8 +22,8 @@ sources. Client provisioning validates fields and allowlists through
 `ClientConfigurationError` before writing any SQL.
 
 Each repository has its own module under `src/repositories/` (`users`, `emails`,
-`sessions`, `events`, `passkeys`, `oidc`, `tokens`, `federation`, `security`,
-`maintenance`), holding its methods and the records they take and return.
+`sessions`, `events`, `deliveries`, `passkeys`, `oidc`, `tokens`, `federation`,
+`security`, `maintenance`), holding its methods and the records they take and return.
 `repositories/mod.rs` holds only shared plumbing: the executor, the
 `repositories!` macro that declares every handle and its accessors on `Database`,
 `DatabaseTransaction` and `ExclusiveConnection`, the `run!` query macro and the
@@ -105,7 +105,9 @@ advisory lock, so concurrent `migrate` runs are safe.
 
 Every five minutes, one replica drains expired ephemeral state in bounded batches
 through `maintenance()`, for up to one minute per pass. The same pass deletes event
-personal data older than 90 days; the events themselves are kept indefinitely. Jobs like it that must run
+personal data older than 90 days; the events themselves are kept indefinitely. It
+also deletes finished deliveries: succeeded ones after 7 days, failed or cancelled
+ones after 30. Deleting a failed ordered delivery cancels the ones behind it. Jobs like it that must run
 on one replica at a time call `Database::try_exclusive(LockKey)`, which takes a
 session-level advisory lock on a dedicated connection outside the pool. The lock
 ends with that connection, even when the job is cancelled or the process dies, so
@@ -123,7 +125,8 @@ change, and `Actor`, the one type every feature uses to say who caused it: a use
 an administrator, an operator at the CLI (`$USER` and host name), a client, a
 background job, or an anonymous browser. Handlers record an event with
 `tx.record(&context, subject, event)` in the transaction that makes the change, so a
-rolled-back change leaves no event. Failed sign-ins change nothing, so they record
+rolled-back change leaves no event. `record` also creates the outbound deliveries
+the event causes, in the same transaction; see [the delivery queue](delivery-queue.md). Failed sign-ins change nothing, so they record
 theirs in a short transaction of their own. A revocation that ends several sessions
 records one `SessionRevoked` per session. Refresh rotations are too frequent to be
 events. `Imported` holds the rows of `security_audit_log`, the log events replace,

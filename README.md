@@ -97,6 +97,22 @@ time. Tokens expire after seven days by default; `h` and `d` are supported. A to
 is redeemed atomically with account creation, so a failed signup does not spend it.
 Disabling invitation enforcement affects signup only; existing users keep access.
 
+### Outbound deliveries
+
+Messages for other systems wait in a queue in the database until a worker sends
+them. No channel uses it yet; back-channel logout (#65) will be the first.
+Inspect and repair it with:
+
+```sh
+just auth deliveries list --status failed
+just auth deliveries retry <id>
+just auth deliveries cancel <id>
+```
+
+A failed delivery with an ordering key holds back the ones after it until it is
+retried or cancelled. After 30 days, cleanup deletes it and cancels the ones
+behind it. See `docs/architecture/delivery-queue.md`.
+
 ### OIDC clients
 
 `AUTH_CLIENTS_FILE` is authoritative: startup disables clients omitted from it.

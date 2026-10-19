@@ -1,0 +1,18 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE deliveries\n                SET status = $3,\n                    next_attempt_at = COALESCE($4, next_attempt_at),\n                    last_error = COALESCE($5, last_error),\n                    finished_at = CASE WHEN $3 = 'pending' THEN NULL ELSE now() END,\n                    claim_token = NULL,\n                    leased_until = NULL\n                WHERE id = $1 AND claim_token = $2",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid",
+        "Text",
+        "Timestamptz",
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "92669291d5c63ab5ee94f61413afcaf488057015a81dc23aa33161e315046067"
+}

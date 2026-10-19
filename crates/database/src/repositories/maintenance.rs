@@ -1,4 +1,5 @@
-//! Bounded deletion of expired ephemeral authentication state and event personal data.
+//! Bounded deletion of expired ephemeral authentication state, event personal data
+//! and finished deliveries.
 
 use super::{MaintenanceRepository, RepositoryExecutor};
 use crate::DatabaseError;
@@ -7,9 +8,11 @@ use crate::DatabaseError;
 const MAX_PURGE_BATCH: u32 = 1_000;
 
 impl MaintenanceRepository<'_> {
-    /// Purges a bounded batch of expired ephemeral authentication state, and of
-    /// event personal data older than 90 days, and returns how many rows were
-    /// deleted. `batch_size` is clamped to 1..=1000 rows per table.
+    /// Purges a bounded batch of expired ephemeral authentication state, of event
+    /// personal data older than 90 days, and of deliveries that succeeded over 7
+    /// days ago or failed or were cancelled over 30 days ago, and returns how many
+    /// rows were deleted. Failed ordered deliveries are left to
+    /// [`DatabaseTransaction::abandon_stuck_deliveries`](crate::DatabaseTransaction::abandon_stuck_deliveries). `batch_size` is clamped to 1..=1000 rows per table.
     ///
     /// Each batch skips rows that live requests have locked. Outside a transaction,
     /// each table's batch commits on its own, so cleanup never holds locks across
@@ -159,6 +162,22 @@ impl MaintenanceRepository<'_> {
                 SELECT ctid
                 FROM event_personal_data
                 WHERE created_at < now() - interval '90 days'
+                LIMIT $1
+                FOR UPDATE SKIP LOCKED
+            )",
+            // Ordered failures hold back their key, so only
+            // `DatabaseTransaction::abandon_stuck_deliveries` removes them.
+            "DELETE FROM deliveries d
+            WHERE d.ctid IN (
+                SELECT delivery.ctid
+                FROM deliveries delivery
+                WHERE (delivery.status = 'succeeded' AND delivery.finished_at < now() - interval '7 days')
+                OR (delivery.status = 'cancelled' AND delivery.finished_at < now() - interval '30 days')
+                OR (
+                    delivery.status = 'failed'
+                    AND delivery.ordering_key IS NULL
+                    AND delivery.finished_at < now() - interval '30 days'
+                )
                 LIMIT $1
                 FOR UPDATE SKIP LOCKED
             )",

@@ -1,4 +1,5 @@
-//! Periodic background work, coordinated across replicas.
+//! Background work: periodic jobs coordinated across replicas, and the delivery
+//! workers every replica runs (see `crate::deliveries`).
 
 use piquel_repository::{Database, DatabaseError, ExclusiveConnection, LockKey};
 use std::{sync::Arc, time::Duration};
@@ -34,11 +35,11 @@ trait ExclusiveJob: Send + Sync + 'static {
 
 /// Tells running jobs that the service is shutting down.
 #[derive(Clone)]
-struct Shutdown(watch::Receiver<bool>);
+pub(crate) struct Shutdown(watch::Receiver<bool>);
 
 impl Shutdown {
     /// Resolves once shutdown has been requested.
-    async fn requested(&self) {
+    pub(crate) async fn requested(&self) {
         // An error means the runner is gone, which is a shutdown too.
         let _ = self.0.clone().wait_for(|&requested| requested).await;
     }
@@ -62,7 +63,7 @@ impl Jobs {
     }
 
     /// A runner without jobs.
-    fn new() -> Self {
+    pub(crate) fn new() -> Self {
         Self {
             tasks: JoinSet::new(),
             shutdown: watch::Sender::new(false),
@@ -70,7 +71,8 @@ impl Jobs {
     }
 
     /// Stops starting runs, waits up to the `SHUTDOWN_GRACE` period for running ones, then
-    /// cancels the rest. Cancelling a job drops its connection, which releases its lock.
+    /// cancels the rest. Cancelling a job drops its connection, which releases its lock;
+    /// cancelling a delivery attempt leaves its lease to expire, so it is sent again.
     ///
     /// # Errors
     /// Returns the first job loop that panicked. Runs that panic are only logged.
@@ -99,11 +101,19 @@ impl Jobs {
         }
     }
 
+    /// Runs the task `start` returns until it ends. It should end soon after the
+    /// [`Shutdown`] it receives is requested.
+    pub(crate) fn spawn<F>(&mut self, start: impl FnOnce(Shutdown) -> F)
+    where
+        F: Future<Output = ()> + Send + 'static,
+    {
+        self.tasks.spawn(start(Shutdown(self.shutdown.subscribe())));
+    }
+
     /// Every [`ExclusiveJob::EVERY`], runs `job` if no other replica is running it.
     fn exclusive<J: ExclusiveJob>(&mut self, job: J, database: Database) {
-        let shutdown = Shutdown(self.shutdown.subscribe());
         let job = Arc::new(job);
-        self.tasks.spawn(async move {
+        self.spawn(|shutdown| async move {
             let mut interval = tokio::time::interval(J::EVERY);
             interval.set_missed_tick_behavior(MissedTickBehavior::Delay);
             loop {
@@ -161,8 +171,10 @@ impl Jobs {
     }
 }
 
-/// Drains expired authentication state, and event personal data past its retention,
-/// in bounded batches until a pass finds nothing or a one-minute budget runs out.
+/// Drains expired authentication state, event personal data and finished
+/// deliveries past their retention, and abandons delivery ordering keys stuck
+/// behind an old failure, in bounded batches until a pass finds nothing or a
+/// one-minute budget runs out.
 /// Short pauses between batches keep cleanup from monopolizing the database under
 /// heavy churn.
 struct Cleanup;
@@ -174,6 +186,19 @@ impl Cleanup {
     const PAUSE: Duration = Duration::from_millis(100);
     /// Per-table batch bound.
     const BATCH_SIZE: u32 = 1_000;
+
+    /// Runs one batch and returns how many rows it changed. Abandoning stuck keys
+    /// needs a transaction of its own, so its locks last until it decides.
+    async fn batch(connection: &mut ExclusiveConnection) -> Result<u64, DatabaseError> {
+        let mut tx = connection.begin().await?;
+        let abandoned = tx.abandon_stuck_deliveries(Self::BATCH_SIZE).await?;
+        tx.commit().await?;
+        let purged = connection
+            .maintenance()
+            .purge_expired_auth_state(Self::BATCH_SIZE)
+            .await?;
+        Ok(abandoned + purged)
+    }
 }
 
 impl ExclusiveJob for Cleanup {
@@ -189,12 +214,7 @@ impl ExclusiveJob for Cleanup {
         shutdown: &Shutdown,
     ) -> Result<(), DatabaseError> {
         let deadline = Instant::now() + Self::BUDGET;
-        while connection
-            .maintenance()
-            .purge_expired_auth_state(Self::BATCH_SIZE)
-            .await?
-            > 0
-        {
+        while Self::batch(connection).await? > 0 {
             if Instant::now() >= deadline {
                 tracing::warn!("expired authentication state cleanup is falling behind");
                 break;

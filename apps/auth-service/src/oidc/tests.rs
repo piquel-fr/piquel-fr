@@ -2,7 +2,7 @@
 
 use super::*;
 use crate::security::{BrowserCookie, RequestContext, Session};
-use crate::tests::{AUTH_ORIGIN, Replicas};
+use crate::tests::{AUTH_ORIGIN, Replicas, TlsListener};
 use axum::{
     body::{Body, to_bytes},
     http::{Method, Request, StatusCode},
@@ -1210,64 +1210,6 @@ async fn oauth_failures_preserve_sources_and_statuses() {
 
 /// Existing approve form spelling, independent of the JSON-only consent enum.
 const APPROVE_CONSENT: &str = "approve";
-
-/// HTTPS on a local port with a self-signed `localhost` certificate, so the SDK can
-/// reach the provider at an `https` issuer as it would in production.
-struct TlsListener {
-    /// Accepts TCP connections.
-    tcp: tokio::net::TcpListener,
-    /// Completes each TLS handshake.
-    acceptor: tokio_rustls::TlsAcceptor,
-}
-
-impl TlsListener {
-    /// Serves `router` on `tcp` in the background, with the request context
-    /// `HttpSecurity` would attach, and returns the certificate to trust.
-    fn serve(tcp: tokio::net::TcpListener, router: Router) -> reqwest::Certificate {
-        use tokio_rustls::rustls::{self, pki_types::PrivateKeyDer};
-        let certified =
-            rcgen::generate_simple_self_signed(vec!["localhost".into()]).expect("certificate");
-        let config = rustls::ServerConfig::builder_with_provider(Arc::new(
-            rustls::crypto::aws_lc_rs::default_provider(),
-        ))
-        .with_safe_default_protocol_versions()
-        .expect("TLS versions")
-        .with_no_client_auth()
-        .with_single_cert(
-            vec![certified.cert.der().clone()],
-            PrivateKeyDer::Pkcs8(certified.signing_key.serialize_der().into()),
-        )
-        .expect("TLS configuration");
-        let listener = Self {
-            tcp,
-            acceptor: tokio_rustls::TlsAcceptor::from(Arc::new(config)),
-        };
-        let router = router.layer(axum::Extension(RequestContext::TEST));
-        tokio::spawn(async move { axum::serve(listener, router).await });
-        reqwest::Certificate::from_der(certified.cert.der()).expect("trusted certificate")
-    }
-}
-
-impl axum::serve::Listener for TlsListener {
-    type Io = tokio_rustls::server::TlsStream<tokio::net::TcpStream>;
-    type Addr = std::net::SocketAddr;
-
-    /// Retries until a connection completes its handshake.
-    async fn accept(&mut self) -> (Self::Io, Self::Addr) {
-        loop {
-            let Ok((stream, address)) = self.tcp.accept().await else {
-                continue;
-            };
-            if let Ok(stream) = self.acceptor.accept(stream).await {
-                return (stream, address);
-            }
-        }
-    }
-
-    fn local_addr(&self) -> std::io::Result<Self::Addr> {
-        self.tcp.local_addr()
-    }
-}
 
 /// The resource the SDK scenario's client requests tokens for.
 const SDK_RESOURCE: &str = "notes-api";

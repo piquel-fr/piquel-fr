@@ -69,6 +69,8 @@ isolation headers.
 Periodic work implements `ExclusiveJob` in `apps/auth-service/src/jobs.rs`, and
 `Jobs::start` schedules it. A job receives only its locked `ExclusiveConnection`,
 never the `Database`, so everything it does happens while it holds the lock.
+Messages for other systems are never sent from handlers: the event's channels queue
+them, and delivery workers send them. See [the delivery queue](delivery-queue.md).
 
 ## Errors
 

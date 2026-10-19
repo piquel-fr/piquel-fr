@@ -1,0 +1,66 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE deliveries\n                SET claim_token = $2, leased_until = now() + $3, attempts = attempts + 1\n                WHERE id = (\n                    SELECT d.id\n                    FROM deliveries d\n                    WHERE d.channel = $1\n                    AND d.status = 'pending'\n                    AND d.next_attempt_at <= now()\n                    AND (d.leased_until IS NULL OR d.leased_until < now())\n                    AND (d.ordering_key IS NULL OR NOT EXISTS (\n                        SELECT 1\n                        FROM deliveries e\n                        WHERE e.ordering_key = d.ordering_key\n                        AND e.ordinal < d.ordinal\n                        AND (e.status IN ('pending', 'failed') OR e.leased_until > now())\n                    ))\n                    ORDER BY d.next_attempt_at\n                    LIMIT 1\n                    FOR UPDATE SKIP LOCKED\n                )\n                RETURNING\n                    id AS \"id: DeliveryId\", event_id AS \"event_id: EventId\", destination,\n                    recipient, payload, attempts::bigint AS \"attempts!: Unsigned\", created_at,\n                    retried_at",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id: DeliveryId",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "event_id: EventId",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 2,
+        "name": "destination",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 3,
+        "name": "recipient",
+        "type_info": "Jsonb"
+      },
+      {
+        "ordinal": 4,
+        "name": "payload",
+        "type_info": "Jsonb"
+      },
+      {
+        "ordinal": 5,
+        "name": "attempts!: Unsigned",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 6,
+        "name": "created_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 7,
+        "name": "retried_at",
+        "type_info": "Timestamptz"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Uuid",
+        "Interval"
+      ]
+    },
+    "nullable": [
+      false,
+      true,
+      false,
+      false,
+      false,
+      null,
+      false,
+      true
+    ]
+  },
+  "hash": "e4e46d053a355110ea6629133c7fa917b9ce434a98b912652baf780d695b79c3"
+}
