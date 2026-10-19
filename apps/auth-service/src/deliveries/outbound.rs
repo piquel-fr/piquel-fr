@@ -4,15 +4,16 @@
 
 use super::{DeliveryError, Failure, SEND_TIMEOUT};
 use axum::http::{HeaderMap, Method, StatusCode, header::RETRY_AFTER};
-use chrono::{DateTime, Utc};
+use chrono::{DateTime, NaiveDateTime, Utc};
+use ipnet::{Ipv4Net, Ipv6Net};
 use reqwest::{
-    RequestBuilder, Response,
+    RequestBuilder,
     dns::{Addrs, Name, Resolve, Resolving},
     redirect,
 };
 use std::{
     error::Error as StdError,
-    net::{IpAddr, Ipv4Addr, SocketAddr},
+    net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr},
     sync::Arc,
     time::Duration,
 };
@@ -23,6 +24,52 @@ use url::{Host, Url};
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(5);
 /// Sent with every request.
 const USER_AGENT: &str = "piquel-auth";
+/// The most of a response body that is read; the rest is ignored.
+const MAX_RESPONSE_BYTES: usize = 64 * 1024;
+/// The obsolete HTTP-date formats receivers must still accept (RFC 9110 section
+/// 5.6.7): RFC 850 and C's `asctime`. The preferred format is RFC 2822's.
+const OBSOLETE_HTTP_DATES: [&str; 2] = ["%A, %d-%b-%y %H:%M:%S GMT", "%a %b %e %H:%M:%S %Y"];
+
+/// IPv4 ranges a destination may not use: the special-purpose ranges that are not
+/// globally reachable (RFC 6890), multicast, and the reserved block.
+const REFUSED_V4: [Ipv4Net; 11] = [
+    Ipv4Net::new_assert(Ipv4Addr::UNSPECIFIED, 8),
+    Ipv4Net::new_assert(Ipv4Addr::new(10, 0, 0, 0), 8),
+    Ipv4Net::new_assert(Ipv4Addr::new(100, 64, 0, 0), 10),
+    Ipv4Net::new_assert(Ipv4Addr::new(127, 0, 0, 0), 8),
+    Ipv4Net::new_assert(Ipv4Addr::new(169, 254, 0, 0), 16),
+    Ipv4Net::new_assert(Ipv4Addr::new(172, 16, 0, 0), 12),
+    Ipv4Net::new_assert(Ipv4Addr::new(192, 0, 0, 0), 24),
+    Ipv4Net::new_assert(Ipv4Addr::new(192, 168, 0, 0), 16),
+    Ipv4Net::new_assert(Ipv4Addr::new(198, 18, 0, 0), 15),
+    Ipv4Net::new_assert(Ipv4Addr::new(224, 0, 0, 0), 4),
+    Ipv4Net::new_assert(Ipv4Addr::new(240, 0, 0, 0), 4),
+];
+/// IPv6 ranges a destination may not use: unspecified, loopback and the
+/// deprecated IPv4-compatible addresses (`::/96`), discard-only, local-use NAT64
+/// (RFC 8215), unique-local, link-local, site-local and multicast.
+const REFUSED_V6: [Ipv6Net; 7] = [
+    Ipv6Net::new_assert(Ipv6Addr::UNSPECIFIED, 96),
+    Ipv6Net::new_assert(Ipv6Addr::new(0x100, 0, 0, 0, 0, 0, 0, 0), 64),
+    Ipv6Net::new_assert(Ipv6Addr::new(0x64, 0xff9b, 1, 0, 0, 0, 0, 0), 48),
+    Ipv6Net::new_assert(Ipv6Addr::new(0xfc00, 0, 0, 0, 0, 0, 0, 0), 7),
+    Ipv6Net::new_assert(Ipv6Addr::new(0xfe80, 0, 0, 0, 0, 0, 0, 0), 10),
+    Ipv6Net::new_assert(Ipv6Addr::new(0xfec0, 0, 0, 0, 0, 0, 0, 0), 10),
+    Ipv6Net::new_assert(Ipv6Addr::new(0xff00, 0, 0, 0, 0, 0, 0, 0), 8),
+];
+/// Well-known NAT64 (RFC 6052): the last 32 bits are the IPv4 address reached.
+const NAT64: Ipv6Net = Ipv6Net::new_assert(Ipv6Addr::new(0x64, 0xff9b, 0, 0, 0, 0, 0, 0), 96);
+/// 6to4 (RFC 3056): bits 16 to 48 are the IPv4 address reached.
+const SIX_TO_FOUR: Ipv6Net = Ipv6Net::new_assert(Ipv6Addr::new(0x2002, 0, 0, 0, 0, 0, 0, 0), 16);
+
+/// A successful response, with at most [`MAX_RESPONSE_BYTES`] of its body.
+#[derive(Debug)]
+pub(crate) struct OutboundResponse {
+    /// The successful status.
+    pub status: StatusCode,
+    /// The body's first [`MAX_RESPONSE_BYTES`] bytes.
+    pub body: Vec<u8>,
+}
 
 /// Sends requests to destinations third parties supply. Destinations must be
 /// HTTPS URLs whose host is, or resolves only to, public addresses; the
@@ -76,7 +123,8 @@ impl OutboundClient {
     }
 
     /// Sends a `method` request to `destination`, configured by `request`, e.g. to
-    /// add a body. Returns the response if its status is successful.
+    /// add a body. Returns the response if its status is successful, with its body
+    /// cut at [`MAX_RESPONSE_BYTES`].
     ///
     /// # Errors
     ///
@@ -89,14 +137,25 @@ impl OutboundClient {
         method: Method,
         destination: &str,
         request: impl FnOnce(RequestBuilder) -> RequestBuilder,
-    ) -> Result<Response, DeliveryError> {
+    ) -> Result<OutboundResponse, DeliveryError> {
         let url = self.check(destination)?;
-        let response = request(self.client.request(method, url))
+        let transport = |error: reqwest::Error| Self::transport_error(&error);
+        let mut response = request(self.client.request(method, url))
             .send()
             .await
-            .map_err(|error| Self::transport_error(&error))?;
+            .map_err(transport)?;
         Self::check_status(response.status(), response.headers(), Utc::now())?;
-        Ok(response)
+        let mut body = Vec::new();
+        while body.len() < MAX_RESPONSE_BYTES
+            && let Some(chunk) = response.chunk().await.map_err(transport)?
+        {
+            let room = MAX_RESPONSE_BYTES - body.len();
+            body.extend_from_slice(&chunk[..chunk.len().min(room)]);
+        }
+        Ok(OutboundResponse {
+            status: response.status(),
+            body,
+        })
     }
 
     /// Parses `destination`, refusing anything but HTTPS and an IP literal host
@@ -172,18 +231,24 @@ impl OutboundClient {
     }
 
     /// How long `Retry-After` asks to wait from `now`: a number of seconds or an
-    /// HTTP date (RFC 9110 section 10.2.3). Malformed values are ignored.
+    /// HTTP date in any of its three formats (RFC 9110 section 10.2.3). Malformed
+    /// values are ignored.
     fn retry_after(headers: &HeaderMap, now: DateTime<Utc>) -> Option<Duration> {
         let value = headers.get(RETRY_AFTER)?.to_str().ok()?.trim();
         if let Ok(seconds) = value.parse::<u64>() {
             return Some(Duration::from_secs(seconds));
         }
-        let date = DateTime::parse_from_rfc2822(value).ok()?;
-        Some(
-            (date.with_timezone(&Utc) - now)
-                .to_std()
-                .unwrap_or_default(),
-        )
+        let date = DateTime::parse_from_rfc2822(value)
+            .map(|date| date.to_utc())
+            .ok()
+            .or_else(|| {
+                OBSOLETE_HTTP_DATES.iter().find_map(|format| {
+                    NaiveDateTime::parse_from_str(value, format)
+                        .ok()
+                        .map(|date| date.and_utc())
+                })
+            })?;
+        Some((date - now).to_std().unwrap_or_default())
     }
 }
 
@@ -198,40 +263,34 @@ pub(super) enum Reachable {
 }
 
 impl Reachable {
-    /// Whether a destination may have `address`. Loopback, private, link-local,
-    /// unique-local, shared, unspecified, multicast and broadcast addresses are
-    /// refused, including IPv4 ones written as IPv4-mapped IPv6.
+    /// Whether a destination may have `address`; see [`Self::is_public`].
     pub(super) fn allows(self, address: IpAddr) -> bool {
-        let address = address.to_canonical();
-        let public = match address {
-            IpAddr::V4(v4) => {
-                !(v4.is_loopback()
-                    || v4.is_private()
-                    || v4.is_link_local()
-                    || v4.is_unspecified()
-                    || v4.is_broadcast()
-                    || v4.is_multicast()
-                    || Self::is_shared(v4))
-            }
-            IpAddr::V6(v6) => {
-                !(v6.is_loopback()
-                    || v6.is_unique_local()
-                    || v6.is_unicast_link_local()
-                    || v6.is_unspecified()
-                    || v6.is_multicast())
-            }
-        };
+        let public = Self::is_public(address);
         match self {
             Self::Public => public,
             #[cfg(test)]
-            Self::PublicOrLoopback => public || address.is_loopback(),
+            Self::PublicOrLoopback => public || address.to_canonical().is_loopback(),
         }
     }
 
-    /// Whether `address` is in the carrier-grade NAT range, `100.64.0.0/10`.
-    fn is_shared(address: Ipv4Addr) -> bool {
-        let [first, second, ..] = address.octets();
-        first == 100 && second & 0b1100_0000 == 0b0100_0000
+    /// Whether `address` is outside every refused range, and so is the IPv4
+    /// address it reaches when it is IPv4-mapped, NAT64 or 6to4.
+    fn is_public(address: IpAddr) -> bool {
+        match address.to_canonical() {
+            IpAddr::V4(v4) => !REFUSED_V4.iter().any(|range| range.contains(&v4)),
+            IpAddr::V6(v6) => {
+                let bits = u128::from(v6);
+                let embedded = if NAT64.contains(&v6) {
+                    u32::try_from(bits & 0xffff_ffff).ok()
+                } else if SIX_TO_FOUR.contains(&v6) {
+                    u32::try_from((bits >> 80) & 0xffff_ffff).ok()
+                } else {
+                    None
+                };
+                !REFUSED_V6.iter().any(|range| range.contains(&v6))
+                    && embedded.is_none_or(|v4| Self::is_public(IpAddr::V4(v4.into())))
+            }
+        }
     }
 }
 

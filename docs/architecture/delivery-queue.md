@@ -25,8 +25,9 @@ Auth-service owns sending: the workers, the retry policy and the HTTP client
   an email's `Message-ID`.
 - **Ordered per key.** Deliveries that share an ordering key are sent one at a
   time, in the order their transactions committed, whatever the replicas' clocks
-  say. A failed one holds back the rest until an operator retries or cancels it.
-  Deliveries without a key are unordered.
+  say. A failed one holds back the rest until an operator retries or cancels it,
+  and so does a cancelled one until its last attempt's lease expires. Deliveries
+  without a key are unordered.
 - **Never secret.** Payloads are stored as they are, so they never hold a
   plaintext secret. `last_error` holds a status code or an error kind, never a
   response body.
@@ -39,7 +40,9 @@ Auth-service owns sending: the workers, the retry policy and the HTTP client
 2. Every replica runs two workers per channel. A worker claims the longest-due
    delivery with `FOR UPDATE SKIP LOCKED`, sets a fresh claim token and a 60 second
    lease, and commits. Idle workers poll every second.
-3. It sends outside any transaction, with a 10 second timeout.
+3. It sends outside any transaction, with a 10 second timeout. A delivery that
+   waited past its channel's `MAX_AGE`, counted from its creation or from an
+   operator's last retry, fails without being sent.
 4. It records the outcome only if its claim token still holds the delivery. If
    another worker claimed it after the lease expired, or an operator cancelled
    it, the outcome is discarded and logged as a lost lease.
@@ -50,7 +53,8 @@ Auth-service owns sending: the workers, the retry policy and the HTTP client
    - Permanent error, or a retry later than the channel's `MAX_AGE` after
      creation: `failed`.
 5. The cleanup job deletes `succeeded` deliveries after 7 days and `failed` or
-   `cancelled` ones after 30, except a failed one that still holds back others.
+   `cancelled` ones after 30. A failed ordered delivery stays until an operator
+   acts, since it holds back its key, even for deliveries not committed yet.
 
 ## Outbound HTTP
 
@@ -59,13 +63,14 @@ Destinations come from client registrations, which third parties can supply.
 
 - HTTPS only.
 - Redirects are refused, never followed. A 3xx fails the delivery.
-- The host is resolved once, and refused if any address is loopback, private,
-  link-local, unique-local, shared (`100.64.0.0/10`), unspecified, multicast or
-  broadcast. The connection goes to the checked addresses. IP literals get the
-  same check, and proxies are never used, since a proxy would resolve the name
-  itself.
-- 5 seconds to connect, 10 in total. A channel that reads a response body reads
-  at most 64 KiB of it.
+- The host is resolved once, and refused if any address is in a range that is
+  not globally reachable: loopback, private, link-local, unique-local, shared,
+  local-use NAT64, multicast, reserved and the like. An IPv4-mapped, NAT64 or
+  6to4 address is also checked as the IPv4 address it reaches. The connection
+  goes to the checked addresses. IP literals get the same check, and proxies are
+  never used, since a proxy would resolve the name itself.
+- 5 seconds to connect, 10 in total. Only the first 64 KiB of a response body
+  are read.
 
 HTTP 408, 429 and 5xx, timeouts, connection and DNS failures are retryable. Other
 statuses, refused destinations and redirects fail at once.
@@ -79,9 +84,9 @@ auth-service deliveries cancel <id>   # a pending or failed delivery
 ```
 
 `just auth deliveries …` runs them with the caller's configuration. Retrying a
-delivery older than its channel's `MAX_AGE` gives it one more attempt: a retryable
-error fails it again. Cancelling an attempt in progress cannot stop it from
-reaching the receiver, but its outcome is discarded.
+delivery restarts its channel's `MAX_AGE`. Cancelling an attempt in progress
+cannot stop it from reaching the receiver, but its outcome is discarded, and the
+deliveries ordered after it wait for its lease to expire.
 
 ## Adding a channel
 

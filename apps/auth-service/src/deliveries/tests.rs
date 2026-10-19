@@ -23,7 +23,7 @@ const UNAVAILABLE: DeliveryError = DeliveryError::Retryable {
 fn outcome(error: DeliveryError, attempts: u64, jitter: f64) -> DeliveryOutcome {
     let created_at = DateTime::UNIX_EPOCH;
     let now = created_at + TimeDelta::hours(1);
-    error.outcome(attempts, created_at, Duration::from_hours(24), now, jitter)
+    error.outcome(attempts, created_at + TimeDelta::days(1), now, jitter)
 }
 
 /// When `outcome` retries, measured from the attempt.
@@ -81,7 +81,12 @@ fn retries_back_off_and_honor_retry_after_until_the_maximum_age() {
 #[test]
 fn only_public_addresses_are_reachable() {
     let allowed = |address: &str| Reachable::Public.allows(address.parse().expect("address"));
-    for public in ["93.184.215.14", "2606:2800:21f:cb07:6820:80da:af6b:8b2c"] {
+    for public in [
+        "93.184.215.14",
+        "2606:2800:21f:cb07:6820:80da:af6b:8b2c",
+        "64:ff9b::5db8:d70e",
+        "2002:5db8:d70e::1",
+    ] {
         assert!(allowed(public), "{public}");
     }
     for refused in [
@@ -101,6 +106,12 @@ fn only_public_addresses_are_reachable() {
         "ff02::1",
         "::ffff:127.0.0.1",
         "::ffff:10.0.0.1",
+        "::7f00:1",
+        "64:ff9b::a00:1",
+        "64:ff9b:1::a00:1",
+        "2002:a00:1::1",
+        "198.18.0.1",
+        "240.0.0.1",
     ] {
         assert!(!allowed(refused), "{refused}");
     }
@@ -108,7 +119,8 @@ fn only_public_addresses_are_reachable() {
     assert!(Reachable::PublicOrLoopback.allows(loopback));
 }
 
-/// Only 408, 429 and 5xx are retried, after `Retry-After` in seconds or as a date.
+/// Only 408, 429 and 5xx are retried, after `Retry-After` in seconds or as a date
+/// in any HTTP-date format.
 #[test]
 fn statuses_classify_and_retry_after_parses() {
     let now = DateTime::parse_from_rfc2822("Wed, 21 Oct 2026 07:28:00 GMT")
@@ -139,6 +151,21 @@ fn statuses_classify_and_retry_after_parses() {
         ),
         retryable(StatusCode::SERVICE_UNAVAILABLE, Some(120))
     );
+    for obsolete in [
+        "Wednesday, 21-Oct-26 07:30:00 GMT",
+        "Wed Oct 21 07:30:00 2026",
+    ] {
+        let mut headers = HeaderMap::new();
+        headers.insert(
+            RETRY_AFTER,
+            HeaderValue::from_str(obsolete).expect("header"),
+        );
+        assert_eq!(
+            OutboundClient::check_status(StatusCode::SERVICE_UNAVAILABLE, &headers, now),
+            retryable(StatusCode::SERVICE_UNAVAILABLE, Some(120)),
+            "{obsolete}"
+        );
+    }
     assert_eq!(
         check(StatusCode::BAD_GATEWAY, Some("soon")),
         retryable(StatusCode::BAD_GATEWAY, None)
@@ -181,8 +208,8 @@ async fn non_public_and_plain_http_destinations_are_refused() {
     }
 }
 
-/// A redirect is refused rather than followed, and a busy receiver's
-/// `Retry-After` comes back with its retryable status.
+/// A redirect is refused rather than followed, a busy receiver's `Retry-After`
+/// comes back with its retryable status, and a long body is cut at 64 KiB.
 #[tokio::test]
 async fn redirects_are_refused() {
     let tcp = tokio::net::TcpListener::bind("127.0.0.1:0")
@@ -203,15 +230,15 @@ async fn redirects_are_refused() {
                 (StatusCode::SERVICE_UNAVAILABLE, [(RETRY_AFTER, "30")]).into_response()
             }),
         )
-        .route("/ok", get(|| async { StatusCode::NO_CONTENT }));
+        .route("/ok", get(|| async { vec![b'a'; 100 * 1024] }));
     let client = OutboundClient::local(TlsListener::serve(tcp, receiver));
     let send = async |path: &str| {
         client
             .send(Method::GET, &format!("{origin}{path}"), |request| request)
             .await
-            .map(|response| response.status())
+            .map(|response| (response.status, response.body.len()))
     };
-    assert_eq!(send("/ok").await, Ok(StatusCode::NO_CONTENT));
+    assert_eq!(send("/ok").await, Ok((StatusCode::OK, 64 * 1024)));
     assert_eq!(
         send("/moved").await,
         Err(DeliveryError::Permanent(Failure::Redirect))

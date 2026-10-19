@@ -116,6 +116,8 @@ pub struct Delivery<C: Channel> {
     pub attempts: u64,
     /// When it was created.
     pub created_at: DateTime<Utc>,
+    /// When an operator last retried it, which restarts its channel's maximum age.
+    pub retried_at: Option<DateTime<Utc>>,
     /// Proves this claim when the outcome is recorded.
     claim_token: Uuid,
 }
@@ -136,6 +138,8 @@ struct ClaimedRow {
     attempts: Unsigned,
     /// When it was created.
     created_at: DateTime<Utc>,
+    /// When an operator last retried it.
+    retried_at: Option<DateTime<Utc>>,
 }
 
 /// How an attempt ended, as [`DeliveryRepository::finish`] records it.
@@ -269,36 +273,30 @@ impl DeliveryRepository<'_> {
         let serialization = |error| DatabaseError::Operation(Box::new(error));
         let recipient = serde_json::to_value(&delivery.recipient).map_err(serialization)?;
         let payload = serde_json::to_value(&delivery.payload).map_err(serialization)?;
-        let ordinal = match &delivery.ordering_key {
-            Some(key) => Some(run!(
-                self,
-                fetch_one,
-                sqlx::query_scalar!(
-                    r#"INSERT INTO delivery_orderings (ordering_key, next_ordinal) VALUES ($1, 2)
-                    ON CONFLICT (ordering_key) DO UPDATE
-                    SET next_ordinal = delivery_orderings.next_ordinal + 1
-                    RETURNING next_ordinal - 1 AS "ordinal!""#,
-                    key,
-                )
-            )?),
-            None => None,
-        };
         let id = DeliveryId::new();
+        // One statement, so the ordinal and the delivery commit together even
+        // outside a transaction. Taking the ordinal locks the key's row until then.
         run!(
             self,
             execute,
             sqlx::query!(
-                "INSERT INTO deliveries (
+                "WITH ordinal AS (
+                    INSERT INTO delivery_orderings (ordering_key, next_ordinal)
+                    SELECT $6, 2 WHERE $6::text IS NOT NULL
+                    ON CONFLICT (ordering_key) DO UPDATE
+                    SET next_ordinal = delivery_orderings.next_ordinal + 1
+                    RETURNING next_ordinal - 1 AS value
+                )
+                INSERT INTO deliveries (
                     id, event_id, channel, destination, recipient, ordering_key, ordinal,
                     payload, status
-                ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)",
+                ) VALUES ($1, $2, $3, $4, $5, $6, (SELECT value FROM ordinal), $7, $8)",
                 id.as_uuid(),
                 event_id.map(EventId::as_uuid),
                 C::NAME,
                 delivery.destination,
                 recipient,
                 delivery.ordering_key,
-                ordinal,
                 payload,
                 DeliveryStatus::Pending.as_str(),
             )
@@ -309,7 +307,8 @@ impl DeliveryRepository<'_> {
     /// Claims the longest-due delivery of channel `C` for `lease`, or returns
     /// `None` when none is due. Concurrent workers never claim the same delivery
     /// while its lease lasts. An ordered delivery is due only once every earlier
-    /// one with its key succeeded or was cancelled. Run it outside a transaction,
+    /// one with its key succeeded or was cancelled, and no attempt of a cancelled
+    /// one may still be in progress. Run it outside a transaction,
     /// so the claim commits before the send starts.
     ///
     /// # Errors
@@ -344,7 +343,7 @@ impl DeliveryRepository<'_> {
                         FROM deliveries e
                         WHERE e.ordering_key = d.ordering_key
                         AND e.ordinal < d.ordinal
-                        AND e.status IN ('pending', 'failed')
+                        AND (e.status IN ('pending', 'failed') OR e.leased_until > now())
                     ))
                     ORDER BY d.next_attempt_at
                     LIMIT 1
@@ -352,7 +351,8 @@ impl DeliveryRepository<'_> {
                 )
                 RETURNING
                     id AS "id: DeliveryId", event_id AS "event_id: EventId", destination,
-                    recipient, payload, attempts::bigint AS "attempts!: Unsigned", created_at"#,
+                    recipient, payload, attempts::bigint AS "attempts!: Unsigned", created_at,
+                    retried_at"#,
                 C::NAME,
                 claim_token,
                 lease as _,
@@ -372,6 +372,7 @@ impl DeliveryRepository<'_> {
                 payload,
                 attempts: row.attempts.into(),
                 created_at: row.created_at,
+                retried_at: row.retried_at,
                 claim_token,
             })),
             Err(source) => {
@@ -473,8 +474,8 @@ impl DeliveryRepository<'_> {
         .collect())
     }
 
-    /// Makes a failed or cancelled delivery due again now. If it is older than its
-    /// channel's maximum age, its next retryable error fails it again.
+    /// Makes a failed or cancelled delivery due again now, and restarts its
+    /// channel's maximum age.
     ///
     /// # Errors
     ///
@@ -486,7 +487,8 @@ impl DeliveryRepository<'_> {
             fetch_one,
             sqlx::query_scalar!(
                 "UPDATE deliveries
-                SET status = 'pending', next_attempt_at = now(), finished_at = NULL
+                SET status = 'pending', next_attempt_at = now(), finished_at = NULL,
+                    retried_at = now()
                 WHERE id = $1 AND status IN ('failed', 'cancelled')
                 RETURNING id",
                 id.as_uuid(),
@@ -497,7 +499,8 @@ impl DeliveryRepository<'_> {
 
     /// Cancels a pending or failed delivery, which unblocks the deliveries ordered
     /// after it. An attempt in progress may still reach the receiver, but its
-    /// outcome is discarded.
+    /// outcome is discarded, and its lease keeps holding back the deliveries
+    /// ordered after it until it expires, so none overtakes it.
     ///
     /// # Errors
     ///
@@ -509,8 +512,7 @@ impl DeliveryRepository<'_> {
             fetch_one,
             sqlx::query_scalar!(
                 "UPDATE deliveries
-                SET status = 'cancelled', finished_at = now(), claim_token = NULL,
-                    leased_until = NULL
+                SET status = 'cancelled', finished_at = now(), claim_token = NULL
                 WHERE id = $1 AND status IN ('pending', 'failed')
                 RETURNING id",
                 id.as_uuid(),

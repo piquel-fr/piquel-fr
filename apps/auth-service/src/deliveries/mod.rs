@@ -97,19 +97,22 @@ pub(crate) enum Failure {
     /// The attempt took longer than its timeout.
     #[error("timed out")]
     Timeout,
+    /// The delivery was still unsent at its channel's maximum age, so it was not
+    /// attempted again.
+    #[error("maximum age exceeded")]
+    Expired,
 }
 
 impl DeliveryError {
-    /// What to record for an attempt of a delivery created at `created_at` that
-    /// failed with this error at `now`, its `attempts`th. `jitter`, in `[0, 1)`,
-    /// scales the backoff: a retry waits a random time up to the bound, which
-    /// doubles from [`FIRST_BACKOFF`] to [`MAX_BACKOFF`] ("full jitter"), unless
-    /// the receiver sent `Retry-After`.
+    /// What to record for a delivery's `attempts`th attempt, which failed with
+    /// this error at `now`. A retry later than `expires` fails it instead.
+    /// `jitter`, in `[0, 1)`, scales the backoff: a retry waits a random time up to
+    /// the bound, which doubles from [`FIRST_BACKOFF`] to [`MAX_BACKOFF`] ("full
+    /// jitter"), unless the receiver sent `Retry-After`.
     fn outcome(
         self,
         attempts: u64,
-        created_at: DateTime<Utc>,
-        max_age: Duration,
+        expires: DateTime<Utc>,
         now: DateTime<Utc>,
         jitter: f64,
     ) -> DeliveryOutcome {
@@ -129,11 +132,11 @@ impl DeliveryError {
             .saturating_mul(2_u32.saturating_pow(doublings))
             .min(MAX_BACKOFF);
         let delay = retry_after.unwrap_or_else(|| bound.mul_f64(jitter));
-        let deadline = |duration| TimeDelta::from_std(duration).ok();
-        let at = deadline(delay).and_then(|delay| now.checked_add_signed(delay));
-        let expires = deadline(max_age).and_then(|age| created_at.checked_add_signed(age));
-        match at.zip(expires) {
-            Some((at, expires)) if at <= expires => DeliveryOutcome::Retry {
+        let at = TimeDelta::from_std(delay)
+            .ok()
+            .and_then(|delay| now.checked_add_signed(delay));
+        match at {
+            Some(at) if at <= expires => DeliveryOutcome::Retry {
                 at,
                 error: failure.to_string(),
             },
@@ -230,21 +233,39 @@ impl<S: Sender> Worker<S> {
         }
     }
 
-    /// Sends `delivery` within [`SEND_TIMEOUT`] and records the outcome, which
-    /// is discarded if the lease was lost meanwhile.
+    /// When `delivery` stops being attempted: [`Sender::MAX_AGE`] after it was
+    /// created, or after an operator last retried it.
+    fn expires(delivery: &Delivery<S::Channel>) -> DateTime<Utc> {
+        TimeDelta::from_std(S::MAX_AGE)
+            .ok()
+            .and_then(|age| {
+                delivery
+                    .retried_at
+                    .unwrap_or(delivery.created_at)
+                    .checked_add_signed(age)
+            })
+            .unwrap_or(DateTime::<Utc>::MAX_UTC)
+    }
+
+    /// Sends `delivery` within [`SEND_TIMEOUT`], unless it expired while it waited,
+    /// and records the outcome, which is discarded if the lease was lost meanwhile.
     async fn send(sender: Arc<S>, database: Database, delivery: Delivery<S::Channel>) {
-        let result = tokio::time::timeout(SEND_TIMEOUT, sender.send(&delivery))
-            .await
-            .unwrap_or(Err(DeliveryError::Retryable {
-                failure: Failure::Timeout,
-                retry_after: None,
-            }));
+        let expires = Self::expires(&delivery);
+        let result = if Utc::now() > expires {
+            Err(DeliveryError::Permanent(Failure::Expired))
+        } else {
+            tokio::time::timeout(SEND_TIMEOUT, sender.send(&delivery))
+                .await
+                .unwrap_or(Err(DeliveryError::Retryable {
+                    failure: Failure::Timeout,
+                    retry_after: None,
+                }))
+        };
         let outcome = match result {
             Ok(()) => DeliveryOutcome::Succeeded,
             Err(error) => error.outcome(
                 delivery.attempts,
-                delivery.created_at,
-                S::MAX_AGE,
+                expires,
                 Utc::now(),
                 DeliveryError::jitter(),
             ),

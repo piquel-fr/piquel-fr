@@ -3,8 +3,8 @@
 //! Tests share one database, so each claims from a channel of its own.
 use super::*;
 use crate::{
-    Actor, Database, EventContext, EventRepository, RequestOrigin, StoredEvent,
-    repositories::events::Personal,
+    Actor, Database, EventContext, EventRepository, MaintenanceRepository, RequestOrigin,
+    StoredEvent, repositories::events::Personal,
 };
 use sqlx::PgPool;
 use std::collections::HashSet;
@@ -42,6 +42,8 @@ test_channels! {
     Leased = "test_leased";
     /// Sent in order.
     Ordered = "test_ordered";
+    /// Cancelled while being sent.
+    Interrupted = "test_interrupted";
 }
 
 /// Copies the subject's username into each event's delivery, as back-channel
@@ -201,7 +203,7 @@ async fn deliveries_commit_with_their_event_and_outlive_the_account() {
 }
 
 /// However many workers claim at once, each delivery goes to exactly one.
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread")]
 #[ignore = "requires a disposable TEST_DATABASE_URL"]
 async fn concurrent_workers_never_claim_the_same_delivery() {
     let pool = Database::test_pool().await;
@@ -210,10 +212,12 @@ async fn concurrent_workers_never_claim_the_same_delivery() {
     for _ in 0..10 {
         queued.insert(insert::<Concurrent>(&pool, None).await);
     }
-    let claims = (0..30).map(|_| {
-        let pool = pool.clone();
-        tokio::spawn(async move { claim::<Concurrent>(&pool, LEASE).await.map(|d| d.id) })
-    });
+    let claims: Vec<_> = (0..30)
+        .map(|_| {
+            let pool = pool.clone();
+            tokio::spawn(async move { claim::<Concurrent>(&pool, LEASE).await.map(|d| d.id) })
+        })
+        .collect();
     let mut claimed = Vec::new();
     for claim in claims {
         claimed.extend(claim.await.expect("claim task"));
@@ -266,7 +270,8 @@ async fn an_expired_lease_is_claimed_again_and_the_stale_outcome_discarded() {
 }
 
 /// Deliveries with one key are claimed in ordinal order, one at a time. A failed
-/// one holds back the rest until it is retried and succeeds, or is cancelled.
+/// one holds back the rest, even past cleanup's retention, until it is retried and
+/// succeeds, or is cancelled.
 #[tokio::test]
 #[ignore = "requires a disposable TEST_DATABASE_URL"]
 async fn ordered_deliveries_go_one_at_a_time_and_a_failure_blocks_the_rest() {
@@ -298,12 +303,25 @@ async fn ordered_deliveries_go_one_at_a_time_and_a_failure_blocks_the_rest() {
     let second = next().await.expect("second");
     assert_eq!(second.id, ids[1]);
     finish(&pool, &second, &failed()).await.expect("fail");
+    sqlx::query("UPDATE deliveries SET finished_at = now() - interval '1 year' WHERE id = $1")
+        .bind(second.id.as_uuid())
+        .execute(&pool)
+        .await
+        .expect("age the failure");
+    MaintenanceRepository::from_pool(&pool)
+        .purge_expired_auth_state(1000)
+        .await
+        .expect("cleanup");
     assert!(next().await.is_none(), "the failure holds back the third");
 
     let repository = || DeliveryRepository::from_pool(&pool);
     repository().retry(ids[1]).await.expect("retry");
     let retried = next().await.expect("retried");
     assert_eq!((retried.id, retried.attempts), (ids[1], 2));
+    assert!(
+        retried.retried_at.is_some(),
+        "retrying restarts the maximum age"
+    );
     finish(&pool, &retried, &failed())
         .await
         .expect("fail again");
@@ -324,4 +342,32 @@ async fn ordered_deliveries_go_one_at_a_time_and_a_failure_blocks_the_rest() {
         .map(|(_, ordinal)| ordinal)
         .collect();
     assert_eq!(ordinals, [3, 2, 1], "newest first");
+}
+
+/// Cancelling a delivery while it is being sent discards its outcome, but the
+/// next one with its key waits for the attempt's lease, so it cannot overtake it.
+#[tokio::test]
+#[ignore = "requires a disposable TEST_DATABASE_URL"]
+async fn a_cancelled_attempt_holds_back_its_key_until_its_lease_expires() {
+    let pool = Database::test_pool().await;
+    clear::<Interrupted>(&pool).await;
+    let key = format!("key-{}", Uuid::now_v7());
+    let first = insert::<Interrupted>(&pool, Some(&key)).await;
+    let second = insert::<Interrupted>(&pool, Some(&key)).await;
+    let lease = Duration::from_millis(300);
+
+    let attempt = claim::<Interrupted>(&pool, lease).await.expect("first");
+    assert_eq!(attempt.id, first);
+    DeliveryRepository::from_pool(&pool)
+        .cancel(first)
+        .await
+        .expect("cancel");
+    assert!(claim::<Interrupted>(&pool, lease).await.is_none());
+    assert!(matches!(
+        finish(&pool, &attempt, &DeliveryOutcome::Succeeded).await,
+        Err(DatabaseError::NotFound)
+    ));
+    tokio::time::sleep(lease).await;
+    let next = claim::<Interrupted>(&pool, lease).await.expect("second");
+    assert_eq!(next.id, second);
 }

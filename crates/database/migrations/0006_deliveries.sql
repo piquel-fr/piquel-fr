@@ -23,11 +23,15 @@ CREATE TABLE deliveries (
     attempts INT NOT NULL DEFAULT 0,
     next_attempt_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     -- Set by the worker sending it. Only the holder of claim_token records the outcome.
+    -- Cancelling clears claim_token but keeps leased_until, so an attempt in progress
+    -- holds back the deliveries ordered after it until its lease expires.
     claim_token UUID,
     leased_until TIMESTAMPTZ,
     -- A status code or an error kind, never a response body.
     last_error TEXT,
     created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    -- When an operator last retried it; the channel's maximum age counts from here.
+    retried_at TIMESTAMPTZ,
     finished_at TIMESTAMPTZ,
     UNIQUE (ordering_key, ordinal),
     CHECK ((ordering_key IS NULL) = (ordinal IS NULL))

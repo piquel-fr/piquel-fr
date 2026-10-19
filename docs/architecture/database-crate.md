@@ -107,7 +107,7 @@ Every five minutes, one replica drains expired ephemeral state in bounded batche
 through `maintenance()`, for up to one minute per pass. The same pass deletes event
 personal data older than 90 days; the events themselves are kept indefinitely. It
 also deletes finished deliveries: succeeded ones after 7 days, failed or cancelled
-ones after 30. Jobs like it that must run
+ones after 30, except failed ordered ones, which wait for an operator. Jobs like it that must run
 on one replica at a time call `Database::try_exclusive(LockKey)`, which takes a
 session-level advisory lock on a dedicated connection outside the pool. The lock
 ends with that connection, even when the job is cancelled or the process dies, so

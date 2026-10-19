@@ -1,0 +1,21 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "WITH ordinal AS (\n                    INSERT INTO delivery_orderings (ordering_key, next_ordinal)\n                    SELECT $6, 2 WHERE $6::text IS NOT NULL\n                    ON CONFLICT (ordering_key) DO UPDATE\n                    SET next_ordinal = delivery_orderings.next_ordinal + 1\n                    RETURNING next_ordinal - 1 AS value\n                )\n                INSERT INTO deliveries (\n                    id, event_id, channel, destination, recipient, ordering_key, ordinal,\n                    payload, status\n                ) VALUES ($1, $2, $3, $4, $5, $6, (SELECT value FROM ordinal), $7, $8)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid",
+        "Text",
+        "Text",
+        "Jsonb",
+        "Text",
+        "Jsonb",
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "f10cae129f20b50fbd60ca278da01e81526777488faa5dc9466cfd251177126b"
+}

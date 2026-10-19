@@ -10,7 +10,8 @@ const MAX_PURGE_BATCH: u32 = 1_000;
 impl MaintenanceRepository<'_> {
     /// Purges a bounded batch of expired ephemeral authentication state, of event
     /// personal data older than 90 days, and of deliveries that succeeded over 7
-    /// days ago or failed or were cancelled over 30 days ago, and returns how many
+    /// days ago or failed or were cancelled over 30 days ago (except failed ordered
+    /// ones, which hold back their key until an operator acts), and returns how many
     /// rows were deleted. `batch_size` is clamped to 1..=1000 rows per table.
     ///
     /// Each batch skips rows that live requests have locked. Outside a transaction,
@@ -164,26 +165,19 @@ impl MaintenanceRepository<'_> {
                 LIMIT $1
                 FOR UPDATE SKIP LOCKED
             )",
-            // A failed delivery that holds back later ones with its key stays until an
-            // operator retries or cancels it, so its successors are never sent out of order.
+            // A failed ordered delivery holds back the later ones with its key, even
+            // ones not committed yet, so it stays until an operator retries or cancels it.
             "DELETE FROM deliveries d
             WHERE d.ctid IN (
                 SELECT delivery.ctid
                 FROM deliveries delivery
-                WHERE (
-                    (delivery.status = 'succeeded' AND delivery.finished_at < now() - interval '7 days')
-                    OR (
-                        delivery.status IN ('failed', 'cancelled')
-                        AND delivery.finished_at < now() - interval '30 days'
-                    )
+                WHERE (delivery.status = 'succeeded' AND delivery.finished_at < now() - interval '7 days')
+                OR (delivery.status = 'cancelled' AND delivery.finished_at < now() - interval '30 days')
+                OR (
+                    delivery.status = 'failed'
+                    AND delivery.ordering_key IS NULL
+                    AND delivery.finished_at < now() - interval '30 days'
                 )
-                AND NOT (delivery.status = 'failed' AND EXISTS (
-                    SELECT 1
-                    FROM deliveries later
-                    WHERE later.ordering_key = delivery.ordering_key
-                    AND later.ordinal > delivery.ordinal
-                    AND later.status = 'pending'
-                ))
                 LIMIT $1
                 FOR UPDATE SKIP LOCKED
             )",

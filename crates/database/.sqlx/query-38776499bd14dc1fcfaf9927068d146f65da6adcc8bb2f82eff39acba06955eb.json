@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "DELETE FROM deliveries d\n            WHERE d.ctid IN (\n                SELECT delivery.ctid\n                FROM deliveries delivery\n                WHERE (delivery.status = 'succeeded' AND delivery.finished_at < now() - interval '7 days')\n                OR (delivery.status = 'cancelled' AND delivery.finished_at < now() - interval '30 days')\n                OR (\n                    delivery.status = 'failed'\n                    AND delivery.ordering_key IS NULL\n                    AND delivery.finished_at < now() - interval '30 days'\n                )\n                LIMIT $1\n                FOR UPDATE SKIP LOCKED\n            )",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Int8"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "38776499bd14dc1fcfaf9927068d146f65da6adcc8bb2f82eff39acba06955eb"
+}
