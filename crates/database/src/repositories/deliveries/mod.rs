@@ -7,9 +7,9 @@
 //! their transactions committed. See `docs/architecture/delivery-queue.md`.
 
 use super::{DeliveryRepository, RepositoryExecutor, Unsigned};
-use crate::{DatabaseError, DatabaseTransaction, DomainEvent};
+use crate::{DatabaseError, DatabaseTransaction};
 use chrono::{DateTime, Utc};
-use piquel_auth_protocol::{DeliveryId, EventId, UserId};
+use piquel_common::{DeliveryId, EventId, UserId, events::DomainEvent};
 use serde::{Serialize, de::DeserializeOwned};
 use serde_json::Value;
 use std::time::Duration;

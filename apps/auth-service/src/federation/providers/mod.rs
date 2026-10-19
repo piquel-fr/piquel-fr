@@ -5,9 +5,9 @@
 use super::{FederationApplication, FederationConfigError, Provider};
 use crate::email::NormalizedEmail;
 use axum::http::{StatusCode, header};
-use piquel_auth_protocol::oauth::GrantType;
-use piquel_common::ConfigurationError;
-use piquel_repository::SignInFailure;
+use piquel_common::{
+    config::ConfigurationError, events::SignInFailure, protocol::oauth::GrantType,
+};
 use serde::{Deserialize, de::DeserializeOwned};
 use thiserror::Error;
 use url::Url;

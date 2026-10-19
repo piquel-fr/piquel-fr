@@ -5,7 +5,7 @@ use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use std::{collections::BTreeSet, fmt, str::FromStr};
 use thiserror::Error;
 
-piquel_common::str_enum! {
+crate::str_enum! {
     /// Token endpoint grants (RFC 6749 §4.1.3 and §6).
     pub enum GrantType {
         /// Exchange a single-use authorization code, bound to PKCE.
@@ -15,7 +15,7 @@ piquel_common::str_enum! {
     }
 }
 
-piquel_common::str_enum! {
+crate::str_enum! {
     /// Authorization response types. Only the code flow is supported.
     pub enum ResponseType {
         /// Return an authorization code to the redirect URI.
@@ -23,7 +23,7 @@ piquel_common::str_enum! {
     }
 }
 
-piquel_common::str_enum! {
+crate::str_enum! {
     /// Authorization response modes. Only the query string is supported.
     pub enum ResponseMode {
         /// Code and state go in the redirect's query string.
@@ -31,7 +31,7 @@ piquel_common::str_enum! {
     }
 }
 
-piquel_common::str_enum! {
+crate::str_enum! {
     /// Client authentication methods at the token and revocation endpoints.
     pub enum ClientAuthMethod {
         /// Public client, identified by its ID alone.
@@ -41,7 +41,7 @@ piquel_common::str_enum! {
     }
 }
 
-piquel_common::str_enum! {
+crate::str_enum! {
     /// OIDC subject identifier types.
     pub enum SubjectType {
         /// Every client sees the same account ID.
@@ -49,7 +49,7 @@ piquel_common::str_enum! {
     }
 }
 
-piquel_common::str_enum! {
+crate::str_enum! {
     /// PKCE code challenge methods (RFC 7636). `plain` is deliberately absent.
     pub enum CodeChallengeMethod {
         /// The challenge is the base64url SHA-256 of the verifier.
@@ -57,7 +57,7 @@ piquel_common::str_enum! {
     }
 }
 
-piquel_common::str_enum! {
+crate::str_enum! {
     /// OIDC `prompt` values controlling browser interaction.
     pub enum Prompt {
         /// Fail instead of showing any page.
@@ -71,7 +71,7 @@ piquel_common::str_enum! {
     }
 }
 
-piquel_common::str_enum! {
+crate::str_enum! {
     /// Standard OIDC scopes. Clients may also be granted registered extension scopes.
     pub enum Scope {
         /// Issue an ID token and allow `UserInfo`.
@@ -90,7 +90,7 @@ piquel_common::str_enum! {
 /// besides the standard [`Scope`] values.
 ///
 /// ```
-/// use piquel_auth_protocol::oauth::{InvalidScope, Scopes};
+/// use piquel_common::protocol::oauth::{InvalidScope, Scopes};
 ///
 /// let granted: Scopes = "profile openid notes:read profile".parse()?;
 /// assert_eq!(granted.to_string(), "notes:read openid profile");
@@ -216,7 +216,7 @@ impl<'de> Deserialize<'de> for Scopes {
     }
 }
 
-piquel_common::open_str_enum! {
+crate::open_str_enum! {
     /// OAuth and OIDC error codes auth returns from its endpoints and in authorization
     /// error redirects (RFC 6749 §4.1.2.1 and §5.2, OIDC Core §3.1.2.6). Open, so an
     /// SDK still reads an error body carrying a code added after it was built.
@@ -255,7 +255,7 @@ piquel_common::open_str_enum! {
 /// so no description can break or inject a header.
 ///
 /// ```
-/// use piquel_auth_protocol::oauth::ErrorDescription;
+/// use piquel_common::protocol::oauth::ErrorDescription;
 ///
 /// assert!("the code expired".parse::<ErrorDescription>().is_ok());
 /// assert!("line\nbreak".parse::<ErrorDescription>().is_err());
@@ -337,7 +337,7 @@ impl fmt::Display for ErrorDescription {
 /// JSON error body of auth's OAuth endpoints (RFC 6749 §5.2).
 ///
 /// ```
-/// use piquel_auth_protocol::oauth::{ErrorCode, ErrorResponse};
+/// use piquel_common::protocol::oauth::{ErrorCode, ErrorResponse};
 ///
 /// let body: ErrorResponse =
 ///     serde_json::from_str(r#"{"error":"invalid_grant","error_description":"code expired"}"#)?;

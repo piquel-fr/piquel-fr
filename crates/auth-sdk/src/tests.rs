@@ -4,7 +4,9 @@ use super::*;
 use crate::{client::PendingLogin, http::Http};
 use ::axum::{Router, http::StatusCode, routing::get};
 use base64::{Engine, engine::general_purpose::URL_SAFE_NO_PAD};
-use piquel_auth_protocol::{challenge::BearerChallenge, claims::AccessTokenClaims, jwt::TokenType};
+use piquel_common::protocol::{
+    challenge::BearerChallenge, claims::AccessTokenClaims, jwt::TokenType,
+};
 use serde_json::Value;
 use std::{
     fs,

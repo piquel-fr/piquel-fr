@@ -8,7 +8,7 @@ use axum::{
     http::{HeaderValue, StatusCode, header, request::Parts},
     response::{IntoResponse, Response},
 };
-use piquel_auth_protocol::challenge::{BearerChallenge, BearerError};
+use piquel_common::protocol::challenge::{BearerChallenge, BearerError};
 use serde::de::DeserializeOwned;
 use std::{
     future::Future,

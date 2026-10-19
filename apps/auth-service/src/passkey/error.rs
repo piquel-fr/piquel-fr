@@ -2,9 +2,9 @@
 
 use super::ApiError;
 use crate::security::SessionError;
-use piquel_auth_protocol::InvalidValue;
+use piquel_common::{InvalidValue, events::SignInFailure};
 use piquel_crypto::CryptoError;
-use piquel_repository::{DatabaseError, SignInFailure};
+use piquel_repository::DatabaseError;
 use std::borrow::Cow;
 use webauthn_rs::prelude::WebauthnError;
 

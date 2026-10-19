@@ -13,16 +13,17 @@ use axum::{
     routing::{delete, get, post},
 };
 use chrono::{Duration, Utc};
-use piquel_auth_protocol::{
-    AuthenticationMethod, Provider, SessionId, TokenId, UserId,
-    oauth::{CodeChallengeMethod, ResponseType},
+use piquel_common::{
+    AuthenticationMethod, ErrorChain, Provider, SessionId, TokenId, UserId,
+    config::{ConfigurationError, Origin, SecretBytes},
+    events::{Actor, SignInFailure},
+    protocol::oauth::{CodeChallengeMethod, ResponseType},
 };
-use piquel_common::{ConfigurationError, ErrorChain, Origin, SecretBytes};
 use piquel_crypto::Pkce;
 use piquel_crypto::Secret;
 use piquel_repository::{
-    Actor, Database, DatabaseTransaction, InsertFederationTransaction, PendingFederation,
-    SignInFailure, StoredExternalIdentity, StoredSession,
+    Database, DatabaseTransaction, InsertFederationTransaction, PendingFederation,
+    StoredExternalIdentity, StoredSession,
 };
 use serde::{Deserialize, Serialize};
 use std::{collections::BTreeMap, sync::Arc, time::Duration as StdDuration};

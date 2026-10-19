@@ -3,7 +3,7 @@
 //! resources check the same type, so both enforce one rule; each only reports an
 //! unmet requirement in its own format.
 
-use crate::claims::Acr;
+use super::claims::Acr;
 use chrono::{DateTime, TimeDelta, Utc};
 use serde::{Deserialize, Serialize};
 
@@ -15,7 +15,7 @@ use serde::{Deserialize, Serialize};
 ///
 /// ```
 /// use chrono::{TimeDelta, Utc};
-/// use piquel_auth_protocol::{claims::Acr, step_up::StepUpRequirement};
+/// use piquel_common::protocol::{claims::Acr, step_up::StepUpRequirement};
 ///
 /// let recent_passkey = StepUpRequirement::passkey_within(300);
 /// let now = Utc::now();

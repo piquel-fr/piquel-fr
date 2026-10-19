@@ -4,16 +4,18 @@ Keep implementations simple. Follow neighbouring modules and share repeated logi
 
 ## Crates
 
-- `piquel-common` (`crates/common`): environment variables, validated URLs,
-  secret references, error-chain formatting and `str_enum!`.
+- `piquel-common` (`crates/common`): the one home for shared types, depending on
+  no other workspace crate. IDs, account status, authentication methods,
+  providers, `Personal<T>`, error-chain formatting, `str_enum!`, and under
+  `protocol` the wire types shared with the SDKs: token claims, metadata, JWK sets,
+  OAuth/OIDC vocabulary and errors, bearer challenges. Server-only parts are
+  features: `config` (environment variables, validated URLs, secret references),
+  `events` (domain events) and `sqlx` (column decoding).
 - `piquel-crypto` (`crates/crypto`): random secrets, digests, HMAC, constant-time
   comparison, PKCE and RS256 signing.
-- `piquel-auth-protocol` (`crates/auth-protocol`): IDs, account status,
-  authentication methods, providers, and the wire types shared with the SDKs: token
-  claims, metadata, JWK sets, OAuth/OIDC vocabulary and errors, bearer challenges.
 - `piquel-auth` (`crates/auth-sdk`): the public Rust SDK, following
-  [sdk.md](sdk.md). It depends only on auth-protocol among the workspace crates,
-  since it is published.
+  [sdk.md](sdk.md). It depends only on `piquel-common`, without features, among
+  the workspace crates, since it is published.
 - `piquel-repository` (`crates/database`): the only SQLx consumer; typed
   repositories, transactions and storage vocabulary.
 - `piquel-telemetry` (`crates/telemetry`): tracing setup.
@@ -98,10 +100,11 @@ choices. Match domain enums exhaustively; use their `ALL` list rather than repea
 variants. Limits and lifetimes are named constants. Preserve existing wire spellings.
 
 Shared authentication vocabulary, JWT/JWK vocabulary and wire types live in
-auth-protocol. Build tokens and protocol documents from its structs, never with
+`piquel-common`. Build tokens and protocol documents from its structs, never with
 `json!`, so auth and the SDKs share one definition. Use `open_str_enum!` for wire
-values a newer peer may extend, such as `amr`. Storage vocabulary (`CeremonyKind`,
-`OidcRedirectKind`, `UserAgentFamily`) and domain events live in the repository.
+values a newer peer may extend, such as `amr`. Domain events and `UserAgentFamily` live in
+`piquel_common::events`; storage vocabulary (`CeremonyKind`, `OidcRedirectKind`)
+lives in the repository.
 Record each account or security change with `tx.record(&context, subject, event)`
 in the transaction that makes it. Handlers extract `RequestContext`, which
 `HttpSecurity::protect` attaches to rate-limited routes, and attribute it with

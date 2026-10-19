@@ -113,9 +113,13 @@ pub use resource::{Resource, ResourceError, ResourceValidator};
 pub use scope::{Scope, ScopeSet};
 pub use token::{AccessToken, AuthenticationPolicy, IdToken, Subject, TokenError};
 
-/// The wire types this SDK reads, shared with auth itself.
-pub use piquel_auth_protocol as protocol;
-pub use piquel_auth_protocol::{
+/// The wire types this SDK reads, shared with auth itself. Each item is re-exported
+/// by name, so this list is the SDK's contract.
+pub mod protocol {
+    pub use piquel_common::protocol::{challenge, claims, jwt, metadata, oauth, sdk, step_up};
+    pub use piquel_common::{ClientId, InvalidValue, SessionId, TokenId, UserId};
+}
+pub use protocol::{
     ClientId, SessionId, TokenId, UserId,
     claims::{Acr, Actor, Amr, Confirmation, IdTokenClaims, ProfileClaims, UserInfo},
     oauth::Scopes,
@@ -167,5 +171,5 @@ impl Clock for SystemClock {
 /// Items the exported macros expand to; not part of the public API.
 #[doc(hidden)]
 pub mod __private {
-    pub use piquel_auth_protocol::oauth::Scopes;
+    pub use crate::protocol::oauth::Scopes;
 }

@@ -1,11 +1,11 @@
 //! Error codes shared by the Rust and TypeScript SDKs, and the shape of the expected
 //! errors in `tests/sdk-vectors`. Each SDK error exposes one
-//! [`SdkError`](crate::sdk::SdkError), so both SDKs report a given failure with the
+//! [`SdkError`](crate::protocol::sdk::SdkError), so both SDKs report a given failure with the
 //! same code and reason.
 
 use serde::{Deserialize, Serialize};
 
-piquel_common::str_enum! {
+crate::str_enum! {
     /// What kind of operation failed.
     pub enum ErrorCategory {
         /// Fetching or checking the issuer's metadata.
@@ -27,7 +27,7 @@ piquel_common::str_enum! {
     }
 }
 
-piquel_common::str_enum! {
+crate::str_enum! {
     /// Which check failed. One flat list, since several categories share a reason.
     pub enum ErrorReason {
         /// An issuer differs from the configured one: in metadata, `iss` or a callback.
@@ -81,7 +81,7 @@ piquel_common::str_enum! {
 /// that failed. It serializes as the vectors' expected errors do:
 ///
 /// ```
-/// use piquel_auth_protocol::sdk::{ErrorCategory, ErrorReason, SdkError};
+/// use piquel_common::protocol::sdk::{ErrorCategory, ErrorReason, SdkError};
 ///
 /// let expired = SdkError::new(ErrorCategory::InvalidToken, ErrorReason::Expired);
 /// assert_eq!(

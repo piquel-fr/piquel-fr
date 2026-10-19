@@ -1,7 +1,7 @@
 //! Scopes as types: an application declares its scopes once with [`scopes!`], and a
 //! required scope that was never declared does not compile.
 
-use piquel_auth_protocol::oauth::Scopes;
+use piquel_common::protocol::oauth::Scopes;
 
 /// One scope, declared with [`scopes!`](crate::scopes).
 pub trait Scope: Copy + Default + Send + Sync + 'static {

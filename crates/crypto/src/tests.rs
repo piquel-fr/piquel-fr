@@ -1,6 +1,6 @@
 //! Known vectors and boundary tests for each primitive.
 use super::*;
-use piquel_auth_protocol::jwt::TokenType;
+use piquel_common::protocol::jwt::TokenType;
 
 /// Random secrets round-trip and reject malformed encodings without exposing bytes.
 #[test]

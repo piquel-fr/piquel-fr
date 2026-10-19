@@ -1,6 +1,6 @@
 //! Persistence guarantees behind invitations and session passkey confirmations.
 use chrono::{Duration, Utc};
-use piquel_auth_protocol::{AuthenticationMethod, SessionId, UserId};
+use piquel_common::{AuthenticationMethod, SessionId, UserId};
 use piquel_repository::{Database, DatabaseConfig, DatabaseError, InsertSession, InsertUser};
 /// Invitations are single-use, and passkey confirmations belong to one session and end with it.
 #[expect(

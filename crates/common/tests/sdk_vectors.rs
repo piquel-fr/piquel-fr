@@ -6,21 +6,23 @@
 use base64::{Engine, engine::general_purpose::URL_SAFE_NO_PAD};
 use chrono::{DateTime, Duration, Utc};
 use openssl::{hash::MessageDigest, pkey::PKey, sign::Signer};
-use piquel_auth_protocol::{
+use piquel_common::{
     AuthenticationMethod, ClientId, SessionId, TokenId,
-    challenge::{BearerChallenge, BearerError},
-    claims::{
-        AccessTokenClaims, Acr, Actor, Amr, Audience, AuthenticationClaims, Confirmation,
-        IdTokenClaims, ProfileClaims,
+    protocol::{
+        challenge::{BearerChallenge, BearerError},
+        claims::{
+            AccessTokenClaims, Acr, Actor, Amr, Audience, AuthenticationClaims, Confirmation,
+            IdTokenClaims, ProfileClaims,
+        },
+        jwt::{Algorithm, Claim, JwkSet, TokenType},
+        metadata::ServerMetadata,
+        oauth::{
+            ClientAuthMethod, CodeChallengeMethod, GrantType, ResponseMode, ResponseType, Scope,
+            SubjectType,
+        },
+        sdk::{ErrorCategory, ErrorReason, SdkError},
+        step_up::StepUpRequirement,
     },
-    jwt::{Algorithm, Claim, JwkSet, TokenType},
-    metadata::ServerMetadata,
-    oauth::{
-        ClientAuthMethod, CodeChallengeMethod, GrantType, ResponseMode, ResponseType, Scope,
-        SubjectType,
-    },
-    sdk::{ErrorCategory, ErrorReason, SdkError},
-    step_up::StepUpRequirement,
 };
 use piquel_crypto::{Digest, Rs256Key};
 use serde::Serialize;

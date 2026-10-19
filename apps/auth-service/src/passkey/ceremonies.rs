@@ -10,7 +10,7 @@ use axum::{
     response::{IntoResponse, Response},
 };
 use chrono::{Duration, Utc};
-use piquel_auth_protocol::{SessionId, TokenId, UserId};
+use piquel_common::{SessionId, TokenId, UserId};
 use piquel_crypto::Secret;
 use piquel_repository::{CeremonyKind, InsertCeremony};
 use serde::{Deserialize, Serialize};

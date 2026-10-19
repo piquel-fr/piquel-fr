@@ -2,7 +2,7 @@
 
 use crate::{AccessToken, Issuer, ScopeSet, TokenError};
 use chrono::{DateTime, Utc};
-use piquel_auth_protocol::{claims::AccessTokenClaims, jwt::TokenType};
+use piquel_common::protocol::{claims::AccessTokenClaims, jwt::TokenType};
 use serde::de::DeserializeOwned;
 use std::{fmt, marker::PhantomData, str::FromStr};
 use thiserror::Error;

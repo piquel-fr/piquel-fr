@@ -10,11 +10,13 @@ use axum::{
     response::{IntoResponse, Response},
     routing::{get, patch, post},
 };
-use piquel_auth_protocol::{AuthenticationMethod, PasskeyId, UserId};
+use piquel_common::{
+    AuthenticationMethod, PasskeyId, UserId,
+    events::{Actor, DomainEvent, EventContext, RevocationReason},
+};
 use piquel_crypto::Secret;
 use piquel_repository::{
-    Actor, Database, DatabaseError, DatabaseTransaction, DomainEvent, EventContext, InsertPasskey,
-    InsertUser, RevocationReason, StoredPasskey,
+    Database, DatabaseError, DatabaseTransaction, InsertPasskey, InsertUser, StoredPasskey,
 };
 use serde_json::Value;
 use std::sync::Arc;

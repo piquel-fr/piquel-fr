@@ -9,16 +9,16 @@ use axum::{
     response::Response,
 };
 use chrono::Utc;
-use piquel_auth_protocol::{
+use piquel_common::{
     AuthenticationMethod, UserId,
-    claims::{Acr, IdTokenClaims},
-    step_up::StepUpRequirement,
+    events::{DomainEvent, GrantRevocation, RevocationReason},
+    protocol::{
+        claims::{Acr, IdTokenClaims},
+        step_up::StepUpRequirement,
+    },
 };
 use piquel_crypto::Secret;
-use piquel_repository::{
-    BootstrapOidcClient, DatabaseConfig, DomainEvent, GrantRevocation, InsertUser,
-    InsertVerifiedEmail, RevocationReason,
-};
+use piquel_repository::{BootstrapOidcClient, DatabaseConfig, InsertUser, InsertVerifiedEmail};
 use serde_json::{Value, json};
 use tower::ServiceExt;
 use url::Url;
@@ -51,7 +51,7 @@ impl Flow {
     /// Like [`Self::new`], for an issuer at `origin` whose client may request tokens
     /// for `audience`.
     async fn at(origin: &str, audience: &str, confidential: bool, trusted: bool) -> Self {
-        let url = piquel_common::Variable::new("TEST_DATABASE_URL")
+        let url = piquel_common::config::Variable::new("TEST_DATABASE_URL")
             .required()
             .expect("TEST_DATABASE_URL must name a disposable PostgreSQL database");
         let db = Database::connect(
@@ -130,7 +130,9 @@ impl Flow {
         let app = OidcApplication::new(
             db,
             &OidcConfig {
-                origin: origin.parse::<piquel_common::Origin>().expect("issuer"),
+                origin: origin
+                    .parse::<piquel_common::config::Origin>()
+                    .expect("issuer"),
                 keys: Arc::new(Rs256Key::generate("oidc-tests").expect("RSA signing key")),
                 refresh_key: Arc::new(Secret::derive(&[7; 32], REFRESH_KEY_LABEL).expect("HMAC")),
                 clients: vec![],
@@ -480,7 +482,7 @@ async fn public_consent_pkce_claim_scoping_and_replay() {
         .authorize(Scope::OpenId.as_str(), Some(Prompt::Login.as_str()))
         .await;
     assert_eq!(Flow::location(&response).path(), "/login");
-    let client_id = piquel_auth_protocol::ClientId::new(flow.client.id.as_str());
+    let client_id = piquel_common::ClientId::new(flow.client.id.as_str());
     assert_eq!(
         flow.events().await[..3],
         [

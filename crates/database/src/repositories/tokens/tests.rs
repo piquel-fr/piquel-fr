@@ -5,9 +5,9 @@ use super::{InsertRefreshFamily, InsertRefreshToken, RefreshRotationError};
 use crate::repositories::{OidcRepository, TokenRepository};
 use crate::{CodeRedemptionError, DatabaseTransaction, SessionAuthentication};
 use chrono::{Duration, Utc};
-use piquel_auth_protocol::{
+use piquel_common::{
     SessionId, TokenId, UserId,
-    claims::{Acr, Amr},
+    protocol::claims::{Acr, Amr},
 };
 use sqlx::{PgConnection, PgPool};
 use std::time::Duration as Wait;

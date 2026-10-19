@@ -8,7 +8,7 @@
 //! including ones carrying `token68` credentials.
 //!
 //! ```
-//! use piquel_auth_protocol::{
+//! use piquel_common::protocol::{
 //!     challenge::BearerChallenge,
 //!     claims::Acr,
 //!     step_up::StepUpRequirement,
@@ -29,10 +29,10 @@
 //!         .parse()?;
 //! assert_eq!(parsed, step_up);
 //! assert_eq!(parsed.step_up.acr, Some(Acr::PhishingResistant));
-//! # Ok::<(), piquel_auth_protocol::challenge::ChallengeError>(())
+//! # Ok::<(), piquel_common::protocol::challenge::ChallengeError>(())
 //! ```
 
-use crate::{
+use super::{
     claims::Acr,
     oauth::{ErrorDescription, Scopes},
     step_up::StepUpRequirement,
@@ -42,7 +42,7 @@ use std::{fmt, str::FromStr};
 use thiserror::Error;
 use url::Url;
 
-piquel_common::open_str_enum! {
+crate::open_str_enum! {
     /// Bearer `error` codes. Open, since the OAuth Extensions Error Registry grows
     /// (RFC 9470 added one): an unknown code must not hide the rest of a challenge.
     pub enum BearerError {

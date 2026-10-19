@@ -18,7 +18,7 @@ use ::axum::{
 };
 use base64::Engine as _;
 use chrono::{TimeDelta, Utc};
-use piquel_auth_protocol::{challenge::BearerChallenge, metadata::ServerMetadata};
+use piquel_common::protocol::{challenge::BearerChallenge, metadata::ServerMetadata};
 use serde_json::json;
 use sha2::Digest as _;
 use std::{

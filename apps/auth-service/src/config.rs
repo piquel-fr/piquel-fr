@@ -2,9 +2,10 @@
 
 use crate::passkey::DecoyKey;
 use ipnet::IpNet;
-use piquel_auth_protocol::{Provider, oauth::Scope};
 use piquel_common::{
-    ConfigurationError, Origin, PublicUrl, SecretBytes, SecretReference, Variable,
+    Provider,
+    config::{ConfigurationError, Origin, PublicUrl, SecretBytes, SecretReference, Variable},
+    protocol::oauth::Scope,
 };
 use piquel_crypto::{Digest, Rs256Key, Secret};
 use piquel_repository::{BootstrapOidcClient, DatabaseConfig};

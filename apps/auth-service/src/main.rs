@@ -2,13 +2,13 @@
 use auth_service::{AuthConfig, Jobs, PUBLIC_BASE_URL};
 use chrono::{Duration, Utc};
 use clap::{Parser, Subcommand};
-use piquel_auth_protocol::DeliveryId;
-use piquel_common::{ConfigurationError, ErrorChain, Origin, Variable};
-use piquel_crypto::{CryptoError, Secret};
-use piquel_repository::{
-    Actor, Database, DatabaseConnectionError, DatabaseError, DeliveryStatus, DomainEvent,
-    EventContext, RequestOrigin,
+use piquel_common::{
+    DeliveryId, ErrorChain,
+    config::{ConfigurationError, Origin, Variable},
+    events::{Actor, DomainEvent, EventContext, RequestOrigin},
 };
+use piquel_crypto::{CryptoError, Secret};
+use piquel_repository::{Database, DatabaseConnectionError, DatabaseError, DeliveryStatus};
 use thiserror::Error;
 
 use std::{net::SocketAddr, process::ExitCode, str::FromStr};

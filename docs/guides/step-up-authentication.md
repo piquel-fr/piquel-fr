@@ -34,11 +34,11 @@ WWW-Authenticate: Bearer error="insufficient_user_authentication",
   error_description="A passkey confirmation is required", acr_values="phr", max_age="300"
 ```
 
-In Rust, `piquel_auth_protocol::step_up::StepUpRequirement` holds the
+In Rust, `piquel_auth::StepUpRequirement` holds the
 requirement and checks the claims. Auth's own settings use the same check.
 
 ```rust
-use piquel_auth_protocol::step_up::StepUpRequirement;
+use piquel_auth::StepUpRequirement;
 
 const DELETE_REPOSITORY: StepUpRequirement = StepUpRequirement::passkey_within(300);
 

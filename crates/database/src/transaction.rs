@@ -1,10 +1,13 @@
 //! Explicit commit/rollback over repository operations; drop rolls back unfinished work.
 
 use crate::{
-    DatabaseError, DomainEvent, EventContext,
+    DatabaseError,
     repositories::deliveries::{Channels, Registered},
 };
-use piquel_auth_protocol::UserId;
+use piquel_common::{
+    UserId,
+    events::{DomainEvent, EventContext},
+};
 use sqlx::{Postgres, Transaction};
 
 /// A private-`SQLx` transaction with the same typed repository families as

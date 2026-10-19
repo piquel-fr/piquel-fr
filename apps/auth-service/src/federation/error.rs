@@ -4,7 +4,7 @@ use super::MAX_RETURN_TO_BYTES;
 use crate::config::FrontendOrigins;
 use crate::security::{ApiError, SessionError};
 use axum::http::header::InvalidHeaderValue;
-use piquel_common::{ConfigurationError, VocabularyError};
+use piquel_common::{VocabularyError, config::ConfigurationError};
 use piquel_crypto::CryptoError;
 use piquel_repository::DatabaseError;
 use thiserror::Error;

@@ -7,15 +7,13 @@ use axum::{
     http::{Method, Request},
 };
 use chrono::{Duration, Utc};
-use piquel_auth_protocol::{
+use piquel_common::{
     TokenId,
-    claims::{Acr, Amr},
+    events::{RevocationReason, SignInFailure},
+    protocol::claims::{Acr, Amr},
 };
 use piquel_crypto::Secret;
-use piquel_repository::{
-    DatabaseConfig, PendingFederation, RevocationReason, SessionAuthentication, SignInFailure,
-    StoredSession,
-};
+use piquel_repository::{DatabaseConfig, PendingFederation, SessionAuthentication, StoredSession};
 use serde_json::json;
 use tower::ServiceExt;
 use url::Url;
@@ -84,7 +82,7 @@ fn typed_ceremonies_preserve_persistence_and_check_the_expected_payload() {
     use ceremonies::CeremonyState;
 
     let user_id = UserId::new();
-    let session_id = piquel_auth_protocol::SessionId::new();
+    let session_id = piquel_common::SessionId::new();
     let origin = Url::parse("https://auth.piquel.fr").expect("origin");
     let webauthn = WebauthnBuilder::new("auth.piquel.fr", &origin)
         .expect("builder")
@@ -139,7 +137,7 @@ struct Fixture {
 impl Fixture {
     /// Seeds an account and passkey in the explicitly configured isolated database.
     async fn new() -> Self {
-        let url = piquel_common::Variable::new("TEST_DATABASE_URL")
+        let url = piquel_common::config::Variable::new("TEST_DATABASE_URL")
             .required()
             .expect("isolated test database");
         let database = Database::connect(
@@ -154,7 +152,7 @@ impl Fixture {
             &PasskeyConfig {
                 origin: origin
                     .as_str()
-                    .parse::<piquel_common::Origin>()
+                    .parse::<piquel_common::config::Origin>()
                     .expect("origin"),
                 invite_required: false,
                 decoy_key: DecoyKey::new(Secret::generate().expect("decoy key")),
@@ -345,7 +343,7 @@ async fn registration_attaches_a_pending_social_signup_only_when_it_names_it() {
     let pending = PendingFederation {
         id: TokenId::new(),
         browser_digest: secret.digest().as_bytes().to_vec(),
-        provider: piquel_auth_protocol::Provider::GitHub,
+        provider: piquel_common::Provider::GitHub,
         issuer: "https://github.com".into(),
         subject: TokenId::new().to_string(),
         email: None,
