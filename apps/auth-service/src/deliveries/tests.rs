@@ -9,8 +9,10 @@ use axum::{
     routing::get,
 };
 use piquel_auth_protocol::{DeliveryId, UserId};
-use piquel_repository::{DatabaseTransaction, DeliveryStatus, DomainEvent, NewDelivery};
-use std::{net::IpAddr, sync::Mutex};
+use piquel_repository::{
+    DatabaseTransaction, DeliveryStatus, DeliverySummary, DomainEvent, NewDelivery,
+};
+use std::{marker::PhantomData, net::IpAddr, sync::Mutex};
 
 /// A retryable failure without `Retry-After`.
 const UNAVAILABLE: DeliveryError = DeliveryError::Retryable {
@@ -256,22 +258,35 @@ async fn redirects_are_refused() {
     );
 }
 
-/// The worker test's channel; its deliveries are inserted directly.
-struct Recorded;
+/// Declares channels for worker tests, whose deliveries are inserted directly.
+/// Tests run at once on one database, so each worker test has its own channel.
+macro_rules! worker_channels {
+    ($($(#[doc = $doc:literal])* $name:ident = $value:literal;)*) => {$(
+        $(#[doc = $doc])*
+        struct $name;
 
-impl Channel for Recorded {
-    const NAME: &'static str = "test_worker";
-    /// Which behavior [`Recorder`] shows for the delivery.
-    type Recipient = Behavior;
-    type Payload = ();
+        impl Channel for $name {
+            const NAME: &'static str = $value;
+            /// How [`Recorder`] answers the delivery.
+            type Recipient = Behavior;
+            type Payload = ();
 
-    fn deliveries(
-        _: &DomainEvent,
-        _: Option<UserId>,
-        _: &mut DatabaseTransaction<'_>,
-    ) -> impl Future<Output = Result<Vec<NewDelivery<Self>>, DatabaseError>> + Send {
-        std::future::ready(Ok(vec![]))
-    }
+            fn deliveries(
+                _: &DomainEvent,
+                _: Option<UserId>,
+                _: &mut DatabaseTransaction<'_>,
+            ) -> impl Future<Output = Result<Vec<NewDelivery<Self>>, DatabaseError>> + Send {
+                std::future::ready(Ok(vec![]))
+            }
+        }
+    )*};
+}
+
+worker_channels! {
+    /// Retryable and permanent failures.
+    Failing = "test_worker";
+    /// An operator retry after a permanent failure.
+    Resent = "test_worker_resent";
 }
 
 /// How [`Recorder`] answers a delivery.
@@ -281,42 +296,45 @@ enum Behavior {
     Unavailable,
     /// Permanently refused.
     Refused,
+    /// Permanently refused on the first attempt, accepted after.
+    RefusedOnce,
 }
 
-/// Sends [`Recorded`] deliveries, keeping the ID each attempt carried.
-#[derive(Default)]
-struct Recorder(Arc<Mutex<Vec<DeliveryId>>>);
+/// Sends channel `C`'s deliveries, keeping the ID each attempt carried.
+struct Recorder<C>(Arc<Mutex<Vec<DeliveryId>>>, PhantomData<C>);
 
-impl Sender for Recorder {
-    type Channel = Recorded;
+impl<C: Channel<Recipient = Behavior, Payload = ()>> Sender for Recorder<C> {
+    type Channel = C;
     const MAX_AGE: Duration = Duration::from_hours(1);
 
     fn send(
         &self,
-        delivery: &Delivery<Recorded>,
+        delivery: &Delivery<C>,
     ) -> impl Future<Output = Result<(), DeliveryError>> + Send {
-        self.0.lock().expect("attempts").push(delivery.id);
+        let mut attempts = self.0.lock().expect("attempts");
+        let first = !attempts.contains(&delivery.id);
+        attempts.push(delivery.id);
+        let refused = DeliveryError::Permanent(Failure::Status(StatusCode::FORBIDDEN));
         std::future::ready(match delivery.recipient {
             Behavior::Unavailable => Err(DeliveryError::Retryable {
                 failure: Failure::Connection,
                 retry_after: Some(Duration::ZERO),
             }),
-            Behavior::Refused => Err(DeliveryError::Permanent(Failure::Status(
-                StatusCode::FORBIDDEN,
-            ))),
+            Behavior::Refused => Err(refused),
+            Behavior::RefusedOnce if first => Err(refused),
+            Behavior::RefusedOnce => Ok(()),
         })
     }
 }
 
-/// Workers record a retryable failure as a retry, with every attempt carrying
-/// the delivery's ID, and fail a permanent one after one attempt.
-#[tokio::test]
-#[ignore = "requires TEST_DATABASE_URL"]
-async fn workers_retry_retryable_errors_and_fail_permanent_ones() {
+/// A database with no pending delivery left on `C` by an earlier run, and workers
+/// sending `C`, whose attempts are recorded in the returned list.
+async fn workers<C: Channel<Recipient = Behavior, Payload = ()>>()
+-> (Database, Jobs, Arc<Mutex<Vec<DeliveryId>>>) {
     let database = Replicas::database().await;
     for summary in database
         .deliveries()
-        .list(Some(DeliveryStatus::Pending), Some(Recorded::NAME), 1000)
+        .list(Some(DeliveryStatus::Pending), Some(C::NAME), 1000)
         .await
         .expect("list")
     {
@@ -326,48 +344,73 @@ async fn workers_retry_retryable_errors_and_fail_permanent_ones() {
             .await
             .expect("clear");
     }
-    let insert = async |behavior| {
-        let delivery = NewDelivery::<Recorded> {
-            destination: "https://receiver.example".into(),
-            recipient: behavior,
-            payload: (),
-            ordering_key: None,
-        };
-        database
-            .deliveries()
-            .insert(None, delivery)
-            .await
-            .expect("insert")
-    };
-    let unavailable = insert(Behavior::Unavailable).await;
-    let refused = insert(Behavior::Refused).await;
-
-    let recorder = Recorder::default();
-    let attempts = Arc::clone(&recorder.0);
+    let attempts = Arc::default();
     let mut jobs = Jobs::new();
-    jobs.deliveries(recorder, &database);
-    let finished = tokio::time::timeout(Duration::from_secs(10), async {
+    jobs.deliveries(Recorder::<C>(Arc::clone(&attempts), PhantomData), &database);
+    (database, jobs, attempts)
+}
+
+/// Queues a delivery on `C` that the receiver answers with `behavior`.
+async fn queue<C: Channel<Recipient = Behavior, Payload = ()>>(
+    database: &Database,
+    behavior: Behavior,
+) -> DeliveryId {
+    let delivery = NewDelivery::<C> {
+        destination: "https://receiver.example".into(),
+        recipient: behavior,
+        payload: (),
+        ordering_key: None,
+    };
+    database
+        .deliveries()
+        .insert(None, delivery)
+        .await
+        .expect("insert")
+}
+
+/// Polls `C`'s deliveries for up to 10 s until `done` returns `Some`.
+async fn wait_for<C: Channel, T>(
+    database: &Database,
+    done: impl Fn(&[DeliverySummary]) -> Option<T>,
+) -> T {
+    tokio::time::timeout(Duration::from_secs(10), async {
         loop {
             let listed = database
                 .deliveries()
-                .list(None, Some(Recorded::NAME), 1000)
+                .list(None, Some(C::NAME), 1000)
                 .await
                 .expect("list");
-            let find = |id| listed.iter().find(|d| d.id == id).cloned();
-            if let (Some(unavailable), Some(refused)) = (find(unavailable), find(refused))
-                && unavailable.last_error.is_some()
-                && refused.status != DeliveryStatus::Pending
-            {
-                break (unavailable, refused);
+            if let Some(found) = done(&listed) {
+                break found;
             }
             tokio::time::sleep(Duration::from_millis(50)).await;
         }
     })
     .await
-    .expect("both deliveries are attempted");
+    .expect("deliveries reach the expected state")
+}
+
+/// The listed delivery `id`, if any.
+fn find(listed: &[DeliverySummary], id: DeliveryId) -> Option<DeliverySummary> {
+    listed.iter().find(|d| d.id == id).cloned()
+}
+
+/// Workers record a retryable failure as a retry, with every attempt carrying
+/// the delivery's ID, and fail a permanent one after one attempt.
+#[tokio::test]
+#[ignore = "requires TEST_DATABASE_URL"]
+async fn workers_retry_retryable_errors_and_fail_permanent_ones() {
+    let (database, jobs, attempts) = workers::<Failing>().await;
+    let unavailable = queue::<Failing>(&database, Behavior::Unavailable).await;
+    let refused = queue::<Failing>(&database, Behavior::Refused).await;
+    let (unavailable_summary, refused_summary) = wait_for::<Failing, _>(&database, |listed| {
+        let (unavailable, refused) = (find(listed, unavailable)?, find(listed, refused)?);
+        (unavailable.last_error.is_some() && refused.status != DeliveryStatus::Pending)
+            .then_some((unavailable, refused))
+    })
+    .await;
     jobs.shutdown().await.expect("no worker panicked");
 
-    let (unavailable_summary, refused_summary) = finished;
     assert_eq!(unavailable_summary.status, DeliveryStatus::Pending);
     assert_eq!(
         unavailable_summary.last_error.as_deref(),
@@ -390,5 +433,31 @@ async fn workers_retry_retryable_errors_and_fail_permanent_ones() {
         (count(refused), seen.len()),
         (1, count(unavailable) + 1),
         "every attempt carries its delivery's ID"
+    );
+}
+
+/// A delivery sent again after an operator retry carries the same ID, which
+/// receivers deduplicate on as its `jti` or `Message-ID`.
+#[tokio::test]
+#[ignore = "requires TEST_DATABASE_URL"]
+async fn a_resent_delivery_carries_the_same_id() {
+    let (database, jobs, attempts) = workers::<Resent>().await;
+    let id = queue::<Resent>(&database, Behavior::RefusedOnce).await;
+    wait_for::<Resent, _>(&database, |listed| {
+        find(listed, id).filter(|d| d.status == DeliveryStatus::Failed)
+    })
+    .await;
+    database.deliveries().retry(id).await.expect("retry");
+    let resent = wait_for::<Resent, _>(&database, |listed| {
+        find(listed, id).filter(|d| d.status == DeliveryStatus::Succeeded)
+    })
+    .await;
+    jobs.shutdown().await.expect("no worker panicked");
+
+    assert_eq!(resent.attempts, 2);
+    assert_eq!(
+        *attempts.lock().expect("attempts"),
+        [id, id],
+        "both sends carry the delivery's ID"
     );
 }
