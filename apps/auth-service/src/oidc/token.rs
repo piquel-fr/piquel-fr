@@ -11,17 +11,20 @@ use axum::{
     http::{HeaderMap, StatusCode, header},
 };
 use chrono::{Duration, Utc};
-use piquel_auth_protocol::{
+use piquel_common::{
     ClientId, SessionId, TokenId, UserId,
-    claims::{
-        AccessTokenClaims, Audience, AuthenticationClaims, IdTokenClaims, ProfileClaims, UserInfo,
+    events::{DomainEvent, EventContext, GrantRevocation},
+    protocol::{
+        claims::{
+            AccessTokenClaims, Audience, AuthenticationClaims, IdTokenClaims, ProfileClaims,
+            UserInfo,
+        },
+        oauth,
     },
-    oauth,
 };
 use piquel_repository::{
-    CodeRedemptionError, ConsumedAuthorizationCode, DatabaseTransaction, DomainEvent, EventContext,
-    GrantRevocation, InsertRefreshFamily, InsertRefreshToken, RefreshRotationError,
-    SessionAuthentication,
+    CodeRedemptionError, ConsumedAuthorizationCode, DatabaseTransaction, InsertRefreshFamily,
+    InsertRefreshToken, RefreshRotationError, SessionAuthentication,
 };
 use serde::{Deserialize, Serialize};
 

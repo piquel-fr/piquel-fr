@@ -11,8 +11,10 @@ use axum::{
     http::HeaderMap,
     response::{IntoResponse, Redirect, Response},
 };
-use piquel_auth_protocol::ClientId;
-use piquel_repository::{DomainEvent, RevocationReason};
+use piquel_common::{
+    ClientId,
+    events::{DomainEvent, RevocationReason},
+};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use url::Url;

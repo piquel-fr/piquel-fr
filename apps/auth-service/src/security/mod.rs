@@ -15,15 +15,18 @@ use axum::{
 };
 use chrono::{Duration, Utc};
 use ipnet::IpNet;
-use piquel_auth_protocol::{
-    AuthenticationMethod, ClientId, SessionId, UserId, step_up::StepUpRequirement,
+use piquel_common::{
+    AuthenticationMethod, ClientId, ErrorChain, SessionId, UserId,
+    events::{
+        Actor, DomainEvent, EventContext, RequestOrigin, RevocationReason, SignInFailure,
+        UserAgentFamily,
+    },
+    protocol::step_up::StepUpRequirement,
 };
-use piquel_common::ErrorChain;
 use piquel_crypto::{CryptoError, Digest, Secret};
 use piquel_repository::{
-    Actor, Database, DatabaseError, DatabaseTransaction, DomainEvent, EventContext, InsertSession,
-    RequestOrigin, RevocationReason, SessionAuthentication, SignInFailure, StoredSession,
-    UserAgentFamily,
+    Database, DatabaseError, DatabaseTransaction, InsertSession, SessionAuthentication,
+    StoredSession,
 };
 use serde::Serialize;
 use std::{

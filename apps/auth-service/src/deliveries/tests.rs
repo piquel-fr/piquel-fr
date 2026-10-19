@@ -8,10 +8,8 @@ use axum::{
     response::IntoResponse,
     routing::get,
 };
-use piquel_auth_protocol::{DeliveryId, UserId};
-use piquel_repository::{
-    DatabaseTransaction, DeliveryStatus, DeliverySummary, DomainEvent, NewDelivery,
-};
+use piquel_common::{DeliveryId, UserId, events::DomainEvent};
+use piquel_repository::{DatabaseTransaction, DeliveryStatus, DeliverySummary, NewDelivery};
 use std::{marker::PhantomData, net::IpAddr, sync::Mutex};
 
 /// A retryable failure without `Retry-After`.

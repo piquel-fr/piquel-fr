@@ -3,7 +3,7 @@
 use super::{RepositoryExecutor, TokenRepository};
 use crate::{DatabaseError, SessionAuthentication};
 use chrono::{DateTime, Utc};
-use piquel_auth_protocol::{SessionId, TokenId, UserId};
+use piquel_common::{SessionId, TokenId, UserId};
 use sqlx::types::Json;
 use thiserror::Error;
 

@@ -157,7 +157,6 @@ dependencies = [
  "clap",
  "ipnet",
  "piquel-auth",
- "piquel-auth-protocol",
  "piquel-common",
  "piquel-crypto",
  "piquel-repository",
@@ -1593,7 +1592,7 @@ dependencies = [
  "base64 0.22.1",
  "chrono",
  "jsonwebtoken",
- "piquel-auth-protocol",
+ "piquel-common",
  "rand 0.8.7",
  "reqwest",
  "secrecy",
@@ -1609,13 +1608,12 @@ dependencies = [
 ]
 
 [[package]]
-name = "piquel-auth-protocol"
+name = "piquel-common"
 version = "0.1.0"
 dependencies = [
  "base64 0.22.1",
  "chrono",
  "openssl",
- "piquel-common",
  "piquel-crypto",
  "serde",
  "serde_json",
@@ -1626,24 +1624,12 @@ dependencies = [
 ]
 
 [[package]]
-name = "piquel-common"
-version = "0.1.0"
-dependencies = [
- "serde",
- "serde_json",
- "sqlx",
- "thiserror 2.0.18",
- "url",
-]
-
-[[package]]
 name = "piquel-crypto"
 version = "0.1.0"
 dependencies = [
  "base64 0.22.1",
  "chrono",
  "openssl",
- "piquel-auth-protocol",
  "piquel-common",
  "rand 0.8.7",
  "serde",
@@ -1657,7 +1643,6 @@ name = "piquel-repository"
 version = "0.1.0"
 dependencies = [
  "chrono",
- "piquel-auth-protocol",
  "piquel-common",
  "serde",
  "serde_json",

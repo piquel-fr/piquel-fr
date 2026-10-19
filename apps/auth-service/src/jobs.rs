@@ -260,7 +260,7 @@ mod tests {
     #[tokio::test]
     #[ignore = "requires TEST_DATABASE_URL"]
     async fn a_panicking_run_releases_its_lock_and_the_job_runs_again() {
-        let url = piquel_common::Variable::new("TEST_DATABASE_URL")
+        let url = piquel_common::config::Variable::new("TEST_DATABASE_URL")
             .required()
             .expect("TEST_DATABASE_URL must name an isolated PostgreSQL database");
         let database = Database::connect(

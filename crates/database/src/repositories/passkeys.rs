@@ -3,7 +3,7 @@
 use super::{PasskeyRepository, RepositoryExecutor};
 use crate::DatabaseError;
 use chrono::{DateTime, Utc};
-use piquel_auth_protocol::{PasskeyId, SessionId, TokenId, UserId};
+use piquel_common::{PasskeyId, SessionId, TokenId, UserId};
 use serde_json::Value;
 
 piquel_common::str_enum! {
@@ -382,7 +382,7 @@ impl PasskeyRepository<'_> {
 mod tests {
     use super::{InsertPasskey, PasskeyRepository};
     use crate::Database;
-    use piquel_auth_protocol::{PasskeyId, UserId};
+    use piquel_common::{PasskeyId, UserId};
 
     /// A disabled account and an account whose only passkey is revoked list no
     /// credentials, like a username nobody holds.

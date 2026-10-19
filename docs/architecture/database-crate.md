@@ -5,13 +5,12 @@
 connections, rows and raw SQL remain private. Application modules choose policy;
 repository methods enforce atomic persistence and return contextual errors.
 
-`piquel-common` supplies closed string enums and `piquel-auth-protocol` supplies
-IDs, account status, authentication methods and providers. Their `sqlx` feature,
+`piquel-common` supplies closed string enums, IDs, account status, authentication
+methods, providers and domain events. Its `sqlx` feature,
 enabled only here, lets IDs decode from `UUID` columns (rejecting anything but
 `UUIDv7`) and vocabularies from `TEXT` columns. Cryptographic material
 is generated and hashed in `piquel-crypto`; the repository persists its digests.
-Ceremony kinds, OIDC redirect kinds and user agent families are typed storage
-vocabulary. Account and security changes are recorded as typed domain events; see
+Ceremony kinds and OIDC redirect kinds are typed storage vocabulary. Account and security changes are recorded as typed domain events; see
 [Domain events](#domain-events).
 
 `DatabaseConfig` rejects zero pool bounds, ambiguous TLS/socket options and host
@@ -120,7 +119,7 @@ throwaway PostgreSQL cluster, or against an explicit, disposable `TEST_DATABASE_
 
 ## Domain events
 
-`repositories/events/` defines `DomainEvent`, one variant per account or security
+`piquel_common::events` defines `DomainEvent`, one variant per account or security
 change, and `Actor`, the one type every feature uses to say who caused it: a user,
 an administrator, an operator at the CLI (`$USER` and host name), a client, a
 background job, or an anonymous browser. Handlers record an event with
@@ -130,14 +129,17 @@ the event causes, in the same transaction; see [the delivery queue](delivery-que
 theirs in a short transaction of their own. A revocation that ends several sessions
 records one `SessionRevoked` per session. Refresh rotations are too frequent to be
 events. `Imported` holds the rows of `security_audit_log`, the log events replace,
-verbatim; only migrations write it, and its fields are private to this crate.
+verbatim; only migrations write it, and its fields are private, so it can only be
+read back. `repositories/events/` stores events: the personal data split below,
+`read_after` and `acknowledge`.
 Migration `0005` imports the log but keeps the table, which the previous release
 writes to during a deploy; a later release imports the rows written since and
 drops it.
 
 Variants hold only typed IDs, enums, scopes, timestamps and counts, so a secret,
 token, `WebAuthn` state or raw header cannot end up in one. Anything that identifies
-a person outside auth is wrapped in `Personal<T>`. Adding a variant is a
+a person outside auth is wrapped in `Personal<T>`, which any `piquel-common` type
+can use; storage decides how to keep it apart. Adding a variant is a
 compile-time change that every `match` must handle.
 
 ### Personal data

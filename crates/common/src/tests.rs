@@ -1,4 +1,4 @@
-//! Focused tests for configuration validation and exported vocabulary expansion.
+//! Focused tests for exported vocabulary expansion and identifier syntax.
 use super::*;
 
 str_enum! {
@@ -55,65 +55,17 @@ fn open_vocabulary_keeps_unknown_values() {
     assert_eq!(OpenExample::KNOWN.len(), 1);
 }
 
-/// Public URLs reject every insecure or ambiguous component.
+/// IDs accept only canonical `UUIDv7`, preserving syntax diagnostics on malformed text.
 #[test]
-fn urls_validate_once() {
-    assert!("https://piquel.fr/settings".parse::<PublicUrl>().is_ok());
-    assert!("https://auth.piquel.fr".parse::<Origin>().is_ok());
-    for value in [
-        "http://localhost",
-        "https://user@auth.piquel.fr",
-        "https://auth.piquel.fr?query",
-        "https://auth.piquel.fr#fragment",
-        "/relative",
-        "https://auth.piquel.fr/path",
-    ] {
-        assert!(value.parse::<Origin>().is_err(), "accepted {value}");
-    }
-    assert!("https://[::1]".parse::<Origin>().is_ok());
-}
-
-/// References and resolved bytes redact secrets in all diagnostic formatting.
-#[test]
-fn secrets_are_redacted() {
-    let reference = SecretReference::parse("env://AUTH_KEY").expect("reference");
-    assert_eq!(format!("{reference:?}"), "SecretReference(REDACTED)");
-    assert_eq!(reference.to_string(), "[REDACTED]");
-    for value in [
-        "env://",
-        "file://",
-        "https://example.com/key",
-        "env://HAS SPACE",
-    ] {
-        assert!(SecretReference::parse(value).is_err());
-    }
-    let secret = SecretBytes(b"private".to_vec());
-    assert_eq!(secret.utf8().expect("UTF-8"), "private");
-    assert!(!format!("{secret:?}").contains("private"));
-    assert!(SecretBytes(vec![255]).utf8().is_err());
-    let missing = SecretReference::parse("file:///nonexistent/piquel-secret-test")
-        .expect("reference")
-        .resolve()
-        .expect_err("missing file");
-    assert!(StdError::source(&missing).is_some());
-}
-
-/// Missing variables and parse failures name the setting without exposing its value.
-#[test]
-fn variable_errors_name_the_setting() {
-    let variable = Variable::new("PIQUEL_COMMON_TEST_ABSENT_5A3C");
-    assert_eq!(variable.optional().expect("optional"), None);
-    assert!(!variable.flag(false).expect("default"));
-    assert_eq!(variable.parse_or::<u32>("42").expect("default"), 42);
+fn ids_are_canonical_uuid_v7() {
+    let id = UserId::new();
+    assert_eq!(id.to_string().parse::<UserId>(), Ok(id));
     assert!(
-        variable
-            .required()
-            .expect_err("absent")
-            .to_string()
-            .contains(variable.name())
+        "00000000-0000-4000-8000-000000000000"
+            .parse::<UserId>()
+            .is_err()
     );
-    let source = "not-an-integer".parse::<u32>().expect_err("integer");
-    let error = variable.error("must be an integer", source);
-    assert!(StdError::source(&error).is_some());
-    assert!(!error.to_string().contains("not-an-integer"));
+    assert!(id.to_string().to_uppercase().parse::<UserId>().is_err());
+    let error = "not-a-uuid".parse::<UserId>().expect_err("UUID syntax");
+    assert!(std::error::Error::source(&error).is_some());
 }

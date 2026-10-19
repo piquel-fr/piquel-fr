@@ -8,11 +8,11 @@ use axum::{
     http::{HeaderMap, StatusCode},
     response::{IntoResponse, Response},
 };
-use piquel_auth_protocol::{TokenId, UserId};
-use piquel_repository::{
-    Database, DatabaseTransaction, DomainEvent, EventContext, InsertExternalIdentity,
-    PendingFederation, Personal, RevocationReason,
+use piquel_common::{
+    Personal, TokenId, UserId,
+    events::{DomainEvent, EventContext, RevocationReason},
 };
+use piquel_repository::{Database, DatabaseTransaction, InsertExternalIdentity, PendingFederation};
 use serde::Serialize;
 
 impl FederationApplication {

@@ -7,7 +7,7 @@ use crate::{
 use base64::{Engine, engine::general_purpose::URL_SAFE_NO_PAD};
 use chrono::{DateTime, TimeDelta, Utc};
 use jsonwebtoken::{DecodingKey, crypto::aws_lc::DEFAULT_PROVIDER};
-use piquel_auth_protocol::{
+use piquel_common::protocol::{
     jwt::{Algorithm, Jwk, JwkSet, TokenType},
     sdk::{ErrorCategory, ErrorReason, SdkError},
 };

@@ -7,12 +7,16 @@ use crate::{
 };
 use base64::{Engine, engine::general_purpose::URL_SAFE_NO_PAD};
 use chrono::{DateTime, TimeDelta, Utc};
-use piquel_auth_protocol::{
+use piquel_common::{
     ClientId,
-    claims::UserInfo,
-    oauth::{CodeChallengeMethod, ErrorResponse, GrantType, Prompt, ResponseType, Scope, Scopes},
-    sdk::{ErrorCategory, ErrorReason, SdkError},
-    step_up::StepUpRequirement,
+    protocol::{
+        claims::UserInfo,
+        oauth::{
+            CodeChallengeMethod, ErrorResponse, GrantType, Prompt, ResponseType, Scope, Scopes,
+        },
+        sdk::{ErrorCategory, ErrorReason, SdkError},
+        step_up::StepUpRequirement,
+    },
 };
 use rand::{RngCore, rngs::OsRng};
 use reqwest::StatusCode;

@@ -2,11 +2,12 @@
 //! and the SDKs deserialize the same structs, so issuer and verifier cannot disagree
 //! on the wire format. Times are whole Unix seconds (RFC 7519 `NumericDate`).
 
-use crate::{ClientId, SessionId, TokenId, known, known_one, oauth::Scopes};
+use super::{known, known_one, oauth::Scopes};
+use crate::{ClientId, SessionId, TokenId};
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 
-piquel_common::str_enum! {
+crate::str_enum! {
     /// `amr` values (RFC 8176): how the user authenticated. This is the wire view,
     /// separate from [`crate::AuthenticationMethod`], which auth stores on sessions.
     pub enum Amr {
@@ -22,11 +23,11 @@ piquel_common::str_enum! {
     }
 }
 
-piquel_common::str_enum! {
+crate::str_enum! {
     /// `acr` values: the authentication context class a session reached, strongest first.
     ///
     /// ```
-    /// use piquel_auth_protocol::claims::Acr;
+    /// use piquel_common::protocol::claims::Acr;
     ///
     /// // A passkey meets a social requirement, but not the other way around.
     /// assert!(Acr::PhishingResistant.satisfies(Acr::Social));
@@ -37,7 +38,7 @@ piquel_common::str_enum! {
     /// ```
     pub enum Acr {
         /// Phishing-resistant authentication, such as a passkey with user
-        /// verification (OpenID Connect EAP ACR Values).
+        /// verification (`OpenID` Connect EAP ACR Values).
         PhishingResistant = "phr",
         /// Sign-in through an external identity provider.
         Social = "urn:piquel:acr:social",
@@ -72,7 +73,7 @@ impl Acr {
 /// `aud`: one string or an array (RFC 7519 §4.1.3). Auth always sends one string.
 ///
 /// ```
-/// use piquel_auth_protocol::claims::Audience;
+/// use piquel_common::protocol::claims::Audience;
 ///
 /// let one: Audience = serde_json::from_str(r#""notes-api""#)?;
 /// let many: Audience = serde_json::from_str(r#"["notes-api", "files-api"]"#)?;

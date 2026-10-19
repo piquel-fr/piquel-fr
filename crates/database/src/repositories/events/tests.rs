@@ -1,6 +1,7 @@
 //! Recording, personal data, the consumer cursor and the audit log import.
 use super::*;
 use crate::{Database, DatabaseTransaction};
+use piquel_common::{PasskeyId, Provider};
 use sqlx::{Connection, PgConnection, PgPool};
 use std::time::Duration;
 

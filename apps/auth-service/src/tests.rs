@@ -6,8 +6,10 @@ use crate::{
     passkey::DecoyKey,
 };
 use axum::{Extension, Router, extract::ConnectInfo};
-use piquel_auth_protocol::UserId;
-use piquel_common::{Origin, PublicUrl};
+use piquel_common::{
+    UserId,
+    config::{Origin, PublicUrl},
+};
 use piquel_crypto::{Rs256Key, Secret};
 use piquel_repository::{Database, DatabaseConfig};
 use std::{
@@ -75,7 +77,7 @@ impl Replicas {
 
     /// Connects a new pool to the migrated test database.
     pub(crate) async fn database() -> Database {
-        let url = piquel_common::Variable::new("TEST_DATABASE_URL")
+        let url = piquel_common::config::Variable::new("TEST_DATABASE_URL")
             .required()
             .expect("TEST_DATABASE_URL must name an isolated PostgreSQL database");
         let database = Database::connect(

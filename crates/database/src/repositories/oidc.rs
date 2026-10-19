@@ -3,7 +3,7 @@
 use super::{JsonArray, OidcRepository, RepositoryExecutor};
 use crate::{DatabaseError, SessionAuthentication};
 use chrono::{DateTime, Utc};
-use piquel_auth_protocol::{SessionId, TokenId, UserId, claims::Acr};
+use piquel_common::{SessionId, TokenId, UserId, protocol::claims::Acr};
 use sqlx::types::Json;
 
 /// Largest identifier, scope or audience accepted by provisioning.

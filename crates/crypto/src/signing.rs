@@ -8,7 +8,7 @@ use openssl::{
     rsa::Rsa,
     sign::{Signer, Verifier},
 };
-use piquel_auth_protocol::jwt::{Algorithm, Claim, Jwk, JwkSet, KeyType, KeyUse, TokenType};
+use piquel_common::protocol::jwt::{Algorithm, Claim, Jwk, JwkSet, KeyType, KeyUse, TokenType};
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
 use serde_json::Value;
 use std::borrow::Cow;

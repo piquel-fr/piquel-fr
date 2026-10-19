@@ -25,14 +25,16 @@ use axum::{
     routing::{get, post},
 };
 use base64::Engine;
-use piquel_auth_protocol::{
+use piquel_common::{
     TokenId,
-    claims::{Acr, ProfileClaims},
-    jwt::{Algorithm, Claim, TokenType},
-    metadata::ServerMetadata,
-    oauth::{
-        self, ClientAuthMethod, CodeChallengeMethod, GrantType, Prompt, ResponseMode, ResponseType,
-        Scope, SubjectType,
+    protocol::{
+        claims::{Acr, ProfileClaims},
+        jwt::{Algorithm, Claim, TokenType},
+        metadata::ServerMetadata,
+        oauth::{
+            self, ClientAuthMethod, CodeChallengeMethod, GrantType, Prompt, ResponseMode,
+            ResponseType, Scope, SubjectType,
+        },
     },
 };
 use piquel_repository::{Database, StoredOidcClient};

@@ -3,7 +3,7 @@
 use super::{RepositoryExecutor, Unsigned, UserRepository};
 use crate::DatabaseError;
 use chrono::{DateTime, Utc};
-use piquel_auth_protocol::{AccountStatus, UserId};
+use piquel_common::{AccountStatus, UserId};
 
 /// A user account row.
 #[derive(Clone, Debug, PartialEq, Eq)]

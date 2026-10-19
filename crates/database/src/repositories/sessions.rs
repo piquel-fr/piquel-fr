@@ -3,9 +3,9 @@
 use super::{JsonArray, RepositoryExecutor, SessionRepository};
 use crate::DatabaseError;
 use chrono::{DateTime, Utc};
-use piquel_auth_protocol::{
+use piquel_common::{
     AuthenticationMethod, SessionId, UserId,
-    claims::{Acr, Amr},
+    protocol::claims::{Acr, Amr},
 };
 use serde::{Deserialize, Serialize};
 use sqlx::{

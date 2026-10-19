@@ -6,9 +6,11 @@ use super::{
 };
 use chrono::Utc;
 use piquel_auth::{Jws, KeyCache, TokenError};
-use piquel_auth_protocol::claims::Audience;
-use piquel_auth_protocol::jwt::Algorithm;
-use piquel_auth_protocol::oauth::{Prompt, Scope};
+use piquel_common::protocol::{
+    claims::Audience,
+    jwt::Algorithm,
+    oauth::{Prompt, Scope},
+};
 use serde::Deserialize;
 use thiserror::Error;
 use url::Url;

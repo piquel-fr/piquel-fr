@@ -2,9 +2,10 @@
 //!
 //! Tests share one database, so each claims from a channel of its own.
 use super::*;
-use crate::{
-    Actor, Database, EventContext, EventRepository, MaintenanceRepository, RequestOrigin,
-    StoredEvent, repositories::events::Personal,
+use crate::{Database, EventRepository, MaintenanceRepository, StoredEvent};
+use piquel_common::{
+    Personal,
+    events::{Actor, EventContext, RequestOrigin},
 };
 use sqlx::PgPool;
 use std::collections::HashSet;
@@ -154,7 +155,7 @@ async fn deliveries_commit_with_their_event_and_outlive_the_account() {
             origin: RequestOrigin::default(),
         };
         let event = DomainEvent::IdentityUnlinked {
-            provider: piquel_auth_protocol::Provider::GitHub,
+            provider: piquel_common::Provider::GitHub,
         };
         tx.record_to::<(Recorder, ())>(&context, Some(user), event)
             .await

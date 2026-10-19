@@ -2,7 +2,7 @@
 
 use serde::{Deserialize, Serialize};
 
-piquel_common::str_enum! {
+crate::str_enum! {
     /// JWT `typ` headers. Distinct types stop an ID token being accepted as an access token.
     pub enum TokenType {
         /// Access token (RFC 9068).
@@ -11,7 +11,7 @@ piquel_common::str_enum! {
         Id = "JWT",
     }
 }
-piquel_common::str_enum! {
+crate::str_enum! {
     /// JWT claim names shared by token issuance, verification and `UserInfo`.
     pub enum Claim {
         /// Issuer that signed the token.
@@ -60,21 +60,21 @@ piquel_common::str_enum! {
         Nonce = "nonce",
     }
 }
-piquel_common::str_enum! {
+crate::str_enum! {
     /// Signing algorithms accepted by this workspace.
     pub enum Algorithm {
         /// RSA PKCS#1 v1.5 with SHA-256.
         Rs256 = "RS256",
     }
 }
-piquel_common::str_enum! {
+crate::str_enum! {
     /// JWK key families accepted for signing.
     pub enum KeyType {
         /// RSA modulus and exponent.
         Rsa = "RSA",
     }
 }
-piquel_common::str_enum! {
+crate::str_enum! {
     /// JWK purposes accepted for signing keys.
     pub enum KeyUse {
         /// Digital signatures.
@@ -87,7 +87,7 @@ piquel_common::str_enum! {
 /// unknown `kty` is skipped rather than failing the whole set.
 ///
 /// ```
-/// use piquel_auth_protocol::jwt::{Jwk, JwkSet, KeyType};
+/// use piquel_common::protocol::jwt::{Jwk, JwkSet, KeyType};
 ///
 /// let set: JwkSet<serde_json::Value> = serde_json::from_str(r#"{"keys": [
 ///     {"kty": "RSA", "kid": "key-2026", "use": "sig", "alg": "RS256", "n": "AQAB", "e": "AQAB"},

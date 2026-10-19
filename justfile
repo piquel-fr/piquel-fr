@@ -57,6 +57,6 @@ doc-test:
 
 # Regenerate tests/sdk-vectors; `just test` fails while the committed files are stale.
 sdk-vectors:
-    @UPDATE_SDK_VECTORS=1 cargo nextest run --locked -p piquel-auth-protocol --test sdk_vectors
+    @UPDATE_SDK_VECTORS=1 cargo nextest run --locked -p piquel-common --test sdk_vectors
 
 audit: rust::audit web::audit

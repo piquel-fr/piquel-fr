@@ -34,7 +34,7 @@ Keep an email only if the provider says it is verified.
 
 ## 1. Name the provider
 
-Add a variant to `Provider` in `crates/auth-protocol/src/lib.rs`:
+Add a variant to `Provider` in `crates/common/src/lib.rs`:
 
 ```rust
 /// GitLab `OpenID` Connect identity.

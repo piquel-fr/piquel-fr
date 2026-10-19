@@ -2,7 +2,7 @@
 //! fields (OIDC Discovery 1.0 §3). RFC 8414 §2 allows OIDC fields in OAuth metadata,
 //! so one document serves both well-known paths.
 
-use crate::{
+use super::{
     claims::Acr,
     jwt::{Algorithm, Claim},
     known,

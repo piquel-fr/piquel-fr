@@ -7,8 +7,7 @@ repository.workspace = true
 
 [dependencies]
 chrono.workspace = true
-piquel-auth-protocol = { workspace = true, features = ["sqlx"] }
-piquel-common = { workspace = true, features = ["sqlx"] }
+piquel-common = { workspace = true, features = ["events", "sqlx"] }
 serde_json.workspace = true
 serde.workspace = true
 sqlx.workspace = true

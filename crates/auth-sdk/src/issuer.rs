@@ -5,7 +5,7 @@ use crate::{
     http::{Authorization, Http, NetworkError},
 };
 use chrono::{DateTime, Utc};
-use piquel_auth_protocol::{
+use piquel_common::protocol::{
     metadata::{OPENID_CONFIGURATION_PATH, ServerMetadata},
     oauth::CodeChallengeMethod,
     sdk::{ErrorCategory, ErrorReason, SdkError},

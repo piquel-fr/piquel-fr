@@ -3,7 +3,7 @@ use crate::Database;
 
 use crate::repositories::{SessionRepository, UserRepository, sessions::InsertSession};
 use chrono::Utc;
-use piquel_auth_protocol::{SessionId, UserId};
+use piquel_common::{SessionId, UserId};
 use sqlx::PgPool;
 use std::time::Duration;
 

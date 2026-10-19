@@ -7,23 +7,25 @@ use axum::{
     http::{HeaderValue, StatusCode, header},
     response::{IntoResponse, Redirect, Response},
 };
-use piquel_auth_protocol::{
-    challenge::{BearerChallenge, BearerError},
-    oauth::{ErrorDescription, ErrorResponse},
+use piquel_common::{
+    ErrorChain,
+    protocol::{
+        challenge::{BearerChallenge, BearerError},
+        oauth::{ErrorDescription, ErrorResponse},
+    },
 };
-use piquel_common::ErrorChain;
 use piquel_crypto::CryptoError;
 use piquel_repository::DatabaseError;
 use std::{borrow::Cow, error::Error as StdError};
 use thiserror::Error;
 use url::Url;
 
-/// OAuth and OIDC error codes, shared with the SDKs through auth-protocol and read by
+/// OAuth and OIDC error codes, shared with the SDKs through `piquel-common` and read by
 /// the auth frontend's consent page.
-pub(super) use piquel_auth_protocol::oauth::ErrorCode as OAuthCode;
+pub(super) use piquel_common::protocol::oauth::ErrorCode as OAuthCode;
 
 /// Builds rejections from an [`OAuthCode`]. A trait because the code type lives in
-/// auth-protocol; import it wherever rejections are built.
+/// `piquel-common`; import it wherever rejections are built.
 pub(super) trait Reject {
     /// Client redirect carrying this error code and its description.
     fn redirect_url(&self, to: &ClientRedirect<'_>, description: &str) -> Url;

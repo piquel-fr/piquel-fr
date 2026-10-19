@@ -10,8 +10,7 @@ use axum::{
     routing::post,
 };
 use piquel_auth::{KeyCache, KeySet};
-use piquel_auth_protocol::jwt::TokenType;
-use piquel_common::SecretReference;
+use piquel_common::{config::SecretReference, protocol::jwt::TokenType};
 use piquel_crypto::Rs256Key;
 use piquel_crypto::Secret;
 use piquel_repository::{
@@ -48,7 +47,7 @@ impl TestApp {
     }
     /// Creates unique provider evidence with an optional verified primary address.
     async fn with_email(email: Option<&str>) -> Self {
-        let url = piquel_common::Variable::new("TEST_DATABASE_URL")
+        let url = piquel_common::config::Variable::new("TEST_DATABASE_URL")
             .required()
             .expect("TEST_DATABASE_URL must name an isolated migrated PostgreSQL database");
         let database = Database::connect(
@@ -104,13 +103,13 @@ impl TestApp {
                 .expect("secret reference"),
         };
         let settings_url = "https://piquel.fr/settings"
-            .parse::<piquel_common::PublicUrl>()
+            .parse::<piquel_common::config::PublicUrl>()
             .expect("settings");
         let mut app = FederationApplication::new(
             database,
             &FederationConfig {
                 origin: "https://auth.piquel.fr/"
-                    .parse::<piquel_common::Origin>()
+                    .parse::<piquel_common::config::Origin>()
                     .expect("origin"),
                 frontends: FrontendOrigins::new([&settings_url]),
                 settings_url,
@@ -217,7 +216,7 @@ impl TestApp {
         // Federation only checks key presence; cryptographic ceremony coverage lives in passkey tests.
         tx.passkeys()
             .insert(&InsertPasskey {
-                id: piquel_auth_protocol::PasskeyId::new(),
+                id: piquel_common::PasskeyId::new(),
                 credential_id: TokenId::new().to_string().into_bytes(),
                 user_id,
                 credential: serde_json::json!({}),
@@ -236,7 +235,7 @@ impl TestApp {
         let pending = PendingFederation {
             id: TokenId::new(),
             browser_digest: secret.digest().as_bytes().to_vec(),
-            provider: piquel_auth_protocol::Provider::GitHub,
+            provider: piquel_common::Provider::GitHub,
             issuer: ProviderEndpoints::new(Provider::GitHub, &reqwest::Client::new())
                 .expect("GitHub facts")
                 .issuer
@@ -303,7 +302,7 @@ impl TestApp {
             .insert_identity(&InsertExternalIdentity {
                 id: TokenId::new(),
                 user_id,
-                provider: piquel_auth_protocol::Provider::GitHub,
+                provider: piquel_common::Provider::GitHub,
                 issuer: ProviderEndpoints::new(Provider::GitHub, &reqwest::Client::new())
                     .expect("GitHub facts")
                     .issuer
@@ -359,7 +358,7 @@ impl TestApp {
 /// Accepts auth paths and frontend URLs only, and rejects duplicated pending-browser cookies.
 #[test]
 fn return_destinations_and_browser_bindings_are_strict() {
-    let settings: piquel_common::PublicUrl = "https://preview.example/settings"
+    let settings: piquel_common::config::PublicUrl = "https://preview.example/settings"
         .parse()
         .expect("settings");
     let frontends = FrontendOrigins::new([&settings]);
@@ -527,7 +526,7 @@ async fn onboarding_commits_only_with_first_key_and_browser_and_never_claims_exi
     assert!(
         FederationApplication::attach_signup(
             &mut tx,
-            &security::RequestContext::TEST.actor(piquel_repository::Actor::Anonymous),
+            &security::RequestContext::TEST.actor(piquel_common::events::Actor::Anonymous),
             pending.id,
             &headers,
             user
@@ -541,7 +540,7 @@ async fn onboarding_commits_only_with_first_key_and_browser_and_never_claims_exi
     assert!(
         FederationApplication::attach_signup(
             &mut tx,
-            &security::RequestContext::TEST.actor(piquel_repository::Actor::Anonymous),
+            &security::RequestContext::TEST.actor(piquel_common::events::Actor::Anonymous),
             pending.id,
             &HeaderMap::new(),
             user
@@ -551,7 +550,7 @@ async fn onboarding_commits_only_with_first_key_and_browser_and_never_claims_exi
     );
     FederationApplication::attach_signup(
         &mut tx,
-        &security::RequestContext::TEST.actor(piquel_repository::Actor::Anonymous),
+        &security::RequestContext::TEST.actor(piquel_common::events::Actor::Anonymous),
         pending.id,
         &headers,
         user,
@@ -577,7 +576,7 @@ async fn onboarding_commits_only_with_first_key_and_browser_and_never_claims_exi
     assert!(
         FederationApplication::attach_signup(
             &mut tx,
-            &security::RequestContext::TEST.actor(piquel_repository::Actor::Anonymous),
+            &security::RequestContext::TEST.actor(piquel_common::events::Actor::Anonymous),
             pending.id,
             &headers,
             user
@@ -856,7 +855,7 @@ async fn callback_email_collision_never_links_and_known_subject_never_bootstraps
         .insert_identity(&InsertExternalIdentity {
             id: TokenId::new(),
             user_id: subject_owner,
-            provider: piquel_auth_protocol::Provider::GitHub,
+            provider: piquel_common::Provider::GitHub,
             issuer: ProviderEndpoints::new(Provider::GitHub, &reqwest::Client::new())
                 .expect("GitHub facts")
                 .issuer

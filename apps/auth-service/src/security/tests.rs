@@ -4,7 +4,7 @@ use super::*;
 use crate::routes::federation;
 use crate::tests::Replicas;
 use axum::{Router, body::Body, http::Request as HttpRequest, middleware, routing::any};
-use piquel_auth_protocol::TokenId;
+use piquel_common::TokenId;
 use piquel_crypto::Secret;
 use piquel_repository::{DatabaseConfig, InsertSession, InsertUser};
 use std::net::{IpAddr, Ipv6Addr};
@@ -51,7 +51,7 @@ struct SecurityFixture {
 impl SecurityFixture {
     /// Connects an isolated test pool with caller-selected acquisition bounds.
     async fn database(max_connections: u32, timeout: std::time::Duration) -> Database {
-        let url = piquel_common::Variable::new("TEST_DATABASE_URL")
+        let url = piquel_common::config::Variable::new("TEST_DATABASE_URL")
             .required()
             .expect("TEST_DATABASE_URL must name an isolated PostgreSQL database");
         Database::connect(

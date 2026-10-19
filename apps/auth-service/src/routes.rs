@@ -61,7 +61,7 @@ pub(crate) mod federation {
 
 /// OAuth 2.0 and `OpenID` Connect endpoints.
 pub(crate) mod oidc {
-    use piquel_auth_protocol::metadata;
+    use piquel_common::protocol::metadata;
 
     /// `OpenID` Provider metadata.
     pub(crate) const DISCOVERY: &str = metadata::OPENID_CONFIGURATION_PATH;

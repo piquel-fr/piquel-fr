@@ -2,16 +2,19 @@
 
 use crate::{Issuer, KeyError, LEEWAY, keys::Jws, scope::ScopeSet};
 use chrono::{DateTime, Utc};
-use piquel_auth_protocol::{
+use piquel_common::{
     ClientId, SessionId, TokenId, UserId,
-    challenge::{BearerChallenge, BearerError},
-    claims::{
-        AccessTokenClaims, Acr, Actor, Amr, Audience, Confirmation, IdTokenClaims, ProfileClaims,
+    protocol::{
+        challenge::{BearerChallenge, BearerError},
+        claims::{
+            AccessTokenClaims, Acr, Actor, Amr, Audience, Confirmation, IdTokenClaims,
+            ProfileClaims,
+        },
+        jwt::{Algorithm, TokenType},
+        oauth::Scopes,
+        sdk::{ErrorCategory, ErrorReason, SdkError},
+        step_up::StepUpRequirement,
     },
-    jwt::{Algorithm, TokenType},
-    oauth::Scopes,
-    sdk::{ErrorCategory, ErrorReason, SdkError},
-    step_up::StepUpRequirement,
 };
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
 use thiserror::Error;

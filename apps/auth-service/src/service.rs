@@ -1,7 +1,7 @@
 //! Built-in health and public configuration routes.
 use crate::{AuthConfig, config::FrontendOrigins, routes, security::ApiError};
 use axum::{Json, Router, extract::State, http::StatusCode, routing::get};
-use piquel_auth_protocol::Provider;
+use piquel_common::Provider;
 use piquel_repository::Database;
 use serde::Serialize;
 

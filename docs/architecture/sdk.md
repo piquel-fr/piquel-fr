@@ -7,7 +7,7 @@ SDK accepts is accepted by the other.
 
 | Path | Package | Published | Role |
 | --- | --- | --- | --- |
-| `crates/auth-protocol` | `piquel-auth-protocol` | yes | Wire types shared by auth and the Rust SDK |
+| `crates/common` | `piquel-common` | yes | Shared types; with no features, the IDs and wire types shared by auth and the Rust SDK |
 | `crates/auth-sdk` | `piquel-auth` | yes | Rust SDK; the `axum` feature adds the axum integration |
 | `packages/auth` | `@piquel/auth` | yes | TypeScript SDK; `@piquel/auth/sveltekit` for SvelteKit |
 | `packages/auth-sdk` | `@piquel/auth-sdk` | no | First-party frontend package for auth-web and piquel-web |
@@ -15,7 +15,9 @@ SDK accepts is accepted by the other.
 
 ## Wire types
 
-The wire format is defined by types in `piquel-auth-protocol`, not by prose:
+The wire format is defined by types in `piquel_common::protocol`, not by prose.
+The Rust SDK re-exports them by name as `piquel_auth::protocol`, so that list is
+its contract:
 
 - `claims`: `AccessTokenClaims`, `IdTokenClaims`, `UserInfo`, and the parts they
   share (`AuthenticationClaims`, `ProfileClaims`, `Audience`, `Actor`,
@@ -117,7 +119,7 @@ misspelled scope does not compile. TypeScript uses string literal types.
 ## Errors
 
 Every SDK error has a category and, for most categories, a reason. Both SDKs expose
-the same values, listed in `piquel_auth_protocol::sdk`.
+the same values, listed in `piquel_common::protocol::sdk`.
 
 | Category | Meaning | Reasons |
 | --- | --- | --- |
@@ -260,7 +262,7 @@ string, so it still yields the rest of the error body or challenge.
 
 `tests/sdk-vectors` holds one JSON file per case: inputs, a fixed `now`, and either
 the parsed value or the expected error code. The generator,
-`crates/auth-protocol/tests/sdk_vectors.rs`, builds them from fixed test keys and the
+`crates/common/tests/sdk_vectors.rs`, builds them from fixed test keys and the
 shared claim types and signs them with auth's signer. `just sdk-vectors` rewrites
 them, and `just test`, and so `just validate`, fails when they are stale. Both SDK
 test suites run every case.

@@ -3,7 +3,7 @@
 use super::{FederationRepository, RepositoryExecutor};
 use crate::DatabaseError;
 use chrono::{DateTime, Utc};
-use piquel_auth_protocol::{Provider, SessionId, TokenId, UserId};
+use piquel_common::{Provider, SessionId, TokenId, UserId};
 
 /// An in-flight redirect to a social login provider, bound to the initiating
 /// browser.

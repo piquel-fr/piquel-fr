@@ -19,9 +19,13 @@ use axum::{
     response::Redirect,
 };
 use chrono::{DateTime, Duration, Utc};
-use piquel_auth_protocol::{ClientId, UserId, claims::Acr, step_up::StepUpRequirement};
+use piquel_common::{
+    ClientId, UserId,
+    events::DomainEvent,
+    protocol::{claims::Acr, step_up::StepUpRequirement},
+};
 use piquel_repository::{
-    DomainEvent, InsertAuthorizationCode, InsertAuthorizationRequest, SessionAuthentication,
+    InsertAuthorizationCode, InsertAuthorizationRequest, SessionAuthentication,
     StoredAuthorizationRequest, StoredSession,
 };
 use serde::{Deserialize, Serialize};
@@ -663,7 +667,7 @@ impl Prompts {
 mod tests {
     //! Prompt, `max_age` and consent decision parsing.
     use super::*;
-    use piquel_auth_protocol::{AuthenticationMethod, SessionId};
+    use piquel_common::{AuthenticationMethod, SessionId};
     /// Duplicates are allowed, flags follow the values, and `none` stands alone.
     #[test]
     fn prompts_enforce_interaction_policy() {

@@ -1,7 +1,7 @@
 //! Focused persistence and security contract tests.
 use crate::Database;
 
-use piquel_auth_protocol::UserId;
+use piquel_common::UserId;
 /// Verified email ownership follows active account status and verification changes.
 #[expect(
     clippy::too_many_lines,
