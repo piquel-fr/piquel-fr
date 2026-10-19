@@ -377,8 +377,9 @@ async fn a_cancelled_attempt_holds_back_its_key_until_its_lease_expires() {
 }
 
 /// Thirty days after a failure, cleanup abandons its key: the deliveries behind
-/// it are cancelled a batch at a time, never sent out of order, and the failure is
-/// deleted once none is left. The key then takes new deliveries again.
+/// it are cancelled, never sent out of order, and the failure is deleted. A key
+/// whose next delivery is being inserted is skipped until the insert ends, and
+/// the key then takes new deliveries again.
 #[tokio::test]
 #[ignore = "requires a disposable TEST_DATABASE_URL"]
 async fn cleanup_abandons_a_key_stuck_behind_an_old_failure() {
@@ -386,10 +387,7 @@ async fn cleanup_abandons_a_key_stuck_behind_an_old_failure() {
     clear::<Abandoned>(&pool).await;
     let key = format!("key-{}", Uuid::now_v7());
     let failed_id = insert::<Abandoned>(&pool, Some(&key)).await;
-    let waiting = [
-        insert::<Abandoned>(&pool, Some(&key)).await,
-        insert::<Abandoned>(&pool, Some(&key)).await,
-    ];
+    let waiting = insert::<Abandoned>(&pool, Some(&key)).await;
     let attempt = claim::<Abandoned>(&pool, LEASE).await.expect("first");
     finish(&pool, &attempt, &failed()).await.expect("fail");
     sqlx::query("UPDATE deliveries SET finished_at = now() - interval '31 days' WHERE id = $1")
@@ -397,41 +395,50 @@ async fn cleanup_abandons_a_key_stuck_behind_an_old_failure() {
         .execute(&pool)
         .await
         .expect("age the failure");
-
-    let cleanup = async || {
-        MaintenanceRepository::from_pool(&pool)
-            .purge_expired_auth_state(1)
-            .await
-            .expect("cleanup");
-        let mut listed: Vec<_> = DeliveryRepository::from_pool(&pool)
-            .list(None, Some(Abandoned::NAME), 10)
-            .await
-            .expect("list")
-            .into_iter()
-            .map(|d| (d.id, d.status))
-            .collect();
-        listed.sort_by_key(|&(id, _)| id.as_uuid());
-        listed
+    let abandon = async || {
+        let mut tx = DatabaseTransaction::new(pool.begin().await.expect("transaction"));
+        let changed = tx.abandon_stuck_deliveries(10).await.expect("abandon");
+        tx.commit().await.expect("commit");
+        changed
     };
-    let statuses = cleanup().await;
-    assert!(
-        statuses.contains(&(failed_id, DeliveryStatus::Failed)),
-        "the failure stays while deliveries wait behind it: {statuses:?}"
-    );
+
+    let mut inserting = DatabaseTransaction::new(pool.begin().await.expect("transaction"));
+    let inserted = inserting
+        .deliveries()
+        .insert::<Abandoned>(
+            None,
+            NewDelivery {
+                destination: "https://receiver.example".into(),
+                recipient: "recipient".into(),
+                payload: 7,
+                ordering_key: Some(key.clone()),
+            },
+        )
+        .await
+        .expect("insert");
+    assert_eq!(abandon().await, 0, "a key being inserted to is skipped");
+    inserting.commit().await.expect("commit the insert");
+
+    assert_eq!(abandon().await, 3, "two cancelled and the failure deleted");
+    let mut listed: Vec<_> = DeliveryRepository::from_pool(&pool)
+        .list(None, Some(Abandoned::NAME), 10)
+        .await
+        .expect("list")
+        .into_iter()
+        .map(|d| (d.id, d.status))
+        .collect();
+    listed.sort_by_key(|&(id, _)| id.as_uuid());
     assert_eq!(
-        statuses
-            .iter()
-            .filter(|(_, status)| *status == DeliveryStatus::Cancelled)
-            .count(),
-        1,
-        "one batch is cancelled"
+        listed,
+        [
+            (waiting, DeliveryStatus::Cancelled),
+            (inserted, DeliveryStatus::Cancelled)
+        ]
     );
-    assert_eq!(
-        cleanup().await,
-        waiting.map(|id| (id, DeliveryStatus::Cancelled)),
-        "the failure is gone once none is waiting"
-    );
-    assert!(claim::<Abandoned>(&pool, LEASE).await.is_none());
+    assert!(matches!(
+        DeliveryRepository::from_pool(&pool).retry(failed_id).await,
+        Err(DatabaseError::NotFound)
+    ));
 
     let next = insert::<Abandoned>(&pool, Some(&key)).await;
     assert_eq!(

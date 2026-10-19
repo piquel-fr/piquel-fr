@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE deliveries\n                SET status = 'cancelled', finished_at = now(), claim_token = NULL\n                WHERE ordering_key = $1 AND status = 'pending'",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "e9fb303b1693061409bb4840c99b87145c30fa5933fed89f223ec3b711113fb1"
+}

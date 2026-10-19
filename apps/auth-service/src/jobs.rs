@@ -171,8 +171,10 @@ impl Jobs {
     }
 }
 
-/// Drains expired authentication state, and event personal data past its retention,
-/// in bounded batches until a pass finds nothing or a one-minute budget runs out.
+/// Drains expired authentication state, event personal data and finished
+/// deliveries past their retention, and abandons delivery ordering keys stuck
+/// behind an old failure, in bounded batches until a pass finds nothing or a
+/// one-minute budget runs out.
 /// Short pauses between batches keep cleanup from monopolizing the database under
 /// heavy churn.
 struct Cleanup;
@@ -184,6 +186,19 @@ impl Cleanup {
     const PAUSE: Duration = Duration::from_millis(100);
     /// Per-table batch bound.
     const BATCH_SIZE: u32 = 1_000;
+
+    /// Runs one batch and returns how many rows it changed. Abandoning stuck keys
+    /// needs a transaction of its own, so its locks last until it decides.
+    async fn batch(connection: &mut ExclusiveConnection) -> Result<u64, DatabaseError> {
+        let mut tx = connection.begin().await?;
+        let abandoned = tx.abandon_stuck_deliveries(Self::BATCH_SIZE).await?;
+        tx.commit().await?;
+        let purged = connection
+            .maintenance()
+            .purge_expired_auth_state(Self::BATCH_SIZE)
+            .await?;
+        Ok(abandoned + purged)
+    }
 }
 
 impl ExclusiveJob for Cleanup {
@@ -199,12 +214,7 @@ impl ExclusiveJob for Cleanup {
         shutdown: &Shutdown,
     ) -> Result<(), DatabaseError> {
         let deadline = Instant::now() + Self::BUDGET;
-        while connection
-            .maintenance()
-            .purge_expired_auth_state(Self::BATCH_SIZE)
-            .await?
-            > 0
-        {
+        while Self::batch(connection).await? > 0 {
             if Instant::now() >= deadline {
                 tracing::warn!("expired authentication state cleanup is falling behind");
                 break;

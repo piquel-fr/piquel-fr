@@ -1,0 +1,26 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT failure.id AS \"id: DeliveryId\", failure.ordering_key AS \"ordering_key!\"\n                FROM deliveries failure\n                JOIN delivery_orderings ordering ON ordering.ordering_key = failure.ordering_key\n                WHERE failure.status = 'failed'\n                AND failure.finished_at < now() - interval '30 days'\n                LIMIT 1\n                FOR UPDATE SKIP LOCKED",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id: DeliveryId",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "ordering_key!",
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": [
+      false,
+      true
+    ]
+  },
+  "hash": "3b0eeb4fc444392dff4bf23ec987e69cc11803c000c0dbe576a0c5c55e27493a"
+}

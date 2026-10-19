@@ -524,6 +524,83 @@ impl DeliveryRepository<'_> {
     }
 }
 
+/// An ordered failure past retention, with its key, as cleanup locks them.
+struct StuckKey {
+    /// The failed delivery.
+    id: DeliveryId,
+    /// The key it holds back.
+    ordering_key: String,
+}
+
+impl DatabaseTransaction<'_> {
+    /// Abandons up to `keys` ordering keys held back by a failure that finished
+    /// over 30 days ago: cancels every delivery waiting behind the failure, so
+    /// none is sent out of order, then deletes the failure. The cancelled ones are
+    /// deleted 30 days later. Returns how many deliveries were cancelled or deleted.
+    ///
+    /// Each key is handled under locks on the failure and the key's ordering row,
+    /// taken before the deliveries waiting behind it are read. An operator retry
+    /// or cancel of the failure therefore waits for this transaction, then finds
+    /// the failure gone, and a delivery being inserted under the key makes this
+    /// skip the key. Each later statement sees every delivery committed before the
+    /// locks were taken.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`DatabaseError`] if a query fails.
+    pub async fn abandon_stuck_deliveries(&mut self, keys: u32) -> Result<u64, DatabaseError> {
+        let mut changed = 0;
+        for _ in 0..keys {
+            let Some(stuck) = self.deliveries().lock_stuck_key().await? else {
+                break;
+            };
+            changed += self.deliveries().abandon(&stuck).await?;
+        }
+        Ok(changed)
+    }
+}
+
+impl DeliveryRepository<'_> {
+    /// Locks one failure past retention, and its key's ordering row, skipping
+    /// any already locked.
+    async fn lock_stuck_key(&mut self) -> Result<Option<StuckKey>, DatabaseError> {
+        run!(
+            self,
+            fetch_optional,
+            sqlx::query_as!(
+                StuckKey,
+                r#"SELECT failure.id AS "id: DeliveryId", failure.ordering_key AS "ordering_key!"
+                FROM deliveries failure
+                JOIN delivery_orderings ordering ON ordering.ordering_key = failure.ordering_key
+                WHERE failure.status = 'failed'
+                AND failure.finished_at < now() - interval '30 days'
+                LIMIT 1
+                FOR UPDATE SKIP LOCKED"#,
+            )
+        )
+    }
+
+    /// Cancels the deliveries waiting behind a locked failure, then deletes it.
+    async fn abandon(&mut self, stuck: &StuckKey) -> Result<u64, DatabaseError> {
+        let cancelled = run!(
+            self,
+            execute,
+            sqlx::query!(
+                "UPDATE deliveries
+                SET status = 'cancelled', finished_at = now(), claim_token = NULL
+                WHERE ordering_key = $1 AND status = 'pending'",
+                stuck.ordering_key,
+            )
+        )?;
+        let deleted = run!(
+            self,
+            execute,
+            sqlx::query!("DELETE FROM deliveries WHERE id = $1", stuck.id.as_uuid())
+        )?;
+        Ok(cancelled.rows_affected() + deleted.rows_affected())
+    }
+}
+
 /// Database tests for fan-out, claims, leases and ordering.
 #[cfg(test)]
 mod tests;

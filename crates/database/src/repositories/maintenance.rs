@@ -11,8 +11,8 @@ impl MaintenanceRepository<'_> {
     /// Purges a bounded batch of expired ephemeral authentication state, of event
     /// personal data older than 90 days, and of deliveries that succeeded over 7
     /// days ago or failed or were cancelled over 30 days ago, and returns how many
-    /// rows were deleted. Deleting an ordered failure cancels the deliveries
-    /// waiting behind it, which are deleted 30 days later. `batch_size` is clamped to 1..=1000 rows per table.
+    /// rows were deleted. Failed ordered deliveries are left to
+    /// [`DatabaseTransaction::abandon_stuck_deliveries`](crate::DatabaseTransaction::abandon_stuck_deliveries). `batch_size` is clamped to 1..=1000 rows per table.
     ///
     /// Each batch skips rows that live requests have locked. Outside a transaction,
     /// each table's batch commits on its own, so cleanup never holds locks across
@@ -165,48 +165,8 @@ impl MaintenanceRepository<'_> {
                 LIMIT $1
                 FOR UPDATE SKIP LOCKED
             )",
-            // A key stuck behind a failure for 30 days is abandoned: the deliveries
-            // waiting behind the failure are cancelled, a batch at a time, then the
-            // failure is deleted once none is left, so none is sent out of order.
-            // Locking the key's ordering row skips a key whose next delivery is being
-            // inserted, and makes later inserts wait.
-            "WITH stuck AS (
-                SELECT ordering.ordering_key
-                FROM delivery_orderings ordering
-                WHERE EXISTS (
-                    SELECT 1
-                    FROM deliveries failure
-                    WHERE failure.ordering_key = ordering.ordering_key
-                    AND failure.status = 'failed'
-                    AND failure.finished_at < now() - interval '30 days'
-                )
-                LIMIT $1
-                FOR UPDATE SKIP LOCKED
-            ), waiting AS (
-                UPDATE deliveries
-                SET status = 'cancelled', finished_at = now(), claim_token = NULL
-                WHERE ctid IN (
-                    SELECT delivery.ctid
-                    FROM deliveries delivery
-                    WHERE delivery.ordering_key IN (SELECT ordering_key FROM stuck)
-                    AND delivery.status = 'pending'
-                    LIMIT $1
-                    FOR UPDATE SKIP LOCKED
-                )
-                RETURNING id
-            )
-            DELETE FROM deliveries failure
-            WHERE failure.ordering_key IN (SELECT ordering_key FROM stuck)
-            AND failure.status = 'failed'
-            -- The statement's snapshot still sees the rows cancelled above as pending.
-            AND NOT EXISTS (
-                SELECT 1
-                FROM deliveries delivery
-                WHERE delivery.ordering_key = failure.ordering_key
-                AND delivery.status = 'pending'
-                AND delivery.id NOT IN (SELECT id FROM waiting)
-            )",
-            // Ordered failures wait for the statement above, which keeps their key's order.
+            // Ordered failures hold back their key, so only
+            // `DatabaseTransaction::abandon_stuck_deliveries` removes them.
             "DELETE FROM deliveries d
             WHERE d.ctid IN (
                 SELECT delivery.ctid

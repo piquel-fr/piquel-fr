@@ -56,10 +56,11 @@ Auth-service owns sending: the workers, the retry policy and the HTTP client
    - Permanent error, or a retry later than the channel's `MAX_AGE` after
      creation: `failed`.
 5. The cleanup job deletes `succeeded` deliveries after 7 days and `failed` or
-   `cancelled` ones after 30. For a failed ordered delivery, it first cancels
-   the ones waiting behind it, a batch at a time, and deletes the failure once
-   none is left. Cleanup locks the key's ordering row first, so it skips a key
-   whose next delivery is still being inserted.
+   `cancelled` ones after 30. A failed ordered delivery is abandoned instead,
+   in a transaction per key: cleanup locks the failure and the key's ordering
+   row, cancels every delivery waiting behind it, and deletes it. An operator
+   retry or cancel waits for that transaction and then finds the failure gone,
+   and a key whose next delivery is still being inserted is skipped.
 
 ## Outbound HTTP
 
