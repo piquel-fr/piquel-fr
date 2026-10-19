@@ -581,7 +581,7 @@ impl PersonalDetails {
 }
 
 impl EventRepository<'_> {
-    /// Writes an event and its personal data. Only
+    /// Writes an event and its personal data, and returns the event's ID. Only
     /// [`DatabaseTransaction::record`](crate::DatabaseTransaction::record) calls it,
     /// so both rows always commit or roll back with the change they describe.
     pub(crate) async fn insert(
@@ -589,7 +589,7 @@ impl EventRepository<'_> {
         context: &EventContext,
         subject: Option<UserId>,
         event: &DomainEvent,
-    ) -> Result<(), DatabaseError> {
+    ) -> Result<EventId, DatabaseError> {
         let serialization = |error| DatabaseError::Operation(Box::new(error));
         let TaggedEvent { kind, mut data } =
             serde_json::from_value(serde_json::to_value(event).map_err(serialization)?)
@@ -634,7 +634,7 @@ impl EventRepository<'_> {
                 Json(&details) as _,
             )
         )?;
-        Ok(())
+        Ok(id)
     }
 
     /// Lists the events concerning an account, newest first, for its security history.

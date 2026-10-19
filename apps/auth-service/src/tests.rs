@@ -74,7 +74,7 @@ impl Replicas {
     }
 
     /// Connects a new pool to the migrated test database.
-    async fn database() -> Database {
+    pub(crate) async fn database() -> Database {
         let url = piquel_common::Variable::new("TEST_DATABASE_URL")
             .required()
             .expect("TEST_DATABASE_URL must name an isolated PostgreSQL database");
@@ -86,5 +86,63 @@ impl Replicas {
         .expect("database");
         database.run_migrations().await.expect("migrations");
         database
+    }
+}
+
+/// HTTPS on a local port with a self-signed `localhost` certificate, so clients
+/// reach local servers over HTTPS as they would in production.
+pub(crate) struct TlsListener {
+    /// Accepts TCP connections.
+    tcp: tokio::net::TcpListener,
+    /// Completes each TLS handshake.
+    acceptor: tokio_rustls::TlsAcceptor,
+}
+
+impl TlsListener {
+    /// Serves `router` on `tcp` in the background, with the request context
+    /// `HttpSecurity` would attach, and returns the certificate to trust.
+    pub(crate) fn serve(tcp: tokio::net::TcpListener, router: Router) -> reqwest::Certificate {
+        use tokio_rustls::rustls::{self, pki_types::PrivateKeyDer};
+        let certified =
+            rcgen::generate_simple_self_signed(vec!["localhost".into()]).expect("certificate");
+        let config = rustls::ServerConfig::builder_with_provider(Arc::new(
+            rustls::crypto::aws_lc_rs::default_provider(),
+        ))
+        .with_safe_default_protocol_versions()
+        .expect("TLS versions")
+        .with_no_client_auth()
+        .with_single_cert(
+            vec![certified.cert.der().clone()],
+            PrivateKeyDer::Pkcs8(certified.signing_key.serialize_der().into()),
+        )
+        .expect("TLS configuration");
+        let listener = Self {
+            tcp,
+            acceptor: tokio_rustls::TlsAcceptor::from(Arc::new(config)),
+        };
+        let router = router.layer(axum::Extension(crate::security::RequestContext::TEST));
+        tokio::spawn(async move { axum::serve(listener, router).await });
+        reqwest::Certificate::from_der(certified.cert.der()).expect("trusted certificate")
+    }
+}
+
+impl axum::serve::Listener for TlsListener {
+    type Io = tokio_rustls::server::TlsStream<tokio::net::TcpStream>;
+    type Addr = std::net::SocketAddr;
+
+    /// Retries until a connection completes its handshake.
+    async fn accept(&mut self) -> (Self::Io, Self::Addr) {
+        loop {
+            let Ok((stream, address)) = self.tcp.accept().await else {
+                continue;
+            };
+            if let Ok(stream) = self.acceptor.accept(stream).await {
+                return (stream, address);
+            }
+        }
+    }
+
+    fn local_addr(&self) -> std::io::Result<Self::Addr> {
+        self.tcp.local_addr()
     }
 }

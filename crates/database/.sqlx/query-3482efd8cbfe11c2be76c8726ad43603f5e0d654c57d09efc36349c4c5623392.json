@@ -1,0 +1,22 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO delivery_orderings (ordering_key, next_ordinal) VALUES ($1, 2)\n                    ON CONFLICT (ordering_key) DO UPDATE\n                    SET next_ordinal = delivery_orderings.next_ordinal + 1\n                    RETURNING next_ordinal - 1 AS \"ordinal!\"",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "ordinal!",
+        "type_info": "Int8"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text"
+      ]
+    },
+    "nullable": [
+      null
+    ]
+  },
+  "hash": "3482efd8cbfe11c2be76c8726ad43603f5e0d654c57d09efc36349c4c5623392"
+}

@@ -14,6 +14,11 @@ serve:
 invite *ARGS:
     @just auth run invite "$@"
 
+# List, retry or cancel outbound deliveries, e.g. `just auth deliveries list --status failed`.
+[positional-arguments]
+deliveries *ARGS:
+    @just auth run deliveries "$@"
+
 # Print a random secret, e.g. for a confidential OIDC client.
 secret:
     @just auth run secret

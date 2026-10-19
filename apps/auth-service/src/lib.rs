@@ -3,6 +3,14 @@
 mod assets;
 /// Validated service and application configuration.
 mod config;
+/// Sending the outbound delivery queue.
+// No channel sends deliveries yet: back-channel logout (#65) adds the first. Until
+// then only tests use this module, and `expect` fails the build once it is used.
+#[cfg_attr(
+    not(test),
+    expect(dead_code, reason = "No channel sends deliveries until #65.")
+)]
+mod deliveries;
 /// Shared normalized email validation.
 mod email;
 /// External identity provider applications and linking.

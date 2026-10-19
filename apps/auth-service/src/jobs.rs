@@ -1,4 +1,5 @@
-//! Periodic background work, coordinated across replicas.
+//! Background work: periodic jobs coordinated across replicas, and the delivery
+//! workers every replica runs (see `crate::deliveries`).
 
 use piquel_repository::{Database, DatabaseError, ExclusiveConnection, LockKey};
 use std::{sync::Arc, time::Duration};
@@ -34,11 +35,11 @@ trait ExclusiveJob: Send + Sync + 'static {
 
 /// Tells running jobs that the service is shutting down.
 #[derive(Clone)]
-struct Shutdown(watch::Receiver<bool>);
+pub(crate) struct Shutdown(watch::Receiver<bool>);
 
 impl Shutdown {
     /// Resolves once shutdown has been requested.
-    async fn requested(&self) {
+    pub(crate) async fn requested(&self) {
         // An error means the runner is gone, which is a shutdown too.
         let _ = self.0.clone().wait_for(|&requested| requested).await;
     }
@@ -62,7 +63,7 @@ impl Jobs {
     }
 
     /// A runner without jobs.
-    fn new() -> Self {
+    pub(crate) fn new() -> Self {
         Self {
             tasks: JoinSet::new(),
             shutdown: watch::Sender::new(false),
@@ -70,7 +71,8 @@ impl Jobs {
     }
 
     /// Stops starting runs, waits up to the `SHUTDOWN_GRACE` period for running ones, then
-    /// cancels the rest. Cancelling a job drops its connection, which releases its lock.
+    /// cancels the rest. Cancelling a job drops its connection, which releases its lock;
+    /// cancelling a delivery attempt leaves its lease to expire, so it is sent again.
     ///
     /// # Errors
     /// Returns the first job loop that panicked. Runs that panic are only logged.
@@ -99,11 +101,19 @@ impl Jobs {
         }
     }
 
+    /// Runs the task `start` returns until it ends. It should end soon after the
+    /// [`Shutdown`] it receives is requested.
+    pub(crate) fn spawn<F>(&mut self, start: impl FnOnce(Shutdown) -> F)
+    where
+        F: Future<Output = ()> + Send + 'static,
+    {
+        self.tasks.spawn(start(Shutdown(self.shutdown.subscribe())));
+    }
+
     /// Every [`ExclusiveJob::EVERY`], runs `job` if no other replica is running it.
     fn exclusive<J: ExclusiveJob>(&mut self, job: J, database: Database) {
-        let shutdown = Shutdown(self.shutdown.subscribe());
         let job = Arc::new(job);
-        self.tasks.spawn(async move {
+        self.spawn(|shutdown| async move {
             let mut interval = tokio::time::interval(J::EVERY);
             interval.set_missed_tick_behavior(MissedTickBehavior::Delay);
             loop {

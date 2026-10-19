@@ -1,0 +1,143 @@
+# Outbound delivery queue
+
+Auth sends messages to other systems through a PostgreSQL queue: back-channel
+logout tokens, Security Event Tokens, SCIM requests, email and audit witness
+checkpoints. Request handlers never send them inline. A slow or unreachable
+receiver must not slow a login, and a message must survive a restart.
+
+The repository owns the queue (`crates/database/src/repositories/deliveries/`).
+Auth-service owns sending: the workers, the retry policy and the HTTP client
+(`apps/auth-service/src/deliveries/`). Operators use `auth-service deliveries`.
+
+## Guarantees
+
+- **Created with the event.** `DatabaseTransaction::record` writes the event and
+  every delivery it causes in the same transaction as the change. A committed
+  change has all its deliveries; a rolled-back one has none.
+- **Self-contained.** A delivery copies everything a send needs when it is
+  created: the destination, and facts about the recipient such as `client_id`,
+  `sub` and `sid`. Purging an account, deleting its sessions or changing a client
+  afterwards does not change or lose a pending delivery.
+- **At least once, with possible duplicates.** A worker that stops after sending
+  but before recording the outcome lets its lease expire, and another worker sends
+  the delivery again. Every attempt carries the same delivery ID, which receivers
+  use to deduplicate: it is the `jti` of logout tokens and SETs, and the source of
+  an email's `Message-ID`.
+- **Ordered per key.** Deliveries that share an ordering key are sent one at a
+  time, in the order their transactions committed, whatever the replicas' clocks
+  say. A failed one holds back the rest until an operator retries or cancels it.
+  Deliveries without a key are unordered.
+- **Never secret.** Payloads are stored as they are, so they never hold a
+  plaintext secret. `last_error` holds a status code or an error kind, never a
+  response body.
+
+## Life of a delivery
+
+1. `record` calls each registered channel's `Channel::deliveries`, which inserts
+   rows with status `pending`. An ordered delivery takes the next ordinal of its
+   key from `delivery_orderings`, which locks the key until commit.
+2. Every replica runs two workers per channel. A worker claims the longest-due
+   delivery with `FOR UPDATE SKIP LOCKED`, sets a fresh claim token and a 60 second
+   lease, and commits. Idle workers poll every second.
+3. It sends outside any transaction, with a 10 second timeout.
+4. It records the outcome only if its claim token still holds the delivery. If
+   another worker claimed it after the lease expired, or an operator cancelled
+   it, the outcome is discarded and logged as a lost lease.
+   - Success: `succeeded`.
+   - Retryable error: back to `pending`. The next attempt waits a random time up
+     to a bound that starts at 10 seconds and doubles to an hour, or as long as
+     the receiver's `Retry-After` asks.
+   - Permanent error, or a retry later than the channel's `MAX_AGE` after
+     creation: `failed`.
+5. The cleanup job deletes `succeeded` deliveries after 7 days and `failed` or
+   `cancelled` ones after 30, except a failed one that still holds back others.
+
+## Outbound HTTP
+
+Destinations come from client registrations, which third parties can supply.
+`OutboundClient` keeps them from reaching this network:
+
+- HTTPS only.
+- Redirects are refused, never followed. A 3xx fails the delivery.
+- The host is resolved once, and refused if any address is loopback, private,
+  link-local, unique-local, shared (`100.64.0.0/10`), unspecified, multicast or
+  broadcast. The connection goes to the checked addresses. IP literals get the
+  same check, and proxies are never used, since a proxy would resolve the name
+  itself.
+- 5 seconds to connect, 10 in total. A channel that reads a response body reads
+  at most 64 KiB of it.
+
+HTTP 408, 429 and 5xx, timeouts, connection and DNS failures are retryable. Other
+statuses, refused destinations and redirects fail at once.
+
+## Operations
+
+```sh
+auth-service deliveries list [--status failed] [--channel scim] [--limit 100]
+auth-service deliveries retry <id>    # a failed or cancelled delivery, due now
+auth-service deliveries cancel <id>   # a pending or failed delivery
+```
+
+`just auth deliveries …` runs them with the caller's configuration. Retrying a
+delivery older than its channel's `MAX_AGE` gives it one more attempt: a retryable
+error fails it again. Cancelling an attempt in progress cannot stop it from
+reaching the receiver, but its outcome is discarded.
+
+## Adding a channel
+
+The examples use a hypothetical back-channel logout channel.
+
+1. **Define what it stores**, in `crates/database/src/repositories/deliveries/`:
+   a type implementing `Channel`. `NAME` is stored in every row, so never rename a
+   released channel. `Recipient` holds the facts copied about the recipient, and
+   `Payload` the message, both serialized as JSON.
+
+   ```rust
+   /// Back-channel logout tokens (OIDC Back-Channel Logout 1.0).
+   pub struct BackchannelLogout;
+
+   impl Channel for BackchannelLogout {
+       const NAME: &'static str = "backchannel_logout";
+       type Recipient = LogoutRecipient; // client_id, sub, sid
+       type Payload = ();
+
+       /// One delivery per client the revoked session signed in to.
+       async fn deliveries(
+           event: &DomainEvent,
+           subject: Option<UserId>,
+           tx: &mut DatabaseTransaction<'_>,
+       ) -> Result<Vec<NewDelivery<Self>>, DatabaseError> {
+           let DomainEvent::SessionRevoked { session_id, .. } = event else {
+               return Ok(vec![]);
+           };
+           // Read the clients and their logout URIs through a repository method.
+       }
+   }
+   ```
+
+   `deliveries` runs inside the event's transaction, so it sees the rows as the
+   change left them. Copy everything a send needs; a send must not read rows that
+   can change or disappear. Set `ordering_key` only if receivers need deliveries
+   in order, like SCIM per client and user, since a failure blocks the key.
+
+2. **Register it** by adding it to `Registered` in `deliveries/mod.rs`, a nested
+   list: `pub(crate) type Registered = (BackchannelLogout, ());`.
+
+3. **Send it**, in `apps/auth-service/src/deliveries/`: a type implementing
+   `Sender` with `type Channel = BackchannelLogout`. `MAX_AGE` bounds how long it
+   keeps retrying. `send` builds the message with `delivery.id` as its identity,
+   fresh timestamps such as `iat` and `exp`, and sends it with `OutboundClient`.
+   Return `DeliveryError::Retryable` or `Permanent`; `OutboundClient::send`
+   already classifies statuses and transport failures.
+
+4. **Start its workers** in `Jobs::start` with `jobs.deliveries(sender, database)`.
+
+5. **Handle duplicates.** Decide how a receiver recognizes a repeated delivery,
+   and document it with the channel.
+
+6. **Test it**: that the right events create the right deliveries with their facts
+   copied, and how `send` maps the receiver's answers. The queue itself is tested
+   in `deliveries/tests.rs` of both crates.
+
+A delivery that no event causes, like a witness checkpoint, is inserted with
+`tx.deliveries().insert(None, delivery)` instead.
