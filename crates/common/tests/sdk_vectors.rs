@@ -665,14 +665,16 @@ impl Vectors {
                 "an audience naming another client is untrusted, even with azp set",
                 |claims| {
                     claims.aud = Audience::Many(vec![CLIENT.into(), "untrusted-client".into()]);
-                    claims.azp = Some(ClientId::new(CLIENT));
+                    claims.azp = Some(CLIENT.parse::<ClientId>().expect("client ID"));
                 },
                 ErrorReason::WrongAudience,
             ),
             (
                 "id-wrong-azp",
                 "azp naming another client is rejected",
-                |claims| claims.azp = Some(ClientId::new("another-client")),
+                |claims| {
+                    claims.azp = Some("another-client".parse::<ClientId>().expect("client ID"));
+                },
                 ErrorReason::WrongAuthorizedParty,
             ),
         ] {
@@ -732,7 +734,7 @@ impl Vectors {
             iss: ISSUER.into(),
             sub: USER.into(),
             aud: Audience::One(RESOURCE.into()),
-            client_id: ClientId::new(CLIENT),
+            client_id: CLIENT.parse::<ClientId>().expect("client ID"),
             jti: "01936f3e-8c00-7000-8000-000000000003"
                 .parse::<TokenId>()
                 .expect("token ID"),

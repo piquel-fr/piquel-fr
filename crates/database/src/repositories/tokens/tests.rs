@@ -6,7 +6,7 @@ use crate::repositories::{OidcRepository, TokenRepository};
 use crate::{CodeRedemptionError, DatabaseTransaction, SessionAuthentication};
 use chrono::{Duration, Utc};
 use piquel_common::{
-    SessionId, TokenId, UserId,
+    ClientId, SessionId, TokenId, UserId,
     protocol::claims::{Acr, Amr},
 };
 use sqlx::{PgConnection, PgPool};
@@ -16,21 +16,23 @@ use std::time::Duration as Wait;
 const REDIRECT_URI: &str = "https://client.example/callback";
 
 /// Registers a refresh-capable client whose policy allows fixture codes.
-async fn client(pool: &PgPool) -> String {
-    let client = format!("locks_{}", UserId::new());
+async fn client(pool: &PgPool) -> ClientId {
+    let client: ClientId = format!("locks_{}", UserId::new())
+        .parse()
+        .expect("client ID");
     sqlx::query(
         "INSERT INTO oidc_clients (
             id, display_name, allowed_scopes, allowed_audiences, allow_refresh
         ) VALUES ($1, 'Lock test', '[\"openid\"]', '[\"test\"]', true)",
     )
-    .bind(&client)
+    .bind(client.as_str())
     .execute(pool)
     .await
     .expect("client");
     sqlx::query(
         "INSERT INTO oidc_redirect_uris (client_id, uri, kind) VALUES ($1, $2, 'authorization')",
     )
-    .bind(&client)
+    .bind(client.as_str())
     .bind(REDIRECT_URI)
     .execute(pool)
     .await
@@ -95,7 +97,7 @@ struct Grant {
 
 impl Grant {
     /// Commits a fresh account, session and code issued to `client`.
-    async fn new(pool: &PgPool, client: &str) -> Self {
+    async fn new(pool: &PgPool, client: &ClientId) -> Self {
         let grant = Self {
             user: UserId::new(),
             session: SessionId::new(),
@@ -128,7 +130,7 @@ impl Grant {
         )
         .bind(grant.code.as_uuid())
         .bind(&grant.code_digest)
-        .bind(client)
+        .bind(client.as_str())
         .bind(grant.user.as_uuid())
         .bind(grant.session.as_uuid())
         .bind(REDIRECT_URI)
@@ -142,7 +144,11 @@ impl Grant {
 
     /// Creates a refresh family redeemed from this grant's code and returns its
     /// first token with that token's digest.
-    async fn family(&self, tokens: &mut TokenRepository<'_>, client: &str) -> (TokenId, Vec<u8>) {
+    async fn family(
+        &self,
+        tokens: &mut TokenRepository<'_>,
+        client: &ClientId,
+    ) -> (TokenId, Vec<u8>) {
         let family = TokenId::new();
         let token = TokenId::new();
         let digest = token.as_uuid().as_bytes().repeat(2);
@@ -152,7 +158,7 @@ impl Grant {
                     id: family,
                     user_id: self.user,
                     session_id: self.session,
-                    client_id: client.into(),
+                    client_id: client.to_string(),
                     authorization_code_id: self.code,
                     audience: "test".into(),
                     scopes: vec!["openid".into()],
@@ -188,7 +194,7 @@ async fn independent_refreshes_share_client_and_logout_does_not_deadlock() {
         .await;
     let mut first_tx = pool.begin().await.expect("first transaction");
     TokenRepository::from_connection(&mut first_tx)
-        .consume_for_rotation(first, &digest_first, &client)
+        .consume_for_rotation(first, &digest_first, client.as_str())
         .await
         .expect("first refresh");
     let mut second_tx = pool.begin().await.expect("second transaction");
@@ -197,7 +203,7 @@ async fn independent_refreshes_share_client_and_logout_does_not_deadlock() {
         TokenRepository::from_connection(&mut second_tx).consume_for_rotation(
             second,
             &digest_second,
-            &client,
+            client.as_str(),
         ),
     )
     .await
@@ -216,7 +222,7 @@ async fn independent_refreshes_share_client_and_logout_does_not_deadlock() {
     let rotation_backend = backend(&mut rotation).await;
     let rotation_task = tokio::spawn(async move {
         let result = TokenRepository::from_connection(&mut rotation)
-            .consume_for_rotation(first, &digest_first, &client)
+            .consume_for_rotation(first, &digest_first, client.as_str())
             .await;
         rotation.rollback().await.expect("rollback rotation");
         result
@@ -261,7 +267,7 @@ async fn replay_revokes_family_despite_invalid_scopes() {
     }
     let mut tx = pool.begin().await.expect("transaction");
     let result = TokenRepository::from_connection(&mut tx)
-        .consume_for_rotation(token, &digest, &client)
+        .consume_for_rotation(token, &digest, client.as_str())
         .await;
     assert!(
         matches!(result, Err(RefreshRotationError::Replay { .. })),
@@ -301,7 +307,7 @@ async fn code_replay_waits_for_first_redemption_and_revokes_its_family() {
         let (token, digest) = grant.family(&mut first.tokens(), &client).await;
         if !redeemable {
             sqlx::query("DELETE FROM oidc_redirect_uris WHERE client_id = $1")
-                .bind(&client)
+                .bind(client.as_str())
                 .execute(&pool)
                 .await
                 .expect("remove redirect URI");
@@ -327,7 +333,7 @@ async fn code_replay_waits_for_first_redemption_and_revokes_its_family() {
         );
         let mut rotation = pool.begin().await.expect("rotation transaction");
         let result = TokenRepository::from_connection(&mut rotation)
-            .consume_for_rotation(token, &digest, &client)
+            .consume_for_rotation(token, &digest, client.as_str())
             .await;
         assert!(
             matches!(result, Err(RefreshRotationError::Invalid)),
@@ -351,7 +357,11 @@ async fn code_replay_by_another_client_revokes_nothing() {
         .family(&mut TokenRepository::from_pool(&pool), &client)
         .await;
     let result = oidc
-        .consume_code(grant.code, &grant.code_digest, "another-client")
+        .consume_code(
+            grant.code,
+            &grant.code_digest,
+            &"another-client".parse().expect("client ID"),
+        )
         .await;
     assert!(
         matches!(result, Err(CodeRedemptionError::Invalid)),
@@ -359,7 +369,7 @@ async fn code_replay_by_another_client_revokes_nothing() {
     );
     let mut rotation = pool.begin().await.expect("rotation transaction");
     TokenRepository::from_connection(&mut rotation)
-        .consume_for_rotation(token, &digest, &client)
+        .consume_for_rotation(token, &digest, client.as_str())
         .await
         .expect("the family still rotates");
 }

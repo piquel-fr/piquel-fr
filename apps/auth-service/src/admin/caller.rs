@@ -55,7 +55,7 @@ pub enum Operator {
 impl Operator {
     /// Attributes events to this operator. Neither carries a client origin: the
     /// admin API's caller is the dashboard's server, not the administrator's browser.
-    pub(super) fn context(&self) -> EventContext {
+    pub(crate) fn context(&self) -> EventContext {
         let actor = match self.clone() {
             Self::Admin {
                 user_id,

@@ -4,7 +4,7 @@ use super::*;
 use crate::routes::federation;
 use crate::tests::Replicas;
 use axum::{Router, body::Body, http::Request as HttpRequest, middleware, routing::any};
-use piquel_common::TokenId;
+use piquel_common::{TokenId, clients::ClientKind};
 use piquel_crypto::Secret;
 use piquel_repository::{DatabaseConfig, InsertSession, InsertUser};
 use std::net::{IpAddr, Ipv6Addr};
@@ -61,9 +61,18 @@ impl SecurityFixture {
         .expect("database")
     }
     /// Builds a test policy with exact browser origins and unique client buckets.
+    /// A public client calls back to `https://external.example`.
     async fn new() -> Self {
         let database = Self::database(5, std::time::Duration::from_secs(5)).await;
         database.run_migrations().await.expect("migrations");
+        database
+            .oidc()
+            .create_client(&crate::tests::registration(
+                ClientKind::Public,
+                "https://external.example",
+            ))
+            .await
+            .expect("public client");
         let policy = HttpSecurity {
             trusted_proxies: Arc::new(vec![]),
             request_timeout: std::time::Duration::from_secs(30),
@@ -72,7 +81,6 @@ impl SecurityFixture {
             frontends: FrontendOrigins::new([&"https://piquel.fr/settings"
                 .parse()
                 .expect("settings URL")]),
-            client_origins: Arc::new(vec!["https://external.example".into()]),
         };
         let mut router = Router::new();
         for path in [

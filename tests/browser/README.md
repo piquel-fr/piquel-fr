@@ -8,11 +8,13 @@ Set `E2E_AUTH_URL` and `E2E_SETTINGS_URL` to the printed auth origin and web
 settings URL, then run `just web test-browser`. If signup requires an invitation,
 provide an unused `E2E_INVITATION`. Previews allow registration without one.
 
-The OIDC checks require a public `browser-e2e` client in `AUTH_CLIENTS_FILE`,
-with the preview web origin's `/callback` in `redirect_uris`, `/settings` in
-`post_logout_uris`, `openid`, `profile`, and `email` in `allowed_scopes`, and
-`trusted: false`. Previews do not configure this client by default. The callback
-is a test destination; the suite captures its code before exchanging it.
+The OIDC checks sign in through a public, untrusted `browser-e2e` client that
+calls back to the web origin's `/callback`, returns to its `/settings` after
+logout, and may request `openid`, `profile` and `email`.
+`just web browser-client ORIGIN` registers it with the auth database configured
+in the environment, e.g. `just web browser-client https://localhost:4443`, as CI
+does. Previews do not register it by default. The callback is a test
+destination; the suite captures its code before exchanging it.
 
 The suite checks consent, the `iss` on each authorization response, a browser
 PKCE exchange, an actual ID-token signature using JWKS and WebCrypto, userinfo

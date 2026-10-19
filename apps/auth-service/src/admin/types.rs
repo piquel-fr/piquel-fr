@@ -2,65 +2,109 @@
 
 use super::AdminError;
 use chrono::Duration;
-use std::str::FromStr;
+use std::{fmt, str::FromStr};
 use thiserror::Error;
 
-/// Largest accepted invitation lifetime number; the suffix chooses hours or days.
-const MAX_INVITE_EXPIRY: i64 = 365;
-/// Invitation lifetime when none is given.
-const DEFAULT_INVITE_EXPIRY_DAYS: i64 = 7;
-/// Shared explanation for invalid invitation lifetimes.
-const INVITE_EXPIRY_HELP: &str = "expiry must be 1 to 365 followed by h or d, e.g. 24h or 7d";
 /// Maximum Unicode characters in an administrator's reason.
 const MAX_REASON_CHARS: usize = 500;
 
-/// An invitation lifetime of 1 to 365 hours or days, written like `24h` or `7d`.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct InviteExpiry(Duration);
+/// Minutes in an hour, for lifetimes.
+const MINUTES_PER_HOUR: i64 = 60;
+/// Minutes in a day, for lifetimes.
+const MINUTES_PER_DAY: i64 = 24 * MINUTES_PER_HOUR;
+/// Invitation lifetime when none is given: seven days.
+const DEFAULT_INVITE_EXPIRY: i64 = 7 * MINUTES_PER_DAY;
 
-/// Why an invitation lifetime was rejected.
-#[derive(Debug, Error)]
-pub enum InvalidInviteExpiry {
-    /// The unit, value or bounds violate the supported hours/days syntax.
-    #[error("{INVITE_EXPIRY_HELP}")]
-    Format,
-    /// The numeric portion could not be parsed.
-    #[error("{INVITE_EXPIRY_HELP}")]
-    Number(#[from] std::num::ParseIntError),
+/// A whole number of minutes, written in its largest whole unit, e.g. `365d`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Minutes(i64);
+
+impl fmt::Display for Minutes {
+    /// Writes `0`, or the number of days, hours or minutes with its unit.
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self.0 {
+            0 => formatter.write_str("0"),
+            minutes if minutes % MINUTES_PER_DAY == 0 => {
+                write!(formatter, "{}d", minutes / MINUTES_PER_DAY)
+            }
+            minutes if minutes % MINUTES_PER_HOUR == 0 => {
+                write!(formatter, "{}h", minutes / MINUTES_PER_HOUR)
+            }
+            minutes => write!(formatter, "{minutes}m"),
+        }
+    }
 }
 
-impl InviteExpiry {
+/// A lifetime written as a whole number of minutes, hours or days, such as `30m`,
+/// `24h` or `7d`, or `0`. It lies between `MIN` and `MAX` minutes.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Lifetime<const MIN: i64, const MAX: i64>(Minutes);
+
+/// How long a signup link stays valid: 1 hour to 365 days.
+pub type InviteExpiry = Lifetime<MINUTES_PER_HOUR, { 365 * MINUTES_PER_DAY }>;
+/// How long a client's earlier secrets keep working after a rotation: up to 30 days.
+pub type GracePeriod = Lifetime<0, { 30 * MINUTES_PER_DAY }>;
+
+/// A lifetime that is malformed or out of bounds.
+#[derive(Debug, Error)]
+#[error("must be a whole number followed by m, h or d, from {min} to {max}, e.g. 24h")]
+pub struct InvalidLifetime {
+    /// The shortest lifetime allowed.
+    min: Minutes,
+    /// The longest lifetime allowed.
+    max: Minutes,
+    /// Why the number did not parse, when it did not.
+    #[source]
+    source: Option<std::num::ParseIntError>,
+}
+
+impl<const MIN: i64, const MAX: i64> Lifetime<MIN, MAX> {
     /// The lifetime as a duration.
-    pub(super) const fn duration(self) -> Duration {
-        self.0
+    #[must_use]
+    pub const fn duration(self) -> Duration {
+        Duration::minutes(self.0.0)
     }
 }
 
 impl Default for InviteExpiry {
     /// Seven days.
     fn default() -> Self {
-        Self(Duration::days(DEFAULT_INVITE_EXPIRY_DAYS))
+        Self(Minutes(DEFAULT_INVITE_EXPIRY))
     }
 }
 
-impl FromStr for InviteExpiry {
-    type Err = InvalidInviteExpiry;
-    /// Parses a bounded hours/days lifetime while retaining numeric syntax errors.
+impl<const MIN: i64, const MAX: i64> FromStr for Lifetime<MIN, MAX> {
+    type Err = InvalidLifetime;
+    /// Parses `0` or a number and unit, keeping the number's parse error.
     fn from_str(value: &str) -> Result<Self, Self::Err> {
-        let (number, unit) = value
-            .char_indices()
-            .last()
-            .map(|(index, _)| value.split_at(index))
-            .ok_or(InvalidInviteExpiry::Format)?;
-        let number = number.parse::<i64>()?;
-        if !(1..=MAX_INVITE_EXPIRY).contains(&number) {
-            return Err(InvalidInviteExpiry::Format);
+        let invalid = |source| InvalidLifetime {
+            min: Minutes(MIN),
+            max: Minutes(MAX),
+            source,
+        };
+        let minutes = if value == "0" {
+            0
+        } else {
+            let (number, unit) = value
+                .char_indices()
+                .last()
+                .map(|(index, _)| value.split_at(index))
+                .ok_or_else(|| invalid(None))?;
+            let number = number
+                .parse::<i64>()
+                .map_err(|error| invalid(Some(error)))?;
+            let scale = match unit {
+                "m" => 1,
+                "h" => MINUTES_PER_HOUR,
+                "d" => MINUTES_PER_DAY,
+                _ => return Err(invalid(None)),
+            };
+            number.checked_mul(scale).ok_or_else(|| invalid(None))?
+        };
+        if !(MIN..=MAX).contains(&minutes) {
+            return Err(invalid(None));
         }
-        match unit {
-            "h" => Ok(Self(Duration::hours(number))),
-            "d" => Ok(Self(Duration::days(number))),
-            _ => Err(InvalidInviteExpiry::Format),
-        }
+        Ok(Self(Minutes(minutes)))
     }
 }
 
@@ -94,26 +138,35 @@ mod tests {
     //! Invitation lifetime parsing and reason bounds.
     use super::*;
 
-    /// Invitation lifetimes accept bounded hours and days and reject malformed input.
+    /// Lifetimes accept a bounded number of minutes, hours or days and reject
+    /// malformed input, naming their bounds.
     #[test]
-    fn invite_expiry_accepts_bounded_hours_and_days() {
-        assert_eq!(
-            "24h"
-                .parse::<InviteExpiry>()
-                .map(InviteExpiry::duration)
-                .ok(),
-            Some(Duration::hours(24))
-        );
-        assert_eq!(
-            "365d"
-                .parse::<InviteExpiry>()
-                .map(InviteExpiry::duration)
-                .ok(),
-            Some(Duration::days(365))
-        );
-        for invalid in ["", "d", "0d", "366d", "-1h", "7w", "7 d", "é"] {
+    fn lifetimes_accept_bounded_minutes_hours_and_days() {
+        for (value, duration) in [("24h", Duration::hours(24)), ("365d", Duration::days(365))] {
+            assert_eq!(
+                value
+                    .parse::<InviteExpiry>()
+                    .map(InviteExpiry::duration)
+                    .ok(),
+                Some(duration)
+            );
+        }
+        for invalid in ["", "0", "d", "0d", "366d", "-1h", "7w", "7 d", "é"] {
             assert!(invalid.parse::<InviteExpiry>().is_err(), "{invalid}");
         }
+        for (value, duration) in [("0", Duration::zero()), ("90m", Duration::minutes(90))] {
+            assert_eq!(
+                value.parse::<GracePeriod>().map(GracePeriod::duration).ok(),
+                Some(duration)
+            );
+        }
+        assert_eq!(
+            "31d"
+                .parse::<GracePeriod>()
+                .expect_err("too long")
+                .to_string(),
+            "must be a whole number followed by m, h or d, from 0 to 30d, e.g. 24h"
+        );
     }
 
     /// Reasons count Unicode characters and reject blank or control input.

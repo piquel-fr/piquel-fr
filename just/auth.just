@@ -14,6 +14,11 @@ serve:
 invite *ARGS:
     @just auth run invite "$@"
 
+# Register, inspect and change OIDC clients, e.g. `just auth client list`.
+[positional-arguments]
+client *ARGS:
+    @just auth run client "$@"
+
 # List, retry or cancel outbound deliveries, e.g. `just auth deliveries list --status failed`.
 [positional-arguments]
 deliveries *ARGS:
@@ -23,10 +28,6 @@ deliveries *ARGS:
 [positional-arguments]
 admin *ARGS:
     @just auth run admin "$@"
-
-# Print a random secret, e.g. for a confidential OIDC client.
-secret:
-    @just auth run secret
 
 # Write a new RSA signing key; refuses to overwrite an existing file.
 generate-key PATH:

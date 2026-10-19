@@ -85,7 +85,7 @@ pub(super) struct TokenResponse {
 /// Client-bound claim policy shared by initial exchanges and refresh rotation.
 struct TokenGrant<'a> {
     /// Client identifier bound into the token claims.
-    client: &'a str,
+    client: &'a ClientId,
     /// Registered resource audience receiving the access token.
     audience: &'a str,
     /// Granted or requested scope set.
@@ -135,7 +135,7 @@ impl TokenGrant<'_> {
                 iss: app.issuer.clone(),
                 sub: user.id.to_string(),
                 aud: Audience::One((*audience).to_owned()),
-                client_id: ClientId::new(*client),
+                client_id: (*client).clone(),
                 jti: TokenId::new(),
                 scope: scopes.wire().clone(),
                 iat: issued_at,
@@ -154,7 +154,7 @@ impl TokenGrant<'_> {
                 &IdTokenClaims {
                     iss: app.issuer.clone(),
                     sub: user.id.to_string(),
-                    aud: Audience::One((*client).to_owned()),
+                    aud: Audience::One(client.to_string()),
                     azp: None,
                     iat: issued_at,
                     exp: expires_at,
@@ -224,7 +224,7 @@ impl OidcApplication {
     async fn exchange_code(
         &self,
         form: TokenForm,
-        client_id: &str,
+        client_id: &ClientId,
         context: &EventContext,
     ) -> Result<TokenResponse, OAuthError> {
         let opaque = OpaqueToken::parse(
@@ -243,7 +243,7 @@ impl OidcApplication {
             Ok(code) => code,
             Err(error) => return Err(Self::code_rejection(tx, context, client_id, error).await),
         };
-        if code.client_id != client_id {
+        if &code.client_id != client_id {
             return Err(OAuthCode::InvalidGrant.reject("code was issued to another client"));
         }
         if form.redirect_uri.as_deref() != Some(&code.redirect_uri) {
@@ -272,7 +272,7 @@ impl OidcApplication {
             .ok_or_else(|| OAuthCode::InvalidGrant.reject(SESSION_ENDED))?;
         let client = tx
             .oidc()
-            .find_client(&code.client_id)
+            .find_client(code.client_id.as_str())
             .await?
             .ok_or_else(|| OAuthCode::InvalidClient.reject("the client is no longer registered"))?;
         let email = tx.oidc().primary_email(user.id).await?;
@@ -297,7 +297,7 @@ impl OidcApplication {
             context,
             Some(user.id),
             DomainEvent::GrantIssued {
-                client_id: ClientId::new(client.id),
+                client_id: client.id,
                 family_id,
                 scopes: scopes.into_stored(),
             },
@@ -316,7 +316,7 @@ impl OidcApplication {
     async fn rotate_refresh(
         &self,
         form: TokenForm,
-        client_id: &str,
+        client_id: &ClientId,
         context: &EventContext,
     ) -> Result<TokenResponse, OAuthError> {
         let opaque = OpaqueToken::parse(
@@ -329,7 +329,7 @@ impl OidcApplication {
         let mut tx = self.database.begin().await?;
         let rotated = match tx
             .tokens()
-            .consume_for_rotation(opaque.id, digest.as_bytes(), client_id)
+            .consume_for_rotation(opaque.id, digest.as_bytes(), client_id.as_str())
             .await
         {
             Ok(value) => value,
@@ -337,7 +337,7 @@ impl OidcApplication {
                 return Err(Self::refresh_rejection(tx, context, client_id, error).await);
             }
         };
-        if rotated.client_id != client_id {
+        if rotated.client_id != client_id.as_str() {
             return Err(
                 OAuthCode::InvalidGrant.reject("refresh_token was issued to another client")
             );
@@ -366,7 +366,7 @@ impl OidcApplication {
             .await?;
         let email = tx.oidc().primary_email(user.id).await?;
         let mut tokens = TokenGrant {
-            client: &rotated.client_id,
+            client: client_id,
             audience: &rotated.audience,
             scopes: &scopes,
             nonce: None,
@@ -401,7 +401,7 @@ impl OidcApplication {
                 &InsertRefreshFamily {
                     id: family_id,
                     user_id: code.user_id,
-                    client_id: code.client_id,
+                    client_id: code.client_id.into(),
                     session_id: code.session_id,
                     authorization_code_id: code.id,
                     audience: code.audience,
@@ -439,14 +439,14 @@ impl OidcApplication {
             let mut tx = app.database.begin().await?;
             if let Some(family) = tx
                 .tokens()
-                .revoke_family_for_client_token(opaque.id, digest.as_bytes(), &client.id)
+                .revoke_family_for_client_token(opaque.id, digest.as_bytes(), client.id.as_str())
                 .await?
             {
                 tx.record(
                     &context.client(&client.id),
                     Some(family.user_id),
                     DomainEvent::GrantRevoked {
-                        client_id: ClientId::new(client.id),
+                        client_id: client.id.clone(),
                         family_id: family.id,
                         reason: GrantRevocation::ClientRevoked,
                     },
@@ -506,7 +506,7 @@ impl OidcApplication {
     async fn refresh_rejection(
         tx: DatabaseTransaction<'_>,
         context: &EventContext,
-        client_id: &str,
+        client_id: &ClientId,
         error: RefreshRotationError,
     ) -> OAuthError {
         let (user_id, family_id, reason) = match error {
@@ -529,7 +529,7 @@ impl OidcApplication {
             );
         }
         let revoked = DomainEvent::GrantRevoked {
-            client_id: ClientId::new(client_id),
+            client_id: client_id.clone(),
             family_id,
             reason,
         };
@@ -546,7 +546,7 @@ impl OidcApplication {
     async fn code_rejection(
         tx: DatabaseTransaction<'_>,
         context: &EventContext,
-        client_id: &str,
+        client_id: &ClientId,
         error: CodeRedemptionError,
     ) -> OAuthError {
         let CodeRedemptionError::Replay {
@@ -562,7 +562,7 @@ impl OidcApplication {
             %user_id,
             "authorization code replay rejected"
         );
-        let client_id = ClientId::new(client_id);
+        let client_id = client_id.clone();
         let events: Vec<_> = std::iter::once(DomainEvent::CodeReplayed {
             client_id: client_id.clone(),
         })

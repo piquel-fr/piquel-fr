@@ -176,7 +176,7 @@ async fn token_vectors() {
                 let result = issuer
                     .id_token(
                         token,
-                        &ClientId::new(audience),
+                        &audience.parse::<ClientId>().expect("client ID"),
                         Some(case.text("nonce")),
                         max_age,
                     )
@@ -257,7 +257,7 @@ fn authentication_requirements_follow_auth() {
     let now = Utc::now();
     let token = |acr, age: i64| AccessToken {
         subject: Subject::User(UserId::new()),
-        client_id: ClientId::new("notes-web"),
+        client_id: "notes-web".parse::<ClientId>().expect("client ID"),
         scopes: Scopes::default(),
         token_id: TokenId::new(),
         session_id: None,
@@ -472,7 +472,7 @@ async fn pending_logins_complete_only_with_their_client() {
     let issuer = issuer(&Case::all("tokens").remove(0));
     let client = |id: &str| {
         issuer.client(ClientConfig {
-            client_id: ClientId::new(id),
+            client_id: id.parse::<ClientId>().expect("client ID"),
             credentials: Credentials::None,
             redirect_uri: "https://client.example.com/callback".parse().expect("URL"),
         })

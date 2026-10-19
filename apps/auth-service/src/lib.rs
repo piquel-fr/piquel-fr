@@ -3,6 +3,8 @@
 mod admin;
 /// Embedded auth frontend pages and static resources.
 mod assets;
+/// Creating, changing and rotating the secrets of OIDC clients.
+mod clients;
 /// Validated service and application configuration.
 mod config;
 /// Sending the outbound delivery queue.
@@ -33,7 +35,8 @@ mod service;
 #[cfg(test)]
 mod tests;
 
-pub use admin::{AdminError, AdminOperations, InviteExpiry, Operator};
+pub use admin::{AdminError, AdminOperations, GracePeriod, InviteExpiry, Operator};
+pub use clients::{ClientRegistry, ClientRegistryError};
 pub use config::{AuthConfig, PUBLIC_BASE_URL};
 use federation::FederationApplication;
 pub use jobs::Jobs;
@@ -43,7 +46,7 @@ use service::ServiceApplication;
 
 use assets::EmbeddedAssets;
 use axum::{Router, extract::DefaultBodyLimit, http::Uri, middleware};
-use piquel_repository::{Database, DatabaseError};
+use piquel_repository::Database;
 use thiserror::Error;
 
 /// Bound on browser ceremony and API JSON bodies.
@@ -61,9 +64,6 @@ pub enum StartupError {
     /// The OIDC metadata or signing keys could not be serialized.
     #[error("could not initialize OIDC application")]
     Oidc(#[from] oidc::OidcConfigError),
-    /// Static OIDC client provisioning failed.
-    #[error("could not provision OIDC clients")]
-    Database(#[from] DatabaseError),
     /// The executable lacks the required browser assets.
     #[error(
         "build the auth frontend with pnpm --filter @piquel/auth-web build before compiling auth-service"
@@ -103,20 +103,5 @@ impl AuthConfig {
             .routes()
             .layer(DefaultBodyLimit::max(MAX_REQUEST_BODY_BYTES))
             .layer(middleware::from_fn(security::HttpSecurity::deadline))
-    }
-
-    /// Replaces every client registration with the clients file, atomically. Every
-    /// replica runs this at startup, after [`Self::router`] has initialized.
-    ///
-    /// # Errors
-    /// Fails when the database rejects the registrations.
-    pub async fn provision_clients(&self, database: &Database) -> Result<(), StartupError> {
-        let mut tx = database.begin().await?;
-        tx.oidc().disable_all_clients().await?;
-        for client in &self.oidc.clients {
-            tx.oidc().bootstrap_client(client).await?;
-        }
-        tx.commit().await?;
-        Ok(())
     }
 }

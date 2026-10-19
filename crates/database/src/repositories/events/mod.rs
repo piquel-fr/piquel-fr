@@ -310,6 +310,43 @@ impl EventRepository<'_> {
         .collect()
     }
 
+    /// Lists the events concerning a client, newest first, for tests of client changes.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`DatabaseError`] if the query fails or a stored event does not decode.
+    #[cfg(feature = "test-support")]
+    pub async fn history_for_client(
+        &mut self,
+        client_id: &ClientId,
+        limit: u32,
+    ) -> Result<Vec<StoredEvent>, DatabaseError> {
+        run!(
+            self,
+            fetch_all,
+            sqlx::query_as!(
+                EventRow,
+                r#"SELECT
+                    e.id AS "id: EventId", e.txid::text::bigint AS "txid!", e.sequence,
+                    e.occurred_at, e.kind, e.payload, e.actor AS "actor: Json<Actor>",
+                    e.subject_user_id AS "subject_user_id: UserId",
+                    p.event_id IS NOT NULL AS "personal!", p.client_ip AS "client_ip?: IpAddr",
+                    p.user_agent_family AS "user_agent_family?: UserAgentFamily",
+                    p.details AS "details?"
+                FROM domain_events e
+                LEFT JOIN event_personal_data p ON p.event_id = e.id
+                WHERE e.client_id = $1
+                ORDER BY e.sequence DESC
+                LIMIT $2"#,
+                client_id.as_str(),
+                i64::from(limit),
+            )
+        )?
+        .into_iter()
+        .map(StoredEvent::try_from)
+        .collect()
+    }
+
     /// Returns up to `limit` events after `consumer`'s acknowledged cursor, in a
     /// safe order, for consumers such as the sealer (#31) or alerts (#83).
     ///

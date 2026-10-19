@@ -2,12 +2,15 @@
 //! protocol's wire types and, behind features, what only servers need.
 //!
 //! With no features, this crate is what the SDKs build on: identifiers such as
-//! [`UserId`], the [`protocol`] documents and the vocabulary macros. Servers add:
+//! [`UserId`], the [`protocol`] documents, the [`clients`] registration types and
+//! the vocabulary macros. Servers add:
 //!
 //! - `config`: environment variables, validated URLs and secret references.
 //! - `events`: the domain events auth records.
 //! - `sqlx`: decoding identifiers and vocabularies from `PostgreSQL` columns.
 
+/// OAuth client registrations, each field validated by its type.
+pub mod clients;
 /// Environment variables, validated URLs and secret references.
 #[cfg(feature = "config")]
 pub mod config;
@@ -21,6 +24,8 @@ use serde::{Deserialize, Serialize};
 use std::{error::Error as StdError, fmt, str::FromStr};
 use thiserror::Error;
 use uuid::Uuid;
+
+pub use clients::ClientId;
 
 /// Formats an error followed by each of its causes, e.g.
 /// `AUTH_PUBLIC_BASE_URL is invalid: must use https://`.
@@ -54,9 +59,9 @@ pub use serde as __serde;
 #[doc(hidden)]
 pub use sqlx as __sqlx;
 
-/// Lets `str_enum!` vocabularies decode from `PostgreSQL` text columns, e.g.
-/// `status AS "status: AccountStatus"` in a checked query. A value outside the
-/// vocabulary fails decoding. This crate's `sqlx` feature selects which
+/// Lets `str_enum!` vocabularies and other validated text types decode from
+/// `PostgreSQL` text columns through `FromStr`, e.g. `status AS "status: AccountStatus"`
+/// in a checked query. A value the type rejects fails decoding. This crate's `sqlx` feature selects which
 /// definition every `str_enum!` expands to, wherever it is invoked.
 #[cfg(feature = "sqlx")]
 #[doc(hidden)]
@@ -350,35 +355,13 @@ uuid_id!(TokenId, "Identifier for a token record or JWT.");
 uuid_id!(PasskeyId, "Identifier of a stored passkey credential.");
 uuid_id!(EventId, "Identifier of a recorded domain event.");
 uuid_id!(
+    ClientSecretId,
+    "Identifier of one of an OAuth client's secrets."
+);
+uuid_id!(
     DeliveryId,
     "Identifier of an outbound delivery, reused by every attempt as its `jti` or `Message-ID`."
 );
-
-/// A registered OAuth client's identifier. Chosen by whoever registers the client,
-/// so any non-empty string.
-#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
-#[serde(transparent)]
-pub struct ClientId(String);
-
-impl ClientId {
-    /// Wraps a client identifier.
-    #[must_use]
-    pub fn new(id: impl Into<String>) -> Self {
-        Self(id.into())
-    }
-    /// The identifier as sent on the wire.
-    #[must_use]
-    pub fn as_str(&self) -> &str {
-        &self.0
-    }
-}
-
-impl fmt::Display for ClientId {
-    /// Writes the identifier unchanged.
-    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        formatter.write_str(&self.0)
-    }
-}
 
 str_enum! {
     /// Account availability state in SQL and JSON.

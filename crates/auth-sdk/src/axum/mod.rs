@@ -36,7 +36,7 @@
 //! ```no_run
 //! use axum::{Router, routing::get};
 //! use piquel_auth::axum::{LoginRoutes, MemoryBackend, SignedIn};
-//! # use piquel_auth::{ClientConfig, ClientId, Credentials, Issuer};
+//! # use piquel_auth::{ClientConfig, Credentials, Issuer};
 //!
 //! async fn home(user: SignedIn) -> String {
 //!     format!("Hello {}", user.name())
@@ -45,7 +45,7 @@
 //! # async fn run() -> Result<(), Box<dyn std::error::Error>> {
 //! # let issuer = Issuer::discover("https://auth.piquel.fr").await?;
 //! # let config = ClientConfig {
-//! #     client_id: ClientId::new("notes-web"),
+//! #     client_id: "notes-web".parse()?,
 //! #     credentials: Credentials::None,
 //! #     redirect_uri: "https://notes.piquel.fr/auth/callback".parse()?,
 //! # };

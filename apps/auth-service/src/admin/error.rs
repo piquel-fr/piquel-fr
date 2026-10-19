@@ -65,9 +65,9 @@ pub enum AdminError {
     /// The reason is blank, longer than 500 characters or holds control characters.
     #[error("give a reason of 1 to 500 characters, without control characters")]
     InvalidReason,
-    /// The invitation lifetime is not 1 to 365 hours or days.
-    #[error(transparent)]
-    InvalidInviteExpiry(#[from] super::InvalidInviteExpiry),
+    /// The invitation lifetime is not 1 hour to 365 days.
+    #[error("expires_in {0}")]
+    InvalidInviteExpiry(#[from] super::InvalidLifetime),
     /// Only active accounts can become administrators.
     #[error("the account is disabled; enable it before granting administrator rights")]
     AccountDisabled,

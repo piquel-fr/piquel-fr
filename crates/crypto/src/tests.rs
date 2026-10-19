@@ -45,17 +45,20 @@ fn digests_match_vectors() {
     assert!(Digest::constant_time_eq(b"", b""));
 }
 
-/// Client hashing retains its wire contract and uses SHA-256 over encoded text.
+/// Client secrets carry their scanner prefix and are stored as the digest of
+/// exactly what clients present.
 #[test]
 fn client_secret_contract() {
-    let secret = Secret::generate().expect("secret").encoded();
+    let secret = ClientSecret::generate().expect("secret");
+    let (prefix, random) = secret.expose().split_at(CLIENT_SECRET_PREFIX.len());
+    assert_eq!(prefix, CLIENT_SECRET_PREFIX);
+    assert!(Secret::parse(random).is_ok());
     assert_eq!(
-        Digest::client_secret(&secret).expect("hash"),
-        Digest::sha256(secret.as_bytes())
+        secret.digest(),
+        ClientSecret::digest_presented(secret.expose())
     );
-    assert!(Digest::client_secret(&"x".repeat(42)).is_err());
-    assert!(Digest::client_secret(&"x".repeat(512)).is_ok());
-    assert!(Digest::client_secret(&"x".repeat(513)).is_err());
+    assert_eq!(secret.digest(), Digest::sha256(secret.expose().as_bytes()));
+    assert_eq!(format!("{secret:?}"), "ClientSecret(REDACTED)");
 }
 
 /// PKCE matches RFC 7636 appendix B and enforces verifier syntax.

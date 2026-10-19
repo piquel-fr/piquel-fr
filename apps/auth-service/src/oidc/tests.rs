@@ -11,6 +11,7 @@ use axum::{
 use chrono::Utc;
 use piquel_common::{
     AuthenticationMethod, UserId,
+    clients::{AllowedScopes, ClientRegistration, ScopeName},
     events::{DomainEvent, GrantRevocation, RevocationReason},
     protocol::{
         claims::{Acr, IdTokenClaims},
@@ -18,13 +19,10 @@ use piquel_common::{
     },
 };
 use piquel_crypto::Secret;
-use piquel_repository::{BootstrapOidcClient, DatabaseConfig, InsertUser, InsertVerifiedEmail};
+use piquel_repository::{DatabaseConfig, InsertUser, InsertVerifiedEmail};
 use serde_json::{Value, json};
 use tower::ServiceExt;
 use url::Url;
-
-/// Secret of confidential scenario clients.
-const CLIENT_SECRET: &str = "randomly-generated-example-secret-for-testing-0123456789";
 
 /// Database-backed OIDC scenario with a provisioned client and authenticated browser.
 #[derive(Clone)]
@@ -33,8 +31,10 @@ struct Flow {
     app: OidcApplication,
     /// Where requests go: the OIDC routes, or a replica of the whole service.
     router: axum::Router,
-    /// Client identifier bound into the token claims.
-    client: BootstrapOidcClient,
+    /// The scenario's client, registered through [`ClientRegistry`](crate::ClientRegistry).
+    client: ClientRegistration,
+    /// The secret of a confidential scenario client.
+    secret: Option<String>,
     /// Authenticated browser cookie pair sent by the scenario.
     cookie: String,
     /// Scenario account whose claims and grants are checked.
@@ -45,12 +45,11 @@ struct Flow {
 impl Flow {
     /// Creates a disposable account, client registration and persistent-key OIDC application.
     async fn new(confidential: bool, trusted: bool) -> Self {
-        Self::at(AUTH_ORIGIN, "test-api", confidential, trusted).await
+        Self::at(AUTH_ORIGIN, confidential, trusted).await
     }
 
-    /// Like [`Self::new`], for an issuer at `origin` whose client may request tokens
-    /// for `audience`.
-    async fn at(origin: &str, audience: &str, confidential: bool, trusted: bool) -> Self {
+    /// Like [`Self::new`], for an issuer at `origin`.
+    async fn at(origin: &str, confidential: bool, trusted: bool) -> Self {
         let url = piquel_common::config::Variable::new("TEST_DATABASE_URL")
             .required()
             .expect("TEST_DATABASE_URL must name a disposable PostgreSQL database");
@@ -93,38 +92,25 @@ impl Flow {
         .expect("create test browser session");
         let cookie = format!("{}={}", BrowserCookie::Session.as_str(), cookie.encoded());
         tx.commit().await.expect("commit test account transaction");
-        let client = BootstrapOidcClient {
-            id: format!("test-{user_id}"),
-            display_name: "Test app".into(),
-            redirect_uris: vec!["https://client.example/callback".into()],
-            post_logout_uris: vec!["https://client.example/logout".into()],
-            allowed_scopes: vec![
-                Scope::OpenId.as_str().into(),
-                Scope::Profile.as_str().into(),
-                Scope::Email.as_str().into(),
-                Scope::OfflineAccess.as_str().into(),
-            ],
-            allowed_audiences: vec![audience.into()],
-            allow_refresh: true,
-            enabled: true,
+        let client = ClientRegistration {
+            kind: if confidential {
+                ClientKind::Confidential
+            } else {
+                ClientKind::Public
+            },
             trusted,
-            client_secret_hash: confidential.then(|| {
-                Digest::client_secret(CLIENT_SECRET)
-                    .expect("hash test client secret")
-                    .as_bytes()
-                    .to_vec()
-            }),
+            ..crate::tests::registration(ClientKind::Public, "https://client.example")
         };
-        db.oidc()
-            .bootstrap_client(&client)
+        let secret = crate::ClientRegistry::new(db.clone())
+            .create(&crate::tests::operator(), &client)
             .await
-            .expect("register test OIDC client");
-        let basic = confidential.then(|| {
+            .expect("register test OIDC client")
+            .map(|secret| secret.expose().to_owned());
+        let basic = secret.as_ref().map(|secret| {
             format!(
                 "{} {}",
                 AuthScheme::Basic.as_str(),
-                base64::engine::general_purpose::STANDARD
-                    .encode(format!("{}:{CLIENT_SECRET}", client.id))
+                base64::engine::general_purpose::STANDARD.encode(format!("{}:{secret}", client.id))
             )
         });
         let app = OidcApplication::new(
@@ -135,8 +121,6 @@ impl Flow {
                     .expect("issuer"),
                 keys: Arc::new(Rs256Key::generate("oidc-tests").expect("RSA signing key")),
                 refresh_key: Arc::new(Secret::derive(&[7; 32], REFRESH_KEY_LABEL).expect("HMAC")),
-                clients: vec![],
-                public_redirects: vec![],
             },
         )
         .expect("OIDC application");
@@ -144,6 +128,7 @@ impl Flow {
             router: app.clone().routes(),
             app,
             client,
+            secret,
             cookie,
             user_id,
             basic,
@@ -216,8 +201,8 @@ impl Flow {
             .expect("parse authorization endpoint URL");
         url.query_pairs_mut().extend_pairs([
             ("response_type", ResponseType::Code.as_str()),
-            ("client_id", &self.client.id),
-            ("redirect_uri", &self.client.redirect_uris[0]),
+            ("client_id", self.client.id.as_str()),
+            ("redirect_uri", self.client.redirect_uris[0].as_str()),
             ("scope", scope),
             ("state", "test-state"),
             ("nonce", "test-nonce"),
@@ -341,8 +326,8 @@ impl Flow {
             "/oauth/token",
             &[
                 ("grant_type", GrantType::AuthorizationCode.as_str()),
-                ("client_id", &self.client.id),
-                ("redirect_uri", &self.client.redirect_uris[0]),
+                ("client_id", self.client.id.as_str()),
+                ("redirect_uri", self.client.redirect_uris[0].as_str()),
                 ("code", code),
                 ("code_verifier", verifier),
             ],
@@ -373,7 +358,7 @@ impl Flow {
             "/oauth/token",
             &[
                 ("grant_type", GrantType::RefreshToken.as_str()),
-                ("client_id", &self.client.id),
+                ("client_id", self.client.id.as_str()),
                 ("refresh_token", token),
             ],
             self.basic.as_deref(),
@@ -482,7 +467,7 @@ async fn public_consent_pkce_claim_scoping_and_replay() {
         .authorize(Scope::OpenId.as_str(), Some(Prompt::Login.as_str()))
         .await;
     assert_eq!(Flow::location(&response).path(), "/login");
-    let client_id = piquel_common::ClientId::new(flow.client.id.as_str());
+    let client_id = flow.client.id.clone();
     assert_eq!(
         flow.events().await[..3],
         [
@@ -549,7 +534,7 @@ async fn confidential_refresh_rotation_logout_and_client_binding() {
             "/oauth/token",
             &[
                 ("grant_type", GrantType::RefreshToken.as_str()),
-                ("client_id", &flow.client.id),
+                ("client_id", flow.client.id.as_str()),
                 ("refresh_token", old),
                 ("scope", UNGRANTED_SCOPES),
             ],
@@ -567,7 +552,7 @@ async fn confidential_refresh_rotation_logout_and_client_binding() {
             "/oauth/token",
             &[
                 ("grant_type", GrantType::RefreshToken.as_str()),
-                ("client_id", &flow.client.id),
+                ("client_id", flow.client.id.as_str()),
                 ("refresh_token", old),
                 ("scope", Scope::OpenId.as_str()),
             ],
@@ -605,8 +590,11 @@ async fn confidential_refresh_rotation_logout_and_client_binding() {
             Method::POST,
             "/oidc/logout",
             &[
-                ("client_id", &flow.client.id),
-                ("post_logout_redirect_uri", &flow.client.post_logout_uris[0]),
+                ("client_id", flow.client.id.as_str()),
+                (
+                    "post_logout_redirect_uri",
+                    flow.client.post_logout_uris[0].as_str(),
+                ),
             ],
             None,
         )
@@ -646,7 +634,7 @@ async fn confidential_refresh_rotation_logout_and_client_binding() {
             DomainEvent::SessionRevoked {
                 reason: RevocationReason::RelyingPartyLogout { client_id },
                 ..
-            } if client_id.as_str() == flow.client.id
+            } if *client_id == flow.client.id
         ),
         "{events:?}"
     );
@@ -771,14 +759,15 @@ async fn concurrent_refresh_across_replicas_rotates_once() {
 async fn policy_reduction_blocks_outstanding_codes_and_refresh() {
     let mut flow = Flow::new(false, true).await;
     let code = flow.code(EMAIL_SCOPES).await;
-    flow.client.allowed_scopes = vec![
-        Scope::OpenId.as_str().into(),
-        Scope::OfflineAccess.as_str().into(),
-    ];
-    flow.app
-        .database
-        .oidc()
-        .bootstrap_client(&flow.client)
+    let registry = crate::ClientRegistry::new(flow.app.database.clone());
+    flow.client.allowed_scopes =
+        AllowedScopes::new([Scope::OpenId, Scope::OfflineAccess].map(ScopeName::from))
+            .expect("reduced scopes");
+    let client = flow.client.clone();
+    registry
+        .update(&crate::tests::operator(), &client.id, |_| {
+            Ok::<_, crate::ClientRegistryError>(client.clone())
+        })
         .await
         .expect("apply reduced client scope policy");
     assert_eq!(
@@ -795,10 +784,11 @@ async fn policy_reduction_blocks_outstanding_codes_and_refresh() {
     let code = flow.code(REFRESH_SCOPES).await;
     let tokens = Flow::json(flow.exchange(&code, Flow::verifier(), None).await).await;
     flow.client.allow_refresh = false;
-    flow.app
-        .database
-        .oidc()
-        .bootstrap_client(&flow.client)
+    let client = flow.client.clone();
+    registry
+        .update(&crate::tests::operator(), &client.id, |_| {
+            Ok::<_, crate::ClientRegistryError>(client.clone())
+        })
         .await
         .expect("disable client refresh permission");
     assert_eq!(
@@ -1090,7 +1080,7 @@ async fn post_protocol_endpoints_and_error_contracts() {
         .request(
             Method::POST,
             "/oauth/token",
-            &[("client_id", &flow.client.id)],
+            &[("client_id", flow.client.id.as_str())],
             None,
         )
         .await;
@@ -1213,9 +1203,6 @@ async fn oauth_failures_preserve_sources_and_statuses() {
 /// Existing approve form spelling, independent of the JSON-only consent enum.
 const APPROVE_CONSENT: &str = "approve";
 
-/// The resource the SDK scenario's client requests tokens for.
-const SDK_RESOURCE: &str = "notes-api";
-
 /// The Rust SDK signs in, validates, refreshes, revokes and logs out against the real
 /// provider over HTTPS, and rejects a mixed-up callback before any code exchange.
 #[tokio::test]
@@ -1226,15 +1213,15 @@ const SDK_RESOURCE: &str = "notes-api";
 )]
 async fn sdk_login_client_runs_against_the_provider() {
     use piquel_auth::{
-        AuthorizeRequest, CallbackParams, ClientConfig, ClientId, Credentials, LoginError,
-        OAuthError, Resource, Scopes, Subject,
+        AuthorizeRequest, CallbackParams, ClientConfig, Credentials, LoginError, OAuthError,
+        Resource, Scopes, Subject,
     };
     let tcp = tokio::net::TcpListener::bind("127.0.0.1:0")
         .await
         .expect("bind provider");
     let port = tcp.local_addr().expect("provider address").port();
     let origin = format!("https://localhost:{port}");
-    let flow = Flow::at(&origin, SDK_RESOURCE, true, false).await;
+    let flow = Flow::at(&origin, true, false).await;
     let certificate = TlsListener::serve(tcp, flow.app.clone().routes());
     let http = reqwest::Client::builder()
         .add_root_certificate(certificate)
@@ -1247,9 +1234,12 @@ async fn sdk_login_client_runs_against_the_provider() {
         .await
         .expect("discover the provider");
     let client = issuer.client(ClientConfig {
-        client_id: ClientId::new(flow.client.id.clone()),
-        credentials: Credentials::Secret(CLIENT_SECRET.into()),
-        redirect_uri: flow.client.redirect_uris[0].parse().expect("callback"),
+        client_id: flow.client.id.clone(),
+        credentials: Credentials::Secret(flow.secret.clone().expect("confidential").into()),
+        redirect_uri: flow.client.redirect_uris[0]
+            .as_str()
+            .parse()
+            .expect("callback"),
     });
     let (url, pending) = client
         .authorize(&AuthorizeRequest {
@@ -1293,7 +1283,7 @@ async fn sdk_login_client_runs_against_the_provider() {
     assert_eq!(id_token.user_id().expect("account"), flow.user_id);
 
     let access = issuer
-        .resource(Resource::new(SDK_RESOURCE).expect("resource"))
+        .resource(Resource::new(flow.client.id.as_str()).expect("resource"))
         .validate::<Scopes>(tokens.access_token.expose())
         .await
         .expect("valid access token");
@@ -1323,6 +1313,7 @@ async fn sdk_login_client_runs_against_the_provider() {
     ));
 
     let post_logout: Url = flow.client.post_logout_uris[0]
+        .as_str()
         .parse()
         .expect("post-logout URI");
     let logout = client.logout_url(id_token, Some(&post_logout));
@@ -1381,7 +1372,7 @@ impl LoginApp {
     /// Serves the provider over TLS and builds the app.
     async fn start() -> Self {
         use piquel_auth::{
-            ClientConfig, ClientId, Credentials, Resource,
+            ClientConfig, Credentials, Resource,
             axum::{BearerLayer, LoginRoutes, MemoryBackend, RequireAuthentication, SignedIn},
             protocol::challenge::BearerChallenge,
         };
@@ -1390,7 +1381,7 @@ impl LoginApp {
             .expect("bind provider");
         let port = tcp.local_addr().expect("provider address").port();
         let origin = format!("https://localhost:{port}");
-        let flow = Flow::at(&origin, SDK_RESOURCE, true, false).await;
+        let flow = Flow::at(&origin, true, false).await;
         let certificate = TlsListener::serve(tcp, flow.app.clone().routes());
         let http = reqwest::Client::builder()
             .add_root_certificate(certificate)
@@ -1405,9 +1396,12 @@ impl LoginApp {
             .await
             .expect("discover the provider");
         let client = issuer.client(ClientConfig {
-            client_id: ClientId::new(flow.client.id.clone()),
-            credentials: Credentials::Secret(CLIENT_SECRET.into()),
-            redirect_uri: flow.client.redirect_uris[0].parse().expect("callback"),
+            client_id: flow.client.id.clone(),
+            credentials: Credentials::Secret(flow.secret.clone().expect("confidential").into()),
+            redirect_uri: flow.client.redirect_uris[0]
+                .as_str()
+                .parse()
+                .expect("callback"),
         });
         // An API the app calls with the user's token: `/settings` needs a recent
         // passkey, and `/stubborn` asks for a step-up, naming nothing, whatever the
@@ -1427,9 +1421,9 @@ impl LoginApp {
                     )
                 }),
             )
-            .layer(BearerLayer::new(
-                issuer.resource(Resource::new(SDK_RESOURCE).expect("resource")),
-            ));
+            .layer(BearerLayer::new(issuer.resource(
+                Resource::new(flow.client.id.as_str()).expect("resource"),
+            )));
         let call_api = move |path: &'static str| {
             let api = api.clone();
             move |user: SignedIn| async move {
@@ -1454,7 +1448,12 @@ impl LoginApp {
         };
         let auth = LoginRoutes::new(client, MemoryBackend::default())
             .scopes("profile offline_access".parse().expect("scopes"))
-            .after_logout(flow.client.post_logout_uris[0].parse().expect("logout URI"));
+            .after_logout(
+                flow.client.post_logout_uris[0]
+                    .as_str()
+                    .parse()
+                    .expect("logout URI"),
+            );
         let app = Router::new()
             .route(
                 "/notes",
@@ -1474,7 +1473,8 @@ impl LoginApp {
     async fn send(&self, method: Method, uri: &str, cookie: Option<&str>) -> Response {
         let mut request = Request::builder().method(method.clone()).uri(uri);
         if method == Method::POST {
-            let callback = Url::parse(&self.flow.client.redirect_uris[0]).expect("callback");
+            let callback =
+                Url::parse(self.flow.client.redirect_uris[0].as_str()).expect("callback");
             request = request.header(header::ORIGIN, callback.origin().ascii_serialization());
         }
         if let Some(cookie) = cookie {
@@ -1626,7 +1626,7 @@ async fn sdk_login_routes_run_against_the_provider() {
     assert_eq!(destination.path(), "/oidc/logout");
     assert_eq!(
         Flow::parameter(&destination, "post_logout_redirect_uri"),
-        app.flow.client.post_logout_uris[0]
+        app.flow.client.post_logout_uris[0].as_str()
     );
     assert!(
         LoginApp::cookies(&logout)

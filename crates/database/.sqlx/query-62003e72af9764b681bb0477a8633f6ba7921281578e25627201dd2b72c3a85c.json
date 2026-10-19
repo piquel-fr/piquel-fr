@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "UPDATE authorization_requests r\n                SET consumed_at = now()\n                FROM oidc_clients c\n                WHERE r.id = $1\n                AND r.secret_digest = $2\n                AND r.consumed_at IS NULL\n                AND r.expires_at > now()\n                AND c.id = r.client_id\n                AND c.enabled\n                AND c.allowed_scopes @> r.scopes\n                AND c.allowed_audiences ? r.audience\n                AND EXISTS (\n                    SELECT 1\n                    FROM oidc_redirect_uris d\n                    WHERE d.client_id = c.id\n                    AND d.kind = 'authorization'\n                    AND d.uri = r.redirect_uri\n                )\n                RETURNING\n                    r.id AS \"id: TokenId\", r.client_id, c.display_name AS client_display_name,\n                    r.redirect_uri, r.client_state, r.nonce, r.pkce_challenge,\n                    r.scopes AS \"scopes: JsonArray<String>\", r.audience, r.force_login,\n                    r.force_consent, r.max_age, r.hinted_user_id AS \"hinted_user_id: UserId\",\n                    r.target_acr AS \"target_acr: Acr\", r.created_at",
+  "query": "SELECT\n                    r.id AS \"id: TokenId\", r.client_id AS \"client_id: ClientId\",\n                    c.display_name AS client_display_name,\n                    r.redirect_uri, r.client_state, r.nonce, r.pkce_challenge,\n                    r.scopes AS \"scopes: JsonArray<String>\", r.audience, r.force_login,\n                    r.force_consent, r.max_age, r.hinted_user_id AS \"hinted_user_id: UserId\",\n                    r.target_acr AS \"target_acr: Acr\", r.created_at\n                FROM authorization_requests r\n                JOIN oidc_clients c ON c.id = r.client_id\n                WHERE r.id = $1\n                AND r.secret_digest = $2\n                AND r.consumed_at IS NULL\n                AND r.expires_at > now()\n                AND c.enabled",
   "describe": {
     "columns": [
       {
@@ -10,7 +10,7 @@
       },
       {
         "ordinal": 1,
-        "name": "client_id",
+        "name": "client_id: ClientId",
         "type_info": "Text"
       },
       {
@@ -103,5 +103,5 @@
       false
     ]
   },
-  "hash": "22505ec16a2ef1f061fa678e8badce428654a606a34116c3e53cb94696a6c2e9"
+  "hash": "62003e72af9764b681bb0477a8633f6ba7921281578e25627201dd2b72c3a85c"
 }

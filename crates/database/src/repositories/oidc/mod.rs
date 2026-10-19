@@ -1,27 +1,11 @@
-//! Static client provisioning, authorization requests, codes and consent.
+//! Client registrations, authorization requests, codes and consent.
 
 use super::{JsonArray, OidcRepository, RepositoryExecutor};
 use crate::{DatabaseError, SessionAuthentication};
 use chrono::{DateTime, Utc};
-use piquel_admin_api::{Client, Consent};
-use piquel_common::{
-    SessionId, TokenId, UserId,
-    protocol::{claims::Acr, oauth::ClientAuthMethod},
-};
+use piquel_admin_api::Consent;
+use piquel_common::{ClientId, SessionId, TokenId, UserId, protocol::claims::Acr};
 use sqlx::types::Json;
-
-/// Largest identifier, scope or audience accepted by provisioning.
-const MAX_IDENTIFIER_LENGTH: usize = 64;
-/// Maximum number of user-visible display-name characters.
-const MAX_NAME_CHARS: usize = 80;
-/// Bound on each redirect allowlist.
-const MAX_REDIRECTS: usize = 16;
-/// Bound on a client's configured scopes.
-const MAX_SCOPES: usize = 32;
-/// Bound on a client's configured audiences.
-const MAX_AUDIENCES: usize = 16;
-/// Length of a persisted SHA-256 client-secret digest.
-const CLIENT_SECRET_DIGEST_LENGTH: usize = 32;
 
 piquel_common::str_enum! {
     /// Purpose of a registered OIDC continuation.
@@ -30,198 +14,6 @@ piquel_common::str_enum! {
         Authorization = "authorization",
         /// Receives the browser after RP-initiated logout.
         PostLogout = "post_logout",
-    }
-}
-
-/// Actionable failures of a statically configured client's provisioning contract.
-#[derive(Debug, thiserror::Error)]
-pub enum ClientConfigurationError {
-    /// The client ID violates the shared identifier syntax.
-    #[error("client ID must match [A-Za-z0-9._-]{{1,64}}")]
-    Identifier,
-    /// Consent-screen names must be present and bounded.
-    #[error("client display name must be nonblank and contain at most 80 characters")]
-    DisplayName,
-    /// Persisted secrets must already be hashed.
-    #[error("client secret hash must contain exactly 32 bytes")]
-    SecretDigest,
-    /// An allowlist is missing or too large.
-    #[error("{kind} redirects must contain {minimum} to 16 URIs")]
-    RedirectCount {
-        /// Which allowlist needs correction.
-        kind: OidcRedirectKind,
-        /// Authorization requires one URI; post-logout permits none.
-        minimum: usize,
-    },
-    /// A redirect could not be parsed as an absolute URL.
-    #[error("{kind} redirect must be an absolute HTTPS URL")]
-    RedirectUrl {
-        /// Which allowlist contains the malformed URL.
-        kind: OidcRedirectKind,
-        /// URL parser failure, without logging the supplied URI.
-        #[source]
-        source: url::ParseError,
-    },
-    /// A redirect violates the transport and authority policy.
-    #[error("{kind} redirect must use HTTPS with a host and no credentials or fragment")]
-    RedirectPolicy {
-        /// Which allowlist violates the redirect policy.
-        kind: OidcRedirectKind,
-    },
-    /// Scope identifiers are missing, too numerous or malformed.
-    #[error("client scopes must contain 1 to 32 values matching [A-Za-z0-9._-]{{1,64}}")]
-    Scopes,
-    /// Audience identifiers are missing, too numerous or malformed.
-    #[error("client audiences must contain 1 to 16 values matching [A-Za-z0-9._-]{{1,64}}")]
-    Audiences,
-}
-
-/// A registered OIDC client with its exact URI allowlists.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct StoredOidcClient {
-    /// Client identifier.
-    pub id: String,
-    /// Name shown on consent screens.
-    pub display_name: String,
-    /// Exact allowed authorization redirect URIs.
-    pub redirect_uris: Vec<String>,
-    /// Exact allowed post-logout redirect URIs.
-    pub post_logout_uris: Vec<String>,
-    /// Scopes the client may request.
-    pub allowed_scopes: Vec<String>,
-    /// Audiences the client may request tokens for.
-    pub allowed_audiences: Vec<String>,
-    /// Whether the client may receive refresh tokens.
-    pub allow_refresh: bool,
-    /// Disabled clients are rejected everywhere.
-    pub enabled: bool,
-    /// Whether the client skips the consent screen.
-    pub trusted: bool,
-    /// SHA-256 hash of the client secret; `None` for public clients.
-    pub client_secret_hash: Option<Vec<u8>>,
-}
-
-impl From<StoredOidcClient> for Client {
-    /// Shows the client without its secret, only the authentication method it implies.
-    fn from(client: StoredOidcClient) -> Self {
-        Self {
-            token_endpoint_auth_method: match client.client_secret_hash {
-                Some(_) => ClientAuthMethod::ClientSecretBasic,
-                None => ClientAuthMethod::None,
-            },
-            id: client.id,
-            display_name: client.display_name,
-            redirect_uris: client.redirect_uris,
-            post_logout_uris: client.post_logout_uris,
-            allowed_scopes: client.allowed_scopes,
-            allowed_audiences: client.allowed_audiences,
-            allow_refresh: client.allow_refresh,
-            enabled: client.enabled,
-            trusted: client.trusted,
-        }
-    }
-}
-
-/// Statically reviewed client configuration provisioned at startup.
-///
-/// [`OidcRepository::bootstrap_client`] rejects identifiers, scopes and
-/// audiences outside `[A-Za-z0-9._-]{1,64}`, display names longer than 80
-/// characters, and redirect URIs that are not HTTPS or
-/// carry credentials or a fragment.
-#[derive(Clone, Debug)]
-pub struct BootstrapOidcClient {
-    /// Client identifier.
-    pub id: String,
-    /// Name shown on consent screens; must not be blank.
-    pub display_name: String,
-    /// 1 to 16 exact authorization redirect URIs.
-    pub redirect_uris: Vec<String>,
-    /// Up to 16 exact post-logout redirect URIs.
-    pub post_logout_uris: Vec<String>,
-    /// 1 to 32 scopes the client may request.
-    pub allowed_scopes: Vec<String>,
-    /// 1 to 16 audiences the client may request tokens for.
-    pub allowed_audiences: Vec<String>,
-    /// Whether the client may receive refresh tokens.
-    pub allow_refresh: bool,
-    /// Whether the client is usable.
-    pub enabled: bool,
-    /// Whether the client skips the consent screen.
-    pub trusted: bool,
-    /// 32-byte SHA-256 hash of the client secret; `None` for public clients.
-    pub client_secret_hash: Option<Vec<u8>>,
-}
-
-impl BootstrapOidcClient {
-    /// Validates a startup client against the database's provisioning contract.
-    ///
-    /// # Errors
-    /// Identifies the invalid field or redirect allowlist and preserves URL parser failures.
-    pub fn validate(&self) -> Result<(), ClientConfigurationError> {
-        if self
-            .client_secret_hash
-            .as_ref()
-            .is_some_and(|hash| hash.len() != CLIENT_SECRET_DIGEST_LENGTH)
-        {
-            return Err(ClientConfigurationError::SecretDigest);
-        }
-        if !Self::valid_identifier(&self.id) {
-            return Err(ClientConfigurationError::Identifier);
-        }
-        if self.display_name.trim().is_empty() || self.display_name.chars().count() > MAX_NAME_CHARS
-        {
-            return Err(ClientConfigurationError::DisplayName);
-        }
-        Self::validate_redirects(OidcRedirectKind::Authorization, &self.redirect_uris)?;
-        Self::validate_redirects(OidcRedirectKind::PostLogout, &self.post_logout_uris)?;
-        if !Self::valid_identifiers(&self.allowed_scopes, MAX_SCOPES) {
-            return Err(ClientConfigurationError::Scopes);
-        }
-        if !Self::valid_identifiers(&self.allowed_audiences, MAX_AUDIENCES) {
-            return Err(ClientConfigurationError::Audiences);
-        }
-        Ok(())
-    }
-
-    /// Checks a nonempty list of at most `max` valid identifiers.
-    fn valid_identifiers(values: &[String], max: usize) -> bool {
-        (1..=max).contains(&values.len())
-            && values.iter().all(|value| Self::valid_identifier(value))
-    }
-
-    /// The same bounded ASCII syntax applies to IDs, scopes and audiences.
-    fn valid_identifier(value: &str) -> bool {
-        (1..=MAX_IDENTIFIER_LENGTH).contains(&value.len())
-            && value
-                .bytes()
-                .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_' | b'.'))
-    }
-
-    /// Validates each exact continuation while allowing query parameters used by RPs.
-    fn validate_redirects(
-        kind: OidcRedirectKind,
-        uris: &[String],
-    ) -> Result<(), ClientConfigurationError> {
-        let minimum = match kind {
-            OidcRedirectKind::Authorization => 1,
-            OidcRedirectKind::PostLogout => 0,
-        };
-        if !(minimum..=MAX_REDIRECTS).contains(&uris.len()) {
-            return Err(ClientConfigurationError::RedirectCount { kind, minimum });
-        }
-        for uri in uris {
-            let url = url::Url::parse(uri)
-                .map_err(|source| ClientConfigurationError::RedirectUrl { kind, source })?;
-            if url.scheme() != "https"
-                || url.host_str().is_none()
-                || !url.username().is_empty()
-                || url.password().is_some()
-                || url.fragment().is_some()
-            {
-                return Err(ClientConfigurationError::RedirectPolicy { kind });
-            }
-        }
-        Ok(())
     }
 }
 
@@ -234,7 +26,7 @@ pub struct InsertAuthorizationRequest {
     /// Digest of the browser-held request secret.
     pub secret_digest: Vec<u8>,
     /// Requesting client.
-    pub client_id: String,
+    pub client_id: ClientId,
     /// Registered redirect URI to answer on.
     pub redirect_uri: String,
     /// The client's opaque `state` parameter.
@@ -267,7 +59,7 @@ pub struct StoredAuthorizationRequest {
     /// Request identifier.
     pub id: TokenId,
     /// Requesting client.
-    pub client_id: String,
+    pub client_id: ClientId,
     /// The client's current consent-screen name.
     pub client_display_name: String,
     /// Registered redirect URI to answer on.
@@ -305,7 +97,7 @@ pub struct InsertAuthorizationCode {
     /// Digest of the code secret.
     pub secret_digest: Vec<u8>,
     /// Client the code was issued to.
-    pub client_id: String,
+    pub client_id: ClientId,
     /// Authorizing account.
     pub user_id: UserId,
     /// Session that authorized the code.
@@ -333,7 +125,7 @@ pub struct ConsumedAuthorizationCode {
     /// Code identifier, recorded on the refresh family the exchange creates.
     pub id: TokenId,
     /// Client the code was issued to.
-    pub client_id: String,
+    pub client_id: ClientId,
     /// Authorizing account.
     pub user_id: UserId,
     /// Session that authorized the code.
@@ -375,145 +167,6 @@ pub enum CodeRedemptionError {
 }
 
 impl OidcRepository<'_> {
-    /// Disables every client. Startup provisioning calls it in the same
-    /// transaction as [`Self::bootstrap_client`], so removed clients fail closed.
-    ///
-    /// # Errors
-    ///
-    /// Returns [`DatabaseError`] if the query fails.
-    pub async fn disable_all_clients(&mut self) -> Result<(), DatabaseError> {
-        run!(
-            self,
-            execute,
-            sqlx::query!("UPDATE oidc_clients SET enabled=FALSE")
-        )?;
-        Ok(())
-    }
-
-    /// Idempotently provisions a client and replaces its URI allowlists.
-    ///
-    /// # Errors
-    ///
-    /// Preserves [`ClientConfigurationError`] as an operation source when configuration is
-    /// invalid, or retains the driver failure if provisioning fails.
-    pub async fn bootstrap_client(
-        &mut self,
-        input: &BootstrapOidcClient,
-    ) -> Result<(), DatabaseError> {
-        input
-            .validate()
-            .map_err(|source| DatabaseError::Operation(Box::new(source)))?;
-        // The statement returns the upserted id; every CTE runs regardless.
-        run!(
-            self,
-            fetch_one,
-            sqlx::query!(
-                "WITH upsert AS (
-                    INSERT INTO oidc_clients (
-                        id, display_name, allowed_scopes, allowed_audiences, allow_refresh,
-                        enabled, trusted, client_secret_hash
-                    ) VALUES ($1, $2, $3, $4, $5, $8, $9, $10)
-                    ON CONFLICT (id) DO UPDATE
-                    SET display_name = EXCLUDED.display_name,
-                        allowed_scopes = EXCLUDED.allowed_scopes,
-                        allowed_audiences = EXCLUDED.allowed_audiences,
-                        allow_refresh = EXCLUDED.allow_refresh,
-                        enabled = EXCLUDED.enabled,
-                        trusted = EXCLUDED.trusted,
-                        client_secret_hash = EXCLUDED.client_secret_hash
-                    RETURNING id
-                ),
-                desired (uri, kind) AS (
-                    SELECT unnest($6::text[]), 'authorization'
-                    UNION ALL
-                    SELECT unnest($7::text[]), 'post_logout'
-                ),
-                inserted AS (
-                    INSERT INTO oidc_redirect_uris (client_id, uri, kind)
-                    SELECT $1, d.uri, d.kind
-                    FROM desired d, upsert
-                    ON CONFLICT DO NOTHING
-                    RETURNING uri
-                ),
-                removed AS (
-                    DELETE FROM oidc_redirect_uris r
-                    WHERE r.client_id = $1
-                    AND NOT EXISTS (
-                        SELECT 1
-                        FROM desired d
-                        WHERE d.uri = r.uri
-                        AND d.kind = r.kind
-                    )
-                    RETURNING uri
-                )
-                SELECT id
-                FROM upsert",
-                input.id,
-                input.display_name,
-                Json(&input.allowed_scopes) as _,
-                Json(&input.allowed_audiences) as _,
-                input.allow_refresh,
-                &input.redirect_uris,
-                &input.post_logout_uris,
-                input.enabled,
-                input.trusted,
-                input.client_secret_hash,
-            )
-        )?;
-        Ok(())
-    }
-
-    /// Finds a client, enabled or not, with its URI allowlists.
-    ///
-    /// # Errors
-    ///
-    /// Returns [`DatabaseError`] if the query fails or the row is invalid.
-    pub async fn find_client(
-        &mut self,
-        id: &str,
-    ) -> Result<Option<StoredOidcClient>, DatabaseError> {
-        Ok(self.clients(Some(id)).await?.pop())
-    }
-
-    /// Lists every client, enabled or not, with its URI allowlists, by ID.
-    ///
-    /// # Errors
-    ///
-    /// Returns [`DatabaseError`] if the query fails or a row is invalid.
-    pub async fn list_clients(&mut self) -> Result<Vec<StoredOidcClient>, DatabaseError> {
-        self.clients(None).await
-    }
-
-    /// Lists the client `id`, or every client without one, by ID.
-    async fn clients(&mut self, id: Option<&str>) -> Result<Vec<StoredOidcClient>, DatabaseError> {
-        run!(
-            self,
-            fetch_all,
-            sqlx::query_as!(
-                StoredOidcClient,
-                r#"SELECT
-                    c.id, c.display_name, c.enabled,
-                    c.allowed_scopes AS "allowed_scopes: JsonArray<String>",
-                    c.allowed_audiences AS "allowed_audiences: JsonArray<String>",
-                    c.allow_refresh, c.trusted, c.client_secret_hash,
-                    COALESCE(
-                        jsonb_agg(r.uri) FILTER (WHERE r.kind = 'authorization'),
-                        '[]'::jsonb
-                    ) AS "redirect_uris!: JsonArray<String>",
-                    COALESCE(
-                        jsonb_agg(r.uri) FILTER (WHERE r.kind = 'post_logout'),
-                        '[]'::jsonb
-                    ) AS "post_logout_uris!: JsonArray<String>"
-                FROM oidc_clients c
-                LEFT JOIN oidc_redirect_uris r ON r.client_id = c.id
-                WHERE $1::text IS NULL OR c.id = $1
-                GROUP BY c.id
-                ORDER BY c.id"#,
-                id,
-            )
-        )
-    }
-
     /// Stores an authorization request.
     ///
     /// # Errors
@@ -534,7 +187,7 @@ impl OidcRepository<'_> {
                 ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)",
                 input.id.as_uuid(),
                 input.secret_digest,
-                input.client_id,
+                input.client_id.as_str(),
                 input.redirect_uri,
                 input.client_state,
                 input.nonce,
@@ -569,7 +222,8 @@ impl OidcRepository<'_> {
             sqlx::query_as!(
                 StoredAuthorizationRequest,
                 r#"SELECT
-                    r.id AS "id: TokenId", r.client_id, c.display_name AS client_display_name,
+                    r.id AS "id: TokenId", r.client_id AS "client_id: ClientId",
+                    c.display_name AS client_display_name,
                     r.redirect_uri, r.client_state, r.nonce, r.pkce_challenge,
                     r.scopes AS "scopes: JsonArray<String>", r.audience, r.force_login,
                     r.force_consent, r.max_age, r.hinted_user_id AS "hinted_user_id: UserId",
@@ -623,7 +277,8 @@ impl OidcRepository<'_> {
                     AND d.uri = r.redirect_uri
                 )
                 RETURNING
-                    r.id AS "id: TokenId", r.client_id, c.display_name AS client_display_name,
+                    r.id AS "id: TokenId", r.client_id AS "client_id: ClientId",
+                    c.display_name AS client_display_name,
                     r.redirect_uri, r.client_state, r.nonce, r.pkce_challenge,
                     r.scopes AS "scopes: JsonArray<String>", r.audience, r.force_login,
                     r.force_consent, r.max_age, r.hinted_user_id AS "hinted_user_id: UserId",
@@ -653,7 +308,7 @@ impl OidcRepository<'_> {
                 ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)",
                 input.id.as_uuid(),
                 input.secret_digest,
-                input.client_id,
+                input.client_id.as_str(),
                 input.user_id.as_uuid(),
                 input.session_id.as_uuid(),
                 input.redirect_uri,
@@ -686,7 +341,7 @@ impl OidcRepository<'_> {
         &mut self,
         id: TokenId,
         digest: &[u8],
-        client_id: &str,
+        client_id: &ClientId,
     ) -> Result<ConsumedAuthorizationCode, CodeRedemptionError> {
         // If the code still looks redeemable, this update waits on a concurrent
         // first redemption's row lock, then re-reads the row and skips it if that
@@ -721,7 +376,8 @@ impl OidcRepository<'_> {
                 AND u.id = c.user_id
                 AND u.status = 'active'
                 RETURNING
-                    c.id AS "id: TokenId", c.client_id, c.user_id AS "user_id: UserId",
+                    c.id AS "id: TokenId", c.client_id AS "client_id: ClientId",
+                    c.user_id AS "user_id: UserId",
                     c.session_id AS "session_id: SessionId", c.redirect_uri, c.pkce_challenge,
                     c.nonce, c.scopes AS "scopes: JsonArray<String>", c.audience,
                     c.authentication AS "authentication: SessionAuthentication""#,
@@ -752,7 +408,7 @@ impl OidcRepository<'_> {
         &mut self,
         id: TokenId,
         digest: &[u8],
-        client_id: &str,
+        client_id: &ClientId,
     ) -> Result<Option<(UserId, Vec<TokenId>)>, DatabaseError> {
         // The row qualifies whether or not it is consumed, so FOR SHARE waits for
         // an in-flight first redemption and then reads the committed row, together
@@ -772,7 +428,7 @@ impl OidcRepository<'_> {
                 FOR SHARE"#,
                 id.as_uuid(),
                 digest,
-                client_id,
+                client_id.as_str(),
             )
         )?
         .filter(|code| code.consumed) else {
@@ -805,7 +461,7 @@ impl OidcRepository<'_> {
     pub async fn consented(
         &mut self,
         user: UserId,
-        client: &str,
+        client: &ClientId,
         audience: &str,
         scopes: &[String],
     ) -> Result<bool, DatabaseError> {
@@ -822,7 +478,7 @@ impl OidcRepository<'_> {
                     AND scopes @> $4
                 ) AS "consented!""#,
                 user.as_uuid(),
-                client,
+                client.as_str(),
                 audience,
                 Json(scopes) as _,
             )
@@ -857,7 +513,7 @@ impl OidcRepository<'_> {
     pub async fn save_consent(
         &mut self,
         user: UserId,
-        client: &str,
+        client: &ClientId,
         audience: &str,
         scopes: &[String],
     ) -> Result<(), DatabaseError> {
@@ -873,7 +529,7 @@ impl OidcRepository<'_> {
                     FROM jsonb_array_elements(oidc_consents.scopes || EXCLUDED.scopes)
                 )",
                 user.as_uuid(),
-                client,
+                client.as_str(),
                 audience,
                 Json(scopes) as _,
             )
@@ -933,108 +589,9 @@ impl OidcRepository<'_> {
         Ok(revoked)
     }
 }
+/// Client registrations, secrets and the origins of public clients.
+mod clients;
+pub use clients::{StoredClientSecret, StoredOidcClient};
+/// Database-backed client registration and migration scenarios.
 #[cfg(test)]
-mod tests {
-    //! Pure provisioning validation without a running database.
-    use super::*;
-
-    impl BootstrapOidcClient {
-        /// A valid public client for exercising individual provisioning constraints.
-        fn fixture() -> Self {
-            Self {
-                id: "test-client".into(),
-                display_name: "Test client".into(),
-                redirect_uris: vec!["https://client.example/callback?flow=one".into()],
-                post_logout_uris: Vec::new(),
-                allowed_scopes: vec!["openid".into()],
-                allowed_audiences: vec!["test-client".into()],
-                allow_refresh: false,
-                enabled: true,
-                trusted: false,
-                client_secret_hash: None,
-            }
-        }
-    }
-
-    /// URI validation preserves URL syntax errors and names the affected allowlist.
-    #[test]
-    fn redirect_validation_preserves_sources_and_applies_both_policies() {
-        let mut client = BootstrapOidcClient::fixture();
-        assert!(client.validate().is_ok());
-        client.redirect_uris.clear();
-        assert!(matches!(
-            client.validate(),
-            Err(ClientConfigurationError::RedirectCount {
-                kind: OidcRedirectKind::Authorization,
-                minimum: 1
-            })
-        ));
-        client.redirect_uris.push("/relative".into());
-        let error = client.validate().expect_err("absolute URL required");
-        assert!(std::error::Error::source(&error).is_some());
-        for invalid in [
-            "http://client.example",
-            "https://user@client.example",
-            "https://user:secret@client.example",
-            "https://client.example/#fragment",
-        ] {
-            client.redirect_uris = vec![invalid.into()];
-            assert!(matches!(
-                client.validate(),
-                Err(ClientConfigurationError::RedirectPolicy {
-                    kind: OidcRedirectKind::Authorization
-                })
-            ));
-            client.redirect_uris = BootstrapOidcClient::fixture().redirect_uris;
-            client.post_logout_uris = vec![invalid.into()];
-            assert!(matches!(
-                client.validate(),
-                Err(ClientConfigurationError::RedirectPolicy {
-                    kind: OidcRedirectKind::PostLogout
-                })
-            ));
-            client.post_logout_uris.clear();
-        }
-    }
-
-    /// Identifiers, labels and digests enforce the provisioning contract at its exact bounds.
-    #[test]
-    fn provisioning_bounds_identifiers_labels_and_digests() {
-        for (value, valid) in [
-            ("", false),
-            ("has space", false),
-            ("a._-Z09", true),
-            (&"x".repeat(64), true),
-            (&"x".repeat(65), false),
-        ] {
-            assert_eq!(BootstrapOidcClient::valid_identifier(value), valid);
-        }
-        let mut client = BootstrapOidcClient::fixture();
-        client.display_name = "é".repeat(80);
-        client.client_secret_hash = Some(vec![0; 32]);
-        assert!(client.validate().is_ok());
-        client.display_name.push('é');
-        assert!(matches!(
-            client.validate(),
-            Err(ClientConfigurationError::DisplayName)
-        ));
-        client.display_name = "Test".into();
-        client.client_secret_hash = Some(vec![0; 31]);
-        assert!(matches!(
-            client.validate(),
-            Err(ClientConfigurationError::SecretDigest)
-        ));
-        client.client_secret_hash = None;
-        client.allowed_scopes.clear();
-        assert!(matches!(
-            client.validate(),
-            Err(ClientConfigurationError::Scopes)
-        ));
-        client.allowed_scopes = vec!["openid".into()];
-        client.allowed_audiences.clear();
-        assert!(matches!(
-            client.validate(),
-            Err(ClientConfigurationError::Audiences)
-        ));
-    }
-}
+mod tests;

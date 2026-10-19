@@ -1,0 +1,23 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "WITH cap AS (SELECT now() + $2::bigint * interval '1 second' AS at),\n                capped AS (\n                    UPDATE oidc_client_secrets\n                    SET expires_at = LEAST(COALESCE(expires_at, 'infinity'), cap.at)\n                    FROM cap\n                    WHERE client_id = $1\n                    AND (expires_at IS NULL OR expires_at > now())\n                )\n                SELECT at AS \"at!\" FROM cap",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "at!",
+        "type_info": "Timestamptz"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Int8"
+      ]
+    },
+    "nullable": [
+      null
+    ]
+  },
+  "hash": "39190d9e112a33d67f729961cb9cfb655bebe676f98de8f06617b807169386fc"
+}

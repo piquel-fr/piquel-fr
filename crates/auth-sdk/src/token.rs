@@ -242,7 +242,7 @@ pub enum Subject {
 ///
 /// ```
 /// use chrono::{TimeDelta, Utc};
-/// use piquel_auth::{AccessToken, ClientId, ProfileClaims, Scopes, Subject};
+/// use piquel_auth::{AccessToken, ProfileClaims, Scopes, Subject};
 ///
 /// piquel_auth::scopes! {
 ///     /// Scopes of the notes API.
@@ -255,7 +255,7 @@ pub enum Subject {
 /// // Normally returned by `ResourceValidator::validate`.
 /// let token: AccessToken = AccessToken {
 ///     subject: Subject::User("01936f3e-8c00-7000-8000-000000000001".parse()?),
-///     client_id: ClientId::new("notes-web"),
+///     client_id: "notes-web".parse()?,
 ///     scopes: "openid notes:read".parse()?,
 ///     token_id: "01936f3e-8c00-7000-8000-000000000003".parse()?,
 ///     session_id: None,
