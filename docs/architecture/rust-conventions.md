@@ -67,7 +67,7 @@ build two on one database as replicas (`Replicas` in `src/tests.rs`).
 The router installs origin/CSRF checks, rate limits, a deadline and browser
 isolation headers. Public-client origins for CORS are looked up per request.
 
-`ClientRegistry` (`src/clients.rs`) is the only code that changes OIDC clients: it
+`ClientRegistry` (`src/clients/mod.rs`) is the only code that changes OIDC clients: it
 creates, updates, enables, disables and rotates the secrets of clients, recording
 each change's event in its transaction. It takes a `ClientRegistration` from
 `piquel_common::clients`, whose field types validate themselves, so invalid input
