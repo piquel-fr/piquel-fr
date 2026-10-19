@@ -376,9 +376,9 @@ async fn a_cancelled_attempt_holds_back_its_key_until_its_lease_expires() {
     assert_eq!(next.id, second);
 }
 
-/// Thirty days after a failure, cleanup abandons its key: the failure is deleted
-/// and the deliveries behind it are cancelled, never sent out of order. The key
-/// then takes new deliveries again.
+/// Thirty days after a failure, cleanup abandons its key: the deliveries behind
+/// it are cancelled a batch at a time, never sent out of order, and the failure is
+/// deleted once none is left. The key then takes new deliveries again.
 #[tokio::test]
 #[ignore = "requires a disposable TEST_DATABASE_URL"]
 async fn cleanup_abandons_a_key_stuck_behind_an_old_failure() {
@@ -386,7 +386,10 @@ async fn cleanup_abandons_a_key_stuck_behind_an_old_failure() {
     clear::<Abandoned>(&pool).await;
     let key = format!("key-{}", Uuid::now_v7());
     let failed_id = insert::<Abandoned>(&pool, Some(&key)).await;
-    let waiting = insert::<Abandoned>(&pool, Some(&key)).await;
+    let waiting = [
+        insert::<Abandoned>(&pool, Some(&key)).await,
+        insert::<Abandoned>(&pool, Some(&key)).await,
+    ];
     let attempt = claim::<Abandoned>(&pool, LEASE).await.expect("first");
     finish(&pool, &attempt, &failed()).await.expect("fail");
     sqlx::query("UPDATE deliveries SET finished_at = now() - interval '31 days' WHERE id = $1")
@@ -395,18 +398,38 @@ async fn cleanup_abandons_a_key_stuck_behind_an_old_failure() {
         .await
         .expect("age the failure");
 
-    MaintenanceRepository::from_pool(&pool)
-        .purge_expired_auth_state(1000)
-        .await
-        .expect("cleanup");
-    let listed = DeliveryRepository::from_pool(&pool)
-        .list(None, Some(Abandoned::NAME), 10)
-        .await
-        .expect("list");
+    let cleanup = async || {
+        MaintenanceRepository::from_pool(&pool)
+            .purge_expired_auth_state(1)
+            .await
+            .expect("cleanup");
+        let mut listed: Vec<_> = DeliveryRepository::from_pool(&pool)
+            .list(None, Some(Abandoned::NAME), 10)
+            .await
+            .expect("list")
+            .into_iter()
+            .map(|d| (d.id, d.status))
+            .collect();
+        listed.sort_by_key(|&(id, _)| id.as_uuid());
+        listed
+    };
+    let statuses = cleanup().await;
+    assert!(
+        statuses.contains(&(failed_id, DeliveryStatus::Failed)),
+        "the failure stays while deliveries wait behind it: {statuses:?}"
+    );
     assert_eq!(
-        listed.iter().map(|d| (d.id, d.status)).collect::<Vec<_>>(),
-        [(waiting, DeliveryStatus::Cancelled)],
-        "the failure is gone and the delivery behind it cancelled"
+        statuses
+            .iter()
+            .filter(|(_, status)| *status == DeliveryStatus::Cancelled)
+            .count(),
+        1,
+        "one batch is cancelled"
+    );
+    assert_eq!(
+        cleanup().await,
+        waiting.map(|id| (id, DeliveryStatus::Cancelled)),
+        "the failure is gone once none is waiting"
     );
     assert!(claim::<Abandoned>(&pool, LEASE).await.is_none());
 

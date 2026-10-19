@@ -108,7 +108,8 @@ impl DeliveryError {
     /// this error at `now`. A retry later than `expires` fails it instead.
     /// `jitter`, in `[0, 1)`, scales the backoff: a retry waits a random time up to
     /// the bound, which doubles from [`FIRST_BACKOFF`] to [`MAX_BACKOFF`] ("full
-    /// jitter"), unless the receiver sent `Retry-After`.
+    /// jitter"), or longer if the receiver's `Retry-After` asks. `Retry-After` is
+    /// only a minimum, so a receiver cannot ask for retries without backoff.
     fn outcome(
         self,
         attempts: u64,
@@ -131,7 +132,8 @@ impl DeliveryError {
         let bound = FIRST_BACKOFF
             .saturating_mul(2_u32.saturating_pow(doublings))
             .min(MAX_BACKOFF);
-        let delay = retry_after.unwrap_or_else(|| bound.mul_f64(jitter));
+        let backoff = bound.mul_f64(jitter);
+        let delay = retry_after.map_or(backoff, |asked| asked.max(backoff));
         let at = TimeDelta::from_std(delay)
             .ok()
             .and_then(|delay| now.checked_add_signed(delay));

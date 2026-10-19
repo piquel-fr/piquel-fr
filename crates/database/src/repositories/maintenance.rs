@@ -165,10 +165,11 @@ impl MaintenanceRepository<'_> {
                 LIMIT $1
                 FOR UPDATE SKIP LOCKED
             )",
-            // A key stuck behind a failure for 30 days is abandoned: the failure is
-            // deleted and the deliveries waiting behind it are cancelled, so none is
-            // sent out of order. Locking the key's ordering row skips a key whose
-            // next delivery is being inserted, and makes later inserts wait.
+            // A key stuck behind a failure for 30 days is abandoned: the deliveries
+            // waiting behind the failure are cancelled, a batch at a time, then the
+            // failure is deleted once none is left, so none is sent out of order.
+            // Locking the key's ordering row skips a key whose next delivery is being
+            // inserted, and makes later inserts wait.
             "WITH stuck AS (
                 SELECT ordering.ordering_key
                 FROM delivery_orderings ordering
@@ -184,12 +185,27 @@ impl MaintenanceRepository<'_> {
             ), waiting AS (
                 UPDATE deliveries
                 SET status = 'cancelled', finished_at = now(), claim_token = NULL
-                WHERE ordering_key IN (SELECT ordering_key FROM stuck)
-                AND status = 'pending'
+                WHERE ctid IN (
+                    SELECT delivery.ctid
+                    FROM deliveries delivery
+                    WHERE delivery.ordering_key IN (SELECT ordering_key FROM stuck)
+                    AND delivery.status = 'pending'
+                    LIMIT $1
+                    FOR UPDATE SKIP LOCKED
+                )
+                RETURNING id
             )
-            DELETE FROM deliveries
-            WHERE ordering_key IN (SELECT ordering_key FROM stuck)
-            AND status = 'failed'",
+            DELETE FROM deliveries failure
+            WHERE failure.ordering_key IN (SELECT ordering_key FROM stuck)
+            AND failure.status = 'failed'
+            -- The statement's snapshot still sees the rows cancelled above as pending.
+            AND NOT EXISTS (
+                SELECT 1
+                FROM deliveries delivery
+                WHERE delivery.ordering_key = failure.ordering_key
+                AND delivery.status = 'pending'
+                AND delivery.id NOT IN (SELECT id FROM waiting)
+            )",
             // Ordered failures wait for the statement above, which keeps their key's order.
             "DELETE FROM deliveries d
             WHERE d.ctid IN (

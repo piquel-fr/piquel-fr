@@ -34,8 +34,8 @@ fn delay(outcome: &DeliveryOutcome) -> Option<TimeDelta> {
     }
 }
 
-/// Retries wait a random time up to a bound doubling from 10 s to an hour, or as
-/// long as `Retry-After` says. Permanent errors, and retries past the channel's
+/// Retries wait a random time up to a bound doubling from 10 s to an hour, or
+/// longer if `Retry-After` asks; a shorter `Retry-After` does not skip the backoff. Permanent errors, and retries past the channel's
 /// maximum age, fail at once.
 #[test]
 fn retries_back_off_and_honor_retry_after_until_the_maximum_age() {
@@ -59,6 +59,10 @@ fn retries_back_off_and_honor_retry_after_until_the_maximum_age() {
     assert_eq!(
         delay(&outcome(asked(120), 1, 0.5)),
         Some(TimeDelta::seconds(120))
+    );
+    assert_eq!(
+        delay(&outcome(asked(0), 3, 0.5)),
+        Some(TimeDelta::seconds(20))
     );
     assert_eq!(
         outcome(asked(24 * 3600), 1, 0.5),
@@ -273,8 +277,8 @@ impl Channel for Recorded {
 /// How [`Recorder`] answers a delivery.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 enum Behavior {
-    /// Retryable at once on the first attempt, then accepted.
-    Flaky,
+    /// Always retryable, asking to be retried at once.
+    Unavailable,
     /// Permanently refused.
     Refused,
 }
@@ -291,15 +295,12 @@ impl Sender for Recorder {
         &self,
         delivery: &Delivery<Recorded>,
     ) -> impl Future<Output = Result<(), DeliveryError>> + Send {
-        let mut attempts = self.0.lock().expect("attempts");
-        attempts.push(delivery.id);
-        let first = attempts.iter().filter(|&&id| id == delivery.id).count() == 1;
+        self.0.lock().expect("attempts").push(delivery.id);
         std::future::ready(match delivery.recipient {
-            Behavior::Flaky if first => Err(DeliveryError::Retryable {
+            Behavior::Unavailable => Err(DeliveryError::Retryable {
                 failure: Failure::Connection,
                 retry_after: Some(Duration::ZERO),
             }),
-            Behavior::Flaky => Ok(()),
             Behavior::Refused => Err(DeliveryError::Permanent(Failure::Status(
                 StatusCode::FORBIDDEN,
             ))),
@@ -307,11 +308,11 @@ impl Sender for Recorder {
     }
 }
 
-/// Workers retry a retryable failure with the same delivery ID until it succeeds,
-/// and fail a permanent one after one attempt.
+/// Workers record a retryable failure as a retry, with every attempt carrying
+/// the delivery's ID, and fail a permanent one after one attempt.
 #[tokio::test]
 #[ignore = "requires TEST_DATABASE_URL"]
-async fn workers_retry_with_the_same_id_and_fail_permanent_errors() {
+async fn workers_retry_retryable_errors_and_fail_permanent_ones() {
     let database = Replicas::database().await;
     for summary in database
         .deliveries()
@@ -338,7 +339,7 @@ async fn workers_retry_with_the_same_id_and_fail_permanent_errors() {
             .await
             .expect("insert")
     };
-    let flaky = insert(Behavior::Flaky).await;
+    let unavailable = insert(Behavior::Unavailable).await;
     let refused = insert(Behavior::Refused).await;
 
     let recorder = Recorder::default();
@@ -352,41 +353,42 @@ async fn workers_retry_with_the_same_id_and_fail_permanent_errors() {
                 .list(None, Some(Recorded::NAME), 1000)
                 .await
                 .expect("list");
-            let status = |id| {
-                listed
-                    .iter()
-                    .find(|d| d.id == id)
-                    .map(|d| (d.status, d.attempts))
-            };
-            if [status(flaky), status(refused)]
-                .iter()
-                .all(|s| s.is_some_and(|(status, _)| status != DeliveryStatus::Pending))
+            let find = |id| listed.iter().find(|d| d.id == id).cloned();
+            if let (Some(unavailable), Some(refused)) = (find(unavailable), find(refused))
+                && unavailable.last_error.is_some()
+                && refused.status != DeliveryStatus::Pending
             {
-                break (status(flaky), status(refused), listed);
+                break (unavailable, refused);
             }
             tokio::time::sleep(Duration::from_millis(50)).await;
         }
     })
     .await
-    .expect("both deliveries finish");
+    .expect("both deliveries are attempted");
     jobs.shutdown().await.expect("no worker panicked");
 
-    let (flaky_status, refused_status, listed) = finished;
-    assert_eq!(flaky_status, Some((DeliveryStatus::Succeeded, 2)));
-    assert_eq!(refused_status, Some((DeliveryStatus::Failed, 1)));
-    let last_error = |id| {
-        listed
-            .iter()
-            .find(|d| d.id == id)
-            .and_then(|d| d.last_error.clone())
-    };
-    assert_eq!(last_error(flaky).as_deref(), Some("connection failed"));
-    assert_eq!(last_error(refused).as_deref(), Some("HTTP 403"));
+    let (unavailable_summary, refused_summary) = finished;
+    assert_eq!(unavailable_summary.status, DeliveryStatus::Pending);
+    assert_eq!(
+        unavailable_summary.last_error.as_deref(),
+        Some("connection failed")
+    );
+    assert!(
+        unavailable_summary.next_attempt_at
+            <= Utc::now() + TimeDelta::from_std(MAX_BACKOFF).expect("backoff"),
+        "retried within its backoff"
+    );
+    assert_eq!(
+        (refused_summary.status, refused_summary.attempts),
+        (DeliveryStatus::Failed, 1)
+    );
+    assert_eq!(refused_summary.last_error.as_deref(), Some("HTTP 403"));
     let seen = attempts.lock().expect("attempts").clone();
     let count = |id| seen.iter().filter(|&&seen| seen == id).count();
+    assert!(count(unavailable) >= 1);
     assert_eq!(
-        (count(flaky), count(refused), seen.len()),
-        (2, 1, 3),
-        "retries reuse the delivery ID"
+        (count(refused), seen.len()),
+        (1, count(unavailable) + 1),
+        "every attempt carries its delivery's ID"
     );
 }

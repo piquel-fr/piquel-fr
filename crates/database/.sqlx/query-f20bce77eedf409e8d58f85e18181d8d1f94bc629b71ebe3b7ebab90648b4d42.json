@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "WITH stuck AS (\n                SELECT ordering.ordering_key\n                FROM delivery_orderings ordering\n                WHERE EXISTS (\n                    SELECT 1\n                    FROM deliveries failure\n                    WHERE failure.ordering_key = ordering.ordering_key\n                    AND failure.status = 'failed'\n                    AND failure.finished_at < now() - interval '30 days'\n                )\n                LIMIT $1\n                FOR UPDATE SKIP LOCKED\n            ), waiting AS (\n                UPDATE deliveries\n                SET status = 'cancelled', finished_at = now(), claim_token = NULL\n                WHERE ctid IN (\n                    SELECT delivery.ctid\n                    FROM deliveries delivery\n                    WHERE delivery.ordering_key IN (SELECT ordering_key FROM stuck)\n                    AND delivery.status = 'pending'\n                    LIMIT $1\n                    FOR UPDATE SKIP LOCKED\n                )\n                RETURNING id\n            )\n            DELETE FROM deliveries failure\n            WHERE failure.ordering_key IN (SELECT ordering_key FROM stuck)\n            AND failure.status = 'failed'\n            -- The statement's snapshot still sees the rows cancelled above as pending.\n            AND NOT EXISTS (\n                SELECT 1\n                FROM deliveries delivery\n                WHERE delivery.ordering_key = failure.ordering_key\n                AND delivery.status = 'pending'\n                AND delivery.id NOT IN (SELECT id FROM waiting)\n            )",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Int8"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "f20bce77eedf409e8d58f85e18181d8d1f94bc629b71ebe3b7ebab90648b4d42"
+}

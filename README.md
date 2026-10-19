@@ -99,8 +99,9 @@ Disabling invitation enforcement affects signup only; existing users keep access
 
 ### Outbound deliveries
 
-Messages for other systems, such as back-channel logout tokens, wait in a queue
-in the database until a worker sends them. Inspect and repair it with:
+Messages for other systems wait in a queue in the database until a worker sends
+them. No channel uses it yet; back-channel logout (#65) will be the first.
+Inspect and repair it with:
 
 ```sh
 just auth deliveries list --status failed

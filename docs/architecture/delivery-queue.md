@@ -50,14 +50,16 @@ Auth-service owns sending: the workers, the retry policy and the HTTP client
    it, the outcome is discarded and logged as a lost lease.
    - Success: `succeeded`.
    - Retryable error: back to `pending`. The next attempt waits a random time up
-     to a bound that starts at 10 seconds and doubles to an hour, or as long as
-     the receiver's `Retry-After` asks.
+     to a bound that starts at 10 seconds and doubles to an hour, or longer if
+     the receiver's `Retry-After` asks. A shorter `Retry-After` never skips the
+     backoff, so a receiver cannot make workers retry it constantly.
    - Permanent error, or a retry later than the channel's `MAX_AGE` after
      creation: `failed`.
 5. The cleanup job deletes `succeeded` deliveries after 7 days and `failed` or
-   `cancelled` ones after 30. Deleting a failed ordered delivery cancels the
-   ones waiting behind it. Cleanup locks the key's ordering row first, so it
-   skips a key whose next delivery is still being inserted.
+   `cancelled` ones after 30. For a failed ordered delivery, it first cancels
+   the ones waiting behind it, a batch at a time, and deletes the failure once
+   none is left. Cleanup locks the key's ordering row first, so it skips a key
+   whose next delivery is still being inserted.
 
 ## Outbound HTTP
 
