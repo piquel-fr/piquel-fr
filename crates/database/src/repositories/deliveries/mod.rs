@@ -474,13 +474,14 @@ impl DeliveryRepository<'_> {
         .collect())
     }
 
-    /// Makes a failed or cancelled delivery due again now, and restarts its
-    /// channel's maximum age.
+    /// Makes a failed delivery, or a cancelled unordered one, due again now, and
+    /// restarts its channel's maximum age. Cancelling an ordered delivery is
+    /// final: the deliveries after it may already have been sent.
     ///
     /// # Errors
     ///
-    /// Returns [`DatabaseError::NotFound`] if no failed or cancelled delivery has
-    /// this ID, or another [`DatabaseError`] if the query fails.
+    /// Returns [`DatabaseError::NotFound`] if no failed delivery or cancelled
+    /// unordered delivery has this ID, or another [`DatabaseError`] if the query fails.
     pub async fn retry(&mut self, id: DeliveryId) -> Result<(), DatabaseError> {
         run!(
             self,
@@ -489,7 +490,8 @@ impl DeliveryRepository<'_> {
                 "UPDATE deliveries
                 SET status = 'pending', next_attempt_at = now(), finished_at = NULL,
                     retried_at = now()
-                WHERE id = $1 AND status IN ('failed', 'cancelled')
+                WHERE id = $1
+                AND (status = 'failed' OR (status = 'cancelled' AND ordering_key IS NULL))
                 RETURNING id",
                 id.as_uuid(),
             )

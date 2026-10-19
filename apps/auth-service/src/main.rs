@@ -232,7 +232,7 @@ enum DeliveriesCommand {
         #[arg(long, default_value_t = 100)]
         limit: u32,
     },
-    /// Attempt a failed or cancelled delivery again now.
+    /// Attempt a failed delivery, or a cancelled unordered one, again now.
     Retry {
         /// The delivery's ID.
         id: DeliveryId,
@@ -280,7 +280,7 @@ impl DeliveriesCommand {
             }
             Self::Retry { id } => (
                 id,
-                "failed or cancelled",
+                "failed or cancelled unordered",
                 database.deliveries().retry(id).await,
             ),
             Self::Cancel { id } => (

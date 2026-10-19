@@ -79,12 +79,13 @@ statuses, refused destinations and redirects fail at once.
 
 ```sh
 auth-service deliveries list [--status failed] [--channel scim] [--limit 100]
-auth-service deliveries retry <id>    # a failed or cancelled delivery, due now
+auth-service deliveries retry <id>    # a failed, or cancelled unordered, delivery
 auth-service deliveries cancel <id>   # a pending or failed delivery
 ```
 
 `just auth deliveries …` runs them with the caller's configuration. Retrying a
-delivery restarts its channel's `MAX_AGE`. Cancelling an attempt in progress
+delivery makes it due now and restarts its channel's `MAX_AGE`. Cancelling an
+ordered delivery is final, since the deliveries after it may already be sent. Cancelling an attempt in progress
 cannot stop it from reaching the receiver, but its outcome is discarded, and the
 deliveries ordered after it wait for its lease to expire.
 

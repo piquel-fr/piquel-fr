@@ -271,7 +271,7 @@ async fn an_expired_lease_is_claimed_again_and_the_stale_outcome_discarded() {
 
 /// Deliveries with one key are claimed in ordinal order, one at a time. A failed
 /// one holds back the rest, even past cleanup's retention, until it is retried and
-/// succeeds, or is cancelled.
+/// succeeds, or is cancelled for good.
 #[tokio::test]
 #[ignore = "requires a disposable TEST_DATABASE_URL"]
 async fn ordered_deliveries_go_one_at_a_time_and_a_failure_blocks_the_rest() {
@@ -326,6 +326,13 @@ async fn ordered_deliveries_go_one_at_a_time_and_a_failure_blocks_the_rest() {
         .await
         .expect("fail again");
     repository().cancel(ids[1]).await.expect("cancel");
+    assert!(
+        matches!(
+            repository().retry(ids[1]).await,
+            Err(DatabaseError::NotFound)
+        ),
+        "cancelling an ordered delivery is final"
+    );
     assert!(matches!(
         repository().cancel(ids[1]).await,
         Err(DatabaseError::NotFound)
