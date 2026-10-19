@@ -109,7 +109,8 @@ just auth deliveries cancel <id>
 ```
 
 A failed delivery with an ordering key holds back the ones after it until it is
-retried or cancelled. See `docs/architecture/delivery-queue.md`.
+retried or cancelled. After 30 days, cleanup deletes it and cancels the ones
+behind it. See `docs/architecture/delivery-queue.md`.
 
 ### OIDC clients
 

@@ -10,9 +10,9 @@ const MAX_PURGE_BATCH: u32 = 1_000;
 impl MaintenanceRepository<'_> {
     /// Purges a bounded batch of expired ephemeral authentication state, of event
     /// personal data older than 90 days, and of deliveries that succeeded over 7
-    /// days ago or failed or were cancelled over 30 days ago (except failed ordered
-    /// ones, which hold back their key until an operator acts), and returns how many
-    /// rows were deleted. `batch_size` is clamped to 1..=1000 rows per table.
+    /// days ago or failed or were cancelled over 30 days ago, and returns how many
+    /// rows were deleted. Deleting an ordered failure cancels the deliveries
+    /// waiting behind it, which are deleted 30 days later. `batch_size` is clamped to 1..=1000 rows per table.
     ///
     /// Each batch skips rows that live requests have locked. Outside a transaction,
     /// each table's batch commits on its own, so cleanup never holds locks across
@@ -165,8 +165,32 @@ impl MaintenanceRepository<'_> {
                 LIMIT $1
                 FOR UPDATE SKIP LOCKED
             )",
-            // A failed ordered delivery holds back the later ones with its key, even
-            // ones not committed yet, so it stays until an operator retries or cancels it.
+            // A key stuck behind a failure for 30 days is abandoned: the failure is
+            // deleted and the deliveries waiting behind it are cancelled, so none is
+            // sent out of order. Locking the key's ordering row skips a key whose
+            // next delivery is being inserted, and makes later inserts wait.
+            "WITH stuck AS (
+                SELECT ordering.ordering_key
+                FROM delivery_orderings ordering
+                WHERE EXISTS (
+                    SELECT 1
+                    FROM deliveries failure
+                    WHERE failure.ordering_key = ordering.ordering_key
+                    AND failure.status = 'failed'
+                    AND failure.finished_at < now() - interval '30 days'
+                )
+                LIMIT $1
+                FOR UPDATE SKIP LOCKED
+            ), waiting AS (
+                UPDATE deliveries
+                SET status = 'cancelled', finished_at = now(), claim_token = NULL
+                WHERE ordering_key IN (SELECT ordering_key FROM stuck)
+                AND status = 'pending'
+            )
+            DELETE FROM deliveries
+            WHERE ordering_key IN (SELECT ordering_key FROM stuck)
+            AND status = 'failed'",
+            // Ordered failures wait for the statement above, which keeps their key's order.
             "DELETE FROM deliveries d
             WHERE d.ctid IN (
                 SELECT delivery.ctid

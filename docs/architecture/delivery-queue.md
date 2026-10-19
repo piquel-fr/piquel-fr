@@ -26,7 +26,9 @@ Auth-service owns sending: the workers, the retry policy and the HTTP client
 - **Ordered per key.** Deliveries that share an ordering key are sent one at a
   time, in the order their transactions committed, whatever the replicas' clocks
   say. A failed one holds back the rest until an operator retries or cancels it,
-  and so does a cancelled one until its last attempt's lease expires. Deliveries
+  or for 30 days, after which cleanup abandons the key: the failure is deleted
+  and the deliveries behind it are cancelled, never sent out of order. A
+  cancelled one holds back the rest until its last attempt's lease expires. Deliveries
   without a key are unordered.
 - **Never secret.** Payloads are stored as they are, so they never hold a
   plaintext secret. `last_error` holds a status code or an error kind, never a
@@ -53,8 +55,9 @@ Auth-service owns sending: the workers, the retry policy and the HTTP client
    - Permanent error, or a retry later than the channel's `MAX_AGE` after
      creation: `failed`.
 5. The cleanup job deletes `succeeded` deliveries after 7 days and `failed` or
-   `cancelled` ones after 30. A failed ordered delivery stays until an operator
-   acts, since it holds back its key, even for deliveries not committed yet.
+   `cancelled` ones after 30. Deleting a failed ordered delivery cancels the
+   ones waiting behind it. Cleanup locks the key's ordering row first, so it
+   skips a key whose next delivery is still being inserted.
 
 ## Outbound HTTP
 

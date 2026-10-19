@@ -44,6 +44,8 @@ test_channels! {
     Ordered = "test_ordered";
     /// Cancelled while being sent.
     Interrupted = "test_interrupted";
+    /// Stuck behind an old failure.
+    Abandoned = "test_abandoned";
 }
 
 /// Copies the subject's username into each event's delivery, as back-channel
@@ -270,8 +272,8 @@ async fn an_expired_lease_is_claimed_again_and_the_stale_outcome_discarded() {
 }
 
 /// Deliveries with one key are claimed in ordinal order, one at a time. A failed
-/// one holds back the rest, even past cleanup's retention, until it is retried and
-/// succeeds, or is cancelled for good.
+/// one holds back the rest, through cleanup, until it is retried and succeeds, or
+/// is cancelled for good.
 #[tokio::test]
 #[ignore = "requires a disposable TEST_DATABASE_URL"]
 async fn ordered_deliveries_go_one_at_a_time_and_a_failure_blocks_the_rest() {
@@ -303,11 +305,6 @@ async fn ordered_deliveries_go_one_at_a_time_and_a_failure_blocks_the_rest() {
     let second = next().await.expect("second");
     assert_eq!(second.id, ids[1]);
     finish(&pool, &second, &failed()).await.expect("fail");
-    sqlx::query("UPDATE deliveries SET finished_at = now() - interval '1 year' WHERE id = $1")
-        .bind(second.id.as_uuid())
-        .execute(&pool)
-        .await
-        .expect("age the failure");
     MaintenanceRepository::from_pool(&pool)
         .purge_expired_auth_state(1000)
         .await
@@ -377,4 +374,45 @@ async fn a_cancelled_attempt_holds_back_its_key_until_its_lease_expires() {
     tokio::time::sleep(lease).await;
     let next = claim::<Interrupted>(&pool, lease).await.expect("second");
     assert_eq!(next.id, second);
+}
+
+/// Thirty days after a failure, cleanup abandons its key: the failure is deleted
+/// and the deliveries behind it are cancelled, never sent out of order. The key
+/// then takes new deliveries again.
+#[tokio::test]
+#[ignore = "requires a disposable TEST_DATABASE_URL"]
+async fn cleanup_abandons_a_key_stuck_behind_an_old_failure() {
+    let pool = Database::test_pool().await;
+    clear::<Abandoned>(&pool).await;
+    let key = format!("key-{}", Uuid::now_v7());
+    let failed_id = insert::<Abandoned>(&pool, Some(&key)).await;
+    let waiting = insert::<Abandoned>(&pool, Some(&key)).await;
+    let attempt = claim::<Abandoned>(&pool, LEASE).await.expect("first");
+    finish(&pool, &attempt, &failed()).await.expect("fail");
+    sqlx::query("UPDATE deliveries SET finished_at = now() - interval '31 days' WHERE id = $1")
+        .bind(failed_id.as_uuid())
+        .execute(&pool)
+        .await
+        .expect("age the failure");
+
+    MaintenanceRepository::from_pool(&pool)
+        .purge_expired_auth_state(1000)
+        .await
+        .expect("cleanup");
+    let listed = DeliveryRepository::from_pool(&pool)
+        .list(None, Some(Abandoned::NAME), 10)
+        .await
+        .expect("list");
+    assert_eq!(
+        listed.iter().map(|d| (d.id, d.status)).collect::<Vec<_>>(),
+        [(waiting, DeliveryStatus::Cancelled)],
+        "the failure is gone and the delivery behind it cancelled"
+    );
+    assert!(claim::<Abandoned>(&pool, LEASE).await.is_none());
+
+    let next = insert::<Abandoned>(&pool, Some(&key)).await;
+    assert_eq!(
+        claim::<Abandoned>(&pool, LEASE).await.map(|d| d.id),
+        Some(next)
+    );
 }
