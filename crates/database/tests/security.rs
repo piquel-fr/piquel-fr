@@ -1,6 +1,6 @@
 //! Persistence guarantees behind invitations and session passkey confirmations.
 use chrono::{Duration, Utc};
-use piquel_common::{AuthenticationMethod, SessionId, UserId};
+use piquel_common::{AuthenticationMethod, SessionId, TokenId, UserId};
 use piquel_repository::{Database, DatabaseConfig, DatabaseError, InsertSession, InsertUser};
 /// Invitations are single-use, and passkey confirmations belong to one session and end with it.
 #[expect(
@@ -20,7 +20,7 @@ async fn invitation_redemption_and_confirmation_lifecycle() {
     let user = UserId::new();
     let digest = user.as_uuid().as_bytes().repeat(2);
     db.security()
-        .create_invitation(&digest, Utc::now() + Duration::minutes(1))
+        .create_invitation(TokenId::new(), &digest, Utc::now() + Duration::minutes(1))
         .await
         .expect("invite");
     let mut tx = db.begin().await.expect("transaction");

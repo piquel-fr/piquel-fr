@@ -13,6 +13,7 @@ use axum::{
 use piquel_common::{
     AuthenticationMethod, PasskeyId, UserId,
     events::{Actor, DomainEvent, EventContext, RevocationReason},
+    protocol::api,
 };
 use piquel_crypto::Secret;
 use piquel_repository::{
@@ -41,7 +42,7 @@ pub use error::PasskeyConfigError;
 use error::PasskeyError;
 use types::{
     AuthenticationFinish, DisplayName, EnrollmentStart, LoginStart, PasskeyKind, PasskeyName,
-    PasskeyView, RegistrationFinish, RegistrationStart, Rename, SessionView, UserView, Username,
+    RegistrationFinish, RegistrationStart, Rename, SessionView, UserView, Username,
 };
 
 /// Browser passkey ceremonies, passkey management and session confirmation.
@@ -769,19 +770,9 @@ impl PasskeyApplication {
     async fn list(
         State(app): State<Self>,
         security::Session(session): security::Session,
-    ) -> Result<Json<Vec<PasskeyView>>, ApiError> {
-        Ok(Json(
-            app.database
-                .passkeys()
-                .list_active(session.user_id)
-                .await?
-                .into_iter()
-                .map(|key| PasskeyView {
-                    id: key.id,
-                    friendly_name: key.friendly_name,
-                })
-                .collect(),
-        ))
+    ) -> Result<Json<Vec<api::Passkey>>, ApiError> {
+        let passkeys = app.database.passkeys().list_active(session.user_id).await?;
+        Ok(Json(passkeys.into_iter().map(Into::into).collect()))
     }
 
     /// Changes a credential label. A name grants nothing, so a session is enough.

@@ -3,7 +3,7 @@
 use super::{FederationRepository, RepositoryExecutor};
 use crate::DatabaseError;
 use chrono::{DateTime, Utc};
-use piquel_common::{Provider, SessionId, TokenId, UserId};
+use piquel_common::{Provider, SessionId, TokenId, UserId, protocol::api::Identity};
 
 /// An in-flight redirect to a social login provider, bound to the initiating
 /// browser.
@@ -79,6 +79,16 @@ pub struct StoredExternalIdentity {
     pub subject: String,
     /// Email the provider reported when linking, if any.
     pub linked_email: Option<String>,
+}
+
+impl From<StoredExternalIdentity> for Identity {
+    /// Shows the provider and linked email, not the provider's subject.
+    fn from(identity: StoredExternalIdentity) -> Self {
+        Self {
+            provider: identity.provider,
+            linked_email: identity.linked_email,
+        }
+    }
 }
 
 /// Verified provider evidence, usable only by its initiating browser until

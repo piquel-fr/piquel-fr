@@ -7,6 +7,11 @@ use super::claims::Acr;
 use chrono::{DateTime, TimeDelta, Utc};
 use serde::{Deserialize, Serialize};
 
+/// Longest time, in seconds, since the passkey confirmation auth's protected
+/// actions accept: sensitive account changes and admin API mutations. The
+/// confirmation happens just before the action, so it can be short.
+pub const CONFIRMATION_MAX_AGE: u32 = 300;
+
 /// What a protected operation needs from the user's authentication: an `acr` to
 /// meet, a maximum age of `auth_time`, or both. The default needs nothing.
 ///

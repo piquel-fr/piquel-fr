@@ -107,6 +107,8 @@ repositories! {
     security: SecurityRepository;
     /// Deletion of expired ephemeral state.
     maintenance: MaintenanceRepository;
+    /// Administrator rights.
+    administrators: AdministratorRepository;
 }
 
 /// Runs a checked query on the repository's pool or transaction connection and
@@ -180,6 +182,8 @@ impl From<Unsigned> for u64 {
     }
 }
 
+/// Administrator rights and the lock that serializes their changes.
+pub(crate) mod administrators;
 /// The outbound delivery queue.
 pub(crate) mod deliveries;
 /// Verified email ownership and primary-address persistence.

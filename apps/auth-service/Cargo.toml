@@ -6,6 +6,7 @@ license.workspace = true
 repository.workspace = true
 
 [dependencies]
+piquel-admin-api.workspace = true
 piquel-common = { workspace = true, features = ["config", "events"] }
 piquel-crypto.workspace = true
 piquel-repository.workspace = true

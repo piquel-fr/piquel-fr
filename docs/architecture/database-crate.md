@@ -22,7 +22,8 @@ sources. Client provisioning validates fields and allowlists through
 
 Each repository has its own module under `src/repositories/` (`users`, `emails`,
 `sessions`, `events`, `deliveries`, `passkeys`, `oidc`, `tokens`, `federation`,
-`security`, `maintenance`), holding its methods and the records they take and return.
+`security`, `maintenance`, `administrators`), holding its methods and the records they
+take and return.
 `repositories/mod.rs` holds only shared plumbing: the executor, the
 `repositories!` macro that declares every handle and its accessors on `Database`,
 `DatabaseTransaction` and `ExclusiveConnection`, the `run!` query macro and the
@@ -43,6 +44,10 @@ rejects, like a non-v7 ID or JSON outside the record's type, becomes
 `DatabaseError::InvalidStoredData` with the column index SQLx reports and the
 decoding error as its source. Uniqueness conflicts and deadline failures retain
 their sources too.
+
+Queries only the admin API reads decode straight into its bodies from
+`piquel-admin-api`. Records that auth also uses elsewhere convert into those bodies
+with `From`, leaving out what the API never shows, so no record repeats an API body.
 
 The cache in `.sqlx/` is committed, and `.cargo/config.toml` sets
 `SQLX_OFFLINE=true`, so builds, including image builds, never connect to a
@@ -69,6 +74,13 @@ Important invariants:
   transaction, under the session row lock, against the action's maximum age. It
   belongs to one session and ends with it.
 - Account locking protects the last-passkey guard from concurrent removals.
+- Grants and revocations of administrator rights take `administrators().lock()`
+  first, so the last-administrator check stays true until they commit. An
+  administrator's mutation that changes an account locks it first, as a grant
+  does. Every admin mutation checks its caller after its last write, just before
+  committing: it share-locks the caller's rights, so a revocation waits for it,
+  and reads their session and confirmation without locking either, so it joins
+  no lock cycle.
 - Active provider subjects and active provider-per-account links are unique.
   Unlink marks the identity revoked and releases both constraints.
 - Verified email ownership is unique across active accounts. Email is optional;

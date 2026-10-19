@@ -118,6 +118,24 @@ pub enum DomainEvent {
         /// When the invitation stops being accepted.
         expires_at: DateTime<Utc>,
     },
+    /// An unredeemed signup invitation was revoked.
+    InvitationRevoked {
+        /// The revoked invitation.
+        invitation_id: TokenId,
+    },
+    /// The account was disabled. Its sessions follow as [`Self::SessionRevoked`].
+    AccountDisabled {
+        /// Why, as the administrator or operator wrote it. Free text may name people.
+        reason: Personal<String>,
+    },
+    /// A disabled account was reactivated.
+    AccountEnabled {},
+    /// An administrator viewed the account's details, which hold personal data.
+    AccountViewed {},
+    /// The account became an administrator.
+    AdministratorGranted {},
+    /// The account's administrator rights were removed.
+    AdministratorRevoked {},
     /// A row of the security audit log that preceded typed events. Only
     /// migrations write these; its fields are private, so one is only ever read back.
     Imported(ImportedAudit),
@@ -147,6 +165,12 @@ impl DomainEvent {
             | Self::IdentityLinked { .. }
             | Self::IdentityUnlinked { .. }
             | Self::InvitationCreated { .. }
+            | Self::InvitationRevoked { .. }
+            | Self::AccountDisabled { .. }
+            | Self::AccountEnabled {}
+            | Self::AccountViewed {}
+            | Self::AdministratorGranted {}
+            | Self::AdministratorRevoked {}
             | Self::Imported(_) => None,
         }
     }
@@ -170,6 +194,12 @@ impl DomainEvent {
             | Self::GrantRevoked { .. }
             | Self::CodeReplayed { .. }
             | Self::InvitationCreated { .. }
+            | Self::InvitationRevoked { .. }
+            | Self::AccountDisabled { .. }
+            | Self::AccountEnabled {}
+            | Self::AccountViewed {}
+            | Self::AdministratorGranted {}
+            | Self::AdministratorRevoked {}
             | Self::Imported(_) => None,
         }
     }

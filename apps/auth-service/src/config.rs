@@ -43,6 +43,8 @@ pub const PUBLIC_BASE_URL: Variable = Variable::new("AUTH_PUBLIC_BASE_URL");
 const SETTINGS_URL: Variable = Variable::new("AUTH_SETTINGS_URL");
 /// HTTP listener behind the HTTPS ingress.
 const PUBLIC_LISTENER: Variable = Variable::new("AUTH_PUBLIC_LISTENER");
+/// Optional private listener serving only the admin API.
+const ADMIN_LISTENER: Variable = Variable::new("AUTH_ADMIN_LISTENER");
 /// `PostgreSQL` transport and database.
 const DATABASE_URL: Variable = Variable::new("AUTH_DATABASE_URL");
 /// Optional separately mounted database password.
@@ -389,6 +391,9 @@ impl ClientConfig {
 pub struct AuthConfig {
     /// Address bound by the HTTP listener behind piqueld.
     pub public_listener: SocketAddr,
+    /// Address bound by the admin API's listener, which no ingress route may reach.
+    /// Without one, auth serves no admin API.
+    pub admin_listener: Option<SocketAddr>,
     /// Passkey policy and origin.
     pub(crate) passkey: PasskeyConfig,
     /// External identity provider policy.
@@ -450,6 +455,7 @@ impl AuthConfig {
         })?;
         Ok(Self {
             public_listener: PUBLIC_LISTENER.parse_or(DEFAULT_PUBLIC_LISTENER)?,
+            admin_listener: ADMIN_LISTENER.parse_optional()?,
             passkey: PasskeyConfig::from_environment(&origin, &persistent_key)?,
             federation: FederationConfig::from_environment(&origin, &settings_url)?,
             oidc: OidcConfig::from_environment(&origin, &persistent_key)?,

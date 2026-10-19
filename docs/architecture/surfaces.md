@@ -8,7 +8,7 @@ This is the target design; parts not built yet are marked *(planned)*.
 | --- | --- | --- |
 | `auth.piquel.fr` | OIDC/OAuth endpoints, ceremony pages and the JSON APIs | every application and user |
 | `piquel.fr` | Account settings; security center, developer console, public profiles *(planned)* | signed-in users |
-| `admin.piquel.fr` | Admin dashboard *(planned)* | administrators |
+| `admin.piquel.fr` | Admin dashboard *(planned)*; auth's private admin API behind it | administrators |
 
 ## auth.piquel.fr
 
@@ -19,31 +19,53 @@ verification *(planned)*). It never hosts settings, developer or admin pages.
 
 The account and admin APIs are routes in the same executable. They are small
 next to the pages that use them, and keeping them there keeps one binary, one
-database owner and one policy layer. Auth keeps its state in PostgreSQL, so it runs
+database owner and one policy layer. The account API is on the public listener; the
+admin API has a private listener of its own (see admin.piquel.fr below). Auth keeps its state in PostgreSQL, so it runs
 as several replicas (see "Running several replicas" in `infra/README.md`). Its pages are static assets embedded at build time
 and are cacheable.
 
-## piquel.fr and admin.piquel.fr
+## piquel.fr
 
-Both are SvelteKit servers on Node (adapter-node), deployed separately from
-auth, so public profiles and discovery documents *(planned)* can be rendered per
-request. The servers keep no state and have no database: public pages read auth's public API, and account and
-admin pages call auth's JSON APIs from the browser with the auth session cookie.
-The hosts are same-site, so the host-only cookie is sent without third-party
-cookie exceptions. Each frontend origin is allowed exactly, and mutations still
-require the CSRF header. No access token is held by these pages.
+A SvelteKit server on Node (adapter-node), deployed separately from auth, so
+public profiles and discovery documents *(planned)* can be rendered per request.
+The server keeps no state and has no database: public pages read auth's public
+API, and account pages call auth's JSON APIs from the browser with the auth session
+cookie. The hosts are same-site, so the host-only cookie is sent without
+third-party cookie exceptions. Each frontend origin is allowed exactly, and
+mutations still require the CSRF header. No access token is held by these pages.
 
 Passkeys are bound to the `auth.piquel.fr` RP ID, so passkey ceremonies always
 run on auth. When an API call needs a recent passkey confirmation, auth answers
 with a step-up error, and the frontend sends the user to auth to confirm and
 back. Users never unlock settings explicitly.
 
-The admin API *(planned)* additionally requires an administrator account and
-accepts only the admin origin. Administrators can change the settings of users
-who are not administrators, through the same handlers as the owner, but never
-add a credential or email to their account. Every admin operation also exists as
-an `auth-service` CLI command. admin.piquel.fr starts reachable only on the
-tailnet; that limits the network path and replaces none of these checks.
+## admin.piquel.fr
+
+The admin dashboard *(planned)* is a server-rendered Rust app, reachable only on
+the tailnet. It signs administrators in as the confidential OIDC client
+`piquel-admin`, with the Rust SDK's login routes, and keeps their tokens on its
+server; the browser holds only the dashboard's session cookie. Its server calls the
+admin API with the administrator's access token.
+
+Auth serves the admin API on a second, private listener that no ingress route
+reaches, so neither the internet nor the tailnet can call it; only the
+application's own services can. The network path is a second wall, not the
+authorization. Auth checks every call:
+
+- The token is for `piquel-admin`, and comes from a passkey sign-in.
+- Its account is an administrator, and its session is still active. Both are read
+  on each call, so revoking either takes effect at once.
+- A mutation needs a passkey confirmation from the last five minutes. Otherwise
+  auth answers with an RFC 9470 challenge, and the dashboard sends the
+  administrator through auth's login and back.
+
+Administrators manage the administrator list too, but never their own rights or
+the last administrator's, and the API never changes an administrator's account.
+Administrators will be able to change the settings of users who are not
+administrators, through the same handlers as the owner, but never add a credential
+or email to their account *(planned)*. Every admin operation is also an
+`auth-service` CLI command *(partly planned)*; granting the first administrator is
+one.
 
 ## Contracts
 

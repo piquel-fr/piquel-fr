@@ -3,6 +3,7 @@
 use super::{EmailRepository, RepositoryExecutor};
 use crate::DatabaseError;
 use chrono::{DateTime, Utc};
+use piquel_admin_api::Email;
 use piquel_common::{TokenId, UserId};
 
 /// An email address attached to an account.
@@ -62,6 +63,26 @@ impl EmailRepository<'_> {
                 input.normalized_email,
                 input.verified_at,
                 input.is_primary,
+            )
+        )
+    }
+
+    /// Lists the account's addresses, primary first.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`DatabaseError`] if the query fails or a row is invalid.
+    pub async fn list_for_user(&mut self, user_id: UserId) -> Result<Vec<Email>, DatabaseError> {
+        run!(
+            self,
+            fetch_all,
+            sqlx::query_as!(
+                Email,
+                r#"SELECT normalized_email AS address, verified_at, is_primary AS "primary"
+                FROM user_emails
+                WHERE user_id = $1
+                ORDER BY is_primary DESC, created_at"#,
+                user_id.as_uuid(),
             )
         )
     }

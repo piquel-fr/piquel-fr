@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "SELECT\n                    c.id, c.display_name, c.enabled,\n                    c.allowed_scopes AS \"allowed_scopes: JsonArray<String>\",\n                    c.allowed_audiences AS \"allowed_audiences: JsonArray<String>\",\n                    c.allow_refresh, c.trusted, c.client_secret_hash,\n                    COALESCE(\n                        jsonb_agg(r.uri) FILTER (WHERE r.kind = 'authorization'),\n                        '[]'::jsonb\n                    ) AS \"redirect_uris!: JsonArray<String>\",\n                    COALESCE(\n                        jsonb_agg(r.uri) FILTER (WHERE r.kind = 'post_logout'),\n                        '[]'::jsonb\n                    ) AS \"post_logout_uris!: JsonArray<String>\"\n                FROM oidc_clients c\n                LEFT JOIN oidc_redirect_uris r ON r.client_id = c.id\n                WHERE c.id = $1\n                GROUP BY c.id",
+  "query": "SELECT\n                    c.id, c.display_name, c.enabled,\n                    c.allowed_scopes AS \"allowed_scopes: JsonArray<String>\",\n                    c.allowed_audiences AS \"allowed_audiences: JsonArray<String>\",\n                    c.allow_refresh, c.trusted, c.client_secret_hash,\n                    COALESCE(\n                        jsonb_agg(r.uri) FILTER (WHERE r.kind = 'authorization'),\n                        '[]'::jsonb\n                    ) AS \"redirect_uris!: JsonArray<String>\",\n                    COALESCE(\n                        jsonb_agg(r.uri) FILTER (WHERE r.kind = 'post_logout'),\n                        '[]'::jsonb\n                    ) AS \"post_logout_uris!: JsonArray<String>\"\n                FROM oidc_clients c\n                LEFT JOIN oidc_redirect_uris r ON r.client_id = c.id\n                WHERE $1::text IS NULL OR c.id = $1\n                GROUP BY c.id\n                ORDER BY c.id",
   "describe": {
     "columns": [
       {
@@ -72,5 +72,5 @@
       null
     ]
   },
-  "hash": "df5f558e5b44c6e01d3e9601e00672110210ca97033c30a5252f7325bda48048"
+  "hash": "5ea38f972a2c6a9592948118691d8b26725ed973ca59696e2d238be5a90b22ab"
 }

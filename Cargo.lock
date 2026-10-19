@@ -156,6 +156,7 @@ dependencies = [
  "chrono",
  "clap",
  "ipnet",
+ "piquel-admin-api",
  "piquel-auth",
  "piquel-common",
  "piquel-crypto",
@@ -1585,6 +1586,17 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a89322df9ebe1c1578d689c92318e070967d1042b512afbe49518723f4e6d5cd"
 
 [[package]]
+name = "piquel-admin-api"
+version = "0.1.0"
+dependencies = [
+ "chrono",
+ "piquel-common",
+ "serde",
+ "serde_json",
+ "url",
+]
+
+[[package]]
 name = "piquel-auth"
 version = "0.1.0"
 dependencies = [
@@ -1643,6 +1655,7 @@ name = "piquel-repository"
 version = "0.1.0"
 dependencies = [
  "chrono",
+ "piquel-admin-api",
  "piquel-common",
  "serde",
  "serde_json",

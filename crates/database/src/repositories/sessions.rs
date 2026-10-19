@@ -3,6 +3,7 @@
 use super::{JsonArray, RepositoryExecutor, SessionRepository};
 use crate::DatabaseError;
 use chrono::{DateTime, Utc};
+use piquel_admin_api::Session;
 use piquel_common::{
     AuthenticationMethod, SessionId, UserId,
     protocol::claims::{Acr, Amr},
@@ -282,6 +283,58 @@ impl SessionRepository<'_> {
                 RETURNING id AS "id: SessionId""#,
                 user_id.as_uuid(),
                 except_session.as_uuid(),
+            )
+        )
+    }
+
+    /// Lists the account's unrevoked, unexpired sessions, newest first.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`DatabaseError`] if the query fails or a row is invalid.
+    pub async fn list_active_for_user(
+        &mut self,
+        user_id: UserId,
+    ) -> Result<Vec<Session>, DatabaseError> {
+        run!(
+            self,
+            fetch_all,
+            sqlx::query_as!(
+                Session,
+                r#"SELECT
+                    id AS "id: SessionId",
+                    authentication_methods AS "methods: JsonArray<AuthenticationMethod>",
+                    authenticated_at, passkey_confirmed_at, last_seen_at, expires_at
+                FROM sessions
+                WHERE user_id = $1
+                AND revoked_at IS NULL
+                AND expires_at > now()
+                ORDER BY authenticated_at DESC"#,
+                user_id.as_uuid(),
+            )
+        )
+    }
+
+    /// Revokes every unrevoked session of the account and returns their IDs, so the
+    /// caller can record each revocation. Callers lock the account first.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`DatabaseError`] if the query fails.
+    pub async fn revoke_all_for_user(
+        &mut self,
+        user_id: UserId,
+    ) -> Result<Vec<SessionId>, DatabaseError> {
+        run!(
+            self,
+            fetch_all,
+            sqlx::query_scalar!(
+                r#"UPDATE sessions
+                SET revoked_at = now(), passkey_confirmed_at = NULL
+                WHERE user_id = $1
+                AND revoked_at IS NULL
+                RETURNING id AS "id: SessionId""#,
+                user_id.as_uuid(),
             )
         )
     }

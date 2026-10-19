@@ -11,6 +11,7 @@ use axum::{
 use piquel_common::{
     Personal, TokenId, UserId,
     events::{DomainEvent, EventContext, RevocationReason},
+    protocol::api::Identity,
 };
 use piquel_repository::{Database, DatabaseTransaction, InsertExternalIdentity, PendingFederation};
 use serde::Serialize;
@@ -225,20 +226,14 @@ impl FederationApplication {
     pub(super) async fn list_identities(
         State(app): State<Self>,
         security::Session(session): security::Session,
-    ) -> Result<Json<Vec<SocialIdentityView>>, ApiError> {
-        Ok(Json(
-            app.database
-                .federation()
-                .list_active(session.user_id)
-                .await
-                .map_err(FederationError::from)?
-                .into_iter()
-                .map(|identity| SocialIdentityView {
-                    provider: identity.provider,
-                    linked_email: identity.linked_email,
-                })
-                .collect(),
-        ))
+    ) -> Result<Json<Vec<Identity>>, ApiError> {
+        let identities = app
+            .database
+            .federation()
+            .list_active(session.user_id)
+            .await
+            .map_err(FederationError::from)?;
+        Ok(Json(identities.into_iter().map(Into::into).collect()))
     }
 
     /// Removes an account's provider link after a recent passkey confirmation.
@@ -323,13 +318,4 @@ pub(super) struct PendingView {
 struct LinkResponse {
     /// Stored, validated continuation for the browser.
     return_to: String,
-}
-
-/// Account settings view of an active social identity.
-#[derive(Serialize)]
-pub(super) struct SocialIdentityView {
-    /// Linked provider.
-    provider: Provider,
-    /// Optional contact address observed at linking time.
-    linked_email: Option<String>,
 }

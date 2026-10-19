@@ -36,6 +36,18 @@ pub struct EventCursor {
     sequence: i64,
 }
 
+/// Which events [`EventRepository::list`] returns. The default matches every event.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct EventFilter {
+    /// Only events concerning this account.
+    pub subject: Option<UserId>,
+    /// Only events of this kind, the serde tag of a [`DomainEvent`] variant, e.g.
+    /// `session_revoked`.
+    pub kind: Option<String>,
+    /// Only events recorded before this one, to page through older events.
+    pub before: Option<EventId>,
+}
+
 /// A recorded event with its personal data merged back in.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct StoredEvent {
@@ -247,6 +259,24 @@ impl EventRepository<'_> {
         user_id: UserId,
         limit: u32,
     ) -> Result<Vec<StoredEvent>, DatabaseError> {
+        let filter = EventFilter {
+            subject: Some(user_id),
+            ..EventFilter::default()
+        };
+        self.list(&filter, limit).await
+    }
+
+    /// Lists up to `limit` events matching `filter`, newest first. A `before` event
+    /// that does not exist matches nothing.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`DatabaseError`] if the query fails or a stored event does not decode.
+    pub async fn list(
+        &mut self,
+        filter: &EventFilter,
+        limit: u32,
+    ) -> Result<Vec<StoredEvent>, DatabaseError> {
         run!(
             self,
             fetch_all,
@@ -261,10 +291,17 @@ impl EventRepository<'_> {
                     p.details AS "details?"
                 FROM domain_events e
                 LEFT JOIN event_personal_data p ON p.event_id = e.id
-                WHERE e.subject_user_id = $1
+                WHERE ($1::uuid IS NULL OR e.subject_user_id = $1)
+                AND ($2::text IS NULL OR e.kind = $2)
+                AND (
+                    $3::uuid IS NULL
+                    OR e.sequence < (SELECT sequence FROM domain_events WHERE id = $3)
+                )
                 ORDER BY e.sequence DESC
-                LIMIT $2"#,
-                user_id.as_uuid(),
+                LIMIT $4"#,
+                filter.subject.map(UserId::as_uuid),
+                filter.kind.as_deref(),
+                filter.before.map(EventId::as_uuid),
                 i64::from(limit),
             )
         )?

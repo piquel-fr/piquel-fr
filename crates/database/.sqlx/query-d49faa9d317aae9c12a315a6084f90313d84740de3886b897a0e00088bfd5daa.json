@@ -1,0 +1,49 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT\n                    u.id AS \"id: UserId\", u.username, u.display_name,\n                    u.status AS \"status: AccountStatus\", u.created_at\n                FROM users u\n                WHERE (\n                    $1 = ''\n                    OR u.id::text = $1\n                    OR u.username ILIKE $2\n                    OR u.display_name ILIKE $2\n                    OR EXISTS (\n                        SELECT FROM user_emails e\n                        WHERE e.user_id = u.id\n                        AND e.normalized_email ILIKE $2\n                    )\n                )\n                AND ($3::uuid IS NULL OR u.id > $3)\n                ORDER BY u.id\n                LIMIT $4",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id: UserId",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "username",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 2,
+        "name": "display_name",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 3,
+        "name": "status: AccountStatus",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 4,
+        "name": "created_at",
+        "type_info": "Timestamptz"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Text",
+        "Uuid",
+        "Int8"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "d49faa9d317aae9c12a315a6084f90313d84740de3886b897a0e00088bfd5daa"
+}

@@ -39,6 +39,7 @@ impl Replicas {
         let settings_url: PublicUrl = "https://piquel.fr/settings".parse().expect("settings URL");
         let config = AuthConfig {
             public_listener: SocketAddr::from(([127, 0, 0, 1], 0)),
+            admin_listener: None,
             passkey: PasskeyConfig {
                 origin: origin.clone(),
                 invite_required: false,
