@@ -1,26 +1,20 @@
-//! Authentication service and its small administrative CLI.
-use auth_service::{AuthConfig, Jobs, PUBLIC_BASE_URL};
-use chrono::{Duration, Utc};
+//! Authentication service and its administrative CLI.
+use auth_service::{
+    AdminError, AdminOperations, AuthConfig, InviteExpiry, Jobs, Operator, PUBLIC_BASE_URL,
+};
 use clap::{Parser, Subcommand};
 use piquel_common::{
     DeliveryId, ErrorChain,
-    config::{ConfigurationError, Origin, Variable},
-    events::{Actor, DomainEvent, EventContext, RequestOrigin},
+    config::{ConfigurationError, Variable},
 };
 use piquel_crypto::{CryptoError, Secret};
 use piquel_repository::{Database, DatabaseConnectionError, DatabaseError, DeliveryStatus};
 use thiserror::Error;
 
-use std::{net::SocketAddr, process::ExitCode, str::FromStr};
+use axum::Router;
+use std::{net::SocketAddr, process::ExitCode};
+use tokio::{net::TcpListener, sync::watch};
 
-/// Largest accepted invitation lifetime number; the suffix chooses hours or days.
-const MAX_INVITE_EXPIRY: i64 = 365;
-/// Shared command-line explanation for invalid invitation lifetimes.
-const INVITE_EXPIRY_HELP: &str = "expiry must be 1 to 365 followed by h or d, e.g. 24h or 7d";
-/// Registration page used by generated signup links.
-const REGISTRATION_PATH: &str = "/register";
-/// Invitation proof sent to the registration page.
-const INVITATION_PARAMETER: &str = "invitation";
 /// The operating system user running a command, recorded on the events it causes.
 const OS_USER: Variable = Variable::new("USER");
 /// The machine's host name, for systems without `/proc`.
@@ -50,6 +44,9 @@ enum CliError {
         /// The states the command applies to.
         states: &'static str,
     },
+    /// An administrative operation was refused or failed.
+    #[error(transparent)]
+    Admin(#[from] AdminError),
     /// Random invitation or client-secret generation failed.
     #[error("could not generate secure command material")]
     Crypto(#[from] CryptoError),
@@ -112,6 +109,55 @@ enum DatabaseCommand {
     /// Inspect, retry and cancel outbound deliveries.
     #[command(subcommand)]
     Deliveries(DeliveriesCommand),
+    /// Grant, revoke or list administrators.
+    #[command(subcommand)]
+    Admin(AdminCommand),
+}
+
+/// Changes to the administrator list. The CLI may act on any account, and is how
+/// the first administrator is granted.
+#[derive(Subcommand)]
+enum AdminCommand {
+    /// Make an active account an administrator.
+    Grant {
+        /// The account's username.
+        username: String,
+    },
+    /// Remove an account's administrator rights. The last administrator keeps theirs.
+    Revoke {
+        /// The account's username.
+        username: String,
+    },
+    /// List administrators, oldest grant first.
+    List,
+}
+
+impl AdminCommand {
+    /// Runs the change as the operator at this terminal.
+    async fn run(self, admin: &AdminOperations) -> Result<(), CliError> {
+        let operator = DatabaseCommand::operator()?;
+        match self {
+            Self::Grant { username } => {
+                let user = admin.user_named(&username).await?;
+                admin.grant_administrator(&operator, user).await?;
+            }
+            Self::Revoke { username } => {
+                let user = admin.user_named(&username).await?;
+                admin.revoke_administrator(&operator, user).await?;
+            }
+            Self::List => {
+                for administrator in admin.list_administrators().await? {
+                    println!(
+                        "{}\t{}\t{}",
+                        administrator.username,
+                        administrator.user_id,
+                        administrator.granted_at.to_rfc3339()
+                    );
+                }
+            }
+        }
+        Ok(())
+    }
 }
 
 impl DatabaseCommand {
@@ -121,50 +167,33 @@ impl DatabaseCommand {
         match self {
             Self::Serve => Self::serve(database).await,
             Self::Migrate => Ok(database.run_migrations().await?),
-            Self::Invite { expires_in } => Self::invite(&database, expires_in).await,
+            Self::Invite { expires_in } => {
+                // Only the secret's digest is stored, so the link is printed once.
+                let invitation = AdminOperations::new(database)
+                    .create_invitation(&Self::operator()?, &PUBLIC_BASE_URL.parse()?, expires_in)
+                    .await?;
+                println!("{}", invitation.url);
+                Ok(())
+            }
             Self::Deliveries(command) => command.run(&database).await,
+            // Grant, revoke and list need only the database, for a bare recovery shell.
+            Self::Admin(command) => command.run(&AdminOperations::new(database)).await,
         }
     }
 
-    /// Prints a single-use signup link; only the secret's digest is stored.
-    async fn invite(database: &Database, expires_in: InviteExpiry) -> Result<(), CliError> {
-        let secret = Secret::generate()?;
-        let expires_at = Utc::now() + expires_in.0;
-        let mut tx = database.begin().await?;
-        tx.security()
-            .create_invitation(secret.digest().as_bytes(), expires_at)
-            .await?;
-        tx.record(
-            &Self::operator()?,
-            None,
-            DomainEvent::InvitationCreated { expires_at },
-        )
-        .await?;
-        tx.commit().await?;
-        let mut url = PUBLIC_BASE_URL.parse::<Origin>()?.as_url().clone();
-        url.set_path(REGISTRATION_PATH);
-        url.query_pairs_mut()
-            .append_pair(INVITATION_PARAMETER, &secret.encoded());
-        println!("{url}");
-        Ok(())
-    }
-
-    /// Attributes events of a command to the operator running it: `$USER` and the
-    /// host name, or `unknown` where they cannot be read, as in some containers.
-    fn operator() -> Result<EventContext, CliError> {
+    /// The operator running a command: `$USER` and the host name, or `unknown` where
+    /// they cannot be read, as in some containers.
+    fn operator() -> Result<Operator, CliError> {
         let host = std::fs::read_to_string(HOST_NAME_FILE)
             .ok()
             .map(|host| host.trim().to_owned())
             .or(HOST_NAME.optional()?)
             .filter(|host| !host.is_empty());
-        Ok(EventContext {
-            actor: Actor::Cli {
-                os_user: OS_USER
-                    .optional()?
-                    .unwrap_or_else(|| UNKNOWN_OPERATOR.to_owned()),
-                host: host.unwrap_or_else(|| UNKNOWN_OPERATOR.to_owned()),
-            },
-            origin: RequestOrigin::default(),
+        Ok(Operator::Cli {
+            os_user: OS_USER
+                .optional()?
+                .unwrap_or_else(|| UNKNOWN_OPERATOR.to_owned()),
+            host: host.unwrap_or_else(|| UNKNOWN_OPERATOR.to_owned()),
         })
     }
 
@@ -196,24 +225,64 @@ impl DatabaseCommand {
     }
 
     /// Builds the configured service, provisions clients, starts background jobs and
-    /// serves until a shutdown signal. Once in-flight requests drain, running jobs
-    /// get a grace period to finish.
+    /// serves the public listener, and the admin listener when one is configured,
+    /// until a shutdown signal. Once in-flight requests drain, running jobs get a
+    /// grace period to finish.
     async fn serve(database: Database) -> Result<(), CliError> {
         let config = AuthConfig::from_environment()?;
-        let listener = tokio::net::TcpListener::bind(config.public_listener).await?;
+        let public = TcpListener::bind(config.public_listener).await?;
+        let admin = match config.admin_listener {
+            Some(address) => Some(TcpListener::bind(address).await?),
+            None => None,
+        };
         let router = config.router(database.clone())?;
+        let admin_router = config.admin_router(database.clone());
         config.provision_clients(&database).await?;
         let jobs = Jobs::start(&database);
         tracing::info!(address=%config.public_listener,"authentication service listening");
+        let (stop, _) = watch::channel(false);
+        let admin = async {
+            let Some(listener) = admin else {
+                return Ok(());
+            };
+            tracing::info!(address=%listener.local_addr()?, "admin API listening");
+            Self::listen(listener, admin_router, &stop).await
+        };
+        let signal = async {
+            let mut stopped = stop.subscribe();
+            tokio::select! {
+                () = Self::shutdown_signal() => {
+                    stop.send_replace(true);
+                }
+                _ = stopped.wait_for(|stopped| *stopped) => {}
+            }
+        };
+        let (public, admin, ()) = tokio::join!(Self::listen(public, router, &stop), admin, signal);
+        let jobs = jobs.shutdown().await;
+        public?;
+        admin?;
+        Ok(jobs?)
+    }
+
+    /// Serves `router` on `listener` until `stop` is set. Once this listener ends,
+    /// whatever the reason, it sets `stop`, so the other listener ends too.
+    async fn listen(
+        listener: TcpListener,
+        router: Router,
+        stop: &watch::Sender<bool>,
+    ) -> std::io::Result<()> {
+        let mut stopped = stop.subscribe();
         let result = axum::serve(
             listener,
             router.into_make_service_with_connect_info::<SocketAddr>(),
         )
-        .with_graceful_shutdown(Self::shutdown_signal())
+        .with_graceful_shutdown(async move {
+            // Fails only once `stop` is dropped, which also means stopping.
+            let _ = stopped.wait_for(|stopped| *stopped).await;
+        })
         .await;
-        let jobs = jobs.shutdown().await;
-        result?;
-        Ok(jobs?)
+        stop.send_replace(true);
+        result
     }
 }
 
@@ -296,42 +365,6 @@ impl DeliveriesCommand {
     }
 }
 
-/// An invitation lifetime of 1 to 365 hours or days.
-#[derive(Clone, Copy)]
-struct InviteExpiry(Duration);
-
-/// Why an invitation lifetime was rejected by the command-line parser.
-#[derive(Debug, Error)]
-enum InvalidInviteExpiry {
-    /// The unit, value or bounds violate the supported hours/days syntax.
-    #[error("{INVITE_EXPIRY_HELP}")]
-    Format,
-    /// The numeric portion could not be parsed.
-    #[error("{INVITE_EXPIRY_HELP}")]
-    Number(#[from] std::num::ParseIntError),
-}
-
-impl FromStr for InviteExpiry {
-    type Err = InvalidInviteExpiry;
-    /// Parses a bounded hours/days lifetime while retaining numeric syntax errors.
-    fn from_str(value: &str) -> Result<Self, Self::Err> {
-        let (number, unit) = value
-            .char_indices()
-            .last()
-            .map(|(index, _)| value.split_at(index))
-            .ok_or(InvalidInviteExpiry::Format)?;
-        let number = number.parse::<i64>()?;
-        if !(1..=MAX_INVITE_EXPIRY).contains(&number) {
-            return Err(InvalidInviteExpiry::Format);
-        }
-        match unit {
-            "h" => Ok(Self(Duration::hours(number))),
-            "d" => Ok(Self(Duration::days(number))),
-            _ => Err(InvalidInviteExpiry::Format),
-        }
-    }
-}
-
 /// Initializes tracing, runs the selected command and prints any failure with its causes.
 #[tokio::main]
 async fn main() -> ExitCode {
@@ -344,26 +377,6 @@ async fn main() -> ExitCode {
         Err(error) => {
             eprintln!("error: {}", ErrorChain(&error));
             ExitCode::FAILURE
-        }
-    }
-}
-#[cfg(test)]
-mod tests {
-    //! Invitation lifetime parsing and bounds.
-    use super::*;
-    /// Invitation lifetimes accept bounded hours and days and reject malformed input.
-    #[test]
-    fn invite_expiry_accepts_bounded_hours_and_days() {
-        assert_eq!(
-            "24h".parse::<InviteExpiry>().map(|expiry| expiry.0).ok(),
-            Some(Duration::hours(24))
-        );
-        assert_eq!(
-            "365d".parse::<InviteExpiry>().map(|expiry| expiry.0).ok(),
-            Some(Duration::days(365))
-        );
-        for invalid in ["", "d", "0d", "366d", "-1h", "7w", "7 d", "é"] {
-            assert!(invalid.parse::<InviteExpiry>().is_err(), "{invalid}");
         }
     }
 }

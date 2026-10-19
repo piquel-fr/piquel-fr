@@ -1,0 +1,17 @@
+[package]
+name = "piquel-admin-api"
+description = "Paths and bodies of auth's private admin API, shared with the admin dashboard"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+piquel-common.workspace = true
+chrono.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+url.workspace = true
+
+[lints]
+workspace = true

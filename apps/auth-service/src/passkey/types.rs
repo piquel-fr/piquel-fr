@@ -1,7 +1,7 @@
 //! Validated names and the browser API's request and response bodies.
 
 use super::PasskeyError;
-use piquel_common::{PasskeyId, TokenId, UserId};
+use piquel_common::{TokenId, UserId};
 use serde::{Deserialize, Serialize};
 use webauthn_rs::prelude::{PublicKeyCredential, RegisterPublicKeyCredential};
 
@@ -167,15 +167,6 @@ pub(super) struct CeremonyResponse {
     pub(super) ceremony_id: TokenId,
     /// `WebAuthn` options passed directly to the browser authenticator API.
     pub(super) public_key: serde_json::Value,
-}
-
-/// Public credential metadata, excluding the credential's cryptographic contents.
-#[derive(Serialize)]
-pub(super) struct PasskeyView {
-    /// User-chosen credential label.
-    pub(super) friendly_name: String,
-    /// Credential row identifier used for rename and removal.
-    pub(super) id: PasskeyId,
 }
 
 /// Account identity shown in the browser session view.

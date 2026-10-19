@@ -49,6 +49,7 @@ piquel-web with Vite against an auth service on `http://localhost:3000`.
 | `AUTH_SETTINGS_URL` | Exact settings destination; defaults to `https://piquel.fr/settings`. Its origin is a frontend origin: it may call the account API, and sign-in may return to any URL on it |
 | `AUTH_TRUSTED_PROXIES` | Optional comma-separated proxy peer IPs or CIDRs; these peers must overwrite `X-Forwarded-For` with one client IP. Defaults to piqueld's `PIQUELD_INGRESS_PROXIES` |
 | `AUTH_PUBLIC_LISTENER` | Listener address; defaults to `127.0.0.1:8080` |
+| `AUTH_ADMIN_LISTENER` | Optional address of the private admin API listener, e.g. `0.0.0.0:8081`. No ingress route may reach it. Without it, auth serves no admin API |
 | `AUTH_KEY_PROVIDER` | Required persistent RSA private-key reference, `file:///absolute/path/key.pem` or `env://VARIABLE_NAME` |
 | `AUTH_SIGNING_KEY_ID` | Stable ID for that signing key; defaults to `primary` |
 | `AUTH_CLIENTS_FILE` | JSON client configuration; omitted means no OIDC clients |
@@ -96,6 +97,34 @@ This prints one signup link. The database stores a digest, expiry and redemption
 time. Tokens expire after seven days by default; `h` and `d` are supported. A token
 is redeemed atomically with account creation, so a failed signup does not spend it.
 Disabling invitation enforcement affects signup only; existing users keep access.
+Administrators can also list, create and revoke invitations through the admin API.
+
+### Administration
+
+```sh
+just auth admin grant alice    # the first administrator is granted here
+just auth admin grant bob
+just auth admin list
+just auth admin revoke bob     # the last administrator's rights stay
+```
+
+Administrators manage accounts, sessions, invitations and other administrators
+through the admin API. Auth serves it only on `AUTH_ADMIN_LISTENER`, which no
+ingress route reaches: the admin dashboard calls it from its server, over the
+application's private network. Its routes and bodies are in `crates/admin-api`.
+
+Every request carries an access token that auth issued to the dashboard,
+registered as the OIDC client `piquel-admin` (the tokens' audience), for an
+administrator who signed in with a passkey. Auth checks on every request that the
+account is still an administrator and the token's session still active, so
+revoking either takes effect at once. Mutations also need a passkey confirmation
+from the last five minutes. Otherwise the API answers `401` with an RFC 9470
+step-up challenge, and the dashboard signs the administrator in again.
+
+The API never changes an administrator's account: revoke their rights first.
+Administrators cannot grant or revoke their own rights, and nobody can revoke the last
+administrator's. Every change is recorded as a domain event with its administrator
+or CLI operator.
 
 ### Outbound deliveries
 
@@ -252,7 +281,7 @@ Use individual recipes while iterating:
 | Dependency audits | `just audit` (`just rust audit` runs cargo-deny, `just web audit` pnpm) |
 | SvelteKit generated types/config | `just web generate` |
 | Frontends / embedded debug binary / release binary | `just web build` / `just rust build` / `just build` |
-| Run with caller-provided auth configuration | `just auth serve`, `just db migrate`, `just auth invite --expires-in 7d` |
+| Run with caller-provided auth configuration | `just auth serve`, `just db migrate`, `just auth invite --expires-in 7d`, `just auth admin list` |
 
 CI runs these recipes on every pull request whose changes they can affect,
 including the database and browser tests, and on every push to `main`.

@@ -1,15 +1,16 @@
 {
   "db_name": "PostgreSQL",
-  "query": "INSERT INTO invitations(secret_digest,expires_at) VALUES($1,$2)",
+  "query": "INSERT INTO invitations(id,secret_digest,expires_at) VALUES($1,$2,$3)",
   "describe": {
     "columns": [],
     "parameters": {
       "Left": [
+        "Uuid",
         "Bytea",
         "Timestamptz"
       ]
     },
     "nullable": []
   },
-  "hash": "64fe75abb1032be71c8497cb7f5f9c31deed5d7d054b80b4dfd56e5eef4d09a6"
+  "hash": "b1060bf10772746126cfec14bf485450f1505aaa6ec3f48ed36a88541e527698"
 }

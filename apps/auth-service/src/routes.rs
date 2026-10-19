@@ -87,6 +87,12 @@ pub(crate) mod oidc {
     pub(crate) const LOGOUT: &str = "/oidc/logout";
 }
 
+/// The admin API, served only on the private admin listener. The paths are shared
+/// with the dashboard through `piquel-admin-api`.
+pub(crate) mod admin {
+    pub(crate) use piquel_admin_api::paths::*;
+}
+
 /// Pages of the embedded auth frontend that the service redirects browsers to.
 pub(crate) mod page {
     /// Sign-in, social signup and link confirmation.

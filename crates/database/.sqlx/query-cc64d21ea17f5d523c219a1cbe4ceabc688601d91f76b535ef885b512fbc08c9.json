@@ -1,0 +1,22 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT EXISTS (\n                    SELECT FROM administrators WHERE user_id = $1\n                ) AS \"administrator!\"",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "administrator!",
+        "type_info": "Bool"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      null
+    ]
+  },
+  "hash": "cc64d21ea17f5d523c219a1cbe4ceabc688601d91f76b535ef885b512fbc08c9"
+}

@@ -39,6 +39,8 @@
 //! # Ok::<(), Box<dyn std::error::Error>>(())
 //! ```
 
+/// Bodies shared by auth's account settings and admin APIs.
+pub mod api;
 /// `WWW-Authenticate: Bearer` challenges sent by resource servers.
 pub mod challenge;
 /// Access token, ID token and `UserInfo` claims, and the `acr` and `amr` values they report.

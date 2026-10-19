@@ -107,6 +107,10 @@ AUTH_DATABASE_URL = "postgres://piquel@postgres:5432/piquel?sslmode=disable"
 AUTH_DATABASE_PASSWORD = "file:///run/secrets/database-password"
 AUTH_KEY_PROVIDER = "file:///run/secrets/signing-key"
 AUTH_PUBLIC_LISTENER = "0.0.0.0:8080"
+# The admin API. No route exposes this port, so only services on the
+# application's private network reach it, and each call needs an
+# administrator's access token.
+AUTH_ADMIN_LISTENER = "0.0.0.0:8081"
 AUTH_PUBLIC_BASE_URL = "https://${{ vars.auth_host }}"
 AUTH_SETTINGS_URL = "https://${{ vars.web_host }}/settings"
 AUTH_INVITE_REQUIRED = "${{ vars.invite_required }}"

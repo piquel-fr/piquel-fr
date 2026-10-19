@@ -21,14 +21,16 @@ use piquel_common::{
         Actor, DomainEvent, EventContext, RequestOrigin, RevocationReason, SignInFailure,
         UserAgentFamily,
     },
-    protocol::step_up::StepUpRequirement,
+    protocol::{
+        api::{ErrorBody, ErrorCode},
+        step_up::StepUpRequirement,
+    },
 };
 use piquel_crypto::{CryptoError, Digest, Secret};
 use piquel_repository::{
     Database, DatabaseError, DatabaseTransaction, InsertSession, SessionAuthentication,
     StoredSession,
 };
-use serde::Serialize;
 use std::{
     borrow::Cow,
     net::{IpAddr, SocketAddr},
@@ -51,9 +53,7 @@ const REQUEST_TIMEOUT: StdDuration = StdDuration::from_secs(30);
 const SESSION_LIFETIME_DAYS: u32 = 30;
 /// Browser flow cookies slightly outlive their server-side ceremonies.
 const FLOW_COOKIE_MAX_AGE: u32 = 600;
-/// Default maximum age, in seconds, of the passkey confirmation a protected action
-/// accepts. The confirmation happens just before the action, so it can be short.
-pub(crate) const CONFIRMATION_MAX_AGE: u32 = 300;
+pub(crate) use piquel_common::protocol::step_up::CONFIRMATION_MAX_AGE;
 
 /// Browser JSON error `{"error": message}`, plus a machine-readable `code` when the
 /// frontend can resolve it. Internal causes only reach the logs.
@@ -65,28 +65,6 @@ pub(crate) struct ApiError {
     message: Cow<'static, str>,
     /// Stable reason a frontend can react to, serialized next to the message.
     code: Option<ErrorCode>,
-}
-
-/// First-party error codes, serialized as `"code"` with their parameters beside it.
-#[derive(Debug, Serialize)]
-#[serde(tag = "code", rename_all = "snake_case")]
-enum ErrorCode {
-    /// The action needs a passkey confirmation of this session. Frontends confirm
-    /// and retry. `max_age` is borrowed from RFC 9470.
-    StepUpRequired {
-        /// Maximum confirmation age the action accepts, in seconds.
-        max_age: u32,
-    },
-}
-
-/// Serialized form of an [`ApiError`].
-#[derive(Serialize)]
-struct ErrorBody<'a> {
-    /// Human-readable message.
-    error: &'a str,
-    /// Machine-readable code and its parameters, when there is one.
-    #[serde(flatten)]
-    code: Option<&'a ErrorCode>,
 }
 
 impl ApiError {
@@ -160,8 +138,8 @@ impl IntoResponse for ApiError {
         let mut response = (
             self.status,
             Json(ErrorBody {
-                error: &self.message,
-                code: self.code.as_ref(),
+                error: self.message.into_owned(),
+                code: self.code,
             }),
         )
             .into_response();
@@ -850,6 +828,16 @@ impl HttpSecurity {
                     .collect(),
             ),
         }
+    }
+
+    /// Middleware for routers outside [`Self::protect`], such as the admin API:
+    /// runs the request, body reads included, under the same deadline.
+    pub(crate) async fn deadline(request: Request, next: Next) -> Response {
+        tokio::time::timeout(REQUEST_TIMEOUT, next.run(request))
+            .await
+            .unwrap_or_else(|elapsed| {
+                ApiError::from(HttpSecurityError::from(elapsed)).into_response()
+            })
     }
 
     /// A trusted edge must overwrite `X-Forwarded-For` with one validated client address.

@@ -3,6 +3,8 @@
 use super::{RepositoryExecutor, SecurityRepository};
 use crate::DatabaseError;
 use chrono::{DateTime, Utc};
+use piquel_admin_api::Invitation;
+use piquel_common::TokenId;
 
 impl SecurityRepository<'_> {
     /// Stores an invitation by the 32-byte digest of its secret.
@@ -13,6 +15,7 @@ impl SecurityRepository<'_> {
     /// the wrong length or one that already exists.
     pub async fn create_invitation(
         &mut self,
+        id: TokenId,
         digest: &[u8],
         expires_at: DateTime<Utc>,
     ) -> Result<(), DatabaseError> {
@@ -20,7 +23,8 @@ impl SecurityRepository<'_> {
             self,
             execute,
             sqlx::query!(
-                "INSERT INTO invitations(secret_digest,expires_at) VALUES($1,$2)",
+                "INSERT INTO invitations(id,secret_digest,expires_at) VALUES($1,$2,$3)",
+                id.as_uuid(),
                 digest,
                 expires_at,
             )
@@ -28,7 +32,49 @@ impl SecurityRepository<'_> {
         Ok(())
     }
 
-    /// Reports whether an invitation exists, is unexpired and is unredeemed.
+    /// Lists every invitation not yet purged, newest first.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`DatabaseError`] if the query fails or a row is invalid.
+    pub async fn list_invitations(&mut self) -> Result<Vec<Invitation>, DatabaseError> {
+        run!(
+            self,
+            fetch_all,
+            sqlx::query_as!(
+                Invitation,
+                r#"SELECT id AS "id: TokenId", created_at, expires_at, redeemed_at, revoked_at
+                FROM invitations
+                ORDER BY created_at DESC, id DESC"#
+            )
+        )
+    }
+
+    /// Revokes an unredeemed invitation. Returns `false` if it is unknown,
+    /// redeemed or already revoked. It also expires now: releases before
+    /// `revoked_at` check only the expiry, and cleanup then purges it.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`DatabaseError`] if the query fails.
+    pub async fn revoke_invitation(&mut self, id: TokenId) -> Result<bool, DatabaseError> {
+        Ok(run!(
+            self,
+            execute,
+            sqlx::query!(
+                "UPDATE invitations
+                SET revoked_at = now(), expires_at = LEAST(expires_at, now())
+                WHERE id = $1
+                AND redeemed_at IS NULL
+                AND revoked_at IS NULL",
+                id.as_uuid(),
+            )
+        )?
+        .rows_affected()
+            == 1)
+    }
+
+    /// Reports whether an invitation exists, is unexpired, unrevoked and unredeemed.
     ///
     /// # Errors
     ///
@@ -43,6 +89,7 @@ impl SecurityRepository<'_> {
                     FROM invitations
                     WHERE secret_digest = $1
                     AND redeemed_at IS NULL
+                    AND revoked_at IS NULL
                     AND expires_at > now()
                 ) AS "active!""#,
                 digest,
@@ -51,7 +98,7 @@ impl SecurityRepository<'_> {
     }
 
     /// Redeems an active invitation. Returns `false` if it is unknown,
-    /// expired or already redeemed. Call it inside the account-creation
+    /// expired, revoked or already redeemed. Call it inside the account-creation
     /// transaction so a rollback keeps the invitation usable.
     ///
     /// # Errors
@@ -66,6 +113,7 @@ impl SecurityRepository<'_> {
                 SET redeemed_at = clock_timestamp()
                 WHERE secret_digest = $1
                 AND redeemed_at IS NULL
+                AND revoked_at IS NULL
                 AND expires_at > clock_timestamp()",
                 digest,
             )

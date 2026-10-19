@@ -1,4 +1,6 @@
-//! One authentication authority: browser flows, settings API, and OIDC.
+//! One authentication authority: browser flows, settings API, OIDC and the admin API.
+/// The private admin API and the operations it shares with the CLI.
+mod admin;
 /// Embedded auth frontend pages and static resources.
 mod assets;
 /// Validated service and application configuration.
@@ -31,6 +33,7 @@ mod service;
 #[cfg(test)]
 mod tests;
 
+pub use admin::{AdminError, AdminOperations, InviteExpiry, Operator};
 pub use config::{AuthConfig, PUBLIC_BASE_URL};
 use federation::FederationApplication;
 pub use jobs::Jobs;
@@ -89,6 +92,17 @@ impl AuthConfig {
                 policy,
                 security::HttpSecurity::protect,
             )))
+    }
+
+    /// Builds the admin API, for the private admin listener only. It has no browser
+    /// origin, CSRF or rate policy: no browser reaches it, and every request
+    /// carries an administrator's access token. It shares the public listener's
+    /// body limit and deadline, so no request can hold up shutdown.
+    pub fn admin_router(&self, database: Database) -> Router {
+        admin::AdminApplication::new(database, self)
+            .routes()
+            .layer(DefaultBodyLimit::max(MAX_REQUEST_BODY_BYTES))
+            .layer(middleware::from_fn(security::HttpSecurity::deadline))
     }
 
     /// Replaces every client registration with the clients file, atomically. Every

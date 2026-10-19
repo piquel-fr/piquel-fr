@@ -122,6 +122,22 @@ impl Variable {
             .parse()
             .map_err(|source| self.error("is invalid", source))
     }
+    /// Parses an optional setting; `None` when it is absent.
+    ///
+    /// # Errors
+    /// Preserves the parsing failure and names the variable.
+    pub fn parse_optional<T: FromStr>(self) -> Result<Option<T>, ConfigurationError>
+    where
+        T::Err: StdError + Send + Sync + 'static,
+    {
+        self.optional()?
+            .map(|value| {
+                value
+                    .parse()
+                    .map_err(|source| self.error("is invalid", source))
+            })
+            .transpose()
+    }
 }
 
 /// Why a configured URL was rejected. Each message tells the operator what to change.

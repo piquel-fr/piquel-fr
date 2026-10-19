@@ -3,7 +3,7 @@
 use super::{PasskeyRepository, RepositoryExecutor};
 use crate::DatabaseError;
 use chrono::{DateTime, Utc};
-use piquel_common::{PasskeyId, SessionId, TokenId, UserId};
+use piquel_common::{PasskeyId, SessionId, TokenId, UserId, protocol::api::Passkey};
 use serde_json::Value;
 
 piquel_common::str_enum! {
@@ -50,6 +50,16 @@ pub struct StoredPasskey {
     pub friendly_name: String,
     /// When the credential was revoked; `None` while it is usable.
     pub revoked_at: Option<DateTime<Utc>>,
+}
+
+impl From<StoredPasskey> for Passkey {
+    /// Shows the label only, never the credential.
+    fn from(passkey: StoredPasskey) -> Self {
+        Self {
+            id: passkey.id,
+            friendly_name: passkey.friendly_name,
+        }
+    }
 }
 
 /// Server-side state for a started `WebAuthn` ceremony. The state contains the

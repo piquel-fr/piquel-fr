@@ -1,0 +1,20 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT count(DISTINCT pid) AS \"count!\"\n            FROM pg_locks\n            WHERE NOT granted\n            AND pg_backend_pid() = ANY(pg_blocking_pids(pid))",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "count!",
+        "type_info": "Int8"
+      }
+    ],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": [
+      null
+    ]
+  },
+  "hash": "26df97c9423f3efa16cfae6b8ad6ee1c4806d5a7c6d500b5b0e0785c14e2942e"
+}

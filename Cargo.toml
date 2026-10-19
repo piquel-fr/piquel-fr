@@ -2,6 +2,7 @@
 resolver = "3"
 members = [
     "apps/auth-service",
+    "crates/admin-api",
     "crates/auth-sdk",
     "crates/common",
     "crates/crypto",
@@ -30,6 +31,7 @@ piquel-crypto        = { path = "crates/crypto" }
 piquel-repository    = { path = "crates/database" }
 piquel-telemetry     = { path = "crates/telemetry" }
 piquel-auth          = { path = "crates/auth-sdk" }
+piquel-admin-api     = { path = "crates/admin-api" }
 
 # External crates
 axum = "0.8"

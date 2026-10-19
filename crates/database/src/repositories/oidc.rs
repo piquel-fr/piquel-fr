@@ -3,7 +3,11 @@
 use super::{JsonArray, OidcRepository, RepositoryExecutor};
 use crate::{DatabaseError, SessionAuthentication};
 use chrono::{DateTime, Utc};
-use piquel_common::{SessionId, TokenId, UserId, protocol::claims::Acr};
+use piquel_admin_api::{Client, Consent};
+use piquel_common::{
+    SessionId, TokenId, UserId,
+    protocol::{claims::Acr, oauth::ClientAuthMethod},
+};
 use sqlx::types::Json;
 
 /// Largest identifier, scope or audience accepted by provisioning.
@@ -95,6 +99,27 @@ pub struct StoredOidcClient {
     pub trusted: bool,
     /// SHA-256 hash of the client secret; `None` for public clients.
     pub client_secret_hash: Option<Vec<u8>>,
+}
+
+impl From<StoredOidcClient> for Client {
+    /// Shows the client without its secret, only the authentication method it implies.
+    fn from(client: StoredOidcClient) -> Self {
+        Self {
+            token_endpoint_auth_method: match client.client_secret_hash {
+                Some(_) => ClientAuthMethod::ClientSecretBasic,
+                None => ClientAuthMethod::None,
+            },
+            id: client.id,
+            display_name: client.display_name,
+            redirect_uris: client.redirect_uris,
+            post_logout_uris: client.post_logout_uris,
+            allowed_scopes: client.allowed_scopes,
+            allowed_audiences: client.allowed_audiences,
+            allow_refresh: client.allow_refresh,
+            enabled: client.enabled,
+            trusted: client.trusted,
+        }
+    }
 }
 
 /// Statically reviewed client configuration provisioned at startup.
@@ -447,9 +472,23 @@ impl OidcRepository<'_> {
         &mut self,
         id: &str,
     ) -> Result<Option<StoredOidcClient>, DatabaseError> {
+        Ok(self.clients(Some(id)).await?.pop())
+    }
+
+    /// Lists every client, enabled or not, with its URI allowlists, by ID.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`DatabaseError`] if the query fails or a row is invalid.
+    pub async fn list_clients(&mut self) -> Result<Vec<StoredOidcClient>, DatabaseError> {
+        self.clients(None).await
+    }
+
+    /// Lists the client `id`, or every client without one, by ID.
+    async fn clients(&mut self, id: Option<&str>) -> Result<Vec<StoredOidcClient>, DatabaseError> {
         run!(
             self,
-            fetch_optional,
+            fetch_all,
             sqlx::query_as!(
                 StoredOidcClient,
                 r#"SELECT
@@ -467,8 +506,9 @@ impl OidcRepository<'_> {
                     ) AS "post_logout_uris!: JsonArray<String>"
                 FROM oidc_clients c
                 LEFT JOIN oidc_redirect_uris r ON r.client_id = c.id
-                WHERE c.id = $1
-                GROUP BY c.id"#,
+                WHERE $1::text IS NULL OR c.id = $1
+                GROUP BY c.id
+                ORDER BY c.id"#,
                 id,
             )
         )
@@ -785,6 +825,26 @@ impl OidcRepository<'_> {
                 client,
                 audience,
                 Json(scopes) as _,
+            )
+        )
+    }
+
+    /// Lists the user's remembered consents, by client and audience.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`DatabaseError`] if the query fails or a row is invalid.
+    pub async fn list_consents(&mut self, user: UserId) -> Result<Vec<Consent>, DatabaseError> {
+        run!(
+            self,
+            fetch_all,
+            sqlx::query_as!(
+                Consent,
+                r#"SELECT client_id, audience, scopes AS "scopes: JsonArray<String>"
+                FROM oidc_consents
+                WHERE user_id = $1
+                ORDER BY client_id, audience"#,
+                user.as_uuid(),
             )
         )
     }
