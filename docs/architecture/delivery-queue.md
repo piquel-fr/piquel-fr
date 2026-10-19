@@ -57,8 +57,9 @@ Auth-service owns sending: the workers, the retry policy and the HTTP client
      creation: `failed`.
 5. The cleanup job deletes `succeeded` deliveries after 7 days and `failed` or
    `cancelled` ones after 30. A failed ordered delivery is abandoned instead,
-   in a transaction per key: cleanup locks the failure and the key's ordering
-   row, cancels every delivery waiting behind it, and deletes it. An operator
+   in a cleanup transaction covering up to 1,000 keys. For each key, cleanup
+   locks the failure and the key's ordering row, cancels every delivery waiting
+   behind it, and deletes it. An operator
    retry or cancel waits for that transaction and then finds the failure gone,
    and a key whose next delivery is still being inserted is skipped.
 
