@@ -8,7 +8,7 @@ This is the target design; parts not built yet are marked *(planned)*.
 | --- | --- | --- |
 | `auth.piquel.fr` | OIDC/OAuth endpoints, ceremony pages and the JSON APIs | every application and user |
 | `piquel.fr` | Account settings; security center, developer console, public profiles *(planned)* | signed-in users |
-| `admin.piquel.fr` | Admin dashboard *(planned)*; auth's private admin API behind it | administrators |
+| `admin.piquel.fr` | Admin dashboard; auth's private admin API behind it | administrators |
 
 ## auth.piquel.fr
 
@@ -41,11 +41,14 @@ back. Users never unlock settings explicitly.
 
 ## admin.piquel.fr
 
-The admin dashboard *(planned)* is a server-rendered Rust app, reachable only on
-the tailnet. It signs administrators in as the confidential OIDC client
-`piquel-admin`, with the Rust SDK's login routes, and keeps their tokens on its
-server; the browser holds only the dashboard's session cookie. Its server calls the
-admin API with the administrator's access token.
+The admin dashboard (`apps/admin-web`) is a server-rendered Rust app on Topcoat,
+reachable only on the tailnet. It signs administrators in as the confidential OIDC
+client `piquel-admin`, with the Rust SDK's login routes, and keeps their tokens in
+its server's memory; the browser holds only the dashboard's session cookie. Its
+server calls the admin API with the administrator's access token, through the typed
+client in `piquel-admin-api`, so both sides share one definition of the API. Pages
+that change something confirm a recent passkey before showing their form, so the
+administrator steps up before submitting rather than after.
 
 Auth serves the admin API on a second, private listener that no ingress route
 reaches, so neither the internet nor the tailnet can call it; only the

@@ -8,10 +8,11 @@ is authentication and the piquel.fr account settings frontend.
 | `apps/auth-service` | Rust auth authority, browser ceremonies, social adapters, OIDC, settings and admin APIs, CLI |
 | `apps/auth-web` | Static SvelteKit auth pages embedded by the Rust build |
 | `apps/piquel-web` | piquel.fr's SvelteKit server on Node: account settings calling the auth API |
+| `apps/admin-web` | The admin dashboard at admin.piquel.fr: server-rendered Topcoat pages calling auth's private admin API |
 | `packages/auth-sdk` | Browser auth SDK: API client, WebAuthn passkey ceremonies, redirect helpers, shared styles; `/server`: auth origin validation and security headers for SvelteKit servers |
 | `crates/database` | `piquel-repository`: PostgreSQL connections, migrations and typed persistence operations |
 | `crates/auth-sdk` | `piquel-auth`, the public Rust SDK: token validation, typed scopes, login and the JWKS cache auth also uses for Google; `axum` feature: extractors, bearer layer, login routes over an application's own session backend |
-| `crates/admin-api` | `piquel-admin-api`: the paths and JSON bodies of auth's private admin API, shared with the admin dashboard |
+| `crates/admin-api` | `piquel-admin-api`: the paths and JSON bodies of auth's private admin API, shared with the admin dashboard; `client` feature: the dashboard's typed client |
 | `crates/common` | `piquel-common`, the one home for shared types: IDs, string enums, `Personal<T>`, and the wire types shared by auth and the SDKs (token claims, discovery metadata, JWK sets, OAuth/OIDC vocabulary and errors, bearer challenges, SDK error codes, and the bodies auth's settings and admin APIs share); `config` feature: environment variables, validated URLs, secret references; `events` feature: domain events |
 | `crates/crypto` | Random secrets, SHA-256, HMAC, PKCE and RS256 signing |
 | `crates/telemetry` | Structured tracing initialization |
@@ -40,8 +41,10 @@ stores sessions, WebAuthn challenges, OAuth state, pending social identities,
 invitations, consent, refresh tokens, rate limits and security events.
 Auth needs no separate cache, RPC service, event bus or key-management service.
 piquel.fr's Node server holds no state and reads everything it renders from auth's
-HTTP API. External applications consume standard OIDC; operators register their
-clients in the database with `auth-service client`.
+HTTP API. The admin dashboard has no database either: it keeps administrators'
+sign-ins in memory and reads everything from the admin API. External applications
+consume standard OIDC; operators register their clients in the database with
+`auth-service client`.
 
 [surfaces.md](surfaces.md) sets out what auth.piquel.fr, piquel.fr and
 admin.piquel.fr each serve. Build/configuration and testing instructions are in

@@ -10,6 +10,7 @@ use axum::{
 };
 use base64::Engine;
 use piquel_common::{UserId, clients::RedirectUris};
+use piquel_crypto::Secret;
 use tower::ServiceExt;
 
 /// Sends `method` to `path` on `replica` from a browser page on `origin`, with an
@@ -69,7 +70,10 @@ async fn changes_apply_to_the_next_request_on_every_replica() {
     let mut client = registration(ClientKind::Public, &first);
     assert!(!cors(&replicas.a, &first).await, "not registered yet");
 
-    let secret = registry.create(&operator(), &client).await.expect("create");
+    let secret = registry
+        .create(&operator(), &client, None)
+        .await
+        .expect("create");
     assert!(secret.is_none(), "public clients have no secret");
     assert!(cors(&replicas.b, &first).await);
     assert!(authenticates(&replicas.a, &client.id, &first).await);
@@ -158,41 +162,53 @@ async fn rotated_secrets_overlap_until_their_grace_period_ends() {
             == StatusCode::OK
     };
     let first = registry
-        .create(&operator(), &client)
+        .create(&operator(), &client, None)
         .await
         .expect("create")
         .expect("confidential clients get a secret");
     assert!(revokes(&first).await);
 
     let second = registry
-        .rotate_secret(&operator(), &client.id, "1h".parse().expect("grace"))
+        .rotate_secret(&operator(), &client.id, "1h".parse().expect("grace"), None)
         .await
         .expect("rotate");
     assert!(revokes(&first).await, "still in its grace period");
     assert!(revokes(&second).await);
 
+    // A deployment's own secret is registered as given.
+    let given = Secret::generate().expect("secret").encoded();
     let third = registry
-        .rotate_secret(&operator(), &client.id, "0".parse().expect("grace"))
+        .rotate_secret(
+            &operator(),
+            &client.id,
+            "0".parse().expect("grace"),
+            Some(ClientSecret::parse(&given).expect("given secret")),
+        )
         .await
         .expect("rotate and revoke");
+    assert_eq!(third.expose(), given);
     assert!(!revokes(&first).await);
     assert!(!revokes(&second).await);
     assert!(revokes(&third).await);
 
     let public = registration(ClientKind::Public, "https://web.example");
     registry
-        .create(&operator(), &public)
+        .create(&operator(), &public, None)
         .await
         .expect("public client");
     assert!(matches!(
         registry
-            .rotate_secret(&operator(), &public.id, "0".parse().expect("grace"))
+            .rotate_secret(&operator(), &public.id, "0".parse().expect("grace"), None)
             .await,
         Err(ClientRegistryError::Public(_))
     ));
     assert!(matches!(
-        registry.create(&operator(), &public).await,
+        registry.create(&operator(), &public, None).await,
         Err(ClientRegistryError::Exists { .. })
+    ));
+    assert!(matches!(
+        registry.create(&operator(), &public, Some(third)).await,
+        Err(ClientRegistryError::Public(_))
     ));
     assert!(matches!(
         registry

@@ -61,6 +61,21 @@ fn client_secret_contract() {
     assert_eq!(format!("{secret:?}"), "ClientSecret(REDACTED)");
 }
 
+/// Secrets generated elsewhere are kept exactly as given, and must be as strong
+/// as generated ones.
+#[test]
+fn client_secret_parse() {
+    let random = Secret::generate().expect("secret").encoded();
+    let generated = ClientSecret::generate().expect("secret");
+    for value in [random.as_str(), generated.expose()] {
+        let parsed = ClientSecret::parse(value).expect("valid secret");
+        assert_eq!(parsed.expose(), value);
+    }
+    for value in ["", "short", &format!("{random}A"), &format!("{random}\n")] {
+        assert!(ClientSecret::parse(value).is_err(), "{value:?}");
+    }
+}
+
 /// PKCE matches RFC 7636 appendix B and enforces verifier syntax.
 #[test]
 fn pkce_matches_rfc() {

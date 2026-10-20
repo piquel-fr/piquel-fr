@@ -11,10 +11,10 @@ use piquel_common::{
         InvalidDisplayName, InvalidRedirectUri, InvalidScopeName, PostLogoutUris, RedirectUri,
         RedirectUris, ScopeName,
     },
-    config::{ConfigurationError, Variable},
+    config::{ConfigurationError, SecretError, SecretReference, Variable},
     protocol::oauth::Scope,
 };
-use piquel_crypto::ClientSecret;
+use piquel_crypto::{ClientSecret, CryptoError};
 use piquel_repository::{
     Database, DatabaseConnectionError, DatabaseError, DeliveryStatus, StoredClientSecret,
     StoredOidcClient,
@@ -81,6 +81,12 @@ enum CliError {
         #[source]
         source: InvalidCount,
     },
+    /// The secret given with `--secret` could not be read.
+    #[error("could not read the client secret given with --secret")]
+    SecretUnreadable(#[from] SecretError),
+    /// The secret given with `--secret` is not 256 random bits in base64url.
+    #[error("the client secret given with --secret must be 32 bytes in unpadded base64url")]
+    WeakSecret(#[source] CryptoError),
     /// A URI to remove is not registered.
     #[error("{0} is not registered for this client")]
     NotRegistered(String),
@@ -313,7 +319,7 @@ impl Command {
 /// Registering, inspecting and changing OIDC clients, through [`ClientRegistry`].
 #[derive(Subcommand)]
 enum ClientCommand {
-    /// Register a client. A confidential client's secret is printed once.
+    /// Register a client. A confidential client's new secret is printed once.
     Create(CreateClient),
     /// List every client.
     List {
@@ -338,7 +344,7 @@ enum ClientCommand {
         /// The client's ID.
         id: ClientId,
     },
-    /// Print a new secret for a confidential client. Earlier secrets keep working
+    /// Give a confidential client a new secret, printed once. Earlier secrets keep working
     /// during the grace period, while the client switches to the new one.
     RotateSecret {
         /// The client's ID.
@@ -346,6 +352,8 @@ enum ClientCommand {
         /// How long earlier secrets keep working, e.g. 30m, 24h or 7d; 0 revokes them now.
         #[arg(long, default_value = "24h")]
         grace: GracePeriod,
+        #[command(flatten)]
+        secret: GivenSecret,
     },
 }
 
@@ -374,9 +382,13 @@ impl ClientCommand {
         let registry = ClientRegistry::new(database.clone());
         let context = Command::operator()?;
         match self {
-            Self::Create(create) => {
-                let secret = registry.create(&context, &create.registration()?).await?;
-                Self::print_secret(secret.as_ref());
+            Self::Create(mut create) => {
+                let given = std::mem::take(&mut create.secret).read()?;
+                let generated = given.is_none();
+                let secret = registry
+                    .create(&context, &create.registration()?, given)
+                    .await?;
+                Self::print_secret(secret.as_ref().filter(|_| generated));
             }
             Self::List { output } => {
                 let clients = database.oidc().list_clients().await?;
@@ -417,9 +429,11 @@ impl ClientCommand {
             }
             Self::Disable { id } => registry.set_enabled(&context, &id, false).await?,
             Self::Enable { id } => registry.set_enabled(&context, &id, true).await?,
-            Self::RotateSecret { id, grace } => {
-                let secret = registry.rotate_secret(&context, &id, grace).await?;
-                Self::print_secret(Some(&secret));
+            Self::RotateSecret { id, grace, secret } => {
+                let given = secret.read()?;
+                let generated = given.is_none();
+                let secret = registry.rotate_secret(&context, &id, grace, given).await?;
+                Self::print_secret(generated.then_some(&secret));
             }
         }
         Ok(())
@@ -470,6 +484,30 @@ struct CreateClient {
     /// The client skips the consent screen. Only for first-party clients.
     #[arg(long)]
     trusted: bool,
+    #[command(flatten)]
+    secret: GivenSecret,
+}
+
+/// A confidential client's secret that its deployment generated, for auth to
+/// register instead of generating one.
+#[derive(Args, Default)]
+struct GivenSecret {
+    /// Register the secret at this reference, `file://PATH` or `env://NAME`,
+    /// instead of printing a new one: for a client whose deployment generates its
+    /// own. It must be 32 random bytes in unpadded base64url.
+    #[arg(long, value_name = "REFERENCE")]
+    secret: Option<SecretReference>,
+}
+
+impl GivenSecret {
+    /// Reads the given secret, if any.
+    fn read(self) -> Result<Option<ClientSecret>, CliError> {
+        self.secret
+            .map(|reference| {
+                ClientSecret::parse(reference.resolve()?.utf8()?).map_err(CliError::WeakSecret)
+            })
+            .transpose()
+    }
 }
 
 impl CreateClient {

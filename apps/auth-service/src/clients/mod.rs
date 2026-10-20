@@ -71,15 +71,20 @@ impl ClientRegistry {
     }
 
     /// Registers an enabled client. A confidential client gets its first secret,
-    /// returned here once; only its digest is stored.
+    /// `secret` or a generated one, returned here once; only its digest is stored.
     ///
     /// # Errors
-    /// Fails if the ID is taken, a secret cannot be generated or the database fails.
+    /// Fails if the ID is taken, a public client is given a secret, a secret
+    /// cannot be generated or the database fails.
     pub async fn create(
         &self,
         operator: &Operator,
         registration: &ClientRegistration,
+        secret: Option<ClientSecret>,
     ) -> Result<Option<ClientSecret>, ClientRegistryError> {
+        if registration.kind == ClientKind::Public && secret.is_some() {
+            return Err(ClientRegistryError::Public(registration.id.clone()));
+        }
         let mut tx = self.database.begin().await?;
         tx.oidc()
             .create_client(registration)
@@ -94,7 +99,7 @@ impl ClientRegistry {
         let secret = match registration.kind {
             ClientKind::Public => None,
             ClientKind::Confidential => {
-                let secret = ClientSecret::generate()?;
+                let secret = Self::or_generate(secret)?;
                 tx.oidc()
                     .insert_client_secret(&registration.id, secret.digest().as_bytes())
                     .await?;
@@ -189,9 +194,9 @@ impl ClientRegistry {
         Ok(())
     }
 
-    /// Gives a confidential client a new secret, returned here once. Its earlier
-    /// secrets keep working for `grace` at most, so it can redeploy in between;
-    /// zero revokes them now.
+    /// Gives a confidential client a new secret, `secret` or a generated one,
+    /// returned here once. Its earlier secrets keep working for `grace` at most, so
+    /// it can redeploy in between; zero revokes them now.
     ///
     /// # Errors
     /// Fails if the client does not exist or is public, a secret cannot be
@@ -201,6 +206,7 @@ impl ClientRegistry {
         operator: &Operator,
         id: &ClientId,
         grace: GracePeriod,
+        secret: Option<ClientSecret>,
     ) -> Result<ClientSecret, ClientRegistryError> {
         let mut tx = self.database.begin().await?;
         // Locked, so a concurrent rotation cannot insert a secret this cap misses.
@@ -208,7 +214,7 @@ impl ClientRegistry {
         if client.kind == ClientKind::Public {
             return Err(ClientRegistryError::Public(client.id));
         }
-        let secret = ClientSecret::generate()?;
+        let secret = Self::or_generate(secret)?;
         let previous_expire_at = tx.oidc().cap_client_secrets(id, grace.duration()).await?;
         tx.oidc()
             .insert_client_secret(id, secret.digest().as_bytes())
@@ -224,6 +230,11 @@ impl ClientRegistry {
         .await?;
         tx.commit().await?;
         Ok(secret)
+    }
+
+    /// `secret`, or a new one when none is given.
+    fn or_generate(secret: Option<ClientSecret>) -> Result<ClientSecret, CryptoError> {
+        secret.map_or_else(ClientSecret::generate, Ok)
     }
 
     /// Locks client `id` for the rest of `tx`, then reads it.

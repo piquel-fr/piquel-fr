@@ -102,7 +102,7 @@ impl Flow {
             ..crate::tests::registration(ClientKind::Public, "https://client.example")
         };
         let secret = crate::ClientRegistry::new(db.clone())
-            .create(&crate::tests::operator(), &client)
+            .create(&crate::tests::operator(), &client, None)
             .await
             .expect("register test OIDC client")
             .map(|secret| secret.expose().to_owned());

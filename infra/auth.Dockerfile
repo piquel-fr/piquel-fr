@@ -14,6 +14,8 @@ COPY Cargo.toml Cargo.lock ./
 COPY .cargo .cargo
 COPY crates crates
 COPY apps/auth-service apps/auth-service
+# Cargo loads every workspace member; only auth-service is built.
+COPY apps/admin-web apps/admin-web
 COPY --from=frontend /app/apps/auth-web/build apps/auth-web/build
 RUN cargo build --locked --release -p auth-service
 

@@ -1,0 +1,29 @@
+[package]
+name = "admin-web"
+description = "The admin dashboard at admin.piquel.fr: server-rendered pages over auth's admin API"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+piquel-admin-api = { workspace = true, features = ["client"] }
+piquel-auth = { workspace = true, features = ["axum"] }
+piquel-common = { workspace = true, features = ["config"] }
+piquel-telemetry.workspace = true
+
+axum.workspace = true
+chrono.workspace = true
+reqwest.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+tokio.workspace = true
+# Pages render on the server; no client runtime, assets or fonts.
+topcoat = { version = "0.10", default-features = false, features = ["router", "view", "tower"] }
+tower.workspace = true
+tracing.workspace = true
+url.workspace = true
+
+[lints]
+workspace = true
