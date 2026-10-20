@@ -1,0 +1,247 @@
+//! The signed-in user's security history, and reports of entries that were not theirs.
+use crate::routes;
+use crate::security::{self, ApiError, RequestContext};
+use axum::{
+    Json, Router,
+    extract::{Path, Query, State},
+    routing::{get, post},
+};
+use chrono::{DateTime, Utc};
+use piquel_common::{
+    ClientId, EventId, Personal,
+    events::{
+        Actor, DomainEvent, FollowUp, HistoryActor, HistoryEntry, RequestOrigin, RevocationReason,
+        UserAgentFamily,
+    },
+};
+use piquel_repository::{Database, EventFilter, StoredEvent};
+use serde::{Deserialize, Serialize};
+use std::{collections::BTreeMap, net::IpAddr};
+
+/// History failures and their browser response mapping.
+mod error;
+use error::HistoryError;
+
+/// Entries per page.
+const PAGE_SIZE: u16 = 50;
+
+/// The account's security history and its reports.
+#[derive(Clone)]
+pub(crate) struct HistoryApplication {
+    /// Events, sessions, refresh families and client names.
+    database: Database,
+}
+
+/// The query of [`routes::history::LIST`].
+#[derive(Deserialize)]
+struct HistoryQuery {
+    /// The previous page's [`HistoryPage::next`], to continue with older entries.
+    before: Option<EventId>,
+}
+
+/// One page of the account's history, newest first.
+#[derive(Serialize)]
+struct HistoryPage {
+    /// The entries.
+    entries: Vec<HistoryItem>,
+    /// The cursor of the next, older page, when there may be one.
+    next: Option<EventId>,
+}
+
+/// One entry of the account's history. Entries whose actor is `account` can be
+/// reported.
+#[derive(Serialize)]
+struct HistoryItem {
+    /// Event ID, to report the entry.
+    id: EventId,
+    /// When it happened.
+    occurred_at: DateTime<Utc>,
+    /// What happened: its `kind` and details.
+    #[serde(flatten)]
+    entry: HistoryEntry,
+    /// Who did it.
+    actor: HistoryActor,
+    /// The application involved, if any.
+    client: Option<ClientView>,
+    /// The request's IP address, while kept.
+    ip: Option<IpAddr>,
+    /// The request's browser family, while kept.
+    browser: Option<UserAgentFamily>,
+    /// Whether retention or a purge deleted the IP address and browser.
+    erased: bool,
+}
+
+/// An application named by a history entry.
+#[derive(Serialize)]
+struct ClientView {
+    /// Client ID.
+    id: ClientId,
+    /// The name its consent screen shows; `None` if it is not registered.
+    name: Option<String>,
+}
+
+/// The answer to a report.
+#[derive(Serialize)]
+struct Report {
+    /// What the user should still do to undo the entry. It needs a passkey confirmation.
+    follow_up: Option<FollowUp>,
+}
+
+impl HistoryItem {
+    /// The entry `stored` shows its subject, or `None` if it shows none. `clients`
+    /// maps client IDs to their names.
+    fn new(stored: &StoredEvent, clients: &BTreeMap<ClientId, String>) -> Option<Self> {
+        let entry = stored.event.history_entry()?;
+        let client = stored
+            .event
+            .client_id()
+            .or(stored.actor.client_id())
+            .map(|id| ClientView {
+                name: clients.get(id).cloned(),
+                id: id.clone(),
+            });
+        let (origin, erased) = match &stored.origin {
+            Personal::Value(origin) => (*origin, false),
+            Personal::Erased => (RequestOrigin::default(), true),
+        };
+        Some(Self {
+            id: stored.id,
+            occurred_at: stored.occurred_at,
+            entry,
+            actor: HistoryActor::from(&stored.actor),
+            client,
+            ip: origin.client_ip,
+            browser: origin.user_agent_family,
+            erased,
+        })
+    }
+}
+
+impl HistoryApplication {
+    /// Serves the history from `database`.
+    pub(crate) const fn new(database: Database) -> Self {
+        Self { database }
+    }
+
+    /// Returns both history endpoints with this application as state.
+    pub(crate) fn routes(self) -> Router {
+        Router::new()
+            .route(routes::history::LIST, get(Self::list))
+            .route(routes::history::REPORT, post(Self::report))
+            .with_state(self)
+    }
+
+    /// Returns a page of the account's entries, newest first. Events the user does
+    /// not see are skipped, and reading continues until the page is full or the
+    /// history ends, so only the last page is short. Only the account's own events
+    /// are read: the repository query filters on its ID.
+    async fn list(
+        State(app): State<Self>,
+        security::Session(session): security::Session,
+        Query(query): Query<HistoryQuery>,
+    ) -> Result<Json<HistoryPage>, ApiError> {
+        let clients: BTreeMap<_, _> = app
+            .database
+            .oidc()
+            .list_clients()
+            .await?
+            .into_iter()
+            .map(|client| (client.id, client.display_name))
+            .collect();
+        let mut filter = EventFilter {
+            subject: Some(session.user_id),
+            before: query.before,
+            ..EventFilter::default()
+        };
+        let mut entries = Vec::new();
+        loop {
+            let batch = app
+                .database
+                .events()
+                .list(&filter, u32::from(PAGE_SIZE))
+                .await?;
+            let exhausted = batch.len() < usize::from(PAGE_SIZE);
+            for stored in batch {
+                filter.before = Some(stored.id);
+                entries.extend(HistoryItem::new(&stored, &clients));
+                if entries.len() == usize::from(PAGE_SIZE) {
+                    return Ok(Json(HistoryPage {
+                        entries,
+                        next: filter.before,
+                    }));
+                }
+            }
+            if exhausted {
+                return Ok(Json(HistoryPage {
+                    entries,
+                    next: None,
+                }));
+            }
+        }
+    }
+
+    /// Reports an entry the account caused as not the user's. In one transaction,
+    /// records the report, ends every other session of the account and revokes
+    /// every refresh family, this session's included. Returns the action that
+    /// undoes the entry, if any.
+    ///
+    /// A session is enough: the worst a stolen cookie can do here is sign the user
+    /// out of their other devices. Undoing the entry needs a passkey confirmation.
+    async fn report(
+        State(app): State<Self>,
+        context: RequestContext,
+        security::Session(session): security::Session,
+        Path(event_id): Path<EventId>,
+    ) -> Result<Json<Report>, ApiError> {
+        let mut tx = app.database.begin().await?;
+        security::Session::lock(&mut tx, &session).await?;
+        let filter = EventFilter {
+            subject: Some(session.user_id),
+            id: Some(event_id),
+            ..EventFilter::default()
+        };
+        let stored = tx
+            .events()
+            .list(&filter, 1)
+            .await?
+            .pop()
+            .ok_or(HistoryError::EntryNotFound)?;
+        let entry = stored
+            .event
+            .history_entry()
+            .ok_or(HistoryError::EntryNotFound)?;
+        if !matches!(stored.actor, Actor::User { user_id, .. } if user_id == session.user_id) {
+            return Err(HistoryError::NotReportable.into());
+        }
+        tx.record(
+            &context.user(&session),
+            Some(session.user_id),
+            DomainEvent::CompromiseReported { event_id },
+        )
+        .await?;
+        security::Session::revoke_other(
+            &mut tx,
+            context,
+            &session,
+            RevocationReason::CompromiseReported,
+        )
+        .await?;
+        tx.tokens().revoke_all_for_user(session.user_id).await?;
+        tx.commit().await?;
+        Ok(Json(Report {
+            follow_up: entry.follow_up(),
+        }))
+    }
+}
+
+/// Supplies the shared database boundary to browser-session extractors.
+impl axum::extract::FromRef<HistoryApplication> for Database {
+    /// Shares persistence with the session extractors.
+    fn from_ref(application: &HistoryApplication) -> Self {
+        application.database.clone()
+    }
+}
+
+/// Database-backed history and report scenarios.
+#[cfg(test)]
+mod tests;

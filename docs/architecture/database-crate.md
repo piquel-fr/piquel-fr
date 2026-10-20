@@ -187,3 +187,19 @@ of transactions older than every running one (`txid < pg_snapshot_xmin(...)`), w
 have all finished. A long-running transaction holds back every consumer until it
 ends, so keep transactions short. `history_for_user` lists an account's events,
 newest first.
+
+### Security history
+
+The account API serves each user their own history (`GET /account/history`): the
+events whose subject is the caller, read with `list` filtered on that subject, so
+the query itself excludes other accounts. `DomainEvent::history_entry` decides
+what a user sees. It names every variant, under
+`#[deny(clippy::wildcard_enum_match_arm)]`, so a new event cannot be added without
+that decision. Ceremonies, rejected attempts, token bookkeeping and invitations
+are hidden; admin and CLI actions show with the kind of actor, never the operator.
+
+`POST /account/history/{event_id}/report` reports an entry the user caused as not
+theirs. One transaction records `CompromiseReported`, ends the account's other
+sessions with `RevocationReason::CompromiseReported` and revokes every refresh
+family. The answer names the action that undoes the entry, such as removing the
+passkey it added, which still needs a passkey confirmation.
