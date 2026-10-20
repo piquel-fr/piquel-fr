@@ -30,8 +30,10 @@ WHERE client_secret_hash IS NOT NULL;
 -- at startup it registers its file's clients, and an old replica may restart during
 -- a deploy or after a rollback. Mirror those writes, so the new release never takes
 -- a confidential client for a public one. Auth's own writes insert the secret row in
--- the same statement, so they match an existing secret and change nothing here. A
--- legacy write of a new hash replaces the previous secrets at once, as it used to.
+-- the same statement, so they match a current secret and change nothing here. A
+-- legacy write of any other hash, even one that expired, as when a rollback restores
+-- an older clients file, replaces the previous secrets at once, as it used to: both
+-- releases then accept the same secret.
 -- A legacy write that clears the hash changes nothing: the client stays
 -- confidential, and fails closed.
 CREATE FUNCTION oidc_clients_mirror_legacy_secret() RETURNS trigger
@@ -39,7 +41,9 @@ LANGUAGE plpgsql AS $$
 BEGIN
     IF NOT EXISTS (
         SELECT 1 FROM oidc_client_secrets
-        WHERE client_id = NEW.id AND secret_digest = NEW.client_secret_hash
+        WHERE client_id = NEW.id
+        AND secret_digest = NEW.client_secret_hash
+        AND expires_at IS NULL
     ) THEN
         UPDATE oidc_clients SET client_type = 'confidential' WHERE id = NEW.id;
         UPDATE oidc_client_secrets SET expires_at = now()
@@ -66,8 +70,9 @@ CREATE INDEX oidc_redirect_uris_origin_idx ON oidc_redirect_uris (origin)
     WHERE kind = 'authorization';
 
 -- The previous release still disables every client it does not find in its
--- AUTH_CLIENTS_FILE whenever it starts. Register clients with the new release only
--- once no previous replica can restart, and re-enable them after a rollback.
+-- AUTH_CLIENTS_FILE whenever it starts, and writes back its file's settings and
+-- secrets. Register or change clients with the new release only once no previous
+-- replica can restart, and re-enable them after a rollback.
 --
 -- PENDING CONTRACT: oidc_clients.client_secret_hash stays, and auth keeps it equal
 -- to a confidential client's newest secret, because the previous release

@@ -241,7 +241,7 @@ impl OidcRepository<'_> {
             sqlx::query_scalar!(
                 r#"UPDATE oidc_clients c
                 SET enabled = $2, updated_at = now()
-                FROM (SELECT id, enabled FROM oidc_clients WHERE id = $1 FOR UPDATE) previous
+                FROM (SELECT id, enabled FROM oidc_clients WHERE id = $1 FOR NO KEY UPDATE) previous
                 WHERE c.id = previous.id
                 RETURNING previous.enabled <> $2 AS "changed!""#,
                 id.as_str(),
@@ -262,7 +262,7 @@ impl OidcRepository<'_> {
             self,
             fetch_one,
             sqlx::query_scalar!(
-                "SELECT id FROM oidc_clients WHERE id = $1 FOR UPDATE",
+                "SELECT id FROM oidc_clients WHERE id = $1 FOR NO KEY UPDATE",
                 id.as_str(),
             )
         )?;

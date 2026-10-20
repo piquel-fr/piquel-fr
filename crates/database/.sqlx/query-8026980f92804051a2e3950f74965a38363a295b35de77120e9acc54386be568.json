@@ -1,0 +1,23 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE oidc_clients c\n                SET enabled = $2, updated_at = now()\n                FROM (SELECT id, enabled FROM oidc_clients WHERE id = $1 FOR NO KEY UPDATE) previous\n                WHERE c.id = previous.id\n                RETURNING previous.enabled <> $2 AS \"changed!\"",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "changed!",
+        "type_info": "Bool"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Bool"
+      ]
+    },
+    "nullable": [
+      null
+    ]
+  },
+  "hash": "8026980f92804051a2e3950f74965a38363a295b35de77120e9acc54386be568"
+}

@@ -96,6 +96,7 @@ fn names_and_scopes_are_bounded() {
     assert!("é".repeat(80).parse::<DisplayName>().is_ok());
     assert!("é".repeat(81).parse::<DisplayName>().is_err());
     assert!("  ".parse::<DisplayName>().is_err());
+    assert!("Web\x1b[2J".parse::<DisplayName>().is_err());
     for (value, valid) in [
         ("notes:read", true),
         ("", false),

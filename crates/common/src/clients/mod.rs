@@ -107,7 +107,9 @@ pub struct DisplayName(String);
 
 /// A display name that is blank or longer than 80 characters.
 #[derive(Clone, Debug, PartialEq, Eq, Error)]
-#[error("display name {0:?} must be nonblank and at most 80 characters")]
+#[error(
+    "display name {0:?} must be nonblank, at most 80 characters and have no control characters"
+)]
 pub struct InvalidDisplayName(String);
 
 impl DisplayName {
@@ -120,9 +122,13 @@ impl DisplayName {
 
 impl FromStr for DisplayName {
     type Err = InvalidDisplayName;
-    /// Accepts nonblank names of at most 80 characters.
+    /// Accepts nonblank names of at most 80 characters, without control characters
+    /// that could rewrite the terminal or page that shows them.
     fn from_str(value: &str) -> Result<Self, Self::Err> {
-        if value.trim().is_empty() || value.chars().count() > MAX_DISPLAY_NAME_CHARS {
+        if value.trim().is_empty()
+            || value.chars().count() > MAX_DISPLAY_NAME_CHARS
+            || value.chars().any(char::is_control)
+        {
             return Err(InvalidDisplayName(value.to_owned()));
         }
         Ok(Self(value.to_owned()))

@@ -156,7 +156,8 @@ async fn public_client_origins_follow_registrations() {
 
 /// Clients the startup file registered keep working after the migration: a
 /// confidential client keeps its secret, redirect origins are filled in as URL
-/// parsing serializes them, and the previous release's writes are mirrored.
+/// parsing serializes them, and the previous release's writes are mirrored, even
+/// of a secret that had expired.
 /// It runs in a scratch schema, since the test database is migrated.
 #[tokio::test]
 #[ignore = "requires a disposable TEST_DATABASE_URL"]
@@ -223,33 +224,37 @@ async fn migration_keeps_file_clients_and_their_secrets() {
     .execute(&mut connection)
     .await
     .expect("legacy confidential client");
-    // It then restarts with a new secret in its file, which replaces the old one.
+    // It then restarts with a new secret in its file, which replaces the old one,
+    // and a rollback restores its earlier file, whose secret had expired.
     let replaced = [7_u8; 32];
-    sqlx::query("UPDATE oidc_clients SET client_secret_hash = $1 WHERE id = 'legacy'")
-        .bind(replaced.as_slice())
-        .execute(&mut connection)
-        .await
-        .expect("legacy secret change");
+    for digest in [replaced, legacy] {
+        sqlx::query("UPDATE oidc_clients SET client_secret_hash = $1 WHERE id = 'legacy'")
+            .bind(digest.as_slice())
+            .execute(&mut connection)
+            .await
+            .expect("legacy secret change");
+        assert_eq!(
+            OidcRepository::from_connection(&mut connection)
+                .active_secret_digests("legacy")
+                .await
+                .expect("secrets"),
+            [digest.to_vec()]
+        );
+    }
 
     let mut oidc = OidcRepository::from_connection(&mut connection);
     oidc.fill_redirect_origins().await.expect("origins");
-    let kind = async |oidc: &mut OidcRepository<'_>, id| {
-        oidc.find_client(id)
-            .await
-            .expect("find")
-            .expect("migrated")
-            .kind
-    };
-    assert_eq!(kind(&mut oidc, "web").await, ClientKind::Public);
-    assert_eq!(kind(&mut oidc, "api").await, ClientKind::Confidential);
+    for (id, kind) in [
+        ("web", ClientKind::Public),
+        ("api", ClientKind::Confidential),
+        ("legacy", ClientKind::Confidential),
+    ] {
+        let client = oidc.find_client(id).await.expect("find").expect("migrated");
+        assert_eq!(client.kind, kind, "{id}");
+    }
     assert_eq!(
         oidc.active_secret_digests("api").await.expect("secrets"),
         [digest.to_vec()]
-    );
-    assert_eq!(kind(&mut oidc, "legacy").await, ClientKind::Confidential);
-    assert_eq!(
-        oidc.active_secret_digests("legacy").await.expect("secrets"),
-        [replaced.to_vec()]
     );
     for origin in ["https://web.example", "https://xn--bcher-kva.example"] {
         assert!(
