@@ -92,12 +92,12 @@ struct Report {
 }
 
 impl HistoryItem {
-    /// The entry `stored` shows its subject, or `None` if it shows none. `clients`
-    /// maps client IDs to their names.
+    /// The entry `stored` shows its subject, or `None` if it shows none, as for an
+    /// event a newer release wrote. `clients` maps client IDs to their names.
     fn new(stored: &StoredEvent, clients: &BTreeMap<ClientId, String>) -> Option<Self> {
-        let entry = stored.event.history_entry()?;
-        let client = stored
-            .event
+        let event = stored.event.known()?;
+        let entry = event.history_entry()?;
+        let client = event
             .client_id()
             .or(stored.actor.client_id())
             .map(|id| ClientView {
@@ -216,7 +216,8 @@ impl HistoryApplication {
             .ok_or(HistoryError::EntryNotFound)?;
         let entry = stored
             .event
-            .history_entry()
+            .known()
+            .and_then(DomainEvent::history_entry)
             .ok_or(HistoryError::EntryNotFound)?;
         if !matches!(stored.actor, Actor::User { user_id, .. } if user_id == session.user_id) {
             return Err(HistoryError::NotReportable.into());

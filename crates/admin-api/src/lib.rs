@@ -273,7 +273,9 @@ pub struct Event {
     /// The account it concerns, if any.
     pub subject: Option<UserId>,
     /// What happened: `{"kind": …, "data": …}`, as auth stores it. Personal values
-    /// read `{"$personal": value}`, or `"$erased"` once deleted.
+    /// read `{"$personal": value}`, or `"$erased"` once deleted. An event of a kind
+    /// or payload version the serving release does not know, written by a newer
+    /// one, also carries its `version`.
     pub event: serde_json::Value,
 }
 

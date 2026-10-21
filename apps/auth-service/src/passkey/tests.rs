@@ -313,7 +313,7 @@ impl Fixture {
             .await
             .expect("history")
             .into_iter()
-            .map(|stored| stored.event)
+            .map(|stored| stored.event.known().cloned().expect("a known event"))
             .collect()
     }
     /// Registers a new account with a fresh software credential; returns the finish response.

@@ -25,7 +25,7 @@ pub use repositories::{
         Channel, Delivery, DeliveryOutcome, DeliveryStatus, DeliverySummary, NewDelivery,
     },
     emails::{InsertVerifiedEmail, StoredEmail},
-    events::{EventCursor, EventFilter, StoredEvent},
+    events::{EventCursor, EventFilter, RecordedEvent, StoredEvent},
     federation::{
         ConsumedFederationTransaction, InsertExternalIdentity, InsertFederationTransaction,
         PendingFederation, StoredExternalIdentity,
