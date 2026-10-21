@@ -9,7 +9,10 @@ use axum::{
     response::Response,
 };
 use base64::Engine;
-use piquel_common::{UserId, clients::RedirectUris};
+use piquel_common::{
+    UserId,
+    clients::{AllowedScopes, RedirectUris},
+};
 use piquel_crypto::Secret;
 use tower::ServiceExt;
 
@@ -169,24 +172,16 @@ async fn rotated_secrets_overlap_until_their_grace_period_ends() {
     assert!(revokes(&first).await);
 
     let second = registry
-        .rotate_secret(&operator(), &client.id, "1h".parse().expect("grace"), None)
+        .rotate_secret(&operator(), &client.id, "1h".parse().expect("grace"))
         .await
         .expect("rotate");
     assert!(revokes(&first).await, "still in its grace period");
     assert!(revokes(&second).await);
 
-    // A deployment's own secret is registered as given.
-    let given = Secret::generate().expect("secret").encoded();
     let third = registry
-        .rotate_secret(
-            &operator(),
-            &client.id,
-            "0".parse().expect("grace"),
-            Some(ClientSecret::parse(&given).expect("given secret")),
-        )
+        .rotate_secret(&operator(), &client.id, "0".parse().expect("grace"))
         .await
         .expect("rotate and revoke");
-    assert_eq!(third.expose(), given);
     assert!(!revokes(&first).await);
     assert!(!revokes(&second).await);
     assert!(revokes(&third).await);
@@ -198,17 +193,13 @@ async fn rotated_secrets_overlap_until_their_grace_period_ends() {
         .expect("public client");
     assert!(matches!(
         registry
-            .rotate_secret(&operator(), &public.id, "0".parse().expect("grace"), None)
+            .rotate_secret(&operator(), &public.id, "0".parse().expect("grace"))
             .await,
         Err(ClientRegistryError::Public(_))
     ));
     assert!(matches!(
         registry.create(&operator(), &public, None).await,
         Err(ClientRegistryError::Exists { .. })
-    ));
-    assert!(matches!(
-        registry.create(&operator(), &public, Some(third)).await,
-        Err(ClientRegistryError::Public(_))
     ));
     assert!(matches!(
         registry
@@ -226,5 +217,137 @@ async fn rotated_secrets_overlap_until_their_grace_period_ends() {
             .set_enabled(&operator(), &"unknown-client".parse().expect("ID"), false)
             .await,
         Err(ClientRegistryError::Unknown(_))
+    ));
+}
+
+/// Applying a deployment's client registers it, then writes only what differs, so
+/// each deploy can apply it again. A new secret overlaps with the previous ones for
+/// the grace period, a previous secret applied again lasts, and a zero grace
+/// revokes the others.
+#[tokio::test]
+#[ignore = "requires TEST_DATABASE_URL"]
+async fn apply_changes_only_what_differs() {
+    let replicas = Replicas::new().await;
+    let database = Replicas::database().await;
+    let registry = ClientRegistry::new(database.clone());
+    let origin = format!("https://{}.example", UserId::new());
+    let mut client = registration(ClientKind::Confidential, &origin);
+    let [first, second] = [(); 2].map(|()| Secret::generate().expect("secret").encoded());
+    let apply = async |client: &ClientRegistration, secret: Option<&str>, grace: &str| {
+        let secret = secret.map(|secret| ClientSecret::parse(secret).expect("secret"));
+        registry
+            .apply(&operator(), client, secret, grace.parse().expect("grace"))
+            .await
+    };
+    let revokes = async |secret: &str| {
+        send(
+            &replicas.a,
+            Method::POST,
+            "/oauth/revoke",
+            &origin,
+            "token=unknown",
+            Some((&client.id, secret)),
+        )
+        .await
+        .status()
+            == StatusCode::OK
+    };
+
+    assert_eq!(
+        apply(&client, Some(&first), "1h").await.expect("register"),
+        Applied::Registered
+    );
+    assert!(revokes(&first).await);
+    let mut reordered = client.clone();
+    reordered.allowed_scopes =
+        AllowedScopes::new(client.allowed_scopes.iter().rev().cloned()).expect("scopes");
+    assert_eq!(
+        apply(&reordered, Some(&first), "1h").await.expect("again"),
+        Applied::Unchanged
+    );
+
+    client.display_name = "Renamed app".parse().expect("display name");
+    assert_eq!(
+        apply(&client, Some(&first), "1h").await.expect("rename"),
+        Applied::Updated
+    );
+    assert_eq!(
+        apply(&client, Some(&second), "1h")
+            .await
+            .expect("new secret"),
+        Applied::Updated
+    );
+    assert!(
+        revokes(&first).await,
+        "the previous secret is in its grace period"
+    );
+    assert!(revokes(&second).await);
+
+    assert_eq!(
+        apply(&client, Some(&first), "1h").await.expect("back"),
+        Applied::Updated,
+        "a secret in its grace period is made lasting again"
+    );
+    assert_eq!(
+        apply(&client, Some(&first), "0").await.expect("revoke"),
+        Applied::Updated
+    );
+    assert!(revokes(&first).await);
+    assert!(!revokes(&second).await);
+    assert_eq!(
+        apply(&client, Some(&first), "0").await.expect("again"),
+        Applied::Unchanged
+    );
+
+    let history = database
+        .events()
+        .history_for_client(&client.id, 10)
+        .await
+        .expect("history");
+    assert!(matches!(
+        history
+            .iter()
+            .map(|stored| &stored.event)
+            .collect::<Vec<_>>()[..],
+        [
+            DomainEvent::ClientSecretRotated { .. },
+            DomainEvent::ClientSecretRotated { .. },
+            DomainEvent::ClientSecretRotated { .. },
+            DomainEvent::ClientUpdated { .. },
+            DomainEvent::ClientRegistered { .. },
+        ]
+    ));
+}
+
+/// Applying refuses a confidential client without its secret, a public one with a
+/// secret, and a change of kind.
+#[tokio::test]
+#[ignore = "requires TEST_DATABASE_URL"]
+async fn apply_refuses_mismatched_secrets_and_kinds() {
+    let registry = ClientRegistry::new(Replicas::database().await);
+    let client = registration(ClientKind::Confidential, "https://api.example");
+    let first = Secret::generate().expect("secret").encoded();
+    let apply = async |client: &ClientRegistration, secret: Option<&str>| {
+        let secret = secret.map(|secret| ClientSecret::parse(secret).expect("secret"));
+        registry
+            .apply(&operator(), client, secret, "1h".parse().expect("grace"))
+            .await
+    };
+    apply(&client, Some(&first)).await.expect("register");
+    assert!(matches!(
+        apply(&client, None).await,
+        Err(ClientRegistryError::MissingSecret(_))
+    ));
+    let public = ClientRegistration {
+        kind: ClientKind::Public,
+        ..client.clone()
+    };
+    assert!(matches!(
+        apply(&public, Some(&first)).await,
+        Err(ClientRegistryError::Public(_))
+    ));
+    assert!(matches!(
+        apply(&public, None).await,
+        Err(ClientRegistryError::Immutable(_))
     ));
 }

@@ -1,7 +1,7 @@
 //! Authentication service and its administrative CLI.
 use auth_service::{
-    AdminError, AdminOperations, AuthConfig, ClientRegistry, ClientRegistryError, GracePeriod,
-    InviteExpiry, Jobs, Operator, PUBLIC_BASE_URL,
+    AdminError, AdminOperations, Applied, AuthConfig, ClientRegistry, ClientRegistryError,
+    GracePeriod, InviteExpiry, Jobs, Operator, PUBLIC_BASE_URL,
 };
 use clap::{Args, Parser, Subcommand, ValueEnum};
 use piquel_common::{
@@ -319,8 +319,12 @@ impl Command {
 /// Registering, inspecting and changing OIDC clients, through [`ClientRegistry`].
 #[derive(Subcommand)]
 enum ClientCommand {
-    /// Register a client. A confidential client's new secret is printed once.
+    /// Register a client. A confidential client's secret is printed once.
     Create(CreateClient),
+    /// Register a client, or update it to match, with the secret its deployment
+    /// generated: for clients a deployment manages, such as the admin dashboard.
+    /// Records nothing when the client already matches.
+    Apply(ApplyClient),
     /// List every client.
     List {
         /// A table for people, or JSON for scripts.
@@ -344,7 +348,7 @@ enum ClientCommand {
         /// The client's ID.
         id: ClientId,
     },
-    /// Give a confidential client a new secret, printed once. Earlier secrets keep working
+    /// Print a new secret for a confidential client. Earlier secrets keep working
     /// during the grace period, while the client switches to the new one.
     RotateSecret {
         /// The client's ID.
@@ -352,8 +356,6 @@ enum ClientCommand {
         /// How long earlier secrets keep working, e.g. 30m, 24h or 7d; 0 revokes them now.
         #[arg(long, default_value = "24h")]
         grace: GracePeriod,
-        #[command(flatten)]
-        secret: GivenSecret,
     },
 }
 
@@ -382,13 +384,24 @@ impl ClientCommand {
         let registry = ClientRegistry::new(database.clone());
         let context = Command::operator()?;
         match self {
-            Self::Create(mut create) => {
-                let given = std::mem::take(&mut create.secret).read()?;
-                let generated = given.is_none();
+            Self::Create(create) => {
                 let secret = registry
-                    .create(&context, &create.registration()?, given)
+                    .create(&context, &create.registration()?, None)
                     .await?;
-                Self::print_secret(secret.as_ref().filter(|_| generated));
+                Self::print_secret(secret.as_ref());
+            }
+            Self::Apply(apply) => {
+                let secret = apply.secret()?;
+                let id = apply.client.id.clone();
+                let applied = registry
+                    .apply(&context, &apply.client.registration()?, secret, apply.grace)
+                    .await?;
+                let applied = match applied {
+                    Applied::Registered => "registered",
+                    Applied::Updated => "updated",
+                    Applied::Unchanged => "unchanged",
+                };
+                eprintln!("Client {id}: {applied}.");
             }
             Self::List { output } => {
                 let clients = database.oidc().list_clients().await?;
@@ -429,11 +442,9 @@ impl ClientCommand {
             }
             Self::Disable { id } => registry.set_enabled(&context, &id, false).await?,
             Self::Enable { id } => registry.set_enabled(&context, &id, true).await?,
-            Self::RotateSecret { id, grace, secret } => {
-                let given = secret.read()?;
-                let generated = given.is_none();
-                let secret = registry.rotate_secret(&context, &id, grace, given).await?;
-                Self::print_secret(generated.then_some(&secret));
+            Self::RotateSecret { id, grace } => {
+                let secret = registry.rotate_secret(&context, &id, grace).await?;
+                Self::print_secret(Some(&secret));
             }
         }
         Ok(())
@@ -484,25 +495,29 @@ struct CreateClient {
     /// The client skips the consent screen. Only for first-party clients.
     #[arg(long)]
     trusted: bool,
-    #[command(flatten)]
-    secret: GivenSecret,
 }
 
-/// A confidential client's secret that its deployment generated, for auth to
-/// register instead of generating one.
-#[derive(Args, Default)]
-struct GivenSecret {
-    /// Register the secret at this reference, `file://PATH` or `env://NAME`,
-    /// instead of printing a new one: for a client whose deployment generates its
-    /// own. It must be 32 random bytes in unpadded base64url.
+/// A client a deployment manages, as `client apply` makes it.
+#[derive(Args)]
+struct ApplyClient {
+    /// The registration, as `client create` takes it.
+    #[command(flatten)]
+    client: CreateClient,
+    /// A confidential client's secret, at `file://PATH` or `env://NAME`: 32 random
+    /// bytes in unpadded base64url, generated by its deployment. Never printed.
     #[arg(long, value_name = "REFERENCE")]
     secret: Option<SecretReference>,
+    /// How long earlier secrets keep working once the secret changes, so the
+    /// running deployment keeps signing in until it rolls out.
+    #[arg(long, default_value = "1h")]
+    grace: GracePeriod,
 }
 
-impl GivenSecret {
+impl ApplyClient {
     /// Reads the given secret, if any.
-    fn read(self) -> Result<Option<ClientSecret>, CliError> {
+    fn secret(&self) -> Result<Option<ClientSecret>, CliError> {
         self.secret
+            .as_ref()
             .map(|reference| {
                 ClientSecret::parse(reference.resolve()?.utf8()?).map_err(CliError::WeakSecret)
             })

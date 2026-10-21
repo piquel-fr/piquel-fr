@@ -1,6 +1,7 @@
 //! The one place that changes OIDC client registrations. Each change commits with
-//! the event that records it. The `client` command uses it; the owner API (#43),
-//! dynamic registration (#44) and the admin API (#38) will too.
+//! the event that records it. The `client` command uses it, as does the deployment
+//! job that registers the admin dashboard; the owner API (#43), dynamic
+//! registration (#44) and the admin API (#38) will too.
 //!
 //! Nothing is cached: every request reads the registration it needs from the
 //! database, so a change applies to the next request on every replica.
@@ -16,7 +17,7 @@ use thiserror::Error;
 
 use crate::{GracePeriod, Operator};
 
-/// Creates, updates, enables, disables and rotates the secrets of clients.
+/// Creates, updates, applies, enables, disables and rotates the secrets of clients.
 #[derive(Clone)]
 pub struct ClientRegistry {
     /// Where registrations and their events are stored.
@@ -41,6 +42,10 @@ pub enum ClientRegistryError {
     /// Public clients authenticate without a secret.
     #[error("client {0} is public, so it has no secret")]
     Public(ClientId),
+    /// A confidential client applied without its secret, which its deployment
+    /// must provide.
+    #[error("client {0} is confidential, so applying it needs its secret")]
+    MissingSecret(ClientId),
     /// An update changed the client's ID or kind, which would orphan its grants
     /// or secrets.
     #[error("client {0}'s ID and kind cannot change; register a new client instead")]
@@ -51,6 +56,17 @@ pub enum ClientRegistryError {
     /// The database failed.
     #[error("client registration database operation failed")]
     Database(#[from] DatabaseError),
+}
+
+/// What [`ClientRegistry::apply`] changed.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Applied {
+    /// The client was not registered yet.
+    Registered,
+    /// Its registration or secret changed.
+    Updated,
+    /// It was already as given; nothing was recorded.
+    Unchanged,
 }
 
 impl ClientRegistryError {
@@ -99,7 +115,7 @@ impl ClientRegistry {
         let secret = match registration.kind {
             ClientKind::Public => None,
             ClientKind::Confidential => {
-                let secret = Self::or_generate(secret)?;
+                let secret = secret.map_or_else(ClientSecret::generate, Ok)?;
                 tx.oidc()
                     .insert_client_secret(&registration.id, secret.digest().as_bytes())
                     .await?;
@@ -143,12 +159,63 @@ impl ClientRegistry {
         if registration.id != *id || registration.kind != kind {
             return Err(ClientRegistryError::Immutable(id.clone()).into());
         }
-        Ok(Self::replace(tx, operator, &registration).await?)
+        Self::replace(&mut tx, operator, &registration).await?;
+        tx.commit().await.map_err(ClientRegistryError::from)?;
+        Ok(())
     }
 
-    /// Writes an update checked by [`Self::update`] and records it.
+    /// Makes a client a deployment manages match `registration`, with `secret` as
+    /// a confidential client's current secret: registers it, or updates what
+    /// differs. Its other secrets keep working for `grace` at most, so the running
+    /// deployment can roll out; zero revokes them now. Its enabled state stays.
+    ///
+    /// # Errors
+    /// Fails if `secret` is missing for a confidential client or given for a public
+    /// one, the client's kind differs, or the database fails.
+    pub async fn apply(
+        &self,
+        operator: &Operator,
+        registration: &ClientRegistration,
+        secret: Option<ClientSecret>,
+        grace: GracePeriod,
+    ) -> Result<Applied, ClientRegistryError> {
+        let id = &registration.id;
+        let secret = match (registration.kind, secret) {
+            (ClientKind::Public, Some(_)) => return Err(ClientRegistryError::Public(id.clone())),
+            (ClientKind::Confidential, None) => {
+                return Err(ClientRegistryError::MissingSecret(id.clone()));
+            }
+            (_, secret) => secret,
+        };
+        let mut tx = self.database.begin().await?;
+        let current = match Self::locked(&mut tx, id).await {
+            Err(ClientRegistryError::Unknown(_)) => {
+                drop(tx);
+                self.create(operator, registration, secret).await?;
+                return Ok(Applied::Registered);
+            }
+            current => current?,
+        };
+        if current.kind != registration.kind {
+            return Err(ClientRegistryError::Immutable(id.clone()));
+        }
+        let mut applied = Applied::Unchanged;
+        if !current.registers(registration) {
+            Self::replace(&mut tx, operator, registration).await?;
+            applied = Applied::Updated;
+        }
+        if let Some(secret) = secret
+            && Self::make_current(&mut tx, operator, id, grace, &secret).await?
+        {
+            applied = Applied::Updated;
+        }
+        tx.commit().await?;
+        Ok(applied)
+    }
+
+    /// Writes an update checked by the caller, and records it.
     async fn replace(
-        mut tx: DatabaseTransaction<'_>,
+        tx: &mut DatabaseTransaction<'_>,
         operator: &Operator,
         registration: &ClientRegistration,
     ) -> Result<(), ClientRegistryError> {
@@ -161,7 +228,6 @@ impl ClientRegistry {
             },
         )
         .await?;
-        tx.commit().await?;
         Ok(())
     }
 
@@ -194,9 +260,9 @@ impl ClientRegistry {
         Ok(())
     }
 
-    /// Gives a confidential client a new secret, `secret` or a generated one,
-    /// returned here once. Its earlier secrets keep working for `grace` at most, so
-    /// it can redeploy in between; zero revokes them now.
+    /// Gives a confidential client a new secret, returned here once. Its earlier
+    /// secrets keep working for `grace` at most, so it can redeploy in between;
+    /// zero revokes them now.
     ///
     /// # Errors
     /// Fails if the client does not exist or is public, a secret cannot be
@@ -206,7 +272,6 @@ impl ClientRegistry {
         operator: &Operator,
         id: &ClientId,
         grace: GracePeriod,
-        secret: Option<ClientSecret>,
     ) -> Result<ClientSecret, ClientRegistryError> {
         let mut tx = self.database.begin().await?;
         // Locked, so a concurrent rotation cannot insert a secret this cap misses.
@@ -214,27 +279,46 @@ impl ClientRegistry {
         if client.kind == ClientKind::Public {
             return Err(ClientRegistryError::Public(client.id));
         }
-        let secret = Self::or_generate(secret)?;
-        let previous_expire_at = tx.oidc().cap_client_secrets(id, grace.duration()).await?;
-        tx.oidc()
-            .insert_client_secret(id, secret.digest().as_bytes())
-            .await?;
-        tx.record(
-            &operator.context(),
-            None,
-            DomainEvent::ClientSecretRotated {
-                client_id: client.id,
-                previous_expire_at,
-            },
-        )
-        .await?;
+        let secret = ClientSecret::generate()?;
+        Self::make_current(&mut tx, operator, id, grace, &secret).await?;
         tx.commit().await?;
         Ok(secret)
     }
 
-    /// `secret`, or a new one when none is given.
-    fn or_generate(secret: Option<ClientSecret>) -> Result<ClientSecret, CryptoError> {
-        secret.map_or_else(ClientSecret::generate, Ok)
+    /// Makes `secret` the locked confidential client `id`'s secret without an end,
+    /// adding it unless it already is one, and makes its other secrets stop at
+    /// `grace` from now at the latest. Records the rotation and returns `true` if
+    /// either changed anything.
+    async fn make_current(
+        tx: &mut DatabaseTransaction<'_>,
+        operator: &Operator,
+        id: &ClientId,
+        grace: GracePeriod,
+        secret: &ClientSecret,
+    ) -> Result<bool, ClientRegistryError> {
+        let digest = secret.digest();
+        let added = !tx.oidc().has_lasting_secret(id, digest.as_bytes()).await?;
+        if added {
+            tx.oidc()
+                .insert_client_secret(id, digest.as_bytes())
+                .await?;
+        }
+        let (previous_expire_at, capped) = tx
+            .oidc()
+            .cap_client_secrets(id, grace.duration(), Some(digest.as_bytes()))
+            .await?;
+        if added || capped {
+            tx.record(
+                &operator.context(),
+                None,
+                DomainEvent::ClientSecretRotated {
+                    client_id: id.clone(),
+                    previous_expire_at,
+                },
+            )
+            .await?;
+        }
+        Ok(added || capped)
     }
 
     /// Locks client `id` for the rest of `tx`, then reads it.

@@ -115,8 +115,9 @@ deploy:
 piquelctl app exec piquel-fr auth --env production -- auth-service client list
 ```
 
-No external identity providers are configured by default, and the only client
-an environment needs is the dashboard's (see [Admin](#admin)). Auth uses
+No external identity providers are configured by default. The only client an
+environment needs, the dashboard's, is registered by a deploy job (see
+[Admin](#admin)). Auth uses
 the gateway ranges in `PIQUELD_INGRESS_PROXIES` to trust ingress's overwritten
 `X-Forwarded-For` address and throttle each client separately.
 `AUTH_TRUSTED_PROXIES` overrides those ranges when set.
@@ -160,21 +161,12 @@ environment reach; it has no database credentials. Its health check,
 `GET /healthz`, does not call auth: the dashboard discovers auth in the
 background, since auth's route may not serve yet when it starts.
 
-Register its OIDC client once per environment, with the `admin-client-secret`
-that piqueld generated and mounts into both auth and the dashboard. Until then,
-signing in to the dashboard fails. Use the environment's admin host:
-
-```sh
-piquelctl app exec piquel-fr auth --env production -- auth-service client create piquel-admin \
-    --name 'Piquel admin' --confidential --refresh --trusted \
-    --redirect-uri https://admin.piquel.fr/auth/callback --post-logout-uri https://admin.piquel.fr/ \
-    --scope openid --scope profile --scope offline_access \
-    --secret file:///run/secrets/admin-client-secret
-```
-
-After `piquelctl env secret piquel-fr --env ENV regenerate admin-client-secret`
-and a deploy, `auth-service client rotate-secret piquel-admin --grace 0 --secret
-file:///run/secrets/admin-client-secret` registers the new value.
+Its OIDC client, `piquel-admin`, needs no setup. After `migrate`, the
+`admin-client` job runs `auth-service client apply` on every deploy: it registers
+the client with the environment's admin host and the `admin-client-secret` that
+piqueld generated, or updates what differs. After `piquelctl env secret piquel-fr
+--env ENV regenerate admin-client-secret`, the next deploy registers the new
+secret; the previous one keeps working for an hour, while the dashboard rolls out.
 
 Only administrators can use it. Grant the first one with the CLI:
 
@@ -183,8 +175,8 @@ piquelctl app exec piquel-fr auth --env production -- auth-service admin grant U
 ```
 
 `app exec` does not reach previews; on the piqueld host, run the same
-`auth-service client create` and `auth-service admin grant USERNAME` with
-`docker exec` in the preview's auth container.
+`auth-service admin grant USERNAME` with `docker exec` in the preview's auth
+container.
 
 Administrators sign in to the dashboard again after it restarts; their sign-ins
 live in its memory. That is silent while their auth session lasts.

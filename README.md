@@ -117,9 +117,9 @@ client are in `crates/admin-api`.
 
 Every request carries an access token that auth issued to the dashboard,
 registered as the confidential OIDC client `piquel-admin` (the tokens' audience;
-see [OIDC clients](#oidc-clients) for `just auth client create piquel-admin
---confidential …`), for an administrator who signed in with a passkey. Auth checks on every request that the
-account is still an administrator and the token's session still active, so
+deployments register it with `client apply`, see [OIDC clients](#oidc-clients)),
+for an administrator who signed in with a passkey. Auth checks on every request
+that the account is still an administrator and the token's session still active, so
 revoking either takes effect at once. Mutations also need a passkey confirmation
 from the last five minutes. Otherwise the API answers `401` with an RFC 9470
 step-up challenge, and the dashboard signs the administrator in again.
@@ -170,9 +170,15 @@ the secret once, and auth stores only its SHA-256 digest. Secrets start with
 `pqcs_` so secret scanners can recognize them. After `rotate-secret`, the earlier
 secrets keep working for the grace period (24 hours by default, at most 30 days;
 `--grace 0` revokes them at once), so the client can switch without downtime.
-A client whose deployment generates its own secret, such as the admin dashboard,
-registers it with `--secret file://PATH` (or `env://NAME`) on `create` and
-`rotate-secret` instead: 32 random bytes in unpadded base64url, never printed.
+
+A client that a deployment manages, such as the admin dashboard, is registered
+with `client apply` instead, which takes the same options as `create`. It
+registers the client, or updates what differs and records nothing when nothing
+does, so a deploy job can run it every time. A confidential client's secret comes
+from the deployment, `--secret file://PATH` (or `env://NAME`): 32 random bytes in
+unpadded base64url, never printed. The client's other secrets keep working for
+`--grace` at most (1 hour by default) while the deployment rolls out; `--grace 0`
+revokes them.
 
 Redirect URIs must match exactly. They use HTTPS, or HTTP on a loopback IP for
 native apps, without credentials or a fragment, and are written as URL parsing

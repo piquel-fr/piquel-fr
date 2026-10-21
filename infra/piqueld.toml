@@ -93,8 +93,8 @@ generate = { type = "random", bytes = 32, encoding = "hex" }
 name = "signing-key"
 generate = { type = "rsa", bits = 3072 }
 
-# The `piquel-admin` OIDC client's secret. The dashboard authenticates with it;
-# auth reads it once, when an operator registers the client (infra/README.md).
+# The `piquel-admin` OIDC client's secret. The dashboard authenticates with it,
+# and the `admin-client` job registers it with auth.
 [[spec.secrets]]
 name = "admin-client-secret"
 generate = { type = "random", bytes = 32, encoding = "base64url" }
@@ -103,6 +103,21 @@ generate = { type = "random", bytes = 32, encoding = "base64url" }
 name = "migrate"
 service = "auth"
 command = ["auth-service", "migrate"]
+run = "before-rollout"
+
+# Registers the admin dashboard as the trusted OIDC client `piquel-admin`, or
+# brings its registration and secret in line, on every deploy after migrations.
+[[spec.jobs]]
+name = "admin-client"
+service = "auth"
+command = [
+  "auth-service", "client", "apply", "piquel-admin",
+  "--name", "Piquel admin", "--confidential", "--refresh", "--trusted",
+  "--redirect-uri", "https://${{ vars.admin_host }}/auth/callback",
+  "--post-logout-uri", "https://${{ vars.admin_host }}/",
+  "--scope", "openid", "--scope", "profile", "--scope", "offline_access",
+  "--secret", "file:///run/secrets/admin-client-secret",
+]
 run = "before-rollout"
 
 [[spec.services]]

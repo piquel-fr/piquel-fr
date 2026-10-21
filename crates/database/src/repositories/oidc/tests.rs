@@ -58,8 +58,8 @@ async fn rotation_caps_earlier_secrets_without_reviving_or_extending_them() {
     let [one, two, three, four, five] = [1, 2, 3, 4, 5].map(|byte| [byte; 32]);
     let rotate = async |digest: [u8; 32], grace: Duration| {
         let mut oidc = OidcRepository::from_pool(&pool);
-        let cap = oidc
-            .cap_client_secrets(&client.id, grace)
+        let (cap, _) = oidc
+            .cap_client_secrets(&client.id, grace, None)
             .await
             .expect("cap");
         oidc.insert_client_secret(&client.id, &digest)

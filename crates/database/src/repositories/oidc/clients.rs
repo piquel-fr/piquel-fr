@@ -49,6 +49,50 @@ pub struct StoredOidcClient {
     pub updated_at: DateTime<Utc>,
 }
 
+impl StoredOidcClient {
+    /// Whether this client is stored exactly as `registration` describes it, so
+    /// writing it would change nothing. Lists compare as sets, since only their
+    /// members matter.
+    #[must_use]
+    pub fn registers(&self, registration: &ClientRegistration) -> bool {
+        let same = |stored: &[String], mut given: Vec<&str>| {
+            let mut stored: Vec<&str> = stored.iter().map(String::as_str).collect();
+            stored.sort_unstable();
+            given.sort_unstable();
+            stored == given
+        };
+        self.id == registration.id
+            && self.display_name == registration.display_name.as_str()
+            && self.kind == registration.kind
+            && same(
+                &self.redirect_uris,
+                registration
+                    .redirect_uris
+                    .iter()
+                    .map(RedirectUri::as_str)
+                    .collect(),
+            )
+            && same(
+                &self.post_logout_uris,
+                registration
+                    .post_logout_uris
+                    .iter()
+                    .map(RedirectUri::as_str)
+                    .collect(),
+            )
+            && same(
+                &self.allowed_scopes,
+                registration
+                    .allowed_scopes
+                    .iter()
+                    .map(ScopeName::as_str)
+                    .collect(),
+            )
+            && self.allow_refresh == registration.allow_refresh
+            && self.trusted == registration.trusted
+    }
+}
+
 impl From<StoredOidcClient> for Client {
     /// Shows the client without its secrets, only the authentication method its kind implies.
     fn from(client: StoredOidcClient) -> Self {
@@ -415,8 +459,9 @@ impl OidcRepository<'_> {
     }
 
     /// Makes the client's secrets that still work stop at `now() + grace` at the
-    /// latest, and returns that time. An expired secret stays expired, and a secret
-    /// that already stops earlier keeps its earlier end.
+    /// latest, except the one whose digest is `keep`, and returns that time and
+    /// whether any secret's end moved. An expired secret stays expired, and a
+    /// secret that already stops earlier keeps its earlier end.
     ///
     /// # Errors
     ///
@@ -425,22 +470,52 @@ impl OidcRepository<'_> {
         &mut self,
         id: &ClientId,
         grace: Duration,
-    ) -> Result<DateTime<Utc>, DatabaseError> {
+        keep: Option<&[u8; 32]>,
+    ) -> Result<(DateTime<Utc>, bool), DatabaseError> {
+        let capped = run!(
+            self,
+            fetch_one,
+            sqlx::query!(
+                r#"WITH cap AS (SELECT now() + $2::bigint * interval '1 second' AS at),
+                capped AS (
+                    UPDATE oidc_client_secrets
+                    SET expires_at = cap.at
+                    FROM cap
+                    WHERE client_id = $1
+                    AND (expires_at IS NULL OR expires_at > cap.at)
+                    AND secret_digest IS DISTINCT FROM $3
+                    RETURNING 1
+                )
+                SELECT at AS "at!", EXISTS (SELECT 1 FROM capped) AS "capped!" FROM cap"#,
+                id.as_str(),
+                grace.num_seconds(),
+                keep.map(<[u8; 32]>::as_slice),
+            )
+        )?;
+        Ok((capped.at, capped.capped))
+    }
+
+    /// Whether the client has a secret with digest `digest` that no rotation has
+    /// given an end yet.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`DatabaseError`] if the query fails.
+    pub async fn has_lasting_secret(
+        &mut self,
+        id: &ClientId,
+        digest: &[u8; 32],
+    ) -> Result<bool, DatabaseError> {
         run!(
             self,
             fetch_one,
             sqlx::query_scalar!(
-                r#"WITH cap AS (SELECT now() + $2::bigint * interval '1 second' AS at),
-                capped AS (
-                    UPDATE oidc_client_secrets
-                    SET expires_at = LEAST(COALESCE(expires_at, 'infinity'), cap.at)
-                    FROM cap
-                    WHERE client_id = $1
-                    AND (expires_at IS NULL OR expires_at > now())
-                )
-                SELECT at AS "at!" FROM cap"#,
+                r#"SELECT EXISTS (
+                    SELECT 1 FROM oidc_client_secrets
+                    WHERE client_id = $1 AND secret_digest = $2 AND expires_at IS NULL
+                ) AS "lasting!""#,
                 id.as_str(),
-                grace.num_seconds(),
+                digest.as_slice(),
             )
         )
     }
