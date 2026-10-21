@@ -31,6 +31,9 @@ pub enum StartupError {
     /// The admin API client could not be built.
     #[error("could not build the admin API client")]
     Api(#[from] ApiError),
+    /// The HTTP client for auth's public endpoints could not be built.
+    #[error("could not build the auth HTTP client")]
+    AuthClient(#[source] reqwest::Error),
     /// The auth origin cannot be sent in the security headers.
     #[error("ADMIN_AUTH_ORIGIN cannot be sent in a header")]
     Header(#[from] axum::http::header::InvalidHeaderValue),

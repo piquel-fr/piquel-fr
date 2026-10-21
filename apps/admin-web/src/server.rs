@@ -16,7 +16,7 @@ use piquel_auth::{
     Issuer,
     axum::{LoginRoutes, MemoryBackend},
 };
-use piquel_common::ErrorChain;
+use piquel_common::{ErrorChain, protocol::oauth::Scope};
 use std::{
     sync::{Arc, OnceLock},
     time::Duration,
@@ -30,7 +30,7 @@ const DISCOVERY_TIMEOUT: Duration = Duration::from_secs(10);
 const DISCOVERY_RETRY: Duration = Duration::from_secs(5);
 /// Scopes besides `openid`. `offline_access` refreshes the five-minute access
 /// tokens for as long as the dashboard session lasts.
-const SCOPES: &str = "profile offline_access";
+const SCOPES: [Scope; 2] = [Scope::Profile, Scope::OfflineAccess];
 
 /// The dashboard's HTTP service: a health check, and everything else once auth's
 /// issuer is discovered.
@@ -49,12 +49,18 @@ impl Dashboard {
     /// Starts discovering auth in the background.
     ///
     /// # Errors
-    /// If the admin API client cannot be built.
+    /// If the security headers or an HTTP client cannot be built.
     pub fn new(config: AdminConfig) -> Result<Self, StartupError> {
         let headers = Arc::new(Self::security_headers(&config)?);
         let api = AdminClient::new(config.api.clone())?;
+        let http = reqwest::Client::builder()
+            .timeout(DISCOVERY_TIMEOUT)
+            // No auth endpoint redirects.
+            .redirect(reqwest::redirect::Policy::none())
+            .build()
+            .map_err(StartupError::AuthClient)?;
         let ready = Arc::new(OnceLock::new());
-        tokio::spawn(Self::discover(config, api, Arc::clone(&ready)));
+        tokio::spawn(Self::discover(config, http, api, Arc::clone(&ready)));
         Ok(Self { ready, headers })
     }
 
@@ -152,19 +158,12 @@ impl Dashboard {
     }
 
     /// Discovers auth's issuer until it answers, then builds the pages.
-    async fn discover(config: AdminConfig, api: AdminClient, ready: Arc<OnceLock<Router>>) {
-        let http = match reqwest::Client::builder()
-            .timeout(DISCOVERY_TIMEOUT)
-            // No auth endpoint redirects.
-            .redirect(reqwest::redirect::Policy::none())
-            .build()
-        {
-            Ok(http) => http,
-            Err(error) => {
-                tracing::error!(error = %ErrorChain(&error), "could not build the auth HTTP client");
-                return;
-            }
-        };
+    async fn discover(
+        config: AdminConfig,
+        http: reqwest::Client,
+        api: AdminClient,
+        ready: Arc<OnceLock<Router>>,
+    ) {
         let issuer = loop {
             match Issuer::builder()
                 .http_client(http.clone())
@@ -178,15 +177,9 @@ impl Dashboard {
                 }
             }
         };
-        let scopes = match SCOPES.parse() {
-            Ok(scopes) => scopes,
-            Err(error) => {
-                tracing::error!(error = %ErrorChain(&error), "invalid sign-in scopes");
-                return;
-            }
-        };
+        let scopes = SCOPES.map(|scope| scope.as_str().to_owned());
         let login = LoginRoutes::new(issuer.client(config.client), MemoryBackend::default())
-            .scopes(scopes)
+            .scopes(scopes.into_iter().collect())
             .after_logout(config.origin.url("/"));
         let pages = Router::new()
             .nest(AUTH_MOUNT, login.router())

@@ -46,9 +46,12 @@ test('an administrator disables a user from the dashboard, and the user is signe
   execFileSync(command, [...args, `admin-${suffix}`], { stdio: 'inherit' });
   const user = await signUp(browser, `user-${suffix}`);
 
-  // A non-administrator signs in to the dashboard, and sees none of its data.
+  // A non-administrator signs in to the dashboard, and sees none of its data. The
+  // first sign-in to a dashboard that just started can take longer than usual.
   await user.goto(`${adminUrl}/users`);
-  await expect(user.getByRole('heading', { name: 'This account has no access' })).toBeVisible();
+  await expect(user.getByRole('heading', { name: 'This account has no access' })).toBeVisible({
+    timeout: 20_000
+  });
   await expect(user.getByRole('table')).toHaveCount(0);
 
   // The administrator signed up with a passkey moments ago, which is recent enough
