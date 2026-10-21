@@ -284,7 +284,7 @@ fn issuer_with_token_endpoint(token_endpoint: Url) -> Issuer {
 /// An app whose home page shows the session's access token.
 fn login_app(issuer: &Issuer, backend: &MemoryBackend) -> (Router, LoginRoutes) {
     let client = issuer.client(ClientConfig {
-        client_id: ClientId::new(CLIENT),
+        client_id: CLIENT.parse::<ClientId>().expect("client ID"),
         credentials: Credentials::None,
         redirect_uri: "https://notes.example.com/auth/callback"
             .parse()

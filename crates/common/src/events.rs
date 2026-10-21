@@ -7,6 +7,7 @@
 
 use crate::{
     AuthenticationMethod, ClientId, PasskeyId, Personal, Provider, SessionId, TokenId, UserId,
+    clients::ClientKind,
 };
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
@@ -136,6 +137,36 @@ pub enum DomainEvent {
     AdministratorGranted {},
     /// The account's administrator rights were removed.
     AdministratorRevoked {},
+    /// An OIDC client was registered, enabled. A confidential client got its first secret.
+    ClientRegistered {
+        /// The new client.
+        client_id: ClientId,
+        /// Whether it is public or confidential.
+        kind: ClientKind,
+    },
+    /// A client's name, redirect URIs, scopes, refresh or consent policy changed.
+    ClientUpdated {
+        /// The changed client.
+        client_id: ClientId,
+    },
+    /// A disabled client was enabled again.
+    ClientEnabled {
+        /// The enabled client.
+        client_id: ClientId,
+    },
+    /// A client was disabled: it can no longer authorize, exchange or refresh.
+    ClientDisabled {
+        /// The disabled client.
+        client_id: ClientId,
+    },
+    /// A confidential client got a new secret. Its earlier secrets keep working until
+    /// `previous_expire_at` at the latest, so the client can redeploy in between.
+    ClientSecretRotated {
+        /// The client.
+        client_id: ClientId,
+        /// When its earlier secrets stop working; now, for an immediate revocation.
+        previous_expire_at: DateTime<Utc>,
+    },
     /// A row of the security audit log that preceded typed events. Only
     /// migrations write these; its fields are private, so one is only ever read back.
     Imported(ImportedAudit),
@@ -150,6 +181,11 @@ impl DomainEvent {
             | Self::GrantIssued { client_id, .. }
             | Self::GrantRevoked { client_id, .. }
             | Self::CodeReplayed { client_id }
+            | Self::ClientRegistered { client_id, .. }
+            | Self::ClientUpdated { client_id }
+            | Self::ClientEnabled { client_id }
+            | Self::ClientDisabled { client_id }
+            | Self::ClientSecretRotated { client_id, .. }
             | Self::SessionRevoked {
                 reason: RevocationReason::RelyingPartyLogout { client_id },
                 ..
@@ -200,6 +236,11 @@ impl DomainEvent {
             | Self::AccountViewed {}
             | Self::AdministratorGranted {}
             | Self::AdministratorRevoked {}
+            | Self::ClientRegistered { .. }
+            | Self::ClientUpdated { .. }
+            | Self::ClientEnabled { .. }
+            | Self::ClientDisabled { .. }
+            | Self::ClientSecretRotated { .. }
             | Self::Imported(_) => None,
         }
     }

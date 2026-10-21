@@ -17,8 +17,9 @@ Ceremony kinds and OIDC redirect kinds are typed storage vocabulary. Account and
 overrides with actionable `DatabaseConnectionError` variants. TCP requires
 `sslmode=verify-full` or explicit `sslmode=disable`; local Unix sockets use an
 absolute `host` path with `localhost` in the URL. Parser failures retain their
-sources. Client provisioning validates fields and allowlists through
-`ClientConfigurationError` before writing any SQL.
+sources. Client registrations are written only from a `ClientRegistration`, whose
+field types (`ClientId`, `RedirectUri`, `ScopeName`, bounded lists) reject invalid
+values before any SQL runs.
 
 Each repository has its own module under `src/repositories/` (`users`, `emails`,
 `sessions`, `events`, `deliveries`, `passkeys`, `oidc`, `tokens`, `federation`,
@@ -146,7 +147,12 @@ read back. `repositories/events/` stores events: the personal data split below,
 `read_after` and `acknowledge`.
 Migration `0005` imports the log but keeps the table, which the previous release
 writes to during a deploy; a later release imports the rows written since and
-drops it.
+drops it. Migration `0008` likewise keeps `oidc_clients.client_secret_hash`, which
+auth keeps equal to a confidential client's newest secret for the previous
+release, and a trigger mirrors the previous release's writes to it into
+`oidc_client_secrets`. Redirect URI origins need URL parsing, so `run_migrations`
+fills in the ones the previous release leaves empty. A later release drops the
+trigger and the column, and makes `oidc_redirect_uris.origin` NOT NULL.
 
 Variants hold only typed IDs, enums, scopes, timestamps and counts, so a secret,
 token, `WebAuthn` state or raw header cannot end up in one. Anything that identifies

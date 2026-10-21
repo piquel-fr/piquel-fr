@@ -504,9 +504,9 @@ impl RequestContext {
     }
 
     /// Attributes events of this request to an authenticated client.
-    pub(crate) fn client(self, client_id: &str) -> EventContext {
+    pub(crate) fn client(self, client_id: &ClientId) -> EventContext {
         self.actor(Actor::Client {
-            client_id: ClientId::new(client_id),
+            client_id: client_id.clone(),
         })
     }
 
@@ -806,8 +806,6 @@ pub(crate) struct HttpSecurity {
     pub auth_origin: String,
     /// First-party frontend origins, allowed on account and login endpoints.
     pub frontends: FrontendOrigins,
-    /// Public OIDC client origins permitted on protocol endpoints.
-    pub client_origins: Arc<Vec<String>>,
 }
 
 impl HttpSecurity {
@@ -819,14 +817,6 @@ impl HttpSecurity {
             request_timeout: REQUEST_TIMEOUT,
             auth_origin: config.passkey.origin.serialized(),
             frontends: config.federation.frontends.clone(),
-            client_origins: Arc::new(
-                config
-                    .oidc
-                    .public_redirects
-                    .iter()
-                    .map(|uri| uri.origin().ascii_serialization())
-                    .collect(),
-            ),
         }
     }
 
@@ -871,13 +861,25 @@ impl HttpSecurity {
     }
 
     /// Determines whether an exact browser origin may access this endpoint family.
-    fn allowed_origin(&self, endpoint: Endpoint, origin: &str) -> bool {
-        matches!(endpoint, Endpoint::Discovery)
+    /// The token, revocation and `UserInfo` endpoints also serve the redirect origins
+    /// of enabled public clients. Those are looked up per request, so registration
+    /// changes apply at once; same-origin and first-party requests skip the query.
+    async fn allowed_origin(
+        &self,
+        endpoint: Endpoint,
+        origin: &str,
+    ) -> Result<bool, HttpSecurityError> {
+        if matches!(endpoint, Endpoint::Discovery)
             || origin == self.auth_origin
             || (self.frontends.contains(origin)
                 && matches!(endpoint, Endpoint::Account | Endpoint::Login))
-            || (matches!(endpoint, Endpoint::OAuthBackChannel | Endpoint::UserInfo)
-                && self.client_origins.iter().any(|v| v == origin))
+        {
+            return Ok(true);
+        }
+        if !matches!(endpoint, Endpoint::OAuthBackChannel | Endpoint::UserInfo) {
+            return Ok(false);
+        }
+        Ok(self.database.oidc().public_client_origin(origin).await?)
     }
 
     /// Middleware: runs the trust checks and the handler under one deadline, then adds the
@@ -890,14 +892,15 @@ impl HttpSecurity {
         // Reuse the original header for CORS so decoration cannot fail during re-parsing.
         let origin = request.headers().get(header::ORIGIN).cloned();
         let endpoint = Endpoint::classify(request.uri().path());
-        let allowed = origin
-            .as_ref()
-            .and_then(|value| value.to_str().ok())
-            .is_some_and(|value| policy.allowed_origin(endpoint, value));
-        let mut response = tokio::time::timeout(
-            policy.request_timeout,
-            policy.dispatch(request, next, endpoint, allowed),
-        )
+        // Set by the origin check, which runs under the deadline; an error response
+        // still carries CORS headers once the origin is known to be allowed.
+        let mut allowed = false;
+        let mut response = tokio::time::timeout(policy.request_timeout, async {
+            if let Some(value) = origin.as_ref().and_then(|value| value.to_str().ok()) {
+                allowed = policy.allowed_origin(endpoint, value).await?;
+            }
+            policy.dispatch(request, next, endpoint, allowed).await
+        })
         .await
         .map_err(HttpSecurityError::from)
         .flatten()

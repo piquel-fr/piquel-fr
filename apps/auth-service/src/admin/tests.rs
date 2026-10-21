@@ -9,7 +9,7 @@ use axum::{
 use chrono::{Duration, Utc};
 use piquel_admin_api::{AUDIENCE, paths};
 use piquel_common::{
-    AccountStatus, AuthenticationMethod, ClientId, Personal,
+    AccountStatus, AuthenticationMethod, Personal,
     config::Origin,
     events::{DomainEvent, RevocationReason},
     protocol::{
@@ -140,7 +140,7 @@ impl Harness {
                     iss: ISSUER.into(),
                     sub: account.user_id.to_string(),
                     aud: Audience::One(audience.into()),
-                    client_id: ClientId::new(AUDIENCE),
+                    client_id: AUDIENCE.parse().expect("client ID"),
                     jti: TokenId::new(),
                     scope: Scopes::default(),
                     iat: now,

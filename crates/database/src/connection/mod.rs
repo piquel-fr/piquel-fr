@@ -190,17 +190,20 @@ impl Database {
             .map_err(Into::into)
     }
 
-    /// Runs schema migrations when explicitly requested through the auth binary.
+    /// Runs schema migrations when explicitly requested through the auth binary,
+    /// then fills in the data they leave to Rust: redirect URI origins.
     ///
     /// # Errors
     ///
     /// Returns [`DatabaseError::Operation`] if a migration fails or the applied
-    /// history differs from the embedded migrations.
+    /// history differs from the embedded migrations, or another [`DatabaseError`]
+    /// if filling in data fails.
     pub async fn run_migrations(&self) -> Result<(), DatabaseError> {
         sqlx::migrate!("./migrations")
             .run(&self.pool)
             .await
-            .map_err(|error| DatabaseError::Operation(Box::new(error)))
+            .map_err(|error| DatabaseError::Operation(Box::new(error)))?;
+        self.oidc().fill_redirect_origins().await
     }
 }
 

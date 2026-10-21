@@ -38,5 +38,11 @@ test: build-settings
 test-browser *ARGS:
     @pnpm test:browser "$@"
 
+# Register the browser checks' public OIDC client for the settings origin ORIGIN, e.g. https://localhost:4443.
+browser-client ORIGIN:
+    @just auth client create browser-e2e --name 'Browser E2E' \
+        --redirect-uri {{ quote(ORIGIN + "/callback") }} \
+        --post-logout-uri {{ quote(ORIGIN + "/settings") }}
+
 audit:
     @pnpm audit

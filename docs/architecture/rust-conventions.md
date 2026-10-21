@@ -33,7 +33,7 @@ Declare each environment variable as a `Variable` constant beside its configurat
 section. `ConfigurationError` names the variable, explains how to fix it and retains
 safe underlying sources. Parse configuration into validated types such as `Origin`
 and `PublicUrl` at startup; downstream code uses those values without revalidation.
-Client callback URLs needed by HTTP policy are retained as parsed `Url` values.
+OIDC clients are not configuration: they live in the database (see below).
 
 `AuthConfig` combines `PasskeyConfig`, `FederationConfig` and `OidcConfig`, each with
 `from_environment`. Use `Config` and `ConfigError` suffixes for feature settings.
@@ -63,10 +63,17 @@ inside the account transaction; set cookies after commit with `BrowserCookie::se
 and clear them with `clear_on`. Both preserve other Set-Cookie headers.
 
 `AuthConfig::router` builds applications without writing to the database, so tests
-build two on one database as replicas (`Replicas` in `src/tests.rs`). Startup then
-runs `AuthConfig::provision_clients`, which replaces client registrations atomically.
+build two on one database as replicas (`Replicas` in `src/tests.rs`).
 The router installs origin/CSRF checks, rate limits, a deadline and browser
-isolation headers.
+isolation headers. Public-client origins for CORS are looked up per request.
+
+`ClientRegistry` (`src/clients/mod.rs`) is the only code that changes OIDC clients: it
+creates, updates, enables, disables and rotates the secrets of clients, recording
+each change's event in its transaction. It takes a `ClientRegistration` from
+`piquel_common::clients`, whose field types validate themselves, so invalid input
+never reaches the repository. The `client` command uses it, and owner,
+registration and admin APIs should too. Handlers read clients from the database on
+each request and cache nothing, so changes apply at once on every replica.
 
 Periodic work implements `ExclusiveJob` in `apps/auth-service/src/jobs.rs`, and
 `Jobs::start` schedules it. A job receives only its locked `ExclusiveConnection`,

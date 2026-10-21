@@ -12,10 +12,8 @@ use thiserror::Error;
 
 /// Byte length of 256-bit secrets and SHA-256 results.
 const SECRET_BYTES: usize = 32;
-/// Minimum encoded confidential client-secret length.
-const MIN_CLIENT_SECRET_LENGTH: usize = 43;
-/// Maximum encoded confidential client-secret length.
-const MAX_CLIENT_SECRET_LENGTH: usize = 512;
+/// Starts every generated client secret, so secret scanners can recognize leaked ones.
+const CLIENT_SECRET_PREFIX: &str = "pqcs_";
 /// RFC 7636 minimum verifier length.
 const MIN_PKCE_VERIFIER_LENGTH: usize = 43;
 /// RFC 7636 maximum verifier length.
@@ -36,9 +34,6 @@ pub enum CryptoError {
     /// A decoded secret has the wrong size.
     #[error("secret must contain exactly 32 bytes")]
     SecretLength,
-    /// The client secret does not meet its wire-length contract.
-    #[error("client secret must encode at least 32 random bytes (43 to 512 characters)")]
-    ClientSecretLength,
     /// An RSA key is too small.
     #[error("RSA signing key must contain at least 2048 bits")]
     RsaKeySize,
@@ -145,16 +140,6 @@ impl Digest {
         signer.sign(&mut bytes)?;
         Ok(Self(bytes))
     }
-    /// Hashes a high-entropy static OIDC client secret with its existing length contract.
-    ///
-    /// # Errors
-    /// Rejects encoded values shorter than 43 or longer than 512 characters.
-    pub fn client_secret(secret: &str) -> Result<Self, CryptoError> {
-        if !(MIN_CLIENT_SECRET_LENGTH..=MAX_CLIENT_SECRET_LENGTH).contains(&secret.len()) {
-            return Err(CryptoError::ClientSecretLength);
-        }
-        Ok(Self::sha256(secret.as_bytes()))
-    }
     /// Exposes the digest for persistence or comparison.
     #[must_use]
     pub const fn as_bytes(&self) -> &[u8; SECRET_BYTES] {
@@ -169,6 +154,48 @@ impl Digest {
     #[must_use]
     pub fn constant_time_eq(left: &[u8], right: &[u8]) -> bool {
         left.len() == right.len() && openssl::memcmp::eq(left, right)
+    }
+}
+
+/// A confidential OIDC client's secret: `pqcs_` followed by 256 random bits in
+/// unpadded base64url. It is shown once; only its digest is stored.
+///
+/// SHA-256 suffices for the digest, rather than a slow password hash: a 256-bit
+/// random value cannot be guessed, so slowing each guess down adds nothing but
+/// latency to every token request.
+pub struct ClientSecret(String);
+impl ClientSecret {
+    /// Generates a secret using operating system randomness.
+    ///
+    /// # Errors
+    /// Preserves failures from the random source.
+    pub fn generate() -> Result<Self, CryptoError> {
+        Ok(Self(format!(
+            "{CLIENT_SECRET_PREFIX}{}",
+            Secret::generate()?.encoded()
+        )))
+    }
+    /// The secret, to show the operator once.
+    #[must_use]
+    pub fn expose(&self) -> &str {
+        &self.0
+    }
+    /// The digest stored for this secret.
+    #[must_use]
+    pub fn digest(&self) -> Digest {
+        Self::digest_presented(&self.0)
+    }
+    /// The digest of a secret a client presents, to compare with stored digests.
+    /// Secrets that predate the prefix are hashed the same way, so they keep working.
+    #[must_use]
+    pub fn digest_presented(secret: &str) -> Digest {
+        Digest::sha256(secret.as_bytes())
+    }
+}
+impl fmt::Debug for ClientSecret {
+    /// Renders a safe diagnostic representation without exposing the secret.
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.write_str("ClientSecret(REDACTED)")
     }
 }
 

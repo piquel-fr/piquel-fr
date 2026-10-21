@@ -161,7 +161,7 @@ struct Login {
 /// use axum::{Router, routing::get};
 /// use chrono::TimeDelta;
 /// use piquel_auth::{
-///     ClientConfig, ClientId, Credentials,
+///     ClientConfig, Credentials,
 ///     axum::{LoginRoutes, SignedIn},
 /// };
 ///
@@ -170,7 +170,7 @@ struct Login {
 /// }
 ///
 /// let client = issuer.client(ClientConfig {
-///     client_id: ClientId::new("notes-web"),
+///     client_id: "notes-web".parse()?,
 ///     credentials: Credentials::Secret(std::env::var("NOTES_CLIENT_SECRET")?.into()),
 ///     // The callback route below, as registered with auth.
 ///     redirect_uri: "https://notes.piquel.fr/account/callback".parse()?,

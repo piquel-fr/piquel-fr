@@ -52,7 +52,6 @@ piquel-web with Vite against an auth service on `http://localhost:3000`.
 | `AUTH_ADMIN_LISTENER` | Optional address of the private admin API listener, e.g. `0.0.0.0:8081`. No ingress route may reach it. Without it, auth serves no admin API |
 | `AUTH_KEY_PROVIDER` | Required persistent RSA private-key reference, `file:///absolute/path/key.pem` or `env://VARIABLE_NAME` |
 | `AUTH_SIGNING_KEY_ID` | Stable ID for that signing key; defaults to `primary` |
-| `AUTH_CLIENTS_FILE` | JSON client configuration; omitted means no OIDC clients |
 | `AUTH_INVITE_REQUIRED` | `true` by default; set `false` to allow public registration |
 | `AUTH_GITHUB_CLIENT_ID`, `AUTH_GITHUB_CLIENT_SECRET` | Both required to enable GitHub; secret is an env/file reference |
 | `AUTH_GOOGLE_CLIENT_ID`, `AUTH_GOOGLE_CLIENT_SECRET` | Both required to enable Google; secret is an env/file reference |
@@ -114,8 +113,9 @@ ingress route reaches: the admin dashboard calls it from its server, over the
 application's private network. Its routes and bodies are in `crates/admin-api`.
 
 Every request carries an access token that auth issued to the dashboard,
-registered as the OIDC client `piquel-admin` (the tokens' audience), for an
-administrator who signed in with a passkey. Auth checks on every request that the
+registered as the confidential OIDC client `piquel-admin` (the tokens' audience;
+see [OIDC clients](#oidc-clients) for `just auth client create piquel-admin
+--confidential …`), for an administrator who signed in with a passkey. Auth checks on every request that the
 account is still an administrator and the token's session still active, so
 revoking either takes effect at once. Mutations also need a passkey confirmation
 from the last five minutes. Otherwise the API answers `401` with an RFC 9470
@@ -144,27 +144,41 @@ behind it. See `docs/architecture/delivery-queue.md`.
 
 ### OIDC clients
 
-`AUTH_CLIENTS_FILE` is authoritative: startup disables clients omitted from it.
-Client IDs must be unique. A minimal public web client looks like:
+Clients live in the database. Register and change them with `auth-service client`
+(`just auth client` here). A change applies to the next request on every replica,
+without a restart, and is recorded as an event attributed to the operator.
 
-```json
-[
-  {
-    "id": "piquel-web",
-    "display_name": "Piquel",
-    "redirect_uris": ["https://piquel.fr/callback"],
-    "post_logout_uris": ["https://piquel.fr/"],
-    "allowed_scopes": ["openid", "profile", "email"],
-    "trusted": true,
-    "allow_refresh": false
-  }
-]
+```sh
+just auth client create piquel-web --name Piquel --trusted \
+    --redirect-uri https://piquel.fr/callback --post-logout-uri https://piquel.fr/
+just auth client create notes --name Notes --confidential --refresh \
+    --redirect-uri https://notes.example/callback --scope openid --scope notes:read
+just auth client list                # --output json for scripts
+just auth client show notes          # registration and secret lifetimes
+just auth client update piquel-web --add-redirect-uri https://piquel.fr/auth/callback
+just auth client disable notes       # enable undoes it
+just auth client rotate-secret notes --grace 24h
 ```
 
-For a confidential backend client, add `"client_secret": "env://MY_CLIENT_SECRET"`.
-Generate its random secret with `just auth secret`. Clients use
-`client_secret_basic` when confidential and `none` when public; both require S256
-PKCE. Redirect URLs must match exactly and use HTTPS.
+Clients are public by default and authenticate with PKCE alone (`none`).
+Confidential clients (`--confidential`) use `client_secret_basic` with a secret
+that auth generates; both require S256 PKCE. `create` and `rotate-secret` print
+the secret once, and auth stores only its SHA-256 digest. Secrets start with
+`pqcs_` so secret scanners can recognize them. After `rotate-secret`, the earlier
+secrets keep working for the grace period (24 hours by default, at most 30 days;
+`--grace 0` revokes them at once), so the client can switch without downtime.
+
+Redirect URIs must match exactly. They use HTTPS, or HTTP on a loopback IP for
+native apps, without credentials or a fragment, and are written as URL parsing
+normalizes them: `https://app.example/`, not `https://APP.example`. The origins of
+an enabled public client's redirect URIs may call the token, revocation and
+userinfo endpoints from a browser. Scopes default to `openid`, `profile` and
+`email`. `--refresh` allows refresh tokens when the client also requests
+`offline_access`; `--trusted` skips the consent screen and is meant for
+first-party clients only.
+
+`AUTH_CLIENTS_FILE` was removed, and startup refuses to run while it is set. The
+clients it registered are already in the database.
 
 Discovery is served at both `/.well-known/openid-configuration` (OIDC) and
 `/.well-known/oauth-authorization-server` (RFC 8414, read by OAuth-only and MCP

@@ -66,14 +66,21 @@ impl OidcApplication {
                     })
             })
             .transpose()?;
+        // Auth signed the hint, so its audience is a client ID it issued to.
         let hinted_client = hint
             .as_ref()
             .and_then(|c| c.get(Claim::Audience.as_str()))
-            .and_then(Value::as_str);
+            .and_then(Value::as_str)
+            .map(str::parse::<ClientId>)
+            .transpose()
+            .map_err(|error| {
+                OAuthCode::InvalidRequest
+                    .reject_with("id_token_hint audience is not a client ID", error)
+            })?;
         if q.client_id
             .as_deref()
-            .zip(hinted_client)
-            .is_some_and(|(a, b)| a != b)
+            .zip(hinted_client.as_ref())
+            .is_some_and(|(a, b)| a != b.as_str())
         {
             return Err(OAuthCode::InvalidRequest
                 .reject("client_id does not match the id_token_hint audience"));
@@ -81,13 +88,17 @@ impl OidcApplication {
         let Some(uri) = q.post_logout_redirect_uri.as_ref() else {
             return Ok((
                 format!("{}{}", self.issuer, routes::page::LOGIN),
-                hinted_client.map(ClientId::new),
+                hinted_client,
             ));
         };
-        let id = q.client_id.as_deref().or(hinted_client).ok_or_else(|| {
-            OAuthCode::InvalidRequest
-                .reject("post_logout_redirect_uri needs client_id or id_token_hint")
-        })?;
+        let id = q
+            .client_id
+            .as_deref()
+            .or(hinted_client.as_ref().map(ClientId::as_str))
+            .ok_or_else(|| {
+                OAuthCode::InvalidRequest
+                    .reject("post_logout_redirect_uri needs client_id or id_token_hint")
+            })?;
         let client = self
             .database
             .oidc()
@@ -109,7 +120,7 @@ impl OidcApplication {
         if let Some(state) = &q.state {
             url.query_pairs_mut().append_pair("state", state);
         }
-        Ok((url.into(), Some(ClientId::new(client.id))))
+        Ok((url.into(), Some(client.id)))
     }
 
     /// Validates RP logout parameters before sending the browser to confirmation.

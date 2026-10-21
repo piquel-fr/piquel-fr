@@ -40,7 +40,8 @@ stores sessions, WebAuthn challenges, OAuth state, pending social identities,
 invitations, consent, refresh tokens, rate limits and security events.
 Auth needs no separate cache, RPC service, event bus or key-management service.
 piquel.fr's Node server holds no state and reads everything it renders from auth's
-HTTP API. External applications consume standard OIDC with static client registration.
+HTTP API. External applications consume standard OIDC; operators register their
+clients in the database with `auth-service client`.
 
 [surfaces.md](surfaces.md) sets out what auth.piquel.fr, piquel.fr and
 admin.piquel.fr each serve. Build/configuration and testing instructions are in

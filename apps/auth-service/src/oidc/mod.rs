@@ -14,7 +14,7 @@ use crate::routes;
 use crate::security::CSRF_HEADER;
 pub use error::OidcConfigError;
 use error::{OAuthCode, OAuthError, Reject};
-use piquel_crypto::{Digest, Rs256Key, Secret};
+use piquel_crypto::{ClientSecret, Digest, Rs256Key, Secret};
 
 use axum::{
     Router,
@@ -27,6 +27,7 @@ use axum::{
 use base64::Engine;
 use piquel_common::{
     TokenId,
+    clients::ClientKind,
     protocol::{
         claims::{Acr, ProfileClaims},
         jwt::{Algorithm, Claim, TokenType},
@@ -464,24 +465,35 @@ impl OidcApplication {
         // Exhaustive over the methods the metadata advertises, so a new one cannot be
         // advertised without being checked here.
         match method {
-            ClientAuthMethod::None if client.client_secret_hash.is_some() => {
+            ClientAuthMethod::None if client.kind == ClientKind::Confidential => {
                 Err(OAuthCode::InvalidClient
                     .reject("this client must authenticate with HTTP Basic credentials"))
             }
             ClientAuthMethod::None => Ok(client),
             ClientAuthMethod::ClientSecretBasic => {
                 // `basic` is always present here, so only a public client fails.
-                let (Some(expected), Some((_, secret))) = (&client.client_secret_hash, &basic)
-                else {
+                let (ClientKind::Confidential, Some((_, secret))) = (client.kind, &basic) else {
                     // Public clients have no secret and must not send one.
                     return Err(OAuthCode::InvalidClient
                         .reject("this public client must not send HTTP Basic credentials"));
                 };
-                if Digest::constant_time_eq(expected, Digest::sha256(secret.as_bytes()).as_bytes())
-                {
+                // During a rotation's grace period, the previous secrets match too.
+                // Every digest is compared, so timing does not reveal which one matched.
+                let presented = ClientSecret::digest_presented(secret);
+                let matched = self
+                    .database
+                    .oidc()
+                    .active_secret_digests(client.id.as_str())
+                    .await?
+                    .iter()
+                    .fold(false, |matched, digest| {
+                        Digest::constant_time_eq(digest, presented.as_bytes()) | matched
+                    });
+                if matched {
                     Ok(client)
                 } else {
-                    Err(OAuthCode::InvalidClient.reject("the client secret is incorrect"))
+                    Err(OAuthCode::InvalidClient
+                        .reject("the client secret is incorrect or expired"))
                 }
             }
         }

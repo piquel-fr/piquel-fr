@@ -194,7 +194,7 @@ pub(crate) mod events;
 pub(crate) mod federation;
 /// Expired-state cleanup.
 pub(crate) mod maintenance;
-/// Client provisioning, authorization requests, codes and consent.
+/// Client registrations, authorization requests, codes and consent.
 pub(crate) mod oidc;
 /// Passkey credentials and single-use ceremony records.
 pub(crate) mod passkeys;

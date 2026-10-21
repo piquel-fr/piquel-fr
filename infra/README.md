@@ -107,6 +107,14 @@ Staging and production require invitations:
 piquelctl app exec piquel-fr auth --env production -- auth-service invite
 ```
 
+OIDC clients are registered and changed the same way, with the `client` command
+(see "OIDC clients" in the root README); a change applies at once, without a
+deploy:
+
+```sh
+piquelctl app exec piquel-fr auth --env production -- auth-service client list
+```
+
 No external identity providers or OIDC clients are configured by default. Auth uses
 the gateway ranges in `PIQUELD_INGRESS_PROXIES` to trust ingress's overwritten
 `X-Forwarded-For` address and throttle each client separately.
@@ -127,10 +135,9 @@ removes the restart gap after a crash; it adds no capacity.
   keys, refresh-token digests and passkey decoys all derive from the
   `signing-key` secret (`AUTH_KEY_PROVIDER`), which the manifest gives every
   replica.
-- **Per-replica state.** Each replica reads OIDC clients from
-  `AUTH_CLIENTS_FILE` at startup: it re-registers them in the database and keeps
-  their origins for CORS until it restarts (#42 moves clients into the database).
-  Google's signing keys are cached per replica.
+- **Per-replica state.** Only Google's signing keys are cached per replica. OIDC
+  clients, and the public-client origins CORS allows, are read from the
+  database on each request, so a client change reaches every replica at once.
 - **Background work.** Jobs run through one runner
   (`apps/auth-service/src/jobs.rs`). An exclusive job, such as expired-state
   cleanup every five minutes, holds a PostgreSQL advisory lock while it runs, so

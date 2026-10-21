@@ -58,7 +58,7 @@ settings are always worth one pass.
   checks are usually simpler from Playwright.
 - **Lasting coverage:** if the change deserves a regression test, add a focused
   spec to `tests/browser`. The existing suite also needs the `browser-e2e` OIDC
-  client, which previews don't configure. Run it locally as
+  client, which previews don't register. Run it locally as
   `tests/browser/README.md` describes when consent or OIDC changes.
 
 After fixing anything, run `just preview` again and repeat the checks the fix

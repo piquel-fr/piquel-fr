@@ -479,10 +479,10 @@ struct ClientInner {
 ///
 /// ```no_run
 /// # async fn run(issuer: piquel_auth::Issuer, callback_query: &str) -> Result<(), Box<dyn std::error::Error>> {
-/// use piquel_auth::{AuthorizeRequest, CallbackParams, ClientConfig, ClientId, Credentials, PendingLogin};
+/// use piquel_auth::{AuthorizeRequest, CallbackParams, ClientConfig, Credentials, PendingLogin};
 ///
 /// let client = issuer.client(ClientConfig {
-///     client_id: ClientId::new("notes-web"),
+///     client_id: "notes-web".parse()?,
 ///     credentials: Credentials::Secret(std::env::var("NOTES_CLIENT_SECRET")?.into()),
 ///     redirect_uri: "https://notes.piquel.fr/auth/callback".parse()?,
 /// });

@@ -5,13 +5,12 @@ use ipnet::IpNet;
 use piquel_common::{
     Provider,
     config::{ConfigurationError, Origin, PublicUrl, SecretBytes, SecretReference, Variable},
-    protocol::oauth::Scope,
 };
-use piquel_crypto::{Digest, Rs256Key, Secret};
-use piquel_repository::{BootstrapOidcClient, DatabaseConfig};
-use serde::{Deserialize, Serialize, Serializer};
+use piquel_crypto::{Rs256Key, Secret};
+use piquel_repository::DatabaseConfig;
+use serde::{Serialize, Serializer};
 use std::{
-    collections::{BTreeMap, BTreeSet, HashSet},
+    collections::{BTreeMap, BTreeSet},
     fmt,
     net::{IpAddr, SocketAddr},
     sync::Arc,
@@ -55,7 +54,8 @@ const KEY_PROVIDER: Variable = Variable::new("AUTH_KEY_PROVIDER");
 const SIGNING_KEY_ID: Variable = Variable::new("AUTH_SIGNING_KEY_ID");
 /// Whether registration requires an invitation.
 const INVITE_REQUIRED: Variable = Variable::new("AUTH_INVITE_REQUIRED");
-/// Statically reviewed OIDC clients file.
+/// The removed OIDC clients file. Startup refuses it, so a deployment that still
+/// sets it fails loudly instead of silently serving without its clients.
 const CLIENTS_FILE: Variable = Variable::new("AUTH_CLIENTS_FILE");
 /// Operator-specified trusted ingress peers.
 const TRUSTED_PROXIES: Variable = Variable::new("AUTH_TRUSTED_PROXIES");
@@ -220,14 +220,10 @@ pub(crate) struct OidcConfig {
     pub keys: Arc<Rs256Key>,
     /// Domain-separated refresh-token HMAC key.
     pub refresh_key: Arc<Secret>,
-    /// Client registrations provisioned atomically at startup.
-    pub clients: Vec<BootstrapOidcClient>,
-    /// Parsed callbacks retained for the public-client origin policy.
-    pub public_redirects: Vec<url::Url>,
 }
 
 impl OidcConfig {
-    /// Parses the persistent signing key and loads statically reviewed clients.
+    /// Parses the persistent signing key.
     pub(crate) fn from_environment(
         origin: &Origin,
         secret: &SecretBytes,
@@ -253,137 +249,11 @@ impl OidcConfig {
             )
         })?;
         let refresh_key = AuthConfig::derive_key(secret, REFRESH_DIGEST_CONTEXT)?;
-        let clients = Self::clients()?;
-        let public_redirects = clients
-            .iter()
-            .filter(|client| client.client_secret_hash.is_none())
-            .flat_map(|client| &client.redirect_uris)
-            .map(|uri| {
-                url::Url::parse(uri).map_err(|source| {
-                    CLIENTS_FILE.error("redirect_uris must contain absolute HTTPS URLs", source)
-                })
-            })
-            .collect::<Result<_, _>>()?;
         Ok(Self {
-            public_redirects,
             origin: origin.clone(),
             keys: Arc::new(keys),
             refresh_key: Arc::new(refresh_key),
-            clients,
         })
-    }
-
-    /// Reads and validates clients without exposing confidential secret values.
-    fn clients() -> Result<Vec<BootstrapOidcClient>, ConfigurationError> {
-        let Some(path) = CLIENTS_FILE.optional()? else {
-            return Ok(Vec::new());
-        };
-        let bytes = std::fs::read(&path).map_err(|source| {
-            CLIENTS_FILE.error("must name a readable JSON clients file", source)
-        })?;
-        let inputs: Vec<ClientConfig> = serde_json::from_slice(&bytes).map_err(|source| {
-            CLIENTS_FILE.error("must contain a JSON array of OIDC clients", source)
-        })?;
-        let clients: Vec<_> = inputs
-            .into_iter()
-            .map(ClientConfig::into_client)
-            .collect::<Result<_, _>>()?;
-        let unique: HashSet<_> = clients.iter().map(|client| &client.id).collect();
-        if unique.len() != clients.len() {
-            return Err(CLIENTS_FILE.invalid("must contain unique client IDs"));
-        }
-        Ok(clients)
-    }
-}
-
-/// Client configuration accepted by the reviewed JSON file.
-#[derive(Deserialize)]
-#[serde(deny_unknown_fields)]
-struct ClientConfig {
-    /// Stable client identifier.
-    id: String,
-    /// Consent-screen name.
-    display_name: String,
-    /// Authorization callback allowlist.
-    redirect_uris: Vec<String>,
-    /// Post-logout callback allowlist.
-    #[serde(default)]
-    post_logout_uris: Vec<String>,
-    /// Scope allowlist.
-    #[serde(default = "ClientConfig::scopes")]
-    allowed_scopes: Vec<String>,
-    /// Refresh-token policy.
-    #[serde(default)]
-    allow_refresh: bool,
-    /// Consent bypass policy.
-    #[serde(default)]
-    trusted: bool,
-    /// Startup availability.
-    #[serde(default = "ClientConfig::enabled")]
-    enabled: bool,
-    /// Confidential client secret reference.
-    client_secret: Option<String>,
-}
-
-impl ClientConfig {
-    /// Scopes granted to a client that lists none.
-    fn scopes() -> Vec<String> {
-        [Scope::OpenId, Scope::Profile, Scope::Email]
-            .map(|scope| scope.as_str().to_owned())
-            .into()
-    }
-
-    /// Clients default to enabled.
-    const fn enabled() -> bool {
-        true
-    }
-
-    /// Resolves secrets, hashes them and validates the repository contract.
-    fn into_client(self) -> Result<BootstrapOidcClient, ConfigurationError> {
-        let client_secret_hash = self
-            .client_secret
-            .map(|reference| {
-                let secret = SecretReference::parse(&reference)
-                    .and_then(|reference| reference.resolve())
-                    .map_err(|source| {
-                        CLIENTS_FILE.error(
-                            "client_secret must resolve through env://NAME or file://PATH",
-                            source,
-                        )
-                    })?;
-                let text = secret.utf8().map_err(|source| {
-                    CLIENTS_FILE.error("client_secret must contain UTF-8 text", source)
-                })?;
-                Digest::client_secret(text)
-                    .map(|digest| digest.as_bytes().to_vec())
-                    .map_err(|source| {
-                        CLIENTS_FILE.error(
-                            "client_secret must encode at least 32 random bytes (43 to 512 characters)",
-                            source,
-                        )
-                    })
-            })
-            .transpose()?;
-        let client = BootstrapOidcClient {
-            allowed_audiences: vec![self.id.clone()],
-            id: self.id,
-            display_name: self.display_name,
-            redirect_uris: self.redirect_uris,
-            post_logout_uris: self.post_logout_uris,
-            allowed_scopes: self.allowed_scopes,
-            allow_refresh: self.allow_refresh,
-            trusted: self.trusted,
-            enabled: self.enabled,
-            client_secret_hash,
-        };
-        client.validate().map_err(|source| {
-            CLIENTS_FILE.error(
-                "clients need IDs/scopes in [A-Za-z0-9._-]{1,64}, a nonblank name of at most \
-                 80 characters, and 1 to 16 HTTPS redirect URIs without credentials or fragments",
-                source,
-            )
-        })?;
-        Ok(client)
     }
 }
 
@@ -439,11 +309,17 @@ impl AuthConfig {
         Ok(config.with_password(password.trim_end_matches('\n')))
     }
 
-    /// Validates all service and application settings before startup.
+    /// Validates all service and application settings before startup. The removed
+    /// clients file is refused first: clients now live in the database.
     ///
     /// # Errors
     /// Names invalid or missing variables and retains safe underlying sources.
     pub fn from_environment() -> Result<Self, ConfigurationError> {
+        if CLIENTS_FILE.optional()?.is_some() {
+            return Err(CLIENTS_FILE.invalid(
+                "was removed; clients live in the database. See `auth-service client --help`.",
+            ));
+        }
         let origin: Origin = PUBLIC_BASE_URL.parse()?;
         let settings_url: PublicUrl = SETTINGS_URL.parse_or(DEFAULT_SETTINGS_URL)?;
         let persistent_key: SecretReference = KEY_PROVIDER.parse()?;

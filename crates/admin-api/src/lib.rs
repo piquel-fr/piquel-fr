@@ -18,7 +18,7 @@ pub use piquel_common::protocol::{
     step_up::CONFIRMATION_MAX_AGE,
 };
 use piquel_common::{
-    AccountStatus, AuthenticationMethod, EventId, SessionId, TokenId, UserId,
+    AccountStatus, AuthenticationMethod, ClientId, EventId, SessionId, TokenId, UserId,
     protocol::oauth::ClientAuthMethod,
 };
 use serde::{Deserialize, Serialize};
@@ -188,7 +188,8 @@ pub struct Invitation {
 /// The optional body of `POST` [`paths::INVITATIONS`].
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct CreateInvitation {
-    /// How long the link stays valid: 1 to 365 followed by `h` or `d`, e.g. `24h`.
+    /// How long the link stays valid: 1 hour to 365 days, a number followed by `m`,
+    /// `h` or `d`, e.g. `24h`.
     /// Seven days when absent.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub expires_in: Option<String>,
@@ -209,7 +210,7 @@ pub struct CreatedInvitation {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Client {
     /// Client ID.
-    pub id: String,
+    pub id: ClientId,
     /// Name shown on consent screens.
     pub display_name: String,
     /// Allowed authorization redirect URIs.

@@ -20,7 +20,7 @@ use axum::{
 };
 use chrono::{DateTime, Duration, Utc};
 use piquel_common::{
-    ClientId, UserId,
+    UserId,
     events::DomainEvent,
     protocol::{claims::Acr, step_up::StepUpRequirement},
 };
@@ -301,7 +301,7 @@ impl OidcApplication {
             .insert_authorization_request(&InsertAuthorizationRequest {
                 id: opaque.id,
                 secret_digest: app.token_digest(&opaque)?.as_bytes().to_vec(),
-                client_id: q.client_id,
+                client_id: client.id.clone(),
                 redirect_uri: q.redirect_uri,
                 client_state: q.state,
                 pkce_challenge: q.code_challenge,
@@ -428,7 +428,7 @@ impl OidcApplication {
                             &context.user(&session),
                             Some(session.user_id),
                             DomainEvent::ConsentGranted {
-                                client_id: ClientId::new(request.client_id.as_str()),
+                                client_id: request.client_id.clone(),
                                 scopes: request.scopes.clone(),
                             },
                         )
@@ -610,7 +610,7 @@ impl OidcApplication {
         let client = self
             .database
             .oidc()
-            .find_client(&request.client_id)
+            .find_client(request.client_id.as_str())
             .await?
             .ok_or_else(|| {
                 OAuthCode::InvalidRequest.reject("the client is no longer registered")

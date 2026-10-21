@@ -11,7 +11,7 @@
 
 use axum::{Json, Router, extract::State, http::StatusCode, routing::get};
 use piquel_auth::{
-    ClientConfig, ClientId, Credentials, Issuer, Resource,
+    ClientConfig, Credentials, Issuer, Resource,
     axum::{BearerLayer, LoginRoutes, MemoryBackend, Scoped, SignedIn},
 };
 use std::{
@@ -69,7 +69,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
         ));
 
     let config = ClientConfig {
-        client_id: ClientId::new(env::var("NOTES_CLIENT_ID")?),
+        client_id: env::var("NOTES_CLIENT_ID")?.parse()?,
         credentials: Credentials::Secret(env::var("NOTES_CLIENT_SECRET")?.into()),
         redirect_uri: env::var("NOTES_REDIRECT_URI")?.parse()?,
     };

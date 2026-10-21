@@ -1,14 +1,19 @@
-//! Two instances of the whole service on one database, as piqueld runs replicas.
+//! Two instances of the whole service on one database, as piqueld runs replicas,
+//! and the fixtures shared by the applications' tests.
 
 use crate::{
-    AuthConfig,
+    AuthConfig, Operator,
     config::{FederationConfig, FrontendOrigins, OidcConfig, PasskeyConfig},
     passkey::DecoyKey,
 };
 use axum::{Extension, Router, extract::ConnectInfo};
 use piquel_common::{
     UserId,
+    clients::{
+        AllowedScopes, ClientKind, ClientRegistration, PostLogoutUris, RedirectUris, ScopeName,
+    },
     config::{Origin, PublicUrl},
+    protocol::oauth::Scope,
 };
 use piquel_crypto::{Rs256Key, Secret};
 use piquel_repository::{Database, DatabaseConfig};
@@ -55,8 +60,6 @@ impl Replicas {
                 origin,
                 keys: Arc::new(Rs256Key::generate("replicas").expect("signing key")),
                 refresh_key: Arc::new(Secret::generate().expect("refresh key")),
-                clients: vec![],
-                public_redirects: vec![],
             },
             trusted_proxies: vec![],
         };
@@ -89,6 +92,45 @@ impl Replicas {
         .expect("database");
         database.run_migrations().await.expect("migrations");
         database
+    }
+}
+
+/// The operator client changes made by tests are attributed to, as the `client`
+/// command's are.
+pub(crate) fn operator() -> Operator {
+    Operator::Cli {
+        os_user: "test".into(),
+        host: "test".into(),
+    }
+}
+
+/// A refresh-capable, untrusted client of `kind` with a fresh ID, calling back to
+/// `{origin}/callback` and returning to `{origin}/logout` after logout.
+pub(crate) fn registration(kind: ClientKind, origin: &str) -> ClientRegistration {
+    ClientRegistration {
+        id: format!("test-{}", UserId::new())
+            .parse()
+            .expect("client ID"),
+        display_name: "Test app".parse().expect("display name"),
+        kind,
+        redirect_uris: RedirectUris::new([format!("{origin}/callback").parse().expect("callback")])
+            .expect("one callback"),
+        post_logout_uris: PostLogoutUris::new([format!("{origin}/logout")
+            .parse()
+            .expect("logout page")])
+        .expect("one logout page"),
+        allowed_scopes: AllowedScopes::new(
+            [
+                Scope::OpenId,
+                Scope::Profile,
+                Scope::Email,
+                Scope::OfflineAccess,
+            ]
+            .map(ScopeName::from),
+        )
+        .expect("standard scopes"),
+        allow_refresh: true,
+        trusted: false,
     }
 }
 
