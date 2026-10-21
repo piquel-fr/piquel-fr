@@ -11,11 +11,12 @@ use axum::{
 use chrono::Duration;
 use piquel_common::{
     AuthenticationMethod, PasskeyId, SessionId, TokenId, UserId,
+    clients::ClientKind,
     events::{EventContext, JobName},
 };
 use piquel_repository::{
-    BootstrapOidcClient, InsertAuthorizationCode, InsertRefreshFamily, InsertRefreshToken,
-    InsertUser, RefreshRotationError, SessionAuthentication,
+    InsertAuthorizationCode, InsertRefreshFamily, InsertRefreshToken, InsertUser,
+    RefreshRotationError, SessionAuthentication,
 };
 use serde_json::{Value, json};
 use tower::ServiceExt;
@@ -159,24 +160,14 @@ impl Harness {
 
     /// Issues a refresh grant to a new client from `account`'s session, and returns
     /// the client and its first refresh token's ID and digest.
-    async fn grant(&self, account: &Account) -> (String, TokenId, Vec<u8>) {
-        let client = format!("history-{}", TokenId::new());
+    async fn grant(&self, account: &Account) -> (ClientId, TokenId, Vec<u8>) {
+        let registration = crate::tests::registration(ClientKind::Public, "https://client.example");
         self.database
             .oidc()
-            .bootstrap_client(&BootstrapOidcClient {
-                id: client.clone(),
-                display_name: "History app".into(),
-                redirect_uris: vec!["https://client.example/callback".into()],
-                post_logout_uris: vec![],
-                allowed_scopes: vec!["openid".into()],
-                allowed_audiences: vec!["test".into()],
-                allow_refresh: true,
-                enabled: true,
-                trusted: true,
-                client_secret_hash: None,
-            })
+            .create_client(&registration)
             .await
             .expect("client");
+        let client = registration.id;
         let mut tx = self.database.begin().await.expect("transaction");
         let session = tx
             .sessions()
@@ -210,7 +201,7 @@ impl Harness {
                 &InsertRefreshFamily {
                     id: family,
                     user_id: account.user_id,
-                    client_id: client.clone(),
+                    client_id: client.to_string(),
                     session_id: account.session_id,
                     authorization_code_id: code,
                     audience: "test".into(),
@@ -345,6 +336,34 @@ async fn pages_hold_only_the_callers_entries() {
     );
 }
 
+/// A page stops after [`MAX_BATCHES`] batches of hidden events, short but with a
+/// cursor, and the next page continues where it stopped.
+#[tokio::test]
+#[ignore = "requires TEST_DATABASE_URL"]
+async fn pages_stop_reading_after_a_bound() {
+    let harness = Harness::new().await;
+    let alice = harness.account().await;
+    let renamed = DomainEvent::PasskeyRenamed {
+        passkey_id: PasskeyId::new(),
+    };
+    let confirmed = DomainEvent::PasskeyConfirmed {
+        session_id: alice.session_id,
+    };
+    let hidden = MAX_BATCHES * usize::from(PAGE_SIZE) + 1;
+    harness
+        .record(&alice, user(&alice), vec![renamed.clone()])
+        .await;
+    harness
+        .record(&alice, user(&alice), vec![confirmed; hidden])
+        .await;
+
+    let first = harness.page(&alice, None).await;
+    assert_eq!(first["entries"], json!([]));
+    let second = harness.page(&alice, Some(&first["next"])).await;
+    assert_eq!(second["entries"][0]["kind"], "passkey.renamed");
+    assert_eq!(second["next"], Value::Null);
+}
+
 /// Reporting an entry records the report, ends the account's other sessions and
 /// revokes every refresh family, this session's included, and says how to undo
 /// the entry. Only the account's own entries, caused by its user, can be reported.
@@ -413,7 +432,7 @@ async fn reporting_ends_other_sessions_and_every_grant() {
         let mut tx = harness.database.begin().await.expect("transaction");
         assert!(matches!(
             tx.tokens()
-                .consume_for_rotation(token, &digest, &client)
+                .consume_for_rotation(token, &digest, client.as_str())
                 .await,
             Err(RefreshRotationError::Invalid)
         ));

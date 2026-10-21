@@ -330,7 +330,9 @@
             </li>{/each}
         </ul>
       </section>{/each}
-    {#if !entries.length}<p class="empty">Nothing has happened to your account yet.</p>{/if}
+    {#if !entries.length && !next}<p class="empty">
+        Nothing has happened to your account yet.
+      </p>{/if}
     {#if next}<button class="secondary full" disabled={task.busy} onclick={older}
         >Show older activity</button
       >{/if}

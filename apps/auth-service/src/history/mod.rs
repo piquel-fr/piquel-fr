@@ -24,6 +24,9 @@ use error::HistoryError;
 
 /// Entries per page.
 const PAGE_SIZE: u16 = 50;
+/// Batches of [`PAGE_SIZE`] events one page reads at most, visible or not, so a
+/// long run of hidden events cannot hold a request.
+const MAX_BATCHES: usize = 10;
 
 /// The account's security history and its reports.
 #[derive(Clone)]
@@ -44,7 +47,8 @@ struct HistoryQuery {
 struct HistoryPage {
     /// The entries.
     entries: Vec<HistoryItem>,
-    /// The cursor of the next, older page, when there may be one.
+    /// The cursor of the next, older page, when there may be one. A page can be
+    /// short, even empty, and still have one.
     next: Option<EventId>,
 }
 
@@ -132,9 +136,9 @@ impl HistoryApplication {
     }
 
     /// Returns a page of the account's entries, newest first. Events the user does
-    /// not see are skipped, and reading continues until the page is full or the
-    /// history ends, so only the last page is short. Only the account's own events
-    /// are read: the repository query filters on its ID.
+    /// not see are skipped, and reading continues until the page is full, the
+    /// history ends or [`MAX_BATCHES`] were read. Only the account's own events are
+    /// read: the repository query filters on its ID.
     async fn list(
         State(app): State<Self>,
         security::Session(session): security::Session,
@@ -154,7 +158,7 @@ impl HistoryApplication {
             ..EventFilter::default()
         };
         let mut entries = Vec::new();
-        loop {
+        for _ in 0..MAX_BATCHES {
             let batch = app
                 .database
                 .events()
@@ -178,6 +182,10 @@ impl HistoryApplication {
                 }));
             }
         }
+        Ok(Json(HistoryPage {
+            entries,
+            next: filter.before,
+        }))
     }
 
     /// Reports an entry the account caused as not the user's. In one transaction,
