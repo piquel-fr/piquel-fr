@@ -72,7 +72,7 @@ async fn personal_data_is_stored_apart_and_erases() {
 
     record(&pool, user, linked()).await;
     let [stored] = <[StoredEvent; 1]>::try_from(history().await).expect("one event");
-    assert_eq!(stored.event, linked());
+    assert_eq!(stored.event, RecordedEvent::Known(linked()));
     assert_eq!(stored.actor, context(user).actor);
     assert_eq!(stored.origin, Personal::Value(context(user).origin));
     let (event_row, personal_row): (String, String) = sqlx::query_as(
@@ -100,10 +100,10 @@ async fn personal_data_is_stored_apart_and_erases() {
     let [erased] = <[StoredEvent; 1]>::try_from(history().await).expect("one event");
     assert_eq!(
         erased.event,
-        DomainEvent::IdentityLinked {
+        RecordedEvent::Known(DomainEvent::IdentityLinked {
             provider: Provider::GitHub,
             subject: Personal::Erased,
-        }
+        })
     );
     assert_eq!(erased.origin, Personal::Erased);
 
@@ -141,7 +141,7 @@ async fn consume(
             batch
                 .into_iter()
                 .filter(|event| event.subject == Some(user))
-                .map(|event| event.event),
+                .map(|event| event.event.known().cloned().expect("a known event")),
         );
         EventRepository::from_pool(pool)
             .acknowledge(consumer, last)
@@ -177,6 +177,57 @@ async fn read_after_never_skips_an_event_committed_out_of_order() {
     );
     earlier.commit().await.expect("commit earlier");
     assert_eq!(consume(&pool, consumer, user, 2).await, [first, second]);
+}
+
+/// Events a newer release wrote, of a kind this one does not know or a known kind
+/// in a newer payload version, read as unknown with their data. A known kind
+/// whose payload does not decode still fails.
+#[tokio::test]
+#[ignore = "requires a disposable TEST_DATABASE_URL"]
+async fn events_a_newer_release_wrote_read_as_unknown() {
+    let pool = Database::test_pool().await;
+    let user = insert_user(&pool).await;
+    let mut events = EventRepository::from_pool(&pool);
+    let data = serde_json::json!({"client_id": "deleted"});
+    for (kind, version) in [
+        ("client_deleted", EVENT_VERSION),
+        ("passkey_added", EVENT_VERSION + 1),
+    ] {
+        events
+            .insert_written_elsewhere(user, kind, version, &data)
+            .await
+            .expect("event");
+    }
+    let unknown = |kind: &str, version| RecordedEvent::Unknown {
+        kind: kind.into(),
+        version,
+        data: data.clone(),
+    };
+    assert_eq!(
+        events
+            .history_for_user(user, 10)
+            .await
+            .expect("history")
+            .into_iter()
+            .map(|stored| stored.event)
+            .collect::<Vec<_>>(),
+        [
+            unknown("passkey_added", EVENT_VERSION + 1),
+            unknown("client_deleted", EVENT_VERSION),
+        ]
+    );
+
+    // Rolled back, so that consumers of every event never read it.
+    let mut tx = DatabaseTransaction::new(pool.begin().await.expect("transaction"));
+    tx.events()
+        .insert_written_elsewhere(user, "passkey_added", EVENT_VERSION, &data)
+        .await
+        .expect("malformed event");
+    assert!(matches!(
+        tx.events().history_for_user(user, 10).await,
+        Err(DatabaseError::InvalidStoredData { .. })
+    ));
+    tx.rollback().await.expect("rollback");
 }
 
 /// The migration turns audit rows into imported events with their action, outcome
@@ -239,7 +290,7 @@ async fn migration_imports_the_audit_log() {
     let imported: Vec<_> = history
         .iter()
         .map(|stored| match &stored.event {
-            DomainEvent::Imported(audit) => {
+            RecordedEvent::Known(DomainEvent::Imported(audit)) => {
                 assert_eq!(stored.actor, Actor::Unrecorded);
                 (audit.action(), audit.outcome(), audit.metadata().clone())
             }

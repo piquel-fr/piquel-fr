@@ -203,7 +203,7 @@ impl Harness {
             .await
             .expect("history")
             .into_iter()
-            .map(|stored| stored.event)
+            .map(|stored| stored.event.known().cloned().expect("a known event"))
             .collect()
     }
 }
@@ -402,6 +402,37 @@ async fn disabling_ends_sessions_and_is_recorded() {
     assert_eq!(
         page["events"][0]["event"]["data"]["reason"],
         json!({"$personal": "Spam"})
+    );
+}
+
+/// An event a newer release wrote, of a kind this one does not know, is listed
+/// with its kind, version and data rather than failing the page.
+#[tokio::test]
+#[ignore = "requires TEST_DATABASE_URL"]
+async fn events_a_newer_release_wrote_are_listed() {
+    let harness = Harness::new().await;
+    let admin = harness.admin().await;
+    let user = harness.account().await;
+    let data = json!({"client_id": "deleted"});
+    harness
+        .database
+        .events()
+        .insert_written_elsewhere(user.user_id, "client_deleted", 1, &data)
+        .await
+        .expect("event");
+    let token = harness.token(admin, Acr::PhishingResistant, Duration::zero());
+    let (status, _, page) = harness
+        .call(
+            Method::GET,
+            &format!("{}?user={}", paths::EVENTS, user.user_id),
+            Some(&token),
+            None,
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(
+        page["events"][0]["event"],
+        json!({"kind": "client_deleted", "version": 1, "data": data})
     );
 }
 

@@ -160,6 +160,20 @@ a person outside auth is wrapped in `Personal<T>`, which any `piquel-common` typ
 can use; storage decides how to keep it apart. Adding a variant is a
 compile-time change that every `match` must handle.
 
+Event readers tolerate events they do not know, so adding a variant is safe during a
+rolling deploy or a rollback, when the previous release reads what the next one
+wrote. Reads return `StoredEvent.event` as a `RecordedEvent`: `Known(DomainEvent)`,
+or `Unknown { kind, version, data }` for a kind this release does not know or a
+known kind in a payload version newer than `EVENT_VERSION`. Each reader decides
+what to do with it: the security history hides it and refuses to report it, and
+the admin events API lists it with its kind, version and data. `record` takes a
+`DomainEvent`, so a release never writes an unknown event, and delivery fan-out,
+which runs in `record`, only ever sees known ones. A payload of a known kind and
+version that does not decode is still `DatabaseError::InvalidStoredData`, so a
+change an older release could not decode, such as a new variant of an enum inside a
+payload or a renamed field, must be written with a new version. Adding a field is
+not one: older releases ignore fields they do not know.
+
 ### Personal data
 
 - `domain_events` holds only non-identifying content: kind, versioned payload,

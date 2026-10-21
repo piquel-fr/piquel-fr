@@ -336,6 +336,28 @@ async fn pages_hold_only_the_callers_entries() {
     );
 }
 
+/// An event a newer release wrote, of a kind this one does not know, is hidden
+/// rather than failing the page, and cannot be reported.
+#[tokio::test]
+#[ignore = "requires TEST_DATABASE_URL"]
+async fn events_a_newer_release_wrote_are_hidden() {
+    let harness = Harness::new().await;
+    let alice = harness.account().await;
+    let unknown = harness
+        .database
+        .events()
+        .insert_written_elsewhere(alice.user_id, "client_deleted", 1, &json!({}))
+        .await
+        .expect("event");
+    let page = harness.page(&alice, None).await;
+    assert_eq!(page["entries"].as_array().expect("entries").len(), 1);
+    assert_eq!(page["entries"][0]["kind"], "session.signed_in");
+    assert_eq!(
+        harness.report(&alice, unknown).await.0,
+        StatusCode::NOT_FOUND
+    );
+}
+
 /// A page stops after [`MAX_BATCHES`] batches of hidden events, short but with a
 /// cursor, and the next page continues where it stopped.
 #[tokio::test]
@@ -444,7 +466,12 @@ async fn reporting_ends_other_sessions_and_every_grant() {
         .await
         .expect("history")
         .into_iter()
-        .map(|stored| (stored.actor, stored.event))
+        .map(|stored| {
+            (
+                stored.actor,
+                stored.event.known().cloned().expect("a known event"),
+            )
+        })
         .collect();
     assert_eq!(
         recorded,

@@ -122,7 +122,7 @@ async fn changes_apply_to_the_next_request_on_every_replica() {
     assert_eq!(
         history
             .into_iter()
-            .map(|stored| stored.event)
+            .map(|stored| stored.event.known().cloned().expect("a known event"))
             .collect::<Vec<_>>(),
         [
             DomainEvent::ClientEnabled {
@@ -307,7 +307,7 @@ async fn apply_changes_only_what_differs() {
     assert!(matches!(
         history
             .iter()
-            .map(|stored| &stored.event)
+            .map(|stored| stored.event.known().expect("a known event"))
             .collect::<Vec<_>>()[..],
         [
             DomainEvent::ClientSecretRotated { .. },
