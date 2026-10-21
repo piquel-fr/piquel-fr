@@ -38,7 +38,7 @@ mod service;
 mod tests;
 
 pub use admin::{AdminError, AdminOperations, GracePeriod, InviteExpiry, Operator};
-pub use clients::{ClientRegistry, ClientRegistryError};
+pub use clients::{Applied, ClientRegistry, ClientRegistryError};
 pub use config::{AuthConfig, PUBLIC_BASE_URL};
 use federation::FederationApplication;
 use history::HistoryApplication;

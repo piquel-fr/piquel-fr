@@ -6,8 +6,9 @@ OIDC/SSO authority at `auth.piquel.fr`, with account settings on `piquel.fr`.
 The authentication service is **one Rust executable** containing its login,
 onboarding, consent and passkey pages. PostgreSQL is its only external data
 service. GitHub and Google are optional login providers. The separate settings
-frontend calls the public authentication API. See [infra/README.md](infra/README.md)
-for repository-driven piqueld deployments.
+frontend calls the public authentication API, and the admin dashboard
+(`apps/admin-web`, at `admin.piquel.fr`) its private admin API. See
+[infra/README.md](infra/README.md) for repository-driven piqueld deployments.
 
 ## Build
 
@@ -108,15 +109,17 @@ just auth admin revoke bob     # the last administrator's rights stay
 ```
 
 Administrators manage accounts, sessions, invitations and other administrators
-through the admin API. Auth serves it only on `AUTH_ADMIN_LISTENER`, which no
-ingress route reaches: the admin dashboard calls it from its server, over the
-application's private network. Its routes and bodies are in `crates/admin-api`.
+through the admin API, from the admin dashboard
+([apps/admin-web](apps/admin-web/README.md)). Auth serves the API only on
+`AUTH_ADMIN_LISTENER`, which no ingress route reaches: the dashboard calls it from
+its server, over the application's private network. Its routes, bodies and typed
+client are in `crates/admin-api`.
 
 Every request carries an access token that auth issued to the dashboard,
 registered as the confidential OIDC client `piquel-admin` (the tokens' audience;
-see [OIDC clients](#oidc-clients) for `just auth client create piquel-admin
---confidential …`), for an administrator who signed in with a passkey. Auth checks on every request that the
-account is still an administrator and the token's session still active, so
+deployments register it with `client apply`, see [OIDC clients](#oidc-clients)),
+for an administrator who signed in with a passkey. Auth checks on every request
+that the account is still an administrator and the token's session still active, so
 revoking either takes effect at once. Mutations also need a passkey confirmation
 from the last five minutes. Otherwise the API answers `401` with an RFC 9470
 step-up challenge, and the dashboard signs the administrator in again.
@@ -167,6 +170,15 @@ the secret once, and auth stores only its SHA-256 digest. Secrets start with
 `pqcs_` so secret scanners can recognize them. After `rotate-secret`, the earlier
 secrets keep working for the grace period (24 hours by default, at most 30 days;
 `--grace 0` revokes them at once), so the client can switch without downtime.
+
+A client that a deployment manages, such as the admin dashboard, is registered
+with `client apply` instead, which takes the same options as `create`. It
+registers the client, or updates what differs and records nothing when nothing
+does, so a deploy job can run it every time. A confidential client's secret comes
+from the deployment, `--secret file://PATH` (or `env://NAME`): 32 random bytes in
+unpadded base64url, never printed. The client's other secrets keep working for
+`--grace` at most (1 hour by default) while the deployment rolls out; `--grace 0`
+revokes them.
 
 Redirect URIs must match exactly. They use HTTPS, or HTTP on a loopback IP for
 native apps, without credentials or a fragment, and are written as URL parsing
@@ -274,7 +286,7 @@ explains how to choose a requirement and handle the challenge.
 `just` runs `validate` by default.
 `just install-tools` installs `cargo-nextest`, `cargo-deny` and `sqlx-cli`. The
 `db` recipes also need the PostgreSQL 18 server binaries (`initdb`, `pg_ctl`).
-Recipes are grouped into `rust`, `web`, `db`, `auth` and `infra` modules under
+Recipes are grouped into `rust`, `web`, `db`, `auth`, `admin` and `infra` modules under
 `just/`; `just --list --list-submodules` shows every recipe. The root `fmt`,
 `fmt-check`, `lint`, `check` and `audit` run the same recipe in `rust` and `web`.
 Use individual recipes while iterating:

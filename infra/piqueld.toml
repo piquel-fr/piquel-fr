@@ -31,6 +31,7 @@ promote_from = "staging"
 web_host = "piquel.fr"
 auth_host = "auth.piquel.fr"
 www_host = "www.piquel.fr"
+admin_host = "admin.piquel.fr"
 
 [spec.environments.staging]
 sync = true
@@ -40,6 +41,7 @@ visibility = "private"
 web_host = "staging.piquel.fr"
 auth_host = "auth.staging.piquel.fr"
 www_host = "www.staging.piquel.fr"
+admin_host = "admin.staging.piquel.fr"
 
 # Flat hostnames, so the `*.dev.piquel.fr` certificate covers every preview.
 # Preview databases start empty, so anyone on the tailnet may register.
@@ -50,6 +52,7 @@ visibility = "private"
 web_host = "${{ env.slug }}.dev.piquel.fr"
 auth_host = "auth-${{ env.slug }}.dev.piquel.fr"
 www_host = "www-${{ env.slug }}.dev.piquel.fr"
+admin_host = "admin-${{ env.slug }}.dev.piquel.fr"
 invite_required = "false"
 
 [[spec.routes]]
@@ -65,6 +68,14 @@ hostname = "${{ vars.auth_host }}"
 service = "auth"
 port = 8080
 visibility = "public"
+
+# The admin dashboard is reachable only from the tailnet, in every environment.
+[[spec.routes]]
+name = "admin"
+hostname = "${{ vars.admin_host }}"
+service = "admin"
+port = 8080
+visibility = "private"
 
 # Routes cannot be limited to one environment, so staging and previews redirect
 # their own `www` name too. The gateway answers; path and query are kept.
@@ -82,10 +93,31 @@ generate = { type = "random", bytes = 32, encoding = "hex" }
 name = "signing-key"
 generate = { type = "rsa", bits = 3072 }
 
+# The `piquel-admin` OIDC client's secret. The dashboard authenticates with it,
+# and the `admin-client` job registers it with auth.
+[[spec.secrets]]
+name = "admin-client-secret"
+generate = { type = "random", bytes = 32, encoding = "base64url" }
+
 [[spec.jobs]]
 name = "migrate"
 service = "auth"
 command = ["auth-service", "migrate"]
+run = "before-rollout"
+
+# Registers the admin dashboard as the trusted OIDC client `piquel-admin`, or
+# brings its registration and secret in line, on every deploy after migrations.
+[[spec.jobs]]
+name = "admin-client"
+service = "auth"
+command = [
+  "auth-service", "client", "apply", "piquel-admin",
+  "--name", "Piquel admin", "--confidential", "--refresh", "--trusted",
+  "--redirect-uri", "https://${{ vars.admin_host }}/auth/callback",
+  "--post-logout-uri", "https://${{ vars.admin_host }}/",
+  "--scope", "openid", "--scope", "profile", "--scope", "offline_access",
+  "--secret", "file:///run/secrets/admin-client-secret",
+]
 run = "before-rollout"
 
 [[spec.services]]
@@ -123,6 +155,10 @@ target = "/run/secrets/database-password"
 name = "signing-key"
 target = "/run/secrets/signing-key"
 
+[[spec.services.secrets]]
+name = "admin-client-secret"
+target = "/run/secrets/admin-client-secret"
+
 [spec.services.healthcheck]
 type = "http"
 port = 8080
@@ -145,6 +181,37 @@ dockerfile = "infra/web.Dockerfile"
 AUTH_ORIGIN = "https://${{ vars.auth_host }}"
 ORIGIN = "https://${{ vars.web_host }}"
 
+[spec.services.healthcheck]
+type = "http"
+port = 8080
+path = "/healthz"
+
+[[spec.services]]
+name = "admin"
+depends_on = ["auth"]
+
+[spec.services.source]
+type = "git"
+repository = "self"
+
+[spec.services.source.build]
+type = "docker"
+dockerfile = "infra/admin.Dockerfile"
+
+# The dashboard calls the admin API on auth's private listener; it has no
+# database credentials.
+[spec.services.environment]
+ADMIN_AUTH_ORIGIN = "https://${{ vars.auth_host }}"
+ADMIN_API_URL = "http://auth:8081"
+ADMIN_ORIGIN = "https://${{ vars.admin_host }}"
+ADMIN_CLIENT_SECRET = "file:///run/secrets/admin-client-secret"
+ADMIN_LISTENER = "0.0.0.0:8080"
+
+[[spec.services.secrets]]
+name = "admin-client-secret"
+target = "/run/secrets/admin-client-secret"
+
+# Does not call auth, so the dashboard starts while auth's route comes up.
 [spec.services.healthcheck]
 type = "http"
 port = 8080

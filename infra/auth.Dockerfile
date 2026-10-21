@@ -14,6 +14,10 @@ COPY Cargo.toml Cargo.lock ./
 COPY .cargo .cargo
 COPY crates crates
 COPY apps/auth-service apps/auth-service
+# Cargo loads every workspace member, so admin-web is only its manifest and an
+# empty target: its sources never invalidate this build.
+COPY apps/admin-web/Cargo.toml apps/admin-web/
+RUN mkdir -p apps/admin-web/src && touch apps/admin-web/src/main.rs
 COPY --from=frontend /app/apps/auth-web/build apps/auth-web/build
 RUN cargo build --locked --release -p auth-service
 

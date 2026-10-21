@@ -175,6 +175,15 @@ impl ClientSecret {
             Secret::generate()?.encoded()
         )))
     }
+    /// A secret generated elsewhere, such as by the deployment of the client that
+    /// uses it: 256 random bits in unpadded base64url, with or without the prefix.
+    ///
+    /// # Errors
+    /// Rejects other encodings and lengths, so a guessable secret is never stored.
+    pub fn parse(value: &str) -> Result<Self, CryptoError> {
+        Secret::parse(value.strip_prefix(CLIENT_SECRET_PREFIX).unwrap_or(value))?;
+        Ok(Self(value.to_owned()))
+    }
     /// The secret, to show the operator once.
     #[must_use]
     pub fn expose(&self) -> &str {

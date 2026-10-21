@@ -1,0 +1,23 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT EXISTS (\n                    SELECT 1 FROM oidc_client_secrets\n                    WHERE client_id = $1 AND secret_digest = $2 AND expires_at IS NULL\n                ) AS \"lasting!\"",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "lasting!",
+        "type_info": "Bool"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Bytea"
+      ]
+    },
+    "nullable": [
+      null
+    ]
+  },
+  "hash": "d39cacf788908e6eabb89a0bae41eeaeef1b8193e7b79e9db9841bc5bea9992b"
+}

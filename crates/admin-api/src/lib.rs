@@ -10,7 +10,8 @@
 //! ([`ErrorBody`]).
 //!
 //! Bodies the account settings API also returns come from `piquel-common`
-//! and are re-exported here.
+//! and are re-exported here. The `client` feature adds [`AdminClient`], a typed
+//! client of every route.
 
 use chrono::{DateTime, Utc};
 pub use piquel_common::protocol::{
@@ -23,6 +24,12 @@ use piquel_common::{
 };
 use serde::{Deserialize, Serialize};
 use url::Url;
+
+/// The typed client, behind the `client` feature.
+#[cfg(feature = "client")]
+mod client;
+#[cfg(feature = "client")]
+pub use client::{AdminClient, ApiError};
 
 /// The `aud` of the access tokens the admin API accepts. The dashboard is
 /// registered as the OIDC client with this ID, whose tokens carry it.

@@ -1,15 +1,15 @@
 # Piqueld deployments
 
 `infra/piqueld.toml` deploys piquel.fr as one repository-backed piqueld
-application, `piquel-fr`: auth, the web settings frontend, and PostgreSQL. Its
-environments and previews share the manifest; variables give each its own
-hostnames.
+application, `piquel-fr`: auth, the web settings frontend, the admin dashboard,
+and PostgreSQL. Its environments and previews share the manifest; variables give
+each its own hostnames.
 
-| Deployment | Source | Web | Auth | Redirects to web | Reachable from |
-| --- | --- | --- | --- | --- | --- |
-| `production` | promoted from staging | `piquel.fr` | `auth.piquel.fr` | `www.piquel.fr` | internet |
-| `staging` | `main`, on every push | `staging.piquel.fr` | `auth.staging.piquel.fr` | `www.staging.piquel.fr` | tailnet |
-| previews | a branch or a local worktree | `<slug>.dev.piquel.fr` | `auth-<slug>.dev.piquel.fr` | `www-<slug>.dev.piquel.fr` | tailnet |
+| Deployment | Source | Web | Auth | Admin | Redirects to web | Reachable from |
+| --- | --- | --- | --- | --- | --- | --- |
+| `production` | promoted from staging | `piquel.fr` | `auth.piquel.fr` | `admin.piquel.fr` | `www.piquel.fr` | internet; admin from the tailnet |
+| `staging` | `main`, on every push | `staging.piquel.fr` | `auth.staging.piquel.fr` | `admin.staging.piquel.fr` | `www.staging.piquel.fr` | tailnet |
+| previews | a branch or a local worktree | `<slug>.dev.piquel.fr` | `auth-<slug>.dev.piquel.fr` | `admin-<slug>.dev.piquel.fr` | `www-<slug>.dev.piquel.fr` | tailnet |
 
 The `www` route is a permanent (308) redirect that the gateway answers itself,
 keeping the path and query: `www.piquel.fr/settings?x=1` goes to
@@ -32,8 +32,8 @@ contain nothing environment-specific: per-environment values are runtime
   every preview).
 - DNS records for every hostname: `manage_records = true` on that provider, or by
   hand: public hosts (`piquel.fr`, `auth.piquel.fr`, `www.piquel.fr`) to the
-  server, and `staging.piquel.fr`, `*.staging.piquel.fr` and `*.dev.piquel.fr`
-  to the apps node's tailnet addresses. Through the Cloudflare Tunnel, a public
+  server, and `admin.piquel.fr`, `staging.piquel.fr`, `*.staging.piquel.fr` and
+  `*.dev.piquel.fr` to the apps node's tailnet addresses. Through the Cloudflare Tunnel, a public
   host is a proxied CNAME to the tunnel; on ports 80/443, an A record, and Caddy
   obtains its certificate over HTTP-01.
 - `ingress.webhook_hostname` for deploy-on-push.
@@ -96,8 +96,8 @@ an explicit data migration.
 
 ## Auth
 
-piqueld generates `database-password` and `signing-key` for each environment and
-preview on its first deployment and never changes them;
+piqueld generates `database-password`, `signing-key` and `admin-client-secret`
+for each environment and preview on its first deployment and never changes them;
 `piquelctl env secret piquel-fr --env ENV regenerate NAME` rotates one. A new
 password does not change the one an existing database volume stores.
 
@@ -115,7 +115,9 @@ deploy:
 piquelctl app exec piquel-fr auth --env production -- auth-service client list
 ```
 
-No external identity providers or OIDC clients are configured by default. Auth uses
+No external identity providers are configured by default. The only client an
+environment needs, the dashboard's, is registered by a deploy job (see
+[Admin](#admin)). Auth uses
 the gateway ranges in `PIQUELD_INGRESS_PROXIES` to trust ingress's overwritten
 `X-Forwarded-For` address and throttle each client separately.
 `AUTH_TRUSTED_PROXIES` overrides those ranges when set.
@@ -149,6 +151,31 @@ removes the restart gap after a crash; it adds no capacity.
 - **Migrations.** During a deploy the previous release runs against the new
   schema, so migrations expand, then contract
   (`docs/architecture/database-crate.md`).
+
+## Admin
+
+The admin service is the dashboard in `apps/admin-web`, on port 8080 as a non-root
+user, behind a private route in every environment. It calls the admin API at
+`http://auth:8081`, auth's private listener, which only services of the same
+environment reach; it has no database credentials. Its health check,
+`GET /healthz`, does not call auth: the dashboard discovers auth in the
+background, since auth's route may not serve yet when it starts.
+
+Its OIDC client, `piquel-admin`, needs no setup. After `migrate`, the
+`admin-client` job runs `auth-service client apply` on every deploy: it registers
+the client with the environment's admin host and the `admin-client-secret` that
+piqueld generated, or updates what differs. After `piquelctl env secret piquel-fr
+--env ENV regenerate admin-client-secret`, the next deploy registers the new
+secret; the previous one keeps working for an hour, while the dashboard rolls out.
+
+Only administrators can use it. Grant the first one with the CLI:
+
+```sh
+piquelctl app exec piquel-fr auth --env production -- auth-service admin grant USERNAME
+```
+
+Administrators sign in to the dashboard again after it restarts; their sign-ins
+live in its memory. That is silent while their auth session lasts.
 
 ## Web
 
