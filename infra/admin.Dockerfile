@@ -2,9 +2,18 @@ FROM rust:1.99.0-bookworm AS backend
 WORKDIR /app
 COPY Cargo.toml Cargo.lock ./
 COPY .cargo .cargo
-COPY crates crates
-# Cargo loads every workspace member; only admin-web is built.
-COPY apps/auth-service apps/auth-service
+COPY crates/admin-api crates/admin-api
+COPY crates/auth-sdk crates/auth-sdk
+COPY crates/common crates/common
+COPY crates/telemetry crates/telemetry
+# Cargo loads every workspace member, so the ones admin-web doesn't use are only
+# their manifests and an empty target: their sources never invalidate this build.
+COPY apps/auth-service/Cargo.toml apps/auth-service/
+COPY crates/crypto/Cargo.toml crates/crypto/
+COPY crates/database/Cargo.toml crates/database/
+RUN for member in apps/auth-service crates/crypto crates/database; do \
+        mkdir -p "$member/src" && touch "$member/src/lib.rs"; \
+    done
 COPY apps/admin-web apps/admin-web
 # The shared piquel.fr styles, which the dashboard serves with its own.
 COPY packages/auth-sdk/src/style.css packages/auth-sdk/src/style.css

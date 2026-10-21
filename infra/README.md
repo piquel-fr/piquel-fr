@@ -174,10 +174,6 @@ Only administrators can use it. Grant the first one with the CLI:
 piquelctl app exec piquel-fr auth --env production -- auth-service admin grant USERNAME
 ```
 
-`app exec` does not reach previews; on the piqueld host, run the same
-`auth-service admin grant USERNAME` with `docker exec` in the preview's auth
-container.
-
 Administrators sign in to the dashboard again after it restarts; their sign-ins
 live in its memory. That is silent while their auth session lasts.
 
