@@ -7,8 +7,7 @@
 #   rust   -> Clippy, unit, database and doc tests against PostgreSQL
 #   e2e    -> the browser suite over HTTPS against the real binary, with the
 #             auth pages embedded, the settings build and PostgreSQL
-#   docker -> both deployment images, on pull requests only: staging builds
-#             them from every push to main
+#   docker -> both deployment images
 #
 # Pull requests run only the jobs their changes can affect (see `changes`).
 # Pushes to main and manual runs run everything. `ci` is the single status to
@@ -58,7 +57,6 @@ jobs:
       web: ${{ github.event_name != 'pull_request' || steps.filter.outputs.web == 'true' }}
       deps: ${{ github.event_name != 'pull_request' || steps.filter.outputs.deps == 'true' }}
       app: ${{ github.event_name != 'pull_request' || steps.filter.outputs.app == 'true' }}
-      docker: ${{ github.event_name == 'workflow_dispatch' || steps.filter.outputs.app == 'true' }}
     steps:
       - if: github.event_name == 'pull_request'
         id: filter
@@ -238,7 +236,7 @@ jobs:
   docker:
     name: docker (${{ matrix.image }})
     needs: changes
-    if: needs.changes.outputs.docker == 'true'
+    if: needs.changes.outputs.app == 'true'
     strategy:
       fail-fast: false
       matrix:
