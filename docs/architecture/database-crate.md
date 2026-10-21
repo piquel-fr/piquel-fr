@@ -171,8 +171,13 @@ the admin events API lists it with its kind, version and data. `record` takes a
 which runs in `record`, only ever sees known ones. A payload of a known kind and
 version that does not decode is still `DatabaseError::InvalidStoredData`, so a
 change an older release could not decode, such as a new variant of an enum inside a
-payload or a renamed field, must be written with a new version. Adding a field is
-not one: older releases ignore fields they do not know.
+payload or a renamed field, must be written with a new version of that kind only:
+bumping `EVENT_VERSION` for every kind would hide every new event from an older
+release. Adding a field is not one, since older releases ignore fields they do not
+know, but the field must be an `Option` or `#[serde(default)]`, so that the new
+release still reads the rows already stored. The tolerance only protects a release
+that has it: ship a new variant in a later deploy than #149, so that a rollback
+never lands on a release without it.
 
 ### Personal data
 

@@ -17,9 +17,10 @@ use serde_json::{Map, Value};
 use sqlx::types::Json;
 use std::{fmt::Display, iter, net::IpAddr};
 
-/// Payload version recorded with every event. A kind whose payload changes shape
-/// gets a new version, and reads keep accepting the old one. A newer version was
-/// written by a newer release, so it reads as [`RecordedEvent::Unknown`].
+/// Payload version recorded with every event. Versions are per kind: a kind whose
+/// payload changes shape gets a new version of its own, never a new value of this
+/// constant for every kind, and reads keep accepting the old one. A newer version
+/// was written by a newer release, so it reads as [`RecordedEvent::Unknown`].
 const EVENT_VERSION: i16 = 1;
 /// Key under which a [`Personal`] value serializes; matches its serde rename.
 const PERSONAL_KEY: &str = "$personal";
