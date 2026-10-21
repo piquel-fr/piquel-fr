@@ -47,7 +47,8 @@ export default defineConfig(
     }
   },
   {
-    files: ['**/*.svelte'],
+    // Svelte parses components and rune modules (`*.svelte.ts`); TypeScript parses their scripts.
+    files: ['**/*.svelte', '**/*.svelte.ts'],
     languageOptions: { parserOptions: { parser: ts.parser } }
   }
 );

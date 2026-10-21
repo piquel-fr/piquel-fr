@@ -2,7 +2,6 @@
   import { onMount } from 'svelte';
   import { page } from '$app/state';
   import {
-    AuthApi,
     Passkeys,
     StepUp,
     errorMessage,
@@ -11,36 +10,28 @@
     type Provider,
     type Session
   } from '@piquel/auth-sdk';
+  import { Account, Task, type Identity, type Passkey } from '$lib/account.svelte';
   // Each environment has its own auth origin, which the server sets at runtime.
-  const authOrigin = page.data.authOrigin;
-  const api = new AuthApi(authOrigin);
-  type Passkey = {
-    id: string;
-    friendly_name: string;
-    created_at?: string;
-    last_used_at?: string | null;
-  };
+  const account = new Account(page.data.authOrigin);
+  const task = new Task();
   let config = $state<Configuration | null>(null);
   let session = $state<Session | null>(null);
   let passkeys = $state<Passkey[]>([]);
-  type Identity = { provider: Provider; linked_email: string | null };
   let identities = $state<Identity[]>([]);
   let loading = $state(true);
-  let busy = $state(false);
-  let error = $state('');
   let editing = $state<string | null>(null);
   let name = $state('');
   let removing = $state<string | null>(null);
   // Removing a passkey or unlinking a provider needs a recent passkey confirmation.
   // When the session has none, auth confirms it and sends the user back to finish.
-  const stepUp = new StepUp(new Passkeys(api), () => session?.user.id, {
+  const stepUp = new StepUp(new Passkeys(account.api), () => session?.user.id, {
     remove: async (id) => {
-      await api.request(`/account/passkeys/${id}`, 'DELETE');
+      await account.removePasskey(id);
       passkeys = passkeys.filter((key) => key.id !== id);
       removing = null;
     },
     unlink: async (provider) => {
-      await api.request(`/account/social-identities/${provider}`, 'DELETE');
+      await account.unlinkIdentity(provider);
       identities = identities.filter((identity) => identity.provider !== provider);
       removing = null;
     }
@@ -56,44 +47,32 @@
   });
   async function load() {
     try {
-      config = await api.request('/config');
-      session = await api.request('/session');
-      [passkeys, identities] = await Promise.all([
-        api.request<Passkey[]>('/account/passkeys'),
-        api.request<Identity[]>('/account/social-identities')
-      ]);
+      config = await account.api.request('/config');
+      session = await account.api.request('/session');
+      [passkeys, identities] = await Promise.all([account.passkeys(), account.identities()]);
       await stepUp.resume();
     } catch (cause) {
-      error = errorMessage(cause);
+      task.error = errorMessage(cause);
     } finally {
       loading = false;
     }
   }
   function authPage(page: string) {
-    return `${authOrigin}/${page}?return_to=${encodeURIComponent(config?.settings_url ?? window.location.href)}`;
-  }
-  async function run(action: () => Promise<void>) {
-    busy = true;
-    error = '';
-    try {
-      await action();
-    } catch (cause) {
-      error = errorMessage(cause);
-    } finally {
-      busy = false;
-    }
+    return account.page(page, config?.settings_url ?? window.location.href);
   }
   async function rename(passkey: Passkey) {
-    await run(async () => {
-      await api.request(`/account/passkeys/${passkey.id}`, 'PATCH', { friendly_name: name.trim() });
+    await task.run(async () => {
+      await account.api.request(`/account/passkeys/${passkey.id}`, 'PATCH', {
+        friendly_name: name.trim()
+      });
       passkey.friendly_name = name.trim();
       editing = null;
     });
   }
   async function link(provider: Provider) {
-    await run(async () => {
+    await task.run(async () => {
       if (!config) throw new Error('Account settings are still loading. Please try again.');
-      const result = await api.request<{ redirect_url: string }>(
+      const result = await account.api.request<{ redirect_url: string }>(
         `/login/${provider}/start`,
         'POST',
         { mode: 'link', return_to: config.settings_url }
@@ -102,8 +81,8 @@
     });
   }
   async function logout() {
-    await run(async () => {
-      await api.request('/session/logout', 'POST', {});
+    await task.run(async () => {
+      await account.api.request('/session/logout', 'POST', {});
       session = null;
       passkeys = [];
       identities = [];
@@ -123,7 +102,7 @@
     <h1>Security, made personal.</h1>
     <p>Manage how you sign in to Piquel and keep your account in your hands.</p>
   </div>
-  {#if error}<p class="notice error" role="alert">{error}</p>{/if}
+  {#if task.error}<p class="notice error" role="alert">{task.error}</p>{/if}
   {#if loading}<p role="status">Loading account settings…</p>
   {:else if !config}<div class="card stack">
       <h2>Account settings are unavailable</h2>
@@ -146,7 +125,7 @@
         <strong>{session.user.display_name}</strong>
         <p class="help">@{session.user.username}</p>
       </div>
-      <button class="text-button" disabled={busy} onclick={logout}>Sign out</button>
+      <button class="text-button" disabled={task.busy} onclick={logout}>Sign out</button>
     </div>
     <section class="card" aria-labelledby="passkeys-heading">
       <div class="row between">
@@ -167,7 +146,7 @@
               >
                 <label>Passkey name<input bind:value={name} maxlength="80" required /></label>
                 <div class="row actions">
-                  <button disabled={busy}>Save name</button><button
+                  <button disabled={task.busy}>Save name</button><button
                     class="secondary"
                     type="button"
                     onclick={() => (editing = null)}>Cancel</button
@@ -180,8 +159,8 @@
                 <div class="row actions">
                   <button
                     class="danger"
-                    disabled={busy}
-                    onclick={() => run(() => stepUp.run('remove', passkey.id))}
+                    disabled={task.busy}
+                    onclick={() => task.run(() => stepUp.run('remove', passkey.id))}
                     >Confirm removal</button
                   ><button class="secondary" onclick={() => (removing = null)}>Cancel</button>
                 </div>
@@ -195,7 +174,7 @@
                 <div class="row">
                   <button
                     class="text-button"
-                    disabled={busy}
+                    disabled={task.busy}
                     aria-label={`Rename ${passkey.friendly_name}`}
                     onclick={() => {
                       editing = passkey.id;
@@ -203,7 +182,7 @@
                     }}>Rename</button
                   ><button
                     class="text-button"
-                    disabled={busy || passkeys.length < 2}
+                    disabled={task.busy || passkeys.length < 2}
                     aria-label={`Remove ${passkey.friendly_name}`}
                     onclick={() => (removing = passkey.id)}>Remove</button
                   >
@@ -239,10 +218,12 @@
               </div>
               {#if identity}<button
                   class="secondary"
-                  disabled={busy}
+                  disabled={task.busy}
                   onclick={() => (removing = provider)}>Unlink</button
-                >{:else}<button class="secondary" disabled={busy} onclick={() => link(provider)}
-                  >Link {providerName(provider)}</button
+                >{:else}<button
+                  class="secondary"
+                  disabled={task.busy}
+                  onclick={() => link(provider)}>Link {providerName(provider)}</button
                 >{/if}
             </div>
             {#if removing === provider}<div class="notice stack">
@@ -250,14 +231,26 @@
                 <div class="row actions">
                   <button
                     class="danger"
-                    disabled={busy}
-                    onclick={() => run(() => stepUp.run('unlink', provider))}>Confirm unlink</button
+                    disabled={task.busy}
+                    onclick={() => task.run(() => stepUp.run('unlink', provider))}
+                    >Confirm unlink</button
                   ><button class="secondary" onclick={() => (removing = null)}>Cancel</button>
                 </div>
               </div>{/if}
           </li>{/each}
       </ul>
       {#if !providers.length}<p class="empty">Social sign-in is not available yet.</p>{/if}
+    </section>
+    <section class="card" aria-labelledby="history-heading">
+      <div class="row between">
+        <div>
+          <h2 id="history-heading">Security history</h2>
+          <p class="help">
+            See every sign-in and change to your account, and secure it if something wasn’t you.
+          </p>
+        </div>
+        <a class="button secondary" href="/settings/history">View history</a>
+      </div>
     </section>
   {/if}
 </section>

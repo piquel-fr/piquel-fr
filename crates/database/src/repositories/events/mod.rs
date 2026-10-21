@@ -44,8 +44,11 @@ pub struct EventFilter {
     /// Only events of this kind, the serde tag of a [`DomainEvent`] variant, e.g.
     /// `session_revoked`.
     pub kind: Option<String>,
-    /// Only events recorded before this one, to page through older events.
+    /// Only events recorded before this one, to page through older events. With a
+    /// `subject`, the cursor must be one of that account's events.
     pub before: Option<EventId>,
+    /// Only this event.
+    pub id: Option<EventId>,
 }
 
 /// A recorded event with its personal data merged back in.
@@ -267,7 +270,7 @@ impl EventRepository<'_> {
     }
 
     /// Lists up to `limit` events matching `filter`, newest first. A `before` event
-    /// that does not exist matches nothing.
+    /// that does not exist, or concerns another account than `subject`, matches nothing.
     ///
     /// # Errors
     ///
@@ -295,14 +298,20 @@ impl EventRepository<'_> {
                 AND ($2::text IS NULL OR e.kind = $2)
                 AND (
                     $3::uuid IS NULL
-                    OR e.sequence < (SELECT sequence FROM domain_events WHERE id = $3)
+                    OR e.sequence < (
+                        SELECT sequence FROM domain_events
+                        WHERE id = $3
+                        AND ($1::uuid IS NULL OR subject_user_id = $1)
+                    )
                 )
+                AND ($5::uuid IS NULL OR e.id = $5)
                 ORDER BY e.sequence DESC
                 LIMIT $4"#,
                 filter.subject.map(UserId::as_uuid),
                 filter.kind.as_deref(),
                 filter.before.map(EventId::as_uuid),
                 i64::from(limit),
+                filter.id.map(EventId::as_uuid),
             )
         )?
         .into_iter()

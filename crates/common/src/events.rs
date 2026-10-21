@@ -6,8 +6,8 @@
 //! [`RequestOrigin`](crate::events::RequestOrigin) apart from the event so both can be deleted on their own.
 
 use crate::{
-    AuthenticationMethod, ClientId, PasskeyId, Personal, Provider, SessionId, TokenId, UserId,
-    clients::ClientKind,
+    AuthenticationMethod, ClientId, EventId, PasskeyId, Personal, Provider, SessionId, TokenId,
+    UserId, clients::ClientKind,
 };
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
@@ -167,6 +167,13 @@ pub enum DomainEvent {
         /// When its earlier secrets stop working; now, for an immediate revocation.
         previous_expire_at: DateTime<Utc>,
     },
+    /// The user reported an event of their history as not theirs. Their other
+    /// sessions follow as [`Self::SessionRevoked`], and every refresh family of the
+    /// account is revoked with them.
+    CompromiseReported {
+        /// The reported event.
+        event_id: EventId,
+    },
     /// A row of the security audit log that preceded typed events. Only
     /// migrations write these; its fields are private, so one is only ever read back.
     Imported(ImportedAudit),
@@ -207,6 +214,7 @@ impl DomainEvent {
             | Self::AccountViewed {}
             | Self::AdministratorGranted {}
             | Self::AdministratorRevoked {}
+            | Self::CompromiseReported { .. }
             | Self::Imported(_) => None,
         }
     }
@@ -241,7 +249,273 @@ impl DomainEvent {
             | Self::ClientEnabled { .. }
             | Self::ClientDisabled { .. }
             | Self::ClientSecretRotated { .. }
+            | Self::CompromiseReported { .. }
             | Self::Imported(_) => None,
+        }
+    }
+
+    /// The entry this event shows in its subject's own security history, or `None`
+    /// for what only auth needs: ceremonies, rejected attempts, token bookkeeping
+    /// and invitations. Every variant is named, so a new one cannot be added
+    /// without deciding whether its subject sees it.
+    #[must_use]
+    #[deny(clippy::wildcard_enum_match_arm)]
+    pub fn history_entry(&self) -> Option<HistoryEntry> {
+        Some(match self {
+            Self::AccountCreated { method, .. } => HistoryEntry::AccountCreated { method: *method },
+            Self::SignedIn { method, .. } => HistoryEntry::SignedIn { method: *method },
+            Self::SessionRevoked { reason, .. } => match reason {
+                // Switching accounts signs this one out of the browser.
+                RevocationReason::Logout
+                | RevocationReason::AccountSwitched
+                | RevocationReason::RelyingPartyLogout { .. } => HistoryEntry::SignedOut,
+                RevocationReason::CredentialRemoved
+                | RevocationReason::IdentityUnlinked
+                | RevocationReason::Admin
+                | RevocationReason::AccountDisabled
+                | RevocationReason::AccountDeletion
+                | RevocationReason::CompromiseReported => HistoryEntry::SessionRevoked {
+                    reason: reason.clone(),
+                },
+                RevocationReason::Expired => return None,
+            },
+            Self::PasskeyAdded { passkey_id } => HistoryEntry::PasskeyAdded {
+                passkey_id: *passkey_id,
+            },
+            Self::PasskeyRenamed { passkey_id } => HistoryEntry::PasskeyRenamed {
+                passkey_id: *passkey_id,
+            },
+            Self::PasskeyRemoved { passkey_id } => HistoryEntry::PasskeyRemoved {
+                passkey_id: *passkey_id,
+            },
+            Self::IdentityLinked { provider, .. } => HistoryEntry::IdentityLinked {
+                provider: *provider,
+            },
+            Self::IdentityUnlinked { provider } => HistoryEntry::IdentityUnlinked {
+                provider: *provider,
+            },
+            Self::ConsentGranted { scopes, .. } => HistoryEntry::ConsentGranted {
+                scopes: scopes.clone(),
+            },
+            Self::GrantRevoked { reason, .. } => match reason {
+                GrantRevocation::RefreshReplay => HistoryEntry::TokenReused,
+                // A replayed code shows once, as its `CodeReplayed`.
+                GrantRevocation::CodeReplay
+                | GrantRevocation::ClientRevoked
+                | GrantRevocation::PolicyRejected => return None,
+            },
+            Self::CodeReplayed { .. } => HistoryEntry::TokenReused,
+            // The reason is written for administrators and may name other people.
+            Self::AccountDisabled { .. } => HistoryEntry::AccountDisabled,
+            Self::AccountEnabled {} => HistoryEntry::AccountEnabled,
+            Self::AccountViewed {} => HistoryEntry::AccountViewed,
+            Self::AdministratorGranted {} => HistoryEntry::AdministratorGranted,
+            Self::AdministratorRevoked {} => HistoryEntry::AdministratorRevoked,
+            Self::CompromiseReported { event_id } => HistoryEntry::CompromiseReported {
+                event_id: *event_id,
+            },
+            Self::Imported(audit) => HistoryEntry::Legacy {
+                action: audit.action.clone(),
+                outcome: audit.outcome.clone(),
+            },
+            Self::SignInFailed { .. }
+            | Self::PasskeyConfirmed { .. }
+            | Self::GrantIssued { .. }
+            | Self::InvitationCreated { .. }
+            | Self::InvitationRevoked { .. }
+            // Changes to an application concern no account.
+            | Self::ClientRegistered { .. }
+            | Self::ClientUpdated { .. }
+            | Self::ClientEnabled { .. }
+            | Self::ClientDisabled { .. }
+            | Self::ClientSecretRotated { .. } => return None,
+        })
+    }
+}
+
+/// What an entry of an account's security history says happened, serialized as a
+/// stable `kind` with its details beside it, e.g.
+/// `{"kind": "passkey.added", "passkey_id": …}`. Built by
+/// [`DomainEvent::history_entry`].
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+#[serde(tag = "kind")]
+pub enum HistoryEntry {
+    /// The account was created.
+    #[serde(rename = "account.created")]
+    AccountCreated {
+        /// How the person proved who they are.
+        method: AuthenticationMethod,
+    },
+    /// A browser signed in.
+    #[serde(rename = "session.signed_in")]
+    SignedIn {
+        /// How it authenticated.
+        method: AuthenticationMethod,
+    },
+    /// A browser signed out, at the user's or an application's request, or by
+    /// signing in to another account.
+    #[serde(rename = "session.signed_out")]
+    SignedOut,
+    /// A session was ended for the user.
+    #[serde(rename = "session.revoked")]
+    SessionRevoked {
+        /// Why.
+        reason: RevocationReason,
+    },
+    /// A passkey was added.
+    #[serde(rename = "passkey.added")]
+    PasskeyAdded {
+        /// The passkey.
+        passkey_id: PasskeyId,
+    },
+    /// A passkey was renamed.
+    #[serde(rename = "passkey.renamed")]
+    PasskeyRenamed {
+        /// The passkey.
+        passkey_id: PasskeyId,
+    },
+    /// A passkey was removed.
+    #[serde(rename = "passkey.removed")]
+    PasskeyRemoved {
+        /// The passkey.
+        passkey_id: PasskeyId,
+    },
+    /// A provider identity was linked.
+    #[serde(rename = "identity.linked")]
+    IdentityLinked {
+        /// Its provider.
+        provider: Provider,
+    },
+    /// A provider identity was unlinked.
+    #[serde(rename = "identity.unlinked")]
+    IdentityUnlinked {
+        /// Its provider.
+        provider: Provider,
+    },
+    /// The user approved an application's access.
+    #[serde(rename = "consent.granted")]
+    ConsentGranted {
+        /// The approved scopes.
+        scopes: Vec<String>,
+    },
+    /// A refresh token or authorization code was used twice, so the access it
+    /// granted was revoked.
+    #[serde(rename = "token.reused")]
+    TokenReused,
+    /// The account was disabled.
+    #[serde(rename = "account.disabled")]
+    AccountDisabled,
+    /// The account was reactivated.
+    #[serde(rename = "account.enabled")]
+    AccountEnabled,
+    /// An administrator viewed the account's details.
+    #[serde(rename = "account.viewed")]
+    AccountViewed,
+    /// The account became an administrator.
+    #[serde(rename = "administrator.granted")]
+    AdministratorGranted,
+    /// The account's administrator rights were removed.
+    #[serde(rename = "administrator.revoked")]
+    AdministratorRevoked,
+    /// The user reported an entry as not theirs.
+    #[serde(rename = "compromise.reported")]
+    CompromiseReported {
+        /// The reported entry.
+        event_id: EventId,
+    },
+    /// A row of the audit log that preceded typed events.
+    #[serde(rename = "legacy")]
+    Legacy {
+        /// The logged action, e.g. `passkey.login`.
+        action: String,
+        /// `success`, `failure` or `rejected`.
+        outcome: String,
+    },
+}
+
+impl HistoryEntry {
+    /// What the user should still do after reporting this entry as not theirs:
+    /// undo the credential it added. Those actions need a passkey confirmation, so
+    /// a stolen cookie that can report an entry still cannot change credentials.
+    #[must_use]
+    #[deny(clippy::wildcard_enum_match_arm)]
+    pub const fn follow_up(&self) -> Option<FollowUp> {
+        match self {
+            Self::PasskeyAdded { passkey_id } => Some(FollowUp::RemovePasskey {
+                passkey_id: *passkey_id,
+            }),
+            Self::IdentityLinked { provider } => Some(FollowUp::UnlinkIdentity {
+                provider: *provider,
+            }),
+            Self::AccountCreated { .. }
+            | Self::SignedIn { .. }
+            | Self::SignedOut
+            | Self::SessionRevoked { .. }
+            | Self::PasskeyRenamed { .. }
+            | Self::PasskeyRemoved { .. }
+            | Self::IdentityUnlinked { .. }
+            | Self::ConsentGranted { .. }
+            | Self::TokenReused
+            | Self::AccountDisabled
+            | Self::AccountEnabled
+            | Self::AccountViewed
+            | Self::AdministratorGranted
+            | Self::AdministratorRevoked
+            | Self::CompromiseReported { .. }
+            | Self::Legacy { .. } => None,
+        }
+    }
+}
+
+/// An action that undoes a reported entry, e.g.
+/// `{"action": "remove_passkey", "passkey_id": …}`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+#[serde(tag = "action", rename_all = "snake_case")]
+pub enum FollowUp {
+    /// Remove the passkey the entry added.
+    RemovePasskey {
+        /// The passkey.
+        passkey_id: PasskeyId,
+    },
+    /// Unlink the identity the entry linked.
+    UnlinkIdentity {
+        /// Its provider.
+        provider: Provider,
+    },
+}
+
+crate::str_enum! {
+    /// Who caused a history entry, as its subject sees it. Operators and
+    /// administrators are not named.
+    pub enum HistoryActor {
+        /// The account's own user.
+        Account = "account",
+        /// An administrator, through the admin API.
+        Admin = "admin",
+        /// An operator, through the service's command line.
+        Operator = "operator",
+        /// An application.
+        Client = "client",
+        /// A background job.
+        System = "system",
+        /// An unauthenticated browser.
+        Anonymous = "anonymous",
+        /// Unknown: imported audit rows never recorded who acted.
+        Unrecorded = "unrecorded",
+    }
+}
+
+impl From<&Actor> for HistoryActor {
+    /// Keeps only the kind of actor. Users act only on their own account.
+    fn from(actor: &Actor) -> Self {
+        match actor {
+            Actor::User { .. } => Self::Account,
+            Actor::Admin { .. } => Self::Admin,
+            Actor::Cli { .. } => Self::Operator,
+            Actor::Client { .. } => Self::Client,
+            Actor::System { .. } => Self::System,
+            Actor::Anonymous => Self::Anonymous,
+            Actor::Unrecorded => Self::Unrecorded,
         }
     }
 }
@@ -286,6 +560,9 @@ pub enum RevocationReason {
     AccountDeletion,
     /// It expired.
     Expired,
+    /// The user reported an event of their history as not theirs, which ends the
+    /// account's other sessions.
+    CompromiseReported,
 }
 
 /// Why a refresh family was revoked.

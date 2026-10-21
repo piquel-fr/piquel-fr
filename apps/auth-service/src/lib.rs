@@ -19,6 +19,8 @@ mod deliveries;
 mod email;
 /// External identity provider applications and linking.
 mod federation;
+/// The signed-in user's security history and its reports.
+mod history;
 /// Periodic background work, coordinated across replicas.
 mod jobs;
 /// OAuth and `OpenID` Connect protocol application.
@@ -39,6 +41,7 @@ pub use admin::{AdminError, AdminOperations, GracePeriod, InviteExpiry, Operator
 pub use clients::{ClientRegistry, ClientRegistryError};
 pub use config::{AuthConfig, PUBLIC_BASE_URL};
 use federation::FederationApplication;
+use history::HistoryApplication;
 pub use jobs::Jobs;
 use oidc::OidcApplication;
 use passkey::PasskeyApplication;
@@ -83,6 +86,7 @@ impl AuthConfig {
             .merge(ServiceApplication::new(database.clone(), self).routes())
             .merge(PasskeyApplication::new(database.clone(), &self.passkey)?.routes())
             .merge(FederationApplication::new(database.clone(), &self.federation)?.routes())
+            .merge(HistoryApplication::new(database.clone()).routes())
             .merge(OidcApplication::new(database.clone(), &self.oidc)?.routes());
         let policy = security::HttpSecurity::new(self, database);
         Ok(application

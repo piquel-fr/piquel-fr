@@ -339,6 +339,7 @@ impl AdminOperations {
             subject: search.user,
             kind: search.kind,
             before: search.before,
+            id: None,
         };
         let stored = self
             .database

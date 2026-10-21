@@ -59,6 +59,14 @@ pub(crate) mod federation {
     pub(crate) const IDENTITY: &str = "/account/social-identities/{provider}";
 }
 
+/// The signed-in user's security history.
+pub(crate) mod history {
+    /// Pages through the account's history, newest first.
+    pub(crate) const LIST: &str = "/account/history";
+    /// Reports one entry as not the user's, ending their other sessions.
+    pub(crate) const REPORT: &str = "/account/history/{event_id}/report";
+}
+
 /// OAuth 2.0 and `OpenID` Connect endpoints.
 pub(crate) mod oidc {
     use piquel_common::protocol::metadata;
