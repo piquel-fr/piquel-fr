@@ -244,7 +244,10 @@ in the application's backend, with the same four operations:
   finds them again. A sign-in whose `sid` is ended deletes its session and fails, so
   a logout that overtakes a sign-in never leaves a live session; auth never accepts
   an ended session again. A logout with only `sub` deletes the sessions listed for
-  the user and leaves no mark.
+  the user and leaves no mark, so a sign-in that stored its session but had not yet
+  listed it can survive; auth sends no such logout until subject logout (#80), which
+  must close this race. Sessions stored before the indexes existed are not read, so
+  their users sign in again.
 - **Replays.** A token whose `jti` is recorded is refused. Once its sessions are
   deleted, the SDK records the `jti` until the token's `exp` plus the leeway, so
   every replica refuses a replay. Recording it last means a request cut short by a

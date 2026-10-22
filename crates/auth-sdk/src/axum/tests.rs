@@ -613,7 +613,7 @@ async fn memory_backend_keeps_the_contract() {
     check_backend(&backend).await.expect("a sound backend");
     let (key, _) = session(&backend, &stored_login(USER, SessionId::new(), 300)).await;
     let name = format!(
-        "session:{}",
+        "session-v2:{}",
         base64::engine::general_purpose::URL_SAFE_NO_PAD
             .encode(sha2::Sha256::digest(key.as_cookie().as_bytes()))
     );

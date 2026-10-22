@@ -546,8 +546,10 @@ erased_backend! {
 #[derive(Clone)]
 pub(super) struct Sessions(Arc<dyn ErasedBackend>);
 
-/// Record kind of a signed-in session.
-const SESSION: &str = "session";
+/// Record kind of a signed-in session. `v2` sessions are listed in the logout
+/// indexes; earlier ones are not, so back-channel logout could not find them, and
+/// they are no longer read: their users sign in again.
+const SESSION: &str = "session-v2";
 /// Record kind of a pending login.
 const PENDING: &str = "pending";
 /// Record kind of the sessions of one auth session, by issuer and `sid`.
