@@ -102,7 +102,9 @@ Important invariants:
 
 The schema starts with the initial migration, `migrations/0001_initial.sql`. The
 prototype schema is disposable and the release requires a fresh database. Released
-migrations are immutable; later schema changes go in new numbered files. Run
+migrations are immutable; later schema changes go in new numbered files. Numbers
+count up from `0001` without gaps or repeats, which a unit test enforces, so a
+branch rebased past another migration must renumber its own. Run
 migrations with `just db migrate` (`auth-service migrate` in deployed images); startup does not silently mutate the schema.
 
 Migrations expand, then contract. A deploy runs `migrate` first, and the previous

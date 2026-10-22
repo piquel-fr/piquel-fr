@@ -1,6 +1,6 @@
 //! Focused persistence and security contract tests.
 
-use super::{Database, DatabaseConfig};
+use super::{Database, DatabaseConfig, MIGRATOR};
 use sqlx::postgres::PgSslMode;
 use std::time::Duration;
 /// TCP requires verified TLS unless plaintext is explicitly selected.
@@ -262,4 +262,18 @@ fn configuration_errors_name_the_constraint_and_preserve_parsers() {
     let error = DatabaseConfig::new("postgres://user:secret@db.example/test", 1, timeout)
         .expect_err("verified transport");
     assert!(!error.to_string().contains("secret"));
+}
+
+/// Migration versions count up from 1 with no gaps or repeats. Two branches
+/// that each add the next migration under different names fail here once the
+/// second is rebased, instead of failing every database test at runtime.
+#[test]
+fn migration_versions_are_unique_and_contiguous() {
+    for (expected, migration) in (1..).zip(MIGRATOR.iter()) {
+        assert_eq!(
+            migration.version, expected,
+            "migration {} ({}) should be numbered {expected:04}; renumber it after the latest migration on main",
+            migration.version, migration.description,
+        );
+    }
 }

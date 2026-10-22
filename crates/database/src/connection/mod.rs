@@ -3,6 +3,7 @@
 use crate::{DatabaseConnectionError, DatabaseError, DatabaseTransaction};
 use sqlx::{
     PgPool,
+    migrate::Migrator,
     postgres::{PgConnectOptions, PgPoolOptions, PgSslMode},
 };
 use std::{str::FromStr, time::Duration};
@@ -22,6 +23,9 @@ const SOCKET_PARAMETER: &str = "host";
 const HOST_ADDRESS_PARAMETER: &str = "hostaddr";
 /// Socket connections require this explicit local URL authority.
 const SOCKET_HOST: &str = "localhost";
+
+/// The schema migrations embedded at compile time, in version order.
+static MIGRATOR: Migrator = sqlx::migrate!("./migrations");
 
 /// Readiness must fail quickly when the database stops responding.
 const HEALTH_CHECK_TIMEOUT: Duration = Duration::from_secs(2);
@@ -199,7 +203,7 @@ impl Database {
     /// history differs from the embedded migrations, or another [`DatabaseError`]
     /// if filling in data fails.
     pub async fn run_migrations(&self) -> Result<(), DatabaseError> {
-        sqlx::migrate!("./migrations")
+        MIGRATOR
             .run(&self.pool)
             .await
             .map_err(|error| DatabaseError::Operation(Box::new(error)))?;
