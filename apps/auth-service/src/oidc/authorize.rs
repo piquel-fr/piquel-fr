@@ -1,9 +1,10 @@
-//! Authorization requests, login/consent continuation and the consent decision.
+//! Authorization requests, pushed or from the browser, login/consent continuation
+//! and the consent decision.
 
 use super::{
     AUTHORIZATION_CODE_MINUTES, AUTHORIZATION_REQUEST_MINUTES, Claim, CodeChallengeMethod,
-    MAX_STATE_BYTES, OAuthCode, OAuthError, OidcApplication, OpaqueToken, Prompt, Reject,
-    ResponseMode, ResponseType, Scopes, TokenPrefix,
+    MAX_STATE_BYTES, OAuthCode, OAuthError, OidcApplication, OpaqueToken, PUSHED_REQUEST_SECONDS,
+    Prompt, Reject, ResponseMode, ResponseType, Scopes, TokenPrefix,
 };
 use crate::{
     routes,
@@ -15,7 +16,7 @@ use axum::{
         Path, Query, State,
         rejection::{FormRejection, QueryRejection},
     },
-    http::HeaderMap,
+    http::{HeaderMap, StatusCode},
     response::Redirect,
 };
 use chrono::{DateTime, Duration, Utc};
@@ -26,7 +27,7 @@ use piquel_common::{
 };
 use piquel_repository::{
     InsertAuthorizationCode, InsertAuthorizationRequest, SessionAuthentication,
-    StoredAuthorizationRequest, StoredSession,
+    StoredAuthorizationRequest, StoredOidcClient, StoredSession,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
@@ -36,16 +37,24 @@ use url::Url;
 const UNKNOWN_TRANSACTION: &str = "transaction is unknown, expired or already used";
 /// Rejection of a `prompt=none` request without a suitable sign-in.
 const SILENT_LOGIN_REQUIRED: &str = "prompt=none was requested, but the user must sign in first";
+/// Rejection of a `request_uri` that cannot be claimed.
+const UNKNOWN_REQUEST_URI: &str =
+    "request_uri is unknown, expired, already used or issued to another client";
+/// Prefix of a pushed request's `request_uri` (RFC 9126 §2.2), followed by the
+/// pushed request's [`OpaqueToken`].
+const REQUEST_URI_PREFIX: &str = "urn:ietf:params:oauth:request_uri:";
 
-/// Authorization request parameters. None of them is trusted, and errors are not
-/// redirected, until `redirect_uri` matches the client's registration.
+/// Authorization request parameters, from the browser or pushed by the client.
+/// None of them is trusted, and errors are not redirected, until `redirect_uri`
+/// matches the client's registration.
 #[derive(Default, Deserialize)]
 #[serde(default)]
-pub(super) struct AuthorizeQuery {
+pub(super) struct AuthorizationParameters {
     /// Must be `code`.
     response_type: String,
-    /// Client making the request.
-    client_id: String,
+    /// Client making the request. A pushing client authenticated with HTTP Basic
+    /// may leave it out.
+    client_id: Option<String>,
     /// Where to send the result; must exactly match a registered URI.
     redirect_uri: String,
     /// Requested scopes, space-separated.
@@ -70,23 +79,89 @@ pub(super) struct AuthorizeQuery {
     id_token_hint: Option<String>,
     /// Signed request object; rejected as unsupported.
     request: Option<String>,
-    /// Request object reference; rejected as unsupported.
+    /// Reference to a pushed request, which replaces every other parameter but
+    /// `client_id`. Client-hosted request objects are not supported.
     request_uri: Option<String>,
     /// Must be `query` when present.
     response_mode: Option<String>,
 }
 
-impl AuthorizeQuery {
+impl AuthorizationParameters {
+    /// The redirect URI, which must be registered for `client`. Until it is, errors
+    /// cannot be redirected.
+    fn redirect_uri(&self, client: &StoredOidcClient) -> Result<Url, OAuthError> {
+        if !client.redirect_uris.contains(&self.redirect_uri) {
+            return Err(OAuthCode::InvalidRequest
+                .reject("redirect_uri is not registered for this client; it must match exactly"));
+        }
+        Url::parse(&self.redirect_uri).map_err(|error| {
+            OAuthCode::InvalidRequest.reject_with("redirect_uri is not a valid URL", error)
+        })
+    }
+
+    /// Validates every other parameter against `client`'s registration, the same
+    /// way for browser and pushed requests, and returns the pending authorization
+    /// to store under the returned token. Errors are not redirected.
+    fn validate(
+        &self,
+        app: &OidcApplication,
+        client: &StoredOidcClient,
+        pushed: bool,
+    ) -> Result<(OpaqueToken, InsertAuthorizationRequest), OAuthError> {
+        let hinted_user_id = self.hinted_user_id(app, client)?;
+        let scopes = self.scopes()?;
+        if !scopes.allowed_by(&client.allowed_scopes) {
+            return Err(
+                OAuthCode::InvalidScope.reject("scope includes values this client may not request")
+            );
+        }
+        let audience = self
+            .audience
+            .clone()
+            .or_else(|| client.allowed_audiences.first().cloned())
+            .filter(|audience| client.allowed_audiences.contains(audience))
+            .ok_or_else(|| {
+                OAuthCode::InvalidTarget.reject("audience is not registered for this client")
+            })?;
+        let prompts = self.prompts()?;
+        let lifetime = if pushed {
+            Duration::seconds(PUSHED_REQUEST_SECONDS)
+        } else {
+            Duration::minutes(AUTHORIZATION_REQUEST_MINUTES)
+        };
+        let token = OpaqueToken::new(TokenPrefix::AuthorizationRequest)?;
+        let request = InsertAuthorizationRequest {
+            id: token.id,
+            secret_digest: app.token_digest(&token)?.as_bytes().to_vec(),
+            pushed,
+            client_id: client.id.clone(),
+            redirect_uri: self.redirect_uri.clone(),
+            client_state: self.state.clone(),
+            pkce_challenge: self.code_challenge.clone(),
+            nonce: self.nonce.clone(),
+            scopes: scopes.into_stored(),
+            audience,
+            force_consent: prompts.force_consent,
+            force_login: prompts.force_login,
+            prompt_none: prompts.silent,
+            max_age: self.max_age,
+            hinted_user_id,
+            target_acr: self.acr_values.as_deref().and_then(Acr::select),
+            expires_at: Utc::now() + lifetime,
+        };
+        Ok((token, request))
+    }
+
     /// Rejects unsupported parameters and returns the account named by a verified
-    /// `id_token_hint`.
-    fn hinted_user_id(&self, app: &OidcApplication) -> Result<Option<UserId>, OAuthError> {
+    /// `id_token_hint`, which must have been issued to `client`.
+    fn hinted_user_id(
+        &self,
+        app: &OidcApplication,
+        client: &StoredOidcClient,
+    ) -> Result<Option<UserId>, OAuthError> {
         if self.request.is_some() {
             return Err(OAuthCode::RequestNotSupported
                 .reject("request objects are not supported; send the parameters directly"));
-        }
-        if self.request_uri.is_some() {
-            return Err(OAuthCode::RequestUriNotSupported
-                .reject("request_uri is not supported; send the parameters directly"));
         }
         if let Some(mode) = &self.response_mode {
             match mode.parse::<ResponseMode>().map_err(|error| {
@@ -109,7 +184,7 @@ impl AuthorizeQuery {
                 OAuthCode::InvalidRequest
                     .reject_with(format!("id_token_hint is invalid: {error}"), error)
             })?;
-        if claims[Claim::Audience.as_str()] != self.client_id {
+        if claims[Claim::Audience.as_str()] != client.id.as_str() {
             return Err(
                 OAuthCode::InvalidRequest.reject("id_token_hint was issued to another client")
             );
@@ -188,6 +263,15 @@ impl AuthorizeQuery {
     }
 }
 
+/// The pushed authorization endpoint's answer (RFC 9126 §2.2).
+#[derive(Serialize)]
+pub(super) struct PushedAuthorization {
+    /// What the browser brings to the authorization endpoint, with `client_id`.
+    request_uri: String,
+    /// Seconds until `request_uri` expires.
+    expires_in: i64,
+}
+
 /// What the consent page shows about a pending authorization.
 #[derive(Serialize)]
 pub(super) struct AuthorizationTransactionView {
@@ -232,11 +316,12 @@ enum ConsentDecision {
 impl OidcApplication {
     /// Starts an authorization by GET query or form POST: validates it, stores it as
     /// a pending transaction, then sends the browser to login, consent or the client.
+    /// A `request_uri` continues a pushed request instead.
     pub(super) async fn authorize(
         State(app): State<Self>,
         headers: HeaderMap,
         // `Form` reads the query string of GET requests.
-        form: Result<Form<AuthorizeQuery>, FormRejection>,
+        form: Result<Form<AuthorizationParameters>, FormRejection>,
     ) -> Result<Redirect, OAuthError> {
         let Form(q) = form.map_err(|error| {
             OAuthCode::InvalidRequest.reject_with(
@@ -244,83 +329,124 @@ impl OidcApplication {
                 error,
             )
         })?;
+        let client_id = q.client_id.as_deref().unwrap_or_default();
+        if let Some(request_uri) = &q.request_uri {
+            return app.claim_pushed(&headers, client_id, request_uri).await;
+        }
         let client = app
             .database
             .oidc()
-            .find_client(&q.client_id)
+            .find_client(client_id)
             .await?
             .filter(|client| client.enabled)
             .ok_or_else(|| {
                 OAuthCode::InvalidRequest.reject("client_id is not a registered, enabled client")
             })?;
-        if !client.redirect_uris.contains(&q.redirect_uri) {
-            return Err(OAuthCode::InvalidRequest
-                .reject("redirect_uri is not registered for this client; it must match exactly"));
-        }
-        let redirect = Url::parse(&q.redirect_uri).map_err(|error| {
-            OAuthCode::InvalidRequest.reject_with("redirect_uri is not a valid URL", error)
-        })?;
+        let redirect = q.redirect_uri(&client)?;
         // The redirect URI is now verified, so rejections go back to the client.
         let client_redirect = app.client_redirect(&redirect, &q.state);
         let back = |error: OAuthError| error.redirected(&client_redirect);
-        let hinted_user_id = q.hinted_user_id(&app).map_err(back)?;
-        let scopes = q.scopes().map_err(back)?;
-        if !scopes.allowed_by(&client.allowed_scopes) {
-            return Err(back(
-                OAuthCode::InvalidScope.reject("scope includes values this client may not request"),
-            ));
+        if client.require_pushed_authorization_requests {
+            return Err(back(OAuthCode::InvalidRequest.reject(
+                "this client must push its authorization requests and send their request_uri",
+            )));
         }
-        let audience = q
-            .audience
-            .clone()
-            .or_else(|| client.allowed_audiences.first().cloned())
-            .filter(|audience| client.allowed_audiences.contains(audience))
-            .ok_or_else(|| {
-                back(OAuthCode::InvalidTarget.reject("audience is not registered for this client"))
-            })?;
-        let prompts = q.prompts().map_err(back)?;
-        let target_acr = q.acr_values.as_deref().and_then(Acr::select);
+        let (opaque, request) = q.validate(&app, &client, false).map_err(back)?;
         let session = Session::optional(&app.database, &headers).await?;
         let requires_login = session.as_ref().is_none_or(|session| {
             !Self::session_satisfies(
                 session,
-                prompts.force_login,
-                q.max_age,
-                hinted_user_id,
-                target_acr,
+                request.force_login,
+                request.max_age,
+                request.hinted_user_id,
+                request.target_acr,
                 None,
             )
         });
-        if prompts.silent && requires_login {
+        if request.prompt_none && requires_login {
             return Err(back(OAuthCode::LoginRequired.reject(SILENT_LOGIN_REQUIRED)));
         }
-        let opaque = OpaqueToken::new(TokenPrefix::AuthorizationRequest)?;
-        let transaction = opaque.encoded();
         app.database
             .oidc()
-            .insert_authorization_request(&InsertAuthorizationRequest {
-                id: opaque.id,
-                secret_digest: app.token_digest(&opaque)?.as_bytes().to_vec(),
-                client_id: client.id.clone(),
-                redirect_uri: q.redirect_uri,
-                client_state: q.state,
-                pkce_challenge: q.code_challenge,
-                nonce: q.nonce,
-                scopes: scopes.into_stored(),
-                audience,
-                force_consent: prompts.force_consent,
-                force_login: prompts.force_login,
-                max_age: q.max_age,
-                hinted_user_id,
-                target_acr,
-                expires_at: Utc::now() + Duration::minutes(AUTHORIZATION_REQUEST_MINUTES),
-            })
+            .insert_authorization_request(&request)
             .await?;
+        let transaction = opaque.encoded();
         if requires_login {
-            return Ok(app.continuation_page(routes::page::LOGIN, &transaction, target_acr));
+            return Ok(app.continuation_page(
+                routes::page::LOGIN,
+                &transaction,
+                request.target_acr,
+            ));
         }
-        app.continue_authorization(&headers, transaction, prompts.silent)
-            .await
+        app.continue_authorization(&headers, transaction).await
+    }
+
+    /// Stores a request pushed by an authenticated client (RFC 9126 §2), validated
+    /// as at the authorization endpoint, and returns the `request_uri` the browser
+    /// brings there. Every error is JSON: nothing goes through the browser.
+    pub(super) async fn push_authorization(
+        State(app): State<Self>,
+        headers: HeaderMap,
+        form: Result<Form<AuthorizationParameters>, FormRejection>,
+    ) -> Result<(StatusCode, Json<PushedAuthorization>), OAuthError> {
+        let Form(q) = form.map_err(|error| {
+            OAuthCode::InvalidRequest.reject_with(
+                format!("pushed authorization request is malformed: {error}"),
+                error,
+            )
+        })?;
+        let client = app
+            .authenticate_client(&headers, q.client_id.as_deref())
+            .await?;
+        if q.request_uri.is_some() {
+            return Err(OAuthCode::InvalidRequest.reject("request_uri cannot be pushed"));
+        }
+        q.redirect_uri(&client)?;
+        let (opaque, request) = q.validate(&app, &client, true)?;
+        app.database
+            .oidc()
+            .insert_authorization_request(&request)
+            .await?;
+        Ok((
+            StatusCode::CREATED,
+            Json(PushedAuthorization {
+                request_uri: format!("{REQUEST_URI_PREFIX}{}", opaque.encoded()),
+                expires_in: PUSHED_REQUEST_SECONDS,
+            }),
+        ))
+    }
+
+    /// Continues a pushed request from its `request_uri` (RFC 9126 §4). Only
+    /// `client_id` can claim it, and only once; the request's other parameters are
+    /// ignored, so none can override a pushed one. From then on, the browser carries
+    /// a fresh transaction, as for a request it sent itself.
+    async fn claim_pushed(
+        &self,
+        headers: &HeaderMap,
+        client_id: &str,
+        request_uri: &str,
+    ) -> Result<Redirect, OAuthError> {
+        let unknown = || OAuthCode::InvalidRequestUri.reject(UNKNOWN_REQUEST_URI);
+        let token = request_uri
+            .strip_prefix(REQUEST_URI_PREFIX)
+            .ok_or_else(unknown)?;
+        let pushed =
+            OpaqueToken::parse(TokenPrefix::AuthorizationRequest, token).map_err(|error| {
+                OAuthCode::InvalidRequestUri.reject_with(UNKNOWN_REQUEST_URI, error)
+            })?;
+        let opaque = pushed.renewed()?;
+        self.database
+            .oidc()
+            .claim_pushed_authorization_request(
+                pushed.id,
+                self.token_digest(&pushed)?.as_bytes(),
+                client_id,
+                self.token_digest(&opaque)?.as_bytes(),
+                Utc::now() + Duration::minutes(AUTHORIZATION_REQUEST_MINUTES),
+            )
+            .await?
+            .ok_or_else(unknown)?;
+        self.continue_authorization(headers, opaque.encoded()).await
     }
 
     /// Resumes an authorization after the browser signs in.
@@ -333,8 +459,7 @@ impl OidcApplication {
             OAuthCode::InvalidRequest
                 .reject_with(format!("resume request is malformed: {error}"), error)
         })?;
-        app.continue_authorization(&headers, q.transaction, false)
-            .await
+        app.continue_authorization(&headers, q.transaction).await
     }
 
     /// Describes a pending authorization to the consent page.
@@ -484,7 +609,7 @@ impl OidcApplication {
             request.max_age,
             request.hinted_user_id,
             request.target_acr,
-            Some(request.created_at),
+            Some(request.started_at),
         ) {
             Ok(())
         } else {
@@ -555,14 +680,14 @@ impl OidcApplication {
 
     /// Sends the browser on from a stored authorization: to login if the session falls
     /// short, straight to the client if consent is already given, otherwise to consent.
-    /// `silent` (`prompt=none`) returns an error to the client instead of showing a page.
+    /// `prompt=none` returns an error to the client instead of showing a page.
     async fn continue_authorization(
         &self,
         headers: &HeaderMap,
         transaction: String,
-        silent: bool,
     ) -> Result<Redirect, OAuthError> {
         let request = self.find_authorization_request(&transaction).await?;
+        let silent = request.prompt_none;
         let redirect = Url::parse(&request.redirect_uri)?;
         let client_redirect = self.client_redirect(&redirect, &request.client_state);
         let back =

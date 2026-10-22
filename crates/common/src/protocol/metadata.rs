@@ -41,6 +41,14 @@ pub struct ServerMetadata {
     pub revocation_endpoint: Url,
     /// Where clients read claims with an access token.
     pub userinfo_endpoint: Url,
+    /// Where clients push authorization requests (RFC 9126 §5). Absent from issuers
+    /// that predate pushed authorization requests.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pushed_authorization_request_endpoint: Option<Url>,
+    /// Whether every client must push its authorization requests (RFC 9126 §5).
+    /// Individual clients may still be required to.
+    #[serde(default)]
+    pub require_pushed_authorization_requests: bool,
     /// Where clients send RP-initiated logout.
     pub end_session_endpoint: Url,
     /// Where clients fetch the public signing keys.
@@ -85,7 +93,9 @@ pub struct ServerMetadata {
     pub claims_parameter_supported: bool,
     /// Whether the `request` parameter is accepted.
     pub request_parameter_supported: bool,
-    /// Whether the `request_uri` parameter is accepted.
+    /// Whether client-hosted request objects (`request_uri`, RFC 9101) are
+    /// accepted. Pushed `request_uri` values are advertised by
+    /// [`Self::pushed_authorization_request_endpoint`] instead.
     pub request_uri_parameter_supported: bool,
     /// Whether authorization responses carry `iss` (RFC 9207).
     pub authorization_response_iss_parameter_supported: bool,

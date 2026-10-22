@@ -267,6 +267,8 @@ impl Vectors {
             token_endpoint: url("/oauth/token"),
             revocation_endpoint: url("/oauth/revoke"),
             userinfo_endpoint: url("/oidc/userinfo"),
+            pushed_authorization_request_endpoint: Some(url("/oauth/par")),
+            require_pushed_authorization_requests: false,
             end_session_endpoint: url("/oidc/logout"),
             jwks_uri: url("/.well-known/jwks.json"),
             service_documentation: "https://github.com/piquel-fr/piquel-fr#oidc-clients"

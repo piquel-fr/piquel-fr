@@ -28,6 +28,7 @@ fn registration(kind: ClientKind, origin: &str) -> ClientRegistration {
         allowed_scopes: AllowedScopes::new([ScopeName::from(Scope::OpenId)]).expect("scopes"),
         allow_refresh: false,
         trusted: false,
+        require_pushed_authorization_requests: false,
     }
 }
 
@@ -206,8 +207,10 @@ async fn migration_keeps_file_clients_and_their_secrets() {
     .execute(&mut connection)
     .await
     .expect("confidential client");
-    sqlx::raw_sql(include_str!(
-        "../../../migrations/0008_oidc_client_registry.sql"
+    // This migration, then the later ones the current release reads with.
+    sqlx::raw_sql(concat!(
+        include_str!("../../../migrations/0008_oidc_client_registry.sql"),
+        include_str!("../../../migrations/0009_pushed_authorization_requests.sql"),
     ))
     .execute(&mut connection)
     .await

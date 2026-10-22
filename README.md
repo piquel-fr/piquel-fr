@@ -187,7 +187,8 @@ an enabled public client's redirect URIs may call the token, revocation and
 userinfo endpoints from a browser. Scopes default to `openid`, `profile` and
 `email`. `--refresh` allows refresh tokens when the client also requests
 `offline_access`; `--trusted` skips the consent screen and is meant for
-first-party clients only.
+first-party clients only. `--require-par` makes the client push its authorization
+requests (`update --no-require-par` lifts it).
 
 `AUTH_CLIENTS_FILE` was removed, and startup refuses to run while it is set. The
 clients it registered are already in the database.
@@ -199,6 +200,16 @@ are cacheable for an hour and readable from any origin, without credentials.
 Every authorization response redirected to a client, success or error, carries
 `iss` (RFC 9207), so clients that use several issuers can reject mix-ups; discovery
 advertises `authorization_response_iss_parameter_supported`.
+
+A client may push its authorization request (RFC 9126) instead of sending it
+through the browser: it posts the usual parameters to `/oauth/par`, authenticated
+as at the token endpoint, and receives a `request_uri` valid for 60 seconds. The
+browser then opens `/oauth/authorize?client_id=…&request_uri=…`. The `request_uri`
+works once, only for that client, and auth ignores every other parameter sent
+with it. A pushed request is validated exactly like a browser one, but its errors
+come back as JSON. Discovery advertises `pushed_authorization_request_endpoint`.
+Client-hosted request objects (`request` and `request_uri` from RFC 9101) are not
+supported.
 The endpoints implement code exchange, RS256 ID/access tokens, userinfo, opt-in
 rotating refresh tokens, revocation and RP-initiated logout. Access tokens are
 intended for the configured client audience. Only requested claims are released;

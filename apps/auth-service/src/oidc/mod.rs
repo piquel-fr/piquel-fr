@@ -61,6 +61,8 @@ const MAX_OPAQUE_TOKEN_BYTES: usize = 160;
 const MAX_SCOPES: usize = 16;
 /// How long a pending authorization waits for login and consent.
 const AUTHORIZATION_REQUEST_MINUTES: i64 = 10;
+/// How long a pushed request waits for the browser to bring its `request_uri`.
+const PUSHED_REQUEST_SECONDS: i64 = 60;
 /// How long an authorization code stays redeemable.
 const AUTHORIZATION_CODE_MINUTES: i64 = 2;
 /// Developer documentation advertised in the metadata.
@@ -107,7 +109,7 @@ impl AuthScheme {
 piquel_common::str_enum! {
     /// Opaque token prefixes; each binds a token to one purpose so it cannot be used for another.
     enum TokenPrefix {
-        /// Pending login and consent transaction.
+        /// Pending login and consent transaction, or a pushed request not yet claimed.
         AuthorizationRequest = "par_v1",
         /// One-use authorization code.
         AuthorizationCode = "pac_v1",
@@ -144,6 +146,16 @@ impl OpaqueToken {
             id: TokenId::new(),
             secret: Secret::generate()?,
             prefix,
+        })
+    }
+
+    /// A token for the same record with a fresh secret. Once the record stores the
+    /// new secret's digest, the previous token stops matching.
+    fn renewed(&self) -> Result<Self, OAuthError> {
+        Ok(Self {
+            id: self.id,
+            secret: Secret::generate()?,
+            prefix: self.prefix,
         })
     }
 
@@ -360,6 +372,9 @@ impl OidcApplication {
             token_endpoint: origin.url(routes::oidc::TOKEN),
             revocation_endpoint: origin.url(routes::oidc::REVOKE),
             userinfo_endpoint: origin.url(routes::oidc::USERINFO),
+            pushed_authorization_request_endpoint: Some(origin.url(routes::oidc::PAR)),
+            // Individual clients may be required to push.
+            require_pushed_authorization_requests: false,
             end_session_endpoint: origin.url(routes::oidc::LOGOUT),
             jwks_uri: origin.url(routes::oidc::JWKS),
             service_documentation: SERVICE_DOCUMENTATION
@@ -369,7 +384,8 @@ impl OidcApplication {
             response_types_supported: ResponseType::ALL.into(),
             response_modes_supported: ResponseMode::ALL.into(),
             grant_types_supported: GrantType::ALL.into(),
-            // Both endpoints authenticate clients with `authenticate_client`.
+            // The token, revocation and pushed authorization endpoints all
+            // authenticate clients with `authenticate_client`.
             token_endpoint_auth_methods_supported: ClientAuthMethod::ALL.into(),
             revocation_endpoint_auth_methods_supported: ClientAuthMethod::ALL.into(),
             code_challenge_methods_supported: CodeChallengeMethod::ALL.into(),
@@ -394,6 +410,7 @@ impl OidcApplication {
                 routes::oidc::AUTHORIZE,
                 get(Self::authorize).post(Self::authorize),
             )
+            .route(routes::oidc::PAR, post(Self::push_authorization))
             .route(routes::oidc::AUTHORIZE_RESUME, get(Self::resume))
             .route(
                 routes::oidc::AUTHORIZE_TRANSACTION,
@@ -426,8 +443,8 @@ impl OidcApplication {
         std::future::ready(app.jwks)
     }
 
-    /// Authenticates the client: public clients by ID alone, confidential clients with
-    /// HTTP Basic. A `client_id` form field, when sent, must name the same client.
+    /// Authenticates the client at the token, revocation and pushed authorization
+    /// endpoints: public clients by ID alone, confidential clients with HTTP Basic. A `client_id` form field, when sent, must name the same client.
     async fn authenticate_client(
         &self,
         headers: &HeaderMap,

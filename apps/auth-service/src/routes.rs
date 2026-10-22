@@ -79,6 +79,8 @@ pub(crate) mod oidc {
     pub(crate) const JWKS: &str = "/.well-known/jwks.json";
     /// Authorization requests, by GET or form POST.
     pub(crate) const AUTHORIZE: &str = "/oauth/authorize";
+    /// Pushed authorization requests (RFC 9126), from the client's back channel.
+    pub(crate) const PAR: &str = "/oauth/par";
     /// Continues an authorization after sign-in.
     pub(crate) const AUTHORIZE_RESUME: &str = "/oauth/authorize/resume";
     /// Describes a pending authorization to the consent page.

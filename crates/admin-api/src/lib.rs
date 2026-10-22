@@ -215,6 +215,10 @@ pub struct CreatedInvitation {
 
 /// An OIDC client: everything but its secret.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[expect(
+    clippy::struct_excessive_bools,
+    reason = "Each flag is an independent registration setting."
+)]
 pub struct Client {
     /// Client ID.
     pub id: ClientId,
@@ -234,6 +238,10 @@ pub struct Client {
     pub enabled: bool,
     /// Whether it skips the consent screen.
     pub trusted: bool,
+    /// Whether it must push its authorization requests (RFC 9126). Absent from
+    /// auth releases that predate them.
+    #[serde(default)]
+    pub require_pushed_authorization_requests: bool,
     /// How it authenticates at the token endpoint.
     pub token_endpoint_auth_method: ClientAuthMethod,
 }

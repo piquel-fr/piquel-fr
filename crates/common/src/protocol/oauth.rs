@@ -243,6 +243,9 @@ crate::open_str_enum! {
         RequestNotSupported = "request_not_supported",
         /// `request_uri` references are not supported.
         RequestUriNotSupported = "request_uri_not_supported",
+        /// A pushed `request_uri` is unknown, expired, already used or another
+        /// client's (RFC 9126 §4).
+        InvalidRequestUri = "invalid_request_uri",
         /// The user declined consent.
         AccessDenied = "access_denied",
         /// An internal operation failed.

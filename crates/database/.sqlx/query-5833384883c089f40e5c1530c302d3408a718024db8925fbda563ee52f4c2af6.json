@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "SELECT\n                    r.id AS \"id: TokenId\", r.client_id AS \"client_id: ClientId\",\n                    c.display_name AS client_display_name,\n                    r.redirect_uri, r.client_state, r.nonce, r.pkce_challenge,\n                    r.scopes AS \"scopes: JsonArray<String>\", r.audience, r.force_login,\n                    r.force_consent, r.max_age, r.hinted_user_id AS \"hinted_user_id: UserId\",\n                    r.target_acr AS \"target_acr: Acr\", r.created_at\n                FROM authorization_requests r\n                JOIN oidc_clients c ON c.id = r.client_id\n                WHERE r.id = $1\n                AND r.secret_digest = $2\n                AND r.consumed_at IS NULL\n                AND r.expires_at > now()\n                AND c.enabled",
+  "query": "SELECT\n                    r.id AS \"id: TokenId\", r.client_id AS \"client_id: ClientId\",\n                    c.display_name AS client_display_name,\n                    r.redirect_uri, r.client_state, r.nonce, r.pkce_challenge,\n                    r.scopes AS \"scopes: JsonArray<String>\", r.audience, r.force_login,\n                    r.force_consent, r.prompt_none, r.max_age,\n                    r.hinted_user_id AS \"hinted_user_id: UserId\",\n                    r.target_acr AS \"target_acr: Acr\",\n                    COALESCE(r.claimed_at, r.created_at) AS \"started_at!\"\n                FROM authorization_requests r\n                JOIN oidc_clients c ON c.id = r.client_id\n                WHERE r.id = $1\n                AND r.secret_digest = $2\n                AND r.consumed_at IS NULL\n                AND r.expires_at > now()\n                AND (NOT r.pushed OR r.claimed_at IS NOT NULL)\n                AND c.enabled",
   "describe": {
     "columns": [
       {
@@ -60,22 +60,27 @@
       },
       {
         "ordinal": 11,
+        "name": "prompt_none",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 12,
         "name": "max_age",
         "type_info": "Int8"
       },
       {
-        "ordinal": 12,
+        "ordinal": 13,
         "name": "hinted_user_id: UserId",
         "type_info": "Uuid"
       },
       {
-        "ordinal": 13,
+        "ordinal": 14,
         "name": "target_acr: Acr",
         "type_info": "Text"
       },
       {
-        "ordinal": 14,
-        "name": "created_at",
+        "ordinal": 15,
+        "name": "started_at!",
         "type_info": "Timestamptz"
       }
     ],
@@ -97,11 +102,12 @@
       false,
       false,
       false,
+      false,
       true,
       true,
       true,
-      false
+      null
     ]
   },
-  "hash": "62003e72af9764b681bb0477a8633f6ba7921281578e25627201dd2b72c3a85c"
+  "hash": "5833384883c089f40e5c1530c302d3408a718024db8925fbda563ee52f4c2af6"
 }

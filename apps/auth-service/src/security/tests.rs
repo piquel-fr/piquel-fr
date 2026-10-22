@@ -594,6 +594,7 @@ fn routes_doing_real_work_have_budgets() {
         (oidc::OAUTH_METADATA, None),
         (oidc::JWKS, None),
         (oidc::TOKEN, Some(RateCategory::Token)),
+        (oidc::PAR, Some(RateCategory::Token)),
         (oidc::USERINFO, Some(RateCategory::UserInfo)),
         (oidc::LOGOUT, Some(RateCategory::Login)),
         (oidc::AUTHORIZE, Some(RateCategory::Login)),

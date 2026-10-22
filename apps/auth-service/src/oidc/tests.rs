@@ -197,6 +197,63 @@ impl Flow {
         prompt: Option<&str>,
         extra: &[(&str, &str)],
     ) -> Response {
+        let url = self.authorization_url(scope, prompt, extra);
+        if method == Method::POST {
+            self.post_query(&url, None).await
+        } else {
+            self.request(
+                method,
+                &format!(
+                    "{}?{}",
+                    url.path(),
+                    url.query().expect("authorization query")
+                ),
+                &[],
+                None,
+            )
+            .await
+        }
+    }
+    /// Pushes the scenario's authorization request with `basic` credentials.
+    async fn push(&self, scope: &str, prompt: Option<&str>, basic: Option<&str>) -> Response {
+        let mut url = self.authorization_url(scope, prompt, &[]);
+        url.set_path(routes::oidc::PAR);
+        self.post_query(&url, basic).await
+    }
+    /// Pushes the scenario's request with its credentials and returns its `request_uri`.
+    async fn pushed(&self, scope: &str, prompt: Option<&str>) -> String {
+        let response = self.push(scope, prompt, self.basic.as_deref()).await;
+        assert_eq!(response.status(), StatusCode::CREATED);
+        let body = Self::json(response).await;
+        assert_eq!(body["expires_in"], PUSHED_REQUEST_SECONDS);
+        body["request_uri"]
+            .as_str()
+            .expect("pushed request has a request_uri")
+            .to_owned()
+    }
+    /// Brings a `request_uri` to the authorization endpoint as `client_id`, along
+    /// with `extra` parameters, which must not override the pushed ones.
+    async fn claim(&self, client_id: &str, request_uri: &str, extra: &[(&str, &str)]) -> Response {
+        let mut url = Url::parse(&format!("{AUTH_ORIGIN}{}", routes::oidc::AUTHORIZE))
+            .expect("parse authorization endpoint URL");
+        url.query_pairs_mut()
+            .append_pair("client_id", client_id)
+            .append_pair("request_uri", request_uri)
+            .extend_pairs(extra.iter().copied());
+        let uri = format!("{}?{}", url.path(), url.query().expect("query"));
+        self.request(Method::GET, &uri, &[], None).await
+    }
+    /// Posts `url`'s query as a form to its path.
+    async fn post_query(&self, url: &Url, basic: Option<&str>) -> Response {
+        let owned: Vec<_> = url.query_pairs().into_owned().collect();
+        let fields: Vec<_> = owned
+            .iter()
+            .map(|(key, value)| (key.as_str(), value.as_str()))
+            .collect();
+        self.request(Method::POST, url.path(), &fields, basic).await
+    }
+    /// The authorization endpoint with the scenario's request parameters, then `extra`.
+    fn authorization_url(&self, scope: &str, prompt: Option<&str>, extra: &[(&str, &str)]) -> Url {
         let mut url = Url::parse(&format!("{AUTH_ORIGIN}/oauth/authorize"))
             .expect("parse authorization endpoint URL");
         url.query_pairs_mut().extend_pairs([
@@ -216,26 +273,7 @@ impl Flow {
             url.query_pairs_mut().append_pair("prompt", prompt);
         }
         url.query_pairs_mut().extend_pairs(extra.iter().copied());
-        if method == Method::POST {
-            let owned: Vec<_> = url.query_pairs().into_owned().collect();
-            let fields: Vec<_> = owned
-                .iter()
-                .map(|(key, value)| (key.as_str(), value.as_str()))
-                .collect();
-            self.request(method, url.path(), &fields, None).await
-        } else {
-            self.request(
-                method,
-                &format!(
-                    "{}?{}",
-                    url.path(),
-                    url.query().expect("authorization query")
-                ),
-                &[],
-                None,
-            )
-            .await
-        }
+        url
     }
     /// Returns the valid PKCE verifier used by database-backed scenarios.
     fn verifier() -> &'static str {
@@ -1017,11 +1055,6 @@ async fn post_protocol_endpoints_and_error_contracts() {
             OAuthCode::RequestNotSupported.as_str(),
         ),
         (
-            "request_uri",
-            "https://example.com/request.jwt",
-            OAuthCode::RequestUriNotSupported.as_str(),
-        ),
-        (
             "response_mode",
             "form_post",
             OAuthCode::InvalidRequest.as_str(),
@@ -1047,6 +1080,23 @@ async fn post_protocol_endpoints_and_error_contracts() {
     .await;
     assert_eq!(discovery["request_parameter_supported"], false);
     assert_eq!(discovery["request_uri_parameter_supported"], false);
+    assert_eq!(
+        discovery["pushed_authorization_request_endpoint"],
+        format!("{}{}", flow.app.issuer, routes::oidc::PAR)
+    );
+    // Only pushed requests have a request_uri, and no redirect URI is known for it.
+    let response = flow
+        .claim(
+            flow.client.id.as_str(),
+            "https://example.com/request.jwt",
+            &[],
+        )
+        .await;
+    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+    assert_eq!(
+        Flow::json(response).await["error"],
+        OAuthCode::InvalidRequestUri.as_str()
+    );
     assert_eq!(
         discovery["authorization_response_iss_parameter_supported"],
         true
@@ -1089,6 +1139,107 @@ async fn post_protocol_endpoints_and_error_contracts() {
         Flow::json(response).await["error"],
         OAuthCode::InvalidRequest.as_str()
     );
+}
+
+/// A pushed request is validated like a browser one, but answers in JSON. Its
+/// `request_uri` is not a transaction: only its client can claim it, once, and the
+/// query cannot override what was pushed, `prompt` included. A client required to
+/// push cannot send plain requests.
+#[tokio::test]
+#[ignore = "requires TEST_DATABASE_URL"]
+async fn pushed_requests_are_one_time_client_bound_and_authoritative() {
+    let mut flow = Flow::new(true, false).await;
+    let id = flow.client.id.to_string();
+    let response = flow.push(Scope::OpenId.as_str(), None, None).await;
+    assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+    let response = flow
+        .push("openid unregistered", None, flow.basic.as_deref())
+        .await;
+    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+    assert_eq!(
+        Flow::json(response).await["error"],
+        OAuthCode::InvalidScope.as_str()
+    );
+    let request_uri = flow
+        .pushed(Scope::OpenId.as_str(), Some(Prompt::None.as_str()))
+        .await;
+    assert_eq!(
+        Flow::parameter(
+            &flow.client_redirect(&flow.claim(&id, &request_uri, &[]).await),
+            "error"
+        ),
+        OAuthCode::ConsentRequired.as_str()
+    );
+    let request_uri = flow.pushed(Scope::OpenId.as_str(), None).await;
+    let transaction = request_uri
+        .strip_prefix("urn:ietf:params:oauth:request_uri:")
+        .expect("RFC 9126 request_uri");
+    let response = flow
+        .request(
+            Method::GET,
+            &format!("/oauth/authorize/resume?transaction={transaction}"),
+            &[],
+            None,
+        )
+        .await;
+    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+    let rejected = async |client_id: &str, request_uri: &str| {
+        let response = flow.claim(client_id, request_uri, &[]).await;
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+        assert_eq!(
+            Flow::json(response).await["error"],
+            OAuthCode::InvalidRequestUri.as_str()
+        );
+    };
+    rejected("another-client", &request_uri).await;
+    rejected(&id, "urn:ietf:params:oauth:request_uri:unknown").await;
+    let response = flow
+        .claim(
+            &id,
+            &request_uri,
+            &[
+                ("scope", EMAIL_SCOPES),
+                ("state", "forged-state"),
+                ("redirect_uri", "https://evil.example/callback"),
+                ("prompt", Prompt::None.as_str()),
+            ],
+        )
+        .await;
+    let redirect = flow.consent(response).await;
+    assert_eq!(
+        redirect.origin(),
+        Url::parse(flow.client.redirect_uris[0].as_str())
+            .expect("callback")
+            .origin()
+    );
+    assert_eq!(Flow::parameter(&redirect, "state"), "test-state");
+    let code = Flow::parameter(&redirect, "code");
+    let response = flow
+        .exchange(&code, Flow::verifier(), flow.basic.as_deref())
+        .await;
+    let (tokens, claims) = flow.id_token(response).await;
+    assert_eq!(tokens["scope"], Scope::OpenId.as_str());
+    assert_eq!(claims["nonce"], "test-nonce");
+    rejected(&id, &request_uri).await;
+    flow.client.require_pushed_authorization_requests = true;
+    let client = flow.client.clone();
+    crate::ClientRegistry::new(flow.app.database.clone())
+        .update(&crate::tests::operator(), &client.id, |_| {
+            Ok::<_, crate::ClientRegistryError>(client.clone())
+        })
+        .await
+        .expect("require pushed requests");
+    assert_eq!(
+        Flow::parameter(
+            &flow.client_redirect(&flow.authorize(Scope::OpenId.as_str(), None).await),
+            "error"
+        ),
+        OAuthCode::InvalidRequest.as_str()
+    );
+    let request_uri = flow.pushed(Scope::OpenId.as_str(), None).await;
+    // The user consented above, so the claim returns a code at once.
+    let response = flow.claim(&id, &request_uri, &[]).await;
+    Flow::parameter(&flow.client_redirect(&response), "code");
 }
 
 /// Checks redirect equality, PKCE rejection and opaque-token bounds.

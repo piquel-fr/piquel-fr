@@ -37,6 +37,7 @@ pub async fn list(cx: &Cx) -> Result<impl View> {
                     <dt>"Scopes"</dt><dd>(client.allowed_scopes.join(" "))</dd>
                     <dt>"Audiences"</dt><dd>(client.allowed_audiences.join(" "))</dd>
                     <dt>"Refresh tokens"</dt><dd>(if client.allow_refresh { "Allowed" } else { "No" })</dd>
+                    <dt>"Pushed requests"</dt><dd>(if client.require_pushed_authorization_requests { "Required" } else { "Optional" })</dd>
                     <dt>"Authentication"</dt><dd><code>(client.token_endpoint_auth_method.to_string())</code></dd>
                 </dl>
             </section>

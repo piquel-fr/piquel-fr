@@ -22,6 +22,10 @@ use url::Url;
 
 /// A registered client with its exact URI allowlists.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+#[expect(
+    clippy::struct_excessive_bools,
+    reason = "Each flag is an independent registration setting."
+)]
 pub struct StoredOidcClient {
     /// Client identifier.
     pub id: ClientId,
@@ -43,6 +47,8 @@ pub struct StoredOidcClient {
     pub enabled: bool,
     /// Whether the client skips the consent screen.
     pub trusted: bool,
+    /// Whether the client must push its authorization requests.
+    pub require_pushed_authorization_requests: bool,
     /// When the client was registered.
     pub created_at: DateTime<Utc>,
     /// When its registration last changed.
@@ -90,6 +96,8 @@ impl StoredOidcClient {
             )
             && self.allow_refresh == registration.allow_refresh
             && self.trusted == registration.trusted
+            && self.require_pushed_authorization_requests
+                == registration.require_pushed_authorization_requests
     }
 }
 
@@ -110,6 +118,7 @@ impl From<StoredOidcClient> for Client {
             allow_refresh: client.allow_refresh,
             enabled: client.enabled,
             trusted: client.trusted,
+            require_pushed_authorization_requests: client.require_pushed_authorization_requests,
         }
     }
 }
@@ -178,8 +187,8 @@ impl OidcRepository<'_> {
                 "WITH client AS (
                     INSERT INTO oidc_clients (
                         id, display_name, client_type, allowed_scopes, allowed_audiences,
-                        allow_refresh, trusted
-                    ) VALUES ($1, $2, $3, $4, jsonb_build_array($1::text), $5, $6)
+                        allow_refresh, trusted, require_pushed_authorization_requests
+                    ) VALUES ($1, $2, $3, $4, jsonb_build_array($1::text), $5, $6, $10)
                     RETURNING id
                 )
                 INSERT INTO oidc_redirect_uris (client_id, uri, kind, origin)
@@ -194,6 +203,7 @@ impl OidcRepository<'_> {
                 &redirects.uris,
                 &redirects.kinds,
                 &redirects.origins,
+                registration.require_pushed_authorization_requests,
             )
         )?;
         Ok(())
@@ -223,6 +233,7 @@ impl OidcRepository<'_> {
                         allowed_scopes = $3,
                         allow_refresh = $4,
                         trusted = $5,
+                        require_pushed_authorization_requests = $9,
                         updated_at = now()
                     WHERE id = $1
                     RETURNING id
@@ -253,6 +264,7 @@ impl OidcRepository<'_> {
                 &redirects.uris,
                 &redirects.kinds,
                 &redirects.origins,
+                registration.require_pushed_authorization_requests,
             )
         )?;
         Ok(())
@@ -343,7 +355,8 @@ impl OidcRepository<'_> {
                 StoredOidcClient,
                 r#"SELECT
                     c.id AS "id: ClientId", c.display_name, c.client_type AS "kind: ClientKind",
-                    c.enabled, c.allow_refresh, c.trusted, c.created_at, c.updated_at,
+                    c.enabled, c.allow_refresh, c.trusted,
+                    c.require_pushed_authorization_requests, c.created_at, c.updated_at,
                     c.allowed_scopes AS "allowed_scopes: JsonArray<String>",
                     c.allowed_audiences AS "allowed_audiences: JsonArray<String>",
                     COALESCE(

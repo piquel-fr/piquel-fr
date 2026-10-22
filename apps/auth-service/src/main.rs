@@ -408,10 +408,10 @@ impl ClientCommand {
                 match output {
                     OutputFormat::Json => println!("{}", serde_json::to_string_pretty(&clients)?),
                     OutputFormat::Table => {
-                        println!("ID\tTYPE\tSTATUS\tREFRESH\tTRUSTED\tNAME");
+                        println!("ID\tTYPE\tSTATUS\tREFRESH\tTRUSTED\tPAR\tNAME");
                         for client in clients {
                             println!(
-                                "{}\t{}\t{}\t{}\t{}\t{}",
+                                "{}\t{}\t{}\t{}\t{}\t{}\t{}",
                                 client.id,
                                 client.kind,
                                 if client.enabled {
@@ -421,6 +421,7 @@ impl ClientCommand {
                                 },
                                 client.allow_refresh,
                                 client.trusted,
+                                client.require_pushed_authorization_requests,
                                 client.display_name,
                             );
                         }
@@ -470,6 +471,10 @@ impl ClientCommand {
 
 /// The registration of a new client.
 #[derive(Args)]
+#[expect(
+    clippy::struct_excessive_bools,
+    reason = "Clap reads each `--x` option into a flag."
+)]
 struct CreateClient {
     /// The client's ID: 1 to 64 characters from A-Z, a-z, 0-9, '.', '_' and '-'.
     id: ClientId,
@@ -495,6 +500,10 @@ struct CreateClient {
     /// The client skips the consent screen. Only for first-party clients.
     #[arg(long)]
     trusted: bool,
+    /// The client must push its authorization requests (RFC 9126), so none of
+    /// their parameters travel through the browser.
+    #[arg(long)]
+    require_par: bool,
 }
 
 /// A client a deployment manages, as `client apply` makes it.
@@ -548,6 +557,7 @@ impl CreateClient {
             allowed_scopes: AllowedScopes::new(scopes).map_err(CliError::count("scopes"))?,
             allow_refresh: self.refresh,
             trusted: self.trusted,
+            require_pushed_authorization_requests: self.require_par,
         })
     }
 }
@@ -591,6 +601,12 @@ struct UpdateClient {
     /// Show the consent screen again.
     #[arg(long)]
     untrusted: bool,
+    /// Require pushed authorization requests.
+    #[arg(long, conflicts_with = "no_require_par")]
+    require_par: bool,
+    /// Accept authorization requests sent through the browser again.
+    #[arg(long)]
+    no_require_par: bool,
 }
 
 impl UpdateClient {
@@ -624,6 +640,8 @@ impl UpdateClient {
             allowed_scopes: AllowedScopes::new(scopes).map_err(CliError::count("scopes"))?,
             allow_refresh: self.refresh || (client.allow_refresh && !self.no_refresh),
             trusted: self.trusted || (client.trusted && !self.untrusted),
+            require_pushed_authorization_requests: self.require_par
+                || (client.require_pushed_authorization_requests && !self.no_require_par),
             id: client.id,
         })
     }
