@@ -729,9 +729,10 @@ crate::str_enum! {
         Opera = "opera",
         /// Apple Safari.
         Safari = "safari",
-        /// Anything else, including back-channel HTTP clients.
+        /// Anything else, including back-channel HTTP clients, and browsers a newer
+        /// release recognizes.
         Other = "other",
-    }
+    } else Other
 }
 
 crate::str_enum! {
@@ -749,14 +750,16 @@ crate::str_enum! {
         MacOs = "macos",
         /// Windows.
         Windows = "windows",
-        /// Anything else, including back-channel HTTP clients.
+        /// Anything else, including back-channel HTTP clients, and platforms a newer
+        /// release recognizes.
         Other = "other",
-    }
+    } else Other
 }
 
 /// Coarse browser and platform of a `User-Agent` header, the only part of it auth
 /// keeps. Stored as text, `browser/platform` (`firefox/linux`); serialized as
-/// `{"browser": …, "platform": …}`.
+/// `{"browser": …, "platform": …}`. A browser or platform this release doesn't
+/// know reads as `other`, so a session or event a newer release tagged still loads.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct UserAgentFamily {
     /// The browser.

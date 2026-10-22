@@ -1,0 +1,24 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE sessions\n                SET revoked_at = now(), passkey_confirmed_at = NULL\n                WHERE user_id = $1\n                AND revoked_at IS NULL\n                AND expires_at > now()\n                AND ($2::uuid IS NULL OR id = $2)\n                AND ($3::uuid IS NULL OR id <> $3)\n                RETURNING id AS \"id: SessionId\"",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id: SessionId",
+        "type_info": "Uuid"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid",
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "7532a32586493759c170937190720ca68c22afd0e33e0978124c3aaaa1285d1e"
+}

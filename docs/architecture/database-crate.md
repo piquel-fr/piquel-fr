@@ -228,6 +228,8 @@ newest first.
 `SessionRepository::revoke(user_id, scope)` is the only way a session ends early.
 `SessionScope` names one session, every other session or all of them, and the
 query always filters on `user_id`, so no scope reaches another account's session.
+It skips expired sessions, which are already over, so the count it returns is what
+the account's session list showed.
 It revokes the refresh token families issued from the revoked sessions in a
 second statement of the same transaction, whose snapshot also sees a family a
 concurrent code exchange committed while the first one waited, and returns the revoked IDs, so the caller records one

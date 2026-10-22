@@ -376,7 +376,7 @@ async fn code_replay_by_another_client_revokes_nothing() {
 }
 
 /// Revoking a session ends the refresh families issued from it, and never touches
-/// another account's session, whatever the scope names.
+/// another account's session, whatever the scope names, or an expired one.
 #[tokio::test]
 #[ignore = "requires a disposable TEST_DATABASE_URL"]
 async fn session_revocation_ends_its_families_and_only_its_owners() {
@@ -385,6 +385,18 @@ async fn session_revocation_ends_its_families_and_only_its_owners() {
     let mut tokens = TokenRepository::from_pool(&pool);
     let mine = Grant::new(&pool, &client).await;
     let theirs = Grant::new(&pool, &client).await;
+    let expired = SessionId::new();
+    sqlx::query(
+        "INSERT INTO sessions (
+            id, user_id, authentication_methods, authenticated_at, expires_at, last_seen_at
+        ) VALUES ($1, $2, '[]', now() - interval '2 hours', now() - interval '1 hour',
+            now() - interval '2 hours')",
+    )
+    .bind(expired.as_uuid())
+    .bind(mine.user.as_uuid())
+    .execute(&pool)
+    .await
+    .expect("expired session");
     mine.family(&mut tokens, &client).await;
     theirs.family(&mut tokens, &client).await;
     let family_revoked = |grant: &Grant| {
@@ -399,6 +411,7 @@ async fn session_revocation_ends_its_families_and_only_its_owners() {
     for scope in [SessionScope::One(theirs.session), SessionScope::All] {
         let revoked = sessions.revoke(mine.user, scope).await.expect("revoke");
         assert!(!revoked.contains(&theirs.session), "{scope:?}");
+        assert!(!revoked.contains(&expired), "{scope:?}");
     }
     assert!(
         sessions

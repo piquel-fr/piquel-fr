@@ -77,7 +77,8 @@ fn user_agents_classify() {
     }
 }
 
-/// The stored text round-trips and needs both halves.
+/// The stored text round-trips and needs both halves; a half a newer release
+/// wrote reads as `other`.
 #[test]
 fn user_agent_family_text_round_trips() {
     let family = UserAgentFamily {
@@ -87,5 +88,11 @@ fn user_agent_family_text_round_trips() {
     assert_eq!(family.to_string(), "firefox/linux");
     assert_eq!("firefox/linux".parse(), Ok(family));
     assert!("firefox".parse::<UserAgentFamily>().is_err());
-    assert!("firefox/beos".parse::<UserAgentFamily>().is_err());
+    assert_eq!(
+        "samsung/harmony_os".parse(),
+        Ok(UserAgentFamily {
+            browser: Browser::Other,
+            platform: Platform::Other,
+        })
+    );
 }

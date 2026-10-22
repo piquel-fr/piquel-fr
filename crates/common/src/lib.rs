@@ -101,10 +101,26 @@ macro_rules! __str_enum_sqlx {
 }
 
 /// Declares a documented, closed string vocabulary with serde and parsing support,
-/// plus `SQLx` text decoding when the `sqlx` feature is on.
+/// plus `SQLx` text decoding when the `sqlx` feature is on. Unknown spellings are
+/// rejected, unless an `else` variant follows the enum: then they read as it, for
+/// labels a newer release may extend that older ones can show coarsely.
+///
+/// ```
+/// piquel_common::str_enum! {
+///     /// A coarse label.
+///     pub enum Shade {
+///         /// Light.
+///         Light = "light",
+///         /// Anything else.
+///         Other = "other",
+///     } else Other
+/// }
+///
+/// assert_eq!("teal".parse(), Ok(Shade::Other));
+/// ```
 #[macro_export]
 macro_rules! str_enum {
-    ($(#[$meta:meta])* $vis:vis enum $name:ident { $($(#[$variant_meta:meta])* $variant:ident = $value:literal),+ $(,)? }) => {
+    ($(#[$meta:meta])* $vis:vis enum $name:ident { $($(#[$variant_meta:meta])* $variant:ident = $value:literal),+ $(,)? } $(else $fallback:ident)?) => {
         $(#[$meta])*
         #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
         $vis enum $name { $($(#[$variant_meta])* $variant),+ }
@@ -121,15 +137,15 @@ macro_rules! str_enum {
         }
         impl ::std::str::FromStr for $name {
             type Err = $crate::VocabularyError;
-            /// Parses the stable spelling and rejects values outside the closed vocabulary.
-            fn from_str(value: &str) -> Result<Self, Self::Err> { match value { $($value => Ok(Self::$variant),)+ _ => Err($crate::VocabularyError { vocabulary: stringify!($name) }) } }
+            /// Parses the stable spelling; an unknown one is rejected or reads as the `else` variant.
+            fn from_str(value: &str) -> Result<Self, Self::Err> { match value { $($value => Ok(Self::$variant),)+ _ => $crate::str_enum!(@unknown $name $($fallback)?) } }
         }
         impl $crate::__serde::Serialize for $name {
             /// Writes the stable vocabulary spelling to its wire representation.
             fn serialize<S: $crate::__serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> { serializer.serialize_str(self.as_str()) }
         }
         impl<'de> $crate::__serde::Deserialize<'de> for $name {
-            /// Parses the wire spelling and rejects values outside the closed vocabulary.
+            /// Parses the wire spelling as `FromStr` does.
             fn deserialize<D: $crate::__serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
                 let value = <String as $crate::__serde::Deserialize>::deserialize(deserializer)?;
                 value.parse().map_err($crate::__serde::de::Error::custom)
@@ -137,6 +153,8 @@ macro_rules! str_enum {
         }
         $crate::__str_enum_sqlx!($name);
     };
+    (@unknown $name:ident) => { Err($crate::VocabularyError { vocabulary: stringify!($name) }) };
+    (@unknown $name:ident $fallback:ident) => { Ok(Self::$fallback) };
     (@count $($variant:ident),+) => { <[()]>::len(&[$($crate::str_enum!(@unit $variant)),+]) };
     (@unit $variant:ident) => { () };
 }

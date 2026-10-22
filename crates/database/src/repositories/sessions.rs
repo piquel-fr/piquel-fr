@@ -300,10 +300,11 @@ impl SessionRepository<'_> {
         )
     }
 
-    /// Revokes the `scope` sessions of `user_id`, with the refresh token families
-    /// issued from them, and returns the IDs of the sessions it revoked, so the
-    /// caller can record each revocation. Sessions of other accounts are never
-    /// touched, whatever the scope names. This is the only way sessions end early;
+    /// Revokes the active `scope` sessions of `user_id`, with the refresh token
+    /// families issued from them, and returns the IDs of the sessions it revoked, so
+    /// the caller can record each revocation. Sessions of other accounts are never
+    /// touched, whatever the scope names, and expired ones are already over: no
+    /// refresh family of theirs rotates. This is the only way sessions end early;
     /// callers run it in a transaction, so both updates commit together.
     ///
     /// The families are revoked by a second statement: a code exchange that held a
@@ -327,6 +328,7 @@ impl SessionRepository<'_> {
                 SET revoked_at = now(), passkey_confirmed_at = NULL
                 WHERE user_id = $1
                 AND revoked_at IS NULL
+                AND expires_at > now()
                 AND ($2::uuid IS NULL OR id = $2)
                 AND ($3::uuid IS NULL OR id <> $3)
                 RETURNING id AS "id: SessionId""#,

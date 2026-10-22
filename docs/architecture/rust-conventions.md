@@ -105,7 +105,8 @@ Keep separate variants when they identify different failures; merge indistinguis
 ## Vocabulary and persistence
 
 Use `str_enum!` for closed stored or wire strings and serde enums for JSON-only
-choices. Match domain enums exhaustively; use their `ALL` list rather than repeating
+choices. Give it an `else` variant, as `Browser` and `Platform` have, for labels a
+newer release may extend that older ones can read coarsely. Match domain enums exhaustively; use their `ALL` list rather than repeating
 variants. Limits and lifetimes are named constants. Preserve existing wire spellings.
 
 Shared authentication vocabulary, JWT/JWK vocabulary and wire types live in
