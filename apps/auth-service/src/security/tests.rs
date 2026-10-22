@@ -829,3 +829,80 @@ async fn session_lock_rechecks_expiry_after_waiting() {
         Err(SessionError::Missing)
     ));
 }
+
+/// Decorates `response` as [`HttpSecurity::protect`] does on the given CORS `grant`.
+fn decorated(response: impl IntoResponse, grant: Option<CorsGrant>) -> Response {
+    let mut response = response.into_response();
+    HttpSecurity::decorate(&mut response, grant);
+    response
+}
+
+/// The CORS grant of a request from an approved first-party origin.
+fn first_party() -> CorsGrant {
+    CorsGrant::Credentialed(HeaderValue::from_static("https://piquel.fr"))
+}
+
+/// Each class sends its own `Cache-Control`, on success and on revalidation.
+#[test]
+fn cached_responses_carry_their_class() {
+    for (class, cache_control) in [
+        (CacheClass::Immutable, "public, max-age=31536000, immutable"),
+        (CacheClass::Revalidate, "private, no-cache"),
+        (
+            CacheClass::Public {
+                max_age: std::time::Duration::from_secs(3600),
+            },
+            "public, max-age=3600",
+        ),
+    ] {
+        for status in [StatusCode::OK, StatusCode::NOT_MODIFIED] {
+            let response = decorated(Cached(class, status), None);
+            assert_eq!(
+                response.headers()[header::CACHE_CONTROL],
+                cache_control,
+                "{class:?} {status}"
+            );
+        }
+    }
+}
+
+/// Only a classed success or revalidation without cookies may be stored: anything
+/// else is `no-store`, whatever the handler set.
+#[test]
+fn unclassed_errors_and_cookie_responses_are_not_stored() {
+    let class = CacheClass::Public {
+        max_age: std::time::Duration::from_secs(3600),
+    };
+    for response in [
+        decorated(Cached(class, [(header::SET_COOKIE, "a=b")]), None),
+        decorated(Cached(class, StatusCode::FORBIDDEN), None),
+        decorated(Cached(class, StatusCode::NOT_FOUND), None),
+        decorated(Cached(class, StatusCode::TOO_MANY_REQUESTS), None),
+        decorated([(header::CACHE_CONTROL, "public, max-age=60")], None),
+    ] {
+        assert_eq!(response.headers()[header::CACHE_CONTROL], "no-store");
+    }
+}
+
+/// Public data is readable from every origin without credentials, so one cached copy
+/// serves them all; a page has no CORS headers, even for an approved origin.
+#[test]
+fn cached_responses_are_the_same_for_every_origin() {
+    let public = CacheClass::Public {
+        max_age: std::time::Duration::from_secs(3600),
+    };
+    for grant in [None, Some(first_party())] {
+        let response = decorated(Cached(public, StatusCode::OK), grant);
+        let headers = response.headers();
+        assert_eq!(headers[header::ACCESS_CONTROL_ALLOW_ORIGIN], "*");
+        assert!(!headers.contains_key(header::ACCESS_CONTROL_ALLOW_CREDENTIALS));
+        assert!(!headers.contains_key(header::VARY));
+    }
+    for class in [CacheClass::Revalidate, CacheClass::Immutable] {
+        let response = decorated(Cached(class, StatusCode::OK), Some(first_party()));
+        let headers = response.headers();
+        assert!(!headers.contains_key(header::ACCESS_CONTROL_ALLOW_ORIGIN));
+        assert!(!headers.contains_key(header::ACCESS_CONTROL_ALLOW_CREDENTIALS));
+        assert!(!headers.contains_key(header::VARY));
+    }
+}

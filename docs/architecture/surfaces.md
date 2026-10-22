@@ -22,7 +22,7 @@ next to the pages that use them, and keeping them there keeps one binary, one
 database owner and one policy layer. The account API is on the public listener; the
 admin API has a private listener of its own (see admin.piquel.fr below). Auth keeps its state in PostgreSQL, so it runs
 as several replicas (see "Running several replicas" in `infra/README.md`). Its pages are static assets embedded at build time
-and are cacheable.
+and are cacheable (see "Caching" in `infra/README.md`).
 
 ## piquel.fr
 
