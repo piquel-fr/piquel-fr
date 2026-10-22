@@ -694,6 +694,11 @@ impl OidcRepository<'_> {
     /// so marks it used. The update waits for a concurrent revocation to commit, then
     /// sees it.
     ///
+    /// A credential without any grant was issued by the release before grants,
+    /// during the deploy that added them. Its grant is created implicit, with the
+    /// credential's `scopes` and generation: grants are never deleted, so a missing
+    /// one was never revoked.
+    ///
     /// # Errors
     ///
     /// Returns [`DatabaseError`] if the query fails.
@@ -702,22 +707,23 @@ impl OidcRepository<'_> {
         user: UserId,
         client: &ClientId,
         audience: &str,
+        scopes: &[String],
         generation: GrantGeneration,
     ) -> Result<bool, DatabaseError> {
         Ok(run!(
             self,
             execute,
             sqlx::query!(
-                "UPDATE oidc_consents
+                "INSERT INTO oidc_consents (user_id, client_id, audience, scopes, implicit, generation)
+                VALUES ($1, $2, $3, $4, TRUE, $5)
+                ON CONFLICT (user_id, client_id, audience) DO UPDATE
                 SET last_used_at = now()
-                WHERE user_id = $1
-                AND client_id = $2
-                AND audience = $3
-                AND generation = $4
-                AND revoked_at IS NULL",
+                WHERE oidc_consents.generation = $5
+                AND oidc_consents.revoked_at IS NULL",
                 user.as_uuid(),
                 client.as_str(),
                 audience,
+                Json(scopes) as _,
                 generation.0,
             )
         )?

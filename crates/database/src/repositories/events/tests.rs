@@ -192,6 +192,7 @@ async fn events_a_newer_release_wrote_read_as_unknown() {
     for (kind, version) in [
         ("client_deleted", EVENT_VERSION),
         ("passkey_added", EVENT_VERSION + 1),
+        ("grant_revoked", kind_version("grant_revoked") + 1),
     ] {
         events
             .insert_written_elsewhere(user, kind, version, &data)
@@ -212,6 +213,7 @@ async fn events_a_newer_release_wrote_read_as_unknown() {
             .map(|stored| stored.event)
             .collect::<Vec<_>>(),
         [
+            unknown("grant_revoked", kind_version("grant_revoked") + 1),
             unknown("passkey_added", EVENT_VERSION + 1),
             unknown("client_deleted", EVENT_VERSION),
         ]

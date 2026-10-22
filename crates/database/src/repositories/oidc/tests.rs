@@ -325,7 +325,7 @@ async fn migration_keeps_file_clients_and_their_secrets() {
 
 /// A grant is implicit while one of its scopes was never approved on the consent
 /// screen, and only an explicit one skips it. Revoking moves the grant to a new
-/// generation, which a later grant keeps.
+/// generation, which a later grant keeps. A credential without a grant gets one.
 #[tokio::test]
 #[ignore = "requires a disposable TEST_DATABASE_URL"]
 async fn grants_are_explicit_only_when_every_scope_was_approved() {
@@ -381,12 +381,18 @@ async fn grants_are_explicit_only_when_every_scope_was_approved() {
     assert!(!consented(&openid).await);
     let next = grant(&openid, Approval::Consented).await;
     assert_ne!(next, GrantGeneration::FIRST);
-    let accepts = async |generation| {
+    let accepts = async |audience: &str, generation| {
         OidcRepository::from_pool(&pool)
-            .use_grant(user, &client.id, "test", generation)
+            .use_grant(user, &client.id, audience, &openid, generation)
             .await
             .expect("use")
     };
-    assert!(!accepts(GrantGeneration::FIRST).await);
-    assert!(accepts(next).await);
+    assert!(!accepts("test", GrantGeneration::FIRST).await);
+    assert!(accepts("test", next).await);
+    // A credential from the release before grants gets its grant on first use.
+    assert!(accepts("legacy", GrantGeneration::FIRST).await);
+    assert!(
+        accepts("legacy", GrantGeneration::FIRST).await,
+        "the created grant accepts it again"
+    );
 }

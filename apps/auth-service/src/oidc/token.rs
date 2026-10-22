@@ -290,6 +290,7 @@ impl OidcApplication {
                 user.id,
                 &code.client_id,
                 &code.audience,
+                &code.scopes,
                 code.grant_generation,
             )
             .await?
@@ -376,6 +377,7 @@ impl OidcApplication {
                 rotated.user_id,
                 client_id,
                 &rotated.audience,
+                &rotated.scopes,
                 rotated.grant_generation,
             )
             .await?

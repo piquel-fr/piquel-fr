@@ -23,9 +23,9 @@ ALTER TABLE authorization_codes ADD COLUMN grant_generation BIGINT NOT NULL DEFA
 ALTER TABLE refresh_token_families ADD COLUMN grant_generation BIGINT NOT NULL DEFAULT 1;
 
 -- Trusted clients never wrote a row, so their live codes and families get an
--- implicit one; existing consent covers the others. A code or family the previous
--- release issues to a trusted client during the deploy still has none, and is
--- rejected: that app signs in again.
+-- implicit one, which lists them; existing consent covers the others. A code or
+-- family the previous release issues to a trusted client during the deploy gets
+-- its row when first used.
 INSERT INTO oidc_consents (user_id, client_id, audience, scopes, implicit, granted_at, last_used_at)
 SELECT g.user_id, g.client_id, g.audience, jsonb_agg(DISTINCT s.scope), TRUE,
     min(g.created_at), max(g.created_at)
