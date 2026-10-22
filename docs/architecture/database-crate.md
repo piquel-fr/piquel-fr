@@ -166,16 +166,21 @@ Event readers tolerate events they do not know, so adding a variant is safe duri
 rolling deploy or a rollback, when the previous release reads what the next one
 wrote. Reads return `StoredEvent.event` as a `RecordedEvent`: `Known(DomainEvent)`,
 or `Unknown { kind, version, data }` for a kind this release does not know or a
-known kind in a payload version newer than `EVENT_VERSION`. Each reader decides
+known kind in a payload version it does not write. Each reader decides
 what to do with it: the security history hides it and refuses to report it, and
 the admin events API lists it with its kind, version and data. `record` takes a
 `DomainEvent`, so a release never writes an unknown event, and delivery fan-out,
 which runs in `record`, only ever sees known ones. A payload of a known kind and
 version that does not decode is still `DatabaseError::InvalidStoredData`, so a
 change an older release could not decode, such as a new variant of an enum inside a
-payload or a renamed field, must be written with a new version of that kind only:
-bumping `EVENT_VERSION` for every kind would hide every new event from an older
-release. Adding a field is not one, since older releases ignore fields they do not
+payload or a renamed field, must be written with a new version of that kind only.
+`DomainEvent::version` decides it per event: every kind starts at
+`DomainEvent::FIRST_VERSION`, and only the events that use the change get the next
+version, so an older release still reads the others. `SessionRevoked` with
+`RevocationReason::UserRevoked` is version 2, and every other `SessionRevoked` is
+still version 1. A release reads an event as known only if it decodes to an event
+whose `version()` is the stored one, so a version it does not write reads as
+unknown. Adding a field is not one, since older releases ignore fields they do not
 know, but the field must be an `Option` or `#[serde(default)]`, so that the new
 release still reads the rows already stored. The tolerance only protects a release
 that has it: ship a new variant in a later deploy than #149, so that a rollback
@@ -194,7 +199,10 @@ always reads it.
   (`os_user`, `host`) is accountability data and stays there too. This is the
   content a hash chain (#31) covers.
 - `event_personal_data`, one row per event, holds the client IP, the user agent
-  family and every `Personal` payload value, keyed by its JSON pointer. On write
+  family and every `Personal` payload value, keyed by its JSON pointer. The
+  family's browser is in `user_agent_family`, the one value releases before
+  migration `0009` read there, and its platform in `platform`; older rows have no
+  platform and read it as `other`. On write
   the repository moves each `Personal` value there and leaves `"$erased"` in the
   payload; on read it merges them back. Once the row is gone, they and the request
   origin read as `Personal::Erased`. Deleting it never breaks the event.
@@ -214,6 +222,32 @@ of transactions older than every running one (`txid < pg_snapshot_xmin(...)`), w
 have all finished. A long-running transaction holds back every consumer until it
 ends, so keep transactions short. `history_for_user` lists an account's events,
 newest first.
+
+### Sessions
+
+`SessionRepository::revoke(user_id, scope)` is the only way a session ends early.
+`SessionScope` names one session, every other session or all of them, and the
+query always filters on `user_id`, so no scope reaches another account's session.
+It revokes the refresh token families issued from the revoked sessions in the
+same statement and returns the revoked IDs, so the caller records one
+`SessionRevoked` per session.
+
+A session records the coarse browser and platform it signed in with in
+`user_agent_family` (`firefox/linux`), never the raw header, and the IP it signed
+in from in `created_ip` and `last_seen_ip`. The session extractors refresh
+`last_seen_at` and `last_seen_ip` with `touch`, at most once every
+`LAST_SEEN_INTERVAL` (five minutes), so session reads rarely write. The IPs live
+as long as the row: the cleanup pass deletes an expired session, and a revoked one
+a day after revocation, once no refresh family or authorization code references
+it.
+
+The account API lists the caller's active sessions (`GET /account/sessions`),
+signs one other out (`DELETE /account/sessions/{id}`; `404` for an unknown or
+foreign ID, `400` for the caller's own) and signs every other out
+(`POST /account/sessions/revoke-others`, answering the count). Both record
+`RevocationReason::UserRevoked`. They need a session but no passkey confirmation:
+signing out only removes access, and a user who suspects a stolen cookie must be
+able to act at once.
 
 ### Security history
 

@@ -1,15 +1,7 @@
 <script lang="ts">
   import { onMount } from 'svelte';
-  import { page } from '$app/state';
-  import {
-    Passkeys,
-    StepUp,
-    errorMessage,
-    providerName,
-    type Provider,
-    type Session
-  } from '@piquel/auth-sdk';
-  import { Account, Task, type Identity, type Passkey } from '$lib/account.svelte';
+  import { Passkeys, StepUp, errorMessage, providerName, type Provider } from '@piquel/auth-sdk';
+  import { Account, Task, type Device, type Identity, type Passkey } from '$lib/account.svelte';
 
   type Method = 'passkey' | 'federation';
   /** An entry of `GET /account/history`, newest first. */
@@ -20,8 +12,8 @@
     actor: 'account' | 'admin' | 'operator' | 'client' | 'system' | 'anonymous' | 'unrecorded';
     client: { id: string; name: string | null } | null;
     ip: string | null;
-    browser: string | null;
-    /** Retention deleted the IP address and browser. */
+    device: Device | null;
+    /** Retention deleted the IP address and device. */
     erased: boolean;
   } & (
     | { kind: 'account.created' | 'session.signed_in'; method: Method }
@@ -48,14 +40,6 @@
     | { action: 'remove_passkey'; passkey_id: string }
     | { action: 'unlink_identity'; provider: Provider };
 
-  const browsers: Record<string, string> = {
-    chrome: 'Chrome',
-    edge: 'Edge',
-    firefox: 'Firefox',
-    opera: 'Opera',
-    safari: 'Safari',
-    other: 'Another browser or app'
-  };
   const actors: Record<Entry['actor'], string | null> = {
     account: null,
     admin: 'By a Piquel administrator',
@@ -71,7 +55,8 @@
     admin: 'Signed out by an administrator',
     account_disabled: 'Signed out because the account was disabled',
     account_deletion: 'Signed out because the account is being deleted',
-    compromise_reported: 'Signed out after you reported activity'
+    compromise_reported: 'Signed out after you reported activity',
+    user_revoked: 'Signed out from your devices list'
   };
   // Rows recorded before typed history, by their logged action.
   const legacy: Record<string, string> = {
@@ -88,9 +73,8 @@
     'refresh.policy_rejected': 'An app’s access ended'
   };
 
-  const account = new Account(page.data.authOrigin);
+  const account = Account.current();
   const task = new Task();
-  let session = $state<Session | null>(null);
   let entries = $state<Entry[]>([]);
   let next = $state<string | null>(null);
   let passkeys = $state<Passkey[]>([]);
@@ -101,7 +85,7 @@
   // Set once a report succeeds: what is left to undo, if anything.
   let reported = $state<{ followUp: FollowUp | null } | null>(null);
   let notice = $state('');
-  const stepUp = new StepUp(new Passkeys(account.api), () => session?.user.id, {
+  const stepUp = new StepUp(new Passkeys(account.api), () => account.session?.user.id, {
     remove: async (id) => {
       await account.removePasskey(id);
       notice = 'The passkey was removed.';
@@ -145,7 +129,6 @@
   });
   async function load() {
     try {
-      session = await account.api.request('/session');
       await refresh();
       await stepUp.resume();
     } catch (cause) {
@@ -249,7 +232,7 @@
     const app = entry.client && `App: ${entry.client.name ?? entry.client.id}`;
     const origin = entry.erased
       ? ['Device details erased']
-      : [entry.browser && (browsers[entry.browser] ?? entry.browser), entry.ip];
+      : [Account.deviceName(entry.device), entry.ip];
     return [time, ...origin, app].filter(Boolean).join(' · ');
   }
   // Reports and the sign-outs other changes cause are reported through those changes.
@@ -265,76 +248,63 @@
     content="Review the sign-ins and changes to your Piquel account."
   /></svelte:head
 >
-<section class="settings">
-  <div class="settings-header">
-    <a href="/settings">← Account settings</a>
-    <p class="eyebrow">Your account</p>
-    <h1>Security history</h1>
-    <p>
-      Every sign-in and change to your account. If something wasn’t you, say so: we’ll sign out
-      every other device and help you undo it.
-    </p>
-  </div>
-  {#if task.error}<p class="notice error" role="alert">{task.error}</p>{/if}
-  {#if notice}<p class="notice" role="status">{notice}</p>{/if}
-  {#if loading}<p role="status">Loading your history…</p>
-  {:else if !session}<div class="card stack">
-      <h2>Sign in to see your history</h2>
-      <a class="button" href={account.page('login', window.location.href)}>Sign in</a>
-    </div>
-  {:else}
-    {#if reported}<div class="notice stack" role="status">
-        <strong>Your account is secured.</strong>
-        <p>
-          Every other device was signed out, and every app must sign in again, including on this
-          device.
-        </p>
-        {#if pending}<p>Undo the change, too:</p>
-          <div class="row actions">
-            <button class="danger" disabled={task.busy} onclick={() => undo(pending.followUp)}
-              >{pending.label}</button
-            >
-          </div>{/if}
-      </div>{/if}
-    {#each days as group (group.day)}<section class="card" aria-label={group.day}>
-        <h2>{group.day}</h2>
-        <ul class="list">
-          {#each group.entries as entry (entry.id)}<li>
-              <div class="row between">
-                <div>
-                  <strong>{describe(entry)}</strong>
-                  <p class="help">{details(entry)}</p>
-                  {#if actors[entry.actor]}<p class="help">{actors[entry.actor]}</p>{/if}
-                </div>
-                {#if reportable(entry) && reporting !== entry.id}<button
-                    class="text-button"
-                    disabled={task.busy}
-                    onclick={() => (reporting = entry.id)}>This wasn’t me</button
-                  >{/if}
+<p class="help">
+  Every sign-in and change to your account. If something wasn’t you, say so: we’ll sign out every
+  other device and help you undo it.
+</p>
+{#if task.error}<p class="notice error" role="alert">{task.error}</p>{/if}
+{#if notice}<p class="notice" role="status">{notice}</p>{/if}
+{#if loading}<p role="status">Loading your history…</p>
+{:else}
+  {#if reported}<div class="notice stack" role="status">
+      <strong>Your account is secured.</strong>
+      <p>
+        Every other device was signed out, and every app must sign in again, including on this
+        device.
+      </p>
+      {#if pending}<p>Undo the change, too:</p>
+        <div class="row actions">
+          <button class="danger" disabled={task.busy} onclick={() => undo(pending.followUp)}
+            >{pending.label}</button
+          >
+        </div>{/if}
+    </div>{/if}
+  {#each days as group (group.day)}<section class="card" aria-label={group.day}>
+      <h2>{group.day}</h2>
+      <ul class="list">
+        {#each group.entries as entry (entry.id)}<li>
+            <div class="row between">
+              <div>
+                <strong>{describe(entry)}</strong>
+                <p class="help">{details(entry)}</p>
+                {#if actors[entry.actor]}<p class="help">{actors[entry.actor]}</p>{/if}
               </div>
-              {#if reporting === entry.id}<div class="notice stack">
-                  <strong>Secure your account?</strong>
-                  <p>
-                    This signs out every device but this one, and every app you use with Piquel must
-                    sign in again, including on this device. Your passkeys keep working.
-                  </p>
-                  {#if entry.kind === 'passkey.added' || entry.kind === 'identity.linked'}<p>
-                      Afterwards, you can confirm with your passkey to undo this change.
-                    </p>{/if}
-                  <div class="row actions">
-                    <button class="danger" disabled={task.busy} onclick={() => report(entry)}
-                      >Sign out everywhere else</button
-                    ><button class="secondary" onclick={() => (reporting = null)}>Cancel</button>
-                  </div>
-                </div>{/if}
-            </li>{/each}
-        </ul>
-      </section>{/each}
-    {#if !entries.length && !next}<p class="empty">
-        Nothing has happened to your account yet.
-      </p>{/if}
-    {#if next}<button class="secondary full" disabled={task.busy} onclick={older}
-        >Show older activity</button
-      >{/if}
-  {/if}
-</section>
+              {#if reportable(entry) && reporting !== entry.id}<button
+                  class="text-button"
+                  disabled={task.busy}
+                  onclick={() => (reporting = entry.id)}>This wasn’t me</button
+                >{/if}
+            </div>
+            {#if reporting === entry.id}<div class="notice stack">
+                <strong>Secure your account?</strong>
+                <p>
+                  This signs out every device but this one, and every app you use with Piquel must
+                  sign in again, including on this device. Your passkeys keep working.
+                </p>
+                {#if entry.kind === 'passkey.added' || entry.kind === 'identity.linked'}<p>
+                    Afterwards, you can confirm with your passkey to undo this change.
+                  </p>{/if}
+                <div class="row actions">
+                  <button class="danger" disabled={task.busy} onclick={() => report(entry)}
+                    >Sign out everywhere else</button
+                  ><button class="secondary" onclick={() => (reporting = null)}>Cancel</button>
+                </div>
+              </div>{/if}
+          </li>{/each}
+      </ul>
+    </section>{/each}
+  {#if !entries.length && !next}<p class="empty">Nothing has happened to your account yet.</p>{/if}
+  {#if next}<button class="secondary full" disabled={task.busy} onclick={older}
+      >Show older activity</button
+    >{/if}
+{/if}

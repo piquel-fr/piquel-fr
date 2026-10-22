@@ -1,6 +1,9 @@
-The piquel.fr SvelteKit server. Today it serves account settings at `/` and
-`/settings`, the account's security history at `/settings/history`, and
-`GET /healthz` for piqueld.
+The piquel.fr SvelteKit server. Today it serves account settings under
+`/settings`, to which `/` redirects, and `GET /healthz` for piqueld. The settings
+layout loads the signed-in account, shares it with its pages and links them:
+sign-in methods at `/settings`, signed-in devices at `/settings/sessions` and the
+security history at `/settings/history`. A new settings page adds itself to the
+layout's `sections`.
 
 It runs on Node with `@sveltejs/adapter-node`: `just web build-settings`
 produces `build/`, which `AUTH_ORIGIN=https://auth.piquel.fr node build` serves

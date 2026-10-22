@@ -1,11 +1,17 @@
 //! Focused persistence and security contract tests.
 use crate::Database;
 
-use crate::repositories::{SessionRepository, UserRepository, sessions::InsertSession};
+use crate::repositories::{
+    SessionRepository, UserRepository,
+    sessions::{InsertSession, LAST_SEEN_INTERVAL, SessionScope},
+};
 use chrono::Utc;
-use piquel_common::{SessionId, UserId};
+use piquel_common::{
+    SessionId, UserId,
+    events::{Browser, Platform, UserAgentFamily},
+};
 use sqlx::PgPool;
-use std::time::Duration;
+use std::{net::IpAddr, time::Duration};
 
 /// Inserts an active account for one lock scenario.
 async fn insert_user(pool: &PgPool) -> UserId {
@@ -28,7 +34,11 @@ fn session_for(user: UserId) -> InsertSession {
         authentication_methods: Vec::new(),
         authenticated_at: now,
         expires_at: now + chrono::Duration::days(1),
-        user_agent_family: None,
+        user_agent_family: UserAgentFamily {
+            browser: Browser::Firefox,
+            platform: Platform::Linux,
+        },
+        ip: IpAddr::from([192, 0, 2, 1]),
         passkey_confirmed_at: None,
     }
 }
@@ -116,11 +126,12 @@ async fn locked_session_lookup_waits_for_concurrent_logout() {
         .expect("session")
         .id;
     let mut logout = pool.begin().await.expect("logout transaction");
-    assert!(
+    assert_eq!(
         SessionRepository::from_connection(&mut logout)
-            .revoke(session)
+            .revoke(user, SessionScope::One(session))
             .await
-            .expect("revoke")
+            .expect("revoke"),
+        [session]
     );
     let exchange = tokio::spawn(async move {
         let mut exchange = pool.begin().await.expect("exchange transaction");
@@ -133,4 +144,43 @@ async fn locked_session_lookup_waits_for_concurrent_logout() {
     assert!(!exchange.is_finished(), "lookup must wait for the logout");
     logout.commit().await.expect("commit logout");
     assert!(exchange.await.expect("exchange task").is_none());
+}
+
+/// Activity is recorded at most once per interval: a fresh session keeps its first
+/// IP, and a stale one takes the new one.
+#[tokio::test]
+#[ignore = "requires a disposable TEST_DATABASE_URL"]
+async fn touch_records_activity_at_most_once_per_interval() {
+    let pool = Database::test_pool().await;
+    let user = insert_user(&pool).await;
+    let mut sessions = SessionRepository::from_pool(&pool);
+    let session = sessions.insert(&session_for(user)).await.expect("session");
+    let elsewhere = IpAddr::from([198, 51, 100, 9]);
+    let pool = &pool;
+    let last_seen = |id| async move {
+        let session = SessionRepository::from_pool(pool)
+            .find_by_id(id)
+            .await
+            .expect("lookup")
+            .expect("session");
+        (session.last_seen_at, session.last_seen_ip)
+    };
+
+    sessions.touch(session.id, elsewhere).await.expect("touch");
+    assert_eq!(
+        last_seen(session.id).await,
+        (session.last_seen_at, session.last_seen_ip),
+        "a fresh session is not written"
+    );
+
+    sqlx::query("UPDATE sessions SET last_seen_at = $2 WHERE id = $1")
+        .bind(session.id.as_uuid())
+        .bind(Utc::now() - LAST_SEEN_INTERVAL - chrono::Duration::seconds(1))
+        .execute(pool)
+        .await
+        .expect("age session");
+    sessions.touch(session.id, elsewhere).await.expect("touch");
+    let (at, ip) = last_seen(session.id).await;
+    assert!(at > session.last_seen_at);
+    assert_eq!(ip, Some(elsewhere));
 }

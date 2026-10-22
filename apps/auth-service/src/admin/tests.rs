@@ -19,7 +19,7 @@ use piquel_common::{
     },
 };
 use piquel_crypto::Rs256Key;
-use piquel_repository::{DatabaseConfig, DatabaseTransaction, InsertUser};
+use piquel_repository::{DatabaseConfig, DatabaseTransaction, InsertUser, SessionScope};
 use serde_json::{Value, json};
 use std::sync::Arc;
 use tower::ServiceExt;
@@ -246,7 +246,7 @@ async fn callers_must_be_administrators_with_a_passkey() {
     harness
         .database
         .sessions()
-        .revoke(ended.session_id)
+        .revoke(ended.user_id, SessionScope::One(ended.session_id))
         .await
         .expect("revoke");
     let read = paths::USERS;
@@ -611,7 +611,7 @@ async fn mutations_recheck_the_confirmation_after_waiting() {
     let mut logout = harness.database.begin().await.expect("transaction");
     logout
         .sessions()
-        .revoke(user.session_id)
+        .revoke(user.user_id, SessionScope::One(user.session_id))
         .await
         .expect("target session lock");
     let operations = harness.operations();
@@ -664,7 +664,7 @@ async fn waiting_mutations_hold_no_caller_locks() {
             until_blocked(&mut switch).await;
             switch
                 .sessions()
-                .revoke(admin.session_id)
+                .revoke(admin.user_id, SessionScope::One(admin.session_id))
                 .await
                 .expect("the switch revokes the caller's session without a deadlock");
             switch.commit().await.expect("commit");
@@ -739,7 +739,7 @@ async fn invitation_revocation_waits_for_signup() {
             until_blocked(&mut signup).await;
             signup
                 .sessions()
-                .revoke(admin.session_id)
+                .revoke(admin.user_id, SessionScope::One(admin.session_id))
                 .await
                 .expect("the signup revokes the browser's session without a deadlock");
             signup.commit().await.expect("signup");

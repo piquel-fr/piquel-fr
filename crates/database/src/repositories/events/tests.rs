@@ -1,7 +1,7 @@
 //! Recording, personal data, the consumer cursor and the audit log import.
 use super::*;
 use crate::{Database, DatabaseTransaction};
-use piquel_common::{PasskeyId, Provider};
+use piquel_common::{PasskeyId, Provider, events::RevocationReason};
 use sqlx::{Connection, PgConnection, PgPool};
 use std::time::Duration;
 
@@ -26,7 +26,10 @@ fn context(user: UserId) -> EventContext {
         },
         origin: RequestOrigin {
             client_ip: Some(IpAddr::from([192, 0, 2, 7])),
-            user_agent_family: Some(UserAgentFamily::Firefox),
+            user_agent_family: Some(UserAgentFamily {
+                browser: Browser::Firefox,
+                platform: Platform::Linux,
+            }),
         },
     }
 }
@@ -179,6 +182,53 @@ async fn read_after_never_skips_an_event_committed_out_of_order() {
     assert_eq!(consume(&pool, consumer, user, 2).await, [first, second]);
 }
 
+/// An event whose payload an older release could not decode is written in its
+/// kind's next version, and this release reads it back. Other events of the kind
+/// keep the first version.
+#[tokio::test]
+#[ignore = "requires a disposable TEST_DATABASE_URL"]
+async fn versions_are_per_event() {
+    let pool = Database::test_pool().await;
+    let user = insert_user(&pool).await;
+    let revoked = |reason| DomainEvent::SessionRevoked {
+        session_id: SessionId::new(),
+        reason,
+    };
+    let events = [
+        revoked(RevocationReason::Logout),
+        revoked(RevocationReason::UserRevoked),
+    ];
+    for event in events.clone() {
+        record(&pool, user, event).await;
+    }
+    let stored = EventRepository::from_pool(&pool)
+        .history_for_user(user, 10)
+        .await
+        .expect("history");
+    assert_eq!(
+        stored
+            .iter()
+            .rev()
+            .map(|stored| &stored.event)
+            .collect::<Vec<_>>(),
+        events
+            .iter()
+            .cloned()
+            .map(RecordedEvent::Known)
+            .collect::<Vec<_>>()
+            .iter()
+            .collect::<Vec<_>>()
+    );
+    let versions: Vec<i16> = sqlx::query_scalar(
+        "SELECT version FROM domain_events WHERE subject_user_id = $1 ORDER BY sequence",
+    )
+    .bind(user.as_uuid())
+    .fetch_all(&pool)
+    .await
+    .expect("versions");
+    assert_eq!(versions, [1, 2]);
+}
+
 /// Events a newer release wrote, of a kind this one does not know or a known kind
 /// in a newer payload version, read as unknown with their data. A known kind
 /// whose payload does not decode still fails.
@@ -190,8 +240,8 @@ async fn events_a_newer_release_wrote_read_as_unknown() {
     let mut events = EventRepository::from_pool(&pool);
     let data = serde_json::json!({"client_id": "deleted"});
     for (kind, version) in [
-        ("client_deleted", EVENT_VERSION),
-        ("passkey_added", EVENT_VERSION + 1),
+        ("client_deleted", DomainEvent::FIRST_VERSION),
+        ("passkey_added", DomainEvent::FIRST_VERSION + 1),
     ] {
         events
             .insert_written_elsewhere(user, kind, version, &data)
@@ -212,15 +262,15 @@ async fn events_a_newer_release_wrote_read_as_unknown() {
             .map(|stored| stored.event)
             .collect::<Vec<_>>(),
         [
-            unknown("passkey_added", EVENT_VERSION + 1),
-            unknown("client_deleted", EVENT_VERSION),
+            unknown("passkey_added", DomainEvent::FIRST_VERSION + 1),
+            unknown("client_deleted", DomainEvent::FIRST_VERSION),
         ]
     );
 
     // Rolled back, so that consumers of every event never read it.
     let mut tx = DatabaseTransaction::new(pool.begin().await.expect("transaction"));
     tx.events()
-        .insert_written_elsewhere(user, "passkey_added", EVENT_VERSION, &data)
+        .insert_written_elsewhere(user, "passkey_added", DomainEvent::FIRST_VERSION, &data)
         .await
         .expect("malformed event");
     assert!(matches!(
@@ -282,6 +332,18 @@ async fn migration_imports_the_audit_log() {
         .execute(&mut connection)
         .await
         .expect("migration");
+    // The rest bring the schema to the one this release reads.
+    for migration in [
+        include_str!("../../../migrations/0006_deliveries.sql"),
+        include_str!("../../../migrations/0007_administrators.sql"),
+        include_str!("../../../migrations/0008_oidc_client_registry.sql"),
+        include_str!("../../../migrations/0009_session_devices.sql"),
+    ] {
+        sqlx::raw_sql(migration)
+            .execute(&mut connection)
+            .await
+            .expect("later migration");
+    }
 
     let history = EventRepository::from_connection(&mut connection)
         .history_for_user(user, 10)

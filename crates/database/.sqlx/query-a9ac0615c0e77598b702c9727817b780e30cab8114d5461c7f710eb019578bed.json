@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "SELECT\n                    e.id AS \"id: EventId\", e.txid::text::bigint AS \"txid!\", e.sequence,\n                    e.occurred_at, e.kind, e.version, e.payload, e.actor AS \"actor: Json<Actor>\",\n                    e.subject_user_id AS \"subject_user_id: UserId\",\n                    p.event_id IS NOT NULL AS \"personal!\", p.client_ip AS \"client_ip?: IpAddr\",\n                    p.user_agent_family AS \"user_agent_family?: UserAgentFamily\",\n                    p.details AS \"details?\"\n                FROM domain_events e\n                LEFT JOIN event_personal_data p ON p.event_id = e.id\n                LEFT JOIN event_consumers c ON c.name = $1\n                WHERE (e.txid, e.sequence) > (COALESCE(c.txid, '0'::xid8), COALESCE(c.sequence, 0))\n                AND e.txid < pg_snapshot_xmin(pg_current_snapshot())\n                ORDER BY e.txid, e.sequence\n                LIMIT $2",
+  "query": "SELECT\n                    e.id AS \"id: EventId\", e.txid::text::bigint AS \"txid!\", e.sequence,\n                    e.occurred_at, e.kind, e.version, e.payload, e.actor AS \"actor: Json<Actor>\",\n                    e.subject_user_id AS \"subject_user_id: UserId\",\n                    p.event_id IS NOT NULL AS \"personal!\", p.client_ip AS \"client_ip?: IpAddr\",\n                    p.user_agent_family AS \"browser?: Browser\",\n                    p.platform AS \"platform?: Platform\",\n                    p.details AS \"details?\"\n                FROM domain_events e\n                LEFT JOIN event_personal_data p ON p.event_id = e.id\n                WHERE e.client_id = $1\n                ORDER BY e.sequence DESC\n                LIMIT $2",
   "describe": {
     "columns": [
       {
@@ -60,11 +60,16 @@
       },
       {
         "ordinal": 11,
-        "name": "user_agent_family?: UserAgentFamily",
+        "name": "browser?: Browser",
         "type_info": "Text"
       },
       {
         "ordinal": 12,
+        "name": "platform?: Platform",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 13,
         "name": "details?",
         "type_info": "Jsonb"
       }
@@ -88,8 +93,9 @@
       null,
       true,
       true,
+      true,
       false
     ]
   },
-  "hash": "4e178ac825e430262861fb13fbf34256db3ce26803a097c913b98e2eadea128f"
+  "hash": "a9ac0615c0e77598b702c9727817b780e30cab8114d5461c7f710eb019578bed"
 }

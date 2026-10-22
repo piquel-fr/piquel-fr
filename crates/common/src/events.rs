@@ -180,6 +180,24 @@ pub enum DomainEvent {
 }
 
 impl DomainEvent {
+    /// The payload version every kind starts at.
+    pub const FIRST_VERSION: i16 = 1;
+
+    /// The payload version stored with the event. A change an older release could
+    /// not decode, such as a new variant of an enum inside a payload, gets the next
+    /// version of that kind, written only by the events that use it, so older
+    /// releases still read the others. See `docs/architecture/database-crate.md`.
+    #[must_use]
+    pub const fn version(&self) -> i16 {
+        match self {
+            Self::SessionRevoked {
+                reason: RevocationReason::UserRevoked,
+                ..
+            } => 2,
+            _ => Self::FIRST_VERSION,
+        }
+    }
+
     /// The client the event concerns, stored in its own column for filtering.
     #[must_use]
     pub fn client_id(&self) -> Option<&ClientId> {
@@ -274,7 +292,8 @@ impl DomainEvent {
                 | RevocationReason::Admin
                 | RevocationReason::AccountDisabled
                 | RevocationReason::AccountDeletion
-                | RevocationReason::CompromiseReported => HistoryEntry::SessionRevoked {
+                | RevocationReason::CompromiseReported
+                | RevocationReason::UserRevoked => HistoryEntry::SessionRevoked {
                     reason: reason.clone(),
                 },
                 RevocationReason::Expired => return None,
@@ -563,6 +582,9 @@ pub enum RevocationReason {
     /// The user reported an event of their history as not theirs, which ends the
     /// account's other sessions.
     CompromiseReported,
+    /// The user signed it out from another session's settings. Added in version 2
+    /// of `session_revoked`.
+    UserRevoked,
 }
 
 /// Why a refresh family was revoked.
@@ -695,8 +717,8 @@ impl ImportedAudit {
 }
 
 crate::str_enum! {
-    /// Coarse browser family derived from a `User-Agent` header, which is never stored.
-    pub enum UserAgentFamily {
+    /// Coarse browser derived from a `User-Agent` header, which is never stored.
+    pub enum Browser {
         /// Google Chrome and other Chromium browsers that announce no other name.
         Chrome = "chrome",
         /// Microsoft Edge.
@@ -712,34 +734,113 @@ crate::str_enum! {
     }
 }
 
-impl UserAgentFamily {
-    /// Classifies a `User-Agent` header. Markers are checked in order, because Edge
-    /// and Opera also announce Chrome, and Chrome announces Safari.
-    #[must_use]
-    pub fn classify(user_agent: &str) -> Self {
-        [
-            ("Edg/", Self::Edge),
-            ("EdgA/", Self::Edge),
-            ("EdgiOS/", Self::Edge),
-            ("OPR/", Self::Opera),
-            ("Firefox/", Self::Firefox),
-            ("FxiOS/", Self::Firefox),
-            ("Chrome/", Self::Chrome),
-            ("CriOS/", Self::Chrome),
-            ("Safari/", Self::Safari),
-        ]
-        .into_iter()
-        .find(|(marker, _)| user_agent.contains(marker))
-        .map_or(Self::Other, |(_, family)| family)
+crate::str_enum! {
+    /// Coarse operating system derived from a `User-Agent` header.
+    pub enum Platform {
+        /// Android.
+        Android = "android",
+        /// `ChromeOS`.
+        ChromeOs = "chrome_os",
+        /// iOS and iPadOS. iPads that request desktop sites announce macOS.
+        Ios = "ios",
+        /// Linux on the desktop.
+        Linux = "linux",
+        /// macOS.
+        MacOs = "macos",
+        /// Windows.
+        Windows = "windows",
+        /// Anything else, including back-channel HTTP clients.
+        Other = "other",
     }
 }
+
+/// Coarse browser and platform of a `User-Agent` header, the only part of it auth
+/// keeps. Stored as text, `browser/platform` (`firefox/linux`); serialized as
+/// `{"browser": …, "platform": …}`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct UserAgentFamily {
+    /// The browser.
+    pub browser: Browser,
+    /// The operating system it runs on.
+    pub platform: Platform,
+}
+
+impl UserAgentFamily {
+    /// Classifies a `User-Agent` header. Markers are checked in order: Edge and Opera
+    /// also announce Chrome, Chrome announces Safari, Android and `ChromeOS` announce
+    /// Linux, and iOS announces macOS.
+    #[must_use]
+    pub fn classify(user_agent: &str) -> Self {
+        /// The value of the first marker `user_agent` contains, or `other`.
+        fn first<T: Copy>(user_agent: &str, markers: &[(&str, T)], other: T) -> T {
+            markers
+                .iter()
+                .find(|(marker, _)| user_agent.contains(marker))
+                .map_or(other, |&(_, value)| value)
+        }
+        Self {
+            browser: first(
+                user_agent,
+                &[
+                    ("Edg/", Browser::Edge),
+                    ("EdgA/", Browser::Edge),
+                    ("EdgiOS/", Browser::Edge),
+                    ("OPR/", Browser::Opera),
+                    ("Firefox/", Browser::Firefox),
+                    ("FxiOS/", Browser::Firefox),
+                    ("Chrome/", Browser::Chrome),
+                    ("CriOS/", Browser::Chrome),
+                    ("Safari/", Browser::Safari),
+                ],
+                Browser::Other,
+            ),
+            platform: first(
+                user_agent,
+                &[
+                    ("Android", Platform::Android),
+                    ("CrOS", Platform::ChromeOs),
+                    ("iPhone", Platform::Ios),
+                    ("iPad", Platform::Ios),
+                    ("iPod", Platform::Ios),
+                    ("Mac OS X", Platform::MacOs),
+                    ("Windows", Platform::Windows),
+                    ("Linux", Platform::Linux),
+                ],
+                Platform::Other,
+            ),
+        }
+    }
+}
+
+impl std::fmt::Display for UserAgentFamily {
+    /// Formats the stored text, `browser/platform`.
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}/{}", self.browser, self.platform)
+    }
+}
+
+impl std::str::FromStr for UserAgentFamily {
+    type Err = crate::VocabularyError;
+    /// Parses the stored text, `browser/platform`.
+    fn from_str(value: &str) -> Result<Self, Self::Err> {
+        let (browser, platform) = value.split_once('/').ok_or(crate::VocabularyError {
+            vocabulary: "UserAgentFamily",
+        })?;
+        Ok(Self {
+            browser: browser.parse()?,
+            platform: platform.parse()?,
+        })
+    }
+}
+
+crate::__str_enum_sqlx!(UserAgentFamily);
 
 /// Where a request came from. Both fields are personal data.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct RequestOrigin {
     /// The client's IP address, when the event came from a request.
     pub client_ip: Option<IpAddr>,
-    /// The client's browser family, when the event came from a request.
+    /// The client's browser and platform, when the event came from a request.
     pub user_agent_family: Option<UserAgentFamily>,
 }
 
@@ -751,3 +852,7 @@ pub struct EventContext {
     /// Where the request came from; empty outside requests.
     pub origin: RequestOrigin,
 }
+
+/// User agent classification on real browser headers.
+#[cfg(test)]
+mod tests;

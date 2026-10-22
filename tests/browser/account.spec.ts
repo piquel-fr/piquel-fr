@@ -287,6 +287,14 @@ test('passkey lifecycle, passkey confirmation and browser OIDC consent with SSO'
     }, authUrl);
     expect(lastPasskey).toBeGreaterThanOrEqual(400);
 
+    // The devices page lists this browser's session, which it cannot sign out there.
+    await page.getByRole('link', { name: 'Devices', exact: true }).click();
+    await expect(page).toHaveURL(new URL('/settings/sessions', settingsUrl).href);
+    await expect(page.getByText('This device', { exact: true })).toBeVisible();
+    await expect(page.getByText('You’re only signed in on this device.')).toBeVisible();
+    await page.getByRole('link', { name: 'Sign-in methods', exact: true }).click();
+    await expect(page).toHaveURL(settingsUrl);
+
     await page.getByRole('button', { name: 'Sign out', exact: true }).click();
     await page.getByRole('link', { name: 'Sign in', exact: true }).click();
     await page.getByRole('button', { name: 'Sign in with a passkey', exact: true }).click();

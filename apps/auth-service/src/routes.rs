@@ -67,6 +67,16 @@ pub(crate) mod history {
     pub(crate) const REPORT: &str = "/account/history/{event_id}/report";
 }
 
+/// The signed-in user's sessions, one per signed-in browser.
+pub(crate) mod sessions {
+    /// Lists the account's active sessions, most recently active first.
+    pub(crate) const LIST: &str = "/account/sessions";
+    /// Signs one other session out.
+    pub(crate) const ITEM: &str = "/account/sessions/{id}";
+    /// Signs every other session out.
+    pub(crate) const REVOKE_OTHERS: &str = "/account/sessions/revoke-others";
+}
+
 /// OAuth 2.0 and `OpenID` Connect endpoints.
 pub(crate) mod oidc {
     use piquel_common::protocol::metadata;

@@ -2,10 +2,11 @@
 
 use super::{JsonArray, RepositoryExecutor, SessionRepository};
 use crate::DatabaseError;
-use chrono::{DateTime, Utc};
+use chrono::{DateTime, TimeDelta, Utc};
 use piquel_admin_api::Session;
 use piquel_common::{
     AuthenticationMethod, SessionId, UserId,
+    events::UserAgentFamily,
     protocol::claims::{Acr, Amr},
 };
 use serde::{Deserialize, Serialize};
@@ -15,7 +16,10 @@ use sqlx::{
     postgres::{PgTypeInfo, PgValueRef},
     types::Json,
 };
-use std::collections::BTreeSet;
+use std::{collections::BTreeSet, net::IpAddr};
+
+/// How often a session's `last_seen_at` and `last_seen_ip` are refreshed at most.
+pub const LAST_SEEN_INTERVAL: TimeDelta = TimeDelta::minutes(5);
 
 /// A new browser session.
 #[derive(Clone, Debug)]
@@ -30,8 +34,10 @@ pub struct InsertSession {
     pub authenticated_at: DateTime<Utc>,
     /// Absolute expiry; must be after `authenticated_at`.
     pub expires_at: DateTime<Utc>,
-    /// Coarse user agent family, if recorded; never the raw header.
-    pub user_agent_family: Option<String>,
+    /// Coarse browser and platform of the signing-in request; never the raw header.
+    pub user_agent_family: UserAgentFamily,
+    /// IP address of the signing-in request; also the initial `last_seen_ip`.
+    pub ip: IpAddr,
     /// When the session last proved possession of a passkey, if it did.
     pub passkey_confirmed_at: Option<DateTime<Utc>>,
 }
@@ -55,6 +61,48 @@ pub struct StoredSession {
     pub revoked_at: Option<DateTime<Utc>>,
     /// When the session last proved possession of a passkey. Social sign-in never sets it.
     pub passkey_confirmed_at: Option<DateTime<Utc>>,
+    /// Coarse browser and platform it signed in with; `None` for sessions created
+    /// before they were recorded.
+    pub user_agent_family: Option<UserAgentFamily>,
+    /// IP address of its last recorded activity; `None` for sessions created before
+    /// it was recorded.
+    pub last_seen_ip: Option<IpAddr>,
+}
+
+/// Which of an account's sessions [`SessionRepository::revoke`] ends.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum SessionScope {
+    /// This session only.
+    One(SessionId),
+    /// Every session but this one.
+    AllExcept(SessionId),
+    /// Every session.
+    All,
+}
+
+impl SessionScope {
+    /// The `(only, except)` session binds of the revocation query.
+    fn binds(self) -> (Option<SessionId>, Option<SessionId>) {
+        match self {
+            Self::One(id) => (Some(id), None),
+            Self::AllExcept(id) => (None, Some(id)),
+            Self::All => (None, None),
+        }
+    }
+}
+
+impl From<StoredSession> for Session {
+    /// Keeps what the admin API shows.
+    fn from(session: StoredSession) -> Self {
+        Self {
+            id: session.id,
+            methods: session.authentication_methods,
+            authenticated_at: session.authenticated_at,
+            passkey_confirmed_at: session.passkey_confirmed_at,
+            last_seen_at: session.last_seen_at,
+            expires_at: session.expires_at,
+        }
+    }
 }
 
 /// How and when a session authenticated, as tokens report it. Token issuance,
@@ -135,21 +183,25 @@ impl SessionRepository<'_> {
                 )
                 INSERT INTO sessions (
                     id, user_id, authentication_methods, authenticated_at, expires_at,
-                    last_seen_at, user_agent_family, passkey_confirmed_at
+                    last_seen_at, user_agent_family, passkey_confirmed_at, created_ip,
+                    last_seen_ip
                 )
-                SELECT $1, id, $3, $4, $5, $4, $6, $7
+                SELECT $1, id, $3, $4, $5, $4, $6, $7, $8, $8
                 FROM active_user
                 RETURNING
                     id AS "id: SessionId", user_id AS "user_id: UserId",
                     authentication_methods AS "authentication_methods: JsonArray<AuthenticationMethod>",
-                    authenticated_at, expires_at, last_seen_at, revoked_at, passkey_confirmed_at"#,
+                    authenticated_at, expires_at, last_seen_at, revoked_at, passkey_confirmed_at,
+                    user_agent_family AS "user_agent_family: UserAgentFamily",
+                    last_seen_ip AS "last_seen_ip: IpAddr""#,
                 input.id.as_uuid(),
                 input.user_id.as_uuid(),
                 Json(&input.authentication_methods) as _,
                 input.authenticated_at,
                 input.expires_at,
-                input.user_agent_family,
+                input.user_agent_family.to_string(),
                 input.passkey_confirmed_at,
+                input.ip as _,
             )
         )
     }
@@ -171,7 +223,9 @@ impl SessionRepository<'_> {
                 r#"SELECT
                     id AS "id: SessionId", user_id AS "user_id: UserId",
                     authentication_methods AS "authentication_methods: JsonArray<AuthenticationMethod>",
-                    authenticated_at, expires_at, last_seen_at, revoked_at, passkey_confirmed_at
+                    authenticated_at, expires_at, last_seen_at, revoked_at, passkey_confirmed_at,
+                    user_agent_family AS "user_agent_family: UserAgentFamily",
+                    last_seen_ip AS "last_seen_ip: IpAddr"
                 FROM sessions
                 WHERE id = $1"#,
                 id.as_uuid(),
@@ -197,7 +251,9 @@ impl SessionRepository<'_> {
                     s.id AS "id: SessionId", s.user_id AS "user_id: UserId",
                     s.authentication_methods AS "authentication_methods: JsonArray<AuthenticationMethod>",
                     s.authenticated_at, s.expires_at, s.last_seen_at, s.revoked_at,
-                    s.passkey_confirmed_at
+                    s.passkey_confirmed_at,
+                    s.user_agent_family AS "user_agent_family: UserAgentFamily",
+                    s.last_seen_ip AS "last_seen_ip: IpAddr"
                 FROM sessions s
                 JOIN users u ON u.id = s.user_id
                 WHERE s.id = $1
@@ -229,7 +285,9 @@ impl SessionRepository<'_> {
                     s.id AS "id: SessionId", s.user_id AS "user_id: UserId",
                     s.authentication_methods AS "authentication_methods: JsonArray<AuthenticationMethod>",
                     s.authenticated_at, s.expires_at, s.last_seen_at, s.revoked_at,
-                    s.passkey_confirmed_at
+                    s.passkey_confirmed_at,
+                    s.user_agent_family AS "user_agent_family: UserAgentFamily",
+                    s.last_seen_ip AS "last_seen_ip: IpAddr"
                 FROM sessions s
                 JOIN users u ON u.id = s.user_id
                 WHERE s.id = $1
@@ -242,52 +300,46 @@ impl SessionRepository<'_> {
         )
     }
 
-    /// Revokes a session. Returns `false` if it was already revoked or unknown.
+    /// Revokes the `scope` sessions of `user_id`, with the refresh token families
+    /// issued from them, and returns the IDs of the sessions it revoked, so the
+    /// caller can record each revocation. Sessions of other accounts are never
+    /// touched, whatever the scope names. This is the only way sessions end early.
     ///
     /// # Errors
     ///
     /// Returns [`DatabaseError`] if the query fails.
-    pub async fn revoke(&mut self, id: SessionId) -> Result<bool, DatabaseError> {
-        Ok(run!(
-            self,
-            execute,
-            sqlx::query!(
-                "UPDATE sessions SET revoked_at=now() WHERE id=$1 AND revoked_at IS NULL",
-                id.as_uuid(),
-            )
-        )?
-        .rows_affected()
-            == 1)
-    }
-
-    /// Revokes every other unrevoked session of the account and returns their
-    /// IDs, so the caller can record each revocation.
-    ///
-    /// # Errors
-    ///
-    /// Returns [`DatabaseError`] if the query fails.
-    pub async fn revoke_other(
+    pub async fn revoke(
         &mut self,
         user_id: UserId,
-        except_session: SessionId,
+        scope: SessionScope,
     ) -> Result<Vec<SessionId>, DatabaseError> {
+        let (only, except) = scope.binds();
         run!(
             self,
             fetch_all,
             sqlx::query_scalar!(
-                r#"UPDATE sessions
-                SET revoked_at = now(), passkey_confirmed_at = NULL
-                WHERE user_id = $1
-                AND id <> $2
-                AND revoked_at IS NULL
-                RETURNING id AS "id: SessionId""#,
+                r#"WITH revoked AS (
+                    UPDATE sessions
+                    SET revoked_at = now(), passkey_confirmed_at = NULL
+                    WHERE user_id = $1
+                    AND revoked_at IS NULL
+                    AND ($2::uuid IS NULL OR id = $2)
+                    AND ($3::uuid IS NULL OR id <> $3)
+                    RETURNING id
+                ), families AS (
+                    UPDATE refresh_token_families
+                    SET revoked_at = COALESCE(revoked_at, now())
+                    WHERE session_id IN (SELECT id FROM revoked)
+                )
+                SELECT id AS "id!: SessionId" FROM revoked"#,
                 user_id.as_uuid(),
-                except_session.as_uuid(),
+                only.map(SessionId::as_uuid),
+                except.map(SessionId::as_uuid),
             )
         )
     }
 
-    /// Lists the account's unrevoked, unexpired sessions, newest first.
+    /// Lists the account's unrevoked, unexpired sessions, most recently active first.
     ///
     /// # Errors
     ///
@@ -295,48 +347,47 @@ impl SessionRepository<'_> {
     pub async fn list_active_for_user(
         &mut self,
         user_id: UserId,
-    ) -> Result<Vec<Session>, DatabaseError> {
+    ) -> Result<Vec<StoredSession>, DatabaseError> {
         run!(
             self,
             fetch_all,
             sqlx::query_as!(
-                Session,
+                StoredSession,
                 r#"SELECT
-                    id AS "id: SessionId",
-                    authentication_methods AS "methods: JsonArray<AuthenticationMethod>",
-                    authenticated_at, passkey_confirmed_at, last_seen_at, expires_at
+                    id AS "id: SessionId", user_id AS "user_id: UserId",
+                    authentication_methods AS "authentication_methods: JsonArray<AuthenticationMethod>",
+                    authenticated_at, expires_at, last_seen_at, revoked_at, passkey_confirmed_at,
+                    user_agent_family AS "user_agent_family: UserAgentFamily",
+                    last_seen_ip AS "last_seen_ip: IpAddr"
                 FROM sessions
                 WHERE user_id = $1
                 AND revoked_at IS NULL
                 AND expires_at > now()
-                ORDER BY authenticated_at DESC"#,
+                ORDER BY last_seen_at DESC, id DESC"#,
                 user_id.as_uuid(),
             )
         )
     }
 
-    /// Revokes every unrevoked session of the account and returns their IDs, so the
-    /// caller can record each revocation. Callers lock the account first.
+    /// Records activity of the session from `ip`, at most once every
+    /// [`LAST_SEEN_INTERVAL`], so session reads rarely become writes.
     ///
     /// # Errors
     ///
     /// Returns [`DatabaseError`] if the query fails.
-    pub async fn revoke_all_for_user(
-        &mut self,
-        user_id: UserId,
-    ) -> Result<Vec<SessionId>, DatabaseError> {
+    pub async fn touch(&mut self, id: SessionId, ip: IpAddr) -> Result<(), DatabaseError> {
         run!(
             self,
-            fetch_all,
-            sqlx::query_scalar!(
-                r#"UPDATE sessions
-                SET revoked_at = now(), passkey_confirmed_at = NULL
-                WHERE user_id = $1
-                AND revoked_at IS NULL
-                RETURNING id AS "id: SessionId""#,
-                user_id.as_uuid(),
+            execute,
+            sqlx::query!(
+                "UPDATE sessions SET last_seen_at = now(), last_seen_ip = $2
+                WHERE id = $1 AND last_seen_at < $3",
+                id.as_uuid(),
+                ip as _,
+                Utc::now() - LAST_SEEN_INTERVAL,
             )
-        )
+        )?;
+        Ok(())
     }
 
     /// Stores the digest of a session's browser cookie secret.
@@ -380,7 +431,9 @@ impl SessionRepository<'_> {
                     s.id AS "id: SessionId", s.user_id AS "user_id: UserId",
                     s.authentication_methods AS "authentication_methods: JsonArray<AuthenticationMethod>",
                     s.authenticated_at, s.expires_at, s.last_seen_at, s.revoked_at,
-                    s.passkey_confirmed_at
+                    s.passkey_confirmed_at,
+                    s.user_agent_family AS "user_agent_family: UserAgentFamily",
+                    s.last_seen_ip AS "last_seen_ip: IpAddr"
                 FROM browser_session_secrets b
                 JOIN sessions s ON s.id = b.session_id
                 JOIN users u ON u.id = s.user_id

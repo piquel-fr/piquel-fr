@@ -13,7 +13,9 @@ use piquel_common::{
     events::{DomainEvent, EventContext, RevocationReason},
     protocol::api::Identity,
 };
-use piquel_repository::{Database, DatabaseTransaction, InsertExternalIdentity, PendingFederation};
+use piquel_repository::{
+    Database, DatabaseTransaction, InsertExternalIdentity, PendingFederation, SessionScope,
+};
 use serde::Serialize;
 
 impl FederationApplication {
@@ -273,10 +275,11 @@ impl FederationApplication {
             DomainEvent::IdentityUnlinked { provider },
         )
         .await?;
-        security::Session::revoke_other(
+        security::Session::revoke(
             &mut tx,
             context,
             session,
+            SessionScope::AllExcept(session.id),
             RevocationReason::IdentityUnlinked,
         )
         .await?;

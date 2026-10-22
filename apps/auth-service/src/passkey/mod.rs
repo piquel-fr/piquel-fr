@@ -17,7 +17,8 @@ use piquel_common::{
 };
 use piquel_crypto::Secret;
 use piquel_repository::{
-    Database, DatabaseError, DatabaseTransaction, InsertPasskey, InsertUser, StoredPasskey,
+    Database, DatabaseError, DatabaseTransaction, InsertPasskey, InsertUser, SessionScope,
+    StoredPasskey,
 };
 use serde_json::Value;
 use std::sync::Arc;
@@ -826,10 +827,11 @@ impl PasskeyApplication {
             DomainEvent::PasskeyRemoved { passkey_id: id },
         )
         .await?;
-        security::Session::revoke_other(
+        security::Session::revoke(
             &mut tx,
             context,
             session,
+            SessionScope::AllExcept(session.id),
             RevocationReason::CredentialRemoved,
         )
         .await?;
@@ -865,17 +867,14 @@ impl PasskeyApplication {
     ) -> Result<Response, ApiError> {
         if let Some(session) = session {
             let mut tx = app.database.begin().await?;
-            if tx.sessions().revoke(session.id).await? {
-                tx.record(
-                    &context.user(&session),
-                    Some(session.user_id),
-                    DomainEvent::SessionRevoked {
-                        session_id: session.id,
-                        reason: RevocationReason::Logout,
-                    },
-                )
-                .await?;
-            }
+            security::Session::revoke(
+                &mut tx,
+                context,
+                &session,
+                SessionScope::One(session.id),
+                RevocationReason::Logout,
+            )
+            .await?;
             tx.commit().await?;
         }
         let mut response = StatusCode::NO_CONTENT.into_response();

@@ -2,8 +2,8 @@
 use crate::Database;
 
 use super::{InsertRefreshFamily, InsertRefreshToken, RefreshRotationError};
-use crate::repositories::{OidcRepository, TokenRepository};
-use crate::{CodeRedemptionError, DatabaseTransaction, SessionAuthentication};
+use crate::repositories::{OidcRepository, SessionRepository, TokenRepository};
+use crate::{CodeRedemptionError, DatabaseTransaction, SessionAuthentication, SessionScope};
 use chrono::{Duration, Utc};
 use piquel_common::{
     ClientId, SessionId, TokenId, UserId,
@@ -230,7 +230,8 @@ async fn independent_refreshes_share_client_and_logout_does_not_deadlock() {
     wait_for_lock(&pool, rotation_backend).await;
     tokio::time::timeout(
         Wait::from_secs(2),
-        OidcRepository::from_connection(&mut logout).revoke_session(grant.session),
+        SessionRepository::from_connection(&mut logout)
+            .revoke(grant.user, SessionScope::One(grant.session)),
     )
     .await
     .expect("logout must not wait for refresh family locks")
@@ -372,4 +373,49 @@ async fn code_replay_by_another_client_revokes_nothing() {
         .consume_for_rotation(token, &digest, client.as_str())
         .await
         .expect("the family still rotates");
+}
+
+/// Revoking a session ends the refresh families issued from it, and never touches
+/// another account's session, whatever the scope names.
+#[tokio::test]
+#[ignore = "requires a disposable TEST_DATABASE_URL"]
+async fn session_revocation_ends_its_families_and_only_its_owners() {
+    let pool = Database::test_pool().await;
+    let client = client(&pool).await;
+    let mut tokens = TokenRepository::from_pool(&pool);
+    let mine = Grant::new(&pool, &client).await;
+    let theirs = Grant::new(&pool, &client).await;
+    mine.family(&mut tokens, &client).await;
+    theirs.family(&mut tokens, &client).await;
+    let family_revoked = |grant: &Grant| {
+        sqlx::query_scalar::<_, bool>(
+            "SELECT revoked_at IS NOT NULL FROM refresh_token_families WHERE session_id = $1",
+        )
+        .bind(grant.session.as_uuid())
+        .fetch_one(&pool)
+    };
+    let mut sessions = SessionRepository::from_pool(&pool);
+
+    for scope in [SessionScope::One(theirs.session), SessionScope::All] {
+        let revoked = sessions.revoke(mine.user, scope).await.expect("revoke");
+        assert!(!revoked.contains(&theirs.session), "{scope:?}");
+    }
+    assert!(
+        sessions
+            .find_active_by_id(theirs.session)
+            .await
+            .expect("lookup")
+            .is_some(),
+        "another account's session stays active"
+    );
+    assert!(!family_revoked(&theirs).await.expect("their family"));
+    assert!(family_revoked(&mine).await.expect("my family"));
+    assert!(
+        sessions
+            .revoke(mine.user, SessionScope::One(mine.session))
+            .await
+            .expect("revoke again")
+            .is_empty(),
+        "a revoked session is not revoked twice"
+    );
 }

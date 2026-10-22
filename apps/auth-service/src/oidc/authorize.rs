@@ -828,6 +828,8 @@ mod tests {
             last_seen_at: now,
             revoked_at: None,
             passkey_confirmed_at: Some(now - Duration::seconds(300)),
+            user_agent_family: None,
+            last_seen_ip: None,
         };
         let satisfies = |max_age, started_at| {
             OidcApplication::session_satisfies(

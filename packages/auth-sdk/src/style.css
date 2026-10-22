@@ -238,6 +238,26 @@ p {
 .settings .card {
   margin: 1rem 0;
 }
+.tabs {
+  display: flex;
+  gap: 0.25rem;
+  margin: 1.5rem 0 1rem;
+  border-bottom: 1px solid var(--line);
+  overflow-x: auto;
+}
+.tabs a {
+  padding: 0.6rem 0.8rem;
+  margin-bottom: -1px;
+  border-bottom: 2px solid transparent;
+  color: var(--muted);
+  text-decoration: none;
+  white-space: nowrap;
+}
+.tabs a[aria-current='page'] {
+  border-bottom-color: var(--green);
+  color: var(--green);
+  font-weight: 600;
+}
 .empty {
   padding: 1rem 0;
 }
