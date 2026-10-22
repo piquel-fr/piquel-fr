@@ -1,10 +1,11 @@
 //! Client registrations against a real database: the migration from the clients
-//! file's rows, secret rotation, and the origins public clients may call from.
-use crate::Database;
+//! file's rows, secret rotation, the origins public clients may call from, and
+//! when pushed authorization requests can be claimed.
 use crate::repositories::OidcRepository;
-use chrono::{Duration, Utc};
+use crate::{Database, InsertAuthorizationRequest};
+use chrono::{DateTime, Duration, Utc};
 use piquel_common::{
-    ClientId, UserId,
+    ClientId, TokenId, UserId,
     clients::{
         AllowedScopes, ClientKind, ClientRegistration, PostLogoutUris, RedirectUris, ScopeName,
     },
@@ -99,6 +100,56 @@ async fn rotation_caps_earlier_secrets_without_reviving_or_extending_them() {
             .all(|expiry| expiry.is_some_and(|at| at <= Utc::now())),
         "revoked secrets stay revoked"
     );
+}
+
+/// A pushed request can be claimed only before it expires.
+#[tokio::test]
+#[ignore = "requires a disposable TEST_DATABASE_URL"]
+async fn pushed_requests_are_claimed_only_before_they_expire() {
+    let pool = Database::test_pool().await;
+    let origin = origin();
+    let client = registration(ClientKind::Public, &origin);
+    OidcRepository::from_pool(&pool)
+        .create_client(&client)
+        .await
+        .expect("create");
+    let claim = async |expires_at: DateTime<Utc>| {
+        let id = TokenId::new();
+        let digest = id.as_uuid().as_bytes().to_vec();
+        let mut oidc = OidcRepository::from_pool(&pool);
+        oidc.insert_authorization_request(&InsertAuthorizationRequest {
+            id,
+            secret_digest: digest.clone(),
+            pushed: true,
+            client_id: client.id.clone(),
+            redirect_uri: format!("{origin}/callback"),
+            client_state: "state".into(),
+            nonce: None,
+            pkce_challenge: "challenge".into(),
+            scopes: vec![Scope::OpenId.as_str().into()],
+            audience: client.id.to_string(),
+            force_login: false,
+            force_consent: false,
+            prompt_none: false,
+            max_age: None,
+            hinted_user_id: None,
+            target_acr: None,
+            expires_at,
+        })
+        .await
+        .expect("push");
+        oidc.claim_pushed_authorization_request(
+            id,
+            &digest,
+            client.id.as_str(),
+            TokenId::new().as_uuid().as_bytes(),
+            Utc::now() + Duration::minutes(10),
+        )
+        .await
+        .expect("claim")
+    };
+    assert!(claim(Utc::now() - Duration::seconds(1)).await.is_none());
+    assert!(claim(Utc::now() + Duration::minutes(1)).await.is_some());
 }
 
 /// Only enabled public clients' authorization redirect origins are allowed, and

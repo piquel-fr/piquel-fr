@@ -427,9 +427,15 @@ impl OidcApplication {
         request_uri: &str,
     ) -> Result<Redirect, OAuthError> {
         let unknown = || OAuthCode::InvalidRequestUri.reject(UNKNOWN_REQUEST_URI);
+        // RFC 9126 §5: a pushed `request_uri` works whatever
+        // `request_uri_parameter_supported` says, so the parameter is supported and
+        // a client-hosted one is invalid rather than `request_uri_not_supported`.
         let token = request_uri
             .strip_prefix(REQUEST_URI_PREFIX)
-            .ok_or_else(unknown)?;
+            .ok_or_else(|| {
+                OAuthCode::InvalidRequestUri
+                    .reject("request_uri must come from the pushed authorization endpoint")
+            })?;
         let pushed =
             OpaqueToken::parse(TokenPrefix::AuthorizationRequest, token).map_err(|error| {
                 OAuthCode::InvalidRequestUri.reject_with(UNKNOWN_REQUEST_URI, error)
@@ -623,18 +629,19 @@ impl OidcApplication {
     /// account, a fresh authentication for `prompt=login` or `max_age=0`, and the
     /// target `acr` and a positive `max_age` as a [`StepUpRequirement`], the rule
     /// resources and auth's own settings apply. Ages count from the session's
-    /// `auth_time`, and only authenticating after the request was stored
-    /// (`created_at`) counts as fresh. A negative `max_age` is never met.
+    /// `auth_time`, and only authenticating after the request started (`started_at`:
+    /// when stored, or claimed if pushed) counts as fresh. A negative `max_age` is
+    /// never met.
     fn session_satisfies(
         session: &StoredSession,
         force_login: bool,
         max_age: Option<i64>,
         hinted_user_id: Option<UserId>,
         target_acr: Option<Acr>,
-        created_at: Option<DateTime<Utc>>,
+        started_at: Option<DateTime<Utc>>,
     ) -> bool {
         let authentication = SessionAuthentication::from(session);
-        let fresh = created_at.is_some_and(|created_at| authentication.auth_time >= created_at);
+        let fresh = started_at.is_some_and(|started_at| authentication.auth_time >= started_at);
         let (force_login, max_age) = match max_age {
             // Requests reject negative ages, so one stored anyway is never met.
             Some(age) if age < 0 => return false,
@@ -822,14 +829,14 @@ mod tests {
             revoked_at: None,
             passkey_confirmed_at: Some(now - Duration::seconds(300)),
         };
-        let satisfies = |max_age, created_at| {
+        let satisfies = |max_age, started_at| {
             OidcApplication::session_satisfies(
                 &session,
                 false,
                 Some(max_age),
                 None,
                 None,
-                created_at,
+                started_at,
             )
         };
         assert!(satisfies(310, None));

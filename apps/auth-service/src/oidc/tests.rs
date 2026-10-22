@@ -11,7 +11,7 @@ use axum::{
 use chrono::Utc;
 use piquel_common::{
     AuthenticationMethod, UserId,
-    clients::{AllowedScopes, ClientRegistration, ScopeName},
+    clients::{AllowedScopes, ClientKind, ClientRegistration, ScopeName},
     events::{DomainEvent, GrantRevocation, RevocationReason},
     protocol::{
         claims::{Acr, IdTokenClaims},
@@ -140,6 +140,15 @@ impl Flow {
             router: router.clone(),
             ..self.clone()
         }
+    }
+    /// Signs the scenario's browser in again with `method`, as a new session.
+    async fn sign_in_again(&mut self, method: AuthenticationMethod) {
+        let mut tx = self.app.database.begin().await.expect("transaction");
+        let session = Session::create(&mut tx, RequestContext::TEST, self.user_id, method)
+            .await
+            .expect("session");
+        tx.commit().await.expect("commit");
+        self.cookie = format!("{}={}", BrowserCookie::Session.as_str(), session.encoded());
     }
     /// Lists the events recorded about the scenario account, newest first.
     async fn events(&self) -> Vec<DomainEvent> {
@@ -984,17 +993,7 @@ async fn acr_targets_and_grants_keep_their_authentication() {
     assert_eq!(refreshed["auth_time"], claims["auth_time"]);
     assert_eq!(refreshed["acr"], claims["acr"]);
 
-    let mut tx = flow.app.database.begin().await.expect("transaction");
-    let social = crate::security::Session::create(
-        &mut tx,
-        RequestContext::TEST,
-        flow.user_id,
-        AuthenticationMethod::Federation,
-    )
-    .await
-    .expect("social session");
-    tx.commit().await.expect("commit");
-    flow.cookie = format!("{}={}", BrowserCookie::Session.as_str(), social.encoded());
+    flow.sign_in_again(AuthenticationMethod::Federation).await;
     let phr = [("acr_values", "urn:example:gold phr")];
     let response = flow
         .authorize_with(
@@ -1191,8 +1190,14 @@ async fn pushed_requests_are_one_time_client_bound_and_authoritative() {
             OAuthCode::InvalidRequestUri.as_str()
         );
     };
-    rejected("another-client", &request_uri).await;
+    let other = crate::tests::registration(ClientKind::Public, "https://other.example");
+    crate::ClientRegistry::new(flow.app.database.clone())
+        .create(&crate::tests::operator(), &other, None)
+        .await
+        .expect("register another client");
+    rejected(other.id.as_str(), &request_uri).await;
     rejected(&id, "urn:ietf:params:oauth:request_uri:unknown").await;
+    rejected(&id, "https://client.example/request.jwt").await;
     let response = flow
         .claim(
             &id,
@@ -1240,6 +1245,32 @@ async fn pushed_requests_are_one_time_client_bound_and_authoritative() {
     // The user consented above, so the claim returns a code at once.
     let response = flow.claim(&id, &request_uri, &[]).await;
     Flow::parameter(&flow.client_redirect(&response), "code");
+}
+
+/// A pushed `prompt=login` needs a sign-in after the browser claims the request:
+/// one between the push and the claim is not fresh.
+#[tokio::test]
+#[ignore = "requires TEST_DATABASE_URL"]
+async fn pushed_requests_count_sign_in_freshness_from_the_claim() {
+    let mut flow = Flow::new(true, false).await;
+    let request_uri = flow
+        .pushed(Scope::OpenId.as_str(), Some(Prompt::Login.as_str()))
+        .await;
+    flow.sign_in_again(AuthenticationMethod::Passkey).await;
+    let response = flow.claim(flow.client.id.as_str(), &request_uri, &[]).await;
+    let location = Flow::location(&response);
+    assert_eq!(location.path(), "/login");
+    let transaction = Flow::parameter(&location, "transaction");
+    flow.sign_in_again(AuthenticationMethod::Passkey).await;
+    let response = flow
+        .request(
+            Method::GET,
+            &format!("/oauth/authorize/resume?transaction={transaction}"),
+            &[],
+            None,
+        )
+        .await;
+    Flow::parameter(&flow.consent(response).await, "code");
 }
 
 /// Checks redirect equality, PKCE rejection and opaque-token bounds.
@@ -1803,17 +1834,9 @@ impl piquel_auth::AuthenticationPolicy for RecentPasskey {
 #[ignore = "requires TEST_DATABASE_URL"]
 async fn sdk_step_up_runs_against_the_provider() {
     let mut app = LoginApp::start().await;
-    let mut tx = app.flow.app.database.begin().await.expect("transaction");
-    let social = Session::create(
-        &mut tx,
-        RequestContext::TEST,
-        app.flow.user_id,
-        AuthenticationMethod::Federation,
-    )
-    .await
-    .expect("social session");
-    tx.commit().await.expect("commit");
-    app.flow.cookie = format!("{}={}", BrowserCookie::Session.as_str(), social.encoded());
+    app.flow
+        .sign_in_again(AuthenticationMethod::Federation)
+        .await;
     let callback = app.sign_in("/auth/login", None).await;
     let first = LoginApp::cookie(&callback, "__Host-piquel-session");
 

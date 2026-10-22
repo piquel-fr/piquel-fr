@@ -444,7 +444,8 @@ impl OidcApplication {
     }
 
     /// Authenticates the client at the token, revocation and pushed authorization
-    /// endpoints: public clients by ID alone, confidential clients with HTTP Basic. A `client_id` form field, when sent, must name the same client.
+    /// endpoints: public clients by ID alone, confidential clients with HTTP Basic.
+    /// A `client_id` form field, when sent, must name the same client.
     async fn authenticate_client(
         &self,
         headers: &HeaderMap,
