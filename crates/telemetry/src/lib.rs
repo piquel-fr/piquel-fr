@@ -104,9 +104,10 @@ pub enum TelemetryError {
 
 /// A service's installed telemetry. Spans always get trace IDs; exporters exist
 /// only while `OTEL_EXPORTER_OTLP_ENDPOINT` is set and `OTEL_SDK_DISABLED` is not
-/// `true` (it must be `true` or `false`). Every other `OTEL_*` variable is read by the SDK: `OTEL_SERVICE_NAME`,
-/// `OTEL_RESOURCE_ATTRIBUTES`, `OTEL_TRACES_SAMPLER` and its `_ARG`, and the
-/// `OTEL_EXPORTER_OTLP_*` timeouts and headers.
+/// `true` (it must be `true` or `false`). `OTEL_EXPORTER_OTLP_TIMEOUT` bounds each
+/// export request. The SDK reads the others: `OTEL_SERVICE_NAME`,
+/// `OTEL_RESOURCE_ATTRIBUTES`, `OTEL_TRACES_SAMPLER` and its `_ARG`, and
+/// `OTEL_EXPORTER_OTLP_HEADERS`.
 ///
 /// Incoming `traceparent` headers are ignored: a public caller must not choose the
 /// trace IDs that recorded events keep.

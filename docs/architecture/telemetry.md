@@ -25,7 +25,9 @@ adds the rest in one line.
   of actor and subject) and counted in `piquel.auth.events{kind}`. The audit
   history and telemetry therefore point at each other: the admin dashboard shows
   each event's trace ID, and the trace shows each event its request recorded. A
-  rolled-back transaction counts nothing.
+  rolled-back transaction counts nothing. Telemetry is best effort, though: a
+  request cancelled while its `COMMIT` is in flight can commit an event that is
+  never logged or counted. The stored history is the audit record.
 - **Failures.** A 5xx response marks its span failed and returns the trace ID in
   `X-Trace-Id`, which CORS exposes to the frontends. `tracing::error!` events
   with an `error` field, such as `ApiError::log_error`'s, also mark their span.
@@ -37,8 +39,8 @@ adds the rest in one line.
 `debug!` for detail nobody needs in production.
 
 **A count derived from an event:** add an arm to `Committed::publish` in
-`crates/database/src/telemetry.rs`. Counting there, after the commit, keeps the
-counter equal to the stored history.
+`crates/database/src/telemetry.rs`. Counting there, after the commit, never
+counts a change that rolled back.
 
 **Any other metric:** a `static` instrument next to the code it measures:
 
@@ -89,6 +91,7 @@ Only the standard variables, read by `Telemetry::init`:
 | `OTEL_SERVICE_NAME` | Overrides `auth-service` or `admin-web` |
 | `OTEL_RESOURCE_ATTRIBUTES` | e.g. `deployment.environment.name=staging`, which dashboards filter on |
 | `OTEL_TRACES_SAMPLER`, `OTEL_TRACES_SAMPLER_ARG` | Sampling; every trace is kept by default |
+| `OTEL_EXPORTER_OTLP_TIMEOUT` | Bound on each export request, in milliseconds; 10000 by default. The per-signal variants are not supported |
 | `RUST_LOG` | What is logged; spans keep the service's default filter |
 
 Export goes through the workspace's `reqwest`, on the service's tokio runtime,

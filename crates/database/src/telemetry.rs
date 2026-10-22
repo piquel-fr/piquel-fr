@@ -53,7 +53,8 @@ pub(crate) struct Committed {
 
 impl Committed {
     /// Logs the event in the current trace and counts it. It runs only after the
-    /// commit, so the counters agree with the stored history. The line names the
+    /// commit, so a rolled-back change is never counted; a commit whose answer is
+    /// lost may go uncounted, so the stored history stays the record. The line names the
     /// event, its kind, the kind of actor and the subject's pseudonymous ID: the
     /// rest, personal data included, stays in the database under the event's ID.
     pub(crate) fn publish(&self) {

@@ -65,7 +65,6 @@ arguments = [
   # Counters start from zero at their OTLP start time, so `increase()` counts
   # their first increment.
   "--enable-feature=created-timestamp-zero-ingestion",
-  "--enable-feature=exemplar-storage",
 ]
 
 [spec.services.source]

@@ -5,11 +5,15 @@ use async_trait::async_trait;
 use bytes::Bytes;
 use opentelemetry_http::{HttpClient, HttpError, Request, Response};
 use opentelemetry_otlp::{LogExporter, MetricExporter, SpanExporter, WithHttpConfig};
+use piquel_common::config::Variable;
 use std::{sync::Arc, time::Duration};
 use tokio::runtime::Handle;
 
-/// Bound on one export request, as the SDK's default `OTEL_EXPORTER_OTLP_TIMEOUT`.
-const EXPORT_TIMEOUT: Duration = Duration::from_secs(10);
+/// Bound on one export request in milliseconds, which only this client enforces.
+/// The per-signal `OTEL_EXPORTER_OTLP_*_TIMEOUT` variables are not supported.
+const TIMEOUT: Variable = Variable::new("OTEL_EXPORTER_OTLP_TIMEOUT");
+/// The specification's default [`TIMEOUT`].
+const DEFAULT_TIMEOUT_MS: &str = "10000";
 
 /// One exporter per signal, sharing one HTTP client.
 pub(crate) struct Exporters {
@@ -26,7 +30,9 @@ impl Exporters {
     /// the current tokio runtime.
     pub(crate) fn new() -> Result<Self, TelemetryError> {
         let client: Arc<dyn HttpClient> = Arc::new(Transport {
-            client: reqwest::Client::builder().timeout(EXPORT_TIMEOUT).build()?,
+            client: reqwest::Client::builder()
+                .timeout(Duration::from_millis(TIMEOUT.parse_or(DEFAULT_TIMEOUT_MS)?))
+                .build()?,
             runtime: Handle::try_current()?,
         });
         Ok(Self {

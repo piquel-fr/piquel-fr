@@ -39,9 +39,11 @@ pub enum ApiError {
         /// The API's explanation.
         body: ErrorBody,
     },
-    /// The API could not be reached, or answered outside its contract.
+    /// The API could not be reached, or answered outside its contract. The error
+    /// keeps no URL: account searches carry names and emails in their query, and
+    /// failures are logged and exported.
     #[error("the admin API could not be reached")]
-    Unreachable(#[from] reqwest::Error),
+    Unreachable(#[source] reqwest::Error),
     /// The API answered with a body this version cannot read.
     #[error("the admin API answered {status} with an unexpected body")]
     InvalidResponse {
@@ -51,6 +53,13 @@ pub enum ApiError {
         #[source]
         source: serde_json::Error,
     },
+}
+
+impl From<reqwest::Error> for ApiError {
+    /// Drops the request URL, keeping every other cause.
+    fn from(error: reqwest::Error) -> Self {
+        Self::Unreachable(error.without_url())
+    }
 }
 
 impl ApiError {
@@ -336,5 +345,23 @@ mod tests {
             client.url(paths::CLIENT, &[&"a/b c"]).as_str(),
             "http://auth:8081/admin/clients/a%2Fb%20c",
         );
+    }
+
+    /// A failed call reports no part of its URL, whose query can hold an email.
+    #[tokio::test]
+    async fn failures_omit_the_query() {
+        // Nothing listens on the discard port.
+        let client = AdminClient::new("http://127.0.0.1:9/".parse().expect("url")).expect("client");
+        let search = UserSearch {
+            q: "person@example.com".into(),
+            cursor: None,
+        };
+        let error = client
+            .search_users("token", &search)
+            .await
+            .expect_err("unreachable");
+        let chain = piquel_common::ErrorChain(&error).to_string();
+        assert!(matches!(error, ApiError::Unreachable(_)), "{chain}");
+        assert!(!chain.contains("example.com"), "{chain}");
     }
 }

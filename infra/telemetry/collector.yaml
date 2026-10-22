@@ -12,17 +12,32 @@ processors:
     limit_percentage: 80
     spike_limit_percentage: 20
   # A second line of defense: auth never records these, but nothing that
-  # carries secrets or addresses is kept if a sender ever does.
-  attributes/redact:
-    actions:
-      - key: url.query
-        action: delete
-      - key: url.full
-        action: delete
-      - key: client.address
-        action: delete
-      - pattern: ^http\.(request|response)\.header\.
-        action: delete
+  # carries secrets or addresses is kept if a sender ever does. Every place an
+  # attribute can be is covered: resources, spans and their events, log
+  # records and metric data points.
+  transform/redact:
+    error_mode: ignore
+    trace_statements:
+      - context: resource
+        statements: &redact
+          - delete_key(attributes, "url.query")
+          - delete_key(attributes, "url.full")
+          - delete_key(attributes, "client.address")
+          - delete_matching_keys(attributes, "^http\\.(request|response)\\.header\\.")
+      - context: span
+        statements: *redact
+      - context: spanevent
+        statements: *redact
+    log_statements:
+      - context: resource
+        statements: *redact
+      - context: log
+        statements: *redact
+    metric_statements:
+      - context: resource
+        statements: *redact
+      - context: datapoint
+        statements: *redact
 
 exporters:
   otlp_http/prometheus:
@@ -49,13 +64,13 @@ service:
   pipelines:
     metrics:
       receivers: [otlp]
-      processors: [memory_limiter, attributes/redact]
+      processors: [memory_limiter, transform/redact]
       exporters: [otlp_http/prometheus]
     traces:
       receivers: [otlp]
-      processors: [memory_limiter, attributes/redact]
+      processors: [memory_limiter, transform/redact]
       exporters: [otlp_grpc/tempo]
     logs:
       receivers: [otlp]
-      processors: [memory_limiter, attributes/redact]
+      processors: [memory_limiter, transform/redact]
       exporters: [otlp_http/loki]

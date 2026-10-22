@@ -1,6 +1,5 @@
-# Grafana 13 data sources, linked to each other: traces to their logs, logs to
-# their trace, and metric exemplars to their trace. `$$` escapes Grafana's
-# provisioning interpolation.
+# Grafana 13 data sources, linked to each other: traces to their logs, and logs
+# to their trace. `$$` escapes Grafana's provisioning interpolation.
 apiVersion: 1
 
 datasources:
@@ -12,9 +11,6 @@ datasources:
     editable: false
     jsonData:
       timeInterval: 30s
-      exemplarTraceIdDestinations:
-        - name: trace_id
-          datasourceUid: tempo
 
   - name: Tempo
     type: tempo

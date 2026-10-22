@@ -132,7 +132,17 @@ impl Jobs {
                 };
                 match connection {
                     Ok(Some(connection)) => {
-                        Self::run(Arc::clone(&job), connection, shutdown.clone()).await;
+                        // Each run is a trace of its own: its queries, the events it
+                        // records, and how it ended.
+                        let span = tracing::info_span!(
+                            parent: None,
+                            "job",
+                            otel.name = J::NAME,
+                            job = J::NAME,
+                        );
+                        Self::run(Arc::clone(&job), connection, shutdown.clone())
+                            .instrument(span)
+                            .await;
                     }
                     Ok(None) => tracing::debug!(job = J::NAME, "another replica runs this job"),
                     Err(error) => {
@@ -145,21 +155,20 @@ impl Jobs {
 
     /// Runs `job` once on its own task, so a panic ends only this run: the job runs
     /// again at its next interval. The task lives in a set that aborts it when
-    /// dropped, so cancelling the caller cancels the run and frees the lock.
+    /// dropped, so cancelling the caller cancels the run and frees the lock. The
+    /// run's task stays in the caller's span.
     async fn run<J: ExclusiveJob>(
         job: Arc<J>,
         mut connection: ExclusiveConnection,
         shutdown: Shutdown,
     ) {
         let mut run = JoinSet::new();
-        // Each run is a trace of its own, holding its queries and the events it records.
-        let span = tracing::info_span!(parent: None, "job", otel.name = J::NAME, job = J::NAME);
         run.spawn(
             async move {
                 let result = job.run(&mut connection, &shutdown).await;
                 (connection, result)
             }
-            .instrument(span),
+            .in_current_span(),
         );
         match run.join_next().await {
             Some(Ok((connection, result))) => {
