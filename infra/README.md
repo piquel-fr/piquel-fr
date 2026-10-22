@@ -3,7 +3,9 @@
 `infra/piqueld.toml` deploys piquel.fr as one repository-backed piqueld
 application, `piquel-fr`: auth, the web settings frontend, the admin dashboard,
 and PostgreSQL. Its environments and previews share the manifest; variables give
-each its own hostnames.
+each its own hostnames. A second application, `telemetry`
+(`infra/telemetry.toml`), stores and shows their traces, metrics and logs; see
+[Telemetry](#telemetry).
 
 | Deployment | Source | Web | Auth | Admin | Redirects to web | Reachable from |
 | --- | --- | --- | --- | --- | --- | --- |
@@ -33,7 +35,7 @@ contain nothing environment-specific: per-environment values are runtime
 - DNS records for every hostname: `manage_records = true` on that provider, or by
   hand: public hosts (`piquel.fr`, `auth.piquel.fr`, `www.piquel.fr`) to the
   server, and `admin.piquel.fr`, `staging.piquel.fr`, `*.staging.piquel.fr` and
-  `*.dev.piquel.fr` to the apps node's tailnet addresses. Through the Cloudflare Tunnel, a public
+  `*.dev.piquel.fr` and `grafana.piquel.fr` to the apps node's tailnet addresses. Through the Cloudflare Tunnel, a public
   host is a proxied CNAME to the tunnel; on ports 80/443, an A record, and Caddy
   obtains its certificate over HTTP-01.
 - `ingress.webhook_hostname` for deploy-on-push.
@@ -210,3 +212,61 @@ origin, passes it to pages as layout data and narrows their CSP `connect-src` to
 it. `ORIGIN` gives the server its public URL behind ingress. The health check,
 `GET /healthz`, does not call auth, so a server that fails to start blocks the
 deployment without coupling it to auth's health.
+
+## Telemetry
+
+`infra/telemetry.toml` is the `telemetry` application, with one environment,
+`production`, that follows `main`:
+
+| Service | Image | Role |
+| --- | --- | --- |
+| `collector` | `otel/opentelemetry-collector-contrib` | OTLP/HTTP on port 4318; memory limit, batching, and deletion of query strings, headers and client addresses |
+| `prometheus` | `prom/prometheus` | Metrics, received over OTLP, kept 30 days |
+| `tempo` | `grafana/tempo` | Traces, kept 14 days |
+| `loki` | `grafana/loki` | Logs, received over OTLP, kept 30 days |
+| `grafana` | `grafana/grafana` | Dashboards at `grafana.piquel.fr` |
+
+Their configuration is in `infra/telemetry/`, mounted as piqueld files. Grafana
+provisions the three data sources, linked so a log line opens its trace and a
+trace its logs, and the **Auth overview** dashboard in the `piquel.fr` folder:
+traffic, errors and latency by route, sign-ins, registrations, tokens, refresh
+revocations, throttling, events by kind, the database pool, cleanup, logs and
+traces. To look up a failed request, paste the `X-Trace-Id` of its response, or
+the trace ID the admin dashboard shows for an event, into Explore > Tempo.
+
+Grafana's route is private, and it never signs in through auth: it is needed
+most when auth is down (see "Recovering auth" in
+`docs/architecture/surfaces.md`). Sign in as `admin` with the password piqueld
+generated:
+
+```sh
+piquelctl app exec telemetry grafana -- cat /run/secrets/grafana-admin-password
+```
+
+Grafana stores that password on its first start, so regenerating the secret
+changes nothing; change it in Grafana instead.
+
+piquel-fr imports the collector (`[[spec.imports]]` in `infra/piqueld.toml`),
+so its staging and production reach it as `collector.telemetry`. Their auth and
+admin services set:
+
+| Variable | Value |
+| --- | --- |
+| `OTEL_EXPORTER_OTLP_ENDPOINT` | `http://collector.telemetry:4318`, from the `otlp_endpoint` variable; empty in previews, which keep telemetry on stderr |
+| `OTEL_RESOURCE_ATTRIBUTES` | `deployment.environment.name=${{ env.name }}`, so dashboards tell staging and production apart |
+
+Every other `OTEL_*` variable keeps its default; see
+`docs/architecture/telemetry.md`. Telemetry never blocks a deploy: until the
+collector is deployed and linked, export fails, the SDK logs a warning on
+stderr, and the services serve normally.
+
+Once, after `infra/telemetry.toml` is on `main`:
+
+```sh
+piquelctl --timeout 30m app apply --file infra/telemetry.toml --deploy --yes
+piquelctl app repository webhook rotate telemetry   # prints the secret once
+piquelctl app repository webhook show telemetry     # prints the payload URL
+```
+
+Add that webhook to this repository as for piquel-fr. `just infra telemetry`
+runs the same dashboard locally.

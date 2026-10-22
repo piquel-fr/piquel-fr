@@ -370,6 +370,7 @@ impl AdminOperations {
                     occurred_at: stored.occurred_at,
                     actor: serde_json::to_value(stored.actor)?,
                     subject: stored.subject,
+                    trace_id: stored.trace_id,
                     event: serde_json::to_value(stored.event)?,
                 })
             })

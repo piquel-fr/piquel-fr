@@ -15,7 +15,7 @@ is authentication and the piquel.fr account settings frontend.
 | `crates/admin-api` | `piquel-admin-api`: the paths and JSON bodies of auth's private admin API, shared with the admin dashboard; `client` feature: the dashboard's typed client |
 | `crates/common` | `piquel-common`, the one home for shared types: IDs, string enums, `Personal<T>`, and the wire types shared by auth and the SDKs (token claims, discovery metadata, JWK sets, OAuth/OIDC vocabulary and errors, bearer challenges, SDK error codes, and the bodies auth's settings and admin APIs share); `config` feature: environment variables, validated URLs, secret references; `events` feature: domain events |
 | `crates/crypto` | Random secrets, SHA-256, HMAC, PKCE and RS256 signing |
-| `crates/telemetry` | Structured tracing initialization |
+| `crates/telemetry` | `piquel-telemetry`: stderr logs, and OpenTelemetry traces, metrics and logs over OTLP; request spans and access logs for axum routers, client spans, and typed metric instruments; see [telemetry.md](telemetry.md) |
 | `tests/sdk-vectors` | Generated cases both SDKs must pass; see [sdk.md](sdk.md) |
 
 Prettier and type-aware ESLint cover all web code from the root configuration, as

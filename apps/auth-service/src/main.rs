@@ -1,7 +1,7 @@
 //! Authentication service and its administrative CLI.
 use auth_service::{
     AdminError, AdminOperations, Applied, AuthConfig, ClientRegistry, ClientRegistryError,
-    GracePeriod, InviteExpiry, Jobs, Operator, PUBLIC_BASE_URL,
+    GracePeriod, InviteExpiry, Jobs, Operator, PUBLIC_BASE_URL, SERVICE_NAME, TELEMETRY_FILTER,
 };
 use clap::{Args, Parser, Subcommand, ValueEnum};
 use piquel_common::{
@@ -19,6 +19,7 @@ use piquel_repository::{
     Database, DatabaseConnectionError, DatabaseError, DeliveryStatus, StoredClientSecret,
     StoredOidcClient,
 };
+use piquel_telemetry::{Telemetry, TelemetryError};
 use serde::Serialize;
 use thiserror::Error;
 
@@ -102,6 +103,9 @@ enum CliError {
     /// A background job panicked.
     #[error("a background job panicked")]
     Job(#[from] tokio::task::JoinError),
+    /// Telemetry could not be installed.
+    #[error(transparent)]
+    Telemetry(#[from] TelemetryError),
 }
 
 impl CliError {
@@ -268,6 +272,7 @@ impl Command {
         };
         let router = config.router(database.clone())?;
         let admin_router = config.admin_router(database.clone());
+        database.observe_connections();
         let jobs = Jobs::start(&database);
         tracing::info!(address=%config.public_listener,"authentication service listening");
         let (stop, _) = watch::channel(false);
@@ -744,12 +749,24 @@ impl DeliveriesCommand {
     }
 }
 
-/// Initializes tracing, runs the selected command and prints any failure with its causes.
+impl Cli {
+    /// Installs telemetry, runs the selected command, then flushes telemetry. A
+    /// failed flush, such as an unreachable collector, is only reported: it must
+    /// not fail a command, such as a deploy's migration job.
+    async fn run(self) -> Result<(), CliError> {
+        let telemetry = Telemetry::init(SERVICE_NAME, TELEMETRY_FILTER)?;
+        let result = self.command.unwrap_or(Command::Serve).run().await;
+        if let Err(error) = telemetry.shutdown().await {
+            eprintln!("warning: {}", ErrorChain(&error));
+        }
+        result
+    }
+}
+
+/// Runs the selected command and prints any failure with its causes.
 #[tokio::main]
 async fn main() -> ExitCode {
-    piquel_telemetry::init("auth_service=info");
-    let command = Cli::parse().command.unwrap_or(Command::Serve);
-    match command.run().await {
+    match Cli::parse().run().await {
         Ok(()) => ExitCode::SUCCESS,
         Err(error) => {
             eprintln!("error: {}", ErrorChain(&error));

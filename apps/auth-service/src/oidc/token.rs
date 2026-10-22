@@ -26,6 +26,7 @@ use piquel_repository::{
     CodeRedemptionError, ConsumedAuthorizationCode, DatabaseTransaction, InsertRefreshFamily,
     InsertRefreshToken, RefreshRotationError, SessionAuthentication,
 };
+use piquel_telemetry::{Counter, Label};
 use serde::{Deserialize, Serialize};
 
 /// Untrusted grant parameters; parse grant type after authenticating the client.
@@ -81,6 +82,28 @@ pub(super) struct TokenResponse {
     #[serde(skip_serializing_if = "Option::is_none")]
     refresh_token: Option<String>,
 }
+
+impl TokenResponse {
+    /// Counts each token issued by `grant`, once its transaction committed, by
+    /// the response field it is sent in.
+    fn count(&self, grant: GrantType) {
+        let issued = [
+            ("access_token", true),
+            ("id_token", self.id_token.is_some()),
+            ("refresh_token", self.refresh_token.is_some()),
+        ];
+        for (token, _) in issued.into_iter().filter(|(_, issued)| *issued) {
+            TOKENS_ISSUED.add(1, &[("grant_type", grant.as_str()), ("token_type", token)]);
+        }
+    }
+}
+
+/// Tokens issued by the token endpoint, by grant and token type.
+static TOKENS_ISSUED: Counter<[Label; 2]> = Counter::new(
+    "piquel.auth.tokens.issued",
+    "{token}",
+    "Tokens issued by the token endpoint, by grant type and token type.",
+);
 
 /// Client-bound claim policy shared by initial exchanges and refresh rotation.
 struct TokenGrant<'a> {
@@ -202,20 +225,18 @@ impl OidcApplication {
         let client = app
             .authenticate_client(&headers, form.client_id.as_deref())
             .await?;
-        match form.grant_type.parse::<GrantType>().map_err(|error| {
+        let grant = form.grant_type.parse::<GrantType>().map_err(|error| {
             let supported = GrantType::ALL.map(GrantType::as_str).join(", ");
             OAuthCode::UnsupportedGrantType
                 .reject_with(format!("grant_type must be one of: {supported}"), error)
-        })? {
-            GrantType::AuthorizationCode => app
-                .exchange_code(form, &client.id, &context.client(&client.id))
-                .await
-                .map(Json),
-            GrantType::RefreshToken => app
-                .rotate_refresh(form, &client.id, &context.client(&client.id))
-                .await
-                .map(Json),
-        }
+        })?;
+        let context = context.client(&client.id);
+        let tokens = match grant {
+            GrantType::AuthorizationCode => app.exchange_code(form, &client.id, &context).await,
+            GrantType::RefreshToken => app.rotate_refresh(form, &client.id, &context).await,
+        }?;
+        tokens.count(grant);
+        Ok(Json(tokens))
     }
 
     /// Exchanges a one-use code for the authenticated client after checking its client,

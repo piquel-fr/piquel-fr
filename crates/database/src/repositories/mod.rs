@@ -111,8 +111,9 @@ repositories! {
     administrators: AdministratorRepository;
 }
 
-/// Runs a checked query on the repository's pool or transaction connection and
-/// converts the driver error into a [`DatabaseError`](crate::DatabaseError), e.g.
+/// Runs a checked query on the repository's pool or transaction connection, in a
+/// [`RepositoryExecutor::span`], and converts the driver error into a
+/// [`DatabaseError`](crate::DatabaseError), e.g.
 /// `run!(self, fetch_optional, sqlx::query_as!(StoredUser, "...", id.as_uuid()))`.
 ///
 /// `$method` is the `sqlx` executor method: `execute`, `fetch_one` (a missing row
@@ -122,12 +123,55 @@ repositories! {
 macro_rules! run {
     ($self:expr, $method:ident, $query:expr) => {{
         let query = $query;
-        match &mut $self.executor {
-            RepositoryExecutor::Pool(pool) => query.$method(*pool).await,
-            RepositoryExecutor::Connection(connection) => query.$method(&mut **connection).await,
-        }
-        .map_err(Into::<DatabaseError>::into)
+        let span = RepositoryExecutor::span(sqlx::Execute::sql(&query));
+        let result = tracing::Instrument::instrument(
+            async {
+                match &mut $self.executor {
+                    RepositoryExecutor::Pool(pool) => query.$method(*pool).await,
+                    RepositoryExecutor::Connection(connection) => {
+                        query.$method(&mut **connection).await
+                    }
+                }
+            },
+            span.clone(),
+        )
+        .await
+        .map_err(Into::<DatabaseError>::into);
+        RepositoryExecutor::finish(&span, result)
     }};
+}
+
+impl RepositoryExecutor<'_> {
+    /// A client span for one query, recording its parameterized `sql` as
+    /// `db.query.text`, never its bind values.
+    fn span(sql: &str) -> tracing::Span {
+        let operation = sql.split_whitespace().next().unwrap_or("query");
+        tracing::info_span!(
+            "db.query",
+            otel.name = operation,
+            otel.kind = "client",
+            otel.status_code = tracing::field::Empty,
+            db.system.name = "postgresql",
+            db.query.text = sql,
+        )
+    }
+
+    /// Marks `span` failed when the query failed for a reason other than a
+    /// missing row or a conflict, which callers expect.
+    fn finish<T>(
+        span: &tracing::Span,
+        result: Result<T, crate::DatabaseError>,
+    ) -> Result<T, crate::DatabaseError> {
+        if let Err(
+            crate::DatabaseError::Timeout(_)
+            | crate::DatabaseError::InvalidStoredData { .. }
+            | crate::DatabaseError::Operation(_),
+        ) = &result
+        {
+            span.record("otel.status_code", "ERROR");
+        }
+        result
+    }
 }
 
 /// A JSONB array column decoded straight into a record's `Vec` field, e.g.

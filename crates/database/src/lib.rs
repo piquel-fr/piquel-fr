@@ -11,6 +11,8 @@ mod error;
 mod exclusive;
 /// Typed repository families with private SQL execution.
 mod repositories;
+/// Committed events and pool connections, reported to telemetry.
+mod telemetry;
 /// Explicit transactions spanning typed repository operations.
 mod transaction;
 

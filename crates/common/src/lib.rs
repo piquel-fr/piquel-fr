@@ -381,6 +381,68 @@ uuid_id!(
     "Identifier of an outbound delivery, reused by every attempt as its `jti` or `Message-ID`."
 );
 
+/// The W3C Trace Context ID of a request's trace: 16 bytes, not all zero, written
+/// as 32 lower-case hex digits. Telemetry assigns one to every request and job run;
+/// a recorded event keeps the one of the request that caused it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(try_from = "String", into = "String")]
+pub struct TraceId([u8; 16]);
+
+impl TraceId {
+    /// Wraps a trace ID's bytes, rejecting the all-zero invalid ID.
+    #[must_use]
+    pub fn from_bytes(bytes: [u8; 16]) -> Option<Self> {
+        (bytes != [0; 16]).then_some(Self(bytes))
+    }
+}
+
+impl fmt::Display for TraceId {
+    /// Writes the 32 lower-case hex digits.
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        self.0
+            .iter()
+            .try_for_each(|byte| write!(formatter, "{byte:02x}"))
+    }
+}
+
+impl FromStr for TraceId {
+    type Err = InvalidValue;
+    /// Parses exactly 32 lower-case hex digits, not all zero.
+    fn from_str(value: &str) -> Result<Self, Self::Err> {
+        let invalid = || InvalidValue::new("TraceId");
+        if value.len() != 32
+            || !value
+                .bytes()
+                .all(|b| matches!(b, b'0'..=b'9' | b'a'..=b'f'))
+        {
+            return Err(invalid());
+        }
+        let mut bytes = [0; 16];
+        for (byte, pair) in bytes.iter_mut().zip(value.as_bytes().as_chunks::<2>().0) {
+            let pair = std::str::from_utf8(pair).map_err(|_| invalid())?;
+            *byte = u8::from_str_radix(pair, 16).map_err(|_| invalid())?;
+        }
+        Self::from_bytes(bytes).ok_or_else(invalid)
+    }
+}
+
+impl TryFrom<String> for TraceId {
+    type Error = InvalidValue;
+    /// Parses the hex form from owned text.
+    fn try_from(value: String) -> Result<Self, Self::Error> {
+        value.parse()
+    }
+}
+
+impl From<TraceId> for String {
+    /// Encodes the hex form.
+    fn from(value: TraceId) -> Self {
+        value.to_string()
+    }
+}
+
+__str_enum_sqlx!(TraceId);
+
 str_enum! {
     /// Account availability state in SQL and JSON.
     pub enum AccountStatus {
@@ -394,14 +456,14 @@ str_enum! {
     }
 }
 
-/// Authentication method recorded on a session or token.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum AuthenticationMethod {
-    /// A `WebAuthn` passkey authenticated the user.
-    Passkey,
-    /// An approved external identity provider authenticated the user.
-    Federation,
+str_enum! {
+    /// Authentication method recorded on a session or token.
+    pub enum AuthenticationMethod {
+        /// A `WebAuthn` passkey authenticated the user.
+        Passkey = "passkey",
+        /// An approved external identity provider authenticated the user.
+        Federation = "federation",
+    }
 }
 
 impl AuthenticationMethod {

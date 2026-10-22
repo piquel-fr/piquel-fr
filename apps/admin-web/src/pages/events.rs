@@ -63,7 +63,7 @@ pub async fn event_rows(events: Vec<Event>) -> Result<impl View> {
         } else {
             <table>
                 <thead>
-                    <tr><th>"When"</th><th>"Kind"</th><th>"Account"</th><th>"By"</th><th>"Details"</th></tr>
+                    <tr><th>"When"</th><th>"Kind"</th><th>"Account"</th><th>"By"</th><th>"Details"</th><th>"Trace"</th></tr>
                 </thead>
                 <tbody>
                     for event in events {
@@ -78,6 +78,11 @@ pub async fn event_rows(events: Vec<Event>) -> Result<impl View> {
                             </td>
                             <td>(actor)</td>
                             <td><code class="details">(event.event.get("data").map(Value::to_string).unwrap_or_default())</code></td>
+                            <td>
+                                if let Some(trace_id) = event.trace_id {
+                                    <code title="Search Grafana for this trace ID">(trace_id.to_string())</code>
+                                }
+                            </td>
                         </tr>
                     }
                 </tbody>

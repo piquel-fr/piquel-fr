@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "SELECT\n                    e.id AS \"id: EventId\", e.txid::text::bigint AS \"txid!\", e.sequence,\n                    e.occurred_at, e.kind, e.version, e.payload, e.actor AS \"actor: Json<Actor>\",\n                    e.subject_user_id AS \"subject_user_id: UserId\",\n                    p.event_id IS NOT NULL AS \"personal!\", p.client_ip AS \"client_ip?: IpAddr\",\n                    p.user_agent_family AS \"browser?: Browser\",\n                    p.platform AS \"platform?: Platform\",\n                    p.details AS \"details?\"\n                FROM domain_events e\n                LEFT JOIN event_personal_data p ON p.event_id = e.id\n                WHERE e.client_id = $1\n                ORDER BY e.sequence DESC\n                LIMIT $2",
+  "query": "SELECT\n                    e.id AS \"id: EventId\", e.txid::text::bigint AS \"txid!\", e.sequence,\n                    e.occurred_at, e.kind, e.version, e.payload, e.actor AS \"actor: Json<Actor>\",\n                    e.subject_user_id AS \"subject_user_id: UserId\",\n                    e.trace_id AS \"trace_id: TraceId\",\n                    p.event_id IS NOT NULL AS \"personal!\", p.client_ip AS \"client_ip?: IpAddr\",\n                    p.user_agent_family AS \"browser?: Browser\",\n                    p.platform AS \"platform?: Platform\",\n                    p.details AS \"details?\"\n                FROM domain_events e\n                LEFT JOIN event_personal_data p ON p.event_id = e.id\n                WHERE e.client_id = $1\n                ORDER BY e.sequence DESC\n                LIMIT $2",
   "describe": {
     "columns": [
       {
@@ -50,26 +50,31 @@
       },
       {
         "ordinal": 9,
+        "name": "trace_id: TraceId",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 10,
         "name": "personal!",
         "type_info": "Bool"
       },
       {
-        "ordinal": 10,
+        "ordinal": 11,
         "name": "client_ip?: IpAddr",
         "type_info": "Inet"
       },
       {
-        "ordinal": 11,
+        "ordinal": 12,
         "name": "browser?: Browser",
         "type_info": "Text"
       },
       {
-        "ordinal": 12,
+        "ordinal": 13,
         "name": "platform?: Platform",
         "type_info": "Text"
       },
       {
-        "ordinal": 13,
+        "ordinal": 14,
         "name": "details?",
         "type_info": "Jsonb"
       }
@@ -90,6 +95,7 @@
       false,
       false,
       true,
+      true,
       null,
       true,
       true,
@@ -97,5 +103,5 @@
       false
     ]
   },
-  "hash": "a9ac0615c0e77598b702c9727817b780e30cab8114d5461c7f710eb019578bed"
+  "hash": "cb4031c7eea94edf30000967e9264a79975c434b4f6e9cff65312de667fab6b2"
 }

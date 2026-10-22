@@ -8,6 +8,7 @@ use axum::http::{StatusCode, header};
 use piquel_common::{
     config::ConfigurationError, events::SignInFailure, protocol::oauth::GrantType,
 };
+use piquel_telemetry::SendTraced;
 use serde::{Deserialize, de::DeserializeOwned};
 use thiserror::Error;
 use url::Url;
@@ -225,7 +226,7 @@ impl FederationApplication {
                 ("code_verifier", verifier),
                 ("grant_type", GrantType::AuthorizationCode.as_str()),
             ])
-            .send()
+            .send_traced()
             .await?;
         match &endpoints.identity {
             IdentityStrategy::GitHub(protocol) => self.github_identity(response, protocol).await,

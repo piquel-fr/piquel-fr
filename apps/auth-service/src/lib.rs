@@ -59,7 +59,14 @@ use axum::{
     routing::get,
 };
 use piquel_repository::Database;
+use piquel_telemetry::HttpTelemetry;
 use thiserror::Error;
+
+/// The default `service.name` of exported telemetry.
+pub const SERVICE_NAME: &str = "auth-service";
+/// What is traced, and logged unless `RUST_LOG` says otherwise: auth's own
+/// operations, and its database queries and committed events.
+pub const TELEMETRY_FILTER: &str = "auth_service=info,piquel_repository=info";
 
 /// Bound on browser ceremony and API JSON bodies.
 const MAX_REQUEST_BODY_BYTES: usize = 64 * 1024;
@@ -99,7 +106,7 @@ impl AuthConfig {
             .merge(SessionsApplication::new(database.clone()).routes())
             .merge(OidcApplication::new(database.clone(), &self.oidc)?.routes());
         let policy = security::HttpSecurity::new(self, database);
-        Ok(application
+        let protected = application
             // Static pages answer GET and HEAD only, so preconditions need no 412.
             .fallback(get(|uri: Uri, headers: HeaderMap| async move {
                 EmbeddedAssets::serve(uri.path(), &headers)
@@ -108,7 +115,11 @@ impl AuthConfig {
             .layer(middleware::from_fn_with_state(
                 policy,
                 security::HttpSecurity::protect,
-            )))
+            ));
+        // Outside the security layer, so throttled and rejected requests are traced too.
+        Ok(HttpTelemetry::default()
+            .quiet(&[routes::service::LIVE, routes::service::READY])
+            .wrap(protected))
     }
 
     /// Builds the admin API, for the private admin listener only. It has no browser
@@ -116,9 +127,11 @@ impl AuthConfig {
     /// carries an administrator's access token. It shares the public listener's
     /// body limit and deadline, so no request can hold up shutdown.
     pub fn admin_router(&self, database: Database) -> Router {
-        admin::AdminApplication::new(database, self)
-            .routes()
-            .layer(DefaultBodyLimit::max(MAX_REQUEST_BODY_BYTES))
-            .layer(middleware::from_fn(security::HttpSecurity::deadline))
+        HttpTelemetry::default().wrap(
+            admin::AdminApplication::new(database, self)
+                .routes()
+                .layer(DefaultBodyLimit::max(MAX_REQUEST_BODY_BYTES))
+                .layer(middleware::from_fn(security::HttpSecurity::deadline)),
+        )
     }
 }

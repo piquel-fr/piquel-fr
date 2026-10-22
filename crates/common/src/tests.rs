@@ -69,3 +69,120 @@ fn ids_are_canonical_uuid_v7() {
     let error = "not-a-uuid".parse::<UserId>().expect_err("UUID syntax");
     assert!(std::error::Error::source(&error).is_some());
 }
+
+/// Trace IDs read and write exactly 32 lower-case hex digits, never all zero.
+#[test]
+fn trace_ids_are_lower_case_hex() {
+    let text = "4bf92f3577b34da6a3ce929d0e0e4736";
+    let id: TraceId = text.parse().expect("trace ID");
+    assert_eq!(id.to_string(), text);
+    assert_eq!(TraceId::from_bytes([0; 16]), None);
+    for invalid in [
+        "00000000000000000000000000000000",
+        "4BF92F3577B34DA6A3CE929D0E0E4736",
+        "4bf92f3577b34da6a3ce929d0e0e473",
+        "4bf92f3577b34da6a3ce929d0e0e473g",
+    ] {
+        assert!(invalid.parse::<TraceId>().is_err(), "{invalid}");
+    }
+}
+
+/// `DomainEvent::kind` is the serde tag each variant is stored under.
+#[cfg(feature = "events")]
+#[test]
+fn event_kinds_match_their_serde_tags() {
+    use events::{DomainEvent, GrantRevocation, RevocationReason, SignInFailure};
+    use serde_json::json;
+
+    let session_id = SessionId::new();
+    let passkey_id = PasskeyId::new();
+    let client_id: ClientId = "client".parse().expect("client ID");
+    let imported = serde_json::from_value(json!({
+        "action": "passkey.login", "outcome": "success", "metadata": {}
+    }))
+    .expect("imported audit row");
+    let events = [
+        DomainEvent::AccountCreated {
+            method: AuthenticationMethod::Passkey,
+            invited: false,
+        },
+        DomainEvent::SignedIn {
+            session_id,
+            method: AuthenticationMethod::Federation,
+        },
+        DomainEvent::SignInFailed {
+            method: AuthenticationMethod::Passkey,
+            reason: SignInFailure::UnknownAccount,
+        },
+        DomainEvent::SessionRevoked {
+            session_id,
+            reason: RevocationReason::Logout,
+        },
+        DomainEvent::PasskeyConfirmed { session_id },
+        DomainEvent::PasskeyAdded { passkey_id },
+        DomainEvent::PasskeyRenamed { passkey_id },
+        DomainEvent::PasskeyRemoved { passkey_id },
+        DomainEvent::IdentityLinked {
+            provider: Provider::GitHub,
+            subject: Personal::Value("1".into()),
+        },
+        DomainEvent::IdentityUnlinked {
+            provider: Provider::Google,
+        },
+        DomainEvent::ConsentGranted {
+            client_id: client_id.clone(),
+            scopes: vec![],
+        },
+        DomainEvent::GrantIssued {
+            client_id: client_id.clone(),
+            family_id: None,
+            scopes: vec![],
+        },
+        DomainEvent::GrantRevoked {
+            client_id: client_id.clone(),
+            family_id: TokenId::new(),
+            reason: GrantRevocation::RefreshReplay,
+        },
+        DomainEvent::CodeReplayed {
+            client_id: client_id.clone(),
+        },
+        DomainEvent::InvitationCreated {
+            expires_at: chrono::Utc::now(),
+        },
+        DomainEvent::InvitationRevoked {
+            invitation_id: TokenId::new(),
+        },
+        DomainEvent::AccountDisabled {
+            reason: Personal::Erased,
+        },
+        DomainEvent::AccountEnabled {},
+        DomainEvent::AccountViewed {},
+        DomainEvent::AdministratorGranted {},
+        DomainEvent::AdministratorRevoked {},
+        DomainEvent::ClientRegistered {
+            client_id: client_id.clone(),
+            kind: clients::ClientKind::Public,
+        },
+        DomainEvent::ClientUpdated {
+            client_id: client_id.clone(),
+        },
+        DomainEvent::ClientEnabled {
+            client_id: client_id.clone(),
+        },
+        DomainEvent::ClientDisabled {
+            client_id: client_id.clone(),
+        },
+        DomainEvent::ClientSecretRotated {
+            client_id,
+            previous_expire_at: chrono::Utc::now(),
+        },
+        DomainEvent::CompromiseReported {
+            event_id: EventId::new(),
+        },
+        DomainEvent::Imported(imported),
+    ];
+    for event in events {
+        let tagged = serde_json::to_value(&event).expect("serialize");
+        assert_eq!(tagged["kind"], event.kind(), "{event:?}");
+    }
+}

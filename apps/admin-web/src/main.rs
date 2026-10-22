@@ -6,6 +6,7 @@
 
 use piquel_admin_api::ApiError;
 use piquel_common::{ErrorChain, config::ConfigurationError};
+use piquel_telemetry::Telemetry;
 use std::process::ExitCode;
 use thiserror::Error;
 use tokio::net::TcpListener;
@@ -42,15 +43,28 @@ pub enum StartupError {
     Listener(#[from] std::io::Error),
 }
 
+/// Installs telemetry, serves, then flushes telemetry. A failed flush is only reported.
 #[tokio::main]
 async fn main() -> ExitCode {
-    piquel_telemetry::init("info");
-    match run().await {
-        Ok(()) => ExitCode::SUCCESS,
+    let telemetry = match Telemetry::init("admin-web", "info") {
+        Ok(telemetry) => telemetry,
         Err(error) => {
-            tracing::error!(error = %ErrorChain(&error), "admin dashboard failed");
-            ExitCode::FAILURE
+            eprintln!("error: {}", ErrorChain(&error));
+            return ExitCode::FAILURE;
         }
+    };
+    let served = run().await;
+    if let Err(error) = &served {
+        tracing::error!(error = %ErrorChain(error), "admin dashboard failed");
+    }
+    // An unreachable collector must not fail the dashboard's exit.
+    if let Err(error) = telemetry.shutdown().await {
+        eprintln!("warning: {}", ErrorChain(&error));
+    }
+    if served.is_ok() {
+        ExitCode::SUCCESS
+    } else {
+        ExitCode::FAILURE
     }
 }
 

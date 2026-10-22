@@ -1,0 +1,61 @@
+# OpenTelemetry Collector 0.163: receives OTLP/HTTP from the applications that
+# import it, and stores metrics in Prometheus, traces in Tempo and logs in Loki.
+receivers:
+  otlp:
+    protocols:
+      http:
+        endpoint: 0.0.0.0:4318
+
+processors:
+  memory_limiter:
+    check_interval: 1s
+    limit_percentage: 80
+    spike_limit_percentage: 20
+  # A second line of defense: auth never records these, but nothing that
+  # carries secrets or addresses is kept if a sender ever does.
+  attributes/redact:
+    actions:
+      - key: url.query
+        action: delete
+      - key: url.full
+        action: delete
+      - key: client.address
+        action: delete
+      - pattern: ^http\.(request|response)\.header\.
+        action: delete
+
+exporters:
+  otlp_http/prometheus:
+    metrics_endpoint: http://prometheus:9090/api/v1/otlp/v1/metrics
+    sending_queue:
+      batch: {}
+  otlp_grpc/tempo:
+    endpoint: tempo:4317
+    tls:
+      insecure: true
+    sending_queue:
+      batch: {}
+  otlp_http/loki:
+    logs_endpoint: http://loki:3100/otlp/v1/logs
+    sending_queue:
+      batch: {}
+
+extensions:
+  health_check:
+    endpoint: 127.0.0.1:13133
+
+service:
+  extensions: [health_check]
+  pipelines:
+    metrics:
+      receivers: [otlp]
+      processors: [memory_limiter, attributes/redact]
+      exporters: [otlp_http/prometheus]
+    traces:
+      receivers: [otlp]
+      processors: [memory_limiter, attributes/redact]
+      exporters: [otlp_grpc/tempo]
+    logs:
+      receivers: [otlp]
+      processors: [memory_limiter, attributes/redact]
+      exporters: [otlp_http/loki]
