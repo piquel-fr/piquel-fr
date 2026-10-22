@@ -20,7 +20,7 @@ use piquel_common::{
     },
 };
 use piquel_crypto::Rs256Key;
-use piquel_repository::{DatabaseConfig, InsertUser, SessionScope};
+use piquel_repository::{DatabaseConfig, DatabaseTransaction, InsertUser};
 use serde_json::{Value, json};
 use std::sync::Arc;
 use tower::ServiceExt;
@@ -35,6 +35,15 @@ struct Account {
     user_id: UserId,
     /// Its passkey session.
     session_id: SessionId,
+}
+
+impl Account {
+    /// Signs the account's session out in `tx`, as its browser would.
+    async fn sign_out(self, tx: &mut DatabaseTransaction<'_>) {
+        crate::tests::sign_out(tx, self.user_id, self.session_id)
+            .await
+            .expect("sign out");
+    }
 }
 
 /// The admin API on the test database, with the key its tokens are signed with.
@@ -252,12 +261,9 @@ async fn callers_must_be_administrators_with_a_passkey() {
         harness.signed(admin, "notes-api", Acr::PhishingResistant, Duration::zero());
     let ended = harness.admin().await;
     let ended_token = harness.token(ended, Acr::PhishingResistant, Duration::zero());
-    harness
-        .database
-        .sessions()
-        .revoke(ended.user_id, SessionScope::One(ended.session_id))
-        .await
-        .expect("revoke");
+    let mut tx = harness.database.begin().await.expect("transaction");
+    ended.sign_out(&mut tx).await;
+    tx.commit().await.expect("commit");
     let read = paths::USERS;
     let mutation = user_path(paths::USER_ENABLE, user.user_id);
     for (path, method, token, status, challenge) in [
@@ -701,11 +707,7 @@ async fn mutations_recheck_the_confirmation_after_waiting() {
     let user = harness.account().await;
     let auth_time = Utc::now() - Duration::seconds(298);
     let mut logout = harness.database.begin().await.expect("transaction");
-    logout
-        .sessions()
-        .revoke(user.user_id, SessionScope::One(user.session_id))
-        .await
-        .expect("target session lock");
+    user.sign_out(&mut logout).await;
     let operations = harness.operations();
     let reason = Reason::parse("Spam".into()).expect("reason");
     let operator = operator(admin, auth_time);
@@ -754,11 +756,8 @@ async fn waiting_mutations_hold_no_caller_locks() {
         operations.disable_user(&operator, user.user_id, reason),
         async {
             until_blocked(&mut switch, 1).await;
-            switch
-                .sessions()
-                .revoke(admin.user_id, SessionScope::One(admin.session_id))
-                .await
-                .expect("the switch revokes the caller's session without a deadlock");
+            // The switch revokes the caller's session without a deadlock.
+            admin.sign_out(&mut switch).await;
             switch.commit().await.expect("commit");
         }
     );
@@ -829,11 +828,8 @@ async fn invitation_revocation_waits_for_signup() {
         operations.revoke_invitation(&operator, invitation.id),
         async {
             until_blocked(&mut signup, 1).await;
-            signup
-                .sessions()
-                .revoke(admin.user_id, SessionScope::One(admin.session_id))
-                .await
-                .expect("the signup revokes the browser's session without a deadlock");
+            // The signup revokes the browser's session without a deadlock.
+            admin.sign_out(&mut signup).await;
             signup.commit().await.expect("signup");
         }
     );

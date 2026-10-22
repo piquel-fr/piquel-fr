@@ -96,9 +96,21 @@ ordered delivery is final, since the deliveries after it may already be sent. Ca
 cannot stop it from reaching the receiver, but its outcome is discarded, and the
 deliveries ordered after it wait for its lease to expire.
 
+## Channels
+
+- **`backchannel_logout`**: OIDC Back-Channel Logout 1.0 tokens. Every early end of
+  a session goes through `DatabaseTransaction::revoke_sessions`, which records one
+  `SessionRevoked` per session. Its fan-out creates one unordered delivery per
+  client that received tokens from the session (`oidc_session_clients`, written at
+  code exchange) and registered a back-channel logout URI. The recipient copies the
+  client ID, `sub` and `sid`. `BackchannelLogoutSender` signs a token per attempt,
+  with `iat` the attempt's time and `exp` two minutes later, and posts it as the
+  `logout_token` form field. `jti` is the delivery ID. `MAX_AGE` is one hour.
+
 ## Adding a channel
 
-The examples use a hypothetical back-channel logout channel.
+The examples follow the back-channel logout channel
+(`repositories/deliveries/backchannel.rs`, `apps/auth-service/src/deliveries/backchannel.rs`).
 
 1. **Define what it stores**, in `crates/database/src/repositories/deliveries/`:
    a type implementing `Channel`. `NAME` is stored in every row, so never rename a
@@ -117,13 +129,15 @@ The examples use a hypothetical back-channel logout channel.
        /// One delivery per client the revoked session signed in to.
        async fn deliveries(
            event: &DomainEvent,
-           subject: Option<UserId>,
+           _: Option<UserId>,
            tx: &mut DatabaseTransaction<'_>,
        ) -> Result<Vec<NewDelivery<Self>>, DatabaseError> {
            let DomainEvent::SessionRevoked { session_id, .. } = event else {
-               return Ok(vec![]);
+               return Ok(Vec::new());
            };
            // Read the clients and their logout URIs through a repository method.
+           let clients = tx.oidc().logout_clients(*session_id).await?;
+           // ...one `NewDelivery` per client.
        }
    }
    ```

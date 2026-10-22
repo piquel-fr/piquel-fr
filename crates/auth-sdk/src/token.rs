@@ -1,14 +1,14 @@
 //! Validated tokens, the checks they pass, and why a token is rejected.
 
 use crate::{Issuer, KeyError, LEEWAY, keys::Jws, scope::ScopeSet};
-use chrono::{DateTime, Utc};
+use chrono::{DateTime, TimeDelta, Utc};
 use piquel_common::{
     ClientId, SessionId, TokenId, UserId,
     protocol::{
         challenge::{BearerChallenge, BearerError},
         claims::{
             AccessTokenClaims, Acr, Actor, Amr, Audience, Confirmation, IdTokenClaims,
-            ProfileClaims,
+            LogoutTokenClaims, ProfileClaims,
         },
         jwt::{Algorithm, TokenType},
         oauth::Scopes,
@@ -105,6 +105,17 @@ pub enum TokenError {
     /// `iat` is in the future, beyond the leeway.
     #[error("token is issued in the future, at {0}")]
     IssuedInFuture(DateTime<Utc>),
+    /// A logout token's `exp` is more than 10 minutes after its `iat`.
+    #[error("logout token is valid from {issued_at} to {expires_at}, longer than 10 minutes")]
+    LifetimeTooLong {
+        /// The token's `iat`.
+        issued_at: DateTime<Utc>,
+        /// The token's `exp`.
+        expires_at: DateTime<Utc>,
+    },
+    /// A logout token names neither `sub` nor `sid`, so no session to end.
+    #[error("logout token names neither sub nor sid")]
+    NoLogoutTarget,
     /// The ID token's `nonce` is not the pending login's.
     #[error("ID token nonce does not match this login")]
     NonceMismatch,
@@ -153,12 +164,15 @@ impl TokenError {
             Self::UnsupportedAlgorithm(_) => ErrorReason::UnsupportedAlgorithm,
             Self::UnknownKey(_) => ErrorReason::UnknownKey,
             Self::BadSignature => ErrorReason::BadSignature,
-            Self::InvalidClaims(_) | Self::InvalidSubject(_) => ErrorReason::InvalidClaims,
+            Self::InvalidClaims(_) | Self::InvalidSubject(_) | Self::NoLogoutTarget => {
+                ErrorReason::InvalidClaims
+            }
             Self::WrongIssuer { .. } => ErrorReason::IssuerMismatch,
             Self::WrongAudience { .. } => ErrorReason::WrongAudience,
             Self::Expired(_) => ErrorReason::Expired,
             Self::NotYetValid(_) => ErrorReason::NotYetValid,
             Self::IssuedInFuture(_) => ErrorReason::IssuedInFuture,
+            Self::LifetimeTooLong { .. } => ErrorReason::LifetimeTooLong,
             Self::NonceMismatch => ErrorReason::NonceMismatch,
             Self::WrongAuthorizedParty { .. } => ErrorReason::WrongAuthorizedParty,
             Self::AuthenticationTooOld { .. } => ErrorReason::AuthenticationTooOld,
@@ -459,6 +473,62 @@ impl IdToken {
     }
 }
 
+/// Longest a logout token may be valid: auth signs each delivery attempt for two
+/// minutes, so a longer-lived token was not made for one attempt.
+const MAX_LOGOUT_LIFETIME: TimeDelta = TimeDelta::minutes(10);
+
+/// Which sessions a back-channel logout ends.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum LogoutScope {
+    /// One auth session: every session the app started under its `sid`.
+    Session(SessionId),
+    /// Every session of the user with this `sub`, for a logout naming no session.
+    Subject(String),
+}
+
+/// A validated back-channel logout token (OIDC Back-Channel Logout 1.0 §2.6), from
+/// [`Client::logout_token`](crate::Client::logout_token).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct LogoutToken {
+    /// The validated claims.
+    claims: LogoutTokenClaims,
+    /// What the token ends, from its `sid` or else its `sub`.
+    scope: LogoutScope,
+}
+
+impl LogoutToken {
+    /// Applies the checks particular to logout tokens to claims that passed the shared
+    /// ones: a lifetime of at most 10 minutes, and `sub` or `sid`. Claim decoding
+    /// already required the logout event and no `nonce`.
+    pub(crate) fn from_claims(claims: LogoutTokenClaims) -> Result<Self, TokenError> {
+        if claims.exp - claims.iat > MAX_LOGOUT_LIFETIME {
+            return Err(TokenError::LifetimeTooLong {
+                issued_at: claims.iat,
+                expires_at: claims.exp,
+            });
+        }
+        let scope = match (claims.sid, &claims.sub) {
+            (Some(sid), _) => LogoutScope::Session(sid),
+            (None, Some(sub)) => LogoutScope::Subject(sub.clone()),
+            (None, None) => return Err(TokenError::NoLogoutTarget),
+        };
+        Ok(Self { claims, scope })
+    }
+
+    /// The validated claims.
+    #[must_use]
+    pub const fn claims(&self) -> &LogoutTokenClaims {
+        &self.claims
+    }
+
+    /// Which sessions to end: those of `sid` when the token names one, else every
+    /// session of `sub`.
+    #[must_use]
+    pub const fn scope(&self) -> &LogoutScope {
+        &self.scope
+    }
+}
+
 /// The registered claims every token type checks the same way.
 pub(crate) trait RegisteredClaims: DeserializeOwned {
     /// `iss`.
@@ -473,8 +543,8 @@ pub(crate) trait RegisteredClaims: DeserializeOwned {
     fn issued_at(&self) -> DateTime<Utc>;
 
     /// Whether `aud` must name the expected audience alone. ID tokens trust no other
-    /// audience (OIDC Core §3.1.3.7), so `azp` can only confirm this client; access
-    /// tokens may name several.
+    /// audience (OIDC Core §3.1.3.7), so `azp` can only confirm this client, and auth
+    /// addresses each logout token to one client; access tokens may name several.
     const EXCLUSIVE_AUDIENCE: bool;
 
     /// Checks `iss`, `aud` and the times, in the documented order.
@@ -545,6 +615,26 @@ impl RegisteredClaims for IdTokenClaims {
     }
     fn not_before(&self) -> Option<DateTime<Utc>> {
         self.nbf
+    }
+    fn issued_at(&self) -> DateTime<Utc> {
+        self.iat
+    }
+}
+
+impl RegisteredClaims for LogoutTokenClaims {
+    const EXCLUSIVE_AUDIENCE: bool = true;
+
+    fn issuer(&self) -> &str {
+        &self.iss
+    }
+    fn audience(&self) -> &Audience {
+        &self.aud
+    }
+    fn expires_at(&self) -> DateTime<Utc> {
+        self.exp
+    }
+    fn not_before(&self) -> Option<DateTime<Utc>> {
+        None
     }
     fn issued_at(&self) -> DateTime<Utc> {
         self.iat

@@ -21,12 +21,13 @@ use piquel_common::{
         RedirectUris, ScopeName,
     },
     config::{Origin, PublicUrl},
+    events::{Actor, RevocationReason},
     protocol::oauth::Scope,
 };
 use piquel_crypto::{ClientSecret, Rs256Key, Secret};
 use piquel_repository::{
-    Database, DatabaseConfig, DatabaseTransaction, InsertAuthorizationCode, InsertRefreshFamily,
-    InsertRefreshToken, InsertUser, SessionAuthentication,
+    Database, DatabaseConfig, DatabaseError, DatabaseTransaction, InsertAuthorizationCode,
+    InsertRefreshFamily, InsertRefreshToken, InsertUser, SessionAuthentication, SessionScope,
 };
 use serde_json::Value;
 use std::{
@@ -284,7 +285,27 @@ pub(crate) fn registration(kind: ClientKind, origin: &str) -> ClientRegistration
         allow_refresh: true,
         trusted: false,
         require_pushed_authorization_requests: false,
+        backchannel_logout_uri: None,
     }
+}
+
+/// Ends `session_id` of `user_id` in `tx`, as their browser's sign-out does.
+pub(crate) async fn sign_out(
+    tx: &mut DatabaseTransaction<'_>,
+    user_id: UserId,
+    session_id: SessionId,
+) -> Result<Vec<SessionId>, DatabaseError> {
+    let context = RequestContext::TEST.actor(Actor::User {
+        user_id,
+        session_id: Some(session_id),
+    });
+    tx.revoke_sessions(
+        &context,
+        user_id,
+        SessionScope::One(session_id),
+        &RevocationReason::Logout,
+    )
+    .await
 }
 
 /// Waits until `waiters` other transactions wait for a lock `holder` holds.

@@ -396,6 +396,9 @@ impl OidcApplication {
             request_parameter_supported: false,
             request_uri_parameter_supported: false,
             authorization_response_iss_parameter_supported: true,
+            // Every logout token names the ended session with `sid`.
+            backchannel_logout_supported: true,
+            backchannel_logout_session_supported: true,
         })
     }
 

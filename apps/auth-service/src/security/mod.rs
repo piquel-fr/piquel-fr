@@ -479,7 +479,7 @@ impl Session {
 
     /// Revokes the `scope` sessions of `session`'s account inside the caller's
     /// transaction, with their refresh grants, recording one revocation per session,
-    /// attributed to `session`. Returns the revoked sessions.
+    /// attributed to `session`, which tells their clients. Returns the revoked sessions.
     pub(crate) async fn revoke(
         tx: &mut DatabaseTransaction<'_>,
         context: RequestContext,
@@ -487,20 +487,8 @@ impl Session {
         scope: SessionScope,
         reason: RevocationReason,
     ) -> Result<Vec<SessionId>, DatabaseError> {
-        let context = context.user(session);
-        let revoked = tx.sessions().revoke(session.user_id, scope).await?;
-        for &session_id in &revoked {
-            tx.record(
-                &context,
-                Some(session.user_id),
-                DomainEvent::SessionRevoked {
-                    session_id,
-                    reason: reason.clone(),
-                },
-            )
-            .await?;
-        }
-        Ok(revoked)
+        tx.revoke_sessions(&context.user(session), session.user_id, scope, &reason)
+            .await
     }
 
     /// Records the session's activity from `context`, at most once every

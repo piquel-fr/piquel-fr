@@ -169,7 +169,7 @@ crate::open_str_enum! {
     /// A setting of a [`ClientRegistration`], named as the account API's bodies
     /// name it. Errors name the field they reject, and `ClientUpdated` events the
     /// fields that changed. Open, since a newer release adds settings (branding,
-    /// #45; back-channel logout, #65) to events this release still reads.
+    /// #45) to events this release still reads.
     pub enum ClientField {
         /// [`ClientRegistration::display_name`].
         DisplayName = "display_name",
@@ -185,6 +185,8 @@ crate::open_str_enum! {
         Trusted = "trusted",
         /// [`ClientRegistration::require_pushed_authorization_requests`].
         RequirePushedAuthorizationRequests = "require_pushed_authorization_requests",
+        /// [`ClientRegistration::backchannel_logout_uri`].
+        BackchannelLogoutUri = "backchannel_logout_uri",
     }
 }
 
@@ -200,6 +202,7 @@ impl ClientField {
             | Self::AllowRefresh
             | Self::Trusted
             | Self::RequirePushedAuthorizationRequests
+            | Self::BackchannelLogoutUri
             | Self::Other(_) => false,
         }
     }
@@ -239,9 +242,10 @@ impl FromStr for DisplayName {
     }
 }
 
-/// A URI auth may send the browser back to: an authorization callback or a
-/// post-logout page. It uses HTTPS, or HTTP on a loopback IP for native apps
-/// (RFC 8252 §7.3), and has no user name, password or fragment.
+/// A URI of the client that auth sends the browser or a request to: an
+/// authorization callback, a post-logout page or a back-channel logout endpoint. It
+/// uses HTTPS, or HTTP on a loopback IP for native apps (RFC 8252 §7.3) and
+/// development, and has no user name, password or fragment.
 ///
 /// It must be written exactly as URL parsing normalizes it, e.g.
 /// `https://app.example/` rather than `https://APP.example`: clients send it
@@ -457,6 +461,10 @@ pub struct ClientRegistration {
     /// Whether the client must push its authorization requests (RFC 9126 §6), so
     /// none of its parameters travel through the browser.
     pub require_pushed_authorization_requests: bool,
+    /// Where auth posts a logout token when a session the client holds tokens from
+    /// ends (OIDC Back-Channel Logout 1.0). Deliveries go only to HTTPS URIs with
+    /// public addresses, so a loopback URI is never reached.
+    pub backchannel_logout_uri: Option<RedirectUri>,
 }
 
 /// Focused tests for each field's rules.

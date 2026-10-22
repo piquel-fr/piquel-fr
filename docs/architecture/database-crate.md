@@ -193,8 +193,12 @@ background job, or an anonymous browser. Handlers record an event with
 `tx.record(&context, subject, event)` in the transaction that makes the change, so a
 rolled-back change leaves no event. `record` also creates the outbound deliveries
 the event causes, in the same transaction; see [the delivery queue](delivery-queue.md). Failed sign-ins change nothing, so they record
-theirs in a short transaction of their own. A revocation that ends several sessions
-records one `SessionRevoked` per session. Refresh rotations are too frequent to be
+theirs in a short transaction of their own. Sessions end early only through
+`DatabaseTransaction::revoke_sessions`, which revokes them with their refresh
+families and records one `SessionRevoked` per session, whose fan-out queues the
+back-channel logout tokens of the clients that received tokens from it
+(`oidc_session_clients`). The repository method underneath is private to the crate,
+so no revocation can skip the event. Refresh rotations are too frequent to be
 events. `Imported` holds the rows of `security_audit_log`, the log events replace,
 verbatim; only migrations write it, and its fields are private, so it can only be
 read back. `repositories/events/` stores events: the personal data split below,

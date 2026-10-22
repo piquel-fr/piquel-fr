@@ -24,7 +24,8 @@ pub use repositories::{
     FederationRepository, MaintenanceRepository, OidcRepository, PasskeyRepository,
     SecurityRepository, SessionRepository, TokenRepository, UserRepository,
     deliveries::{
-        Channel, Delivery, DeliveryOutcome, DeliveryStatus, DeliverySummary, NewDelivery,
+        BackchannelLogout, Channel, Delivery, DeliveryOutcome, DeliveryStatus, DeliverySummary,
+        LogoutRecipient, NewDelivery,
     },
     emails::{InsertVerifiedEmail, StoredEmail},
     events::{EventCursor, EventFilter, RecordedEvent, StoredEvent},

@@ -6,11 +6,16 @@
 //! a worker that stops after sending but before recording lets its lease expire,
 //! and the delivery is sent again. See `docs/architecture/delivery-queue.md`.
 
-/// The HTTP client for destinations third parties supply, [`outbound::OutboundClient`].
+/// Back-channel logout tokens, [`BackchannelLogoutSender`].
+mod backchannel;
+/// The HTTP client for destinations third parties supply, [`OutboundClient`].
 mod outbound;
 /// Retry policy, the HTTP client's safety checks and the worker loop.
 #[cfg(test)]
 mod tests;
+
+pub(crate) use backchannel::BackchannelLogoutSender;
+pub(crate) use outbound::OutboundClient;
 
 use crate::jobs::{Jobs, Shutdown};
 use axum::http::StatusCode;
@@ -101,6 +106,9 @@ pub(crate) enum Failure {
     /// attempted again.
     #[error("maximum age exceeded")]
     Expired,
+    /// The message could not be signed.
+    #[error("signing failed")]
+    Signing,
 }
 
 impl DeliveryError {

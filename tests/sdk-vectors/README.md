@@ -38,7 +38,7 @@ Each file is one case:
 | --- | --- | --- |
 | `discovery/` | `issuer` configured, `document` returned by the well-known endpoint | the parsed metadata |
 | `jwks/` | `jwks`, a key set | `kids`: the usable key IDs, in set order |
-| `tokens/` | `issuer`, `jwks`, `kind` (`access` or `id`), `audience` (the resource, or the client for ID tokens), `token`; ID tokens add `nonce` and `max_age` (`null` when not sent) | the token's claims |
+| `tokens/` | `issuer`, `jwks`, `kind` (`access`, `id` or `logout`), `audience` (the resource, or the client for ID and logout tokens), `token`; ID tokens add `nonce` and `max_age` (`null` when not sent) | the token's claims |
 | `challenges/` | `challenge` (format cases) or `header` (parse cases) | `status` and `header`, or `challenge` |
 | `callbacks/` | `issuer`, `authorization_response_iss_parameter_supported`, the expected `state`, and the callback's query `parameters` | `code` |
 

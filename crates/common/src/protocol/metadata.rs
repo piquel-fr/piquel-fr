@@ -99,4 +99,11 @@ pub struct ServerMetadata {
     pub request_uri_parameter_supported: bool,
     /// Whether authorization responses carry `iss` (RFC 9207).
     pub authorization_response_iss_parameter_supported: bool,
+    /// Whether clients may register a back-channel logout URI (OIDC Back-Channel
+    /// Logout 1.0 §2.1). False when absent.
+    #[serde(default)]
+    pub backchannel_logout_supported: bool,
+    /// Whether logout tokens name the ended session with `sid`. False when absent.
+    #[serde(default)]
+    pub backchannel_logout_session_supported: bool,
 }

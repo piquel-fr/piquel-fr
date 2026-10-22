@@ -322,6 +322,10 @@ impl OidcApplication {
         } else {
             (None, None)
         };
+        // Ending the session now tells the client (back-channel logout).
+        tx.oidc()
+            .record_session_client(session.id, &client.id)
+            .await?;
         tx.record(
             context,
             Some(user.id),

@@ -71,6 +71,10 @@ struct ClientSettings {
     /// Whether the client must push its authorization requests (RFC 9126).
     #[serde(default)]
     require_pushed_authorization_requests: bool,
+    /// Where auth posts logout tokens. Only the operator sets it for now, so a
+    /// registration has none and a change keeps the stored one.
+    #[serde(skip)]
+    backchannel_logout_uri: Option<RedirectUri>,
 }
 
 /// The body of a registration.
@@ -176,6 +180,7 @@ impl ClientSettings {
             allow_refresh: self.allow_refresh,
             trusted: false,
             require_pushed_authorization_requests: self.require_pushed_authorization_requests,
+            backchannel_logout_uri: self.backchannel_logout_uri,
         })
     }
 
@@ -208,6 +213,12 @@ impl ClientPatch {
             require_pushed_authorization_requests: self
                 .require_pushed_authorization_requests
                 .unwrap_or(current.require_pushed_authorization_requests),
+            backchannel_logout_uri: current
+                .backchannel_logout_uri
+                .as_deref()
+                .map(str::parse)
+                .transpose()
+                .map_err(InvalidSetting::with(ClientField::BackchannelLogoutUri))?,
         }
         .registration(current.id.clone(), current.kind)
     }

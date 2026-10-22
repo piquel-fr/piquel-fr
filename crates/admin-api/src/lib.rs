@@ -244,6 +244,9 @@ pub struct Client {
     pub require_pushed_authorization_requests: bool,
     /// How it authenticates at the token endpoint.
     pub token_endpoint_auth_method: ClientAuthMethod,
+    /// Where logout tokens are posted when a session it holds tokens from ends.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub backchannel_logout_uri: Option<String>,
 }
 
 /// The query of [`paths::EVENTS`]. Every filter is optional.

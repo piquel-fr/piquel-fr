@@ -2,10 +2,12 @@
 //!
 //! Tests share one database, so each claims from a channel of its own.
 use super::*;
-use crate::{Database, EventRepository, MaintenanceRepository, StoredEvent};
+use crate::{
+    Database, EventRepository, MaintenanceRepository, OidcRepository, SessionScope, StoredEvent,
+};
 use piquel_common::{
-    Personal,
-    events::{Actor, EventContext, RequestOrigin},
+    Personal, SessionId,
+    events::{Actor, EventContext, RequestOrigin, RevocationReason},
 };
 use sqlx::PgPool;
 use std::collections::HashSet;
@@ -445,5 +447,104 @@ async fn cleanup_abandons_a_key_stuck_behind_an_old_failure() {
     assert_eq!(
         claim::<Abandoned>(&pool, LEASE).await.map(|d| d.id),
         Some(next)
+    );
+}
+
+/// Ending a session queues, in the revocation's transaction, one logout token per
+/// client that received tokens from it and registered a back-channel logout URI,
+/// with the facts the token needs. Other clients are not told.
+#[tokio::test]
+#[ignore = "requires a disposable TEST_DATABASE_URL"]
+async fn revoking_a_session_queues_a_logout_token_for_each_client_to_tell() {
+    let pool = Database::test_pool().await;
+    let user = UserId::new();
+    let session = SessionId::new();
+    sqlx::query("INSERT INTO users(id,username,display_name) VALUES($1,$2,'Logout test')")
+        .bind(user.as_uuid())
+        .bind(format!("logout_{user}"))
+        .execute(&pool)
+        .await
+        .expect("user");
+    sqlx::query(
+        "INSERT INTO sessions(id,user_id,authentication_methods,authenticated_at,expires_at,last_seen_at)
+        VALUES($1,$2,'[\"passkey\"]',now(),now()+interval '1 hour',now())",
+    )
+    .bind(session.as_uuid())
+    .bind(user.as_uuid())
+    .execute(&pool)
+    .await
+    .expect("session");
+    // Told; without a URI; and with a URI but no tokens from the session.
+    let told = format!("told-{user}");
+    let told_uri = "https://told.example/backchannel-logout";
+    for (client, uri, issued) in [
+        (told.clone(), Some(told_uri), true),
+        (format!("silent-{user}"), None, true),
+        (
+            format!("absent-{user}"),
+            Some("https://absent.example/logout"),
+            false,
+        ),
+    ] {
+        sqlx::query(
+            "INSERT INTO oidc_clients(id,display_name,allowed_scopes,allowed_audiences,backchannel_logout_uri)
+            VALUES($1,'Logout test','[]','[]',$2)",
+        )
+        .bind(&client)
+        .bind(uri)
+        .execute(&pool)
+        .await
+        .expect("client");
+        if issued {
+            OidcRepository::from_pool(&pool)
+                .record_session_client(session, &client.parse().expect("client ID"))
+                .await
+                .expect("record the session's client");
+        }
+    }
+    let revoke = async |commit: bool| {
+        let mut tx = DatabaseTransaction::new(pool.begin().await.expect("transaction"));
+        let context = EventContext {
+            actor: Actor::Anonymous,
+            origin: RequestOrigin::default(),
+        };
+        let revoked = tx
+            .revoke_sessions(
+                &context,
+                user,
+                SessionScope::One(session),
+                &RevocationReason::Logout,
+            )
+            .await
+            .expect("revoke");
+        assert_eq!(revoked, [session]);
+        if commit {
+            tx.commit().await.expect("commit");
+        }
+    };
+    let queued = async || -> Vec<(String, Value)> {
+        sqlx::query_as(
+            "SELECT destination, recipient FROM deliveries
+            WHERE channel = $1 AND recipient->>'sid' = $2",
+        )
+        .bind(BackchannelLogout::NAME)
+        .bind(session.to_string())
+        .fetch_all(&pool)
+        .await
+        .expect("deliveries")
+    };
+
+    revoke(false).await;
+    assert!(
+        queued().await.is_empty(),
+        "a rolled-back revocation tells no one"
+    );
+    revoke(true).await;
+    assert_eq!(
+        queued().await,
+        [(
+            told_uri.into(),
+            serde_json::json!({"client_id": told, "sub": user, "sid": session}),
+        )]
     );
 }

@@ -60,6 +60,12 @@
 //! # Ok(()) }
 //! ```
 //!
+//! **Back-channel logout.** When auth ends a session, it posts a logout token to the
+//! login routes' `/backchannel-logout`: register `https://<app>/auth/backchannel-logout`,
+//! with the routes' mount in place of `/auth`, as the client's back-channel logout
+//! URI. The routes delete every session started under the token's `sid`, or every
+//! session of its `sub`, in the shared backend, so the logout reaches every replica.
+//!
 //! **Step-up.** A page that needs a stronger or more recent sign-in returns the
 //! [`StepUp`] from [`SignedIn::require`], and one calling an API answers the API's
 //! `insufficient_user_authentication` challenge with [`SignedIn::step_up`]. The layer

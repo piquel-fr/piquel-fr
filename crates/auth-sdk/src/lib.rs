@@ -58,6 +58,10 @@
 //! 3. [`Client::refresh`], [`Client::revoke`], [`Client::userinfo`] and
 //!    [`Client::logout_url`] cover the rest of a session.
 //!
+//! When auth ends a session, it posts a logout token to the client's back-channel
+//! logout URI; [`Client::logout_token`] validates it. The axum login routes receive
+//! it and end the matching sessions.
+//!
 //! # Signing keys
 //!
 //! [`KeyCache`] caches a JWKS for any issuer. An unknown `kid` triggers one refetch,
@@ -111,17 +115,21 @@ pub use issuer::{DiscoveryError, Issuer, IssuerBuilder};
 pub use keys::{Jws, JwsHeader, KeyCache, KeyError, KeySet};
 pub use resource::{Resource, ResourceError, ResourceValidator};
 pub use scope::{Scope, ScopeSet};
-pub use token::{AccessToken, AuthenticationPolicy, IdToken, Subject, TokenError};
+pub use token::{
+    AccessToken, AuthenticationPolicy, IdToken, LogoutScope, LogoutToken, Subject, TokenError,
+};
 
 /// The wire types this SDK reads, shared with auth itself. Each item is re-exported
 /// by name, so this list is the SDK's contract.
 pub mod protocol {
     pub use piquel_common::protocol::{challenge, claims, jwt, metadata, oauth, sdk, step_up};
-    pub use piquel_common::{ClientId, InvalidValue, SessionId, TokenId, UserId};
+    pub use piquel_common::{ClientId, DeliveryId, InvalidValue, SessionId, TokenId, UserId};
 }
 pub use protocol::{
     ClientId, SessionId, TokenId, UserId,
-    claims::{Acr, Actor, Amr, Confirmation, IdTokenClaims, ProfileClaims, UserInfo},
+    claims::{
+        Acr, Actor, Amr, Confirmation, IdTokenClaims, LogoutTokenClaims, ProfileClaims, UserInfo,
+    },
     oauth::Scopes,
     sdk::SdkError,
     step_up::StepUpRequirement,

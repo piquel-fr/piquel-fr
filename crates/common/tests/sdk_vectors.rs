@@ -7,12 +7,12 @@ use base64::{Engine, engine::general_purpose::URL_SAFE_NO_PAD};
 use chrono::{DateTime, Duration, Utc};
 use openssl::{hash::MessageDigest, pkey::PKey, sign::Signer};
 use piquel_common::{
-    AuthenticationMethod, ClientId, SessionId, TokenId,
+    AuthenticationMethod, ClientId, DeliveryId, SessionId, TokenId,
     protocol::{
         challenge::{BearerChallenge, BearerError},
         claims::{
-            AccessTokenClaims, Acr, Actor, Amr, Audience, AuthenticationClaims, Confirmation,
-            IdTokenClaims, ProfileClaims,
+            Absent, AccessTokenClaims, Acr, Actor, Amr, Audience, AuthenticationClaims,
+            Confirmation, IdTokenClaims, LogoutEvents, LogoutTokenClaims, ProfileClaims,
         },
         jwt::{Algorithm, Claim, JwkSet, TokenType},
         metadata::ServerMetadata,
@@ -300,6 +300,8 @@ impl Vectors {
             request_parameter_supported: false,
             request_uri_parameter_supported: false,
             authorization_response_iss_parameter_supported: true,
+            backchannel_logout_supported: true,
+            backchannel_logout_session_supported: true,
         }
     }
 
@@ -602,6 +604,7 @@ impl Vectors {
             ),
         );
         self.id_tokens(&during);
+        self.logout_tokens(&during);
     }
 
     /// ID token cases, checked against the pending login's nonce and `max_age`. The
@@ -695,6 +698,123 @@ impl Vectors {
         }
     }
 
+    /// Back-channel logout token cases, validated for the client (OIDC Back-Channel
+    /// Logout 1.0 §2.6).
+    #[expect(
+        clippy::too_many_lines,
+        reason = "One table of cases reads better than many small builders."
+    )]
+    fn logout_tokens(&mut self, jwks: &Value) {
+        let logout = Self::logout_claims();
+        let logout_case = |token: String| {
+            json!({
+                "issuer": ISSUER, "jwks": jwks, "kind": "logout", "audience": CLIENT,
+                "token": token,
+            })
+        };
+        self.token(
+            "logout-valid",
+            "a session logout token as auth sends it",
+            logout_case(Self::sign(&self.old, TokenType::Logout, &logout)),
+            Expected::ok(&logout),
+        );
+        let subject = LogoutTokenClaims {
+            sid: None,
+            ..logout.clone()
+        };
+        self.token(
+            "logout-subject",
+            "a subject logout token names sub alone",
+            logout_case(Self::sign(&self.old, TokenType::Logout, &subject)),
+            Expected::ok(&subject),
+        );
+        let boundary = LogoutTokenClaims {
+            exp: logout.iat + Duration::minutes(10),
+            ..logout.clone()
+        };
+        self.token(
+            "logout-lifetime-boundary",
+            "a token valid for exactly 10 minutes is accepted",
+            logout_case(Self::sign(&self.old, TokenType::Logout, &boundary)),
+            Expected::ok(&boundary),
+        );
+        self.token(
+            "logout-wrong-type",
+            "an ID token is not a logout token",
+            logout_case(Self::sign(&self.old, TokenType::Id, &Self::id_claims())),
+            Expected::error(ErrorCategory::InvalidToken, ErrorReason::WrongType),
+        );
+        for (name, description, change, reason) in [
+            (
+                "logout-issued-in-future",
+                "iat more than 30 seconds in the future is rejected",
+                (|claims: &mut Value| {
+                    claims["iat"] = json!(at(31).timestamp());
+                    claims["exp"] = json!(at(151).timestamp());
+                }) as fn(&mut Value),
+                ErrorReason::IssuedInFuture,
+            ),
+            (
+                "logout-expired",
+                "exp 30 seconds in the past is expired: the leeway ends there",
+                |claims| {
+                    claims["iat"] = json!(at(-150).timestamp());
+                    claims["exp"] = json!(at(-30).timestamp());
+                },
+                ErrorReason::Expired,
+            ),
+            (
+                "logout-lifetime-too-long",
+                "exp more than 10 minutes after iat is rejected",
+                |claims| claims["exp"] = json!(at(-10 + 601).timestamp()),
+                ErrorReason::LifetimeTooLong,
+            ),
+            (
+                "logout-missing-events",
+                "a token without the back-channel logout event is rejected",
+                |claims| drop(claims.as_object_mut().expect("claims").remove("events")),
+                ErrorReason::InvalidClaims,
+            ),
+            (
+                "logout-nonce",
+                "a nonce, even null, is rejected, so an ID token never passes as a logout token",
+                |claims| claims["nonce"] = Value::Null,
+                ErrorReason::InvalidClaims,
+            ),
+            (
+                "logout-no-target",
+                "a token naming neither sub nor sid is rejected",
+                |claims| {
+                    let claims = claims.as_object_mut().expect("claims");
+                    claims.remove("sub");
+                    claims.remove("sid");
+                },
+                ErrorReason::InvalidClaims,
+            ),
+            (
+                "logout-wrong-audience",
+                "aud must be the client",
+                |claims| claims["aud"] = json!("another-client"),
+                ErrorReason::WrongAudience,
+            ),
+            (
+                "logout-extra-audience",
+                "aud naming another client too is rejected",
+                |claims| claims["aud"] = json!([CLIENT, "another-client"]),
+                ErrorReason::WrongAudience,
+            ),
+        ] {
+            let mut claims = serde_json::to_value(&logout).expect("serialize claims");
+            change(&mut claims);
+            self.token(
+                name,
+                description,
+                logout_case(Self::sign(&self.old, TokenType::Logout, &claims)),
+                Expected::error(ErrorCategory::InvalidToken, reason),
+            );
+        }
+    }
+
     /// Signs `claims` under a hand-written `header` with the old key, for headers
     /// auth's signer never writes.
     fn sign_header(&self, header: &Value, claims: &impl Serialize) -> String {
@@ -765,6 +885,24 @@ impl Vectors {
             nonce: Some(NONCE.into()),
             authentication: Self::authentication(),
             profile: Self::profile(),
+        }
+    }
+
+    /// Claims of the logout token auth sends when the fixture session ends, signed
+    /// 10 seconds before [`NOW`].
+    fn logout_claims() -> LogoutTokenClaims {
+        LogoutTokenClaims {
+            iss: ISSUER.into(),
+            aud: Audience::One(CLIENT.into()),
+            iat: at(-10),
+            exp: at(110),
+            jti: "01936f3e-8c00-7000-8000-000000000006"
+                .parse::<DeliveryId>()
+                .expect("delivery ID"),
+            sub: Some(USER.into()),
+            sid: Self::authentication().sid,
+            events: LogoutEvents,
+            nonce: Absent,
         }
     }
 

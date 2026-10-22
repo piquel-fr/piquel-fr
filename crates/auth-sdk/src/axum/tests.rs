@@ -1,5 +1,5 @@
 //! Bearer rejections against the shared challenge vectors, the session layer's
-//! refresh lease, and logout.
+//! refresh lease, logout, and back-channel logout.
 
 use super::session::{Lease, LeaseId, Session, SessionKey, Sessions};
 use super::*;
@@ -18,7 +18,14 @@ use ::axum::{
 };
 use base64::Engine as _;
 use chrono::{TimeDelta, Utc};
-use piquel_common::protocol::{challenge::BearerChallenge, metadata::ServerMetadata};
+use piquel_common::{
+    DeliveryId,
+    protocol::{
+        challenge::BearerChallenge,
+        claims::{Absent, Audience, LogoutEvents, LogoutTokenClaims},
+        metadata::ServerMetadata,
+    },
+};
 use serde_json::json;
 use sha2::Digest as _;
 use std::{
@@ -342,10 +349,11 @@ fn stored_login(sub: &str, sid: SessionId, expires_in: i64) -> StoredLogin {
 /// Starts a session for `login` in `backend`; returns its key and cookie header.
 async fn session(backend: &MemoryBackend, login: &StoredLogin) -> (SessionKey, String) {
     let key = SessionKey::generate().expect("key");
-    Sessions::new(backend.clone())
-        .insert(&key, login, Utc::now() + TimeDelta::hours(1))
+    let started = Sessions::new(backend.clone())
+        .insert(&key, login, Utc::now() + TimeDelta::hours(1), Utc::now())
         .await
         .expect("insert session");
+    assert!(started, "the session starts");
     let cookie = format!("__Host-piquel-session={}", key.as_cookie());
     (key, cookie)
 }
@@ -464,20 +472,45 @@ async fn leases_are_fenced() {
     );
 }
 
-/// A backend whose reads are slow.
-#[derive(Clone, Default)]
-struct SlowReads(MemoryBackend);
+/// A flaw of a [`Flawed`] backend.
+#[derive(Clone, Copy)]
+enum Flaw {
+    /// Reads are slow.
+    SlowReads,
+    /// `replace` reads, pauses, then writes: not atomic.
+    ReadThenWrite,
+    /// `replace` inserts a missing record, which could resurrect a logged-out session.
+    Upserting,
+    /// `insert` replaces a record already there.
+    Overwriting,
+}
 
-impl SessionBackend for SlowReads {
+/// A memory backend with one flaw.
+#[derive(Clone)]
+struct Flawed(Flaw, MemoryBackend);
+
+impl Flawed {
+    /// An empty backend with `flaw`.
+    fn new(flaw: Flaw) -> Self {
+        Self(flaw, MemoryBackend::default())
+    }
+}
+
+impl SessionBackend for Flawed {
     type Error = std::convert::Infallible;
 
     async fn load(&self, key: &str) -> Result<Option<SessionRecord>, Self::Error> {
-        tokio::time::sleep(Duration::from_millis(150)).await;
-        self.0.load(key).await
+        if matches!(self.0, Flaw::SlowReads) {
+            tokio::time::sleep(Duration::from_millis(150)).await;
+        }
+        self.1.load(key).await
     }
 
-    async fn insert(&self, key: &str, record: &SessionRecord) -> Result<(), Self::Error> {
-        self.0.insert(key, record).await
+    async fn insert(&self, key: &str, record: &SessionRecord) -> Result<bool, Self::Error> {
+        if matches!(self.0, Flaw::Overwriting) {
+            self.1.remove(key).await?;
+        }
+        self.1.insert(key, record).await
     }
 
     async fn replace(
@@ -486,11 +519,26 @@ impl SessionBackend for SlowReads {
         expected: u64,
         record: &SessionRecord,
     ) -> Result<bool, Self::Error> {
-        self.0.replace(key, expected, record).await
+        match self.0 {
+            Flaw::ReadThenWrite => {
+                let current = self.1.load(key).await?;
+                std::thread::sleep(Duration::from_millis(2));
+                if current.is_none_or(|stored| stored.version != expected) {
+                    return Ok(false);
+                }
+                self.1.remove(key).await?;
+                self.1.insert(key, record).await?;
+                Ok(true)
+            }
+            Flaw::Upserting if self.1.load(key).await?.is_none() => {
+                self.1.insert(key, record).await
+            }
+            _ => self.1.replace(key, expected, record).await,
+        }
     }
 
     async fn remove(&self, key: &str) -> Result<bool, Self::Error> {
-        self.0.remove(key).await
+        self.1.remove(key).await
     }
 }
 
@@ -498,11 +546,11 @@ impl SessionBackend for SlowReads {
 /// read again after the backend answers.
 #[tokio::test]
 async fn saves_recheck_expiry_after_slow_reads() {
-    let sessions = Sessions::new(SlowReads::default());
+    let sessions = Sessions::new(Flawed::new(Flaw::SlowReads));
     let login = stored_login(USER, SessionId::new(), 300);
     let key = SessionKey::generate().expect("key");
     sessions
-        .insert(&key, &login, Utc::now() + TimeDelta::hours(1))
+        .insert(&key, &login, Utc::now() + TimeDelta::hours(1), Utc::now())
         .await
         .expect("insert");
     let lease = LeaseId::generate().expect("lease");
@@ -519,93 +567,26 @@ async fn saves_recheck_expiry_after_slow_reads() {
     assert!(saved.is_none(), "an expired lease must not save");
 }
 
-/// A backend whose `replace` reads, pauses, then writes: not atomic.
-#[derive(Clone, Default)]
-struct ReadThenWrite(MemoryBackend);
-
-impl SessionBackend for ReadThenWrite {
-    type Error = std::convert::Infallible;
-
-    async fn load(&self, key: &str) -> Result<Option<SessionRecord>, Self::Error> {
-        self.0.load(key).await
-    }
-
-    async fn insert(&self, key: &str, record: &SessionRecord) -> Result<(), Self::Error> {
-        self.0.insert(key, record).await
-    }
-
-    async fn replace(
-        &self,
-        key: &str,
-        expected: u64,
-        record: &SessionRecord,
-    ) -> Result<bool, Self::Error> {
-        let current = self.0.load(key).await?;
-        std::thread::sleep(Duration::from_millis(2));
-        match current {
-            Some(stored) if stored.version == expected => {
-                self.0.insert(key, record).await?;
-                Ok(true)
-            }
-            _ => Ok(false),
-        }
-    }
-
-    async fn remove(&self, key: &str) -> Result<bool, Self::Error> {
-        self.0.remove(key).await
-    }
-}
-
-/// A backend whose `replace` inserts a missing record, which could resurrect a
-/// logged-out session.
-#[derive(Clone, Default)]
-struct Upserting(MemoryBackend);
-
-impl SessionBackend for Upserting {
-    type Error = std::convert::Infallible;
-
-    async fn load(&self, key: &str) -> Result<Option<SessionRecord>, Self::Error> {
-        self.0.load(key).await
-    }
-
-    async fn insert(&self, key: &str, record: &SessionRecord) -> Result<(), Self::Error> {
-        self.0.insert(key, record).await
-    }
-
-    async fn replace(
-        &self,
-        key: &str,
-        expected: u64,
-        record: &SessionRecord,
-    ) -> Result<bool, Self::Error> {
-        if self.0.load(key).await?.is_none() {
-            self.0.insert(key, record).await?;
-            return Ok(true);
-        }
-        self.0.replace(key, expected, record).await
-    }
-
-    async fn remove(&self, key: &str) -> Result<bool, Self::Error> {
-        self.0.remove(key).await
-    }
-}
-
 /// The check refuses a non-atomic backend, one that creates records on `replace`,
-/// and a runtime on which racing calls cannot overlap.
+/// one whose `insert` overwrites, and a runtime on which racing calls cannot overlap.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn check_backend_catches_broken_backends() {
-    assert!(matches!(
-        check_backend(&ReadThenWrite::default()).await,
-        Err(BackendCheckError::Contract(
-            "of racing replaces at one version, exactly one must write"
-        ))
-    ));
-    assert!(matches!(
-        check_backend(&Upserting::default()).await,
-        Err(BackendCheckError::Contract(
-            "replace wrote a record that does not exist"
-        ))
-    ));
+    for (flaw, broken) in [
+        (
+            Flaw::ReadThenWrite,
+            "of racing replaces at one version, exactly one must write",
+        ),
+        (
+            Flaw::Upserting,
+            "replace wrote a record that does not exist",
+        ),
+        (Flaw::Overwriting, "insert replaced a record already there"),
+    ] {
+        assert!(matches!(
+            check_backend(&Flawed::new(flaw)).await,
+            Err(BackendCheckError::Contract(message)) if message == broken
+        ));
+    }
     // Neither a current-thread runtime nor a single worker lets racing calls overlap.
     for runtime in [
         tokio::runtime::Builder::new_current_thread().build(),
@@ -615,7 +596,7 @@ async fn check_backend_catches_broken_backends() {
     ] {
         let runtime = runtime.expect("runtime");
         let checked = tokio::task::spawn_blocking(move || {
-            runtime.block_on(check_backend(&ReadThenWrite::default()))
+            runtime.block_on(check_backend(&Flawed::new(Flaw::ReadThenWrite)))
         });
         assert!(matches!(
             checked.await.expect("task"),
@@ -731,4 +712,140 @@ async fn logout_refuses_other_origins() {
         StatusCode::SEE_OTHER
     );
     assert!(load(&backend, &key).await.is_none());
+}
+
+/// Signs `claims` as auth signs logout tokens, with the vectors' `key-2025`.
+fn logout_token(claims: &serde_json::Value) -> String {
+    use base64::engine::general_purpose::{STANDARD, URL_SAFE_NO_PAD};
+    use jsonwebtoken::{EncodingKey, crypto::aws_lc::DEFAULT_PROVIDER};
+    let pem = include_str!("../../../../tests/sdk-vectors/keys/key-2025.pem");
+    let pkcs8 = STANDARD
+        .decode(
+            pem.lines()
+                .filter(|line| !line.starts_with("-----"))
+                .collect::<String>(),
+        )
+        .expect("PEM");
+    // jsonwebtoken reads RSA keys in PKCS#1 form, which the PKCS#8 form of a
+    // 2048-bit key wraps in a fixed 26-byte header.
+    let key = EncodingKey::from_rsa_der(&pkcs8[26..]);
+    let encode = |value: &serde_json::Value| URL_SAFE_NO_PAD.encode(value.to_string());
+    let header = json!({ "alg": "RS256", "kid": "key-2025", "typ": "logout+jwt" });
+    let input = format!("{}.{}", encode(&header), encode(claims));
+    let signer =
+        (DEFAULT_PROVIDER.signer_factory)(&jsonwebtoken::Algorithm::RS256, &key).expect("signer");
+    let signature = signer.try_sign(input.as_bytes()).expect("signature");
+    format!("{input}.{}", URL_SAFE_NO_PAD.encode(signature))
+}
+
+/// A logout token for `sub` and `sid`, valid now, with a fresh `jti`.
+fn logout(sub: Option<&str>, sid: Option<SessionId>) -> String {
+    let now = Utc::now();
+    let claims = LogoutTokenClaims {
+        iss: "https://auth.example.com".into(),
+        aud: Audience::One(CLIENT.into()),
+        iat: now,
+        exp: now + TimeDelta::minutes(2),
+        jti: DeliveryId::new(),
+        sub: sub.map(str::to_owned),
+        sid,
+        events: LogoutEvents,
+        nonce: Absent,
+    };
+    logout_token(&serde_json::to_value(claims).expect("claims"))
+}
+
+/// Posts `body` to the back-channel logout route as a form.
+async fn post_logout(app: &Router, body: String) -> Response {
+    let request = Request::post("/auth/backchannel-logout")
+        .header(header::CONTENT_TYPE, "application/x-www-form-urlencoded")
+        .body(Body::from(body))
+        .expect("request");
+    app.clone().oneshot(request).await.expect("response")
+}
+
+/// The response's status and `Cache-Control`.
+fn status(response: &Response) -> (StatusCode, Option<&str>) {
+    let cache = response.headers().get(header::CACHE_CONTROL);
+    (
+        response.status(),
+        cache.map(|value| value.to_str().expect("text")),
+    )
+}
+
+/// A logout by `sid` ends the sessions of that auth session only, a replay of it is
+/// refused, and a logout by `sub` alone ends every session of that user.
+#[tokio::test]
+async fn backchannel_logout_ends_the_named_sessions() {
+    let backend = MemoryBackend::default();
+    let issuer = issuer_with_token_endpoint("http://127.0.0.1:9/token".parse().expect("URL"));
+    let (app, _) = login_app(&issuer, &backend);
+    let other = "01936f3e-8c00-7000-8000-000000000009";
+    let ended = SessionId::new();
+    let (first, _) = session(&backend, &stored_login(USER, ended, 300)).await;
+    let (second, _) = session(&backend, &stored_login(USER, SessionId::new(), 300)).await;
+    let (stranger, _) = session(&backend, &stored_login(other, SessionId::new(), 300)).await;
+
+    let token = logout(Some(USER), Some(ended));
+    let response = post_logout(&app, format!("logout_token={token}")).await;
+    assert_eq!(status(&response), (StatusCode::OK, Some("no-store")));
+    assert!(load(&backend, &first).await.is_none());
+    assert!(
+        load(&backend, &second).await.is_some(),
+        "another auth session"
+    );
+    let replayed = post_logout(&app, format!("logout_token={token}")).await;
+    assert_eq!(
+        status(&replayed),
+        (StatusCode::BAD_REQUEST, Some("no-store"))
+    );
+
+    let response = post_logout(&app, format!("logout_token={}", logout(Some(USER), None))).await;
+    assert_eq!(status(&response), (StatusCode::OK, Some("no-store")));
+    assert!(load(&backend, &second).await.is_none());
+    assert!(load(&backend, &stranger).await.is_some(), "another user");
+}
+
+/// An invalid token, or none, is refused with the OAuth error and `no-store`.
+#[tokio::test]
+async fn backchannel_logout_refuses_bad_tokens() {
+    let backend = MemoryBackend::default();
+    let issuer = issuer_with_token_endpoint("http://127.0.0.1:9/token".parse().expect("URL"));
+    let (app, _) = login_app(&issuer, &backend);
+    let id_token = format!("logout_token={}", vector_token("id-valid"));
+    for body in [id_token, "token=abc".to_owned()] {
+        let response = post_logout(&app, body.clone()).await;
+        assert_eq!(
+            status(&response),
+            (StatusCode::BAD_REQUEST, Some("no-store")),
+            "{body}"
+        );
+        assert_eq!(text(response).await, r#"{"error":"invalid_request"}"#);
+    }
+}
+
+/// A sign-in that completes after auth ended its session keeps no session, while
+/// the user's other sign-ins still start.
+#[tokio::test]
+async fn sign_ins_cannot_join_an_ended_session() {
+    let backend = MemoryBackend::default();
+    let issuer = issuer_with_token_endpoint("http://127.0.0.1:9/token".parse().expect("URL"));
+    let (app, _) = login_app(&issuer, &backend);
+    let ended = SessionId::new();
+    let token = logout(Some(USER), Some(ended));
+    let response = post_logout(&app, format!("logout_token={token}")).await;
+    assert_eq!(response.status(), StatusCode::OK);
+    let key = SessionKey::generate().expect("key");
+    let started = Sessions::new(backend.clone())
+        .insert(
+            &key,
+            &stored_login(USER, ended, 300),
+            Utc::now() + TimeDelta::hours(1),
+            Utc::now(),
+        )
+        .await
+        .expect("insert");
+    assert!(!started);
+    assert!(load(&backend, &key).await.is_none());
+    session(&backend, &stored_login(USER, SessionId::new(), 300)).await;
 }

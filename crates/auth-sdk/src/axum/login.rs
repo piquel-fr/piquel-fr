@@ -1,5 +1,5 @@
-//! Server-side login: the `/login`, `/callback` and `/logout` routes, the session
-//! layer, and the session extractors.
+//! Server-side login: the `/login`, `/callback`, `/logout` and `/backchannel-logout`
+//! routes, the session layer, and the session extractors.
 
 use super::{
     BoxFuture, SessionBackend, StoredLogin,
@@ -11,8 +11,8 @@ use crate::{
     StepUpRequirement, TokenError, UserId,
 };
 use axum::{
-    Extension, Router,
-    extract::{FromRequestParts, OriginalUri, Query, Request, State},
+    Extension, Form, Json, Router,
+    extract::{FromRequestParts, OriginalUri, Query, Request, State, rejection::FormRejection},
     http::{HeaderMap, HeaderValue, Method, StatusCode, header, request::Parts},
     response::{IntoResponse, Redirect, Response},
     routing::{get, post},
@@ -152,6 +152,13 @@ struct Login {
 /// - `GET /callback` completes it, then starts a session under another fresh key,
 ///   ending any session the browser already had.
 /// - `POST /logout` deletes the session and redirects to RP-initiated logout.
+/// - `POST /backchannel-logout` receives auth's logout tokens (OIDC Back-Channel
+///   Logout 1.0) and deletes the sessions they name: every session started under the
+///   token's `sid`, or without one, every session of its `sub`. Register
+///   `https://<app><mount>/backchannel-logout` as the client's back-channel logout
+///   URI. It answers 200 once the sessions are gone, 400 with
+///   `{"error":"invalid_request"}` for an invalid or replayed token, 503 when auth's
+///   keys cannot be fetched and 500 when the backend fails, so auth retries those.
 ///
 /// Mount the router at `/auth`, or tell [`Self::mounted_at`], and add
 /// [`Self::layer`] around every route that uses [`SignedIn`] or [`MaybeSignedIn`].
@@ -259,6 +266,7 @@ impl LoginRoutes {
             .route("/login", get(Login::start))
             .route("/callback", get(Login::callback))
             .route("/logout", post(Login::logout))
+            .route("/backchannel-logout", post(Login::backchannel_logout))
             .with_state(Arc::new(self.0.clone()))
     }
 
@@ -283,6 +291,13 @@ struct StartQuery {
     /// `insufficient_user_authentication` challenge leaves it (RFC 9470 §4).
     #[serde(default)]
     step_up: bool,
+}
+
+/// The form auth posts to `POST /backchannel-logout`.
+#[derive(Deserialize)]
+struct LogoutForm {
+    /// The signed logout token.
+    logout_token: String,
 }
 
 impl Login {
@@ -431,9 +446,22 @@ impl Login {
         {
             return Self::store_failure(&error);
         }
-        let expires = login.now() + login.lifetime;
-        if let Err(error) = login.sessions.insert(&session, &stored, expires).await {
-            return Self::store_failure(&error);
+        let now = login.now();
+        match login
+            .sessions
+            .insert(&session, &stored, now + login.lifetime, now)
+            .await
+        {
+            Ok(true) => {}
+            Ok(false) => {
+                tracing::debug!("sign-in completed after auth ended its session");
+                return (
+                    StatusCode::BAD_REQUEST,
+                    "Sign-in failed: this session was signed out; start again.",
+                )
+                    .into_response();
+            }
+            Err(error) => return Self::store_failure(&error),
         }
         let mut response = Redirect::to(pending.return_to.as_str()).into_response();
         let cookies = response.headers_mut();
@@ -516,6 +544,58 @@ impl Login {
             );
         }
         response
+    }
+
+    /// `POST /backchannel-logout`: validates auth's logout token and deletes the
+    /// sessions it names (OIDC Back-Channel Logout 1.0 §2.8). Auth posts it server to
+    /// server, so there is no origin to check: the signed token is the authentication.
+    async fn backchannel_logout(
+        State(login): State<Arc<Self>>,
+        form: Result<Form<LogoutForm>, FormRejection>,
+    ) -> Response {
+        let mut response = login.receive_logout(form.ok()).await;
+        response
+            .headers_mut()
+            .insert(header::CACHE_CONTROL, HeaderValue::from_static("no-store"));
+        response
+    }
+
+    /// Applies the logout token in `form`, answering as [`LoginRoutes`] documents.
+    async fn receive_logout(&self, form: Option<Form<LogoutForm>>) -> Response {
+        let invalid = || {
+            let body = Json(serde_json::json!({ "error": "invalid_request" }));
+            (StatusCode::BAD_REQUEST, body).into_response()
+        };
+        let Some(Form(form)) = form else {
+            tracing::warn!("back-channel logout without a logout_token form field");
+            return invalid();
+        };
+        let token = match self.client.logout_token(&form.logout_token).await {
+            Ok(token) => token,
+            Err(error @ TokenError::Keys(_)) => {
+                tracing::warn!(error = %ErrorChain(&error), "back-channel logout could not be validated");
+                return StatusCode::SERVICE_UNAVAILABLE.into_response();
+            }
+            Err(error) => {
+                tracing::warn!(error = %ErrorChain(&error), "invalid back-channel logout token");
+                return invalid();
+            }
+        };
+        // An ended `sid` is remembered for as long as a session started now would
+        // last, far beyond any ID token a racing sign-in could still complete with.
+        let now = self.now();
+        match self
+            .sessions
+            .log_out(&token, now + self.lifetime, now)
+            .await
+        {
+            Ok(true) => StatusCode::OK.into_response(),
+            Ok(false) => {
+                tracing::warn!("replayed back-channel logout token");
+                invalid()
+            }
+            Err(error) => Self::store_failure(&error),
+        }
     }
 
     /// The signed-in session the request's cookie names, its access token refreshed

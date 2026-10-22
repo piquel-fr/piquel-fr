@@ -34,6 +34,7 @@ pub async fn list(cx: &Cx) -> Result<impl View> {
                 <dl class="facts">
                     <dt>"Redirect URIs"</dt><dd>(client.redirect_uris.join(", "))</dd>
                     <dt>"After sign-out"</dt><dd>(client.post_logout_uris.join(", "))</dd>
+                    <dt>"Back-channel logout"</dt><dd>(client.backchannel_logout_uri.as_deref().unwrap_or("Not told"))</dd>
                     <dt>"Scopes"</dt><dd>(client.allowed_scopes.join(" "))</dd>
                     <dt>"Audiences"</dt><dd>(client.allowed_audiences.join(" "))</dd>
                     <dt>"Refresh tokens"</dt><dd>(if client.allow_refresh { "Allowed" } else { "No" })</dd>

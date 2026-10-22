@@ -31,6 +31,7 @@ fn registration(kind: ClientKind, origin: &str) -> ClientRegistration {
         allow_refresh: false,
         trusted: false,
         require_pushed_authorization_requests: false,
+        backchannel_logout_uri: None,
     }
 }
 
@@ -259,6 +260,10 @@ async fn purging_an_owner_needs_its_live_clients_deleted() {
 /// parsing serializes them, and the previous release's writes are mirrored, even
 /// of a secret that had expired.
 /// It runs in a scratch schema, since the test database is migrated.
+#[expect(
+    clippy::too_many_lines,
+    reason = "Keep the migration, the previous release's writes and the checks in one scenario."
+)]
 #[tokio::test]
 #[ignore = "requires a disposable TEST_DATABASE_URL"]
 async fn migration_keeps_file_clients_and_their_secrets() {
@@ -306,6 +311,7 @@ async fn migration_keeps_file_clients_and_their_secrets() {
         include_str!("../../../migrations/0008_oidc_client_registry.sql"),
         include_str!("../../../migrations/0009_pushed_authorization_requests.sql"),
         include_str!("../../../migrations/0012_client_owners.sql"),
+        include_str!("../../../migrations/0013_backchannel_logout.sql"),
     ))
     .execute(&mut connection)
     .await

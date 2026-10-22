@@ -60,6 +60,8 @@ crate::str_enum! {
         NotYetValid = "not_yet_valid",
         /// `iat` is in the future, beyond the leeway.
         IssuedInFuture = "issued_in_future",
+        /// A logout token's `exp` is more than 10 minutes after its `iat`.
+        LifetimeTooLong = "lifetime_too_long",
         /// A required claim is missing or has the wrong type.
         InvalidClaims = "invalid_claims",
         /// An ID token's `nonce` differs from the pending login's.
