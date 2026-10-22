@@ -179,6 +179,12 @@ release still reads the rows already stored. The tolerance only protects a relea
 that has it: ship a new variant in a later deploy than #149, so that a rollback
 never lands on a release without it.
 
+Closed vocabularies stored in other columns, such as `AccountStatus` and the
+`JobName` of an `Actor::System`, have no such tolerance: a release fails to decode
+a value it does not know. Add the value in one release that never writes it, and
+start writing it in a later one, so the release a deploy or rollback runs beside
+always reads it.
+
 ### Personal data
 
 - `domain_events` holds only non-identifying content: kind, versioned payload,
