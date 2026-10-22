@@ -6,7 +6,7 @@ use piquel_common::{
     Provider,
     config::{ConfigurationError, Origin, PublicUrl, SecretBytes, SecretReference, Variable},
 };
-use piquel_crypto::{Rs256Key, Secret};
+use piquel_crypto::{NoteKey, NoteVerifier, Rs256Key, Secret};
 use piquel_repository::DatabaseConfig;
 use serde::{Serialize, Serializer};
 use std::{
@@ -50,6 +50,8 @@ const DATABASE_URL: Variable = Variable::new("AUTH_DATABASE_URL");
 const DATABASE_PASSWORD: Variable = Variable::new("AUTH_DATABASE_PASSWORD");
 /// Required persistent signing-key reference.
 const KEY_PROVIDER: Variable = Variable::new("AUTH_KEY_PROVIDER");
+/// Required reference to the key that signs audit checkpoints.
+const AUDIT_KEY_PROVIDER: Variable = Variable::new("AUTH_AUDIT_KEY_PROVIDER");
 /// Stable public signing-key identifier.
 const SIGNING_KEY_ID: Variable = Variable::new("AUTH_SIGNING_KEY_ID");
 /// Whether registration requires an invitation.
@@ -257,6 +259,49 @@ impl OidcConfig {
     }
 }
 
+/// The key that signs audit checkpoints: an Ed25519 key of its own, so it rotates
+/// independently of the OIDC signing key. See `docs/security/audit-history.md`.
+#[derive(Clone)]
+pub struct AuditConfig {
+    /// Signs checkpoints as `<auth host>/audit`.
+    pub(crate) key: Arc<NoteKey>,
+}
+
+impl AuditConfig {
+    /// Reads the key from `AUTH_AUDIT_KEY_PROVIDER` and names it after `origin`.
+    ///
+    /// # Errors
+    /// Names the variable when it is missing, does not resolve, or does not hold a
+    /// 32-byte seed in hex.
+    pub fn from_environment(origin: &Origin) -> Result<Self, ConfigurationError> {
+        let reference: SecretReference = AUDIT_KEY_PROVIDER.parse()?;
+        let secret = reference.resolve().map_err(|source| {
+            AUDIT_KEY_PROVIDER.error("must resolve to a 32-byte Ed25519 seed in hex", source)
+        })?;
+        Self::parse(origin, &secret)
+    }
+
+    /// Decodes the seed: 64 hex characters, with one trailing newline allowed, as
+    /// piqueld writes a generated `{ type = "random", bytes = 32, encoding = "hex" }`
+    /// secret.
+    pub(crate) fn parse(origin: &Origin, secret: &SecretBytes) -> Result<Self, ConfigurationError> {
+        let reason = "must contain a 32-byte Ed25519 seed as 64 hexadecimal characters";
+        let hex = secret
+            .utf8()
+            .map_err(|source| AUDIT_KEY_PROVIDER.error(reason, source))?;
+        let key = NoteKey::from_hex_seed(&format!("{}/audit", origin.host()), hex)
+            .map_err(|source| AUDIT_KEY_PROVIDER.error(reason, source))?;
+        Ok(Self { key: Arc::new(key) })
+    }
+
+    /// The name and public key that verify checkpoints, to commit to
+    /// `docs/security/audit-key.pub`.
+    #[must_use]
+    pub fn verifier(&self) -> &NoteVerifier {
+        self.key.verifier()
+    }
+}
+
 /// Validated service configuration combining one section per application.
 pub struct AuthConfig {
     /// Address bound by the HTTP listener behind piqueld.
@@ -270,6 +315,8 @@ pub struct AuthConfig {
     pub(crate) federation: FederationConfig,
     /// OIDC issuer and persistent keys.
     pub(crate) oidc: OidcConfig,
+    /// The audit checkpoint key.
+    pub(crate) audit: AuditConfig,
     /// Trusted reverse-proxy peers.
     pub(crate) trusted_proxies: Vec<IpNet>,
 }
@@ -335,6 +382,7 @@ impl AuthConfig {
             passkey: PasskeyConfig::from_environment(&origin, &persistent_key)?,
             federation: FederationConfig::from_environment(&origin, &settings_url)?,
             oidc: OidcConfig::from_environment(&origin, &persistent_key)?,
+            audit: AuditConfig::from_environment(&origin)?,
             trusted_proxies: Self::trusted_proxies()?,
         })
     }
@@ -377,5 +425,39 @@ impl AuthConfig {
                 }
             })
             .collect()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    //! Audit key validation.
+    use super::*;
+
+    /// The audit key is a 32-byte seed in hex, with one trailing newline allowed.
+    /// Anything else stops startup with an error naming the variable.
+    #[test]
+    fn audit_keys_must_be_32_hex_encoded_bytes() {
+        let origin: Origin = "https://auth.piquel.fr".parse().expect("origin");
+        let path = std::env::temp_dir().join(format!("audit-key-{}", piquel_common::UserId::new()));
+        let parse = |value: &str| {
+            std::fs::write(&path, value).expect("secret file");
+            let secret = SecretReference::parse(&format!("file://{}", path.display()))
+                .and_then(|reference| reference.resolve())
+                .expect("secret");
+            AuditConfig::parse(&origin, &secret)
+        };
+        let config = parse(&format!("{}\n", "ab".repeat(32))).expect("generated secret");
+        assert_eq!(config.verifier().name(), "auth.piquel.fr/audit");
+        for malformed in [
+            "ab".repeat(31),
+            "ab".repeat(33),
+            "zz".repeat(32),
+            "-----BEGIN".into(),
+        ] {
+            let error = parse(&malformed).err().expect("malformed key").to_string();
+            assert!(error.contains("AUTH_AUDIT_KEY_PROVIDER"), "{error}");
+            assert!(error.contains("64 hexadecimal characters"), "{error}");
+        }
+        std::fs::remove_file(path).expect("cleanup");
     }
 }

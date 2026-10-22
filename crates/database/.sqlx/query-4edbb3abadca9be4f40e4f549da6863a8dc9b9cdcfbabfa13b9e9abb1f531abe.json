@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE audit_checkpoints SET note = $2 WHERE position = $1",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Int8",
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "4edbb3abadca9be4f40e4f549da6863a8dc9b9cdcfbabfa13b9e9abb1f531abe"
+}

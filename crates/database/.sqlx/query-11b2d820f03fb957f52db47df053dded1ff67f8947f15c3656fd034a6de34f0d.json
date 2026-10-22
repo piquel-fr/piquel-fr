@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE audit_checkpoints SET head = $2 WHERE position = $1",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Int8",
+        "Bytea"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "11b2d820f03fb957f52db47df053dded1ff67f8947f15c3656fd034a6de34f0d"
+}

@@ -10,6 +10,8 @@ use sqlx::{Connection, PgConnection};
 pub enum LockKey {
     /// Expired-state cleanup.
     Cleanup = 1,
+    /// Sealing the audit chain and signing its checkpoints.
+    AuditChain = 2,
     /// Job runner tests in other crates; no release takes it.
     #[cfg(feature = "test-support")]
     Test = -1,

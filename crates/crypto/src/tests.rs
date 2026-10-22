@@ -156,3 +156,118 @@ fn jwt_persistence_and_trust_boundaries() {
         );
     }
 }
+
+/// Signed notes match the Go reference implementation (`golang.org/x/mod/sumdb/note`):
+/// the same seed gives the same verifier key and the same signature line.
+#[test]
+fn notes_match_the_reference_vectors() {
+    let key = NoteKey::from_hex_seed(
+        "PeterNeumann",
+        "810a1402d5146c8d84f2443330f54080ebf98ee17d9c74f6252fc5d5c7283173\n",
+    )
+    .expect("seed");
+    let vkey = "PeterNeumann+c74f20a3+ARpc2QcUPDhMQegwxbzhKqiBfsVkmqq/LDE4izWy10TW";
+    assert_eq!(key.verifier().to_string(), vkey);
+    assert_eq!(
+        NoteVerifier::parse(vkey).expect("verifier key"),
+        *key.verifier()
+    );
+    let text = "If you think cryptography is the answer to your problem,\n\
+                then you don't know what your problem is.\n";
+    let note = key.sign(text).expect("sign");
+    assert_eq!(
+        note,
+        format!(
+            "{text}\n\u{2014} PeterNeumann x08go/ZJkuBS9UG/SffcvIAQxVBtiFupLLr8pAcElZInNIuGUgYN1FFYC2pZSNXgKvqfqdngotpRZb6KE6RyyBwJnAM=\n"
+        )
+    );
+    let verifiers = NoteVerifiers::parse(&format!("\n{vkey}\n")).expect("verifier list");
+    // Base64 keys may contain `+`, the field separator; several of these do.
+    for seed in 0..32_u8 {
+        let key = NoteKey::from_hex_seed("audit", &format!("{seed:064x}")).expect("seed");
+        let vkey = key.verifier().to_string();
+        assert_eq!(
+            NoteVerifier::parse(&vkey).expect("verifier key"),
+            *key.verifier()
+        );
+    }
+    assert_eq!(verifiers.open(&note).expect("open"), text);
+}
+
+/// A note opens only with a valid signature by a listed key. Other keys'
+/// signatures are ignored, but a listed key's invalid signature fails.
+#[test]
+fn notes_open_only_with_a_valid_listed_signature() {
+    let key = NoteKey::generate("auth.example/audit").expect("key");
+    let other = NoteKey::generate("other.example/audit").expect("key");
+    let verifiers = NoteVerifiers::from(key.verifier().clone());
+    let note = key.sign("position 1\n").expect("sign");
+    assert_eq!(verifiers.open(&note).expect("open"), "position 1\n");
+
+    let cosigned = format!(
+        "{note}{}",
+        other
+            .sign("position 1\n")
+            .expect("sign")
+            .split_once("\n\n")
+            .expect("split")
+            .1
+    );
+    assert_eq!(
+        verifiers.open(&cosigned).expect("other key ignored"),
+        "position 1\n"
+    );
+    assert!(matches!(
+        NoteVerifiers::from(other.verifier().clone()).open(&note),
+        Err(CryptoError::NoteUnverified)
+    ));
+    assert!(matches!(
+        verifiers.open(&note.replace("position 1", "position 2")),
+        Err(CryptoError::NoteSignature)
+    ));
+    for malformed in [
+        "position 1\n",
+        "position 1\n\n",
+        "position 1\n\nsignature\n",
+    ] {
+        assert!(matches!(
+            verifiers.open(malformed),
+            Err(CryptoError::NoteFormat)
+        ));
+    }
+    for text in ["no newline", "tab\there\n"] {
+        assert!(matches!(key.sign(text), Err(CryptoError::NoteText)));
+    }
+}
+
+/// Seeds must be exactly 32 hex-encoded bytes; one trailing newline is allowed.
+/// Key names must be usable in signature lines and verifier keys.
+#[test]
+fn note_keys_reject_malformed_seeds_and_names() {
+    let seed = "00".repeat(32);
+    assert!(NoteKey::from_hex_seed("audit", &seed).is_ok());
+    assert!(NoteKey::from_hex_seed("audit", &format!("{seed}\n")).is_ok());
+    for bad in [
+        String::new(),
+        "00".repeat(31),
+        "00".repeat(33),
+        format!("{seed}\n\n"),
+        format!("+f{}", "00".repeat(31)),
+        format!("zz{}", "00".repeat(31)),
+    ] {
+        assert!(matches!(
+            NoteKey::from_hex_seed("audit", &bad),
+            Err(CryptoError::NoteKeySeed)
+        ));
+    }
+    for name in ["", "two words", "a+b"] {
+        assert!(matches!(
+            NoteKey::from_hex_seed(name, &seed),
+            Err(CryptoError::NoteKeyName)
+        ));
+    }
+    assert!(
+        format!("{:?}", NoteKey::from_hex_seed("audit", &seed).expect("key"))
+            .starts_with("NoteKey { verifier")
+    );
+}

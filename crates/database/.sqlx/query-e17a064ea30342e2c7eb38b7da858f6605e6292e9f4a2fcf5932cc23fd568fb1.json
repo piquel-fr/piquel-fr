@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE domain_events SET chain_position = chain_position + $2\n                WHERE chain_position >= $1",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Int8",
+        "Int8"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "e17a064ea30342e2c7eb38b7da858f6605e6292e9f4a2fcf5932cc23fd568fb1"
+}

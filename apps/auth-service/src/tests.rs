@@ -3,7 +3,7 @@
 
 use crate::{
     AuthConfig, Operator,
-    config::{FederationConfig, FrontendOrigins, OidcConfig, PasskeyConfig},
+    config::{AuditConfig, FederationConfig, FrontendOrigins, OidcConfig, PasskeyConfig},
     passkey::DecoyKey,
 };
 use axum::{Extension, Router, extract::ConnectInfo};
@@ -15,7 +15,7 @@ use piquel_common::{
     config::{Origin, PublicUrl},
     protocol::oauth::Scope,
 };
-use piquel_crypto::{Rs256Key, Secret};
+use piquel_crypto::{NoteKey, Rs256Key, Secret};
 use piquel_repository::{Database, DatabaseConfig};
 use std::{
     collections::BTreeMap,
@@ -60,6 +60,9 @@ impl Replicas {
                 origin,
                 keys: Arc::new(Rs256Key::generate("replicas").expect("signing key")),
                 refresh_key: Arc::new(Secret::generate().expect("refresh key")),
+            },
+            audit: AuditConfig {
+                key: Arc::new(NoteKey::generate("auth.piquel.fr/audit").expect("audit key")),
             },
             trusted_proxies: vec![],
         };

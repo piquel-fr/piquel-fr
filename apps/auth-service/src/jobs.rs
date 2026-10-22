@@ -1,6 +1,7 @@
 //! Background work: periodic jobs coordinated across replicas, and the delivery
 //! workers every replica runs (see `crate::deliveries`).
 
+use crate::{AuthConfig, audit::Sealer};
 use piquel_repository::{Database, DatabaseError, ExclusiveConnection, LockKey};
 use std::{sync::Arc, time::Duration};
 use tokio::{
@@ -14,7 +15,7 @@ const SHUTDOWN_GRACE: Duration = Duration::from_secs(10);
 
 /// A periodic task that runs on at most one replica at a time. It receives only the
 /// locked connection, never the pool, so all its work happens while it holds the lock.
-trait ExclusiveJob: Send + Sync + 'static {
+pub(crate) trait ExclusiveJob: Send + Sync + 'static {
     /// Names the job in logs.
     const NAME: &'static str;
     /// Keeps other replicas from running the job at the same time.
@@ -43,6 +44,11 @@ impl Shutdown {
         // An error means the runner is gone, which is a shutdown too.
         let _ = self.0.clone().wait_for(|&requested| requested).await;
     }
+
+    /// Whether shutdown has been requested, for work that checks between steps.
+    pub(crate) fn is_requested(&self) -> bool {
+        *self.0.borrow()
+    }
 }
 
 /// Every background job of the service, running until [`Self::shutdown`].
@@ -54,11 +60,12 @@ pub struct Jobs {
 }
 
 impl Jobs {
-    /// Starts every job on `database`.
+    /// Starts every job on `database`, sealing the audit chain with `config`'s key.
     #[must_use]
-    pub fn start(database: &Database) -> Self {
+    pub fn start(database: &Database, config: &AuthConfig) -> Self {
         let mut jobs = Self::new();
         jobs.exclusive(Cleanup, database.clone());
+        jobs.exclusive(Sealer::new(config.audit.key.clone()), database.clone());
         jobs
     }
 

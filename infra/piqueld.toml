@@ -21,6 +21,9 @@ branch = "main"
 # instead of competing for another one's.
 [spec.variables]
 invite_required = "true"
+# Previews sign audit checkpoints with a generated key. Staging and production
+# use stored keys whose verifier keys are committed in docs/security/audit-key.pub.
+audit_key = "audit-key"
 # See "Running several replicas" in infra/README.md before raising it.
 auth_replicas = 1
 
@@ -32,6 +35,7 @@ web_host = "piquel.fr"
 auth_host = "auth.piquel.fr"
 www_host = "www.piquel.fr"
 admin_host = "admin.piquel.fr"
+audit_key = "audit-key-production"
 
 [spec.environments.staging]
 sync = true
@@ -42,6 +46,7 @@ web_host = "staging.piquel.fr"
 auth_host = "auth.staging.piquel.fr"
 www_host = "www.staging.piquel.fr"
 admin_host = "admin.staging.piquel.fr"
+audit_key = "audit-key-staging"
 
 # Flat hostnames, so the `*.dev.piquel.fr` certificate covers every preview.
 # Preview databases start empty, so anyone on the tailnet may register.
@@ -93,6 +98,13 @@ generate = { type = "random", bytes = 32, encoding = "hex" }
 name = "signing-key"
 generate = { type = "rsa", bits = 3072 }
 
+# The Ed25519 seed that signs a preview's audit checkpoints, apart from the OIDC
+# signing key so the two rotate independently. Staging and production mount
+# stored seeds instead. See docs/security/audit-history.md.
+[[spec.secrets]]
+name = "audit-key"
+generate = { type = "random", bytes = 32, encoding = "hex" }
+
 # The `piquel-admin` OIDC client's secret. The dashboard authenticates with it,
 # and the `admin-client` job registers it with auth.
 [[spec.secrets]]
@@ -138,6 +150,7 @@ dockerfile = "infra/auth.Dockerfile"
 AUTH_DATABASE_URL = "postgres://piquel@postgres:5432/piquel?sslmode=disable"
 AUTH_DATABASE_PASSWORD = "file:///run/secrets/database-password"
 AUTH_KEY_PROVIDER = "file:///run/secrets/signing-key"
+AUTH_AUDIT_KEY_PROVIDER = "file:///run/secrets/audit-key"
 AUTH_PUBLIC_LISTENER = "0.0.0.0:8080"
 # The admin API. No route exposes this port, so only services on the
 # application's private network reach it, and each call needs an
@@ -154,6 +167,10 @@ target = "/run/secrets/database-password"
 [[spec.services.secrets]]
 name = "signing-key"
 target = "/run/secrets/signing-key"
+
+[[spec.services.secrets]]
+name = "${{ vars.audit_key }}"
+target = "/run/secrets/audit-key"
 
 [[spec.services.secrets]]
 name = "admin-client-secret"

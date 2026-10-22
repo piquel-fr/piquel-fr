@@ -1,0 +1,41 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT position AS \"position: Unsigned\", head AS \"head: Bytes32\", created_at, note\n                FROM audit_checkpoints\n                WHERE position > $1\n                ORDER BY position\n                LIMIT $2",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "position: Unsigned",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 1,
+        "name": "head: Bytes32",
+        "type_info": "Bytea"
+      },
+      {
+        "ordinal": 2,
+        "name": "created_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 3,
+        "name": "note",
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int8",
+        "Int8"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "6625a183128cc9a49d45b73227da8b832b83e9d768f14d650fc6a71dcd09143b"
+}

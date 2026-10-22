@@ -14,6 +14,8 @@ COPY Cargo.toml Cargo.lock ./
 COPY .cargo .cargo
 COPY crates crates
 COPY apps/auth-service apps/auth-service
+# The committed audit verifier keys, compiled into `audit verify`.
+COPY docs/security/audit-key.pub docs/security/audit-key.pub
 # Cargo loads every workspace member, so admin-web is only its manifest and an
 # empty target: its sources never invalidate this build.
 COPY apps/admin-web/Cargo.toml apps/admin-web/

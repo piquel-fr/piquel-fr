@@ -1,8 +1,8 @@
 # Outbound delivery queue
 
 Auth sends messages to other systems through a PostgreSQL queue: back-channel
-logout tokens, Security Event Tokens, SCIM requests, email and audit witness
-checkpoints. Request handlers never send them inline. A slow or unreachable
+logout tokens, Security Event Tokens, SCIM requests, email and, later, audit
+witness checkpoints. Request handlers never send them inline. A slow or unreachable
 receiver must not slow a login, and a message must survive a restart.
 
 The repository owns the queue (`crates/database/src/repositories/deliveries/`).
@@ -152,5 +152,5 @@ The examples use a hypothetical back-channel logout channel.
    copied, and how `send` maps the receiver's answers. The queue itself is tested
    in `deliveries/tests.rs` of both crates.
 
-A delivery that no event causes, like a witness checkpoint, is inserted with
+A delivery that no event causes, like a future audit witness checkpoint, is inserted with
 `tx.deliveries().insert(None, delivery)` instead.

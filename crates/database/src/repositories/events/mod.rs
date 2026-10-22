@@ -1,7 +1,7 @@
 //! Storage for typed domain events, and the personal data kept apart from them.
 //!
-//! An event row holds only non-identifying content, so it can be kept and later
-//! hashed (#31). Personal data, the client IP, user agent family and every
+//! An event row holds only non-identifying content, so it can be kept and hashed
+//! into the audit chain (see `repositories/audit`). Personal data, the client IP, user agent family and every
 //! [`Personal`] payload value, lives in a separate row that retention and account
 //! purges delete; reads then return [`Personal::Erased`] in its place.
 
@@ -474,7 +474,8 @@ impl EventRepository<'_> {
     }
 
     /// Returns up to `limit` events after `consumer`'s acknowledged cursor, in a
-    /// safe order, for consumers such as the sealer (#31) or alerts (#83).
+    /// safe order, for consumers such as alerts (#83). The audit sealer reads in the
+    /// same order through [`AuditRepository::unsealed`](crate::AuditRepository::unsealed).
     ///
     /// Sequence order alone is not safe: a transaction can take sequence 10 and
     /// commit after another took 11, so a reader that saw 11 would skip 10. Events

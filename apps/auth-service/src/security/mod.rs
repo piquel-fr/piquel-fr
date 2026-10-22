@@ -1,7 +1,7 @@
 //! Shared browser-session, passkey confirmation and HTTP trust boundaries.
 
 use crate::config::FrontendOrigins;
-use crate::routes::{ACCOUNT_PREFIX, LOGIN_PREFIX, oidc, passkey, service};
+use crate::routes::{ACCOUNT_PREFIX, LOGIN_PREFIX, audit, oidc, passkey, service};
 use axum::{
     Json,
     extract::{ConnectInfo, FromRef, FromRequestParts, MatchedPath, Request, State},
@@ -629,6 +629,8 @@ enum Endpoint {
     UserInfo,
     /// Public metadata and signing keys, served from memory and readable from any origin.
     Discovery,
+    /// Public audit checkpoints, read from the database and readable from any origin.
+    Checkpoints,
     /// Liveness and readiness probes polled by the orchestrator.
     Health,
     /// Authorization requests, including cross-site form navigation.
@@ -650,6 +652,7 @@ impl Endpoint {
             oidc::TOKEN | oidc::REVOKE => Self::OAuthBackChannel,
             oidc::USERINFO => Self::UserInfo,
             oidc::DISCOVERY | oidc::OAUTH_METADATA | oidc::JWKS => Self::Discovery,
+            audit::LATEST_CHECKPOINT | audit::CHECKPOINTS => Self::Checkpoints,
             service::LIVE | service::READY => Self::Health,
             oidc::AUTHORIZE => Self::Authorize,
             oidc::LOGOUT => Self::Logout,
@@ -664,7 +667,12 @@ impl Endpoint {
     const fn is_protocol(self) -> bool {
         match self {
             Self::OAuthBackChannel | Self::UserInfo | Self::Authorize | Self::Logout => true,
-            Self::Discovery | Self::Health | Self::Account | Self::Login | Self::Other => false,
+            Self::Discovery
+            | Self::Checkpoints
+            | Self::Health
+            | Self::Account
+            | Self::Login
+            | Self::Other => false,
         }
     }
 
@@ -678,6 +686,7 @@ impl Endpoint {
             Self::OAuthBackChannel => Some(RateCategory::Token),
             Self::UserInfo => Some(RateCategory::UserInfo),
             Self::Account => Some(RateCategory::Account),
+            Self::Checkpoints => Some(RateCategory::Audit),
             Self::Login | Self::Authorize | Self::Logout | Self::Other => Some(RateCategory::Login),
             Self::Discovery | Self::Health => None,
         }
@@ -697,6 +706,8 @@ piquel_common::str_enum! {
         Account = "account",
         /// Sign-in, authorization, logout and the other auth-origin routes.
         Login = "login",
+        /// Reads of the public audit checkpoints.
+        Audit = "audit",
     }
 }
 
@@ -869,7 +880,7 @@ impl HttpSecurity {
         endpoint: Endpoint,
         origin: &str,
     ) -> Result<bool, HttpSecurityError> {
-        if matches!(endpoint, Endpoint::Discovery)
+        if matches!(endpoint, Endpoint::Discovery | Endpoint::Checkpoints)
             || origin == self.auth_origin
             || (self.frontends.contains(origin)
                 && matches!(endpoint, Endpoint::Account | Endpoint::Login))
@@ -906,7 +917,7 @@ impl HttpSecurity {
         .flatten()
         .unwrap_or_else(|error| ApiError::from(error).into_response());
         let grant = match endpoint {
-            Endpoint::Discovery => Some(CorsGrant::Public),
+            Endpoint::Discovery | Endpoint::Checkpoints => Some(CorsGrant::Public),
             _ => origin.filter(|_| allowed).map(CorsGrant::Credentialed),
         };
         Self::decorate(&mut response, grant);

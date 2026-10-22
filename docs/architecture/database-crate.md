@@ -22,7 +22,7 @@ field types (`ClientId`, `RedirectUri`, `ScopeName`, bounded lists) reject inval
 values before any SQL runs.
 
 Each repository has its own module under `src/repositories/` (`users`, `emails`,
-`sessions`, `events`, `deliveries`, `passkeys`, `oidc`, `tokens`, `federation`,
+`sessions`, `events`, `audit`, `deliveries`, `passkeys`, `oidc`, `tokens`, `federation`,
 `security`, `maintenance`, `administrators`), holding its methods and the records they
 take and return.
 `repositories/mod.rs` holds only shared plumbing: the executor, the
@@ -192,7 +192,7 @@ always reads it.
 - `domain_events` holds only non-identifying content: kind, versioned payload,
   actor, subject, client and session IDs, and timestamps. Operator attribution
   (`os_user`, `host`) is accountability data and stays there too. This is the
-  content a hash chain (#31) covers.
+  content the audit chain covers; see [Audit chain](#audit-chain).
 - `event_personal_data`, one row per event, holds the client IP, the user agent
   family and every `Personal` payload value, keyed by its JSON pointer. On write
   the repository moves each `Personal` value there and leaves `"$erased"` in the
@@ -214,6 +214,32 @@ of transactions older than every running one (`txid < pg_snapshot_xmin(...)`), w
 have all finished. A long-running transaction holds back every consumer until it
 ends, so keep transactions short. `history_for_user` lists an account's events,
 newest first.
+
+### Audit chain
+
+`repositories/audit/` stores the tamper-evident chain that
+[audit-history.md](../security/audit-history.md) describes. Events are inserted
+unsealed, so recording never waits on the chain head. Auth's sealer job, under
+`LockKey::AuditChain`, reads them with `audit().unsealed`, in the consumers' safe
+order but tracked by `chain_position IS NULL` rather than a cursor, gives each its
+`chain_position` and `chain_hash` with `seal`, and stores signed checkpoints with
+`insert_checkpoint`. The repository never hashes or signs: auth computes the hashes
+from `EventContent`, whose serialization is the canonical event, so a tampered row
+reads back and fails verification rather than failing to decode.
+
+A trigger rejects updates and deletes of sealed events, and any change to
+`audit_checkpoints`, to catch bugs. Only `DatabaseTransaction::prune_audit_chain`
+deletes sealed events: it sets `piquel.audit_prune` for its own transaction, then
+moves the anchor (`audit_anchor`) to the checkpoint it pruned through. The
+anchor only moves forward, so of two concurrent prunes, the one that would move
+it back fails. Once events are pruned, the pending import of
+`security_audit_log` must take only rows written after migration `0005`: pruned
+rows are no longer there to skip. Personal data is not covered, so retention
+keeps deleting `event_personal_data` freely.
+
+Verification tests need history no other test shares: `Database::isolated` (behind
+`test-support`) migrates a schema of its own, and `audit().tamper` applies the
+changes an attacker could make, with the trigger disabled.
 
 ### Security history
 

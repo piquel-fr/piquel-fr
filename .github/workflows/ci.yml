@@ -192,6 +192,8 @@ jobs:
         run: |
           just auth generate-key "$RUNNER_TEMP/key.pem"
           export AUTH_KEY_PROVIDER="file://$RUNNER_TEMP/key.pem"
+          openssl rand -hex 32 > "$RUNNER_TEMP/audit-key"
+          export AUTH_AUDIT_KEY_PROVIDER="file://$RUNNER_TEMP/audit-key"
           cat > "$RUNNER_TEMP/Caddyfile" <<'EOF'
           {
             auto_https disable_redirects
