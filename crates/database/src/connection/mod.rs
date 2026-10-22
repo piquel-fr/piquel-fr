@@ -211,6 +211,38 @@ impl Database {
     }
 }
 
+#[cfg(feature = "test-support")]
+impl Database {
+    /// Connects to `config`'s database in a schema of its own, created and migrated
+    /// for this call, so a test can change history that the whole database shares,
+    /// like the audit chain, without disturbing other tests. The schema is left
+    /// behind; test databases are disposable.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`DatabaseError`] if connecting, creating the schema or migrating fails.
+    pub async fn isolated(config: DatabaseConfig) -> Result<Self, DatabaseError> {
+        let schema = format!("test_{}", uuid::Uuid::now_v7().simple());
+        let setup = Self::connect(config.clone())
+            .await
+            .map_err(|error| DatabaseError::Operation(Box::new(error)))?;
+        // A schema name cannot be a bind parameter; this one is generated above.
+        sqlx::raw_sql(&format!("CREATE SCHEMA {schema}"))
+            .execute(&setup.pool)
+            .await?;
+        setup.pool.close().await;
+        let config = DatabaseConfig {
+            options: config.options.options([("search_path", schema.as_str())]),
+            ..config
+        };
+        let database = Self::connect(config)
+            .await
+            .map_err(|error| DatabaseError::Operation(Box::new(error)))?;
+        database.run_migrations().await?;
+        Ok(database)
+    }
+}
+
 #[cfg(test)]
 impl Database {
     /// Connects to `TEST_DATABASE_URL` and applies the schema. In-crate database

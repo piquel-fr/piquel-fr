@@ -67,6 +67,14 @@ pub(crate) mod history {
     pub(crate) const REPORT: &str = "/account/history/{event_id}/report";
 }
 
+/// The audit chain's signed checkpoints, public so anyone can keep copies.
+pub(crate) mod audit {
+    /// The newest checkpoint, as a signed note.
+    pub(crate) const LATEST_CHECKPOINT: &str = "/audit/checkpoints/latest";
+    /// Checkpoints after a position, oldest first.
+    pub(crate) const CHECKPOINTS: &str = "/audit/checkpoints";
+}
+
 /// OAuth 2.0 and `OpenID` Connect endpoints.
 pub(crate) mod oidc {
     use piquel_common::protocol::metadata;

@@ -1,0 +1,26 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT position AS \"position!: Unsigned\", hash AS \"hash!: Bytes32\"\n                FROM (\n                    (SELECT chain_position AS position, chain_hash AS hash\n                    FROM domain_events\n                    WHERE chain_position IS NOT NULL\n                    ORDER BY chain_position DESC\n                    LIMIT 1)\n                    UNION ALL\n                    (SELECT c.position, c.head\n                    FROM audit_anchor a JOIN audit_checkpoints c USING (position))\n                ) head\n                ORDER BY position DESC\n                LIMIT 1",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "position!: Unsigned",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 1,
+        "name": "hash!: Bytes32",
+        "type_info": "Bytea"
+      }
+    ],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": [
+      null,
+      null
+    ]
+  },
+  "hash": "2a4c55f1002fbb02c4eaae75f692bf23dee096163bc18da77b1ab8420fe1994f"
+}

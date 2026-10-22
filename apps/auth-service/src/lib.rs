@@ -3,6 +3,8 @@
 mod admin;
 /// Embedded auth frontend pages and static resources.
 mod assets;
+/// The tamper-evident audit chain: sealing, checkpoints, verification and pruning.
+mod audit;
 /// Creating, changing and rotating the secrets of OIDC clients.
 mod clients;
 /// Validated service and application configuration.
@@ -38,8 +40,10 @@ mod service;
 mod tests;
 
 pub use admin::{AdminError, AdminOperations, GracePeriod, InviteExpiry, Operator};
+use audit::AuditApplication;
+pub use audit::{AuditChain, AuditError, AuditKeys};
 pub use clients::{Applied, ClientRegistry, ClientRegistryError};
-pub use config::{AuthConfig, PUBLIC_BASE_URL};
+pub use config::{AuditConfig, AuthConfig, PUBLIC_BASE_URL};
 use federation::FederationApplication;
 use history::HistoryApplication;
 pub use jobs::Jobs;
@@ -87,6 +91,7 @@ impl AuthConfig {
             .merge(PasskeyApplication::new(database.clone(), &self.passkey)?.routes())
             .merge(FederationApplication::new(database.clone(), &self.federation)?.routes())
             .merge(HistoryApplication::new(database.clone()).routes())
+            .merge(AuditApplication::new(database.clone()).routes())
             .merge(OidcApplication::new(database.clone(), &self.oidc)?.routes());
         let policy = security::HttpSecurity::new(self, database);
         Ok(application

@@ -27,6 +27,8 @@ mod users;
 
 /// The administrator list.
 mod administrators;
+/// Verification of the audit history.
+mod audit;
 /// The OIDC clients.
 mod clients;
 /// Domain events.
@@ -62,6 +64,7 @@ pub fn router(api: AdminClient) -> Router {
         .page(invitations::revoke)
         .page(clients::list)
         .page(events::list)
+        .page(audit::verify)
         .build()
 }
 
@@ -89,6 +92,7 @@ async fn root(cx: &Cx, slot: Slot<'_>) -> Result<impl View> {
         ("Invitations", href!(invitations::list).resolve(cx)),
         ("Clients", href!(clients::list).resolve(cx)),
         ("Events", href!(events::list).resolve(cx)),
+        ("Audit", href!(audit::verify).resolve(cx)),
     ];
     let path = uri(cx).path();
     Ok(view! {

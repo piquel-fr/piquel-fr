@@ -5,7 +5,11 @@
 //! [`Admin`] and mutations [`ConfirmedAdmin`], which answer RFC 6750 and RFC 9470
 //! challenges, so the dashboard signs the administrator in again when a mutation
 //! needs a fresh passkey.
-use crate::{AuthConfig, routes::admin};
+use crate::{
+    AuthConfig,
+    audit::{AuditChain, AuditKeys},
+    routes::admin,
+};
 use axum::{
     Json, Router,
     extract::{FromRef, Path, Query, State},
@@ -13,10 +17,11 @@ use axum::{
     routing::{delete, get, post},
 };
 use piquel_admin_api::{
-    Administrator, Client, CreateInvitation, CreatedInvitation, DisableUser, EventPage,
-    EventSearch, GrantAdministrator, Invitation, UserDetail, UserPage, UserSearch,
+    Administrator, AuditVerification, Client, CreateInvitation, CreatedInvitation, DisableUser,
+    EventPage, EventSearch, GrantAdministrator, Invitation, UserDetail, UserPage, UserSearch,
 };
 use piquel_common::{SessionId, TokenId, UserId, config::Origin};
+use piquel_crypto::NoteVerifier;
 use piquel_repository::Database;
 
 /// The administrators the API serves, and how their tokens are checked.
@@ -45,6 +50,11 @@ pub(crate) struct AdminApplication {
     origin: Origin,
     /// Invitation routes exist only while signup requires invitations.
     invitations: bool,
+    /// The audit chain, to verify.
+    audit: AuditChain,
+    /// The key that signs this server's checkpoints, which verification also
+    /// accepts. See [`AuditKeys::server`].
+    audit_key: NoteVerifier,
 }
 
 impl FromRef<AdminApplication> for AdminTokens {
@@ -59,6 +69,7 @@ impl AdminApplication {
     pub(crate) fn new(database: Database, config: &AuthConfig) -> Self {
         Self {
             operations: AdminOperations::new(database.clone()),
+            audit: AuditChain::new(database.clone()),
             tokens: AdminTokens {
                 keys: config.oidc.keys.clone(),
                 issuer: config.oidc.origin.serialized(),
@@ -66,6 +77,7 @@ impl AdminApplication {
             },
             origin: config.passkey.origin.clone(),
             invitations: config.passkey.invite_required,
+            audit_key: config.audit.verifier().clone(),
         }
     }
 
@@ -85,7 +97,8 @@ impl AdminApplication {
                 admin::ADMINISTRATORS,
                 get(Self::list_administrators).post(Self::grant_administrator),
             )
-            .route(admin::ADMINISTRATOR, delete(Self::revoke_administrator));
+            .route(admin::ADMINISTRATOR, delete(Self::revoke_administrator))
+            .route(admin::AUDIT_VERIFICATION, get(Self::audit_verification));
         if self.invitations {
             router = router
                 .route(
@@ -253,6 +266,16 @@ impl AdminApplication {
     ) -> Result<StatusCode, AdminError> {
         app.operations.revoke_administrator(&operator, id).await?;
         Ok(StatusCode::NO_CONTENT)
+    }
+
+    /// Verifies the audit chain, as `auth-service audit verify` does, against the
+    /// committed keys and this server's own.
+    async fn audit_verification(
+        State(app): State<Self>,
+        _: Admin,
+    ) -> Result<Json<AuditVerification>, AdminError> {
+        let keys = AuditKeys::server(&app.audit_key)?;
+        Ok(Json(app.audit.verify(&keys).await?))
     }
 }
 

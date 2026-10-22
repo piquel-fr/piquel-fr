@@ -29,6 +29,11 @@ deliveries *ARGS:
 admin *ARGS:
     @just auth run admin "$@"
 
+# Verify or prune the audit history, e.g. `just auth audit verify`.
+[positional-arguments]
+audit *ARGS:
+    @just auth run audit "$@"
+
 # Write a new RSA signing key; refuses to overwrite an existing file.
 generate-key PATH:
     #!/usr/bin/env bash

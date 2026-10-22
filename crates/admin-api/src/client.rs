@@ -2,8 +2,9 @@
 //! it from its server with the signed-in administrator's access token.
 
 use super::{
-    Administrator, Client, CreateInvitation, CreatedInvitation, DisableUser, ErrorBody, EventPage,
-    EventSearch, GrantAdministrator, Invitation, UserDetail, UserPage, UserSearch, paths,
+    Administrator, AuditVerification, Client, CreateInvitation, CreatedInvitation, DisableUser,
+    ErrorBody, EventPage, EventSearch, GrantAdministrator, Invitation, UserDetail, UserPage,
+    UserSearch, paths,
 };
 use piquel_common::{
     SessionId, TokenId, UserId,
@@ -215,6 +216,15 @@ impl AdminClient {
                 .query(search),
         )
         .await
+    }
+
+    /// Verifies the audit chain and its checkpoints.
+    ///
+    /// # Errors
+    /// See [`ApiError`].
+    pub async fn audit_verification(&self, token: &str) -> Result<AuditVerification, ApiError> {
+        self.send(self.request(token, Method::GET, paths::AUDIT_VERIFICATION, &[]))
+            .await
     }
 
     /// Lists administrators.

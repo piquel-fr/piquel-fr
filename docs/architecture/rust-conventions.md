@@ -12,7 +12,7 @@ Keep implementations simple. Follow neighbouring modules and share repeated logi
   features: `config` (environment variables, validated URLs, secret references),
   `events` (domain events) and `sqlx` (column decoding).
 - `piquel-crypto` (`crates/crypto`): random secrets, digests, HMAC, constant-time
-  comparison, PKCE and RS256 signing.
+  comparison, PKCE, RS256 signing and Ed25519 signed notes.
 - `piquel-auth` (`crates/auth-sdk`): the public Rust SDK, following
   [sdk.md](sdk.md). It depends only on `piquel-common`, without features, among
   the workspace crates, since it is published.
@@ -20,7 +20,7 @@ Keep implementations simple. Follow neighbouring modules and share repeated logi
   repositories, transactions and storage vocabulary.
 - `piquel-telemetry` (`crates/telemetry`): tracing setup.
 
-Application code uses `Secret`, `Digest`, `Pkce` and `Rs256Key` instead of calling
+Application code uses `Secret`, `Digest`, `Pkce`, `Rs256Key` and `NoteKey` instead of calling
 `openssl`, `sha2` or `rand` directly. Environment reads go through `Variable`.
 Keep cryptographic implementations in the crypto crate so they can be audited together.
 

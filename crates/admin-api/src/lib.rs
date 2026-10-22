@@ -72,6 +72,9 @@ pub mod paths {
     /// `DELETE`: removes an administrator's rights. Administrators cannot remove
     /// their own, and the last administrator cannot be removed.
     pub const ADMINISTRATOR: &str = "/administrators/{user_id}";
+    /// `GET`: verifies the audit chain and its checkpoints
+    /// ([`AuditVerification`](super::AuditVerification)).
+    pub const AUDIT_VERIFICATION: &str = "/audit/verification";
 }
 
 /// An account, as search results and its detail page show it.
@@ -295,4 +298,125 @@ pub struct Administrator {
 pub struct GrantAdministrator {
     /// The active account to make an administrator.
     pub user_id: UserId,
+}
+
+/// The result of verifying the audit chain, as the admin API returns it and
+/// `auth-service audit verify` prints it. Verification stops at the first problem.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AuditVerification {
+    /// The first position that does not match, or `None` if the chain is intact.
+    pub broken: Option<ChainBreak>,
+    /// Sealed events whose hash was recomputed.
+    pub events_checked: u64,
+    /// Checkpoints whose signature was checked.
+    pub checkpoints_checked: u64,
+    /// Events not sealed yet. They are sealed within seconds, once every older
+    /// transaction has finished.
+    pub unsealed: u64,
+    /// The checkpoint the chain was last pruned through, which it extends.
+    pub anchor: Option<ChainPoint>,
+    /// The newest sealed event.
+    pub newest: Option<ChainPoint>,
+    /// The newest checkpoint.
+    pub latest_checkpoint: Option<ChainPoint>,
+    /// The keys checkpoint signatures were checked against.
+    pub keys: VerificationKeys,
+}
+
+/// A position on the audit chain and the chain hash through it.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ChainPoint {
+    /// The position, from 1.
+    pub position: u64,
+    /// The chain hash, in standard base64 as checkpoints write it.
+    pub hash: String,
+}
+
+impl std::fmt::Display for ChainPoint {
+    /// Writes the position and hash, e.g. `3037 b3Fx…=`.
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(formatter, "{} {}", self.position, self.hash)
+    }
+}
+
+/// Where the audit chain stops matching.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ChainBreak {
+    /// The first position that does not match. The change may also be a removal
+    /// or insertion just before it.
+    pub position: u64,
+    /// What does not match there.
+    pub problem: ChainProblem,
+}
+
+/// What does not match at a [`ChainBreak`].
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ChainProblem {
+    /// No sealed event has the position.
+    MissingEvent,
+    /// A sealed event remains at or before the anchor, which pruning would have
+    /// deleted: the anchor was moved to hide it.
+    EventBeforeAnchor,
+    /// The event's content or position does not match its stored chain hash.
+    EventChanged,
+    /// The chain recomputed through the position does not match the checkpoint
+    /// signed there: an event before it was changed and the stored hashes
+    /// recomputed.
+    CheckpointMismatch,
+    /// The checkpoint's signature does not verify against the keys.
+    CheckpointSignature,
+    /// The checkpoint's note does not match its stored position and head.
+    CheckpointMalformed,
+    /// A checkpoint was signed at the position, but the chain ends before it:
+    /// newer events were deleted.
+    CheckpointBeyondChain,
+}
+
+impl std::fmt::Display for ChainProblem {
+    /// Explains the problem in a sentence fragment, e.g. for the CLI.
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str(match self {
+            Self::MissingEvent => "no sealed event has this position",
+            Self::EventBeforeAnchor => {
+                "a sealed event remains here, at or before the anchor it was pruned through"
+            }
+            Self::EventChanged => "the event does not match its chain hash",
+            Self::CheckpointMismatch => {
+                "the recomputed chain does not match the checkpoint signed here"
+            }
+            Self::CheckpointSignature => "the checkpoint's signature does not verify",
+            Self::CheckpointMalformed => {
+                "the checkpoint's note does not match its stored position and head"
+            }
+            Self::CheckpointBeyondChain => {
+                "a checkpoint was signed here, but the chain ends before it"
+            }
+        })
+    }
+}
+
+/// The keys checkpoint signatures were checked against.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum VerificationKeys {
+    /// The keys committed to the repository (`docs/security/audit-key.pub`), which
+    /// include the one signing new checkpoints.
+    Committed,
+    /// Keys the operator gave on the command line.
+    Given,
+    /// The committed keys and the server's own, which is not committed. A
+    /// compromised server could have signed with it.
+    Uncommitted,
+}
+
+impl std::fmt::Display for VerificationKeys {
+    /// Describes the keys, e.g. for the CLI.
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str(match self {
+            Self::Committed => "committed",
+            Self::Given => "given with --key",
+            Self::Uncommitted => "committed, and the server's own key, which is not committed",
+        })
+    }
 }

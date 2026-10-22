@@ -1,9 +1,11 @@
 //! Authentication service and its administrative CLI.
 use auth_service::{
-    AdminError, AdminOperations, Applied, AuthConfig, ClientRegistry, ClientRegistryError,
-    GracePeriod, InviteExpiry, Jobs, Operator, PUBLIC_BASE_URL,
+    AdminError, AdminOperations, Applied, AuditChain, AuditConfig, AuditError, AuditKeys,
+    AuthConfig, ClientRegistry, ClientRegistryError, GracePeriod, InviteExpiry, Jobs, Operator,
+    PUBLIC_BASE_URL,
 };
 use clap::{Args, Parser, Subcommand, ValueEnum};
+use piquel_admin_api::{AuditVerification, ChainPoint};
 use piquel_common::{
     ClientId, DeliveryId, ErrorChain,
     clients::{
@@ -23,7 +25,7 @@ use serde::Serialize;
 use thiserror::Error;
 
 use axum::Router;
-use std::{net::SocketAddr, process::ExitCode};
+use std::{net::SocketAddr, path::PathBuf, process::ExitCode};
 use tokio::{net::TcpListener, sync::watch};
 
 /// The operating system user running a command, recorded on the events it causes.
@@ -63,6 +65,12 @@ enum CliError {
     /// A client change was refused.
     #[error(transparent)]
     Client(#[from] ClientRegistryError),
+    /// The audit chain is broken, or could not be verified or pruned.
+    #[error(transparent)]
+    Audit(#[from] AuditError),
+    /// The file given with `--key` could not be read.
+    #[error("could not read the verifier keys given with --key")]
+    KeyFile(#[source] std::io::Error),
     /// A display name, given or stored, is invalid.
     #[error(transparent)]
     DisplayName(#[from] InvalidDisplayName),
@@ -142,6 +150,104 @@ enum Command {
     /// Grant, revoke or list administrators.
     #[command(subcommand)]
     Admin(AdminCommand),
+    /// Verify and prune the tamper-evident audit history.
+    #[command(subcommand)]
+    Audit(AuditCommand),
+}
+
+/// The audit history's break-glass commands. They need only the database.
+#[derive(Subcommand)]
+enum AuditCommand {
+    /// Recompute the chain and check every checkpoint against it. Exits non-zero,
+    /// naming the first position that does not match, when the chain is broken.
+    Verify(AuditKeyArgs),
+    /// Delete the events through a checkpoint, once the chain verifies through it.
+    /// The checkpoint becomes the anchor the remaining chain extends.
+    Prune {
+        /// The position of the checkpoint to prune through.
+        #[arg(long)]
+        through: u64,
+        /// The keys to verify with.
+        #[command(flatten)]
+        keys: AuditKeyArgs,
+    },
+    /// Print the verifier key of the configured audit key, to commit to
+    /// docs/security/audit-key.pub.
+    PublicKey,
+}
+
+/// Which keys checkpoint signatures are checked against.
+#[derive(Args)]
+struct AuditKeyArgs {
+    /// A file of verifier keys, one per line, to use instead of the keys committed
+    /// to the repository, e.g. a preview's.
+    #[arg(long)]
+    key: Option<PathBuf>,
+}
+
+impl AuditKeyArgs {
+    /// The given keys, or the committed ones.
+    fn keys(&self) -> Result<AuditKeys, CliError> {
+        Ok(match &self.key {
+            Some(path) => {
+                AuditKeys::given(&std::fs::read_to_string(path).map_err(CliError::KeyFile)?)?
+            }
+            None => AuditKeys::committed()?,
+        })
+    }
+}
+
+impl AuditCommand {
+    /// Runs this command on `database`.
+    async fn run(self, database: Database) -> Result<(), CliError> {
+        let chain = AuditChain::new(database);
+        match self {
+            Self::Verify(keys) => {
+                let verification = chain.verify(&keys.keys()?).await?;
+                Self::print(&verification);
+                if let Some(broken) = verification.broken {
+                    return Err(AuditError::Broken(broken).into());
+                }
+            }
+            Self::Prune { through, keys } => {
+                let deleted = chain.prune(&keys.keys()?, through).await?;
+                println!("Pruned {deleted} events through position {through}");
+            }
+            Self::PublicKey => {
+                let config = AuditConfig::from_environment(&PUBLIC_BASE_URL.parse()?)?;
+                println!("{}", config.verifier());
+            }
+        }
+        Ok(())
+    }
+
+    /// Prints a verification like piqueld's `audit verify`.
+    fn print(verification: &AuditVerification) {
+        let point = |point: &Option<ChainPoint>| {
+            point
+                .as_ref()
+                .map_or_else(|| "none".to_owned(), ChainPoint::to_string)
+        };
+        match &verification.broken {
+            None => println!("Chain: intact"),
+            Some(broken) => println!(
+                "Chain: broken at position {}: {}",
+                broken.position, broken.problem
+            ),
+        }
+        println!("Events checked: {}", verification.events_checked);
+        println!("Checkpoints checked: {}", verification.checkpoints_checked);
+        println!("Unsealed: {}", verification.unsealed);
+        if verification.anchor.is_some() {
+            println!("Pruned through: {}", point(&verification.anchor));
+        }
+        println!("Newest: {}", point(&verification.newest));
+        println!(
+            "Latest checkpoint: {}",
+            point(&verification.latest_checkpoint)
+        );
+        println!("Keys: {}", verification.keys);
+    }
 }
 
 /// Changes to the administrator list. The CLI may act on any account, and is how
@@ -209,6 +315,7 @@ impl Command {
             Self::Deliveries(command) => command.run(&database).await,
             // Grant, revoke and list need only the database, for a bare recovery shell.
             Self::Admin(command) => command.run(&AdminOperations::new(database)).await,
+            Self::Audit(command) => command.run(database).await,
         }
     }
 
@@ -268,7 +375,7 @@ impl Command {
         };
         let router = config.router(database.clone())?;
         let admin_router = config.admin_router(database.clone());
-        let jobs = Jobs::start(&database);
+        let jobs = Jobs::start(&database, &config);
         tracing::info!(address=%config.public_listener,"authentication service listening");
         let (stop, _) = watch::channel(false);
         let admin = async {

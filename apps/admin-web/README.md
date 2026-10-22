@@ -38,6 +38,7 @@ The dashboard is a convenience: every operation is also an `auth-service` comman
 | `/invitations` | While signup requires invitations: list, create (the link is shown once), revoke |
 | `/clients` | Every OIDC client and its settings, read-only |
 | `/events` | Domain events, filtered by account and kind |
+| `/audit` | Verifies the audit history's hash chain and signed checkpoints; see `docs/security/audit-history.md` |
 
 ## Configuration
 

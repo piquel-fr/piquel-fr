@@ -17,10 +17,13 @@ mod transaction;
 pub use connection::{Database, DatabaseConfig};
 pub use error::{DatabaseConnectionError, DatabaseError};
 pub use exclusive::{ExclusiveConnection, LockKey};
+#[cfg(feature = "test-support")]
+pub use repositories::audit::Tamper;
 pub use repositories::{
-    AdministratorRepository, DeliveryRepository, EmailRepository, EventRepository,
+    AdministratorRepository, AuditRepository, DeliveryRepository, EmailRepository, EventRepository,
     FederationRepository, MaintenanceRepository, OidcRepository, PasskeyRepository,
     SecurityRepository, SessionRepository, TokenRepository, UserRepository,
+    audit::{ChainLink, Checkpoint, EventContent, SealedEvent},
     deliveries::{
         Channel, Delivery, DeliveryOutcome, DeliveryStatus, DeliverySummary, NewDelivery,
     },

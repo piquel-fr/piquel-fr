@@ -1,7 +1,7 @@
 //! Focused persistence and security contract tests.
 
 use super::*;
-use crate::routes::federation;
+use crate::routes::{audit, federation};
 use crate::tests::Replicas;
 use axum::{Router, body::Body, http::Request as HttpRequest, middleware, routing::any};
 use piquel_common::{TokenId, clients::ClientKind};
@@ -89,6 +89,8 @@ impl SecurityFixture {
             "/.well-known/openid-configuration",
             "/.well-known/oauth-authorization-server",
             "/.well-known/jwks.json",
+            "/audit/checkpoints",
+            "/audit/checkpoints/latest",
             "/oauth/token",
             "/oauth/authorize",
             "/oauth/revoke",
@@ -227,11 +229,14 @@ async fn router_enforces_exact_browser_origins_csrf_and_public_client_cors_bound
         .await;
     assert_eq!(response.status(), StatusCode::ACCEPTED);
 
-    // Any page may read the public metadata and keys, without credentials.
+    // Any page may read the public metadata, keys and audit checkpoints, without
+    // credentials.
     for path in [
         "/.well-known/openid-configuration",
         "/.well-known/oauth-authorization-server",
         "/.well-known/jwks.json",
+        "/audit/checkpoints",
+        "/audit/checkpoints/latest",
     ] {
         for (method, status) in [
             (Method::GET, StatusCode::ACCEPTED),
@@ -593,6 +598,8 @@ fn routes_doing_real_work_have_budgets() {
         (oidc::DISCOVERY, None),
         (oidc::OAUTH_METADATA, None),
         (oidc::JWKS, None),
+        (audit::CHECKPOINTS, Some(RateCategory::Audit)),
+        (audit::LATEST_CHECKPOINT, Some(RateCategory::Audit)),
         (oidc::TOKEN, Some(RateCategory::Token)),
         (oidc::USERINFO, Some(RateCategory::UserInfo)),
         (oidc::LOGOUT, Some(RateCategory::Login)),
@@ -615,6 +622,7 @@ fn endpoint_policy_requires_browser_proof_outside_protocol_endpoints() {
         (Endpoint::OAuthBackChannel, true),
         (Endpoint::UserInfo, true),
         (Endpoint::Discovery, false),
+        (Endpoint::Checkpoints, false),
         (Endpoint::Health, false),
         (Endpoint::Authorize, true),
         (Endpoint::Logout, true),

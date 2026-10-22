@@ -1,0 +1,16 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE domain_events SET chain_position = chain_position + $3\n                WHERE chain_position IN ($1, $2)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Int8",
+        "Int8",
+        "Int8"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "4f2c3a0322171830005bcfdf8150ddee1aff1fac1173155887b27049e9c0d9b5"
+}

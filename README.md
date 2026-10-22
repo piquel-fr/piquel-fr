@@ -53,6 +53,7 @@ piquel-web with Vite against an auth service on `http://localhost:3000`.
 | `AUTH_ADMIN_LISTENER` | Optional address of the private admin API listener, e.g. `0.0.0.0:8081`. No ingress route may reach it. Without it, auth serves no admin API |
 | `AUTH_KEY_PROVIDER` | Required persistent RSA private-key reference, `file:///absolute/path/key.pem` or `env://VARIABLE_NAME` |
 | `AUTH_SIGNING_KEY_ID` | Stable ID for that signing key; defaults to `primary` |
+| `AUTH_AUDIT_KEY_PROVIDER` | Required env/file reference to the key that signs audit checkpoints: a 32-byte Ed25519 seed as 64 hex characters. See `docs/security/audit-history.md` |
 | `AUTH_INVITE_REQUIRED` | `true` by default; set `false` to allow public registration |
 | `AUTH_GITHUB_CLIENT_ID`, `AUTH_GITHUB_CLIENT_SECRET` | Both required to enable GitHub; secret is an env/file reference |
 | `AUTH_GOOGLE_CLIENT_ID`, `AUTH_GOOGLE_CLIENT_SECRET` | Both required to enable Google; secret is an env/file reference |
@@ -62,7 +63,8 @@ directory in the `host` query parameter, e.g.
 `postgres://USER:PASSWORD@localhost/piquel?host=/run/postgresql&sslmode=disable`.
 
 Generate a persistent RSA key with `just auth generate-key /absolute/path/key.pem` (uses the
-OpenSSL CLI; piqueld generates its own, see `infra/README.md`).
+OpenSSL CLI; piqueld generates its own, see `infra/README.md`), and an audit key
+with `openssl rand -hex 32 > /absolute/path/audit-key`.
 Keep the same key and ID across restarts. Replacing the only configured key
 invalidates issued tokens; overlapping signing-key rotation is not implemented.
 It also changes the decoy passkey IDs that username sign-in returns for unknown

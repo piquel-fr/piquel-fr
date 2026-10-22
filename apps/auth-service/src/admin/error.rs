@@ -92,6 +92,9 @@ pub enum AdminError {
     /// A stored event could not be shown.
     #[error("could not serialize a stored event")]
     Event(#[from] serde_json::Error),
+    /// The audit chain could not be verified.
+    #[error(transparent)]
+    Audit(#[from] crate::audit::AuditError),
 }
 
 impl AdminError {
@@ -125,7 +128,8 @@ impl AdminError {
             | Self::LastAdministrator
             | Self::Database(_)
             | Self::Crypto(_)
-            | Self::Event(_) => None,
+            | Self::Event(_)
+            | Self::Audit(_) => None,
         }
     }
 }
@@ -158,7 +162,9 @@ impl From<AdminError> for ApiError {
             | AdminError::AlreadyAdministrator
             | AdminError::NotAnAdministrator => Self::conflict(message),
             AdminError::Database(error) => error.into(),
-            error @ (AdminError::Crypto(_) | AdminError::Event(_)) => Self::internal(error),
+            error @ (AdminError::Crypto(_) | AdminError::Event(_) | AdminError::Audit(_)) => {
+                Self::internal(error)
+            }
         }
     }
 }

@@ -18,7 +18,7 @@ use piquel_common::{
         oauth::Scopes,
     },
 };
-use piquel_crypto::Rs256Key;
+use piquel_crypto::{NoteKey, Rs256Key};
 use piquel_repository::{DatabaseConfig, DatabaseTransaction, InsertUser};
 use serde_json::{Value, json};
 use std::sync::Arc;
@@ -68,6 +68,11 @@ impl Harness {
             },
             origin: origin(),
             invitations: true,
+            audit: AuditChain::new(database.clone()),
+            audit_key: NoteKey::generate("auth.piquel.fr/audit")
+                .expect("audit key")
+                .verifier()
+                .clone(),
         };
         Self {
             router: application.routes(),
@@ -781,4 +786,19 @@ async fn administrators_acting_on_each_other_are_refused() {
             (StatusCode::FORBIDDEN, StatusCode::FORBIDDEN)
         );
     }
+}
+
+/// Administrators can verify the audit chain. The server's own key is not
+/// committed, and the answer says so.
+#[tokio::test]
+#[ignore = "requires TEST_DATABASE_URL"]
+async fn administrators_verify_the_audit_chain() {
+    let harness = Harness::new().await;
+    let admin = harness.admin().await;
+    let token = harness.token(admin, Acr::PhishingResistant, Duration::zero());
+    let (status, _, verification) = harness
+        .call(Method::GET, paths::AUDIT_VERIFICATION, Some(&token), None)
+        .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(verification["keys"], "uncommitted");
 }
