@@ -1,8 +1,9 @@
 //! Client registrations against a real database: the migration from the clients
-//! file's rows, secret rotation, the origins public clients may call from, and
-//! when pushed authorization requests can be claimed.
-use crate::repositories::OidcRepository;
-use crate::{Database, InsertAuthorizationRequest};
+//! file's rows, secret rotation, the origins public clients may call from, when
+//! pushed authorization requests can be claimed, and how grants are approved and
+//! revoked.
+use crate::repositories::{OidcRepository, UserRepository};
+use crate::{Approval, Database, GrantGeneration, InsertAuthorizationRequest, InsertUser};
 use chrono::{DateTime, Duration, Utc};
 use piquel_common::{
     ClientId, TokenId, UserId,
@@ -320,4 +321,72 @@ async fn migration_keeps_file_clients_and_their_secrets() {
         .execute(&mut connection)
         .await
         .expect("drop schema");
+}
+
+/// A grant is implicit while one of its scopes was never approved on the consent
+/// screen, and only an explicit one skips it. Revoking moves the grant to a new
+/// generation, which a later grant keeps.
+#[tokio::test]
+#[ignore = "requires a disposable TEST_DATABASE_URL"]
+async fn grants_are_explicit_only_when_every_scope_was_approved() {
+    let pool = Database::test_pool().await;
+    let user = UserId::new();
+    UserRepository::from_pool(&pool)
+        .insert(&InsertUser {
+            id: user,
+            username: format!("grant_{}", &user.to_string()[24..]),
+            display_name: "Grant test".into(),
+        })
+        .await
+        .expect("user");
+    let mut oidc = OidcRepository::from_pool(&pool);
+    let client = registration(ClientKind::Public, &origin());
+    oidc.create_client(&client).await.expect("create");
+    let scopes = |list: &[&str]| {
+        list.iter()
+            .map(|&scope| scope.to_owned())
+            .collect::<Vec<_>>()
+    };
+    let (openid, email) = (scopes(&["openid"]), scopes(&["openid", "email"]));
+    let grant = async |scopes: &[String], approval| {
+        OidcRepository::from_pool(&pool)
+            .grant(user, &client.id, "test", scopes, approval)
+            .await
+            .expect("grant")
+    };
+    let consented = async |scopes: &[String]| {
+        OidcRepository::from_pool(&pool)
+            .consented(user, &client.id, "test", scopes)
+            .await
+            .expect("consented")
+    };
+    grant(&openid, Approval::Implicit).await;
+    assert!(!consented(&openid).await, "an implicit grant asks");
+    grant(&openid, Approval::Consented).await;
+    assert!(consented(&openid).await);
+    grant(&openid, Approval::Implicit).await;
+    assert!(
+        consented(&openid).await,
+        "reusing consent keeps it explicit"
+    );
+    grant(&email, Approval::Implicit).await;
+    assert!(!consented(&openid).await, "a new implicit scope asks again");
+    assert_eq!(
+        grant(&email, Approval::Consented).await,
+        GrantGeneration::FIRST
+    );
+    assert!(consented(&email).await);
+    let revoked = oidc.revoke_grants(user, &client.id).await.expect("revoke");
+    assert_eq!(revoked, Some(vec![]));
+    assert!(!consented(&openid).await);
+    let next = grant(&openid, Approval::Consented).await;
+    assert_ne!(next, GrantGeneration::FIRST);
+    let accepts = async |generation| {
+        OidcRepository::from_pool(&pool)
+            .use_grant(user, &client.id, "test", generation)
+            .await
+            .expect("use")
+    };
+    assert!(!accepts(GrantGeneration::FIRST).await);
+    assert!(accepts(next).await);
 }

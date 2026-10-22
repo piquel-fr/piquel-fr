@@ -1,0 +1,26 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO oidc_consents (user_id, client_id, audience, scopes, implicit)\n                VALUES ($1, $2, $3, $4, $5)\n                ON CONFLICT (user_id, client_id, audience) DO UPDATE\n                SET scopes = (\n                        SELECT jsonb_agg(DISTINCT value)\n                        FROM jsonb_array_elements(oidc_consents.scopes || EXCLUDED.scopes)\n                    ),\n                    implicit = CASE\n                        WHEN EXCLUDED.implicit\n                        THEN oidc_consents.implicit OR NOT oidc_consents.scopes @> EXCLUDED.scopes\n                        ELSE oidc_consents.implicit AND NOT EXCLUDED.scopes @> oidc_consents.scopes\n                    END,\n                    granted_at = CASE\n                        WHEN oidc_consents.revoked_at IS NULL THEN oidc_consents.granted_at\n                        ELSE now()\n                    END,\n                    revoked_at = NULL\n                RETURNING generation AS \"generation: GrantGeneration\"",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "generation: GrantGeneration",
+        "type_info": "Int8"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Text",
+        "Text",
+        "Jsonb",
+        "Bool"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "ab8b8e0a02226dda011d070b457f27ab4c6ef775a9e47d8cd66bf2a59bc4c843"
+}

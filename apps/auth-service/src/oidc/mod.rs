@@ -190,6 +190,26 @@ impl OpaqueToken {
     }
 }
 
+/// A scope with what it gives an application, as the consent screen and the
+/// user's connected apps show it. Extension scopes have no description yet (#71).
+#[derive(Serialize)]
+pub(crate) struct DescribedScope {
+    /// The scope token.
+    scope: String,
+    /// What the scope gives the application, for a standard [`Scope`].
+    description: Option<&'static str>,
+}
+
+impl From<String> for DescribedScope {
+    /// Looks up the description of a standard scope.
+    fn from(scope: String) -> Self {
+        Self {
+            description: scope.parse().ok().map(Scope::description),
+            scope,
+        }
+    }
+}
+
 /// A requested or granted scope set: the shared wire type, plus auth's request limits.
 /// Holds plain strings because clients may be granted registered extension scopes
 /// besides [`Scope`].

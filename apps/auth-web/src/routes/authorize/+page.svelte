@@ -3,7 +3,12 @@
   import { AuthApi, errorMessage } from '@piquel/auth-sdk';
   const api = new AuthApi();
   let transaction = $state('');
-  let details = $state<{ client_name: string; scopes: string[]; audience: string } | null>(null);
+  let details = $state<{
+    client_name: string;
+    /** Scopes without a description are shown by name. */
+    scopes: { scope: string; description: string | null }[];
+    audience: string;
+  } | null>(null);
   let error = $state('');
   let busy = $state(false);
   onMount(async () => {
@@ -49,16 +54,8 @@
   {:else}<div class="card">
       <h2>{details.client_name}</h2>
       <ul>
-        {#each details.scopes as scope (scope)}<li>
-            {scope === 'openid'
-              ? 'Your account identifier'
-              : scope === 'profile'
-                ? 'Your username and display name'
-                : scope === 'email'
-                  ? 'Your verified email address'
-                  : scope === 'offline_access'
-                    ? 'Stay signed in'
-                    : scope}
+        {#each details.scopes as { scope, description } (scope)}<li>
+            {description ?? scope}
           </li>{/each}
       </ul>
     </div>

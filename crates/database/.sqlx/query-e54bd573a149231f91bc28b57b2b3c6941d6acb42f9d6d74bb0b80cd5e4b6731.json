@@ -1,0 +1,17 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE oidc_consents\n                SET last_used_at = now()\n                WHERE user_id = $1\n                AND client_id = $2\n                AND audience = $3\n                AND generation = $4\n                AND revoked_at IS NULL",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Text",
+        "Text",
+        "Int8"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "e54bd573a149231f91bc28b57b2b3c6941d6acb42f9d6d74bb0b80cd5e4b6731"
+}

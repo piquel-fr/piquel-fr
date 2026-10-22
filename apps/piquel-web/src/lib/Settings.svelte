@@ -241,6 +241,15 @@
       </ul>
       {#if !providers.length}<p class="empty">Social sign-in is not available yet.</p>{/if}
     </section>
+    <section class="card" aria-labelledby="apps-heading">
+      <div class="row between">
+        <div>
+          <h2 id="apps-heading">Connected apps</h2>
+          <p class="help">See the apps you use with Piquel, and remove their access.</p>
+        </div>
+        <a class="button secondary" href="/settings/apps">View apps</a>
+      </div>
+    </section>
     <section class="card" aria-labelledby="history-heading">
       <div class="row between">
         <div>

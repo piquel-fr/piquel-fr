@@ -3,8 +3,8 @@
 
 use super::{
     AUTHORIZATION_CODE_MINUTES, AUTHORIZATION_REQUEST_MINUTES, Claim, CodeChallengeMethod,
-    MAX_STATE_BYTES, OAuthCode, OAuthError, OidcApplication, OpaqueToken, PUSHED_REQUEST_SECONDS,
-    Prompt, Reject, ResponseMode, ResponseType, Scopes, TokenPrefix,
+    DescribedScope, MAX_STATE_BYTES, OAuthCode, OAuthError, OidcApplication, OpaqueToken,
+    PUSHED_REQUEST_SECONDS, Prompt, Reject, ResponseMode, ResponseType, Scopes, TokenPrefix,
 };
 use crate::{
     routes,
@@ -26,7 +26,7 @@ use piquel_common::{
     protocol::{claims::Acr, step_up::StepUpRequirement},
 };
 use piquel_repository::{
-    InsertAuthorizationCode, InsertAuthorizationRequest, SessionAuthentication,
+    Approval, InsertAuthorizationCode, InsertAuthorizationRequest, SessionAuthentication,
     StoredAuthorizationRequest, StoredOidcClient, StoredSession,
 };
 use serde::{Deserialize, Serialize};
@@ -278,7 +278,7 @@ pub(super) struct AuthorizationTransactionView {
     /// Client's registered display name.
     client_name: String,
     /// Requested scopes.
-    scopes: Vec<String>,
+    scopes: Vec<DescribedScope>,
     /// Resource the access token is for.
     audience: String,
 }
@@ -479,7 +479,7 @@ impl OidcApplication {
         Self::require_authorization_session(&request, &session)?;
         Ok(Json(AuthorizationTransactionView {
             client_name: request.client_display_name,
-            scopes: request.scopes,
+            scopes: request.scopes.into_iter().map(Into::into).collect(),
             audience: request.audience,
         }))
     }
@@ -501,9 +501,10 @@ impl OidcApplication {
     }
 
     /// Consumes the pending authorization and returns the client redirect: an error
-    /// for a denial, or a new authorization code. Explicit decisions come from the
-    /// consent page, whose request is `consent`, and save and record consent;
-    /// implicit ones must already be allowed.
+    /// for a denial, or a new authorization code under the user's grant to the
+    /// client, which an approval creates or extends. Explicit decisions come from the
+    /// consent page, whose request is `consent`, and record consent; implicit ones
+    /// must already be allowed.
     async fn decide(
         &self,
         headers: &HeaderMap,
@@ -537,23 +538,30 @@ impl OidcApplication {
             ConsentDecision::Deny => OAuthCode::AccessDenied
                 .redirect_url(&client_redirect, "the user denied the request"),
             ConsentDecision::Approve => {
-                // Lock the account before writing consent: the consent row's foreign key
-                // would otherwise take a key-share lock that deadlocks with a concurrent login.
+                // Lock the account before writing the grant: the grant row's foreign key
+                // would otherwise take a key-share lock that deadlocks with a concurrent
+                // login, and grant writes serialize on it.
                 transaction
                     .users()
                     .find_active_by_id_for_update(session.user_id)
                     .await?
                     .ok_or_else(|| OAuthCode::InvalidToken.reject("this account is disabled"))?;
+                let approval = if consent.is_some() {
+                    Approval::Consented
+                } else {
+                    Approval::Implicit
+                };
+                let grant_generation = transaction
+                    .oidc()
+                    .grant(
+                        session.user_id,
+                        &request.client_id,
+                        &request.audience,
+                        &request.scopes,
+                        approval,
+                    )
+                    .await?;
                 if let Some(context) = consent {
-                    transaction
-                        .oidc()
-                        .save_consent(
-                            session.user_id,
-                            &request.client_id,
-                            &request.audience,
-                            &request.scopes,
-                        )
-                        .await?;
                     transaction
                         .record(
                             &context.user(&session),
@@ -580,6 +588,7 @@ impl OidcApplication {
                         scopes: request.scopes,
                         audience: request.audience,
                         authentication: SessionAuthentication::from(&session),
+                        grant_generation,
                         expires_at: Utc::now() + Duration::minutes(AUTHORIZATION_CODE_MINUTES),
                     })
                     .await?;

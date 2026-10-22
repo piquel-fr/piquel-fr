@@ -29,6 +29,7 @@
     | { kind: 'passkey.added' | 'passkey.renamed' | 'passkey.removed'; passkey_id: string }
     | { kind: 'identity.linked' | 'identity.unlinked'; provider: Provider }
     | { kind: 'consent.granted'; scopes: string[] }
+    | { kind: 'consent.revoked' }
     | { kind: 'compromise.reported'; event_id: string }
     | { kind: 'legacy'; action: string; outcome: string }
     | {
@@ -225,6 +226,8 @@
         return `${providerName(entry.provider)} sign-in unlinked`;
       case 'consent.granted':
         return `Access approved: ${entry.scopes.join(', ')}`;
+      case 'consent.revoked':
+        return 'App access removed';
       case 'token.reused':
         return 'An app’s sign-in was used twice, so its access was revoked';
       case 'account.disabled':

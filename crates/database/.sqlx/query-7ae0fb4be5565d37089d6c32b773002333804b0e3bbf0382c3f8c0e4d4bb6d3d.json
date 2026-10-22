@@ -1,0 +1,23 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE refresh_token_families\n                SET revoked_at = now()\n                WHERE user_id = $1\n                AND client_id = $2\n                AND revoked_at IS NULL\n                RETURNING id AS \"id: TokenId\"",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id: TokenId",
+        "type_info": "Uuid"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Text"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "7ae0fb4be5565d37089d6c32b773002333804b0e3bbf0382c3f8c0e4d4bb6d3d"
+}

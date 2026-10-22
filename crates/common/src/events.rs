@@ -90,6 +90,12 @@ pub enum DomainEvent {
         /// The approved scopes, drawn from the client's registered allowlist.
         scopes: Vec<String>,
     },
+    /// The user removed a client's access: every grant of it to the account. Each
+    /// refresh family it ended follows as a [`Self::GrantRevoked`].
+    ConsentRevoked {
+        /// The client that lost access.
+        client_id: ClientId,
+    },
     /// A client exchanged an authorization code for tokens.
     GrantIssued {
         /// The client the tokens were issued to.
@@ -185,6 +191,7 @@ impl DomainEvent {
     pub fn client_id(&self) -> Option<&ClientId> {
         match self {
             Self::ConsentGranted { client_id, .. }
+            | Self::ConsentRevoked { client_id }
             | Self::GrantIssued { client_id, .. }
             | Self::GrantRevoked { client_id, .. }
             | Self::CodeReplayed { client_id }
@@ -234,6 +241,7 @@ impl DomainEvent {
             | Self::IdentityLinked { .. }
             | Self::IdentityUnlinked { .. }
             | Self::ConsentGranted { .. }
+            | Self::ConsentRevoked { .. }
             | Self::GrantIssued { .. }
             | Self::GrantRevoked { .. }
             | Self::CodeReplayed { .. }
@@ -297,10 +305,13 @@ impl DomainEvent {
             Self::ConsentGranted { scopes, .. } => HistoryEntry::ConsentGranted {
                 scopes: scopes.clone(),
             },
+            Self::ConsentRevoked { .. } => HistoryEntry::ConsentRevoked,
             Self::GrantRevoked { reason, .. } => match reason {
                 GrantRevocation::RefreshReplay => HistoryEntry::TokenReused,
-                // A replayed code shows once, as its `CodeReplayed`.
+                // A replayed code shows once, as its `CodeReplayed`, and a removed
+                // app as its `ConsentRevoked`.
                 GrantRevocation::CodeReplay
+                | GrantRevocation::UserRevoked
                 | GrantRevocation::ClientRevoked
                 | GrantRevocation::PolicyRejected => return None,
             },
@@ -398,6 +409,9 @@ pub enum HistoryEntry {
         /// The approved scopes.
         scopes: Vec<String>,
     },
+    /// The user removed an application's access.
+    #[serde(rename = "consent.revoked")]
+    ConsentRevoked,
     /// A refresh token or authorization code was used twice, so the access it
     /// granted was revoked.
     #[serde(rename = "token.reused")]
@@ -455,6 +469,7 @@ impl HistoryEntry {
             | Self::PasskeyRemoved { .. }
             | Self::IdentityUnlinked { .. }
             | Self::ConsentGranted { .. }
+            | Self::ConsentRevoked
             | Self::TokenReused
             | Self::AccountDisabled
             | Self::AccountEnabled
@@ -577,6 +592,8 @@ pub enum GrantRevocation {
     PolicyRejected,
     /// The authorization code it came from was redeemed twice.
     CodeReplay,
+    /// The user removed the client's access in settings.
+    UserRevoked,
 }
 
 /// Who caused an event. Every feature attributes events with this one type.

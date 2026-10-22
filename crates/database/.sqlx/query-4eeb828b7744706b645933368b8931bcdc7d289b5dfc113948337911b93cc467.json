@@ -1,0 +1,58 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT\n                    g.client_id AS \"client_id: ClientId\", c.display_name AS client_name,\n                    c.trusted, c.allow_refresh,\n                    COALESCE(\n                        jsonb_agg(DISTINCT s.scope) FILTER (WHERE s.scope IS NOT NULL),\n                        '[]'\n                    ) AS \"scopes!: JsonArray<String>\",\n                    min(g.granted_at) AS \"granted_at!\",\n                    max(g.last_used_at) AS \"last_used_at!\"\n                FROM oidc_consents g\n                JOIN oidc_clients c ON c.id = g.client_id\n                LEFT JOIN LATERAL jsonb_array_elements_text(g.scopes) AS s(scope) ON TRUE\n                WHERE g.user_id = $1\n                AND g.revoked_at IS NULL\n                AND c.enabled\n                GROUP BY g.client_id, c.display_name, c.trusted, c.allow_refresh\n                ORDER BY max(g.last_used_at) DESC, g.client_id",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "client_id: ClientId",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 1,
+        "name": "client_name",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 2,
+        "name": "trusted",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 3,
+        "name": "allow_refresh",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 4,
+        "name": "scopes!: JsonArray<String>",
+        "type_info": "Jsonb"
+      },
+      {
+        "ordinal": 5,
+        "name": "granted_at!",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 6,
+        "name": "last_used_at!",
+        "type_info": "Timestamptz"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      null,
+      null,
+      null
+    ]
+  },
+  "hash": "4eeb828b7744706b645933368b8931bcdc7d289b5dfc113948337911b93cc467"
+}

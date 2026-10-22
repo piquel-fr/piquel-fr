@@ -3,7 +3,7 @@ use crate::Database;
 
 use super::{InsertRefreshFamily, InsertRefreshToken, RefreshRotationError};
 use crate::repositories::{OidcRepository, TokenRepository};
-use crate::{CodeRedemptionError, DatabaseTransaction, SessionAuthentication};
+use crate::{CodeRedemptionError, DatabaseTransaction, GrantGeneration, SessionAuthentication};
 use chrono::{Duration, Utc};
 use piquel_common::{
     ClientId, SessionId, TokenId, UserId,
@@ -163,6 +163,7 @@ impl Grant {
                     audience: "test".into(),
                     scopes: vec!["openid".into()],
                     authentication: authentication(),
+                    grant_generation: GrantGeneration::FIRST,
                 },
                 &InsertRefreshToken {
                     id: token,
