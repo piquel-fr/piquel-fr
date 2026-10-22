@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "SELECT\n                    c.id AS \"id: ClientId\", c.display_name, c.client_type AS \"kind: ClientKind\",\n                    c.enabled, c.allow_refresh, c.trusted, c.created_at, c.updated_at,\n                    c.allowed_scopes AS \"allowed_scopes: JsonArray<String>\",\n                    c.allowed_audiences AS \"allowed_audiences: JsonArray<String>\",\n                    COALESCE(\n                        jsonb_agg(r.uri ORDER BY r.uri) FILTER (WHERE r.kind = 'authorization'),\n                        '[]'::jsonb\n                    ) AS \"redirect_uris!: JsonArray<String>\",\n                    COALESCE(\n                        jsonb_agg(r.uri ORDER BY r.uri) FILTER (WHERE r.kind = 'post_logout'),\n                        '[]'::jsonb\n                    ) AS \"post_logout_uris!: JsonArray<String>\"\n                FROM oidc_clients c\n                LEFT JOIN oidc_redirect_uris r ON r.client_id = c.id\n                WHERE $1::text IS NULL OR c.id = $1\n                GROUP BY c.id\n                ORDER BY c.id",
+  "query": "SELECT\n                    c.id AS \"id: ClientId\", c.display_name, c.client_type AS \"kind: ClientKind\",\n                    c.enabled, c.allow_refresh, c.trusted,\n                    c.require_pushed_authorization_requests, c.created_at, c.updated_at,\n                    c.allowed_scopes AS \"allowed_scopes: JsonArray<String>\",\n                    c.allowed_audiences AS \"allowed_audiences: JsonArray<String>\",\n                    COALESCE(\n                        jsonb_agg(r.uri ORDER BY r.uri) FILTER (WHERE r.kind = 'authorization'),\n                        '[]'::jsonb\n                    ) AS \"redirect_uris!: JsonArray<String>\",\n                    COALESCE(\n                        jsonb_agg(r.uri ORDER BY r.uri) FILTER (WHERE r.kind = 'post_logout'),\n                        '[]'::jsonb\n                    ) AS \"post_logout_uris!: JsonArray<String>\"\n                FROM oidc_clients c\n                LEFT JOIN oidc_redirect_uris r ON r.client_id = c.id\n                WHERE $1::text IS NULL OR c.id = $1\n                GROUP BY c.id\n                ORDER BY c.id",
   "describe": {
     "columns": [
       {
@@ -35,31 +35,36 @@
       },
       {
         "ordinal": 6,
+        "name": "require_pushed_authorization_requests",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 7,
         "name": "created_at",
         "type_info": "Timestamptz"
       },
       {
-        "ordinal": 7,
+        "ordinal": 8,
         "name": "updated_at",
         "type_info": "Timestamptz"
       },
       {
-        "ordinal": 8,
+        "ordinal": 9,
         "name": "allowed_scopes: JsonArray<String>",
         "type_info": "Jsonb"
       },
       {
-        "ordinal": 9,
+        "ordinal": 10,
         "name": "allowed_audiences: JsonArray<String>",
         "type_info": "Jsonb"
       },
       {
-        "ordinal": 10,
+        "ordinal": 11,
         "name": "redirect_uris!: JsonArray<String>",
         "type_info": "Jsonb"
       },
       {
-        "ordinal": 11,
+        "ordinal": 12,
         "name": "post_logout_uris!: JsonArray<String>",
         "type_info": "Jsonb"
       }
@@ -80,9 +85,10 @@
       false,
       false,
       false,
+      false,
       null,
       null
     ]
   },
-  "hash": "2096dd1e822dfde1fdd2995a7ddb207054a070706af44038da7ef94bae97b6ce"
+  "hash": "0c19940c3cae3eae60f43f0a6c220ae0c30fc6d3c40e3e506840c24dbbb88587"
 }

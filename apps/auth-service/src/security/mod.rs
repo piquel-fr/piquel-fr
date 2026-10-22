@@ -623,7 +623,8 @@ session_extractor!(OptionalSession, optional);
 /// classification, so it must list every route that differs from `Other`.
 #[derive(Clone, Copy)]
 enum Endpoint {
-    /// Token and revocation, authenticated by client credentials.
+    /// Token, revocation and pushed authorization requests, authenticated by client
+    /// credentials.
     OAuthBackChannel,
     /// Bearer-authenticated `UserInfo`.
     UserInfo,
@@ -647,7 +648,7 @@ impl Endpoint {
     /// Classifies exact protocol paths and the settings/login route families.
     fn classify(path: &str) -> Self {
         match path {
-            oidc::TOKEN | oidc::REVOKE => Self::OAuthBackChannel,
+            oidc::TOKEN | oidc::REVOKE | oidc::PAR => Self::OAuthBackChannel,
             oidc::USERINFO => Self::UserInfo,
             oidc::DISCOVERY | oidc::OAUTH_METADATA | oidc::JWKS => Self::Discovery,
             service::LIVE | service::READY => Self::Health,
@@ -861,7 +862,7 @@ impl HttpSecurity {
     }
 
     /// Determines whether an exact browser origin may access this endpoint family.
-    /// The token, revocation and `UserInfo` endpoints also serve the redirect origins
+    /// The back-channel and `UserInfo` endpoints also serve the redirect origins
     /// of enabled public clients. Those are looked up per request, so registration
     /// changes apply at once; same-origin and first-party requests skip the query.
     async fn allowed_origin(

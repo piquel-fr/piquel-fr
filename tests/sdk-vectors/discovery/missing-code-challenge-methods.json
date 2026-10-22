@@ -31,8 +31,10 @@
       ],
       "issuer": "https://auth.example.com",
       "jwks_uri": "https://auth.example.com/.well-known/jwks.json",
+      "pushed_authorization_request_endpoint": "https://auth.example.com/oauth/par",
       "request_parameter_supported": false,
       "request_uri_parameter_supported": false,
+      "require_pushed_authorization_requests": false,
       "response_modes_supported": [
         "query"
       ],

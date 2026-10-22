@@ -18,13 +18,21 @@ piquel_common::str_enum! {
 }
 
 /// A validated authorization request, stored while the user logs in and
-/// consents.
+/// consents. A pushed one waits for the browser to claim it first.
 #[derive(Clone, Debug)]
+#[expect(
+    clippy::struct_excessive_bools,
+    reason = "The flags are the row's independent boolean columns."
+)]
 pub struct InsertAuthorizationRequest {
     /// Request identifier.
     pub id: TokenId,
-    /// Digest of the browser-held request secret.
+    /// Digest of the request secret: the browser's, or the `request_uri`'s for a
+    /// pushed request.
     pub secret_digest: Vec<u8>,
+    /// Whether the client pushed the request (RFC 9126), so the browser must claim
+    /// it with [`OidcRepository::claim_pushed_authorization_request`].
+    pub pushed: bool,
     /// Requesting client.
     pub client_id: ClientId,
     /// Registered redirect URI to answer on.
@@ -43,6 +51,8 @@ pub struct InsertAuthorizationRequest {
     pub force_login: bool,
     /// `prompt=consent`: the user must consent again.
     pub force_consent: bool,
+    /// `prompt=none`: fail rather than show the user a page.
+    pub prompt_none: bool,
     /// `max_age` in seconds since the last authentication.
     pub max_age: Option<i64>,
     /// Account the client asked for, kept across login and consent.
@@ -78,14 +88,17 @@ pub struct StoredAuthorizationRequest {
     pub force_login: bool,
     /// `prompt=consent`: the user must consent again.
     pub force_consent: bool,
+    /// `prompt=none`: fail rather than show the user a page.
+    pub prompt_none: bool,
     /// `max_age` in seconds since the last authentication.
     pub max_age: Option<i64>,
     /// Account the client asked for.
     pub hinted_user_id: Option<UserId>,
     /// Class the session must reach, chosen from `acr_values`.
     pub target_acr: Option<Acr>,
-    /// When the request was stored.
-    pub created_at: DateTime<Utc>,
+    /// When the browser arrived with the request: when it was stored, or claimed
+    /// if pushed. Only a sign-in since then is fresh.
+    pub started_at: DateTime<Utc>,
 }
 
 /// A single-use authorization code, bound to its client, redirect URI, PKCE
@@ -183,8 +196,11 @@ impl OidcRepository<'_> {
                 "INSERT INTO authorization_requests (
                     id, secret_digest, client_id, redirect_uri, client_state,
                     nonce, pkce_challenge, scopes, audience, force_login,
-                    max_age, expires_at, force_consent, hinted_user_id, target_acr
-                ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)",
+                    max_age, expires_at, force_consent, hinted_user_id, target_acr,
+                    pushed, prompt_none
+                ) VALUES (
+                    $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17
+                )",
                 input.id.as_uuid(),
                 input.secret_digest,
                 input.client_id.as_str(),
@@ -200,13 +216,66 @@ impl OidcRepository<'_> {
                 input.force_consent,
                 input.hinted_user_id.map(UserId::as_uuid),
                 input.target_acr.map(Acr::as_str),
+                input.pushed,
+                input.prompt_none,
             )
         )?;
         Ok(())
     }
 
+    /// Claims a pushed request for the browser, once: it must be `client`'s, and
+    /// neither claimed nor expired. Its secret becomes `new_digest`, so the
+    /// `request_uri` stops working, and it now expires at `expires_at`. Returns
+    /// `None` if no such request exists.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`DatabaseError`] if the query fails or the row is invalid.
+    pub async fn claim_pushed_authorization_request(
+        &mut self,
+        id: TokenId,
+        digest: &[u8],
+        client: &str,
+        new_digest: &[u8],
+        expires_at: DateTime<Utc>,
+    ) -> Result<Option<StoredAuthorizationRequest>, DatabaseError> {
+        run!(
+            self,
+            fetch_optional,
+            sqlx::query_as!(
+                StoredAuthorizationRequest,
+                r#"UPDATE authorization_requests r
+                SET claimed_at = now(), secret_digest = $4, expires_at = $5
+                FROM oidc_clients c
+                WHERE r.id = $1
+                AND r.secret_digest = $2
+                AND r.client_id = $3
+                AND r.pushed
+                AND r.claimed_at IS NULL
+                AND r.consumed_at IS NULL
+                AND r.expires_at > now()
+                AND c.id = r.client_id
+                AND c.enabled
+                RETURNING
+                    r.id AS "id: TokenId", r.client_id AS "client_id: ClientId",
+                    c.display_name AS client_display_name,
+                    r.redirect_uri, r.client_state, r.nonce, r.pkce_challenge,
+                    r.scopes AS "scopes: JsonArray<String>", r.audience, r.force_login,
+                    r.force_consent, r.prompt_none, r.max_age,
+                    r.hinted_user_id AS "hinted_user_id: UserId",
+                    r.target_acr AS "target_acr: Acr",
+                    r.claimed_at AS "started_at!""#,
+                id.as_uuid(),
+                digest,
+                client,
+                new_digest,
+                expires_at,
+            )
+        )
+    }
+
     /// Finds an unconsumed, unexpired request of an enabled client by its id
-    /// and secret digest.
+    /// and secret digest. A pushed request must be claimed first.
     ///
     /// # Errors
     ///
@@ -226,14 +295,17 @@ impl OidcRepository<'_> {
                     c.display_name AS client_display_name,
                     r.redirect_uri, r.client_state, r.nonce, r.pkce_challenge,
                     r.scopes AS "scopes: JsonArray<String>", r.audience, r.force_login,
-                    r.force_consent, r.max_age, r.hinted_user_id AS "hinted_user_id: UserId",
-                    r.target_acr AS "target_acr: Acr", r.created_at
+                    r.force_consent, r.prompt_none, r.max_age,
+                    r.hinted_user_id AS "hinted_user_id: UserId",
+                    r.target_acr AS "target_acr: Acr",
+                    COALESCE(r.claimed_at, r.created_at) AS "started_at!"
                 FROM authorization_requests r
                 JOIN oidc_clients c ON c.id = r.client_id
                 WHERE r.id = $1
                 AND r.secret_digest = $2
                 AND r.consumed_at IS NULL
                 AND r.expires_at > now()
+                AND (NOT r.pushed OR r.claimed_at IS NOT NULL)
                 AND c.enabled"#,
                 id.as_uuid(),
                 digest,
@@ -242,7 +314,8 @@ impl OidcRepository<'_> {
     }
 
     /// Consumes a request that the client's current policy still allows:
-    /// its scopes, audience and redirect URI must remain registered.
+    /// its scopes, audience and redirect URI must remain registered. A pushed
+    /// request must be claimed first.
     ///
     /// # Errors
     ///
@@ -265,6 +338,7 @@ impl OidcRepository<'_> {
                 AND r.secret_digest = $2
                 AND r.consumed_at IS NULL
                 AND r.expires_at > now()
+                AND (NOT r.pushed OR r.claimed_at IS NOT NULL)
                 AND c.id = r.client_id
                 AND c.enabled
                 AND c.allowed_scopes @> r.scopes
@@ -281,8 +355,10 @@ impl OidcRepository<'_> {
                     c.display_name AS client_display_name,
                     r.redirect_uri, r.client_state, r.nonce, r.pkce_challenge,
                     r.scopes AS "scopes: JsonArray<String>", r.audience, r.force_login,
-                    r.force_consent, r.max_age, r.hinted_user_id AS "hinted_user_id: UserId",
-                    r.target_acr AS "target_acr: Acr", r.created_at"#,
+                    r.force_consent, r.prompt_none, r.max_age,
+                    r.hinted_user_id AS "hinted_user_id: UserId",
+                    r.target_acr AS "target_acr: Acr",
+                    COALESCE(r.claimed_at, r.created_at) AS "started_at!""#,
                 id.as_uuid(),
                 digest,
             )

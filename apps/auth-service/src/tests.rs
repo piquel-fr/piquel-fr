@@ -131,6 +131,7 @@ pub(crate) fn registration(kind: ClientKind, origin: &str) -> ClientRegistration
         .expect("standard scopes"),
         allow_refresh: true,
         trusted: false,
+        require_pushed_authorization_requests: false,
     }
 }
 

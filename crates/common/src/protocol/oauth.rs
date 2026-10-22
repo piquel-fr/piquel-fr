@@ -241,8 +241,9 @@ crate::open_str_enum! {
         ConsentRequired = "consent_required",
         /// Signed `request` objects are not supported.
         RequestNotSupported = "request_not_supported",
-        /// `request_uri` references are not supported.
-        RequestUriNotSupported = "request_uri_not_supported",
+        /// A `request_uri` is not one this server pushed, or is expired, already
+        /// used or another client's (RFC 9101 §6.2, RFC 9126 §4).
+        InvalidRequestUri = "invalid_request_uri",
         /// The user declined consent.
         AccessDenied = "access_denied",
         /// An internal operation failed.

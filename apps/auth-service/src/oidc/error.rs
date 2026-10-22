@@ -125,7 +125,7 @@ impl OAuthError {
             | OAuthCode::LoginRequired
             | OAuthCode::ConsentRequired
             | OAuthCode::RequestNotSupported
-            | OAuthCode::RequestUriNotSupported
+            | OAuthCode::InvalidRequestUri
             | OAuthCode::AccessDenied
             | OAuthCode::Other(_) => StatusCode::BAD_REQUEST,
         }
@@ -146,7 +146,7 @@ impl OAuthError {
             | OAuthCode::LoginRequired
             | OAuthCode::ConsentRequired
             | OAuthCode::RequestNotSupported
-            | OAuthCode::RequestUriNotSupported
+            | OAuthCode::InvalidRequestUri
             | OAuthCode::AccessDenied
             | OAuthCode::ServerError
             | OAuthCode::Other(_) => None,

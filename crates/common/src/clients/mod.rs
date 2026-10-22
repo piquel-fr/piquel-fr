@@ -350,6 +350,9 @@ pub struct ClientRegistration {
     pub allow_refresh: bool,
     /// Whether the client skips the consent screen. Only for first-party clients.
     pub trusted: bool,
+    /// Whether the client must push its authorization requests (RFC 9126 §6), so
+    /// none of its parameters travel through the browser.
+    pub require_pushed_authorization_requests: bool,
 }
 
 /// Focused tests for each field's rules.
