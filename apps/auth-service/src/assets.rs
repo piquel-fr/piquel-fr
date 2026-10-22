@@ -62,7 +62,9 @@ impl Asset {
             .map(str::trim)
             .any(|tag| tag == "*" || tag.strip_prefix("W/").unwrap_or(tag) == self.etag);
         if not_modified {
-            Cached(self.cache, (StatusCode::NOT_MODIFIED, headers)).into_response()
+            // The representation's length, not the empty body's (RFC 9110 §8.6).
+            let length = [(header::CONTENT_LENGTH, self.bytes.len())];
+            Cached(self.cache, (StatusCode::NOT_MODIFIED, headers, length)).into_response()
         } else {
             Cached(self.cache, (headers, self.bytes)).into_response()
         }
@@ -106,7 +108,8 @@ mod tests {
         cache: CacheClass::Revalidate,
     };
 
-    /// A matching tag gets a bodiless 304 with the 200's headers; any other gets the file.
+    /// A matching tag gets a bodiless 304 with the 200's headers and the file's length;
+    /// any other gets the file.
     #[tokio::test]
     async fn if_none_match_with_the_tag_is_not_modified() {
         let full = PAGE.response(&HeaderMap::new());
@@ -123,7 +126,14 @@ mod tests {
             request.insert(header::IF_NONE_MATCH, HeaderValue::from_static(tag));
             let response = PAGE.response(&request);
             assert_eq!(response.status(), status, "{tag}");
-            assert_eq!(response.headers(), full.headers(), "{tag}");
+            let mut headers = response.headers().clone();
+            if status == StatusCode::NOT_MODIFIED {
+                assert_eq!(
+                    headers.remove(header::CONTENT_LENGTH),
+                    Some(HeaderValue::from(PAGE.bytes.len()))
+                );
+            }
+            assert_eq!(&headers, full.headers(), "{tag}");
             assert_eq!(
                 response.extensions().get::<CacheClass>(),
                 Some(&CacheClass::Revalidate)

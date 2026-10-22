@@ -53,6 +53,7 @@ use axum::{
     extract::DefaultBodyLimit,
     http::{HeaderMap, Uri},
     middleware,
+    routing::get,
 };
 use piquel_repository::Database;
 use thiserror::Error;
@@ -95,9 +96,10 @@ impl AuthConfig {
             .merge(OidcApplication::new(database.clone(), &self.oidc)?.routes());
         let policy = security::HttpSecurity::new(self, database);
         Ok(application
-            .fallback(|uri: Uri, headers: HeaderMap| async move {
+            // Static pages answer GET and HEAD only, so preconditions need no 412.
+            .fallback(get(|uri: Uri, headers: HeaderMap| async move {
                 EmbeddedAssets::serve(uri.path(), &headers)
-            })
+            }))
             .layer(DefaultBodyLimit::max(MAX_REQUEST_BODY_BYTES))
             .layer(middleware::from_fn_with_state(
                 policy,
