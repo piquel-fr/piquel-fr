@@ -370,6 +370,9 @@ str_enum! {
         Active = "active",
         /// The account is administratively unavailable.
         Disabled = "disabled",
+        /// The account is scheduled for deletion. It cannot sign in, but a passkey
+        /// can restore it until its grace period ends and it is purged.
+        Deleting = "deleting",
     }
 }
 

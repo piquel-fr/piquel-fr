@@ -659,6 +659,8 @@ impl Actor {
 pub enum JobName {
     /// The periodic expired-state cleanup.
     Cleanup,
+    /// The purge of accounts whose deletion grace period ended.
+    AccountPurge,
 }
 
 /// A security audit log row, kept verbatim by the migrations to typed events.
