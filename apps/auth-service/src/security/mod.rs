@@ -281,6 +281,21 @@ impl Session {
             .await?)
     }
 
+    /// Looks up the browser's session like [`Self::optional`] and records its activity.
+    /// The session extractors and authorization requests resolve sessions this way,
+    /// so a browser that only signs in to applications still shows as active.
+    pub(crate) async fn resolve(
+        database: &Database,
+        context: RequestContext,
+        headers: &HeaderMap,
+    ) -> Result<Option<StoredSession>, SessionError> {
+        let session = Self::optional(database, headers).await?;
+        if let Some(session) = &session {
+            Self::touch(database, context, session).await?;
+        }
+        Ok(session)
+    }
+
     /// Requires a live browser session.
     pub(crate) async fn required(
         database: &Database,
@@ -623,16 +638,13 @@ where
     S: Send + Sync,
 {
     type Rejection = ApiError;
-    /// Looks up the browser's session and records its activity, so no handler does
-    /// it by hand.
+    /// Resolves the browser's session with [`Session::resolve`], so no handler
+    /// records its activity by hand.
     async fn from_request_parts(parts: &mut Parts, state: &S) -> Result<Self, Self::Rejection> {
         let context = RequestContext::from_request_parts(parts, state).await?;
-        let database = Database::from_ref(state);
-        let session = Session::optional(&database, &parts.headers).await?;
-        if let Some(session) = &session {
-            Session::touch(&database, context, session).await?;
-        }
-        Ok(Self(session))
+        Ok(Self(
+            Session::resolve(&Database::from_ref(state), context, &parts.headers).await?,
+        ))
     }
 }
 

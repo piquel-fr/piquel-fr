@@ -337,7 +337,8 @@ async fn migration_imports_the_audit_log() {
         include_str!("../../../migrations/0006_deliveries.sql"),
         include_str!("../../../migrations/0007_administrators.sql"),
         include_str!("../../../migrations/0008_oidc_client_registry.sql"),
-        include_str!("../../../migrations/0009_session_devices.sql"),
+        include_str!("../../../migrations/0009_pushed_authorization_requests.sql"),
+        include_str!("../../../migrations/0010_session_devices.sql"),
     ] {
         sqlx::raw_sql(migration)
             .execute(&mut connection)

@@ -319,6 +319,7 @@ impl OidcApplication {
     /// A `request_uri` continues a pushed request instead.
     pub(super) async fn authorize(
         State(app): State<Self>,
+        context: RequestContext,
         headers: HeaderMap,
         // `Form` reads the query string of GET requests.
         form: Result<Form<AuthorizationParameters>, FormRejection>,
@@ -331,7 +332,9 @@ impl OidcApplication {
         })?;
         let client_id = q.client_id.as_deref().unwrap_or_default();
         if let Some(request_uri) = &q.request_uri {
-            return app.claim_pushed(&headers, client_id, request_uri).await;
+            return app
+                .claim_pushed(context, &headers, client_id, request_uri)
+                .await;
         }
         let client = app
             .database
@@ -352,7 +355,7 @@ impl OidcApplication {
             )));
         }
         let (opaque, request) = q.validate(&app, &client, false).map_err(back)?;
-        let session = Session::optional(&app.database, &headers).await?;
+        let session = Session::resolve(&app.database, context, &headers).await?;
         let requires_login = session.as_ref().is_none_or(|session| {
             !Self::session_satisfies(
                 session,
@@ -378,7 +381,8 @@ impl OidcApplication {
                 request.target_acr,
             ));
         }
-        app.continue_authorization(&headers, transaction).await
+        app.continue_authorization(context, &headers, transaction)
+            .await
     }
 
     /// Stores a request pushed by an authenticated client (RFC 9126 §2), validated
@@ -422,6 +426,7 @@ impl OidcApplication {
     /// a fresh transaction, as for a request it sent itself.
     async fn claim_pushed(
         &self,
+        context: RequestContext,
         headers: &HeaderMap,
         client_id: &str,
         request_uri: &str,
@@ -452,12 +457,14 @@ impl OidcApplication {
             )
             .await?
             .ok_or_else(unknown)?;
-        self.continue_authorization(headers, opaque.encoded()).await
+        self.continue_authorization(context, headers, opaque.encoded())
+            .await
     }
 
     /// Resumes an authorization after the browser signs in.
     pub(super) async fn resume(
         State(app): State<Self>,
+        context: RequestContext,
         headers: HeaderMap,
         query: Result<Query<ResumeQuery>, QueryRejection>,
     ) -> Result<Redirect, OAuthError> {
@@ -465,7 +472,8 @@ impl OidcApplication {
             OAuthCode::InvalidRequest
                 .reject_with(format!("resume request is malformed: {error}"), error)
         })?;
-        app.continue_authorization(&headers, q.transaction).await
+        app.continue_authorization(context, &headers, q.transaction)
+            .await
     }
 
     /// Describes a pending authorization to the consent page.
@@ -687,9 +695,11 @@ impl OidcApplication {
 
     /// Sends the browser on from a stored authorization: to login if the session falls
     /// short, straight to the client if consent is already given, otherwise to consent.
-    /// `prompt=none` returns an error to the client instead of showing a page.
+    /// `prompt=none` returns an error to the client instead of showing a page. Looking
+    /// the session up records its activity, so single sign-on keeps it current.
     async fn continue_authorization(
         &self,
+        context: RequestContext,
         headers: &HeaderMap,
         transaction: String,
     ) -> Result<Redirect, OAuthError> {
@@ -699,7 +709,7 @@ impl OidcApplication {
         let client_redirect = self.client_redirect(&redirect, &request.client_state);
         let back =
             |code: OAuthCode, description| code.reject(description).redirected(&client_redirect);
-        let session = Session::optional(&self.database, headers)
+        let session = Session::resolve(&self.database, context, headers)
             .await?
             .filter(|session| Self::require_authorization_session(&request, session).is_ok());
         let Some(session) = session else {

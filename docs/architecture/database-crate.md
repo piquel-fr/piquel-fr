@@ -201,7 +201,7 @@ always reads it.
 - `event_personal_data`, one row per event, holds the client IP, the user agent
   family and every `Personal` payload value, keyed by its JSON pointer. The
   family's browser is in `user_agent_family`, the one value releases before
-  migration `0009` read there, and its platform in `platform`; older rows have no
+  migration `0010` read there, and its platform in `platform`; older rows have no
   platform and read it as `other`. On write
   the repository moves each `Personal` value there and leaves `"$erased"` in the
   payload; on read it merges them back. Once the row is gone, they and the request
@@ -228,13 +228,15 @@ newest first.
 `SessionRepository::revoke(user_id, scope)` is the only way a session ends early.
 `SessionScope` names one session, every other session or all of them, and the
 query always filters on `user_id`, so no scope reaches another account's session.
-It revokes the refresh token families issued from the revoked sessions in the
-same statement and returns the revoked IDs, so the caller records one
+It revokes the refresh token families issued from the revoked sessions in a
+second statement of the same transaction, whose snapshot also sees a family a
+concurrent code exchange committed while the first one waited, and returns the revoked IDs, so the caller records one
 `SessionRevoked` per session.
 
 A session records the coarse browser and platform it signed in with in
 `user_agent_family` (`firefox/linux`), never the raw header, and the IP it signed
-in from in `created_ip` and `last_seen_ip`. The session extractors refresh
+in from in `created_ip` and `last_seen_ip`. `Session::resolve`, which the session
+extractors and authorization requests use, refreshes
 `last_seen_at` and `last_seen_ip` with `touch`, at most once every
 `LAST_SEEN_INTERVAL` (five minutes), so session reads rarely write. The IPs live
 as long as the row: the cleanup pass deletes an expired session, and a revoked one

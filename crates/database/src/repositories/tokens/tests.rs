@@ -419,3 +419,47 @@ async fn session_revocation_ends_its_families_and_only_its_owners() {
         "a revoked session is not revoked twice"
     );
 }
+
+/// A logout that waits for a code exchange holding the session's lock still
+/// revokes the family that exchange committed.
+#[tokio::test]
+#[ignore = "requires a disposable TEST_DATABASE_URL"]
+async fn logout_revokes_a_family_committed_while_it_waited() {
+    let pool = Database::test_pool().await;
+    let client = client(&pool).await;
+    let grant = Grant::new(&pool, &client).await;
+    let mut exchange = pool.begin().await.expect("exchange transaction");
+    SessionRepository::from_connection(&mut exchange)
+        .find_active_by_id_for_update(grant.session)
+        .await
+        .expect("lock")
+        .expect("active session");
+    grant
+        .family(
+            &mut TokenRepository::from_connection(&mut exchange),
+            &client,
+        )
+        .await;
+    let mut logout = pool.begin().await.expect("logout transaction");
+    let logout_backend = backend(&mut logout).await;
+    let (user, session) = (grant.user, grant.session);
+    let logout_task = tokio::spawn(async move {
+        let revoked = SessionRepository::from_connection(&mut logout)
+            .revoke(user, SessionScope::One(session))
+            .await
+            .expect("logout");
+        logout.commit().await.expect("commit logout");
+        revoked
+    });
+    wait_for_lock(&pool, logout_backend).await;
+    exchange.commit().await.expect("commit exchange");
+    assert_eq!(logout_task.await.expect("logout task"), [session]);
+    let revoked: bool = sqlx::query_scalar(
+        "SELECT revoked_at IS NOT NULL FROM refresh_token_families WHERE session_id = $1",
+    )
+    .bind(session.as_uuid())
+    .fetch_one(&pool)
+    .await
+    .expect("family");
+    assert!(revoked, "the family committed during the wait is revoked");
+}

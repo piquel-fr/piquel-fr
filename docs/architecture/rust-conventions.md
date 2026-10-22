@@ -54,8 +54,8 @@ when an existing type can own the operations.
 
 `apps/auth-service/src/routes.rs` owns HTTP paths used by routers, discovery,
 redirects and endpoint policy. Browser handlers use `Session`, `OptionalSession`
-or `Confirmed` extractors, with `FromRef<Application> for Database`. They record
-the session's activity, so no handler does. `Confirmed`
+or `Confirmed` extractors, with `FromRef<Application> for Database`. They resolve
+it with `Session::resolve`, which records its activity, so no handler does. `Confirmed`
 requires a recent passkey confirmation; handlers recheck it with `Confirmed::lock`
 inside their transaction. Handlers that only need the session locked against logout
 use `Session::lock`.

@@ -303,7 +303,12 @@ impl SessionRepository<'_> {
     /// Revokes the `scope` sessions of `user_id`, with the refresh token families
     /// issued from them, and returns the IDs of the sessions it revoked, so the
     /// caller can record each revocation. Sessions of other accounts are never
-    /// touched, whatever the scope names. This is the only way sessions end early.
+    /// touched, whatever the scope names. This is the only way sessions end early;
+    /// callers run it in a transaction, so both updates commit together.
+    ///
+    /// The families are revoked by a second statement: a code exchange that held a
+    /// session's lock may have committed a family while the first one waited, and
+    /// only a new statement's snapshot sees it.
     ///
     /// # Errors
     ///
@@ -314,29 +319,34 @@ impl SessionRepository<'_> {
         scope: SessionScope,
     ) -> Result<Vec<SessionId>, DatabaseError> {
         let (only, except) = scope.binds();
-        run!(
+        let revoked = run!(
             self,
             fetch_all,
             sqlx::query_scalar!(
-                r#"WITH revoked AS (
-                    UPDATE sessions
-                    SET revoked_at = now(), passkey_confirmed_at = NULL
-                    WHERE user_id = $1
-                    AND revoked_at IS NULL
-                    AND ($2::uuid IS NULL OR id = $2)
-                    AND ($3::uuid IS NULL OR id <> $3)
-                    RETURNING id
-                ), families AS (
-                    UPDATE refresh_token_families
-                    SET revoked_at = COALESCE(revoked_at, now())
-                    WHERE session_id IN (SELECT id FROM revoked)
-                )
-                SELECT id AS "id!: SessionId" FROM revoked"#,
+                r#"UPDATE sessions
+                SET revoked_at = now(), passkey_confirmed_at = NULL
+                WHERE user_id = $1
+                AND revoked_at IS NULL
+                AND ($2::uuid IS NULL OR id = $2)
+                AND ($3::uuid IS NULL OR id <> $3)
+                RETURNING id AS "id: SessionId""#,
                 user_id.as_uuid(),
                 only.map(SessionId::as_uuid),
                 except.map(SessionId::as_uuid),
             )
-        )
+        )?;
+        let ids: Vec<_> = revoked.iter().copied().map(SessionId::as_uuid).collect();
+        run!(
+            self,
+            execute,
+            sqlx::query!(
+                "UPDATE refresh_token_families
+                SET revoked_at = COALESCE(revoked_at, now())
+                WHERE session_id = ANY($1)",
+                &ids,
+            )
+        )?;
+        Ok(revoked)
     }
 
     /// Lists the account's unrevoked, unexpired sessions, most recently active first.
