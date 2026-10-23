@@ -22,7 +22,8 @@ adds the rest in one line.
 - **Events in telemetry.** Every event recorded with `DatabaseTransaction::record`
   stores the current trace ID in `domain_events.trace_id`, and once its
   transaction commits it is logged as `event recorded` (with its ID, kind, kind
-  of actor and subject) and counted in `piquel.auth.events{kind}`. The audit
+  of actor, subject and, when one acted through the admin API, administrator) and
+  counted in `piquel.auth.events{kind}`. The audit
   history and telemetry therefore point at each other: the admin dashboard shows
   each event's trace ID, and the trace shows each event its request recorded. A
   rolled-back transaction counts nothing. Telemetry is best effort, though: a
@@ -31,6 +32,12 @@ adds the rest in one line.
 - **Failures.** A 5xx response marks its span failed and returns the trace ID in
   `X-Trace-Id`, which CORS exposes to the frontends. `tracing::error!` events
   with an `error` field, such as `ApiError::log_error`'s, also mark their span.
+  Every failed admin API request is logged as `admin API request failed`, with
+  its `admin.failure` reason.
+- **One series per process.** Each process gets a new UUID as its
+  `service.instance.id`, so replicas and command-line runs never write to the
+  same metric series. The admin API's requests carry `piquel.listener = "admin"`,
+  which tells them apart from the public listener's.
 
 ## Adding telemetry
 
@@ -40,7 +47,9 @@ adds the rest in one line.
 
 **A count derived from an event:** add an arm to `Committed::publish` in
 `crates/database/src/telemetry.rs`. Counting there, after the commit, never
-counts a change that rolled back.
+counts a change that rolled back. Prometheus estimates counts over a range, so a
+dashboard that needs exact counts of rare events, such as Admin activity,
+counts their `event recorded` lines in Loki instead.
 
 **Any other metric:** a `static` instrument next to the code it measures:
 
@@ -101,7 +110,7 @@ flushes pending telemetry after the listeners stop.
 ## Locally
 
 ```sh
-just infra telemetry   # Grafana, with the Auth overview dashboard, at http://localhost:3000
+just infra telemetry   # Grafana, with both dashboards, at http://localhost:3000
 OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4318 \
 OTEL_RESOURCE_ATTRIBUTES=deployment.environment.name=local just auth serve
 ```

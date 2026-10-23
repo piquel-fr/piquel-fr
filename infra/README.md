@@ -228,11 +228,22 @@ deployment without coupling it to auth's health.
 
 Their configuration is in `infra/telemetry/`, mounted as piqueld files. Grafana
 provisions the three data sources, linked so a log line opens its trace and a
-trace its logs, and the **Auth overview** dashboard in the `piquel.fr` folder:
-traffic, errors and latency by route, sign-ins, registrations, tokens, refresh
-revocations, throttling, events by kind, the database pool, cleanup, logs and
-traces. To look up a failed request, paste the `X-Trace-Id` of its response, or
-the trace ID the admin dashboard shows for an event, into Explore > Tempo.
+trace its logs, and two dashboards in the `piquel.fr` folder:
+
+- **Auth overview**: traffic, errors and latency by route, sign-ins,
+  registrations, tokens, refresh revocations, throttling, events by kind, the
+  database pool, cleanup, logs and traces.
+- **Admin activity**: what administrators and operators did, to notice a stolen
+  administrator session or a compromised server. Its first row counts, over the
+  chosen range, administrator rights changed, admin API requests with a token the
+  dashboard would never send, changes refused because they targeted an
+  administrator, command-line changes, disabled accounts and viewed accounts.
+  Below are their timelines, admin API traffic, actions by administrator, and
+  the matching log lines and traces. Its counts come from the event and failure
+  log lines, so they are exact.
+
+To look up a failed request, paste the `X-Trace-Id` of its response, or the
+trace ID the admin dashboard shows for an event, into Explore > Tempo.
 
 Grafana's route is private, and it never signs in through auth: it is needed
 most when auth is down (see "Recovering auth" in
@@ -269,4 +280,4 @@ piquelctl app repository webhook show telemetry     # prints the payload URL
 ```
 
 Add that webhook to this repository as for piquel-fr. `just infra telemetry`
-runs the same dashboard locally.
+runs the same dashboards locally.

@@ -12,7 +12,7 @@ preview-delete *args:
 
 # Point auth at it with OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4318 and
 # OTEL_RESOURCE_ATTRIBUTES=deployment.environment.name=local.
-# Grafana's all-in-one OpenTelemetry backend, with the Auth overview dashboard, at http://localhost:3000.
+# Grafana's all-in-one OpenTelemetry backend, with the piquel.fr dashboards, at http://localhost:3000.
 telemetry:
     docker run --rm --name piquel-telemetry \
         -p 127.0.0.1:3000:3000 -p 127.0.0.1:4318:4318 \

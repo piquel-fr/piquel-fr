@@ -54,6 +54,8 @@ static REQUEST_DURATION: Histogram = Histogram::new(
 pub struct HttpTelemetry {
     /// Routes whose access log lines are debug output only, such as health probes.
     quiet: &'static [&'static str],
+    /// Names the listener when a service has several, as `piquel.listener`.
+    listener: Option<&'static str>,
 }
 
 impl HttpTelemetry {
@@ -64,7 +66,20 @@ impl HttpTelemetry {
     /// Logs requests to `routes` at debug level only; they are still traced and measured.
     #[must_use]
     pub const fn quiet(self, routes: &'static [&'static str]) -> Self {
-        Self { quiet: routes }
+        Self {
+            quiet: routes,
+            ..self
+        }
+    }
+
+    /// Labels the requests' spans, log lines and measurements with
+    /// `piquel.listener = name`, telling apart the listeners of one service.
+    #[must_use]
+    pub const fn listener(self, name: &'static str) -> Self {
+        Self {
+            listener: Some(name),
+            ..self
+        }
     }
 
     /// Wraps every route and the fallback of `router`.
@@ -96,6 +111,10 @@ impl HttpTelemetry {
             span.record("trace_id", tracing::field::display(trace_id));
         }
         let mut labels = vec![KeyValue::new("http.request.method", method)];
+        labels.extend(
+            this.listener
+                .map(|listener| KeyValue::new("piquel.listener", listener)),
+        );
         // Unmatched paths go on the span and log line only: they are unbounded.
         let path = route.is_none().then(|| request.uri().path().to_owned());
         match (&route, &path) {
@@ -131,6 +150,7 @@ impl HttpTelemetry {
                 ($level:ident) => {
                     tracing::$level!(
                         http.response.status_code = status,
+                        piquel.listener = this.listener,
                         duration_ms,
                         "{method} {target}"
                     )

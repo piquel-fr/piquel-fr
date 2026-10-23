@@ -43,8 +43,12 @@ static CONNECTIONS: Gauge<[Label; 1]> = Gauge::new(
 pub(crate) struct Committed {
     /// The stored event's ID.
     pub(crate) id: EventId,
-    /// The kind of actor that caused it; never who.
+    /// The kind of actor that caused it.
     pub(crate) actor: HistoryActor,
+    /// The administrator that caused it, if one did through the admin API: the
+    /// only actor whose account is not the subject, so their actions can be
+    /// followed in telemetry. Operators are never named.
+    pub(crate) administrator: Option<UserId>,
     /// The account it concerns.
     pub(crate) subject: Option<UserId>,
     /// What happened.
@@ -55,8 +59,9 @@ impl Committed {
     /// Logs the event in the current trace and counts it. It runs only after the
     /// commit, so a rolled-back change is never counted; a commit whose answer is
     /// lost may go uncounted, so the stored history stays the record. The line names the
-    /// event, its kind, the kind of actor and the subject's pseudonymous ID: the
-    /// rest, personal data included, stays in the database under the event's ID.
+    /// event, its kind, the kind of actor and the pseudonymous IDs of the subject and
+    /// administrator: the rest, personal data included, stays in the database under
+    /// the event's ID.
     pub(crate) fn publish(&self) {
         let kind = self.event.kind();
         tracing::info!(
@@ -64,6 +69,7 @@ impl Committed {
             event.kind = kind,
             event.actor = self.actor.as_str(),
             event.subject = self.subject.map(tracing::field::display),
+            event.administrator = self.administrator.map(tracing::field::display),
             "event recorded"
         );
         EVENTS.add(1, &[("kind", kind)]);

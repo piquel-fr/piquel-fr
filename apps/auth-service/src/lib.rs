@@ -125,9 +125,10 @@ impl AuthConfig {
     /// Builds the admin API, for the private admin listener only. It has no browser
     /// origin, CSRF or rate policy: no browser reaches it, and every request
     /// carries an administrator's access token. It shares the public listener's
-    /// body limit and deadline, so no request can hold up shutdown.
+    /// body limit and deadline, so no request can hold up shutdown. Its telemetry
+    /// is labelled `piquel.listener = "admin"`.
     pub fn admin_router(&self, database: Database) -> Router {
-        HttpTelemetry::default().wrap(
+        HttpTelemetry::default().listener("admin").wrap(
             admin::AdminApplication::new(database, self)
                 .routes()
                 .layer(DefaultBodyLimit::max(MAX_REQUEST_BODY_BYTES))

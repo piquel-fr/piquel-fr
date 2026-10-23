@@ -7,7 +7,7 @@ use crate::{
 };
 use piquel_common::{
     UserId,
-    events::{DomainEvent, EventContext, HistoryActor},
+    events::{Actor, DomainEvent, EventContext, HistoryActor},
 };
 use sqlx::{Postgres, Transaction};
 
@@ -62,6 +62,10 @@ impl<'a> DatabaseTransaction<'a> {
         self.recorded.push(Committed {
             id,
             actor: HistoryActor::from(&context.actor),
+            administrator: match context.actor {
+                Actor::Admin { user_id, .. } => Some(user_id),
+                _ => None,
+            },
             subject,
             event,
         });

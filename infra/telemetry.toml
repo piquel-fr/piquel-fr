@@ -172,6 +172,10 @@ path = "infra/telemetry/grafana/dashboards.yaml"
 target = "/etc/grafana/dashboards/auth-overview.json"
 path = "infra/telemetry/grafana/dashboards/auth-overview.json"
 
+[[spec.services.files]]
+target = "/etc/grafana/dashboards/admin-activity.json"
+path = "infra/telemetry/grafana/dashboards/admin-activity.json"
+
 [[spec.services.mounts]]
 volume = "grafana"
 target = "/var/lib/grafana"

@@ -37,7 +37,7 @@ pub use http::HttpTelemetry;
 pub use metrics::{Counter, Gauge, Histogram, Label, Labels};
 
 use export::Exporters;
-use opentelemetry::trace::TraceContextExt;
+use opentelemetry::{KeyValue, trace::TraceContextExt};
 use opentelemetry_appender_tracing::layer::OpenTelemetryTracingBridge;
 use opentelemetry_otlp::ExporterBuildError;
 use opentelemetry_sdk::{
@@ -60,6 +60,7 @@ use tracing_subscriber::{
     layer::SubscriberExt,
     util::SubscriberInitExt,
 };
+use uuid::Uuid;
 
 /// Instrumentation scope of every tracer and meter.
 const SCOPE: &str = "piquel";
@@ -72,6 +73,9 @@ const SDK_DISABLED: Variable = Variable::new("OTEL_SDK_DISABLED");
 const ENDPOINT: Variable = Variable::new("OTEL_EXPORTER_OTLP_ENDPOINT");
 /// Resource attribute naming the service.
 const SERVICE_NAME: &str = "service.name";
+/// Resource attribute naming this process, so replicas and command-line runs of
+/// one service each keep their own metric series.
+const INSTANCE_ID: &str = "service.instance.id";
 
 /// Failures installing or flushing telemetry.
 #[derive(Debug, Error)]
@@ -205,17 +209,21 @@ impl Telemetry {
     }
 
     /// The SDK's resource from `OTEL_SERVICE_NAME` and `OTEL_RESOURCE_ATTRIBUTES`,
-    /// named `service` when neither names it.
+    /// named `service` when neither names it, and with a new UUID as this
+    /// process's `service.instance.id` unless they give one.
     fn resource(service: &'static str) -> Resource {
-        let resource = Resource::builder().build();
-        let named = resource
+        let detected = Resource::builder().build();
+        let named = detected
             .get(&SERVICE_NAME.into())
             .is_some_and(|name| !name.as_str().starts_with("unknown_service"));
-        if named {
-            resource
-        } else {
-            Resource::builder().with_service_name(service).build()
+        let mut defaults = Vec::new();
+        if !named {
+            defaults.push(KeyValue::new(SERVICE_NAME, service));
         }
+        if detected.get(&INSTANCE_ID.into()).is_none() {
+            defaults.push(KeyValue::new(INSTANCE_ID, Uuid::now_v7().to_string()));
+        }
+        Resource::builder().with_attributes(defaults).build()
     }
 
     /// The layers `init` installs: spans to `tracer`, filtered by `default_filter`;
