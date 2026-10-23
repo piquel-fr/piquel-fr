@@ -70,7 +70,7 @@ impl Harness {
         database.run_migrations().await.expect("migrations");
         let keys = Arc::new(Rs256Key::generate("admin-tests").expect("signing key"));
         let application = AdminApplication {
-            operations: AdminOperations::new(database.clone()),
+            service: AdminService::new(database.clone()),
             tokens: AdminTokens {
                 keys: keys.clone(),
                 issuer: ISSUER.into(),
@@ -128,15 +128,15 @@ impl Harness {
         }
     }
 
-    /// The operations behind the routes, to call without an extractor.
-    fn operations(&self) -> AdminOperations {
-        AdminOperations::new(self.database.clone())
+    /// The service behind the routes, to call without an extractor.
+    fn service(&self) -> AdminService {
+        AdminService::new(self.database.clone())
     }
 
     /// Creates an administrator, granted by the CLI.
     async fn admin(&self) -> Account {
         let account = self.account().await;
-        self.operations()
+        self.service()
             .grant_administrator(&cli(), account.user_id)
             .await
             .expect("grant");
@@ -440,7 +440,7 @@ async fn disabling_ends_sessions_and_is_recorded() {
 #[ignore = "requires TEST_DATABASE_URL"]
 async fn handles_are_checked_and_renamed() {
     let harness = Harness::new().await;
-    let operations = harness.operations();
+    let service = harness.service();
     let suffix = &TokenId::new().to_string()[24..];
     let original = harness.named(&format!("look-{suffix}")).await;
     let lookalike = harness.named(&format!("l0ok-{suffix}")).await;
@@ -452,7 +452,7 @@ async fn handles_are_checked_and_renamed() {
             .collect::<Vec<_>>()
     };
     assert_eq!(
-        problems(operations.check_handles().await.expect("check")),
+        problems(service.check_handles().await.expect("check")),
         [
             (
                 format!("l0ok-{suffix}"),
@@ -465,9 +465,9 @@ async fn handles_are_checked_and_renamed() {
         ]
     );
     let rename = |handle: String, allow_reserved| {
-        let operations = operations.clone();
+        let service = service.clone();
         async move {
-            operations
+            service
                 .rename_handle(
                     &cli(),
                     lookalike,
@@ -508,10 +508,7 @@ async fn handles_are_checked_and_renamed() {
             new: Personal::Value(Handle::parse(&format!("renamed-{suffix}")).expect("handle")),
         }]
     );
-    assert_eq!(
-        problems(operations.check_handles().await.expect("check")),
-        []
-    );
+    assert_eq!(problems(service.check_handles().await.expect("check")), []);
 }
 
 /// An event a newer release wrote, of a kind this one does not know, is listed
@@ -708,11 +705,11 @@ async fn mutations_recheck_the_confirmation_after_waiting() {
     let auth_time = Utc::now() - Duration::seconds(298);
     let mut logout = harness.database.begin().await.expect("transaction");
     user.sign_out(&mut logout).await;
-    let operations = harness.operations();
+    let service = harness.service();
     let reason = Reason::parse("Spam".into()).expect("reason");
     let operator = operator(admin, auth_time);
     let (result, ()) = tokio::join!(
-        operations.disable_user(&operator, user.user_id, reason),
+        service.disable_user(&operator, user.user_id, reason),
         async {
             until_blocked(&mut logout, 1).await;
             let expired = auth_time + Duration::seconds(301) - Utc::now();
@@ -749,11 +746,11 @@ async fn waiting_mutations_hold_no_caller_locks() {
         .find_active_by_id_for_update(user.user_id)
         .await
         .expect("target lock");
-    let operations = harness.operations();
+    let service = harness.service();
     let reason = Reason::parse("Spam".into()).expect("reason");
     let operator = operator(admin, Utc::now());
     let (result, ()) = tokio::join!(
-        operations.disable_user(&operator, user.user_id, reason),
+        service.disable_user(&operator, user.user_id, reason),
         async {
             until_blocked(&mut switch, 1).await;
             // The switch revokes the caller's session without a deadlock.
@@ -785,7 +782,7 @@ async fn mutations_never_wait_for_the_callers_session() {
     let disabled = tokio::time::timeout(
         std::time::Duration::from_secs(5),
         harness
-            .operations()
+            .service()
             .disable_user(&operator(admin, Utc::now()), user.user_id, reason),
     )
     .await
@@ -802,8 +799,8 @@ async fn mutations_never_wait_for_the_callers_session() {
 async fn invitation_revocation_waits_for_signup() {
     let harness = Harness::new().await;
     let admin = harness.admin().await;
-    let operations = harness.operations();
-    let invitation = operations
+    let service = harness.service();
+    let invitation = service
         .create_invitation(&cli(), &origin(), InviteExpiry::default())
         .await
         .expect("invitation");
@@ -824,15 +821,12 @@ async fn invitation_revocation_waits_for_signup() {
             .expect("redeem")
     );
     let operator = operator(admin, Utc::now());
-    let (result, ()) = tokio::join!(
-        operations.revoke_invitation(&operator, invitation.id),
-        async {
-            until_blocked(&mut signup, 1).await;
-            // The signup revokes the browser's session without a deadlock.
-            admin.sign_out(&mut signup).await;
-            signup.commit().await.expect("signup");
-        }
-    );
+    let (result, ()) = tokio::join!(service.revoke_invitation(&operator, invitation.id), async {
+        until_blocked(&mut signup, 1).await;
+        // The signup revokes the browser's session without a deadlock.
+        admin.sign_out(&mut signup).await;
+        signup.commit().await.expect("signup");
+    });
     assert!(
         matches!(result, Err(AdminError::InvitationNotFound)),
         "{result:?}"

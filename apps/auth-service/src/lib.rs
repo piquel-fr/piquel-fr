@@ -3,6 +3,8 @@
 mod admin;
 /// Embedded auth frontend pages and static resources.
 mod assets;
+/// The command line: serving, migrations and break-glass administration.
+mod cli;
 /// Creating, changing, rotating the secrets of and deleting OIDC clients, and the
 /// account API for the clients an account manages.
 mod clients;
@@ -35,8 +37,9 @@ mod sessions;
 mod tests;
 
 pub use admin::{
-    AdminError, AdminOperations, GracePeriod, HandleIssue, HandleProblem, InviteExpiry, Operator,
+    AdminError, AdminService, GracePeriod, HandleIssue, HandleProblem, InviteExpiry, Operator,
 };
+pub use cli::Cli;
 use clients::ClientApplication;
 pub use clients::{
     Applied, ClientDetails, ClientRegistry, ClientRegistryError, DEFAULT_CLIENT_SCOPES,

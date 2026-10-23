@@ -7,13 +7,14 @@ use piquel_admin_api::{
     UserDetail, UserPage,
 };
 use piquel_common::{
-    AccountStatus, Handle, Personal, SessionId, TokenId, UserId,
+    AccountStatus, DeliveryId, Handle, Personal, SessionId, TokenId, UserId,
     config::Origin,
     events::{DomainEvent, RevocationReason},
 };
 use piquel_crypto::Secret;
 use piquel_repository::{
-    Database, DatabaseError, DatabaseTransaction, EventFilter, SessionScope, StoredUser,
+    Database, DatabaseError, DatabaseTransaction, DeliveryStatus, DeliverySummary, EventFilter,
+    SessionScope, StoredUser,
 };
 use std::collections::BTreeMap;
 
@@ -37,12 +38,12 @@ const INVITATION_PARAMETER: &str = "invitation";
 /// other administrators out; revoking their rights comes first, and is itself
 /// guarded.
 #[derive(Clone)]
-pub struct AdminOperations {
+pub struct AdminService {
     /// Accounts, sessions, invitations, clients, events and administrators.
     database: Database,
 }
 
-impl AdminOperations {
+impl AdminService {
     /// Operates on `database`.
     #[must_use]
     pub const fn new(database: Database) -> Self {
@@ -540,5 +541,39 @@ impl AdminOperations {
         tx.administrators().revoke(user_id).await?;
         let revoked = DomainEvent::AdministratorRevoked {};
         Self::finish(tx, operator, Some(user_id), vec![revoked]).await
+    }
+
+    /// Lists outbound deliveries, newest first, with `status` and on `channel` when
+    /// given, at most `limit`.
+    pub(crate) async fn list_deliveries(
+        &self,
+        status: Option<DeliveryStatus>,
+        channel: Option<&str>,
+        limit: u32,
+    ) -> Result<Vec<DeliverySummary>, AdminError> {
+        Ok(self
+            .database
+            .deliveries()
+            .list(status, channel, limit)
+            .await?)
+    }
+
+    /// Attempts a failed delivery, or a cancelled unordered one, again now.
+    pub(crate) async fn retry_delivery(&self, id: DeliveryId) -> Result<(), AdminError> {
+        self.database
+            .deliveries()
+            .retry(id)
+            .await
+            .map_err(AdminError::delivery(id, "failed or cancelled unordered"))
+    }
+
+    /// Cancels a pending or failed delivery, which unblocks the deliveries ordered
+    /// after it.
+    pub(crate) async fn cancel_delivery(&self, id: DeliveryId) -> Result<(), AdminError> {
+        self.database
+            .deliveries()
+            .cancel(id)
+            .await
+            .map_err(AdminError::delivery(id, "pending or failed"))
     }
 }
