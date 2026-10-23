@@ -5,7 +5,7 @@
 //! the meantime receives nothing, and derives the link's token again from the ID,
 //! so it is stored nowhere. Notices carry the address they go to.
 //!
-//! Every attempt builds the same message, whose `Message-ID` is the delivery's ID.
+//! Every attempt sends the same content, with the delivery's ID as `Message-ID`.
 //! SMTP is at least once like the queue: if the connection breaks after the relay
 //! accepted the message, the delivery is sent again, and mail clients that
 //! deduplicate on `Message-ID` hide the copy.
@@ -29,8 +29,10 @@ pub(crate) trait Mailer: Send + Sync + 'static {
 }
 
 impl Mailer for AsyncSmtpTransport<Tokio1Executor> {
-    /// A permanent (5xx) reply fails the delivery. Temporary (4xx) replies,
-    /// timeouts and connection or TLS failures are retried.
+    /// A permanent (5xx) reply fails the delivery. Temporary (4xx) replies, a
+    /// rejected login (530, 534, 535), timeouts and connection or TLS failures are
+    /// retried: a login fails on the relay's key, not the message, so sending
+    /// resumes once the key is fixed.
     async fn send(&self, message: Message) -> Result<(), DeliveryError> {
         let Err(error) = AsyncTransport::send(self, message).await else {
             return Ok(());
@@ -38,19 +40,22 @@ impl Mailer for AsyncSmtpTransport<Tokio1Executor> {
         // The relay's reply text can quote the recipient, so it stays out of the
         // delivery and the default logs.
         tracing::debug!(error = %ErrorChain(&error), "SMTP send failed");
-        let failure = match error.status() {
-            Some(code) => Failure::Smtp(code.into()),
+        let code = error.status().map(u16::from);
+        let failure = match code {
+            Some(code) => Failure::Smtp(code),
             None if error.is_timeout() => Failure::Timeout,
             None => Failure::Connection,
         };
-        Err(if error.is_permanent() {
-            DeliveryError::Permanent(failure)
-        } else {
-            DeliveryError::Retryable {
-                failure,
-                retry_after: None,
-            }
-        })
+        Err(
+            if error.is_permanent() && !matches!(code, Some(530 | 534 | 535)) {
+                DeliveryError::Permanent(failure)
+            } else {
+                DeliveryError::Retryable {
+                    failure,
+                    retry_after: None,
+                }
+            },
+        )
     }
 }
 

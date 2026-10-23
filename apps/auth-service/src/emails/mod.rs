@@ -258,6 +258,13 @@ impl EmailApplication {
             .find_active_by_id_for_update(pending.user_id)
             .await?
             .ok_or(EmailError::InvalidToken)?;
+        // A browser signed in to another account would otherwise confirm the
+        // address for an account that is not theirs, as a phishing link could ask.
+        let context = match &session {
+            Some(session) if session.user_id == pending.user_id => context.user(session),
+            Some(_) => return Err(EmailError::OtherAccount.into()),
+            None => context.actor(Actor::Anonymous),
+        };
         let primary = match tx
             .emails()
             .consume_verification(&pending, digest.as_bytes())
@@ -268,13 +275,6 @@ impl EmailApplication {
             // The ownership trigger: another active account verified it first.
             Err(DatabaseError::Conflict(_)) => return Err(EmailError::OwnedElsewhere.into()),
             Err(error) => return Err(error.into()),
-        };
-        // A browser signed in to another account would otherwise confirm the
-        // address for an account that is not theirs, as a phishing link could ask.
-        let context = match &session {
-            Some(session) if session.user_id == pending.user_id => context.user(session),
-            Some(_) => return Err(EmailError::OtherAccount.into()),
-            None => context.actor(Actor::Anonymous),
         };
         let email_id = pending.email_id;
         let subject = Some(pending.user_id);

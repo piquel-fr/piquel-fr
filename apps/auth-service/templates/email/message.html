@@ -18,7 +18,7 @@
 <p>Another email address replaced <strong>{{ address }}</strong> as the primary address of your Piquel account. Piquel’s security emails now go there.</p>
 <p>If you made this change, there is nothing to do. If you did not, sign in and <a href="{{ history }}">review your account’s security history</a>.</p>
 {%- when Content::AddressRemoved { address, history } %}
-<p><strong>{{ address }}</strong> was removed from your Piquel account, and will receive no more email from Piquel.</p>
+<p><strong>{{ address }}</strong> was removed from your Piquel account.</p>
 <p>If you made this change, there is nothing to do. If you did not, sign in and <a href="{{ history }}">review your account’s security history</a>.</p>
 {%- endmatch %}
 <p>Piquel</p>

@@ -100,14 +100,15 @@ operators.
 A verification link's token is never stored, not even in the payload: it is an
 HMAC of the address's ID under a key derived from the signing key. Settings store
 its SHA-256 digest when the address is added, and the sender derives it again.
-Every attempt therefore builds the same message, with the same link and the
-`Message-ID` `<delivery ID@sender's domain>`. If the connection breaks after the
+Every attempt therefore sends the same content and link, with the `Message-ID`
+`<delivery ID@sender's domain>`. If the connection breaks after the
 relay accepted a message, the delivery is retried and the mail may arrive twice;
 mail clients that deduplicate on `Message-ID` hide the copy.
 
-A permanent (5xx) SMTP reply fails the delivery. Temporary (4xx) replies,
-timeouts, and connection or TLS failures retry, for up to 24 hours, as long as a
-link works. The error recorded is the reply code, never its text, which can quote
+A permanent (5xx) SMTP reply fails the delivery. Temporary (4xx) replies, a
+rejected login (`530`, `534`, `535`), timeouts, and connection or TLS failures
+retry, for up to 24 hours, as long as a link works: a login fails on the relay's
+key, not the message, so sending resumes once the key is fixed. The error recorded is the reply code, never its text, which can quote
 the recipient. Without `AUTH_SMTP_URL`, the workers still run and drop every
 delivery, so none waits forever.
 

@@ -183,11 +183,16 @@ impl EmailConfig {
         let usage = "must be smtps://USER@HOST[:PORT] or smtp://USER@HOST[:PORT], \
                      without a password, path, query or fragment";
         let url = url::Url::parse(url).map_err(|source| SMTP_URL.error(usage, source))?;
-        // The typed host, so an IPv6 address reaches lettre without its brackets.
-        let (host, loopback) = match url.host().ok_or_else(|| SMTP_URL.invalid(usage))? {
-            url::Host::Domain(domain) => (domain.to_owned(), domain == "localhost"),
-            url::Host::Ipv4(ip) => (ip.to_string(), ip.is_loopback()),
-            url::Host::Ipv6(ip) => (ip.to_string(), ip.is_loopback()),
+        // `url` only types a bracketed IPv6 host for schemes it does not know, such
+        // as `smtp`: an IPv4 address or `LOCALHOST` stays text, parsed here. IPv6
+        // reaches lettre without its brackets.
+        let host = match url.host().ok_or_else(|| SMTP_URL.invalid(usage))? {
+            url::Host::Ipv6(ip) => ip.to_string(),
+            host => host.to_string(),
+        };
+        let loopback = match host.parse::<IpAddr>() {
+            Ok(ip) => ip.is_loopback(),
+            Err(_) => host.eq_ignore_ascii_case("localhost"),
         };
         if url.password().is_some()
             || !matches!(url.path(), "" | "/")

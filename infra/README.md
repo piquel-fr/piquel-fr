@@ -235,8 +235,8 @@ providers file the mail as spam:
 
 `auth-service deliveries list --channel email --status failed` lists what did
 not go out; a delivery's error is the SMTP reply code, never its text. A rejected
-password (`535`) fails deliveries for good, so after rotating a Resend key,
-retry what failed meanwhile with `auth-service deliveries retry`.
+password (`535`) is retried for 24 hours, so mail queued while the Resend key
+was wrong goes out once auth runs with the fixed secret.
 
 ## Admin
 

@@ -13,7 +13,7 @@ If you made this change, there is nothing to do. If you did not, sign in and rev
 
 {{ history }}
 {%- when Content::AddressRemoved { address, history } %}
-{{ address }} was removed from your Piquel account, and will receive no more email from Piquel.
+{{ address }} was removed from your Piquel account.
 
 If you made this change, there is nothing to do. If you did not, sign in and review your account's security history:
 
