@@ -233,7 +233,11 @@ impl AccountService {
         subject: &Subject,
     ) -> Result<Vec<Identity>, AccountError> {
         subject.viewed(&self.database).await?;
-        let identities = self.database.federation().list_active(subject.user).await?;
+        let identities = self
+            .database
+            .federation()
+            .list_active(subject.user())
+            .await?;
         Ok(identities.into_iter().map(Into::into).collect())
     }
 
@@ -246,19 +250,19 @@ impl AccountService {
     ) -> Result<(), AccountError> {
         let mut tx = self.database.begin().await?;
         subject.lock(&mut tx).await?;
-        if !tx.federation().unlink(subject.user, provider).await? {
+        if !tx.federation().unlink(subject.user(), provider).await? {
             return Err(FederationError::IdentityNotLinked.into());
         }
         let context = subject.context();
         tx.record(
             &context,
-            Some(subject.user),
+            Some(subject.user()),
             DomainEvent::IdentityUnlinked { provider },
         )
         .await?;
         tx.revoke_sessions(
             &context,
-            subject.user,
+            subject.user(),
             subject.others(),
             &RevocationReason::IdentityUnlinked,
         )

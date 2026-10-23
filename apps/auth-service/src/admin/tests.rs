@@ -7,6 +7,7 @@ use axum::{
     body::{Body, to_bytes},
     http::{HeaderMap, Method, Request, header},
 };
+use caller::AdminSession;
 use chrono::{Duration, Utc};
 use piquel_admin_api::{AUDIENCE, paths};
 use piquel_common::{
@@ -145,7 +146,7 @@ impl Harness {
     }
 
     /// An admin API token for `account`, signed in at `acr` `age` ago.
-    pub(crate) fn token(&self, account: Account, acr: Acr, age: Duration) -> String {
+    fn token(&self, account: Account, acr: Acr, age: Duration) -> String {
         self.signed(account, AUDIENCE, acr, age)
     }
 
@@ -198,11 +199,6 @@ impl Harness {
         let request = request
             .body(body.map_or_else(Body::empty, |body| Body::from(body.to_string())))
             .expect("request");
-        self.send(request).await
-    }
-
-    /// Sends `request`, and returns its status, headers and JSON body.
-    pub(crate) async fn send(&self, request: Request<Body>) -> (StatusCode, HeaderMap, Value) {
         let response = self
             .router
             .clone()
@@ -691,12 +687,12 @@ async fn revoked_invitations_cannot_be_redeemed() {
 /// An administrator's operator, as a token signed in with a passkey at `auth_time`
 /// makes it.
 pub(crate) fn operator(admin: Account, auth_time: chrono::DateTime<Utc>) -> Operator {
-    Operator::Admin {
+    Operator::Admin(AdminSession {
         user_id: admin.user_id,
         session_id: admin.session_id,
         acr: Some(Acr::PhishingResistant),
         auth_time: Some(auth_time),
-    }
+    })
 }
 
 /// A mutation checks its caller's confirmation after its last write: one admitted

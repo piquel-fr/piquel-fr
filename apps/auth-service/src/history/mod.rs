@@ -219,7 +219,7 @@ impl AccountService {
             .map(|client| (client.id, client.display_name))
             .collect();
         let mut filter = EventFilter {
-            subject: Some(subject.user),
+            subject: Some(subject.user()),
             before,
             ..EventFilter::default()
         };

@@ -149,8 +149,7 @@ pub(crate) mod page {
     pub(crate) const LOGOUT: &str = "/logout";
 }
 
-/// Prefix shared by the settings APIs, which the settings site may call. The admin
-/// listener serves the shared ones under `/users/{user_id}` too.
+/// Prefix shared by the settings APIs, which the settings site may call.
 pub(crate) const ACCOUNT_PREFIX: &str = "/account/";
 /// Prefix shared by social sign-in, which the settings site may also start.
 pub(crate) const LOGIN_PREFIX: &str = "/login/";

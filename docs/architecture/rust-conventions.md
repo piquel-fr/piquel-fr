@@ -82,14 +82,15 @@ does not compile until both sides handle it.
 Settings an administrator may also change on another account are methods of
 `AccountService` (`src/account`), written with their setting's module, such as
 `src/passkey`. They take a `Subject`: the account and who acts, the owner with
-their session or an `Operator` with a reason. They lock with `Subject::lock` (or
-`ConfirmedSubject::lock` when the owner must have confirmed recently), record
-events with `Subject::context`, and end with `Subject::commit`, which checks an
-administrator again. The shared router serves each `AccountOperation` on both
-mounts, and the `account` command has a command for each, under the same exhaustive
-matches and test as `AdminOperation`. A new settings route either joins
-`AccountOperation`, if it only views, edits or removes, or stays in its module's
-router, on the owner's mount only.
+their session or an `Operator` with a reason. Only the extractor builds an owner's
+subject, from the session cookie, and only the admin API's authenticator builds an
+`Operator::Admin`. Operations lock with `Subject::lock` (or `ConfirmedSubject::lock`
+when the owner must have confirmed recently), record events with
+`Subject::context`, and end with `Subject::commit`, which checks an administrator
+again. The owner's router serves each `AccountOperation`, and the `account` command
+has a command for each, under the same exhaustive matches and test as
+`AdminOperation`. A new setting either joins `AccountOperation`, if it only views,
+edits or removes, or stays in its module, for the owner only.
 
 `ClientRegistry` (`src/clients/mod.rs`) is the only code that changes OIDC clients: it
 creates, updates, enables, disables, deletes and rotates the secrets of clients,

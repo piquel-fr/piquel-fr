@@ -1,55 +1,49 @@
-//! Database-backed scenarios of the shared settings on the admin mount: what an
-//! administrator may change on another account, how it is recorded, and what the
-//! mount refuses.
+//! Database-backed scenarios of administrators acting on another account through
+//! [`AccountService`]: what they may change, how it is recorded, and what refuses
+//! them.
 
 use super::*;
 use crate::{
     AdminError, Operator, Reason,
     admin::tests::{Account, Harness, cli, operator},
-    routes,
-    security::CSRF_HEADER,
-    tests::{AUTH_ORIGIN, Browser, Replicas, until_blocked},
+    passkey::PasskeyError,
+    security::CONFIRMATION_MAX_AGE,
+    tests::{Browser, sign_out, until_blocked},
 };
-use axum::{
-    body::Body,
-    http::{HeaderMap, Method, Request, header},
-};
+use axum::http::Method;
 use chrono::{Duration, Utc};
-use percent_encoding::{NON_ALPHANUMERIC, utf8_percent_encode};
-use piquel_admin_api::{REASON_HEADER, paths};
 use piquel_common::{
-    EventId, Provider, TokenId, UserId,
+    Provider, TokenId, UserId,
     events::{Actor, DomainEvent, RevocationReason},
-    protocol::claims::Acr,
+    protocol::step_up::StepUpRequirement,
 };
 use piquel_repository::{InsertExternalIdentity, InsertPasskey};
-use serde_json::{Value, json};
-use tower::ServiceExt;
+use serde_json::json;
+use std::mem::discriminant;
 
-/// The reason the scenarios give, outside ASCII so its percent-encoding matters.
+/// The reason the scenarios give.
 const REASON: &str = "Le propriétaire a perdu son téléphone";
 
-/// The admin listener, an administrator with a fresh passkey sign-in, and the
-/// owner mount, over the test database.
+/// The test database, its accounts, and an administrator signed in with a passkey.
 struct Fixture {
-    /// The admin API and the admin mount.
+    /// Creates accounts and administrators.
     harness: Harness,
     /// The acting administrator.
     admin: Account,
-    /// Their token, signed in with a passkey just now.
-    token: String,
+    /// The operations under test.
+    service: AccountService,
 }
 
 impl Fixture {
-    /// Builds the listener and signs an administrator in.
+    /// Signs an administrator in over the test database.
     async fn new() -> Self {
         let harness = Harness::new().await;
         let admin = harness.admin().await;
-        let token = harness.token(admin, Acr::PhishingResistant, Duration::seconds(10));
+        let service = AccountService::new(harness.database.clone());
         Self {
             harness,
             admin,
-            token,
+            service,
         }
     }
 
@@ -87,98 +81,69 @@ impl Fixture {
         (account, ids)
     }
 
-    /// Sends `method` to the account settings path `path` of `user` on the admin
-    /// mount, with `token` and the percent-encoded `reason`, if any.
-    async fn call(
+    /// The administrator, signed in with a passkey `age` ago.
+    fn operator(&self, age: Duration) -> Operator {
+        operator(self.admin, Utc::now() - age)
+    }
+
+    /// Renames `user`'s `passkey` as `operator`, for [`REASON`].
+    async fn rename(
         &self,
-        method: Method,
+        operator: Operator,
         user: UserId,
-        path: &str,
-        token: Option<&str>,
-        reason: Option<&str>,
-        body: Option<Value>,
-    ) -> (StatusCode, HeaderMap, Value) {
-        let mut request = Request::builder().method(method).uri(format!(
-            "{}{path}",
-            paths::USER.replace("{user_id}", &user.to_string())
-        ));
-        if let Some(token) = token {
-            request = request.header(header::AUTHORIZATION, format!("Bearer {token}"));
-        }
-        if let Some(reason) = reason {
-            request = request.header(REASON_HEADER, reason);
-        }
-        let body = match body {
-            Some(body) => {
-                request = request.header(header::CONTENT_TYPE, "application/json");
-                Body::from(body.to_string())
-            }
-            None => Body::empty(),
-        };
-        self.harness
-            .send(request.body(body).expect("request"))
+        passkey: PasskeyId,
+    ) -> Result<(), AccountError> {
+        let subject = Subject::operator(user, operator, reason());
+        self.service
+            .rename_passkey(&subject, passkey, "Renamed".into())
             .await
     }
 
-    /// [`Self::call`] as the administrator, giving [`REASON`].
-    async fn change(
-        &self,
-        method: Method,
-        user: UserId,
-        path: &str,
-        body: Option<Value>,
-    ) -> StatusCode {
-        let reason = utf8_percent_encode(REASON, NON_ALPHANUMERIC).to_string();
-        self.call(method, user, path, Some(&self.token), Some(&reason), body)
-            .await
-            .0
+    /// The names of `user`'s active passkeys.
+    async fn names(&self, user: UserId) -> Vec<String> {
+        let passkeys = self.harness.database.passkeys().list_active(user).await;
+        passkeys
+            .expect("passkeys")
+            .into_iter()
+            .map(|passkey| passkey.friendly_name)
+            .collect()
     }
 }
 
-/// The path of a shared route for `id`.
-fn item(template: &str, id: &impl ToString) -> String {
-    template.replace("{id}", &id.to_string())
+/// [`REASON`], validated.
+fn reason() -> Reason {
+    Reason::parse(REASON.into()).expect("reason")
 }
 
 /// An administrator renames and removes another account's passkey and unlinks its
-/// identity. Each change is the owner's own operation, recorded as the
-/// administrator's with the decoded reason as personal data, and the owner sees
-/// who acted and why in their history.
+/// identity, with the owner's own operations. Each change is recorded as the
+/// administrator's, with the reason as personal data, and the owner sees who
+/// acted and why in their history.
 #[tokio::test]
 #[ignore = "requires TEST_DATABASE_URL"]
 async fn administrators_change_another_account_on_its_behalf() {
     let fixture = Fixture::new().await;
     let (target, passkeys) = fixture.target(2).await;
     let user = target.user_id;
-    let renamed = json!({"friendly_name": "Lost phone"});
-    for (method, path, body) in [
-        (
-            Method::PATCH,
-            item(passkey::ITEM, &passkeys[0]),
-            Some(renamed),
-        ),
-        (Method::DELETE, item(passkey::ITEM, &passkeys[1]), None),
-        (
-            Method::DELETE,
-            federation::IDENTITY.replace("{provider}", "github"),
-            None,
-        ),
-    ] {
-        assert_eq!(
-            fixture.change(method.clone(), user, &path, body).await,
-            StatusCode::NO_CONTENT,
-            "{method} {path}"
-        );
-    }
-
-    let database = &fixture.harness.database;
-    let keys = database
-        .passkeys()
-        .list_active(user)
+    let admin = || fixture.operator(Duration::seconds(10));
+    let service = &fixture.service;
+    let subject = Subject::operator(user, admin(), reason());
+    service
+        .rename_passkey(&subject, passkeys[0], "Lost phone".into())
         .await
-        .expect("passkeys");
-    assert_eq!(keys.len(), 1);
-    assert_eq!(keys[0].friendly_name, "Lost phone");
+        .expect("rename");
+    let confirmed = || ConfirmedSubject::operator(user, admin(), reason());
+    service
+        .revoke_passkey(&confirmed(), passkeys[1])
+        .await
+        .expect("remove");
+    service
+        .unlink_identity(&confirmed(), Provider::GitHub)
+        .await
+        .expect("unlink");
+
+    assert_eq!(fixture.names(user).await, ["Lost phone"]);
+    let database = &fixture.harness.database;
     let identities = database.federation().list_active(user).await;
     assert_eq!(identities.expect("identities").len(), 0, "unlinked");
     let history = database
@@ -186,7 +151,7 @@ async fn administrators_change_another_account_on_its_behalf() {
         .history_for_user(user, 20)
         .await
         .expect("history");
-    let admin = Actor::Admin {
+    let actor = Actor::Admin {
         user_id: fixture.admin.user_id,
         session_id: fixture.admin.session_id,
     };
@@ -200,6 +165,7 @@ async fn administrators_change_another_account_on_its_behalf() {
         DomainEvent::IdentityUnlinked {
             provider: Provider::GitHub,
         },
+        // An administrator has none of the owner's sessions to keep.
         DomainEvent::SessionRevoked {
             session_id: target.session_id,
             reason: RevocationReason::CredentialRemoved,
@@ -209,12 +175,12 @@ async fn administrators_change_another_account_on_its_behalf() {
             .iter()
             .find(|stored| stored.event.known() == Some(&expected))
             .unwrap_or_else(|| panic!("{expected:?} recorded"));
-        assert_eq!(stored.actor, admin, "{expected:?}");
+        assert_eq!(stored.actor, actor, "{expected:?}");
         assert_eq!(stored.reason.as_deref(), Some(REASON), "{expected:?}");
     }
 
     let browser = Browser::sign_in(database, user).await;
-    let owner = AccountApplication::owner(database.clone()).routes();
+    let owner = AccountApplication::new(database.clone()).routes();
     let (status, page) = browser.call(&owner, Method::GET, history::LIST).await;
     assert_eq!(status, StatusCode::OK);
     let entry = page["entries"]
@@ -227,88 +193,42 @@ async fn administrators_change_another_account_on_its_behalf() {
     assert_eq!(entry["reason"], REASON);
 }
 
-/// The admin mount serves only the shared routes and methods: an administrator
-/// cannot add a passkey or an address, verify one, report an entry or manage
-/// clients there.
+/// An administrator changes only existing accounts that are not administrators',
+/// while they still hold their rights and session, and confirmed a passkey
+/// recently. Each refusal changes nothing.
 #[tokio::test]
 #[ignore = "requires TEST_DATABASE_URL"]
-async fn the_admin_mount_serves_only_shared_routes() {
-    let fixture = Fixture::new().await;
-    let (target, _) = fixture.target(1).await;
-    let report = routes::history::REPORT.replace("{event_id}", &EventId::new().to_string());
-    for (method, path, status) in [
-        (Method::POST, emails::LIST, StatusCode::METHOD_NOT_ALLOWED),
-        (Method::POST, emails::VERIFY, StatusCode::METHOD_NOT_ALLOWED),
-        (
-            Method::POST,
-            routes::passkey::ENROLL_START,
-            StatusCode::NOT_FOUND,
-        ),
-        (
-            Method::POST,
-            routes::passkey::CONFIRM_START,
-            StatusCode::NOT_FOUND,
-        ),
-        (Method::POST, &report, StatusCode::NOT_FOUND),
-        (Method::GET, routes::clients::LIST, StatusCode::NOT_FOUND),
-    ] {
-        let body = Some(json!({"email": "taken@example.com"}));
-        let status_now = fixture
-            .change(method.clone(), target.user_id, path, body)
-            .await;
-        assert_eq!(status_now, status, "{method} {path}");
-    }
-}
-
-/// The admin mount serves administrators only, on accounts that are not
-/// administrators', with a reason and a recent passkey for every change. A read
-/// needs neither.
-#[tokio::test]
-#[ignore = "requires TEST_DATABASE_URL"]
-async fn the_admin_mount_checks_who_acts_and_why() {
+async fn administrators_are_refused_unless_they_may_change_the_account() {
     let fixture = Fixture::new().await;
     let (target, passkeys) = fixture.target(1).await;
     let user = target.user_id;
-    let harness = &fixture.harness;
-    let admin = Some(fixture.token.as_str());
-    let other_admin = harness.admin().await.user_id;
-    let account = harness.account().await;
-    let account = harness.token(account, Acr::PhishingResistant, Duration::seconds(10));
-    let account = Some(account.as_str());
-    let old = harness.token(fixture.admin, Acr::PhishingResistant, Duration::minutes(10));
-    let old = Some(old.as_str());
-    let max_age =
-        r#"Bearer error="insufficient_user_authentication", acr_values="phr", max_age="300""#;
-    let (read, change) = (Method::GET, Method::PATCH);
-    for (method, user, token, reason, status, challenge) in [
-        (read.clone(), user, None, None, 401, Some("Bearer")),
-        (read.clone(), user, account, None, 403, None),
-        (read.clone(), other_admin, admin, None, 403, None),
-        (read.clone(), UserId::new(), admin, None, 404, None),
-        (read, user, old, None, 200, None),
-        (change.clone(), user, admin, None, 400, None),
-        (change.clone(), user, admin, Some("%0A"), 400, None),
-        (change.clone(), user, admin, Some("%FF"), 400, None),
-        (change, user, old, Some("Spam"), 401, Some(max_age)),
+    let other_admin = fixture.harness.admin().await.user_id;
+    let not_admin = operator(fixture.harness.account().await, Utc::now());
+    let ended = fixture.harness.admin().await;
+    let mut tx = fixture.harness.database.begin().await.expect("transaction");
+    sign_out(&mut tx, ended.user_id, ended.session_id)
+        .await
+        .expect("sign out");
+    tx.commit().await.expect("commit");
+    let fresh = fixture.operator(Duration::seconds(10));
+    let stale = fixture.operator(Duration::minutes(10));
+    let step_up = StepUpRequirement::passkey_within(CONFIRMATION_MAX_AGE);
+    for (operator, target, refusal) in [
+        (fresh.clone(), other_admin, AdminError::AdministratorTarget),
+        (fresh, UserId::new(), AdminError::UserNotFound),
+        (not_admin, user, AdminError::NotAdministrator),
+        (operator(ended, Utc::now()), user, AdminError::SessionEnded),
+        (stale, user, AdminError::StepUpRequired(step_up)),
     ] {
-        let path = if method == Method::GET {
-            passkey::LIST.to_owned()
-        } else {
-            item(passkey::ITEM, &passkeys[0])
-        };
-        let body = Some(json!({"friendly_name": "Renamed"}));
-        let (actual, headers, _) = fixture
-            .call(method.clone(), user, &path, token, reason, body)
-            .await;
-        let actual_challenge = headers
-            .get(header::WWW_AUTHENTICATE)
-            .map(|value| value.to_str().expect("header"));
-        let row = format!("{method} {path} for {user} with reason {reason:?}");
-        assert_eq!(actual.as_u16(), status, "{row}");
-        assert_eq!(actual_challenge, challenge, "{row}");
+        let expected = format!("{refusal:?}");
+        match fixture.rename(operator, target, passkeys[0]).await {
+            Err(AccountError::Operator(error)) => {
+                assert_eq!(discriminant(&error), discriminant(&refusal), "{expected}");
+            }
+            result => panic!("{expected}: {result:?}"),
+        }
     }
-    let keys = harness.database.passkeys().list_active(user).await;
-    assert_eq!(keys.expect("passkeys")[0].friendly_name, "Key 0");
+    assert_eq!(fixture.names(user).await, ["Key 0"]);
 }
 
 /// A change checks its administrator again under the account lock and before
@@ -320,14 +240,6 @@ async fn the_admin_mount_checks_who_acts_and_why() {
 async fn changes_check_the_administrator_again_after_waiting() {
     let fixture = Fixture::new().await;
     let database = &fixture.harness.database;
-    let service = AccountService::new(database.clone());
-    let rename = async |operator: Operator, user: UserId, passkey: PasskeyId| {
-        let reason = Reason::parse("Support ticket".into()).expect("reason");
-        let subject = Subject::operator(user, operator, Some(reason));
-        service
-            .rename_passkey(&subject, passkey, "Renamed".into())
-            .await
-    };
     let (target, passkeys) = fixture.target(1).await;
     let user = target.user_id;
 
@@ -345,7 +257,7 @@ async fn changes_check_the_administrator_again_after_waiting() {
         .await
         .expect("revoke");
     let (result, ()) = tokio::join!(
-        rename(operator(revoked, Utc::now()), user, passkeys[0]),
+        fixture.rename(operator(revoked, Utc::now()), user, passkeys[0]),
         async {
             until_blocked(&mut revocation, 1).await;
             revocation.commit().await.expect("commit");
@@ -368,7 +280,7 @@ async fn changes_check_the_administrator_again_after_waiting() {
         .expect("target lock");
     grant.administrators().grant(user).await.expect("grant");
     let (result, ()) = tokio::join!(
-        rename(operator(fixture.admin, Utc::now()), user, passkeys[0]),
+        fixture.rename(fixture.operator(Duration::zero()), user, passkeys[0]),
         async {
             until_blocked(&mut grant, 1).await;
             grant.commit().await.expect("commit");
@@ -382,12 +294,7 @@ async fn changes_check_the_administrator_again_after_waiting() {
         "{result:?}"
     );
 
-    let keys = database
-        .passkeys()
-        .list_active(user)
-        .await
-        .expect("passkeys");
-    assert_eq!(keys[0].friendly_name, "Key 0", "nothing changed");
+    assert_eq!(fixture.names(user).await, ["Key 0"], "nothing changed");
     let renamed = DomainEvent::PasskeyRenamed {
         passkey_id: passkeys[0],
     };
@@ -402,7 +309,8 @@ async fn changes_check_the_administrator_again_after_waiting() {
             .all(|stored| stored.event.known() != Some(&renamed)),
         "no rename recorded"
     );
-    rename(cli(), user, passkeys[0])
+    fixture
+        .rename(cli(), user, passkeys[0])
         .await
         .expect("the CLI changes an administrator's account");
 }
@@ -411,65 +319,24 @@ async fn changes_check_the_administrator_again_after_waiting() {
 /// linked.
 #[tokio::test]
 #[ignore = "requires TEST_DATABASE_URL"]
-async fn the_last_passkey_stays_on_both_mounts() {
+async fn the_last_passkey_stays_whoever_removes_it() {
     let fixture = Fixture::new().await;
     let (target, passkeys) = fixture.target(1).await;
-    let path = item(passkey::ITEM, &passkeys[0]);
-    assert_eq!(
-        fixture
-            .change(Method::DELETE, target.user_id, &path, None)
-            .await,
-        StatusCode::BAD_REQUEST
+    let subject =
+        ConfirmedSubject::operator(target.user_id, fixture.operator(Duration::zero()), reason());
+    let removed = fixture.service.revoke_passkey(&subject, passkeys[0]).await;
+    assert!(
+        matches!(
+            removed,
+            Err(AccountError::Passkey(PasskeyError::LastPasskey))
+        ),
+        "{removed:?}"
     );
     let database = &fixture.harness.database;
     let browser = Browser::sign_in(database, target.user_id).await;
-    let owner = AccountApplication::owner(database.clone()).routes();
+    let owner = AccountApplication::new(database.clone()).routes();
+    let path = passkey::ITEM.replace("{id}", &passkeys[0].to_string());
     let (status, _) = browser.call(&owner, Method::DELETE, &path).await;
     assert_eq!(status, StatusCode::BAD_REQUEST);
-    assert_eq!(
-        database
-            .passkeys()
-            .list_active(target.user_id)
-            .await
-            .expect("passkeys")
-            .len(),
-        1
-    );
-}
-
-/// The public listener serves no admin mount: `/users/…` is no route there, for
-/// reads or for mutations that pass the browser policy.
-#[tokio::test]
-#[ignore = "requires TEST_DATABASE_URL"]
-async fn the_public_listener_has_no_admin_mount() {
-    let replicas = Replicas::new().await;
-    let path = format!(
-        "{}{}",
-        paths::USER.replace("{user_id}", &UserId::new().to_string()),
-        passkey::LIST
-    );
-    for method in [Method::GET, Method::DELETE] {
-        let response = replicas
-            .a
-            .clone()
-            .oneshot(
-                Request::builder()
-                    .method(method.clone())
-                    .uri(&path)
-                    .header(header::ORIGIN, AUTH_ORIGIN)
-                    .header(CSRF_HEADER, "1")
-                    .body(Body::empty())
-                    .expect("request"),
-            )
-            .await
-            .expect("response");
-        assert!(
-            matches!(
-                response.status(),
-                StatusCode::NOT_FOUND | StatusCode::METHOD_NOT_ALLOWED
-            ),
-            "{method} {path}: {}",
-            response.status()
-        );
-    }
+    assert_eq!(fixture.names(target.user_id).await, ["Key 0"]);
 }

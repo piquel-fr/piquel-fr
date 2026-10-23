@@ -346,7 +346,7 @@ impl AccountService {
     /// Lists the account's addresses, primary first.
     pub(crate) async fn emails(&self, subject: &Subject) -> Result<Vec<EmailView>, AccountError> {
         subject.viewed(&self.database).await?;
-        let emails = self.database.emails().list(subject.user).await?;
+        let emails = self.database.emails().list(subject.user()).await?;
         Ok(emails.into_iter().map(EmailView::from).collect())
     }
 
@@ -361,17 +361,17 @@ impl AccountService {
         subject.lock(&mut tx).await?;
         let email = tx
             .emails()
-            .find(subject.user, id)
+            .find(subject.user(), id)
             .await?
             .ok_or(EmailError::NotFound)?;
         if email.verified_at.is_none() {
             return Err(EmailError::NotVerified.into());
         }
         if !email.is_primary {
-            let previous_email_id = tx.emails().set_primary(subject.user, id).await?;
+            let previous_email_id = tx.emails().set_primary(subject.user(), id).await?;
             tx.record(
                 &subject.context(),
-                Some(subject.user),
+                Some(subject.user()),
                 DomainEvent::PrimaryEmailChanged {
                     email_id: id,
                     previous_email_id,
@@ -392,7 +392,7 @@ impl AccountService {
     ) -> Result<(), AccountError> {
         let mut tx = self.database.begin().await?;
         subject.lock(&mut tx).await?;
-        let emails = tx.emails().list(subject.user).await?;
+        let emails = tx.emails().list(subject.user()).await?;
         let email = emails
             .iter()
             .find(|email| email.id == id)
@@ -404,7 +404,7 @@ impl AccountService {
         {
             return Err(EmailError::PrimaryInUse.into());
         }
-        EmailApplication::delete(&mut tx, &subject.context(), subject.user, id).await?;
+        EmailApplication::delete(&mut tx, &subject.context(), subject.user(), id).await?;
         subject.commit(tx).await
     }
 }

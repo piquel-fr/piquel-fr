@@ -11,7 +11,7 @@ use axum::{
     Router,
     http::{Method, StatusCode},
 };
-use piquel_common::events::{Actor, DomainEvent};
+use piquel_common::events::{Actor, DomainEvent, RevocationReason};
 use piquel_repository::Database;
 use serde_json::{Value, json};
 
@@ -28,7 +28,7 @@ impl Harness {
     async fn new() -> Self {
         let database = Replicas::database().await;
         Self {
-            router: AccountApplication::owner(database.clone()).routes(),
+            router: AccountApplication::new(database.clone()).routes(),
             database,
         }
     }

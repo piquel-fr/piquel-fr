@@ -1,4 +1,4 @@
-//! Failures of a shared settings operation, from either mount or the CLI.
+//! Failures of a shared settings operation, from the owner's routes or the CLI.
 
 use crate::{
     AdminError,
@@ -12,8 +12,7 @@ use axum::response::{IntoResponse, Response};
 use piquel_repository::DatabaseError;
 
 /// Why a shared settings operation failed: the setting's own failure, or the
-/// actor's. Responses keep each failure's own answer, so the owner mount answers as
-/// it always has, and the admin mount with the admin API's challenges.
+/// actor's. The owner's routes answer each failure as its module always has.
 #[derive(Debug, thiserror::Error)]
 pub(crate) enum AccountError {
     /// A passkey could not be renamed or removed.

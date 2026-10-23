@@ -48,7 +48,7 @@ impl TestApp {
         self.app
             .clone()
             .routes()
-            .merge(AccountApplication::owner(self.app.database.clone()).routes())
+            .merge(AccountApplication::new(self.app.database.clone()).routes())
     }
     /// Creates a provider fixture with no verified contact address.
     async fn new() -> Self {

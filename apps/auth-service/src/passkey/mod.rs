@@ -822,7 +822,7 @@ impl AccountService {
         subject: &Subject,
     ) -> Result<Vec<api::Passkey>, AccountError> {
         subject.viewed(&self.database).await?;
-        let passkeys = self.database.passkeys().list_active(subject.user).await?;
+        let passkeys = self.database.passkeys().list_active(subject.user()).await?;
         Ok(passkeys.into_iter().map(Into::into).collect())
     }
 
@@ -839,14 +839,14 @@ impl AccountService {
         subject.lock(&mut tx).await?;
         if !tx
             .passkeys()
-            .rename(id, subject.user, friendly_name.as_str())
+            .rename(id, subject.user(), friendly_name.as_str())
             .await?
         {
             return Err(PasskeyError::PasskeyNotFound.into());
         }
         tx.record(
             &subject.context(),
-            Some(subject.user),
+            Some(subject.user()),
             DomainEvent::PasskeyRenamed { passkey_id: id },
         )
         .await?;
@@ -862,19 +862,19 @@ impl AccountService {
     ) -> Result<(), AccountError> {
         let mut tx = self.database.begin().await?;
         subject.lock(&mut tx).await?;
-        if !tx.passkeys().revoke_if_not_last(id, subject.user).await? {
+        if !tx.passkeys().revoke_if_not_last(id, subject.user()).await? {
             return Err(PasskeyError::LastPasskey.into());
         }
         let context = subject.context();
         tx.record(
             &context,
-            Some(subject.user),
+            Some(subject.user()),
             DomainEvent::PasskeyRemoved { passkey_id: id },
         )
         .await?;
         tx.revoke_sessions(
             &context,
-            subject.user,
+            subject.user(),
             subject.others(),
             &RevocationReason::CredentialRemoved,
         )

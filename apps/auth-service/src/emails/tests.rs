@@ -48,7 +48,7 @@ impl Harness {
         Self {
             router: EmailApplication::new(database.clone(), &config)
                 .routes()
-                .merge(AccountApplication::owner(database.clone()).routes()),
+                .merge(AccountApplication::new(database.clone()).routes()),
             database,
             config,
             context: RequestContext::from_ip(IpAddr::V6(Ipv6Addr::from(

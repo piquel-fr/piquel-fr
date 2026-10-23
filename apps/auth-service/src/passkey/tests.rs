@@ -179,7 +179,7 @@ impl Fixture {
             router: app
                 .clone()
                 .routes()
-                .merge(AccountApplication::owner(app.database.clone()).routes()),
+                .merge(AccountApplication::new(app.database.clone()).routes()),
             app,
             authenticator,
             origin,

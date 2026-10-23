@@ -145,8 +145,11 @@ just auth account alice emails remove <email-id> --reason "Asked by email"
   Without a terminal they refuse unless given `--yes`.
 - `account <user>` reads and changes the settings administrators share with the
   owner: passkeys, social identities, email addresses, sessions and the security
-  history. It never adds a way to sign in or an address. Every change needs
-  `--reason`, which the owner sees in their history; reads are recorded as views.
+  history, with the owner's own operations. It never adds a way to sign in or an
+  address. Every change needs `--reason`, which the owner sees in their history;
+  reads are recorded as views. See
+  [surfaces.md](docs/architecture/surfaces.md#changing-an-account-on-its-owners-behalf)
+  for what is shared.
 - Each change is recorded as a domain event with the operator: `$USER` and the host
   name. Unlike the admin API, the CLI may act on administrators' accounts.
 - Failures print their causes and exit with 1; usage errors exit with 2.
@@ -171,13 +174,6 @@ The API never changes an administrator's account: revoke their rights first.
 Administrators cannot grant or revoke their own rights, and nobody can revoke the last
 administrator's. Every change is recorded as a domain event with its administrator
 or CLI operator.
-
-Administrators change another account's settings through the account settings API
-itself, under `/users/{user_id}/account` on the same listener, with the same
-bodies as the owner's `/account`. Every change there needs the administrator's
-reason in the `x-piquel-admin-reason` header, percent-encoded; the owner sees it in
-their security history. See [surfaces.md](docs/architecture/surfaces.md#changing-an-account-on-its-owners-behalf)
-for what is shared.
 
 ### Handles
 

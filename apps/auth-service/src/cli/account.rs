@@ -1,4 +1,5 @@
-//! Changing one account's settings on its owner's behalf, as the admin mount does.
+//! Changing one account's settings on its owner's behalf, with the owner's own
+//! operations.
 
 use super::{CliError, Confirm, Console, Output};
 use crate::{
@@ -176,7 +177,12 @@ struct Change {
 impl Change {
     /// The operator at this terminal changing `user`, for this reason.
     fn on(self, user: UserId, console: &Console) -> Subject {
-        Subject::operator(user, console.operator.clone(), Some(self.reason))
+        Subject::operator(user, console.operator.clone(), self.reason)
+    }
+
+    /// [`Self::on`], for a change the owner would have to confirm.
+    fn confirmed(self, user: UserId, console: &Console) -> ConfirmedSubject {
+        ConfirmedSubject::operator(user, console.operator.clone(), self.reason)
     }
 }
 
@@ -215,7 +221,7 @@ impl AccountCommand {
         let Self { user, setting } = self;
         let id = console.user(&user).await?;
         let account = &console.account;
-        let read = || Subject::operator(id, console.operator.clone(), None);
+        let read = || Subject::reading(id, console.operator.clone());
         match setting {
             Setting::Passkeys(Passkeys::List { output }) => {
                 output.print(&account.passkeys(&read()).await?[..], Self::print_passkeys)?;
@@ -237,7 +243,7 @@ impl AccountCommand {
                 confirm.ask(&format!(
                     "Remove passkey {passkey} of {user} ({id}) and sign it out everywhere"
                 ))?;
-                let subject = ConfirmedSubject(change.on(id, console));
+                let subject = change.confirmed(id, console);
                 account.revoke_passkey(&subject, passkey).await?;
             }
             Setting::Identities(Identities::List { output }) => {
@@ -254,18 +260,18 @@ impl AccountCommand {
                 confirm.ask(&format!(
                     "Unlink {provider} from {user} ({id}) and sign it out everywhere"
                 ))?;
-                let subject = ConfirmedSubject(change.on(id, console));
+                let subject = change.confirmed(id, console);
                 account.unlink_identity(&subject, provider).await?;
             }
             Setting::Emails(Emails::List { output }) => {
                 output.print(&account.emails(&read()).await?[..], Self::print_emails)?;
             }
             Setting::Emails(Emails::Primary { email, change }) => {
-                let subject = ConfirmedSubject(change.on(id, console));
+                let subject = change.confirmed(id, console);
                 account.make_primary_email(&subject, email).await?;
             }
             Setting::Emails(Emails::Remove { email, change }) => {
-                let subject = ConfirmedSubject(change.on(id, console));
+                let subject = change.confirmed(id, console);
                 account.remove_email(&subject, email).await?;
             }
             Setting::Sessions(Sessions::List { output }) => {

@@ -43,16 +43,7 @@ const RECENT_PASSKEY: StepUpRequirement = StepUpRequirement::passkey_within(CONF
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Operator {
     /// An administrator, authenticated by an access token the dashboard holds.
-    Admin {
-        /// The administrator's account.
-        user_id: UserId,
-        /// The session the token was issued from.
-        session_id: SessionId,
-        /// How that session had authenticated, as the token reports it.
-        acr: Option<Acr>,
-        /// When it had, as the token reports it.
-        auth_time: Option<DateTime<Utc>>,
-    },
+    Admin(AdminSession),
     /// An operator running `auth-service`.
     Cli {
         /// The operating system user, from `$USER`.
@@ -60,6 +51,21 @@ pub enum Operator {
         /// The machine's host name.
         host: String,
     },
+}
+
+/// An administrator signed in to the admin API. Its fields are private to the
+/// admin module, so only [`AdminTokens`] creates one, from a token it verified: no
+/// other code can act as an administrator.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct AdminSession {
+    /// The administrator's account.
+    pub(super) user_id: UserId,
+    /// The session the token was issued from.
+    pub(super) session_id: SessionId,
+    /// How that session had authenticated, as the token reports it.
+    pub(super) acr: Option<Acr>,
+    /// When it had, as the token reports it.
+    pub(super) auth_time: Option<DateTime<Utc>>,
 }
 
 impl Operator {
@@ -84,13 +90,9 @@ impl Operator {
     #[must_use]
     pub fn context(&self) -> EventContext {
         let actor = match self.clone() {
-            Self::Admin {
-                user_id,
-                session_id,
-                ..
-            } => Actor::Admin {
-                user_id,
-                session_id,
+            Self::Admin(session) => Actor::Admin {
+                user_id: session.user_id,
+                session_id: session.session_id,
             },
             Self::Cli { os_user, host } => Actor::Cli { os_user, host },
         };
@@ -104,7 +106,7 @@ impl Operator {
     /// The administrator's account, if an administrator acts.
     pub(super) const fn administrator(&self) -> Option<UserId> {
         match self {
-            Self::Admin { user_id, .. } => Some(*user_id),
+            Self::Admin(session) => Some(session.user_id),
             Self::Cli { .. } => None,
         }
     }
@@ -159,12 +161,12 @@ impl Operator {
         &self,
         tx: &mut DatabaseTransaction<'_>,
     ) -> Result<(), AdminError> {
-        let Self::Admin {
+        let Self::Admin(AdminSession {
             user_id,
             session_id,
             acr,
             auth_time,
-        } = *self
+        }) = *self
         else {
             return Ok(());
         };
@@ -194,17 +196,6 @@ pub(crate) struct AdminTokens {
 }
 
 impl AdminTokens {
-    /// Authenticates the administrator of a request `parts` describes as [`Admin`]
-    /// does for a read, a `GET` or `HEAD`, and as [`ConfirmedAdmin`] does otherwise.
-    pub(crate) async fn caller(&self, parts: &Parts) -> Result<Operator, AdminError> {
-        let requirement = if parts.method.is_safe() {
-            PASSKEY
-        } else {
-            RECENT_PASSKEY
-        };
-        self.authenticate(&parts.headers, requirement).await
-    }
-
     /// Authenticates the request's administrator: a valid access token for the
     /// admin API, from an active session of an administrator, whose sign-in meets
     /// `requirement`. The rights and session are read now, not from the token, so
@@ -240,12 +231,12 @@ impl AdminTokens {
                 Utc::now(),
             )
             .map_err(AdminError::StepUpRequired)?;
-        Ok(Operator::Admin {
+        Ok(Operator::Admin(AdminSession {
             user_id,
             session_id,
             acr: claims.authentication.acr,
             auth_time: claims.authentication.auth_time,
-        })
+        }))
     }
 
     /// The token of the request's one `Authorization: Bearer` header. Another scheme

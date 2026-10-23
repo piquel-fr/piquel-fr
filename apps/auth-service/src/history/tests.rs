@@ -30,7 +30,7 @@ impl Harness {
         Self {
             router: HistoryApplication::new(database.clone())
                 .routes()
-                .merge(AccountApplication::owner(database.clone()).routes()),
+                .merge(AccountApplication::new(database.clone()).routes()),
             database,
         }
     }

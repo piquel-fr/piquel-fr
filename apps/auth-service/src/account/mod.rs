@@ -1,28 +1,24 @@
-//! Account settings any administrator may also change: one router, mounted twice.
-//!
-//! The owner reaches it at `/account` on the public listener, with their browser
-//! session and under the browser policy. An administrator reaches the same routes
-//! at `/users/{user_id}/account` on the private admin listener, with an admin API
-//! token, a recent passkey and a reason for every change. Handlers take the
-//! [`Subject`] they act on rather than a session, and run the same
-//! [`AccountService`] operations the `account` command runs.
+//! Account settings any administrator may also change, as [`AccountService`]
+//! operations on a [`Subject`]: the account, and who acts on it. The owner's
+//! `/account` routes run them with the subject of their session cookie, and the
+//! `account` command with the operator at the terminal. The admin dashboard will
+//! call them in-process, as an administrator.
 //!
 //! The rule for sharing: administrators may view, edit and remove, but never add
 //! a way to sign in or to receive the account's email, which would let them take
-//! the account over. Routes that add one, the owner's own reports, and the owner's
-//! clients, which administrators manage through the admin API, stay with their
-//! modules and on the owner mount only.
+//! the account over. Operations that add one, the owner's own reports, and the
+//! owner's clients, which administrators manage through `AdminService`, stay with
+//! their modules, for the owner only.
 
 /// Failures of the shared operations.
 mod error;
-/// The account acted on, who acts, and how each mount authenticates them.
+/// The account acted on, and who acts on it.
 mod subject;
 
 pub(crate) use error::AccountError;
-pub(crate) use subject::{ActingAs, ConfirmedSubject, Subject};
+pub(crate) use subject::{ConfirmedSubject, Subject};
 
 use crate::{
-    admin::AdminTokens,
     emails::EmailView,
     federation::FederationError,
     history::{HistoryPage, HistoryQuery},
@@ -42,13 +38,11 @@ use piquel_common::{
     protocol::api::{Identity, Passkey},
 };
 use piquel_repository::Database;
-use serde::Deserialize;
-use subject::Mount;
 
 operations! {
-    /// Every shared settings operation. The shared router maps each to its route,
-    /// served on both mounts, and the `account` command has a command for each,
-    /// which a CLI test checks.
+    /// Every shared settings operation. The owner's router maps each to its
+    /// route, and the `account` command has a command for each, which a CLI test
+    /// checks.
     pub(crate) enum AccountOperation {
         /// List the account's passkeys.
         ListPasskeys,
@@ -78,8 +72,8 @@ operations! {
     }
 }
 
-/// Every shared settings operation, on any account: what both mounts and the
-/// `account` command run. Each operation takes the [`Subject`] it acts on, and
+/// Every shared settings operation, on any account: what the owner's routes and
+/// the `account` command run. Each operation takes the [`Subject`] it acts on, and
 /// lives with its setting in the passkey, federation, emails, sessions or history
 /// module.
 #[derive(Clone)]
@@ -95,28 +89,11 @@ impl AccountService {
     }
 }
 
-/// The shared settings routes on one mount.
+/// The owner's routes for the shared settings, at `/account`.
 #[derive(Clone)]
 pub(crate) struct AccountApplication {
     /// The operations behind the routes.
     service: AccountService,
-    /// The mount, which decides who acts.
-    mount: Mount,
-}
-
-/// The `{id}` of a shared route's path, read by name, since the admin mount's
-/// path also holds the account's `{user_id}`.
-#[derive(Deserialize)]
-struct Item<T> {
-    /// The passkey, address or session.
-    id: T,
-}
-
-/// The `{provider}` of an identity's path, read by name like [`Item`].
-#[derive(Deserialize)]
-struct IdentityPath {
-    /// The provider's name.
-    provider: String,
 }
 
 impl FromRef<AccountApplication> for Database {
@@ -127,25 +104,15 @@ impl FromRef<AccountApplication> for Database {
 }
 
 impl AccountApplication {
-    /// The routes at `/account`, for the signed-in owner.
-    pub(crate) const fn owner(database: Database) -> Self {
+    /// Serves the shared settings of the signed-in owner from `database`.
+    pub(crate) const fn new(database: Database) -> Self {
         Self {
             service: AccountService::new(database),
-            mount: Mount::Owner,
-        }
-    }
-
-    /// The routes at `/users/{user_id}/account`, for administrators whose tokens
-    /// `tokens` checks.
-    pub(crate) fn admin(database: Database, tokens: AdminTokens) -> Self {
-        Self {
-            service: AccountService::new(database),
-            mount: Mount::Admin(tokens),
         }
     }
 
     /// Returns every shared route at its `/account/…` path, with this
-    /// application as state. The admin listener nests them under `/users/{user_id}`.
+    /// application as state.
     pub(crate) fn routes(self) -> Router {
         AccountOperation::ALL
             .iter()
@@ -188,7 +155,7 @@ impl AccountApplication {
     async fn rename_passkey(
         State(app): State<Self>,
         subject: Subject,
-        Path(Item { id }): Path<Item<PasskeyId>>,
+        Path(id): Path<PasskeyId>,
         Json(input): Json<Rename>,
     ) -> Result<StatusCode, AccountError> {
         app.service
@@ -201,7 +168,7 @@ impl AccountApplication {
     async fn revoke_passkey(
         State(app): State<Self>,
         subject: ConfirmedSubject,
-        Path(Item { id }): Path<Item<PasskeyId>>,
+        Path(id): Path<PasskeyId>,
     ) -> Result<StatusCode, AccountError> {
         app.service.revoke_passkey(&subject, id).await?;
         Ok(StatusCode::NO_CONTENT)
@@ -219,7 +186,7 @@ impl AccountApplication {
     async fn unlink_identity(
         State(app): State<Self>,
         subject: ConfirmedSubject,
-        Path(IdentityPath { provider }): Path<IdentityPath>,
+        Path(provider): Path<String>,
     ) -> Result<StatusCode, AccountError> {
         let provider = provider
             .parse()
@@ -240,7 +207,7 @@ impl AccountApplication {
     async fn make_primary_email(
         State(app): State<Self>,
         subject: ConfirmedSubject,
-        Path(Item { id }): Path<Item<EmailId>>,
+        Path(id): Path<EmailId>,
     ) -> Result<StatusCode, AccountError> {
         app.service.make_primary_email(&subject, id).await?;
         Ok(StatusCode::NO_CONTENT)
@@ -250,7 +217,7 @@ impl AccountApplication {
     async fn remove_email(
         State(app): State<Self>,
         subject: ConfirmedSubject,
-        Path(Item { id }): Path<Item<EmailId>>,
+        Path(id): Path<EmailId>,
     ) -> Result<StatusCode, AccountError> {
         app.service.remove_email(&subject, id).await?;
         Ok(StatusCode::NO_CONTENT)
@@ -268,7 +235,7 @@ impl AccountApplication {
     async fn revoke_session(
         State(app): State<Self>,
         subject: Subject,
-        Path(Item { id }): Path<Item<SessionId>>,
+        Path(id): Path<SessionId>,
     ) -> Result<StatusCode, AccountError> {
         app.service.revoke_session(&subject, id).await?;
         Ok(StatusCode::NO_CONTENT)
@@ -292,6 +259,6 @@ impl AccountApplication {
     }
 }
 
-/// Database-backed scenarios of the admin mount.
+/// Database-backed scenarios of administrators acting on another account.
 #[cfg(test)]
 mod tests;

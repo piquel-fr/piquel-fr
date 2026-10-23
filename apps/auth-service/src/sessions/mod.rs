@@ -1,11 +1,8 @@
 //! The account's sessions, one per signed-in browser, and signing them out:
 //! settings any administrator may also change, which [`AccountService`] serves.
-use crate::account::{AccountError, AccountService, ActingAs, Subject};
+use crate::account::{AccountError, AccountService, Subject};
 use chrono::{DateTime, Utc};
-use piquel_common::{
-    AuthenticationMethod, SessionId,
-    events::{RevocationReason, UserAgentFamily},
-};
+use piquel_common::{AuthenticationMethod, SessionId, events::UserAgentFamily};
 use piquel_repository::{SessionScope, StoredSession};
 use serde::Serialize;
 use std::net::IpAddr;
@@ -73,7 +70,7 @@ impl AccountService {
         Ok(self
             .database
             .sessions()
-            .list_active_for_user(subject.user)
+            .list_active_for_user(subject.user())
             .await?
             .into_iter()
             .map(|session| SessionItem::new(session, subject.own_session()))
@@ -117,14 +114,15 @@ impl AccountService {
         subject: &Subject,
         scope: SessionScope,
     ) -> Result<Vec<SessionId>, AccountError> {
-        let reason = match subject.by {
-            ActingAs::Owner { .. } => RevocationReason::UserRevoked,
-            ActingAs::Operator { .. } => RevocationReason::Admin,
-        };
         let mut tx = self.database.begin().await?;
         subject.lock(&mut tx).await?;
         let revoked = tx
-            .revoke_sessions(&subject.context(), subject.user, scope, &reason)
+            .revoke_sessions(
+                &subject.context(),
+                subject.user(),
+                scope,
+                &subject.revocation(),
+            )
             .await?;
         subject.commit(tx).await?;
         Ok(revoked)

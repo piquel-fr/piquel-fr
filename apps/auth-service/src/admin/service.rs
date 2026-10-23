@@ -498,7 +498,6 @@ impl AdminService {
                     subject: stored.subject,
                     trace_id: stored.trace_id,
                     event: serde_json::to_value(stored.event)?,
-                    reason: stored.reason,
                 })
             })
             .collect::<Result<_, serde_json::Error>>()?;
