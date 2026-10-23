@@ -1,6 +1,6 @@
 //! Admin failures, from the API or the CLI, and their one conversion to responses.
 
-use crate::{ClientRegistryError, security::ApiError};
+use crate::{ClientRegistryError, account::AccountError, security::ApiError};
 use axum::{
     http::{HeaderValue, header},
     response::{IntoResponse, Response},
@@ -81,8 +81,13 @@ pub enum AdminError {
     #[error("expires_in {0}")]
     InvalidInviteExpiry(#[from] super::InvalidLifetime),
     /// Only active accounts can become administrators.
-    #[error("the account is disabled; enable it before granting administrator rights")]
-    AccountDisabled,
+    #[error(
+        "the account is disabled or being deleted; only active accounts can become administrators"
+    )]
+    AccountInactive,
+    /// The account is scheduled for deletion, which only restoring it ends.
+    #[error("the account is scheduled for deletion; restore it first")]
+    DeletionScheduled,
     /// The account is already an administrator.
     #[error("the account is already an administrator")]
     AlreadyAdministrator,
@@ -104,6 +109,9 @@ pub enum AdminError {
     /// Another account has this handle.
     #[error("another account has this handle")]
     HandleTaken(#[source] DatabaseError),
+    /// Deleting or restoring the account was refused or failed.
+    #[error(transparent)]
+    Account(#[from] AccountError),
     /// Persistence failed.
     #[error(transparent)]
     Database(#[from] DatabaseError),
@@ -153,7 +161,8 @@ impl AdminError {
             Self::EmailClaimed(_) => "email_claimed",
             Self::InvalidReason => "invalid_reason",
             Self::InvalidInviteExpiry(_) => "invalid_invite_expiry",
-            Self::AccountDisabled => "account_disabled",
+            Self::AccountInactive => "account_inactive",
+            Self::DeletionScheduled => "deletion_scheduled",
             Self::AlreadyAdministrator => "already_administrator",
             Self::NotAnAdministrator => "not_an_administrator",
             Self::OwnRights => "own_rights",
@@ -161,6 +170,7 @@ impl AdminError {
             Self::InvalidHandle(_) => "invalid_handle",
             Self::SameHandle => "same_handle",
             Self::HandleTaken(_) => "handle_taken",
+            Self::Account(_) => "account",
             Self::Database(_) => "database",
             Self::Client(_) => "client",
             Self::Crypto(_) => "crypto",
@@ -192,7 +202,9 @@ impl AdminError {
             | Self::EmailClaimed(_)
             | Self::InvalidReason
             | Self::InvalidInviteExpiry(_)
-            | Self::AccountDisabled
+            | Self::AccountInactive
+            | Self::DeletionScheduled
+            | Self::Account(_)
             | Self::AlreadyAdministrator
             | Self::NotAnAdministrator
             | Self::OwnRights
@@ -234,11 +246,13 @@ impl From<AdminError> for ApiError {
             AdminError::AlreadyDisabled
             | AdminError::AlreadyActive
             | AdminError::EmailClaimed(_)
-            | AdminError::AccountDisabled
+            | AdminError::AccountInactive
+            | AdminError::DeletionScheduled
             | AdminError::AlreadyAdministrator
             | AdminError::NotAnAdministrator
             | AdminError::SameHandle => Self::conflict(message),
             AdminError::HandleTaken(_) => Self::conflict(message).with_code(ErrorCode::HandleTaken),
+            AdminError::Account(error) => error.into(),
             AdminError::Database(error) => error.into(),
             AdminError::Client(error) => error.into(),
             error @ (AdminError::Crypto(_) | AdminError::Event(_)) => Self::internal(error),

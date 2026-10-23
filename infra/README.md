@@ -177,7 +177,8 @@ removes the restart gap after a crash; it adds no capacity.
   database on each request, so a client change reaches every replica at once.
 - **Background work.** Jobs run through one runner
   (`apps/auth-service/src/jobs.rs`). An exclusive job, such as expired-state
-  cleanup every five minutes, holds a PostgreSQL advisory lock while it runs, so
+  cleanup or the purge of deleted accounts, each every five minutes, holds a
+  PostgreSQL advisory lock while it runs, so
   one replica at a time runs it and the others skip that run. A run that fails
   or panics is logged and retried at the next interval. On shutdown, once
   in-flight requests drain, running jobs get 10 seconds to finish (cleanup stops

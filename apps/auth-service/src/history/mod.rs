@@ -8,13 +8,16 @@ use axum::{
 };
 use chrono::{DateTime, Utc};
 use piquel_common::{
-    ClientId, EventId, Personal,
+    ClientId, EventId, Personal, UserId,
     events::{
         Actor, DomainEvent, FollowUp, HistoryActor, HistoryEntry, RequestOrigin, RevocationReason,
         UserAgentFamily,
     },
 };
-use piquel_repository::{Database, EventFilter, SessionScope, StoredEvent};
+use piquel_repository::{
+    Database, DatabaseError, DatabaseTransaction, EventFilter, OidcRepository, SessionScope,
+    StoredEvent,
+};
 use serde::{Deserialize, Serialize};
 use std::{collections::BTreeMap, net::IpAddr};
 
@@ -27,6 +30,8 @@ const PAGE_SIZE: u16 = 50;
 /// Batches of [`PAGE_SIZE`] events one page reads at most, visible or not, so a
 /// long run of hidden events cannot hold a request.
 const MAX_BATCHES: usize = 10;
+/// Events a data export reads per query.
+const EXPORT_BATCH: u16 = 500;
 
 /// The account's security history and its reports.
 #[derive(Clone)]
@@ -52,37 +57,37 @@ struct HistoryPage {
     next: Option<EventId>,
 }
 
-/// One entry of the account's history. Entries whose actor is `account` can be
-/// reported.
-#[derive(Serialize)]
-struct HistoryItem {
+/// One entry of the account's history, also part of its data export. Entries
+/// whose actor is `account` can be reported.
+#[derive(Debug, Serialize)]
+pub(crate) struct HistoryItem {
     /// Event ID, to report the entry.
-    id: EventId,
+    pub(crate) id: EventId,
     /// When it happened.
-    occurred_at: DateTime<Utc>,
+    pub(crate) occurred_at: DateTime<Utc>,
     /// What happened: its `kind` and details.
     #[serde(flatten)]
-    entry: HistoryEntry,
+    pub(crate) entry: HistoryEntry,
     /// Who did it.
-    actor: HistoryActor,
+    pub(crate) actor: HistoryActor,
     /// The application involved, if any.
-    client: Option<ClientView>,
+    pub(crate) client: Option<ClientView>,
     /// The request's IP address, while kept.
-    ip: Option<IpAddr>,
+    pub(crate) ip: Option<IpAddr>,
     /// The request's browser and platform, while kept. Entries recorded before
     /// platforms were have `other` for theirs.
-    device: Option<UserAgentFamily>,
+    pub(crate) device: Option<UserAgentFamily>,
     /// Whether retention or a purge deleted the IP address and device.
-    erased: bool,
+    pub(crate) erased: bool,
 }
 
 /// An application named by a history entry.
-#[derive(Serialize)]
-struct ClientView {
+#[derive(Debug, Serialize)]
+pub(crate) struct ClientView {
     /// Client ID.
-    id: ClientId,
+    pub(crate) id: ClientId,
     /// The name its consent screen shows; `None` if it is not registered.
-    name: Option<String>,
+    pub(crate) name: Option<String>,
 }
 
 /// The answer to a report.
@@ -120,6 +125,42 @@ impl HistoryItem {
             erased,
         })
     }
+
+    /// The names of the registered clients, by ID, for [`Self::new`].
+    async fn client_names(
+        mut oidc: OidcRepository<'_>,
+    ) -> Result<BTreeMap<ClientId, String>, DatabaseError> {
+        Ok(oidc
+            .list_clients()
+            .await?
+            .into_iter()
+            .map(|client| (client.id, client.display_name))
+            .collect())
+    }
+
+    /// Every entry of the account's history, newest first, for its data export.
+    pub(crate) async fn all(
+        tx: &mut DatabaseTransaction<'_>,
+        user_id: UserId,
+    ) -> Result<Vec<Self>, DatabaseError> {
+        let clients = Self::client_names(tx.oidc()).await?;
+        let mut filter = EventFilter {
+            subject: Some(user_id),
+            ..EventFilter::default()
+        };
+        let mut items = Vec::new();
+        loop {
+            let batch = tx.events().list(&filter, u32::from(EXPORT_BATCH)).await?;
+            let exhausted = batch.len() < usize::from(EXPORT_BATCH);
+            for stored in batch {
+                filter.before = Some(stored.id);
+                items.extend(Self::new(&stored, &clients));
+            }
+            if exhausted {
+                return Ok(items);
+            }
+        }
+    }
 }
 
 impl HistoryApplication {
@@ -145,14 +186,7 @@ impl HistoryApplication {
         security::Session(session): security::Session,
         Query(query): Query<HistoryQuery>,
     ) -> Result<Json<HistoryPage>, ApiError> {
-        let clients: BTreeMap<_, _> = app
-            .database
-            .oidc()
-            .list_clients()
-            .await?
-            .into_iter()
-            .map(|client| (client.id, client.display_name))
-            .collect();
+        let clients = HistoryItem::client_names(app.database.oidc()).await?;
         let mut filter = EventFilter {
             subject: Some(session.user_id),
             before: query.before,

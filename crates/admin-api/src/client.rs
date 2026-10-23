@@ -149,6 +149,24 @@ impl AdminClient {
             .await
     }
 
+    /// Schedules an active account's deletion.
+    ///
+    /// # Errors
+    /// See [`ApiError`].
+    pub async fn schedule_deletion(&self, token: &str, user: UserId) -> Result<(), ApiError> {
+        self.send(self.request(token, Method::POST, paths::USER_DELETION, &[&user]))
+            .await
+    }
+
+    /// Restores an account scheduled for deletion.
+    ///
+    /// # Errors
+    /// See [`ApiError`].
+    pub async fn restore_user(&self, token: &str, user: UserId) -> Result<(), ApiError> {
+        self.send(self.request(token, Method::DELETE, paths::USER_DELETION, &[&user]))
+            .await
+    }
+
     /// Ends every session and refresh grant of an account.
     ///
     /// # Errors

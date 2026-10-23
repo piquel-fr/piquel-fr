@@ -1,0 +1,22 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT id FROM refresh_token_families\n                WHERE client_id = ANY($1) AND revoked_at IS NULL\n                ORDER BY id\n                FOR UPDATE",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "TextArray"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "7e7945abdbd1e9825224e3fdc1d7b01f6f3cb5a0ba3638fc3192d6b7d361c7b4"
+}

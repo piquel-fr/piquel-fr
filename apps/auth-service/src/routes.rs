@@ -103,6 +103,16 @@ pub(crate) mod clients {
     pub(crate) const SECRETS: &str = "/account/clients/{id}/secrets";
 }
 
+/// The signed-in user's data export and account deletion.
+pub(crate) mod account {
+    /// Downloads every record of the account as JSON.
+    pub(crate) const EXPORT: &str = "/account/export";
+    /// Schedules the account's deletion.
+    pub(crate) const DELETION: &str = "/account/deletion";
+    /// Restores an account scheduled for deletion with a restore token, and signs in.
+    pub(crate) const RESTORE: &str = "/account/deletion/cancel";
+}
+
 /// OAuth 2.0 and `OpenID` Connect endpoints.
 pub(crate) mod oidc {
     use piquel_common::protocol::metadata;

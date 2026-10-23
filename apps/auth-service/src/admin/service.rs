@@ -1,7 +1,10 @@
 //! Every administrative operation, shared by the admin API and the CLI.
 
 use super::{AdminError, HandleIssue, HandleProblem, InviteExpiry, Operator, Reason, UserRef};
-use crate::{Applied, ClientDetails, ClientRegistry, ClientRegistryError, GracePeriod};
+use crate::{
+    Applied, ClientDetails, ClientRegistry, ClientRegistryError, GracePeriod,
+    account::AccountApplication, security::Session,
+};
 use chrono::Utc;
 use piquel_admin_api::{
     Administrator, Client, CreatedInvitation, Email, Event, EventPage, EventSearch, Invitation,
@@ -199,22 +202,26 @@ impl AdminService {
         reason: Reason,
     ) -> Result<(), AdminError> {
         let mut tx = self.database.begin().await?;
-        Self::lock_target(&mut tx, operator, user_id).await?;
-        if !tx
-            .users()
-            .set_status(user_id, AccountStatus::Disabled)
-            .await?
-        {
-            return Err(AdminError::AlreadyDisabled);
+        // Deleting an account checks that another administrator stays active under
+        // this lock, so disabling one must wait for it.
+        tx.administrators().lock().await?;
+        let user = Self::lock_target(&mut tx, operator, user_id).await?;
+        match user.status {
+            AccountStatus::Active => {}
+            AccountStatus::Disabled => return Err(AdminError::AlreadyDisabled),
+            AccountStatus::Deleting => return Err(AdminError::DeletionScheduled),
         }
+        tx.users()
+            .set_status(user_id, AccountStatus::Disabled)
+            .await?;
+        let context = operator.context();
         let disabled = DomainEvent::AccountDisabled {
             reason: Personal::Value(reason.into_inner()),
         };
-        tx.record(&operator.context(), Some(user_id), disabled)
-            .await?;
-        Self::end_sessions(
+        tx.record(&context, Some(user_id), disabled).await?;
+        Session::end_all(
             &mut tx,
-            operator,
+            &context,
             user_id,
             RevocationReason::AccountDisabled,
         )
@@ -230,9 +237,13 @@ impl AdminService {
         user_id: UserId,
     ) -> Result<(), AdminError> {
         let mut tx = self.database.begin().await?;
-        Self::lock_target(&mut tx, operator, user_id).await?;
-        let changed = tx
-            .users()
+        let user = Self::lock_target(&mut tx, operator, user_id).await?;
+        match user.status {
+            AccountStatus::Disabled => {}
+            AccountStatus::Active => return Err(AdminError::AlreadyActive),
+            AccountStatus::Deleting => return Err(AdminError::DeletionScheduled),
+        }
+        tx.users()
             .set_status(user_id, AccountStatus::Active)
             .await
             .map_err(|error| match error {
@@ -242,9 +253,6 @@ impl AdminService {
                 | DatabaseError::InvalidStoredData { .. }
                 | DatabaseError::Operation(_) => error.into(),
             })?;
-        if !changed {
-            return Err(AdminError::AlreadyActive);
-        }
         Self::finish(
             tx,
             operator,
@@ -252,6 +260,65 @@ impl AdminService {
             vec![DomainEvent::AccountEnabled {}],
         )
         .await
+    }
+
+    /// Schedules the deletion of an active account: it can no longer sign in, its
+    /// sessions and refresh grants end, and it is purged once its grace period ends,
+    /// unless it is restored first. The last active administrator's account cannot
+    /// be deleted.
+    ///
+    /// # Errors
+    /// Fails when the account is unknown, not active or refused.
+    pub async fn schedule_deletion(
+        &self,
+        operator: &Operator,
+        user_id: UserId,
+    ) -> Result<(), AdminError> {
+        let (mut tx, user) = self.lock_deletable(operator, user_id).await?;
+        AccountApplication::schedule_deletion(&mut tx, &operator.context(), &user).await?;
+        Self::finish(tx, operator, Some(user_id), vec![]).await
+    }
+
+    /// Purges an account now, in any status, without a grace period. Irreversible,
+    /// so only the CLI offers it.
+    ///
+    /// # Errors
+    /// Fails when the account is unknown or the last active administrator's.
+    pub async fn purge_user(&self, operator: &Operator, user_id: UserId) -> Result<(), AdminError> {
+        let (mut tx, user) = self.lock_deletable(operator, user_id).await?;
+        AccountApplication::purge(&mut tx, &operator.context(), &user).await?;
+        Self::finish(tx, operator, Some(user_id), vec![]).await
+    }
+
+    /// Opens the transaction of a deletion and locks its account, refusing the
+    /// last active administrator's, and any administrator's unless the CLI acts.
+    async fn lock_deletable(
+        &self,
+        operator: &Operator,
+        user_id: UserId,
+    ) -> Result<(DatabaseTransaction<'_>, StoredUser), AdminError> {
+        let mut tx = self.database.begin().await?;
+        let user = AccountApplication::lock_deletable(&mut tx, user_id).await?;
+        // The administrator list is locked, so the answer holds until commit.
+        if operator.administrator().is_some() && tx.administrators().contains(user_id).await? {
+            return Err(AdminError::AdministratorTarget);
+        }
+        Ok((tx, user))
+    }
+
+    /// Restores an account scheduled for deletion. It can sign in again.
+    ///
+    /// # Errors
+    /// Fails when the account is unknown or not scheduled for deletion.
+    pub async fn restore_user(
+        &self,
+        operator: &Operator,
+        user_id: UserId,
+    ) -> Result<(), AdminError> {
+        let mut tx = self.database.begin().await?;
+        let user = Self::lock_target(&mut tx, operator, user_id).await?;
+        AccountApplication::restore(&mut tx, &operator.context(), &user).await?;
+        Self::finish(tx, operator, Some(user_id), vec![]).await
     }
 
     /// Ends every session and refresh grant of an account.
@@ -262,22 +329,14 @@ impl AdminService {
     ) -> Result<(), AdminError> {
         let mut tx = self.database.begin().await?;
         Self::lock_target(&mut tx, operator, user_id).await?;
-        Self::end_sessions(&mut tx, operator, user_id, RevocationReason::Admin).await?;
+        Session::end_all(
+            &mut tx,
+            &operator.context(),
+            user_id,
+            RevocationReason::Admin,
+        )
+        .await?;
         Self::finish(tx, operator, Some(user_id), vec![]).await
-    }
-
-    /// Revokes the account's sessions, recording each as `operator`'s, then its
-    /// refresh grants. Callers hold the account lock.
-    async fn end_sessions(
-        tx: &mut DatabaseTransaction<'_>,
-        operator: &Operator,
-        user_id: UserId,
-        reason: RevocationReason,
-    ) -> Result<(), AdminError> {
-        tx.revoke_sessions(&operator.context(), user_id, SessionScope::All, &reason)
-            .await?;
-        tx.tokens().revoke_all_for_user(user_id).await?;
-        Ok(())
     }
 
     /// Ends one active session and the refresh grants issued from it.
@@ -655,8 +714,8 @@ impl AdminService {
             .find_by_id_for_update(user_id)
             .await?
             .ok_or(AdminError::UserNotFound)?;
-        if user.status == AccountStatus::Disabled {
-            return Err(AdminError::AccountDisabled);
+        if user.status != AccountStatus::Active {
+            return Err(AdminError::AccountInactive);
         }
         if !tx.administrators().grant(user_id).await? {
             return Err(AdminError::AlreadyAdministrator);

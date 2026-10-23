@@ -1,9 +1,10 @@
 //! Transactional refresh-token families, rotation and replay revocation.
 
-use super::{RepositoryExecutor, TokenRepository};
+use super::{JsonArray, RepositoryExecutor, TokenRepository};
 use crate::{DatabaseError, SessionAuthentication};
 use chrono::{DateTime, Utc};
 use piquel_common::{ClientId, SessionId, TokenId, UserId};
+use serde::Serialize;
 use sqlx::types::Json;
 use thiserror::Error;
 
@@ -61,6 +62,23 @@ pub struct RotatedRefreshToken {
     pub scopes: Vec<String>,
     /// How the session had authenticated when the grant's code was issued.
     pub authentication: SessionAuthentication,
+}
+
+/// A refresh grant of an account: one family, without its tokens.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+pub struct StoredGrant {
+    /// Family identifier.
+    pub id: TokenId,
+    /// Client the grant was issued to.
+    pub client_id: ClientId,
+    /// Audience of the grant's access tokens.
+    pub audience: String,
+    /// Granted scopes.
+    pub scopes: Vec<String>,
+    /// When the grant was issued.
+    pub created_at: DateTime<Utc>,
+    /// When it was revoked; `None` while it can refresh.
+    pub revoked_at: Option<DateTime<Utc>>,
 }
 
 /// A refresh family that a revocation ended.
@@ -439,31 +457,63 @@ impl TokenRepository<'_> {
         Ok(())
     }
 
-    /// Locks the client's live families until the transaction ends, in ID order.
-    /// A rotation locks its family before its client, so a change that locks the
-    /// client and then writes its families, such as a deletion, takes these
-    /// first; otherwise each could hold the lock the other waits for.
+    /// Locks the live families of `clients` until the transaction ends, in ID
+    /// order. A rotation locks its family before its client, so a change that
+    /// locks the client and then writes its families, such as a deletion, takes
+    /// these first; otherwise each could hold the lock the other waits for.
     ///
     /// Every statement that locks several families locks them in ID order, as
     /// this one does, so two of them never wait for each other's families: a
-    /// deletion's for a client and a logout's for a session can share some.
+    /// deletion's for a client and a logout's for a session can share some. A
+    /// change to several clients, such as a purge deleting an account's clients,
+    /// locks all their families in this one statement.
     ///
     /// # Errors
     ///
     /// Returns [`DatabaseError`] if the query fails.
-    pub async fn lock_client_families(&mut self, client: &ClientId) -> Result<(), DatabaseError> {
+    pub async fn lock_client_families(
+        &mut self,
+        clients: &[ClientId],
+    ) -> Result<(), DatabaseError> {
+        let clients: Vec<&str> = clients.iter().map(ClientId::as_str).collect();
         run!(
             self,
             fetch_all,
             sqlx::query_scalar!(
                 "SELECT id FROM refresh_token_families
-                WHERE client_id = $1 AND revoked_at IS NULL
+                WHERE client_id = ANY($1) AND revoked_at IS NULL
                 ORDER BY id
                 FOR UPDATE",
-                client.as_str(),
+                &clients as &[&str],
             )
         )?;
         Ok(())
+    }
+
+    /// Lists every refresh grant of the account cleanup has not deleted yet,
+    /// revoked ones included, oldest first.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`DatabaseError`] if the query fails or a row is invalid.
+    pub async fn list_for_user(
+        &mut self,
+        user_id: UserId,
+    ) -> Result<Vec<StoredGrant>, DatabaseError> {
+        run!(
+            self,
+            fetch_all,
+            sqlx::query_as!(
+                StoredGrant,
+                r#"SELECT
+                    id AS "id: TokenId", client_id AS "client_id: ClientId", audience,
+                    scopes AS "scopes: JsonArray<String>", created_at, revoked_at
+                FROM refresh_token_families
+                WHERE user_id = $1
+                ORDER BY created_at, id"#,
+                user_id.as_uuid(),
+            )
+        )
     }
 
     /// Revokes every active family of the account and returns how many were

@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO retired_usernames (username)\n            SELECT username FROM users WHERE id = $1\n            ON CONFLICT DO NOTHING",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "5da234ad7cd09b14dc5f01da68c7b6e0e4c904d08ed4d4da817045e4fd23341c"
+}

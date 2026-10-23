@@ -21,6 +21,13 @@ export type Identity = { provider: Provider; linked_email: string | null };
 export type Device = { browser: string; platform: string };
 /** An email address of the account. Only a verified one can be primary. */
 export type Email = { id: string; address: string; verified: boolean; primary: boolean };
+/** Every record of the account, as auth exports it; only what the page reads is typed. */
+export type AccountExport = {
+  format: 'piquel.account-export';
+  version: number;
+  exported_at: string;
+  profile: { username: string };
+};
 
 const browsers: Record<string, string> = {
   chrome: 'Chrome',
@@ -48,6 +55,8 @@ export class Account {
   config = $state<Configuration | null>(null);
   session = $state<Session | null>(null);
   loading = $state(true);
+  /** When the account will be purged, once this browser scheduled its deletion. */
+  purgeAfter = $state<string | null>(null);
   constructor(readonly authOrigin: string) {
     this.api = new AuthApi(authOrigin);
   }
@@ -122,6 +131,21 @@ export class Account {
   /** Needs a recent passkey confirmation; run it through `StepUp`. */
   unlinkIdentity(provider: string): Promise<void> {
     return this.api.request(`/account/social-identities/${provider}`, 'DELETE');
+  }
+  /** Needs a recent passkey confirmation; run it through `StepUp`. */
+  exportData(): Promise<AccountExport> {
+    return this.api.request('/account/export');
+  }
+  /**
+   * Schedules the account's deletion, confirmed by its `username`, and signs every
+   * browser out. Needs a recent passkey confirmation; run it through `StepUp`.
+   */
+  async deleteAccount(username: string): Promise<void> {
+    const scheduled = await this.api.request<{ purge_after: string }>('/account/deletion', 'POST', {
+      confirm_username: username
+    });
+    this.purgeAfter = scheduled.purge_after;
+    this.session = null;
   }
 }
 

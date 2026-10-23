@@ -27,9 +27,9 @@ pub(crate) struct SessionsApplication {
     database: Database,
 }
 
-/// One active session of the account.
-#[derive(Serialize)]
-struct SessionItem {
+/// One active session of the account, as settings and the data export show it.
+#[derive(Debug, Serialize)]
+pub(crate) struct SessionItem {
     /// Session ID, to sign it out.
     id: SessionId,
     /// Whether it is the session making the request.
@@ -57,7 +57,7 @@ struct Revoked {
 
 impl SessionItem {
     /// Shows `session`, marking it if it is the `current` one.
-    fn new(session: StoredSession, current: SessionId) -> Self {
+    pub(crate) fn new(session: StoredSession, current: SessionId) -> Self {
         Self {
             current: session.id == current,
             id: session.id,

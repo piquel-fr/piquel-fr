@@ -52,6 +52,8 @@ pub fn router(api: AdminClient) -> Router {
         .page(users::detail)
         .page(users::disable)
         .page(users::enable)
+        .page(users::delete)
+        .page(users::restore)
         .page(users::revoke_sessions)
         .page(users::revoke_session)
         .page(administrators::list)

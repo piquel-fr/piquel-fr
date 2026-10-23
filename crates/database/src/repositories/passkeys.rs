@@ -48,6 +48,10 @@ pub struct StoredPasskey {
     pub credential: Value,
     /// User-chosen label.
     pub friendly_name: String,
+    /// When the credential was registered.
+    pub created_at: DateTime<Utc>,
+    /// When the credential last authenticated, if it has.
+    pub last_used_at: Option<DateTime<Utc>>,
     /// When the credential was revoked; `None` while it is usable.
     pub revoked_at: Option<DateTime<Utc>>,
 }
@@ -111,7 +115,7 @@ impl PasskeyRepository<'_> {
                 ) VALUES ($1, $2, $3, $4, $5)
                 RETURNING
                     id AS "id: PasskeyId", credential_id, user_id AS "user_id: UserId", credential,
-                    friendly_name, revoked_at"#,
+                    friendly_name, created_at, last_used_at, revoked_at"#,
                 input.id.as_uuid(),
                 input.credential_id,
                 input.user_id.as_uuid(),
@@ -137,7 +141,7 @@ impl PasskeyRepository<'_> {
                 StoredPasskey,
                 r#"SELECT
                     id AS "id: PasskeyId", credential_id, user_id AS "user_id: UserId", credential,
-                    friendly_name, revoked_at
+                    friendly_name, created_at, last_used_at, revoked_at
                 FROM passkey_credentials
                 WHERE user_id = $1
                 AND revoked_at IS NULL
@@ -147,9 +151,10 @@ impl PasskeyRepository<'_> {
         )
     }
 
-    /// Lists the unrevoked credentials of the active account named `username`,
-    /// oldest first. A missing, inactive or passkey-less account returns none,
-    /// in the same single query, so callers cannot tell those cases apart.
+    /// Lists the unrevoked credentials of the account named `username`, oldest
+    /// first, if it is active or scheduled for deletion: a passkey can restore the
+    /// latter. A missing, disabled or passkey-less account returns none, in the
+    /// same single query, so callers cannot tell those cases apart.
     ///
     /// # Errors
     ///
@@ -165,11 +170,11 @@ impl PasskeyRepository<'_> {
                 StoredPasskey,
                 r#"SELECT
                     p.id AS "id: PasskeyId", p.credential_id, p.user_id AS "user_id: UserId",
-                    p.credential, p.friendly_name, p.revoked_at
+                    p.credential, p.friendly_name, p.created_at, p.last_used_at, p.revoked_at
                 FROM passkey_credentials p
                 JOIN users u ON u.id = p.user_id
                 WHERE u.username = $1
-                AND u.status = 'active'
+                AND u.status IN ('active', 'deleting')
                 AND p.revoked_at IS NULL
                 ORDER BY p.created_at"#,
                 username,
@@ -194,7 +199,7 @@ impl PasskeyRepository<'_> {
                 StoredPasskey,
                 r#"SELECT
                     id AS "id: PasskeyId", credential_id, user_id AS "user_id: UserId", credential,
-                    friendly_name, revoked_at
+                    friendly_name, created_at, last_used_at, revoked_at
                 FROM passkey_credentials
                 WHERE credential_id = $1
                 AND revoked_at IS NULL

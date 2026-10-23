@@ -20,9 +20,10 @@ pub use connection::{Database, DatabaseConfig, RuntimeRole};
 pub use error::{DatabaseConnectionError, DatabaseError};
 pub use exclusive::{ExclusiveConnection, LockKey};
 pub use repositories::{
-    AdministratorRepository, DeliveryRepository, EmailRepository, EventRepository,
-    FederationRepository, MaintenanceRepository, OidcRepository, PasskeyRepository,
-    SecurityRepository, SessionRepository, TokenRepository, UserRepository,
+    AccountDeletionRepository, AdministratorRepository, DeliveryRepository, EmailRepository,
+    EventRepository, FederationRepository, MaintenanceRepository, OidcRepository,
+    PasskeyRepository, SecurityRepository, SessionRepository, TokenRepository, UserRepository,
+    deletions::AccountDeletion,
     deliveries::{
         BackchannelLogout, Channel, Delivery, DeliveryOutcome, DeliveryStatus, DeliverySummary,
         Email, EmailMessage, LogoutRecipient, NewDelivery, PendingAddress,
@@ -44,7 +45,7 @@ pub use repositories::{
     },
     tokens::{
         InsertRefreshFamily, InsertRefreshToken, RefreshRotationError, RevokedFamily,
-        RotatedRefreshToken,
+        RotatedRefreshToken, StoredGrant,
     },
     users::{AccountName, InsertUser, StoredUser},
 };

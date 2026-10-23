@@ -95,6 +95,8 @@ impl AdminApplication {
             Op::ViewUser => (admin::USER, get(Self::view_user)),
             Op::DisableUser => (admin::USER_DISABLE, post(Self::disable_user)),
             Op::EnableUser => (admin::USER_ENABLE, post(Self::enable_user)),
+            Op::ScheduleDeletion => (admin::USER_DELETION, post(Self::schedule_deletion)),
+            Op::RestoreUser => (admin::USER_DELETION, delete(Self::restore_user)),
             Op::RevokeUserSessions => (admin::USER_SESSIONS, delete(Self::revoke_user_sessions)),
             Op::RevokeSession => (admin::SESSION, delete(Self::revoke_session)),
             Op::ListInvitations if self.invitations => {
@@ -113,7 +115,9 @@ impl AdminApplication {
             Op::GrantAdministrator => (admin::ADMINISTRATORS, post(Self::grant_administrator)),
             Op::RevokeAdministrator => (admin::ADMINISTRATOR, delete(Self::revoke_administrator)),
             // Client changes, handles and the delivery queue are CLI-only, for now.
-            Op::ListInvitations
+            // Purging at once cannot be undone, so it stays with operators.
+            Op::PurgeUser
+            | Op::ListInvitations
             | Op::CreateInvitation
             | Op::RevokeInvitation
             | Op::CreateClient
@@ -172,6 +176,26 @@ impl AdminApplication {
         Path(id): Path<UserId>,
     ) -> Result<StatusCode, AdminError> {
         app.service.enable_user(&operator, id).await?;
+        Ok(StatusCode::NO_CONTENT)
+    }
+
+    /// Schedules an account's deletion.
+    async fn schedule_deletion(
+        State(app): State<Self>,
+        ConfirmedAdmin(operator): ConfirmedAdmin,
+        Path(id): Path<UserId>,
+    ) -> Result<StatusCode, AdminError> {
+        app.service.schedule_deletion(&operator, id).await?;
+        Ok(StatusCode::NO_CONTENT)
+    }
+
+    /// Restores an account scheduled for deletion.
+    async fn restore_user(
+        State(app): State<Self>,
+        ConfirmedAdmin(operator): ConfirmedAdmin,
+        Path(id): Path<UserId>,
+    ) -> Result<StatusCode, AdminError> {
+        app.service.restore_user(&operator, id).await?;
         Ok(StatusCode::NO_CONTENT)
     }
 

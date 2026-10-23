@@ -12,6 +12,7 @@ use axum::{
     body::{Body, to_bytes},
     extract::ConnectInfo,
     http::{Method, Request, StatusCode, header},
+    response::Response,
 };
 use chrono::{Duration, Utc};
 use piquel_common::{
@@ -191,7 +192,19 @@ impl Browser {
         path: &str,
         body: Option<Value>,
     ) -> (StatusCode, Value) {
-        let response = router
+        let response = self.request(router, method, path, body).await;
+        (response.status(), Self::json(response).await)
+    }
+
+    /// Like [`Self::send`], returning the whole response, for its headers.
+    pub(crate) async fn request(
+        &self,
+        router: &Router,
+        method: Method,
+        path: &str,
+        body: Option<Value>,
+    ) -> Response {
+        router
             .clone()
             .oneshot(
                 Request::builder()
@@ -204,12 +217,15 @@ impl Browser {
                     .expect("request"),
             )
             .await
-            .expect("response");
-        let status = response.status();
+            .expect("response")
+    }
+
+    /// Reads a response's JSON body, or `null` if it has none.
+    pub(crate) async fn json(response: Response) -> Value {
         let body = to_bytes(response.into_body(), MAX_RESPONSE_BYTES)
             .await
             .expect("body");
-        (status, serde_json::from_slice(&body).unwrap_or(Value::Null))
+        serde_json::from_slice(&body).unwrap_or(Value::Null)
     }
 }
 

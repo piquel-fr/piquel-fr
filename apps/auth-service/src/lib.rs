@@ -1,4 +1,6 @@
 //! One authentication authority: browser flows, settings API, OIDC and the admin API.
+/// The signed-in user's data export and account deletion.
+mod account;
 /// The private admin API and the operations it shares with the CLI.
 mod admin;
 /// Embedded auth frontend pages and static resources.
@@ -36,6 +38,8 @@ mod sessions;
 #[cfg(test)]
 mod tests;
 
+use account::AccountApplication;
+pub use account::AccountError;
 pub use admin::{
     AdminError, AdminService, GracePeriod, HandleIssue, HandleProblem, InviteExpiry, Operator,
     Reason, UserRef,
@@ -115,6 +119,7 @@ impl AuthConfig {
             .merge(SessionsApplication::new(database.clone()).routes())
             .merge(ClientApplication::new(database.clone()).routes())
             .merge(EmailApplication::new(database.clone(), &self.email).routes())
+            .merge(AccountApplication::new(database.clone()).routes())
             .merge(OidcApplication::new(database.clone(), &self.oidc)?.routes());
         let policy = security::HttpSecurity::new(self, database);
         let protected = application

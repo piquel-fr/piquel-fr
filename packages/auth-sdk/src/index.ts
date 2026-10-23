@@ -16,6 +16,11 @@ export type Configuration = {
   invite_required: boolean;
 };
 export const providerName = (provider: Provider) => (provider === 'github' ? 'GitHub' : 'Google');
+/**
+ * What a passkey sign-in to an account scheduled for deletion returns instead of a
+ * session. `restore_token` restores the account and signs in, once, for five minutes.
+ */
+export type RestoreOffer = { deletion_scheduled: { purge_after: string }; restore_token: string };
 
 /** A failed auth request, with a message the page can show as is. */
 export class ApiError extends Error {
@@ -144,16 +149,26 @@ export function passkeysAvailable(): boolean {
 /** All ceremonies run on the auth origin; serialized WebAuthn wrappers contain publicKey. */
 export class Passkeys {
   constructor(readonly api: AuthApi) {}
-  /** Signs in, which also confirms the new session for actions that need a passkey. */
-  authenticate(username?: string): Promise<void> {
+  /**
+   * Signs in, which also confirms the new session for actions that need a passkey.
+   * An account scheduled for deletion gets no session: this returns the offer to
+   * restore it instead, which `restore` accepts.
+   */
+  authenticate(username?: string): Promise<RestoreOffer | undefined> {
     return this.assert('/webauthn/authenticate', username ? { username } : {});
+  }
+  /** Restores the account a sign-in offered to restore, and signs in to it. */
+  restore(offer: RestoreOffer): Promise<void> {
+    return this.api.request('/account/deletion/cancel', 'POST', {
+      restore_token: offer.restore_token
+    });
   }
   /** Confirms the current session with a passkey, for actions that need a recent one. */
   confirm(): Promise<void> {
     return this.assert('/account/passkeys/confirm', {});
   }
   /** Runs an assertion ceremony against `path`'s start and finish endpoints. */
-  private async assert(path: string, body: object): Promise<void> {
+  private async assert<T = void>(path: string, body: object): Promise<T> {
     const start = await this.api.request<Ceremony<RequestOptions>>(`${path}/start`, 'POST', body);
     const options = start.public_key.publicKey;
     const credential = (await navigator.credentials.get({
@@ -165,7 +180,7 @@ export class Passkeys {
     })) as PublicKeyCredential | null;
     if (!credential) throw new Error('Passkey verification was cancelled.');
     const response = credential.response as AuthenticatorAssertionResponse;
-    await this.api.request(`${path}/finish`, 'POST', {
+    return this.api.request<T>(`${path}/finish`, 'POST', {
       ceremony_id: start.ceremony_id,
       credential: {
         id: credential.id,

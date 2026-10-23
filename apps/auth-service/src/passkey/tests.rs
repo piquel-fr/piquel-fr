@@ -1143,3 +1143,110 @@ async fn telemetry_exports_no_secret_of_a_sign_in_and_code_exchange() {
         "the event's log line links to the exchange's trace"
     );
 }
+
+/// A passkey sign-in to an account scheduled for deletion gets no session, but a
+/// token that restores the account once and signs the browser in, on any replica.
+/// A disabled account gets neither.
+#[tokio::test]
+#[ignore = "requires TEST_DATABASE_URL"]
+async fn signing_in_to_an_account_scheduled_for_deletion_offers_to_restore_it() {
+    let mut fixture = Fixture::new().await;
+    let replicas = Replicas::new().await;
+    let mut tx = fixture.app.database.begin().await.expect("transaction");
+    tx.users()
+        .set_status(fixture.user_id, AccountStatus::Deleting)
+        .await
+        .expect("status");
+    tx.deletions()
+        .schedule(fixture.user_id, Utc::now() + Duration::days(30))
+        .await
+        .expect("schedule");
+    tx.commit().await.expect("commit");
+
+    let username = json!({"username":fixture.username});
+    let (started, browser) = fixture
+        .on(&replicas.a)
+        .start("/webauthn/authenticate/start", "", username.clone())
+        .await;
+    let assertion = fixture.assertion(&started);
+    let offered = fixture
+        .request(
+            "/webauthn/authenticate/finish",
+            Method::POST,
+            &browser,
+            json!({"ceremony_id":started["ceremony_id"],"credential":assertion}),
+        )
+        .await;
+    assert_eq!(offered.status(), StatusCode::OK);
+    assert!(
+        !offered
+            .headers()
+            .get_all(header::SET_COOKIE)
+            .iter()
+            .any(|cookie| cookie
+                .as_bytes()
+                .starts_with(BrowserCookie::Session.as_str().as_bytes())),
+        "no session for an account scheduled for deletion"
+    );
+    let offer = Fixture::json(offered).await;
+    assert!(
+        offer["deletion_scheduled"]["purge_after"].is_string(),
+        "{offer}"
+    );
+    let restore = json!({"restore_token": offer["restore_token"]});
+
+    let restored = fixture
+        .on(&replicas.b)
+        .request(routes::account::RESTORE, Method::POST, "", restore.clone())
+        .await;
+    assert_eq!(restored.status(), StatusCode::NO_CONTENT);
+    let session = fixture
+        .session(&Fixture::cookie(&restored))
+        .await
+        .expect("signed in");
+    assert_eq!(session.user_id, fixture.user_id);
+    assert_eq!(
+        SessionAuthentication::from(&session).acr,
+        Acr::PhishingResistant
+    );
+    let again = fixture
+        .request(routes::account::RESTORE, Method::POST, "", restore)
+        .await;
+    assert_eq!(
+        again.status(),
+        StatusCode::BAD_REQUEST,
+        "a token restores once"
+    );
+    assert_eq!(
+        fixture.events().await[..2],
+        [
+            DomainEvent::SignedIn {
+                session_id: session.id,
+                method: AuthenticationMethod::Passkey,
+            },
+            DomainEvent::AccountRestored {},
+        ]
+    );
+
+    // Disabled after the ceremony started, which still names the passkey.
+    let (started, browser) = fixture
+        .start("/webauthn/authenticate/start", "", username)
+        .await;
+    fixture
+        .app
+        .database
+        .users()
+        .set_status(fixture.user_id, AccountStatus::Disabled)
+        .await
+        .expect("disable");
+    let assertion = fixture.assertion(&started);
+    let refused = fixture
+        .request(
+            "/webauthn/authenticate/finish",
+            Method::POST,
+            &browser,
+            json!({"ceremony_id":started["ceremony_id"],"credential":assertion}),
+        )
+        .await;
+    assert_eq!(refused.status(), StatusCode::UNAUTHORIZED);
+}

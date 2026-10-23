@@ -491,6 +491,21 @@ impl Session {
         Ok(secret)
     }
 
+    /// Ends every session of the account, recording each revocation as `context`
+    /// says, which tells their clients, then revokes every refresh grant, those of
+    /// sessions that already expired included. Callers hold the account lock.
+    pub(crate) async fn end_all(
+        tx: &mut DatabaseTransaction<'_>,
+        context: &EventContext,
+        user_id: UserId,
+        reason: RevocationReason,
+    ) -> Result<(), DatabaseError> {
+        tx.revoke_sessions(context, user_id, SessionScope::All, &reason)
+            .await?;
+        tx.tokens().revoke_all_for_user(user_id).await?;
+        Ok(())
+    }
+
     /// Revokes the `scope` sessions of `session`'s account inside the caller's
     /// transaction, with their refresh grants, recording one revocation per session,
     /// attributed to `session`, which tells their clients. Returns the revoked sessions.
