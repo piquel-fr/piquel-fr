@@ -9,16 +9,19 @@ adds the rest in one line.
 
 ## What every feature gets
 
-- **A trace per request and job run.** `HttpTelemetry` wraps both of auth's
-  routers and the dashboard's. Each request gets one root span, named after its
-  method and route template (`POST /oauth/token`). Every log line inside the
-  span carries the trace ID, on stderr and in exported logs. Exclusive jobs get
-  one root span per run. Incoming `traceparent` headers are ignored: a public
-  caller must not choose the trace IDs that events keep.
+- **A trace per request, job run and delivery attempt.** `HttpTelemetry` wraps
+  both of auth's routers and the dashboard's. Each request gets one root span,
+  named after its method and route template (`POST /oauth/token`). Every log line
+  inside the span carries the trace ID, on stderr and in exported logs. Exclusive
+  jobs get one root span per run, and delivery workers one per attempt. Incoming
+  `traceparent` headers are ignored: a public caller must not choose the trace IDs
+  that events keep.
 - **An access log line** with status and duration. Health probes log at debug
   level only.
-- **A span per query.** `run!` wraps every query in a `db.query` span with its
-  parameterized SQL (`db.query.text`), never its bind values.
+- **A span per query.** `run!` wraps every query in a trace in a `db.query` span
+  with its parameterized SQL (`db.query.text`), never its bind values. Queries
+  outside a trace, such as an idle delivery worker's poll every second or a
+  command-line run's, are not traced: each would be a trace of its own.
 - **Events in telemetry.** Every event recorded with `DatabaseTransaction::record`
   stores the current trace ID in `domain_events.trace_id`, and once its
   transaction commits it is logged as `event recorded` (with its ID, kind, kind

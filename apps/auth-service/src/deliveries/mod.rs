@@ -28,6 +28,7 @@ use std::{
 };
 use thiserror::Error;
 use tokio::task::JoinSet;
+use tracing::Instrument;
 
 /// How long a worker holds a claimed delivery: well beyond [`SEND_TIMEOUT`].
 const LEASE: Duration = Duration::from_mins(1);
@@ -227,13 +228,19 @@ impl<S: Sender> Worker<S> {
 
     /// Sends `delivery` once and records the outcome. The attempt runs on its own
     /// task, so a panic ends only the attempt: its lease expires and it is retried.
+    /// Each attempt is a trace of its own: its send, its queries and its outcome.
     async fn attempt(&self, delivery: Delivery<S::Channel>) {
+        let span = tracing::info_span!(
+            parent: None,
+            "delivery",
+            otel.name = S::Channel::NAME,
+            channel = S::Channel::NAME,
+            delivery.id = %delivery.id,
+        );
         let mut attempt = JoinSet::new();
-        attempt.spawn(Self::send(
-            Arc::clone(&self.sender),
-            self.database.clone(),
-            delivery,
-        ));
+        attempt.spawn(
+            Self::send(Arc::clone(&self.sender), self.database.clone(), delivery).instrument(span),
+        );
         if let Some(Err(error)) = attempt.join_next().await {
             tracing::error!(
                 ?error,

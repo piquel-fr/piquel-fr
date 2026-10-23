@@ -285,6 +285,8 @@ worker_channels! {
     Failing = "test_worker";
     /// An operator retry after a permanent failure.
     Resent = "test_worker_resent";
+    /// What an attempt and an idle worker export.
+    Traced = "test_worker_traced";
 }
 
 /// How [`Recorder`] answers a delivery.
@@ -432,6 +434,37 @@ async fn workers_retry_retryable_errors_and_fail_permanent_ones() {
         (1, count(unavailable) + 1),
         "every attempt carries its delivery's ID"
     );
+}
+
+/// Each attempt is a trace of its own, holding its queries, and an idle worker's
+/// polls export nothing.
+#[tokio::test]
+#[ignore = "requires TEST_DATABASE_URL"]
+async fn each_attempt_is_a_trace_and_idle_polls_export_nothing() {
+    let capture = piquel_telemetry::Telemetry::capture(crate::TELEMETRY_FILTER);
+    let (database, jobs, _) = workers::<Traced>().await;
+    let id = queue::<Traced>(&database, Behavior::Refused).await;
+    wait_for::<Traced, _>(&database, |listed| {
+        find(listed, id).filter(|d| d.status == DeliveryStatus::Failed)
+    })
+    .await;
+    tokio::time::sleep(POLL_INTERVAL * 2).await;
+    jobs.shutdown().await.expect("no worker panicked");
+
+    let spans = capture.spans();
+    let names: Vec<_> = spans.iter().map(|span| span.name.as_ref()).collect();
+    let attempt = spans
+        .iter()
+        .find(|span| span.name == Traced::NAME)
+        .unwrap_or_else(|| panic!("the attempt's span: {names:?}"));
+    let trace = attempt.span_context.trace_id();
+    assert!(
+        spans
+            .iter()
+            .all(|span| span.span_context.trace_id() == trace),
+        "only the attempt is traced: {names:?}"
+    );
+    assert!(spans.len() > 1, "the attempt's queries are in its trace");
 }
 
 /// A delivery sent again after an operator retry carries the same ID, which
