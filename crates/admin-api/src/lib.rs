@@ -83,7 +83,8 @@ pub mod paths {
 pub struct User {
     /// Account ID.
     pub id: UserId,
-    /// Public identifier and login name.
+    /// Public identifier and login name; `username` in the release before handles.
+    #[serde(alias = "username")]
     pub handle: Handle,
     /// Name shown to the user and to applications.
     pub display_name: String,
@@ -301,7 +302,8 @@ pub struct Event {
 pub struct Administrator {
     /// The administrator's account.
     pub user_id: UserId,
-    /// The account's handle.
+    /// The account's handle; `username` in the release before handles.
+    #[serde(alias = "username")]
     pub handle: Handle,
     /// When the rights were granted.
     pub granted_at: DateTime<Utc>,

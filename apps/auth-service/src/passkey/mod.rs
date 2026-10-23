@@ -1,7 +1,7 @@
 //! Browser-bound `WebAuthn` ceremonies, passkey management and session confirmation.
 use crate::config::PasskeyConfig;
 use crate::federation::FederationApplication;
-use crate::handles::{HandleApplication, HandlesError};
+use crate::handles::HandleApplication;
 use crate::routes;
 use crate::security::{self, ApiError, BrowserCookie, RequestContext};
 use axum::{
@@ -467,10 +467,9 @@ impl PasskeyApplication {
             .await;
         if let Err(DatabaseError::Conflict(_)) = inserted {
             // Another account claimed the handle, or one like it, since the start.
-            let refused = HandleApplication::claimable(&app.database, &handle, None)
-                .await
-                .err()
-                .unwrap_or(HandlesError::Taken);
+            // Roll back first, so the lookup holds no second connection.
+            tx.rollback().await?;
+            let refused = HandleApplication::refusal(&app.database, &handle, None).await;
             return Err(PasskeyError::from(refused).into());
         }
         inserted?;

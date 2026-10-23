@@ -420,7 +420,7 @@ impl AdminOperations {
         }
         let mut tx = self.database.begin().await?;
         let user = Self::lock_target(&mut tx, operator, user_id).await?;
-        let changed = HandleApplication::rename(&self.database, &mut tx, &user, handle).await?;
+        let (tx, changed) = HandleApplication::rename(&self.database, tx, &user, handle).await?;
         Self::finish(tx, operator, Some(user_id), vec![changed]).await
     }
 

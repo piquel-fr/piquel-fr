@@ -138,23 +138,33 @@ impl UserRepository<'_> {
         &mut self,
         id: UserId,
     ) -> Result<Option<StoredUser>, DatabaseError> {
-        run!(
+        self.lock(id, true).await
+    }
+
+    /// Locks the account `id`, only if active when `active`, then reads it. A lock
+    /// that waited sees the account's latest row, but a join in the same statement
+    /// would keep the handle its snapshot saw, perhaps from before a rename that
+    /// committed meanwhile. The read is a separate statement, with a fresh snapshot.
+    async fn lock(
+        &mut self,
+        id: UserId,
+        active: bool,
+    ) -> Result<Option<StoredUser>, DatabaseError> {
+        let locked = run!(
             self,
             fetch_optional,
-            sqlx::query_as!(
-                StoredUser,
-                r#"SELECT
-                    u.id AS "id: UserId", h.handle AS "handle: Handle", u.handle_changed_at,
-                    u.display_name, u.profile_version AS "profile_version: Unsigned",
-                    u.status AS "status: AccountStatus", u.created_at, u.updated_at
-                FROM users u
-                JOIN handles h ON h.user_id = u.id AND h.released_at IS NULL
-                WHERE u.id = $1
-                AND u.status = 'active'
-                FOR NO KEY UPDATE OF u"#,
+            sqlx::query_scalar!(
+                "SELECT id FROM users
+                WHERE id = $1 AND (NOT $2 OR status = 'active')
+                FOR NO KEY UPDATE",
                 id.as_uuid(),
+                active,
             )
-        )
+        )?;
+        match locked {
+            Some(_) => self.find_by_id(id).await,
+            None => Ok(None),
+        }
     }
 
     /// Finds an active account by its current handle.
@@ -194,22 +204,7 @@ impl UserRepository<'_> {
         &mut self,
         id: UserId,
     ) -> Result<Option<StoredUser>, DatabaseError> {
-        run!(
-            self,
-            fetch_optional,
-            sqlx::query_as!(
-                StoredUser,
-                r#"SELECT
-                    u.id AS "id: UserId", h.handle AS "handle: Handle", u.handle_changed_at,
-                    u.display_name, u.profile_version AS "profile_version: Unsigned",
-                    u.status AS "status: AccountStatus", u.created_at, u.updated_at
-                FROM users u
-                JOIN handles h ON h.user_id = u.id AND h.released_at IS NULL
-                WHERE u.id = $1
-                FOR NO KEY UPDATE OF u"#,
-                id.as_uuid(),
-            )
-        )
+        self.lock(id, false).await
     }
 
     /// Finds an account in any status by its current handle.

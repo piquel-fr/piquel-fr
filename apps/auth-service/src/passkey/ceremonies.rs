@@ -26,7 +26,9 @@ const CEREMONY_LIFETIME: Duration = Duration::minutes(5);
 pub(super) struct RegistrationCeremony {
     /// New account identifier included in the authenticator's user handle.
     pub(super) user_id: UserId,
-    /// Validated, unreserved account handle, free when the ceremony started.
+    /// Validated, unreserved account handle, free when the ceremony started. The
+    /// release before handles stored it as `username`.
+    #[serde(alias = "username")]
     pub(super) handle: Handle,
     /// Validated account display name.
     pub(super) display_name: DisplayName,

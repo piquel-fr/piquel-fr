@@ -95,7 +95,9 @@ pub(super) struct RegistrationStart {
     /// Requested authenticator selection.
     #[serde(default)]
     pub(super) passkey_kind: PasskeyKind,
-    /// Account handle, validated before starting `WebAuthn`.
+    /// Account handle, validated before starting `WebAuthn`. Pages of the release
+    /// before handles send it as `username`.
+    #[serde(alias = "username")]
     pub(super) handle: String,
     /// Account display name; an empty value defaults to the handle.
     #[serde(default)]
@@ -128,7 +130,9 @@ impl RegistrationFinish {
 /// Handle-based login, or account-picker login when absent or empty.
 #[derive(Deserialize)]
 pub(super) struct LoginStart {
-    /// An account's handle, trimmed and lowercased like signup's.
+    /// An account's handle, trimmed and lowercased like signup's. Pages of the
+    /// release before handles send it as `username`.
+    #[serde(alias = "username")]
     pub(super) handle: Option<String>,
 }
 

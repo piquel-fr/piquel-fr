@@ -126,15 +126,15 @@ impl HandleApplication {
         }
     }
 
-    /// Gives the account `user`, locked in `tx`, the handle `handle`, and returns the
-    /// event to record. On refusal `tx` is aborted, and the reason is looked up on
-    /// `database`, where the conflicting claim has committed.
-    pub(crate) async fn rename(
+    /// Gives the account `user`, locked in `tx`, the handle `handle`, and returns
+    /// `tx` with the event to record. On refusal, `tx` is rolled back first, so the
+    /// reason is looked up on `database` without holding a second connection.
+    pub(crate) async fn rename<'a>(
         database: &Database,
-        tx: &mut DatabaseTransaction<'_>,
+        mut tx: DatabaseTransaction<'a>,
         user: &StoredUser,
         handle: Handle,
-    ) -> Result<DomainEvent, HandlesError> {
+    ) -> Result<(DatabaseTransaction<'a>, DomainEvent), HandlesError> {
         if user.handle == handle {
             return Err(HandlesError::Current);
         }
@@ -144,15 +144,27 @@ impl HandleApplication {
             Err(error) => return Err(error.into()),
         };
         if !renamed {
-            return Err(Self::claimable(database, &handle, Some(user.id))
-                .await
-                .err()
-                .unwrap_or(HandlesError::Taken));
+            tx.rollback().await?;
+            return Err(Self::refusal(database, &handle, Some(user.id)).await);
         }
-        Ok(DomainEvent::HandleChanged {
+        let changed = DomainEvent::HandleChanged {
             old: Personal::Value(user.handle.to_string()),
             new: Personal::Value(handle),
-        })
+        };
+        Ok((tx, changed))
+    }
+
+    /// Why a claim of `handle` by `user`, or a new account, failed. Callers roll
+    /// back first. A concurrent claim that has since rolled back reads as taken.
+    pub(crate) async fn refusal(
+        database: &Database,
+        handle: &Handle,
+        user: Option<UserId>,
+    ) -> HandlesError {
+        match Self::claimable(database, handle, user).await {
+            Ok(()) => HandlesError::Taken,
+            Err(error) => error,
+        }
     }
 
     /// Changes the signed-in account's handle, at most once per [`COOLDOWN`]. The
@@ -178,7 +190,7 @@ impl HandleApplication {
         if retry_after > Utc::now() && user.handle != handle {
             return Err(HandlesError::Cooldown { retry_after }.into());
         }
-        let changed = Self::rename(&app.database, &mut tx, &user, handle.clone()).await?;
+        let (mut tx, changed) = Self::rename(&app.database, tx, &user, handle.clone()).await?;
         tx.record(&context.user(session), Some(user.id), changed)
             .await?;
         tx.commit().await?;
