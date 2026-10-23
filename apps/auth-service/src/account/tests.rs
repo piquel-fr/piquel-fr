@@ -193,6 +193,43 @@ async fn administrators_change_another_account_on_its_behalf() {
     assert_eq!(entry["reason"], REASON);
 }
 
+/// An administrator's read shows every session, none of them theirs, and is
+/// recorded as a view of the account, by them.
+#[tokio::test]
+#[ignore = "requires TEST_DATABASE_URL"]
+async fn administrators_reads_are_recorded_as_views() {
+    let fixture = Fixture::new().await;
+    let (target, _) = fixture.target(0).await;
+    let viewer = Viewer::operator(target.user_id, fixture.operator(Duration::zero()));
+    let sessions = fixture.service.sessions(&viewer).await.expect("sessions");
+    assert_eq!(
+        sessions
+            .iter()
+            .map(|session| (session.id, session.current))
+            .collect::<Vec<_>>(),
+        [(target.session_id, false)]
+    );
+    let history = fixture
+        .harness
+        .database
+        .events()
+        .history_for_user(target.user_id, 10)
+        .await
+        .expect("history");
+    let view = history
+        .iter()
+        .find(|stored| stored.event.known() == Some(&DomainEvent::AccountViewed {}))
+        .expect("the view is recorded");
+    assert_eq!(
+        view.actor,
+        Actor::Admin {
+            user_id: fixture.admin.user_id,
+            session_id: fixture.admin.session_id,
+        }
+    );
+    assert_eq!(view.subject, Some(target.user_id));
+}
+
 /// An administrator changes only existing accounts that are not administrators',
 /// while they still hold their rights and session, and confirmed a passkey
 /// recently. Each refusal changes nothing.

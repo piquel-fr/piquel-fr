@@ -71,9 +71,10 @@ administrator is one.
 
 Administrators change other users' settings with the owner's own operations,
 never by signing in as them. Each setting an administrator may share with the
-owner is an `AccountService` operation on a `Subject`: the account, and who acts
-on it. The owner's `/account` routes run them with the subject of their session
-cookie, the only way to act as an owner. The `auth-service account <user> …`
+owner is an `AccountService` operation: a change takes a `Subject`, the account and
+who acts on it, and a read a `Viewer`, the account and who reads it. The owner's
+`/account` routes run them as the owner of the session cookie, the only way to act
+as an owner. The `auth-service account <user> …`
 command runs them as the operator at the terminal, and the dashboard will call
 them in-process as an administrator *(planned)*. Both run the same safety rules:
 for example, one active passkey always remains, whoever removes the others.
