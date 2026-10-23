@@ -39,6 +39,8 @@ pub struct InsertRefreshToken {
     pub family_id: TokenId,
     /// Digest of the token secret.
     pub secret_digest: Vec<u8>,
+    /// Fingerprint of the digest key that made `secret_digest`.
+    pub digest_key: String,
     /// When the token stops being accepted.
     pub expires_at: DateTime<Utc>,
 }
@@ -142,12 +144,13 @@ impl TokenRepository<'_> {
             self,
             execute,
             sqlx::query!(
-                "INSERT INTO refresh_tokens (id, family_id, secret_digest, expires_at)
-                VALUES ($1, $2, $3, $4)",
+                "INSERT INTO refresh_tokens (id, family_id, secret_digest, expires_at, digest_key)
+                VALUES ($1, $2, $3, $4, $5)",
                 token.id.as_uuid(),
                 token.family_id.as_uuid(),
                 token.secret_digest,
                 token.expires_at,
+                token.digest_key,
             )
         )?;
         Ok(())
@@ -157,7 +160,7 @@ impl TokenRepository<'_> {
     async fn lock_rotation(
         &mut self,
         id: TokenId,
-        digest: &[u8],
+        digests: &[Vec<u8>],
         client: &str,
     ) -> Result<(), RefreshRotationError> {
         // All state locks must outlive rotation, replacement insertion and commit.
@@ -177,10 +180,10 @@ impl TokenRepository<'_> {
                 FROM refresh_tokens t
                 JOIN refresh_token_families f ON f.id = t.family_id
                 WHERE t.id = $1
-                AND t.secret_digest = $2
+                AND t.secret_digest = ANY($2)
                 AND f.client_id = $3",
                 id.as_uuid(),
-                digest,
+                digests,
                 client,
             )
         )?
@@ -273,7 +276,7 @@ impl TokenRepository<'_> {
     pub async fn consume_for_rotation(
         &mut self,
         id: TokenId,
-        digest: &[u8],
+        digests: &[Vec<u8>],
         client: &str,
     ) -> Result<RotatedRefreshToken, RefreshRotationError> {
         /// Decodes a JSONB column of the grant, naming it if invalid.
@@ -286,7 +289,7 @@ impl TokenRepository<'_> {
                 source: source.into(),
             })
         }
-        self.lock_rotation(id, digest, client).await?;
+        self.lock_rotation(id, digests, client).await?;
         let row = run!(
             self,
             fetch_optional,
@@ -302,7 +305,7 @@ impl TokenRepository<'_> {
                 JOIN sessions s ON s.id = f.session_id
                 JOIN users u ON u.id = f.user_id
                 WHERE t.id = $1
-                AND t.secret_digest = $2
+                AND t.secret_digest = ANY($2)
                 AND f.client_id = $3
                 AND t.expires_at > now()
                 AND f.revoked_at IS NULL
@@ -313,7 +316,7 @@ impl TokenRepository<'_> {
                 AND u.status = 'active'
                 FOR UPDATE OF t"#,
                 id.as_uuid(),
-                digest,
+                digests,
                 client,
             )
         )?
@@ -359,7 +362,7 @@ impl TokenRepository<'_> {
         })
     }
 
-    /// Revokes the family of the token matching `id` and `digest`, if any.
+    /// Revokes the family of the token matching `id` and any of `digests`, if any.
     ///
     /// # Errors
     ///
@@ -367,7 +370,7 @@ impl TokenRepository<'_> {
     pub async fn revoke_family_for_token(
         &mut self,
         id: TokenId,
-        digest: &[u8],
+        digests: &[Vec<u8>],
     ) -> Result<(), DatabaseError> {
         run!(
             self,
@@ -377,10 +380,10 @@ impl TokenRepository<'_> {
                 SET revoked_at = COALESCE(revoked_at, now())
                 FROM refresh_tokens t
                 WHERE t.id = $1
-                AND t.secret_digest = $2
+                AND t.secret_digest = ANY($2)
                 AND t.family_id = f.id",
                 id.as_uuid(),
-                digest,
+                digests,
             )
         )?;
         Ok(())
@@ -396,7 +399,7 @@ impl TokenRepository<'_> {
     pub async fn revoke_family_for_client_token(
         &mut self,
         id: TokenId,
-        digest: &[u8],
+        digests: &[Vec<u8>],
         client: &str,
     ) -> Result<Option<RevokedFamily>, DatabaseError> {
         run!(
@@ -408,13 +411,13 @@ impl TokenRepository<'_> {
                 SET revoked_at = now()
                 FROM refresh_tokens t
                 WHERE t.id = $1
-                AND t.secret_digest = $2
+                AND t.secret_digest = ANY($2)
                 AND t.family_id = f.id
                 AND f.client_id = $3
                 AND f.revoked_at IS NULL
                 RETURNING f.id AS "id: TokenId", f.user_id AS "user_id: UserId""#,
                 id.as_uuid(),
-                digest,
+                digests,
                 client,
             )
         )

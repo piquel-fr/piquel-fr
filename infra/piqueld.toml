@@ -120,6 +120,20 @@ generate = { type = "random", bytes = 32, encoding = "hex" }
 name = "database-runtime-password"
 generate = { type = "random", bytes = 32, encoding = "hex" }
 
+# Seals the signing keys auth stores in its database (AUTH_KEY_ENCRYPTION_KEY).
+[[spec.secrets]]
+name = "key-encryption-key"
+generate = { type = "random", bytes = 32, encoding = "base64url" }
+
+# Will digest refresh tokens, codes and pending logins. Accepted for now, so the
+# release that makes it current can roll back (see infra/README.md).
+[[spec.secrets]]
+name = "token-digest-key"
+generate = { type = "random", bytes = 32, encoding = "base64url" }
+
+# The signing key before keys moved to the database. The `signing-key-import`
+# job imports it, and it stays the token digest key until the migration in
+# infra/README.md moves digests to `token-digest-key`.
 [[spec.secrets]]
 name = "signing-key"
 generate = { type = "rsa", bits = 3072 }
@@ -144,6 +158,15 @@ AUTH_DATABASE_OWNER_PASSWORD = "file:///run/secrets/database-password"
 [[spec.jobs.secrets]]
 name = "database-password"
 target = "/run/secrets/database-password"
+
+# Imports the PEM signing key as the active key before the first release that
+# reads keys from the database serves, so no token it signed breaks. It imports
+# only into an empty key set, so later deploys change nothing.
+[[spec.jobs]]
+name = "signing-key-import"
+service = "auth"
+command = ["auth-service", "keys", "import", "file:///run/secrets/signing-key"]
+run = "before-rollout"
 
 # Registers the admin dashboard as the trusted OIDC client `piquel-admin`, or
 # brings its registration and secret in line, on every deploy after migrations.
@@ -177,7 +200,9 @@ dockerfile = "infra/auth.Dockerfile"
 # Plaintext stays on the application's private network, which ingress cannot reach.
 AUTH_DATABASE_URL = "postgres://piquel_auth@postgres:5432/piquel?sslmode=disable"
 AUTH_DATABASE_PASSWORD = "file:///run/secrets/database-runtime-password"
-AUTH_KEY_PROVIDER = "file:///run/secrets/signing-key"
+AUTH_KEY_ENCRYPTION_KEY = "file:///run/secrets/key-encryption-key"
+AUTH_TOKEN_DIGEST_KEY = "file:///run/secrets/signing-key"
+AUTH_TOKEN_DIGEST_KEY_ACCEPTED = "file:///run/secrets/token-digest-key"
 AUTH_PUBLIC_LISTENER = "0.0.0.0:8080"
 # The admin API. No route exposes this port, so only services on the
 # application's private network reach it, and each call needs an
@@ -195,6 +220,14 @@ OTEL_RESOURCE_ATTRIBUTES = "deployment.environment.name=${{ env.name }}"
 [[spec.services.secrets]]
 name = "database-runtime-password"
 target = "/run/secrets/database-runtime-password"
+
+[[spec.services.secrets]]
+name = "key-encryption-key"
+target = "/run/secrets/key-encryption-key"
+
+[[spec.services.secrets]]
+name = "token-digest-key"
+target = "/run/secrets/token-digest-key"
 
 [[spec.services.secrets]]
 name = "signing-key"

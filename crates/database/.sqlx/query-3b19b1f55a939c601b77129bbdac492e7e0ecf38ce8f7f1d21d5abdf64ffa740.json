@@ -1,0 +1,68 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT\n                    id AS \"id: KeyId\", key_type AS \"key_type: SigningKeyType\",\n                    state AS \"state: SigningKeyState\", public_jwk AS \"public_jwk: Json<Jwk>\",\n                    sealed_private_key, created_at, activated_at, deactivated_at, retired_at\n                FROM signing_keys\n                ORDER BY created_at, id",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id: KeyId",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 1,
+        "name": "key_type: SigningKeyType",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 2,
+        "name": "state: SigningKeyState",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 3,
+        "name": "public_jwk: Json<Jwk>",
+        "type_info": "Jsonb"
+      },
+      {
+        "ordinal": 4,
+        "name": "sealed_private_key",
+        "type_info": "Bytea"
+      },
+      {
+        "ordinal": 5,
+        "name": "created_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 6,
+        "name": "activated_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 7,
+        "name": "deactivated_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 8,
+        "name": "retired_at",
+        "type_info": "Timestamptz"
+      }
+    ],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      true,
+      false,
+      true,
+      true,
+      true
+    ]
+  },
+  "hash": "3b19b1f55a939c601b77129bbdac492e7e0ecf38ce8f7f1d21d5abdf64ffa740"
+}

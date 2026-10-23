@@ -105,10 +105,12 @@ repositories! {
     federation: FederationRepository;
     /// Invitations and shared request rate limits.
     security: SecurityRepository;
-    /// Deletion of expired ephemeral state.
+    /// Deletion of expired ephemeral state, and counts of what is left of it.
     maintenance: MaintenanceRepository;
     /// Administrator rights.
     administrators: AdministratorRepository;
+    /// Signing keys and their lifecycle.
+    signing_keys: SigningKeyRepository;
 }
 
 /// Runs a checked query on the repository's pool or transaction connection, in a
@@ -250,6 +252,8 @@ pub(crate) mod passkeys;
 pub(crate) mod security;
 /// Browser sessions, cookie digests and passkey confirmations.
 pub(crate) mod sessions;
+/// Signing keys, their lifecycle and its lock.
+pub(crate) mod signing_keys;
 /// Focused tests for the column types shared by every repository.
 #[cfg(test)]
 mod tests;

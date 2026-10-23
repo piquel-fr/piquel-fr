@@ -2,7 +2,7 @@
 //! workers every replica runs (see `crate::deliveries`).
 
 use crate::{
-    AuthConfig, StartupError,
+    AuthConfig, KeyStore, SigningKeys, StartupError,
     deliveries::{BackchannelLogoutSender, EmailSender, OutboundClient},
 };
 use piquel_repository::{Database, DatabaseError, ExclusiveConnection, LockKey};
@@ -60,17 +60,25 @@ pub struct Jobs {
 }
 
 impl Jobs {
-    /// Starts every job on `database`, and the delivery workers of every channel,
-    /// configured by `config`.
+    /// Starts every job on `database`: signing key rotation in `store` and the
+    /// reloads of this replica's `keys`, and the delivery workers of every
+    /// channel, configured by `config`.
     ///
     /// # Errors
     /// Fails if the outbound HTTP client cannot initialize.
-    pub fn start(database: &Database, config: &AuthConfig) -> Result<Self, StartupError> {
+    pub fn start(
+        database: &Database,
+        config: &AuthConfig,
+        store: &KeyStore,
+        keys: &SigningKeys,
+    ) -> Result<Self, StartupError> {
         let mut jobs = Self::new();
         jobs.exclusive(Cleanup, database.clone());
+        let (store, reloaded) = (store.clone(), keys.clone());
+        jobs.spawn(|shutdown| store.run(reloaded, shutdown));
         let logout = BackchannelLogoutSender::new(
             config.oidc.origin.serialized(),
-            config.oidc.keys.clone(),
+            keys.clone(),
             OutboundClient::new().map_err(StartupError::Outbound)?,
         );
         jobs.deliveries(logout, database);

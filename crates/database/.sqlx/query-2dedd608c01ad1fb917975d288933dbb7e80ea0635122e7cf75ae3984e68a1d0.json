@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "SELECT f.user_id, f.session_id, f.id AS family_id\n                FROM refresh_tokens t\n                JOIN refresh_token_families f ON f.id = t.family_id\n                WHERE t.id = $1\n                AND t.secret_digest = $2\n                AND f.client_id = $3",
+  "query": "SELECT f.user_id, f.session_id, f.id AS family_id\n                FROM refresh_tokens t\n                JOIN refresh_token_families f ON f.id = t.family_id\n                WHERE t.id = $1\n                AND t.secret_digest = ANY($2)\n                AND f.client_id = $3",
   "describe": {
     "columns": [
       {
@@ -22,7 +22,7 @@
     "parameters": {
       "Left": [
         "Uuid",
-        "Bytea",
+        "ByteaArray",
         "Text"
       ]
     },
@@ -32,5 +32,5 @@
       false
     ]
   },
-  "hash": "b526825419045dbb1f3616f81a2027fd5df3db82bd316ad48ddcb616352af92e"
+  "hash": "2dedd608c01ad1fb917975d288933dbb7e80ea0635122e7cf75ae3984e68a1d0"
 }

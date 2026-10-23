@@ -101,16 +101,56 @@ an explicit data migration.
 
 ## Auth
 
-piqueld generates `database-password`, `database-runtime-password`, `signing-key`
-and `admin-client-secret` for each environment and preview on the first
-deployment that uses them, and never changes them; `piquelctl env secret piquel-fr --env ENV
-regenerate NAME` rotates one. A new `database-password` does not change the one an
-existing database volume stores. A new `database-runtime-password` takes effect on
+piqueld generates `database-password`, `database-runtime-password`,
+`key-encryption-key`, `token-digest-key`, `signing-key` and `admin-client-secret`
+for each environment and preview on the first deployment that uses them, and
+never changes them; `piquelctl env secret piquel-fr --env ENV regenerate NAME`
+rotates one. A new `database-password` does not change the one an existing
+database volume stores. A new `database-runtime-password` takes effect on
 the next deploy, whose `migrate` job sets it before the rollout. From then until
 the new auth replicas are healthy, the old ones keep their open connections but
 cannot open new ones. If that deploy fails after `migrate`, auth goes down as its
 pool's connections expire (within 30 minutes), so rotate it during a deploy you
 watch, and fix forward if it fails: a retry reuses the same secret.
+
+`key-encryption-key` (`AUTH_KEY_ENCRYPTION_KEY`) and `token-digest-key` are 32
+random bytes as unpadded base64url text. Never regenerate `key-encryption-key`:
+the signing keys sealed with it would no longer open. Change the token digest
+key only as "Changing the token digest key" in the root README describes, or
+every refresh token ends. Signing keys are not secrets of the manifest:
+auth keeps them in its database and rotates them on its own (see "Signing keys"
+in the root README, which also has the runbook for a compromised key):
+
+```sh
+piquelctl app exec piquel-fr auth --env production -- auth-service keys list
+```
+
+### Moving signing keys to the database
+
+Auth used to sign with the `signing-key` PEM secret alone, and derived the
+digests of refresh tokens, codes and pending logins, passkey decoys and email
+verification links from it. The move to the database (#48) keeps everything issued before it valid,
+through rolling deploys and rollbacks:
+
+1. The first release reading keys from the database runs the
+   `signing-key-import` job before it serves: it imports `signing-key` as the
+   active key `primary`, the ID its tokens name. Later deploys import nothing.
+   `signing-key` stays the token digest key (`AUTH_TOKEN_DIGEST_KEY`), so the
+   previous release checks every digest this one makes, and
+   `token-digest-key` is already accepted (`AUTH_TOKEN_DIGEST_KEY_ACCEPTED`).
+2. In a later deploy, swap the two: `AUTH_TOKEN_DIGEST_KEY` points at
+   `token-digest-key`, and `AUTH_TOKEN_DIGEST_KEY_ACCEPTED` at `signing-key`.
+   Passkey decoys change once then, and so does the email verification key:
+   links already sent keep working, but one still queued then does not, and its
+   owner sends another. From this deploy on, a rollback lands on a
+   release that reads signing keys from the database.
+3. Only then rotate once by hand to see rotation work: `auth-service keys
+   rotate`, then a day later `keys list` shows the new key active and `primary`
+   retiring. Rotating earlier would let a rollback to the release before step 1
+   reject every token the new key signs; the schedule itself waits 90 days.
+4. Once `auth-service keys digest-usage` lists only `current` keys, about 30
+   days after step 2, remove `AUTH_TOKEN_DIGEST_KEY_ACCEPTED`, the
+   `signing-key-import` job, and the `signing-key` mount and secret together.
 
 Staging and production require invitations:
 
@@ -168,11 +208,12 @@ removes the restart gap after a crash; it adds no capacity.
   refresh-token rotation live in PostgreSQL. Database tests build two instances
   on one database to check that sign-in, logout, budgets and refresh rotation
   span them.
-- **Configuration.** Replicas must run with the same `AUTH_*` settings. Signing
-  keys, refresh-token digests and passkey decoys all derive from the
-  `signing-key` secret (`AUTH_KEY_PROVIDER`), which the manifest gives every
-  replica.
-- **Per-replica state.** Only Google's signing keys are cached per replica. OIDC
+- **Configuration.** Replicas must run with the same `AUTH_*` settings. The
+  manifest gives every replica the same `key-encryption-key`, which opens the
+  signing keys in the database, and the same token digest keys, from which
+  refresh-token digests and passkey decoys derive.
+- **Per-replica state.** Only signing keys are cached per replica: Google's,
+  and auth's own key set, which every replica reloads each minute. OIDC
   clients, and the public-client origins CORS allows, are read from the
   database on each request, so a client change reaches every replica at once.
 - **Background work.** Jobs run through one runner
@@ -182,7 +223,9 @@ removes the restart gap after a crash; it adds no capacity.
   or panics is logged and retried at the next interval. On shutdown, once
   in-flight requests drain, running jobs get 10 seconds to finish (cleanup stops
   after its current batch), then are cancelled, which closes their connection and
-  releases the lock.
+  releases the lock. Signing key rotation runs on every replica each minute, in
+  a transaction that takes a transaction-level advisory lock if it is free, so
+  one replica at a time advances it; the `keys` commands wait for the same lock.
 - **Migrations.** During a deploy the previous release runs against the new
   schema, so migrations expand, then contract
   (`docs/architecture/database-crate.md`).

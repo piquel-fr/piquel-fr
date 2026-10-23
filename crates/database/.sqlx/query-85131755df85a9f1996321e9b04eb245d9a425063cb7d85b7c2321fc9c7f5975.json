@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "SELECT user_id AS \"user_id: UserId\", consumed_at IS NOT NULL AS \"consumed!\"\n                FROM authorization_codes\n                WHERE id = $1\n                AND secret_digest = $2\n                AND client_id = $3\n                FOR SHARE",
+  "query": "SELECT user_id AS \"user_id: UserId\", consumed_at IS NOT NULL AS \"consumed!\"\n                FROM authorization_codes\n                WHERE id = $1\n                AND secret_digest = ANY($2)\n                AND client_id = $3\n                FOR SHARE",
   "describe": {
     "columns": [
       {
@@ -17,7 +17,7 @@
     "parameters": {
       "Left": [
         "Uuid",
-        "Bytea",
+        "ByteaArray",
         "Text"
       ]
     },
@@ -26,5 +26,5 @@
       null
     ]
   },
-  "hash": "cd1a45795caa5857b020db1f77349f5f9ebc136e4556462196fff080d263db3f"
+  "hash": "85131755df85a9f1996321e9b04eb245d9a425063cb7d85b7c2321fc9c7f5975"
 }

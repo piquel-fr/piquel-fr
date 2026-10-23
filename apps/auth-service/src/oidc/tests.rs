@@ -1,6 +1,7 @@
 //! Focused parsing checks and database-backed OAuth/OIDC scenarios.
 
 use super::*;
+use crate::config::TokenDigestKey;
 use crate::deliveries::{BackchannelLogoutSender, OutboundClient, Sender};
 use crate::security::{BrowserCookie, RequestContext, Session};
 use crate::tests::{AUTH_ORIGIN, Replicas, TlsListener};
@@ -20,7 +21,7 @@ use piquel_common::{
         step_up::StepUpRequirement,
     },
 };
-use piquel_crypto::Secret;
+use piquel_crypto::{KeySet, Rs256Key};
 use piquel_repository::{BackchannelLogout, DatabaseConfig, InsertUser, InsertVerifiedEmail};
 use serde_json::{Value, json};
 use std::{
@@ -125,9 +126,14 @@ impl Flow {
                 origin: origin
                     .parse::<piquel_common::config::Origin>()
                     .expect("issuer"),
-                keys: Arc::new(Rs256Key::generate("oidc-tests").expect("RSA signing key")),
-                refresh_key: Arc::new(Secret::derive(&[7; 32], REFRESH_KEY_LABEL).expect("HMAC")),
+                digest_keys: Arc::new(TokenDigestKeys::new(
+                    TokenDigestKey::derive(&[7; 32]).expect("digest key"),
+                    None,
+                )),
             },
+            SigningKeys::new(KeySet::single(
+                Rs256Key::generate("oidc-tests").expect("RSA signing key"),
+            )),
         )
         .expect("OIDC application");
         Self {
@@ -396,6 +402,7 @@ impl Flow {
         let claims = self
             .app
             .keys
+            .current()
             .verify(
                 tokens["id_token"].as_str().expect("ID token"),
                 TokenType::Id,
@@ -427,6 +434,13 @@ impl Flow {
 async fn metadata_is_one_document_whose_endpoints_are_routed() {
     let flow = Flow::new(false, false).await;
     let mut documents = vec![];
+    let jwks = flow
+        .request(Method::GET, routes::oidc::JWKS, &[], None)
+        .await;
+    assert_eq!(
+        jwks.extensions().get::<CacheClass>(),
+        Some(&PublicDocument::CACHE)
+    );
     for path in [routes::oidc::DISCOVERY, routes::oidc::OAUTH_METADATA] {
         let response = flow.request(Method::GET, path, &[], None).await;
         assert_eq!(response.status(), StatusCode::OK, "{path}");
@@ -486,6 +500,7 @@ async fn public_consent_pkce_claim_scoping_and_replay() {
     let claims: IdTokenClaims = flow
         .app
         .keys
+        .current()
         .verify(
             tokens["id_token"]
                 .as_str()
@@ -563,6 +578,7 @@ async fn confidential_refresh_rotation_logout_and_client_binding() {
     let claims: IdTokenClaims = flow
         .app
         .keys
+        .current()
         .verify(
             tokens["id_token"]
                 .as_str()
@@ -618,6 +634,7 @@ async fn confidential_refresh_rotation_logout_and_client_binding() {
     let narrowed_claims: IdTokenClaims = flow
         .app
         .keys
+        .current()
         .verify(
             narrowed["id_token"]
                 .as_str()
@@ -740,11 +757,8 @@ async fn logout_receiver() -> (RedirectUri, OutboundClient, Arc<Mutex<Vec<String
 async fn logout_posts_a_logout_token_to_the_clients_of_the_session() {
     let flow = Flow::new(true, true).await;
     let (uri, outbound, posted) = logout_receiver().await;
-    let sender = BackchannelLogoutSender::new(
-        flow.app.issuer.clone(),
-        Arc::clone(&flow.app.keys),
-        outbound,
-    );
+    let sender =
+        BackchannelLogoutSender::new(flow.app.issuer.clone(), flow.app.keys.clone(), outbound);
     let told = ClientRegistration {
         backchannel_logout_uri: Some(uri.clone()),
         ..flow.client.clone()
@@ -804,6 +818,7 @@ async fn logout_posts_a_logout_token_to_the_clients_of_the_session() {
     let claims: Value = flow
         .app
         .keys
+        .current()
         .verify(&token, TokenType::Logout, &flow.app.issuer)
         .expect("a logout token signed by auth");
     let issued_at = claims["iat"].as_i64().expect("iat");
@@ -931,6 +946,61 @@ async fn concurrent_refresh_across_replicas_rotates_once() {
     );
 }
 
+/// A new signing key and a new token digest key leave outstanding codes and
+/// refresh tokens valid, since the old digest key is still accepted. What
+/// replaces them is digested under the new key alone.
+#[tokio::test]
+#[ignore = "requires TEST_DATABASE_URL"]
+async fn changing_keys_keeps_codes_and_refresh_tokens() {
+    let flow = Flow::new(true, true).await;
+    let code = flow.code(REFRESH_SCOPES).await;
+    let tokens = Flow::json(
+        flow.exchange(
+            &flow.code(REFRESH_SCOPES).await,
+            Flow::verifier(),
+            flow.basic.as_deref(),
+        )
+        .await,
+    )
+    .await;
+    let token = tokens["refresh_token"].as_str().expect("refresh token");
+    let app = OidcApplication::new(
+        flow.app.database.clone(),
+        &OidcConfig {
+            origin: flow.app.issuer.parse().expect("issuer"),
+            digest_keys: Arc::new(TokenDigestKeys::new(
+                TokenDigestKey::derive(&[8; 32]).expect("new digest key"),
+                Some(TokenDigestKey::derive(&[7; 32]).expect("old digest key")),
+            )),
+        },
+        SigningKeys::new(KeySet::single(
+            Rs256Key::generate("rotated").expect("new signing key"),
+        )),
+    )
+    .expect("OIDC application");
+    let changed = Flow {
+        router: app.clone().routes(),
+        app,
+        ..flow.clone()
+    };
+    let exchanged = changed
+        .exchange(&code, Flow::verifier(), changed.basic.as_deref())
+        .await;
+    assert_eq!(exchanged.status(), StatusCode::OK);
+    let refreshed = changed.refresh(token).await;
+    assert_eq!(refreshed.status(), StatusCode::OK);
+    let rotated = Flow::json(refreshed).await["refresh_token"]
+        .as_str()
+        .expect("rotated refresh token")
+        .to_owned();
+    assert_eq!(
+        flow.refresh(&rotated).await.status(),
+        StatusCode::BAD_REQUEST,
+        "only the new digest key made the rotated token"
+    );
+    assert_eq!(changed.refresh(&rotated).await.status(), StatusCode::OK);
+}
+
 /// Checks that policy reductions reject new requests and invalidate outstanding grants,
 /// and that unsafe logout redirects are refused.
 #[tokio::test]
@@ -995,6 +1065,7 @@ async fn authorization_hints_bind_initial_resumed_and_consent_requests() {
     let hint = flow
         .app
         .keys
+        .current()
         .sign(TokenType::Id, &claims)
         .expect("sign expired hint");
     let response = flow
@@ -1018,6 +1089,7 @@ async fn authorization_hints_bind_initial_resumed_and_consent_requests() {
         let hint = flow
             .app
             .keys
+            .current()
             .sign(TokenType::Id, &invalid)
             .expect("sign invalid hint");
         let response = flow
@@ -1038,6 +1110,7 @@ async fn authorization_hints_bind_initial_resumed_and_consent_requests() {
     let hint = flow
         .app
         .keys
+        .current()
         .sign(TokenType::Id, &other)
         .expect("sign other account hint");
     let response = flow
@@ -1423,8 +1496,6 @@ fn authentication_schemes_are_case_insensitive() {
     assert_eq!(AuthScheme::Bearer.credentials("Bearer"), None);
 }
 
-/// HMAC label fixture; matching production key derivation in config.
-const REFRESH_KEY_LABEL: &[u8] = b"piquel-refresh-token-digest-v1";
 /// Existing scope strings exercise the HTTP wire contract independently of enum serialization.
 const EMAIL_REFRESH_SCOPES: &str = "openid email offline_access";
 /// Identity and session-bounded refresh requested together.

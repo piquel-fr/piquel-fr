@@ -1,6 +1,7 @@
 //! Who runs an administrative operation, and how the admin API authenticates them.
 
 use super::AdminError;
+use crate::keys::SigningKeys;
 use axum::{
     extract::{FromRef, FromRequestParts},
     http::{HeaderMap, header, request::Parts},
@@ -17,9 +18,7 @@ use piquel_common::{
         step_up::StepUpRequirement,
     },
 };
-use piquel_crypto::Rs256Key;
 use piquel_repository::{Database, DatabaseTransaction, StoredSession, StoredUser};
-use std::sync::Arc;
 
 /// The operating system user running a command, recorded on the events it causes.
 const OS_USER: Variable = Variable::new("USER");
@@ -213,11 +212,11 @@ impl AdminSession {
     }
 }
 
-/// Verifies admin API access tokens with auth's own signing key.
+/// Verifies admin API access tokens with auth's own signing keys.
 #[derive(Clone)]
 pub(crate) struct AdminTokens {
-    /// Key that signed the tokens.
-    pub(super) keys: Arc<Rs256Key>,
+    /// Keys that signed the tokens.
+    pub(super) keys: SigningKeys,
     /// The issuer the tokens must name.
     pub(super) issuer: String,
     /// Holds the sessions and administrator rights checked on each request.
@@ -236,6 +235,7 @@ impl AdminTokens {
     ) -> Result<Operator, AdminError> {
         let claims: AccessTokenClaims = self
             .keys
+            .current()
             .verify(Self::bearer(headers)?, TokenType::Access, &self.issuer)
             .map_err(AdminError::InvalidToken)?;
         let user_id: UserId = claims.sub.parse().map_err(|_| AdminError::WrongToken)?;

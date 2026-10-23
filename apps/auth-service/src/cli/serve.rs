@@ -1,15 +1,15 @@
 //! Serving the public listener and, when configured, the private admin listener.
 
 use super::{CliError, Command};
-use crate::{AuthConfig, Jobs};
+use crate::{AuthConfig, Jobs, KeyStore};
 use axum::Router;
 use piquel_repository::Database;
-use std::net::SocketAddr;
+use std::{net::SocketAddr, sync::Arc};
 use tokio::{net::TcpListener, sync::watch};
 
 impl Command {
-    /// Builds the configured service, starts background jobs and
-    /// serves the public listener, and the admin listener when one is configured,
+    /// Builds the configured service, loads its signing keys, starts background
+    /// jobs and serves the public listener, and the admin listener when one is configured,
     /// until a shutdown signal. Once in-flight requests drain, running jobs get a
     /// grace period to finish.
     pub(super) async fn serve(database: Database) -> Result<(), CliError> {
@@ -19,10 +19,12 @@ impl Command {
             Some(address) => Some(TcpListener::bind(address).await?),
             None => None,
         };
-        let router = config.router(database.clone())?;
-        let admin_router = config.admin_router(database.clone());
+        let store = KeyStore::new(database.clone(), Arc::clone(&config.key_encryption_key));
+        let keys = store.start().await?;
+        let router = config.router(database.clone(), &keys)?;
+        let admin_router = config.admin_router(database.clone(), &keys);
         database.observe_connections();
-        let jobs = Jobs::start(&database, &config)?;
+        let jobs = Jobs::start(&database, &config, &store, &keys)?;
         tracing::info!(address=%config.public_listener,"authentication service listening");
         let (stop, _) = watch::channel(false);
         let admin = async {

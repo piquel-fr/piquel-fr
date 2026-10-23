@@ -23,6 +23,8 @@ mod federation;
 mod history;
 /// Periodic background work, coordinated across replicas.
 mod jobs;
+/// Signing keys: sealed storage, rotation and the key set every replica reloads.
+mod keys;
 /// OAuth and `OpenID` Connect protocol application.
 mod oidc;
 /// Lists of operations every surface serving them must cover.
@@ -51,11 +53,12 @@ pub use clients::{
     Applied, ClientDetails, ClientRegistry, ClientRegistryError, DEFAULT_CLIENT_SCOPES,
     MAX_DAILY_REGISTRATIONS, MAX_OWNED_CLIENTS,
 };
-pub use config::{AuthConfig, PUBLIC_BASE_URL};
+pub use config::{AuthConfig, PUBLIC_BASE_URL, TokenDigestKeys};
 use emails::EmailApplication;
 use federation::FederationApplication;
 use history::HistoryApplication;
 pub use jobs::Jobs;
+pub use keys::{KeyError, KeyStore, SigningKeys};
 use oidc::OidcApplication;
 use passkey::PasskeyApplication;
 use service::ServiceApplication;
@@ -105,12 +108,13 @@ pub enum StartupError {
 }
 
 impl AuthConfig {
-    /// Builds uniformly constructed applications under shared browser-origin protection.
-    /// It changes nothing in the database, so tests build several to act as replicas.
+    /// Builds uniformly constructed applications under shared browser-origin
+    /// protection, signing and verifying with `keys`. It changes nothing in the
+    /// database, so tests build several to act as replicas.
     ///
     /// # Errors
     /// Fails when the frontend is not embedded or an application cannot initialize.
-    pub fn router(&self, database: Database) -> Result<Router, StartupError> {
+    pub fn router(&self, database: Database, keys: &SigningKeys) -> Result<Router, StartupError> {
         EmbeddedAssets::check()?;
         let application = Router::new()
             .merge(ServiceApplication::new(database.clone(), self).routes())
@@ -120,7 +124,7 @@ impl AuthConfig {
             .merge(AccountApplication::new(database.clone()).routes())
             .merge(ClientApplication::new(database.clone()).routes())
             .merge(EmailApplication::new(database.clone(), &self.email).routes())
-            .merge(OidcApplication::new(database.clone(), &self.oidc)?.routes());
+            .merge(OidcApplication::new(database.clone(), &self.oidc, keys.clone())?.routes());
         let policy = security::HttpSecurity::new(self, database);
         let protected = application
             // Static pages answer GET and HEAD only, so preconditions need no 412.
@@ -143,9 +147,9 @@ impl AuthConfig {
     /// carries an administrator's access token. It shares the public listener's
     /// body limit and deadline, so no request can hold up shutdown. Its telemetry
     /// is labelled `piquel.listener = "admin"`.
-    pub fn admin_router(&self, database: Database) -> Router {
+    pub fn admin_router(&self, database: Database, keys: &SigningKeys) -> Router {
         HttpTelemetry::default().listener("admin").wrap(
-            admin::AdminApplication::new(database, self)
+            admin::AdminApplication::new(database, self, keys.clone())
                 .routes()
                 .layer(DefaultBodyLimit::max(MAX_REQUEST_BODY_BYTES))
                 .layer(middleware::from_fn(security::HttpSecurity::deadline)),

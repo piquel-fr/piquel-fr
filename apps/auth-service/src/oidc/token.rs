@@ -152,7 +152,8 @@ impl TokenGrant<'_> {
             email: email.map(str::to_owned),
             email_verified: email.map(|_| true),
         });
-        let access_token = app.keys.sign(
+        let keys = app.keys.current();
+        let access_token = keys.sign(
             TokenType::Access,
             &AccessTokenClaims {
                 iss: app.issuer.clone(),
@@ -172,7 +173,7 @@ impl TokenGrant<'_> {
             },
         )?;
         let id_token = if scopes.contains(Scope::OpenId) {
-            Some(app.keys.sign(
+            Some(keys.sign(
                 TokenType::Id,
                 &IdTokenClaims {
                     iss: app.issuer.clone(),
@@ -262,13 +263,9 @@ impl OidcApplication {
                 .as_deref()
                 .ok_or_else(|| OAuthCode::InvalidGrant.reject("code is required"))?,
         )?;
-        let digest = self.token_digest(&opaque)?;
+        let digests = self.accepted_digests(&opaque)?;
         let mut tx = self.database.begin().await?;
-        let code = match tx
-            .oidc()
-            .consume_code(opaque.id, digest.as_bytes(), client_id)
-            .await
-        {
+        let code = match tx.oidc().consume_code(opaque.id, &digests, client_id).await {
             Ok(code) => code,
             Err(error) => return Err(Self::code_rejection(tx, context, client_id, error).await),
         };
@@ -354,11 +351,11 @@ impl OidcApplication {
                 .as_deref()
                 .ok_or_else(|| OAuthCode::InvalidGrant.reject("refresh_token is required"))?,
         )?;
-        let digest = self.token_digest(&opaque)?;
+        let digests = self.accepted_digests(&opaque)?;
         let mut tx = self.database.begin().await?;
         let rotated = match tx
             .tokens()
-            .consume_for_rotation(opaque.id, digest.as_bytes(), client_id.as_str())
+            .consume_for_rotation(opaque.id, &digests, client_id.as_str())
             .await
         {
             Ok(value) => value,
@@ -384,12 +381,13 @@ impl OidcApplication {
             .ok_or_else(|| OAuthCode::InvalidGrant.reject(SESSION_ENDED))?;
         let opaque_refresh = OpaqueToken::new(TokenPrefix::RefreshToken)?;
         let raw = opaque_refresh.encoded();
-        let new_digest = self.token_digest(&opaque_refresh)?;
+        let (secret_digest, digest_key) = self.token_digest(&opaque_refresh)?;
         tx.tokens()
             .insert_token(&InsertRefreshToken {
                 id: opaque_refresh.id,
                 family_id: rotated.family_id,
-                secret_digest: new_digest.as_bytes().to_vec(),
+                secret_digest,
+                digest_key,
                 expires_at: session.expires_at,
             })
             .await?;
@@ -424,7 +422,7 @@ impl OidcApplication {
         let family_id = TokenId::new();
         let opaque = OpaqueToken::new(TokenPrefix::RefreshToken)?;
         let raw = opaque.encoded();
-        let digest = self.token_digest(&opaque)?;
+        let (secret_digest, digest_key) = self.token_digest(&opaque)?;
         tx.tokens()
             .insert_family(
                 &InsertRefreshFamily {
@@ -440,7 +438,8 @@ impl OidcApplication {
                 &InsertRefreshToken {
                     id: opaque.id,
                     family_id,
-                    secret_digest: digest.as_bytes().to_vec(),
+                    secret_digest,
+                    digest_key,
                     expires_at: session.expires_at,
                 },
             )
@@ -464,11 +463,11 @@ impl OidcApplication {
             .await?;
         // RFC 7009 requires success even for malformed or unknown tokens.
         if let Ok(opaque) = OpaqueToken::parse(TokenPrefix::RefreshToken, &form.token) {
-            let digest = app.token_digest(&opaque)?;
+            let digests = app.accepted_digests(&opaque)?;
             let mut tx = app.database.begin().await?;
             if let Some(family) = tx
                 .tokens()
-                .revoke_family_for_client_token(opaque.id, digest.as_bytes(), client.id.as_str())
+                .revoke_family_for_client_token(opaque.id, &digests, client.id.as_str())
                 .await?
             {
                 tx.record(
@@ -512,6 +511,7 @@ impl OidcApplication {
             .ok_or_else(|| OAuthCode::InvalidToken.reject(bearer()))?;
         let claims: AccessTokenClaims = self
             .keys
+            .current()
             .verify(token, TokenType::Access, &self.issuer)
             .map_err(|error| {
                 OAuthCode::InvalidToken

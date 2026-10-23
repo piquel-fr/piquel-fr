@@ -57,6 +57,7 @@ impl OidcApplication {
             .as_ref()
             .map(|token| {
                 self.keys
+                    .current()
                     .verify_id_token_hint(token, &self.issuer)
                     .map_err(|error| {
                         OAuthCode::InvalidRequest

@@ -1,6 +1,7 @@
 //! Validated startup configuration, grouped by application.
 
 use crate::{emails::VerificationKey, passkey::DecoyKey};
+use base64::{Engine, engine::general_purpose::URL_SAFE_NO_PAD};
 use ipnet::IpNet;
 use lettre::{
     AsyncSmtpTransport, Tokio1Executor,
@@ -11,7 +12,7 @@ use piquel_common::{
     Provider,
     config::{ConfigurationError, Origin, PublicUrl, SecretBytes, SecretReference, Variable},
 };
-use piquel_crypto::{Rs256Key, Secret};
+use piquel_crypto::{CryptoError, Digest, KeyEncryptionKey, Secret};
 use piquel_repository::{DatabaseConfig, RuntimeRole};
 use serde::{Serialize, Serializer};
 use std::{
@@ -24,16 +25,20 @@ use std::{
 
 /// Maximum provider-assigned client ID length.
 const MAX_PROVIDER_CLIENT_ID_LENGTH: usize = 512;
-/// Maximum signing-key identifier length.
-const MAX_SIGNING_KEY_ID_LENGTH: usize = 128;
-/// Identifier used when the operator does not name the primary signing key.
-const DEFAULT_SIGNING_KEY_ID: &str = "primary";
-/// Separates refresh digests from every other use of the persistent PEM bytes.
-const REFRESH_DIGEST_CONTEXT: &[u8] = b"piquel-refresh-token-digest-v1";
-/// Separates the passkey decoy key from every other use of the persistent PEM bytes.
+/// Separates opaque token digests from every other use of a token digest key. The
+/// PEM signing key was used the same way, so it still works as a token digest key.
+const TOKEN_DIGEST_CONTEXT: &[u8] = b"piquel-refresh-token-digest-v1";
+/// Separates the passkey decoy key from every other use of the current token
+/// digest key. The PEM signing key was used the same way, so decoys stay the same
+/// while it is the current key.
 const PASSKEY_DECOY_CONTEXT: &[u8] = b"piquel-passkey-decoy-credential-v1";
-/// Separates the email verification key from every other use of the persistent PEM bytes.
+/// Separates the email verification key from every other use of the current token
+/// digest key, as [`PASSKEY_DECOY_CONTEXT`] does the decoy key.
 const EMAIL_VERIFICATION_CONTEXT: &[u8] = b"piquel-email-verification-token-v1";
+/// Fewest bytes a token digest key may have.
+const MIN_TOKEN_DIGEST_KEY_BYTES: usize = 32;
+/// Bytes of a token digest key's digest kept as its fingerprint.
+const DIGEST_KEY_FINGERPRINT_BYTES: usize = 8;
 /// Default number of pooled authentication connections.
 const DATABASE_POOL_SIZE: u32 = 10;
 /// Maximum startup wait for a pooled database connection.
@@ -69,10 +74,19 @@ const OWNER_DATABASE: DatabaseVariables = DatabaseVariables {
     url: DATABASE_OWNER_URL,
     password: DATABASE_OWNER_PASSWORD,
 };
-/// Required persistent signing-key reference.
-const KEY_PROVIDER: Variable = Variable::new("AUTH_KEY_PROVIDER");
-/// Stable public signing-key identifier.
-const SIGNING_KEY_ID: Variable = Variable::new("AUTH_SIGNING_KEY_ID");
+/// Reference to the key that seals signing keys in the database.
+const KEY_ENCRYPTION_KEY: Variable = Variable::new("AUTH_KEY_ENCRYPTION_KEY");
+/// Reference to the key under which opaque token secrets are digested.
+const TOKEN_DIGEST_KEY: Variable = Variable::new("AUTH_TOKEN_DIGEST_KEY");
+/// Optional reference to another token digest key, accepted but never used for
+/// new digests: the next key before it is current, or the old one after.
+const TOKEN_DIGEST_KEY_ACCEPTED: Variable = Variable::new("AUTH_TOKEN_DIGEST_KEY_ACCEPTED");
+/// The removed PEM signing key and its ID. Startup refuses them, so a deployment
+/// that still sets them learns that signing keys now live in the database.
+const REMOVED_KEY_VARIABLES: [Variable; 2] = [
+    Variable::new("AUTH_KEY_PROVIDER"),
+    Variable::new("AUTH_SIGNING_KEY_ID"),
+];
 /// Whether registration requires an invitation.
 const INVITE_REQUIRED: Variable = Variable::new("AUTH_INVITE_REQUIRED");
 /// The removed OIDC clients file. Startup refuses it, so a deployment that still
@@ -95,10 +109,10 @@ pub(crate) struct PasskeyConfig {
 }
 impl PasskeyConfig {
     /// Reads the passkey policy, validates that the origin has a domain RP ID and
-    /// derives the decoy key from the persistent PEM key.
+    /// derives the decoy key from the token digest key.
     pub(crate) fn from_environment(
         origin: &Origin,
-        persistent_key: &SecretBytes,
+        digest_keys: &TokenDigestKeys,
     ) -> Result<Self, ConfigurationError> {
         if !matches!(origin.as_url().host(), Some(url::Host::Domain(_))) {
             return Err(PUBLIC_BASE_URL
@@ -107,10 +121,7 @@ impl PasskeyConfig {
         Ok(Self {
             origin: origin.clone(),
             invite_required: INVITE_REQUIRED.flag(true)?,
-            decoy_key: DecoyKey::new(AuthConfig::derive_key(
-                persistent_key,
-                PASSKEY_DECOY_CONTEXT,
-            )?),
+            decoy_key: DecoyKey::new(digest_keys.current.decoy.clone()),
         })
     }
 }
@@ -147,11 +158,11 @@ pub(crate) struct EmailConfig {
 
 impl EmailConfig {
     /// Reads the relay and sender, and derives the verification key from the
-    /// persistent PEM key.
+    /// token digest key.
     fn from_environment(
         origin: &Origin,
         settings_url: &PublicUrl,
-        persistent_key: &SecretBytes,
+        digest_keys: &TokenDigestKeys,
     ) -> Result<Self, ConfigurationError> {
         let smtp = match SMTP_URL.optional()? {
             Some(url) => Some(Self::relay(&url, origin)?),
@@ -164,10 +175,7 @@ impl EmailConfig {
             smtp,
             from: EMAIL_FROM.parse_or(DEFAULT_EMAIL_FROM)?,
             settings_url: settings_url.clone(),
-            verification_key: VerificationKey::new(AuthConfig::derive_key(
-                persistent_key,
-                EMAIL_VERIFICATION_CONTEXT,
-            )?),
+            verification_key: VerificationKey::new(digest_keys.current.verification.clone()),
         })
     }
 
@@ -383,50 +391,135 @@ impl FederationConfig {
     }
 }
 
-/// Persistent signing material and the exact OIDC issuer.
+/// One key under which opaque token secrets are stored as HMAC digests.
+pub(crate) struct TokenDigestKey {
+    /// The HMAC key, derived from the configured bytes.
+    key: Secret,
+    /// Identifies the key in stored records, without revealing it.
+    fingerprint: String,
+    /// The passkey decoy key, derived from the same bytes, used only while this
+    /// key is current.
+    decoy: Secret,
+    /// The email verification key, derived and used like [`Self::decoy`].
+    verification: Secret,
+}
+
+impl TokenDigestKey {
+    /// Derives the HMAC, decoy and verification keys from configured bytes, as
+    /// the PEM key's always were.
+    pub(crate) fn derive(bytes: &[u8]) -> Result<Self, CryptoError> {
+        let key = Secret::derive(bytes, TOKEN_DIGEST_CONTEXT)?;
+        let fingerprint = URL_SAFE_NO_PAD
+            .encode(&Digest::sha256(key.as_bytes()).as_bytes()[..DIGEST_KEY_FINGERPRINT_BYTES]);
+        Ok(Self {
+            key,
+            fingerprint,
+            decoy: Secret::derive(bytes, PASSKEY_DECOY_CONTEXT)?,
+            verification: Secret::derive(bytes, EMAIL_VERIFICATION_CONTEXT)?,
+        })
+    }
+
+    /// The digest of `secret` under this key.
+    fn digest(&self, secret: &Secret) -> Result<Digest, CryptoError> {
+        Digest::hmac(self.key.as_bytes(), secret.as_bytes())
+    }
+}
+
+/// The token digest keys: the current one makes every new digest, and during a
+/// change of key another one is accepted too. A change takes two deploys, so a
+/// release never issues a digest the release beside it cannot check: the first
+/// accepts the next key, the second makes it current and accepts the old one.
+pub struct TokenDigestKeys {
+    /// Makes new digests.
+    current: TokenDigestKey,
+    /// Also accepted.
+    accepted: Option<TokenDigestKey>,
+}
+
+impl TokenDigestKeys {
+    /// Uses `current` for new digests and accepts `accepted` too.
+    pub(crate) const fn new(current: TokenDigestKey, accepted: Option<TokenDigestKey>) -> Self {
+        Self { current, accepted }
+    }
+
+    /// Reads `AUTH_TOKEN_DIGEST_KEY` and `AUTH_TOKEN_DIGEST_KEY_ACCEPTED`.
+    ///
+    /// # Errors
+    /// Names a missing or unreadable key, or one shorter than 32 bytes.
+    pub fn from_environment() -> Result<Self, ConfigurationError> {
+        let derive = |variable: Variable, bytes: SecretBytes| {
+            TokenDigestKey::derive(bytes.expose_secret())
+                .map_err(|source| variable.error("could not derive a key", source))
+        };
+        let current = derive(TOKEN_DIGEST_KEY, Self::read(TOKEN_DIGEST_KEY)?)?;
+        let accepted = TOKEN_DIGEST_KEY_ACCEPTED
+            .optional()?
+            .map(|_| {
+                derive(
+                    TOKEN_DIGEST_KEY_ACCEPTED,
+                    Self::read(TOKEN_DIGEST_KEY_ACCEPTED)?,
+                )
+            })
+            .transpose()?;
+        Ok(Self::new(current, accepted))
+    }
+
+    /// Resolves the key `variable` references; its raw bytes are the key.
+    fn read(variable: Variable) -> Result<SecretBytes, ConfigurationError> {
+        let reference: SecretReference = variable.parse()?;
+        let bytes = reference.resolve().map_err(|source| {
+            variable.error("must resolve through env://NAME or file://PATH", source)
+        })?;
+        if bytes.expose_secret().len() < MIN_TOKEN_DIGEST_KEY_BYTES {
+            return Err(variable.invalid("must contain at least 32 bytes"));
+        }
+        Ok(bytes)
+    }
+
+    /// The digest a new `secret` is stored as, and its key's fingerprint.
+    pub(crate) fn issue(&self, secret: &Secret) -> Result<(Digest, &str), CryptoError> {
+        Ok((self.current.digest(secret)?, &self.current.fingerprint))
+    }
+
+    /// Every digest a presented `secret` may be stored as, one per accepted key.
+    pub(crate) fn accepted(&self, secret: &Secret) -> Result<Vec<Vec<u8>>, CryptoError> {
+        [Some(&self.current), self.accepted.as_ref()]
+            .into_iter()
+            .flatten()
+            .map(|key| Ok(key.digest(secret)?.as_bytes().to_vec()))
+            .collect()
+    }
+
+    /// Names the key a stored fingerprint belongs to: `current`, `accepted`,
+    /// `unrecorded` for digests made before fingerprints were stored, under the
+    /// PEM key's derivation, or `unknown`.
+    #[must_use]
+    pub fn name(&self, fingerprint: Option<&str>) -> &'static str {
+        let Some(fingerprint) = fingerprint else {
+            return "unrecorded";
+        };
+        if fingerprint == self.current.fingerprint {
+            "current"
+        } else if self
+            .accepted
+            .as_ref()
+            .is_some_and(|accepted| fingerprint == accepted.fingerprint)
+        {
+            "accepted"
+        } else {
+            "unknown"
+        }
+    }
+}
+
+/// The exact OIDC issuer and the keys of its opaque tokens. Signing keys live in
+/// the database (see `crate::keys`).
 #[derive(Clone)]
 pub(crate) struct OidcConfig {
     /// Exact HTTPS issuer origin.
     pub origin: Origin,
-    /// Key used to sign and verify service JWTs.
-    pub keys: Arc<Rs256Key>,
-    /// Domain-separated refresh-token HMAC key.
-    pub refresh_key: Arc<Secret>,
-}
-
-impl OidcConfig {
-    /// Parses the persistent signing key.
-    pub(crate) fn from_environment(
-        origin: &Origin,
-        secret: &SecretBytes,
-    ) -> Result<Self, ConfigurationError> {
-        let pem = secret
-            .utf8()
-            .map_err(|source| KEY_PROVIDER.error("must contain UTF-8 PEM", source))?;
-        let kid = SIGNING_KEY_ID
-            .optional()?
-            .unwrap_or_else(|| DEFAULT_SIGNING_KEY_ID.into());
-        if kid.is_empty()
-            || kid.len() > MAX_SIGNING_KEY_ID_LENGTH
-            || kid.chars().any(char::is_whitespace)
-        {
-            return Err(
-                SIGNING_KEY_ID.invalid("must contain 1 to 128 characters without whitespace")
-            );
-        }
-        let keys = Rs256Key::from_pem(kid, pem).map_err(|source| {
-            KEY_PROVIDER.error(
-                "must contain an RSA private PEM key of at least 2048 bits",
-                source,
-            )
-        })?;
-        let refresh_key = AuthConfig::derive_key(secret, REFRESH_DIGEST_CONTEXT)?;
-        Ok(Self {
-            origin: origin.clone(),
-            keys: Arc::new(keys),
-            refresh_key: Arc::new(refresh_key),
-        })
-    }
+    /// Keys under which opaque token secrets are stored.
+    pub digest_keys: Arc<TokenDigestKeys>,
 }
 
 /// A database connection's URL variable and its optional password variable.
@@ -486,10 +579,12 @@ pub struct AuthConfig {
     pub(crate) passkey: PasskeyConfig,
     /// External identity provider policy.
     pub(crate) federation: FederationConfig,
-    /// OIDC issuer and persistent keys.
+    /// OIDC issuer and token digest keys.
     pub(crate) oidc: OidcConfig,
     /// Email to account holders.
     pub(crate) email: EmailConfig,
+    /// Seals and opens the signing keys in the database.
+    pub key_encryption_key: Arc<KeyEncryptionKey>,
     /// Trusted reverse-proxy peers.
     pub(crate) trusted_proxies: Vec<IpNet>,
 }
@@ -539,34 +634,47 @@ impl AuthConfig {
                 "was removed; clients live in the database. See `auth-service client --help`.",
             ));
         }
+        for variable in REMOVED_KEY_VARIABLES {
+            if variable.optional()?.is_some() {
+                return Err(variable.invalid(
+                    "was removed; signing keys live in the database. See `auth-service keys --help`.",
+                ));
+            }
+        }
         let origin: Origin = PUBLIC_BASE_URL.parse()?;
         let settings_url: PublicUrl = SETTINGS_URL.parse_or(DEFAULT_SETTINGS_URL)?;
-        let persistent_key: SecretReference = KEY_PROVIDER.parse()?;
-        let persistent_key = persistent_key.resolve().map_err(|source| {
-            KEY_PROVIDER.error(
-                "must resolve to an RSA private PEM key of at least 2048 bits",
-                source,
-            )
-        })?;
+        let digest_keys = Arc::new(TokenDigestKeys::from_environment()?);
         Ok(Self {
             public_listener: PUBLIC_LISTENER.parse_or(DEFAULT_PUBLIC_LISTENER)?,
             admin_listener: ADMIN_LISTENER.parse_optional()?,
-            passkey: PasskeyConfig::from_environment(&origin, &persistent_key)?,
+            passkey: PasskeyConfig::from_environment(&origin, &digest_keys)?,
             federation: FederationConfig::from_environment(&origin, &settings_url)?,
-            oidc: OidcConfig::from_environment(&origin, &persistent_key)?,
-            email: EmailConfig::from_environment(&origin, &settings_url, &persistent_key)?,
+            email: EmailConfig::from_environment(&origin, &settings_url, &digest_keys)?,
+            oidc: OidcConfig {
+                origin,
+                digest_keys,
+            },
+            key_encryption_key: Arc::new(Self::key_encryption_key_from_environment()?),
             trusted_proxies: Self::trusted_proxies()?,
         })
     }
 
-    /// Derives a service key from the persistent PEM bytes under its own `context`,
-    /// so each key is stable across restarts and replicas but independent of the others.
-    fn derive_key(
-        persistent_key: &SecretBytes,
-        context: &[u8],
-    ) -> Result<Secret, ConfigurationError> {
-        Secret::derive(persistent_key.expose_secret(), context)
-            .map_err(|source| KEY_PROVIDER.error("could not derive a key from the PEM key", source))
+    /// Reads the key-encryption key, for serving and for the `keys` commands.
+    ///
+    /// # Errors
+    /// Names a missing or unreadable reference, or a value that is not 32 bytes
+    /// in unpadded base64url.
+    pub fn key_encryption_key_from_environment() -> Result<KeyEncryptionKey, ConfigurationError> {
+        let reference: SecretReference = KEY_ENCRYPTION_KEY.parse()?;
+        let secret = reference.resolve().map_err(|source| {
+            KEY_ENCRYPTION_KEY.error("must resolve through env://NAME or file://PATH", source)
+        })?;
+        let text = secret
+            .utf8()
+            .map_err(|source| KEY_ENCRYPTION_KEY.error("must contain UTF-8 text", source))?;
+        KeyEncryptionKey::parse(text).map_err(|source| {
+            KEY_ENCRYPTION_KEY.error("must contain 32 bytes in unpadded base64url", source)
+        })
     }
 
     /// Uses the operator override, then piqueld's ingress ranges, then no trusted peers.

@@ -2,8 +2,11 @@
 //! and the fixtures shared by the applications' tests.
 
 use crate::{
-    AuthConfig, ClientRegistry, ClientRegistryError, Operator,
-    config::{EmailConfig, FederationConfig, FrontendOrigins, OidcConfig, PasskeyConfig},
+    AuthConfig, ClientRegistry, ClientRegistryError, KeyStore, Operator,
+    config::{
+        EmailConfig, FederationConfig, FrontendOrigins, OidcConfig, PasskeyConfig, TokenDigestKey,
+        TokenDigestKeys,
+    },
     passkey::DecoyKey,
     security::{BrowserCookie, RequestContext, Session},
 };
@@ -24,7 +27,7 @@ use piquel_common::{
     events::{Actor, RevocationReason},
     protocol::oauth::Scope,
 };
-use piquel_crypto::{ClientSecret, Rs256Key, Secret};
+use piquel_crypto::{ClientSecret, KeyEncryptionKey, Secret};
 use piquel_repository::{
     Database, DatabaseConfig, DatabaseError, DatabaseTransaction, InsertAuthorizationCode,
     InsertRefreshFamily, InsertRefreshToken, InsertUser, SessionAuthentication, SessionScope,
@@ -39,10 +42,18 @@ use tower::ServiceExt;
 
 /// Auth origin of the replicas, and of the fixtures that send requests to them.
 pub(crate) const AUTH_ORIGIN: &str = "https://auth.piquel.fr";
+/// The key-encryption key of every test that stores signing keys. Tests share one
+/// database, so they must all open the keys any of them stored.
+const KEY_ENCRYPTION_KEY: &str = "dGVzdHMgc2hhcmUgdGhpcyBrZXktZW5jcnlwdGlvbiE";
+
+/// The key-encryption key tests seal signing keys with.
+pub(crate) fn key_encryption_key() -> KeyEncryptionKey {
+    KeyEncryptionKey::parse(KEY_ENCRYPTION_KEY).expect("test key-encryption key")
+}
 
 /// Two routers built by [`AuthConfig::router`] from one configuration. Each has its
-/// own database pool and in-process state, so a test passes only if everything it
-/// relies on is shared through PostgreSQL or the configuration.
+/// own database pool and in-process state, signing keys included, so a test passes
+/// only if everything it relies on is shared through PostgreSQL or the configuration.
 pub(crate) struct Replicas {
     /// The first replica.
     pub a: Router,
@@ -73,9 +84,13 @@ impl Replicas {
             },
             oidc: OidcConfig {
                 origin,
-                keys: Arc::new(Rs256Key::generate("replicas").expect("signing key")),
-                refresh_key: Arc::new(Secret::generate().expect("refresh key")),
+                digest_keys: Arc::new(TokenDigestKeys::new(
+                    TokenDigestKey::derive(Secret::generate().expect("random").as_bytes())
+                        .expect("digest key"),
+                    None,
+                )),
             },
+            key_encryption_key: Arc::new(key_encryption_key()),
             trusted_proxies: vec![],
         };
         let peer = SocketAddr::new(
@@ -83,8 +98,13 @@ impl Replicas {
             4321,
         );
         let replica = async || {
+            let database = Self::database().await;
+            let keys = KeyStore::new(database.clone(), Arc::clone(&config.key_encryption_key))
+                .start()
+                .await
+                .expect("signing keys");
             config
-                .router(Self::database().await)
+                .router(database, &keys)
                 .expect("replica")
                 .layer(Extension(ConnectInfo(peer)))
         };
@@ -343,6 +363,7 @@ pub(crate) async fn refresh_grant(
         .insert_code(&InsertAuthorizationCode {
             id: code,
             secret_digest: code.as_uuid().as_bytes().repeat(2),
+            digest_key: "test".into(),
             client_id: client.clone(),
             user_id,
             session_id,
@@ -374,6 +395,7 @@ pub(crate) async fn refresh_grant(
                 id: token,
                 family_id: family,
                 secret_digest: digest.clone(),
+                digest_key: "test".into(),
                 expires_at: Utc::now() + Duration::hours(1),
             },
         )

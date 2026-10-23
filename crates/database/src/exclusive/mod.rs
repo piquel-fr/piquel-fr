@@ -3,8 +3,9 @@
 use crate::{Database, DatabaseError, DatabaseTransaction};
 use sqlx::{Connection, PgConnection};
 
-/// Advisory lock keys, one per exclusive job or step. The values are stable and
-/// never reused, so replicas running different releases agree on them.
+/// Advisory lock keys: session-level ones, one per exclusive job, and
+/// transaction-level ones that serialize a kind of change. The values are stable
+/// and never reused, so replicas running different releases agree on them.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 #[repr(i64)]
 pub enum LockKey {
@@ -13,6 +14,9 @@ pub enum LockKey {
     /// Runtime role provisioning, held for its transaction, so overlapping
     /// `migrate` runs take turns.
     Provisioning = 2,
+    /// Changes to signing keys, taken per transaction by
+    /// [`SigningKeyRepository::lock`](crate::SigningKeyRepository::lock).
+    SigningKeys = 3,
     /// Job runner tests in other crates; no release takes it.
     #[cfg(feature = "test-support")]
     Test = -1,

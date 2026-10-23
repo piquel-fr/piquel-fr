@@ -1,6 +1,7 @@
 //! Database-backed admin API scenarios: who may call it, and what each operation changes.
 
 use super::*;
+use crate::keys::SigningKeys;
 use crate::security::{RequestContext, Session};
 use crate::tests::until_blocked;
 use axum::{
@@ -21,13 +22,13 @@ use piquel_common::{
         step_up::StepUpRequirement,
     },
 };
-use piquel_crypto::Rs256Key;
+use piquel_crypto::{KeySet, Rs256Key};
 use piquel_repository::{
     Channel, DatabaseConfig, DatabaseError, DatabaseTransaction, DeliveryStatus, EventFilter,
     InsertUser, NewDelivery,
 };
 use serde_json::{Value, json};
-use std::{mem::discriminant, sync::Arc};
+use std::mem::discriminant;
 use tower::ServiceExt;
 
 /// Issuer of the scenario tokens.
@@ -59,7 +60,7 @@ pub(crate) struct Harness {
     /// The scenario database.
     pub(crate) database: Database,
     /// Signs scenario access tokens.
-    keys: Arc<Rs256Key>,
+    keys: SigningKeys,
 }
 
 impl Harness {
@@ -74,7 +75,9 @@ impl Harness {
         .await
         .expect("database");
         database.run_migrations().await.expect("migrations");
-        let keys = Arc::new(Rs256Key::generate("admin-tests").expect("signing key"));
+        let keys = SigningKeys::new(KeySet::single(
+            Rs256Key::generate("admin-tests").expect("signing key"),
+        ));
         let application = AdminApplication {
             service: AdminService::new(database.clone()),
             tokens: AdminTokens {
@@ -158,6 +161,7 @@ impl Harness {
     fn signed(&self, account: Account, audience: &str, acr: Acr, age: Duration) -> String {
         let now = Utc::now();
         self.keys
+            .current()
             .sign(
                 TokenType::Access,
                 &AccessTokenClaims {

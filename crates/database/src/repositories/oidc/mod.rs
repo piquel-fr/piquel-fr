@@ -33,6 +33,8 @@ pub struct InsertAuthorizationRequest {
     /// Whether the client pushed the request (RFC 9126), so the browser must claim
     /// it with [`OidcRepository::claim_pushed_authorization_request`].
     pub pushed: bool,
+    /// Fingerprint of the digest key that made `secret_digest`.
+    pub digest_key: String,
     /// Requesting client.
     pub client_id: ClientId,
     /// Registered redirect URI to answer on.
@@ -109,6 +111,8 @@ pub struct InsertAuthorizationCode {
     pub id: TokenId,
     /// Digest of the code secret.
     pub secret_digest: Vec<u8>,
+    /// Fingerprint of the digest key that made `secret_digest`.
+    pub digest_key: String,
     /// Client the code was issued to.
     pub client_id: ClientId,
     /// Authorizing account.
@@ -197,9 +201,10 @@ impl OidcRepository<'_> {
                     id, secret_digest, client_id, redirect_uri, client_state,
                     nonce, pkce_challenge, scopes, audience, force_login,
                     max_age, expires_at, force_consent, hinted_user_id, target_acr,
-                    pushed, prompt_none
+                    pushed, prompt_none, digest_key
                 ) VALUES (
-                    $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17
+                    $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17,
+                    $18
                 )",
                 input.id.as_uuid(),
                 input.secret_digest,
@@ -218,15 +223,17 @@ impl OidcRepository<'_> {
                 input.target_acr.map(Acr::as_str),
                 input.pushed,
                 input.prompt_none,
+                input.digest_key,
             )
         )?;
         Ok(())
     }
 
     /// Claims a pushed request for the browser, once: it must be `client`'s, and
-    /// neither claimed nor expired. Its secret becomes `new_digest`, so the
-    /// `request_uri` stops working, and it now expires at `expires_at`. Returns
-    /// `None` if no such request exists.
+    /// neither claimed nor expired, and its digest any of `digests`, one per
+    /// accepted digest key. Its secret becomes `new_digest`, made by the digest key
+    /// `new_digest_key`, so the `request_uri` stops working, and it now expires at
+    /// `expires_at`. Returns `None` if no such request exists.
     ///
     /// # Errors
     ///
@@ -234,9 +241,10 @@ impl OidcRepository<'_> {
     pub async fn claim_pushed_authorization_request(
         &mut self,
         id: TokenId,
-        digest: &[u8],
+        digests: &[Vec<u8>],
         client: &str,
         new_digest: &[u8],
+        new_digest_key: &str,
         expires_at: DateTime<Utc>,
     ) -> Result<Option<StoredAuthorizationRequest>, DatabaseError> {
         run!(
@@ -245,10 +253,10 @@ impl OidcRepository<'_> {
             sqlx::query_as!(
                 StoredAuthorizationRequest,
                 r#"UPDATE authorization_requests r
-                SET claimed_at = now(), secret_digest = $4, expires_at = $5
+                SET claimed_at = now(), secret_digest = $4, digest_key = $5, expires_at = $6
                 FROM oidc_clients c
                 WHERE r.id = $1
-                AND r.secret_digest = $2
+                AND r.secret_digest = ANY($2)
                 AND r.client_id = $3
                 AND r.pushed
                 AND r.claimed_at IS NULL
@@ -266,16 +274,18 @@ impl OidcRepository<'_> {
                     r.target_acr AS "target_acr: Acr",
                     r.claimed_at AS "started_at!""#,
                 id.as_uuid(),
-                digest,
+                digests,
                 client,
                 new_digest,
+                new_digest_key,
                 expires_at,
             )
         )
     }
 
     /// Finds an unconsumed, unexpired request of an enabled client by its id
-    /// and secret digest. A pushed request must be claimed first.
+    /// and secret digest, which may be any of `digests`: one per accepted digest
+    /// key. A pushed request must be claimed first.
     ///
     /// # Errors
     ///
@@ -283,7 +293,7 @@ impl OidcRepository<'_> {
     pub async fn find_authorization_request(
         &mut self,
         id: TokenId,
-        digest: &[u8],
+        digests: &[Vec<u8>],
     ) -> Result<Option<StoredAuthorizationRequest>, DatabaseError> {
         run!(
             self,
@@ -302,13 +312,13 @@ impl OidcRepository<'_> {
                 FROM authorization_requests r
                 JOIN oidc_clients c ON c.id = r.client_id
                 WHERE r.id = $1
-                AND r.secret_digest = $2
+                AND r.secret_digest = ANY($2)
                 AND r.consumed_at IS NULL
                 AND r.expires_at > now()
                 AND (NOT r.pushed OR r.claimed_at IS NOT NULL)
                 AND c.enabled"#,
                 id.as_uuid(),
-                digest,
+                digests,
             )
         )
     }
@@ -324,7 +334,7 @@ impl OidcRepository<'_> {
     pub async fn consume_authorization_request(
         &mut self,
         id: TokenId,
-        digest: &[u8],
+        digests: &[Vec<u8>],
     ) -> Result<StoredAuthorizationRequest, DatabaseError> {
         run!(
             self,
@@ -335,7 +345,7 @@ impl OidcRepository<'_> {
                 SET consumed_at = now()
                 FROM oidc_clients c
                 WHERE r.id = $1
-                AND r.secret_digest = $2
+                AND r.secret_digest = ANY($2)
                 AND r.consumed_at IS NULL
                 AND r.expires_at > now()
                 AND (NOT r.pushed OR r.claimed_at IS NOT NULL)
@@ -360,7 +370,7 @@ impl OidcRepository<'_> {
                     r.target_acr AS "target_acr: Acr",
                     COALESCE(r.claimed_at, r.created_at) AS "started_at!""#,
                 id.as_uuid(),
-                digest,
+                digests,
             )
         )
     }
@@ -380,8 +390,8 @@ impl OidcRepository<'_> {
             sqlx::query!(
                 "INSERT INTO authorization_codes (
                     id, secret_digest, client_id, user_id, session_id, redirect_uri,
-                    pkce_challenge, nonce, scopes, audience, expires_at, authentication
-                ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)",
+                    pkce_challenge, nonce, scopes, audience, expires_at, authentication, digest_key
+                ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)",
                 input.id.as_uuid(),
                 input.secret_digest,
                 input.client_id.as_str(),
@@ -394,6 +404,7 @@ impl OidcRepository<'_> {
                 input.audience,
                 input.expires_at,
                 Json(&input.authentication) as _,
+                input.digest_key,
             )
         )?;
         Ok(())
@@ -416,7 +427,7 @@ impl OidcRepository<'_> {
     pub async fn consume_code(
         &mut self,
         id: TokenId,
-        digest: &[u8],
+        digests: &[Vec<u8>],
         client_id: &ClientId,
     ) -> Result<ConsumedAuthorizationCode, CodeRedemptionError> {
         // If the code still looks redeemable, this update waits on a concurrent
@@ -432,7 +443,7 @@ impl OidcRepository<'_> {
                 SET consumed_at = now()
                 FROM oidc_clients cl, sessions s, users u
                 WHERE c.id = $1
-                AND c.secret_digest = $2
+                AND c.secret_digest = ANY($2)
                 AND c.consumed_at IS NULL
                 AND c.expires_at > now()
                 AND cl.id = c.client_id
@@ -458,13 +469,13 @@ impl OidcRepository<'_> {
                     c.nonce, c.scopes AS "scopes: JsonArray<String>", c.audience,
                     c.authentication AS "authentication: SessionAuthentication""#,
                 id.as_uuid(),
-                digest,
+                digests,
             )
         )?;
         match code {
             Some(code) => Ok(code),
             None => Err(
-                match self.revoke_replayed_code(id, digest, client_id).await? {
+                match self.revoke_replayed_code(id, digests, client_id).await? {
                     Some((user_id, revoked_families)) => CodeRedemptionError::Replay {
                         user_id,
                         revoked_families,
@@ -477,13 +488,13 @@ impl OidcRepository<'_> {
 
     /// Revokes the refresh families issued from an already consumed code and
     /// returns its account and the families it revoked, or `None` if `id`,
-    /// `digest` and `client_id` match no
+    /// `digests` and `client_id` match no
     /// consumed code. Matching the secret digest and client means neither a guessed
     /// code ID nor a leaked code presented by another client can revoke a grant.
     async fn revoke_replayed_code(
         &mut self,
         id: TokenId,
-        digest: &[u8],
+        digests: &[Vec<u8>],
         client_id: &ClientId,
     ) -> Result<Option<(UserId, Vec<TokenId>)>, DatabaseError> {
         // The row qualifies whether or not it is consumed, so FOR SHARE waits for
@@ -499,11 +510,11 @@ impl OidcRepository<'_> {
                 r#"SELECT user_id AS "user_id: UserId", consumed_at IS NOT NULL AS "consumed!"
                 FROM authorization_codes
                 WHERE id = $1
-                AND secret_digest = $2
+                AND secret_digest = ANY($2)
                 AND client_id = $3
                 FOR SHARE"#,
                 id.as_uuid(),
-                digest,
+                digests,
                 client_id.as_str(),
             )
         )?

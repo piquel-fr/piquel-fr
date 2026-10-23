@@ -9,12 +9,13 @@ mod logout;
 /// Code exchanges, refresh rotation and identity claims.
 mod token;
 
-use crate::config::OidcConfig;
+use crate::config::{OidcConfig, TokenDigestKeys};
+use crate::keys::SigningKeys;
 use crate::routes;
 use crate::security::{CSRF_HEADER, CacheClass, Cached};
 pub use error::OidcConfigError;
 use error::{OAuthCode, OAuthError, Reject};
-use piquel_crypto::{ClientSecret, Digest, Rs256Key, Secret};
+use piquel_crypto::{ClientSecret, CryptoError, Digest, Secret};
 
 use axum::{
     Router,
@@ -49,8 +50,8 @@ const CSRF_HEADER_VALUE: &str = "1";
 const FETCH_SITE_HEADER: &str = "sec-fetch-site";
 /// `Sec-Fetch-Site` value proving the request came from the issuer's own pages.
 const FETCH_SITE_SAME_ORIGIN: &str = "same-origin";
-/// Lifetime of signed access tokens; kept short because they cannot be revoked.
-const ACCESS_TOKEN_SECONDS: i64 = 300;
+/// Lifetime of signed access and ID tokens; kept short because they cannot be revoked.
+pub(crate) const ACCESS_TOKEN_SECONDS: i64 = 300;
 /// Maximum byte length of `state` and `nonce`.
 const MAX_STATE_BYTES: usize = 512;
 /// Maximum length of the base64 part of an HTTP Basic header.
@@ -75,14 +76,12 @@ pub struct OidcApplication {
     database: Database,
     /// HTTPS issuer origin, without a trailing slash.
     issuer: String,
-    /// HMAC key under which opaque token secrets are stored.
-    refresh_key: Arc<Secret>,
-    /// Persistent key that signs and verifies tokens.
-    keys: Arc<Rs256Key>,
+    /// Keys under which opaque token secrets are stored.
+    digest_keys: Arc<TokenDigestKeys>,
+    /// Keys that sign and verify tokens, reloaded from the database.
+    keys: SigningKeys,
     /// Server metadata, served at both well-known discovery paths.
     metadata: PublicDocument,
-    /// Public signing keys.
-    jwks: PublicDocument,
 }
 
 piquel_common::str_enum! {
@@ -284,18 +283,22 @@ const SUPPORTED_CLAIMS: [Claim; 10] = [
     Claim::Session,
 ];
 
-/// A public JSON document serialized once at startup. Responses share its bytes and
-/// let any cache keep them for an hour.
+/// A public JSON document, such as the metadata, serialized once at startup, or
+/// JWKS, serialized from the current key set. Responses let any cache keep them
+/// for an hour.
 #[derive(Clone)]
-struct PublicDocument(Bytes);
+pub(crate) struct PublicDocument(Bytes);
 
 impl PublicDocument {
-    /// How long caches may reuse the document.
-    const CACHE: CacheClass = CacheClass::Public {
-        max_age: std::time::Duration::from_secs(3600),
+    /// How long caches may reuse the document, in seconds. Signing key rotation
+    /// publishes keys for longer than this before and after they sign.
+    pub(crate) const MAX_AGE_SECONDS: i64 = 3600;
+    /// The caching [`Self::MAX_AGE_SECONDS`] allows.
+    pub(crate) const CACHE: CacheClass = CacheClass::Public {
+        max_age: std::time::Duration::from_secs(Self::MAX_AGE_SECONDS.unsigned_abs()),
     };
 
-    /// Serializes `value` once.
+    /// Serializes `value`.
     fn new(value: &impl Serialize) -> Result<Self, serde_json::Error> {
         Ok(Self(serde_json::to_vec(value)?.into()))
     }
@@ -348,16 +351,19 @@ impl axum::extract::FromRef<OidcApplication> for Database {
 }
 
 impl OidcApplication {
-    /// Builds the provider from its validated configuration, serializing its public
-    /// documents once.
-    pub(crate) fn new(database: Database, config: &OidcConfig) -> Result<Self, OidcConfigError> {
+    /// Builds the provider from its validated configuration and the shared
+    /// signing keys, serializing its metadata once.
+    pub(crate) fn new(
+        database: Database,
+        config: &OidcConfig,
+        keys: SigningKeys,
+    ) -> Result<Self, OidcConfigError> {
         Ok(Self {
             database,
             issuer: config.origin.serialized(),
-            refresh_key: config.refresh_key.clone(),
-            keys: config.keys.clone(),
+            digest_keys: config.digest_keys.clone(),
+            keys,
             metadata: PublicDocument::new(&Self::metadata(config)?)?,
-            jwks: PublicDocument::new(&config.keys.jwks())?,
         })
     }
 
@@ -440,9 +446,13 @@ impl OidcApplication {
         std::future::ready(app.metadata)
     }
 
-    /// Serves the public signing keys.
-    fn jwks(State(app): State<Self>) -> std::future::Ready<PublicDocument> {
-        std::future::ready(app.jwks)
+    /// Serves the published signing keys: the active key, the `next` one and
+    /// those still retiring.
+    fn jwks(State(app): State<Self>) -> std::future::Ready<Result<PublicDocument, OAuthError>> {
+        std::future::ready(
+            PublicDocument::new(app.keys.current().jwks())
+                .map_err(|error| CryptoError::Json(error).into()),
+        )
     }
 
     /// Authenticates the client at the token, revocation and pushed authorization
@@ -595,11 +605,16 @@ impl OidcApplication {
         }
     }
 
-    /// HMAC of an opaque token's secret, the only form in which it is stored.
-    fn token_digest(&self, token: &OpaqueToken) -> Result<Digest, OAuthError> {
-        Ok(Digest::hmac(
-            self.refresh_key.as_bytes(),
-            token.secret.as_bytes(),
-        )?)
+    /// HMAC of a new opaque token's secret, the only form in which it is
+    /// stored, and the fingerprint of the key that made it.
+    fn token_digest(&self, token: &OpaqueToken) -> Result<(Vec<u8>, String), OAuthError> {
+        let (digest, key) = self.digest_keys.issue(&token.secret)?;
+        Ok((digest.as_bytes().to_vec(), key.to_owned()))
+    }
+
+    /// Every form in which a presented opaque token's secret may be stored: one
+    /// digest per accepted digest key.
+    fn accepted_digests(&self, token: &OpaqueToken) -> Result<Vec<Vec<u8>>, OAuthError> {
+        Ok(self.digest_keys.accepted(&token.secret)?)
     }
 }

@@ -10,7 +10,7 @@ mod web 'just/web.just'
 # Scratch PostgreSQL clusters, database tests, the SQLx query cache and migrations.
 mod db 'just/db.just'
 
-# auth-service commands with the caller's configuration, and signing keys.
+# auth-service commands with the caller's configuration, and secret generation.
 mod auth 'just/auth.just'
 
 # The admin dashboard with the caller's configuration.

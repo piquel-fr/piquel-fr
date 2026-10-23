@@ -13,7 +13,7 @@ Keep implementations simple. Follow neighbouring modules and share repeated logi
   variables, validated URLs, secret references), `email` (address normalization),
   `events` (domain events) and `sqlx` (column decoding).
 - `piquel-crypto` (`crates/crypto`): random secrets, digests, HMAC, constant-time
-  comparison, PKCE and RS256 signing.
+  comparison, PKCE, RS256 signing, key sets and AES-256-GCM sealing of keys at rest.
 - `piquel-auth` (`crates/auth-sdk`): the public Rust SDK, following
   [sdk.md](sdk.md). It depends only on `piquel-common`, without features, among
   the workspace crates, since it is published.
@@ -22,14 +22,16 @@ Keep implementations simple. Follow neighbouring modules and share repeated logi
 - `piquel-telemetry` (`crates/telemetry`): logs, traces and metrics, following
   [telemetry.md](telemetry.md).
 
-Application code uses `Secret`, `Digest`, `Pkce` and `Rs256Key` instead of calling
-`openssl`, `sha2` or `rand` directly. Environment reads go through `Variable`.
+Application code uses `Secret`, `Digest`, `Pkce`, `Rs256Key`, `KeySet` and
+`KeyEncryptionKey` instead of calling `openssl`, `sha2` or `rand` directly.
+Environment reads go through `Variable`.
 Keep cryptographic implementations in the crypto crate so they can be audited together.
 
 ## Configuration
 
 There is no development mode. Use `just preview` for development over HTTPS through
-piqueld. Every environment needs HTTPS URLs and a persistent signing key.
+piqueld. Every environment needs HTTPS URLs, a key-encryption key and a token
+digest key.
 
 Declare each environment variable as a `Variable` constant beside its configuration
 section. `ConfigurationError` names the variable, explains how to fix it and retains

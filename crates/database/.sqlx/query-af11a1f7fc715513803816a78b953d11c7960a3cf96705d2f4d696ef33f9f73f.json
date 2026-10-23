@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "SELECT\n                    t.family_id AS \"family_id: TokenId\", t.consumed_at,\n                    f.user_id AS \"user_id: UserId\", f.client_id,\n                    f.session_id AS \"session_id: SessionId\", f.audience, f.scopes,\n                    f.authentication, c.allow_refresh, c.allowed_scopes, c.allowed_audiences\n                FROM refresh_tokens t\n                JOIN refresh_token_families f ON f.id = t.family_id\n                JOIN oidc_clients c ON c.id = f.client_id\n                JOIN sessions s ON s.id = f.session_id\n                JOIN users u ON u.id = f.user_id\n                WHERE t.id = $1\n                AND t.secret_digest = $2\n                AND f.client_id = $3\n                AND t.expires_at > now()\n                AND f.revoked_at IS NULL\n                AND c.enabled\n                AND s.user_id = f.user_id\n                AND s.revoked_at IS NULL\n                AND s.expires_at > now()\n                AND u.status = 'active'\n                FOR UPDATE OF t",
+  "query": "SELECT\n                    t.family_id AS \"family_id: TokenId\", t.consumed_at,\n                    f.user_id AS \"user_id: UserId\", f.client_id,\n                    f.session_id AS \"session_id: SessionId\", f.audience, f.scopes,\n                    f.authentication, c.allow_refresh, c.allowed_scopes, c.allowed_audiences\n                FROM refresh_tokens t\n                JOIN refresh_token_families f ON f.id = t.family_id\n                JOIN oidc_clients c ON c.id = f.client_id\n                JOIN sessions s ON s.id = f.session_id\n                JOIN users u ON u.id = f.user_id\n                WHERE t.id = $1\n                AND t.secret_digest = ANY($2)\n                AND f.client_id = $3\n                AND t.expires_at > now()\n                AND f.revoked_at IS NULL\n                AND c.enabled\n                AND s.user_id = f.user_id\n                AND s.revoked_at IS NULL\n                AND s.expires_at > now()\n                AND u.status = 'active'\n                FOR UPDATE OF t",
   "describe": {
     "columns": [
       {
@@ -62,7 +62,7 @@
     "parameters": {
       "Left": [
         "Uuid",
-        "Bytea",
+        "ByteaArray",
         "Text"
       ]
     },
@@ -80,5 +80,5 @@
       false
     ]
   },
-  "hash": "d3b2c26c4435c21a05fbb96c7db8e365164bab49c82f2bddfbfb925e52799e88"
+  "hash": "af11a1f7fc715513803816a78b953d11c7960a3cf96705d2f4d696ef33f9f73f"
 }

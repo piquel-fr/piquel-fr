@@ -57,7 +57,7 @@ const RATE_WINDOW: StdDuration = StdDuration::from_mins(1);
 /// Deadline includes origin checks, rate-limit persistence and the handler.
 const REQUEST_TIMEOUT: StdDuration = StdDuration::from_secs(30);
 /// Browser session lifetime, also used by its host cookie.
-const SESSION_LIFETIME_DAYS: u32 = 30;
+pub(crate) const SESSION_LIFETIME_DAYS: u32 = 30;
 /// Browser flow cookies slightly outlive their server-side ceremonies.
 const FLOW_COOKIE_MAX_AGE: u32 = 600;
 pub(crate) use piquel_common::protocol::step_up::CONFIRMATION_MAX_AGE;
