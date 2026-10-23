@@ -15,13 +15,25 @@ export type Configuration = {
 };
 export const providerName = (provider: Provider) => (provider === 'github' ? 'GitHub' : 'Google');
 
-/** The action needs a passkey confirmation of the session at most `maxAge` seconds old. */
-export class StepUpRequired extends Error {
+/** A failed auth request, with a message the page can show as is. */
+export class ApiError extends Error {
   constructor(
     message: string,
-    readonly maxAge: number
+    readonly status: number
   ) {
     super(message);
+    this.name = 'ApiError';
+  }
+}
+
+/** The action needs a passkey confirmation of the session at most `maxAge` seconds old. */
+export class StepUpRequired extends ApiError {
+  constructor(
+    message: string,
+    status: number,
+    readonly maxAge: number
+  ) {
+    super(message, status);
     this.name = 'StepUpRequired';
   }
 }
@@ -40,7 +52,7 @@ export class AuthApi {
     return response.status === 204 ? (undefined as T) : (response.json() as Promise<T>);
   }
   /** Turns a failed response into an error whose message the page can show as is. */
-  private async failure(response: Response): Promise<Error> {
+  private async failure(response: Response): Promise<ApiError> {
     const problem: unknown = await response.json().catch(() => null);
     const text = (name: string): string | null => {
       if (!problem || typeof problem !== 'object') return null;
@@ -53,7 +65,11 @@ export class AuthApi {
     const description = text('error_description');
     const maxAge = (problem as Record<string, unknown> | null)?.max_age;
     if (text('code') === 'step_up_required' && typeof maxAge === 'number')
-      return new StepUpRequired(error ?? 'Confirm with your passkey to continue.', maxAge);
+      return new StepUpRequired(
+        error ?? 'Confirm with your passkey to continue.',
+        response.status,
+        maxAge
+      );
     const protocolErrors: Record<string, string> = {
       invalid_request:
         'This sign-in request is invalid or expired. Start again from the application.',
@@ -65,7 +81,7 @@ export class AuthApi {
       temporarily_unavailable: 'Sign-in is temporarily unavailable. Please try again.'
     };
     const protocolMessage = error === null ? undefined : protocolErrors[error];
-    return new Error(
+    return new ApiError(
       response.status === 429
         ? 'Too many attempts. Wait a moment and try again.'
         : protocolMessage
@@ -76,7 +92,8 @@ export class AuthApi {
             error ??
             (response.status === 401
               ? 'Please sign in again.'
-              : 'This action could not be completed. Please try again.'))
+              : 'This action could not be completed. Please try again.')),
+      response.status
     );
   }
   async form(path: string, body: URLSearchParams): Promise<{ redirect_url: string }> {

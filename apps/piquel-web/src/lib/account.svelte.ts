@@ -1,5 +1,6 @@
 import { getContext, setContext } from 'svelte';
 import {
+  ApiError,
   AuthApi,
   errorMessage,
   type Configuration,
@@ -63,11 +64,15 @@ export class Account {
     const platform = platforms[device.platform];
     return platform ? `${browser} on ${platform}` : browser;
   }
-  /** Loads the public configuration, then the signed-in user. */
+  /** Loads the public configuration, then the signed-in user, if any. */
   async load(): Promise<void> {
     try {
       this.config = await this.api.request('/config');
-      this.session = await this.api.request('/session');
+      // Auth answers 401 when this browser has no session; that is not a failure.
+      this.session = await this.api.request<Session>('/session').catch((cause: unknown) => {
+        if (cause instanceof ApiError && cause.status === 401) return null;
+        throw cause;
+      });
     } finally {
       this.loading = false;
     }
