@@ -374,3 +374,49 @@ async fn code_replay_by_another_client_revokes_nothing() {
         .await
         .expect("the family still rotates");
 }
+
+/// A code the release before grants issued has no grant. Revoking its client while
+/// an exchange holds the code still covers it, so the exchange cannot create a
+/// fresh grant for it afterwards.
+#[tokio::test]
+#[ignore = "requires a disposable TEST_DATABASE_URL"]
+async fn revocation_covers_a_code_without_a_grant_mid_exchange() {
+    let pool = Database::test_pool().await;
+    let client = client(&pool).await;
+    let grant = Grant::new(&pool, &client).await;
+    let mut exchange = DatabaseTransaction::new(pool.begin().await.expect("exchange"));
+    let code = exchange
+        .oidc()
+        .consume_code(grant.code, &grant.code_digest, &client)
+        .await
+        .expect("redeem");
+    let mut revocation = DatabaseTransaction::new(pool.begin().await.expect("revocation"));
+    revocation
+        .users()
+        .find_active_by_id_for_update(grant.user)
+        .await
+        .expect("lock")
+        .expect("account");
+    assert_eq!(
+        revocation
+            .oidc()
+            .revoke_grants(grant.user, &client)
+            .await
+            .expect("revoke"),
+        Some(vec![])
+    );
+    revocation.commit().await.expect("commit revocation");
+    assert!(
+        !exchange
+            .oidc()
+            .use_grant(
+                grant.user,
+                &client,
+                &code.audience,
+                &code.scopes,
+                code.grant_generation
+            )
+            .await
+            .expect("use")
+    );
+}

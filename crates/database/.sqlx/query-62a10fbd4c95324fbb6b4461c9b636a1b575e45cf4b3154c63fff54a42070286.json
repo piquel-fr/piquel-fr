@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO oidc_consents (user_id, client_id, audience, scopes, implicit)\n                SELECT DISTINCT $1::UUID, $2::TEXT, audience, '[]'::JSONB, TRUE\n                FROM (\n                    SELECT audience\n                    FROM refresh_token_families\n                    WHERE user_id = $1\n                    AND client_id = $2\n                    AND revoked_at IS NULL\n                    UNION ALL\n                    SELECT audience\n                    FROM authorization_codes\n                    WHERE user_id = $1\n                    AND client_id = $2\n                    AND consumed_at IS NULL\n                    AND expires_at > now()\n                ) credentials\n                ON CONFLICT (user_id, client_id, audience) DO NOTHING",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "62a10fbd4c95324fbb6b4461c9b636a1b575e45cf4b3154c63fff54a42070286"
+}

@@ -696,8 +696,10 @@ impl OidcRepository<'_> {
     ///
     /// A credential without any grant was issued by the release before grants,
     /// during the deploy that added them. Its grant is created implicit, with the
-    /// credential's `scopes` and generation: grants are never deleted, so a missing
-    /// one was never revoked.
+    /// credential's `scopes` and generation: grants are never deleted, and
+    /// [`Self::revoke_grants`] covers every credential, so a missing one was never
+    /// revoked. That release may also have issued scopes the grant lacks, which are
+    /// added to it as implicit.
     ///
     /// # Errors
     ///
@@ -717,7 +719,13 @@ impl OidcRepository<'_> {
                 "INSERT INTO oidc_consents (user_id, client_id, audience, scopes, implicit, generation)
                 VALUES ($1, $2, $3, $4, TRUE, $5)
                 ON CONFLICT (user_id, client_id, audience) DO UPDATE
-                SET last_used_at = now()
+                SET last_used_at = now(),
+                    scopes = (
+                        SELECT jsonb_agg(DISTINCT value)
+                        FROM jsonb_array_elements(oidc_consents.scopes || EXCLUDED.scopes)
+                    ),
+                    implicit = oidc_consents.implicit
+                        OR NOT oidc_consents.scopes @> EXCLUDED.scopes
                 WHERE oidc_consents.generation = $5
                 AND oidc_consents.revoked_at IS NULL",
                 user.as_uuid(),
@@ -765,8 +773,10 @@ impl OidcRepository<'_> {
         )
     }
 
-    /// Revokes the user's grants to `client` across audiences: each moves to a new
-    /// generation, marked revoked and without scopes. Then revokes the client's
+    /// Revokes the user's grants to `client` across audiences, with one for each
+    /// audience of its outstanding credentials, a code being exchanged right now
+    /// included: each moves to a new generation, marked revoked and without
+    /// scopes. Then revokes the client's
     /// refresh families of the user and expires its outstanding codes, which the new
     /// generation already rejects. Codes expire rather than count as redeemed, so
     /// presenting one later is not taken for a replay. Returns the revoked families,
@@ -784,6 +794,33 @@ impl OidcRepository<'_> {
         user: UserId,
         client: &ClientId,
     ) -> Result<Option<Vec<TokenId>>, DatabaseError> {
+        // A credential the release before grants issued may have none yet. Give it
+        // one to revoke, so that using it later cannot create a fresh grant.
+        run!(
+            self,
+            execute,
+            sqlx::query!(
+                "INSERT INTO oidc_consents (user_id, client_id, audience, scopes, implicit)
+                SELECT DISTINCT $1::UUID, $2::TEXT, audience, '[]'::JSONB, TRUE
+                FROM (
+                    SELECT audience
+                    FROM refresh_token_families
+                    WHERE user_id = $1
+                    AND client_id = $2
+                    AND revoked_at IS NULL
+                    UNION ALL
+                    SELECT audience
+                    FROM authorization_codes
+                    WHERE user_id = $1
+                    AND client_id = $2
+                    AND consumed_at IS NULL
+                    AND expires_at > now()
+                ) credentials
+                ON CONFLICT (user_id, client_id, audience) DO NOTHING",
+                user.as_uuid(),
+                client.as_str(),
+            )
+        )?;
         let revoked = run!(
             self,
             execute,

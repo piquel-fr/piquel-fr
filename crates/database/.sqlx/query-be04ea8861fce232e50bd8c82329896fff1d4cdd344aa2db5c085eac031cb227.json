@@ -1,0 +1,18 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO oidc_consents (user_id, client_id, audience, scopes, implicit, generation)\n                VALUES ($1, $2, $3, $4, TRUE, $5)\n                ON CONFLICT (user_id, client_id, audience) DO UPDATE\n                SET last_used_at = now(),\n                    scopes = (\n                        SELECT jsonb_agg(DISTINCT value)\n                        FROM jsonb_array_elements(oidc_consents.scopes || EXCLUDED.scopes)\n                    ),\n                    implicit = oidc_consents.implicit\n                        OR NOT oidc_consents.scopes @> EXCLUDED.scopes\n                WHERE oidc_consents.generation = $5\n                AND oidc_consents.revoked_at IS NULL",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Text",
+        "Text",
+        "Jsonb",
+        "Int8"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "be04ea8861fce232e50bd8c82329896fff1d4cdd344aa2db5c085eac031cb227"
+}
