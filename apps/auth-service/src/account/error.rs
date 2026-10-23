@@ -1,9 +1,10 @@
-//! Failures of a shared settings operation, from the owner's routes or the CLI.
+//! Failures of an account operation, from the owner's routes or the CLI.
 
 use crate::{
     AdminError,
     emails::EmailError,
     federation::FederationError,
+    history::HistoryError,
     passkey::PasskeyError,
     security::{ApiError, SessionError},
     sessions::SessionsError,
@@ -11,8 +12,8 @@ use crate::{
 use axum::response::{IntoResponse, Response};
 use piquel_repository::DatabaseError;
 
-/// Why a shared settings operation failed: the setting's own failure, or the
-/// actor's. The owner's routes answer each failure as its module always has.
+/// Why an account operation failed: the setting's own failure, or the actor's.
+/// The owner's routes answer each failure as its module always has.
 #[derive(Debug, thiserror::Error)]
 pub(crate) enum AccountError {
     /// A passkey could not be renamed or removed.
@@ -27,6 +28,9 @@ pub(crate) enum AccountError {
     /// A session could not be signed out.
     #[error(transparent)]
     Session(#[from] SessionsError),
+    /// A history entry could not be reported.
+    #[error(transparent)]
+    History(#[from] HistoryError),
     /// The owner's session ended, or lacks a recent enough passkey confirmation.
     #[error(transparent)]
     Owner(#[from] SessionError),
@@ -46,6 +50,7 @@ impl From<AccountError> for ApiError {
             AccountError::Identity(error) => error.into(),
             AccountError::Email(error) => error.into(),
             AccountError::Session(error) => error.into(),
+            AccountError::History(error) => error.into(),
             AccountError::Owner(error) => error.into(),
             AccountError::Operator(error) => error.into(),
             AccountError::Database(error) => error.into(),

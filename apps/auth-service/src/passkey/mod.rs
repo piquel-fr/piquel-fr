@@ -1,5 +1,5 @@
 //! Browser-bound `WebAuthn` ceremonies, passkey management and session confirmation.
-use crate::account::{AccountError, AccountService, ConfirmedSubject, Subject, Viewer};
+use crate::account::{AccountError, AccountService, Owner, Subject, Viewer};
 use crate::config::PasskeyConfig;
 use crate::federation::FederationApplication;
 use crate::routes;
@@ -42,11 +42,11 @@ use ceremonies::{
 };
 pub use error::PasskeyConfigError;
 pub(crate) use error::PasskeyError;
-pub(crate) use types::Rename;
 use types::{
-    AuthenticationFinish, DisplayName, EnrollmentStart, LoginStart, PasskeyKind, PasskeyName,
+    AuthenticationFinish, DisplayName, EnrollmentStart, LoginStart, PasskeyKind,
     RegistrationFinish, RegistrationStart, SessionView, UserView,
 };
+pub(crate) use types::{PasskeyName, Rename};
 
 /// Browser passkey ceremonies, passkey management and session confirmation.
 #[derive(Clone)]
@@ -726,14 +726,12 @@ impl PasskeyApplication {
             .await?)
     }
 
-    /// Adds a verified credential under the session lock. The confirmation authorized
-    /// the ceremony at start, and the ceremony belongs to this session and expires on
-    /// its own, so a confirmation lapsing at the authenticator never discards the new
-    /// credential.
+    /// Finishes the owner's enrollment of another passkey: the ceremony must be
+    /// the one this session started, and the authenticator's credential must
+    /// verify against it.
     async fn finish_enrollment(
         State(app): State<Self>,
-        context: RequestContext,
-        security::Session(session): security::Session,
+        owner: Owner,
         headers: HeaderMap,
         Json(input): Json<RegistrationFinish>,
     ) -> Result<StatusCode, ApiError> {
@@ -746,24 +744,16 @@ impl PasskeyApplication {
         } = app
             .consume::<EnrollmentCeremony>(&headers, input.ceremony_id)
             .await?;
-        if user_id != session.user_id || session_id != session.id {
+        if user_id != owner.user() || session_id != owner.session().id {
             return Err(PasskeyError::SessionChanged.into());
         }
         let key = app
             .webauthn
             .finish_passkey_registration(&input.credential, &state)
             .map_err(PasskeyError::from)?;
-        let mut tx = app.database.begin().await?;
-        security::Session::lock(&mut tx, &session).await?;
-        Self::insert_passkey(
-            &mut tx,
-            &context.user(&session),
-            user_id,
-            key,
-            friendly_name,
-        )
-        .await?;
-        tx.commit().await?;
+        AccountService::new(app.database.clone())
+            .add_passkey(&owner, key, friendly_name)
+            .await?;
         Ok(StatusCode::NO_CONTENT)
     }
 
@@ -814,8 +804,32 @@ impl PasskeyApplication {
 }
 
 /// Passkey settings any administrator may also change: listing, renaming and
-/// removing.
+/// removing. Only the owner adds a passkey, since it is a way to sign in.
 impl AccountService {
+    /// Adds `key`, a passkey the owner's browser registered and the enrollment
+    /// ceremony verified, under the owner's session lock. A recent confirmation
+    /// authorized the ceremony at its start, and the ceremony belongs to this
+    /// session and expires on its own, so a confirmation lapsing at the
+    /// authenticator never discards the new credential.
+    pub(crate) async fn add_passkey(
+        &self,
+        owner: &Owner,
+        key: Passkey,
+        friendly_name: PasskeyName,
+    ) -> Result<(), AccountError> {
+        let mut tx = self.database.begin().await?;
+        owner.lock(&mut tx).await?;
+        PasskeyApplication::insert_passkey(
+            &mut tx,
+            &owner.context(),
+            owner.user(),
+            key,
+            friendly_name,
+        )
+        .await?;
+        Ok(tx.commit().await?)
+    }
+
     /// Lists public labels and identifiers of the account's active passkeys.
     pub(crate) async fn passkeys(
         &self,
@@ -857,11 +871,11 @@ impl AccountService {
     /// always remains, even with a social identity linked.
     pub(crate) async fn revoke_passkey(
         &self,
-        subject: &ConfirmedSubject,
+        subject: &Subject,
         id: PasskeyId,
     ) -> Result<(), AccountError> {
         let mut tx = self.database.begin().await?;
-        subject.lock(&mut tx).await?;
+        subject.lock_confirmed(&mut tx).await?;
         if !tx.passkeys().revoke_if_not_last(id, subject.user()).await? {
             return Err(PasskeyError::LastPasskey.into());
         }

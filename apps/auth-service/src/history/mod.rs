@@ -1,9 +1,9 @@
 //! The account's security history, and the owner's reports of entries that were
 //! not theirs. Any administrator may also read the history, which
 //! [`AccountService`] serves; only the owner can report an entry.
-use crate::account::{AccountError, AccountService, Viewer};
+use crate::account::{AccountError, AccountService, Owner, Viewer};
 use crate::routes;
-use crate::security::{self, ApiError, RequestContext};
+use crate::security::ApiError;
 use axum::{
     Json, Router,
     extract::{Path, State},
@@ -23,7 +23,7 @@ use std::{collections::BTreeMap, net::IpAddr};
 
 /// History failures and their browser response mapping.
 mod error;
-use error::HistoryError;
+pub(crate) use error::HistoryError;
 
 /// Entries per page.
 const PAGE_SIZE: u16 = 50;
@@ -142,23 +142,40 @@ impl HistoryApplication {
             .with_state(self)
     }
 
-    /// Reports an entry the account caused as not the user's. In one transaction,
-    /// records the report, ends every other session of the account and revokes
-    /// every refresh family, this session's included. Returns the action that
-    /// undoes the entry, if any.
-    ///
-    /// A session is enough: the worst a stolen cookie can do here is sign the user
-    /// out of their other devices. Undoing the entry needs a passkey confirmation.
+    /// Reports an entry the owner's account caused as not theirs, and returns the
+    /// action that undoes it, if any.
     async fn report(
         State(app): State<Self>,
-        context: RequestContext,
-        security::Session(session): security::Session,
+        owner: Owner,
         Path(event_id): Path<EventId>,
     ) -> Result<Json<Report>, ApiError> {
-        let mut tx = app.database.begin().await?;
-        security::Session::lock(&mut tx, &session).await?;
+        let follow_up = AccountService::new(app.database.clone())
+            .report(&owner, event_id)
+            .await?;
+        Ok(Json(Report { follow_up }))
+    }
+}
+
+/// The history any administrator may also read, and the reports only its owner
+/// makes.
+impl AccountService {
+    /// Reports an entry the account caused as not the owner's. In one
+    /// transaction, records the report, ends every other session of the account
+    /// and revokes every refresh family, this session's included. Returns the
+    /// action that undoes the entry, if any.
+    ///
+    /// The owner's session is enough: the worst a stolen cookie can do here is
+    /// sign the owner out of their other devices. Undoing the entry needs a
+    /// passkey confirmation.
+    pub(crate) async fn report(
+        &self,
+        owner: &Owner,
+        event_id: EventId,
+    ) -> Result<Option<FollowUp>, AccountError> {
+        let mut tx = self.database.begin().await?;
+        owner.lock(&mut tx).await?;
         let filter = EventFilter {
-            subject: Some(session.user_id),
+            subject: Some(owner.user()),
             id: Some(event_id),
             ..EventFilter::default()
         };
@@ -173,33 +190,28 @@ impl HistoryApplication {
             .known()
             .and_then(DomainEvent::history_entry)
             .ok_or(HistoryError::EntryNotFound)?;
-        if !matches!(stored.actor, Actor::User { user_id, .. } if user_id == session.user_id) {
+        if !matches!(stored.actor, Actor::User { user_id, .. } if user_id == owner.user()) {
             return Err(HistoryError::NotReportable.into());
         }
+        let context = owner.context();
         tx.record(
-            &context.user(&session),
-            Some(session.user_id),
+            &context,
+            Some(owner.user()),
             DomainEvent::CompromiseReported { event_id },
         )
         .await?;
-        security::Session::revoke(
-            &mut tx,
-            context,
-            &session,
-            SessionScope::AllExcept(session.id),
-            RevocationReason::CompromiseReported,
+        tx.revoke_sessions(
+            &context,
+            owner.user(),
+            SessionScope::AllExcept(owner.session().id),
+            &RevocationReason::CompromiseReported,
         )
         .await?;
-        tx.tokens().revoke_all_for_user(session.user_id).await?;
+        tx.tokens().revoke_all_for_user(owner.user()).await?;
         tx.commit().await?;
-        Ok(Json(Report {
-            follow_up: entry.follow_up(),
-        }))
+        Ok(entry.follow_up())
     }
-}
 
-/// The history any administrator may also read.
-impl AccountService {
     /// Returns a page of the account's entries, newest first, older than
     /// `before`. Events the owner does not see are skipped, and reading continues
     /// until the page is full, the history ends or [`MAX_BATCHES`] were read. Only

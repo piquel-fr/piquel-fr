@@ -4,7 +4,7 @@
 use super::{CliError, Confirm, Console, Output};
 use crate::{
     Reason, UserRef,
-    account::{AccountOperation, ConfirmedSubject, Subject, Viewer},
+    account::{AccountOperation, Subject, Viewer},
     emails::EmailView,
     history::HistoryPage,
     sessions::{Revoked, SessionItem},
@@ -179,11 +179,6 @@ impl Change {
     fn on(self, user: UserId, console: &Console) -> Subject {
         Subject::operator(user, console.operator.clone(), self.reason)
     }
-
-    /// [`Self::on`], for a change the owner would have to confirm.
-    fn confirmed(self, user: UserId, console: &Console) -> ConfirmedSubject {
-        ConfirmedSubject::operator(user, console.operator.clone(), self.reason)
-    }
 }
 
 impl AccountCommand {
@@ -243,7 +238,7 @@ impl AccountCommand {
                 confirm.ask(&format!(
                     "Remove passkey {passkey} of {user} ({id}) and sign it out everywhere"
                 ))?;
-                let subject = change.confirmed(id, console);
+                let subject = change.on(id, console);
                 account.revoke_passkey(&subject, passkey).await?;
             }
             Setting::Identities(Identities::List { output }) => {
@@ -260,18 +255,18 @@ impl AccountCommand {
                 confirm.ask(&format!(
                     "Unlink {provider} from {user} ({id}) and sign it out everywhere"
                 ))?;
-                let subject = change.confirmed(id, console);
+                let subject = change.on(id, console);
                 account.unlink_identity(&subject, provider).await?;
             }
             Setting::Emails(Emails::List { output }) => {
                 output.print(&account.emails(&read()).await?[..], Self::print_emails)?;
             }
             Setting::Emails(Emails::Primary { email, change }) => {
-                let subject = change.confirmed(id, console);
+                let subject = change.on(id, console);
                 account.make_primary_email(&subject, email).await?;
             }
             Setting::Emails(Emails::Remove { email, change }) => {
-                let subject = change.confirmed(id, console);
+                let subject = change.on(id, console);
                 account.remove_email(&subject, email).await?;
             }
             Setting::Sessions(Sessions::List { output }) => {

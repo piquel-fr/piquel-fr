@@ -1,23 +1,25 @@
-//! Account settings any administrator may also change, as [`AccountService`]
-//! operations on a [`Subject`], for changes, or a [`Viewer`], for reads: the
-//! account, and who acts on it. The owner's
-//! `/account` routes run them with the subject of their session cookie, and the
-//! `account` command with the operator at the terminal. The admin dashboard will
-//! call them in-process, as an administrator.
+//! What can be done to an account, as [`AccountService`] operations on the
+//! account and who acts on it: an [`Owner`], only for what the owner alone may
+//! do; a [`Subject`], for changes any administrator may also make; or a
+//! [`Viewer`], for reads. The owner's routes run them with the owner of their
+//! session cookie, and the `account` command with the operator at the terminal.
+//! The admin dashboard will call them in-process, as an administrator.
 //!
 //! The rule for sharing: administrators may view, edit and remove, but never add
 //! a way to sign in or to receive the account's email, which would let them take
-//! the account over. Operations that add one, the owner's own reports, and the
-//! owner's clients, which administrators manage through `AdminService`, stay with
-//! their modules, for the owner only.
+//! the account over. Adding a passkey, linking an identity, adding or verifying
+//! an address, and reporting a history entry take an [`Owner`], which only the
+//! session cookie builds, so an administrator cannot call them. The owner's
+//! clients, which administrators manage through `AdminService`, are the owner's
+//! too.
 
-/// Failures of the shared operations.
+/// Failures of the account operations.
 mod error;
 /// The account acted on, and who acts on it.
 mod subject;
 
 pub(crate) use error::AccountError;
-pub(crate) use subject::{ConfirmedSubject, Subject, Viewer};
+pub(crate) use subject::{Owner, Subject, Viewer};
 
 use crate::{
     emails::EmailView,
@@ -168,7 +170,7 @@ impl AccountApplication {
     /// Removes a passkey, keeping at least one.
     async fn revoke_passkey(
         State(app): State<Self>,
-        subject: ConfirmedSubject,
+        subject: Subject,
         Path(id): Path<PasskeyId>,
     ) -> Result<StatusCode, AccountError> {
         app.service.revoke_passkey(&subject, id).await?;
@@ -186,7 +188,7 @@ impl AccountApplication {
     /// Unlinks the provider the path names.
     async fn unlink_identity(
         State(app): State<Self>,
-        subject: ConfirmedSubject,
+        subject: Subject,
         Path(provider): Path<String>,
     ) -> Result<StatusCode, AccountError> {
         let provider = provider
@@ -207,7 +209,7 @@ impl AccountApplication {
     /// Makes a verified address the primary one.
     async fn make_primary_email(
         State(app): State<Self>,
-        subject: ConfirmedSubject,
+        subject: Subject,
         Path(id): Path<EmailId>,
     ) -> Result<StatusCode, AccountError> {
         app.service.make_primary_email(&subject, id).await?;
@@ -217,7 +219,7 @@ impl AccountApplication {
     /// Removes an address.
     async fn remove_email(
         State(app): State<Self>,
-        subject: ConfirmedSubject,
+        subject: Subject,
         Path(id): Path<EmailId>,
     ) -> Result<StatusCode, AccountError> {
         app.service.remove_email(&subject, id).await?;

@@ -1,24 +1,38 @@
 //! The account a settings operation reads or changes, and who acts on it.
 
-use super::{AccountApplication, AccountError};
+use super::AccountError;
 use crate::{
     Operator, Reason,
-    security::{ApiError, CONFIRMATION_MAX_AGE, Confirmed, RequestContext, Session},
+    security::{ApiError, Confirmed, OptionalSession, RequestContext, Session, SessionError},
 };
-use axum::{extract::FromRequestParts, http::request::Parts};
+use axum::{
+    extract::{FromRef, FromRequestParts, OptionalFromRequestParts},
+    http::request::Parts,
+};
 use piquel_common::{
     SessionId, UserId,
     events::{DomainEvent, EventContext, RevocationReason},
 };
 use piquel_repository::{Database, DatabaseTransaction, SessionScope, StoredSession};
-use std::ops::Deref;
 
-/// The account a settings change applies to, and who makes it. Changes take it
-/// instead of a session, so they serve the owner and operators alike. Its fields
-/// are private: an owner's comes only from their session cookie, through the
-/// extractor, and an operator's from [`Self::operator`], with their reason and an
-/// [`Operator`] only the admin API's authenticator or the CLI creates. An operator
-/// cannot make a change without a reason: a read takes a [`Viewer`] instead.
+/// The signed-in owner of an account, acting through their browser session. Its
+/// fields are private and only the extractors build one, from the session cookie,
+/// so an operation only the owner may run, such as adding a passkey or an
+/// address, takes an `Owner`: no administrator or operator can call it.
+pub(crate) struct Owner {
+    /// The owner's browser session, as the request found it.
+    session: StoredSession,
+    /// Where the request came from.
+    context: RequestContext,
+}
+
+/// The account a settings change applies to, and who makes it. Changes any
+/// administrator may also make take it instead of a session, so they serve the
+/// owner and operators alike. Its fields are private: an owner's comes only from
+/// their session cookie, through the extractor, and an operator's from
+/// [`Self::operator`], with their reason and an [`Operator`] only the admin API's
+/// authenticator or the CLI creates. An operator cannot make a change without a
+/// reason: a read takes a [`Viewer`] instead.
 pub(crate) struct Subject {
     /// The account.
     user: UserId,
@@ -28,13 +42,8 @@ pub(crate) struct Subject {
 
 /// Who acts on a [`Subject`].
 enum ActingAs {
-    /// The account's own user, signed in with `session`, from `context`.
-    Owner {
-        /// The owner's browser session.
-        session: StoredSession,
-        /// Where the request came from.
-        context: RequestContext,
-    },
+    /// The account's own user.
+    Owner(Owner),
     /// An administrator or operator, and why they make the change.
     Operator {
         /// Who acts.
@@ -62,10 +71,61 @@ enum Reading {
     Operator(Operator),
 }
 
-/// A [`Subject`] whose owner confirmed their session with a passkey at most
-/// `MAX_AGE` seconds ago, for changes that need one. Operators need none: an
-/// administrator's change checks their own recent passkey before it commits.
-pub(crate) struct ConfirmedSubject<const MAX_AGE: u32 = CONFIRMATION_MAX_AGE>(Subject);
+impl Owner {
+    /// The owner signed in with `session`, acting from the request `parts`
+    /// describes. Only the extractors call it, with the session of the request's
+    /// cookie.
+    async fn new<S>(parts: &mut Parts, state: &S, session: StoredSession) -> Result<Self, ApiError>
+    where
+        S: Send + Sync,
+    {
+        Ok(Self {
+            session,
+            context: RequestContext::from_request_parts(parts, state).await?,
+        })
+    }
+
+    /// The owner's account.
+    pub(crate) const fn user(&self) -> UserId {
+        self.session.user_id
+    }
+
+    /// The owner's browser session, as the request found it.
+    pub(crate) const fn session(&self) -> &StoredSession {
+        &self.session
+    }
+
+    /// Where the request came from.
+    pub(crate) const fn request(&self) -> RequestContext {
+        self.context
+    }
+
+    /// Attributes events to the owner, through their session.
+    pub(crate) fn context(&self) -> EventContext {
+        self.context.user(&self.session)
+    }
+
+    /// Locks the account, then the owner's session, as [`Session::lock`] does,
+    /// and returns the session as it is now. A sign-out or revocation either
+    /// commits first or waits.
+    pub(crate) async fn lock(
+        &self,
+        tx: &mut DatabaseTransaction<'_>,
+    ) -> Result<StoredSession, SessionError> {
+        Session::lock(tx, &self.session).await
+    }
+
+    /// [`Self::lock`], then requires the session's passkey confirmation, as it is
+    /// now, to be recent: what adding a way to sign in or an address needs.
+    pub(crate) async fn lock_confirmed(
+        &self,
+        tx: &mut DatabaseTransaction<'_>,
+    ) -> Result<StoredSession, SessionError> {
+        let session = self.lock(tx).await?;
+        <Confirmed>::check(&session)?;
+        Ok(session)
+    }
+}
 
 impl Subject {
     /// An administrator or operator changing `user`'s settings, for `reason`.
@@ -85,7 +145,7 @@ impl Subject {
     /// goes with them, as personal data the owner sees in their history.
     pub(crate) fn context(&self) -> EventContext {
         match &self.by {
-            ActingAs::Owner { session, context } => context.user(session),
+            ActingAs::Owner(owner) => owner.context(),
             ActingAs::Operator { operator, reason } => EventContext {
                 reason: Some(reason.clone().into_inner()),
                 ..operator.context()
@@ -96,7 +156,7 @@ impl Subject {
     /// The owner's own session, if the owner acts.
     pub(crate) const fn own_session(&self) -> Option<SessionId> {
         match &self.by {
-            ActingAs::Owner { session, .. } => Some(session.id),
+            ActingAs::Owner(owner) => Some(owner.session.id),
             ActingAs::Operator { .. } => None,
         }
     }
@@ -112,51 +172,62 @@ impl Subject {
     /// their devices list, or an administrator or operator did.
     pub(crate) const fn revocation(&self) -> RevocationReason {
         match &self.by {
-            ActingAs::Owner { .. } => RevocationReason::UserRevoked,
+            ActingAs::Owner(_) => RevocationReason::UserRevoked,
             ActingAs::Operator { .. } => RevocationReason::Admin,
         }
     }
 
     /// Locks the account for a change. The owner's session is locked after it,
-    /// as [`Session::lock`] does, and returned as it is now. An administrator may
-    /// not change another administrator's account, which [`Operator::lock`] checks
-    /// before and under the lock.
-    pub(crate) async fn lock(
-        &self,
-        tx: &mut DatabaseTransaction<'_>,
-    ) -> Result<Option<StoredSession>, AccountError> {
+    /// as [`Owner::lock`] does. An administrator may not change another
+    /// administrator's account, which [`Operator::lock`] checks before and under
+    /// the lock.
+    pub(crate) async fn lock(&self, tx: &mut DatabaseTransaction<'_>) -> Result<(), AccountError> {
         match &self.by {
-            ActingAs::Owner { session, .. } => Ok(Some(Session::lock(tx, session).await?)),
+            ActingAs::Owner(owner) => {
+                owner.lock(tx).await?;
+            }
             ActingAs::Operator { operator, .. } => {
                 operator.lock(tx, self.user).await?;
-                Ok(None)
             }
+        }
+        Ok(())
+    }
+
+    /// [`Self::lock`], for a change the owner must have confirmed with a passkey
+    /// recently, which [`Owner::lock_confirmed`] checks on their session as it is
+    /// now. Operators need no confirmation of the owner's: an administrator's
+    /// change checks their own recent passkey before it commits.
+    pub(crate) async fn lock_confirmed(
+        &self,
+        tx: &mut DatabaseTransaction<'_>,
+    ) -> Result<(), AccountError> {
+        match &self.by {
+            ActingAs::Owner(owner) => {
+                owner.lock_confirmed(tx).await?;
+                Ok(())
+            }
+            ActingAs::Operator { .. } => self.lock(tx).await,
         }
     }
 
     /// Commits a change. An administrator's rights, session and passkey
     /// confirmation are checked once more first, after the last write, as every
-    /// admin API mutation does, so a grant revoked meanwhile rolls the change back.
+    /// admin mutation does, so a grant revoked meanwhile rolls the change back.
     pub(crate) async fn commit(&self, mut tx: DatabaseTransaction<'_>) -> Result<(), AccountError> {
         if let ActingAs::Operator { operator, .. } = &self.by {
             operator.authorize(&mut tx).await?;
         }
         Ok(tx.commit().await?)
     }
+}
 
-    /// The owner signed in with `session`, acting from the request `parts`
-    /// describes. Only the extractors call it, with the session of the request's
-    /// cookie.
-    async fn owner(
-        parts: &mut Parts,
-        app: &AccountApplication,
-        session: StoredSession,
-    ) -> Result<Self, ApiError> {
-        let context = RequestContext::from_request_parts(parts, app).await?;
-        Ok(Self {
-            user: session.user_id,
-            by: ActingAs::Owner { session, context },
-        })
+impl From<Owner> for Subject {
+    /// The owner, changing their own account.
+    fn from(owner: Owner) -> Self {
+        Self {
+            user: owner.user(),
+            by: ActingAs::Owner(owner),
+        }
     }
 }
 
@@ -204,67 +275,64 @@ impl Viewer {
     }
 }
 
-impl FromRequestParts<AccountApplication> for Viewer {
+impl<S> FromRequestParts<S> for Owner
+where
+    Database: FromRef<S>,
+    S: Send + Sync,
+{
     type Rejection = ApiError;
     /// The owner of the request's browser session.
+    async fn from_request_parts(parts: &mut Parts, state: &S) -> Result<Self, Self::Rejection> {
+        let Session(session) = Session::from_request_parts(parts, state).await?;
+        Self::new(parts, state, session).await
+    }
+}
+
+impl<S> OptionalFromRequestParts<S> for Owner
+where
+    Database: FromRef<S>,
+    S: Send + Sync,
+{
+    type Rejection = ApiError;
+    /// The owner of the request's browser session, if it has one.
     async fn from_request_parts(
         parts: &mut Parts,
-        app: &AccountApplication,
-    ) -> Result<Self, Self::Rejection> {
-        let Session(session) = Session::from_request_parts(parts, app).await?;
+        state: &S,
+    ) -> Result<Option<Self>, Self::Rejection> {
+        let OptionalSession(session) = OptionalSession::from_request_parts(parts, state).await?;
+        match session {
+            Some(session) => Ok(Some(Self::new(parts, state, session).await?)),
+            None => Ok(None),
+        }
+    }
+}
+
+impl<S> FromRequestParts<S> for Subject
+where
+    Database: FromRef<S>,
+    S: Send + Sync,
+{
+    type Rejection = ApiError;
+    /// The owner of the request's browser session.
+    async fn from_request_parts(parts: &mut Parts, state: &S) -> Result<Self, Self::Rejection> {
+        <Owner as FromRequestParts<S>>::from_request_parts(parts, state)
+            .await
+            .map(Self::from)
+    }
+}
+
+impl<S> FromRequestParts<S> for Viewer
+where
+    Database: FromRef<S>,
+    S: Send + Sync,
+{
+    type Rejection = ApiError;
+    /// The owner of the request's browser session.
+    async fn from_request_parts(parts: &mut Parts, state: &S) -> Result<Self, Self::Rejection> {
+        let Session(session) = Session::from_request_parts(parts, state).await?;
         Ok(Self {
             user: session.user_id,
             by: Reading::Owner(session.id),
         })
-    }
-}
-
-impl FromRequestParts<AccountApplication> for Subject {
-    type Rejection = ApiError;
-    /// The owner of the request's browser session.
-    async fn from_request_parts(
-        parts: &mut Parts,
-        app: &AccountApplication,
-    ) -> Result<Self, Self::Rejection> {
-        let Session(session) = Session::from_request_parts(parts, app).await?;
-        Self::owner(parts, app, session).await
-    }
-}
-
-impl<const MAX_AGE: u32> ConfirmedSubject<MAX_AGE> {
-    /// An administrator or operator making a change that needs the owner's
-    /// recent confirmation, for `reason`.
-    pub(crate) const fn operator(user: UserId, operator: Operator, reason: Reason) -> Self {
-        Self(Subject::operator(user, operator, reason))
-    }
-
-    /// Locks the account as [`Subject::lock`] does, then checks the owner's
-    /// confirmation again on their session as it is now.
-    pub(crate) async fn lock(&self, tx: &mut DatabaseTransaction<'_>) -> Result<(), AccountError> {
-        if let Some(session) = self.0.lock(tx).await? {
-            Confirmed::<MAX_AGE>::check(&session)?;
-        }
-        Ok(())
-    }
-}
-
-impl<const MAX_AGE: u32> Deref for ConfirmedSubject<MAX_AGE> {
-    type Target = Subject;
-    /// The subject, whose confirmation was checked.
-    fn deref(&self) -> &Subject {
-        &self.0
-    }
-}
-
-impl<const MAX_AGE: u32> FromRequestParts<AccountApplication> for ConfirmedSubject<MAX_AGE> {
-    type Rejection = ApiError;
-    /// The owner of the request's browser session, confirmed at most `MAX_AGE`
-    /// seconds ago.
-    async fn from_request_parts(
-        parts: &mut Parts,
-        app: &AccountApplication,
-    ) -> Result<Self, Self::Rejection> {
-        let Confirmed(session) = Confirmed::<MAX_AGE>::from_request_parts(parts, app).await?;
-        Subject::owner(parts, app, session).await.map(Self)
     }
 }

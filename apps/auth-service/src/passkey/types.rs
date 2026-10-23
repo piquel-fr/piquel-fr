@@ -17,14 +17,14 @@ macro_rules! validated_name {
         $(#[$meta])*
         #[derive(Clone, Serialize, Deserialize)]
         #[serde(try_from = "String", into = "String")]
-        pub(super) struct $name(String);
+        pub(crate) struct $name(String);
         impl $name {
             /// Whether `value` satisfies this name's rule.
             fn is_valid(value: &str) -> bool {
                 ($valid)(value)
             }
             /// Accepts `value` unchanged if it satisfies the rule.
-            pub(super) fn parse(value: String) -> Result<Self, PasskeyError> {
+            pub(crate) fn parse(value: String) -> Result<Self, PasskeyError> {
                 if Self::is_valid(&value) {
                     Ok(Self(value))
                 } else {
@@ -32,7 +32,7 @@ macro_rules! validated_name {
                 }
             }
             /// Borrows the validated text.
-            pub(super) fn as_str(&self) -> &str {
+            pub(crate) fn as_str(&self) -> &str {
                 &self.0
             }
         }

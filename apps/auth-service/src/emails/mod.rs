@@ -10,10 +10,10 @@
 //! derived from the address's ID with [`VerificationKey`], once here to store its
 //! digest, and again by the email sender. See `docs/architecture/delivery-queue.md`.
 use crate::{
-    account::{AccountError, AccountService, ConfirmedSubject, Viewer},
+    account::{AccountError, AccountService, Owner, Subject, Viewer},
     config::EmailConfig,
     routes,
-    security::{ApiError, Confirmed, OptionalSession, RequestContext},
+    security::{ApiError, RequestContext},
 };
 use axum::{Json, Router, extract::State, http::StatusCode, routing::post};
 use chrono::{Duration, Utc};
@@ -120,11 +120,11 @@ struct VerifyEmail {
 
 /// The answer to a verification.
 #[derive(Serialize)]
-struct Verified {
+pub(crate) struct Verified {
     /// The verified address.
-    address: String,
+    pub(crate) address: String,
     /// Whether it became the primary address, being the account's first.
-    primary: bool,
+    pub(crate) primary: bool,
 }
 
 impl EmailApplication {
@@ -147,146 +147,31 @@ impl EmailApplication {
             .with_state(self)
     }
 
-    /// Adds an unverified address and queues its verification email, in one
-    /// transaction. Adding an address that is still waiting for verification
-    /// replaces it, which sends a new link. The address may be another account's:
-    /// rejecting it here would tell anyone which addresses have accounts, so only
-    /// verification, by whoever controls the mailbox, finds out.
+    /// Adds an unverified address to the owner's account, and queues its
+    /// verification email.
     async fn add(
         State(app): State<Self>,
-        context: RequestContext,
-        confirmed: Confirmed,
+        owner: Owner,
         Json(body): Json<AddEmail>,
     ) -> Result<(StatusCode, Json<EmailView>), ApiError> {
-        if app.config.smtp.is_none() {
-            return Err(EmailError::Disabled.into());
-        }
-        let address = NormalizedEmail::parse(&body.email).map_err(EmailError::Invalid)?;
-        // The sender must be able to send to it, or its link would never arrive.
-        address
-            .as_str()
-            .parse::<lettre::Address>()
-            .map_err(EmailError::Unsendable)?;
-        let session = &confirmed.0;
-        let mut tx = app.database.begin().await?;
-        confirmed.lock(&mut tx).await?;
-        let emails = tx.emails().list(session.user_id).await?;
-        let mut count = emails.len();
-        if let Some(existing) = emails
-            .iter()
-            .find(|email| email.normalized_email == address.as_str())
-        {
-            if existing.verified_at.is_some() {
-                return Err(EmailError::AlreadyAdded.into());
-            }
-            Self::delete(
-                &mut tx,
-                &context.user(session),
-                session.user_id,
-                existing.id,
-            )
+        let added = AccountService::new(app.database.clone())
+            .add_email(&owner, &app.config, &body.email)
             .await?;
-            count -= 1;
-        }
-        if count >= MAX_EMAILS {
-            return Err(EmailError::TooMany { max: MAX_EMAILS }.into());
-        }
-        Self::limit(&mut tx, session.user_id, context.client_ip, &address).await?;
-        let id = EmailId::new();
-        let digest = app
-            .config
-            .verification_key
-            .token(id)
-            .map_err(EmailError::Crypto)?
-            .digest();
-        tx.emails()
-            .insert_unverified(&InsertUnverifiedEmail {
-                id,
-                user_id: session.user_id,
-                normalized_email: address.as_str(),
-                secret_digest: digest.as_bytes(),
-                expires_at: Utc::now() + VERIFICATION_LIFETIME,
-            })
-            .await?;
-        tx.record(
-            &context.user(session),
-            Some(session.user_id),
-            DomainEvent::EmailAdded {
-                email_id: id,
-                address: Personal::Value(address.clone()),
-            },
-        )
-        .await?;
-        tx.commit().await?;
-        Ok((
-            StatusCode::CREATED,
-            Json(EmailView {
-                id,
-                address: address.into(),
-                verified: false,
-                primary: false,
-            }),
-        ))
+        Ok((StatusCode::CREATED, Json(added)))
     }
 
-    /// Verifies the address whose link holds `token`, once. It becomes primary if
-    /// the account had none. No session is needed: the token proves control of the
-    /// mailbox, and whoever holds it may be signed out or on another device. A
-    /// `GET` never verifies, since mail scanners follow links.
+    /// Verifies the address whose link holds the body's token, whether this
+    /// browser is signed out or signed in to the account the address joins.
     async fn verify(
         State(app): State<Self>,
         context: RequestContext,
-        OptionalSession(session): OptionalSession,
+        owner: Option<Owner>,
         Json(body): Json<VerifyEmail>,
     ) -> Result<Json<Verified>, ApiError> {
-        // A token that does not parse cannot match: answer as for an unknown one.
-        let digest = Secret::parse(&body.token)
-            .map_err(|_| EmailError::InvalidToken)?
-            .digest();
-        let mut tx = app.database.begin().await?;
-        let pending = tx
-            .emails()
-            .find_verification(digest.as_bytes())
-            .await?
-            .ok_or(EmailError::InvalidToken)?;
-        tx.users()
-            .find_active_by_id_for_update(pending.user_id)
-            .await?
-            .ok_or(EmailError::InvalidToken)?;
-        // A browser signed in to another account would otherwise confirm the
-        // address for an account that is not theirs, as a phishing link could ask.
-        let context = match &session {
-            Some(session) if session.user_id == pending.user_id => context.user(session),
-            Some(_) => return Err(EmailError::OtherAccount.into()),
-            None => context.actor(Actor::Anonymous),
-        };
-        let primary = match tx
-            .emails()
-            .consume_verification(&pending, digest.as_bytes())
-            .await
-        {
-            Ok(primary) => primary,
-            Err(DatabaseError::NotFound) => return Err(EmailError::InvalidToken.into()),
-            // The ownership trigger: another active account verified it first.
-            Err(DatabaseError::Conflict(_)) => return Err(EmailError::OwnedElsewhere.into()),
-            Err(error) => return Err(error.into()),
-        };
-        let email_id = pending.email_id;
-        let subject = Some(pending.user_id);
-        tx.record(&context, subject, DomainEvent::EmailVerified { email_id })
+        let verified = AccountService::new(app.database.clone())
+            .verify_email(&body.token, owner.as_ref(), context)
             .await?;
-        if primary {
-            let event = DomainEvent::PrimaryEmailChanged {
-                email_id,
-                previous_email_id: None,
-            };
-            tx.record(&context, subject, event).await?;
-        }
-        tx.commit().await?;
-        Ok(Json(Verified {
-            address: pending.address,
-            primary,
-        }))
+        Ok(Json(verified))
     }
 
     /// Records the removal of `user_id`'s address `id` as `context`'s, then
@@ -350,15 +235,150 @@ impl AccountService {
         Ok(emails.into_iter().map(EmailView::from).collect())
     }
 
+    /// Adds an unverified address to the owner's account and queues its
+    /// verification email, in one transaction, once they confirmed with a passkey.
+    /// Adding an address that is still waiting for verification replaces it,
+    /// which sends a new link. The address may be another account's: rejecting it
+    /// here would tell anyone which addresses have accounts, so only verification,
+    /// by whoever controls the mailbox, finds out. Only the owner adds an address,
+    /// since it receives the account's mail.
+    pub(crate) async fn add_email(
+        &self,
+        owner: &Owner,
+        config: &EmailConfig,
+        address: &str,
+    ) -> Result<EmailView, AccountError> {
+        if config.smtp.is_none() {
+            return Err(EmailError::Disabled.into());
+        }
+        let address = NormalizedEmail::parse(address).map_err(EmailError::Invalid)?;
+        // The sender must be able to send to it, or its link would never arrive.
+        address
+            .as_str()
+            .parse::<lettre::Address>()
+            .map_err(EmailError::Unsendable)?;
+        let user = owner.user();
+        let context = owner.context();
+        let mut tx = self.database.begin().await?;
+        owner.lock_confirmed(&mut tx).await?;
+        let emails = tx.emails().list(user).await?;
+        let mut count = emails.len();
+        if let Some(existing) = emails
+            .iter()
+            .find(|email| email.normalized_email == address.as_str())
+        {
+            if existing.verified_at.is_some() {
+                return Err(EmailError::AlreadyAdded.into());
+            }
+            EmailApplication::delete(&mut tx, &context, user, existing.id).await?;
+            count -= 1;
+        }
+        if count >= MAX_EMAILS {
+            return Err(EmailError::TooMany { max: MAX_EMAILS }.into());
+        }
+        EmailApplication::limit(&mut tx, user, owner.request().client_ip, &address).await?;
+        let id = EmailId::new();
+        let digest = config
+            .verification_key
+            .token(id)
+            .map_err(EmailError::Crypto)?
+            .digest();
+        tx.emails()
+            .insert_unverified(&InsertUnverifiedEmail {
+                id,
+                user_id: user,
+                normalized_email: address.as_str(),
+                secret_digest: digest.as_bytes(),
+                expires_at: Utc::now() + VERIFICATION_LIFETIME,
+            })
+            .await?;
+        tx.record(
+            &context,
+            Some(user),
+            DomainEvent::EmailAdded {
+                email_id: id,
+                address: Personal::Value(address.clone()),
+            },
+        )
+        .await?;
+        tx.commit().await?;
+        Ok(EmailView {
+            id,
+            address: address.into(),
+            verified: false,
+            primary: false,
+        })
+    }
+
+    /// Verifies the address whose link holds `token`, once. It becomes primary if
+    /// the account had none. The token authorizes it, not a session: it proves
+    /// control of the mailbox, and whoever holds it may be signed out or on another
+    /// device. A browser `signed_in` to another account is refused, since it would
+    /// confirm the address for an account that is not theirs, as a phishing link
+    /// could ask. Pages never verify on `GET`, since mail scanners follow links.
+    pub(crate) async fn verify_email(
+        &self,
+        token: &str,
+        signed_in: Option<&Owner>,
+        request: RequestContext,
+    ) -> Result<Verified, AccountError> {
+        // A token that does not parse cannot match: answer as for an unknown one.
+        let digest = Secret::parse(token)
+            .map_err(|_| EmailError::InvalidToken)?
+            .digest();
+        let mut tx = self.database.begin().await?;
+        let pending = tx
+            .emails()
+            .find_verification(digest.as_bytes())
+            .await?
+            .ok_or(EmailError::InvalidToken)?;
+        tx.users()
+            .find_active_by_id_for_update(pending.user_id)
+            .await?
+            .ok_or(EmailError::InvalidToken)?;
+        let context = match signed_in {
+            Some(owner) if owner.user() == pending.user_id => owner.context(),
+            Some(_) => return Err(EmailError::OtherAccount.into()),
+            None => request.actor(Actor::Anonymous),
+        };
+        let primary = match tx
+            .emails()
+            .consume_verification(&pending, digest.as_bytes())
+            .await
+        {
+            Ok(primary) => primary,
+            Err(DatabaseError::NotFound) => return Err(EmailError::InvalidToken.into()),
+            // The ownership trigger: another active account verified it first.
+            Err(DatabaseError::Conflict(_)) => return Err(EmailError::OwnedElsewhere.into()),
+            Err(error) => return Err(error.into()),
+        };
+        let email_id = pending.email_id;
+        let subject = Some(pending.user_id);
+        tx.record(&context, subject, DomainEvent::EmailVerified { email_id })
+            .await?;
+        if primary {
+            let event = DomainEvent::PrimaryEmailChanged {
+                email_id,
+                previous_email_id: None,
+            };
+            tx.record(&context, subject, event).await?;
+        }
+        tx.commit().await?;
+        Ok(Verified {
+            address: pending.address,
+            primary,
+        })
+    }
+
     /// Makes a verified address the primary one, and queues a notice to the
     /// previous primary address.
     pub(crate) async fn make_primary_email(
         &self,
-        subject: &ConfirmedSubject,
+        subject: &Subject,
         id: EmailId,
     ) -> Result<(), AccountError> {
         let mut tx = self.database.begin().await?;
-        subject.lock(&mut tx).await?;
+        subject.lock_confirmed(&mut tx).await?;
         let email = tx
             .emails()
             .find(subject.user(), id)
@@ -387,11 +407,11 @@ impl AccountService {
     /// replace it: another one must be made primary first, which notifies it too.
     pub(crate) async fn remove_email(
         &self,
-        subject: &ConfirmedSubject,
+        subject: &Subject,
         id: EmailId,
     ) -> Result<(), AccountError> {
         let mut tx = self.database.begin().await?;
-        subject.lock(&mut tx).await?;
+        subject.lock_confirmed(&mut tx).await?;
         let emails = tx.emails().list(subject.user()).await?;
         let email = emails
             .iter()

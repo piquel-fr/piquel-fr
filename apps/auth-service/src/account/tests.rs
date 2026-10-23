@@ -8,12 +8,12 @@ use crate::{
     admin::tests::{Account, Harness, cli, operator},
     passkey::PasskeyError,
     security::CONFIRMATION_MAX_AGE,
-    tests::{Browser, sign_out, until_blocked},
+    tests::{Browser, Replicas, sign_out, until_blocked},
 };
 use axum::http::Method;
 use chrono::{Duration, Utc};
 use piquel_common::{
-    Provider, TokenId, UserId,
+    AuthenticationMethod, EmailId, Provider, TokenId, UserId,
     events::{Actor, DomainEvent, RevocationReason},
     protocol::step_up::StepUpRequirement,
 };
@@ -132,7 +132,7 @@ async fn administrators_change_another_account_on_its_behalf() {
         .rename_passkey(&subject, passkeys[0], "Lost phone".into())
         .await
         .expect("rename");
-    let confirmed = || ConfirmedSubject::operator(user, admin(), reason());
+    let confirmed = || Subject::operator(user, admin(), reason());
     service
         .revoke_passkey(&confirmed(), passkeys[1])
         .await
@@ -425,8 +425,7 @@ async fn changes_check_the_administrator_again_after_waiting() {
 async fn the_last_passkey_stays_whoever_removes_it() {
     let fixture = Fixture::new().await;
     let (target, passkeys) = fixture.target(1).await;
-    let subject =
-        ConfirmedSubject::operator(target.user_id, fixture.operator(Duration::zero()), reason());
+    let subject = Subject::operator(target.user_id, fixture.operator(Duration::zero()), reason());
     let removed = fixture.service.revoke_passkey(&subject, passkeys[0]).await;
     assert!(
         matches!(
@@ -442,4 +441,35 @@ async fn the_last_passkey_stays_whoever_removes_it() {
     let (status, _) = browser.call(&owner, Method::DELETE, &path).await;
     assert_eq!(status, StatusCode::BAD_REQUEST);
     assert_eq!(fixture.names(target.user_id).await, ["Key 0"]);
+}
+
+/// The shared changes that could cut the owner off need their recent passkey
+/// confirmation, checked under the account lock before anything is looked up: a
+/// session that never confirmed one is refused, whichever passkey, identity or
+/// address it names.
+#[tokio::test]
+#[ignore = "requires TEST_DATABASE_URL"]
+async fn owners_confirm_the_changes_that_need_it() {
+    let database = Replicas::database().await;
+    let owner = Browser::new_account(&database).await;
+    let social =
+        Browser::sign_in_with(&database, owner.user_id, AuthenticationMethod::Federation).await;
+    let routes = AccountApplication::new(database).routes();
+    let item = |template: &str| template.replace("{id}", &EmailId::new().to_string());
+    for (method, path) in [
+        (Method::DELETE, item(passkey::ITEM)),
+        (
+            Method::DELETE,
+            federation::IDENTITY.replace("{provider}", "github"),
+        ),
+        (Method::POST, item(emails::PRIMARY)),
+        (Method::DELETE, item(emails::ITEM)),
+    ] {
+        let (status, body) = social.call(&routes, method.clone(), &path).await;
+        assert_eq!(
+            (status, body["code"].as_str()),
+            (StatusCode::FORBIDDEN, Some("step_up_required")),
+            "{method} {path}"
+        );
+    }
 }
