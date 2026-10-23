@@ -26,7 +26,7 @@ mod api;
 pub(crate) use api::ClientApplication;
 /// The clients an account owns: their policy and the owner's operations.
 mod owned;
-pub(crate) use owned::{ClientPatch, NewClient, OwnedClientError, Rotation};
+pub(crate) use owned::{ClientPatch, NewClient, OwnedClient, OwnedClientError, Rotation};
 
 /// Scopes a new client may request when none are given.
 pub const DEFAULT_CLIENT_SCOPES: [Scope; 3] = [Scope::OpenId, Scope::Profile, Scope::Email];

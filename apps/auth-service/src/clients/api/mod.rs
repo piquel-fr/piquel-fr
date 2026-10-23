@@ -5,7 +5,7 @@
 //! first-party frontends' exact origins and the session cookie, and mutations need
 //! the CSRF header.
 
-use super::{ClientDetails, ClientPatch, NewClient, Rotation};
+use super::{ClientDetails, ClientPatch, NewClient, OwnedClient, OwnedClientError, Rotation};
 use crate::{
     account::{AccountService, ConfirmedOwner, Owner},
     routes,
@@ -13,8 +13,8 @@ use crate::{
 };
 use axum::{
     Json, Router,
-    extract::{FromRef, Path, State},
-    http::StatusCode,
+    extract::{FromRef, FromRequestParts, Path, State},
+    http::{StatusCode, request::Parts},
     routing::{get, post},
 };
 use piquel_repository::{Database, StoredOidcClient};
@@ -97,52 +97,41 @@ impl ClientApplication {
     /// Shows a client with the lifetimes of its secrets.
     async fn show(
         State(app): State<Self>,
-        owner: Owner,
-        Path(id): Path<String>,
+        owned: OwnedClient,
     ) -> Result<Json<ClientDetails>, ApiError> {
-        Ok(Json(app.service().client(&owner, &id).await?))
+        Ok(Json(app.service().client(owned).await?))
     }
 
     /// Changes the given settings and returns the client.
     async fn update(
         State(app): State<Self>,
-        owner: Owner,
-        Path(id): Path<String>,
+        owned: OwnedClient,
         Json(patch): Json<ClientPatch>,
     ) -> Result<Json<StoredOidcClient>, ApiError> {
-        Ok(Json(app.service().update_client(&owner, &id, patch).await?))
+        Ok(Json(app.service().update_client(&owned, patch).await?))
     }
 
     /// Pauses a client: it can no longer authorize, exchange codes or refresh.
-    async fn disable(
-        State(app): State<Self>,
-        owner: Owner,
-        Path(id): Path<String>,
-    ) -> Result<StatusCode, ApiError> {
-        app.service().set_client_enabled(&owner, &id, false).await?;
+    async fn disable(State(app): State<Self>, owned: OwnedClient) -> Result<StatusCode, ApiError> {
+        app.service().set_client_enabled(&owned, false).await?;
         Ok(StatusCode::NO_CONTENT)
     }
 
     /// Lets a paused client work again.
-    async fn enable(
-        State(app): State<Self>,
-        owner: Owner,
-        Path(id): Path<String>,
-    ) -> Result<StatusCode, ApiError> {
-        app.service().set_client_enabled(&owner, &id, true).await?;
+    async fn enable(State(app): State<Self>, owned: OwnedClient) -> Result<StatusCode, ApiError> {
+        app.service().set_client_enabled(&owned, true).await?;
         Ok(StatusCode::NO_CONTENT)
     }
 
     /// Gives a confidential client a new secret, shown only in this answer.
     async fn rotate(
         State(app): State<Self>,
-        owner: Owner,
-        Path(id): Path<String>,
+        owned: OwnedClient,
         Json(rotation): Json<Rotation>,
     ) -> Result<Json<Rotated>, ApiError> {
         let secret = app
             .service()
-            .rotate_client_secret(&owner, &id, rotation.grace)
+            .rotate_client_secret(&owned, rotation.grace)
             .await?;
         Ok(Json(Rotated {
             client_secret: secret.expose().to_owned(),
@@ -150,13 +139,25 @@ impl ClientApplication {
     }
 
     /// Deletes a client for good.
-    async fn delete(
-        State(app): State<Self>,
-        owner: Owner,
-        Path(id): Path<String>,
-    ) -> Result<StatusCode, ApiError> {
-        app.service().delete_client(&owner, &id).await?;
+    async fn delete(State(app): State<Self>, owned: OwnedClient) -> Result<StatusCode, ApiError> {
+        app.service().delete_client(&owned).await?;
         Ok(StatusCode::NO_CONTENT)
+    }
+}
+
+impl FromRequestParts<ClientApplication> for OwnedClient {
+    type Rejection = ApiError;
+    /// The signed-in owner's client the path names, found before the body is
+    /// read, so any other ID, malformed ones included, answers 404 first.
+    async fn from_request_parts(
+        parts: &mut Parts,
+        app: &ClientApplication,
+    ) -> Result<Self, Self::Rejection> {
+        let owner = <Owner as FromRequestParts<_>>::from_request_parts(parts, app).await?;
+        let Path(id) = Path::<String>::from_request_parts(parts, app)
+            .await
+            .map_err(|_| OwnedClientError::NotFound)?;
+        Ok(app.service().owned_client(owner, &id).await?)
     }
 }
 

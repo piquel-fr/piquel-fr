@@ -60,7 +60,7 @@ impl Harness {
 
 /// An account lists, shows and changes only its own clients. Another account's
 /// client, and a client operators manage, answer 404 to every route, as an
-/// unknown ID does.
+/// unknown or malformed ID does, before the body is read.
 #[tokio::test]
 #[ignore = "requires TEST_DATABASE_URL"]
 async fn accounts_manage_only_their_own_clients() {
@@ -107,6 +107,7 @@ async fn accounts_manage_only_their_own_clients() {
         (&bob, id.as_str()),
         (&alice, operated.id.as_str()),
         (&alice, "c_unknown"),
+        (&alice, "%FF"),
     ] {
         let item = format!("/account/clients/{id}");
         for (method, path, body) in [
@@ -116,14 +117,28 @@ async fn accounts_manage_only_their_own_clients() {
                 item.clone(),
                 Some(json!({"display_name": "Mine"})),
             ),
+            (
+                Method::PATCH,
+                item.clone(),
+                Some(json!({"display_name": 17})),
+            ),
             (Method::DELETE, item.clone(), None),
             (Method::POST, format!("{item}/disable"), None),
             (Method::POST, format!("{item}/secrets"), Some(json!({}))),
+            (
+                Method::POST,
+                format!("{item}/secrets"),
+                Some(json!({"grace": "x"})),
+            ),
         ] {
-            let (status, _) = browser
+            let (status, body) = browser
                 .send(&harness.router, method.clone(), &path, body)
                 .await;
-            assert_eq!(status, StatusCode::NOT_FOUND, "{method} {path}");
+            assert_eq!(
+                (status, body["error"].is_string()),
+                (StatusCode::NOT_FOUND, true),
+                "{method} {path}"
+            );
         }
     }
     let client = harness

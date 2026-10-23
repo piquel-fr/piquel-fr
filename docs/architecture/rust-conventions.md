@@ -58,9 +58,11 @@ when an existing type can own the operations.
 redirects and endpoint policy. Browser handlers use `Session`, `OptionalSession`
 or `Confirmed` extractors, with `FromRef<Application> for Database`. They resolve
 it with `Session::resolve`, which records its activity, so no handler does. `Confirmed`
-requires a recent passkey confirmation; handlers recheck it with `Confirmed::lock`
-inside their transaction. Handlers that only need the session locked against logout
-use `Session::lock`.
+requires a recent passkey confirmation when the request arrives; account
+operations check it again under the account lock with `Owner::lock_confirmed`, or
+with `Owner::confirmed` before committing when their need for one depends on what
+they changed. Code that only needs the session locked against logout uses
+`Session::lock`.
 Protocol and conditional flows may use `Session` methods directly. Create sessions
 inside the account transaction, and end them with `Session::revoke`, which records
 one event per session; set cookies after commit with `BrowserCookie::set_on`

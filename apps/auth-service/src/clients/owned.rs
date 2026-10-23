@@ -90,6 +90,17 @@ pub(crate) struct Rotation {
     pub(crate) grace: GracePeriod,
 }
 
+/// One of an owner's live clients, with its owner. Only
+/// [`AccountService::owned_client`] builds one, once it checked the client is the
+/// owner's, so the operations on it never check ownership again: it never
+/// changes, and the registry refuses a client deleted since.
+pub(crate) struct OwnedClient {
+    /// The owner.
+    owner: Owner,
+    /// The client, as it was when found.
+    client: StoredOidcClient,
+}
+
 /// Why an owner's request about their clients was refused.
 #[derive(Debug, Error)]
 pub(crate) enum OwnedClientError {
@@ -245,16 +256,36 @@ impl AccountService {
             .await?)
     }
 
-    /// Shows the owner's client `id` with the lifetimes of its secrets, never
-    /// their values.
-    pub(crate) async fn client(
+    /// The owner's live client `id`, as it is now. Any other ID, a deleted
+    /// client's or another account's included, is not found, so probing IDs
+    /// reveals nothing. Every operation on one client starts here.
+    pub(crate) async fn owned_client(
         &self,
-        owner: &Owner,
+        owner: Owner,
         id: &str,
-    ) -> Result<ClientDetails, AccountError> {
-        let client = self.owned(owner, id).await?;
-        let secrets = self.database.oidc().client_secrets(&client.id).await?;
-        Ok(ClientDetails { client, secrets })
+    ) -> Result<OwnedClient, AccountError> {
+        let client = self
+            .database
+            .oidc()
+            .find_client(id)
+            .await?
+            .filter(|client| client.owner_id == Some(owner.user()) && client.deleted_at.is_none())
+            .ok_or(OwnedClientError::NotFound)?;
+        Ok(OwnedClient { owner, client })
+    }
+
+    /// Shows an owner's client with the lifetimes of its secrets, never their
+    /// values.
+    pub(crate) async fn client(&self, owned: OwnedClient) -> Result<ClientDetails, AccountError> {
+        let secrets = self
+            .database
+            .oidc()
+            .client_secrets(&owned.client.id)
+            .await?;
+        Ok(ClientDetails {
+            client: owned.client,
+            secrets,
+        })
     }
 
     /// Registers a client the owner manages, with an ID auth generates, once they
@@ -284,18 +315,17 @@ impl AccountService {
         Ok((client, secret))
     }
 
-    /// Changes the given settings of the owner's client `id`, and returns it.
+    /// Changes the given settings of an owner's client, and returns it.
     /// Changing where auth may send the browser needs a passkey confirmation: with
     /// a stolen session cookie, someone could otherwise add their own redirect URI
     /// and collect authorization codes. Only the change shows whether it does, so
     /// the confirmation is checked after it, before committing.
     pub(crate) async fn update_client(
         &self,
-        owner: &Owner,
-        id: &str,
+        owned: &OwnedClient,
         patch: ClientPatch,
     ) -> Result<StoredOidcClient, AccountError> {
-        let client = self.owned(owner, id).await?;
+        let OwnedClient { owner, client } = owned;
         let mut tx = self.database.begin().await?;
         let session = owner.lock(&mut tx).await?;
         let changed = ClientRegistry::new(&mut tx, owner.context())
@@ -311,15 +341,14 @@ impl AccountService {
         Ok(client)
     }
 
-    /// Enables or disables the owner's client `id`. The session is enough: either
+    /// Enables or disables an owner's client. The session is enough: either
     /// is undone as easily. A suspended client stays disabled.
     pub(crate) async fn set_client_enabled(
         &self,
-        owner: &Owner,
-        id: &str,
+        owned: &OwnedClient,
         enabled: bool,
     ) -> Result<(), AccountError> {
-        let client = self.owned(owner, id).await?;
+        let OwnedClient { owner, client } = owned;
         let mut tx = self.database.begin().await?;
         owner.lock(&mut tx).await?;
         ClientRegistry::new(&mut tx, owner.context())
@@ -329,16 +358,15 @@ impl AccountService {
         Ok(tx.commit().await?)
     }
 
-    /// Gives the owner's confidential client `id` a new secret, once they
+    /// Gives an owner's confidential client a new secret, once they
     /// confirmed with a passkey, and returns it, which nothing shows again.
     /// Earlier secrets keep working for `grace`.
     pub(crate) async fn rotate_client_secret(
         &self,
-        owner: &Owner,
-        id: &str,
+        owned: &OwnedClient,
         grace: GracePeriod,
     ) -> Result<ClientSecret, AccountError> {
-        let client = self.owned(owner, id).await?;
+        let OwnedClient { owner, client } = owned;
         let mut tx = self.database.begin().await?;
         owner.lock_confirmed(&mut tx).await?;
         let secret = ClientRegistry::new(&mut tx, owner.context())
@@ -349,10 +377,10 @@ impl AccountService {
         Ok(secret)
     }
 
-    /// Deletes the owner's client `id` for good, once they confirmed with a
+    /// Deletes an owner's client for good, once they confirmed with a
     /// passkey: it stops working at once, and its ID is never used again.
-    pub(crate) async fn delete_client(&self, owner: &Owner, id: &str) -> Result<(), AccountError> {
-        let client = self.owned(owner, id).await?;
+    pub(crate) async fn delete_client(&self, owned: &OwnedClient) -> Result<(), AccountError> {
+        let OwnedClient { owner, client } = owned;
         let mut tx = self.database.begin().await?;
         owner.lock_confirmed(&mut tx).await?;
         ClientRegistry::new(&mut tx, owner.context())
@@ -360,20 +388,6 @@ impl AccountService {
             .await
             .map_err(OwnedClientError::from)?;
         Ok(tx.commit().await?)
-    }
-
-    /// The owner's live client `id`, as it is now. Any other ID, a deleted
-    /// client's or another account's included, is not found. Callers never check
-    /// ownership again: it never changes, and the registry refuses a client
-    /// deleted since.
-    async fn owned(&self, owner: &Owner, id: &str) -> Result<StoredOidcClient, AccountError> {
-        Ok(self
-            .database
-            .oidc()
-            .find_client(id)
-            .await?
-            .filter(|client| client.owner_id == Some(owner.user()) && client.deleted_at.is_none())
-            .ok_or(OwnedClientError::NotFound)?)
     }
 
     /// Reads back client `id` as the transaction changed it.
