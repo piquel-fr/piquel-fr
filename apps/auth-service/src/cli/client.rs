@@ -106,7 +106,7 @@ impl ClientCommand {
                 ClientChange::Applied(id, applied)
             }
             Self::List { output } => {
-                output.print(&service.list_clients().await?, |clients| {
+                output.print(&service.list_clients(operator).await?, |clients| {
                     println!("ID\tAUTH\tSTATUS\tREFRESH\tTRUSTED\tPAR\tOWNER\tNAME");
                     for client in clients {
                         println!(
@@ -127,7 +127,7 @@ impl ClientCommand {
                 ClientChange::Silent
             }
             Self::Show { id } => {
-                let details = service.client_details(&id).await?;
+                let details = service.client_details(operator, &id).await?;
                 println!("{}", serde_json::to_string_pretty(&details)?);
                 ClientChange::Silent
             }

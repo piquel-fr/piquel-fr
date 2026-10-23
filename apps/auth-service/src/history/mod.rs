@@ -209,7 +209,7 @@ impl AccountService {
         viewer: &Viewer,
         before: Option<EventId>,
     ) -> Result<HistoryPage, AccountError> {
-        viewer.viewed(&self.database).await?;
+        viewer.authorize(&self.database).await?;
         let clients: BTreeMap<_, _> = self
             .database
             .oidc()

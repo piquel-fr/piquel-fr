@@ -4,7 +4,7 @@
 
 use super::*;
 use crate::{
-    AdminError, Operator, Reason,
+    AdminError, AdminService, Operator, Reason,
     admin::tests::{Account, Harness, cli, operator},
     passkey::PasskeyError,
     security::CONFIRMATION_MAX_AGE,
@@ -191,6 +191,72 @@ async fn administrators_change_another_account_on_its_behalf() {
         .expect("the rename");
     assert_eq!(entry["actor"], "admin");
     assert_eq!(entry["reason"], REASON);
+}
+
+impl AccountOperation {
+    /// Runs this operation as `viewer`, if it reads. `None` for a change, which
+    /// checks its operator before it commits. The match is exhaustive, so a new
+    /// operation must say which it is.
+    async fn read(
+        self,
+        service: &AccountService,
+        viewer: &Viewer,
+    ) -> Option<Result<(), AccountError>> {
+        Some(match self {
+            Self::ListPasskeys => service.passkeys(viewer).await.map(drop),
+            Self::ListIdentities => service.identities(viewer).await.map(drop),
+            Self::ListEmails => service.emails(viewer).await.map(drop),
+            Self::ListSessions => service.sessions(viewer).await.map(drop),
+            Self::ViewHistory => service.history(viewer, None).await.map(drop),
+            Self::RenamePasskey
+            | Self::RevokePasskey
+            | Self::UnlinkIdentity
+            | Self::MakeEmailPrimary
+            | Self::RemoveEmail
+            | Self::RevokeSession
+            | Self::RevokeOtherSessions => return None,
+        })
+    }
+}
+
+/// Every settings read checks an administrator as admin reads do, before it
+/// reads or records anything: one whose rights were revoked reads nothing, and no
+/// view of the account is recorded.
+#[tokio::test]
+#[ignore = "requires TEST_DATABASE_URL"]
+async fn every_settings_read_checks_its_administrator() {
+    let fixture = Fixture::new().await;
+    let (target, _) = fixture.target(1).await;
+    let revoked = fixture.harness.admin().await;
+    AdminService::new(fixture.harness.database.clone())
+        .revoke_administrator(&cli(), revoked.user_id)
+        .await
+        .expect("revoke");
+    let viewer = Viewer::operator(target.user_id, operator(revoked, Utc::now()));
+    for read in AccountOperation::ALL {
+        if let Some(result) = read.read(&fixture.service, &viewer).await {
+            assert!(
+                matches!(
+                    result,
+                    Err(AccountError::Operator(AdminError::NotAdministrator))
+                ),
+                "{read:?}: {result:?}"
+            );
+        }
+    }
+    let history = fixture
+        .harness
+        .database
+        .events()
+        .history_for_user(target.user_id, 10)
+        .await
+        .expect("history");
+    assert!(
+        history
+            .iter()
+            .all(|stored| stored.event.known() != Some(&DomainEvent::AccountViewed {})),
+        "no view recorded"
+    );
 }
 
 /// An administrator's read shows every session, none of them theirs, and is

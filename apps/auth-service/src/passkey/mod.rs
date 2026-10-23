@@ -821,7 +821,7 @@ impl AccountService {
         &self,
         viewer: &Viewer,
     ) -> Result<Vec<api::Passkey>, AccountError> {
-        viewer.viewed(&self.database).await?;
+        viewer.authorize(&self.database).await?;
         let passkeys = self.database.passkeys().list_active(viewer.user()).await?;
         Ok(passkeys.into_iter().map(Into::into).collect())
     }

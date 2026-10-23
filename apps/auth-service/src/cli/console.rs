@@ -34,7 +34,7 @@ impl Console {
     /// The account `user` names. A failure names the reference, as given.
     pub(super) async fn user(&self, user: &UserRef) -> Result<UserId, CliError> {
         self.service
-            .find_user(user)
+            .find_user(&self.operator, user)
             .await
             .map_err(|source| CliError::User {
                 user: user.clone(),

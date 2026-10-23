@@ -229,7 +229,7 @@ impl FederationApplication {
 impl AccountService {
     /// Lists the account's active social identities.
     pub(crate) async fn identities(&self, viewer: &Viewer) -> Result<Vec<Identity>, AccountError> {
-        viewer.viewed(&self.database).await?;
+        viewer.authorize(&self.database).await?;
         let identities = self
             .database
             .federation()

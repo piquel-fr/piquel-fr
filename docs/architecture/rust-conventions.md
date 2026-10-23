@@ -73,7 +73,12 @@ isolation headers. Public-client origins for CORS are looked up per request.
 
 Administrative operations are methods of `AdminService` (`src/admin/service.rs`);
 the admin API's handlers and the CLI's commands (`src/cli`) are thin adapters that
-say which `Operator` acts. Each operation joins `AdminOperation`: the admin router
+say which `Operator` acts. Every method takes that `Operator` and checks it itself,
+so a caller in the same process needs no check of its own: a read first calls
+`Operator::authorize_read` (rights, session and a passkey sign-in), and a change
+calls `Operator::authorize` (the same, with a recent confirmation) after its last
+write. A test runs every read as an administrator who may no longer read. Each
+operation joins `AdminOperation`: the admin router
 maps it to its route, or to none when only the CLI runs it, and every CLI command
 names the operation it runs. A test parses a command line for each operation and
 checks that it names that operation. The matches are exhaustive, so a new operation
@@ -83,7 +88,8 @@ Settings an administrator may also change on another account are methods of
 `AccountService` (`src/account`), written with their setting's module, such as
 `src/passkey`. Changes take a `Subject`: the account and who acts, the owner with
 their session or an `Operator` with the reason it must give. Reads take a
-`Viewer`, which needs no reason and records an operator's read as a view. Only the
+`Viewer`, which needs no reason; `Viewer::authorize` checks an operator as admin
+reads are checked and records their read as a view. Only the
 extractors build an owner's, from the session cookie, and only the admin API's
 authenticator builds an `Operator::Admin`. Changes lock with `Subject::lock` (or
 `ConfirmedSubject::lock` when the owner must have confirmed recently), record

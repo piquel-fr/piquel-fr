@@ -63,7 +63,7 @@ impl AccountService {
     /// Lists the account's active sessions, most recently active first. On the
     /// owner's routes, the extractor has just recorded the owner's own activity.
     pub(crate) async fn sessions(&self, viewer: &Viewer) -> Result<Vec<SessionItem>, AccountError> {
-        viewer.viewed(&self.database).await?;
+        viewer.authorize(&self.database).await?;
         Ok(self
             .database
             .sessions()

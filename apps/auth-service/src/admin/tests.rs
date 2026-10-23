@@ -9,7 +9,7 @@ use axum::{
 };
 use caller::AdminSession;
 use chrono::{Duration, Utc};
-use piquel_admin_api::{AUDIENCE, paths};
+use piquel_admin_api::{AUDIENCE, CONFIRMATION_MAX_AGE, paths};
 use piquel_common::{
     AccountStatus, AuthenticationMethod, Handle, HandleError, Personal,
     config::Origin,
@@ -18,12 +18,13 @@ use piquel_common::{
         claims::{AccessTokenClaims, Acr, Audience, AuthenticationClaims, ProfileClaims},
         jwt::TokenType,
         oauth::Scopes,
+        step_up::StepUpRequirement,
     },
 };
 use piquel_crypto::Rs256Key;
 use piquel_repository::{DatabaseConfig, DatabaseTransaction, InsertUser};
 use serde_json::{Value, json};
-use std::sync::Arc;
+use std::{mem::discriminant, sync::Arc};
 use tower::ServiceExt;
 
 /// Issuer of the scenario tokens.
@@ -454,7 +455,7 @@ async fn handles_are_checked_and_renamed() {
             .collect::<Vec<_>>()
     };
     assert_eq!(
-        problems(service.check_handles().await.expect("check")),
+        problems(service.check_handles(&cli()).await.expect("check")),
         [
             (
                 format!("l0ok-{suffix}"),
@@ -510,7 +511,10 @@ async fn handles_are_checked_and_renamed() {
             new: Personal::Value(Handle::parse(&format!("renamed-{suffix}")).expect("handle")),
         }]
     );
-    assert_eq!(problems(service.check_handles().await.expect("check")), []);
+    assert_eq!(
+        problems(service.check_handles(&cli()).await.expect("check")),
+        []
+    );
 }
 
 /// An event a newer release wrote, of a kind this one does not know, is listed
@@ -864,5 +868,120 @@ async fn administrators_acting_on_each_other_are_refused() {
             (first, second),
             (StatusCode::FORBIDDEN, StatusCode::FORBIDDEN)
         );
+    }
+}
+
+impl AdminOperation {
+    /// Runs the service methods behind this operation as `operator`, if it reads,
+    /// with arguments that need not exist, since a read checks its operator before
+    /// anything else. `None` for a change, which checks its operator before it
+    /// commits. The match is exhaustive, so a new operation must say which it is.
+    async fn read(
+        self,
+        service: &AdminService,
+        operator: &Operator,
+    ) -> Option<Vec<Result<(), AdminError>>> {
+        let (user, client) = (UserId::new(), "notes");
+        Some(match self {
+            Self::SearchUsers => vec![service.search_users(operator, "", None).await.map(drop)],
+            Self::ViewUser => vec![
+                service
+                    .find_user(operator, &UserRef::Id(user))
+                    .await
+                    .map(drop),
+                service.view_user(operator, user).await.map(drop),
+            ],
+            Self::ListInvitations => vec![service.list_invitations(operator).await.map(drop)],
+            Self::ListClients => vec![service.list_clients(operator).await.map(drop)],
+            Self::ViewClient => vec![
+                service.client(operator, client).await.map(drop),
+                service
+                    .client_details(operator, &client.parse().expect("client ID"))
+                    .await
+                    .map(drop),
+            ],
+            Self::ListEvents => vec![
+                service
+                    .events(operator, EventSearch::default())
+                    .await
+                    .map(drop),
+            ],
+            Self::ListAdministrators => vec![service.list_administrators(operator).await.map(drop)],
+            Self::CheckHandles => vec![service.check_handles(operator).await.map(drop)],
+            Self::ListDeliveries => vec![
+                service
+                    .list_deliveries(operator, None, None, 1)
+                    .await
+                    .map(drop),
+            ],
+            Self::DisableUser
+            | Self::EnableUser
+            | Self::RevokeUserSessions
+            | Self::RevokeSession
+            | Self::CreateInvitation
+            | Self::RevokeInvitation
+            | Self::CreateClient
+            | Self::ApplyClient
+            | Self::UpdateClient
+            | Self::EnableClient
+            | Self::DisableClient
+            | Self::SuspendClient
+            | Self::UnsuspendClient
+            | Self::DeleteClient
+            | Self::RotateClientSecret
+            | Self::GrantAdministrator
+            | Self::RevokeAdministrator
+            | Self::RenameHandle
+            | Self::RetryDelivery
+            | Self::CancelDelivery => return None,
+        })
+    }
+}
+
+/// Every read checks its operator itself, as the dashboard will call the service
+/// in-process: an administrator whose rights were revoked, whose session ended,
+/// or who signed in without a passkey reads nothing.
+#[tokio::test]
+#[ignore = "requires TEST_DATABASE_URL"]
+async fn every_read_checks_its_administrator() {
+    let harness = Harness::new().await;
+    let service = harness.service();
+    let (revoked, ended, social) = (
+        harness.admin().await,
+        harness.admin().await,
+        harness.admin().await,
+    );
+    service
+        .revoke_administrator(&cli(), revoked.user_id)
+        .await
+        .expect("revoke");
+    let mut tx = harness.database.begin().await.expect("transaction");
+    ended.sign_out(&mut tx).await;
+    tx.commit().await.expect("commit");
+    let social = Operator::Admin(AdminSession {
+        user_id: social.user_id,
+        session_id: social.session_id,
+        acr: Some(Acr::Social),
+        auth_time: Some(Utc::now()),
+    });
+    let step_up = StepUpRequirement::passkey_within(CONFIRMATION_MAX_AGE);
+    for (operator, refusal) in [
+        (operator(revoked, Utc::now()), AdminError::NotAdministrator),
+        (operator(ended, Utc::now()), AdminError::SessionEnded),
+        (social, AdminError::StepUpRequired(step_up)),
+    ] {
+        for read in AdminOperation::ALL {
+            let Some(results) = read.read(&service, &operator).await else {
+                continue;
+            };
+            for result in results {
+                let refused = result.expect_err("refused");
+                assert_eq!(
+                    discriminant(&refused),
+                    discriminant(&refusal),
+                    "{read:?}: {refused:?}"
+                );
+            }
+        }
     }
 }
