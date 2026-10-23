@@ -1,9 +1,12 @@
 //! The `auth-service` command line: serving, migrations and break-glass
 //! administration. Administrative commands need only the database, so they work
-//! while the service is down, and run through [`AdminService`](crate::AdminService)
-//! like the admin API. Every command names the [`AdminOperation`] it runs, and a
-//! test checks that every operation has a command.
+//! while the service is down. They run through [`AdminService`](crate::AdminService)
+//! like the admin API, and through [`AccountService`](crate::account::AccountService)
+//! like the shared settings mounts. Every command names the [`Operation`] it runs,
+//! and tests check that every operation has a command.
 
+/// Changing one account's settings on its owner's behalf.
+mod account;
 /// Granting, revoking and listing administrators.
 mod admin;
 /// The audit history.
@@ -27,7 +30,10 @@ mod session;
 /// Finding, showing, disabling and reactivating accounts.
 mod user;
 
-use crate::{AuthConfig, SERVICE_NAME, TELEMETRY_FILTER, admin::AdminOperation};
+use crate::{
+    AuthConfig, SERVICE_NAME, TELEMETRY_FILTER, account::AccountOperation, admin::AdminOperation,
+};
+use account::AccountCommand;
 use admin::AdminCommand;
 use audit::AuditCommand;
 use clap::{Parser, Subcommand};
@@ -97,6 +103,17 @@ enum Administration {
     /// Inspect, retry and cancel outbound deliveries.
     #[command(subcommand)]
     Deliveries(DeliveriesCommand),
+    /// Read or change one account's settings on its owner's behalf.
+    Account(AccountCommand),
+}
+
+/// What an administrative command runs, recorded on its trace.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Operation {
+    /// An administrative operation.
+    Admin(AdminOperation),
+    /// A shared settings operation on one account.
+    Account(AccountOperation),
 }
 
 impl Command {
@@ -126,9 +143,10 @@ impl Command {
 impl Administration {
     /// The operation this command runs. The match is exhaustive, so a new command
     /// does not compile until it names one.
-    const fn operation(&self) -> AdminOperation {
+    const fn operation(&self) -> Operation {
         type Op = AdminOperation;
-        match self {
+        Operation::Admin(match self {
+            Self::Account(command) => return Operation::Account(command.operation()),
             Self::User(command) => match command {
                 UserCommand::Search { .. } => Op::SearchUsers,
                 UserCommand::Show { .. } => Op::ViewUser,
@@ -172,7 +190,7 @@ impl Administration {
                 DeliveriesCommand::Retry { .. } => Op::RetryDelivery,
                 DeliveriesCommand::Cancel { .. } => Op::CancelDelivery,
             },
-        }
+        })
     }
 
     /// Runs this command through `console`, in a span naming its operation, so
@@ -193,6 +211,7 @@ impl Administration {
             Self::Admin(command) => command.run(console).await,
             Self::Handle(command) => command.run(console).await,
             Self::Deliveries(command) => command.run(console).await,
+            Self::Account(command) => command.run(console).await,
         }
     }
 }

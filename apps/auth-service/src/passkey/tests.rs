@@ -1,7 +1,10 @@
 //! Focused name validation and database-backed `WebAuthn` ceremony invariants.
 
 use super::*;
-use crate::tests::{AUTH_ORIGIN, Replicas};
+use crate::{
+    account::AccountApplication,
+    tests::{AUTH_ORIGIN, Replicas},
+};
 use axum::{
     body::{Body, to_bytes},
     http::{Method, Request},
@@ -173,7 +176,10 @@ impl Fixture {
             .expect("stored key");
         tx.commit().await.expect("commit");
         Self {
-            router: app.clone().routes(),
+            router: app
+                .clone()
+                .routes()
+                .merge(AccountApplication::owner(app.database.clone()).routes()),
             app,
             authenticator,
             origin,

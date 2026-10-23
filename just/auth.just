@@ -30,6 +30,12 @@ session *ARGS:
 audit *ARGS:
     @just auth run audit "$@"
 
+# Read or change one account's settings on its owner's behalf, e.g.
+# `just auth account alice passkeys list`.
+[positional-arguments]
+account *ARGS:
+    @just auth run account "$@"
+
 # Register, inspect and change OIDC clients, e.g. `just auth client list`.
 [positional-arguments]
 client *ARGS:

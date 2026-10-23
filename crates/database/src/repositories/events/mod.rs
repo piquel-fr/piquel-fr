@@ -1,9 +1,10 @@
 //! Storage for typed domain events, and the personal data kept apart from them.
 //!
 //! An event row holds only non-identifying content, so it can be kept and later
-//! hashed (#31). Personal data, the client IP, user agent family and every
-//! [`Personal`] payload value, lives in a separate row that retention and account
-//! purges delete; reads then return [`Personal::Erased`] in its place.
+//! hashed (#31). Personal data, the client IP, user agent family, an
+//! administrator's reason and every [`Personal`] payload value, lives in a separate
+//! row that retention and account purges delete; reads then return
+//! [`Personal::Erased`] in its place.
 
 use super::{EventRepository, RepositoryExecutor};
 use crate::DatabaseError;
@@ -68,6 +69,9 @@ pub struct StoredEvent {
     pub event: RecordedEvent,
     /// Where the request came from, until its personal data is deleted.
     pub origin: Personal<RequestOrigin>,
+    /// Why an administrator or operator made the change, as they wrote it; `None`
+    /// when none was given, or once its personal data is deleted.
+    pub reason: Option<String>,
 }
 
 /// What a stored event says happened. A deploy keeps the previous release serving
@@ -170,6 +174,8 @@ struct EventRow {
     platform: Option<Platform>,
     /// Personal payload values by JSON pointer.
     details: Option<Value>,
+    /// Why an administrator or operator acted.
+    reason: Option<String>,
 }
 
 impl TryFrom<EventRow> for StoredEvent {
@@ -229,6 +235,7 @@ impl TryFrom<EventRow> for StoredEvent {
             trace_id: row.trace_id,
             event,
             origin,
+            reason: row.reason,
         })
     }
 }
@@ -337,13 +344,14 @@ impl EventRepository<'_> {
             execute,
             sqlx::query!(
                 "INSERT INTO event_personal_data (
-                    event_id, client_ip, user_agent_family, platform, details
-                ) VALUES ($1, $2, $3, $4, $5)",
+                    event_id, client_ip, user_agent_family, platform, details, reason
+                ) VALUES ($1, $2, $3, $4, $5, $6)",
                 id.as_uuid(),
                 context.origin.client_ip as _,
                 family.map(|family| family.browser.as_str()),
                 family.map(|family| family.platform.as_str()),
                 Json(&details) as _,
+                context.reason.as_deref(),
             )
         )?;
         Ok(id)
@@ -390,7 +398,7 @@ impl EventRepository<'_> {
                     p.event_id IS NOT NULL AS "personal!", p.client_ip AS "client_ip?: IpAddr",
                     p.user_agent_family AS "browser?: Browser",
                     p.platform AS "platform?: Platform",
-                    p.details AS "details?"
+                    p.details AS "details?", p.reason AS "reason?"
                 FROM domain_events e
                 LEFT JOIN event_personal_data p ON p.event_id = e.id
                 WHERE ($1::uuid IS NULL OR e.subject_user_id = $1)
@@ -442,7 +450,7 @@ impl EventRepository<'_> {
                     p.event_id IS NOT NULL AS "personal!", p.client_ip AS "client_ip?: IpAddr",
                     p.user_agent_family AS "browser?: Browser",
                     p.platform AS "platform?: Platform",
-                    p.details AS "details?"
+                    p.details AS "details?", p.reason AS "reason?"
                 FROM domain_events e
                 LEFT JOIN event_personal_data p ON p.event_id = e.id
                 WHERE e.client_id = $1
@@ -521,7 +529,7 @@ impl EventRepository<'_> {
                     p.event_id IS NOT NULL AS "personal!", p.client_ip AS "client_ip?: IpAddr",
                     p.user_agent_family AS "browser?: Browser",
                     p.platform AS "platform?: Platform",
-                    p.details AS "details?"
+                    p.details AS "details?", p.reason AS "reason?"
                 FROM domain_events e
                 LEFT JOIN event_personal_data p ON p.event_id = e.id
                 LEFT JOIN event_consumers c ON c.name = $1

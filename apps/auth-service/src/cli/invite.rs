@@ -31,7 +31,9 @@ pub(super) enum InviteCommand {
 impl InviteCommand {
     /// Runs this command as the operator at this terminal.
     pub(super) async fn run(self, console: &Console) -> Result<(), CliError> {
-        let Console { service, operator } = console;
+        let Console {
+            service, operator, ..
+        } = console;
         match self {
             Self::Create { expires_in } => {
                 let invitation = service

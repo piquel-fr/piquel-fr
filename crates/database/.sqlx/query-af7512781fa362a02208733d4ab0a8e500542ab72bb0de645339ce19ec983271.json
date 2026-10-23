@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "SELECT\n                    e.id AS \"id: EventId\", e.txid::text::bigint AS \"txid!\", e.sequence,\n                    e.occurred_at, e.kind, e.version, e.payload, e.actor AS \"actor: Json<Actor>\",\n                    e.subject_user_id AS \"subject_user_id: UserId\",\n                    e.trace_id AS \"trace_id: TraceId\",\n                    p.event_id IS NOT NULL AS \"personal!\", p.client_ip AS \"client_ip?: IpAddr\",\n                    p.user_agent_family AS \"browser?: Browser\",\n                    p.platform AS \"platform?: Platform\",\n                    p.details AS \"details?\"\n                FROM domain_events e\n                LEFT JOIN event_personal_data p ON p.event_id = e.id\n                LEFT JOIN event_consumers c ON c.name = $1\n                WHERE (e.txid, e.sequence) > (COALESCE(c.txid, '0'::xid8), COALESCE(c.sequence, 0))\n                AND e.txid < pg_snapshot_xmin(pg_current_snapshot())\n                ORDER BY e.txid, e.sequence\n                LIMIT $2",
+  "query": "SELECT\n                    e.id AS \"id: EventId\", e.txid::text::bigint AS \"txid!\", e.sequence,\n                    e.occurred_at, e.kind, e.version, e.payload, e.actor AS \"actor: Json<Actor>\",\n                    e.subject_user_id AS \"subject_user_id: UserId\",\n                    e.trace_id AS \"trace_id: TraceId\",\n                    p.event_id IS NOT NULL AS \"personal!\", p.client_ip AS \"client_ip?: IpAddr\",\n                    p.user_agent_family AS \"browser?: Browser\",\n                    p.platform AS \"platform?: Platform\",\n                    p.details AS \"details?\", p.reason AS \"reason?\"\n                FROM domain_events e\n                LEFT JOIN event_personal_data p ON p.event_id = e.id\n                LEFT JOIN event_consumers c ON c.name = $1\n                WHERE (e.txid, e.sequence) > (COALESCE(c.txid, '0'::xid8), COALESCE(c.sequence, 0))\n                AND e.txid < pg_snapshot_xmin(pg_current_snapshot())\n                ORDER BY e.txid, e.sequence\n                LIMIT $2",
   "describe": {
     "columns": [
       {
@@ -77,6 +77,11 @@
         "ordinal": 14,
         "name": "details?",
         "type_info": "Jsonb"
+      },
+      {
+        "ordinal": 15,
+        "name": "reason?",
+        "type_info": "Text"
       }
     ],
     "parameters": {
@@ -100,8 +105,9 @@
       true,
       true,
       true,
-      false
+      false,
+      true
     ]
   },
-  "hash": "0aec1349e28e639da4725323d2017bf961f22c3131329009179a34894ba0c85a"
+  "hash": "af7512781fa362a02208733d4ab0a8e500542ab72bb0de645339ce19ec983271"
 }

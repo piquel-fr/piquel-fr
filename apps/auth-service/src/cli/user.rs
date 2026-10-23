@@ -52,7 +52,9 @@ pub(super) enum UserCommand {
 impl UserCommand {
     /// Runs this command as the operator at this terminal.
     pub(super) async fn run(self, console: &Console) -> Result<(), CliError> {
-        let Console { service, operator } = console;
+        let Console {
+            service, operator, ..
+        } = console;
         match self {
             Self::Search {
                 query,

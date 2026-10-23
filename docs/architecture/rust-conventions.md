@@ -79,6 +79,18 @@ names the operation it runs. A test parses a command line for each operation and
 checks that it names that operation. The matches are exhaustive, so a new operation
 does not compile until both sides handle it.
 
+Settings an administrator may also change on another account are methods of
+`AccountService` (`src/account`), written with their setting's module, such as
+`src/passkey`. They take a `Subject`: the account and who acts, the owner with
+their session or an `Operator` with a reason. They lock with `Subject::lock` (or
+`ConfirmedSubject::lock` when the owner must have confirmed recently), record
+events with `Subject::context`, and end with `Subject::commit`, which checks an
+administrator again. The shared router serves each `AccountOperation` on both
+mounts, and the `account` command has a command for each, under the same exhaustive
+matches and test as `AdminOperation`. A new settings route either joins
+`AccountOperation`, if it only views, edits or removes, or stays in its module's
+router, on the owner's mount only.
+
 `ClientRegistry` (`src/clients/mod.rs`) is the only code that changes OIDC clients: it
 creates, updates, enables, disables, deletes and rotates the secrets of clients,
 recording each change's event. It works in the caller's transaction, so a handler

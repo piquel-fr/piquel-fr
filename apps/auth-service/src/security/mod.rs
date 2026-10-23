@@ -23,6 +23,7 @@ use piquel_common::{
     },
     protocol::{
         api::{ErrorBody, ErrorCode},
+        challenge::BearerChallenge,
         step_up::StepUpRequirement,
     },
 };
@@ -74,6 +75,9 @@ pub(crate) struct ApiError {
     code: Option<ErrorCode>,
     /// When a rate-limited client may try again, sent as `Retry-After`.
     retry_after: Option<StdDuration>,
+    /// What a bearer-token caller must send instead, sent as `WWW-Authenticate`
+    /// (RFC 6750, RFC 9470). Boxed, since few errors have one.
+    challenge: Option<Box<BearerChallenge>>,
 }
 
 impl ApiError {
@@ -84,12 +88,19 @@ impl ApiError {
             message: message.into(),
             code: None,
             retry_after: None,
+            challenge: None,
         }
     }
 
     /// Adds the machine-readable `code` a frontend can resolve the error with.
     pub(crate) fn with_code(mut self, code: ErrorCode) -> Self {
         self.code = Some(code);
+        self
+    }
+
+    /// Adds the `WWW-Authenticate` challenge of a bearer-token caller failure.
+    pub(crate) fn with_challenge(mut self, challenge: Option<BearerChallenge>) -> Self {
+        self.challenge = challenge.map(Box::new);
         self
     }
 
@@ -171,7 +182,8 @@ impl From<HandleError> for ApiError {
 }
 
 impl IntoResponse for ApiError {
-    /// Serializes the fixed browser error and adds the retry delay for rate limits.
+    /// Serializes the fixed browser error, and adds the retry delay of a rate limit
+    /// and the challenge of a bearer-token failure.
     fn into_response(self) -> Response {
         let mut response = (
             self.status,
@@ -186,6 +198,14 @@ impl IntoResponse for ApiError {
                 header::RETRY_AFTER,
                 HeaderValue::from(retry_after.as_secs()),
             );
+        }
+        if let Some(challenge) = self
+            .challenge
+            .and_then(|challenge| HeaderValue::try_from(challenge.to_string()).ok())
+        {
+            response
+                .headers_mut()
+                .insert(header::WWW_AUTHENTICATE, challenge);
         }
         response
     }
@@ -555,6 +575,7 @@ impl RequestContext {
                 client_ip: Some(self.client_ip),
                 user_agent_family: Some(self.user_agent_family),
             },
+            reason: None,
         }
     }
 

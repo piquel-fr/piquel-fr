@@ -1,10 +1,11 @@
 //! Pending and linked social identities: signup, linking, listing and unlinking.
 
 use super::{FederationApplication, FederationError, Provider};
+use crate::account::{AccountError, AccountService, ConfirmedSubject, Subject};
 use crate::security::{self, ApiError, BrowserCookie, RequestContext};
 use axum::{
     Json,
-    extract::{Path, State},
+    extract::State,
     http::{HeaderMap, StatusCode},
     response::{IntoResponse, Response},
 };
@@ -13,9 +14,7 @@ use piquel_common::{
     events::{DomainEvent, EventContext, RevocationReason},
     protocol::api::Identity,
 };
-use piquel_repository::{
-    Database, DatabaseTransaction, InsertExternalIdentity, PendingFederation, SessionScope,
-};
+use piquel_repository::{Database, DatabaseTransaction, InsertExternalIdentity, PendingFederation};
 use serde::Serialize;
 
 impl FederationApplication {
@@ -223,67 +222,48 @@ impl FederationApplication {
         BrowserCookie::FederationPending.clear_on(&mut response)?;
         Ok(response)
     }
+}
 
-    /// Lists active social identities belonging to the authenticated account.
-    pub(super) async fn list_identities(
-        State(app): State<Self>,
-        security::Session(session): security::Session,
-    ) -> Result<Json<Vec<Identity>>, ApiError> {
-        let identities = app
-            .database
-            .federation()
-            .list_active(session.user_id)
-            .await
-            .map_err(FederationError::from)?;
-        Ok(Json(identities.into_iter().map(Into::into).collect()))
-    }
-
-    /// Removes an account's provider link after a recent passkey confirmation.
-    pub(super) async fn unlink(
-        State(app): State<Self>,
-        context: RequestContext,
-        Path(provider): Path<String>,
-        confirmed: security::Confirmed,
-    ) -> Result<StatusCode, ApiError> {
-        app.unlink_identity(
-            context,
-            &confirmed,
-            provider
-                .parse()
-                .map_err(FederationError::UnsupportedProvider)?,
-        )
-        .await?;
-        Ok(StatusCode::NO_CONTENT)
-    }
-
-    /// Serializes unlink against sign-in and linking, then revokes other browser sessions.
-    async fn unlink_identity(
+/// Linked identities any administrator may also manage: listing and unlinking.
+/// Linking adds a way to sign in, so only the owner can.
+impl AccountService {
+    /// Lists the account's active social identities.
+    pub(crate) async fn identities(
         &self,
-        context: RequestContext,
-        confirmed: &security::Confirmed,
+        subject: &Subject,
+    ) -> Result<Vec<Identity>, AccountError> {
+        subject.viewed(&self.database).await?;
+        let identities = self.database.federation().list_active(subject.user).await?;
+        Ok(identities.into_iter().map(Into::into).collect())
+    }
+
+    /// Unlinks the account's identity at `provider`, serialized with sign-in and
+    /// linking by the account lock, then signs the account out elsewhere.
+    pub(crate) async fn unlink_identity(
+        &self,
+        subject: &ConfirmedSubject,
         provider: Provider,
-    ) -> Result<(), FederationError> {
-        let session = &confirmed.0;
+    ) -> Result<(), AccountError> {
         let mut tx = self.database.begin().await?;
-        confirmed.lock(&mut tx).await?;
-        if !tx.federation().unlink(session.user_id, provider).await? {
-            return Err(FederationError::IdentityNotLinked);
+        subject.lock(&mut tx).await?;
+        if !tx.federation().unlink(subject.user, provider).await? {
+            return Err(FederationError::IdentityNotLinked.into());
         }
+        let context = subject.context();
         tx.record(
-            &context.user(session),
-            Some(session.user_id),
+            &context,
+            Some(subject.user),
             DomainEvent::IdentityUnlinked { provider },
         )
         .await?;
-        security::Session::revoke(
-            &mut tx,
-            context,
-            session,
-            SessionScope::AllExcept(session.id),
-            RevocationReason::IdentityUnlinked,
+        tx.revoke_sessions(
+            &context,
+            subject.user,
+            subject.others(),
+            &RevocationReason::IdentityUnlinked,
         )
         .await?;
-        Ok(tx.commit().await?)
+        subject.commit(tx).await
     }
 }
 

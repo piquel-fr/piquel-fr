@@ -18,7 +18,7 @@ use piquel_common::{
     },
 };
 use piquel_crypto::Rs256Key;
-use piquel_repository::{Database, DatabaseTransaction};
+use piquel_repository::{Database, DatabaseTransaction, StoredUser};
 use std::sync::Arc;
 
 /// The operating system user running a command, recorded on the events it causes.
@@ -97,6 +97,7 @@ impl Operator {
         EventContext {
             actor,
             origin: RequestOrigin::default(),
+            reason: None,
         }
     }
 
@@ -116,6 +117,31 @@ impl Operator {
         }
     }
 
+    /// Locks the account `user_id` for a change, and returns it. An administrator
+    /// may not change another administrator's account, which only the CLI may:
+    /// granting rights takes the same account lock, so the account cannot become an
+    /// administrator before `tx` commits, and a known administrator is refused
+    /// before waiting for the lock, too.
+    pub(crate) async fn lock(
+        &self,
+        tx: &mut DatabaseTransaction<'_>,
+        user_id: UserId,
+    ) -> Result<StoredUser, AdminError> {
+        let checked = self.administrator().is_some();
+        if checked && tx.administrators().contains(user_id).await? {
+            return Err(AdminError::AdministratorTarget);
+        }
+        let user = tx
+            .users()
+            .find_by_id_for_update(user_id)
+            .await?
+            .ok_or(AdminError::UserNotFound)?;
+        if checked && tx.administrators().contains(user_id).await? {
+            return Err(AdminError::AdministratorTarget);
+        }
+        Ok(user)
+    }
+
     /// Requires an administrator to still hold their rights, their session and a
     /// passkey confirmation recent enough for a mutation. The rights stay
     /// share-locked until `tx` ends, so revoking them waits for the operation, or
@@ -129,7 +155,7 @@ impl Operator {
     /// waits for one of this one's, such as the caller's own sign-in or social
     /// linking. A sign-out or account disablement that commits between this read
     /// and the commit does not stop the operation.
-    pub(super) async fn authorize(
+    pub(crate) async fn authorize(
         &self,
         tx: &mut DatabaseTransaction<'_>,
     ) -> Result<(), AdminError> {
@@ -168,6 +194,17 @@ pub(crate) struct AdminTokens {
 }
 
 impl AdminTokens {
+    /// Authenticates the administrator of a request `parts` describes as [`Admin`]
+    /// does for a read, a `GET` or `HEAD`, and as [`ConfirmedAdmin`] does otherwise.
+    pub(crate) async fn caller(&self, parts: &Parts) -> Result<Operator, AdminError> {
+        let requirement = if parts.method.is_safe() {
+            PASSKEY
+        } else {
+            RECENT_PASSKEY
+        };
+        self.authenticate(&parts.headers, requirement).await
+    }
+
     /// Authenticates the request's administrator: a valid access token for the
     /// admin API, from an active session of an administrator, whose sign-in meets
     /// `requirement`. The rights and session are read now, not from the token, so

@@ -17,6 +17,8 @@
     occurred_at: string;
     /** Who acted. Only entries the account caused can be reported. */
     actor: 'account' | 'admin' | 'operator' | 'client' | 'system' | 'anonymous' | 'unrecorded';
+    /** Why an administrator or operator made the change, as they wrote it. */
+    reason: string | null;
     client: { id: string; name: string | null } | null;
     ip: string | null;
     device: Device | null;
@@ -321,7 +323,9 @@
               <div>
                 <strong>{describe(entry)}</strong>
                 <p class="help">{details(entry)}</p>
-                {#if actors[entry.actor]}<p class="help">{actors[entry.actor]}</p>{/if}
+                {#if actors[entry.actor]}<p class="help">
+                    {actors[entry.actor]}{#if entry.reason}: “{entry.reason}”{/if}
+                  </p>{/if}
               </div>
               {#if reportable(entry) && reporting !== entry.id}<button
                   class="text-button"

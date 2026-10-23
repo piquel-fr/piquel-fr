@@ -9,6 +9,10 @@
 //! answers `401` with an RFC 9470 step-up challenge. Other errors are `{"error": …}`
 //! ([`ErrorBody`]).
 //!
+//! An administrator can also change another account's settings, as its owner
+//! would, under [`paths::USER_ACCOUNT`]: the account settings API, with the same
+//! bodies. Mutations there carry the administrator's reason in [`REASON_HEADER`].
+//!
 //! Bodies the account settings API also returns come from `piquel-common`
 //! and are re-exported here. The `client` feature adds [`AdminClient`], a typed
 //! client of every route.
@@ -35,6 +39,13 @@ pub use client::{AdminClient, ApiError};
 /// registered as the OIDC client with this ID, whose tokens carry it.
 pub const AUDIENCE: &str = "piquel-admin";
 
+/// The header carrying why an administrator changes another account's settings
+/// under [`paths::USER_ACCOUNT`], required on every mutation there: percent-encoded
+/// UTF-8, 1 to 500 characters once decoded, without control characters. It is
+/// recorded with each change as personal data, and the account's owner sees it in
+/// their security history.
+pub const REASON_HEADER: &str = "x-piquel-admin-reason";
+
 /// Every route of the admin API, as axum path templates.
 pub mod paths {
     /// `GET`: searches accounts ([`UserSearch`](super::UserSearch) →
@@ -49,6 +60,13 @@ pub mod paths {
     pub const USER_ENABLE: &str = "/users/{user_id}/enable";
     /// `DELETE`: ends every session and refresh grant of an account.
     pub const USER_SESSIONS: &str = "/users/{user_id}/sessions";
+    /// The account settings API of another account, which an administrator uses as
+    /// its owner would: `/users/{user_id}` followed by an `/account/…` path, such as
+    /// `/users/{user_id}/account/passkeys`. It serves the settings an administrator
+    /// may view, edit or remove, never one that adds a way to sign in or to receive
+    /// the account's email. Mutations need a [`REASON_HEADER`](super::REASON_HEADER),
+    /// and accounts of administrators are refused.
+    pub const USER_ACCOUNT: &str = "/users/{user_id}/account";
     /// `DELETE`: ends one session and its refresh grants.
     pub const SESSION: &str = "/sessions/{session_id}";
     /// `GET`: lists invitations ([`Invitation`](super::Invitation)). `POST`: creates
@@ -319,6 +337,10 @@ pub struct Event {
     /// or payload version the serving release does not know, written by a newer
     /// one, also carries its `version`.
     pub event: serde_json::Value,
+    /// Why an administrator or operator made the change, until its personal data
+    /// is deleted.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reason: Option<String>,
 }
 
 /// An administrator account.

@@ -1,6 +1,6 @@
 //! Failures of startup and administrative commands.
 
-use crate::{AdminError, ClientRegistryError, StartupError, UserRef};
+use crate::{AdminError, ClientRegistryError, StartupError, UserRef, account::AccountError};
 use piquel_common::{
     clients::{InvalidCount, InvalidDisplayName, InvalidRedirectUri, InvalidScopeName},
     config::{ConfigurationError, SecretError},
@@ -25,6 +25,9 @@ pub(super) enum CliError {
     /// An administrative operation was refused or failed.
     #[error(transparent)]
     Admin(#[from] AdminError),
+    /// A change to an account's settings was refused or failed.
+    #[error(transparent)]
+    Account(#[from] AccountError),
     /// The account an operator named could not be found.
     #[error("account {user}")]
     User {

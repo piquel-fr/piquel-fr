@@ -1,7 +1,10 @@
 //! Validated admin inputs.
 
 use super::AdminError;
+use axum::http::HeaderMap;
 use chrono::Duration;
+use percent_encoding::percent_decode;
+use piquel_admin_api::REASON_HEADER;
 use piquel_common::{HandleError, UserId};
 use serde::Deserialize;
 use std::{fmt, str::FromStr};
@@ -170,8 +173,24 @@ impl Reason {
         Ok(Self(value))
     }
 
+    /// Reads the reason an administrator gives for changing another account's
+    /// settings, from its percent-encoded [`REASON_HEADER`].
+    ///
+    /// # Errors
+    /// [`AdminError::MissingReason`] without the header, and
+    /// [`AdminError::InvalidReason`] when it does not decode to a valid reason.
+    pub(crate) fn from_headers(headers: &HeaderMap) -> Result<Self, AdminError> {
+        let encoded = headers
+            .get(REASON_HEADER)
+            .ok_or(AdminError::MissingReason)?;
+        let decoded = percent_decode(encoded.as_bytes())
+            .decode_utf8()
+            .map_err(|_| AdminError::InvalidReason)?;
+        Self::parse(decoded.into_owned())
+    }
+
     /// Unwraps the validated text.
-    pub(super) fn into_inner(self) -> String {
+    pub(crate) fn into_inner(self) -> String {
         self.0
     }
 }

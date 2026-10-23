@@ -1,10 +1,13 @@
-//! The signed-in user's security history, and reports of entries that were not theirs.
+//! The account's security history, and the owner's reports of entries that were
+//! not theirs. Any administrator may also read the history, which
+//! [`AccountService`] serves; only the owner can report an entry.
+use crate::account::{AccountError, AccountService, Subject};
 use crate::routes;
 use crate::security::{self, ApiError, RequestContext};
 use axum::{
     Json, Router,
-    extract::{Path, Query, State},
-    routing::{get, post},
+    extract::{Path, State},
+    routing::post,
 };
 use chrono::{DateTime, Utc};
 use piquel_common::{
@@ -37,34 +40,36 @@ pub(crate) struct HistoryApplication {
 
 /// The query of [`routes::history::LIST`].
 #[derive(Deserialize)]
-struct HistoryQuery {
+pub(crate) struct HistoryQuery {
     /// The previous page's [`HistoryPage::next`], to continue with older entries.
-    before: Option<EventId>,
+    pub(crate) before: Option<EventId>,
 }
 
 /// One page of the account's history, newest first.
 #[derive(Serialize)]
-struct HistoryPage {
+pub(crate) struct HistoryPage {
     /// The entries.
-    entries: Vec<HistoryItem>,
+    pub(crate) entries: Vec<HistoryItem>,
     /// The cursor of the next, older page, when there may be one. A page can be
     /// short, even empty, and still have one.
-    next: Option<EventId>,
+    pub(crate) next: Option<EventId>,
 }
 
 /// One entry of the account's history. Entries whose actor is `account` can be
 /// reported.
 #[derive(Serialize)]
-struct HistoryItem {
+pub(crate) struct HistoryItem {
     /// Event ID, to report the entry.
-    id: EventId,
+    pub(crate) id: EventId,
     /// When it happened.
-    occurred_at: DateTime<Utc>,
+    pub(crate) occurred_at: DateTime<Utc>,
     /// What happened: its `kind` and details.
     #[serde(flatten)]
-    entry: HistoryEntry,
+    pub(crate) entry: HistoryEntry,
     /// Who did it.
-    actor: HistoryActor,
+    pub(crate) actor: HistoryActor,
+    /// Why, as the administrator or operator who did it wrote it, while kept.
+    pub(crate) reason: Option<String>,
     /// The application involved, if any.
     client: Option<ClientView>,
     /// The request's IP address, while kept.
@@ -114,6 +119,7 @@ impl HistoryItem {
             occurred_at: stored.occurred_at,
             entry,
             actor: HistoryActor::from(&stored.actor),
+            reason: stored.reason.clone(),
             client,
             ip: origin.client_ip,
             device: origin.user_agent_family,
@@ -128,65 +134,12 @@ impl HistoryApplication {
         Self { database }
     }
 
-    /// Returns both history endpoints with this application as state.
+    /// Returns the report endpoint with this application as state. Only the owner
+    /// can say an entry was not theirs.
     pub(crate) fn routes(self) -> Router {
         Router::new()
-            .route(routes::history::LIST, get(Self::list))
             .route(routes::history::REPORT, post(Self::report))
             .with_state(self)
-    }
-
-    /// Returns a page of the account's entries, newest first. Events the user does
-    /// not see are skipped, and reading continues until the page is full, the
-    /// history ends or [`MAX_BATCHES`] were read. Only the account's own events are
-    /// read: the repository query filters on its ID.
-    async fn list(
-        State(app): State<Self>,
-        security::Session(session): security::Session,
-        Query(query): Query<HistoryQuery>,
-    ) -> Result<Json<HistoryPage>, ApiError> {
-        let clients: BTreeMap<_, _> = app
-            .database
-            .oidc()
-            .list_clients()
-            .await?
-            .into_iter()
-            .map(|client| (client.id, client.display_name))
-            .collect();
-        let mut filter = EventFilter {
-            subject: Some(session.user_id),
-            before: query.before,
-            ..EventFilter::default()
-        };
-        let mut entries = Vec::new();
-        for _ in 0..MAX_BATCHES {
-            let batch = app
-                .database
-                .events()
-                .list(&filter, u32::from(PAGE_SIZE))
-                .await?;
-            let exhausted = batch.len() < usize::from(PAGE_SIZE);
-            for stored in batch {
-                filter.before = Some(stored.id);
-                entries.extend(HistoryItem::new(&stored, &clients));
-                if entries.len() == usize::from(PAGE_SIZE) {
-                    return Ok(Json(HistoryPage {
-                        entries,
-                        next: filter.before,
-                    }));
-                }
-            }
-            if exhausted {
-                return Ok(Json(HistoryPage {
-                    entries,
-                    next: None,
-                }));
-            }
-        }
-        Ok(Json(HistoryPage {
-            entries,
-            next: filter.before,
-        }))
     }
 
     /// Reports an entry the account caused as not the user's. In one transaction,
@@ -242,6 +195,63 @@ impl HistoryApplication {
         Ok(Json(Report {
             follow_up: entry.follow_up(),
         }))
+    }
+}
+
+/// The history any administrator may also read.
+impl AccountService {
+    /// Returns a page of the account's entries, newest first, older than
+    /// `before`. Events the owner does not see are skipped, and reading continues
+    /// until the page is full, the history ends or [`MAX_BATCHES`] were read. Only
+    /// the account's own events are read: the repository query filters on its ID.
+    pub(crate) async fn history(
+        &self,
+        subject: &Subject,
+        before: Option<EventId>,
+    ) -> Result<HistoryPage, AccountError> {
+        subject.viewed(&self.database).await?;
+        let clients: BTreeMap<_, _> = self
+            .database
+            .oidc()
+            .list_clients()
+            .await?
+            .into_iter()
+            .map(|client| (client.id, client.display_name))
+            .collect();
+        let mut filter = EventFilter {
+            subject: Some(subject.user),
+            before,
+            ..EventFilter::default()
+        };
+        let mut entries = Vec::new();
+        for _ in 0..MAX_BATCHES {
+            let batch = self
+                .database
+                .events()
+                .list(&filter, u32::from(PAGE_SIZE))
+                .await?;
+            let exhausted = batch.len() < usize::from(PAGE_SIZE);
+            for stored in batch {
+                filter.before = Some(stored.id);
+                entries.extend(HistoryItem::new(&stored, &clients));
+                if entries.len() == usize::from(PAGE_SIZE) {
+                    return Ok(HistoryPage {
+                        entries,
+                        next: filter.before,
+                    });
+                }
+            }
+            if exhausted {
+                return Ok(HistoryPage {
+                    entries,
+                    next: None,
+                });
+            }
+        }
+        Ok(HistoryPage {
+            entries,
+            next: filter.before,
+        })
     }
 }
 

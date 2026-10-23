@@ -1026,13 +1026,17 @@ pub struct RequestOrigin {
     pub user_agent_family: Option<UserAgentFamily>,
 }
 
-/// Who caused an event and where their request came from, recorded with it.
+/// Who caused an event, where their request came from and why, recorded with it.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct EventContext {
     /// Who caused the event.
     pub actor: Actor,
     /// Where the request came from; empty outside requests.
     pub origin: RequestOrigin,
+    /// Why an administrator or operator changed someone's account, as they wrote
+    /// it. Kept with the origin as personal data, since free text may name people,
+    /// and shown to the account's owner in their security history.
+    pub reason: Option<String>,
 }
 
 /// User agent classification on real browser headers.

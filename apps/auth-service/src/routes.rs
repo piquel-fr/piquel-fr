@@ -71,7 +71,7 @@ pub(crate) mod emails {
     pub(crate) const ITEM: &str = "/account/emails/{id}";
 }
 
-/// The signed-in user's security history.
+/// The account's security history.
 pub(crate) mod history {
     /// Pages through the account's history, newest first.
     pub(crate) const LIST: &str = "/account/history";
@@ -79,7 +79,7 @@ pub(crate) mod history {
     pub(crate) const REPORT: &str = "/account/history/{event_id}/report";
 }
 
-/// The signed-in user's sessions, one per signed-in browser.
+/// The account's sessions, one per signed-in browser.
 pub(crate) mod sessions {
     /// Lists the account's active sessions, most recently active first.
     pub(crate) const LIST: &str = "/account/sessions";
@@ -149,7 +149,8 @@ pub(crate) mod page {
     pub(crate) const LOGOUT: &str = "/logout";
 }
 
-/// Prefix shared by the settings APIs, which the settings site may call.
+/// Prefix shared by the settings APIs, which the settings site may call. The admin
+/// listener serves the shared ones under `/users/{user_id}` too.
 pub(crate) const ACCOUNT_PREFIX: &str = "/account/";
 /// Prefix shared by social sign-in, which the settings site may also start.
 pub(crate) const LOGIN_PREFIX: &str = "/login/";

@@ -1,11 +1,12 @@
 //! The admin API: thin HTTP adapters over [`AdminService`], served only on the
-//! private admin listener.
+//! private admin listener, next to the shared account settings at
+//! `/users/{user_id}/account`.
 //!
 //! The dashboard calls it with an administrator's access token. Reads take
 //! [`Admin`] and mutations [`ConfirmedAdmin`], which answer RFC 6750 and RFC 9470
 //! challenges, so the dashboard signs the administrator in again when a mutation
 //! needs a fresh passkey.
-use crate::{AuthConfig, routes::admin};
+use crate::{AuthConfig, account::AccountApplication, routes::admin};
 use axum::{
     Json, Router,
     extract::{FromRef, Path, Query, State},
@@ -30,8 +31,9 @@ mod service;
 /// Validated inputs.
 mod types;
 
+pub(crate) use caller::AdminTokens;
 pub use caller::Operator;
-use caller::{Admin, AdminTokens, ConfirmedAdmin};
+use caller::{Admin, ConfirmedAdmin};
 pub use error::AdminError;
 pub(crate) use operation::AdminOperation;
 pub use service::AdminService;
@@ -75,8 +77,10 @@ impl AdminApplication {
     }
 
     /// Returns every admin endpoint with this application as state: one route
-    /// per operation the API serves. Methods on one path merge.
+    /// per operation the API serves, where methods on one path merge. The shared
+    /// account settings follow under `/users/{user_id}`, checking the same tokens.
     pub(crate) fn routes(self) -> Router {
+        let account = AccountApplication::admin(self.tokens.database.clone(), self.tokens.clone());
         AdminOperation::ALL
             .iter()
             .filter_map(|operation| self.route(*operation))
@@ -84,6 +88,7 @@ impl AdminApplication {
                 router.route(path, method)
             })
             .with_state(self)
+            .nest(admin::USER, account.routes())
     }
 
     /// The path and method serving `operation`, or `None` if only the CLI runs it.
@@ -290,5 +295,6 @@ impl AdminApplication {
     }
 }
 
+/// Admin API scenarios, and the harness the shared settings' tests also use.
 #[cfg(test)]
-mod tests;
+pub(crate) mod tests;

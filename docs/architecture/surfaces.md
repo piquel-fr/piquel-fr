@@ -64,11 +64,49 @@ authorization. Auth checks every call:
 
 Administrators manage the administrator list too, but never their own rights or
 the last administrator's, and the API never changes an administrator's account.
-Administrators will be able to change the settings of users who are not
-administrators, through the same handlers as the owner, but never add a credential
-or email to their account *(planned)*. Every admin operation is also an
-`auth-service` CLI command *(partly planned)*; granting the first administrator is
-one.
+Every admin operation is also an `auth-service` CLI command; granting the first
+administrator is one.
+
+### Changing an account on its owner's behalf
+
+Administrators change other users' settings through the account settings API
+itself, never by signing in as them. Auth mounts one router of shared settings
+twice: at `/account` on the public listener for the owner, and at
+`/users/{user_id}/account` on the admin listener. Each mount keeps its listener's
+policy: the owner's needs the browser session, origin and CSRF checks, and the
+admin mount the checks above. The handlers take the account they act on and who
+acts, never a session, so both mounts run the same operations, with the same
+safety rules. For example, one active passkey always remains, whoever removes the
+others.
+
+The rule for what is shared: administrators may view, edit and remove, but never
+add a way to sign in or to receive the account's email, since that would let them
+take the account over.
+
+| Area | Shared | Owner only |
+| --- | --- | --- |
+| Passkeys | list, rename, remove | add, confirm |
+| Social identities | list, unlink | link |
+| Email addresses | list, choose the primary among verified, remove | add, verify |
+| Sessions | list, sign out one, sign out all | |
+| Security history | read | report an entry |
+| OIDC clients | | all; administrators use the admin API's |
+
+On the admin mount:
+
+- Every change needs the administrator's reason in the `x-piquel-admin-reason`
+  header, percent-encoded. It is stored with each event as personal data, and the
+  owner sees it in their security history, next to "By a Piquel administrator".
+- Events record the administrator as their actor. A read is recorded as a view of
+  the account, as the user detail page is.
+- Administrators' accounts are refused, before any work and again under the
+  account lock, and a change checks the administrator's rights and confirmation
+  once more before it commits.
+- A change that signs the owner out elsewhere, such as removing a passkey, signs
+  out every session, since the administrator has none of the owner's to keep.
+
+The `auth-service account <user> …` command runs the same operations at the
+command line, where it may also change administrators' accounts.
 
 ## Contracts
 

@@ -10,7 +10,7 @@ use webauthn_rs::prelude::WebauthnError;
 
 /// Failures while validating, persisting or completing a passkey operation.
 #[derive(Debug, thiserror::Error)]
-pub(super) enum PasskeyError {
+pub(crate) enum PasskeyError {
     /// The signup handle breaks the handle rules or is reserved.
     #[error("invalid handle")]
     InvalidHandle(#[from] HandleError),

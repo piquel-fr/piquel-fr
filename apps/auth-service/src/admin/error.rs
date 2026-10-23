@@ -1,10 +1,8 @@
 //! Admin failures, from the API or the CLI, and their one conversion to responses.
 
 use crate::{ClientRegistryError, security::ApiError};
-use axum::{
-    http::{HeaderValue, header},
-    response::{IntoResponse, Response},
-};
+use axum::response::{IntoResponse, Response};
+use piquel_admin_api::REASON_HEADER;
 use piquel_common::{
     DeliveryId, HandleError,
     protocol::{
@@ -74,7 +72,11 @@ pub enum AdminError {
     /// Reactivation found a verified email of the account owned by another active account.
     #[error("another active account has claimed one of this account's verified emails")]
     EmailClaimed(#[source] DatabaseError),
-    /// The reason is blank, longer than 500 characters or holds control characters.
+    /// A change to another account's settings came without its reason.
+    #[error("say why in the {REASON_HEADER} header")]
+    MissingReason,
+    /// The reason is blank, longer than 500 characters, holds control characters,
+    /// or is not percent-encoded UTF-8.
     #[error("give a reason of 1 to 500 characters, without control characters")]
     InvalidReason,
     /// The invitation lifetime is not 1 hour to 365 days.
@@ -151,6 +153,7 @@ impl AdminError {
             Self::AlreadyDisabled => "already_disabled",
             Self::AlreadyActive => "already_active",
             Self::EmailClaimed(_) => "email_claimed",
+            Self::MissingReason => "missing_reason",
             Self::InvalidReason => "invalid_reason",
             Self::InvalidInviteExpiry(_) => "invalid_invite_expiry",
             Self::AccountDisabled => "account_disabled",
@@ -190,6 +193,7 @@ impl AdminError {
             | Self::AlreadyDisabled
             | Self::AlreadyActive
             | Self::EmailClaimed(_)
+            | Self::MissingReason
             | Self::InvalidReason
             | Self::InvalidInviteExpiry(_)
             | Self::AccountDisabled
@@ -209,11 +213,17 @@ impl AdminError {
 }
 
 impl From<AdminError> for ApiError {
-    /// Maps every admin failure to a stable status and its message.
+    /// Maps every admin failure to a stable status, its message and, for a caller
+    /// failure, its challenge. Only responses convert admin failures, the CLI
+    /// reports its own, so this also logs the failure's reason in the request's
+    /// trace: every refusal can be counted and followed.
     fn from(error: AdminError) -> Self {
+        tracing::info!(admin.failure = error.reason(), "admin API request failed");
+        let challenge = error.challenge();
         let message = error.to_string();
-        match error {
+        let response = match error {
             AdminError::MalformedAuthorization
+            | AdminError::MissingReason
             | AdminError::InvalidReason
             | AdminError::InvalidInviteExpiry(_) => Self::bad_request(message),
             AdminError::InvalidHandle(error) => error.into(),
@@ -242,25 +252,14 @@ impl From<AdminError> for ApiError {
             AdminError::Database(error) => error.into(),
             AdminError::Client(error) => error.into(),
             error @ (AdminError::Crypto(_) | AdminError::Event(_)) => Self::internal(error),
-        }
+        };
+        response.with_challenge(challenge)
     }
 }
 
 impl IntoResponse for AdminError {
-    /// Answers `{"error": message}`, with the challenge of a caller failure, and
-    /// logs the failure's reason in the request's trace, so every refusal can be
-    /// counted and followed. The CLI reports its own failures.
+    /// Answers `{"error": message}`, with the challenge of a caller failure.
     fn into_response(self) -> Response {
-        tracing::info!(admin.failure = self.reason(), "admin API request failed");
-        let challenge = self
-            .challenge()
-            .and_then(|challenge| HeaderValue::try_from(challenge.to_string()).ok());
-        let mut response = ApiError::from(self).into_response();
-        if let Some(challenge) = challenge {
-            response
-                .headers_mut()
-                .insert(header::WWW_AUTHENTICATE, challenge);
-        }
-        response
+        ApiError::from(self).into_response()
     }
 }

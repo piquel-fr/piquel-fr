@@ -30,11 +30,11 @@ const ISSUER: &str = "https://auth.piquel.fr";
 
 /// A scenario account and its signed-in session.
 #[derive(Clone, Copy)]
-struct Account {
+pub(crate) struct Account {
     /// The account.
-    user_id: UserId,
+    pub(crate) user_id: UserId,
     /// Its passkey session.
-    session_id: SessionId,
+    pub(crate) session_id: SessionId,
 }
 
 impl Account {
@@ -47,18 +47,19 @@ impl Account {
 }
 
 /// The admin API on the test database, with the key its tokens are signed with.
-struct Harness {
+/// The shared account settings' tests use it too.
+pub(crate) struct Harness {
     /// Routes under test.
     router: Router,
     /// The scenario database.
-    database: Database,
+    pub(crate) database: Database,
     /// Signs scenario access tokens.
     keys: Arc<Rs256Key>,
 }
 
 impl Harness {
     /// Builds the admin API over a migrated test database.
-    async fn new() -> Self {
+    pub(crate) async fn new() -> Self {
         let url = piquel_common::config::Variable::new("TEST_DATABASE_URL")
             .required()
             .expect("TEST_DATABASE_URL must name a disposable PostgreSQL database");
@@ -102,7 +103,7 @@ impl Harness {
     }
 
     /// Creates an account signed in with a passkey.
-    async fn account(&self) -> Account {
+    pub(crate) async fn account(&self) -> Account {
         let suffix = TokenId::new().to_string();
         let user_id = self.named(&format!("admin-{}", &suffix[24..])).await;
         let mut tx = self.database.begin().await.expect("transaction");
@@ -134,7 +135,7 @@ impl Harness {
     }
 
     /// Creates an administrator, granted by the CLI.
-    async fn admin(&self) -> Account {
+    pub(crate) async fn admin(&self) -> Account {
         let account = self.account().await;
         self.service()
             .grant_administrator(&cli(), account.user_id)
@@ -144,7 +145,7 @@ impl Harness {
     }
 
     /// An admin API token for `account`, signed in at `acr` `age` ago.
-    fn token(&self, account: Account, acr: Acr, age: Duration) -> String {
+    pub(crate) fn token(&self, account: Account, acr: Acr, age: Duration) -> String {
         self.signed(account, AUDIENCE, acr, age)
     }
 
@@ -197,6 +198,11 @@ impl Harness {
         let request = request
             .body(body.map_or_else(Body::empty, |body| Body::from(body.to_string())))
             .expect("request");
+        self.send(request).await
+    }
+
+    /// Sends `request`, and returns its status, headers and JSON body.
+    pub(crate) async fn send(&self, request: Request<Body>) -> (StatusCode, HeaderMap, Value) {
         let response = self
             .router
             .clone()
@@ -227,7 +233,7 @@ impl Harness {
 }
 
 /// The operator of CLI-side changes.
-fn cli() -> Operator {
+pub(crate) fn cli() -> Operator {
     Operator::Cli {
         os_user: "tester".into(),
         host: "test".into(),
@@ -684,7 +690,7 @@ async fn revoked_invitations_cannot_be_redeemed() {
 
 /// An administrator's operator, as a token signed in with a passkey at `auth_time`
 /// makes it.
-fn operator(admin: Account, auth_time: chrono::DateTime<Utc>) -> Operator {
+pub(crate) fn operator(admin: Account, auth_time: chrono::DateTime<Utc>) -> Operator {
     Operator::Admin {
         user_id: admin.user_id,
         session_id: admin.session_id,

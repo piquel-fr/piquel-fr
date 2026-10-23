@@ -3,7 +3,7 @@
 
 use super::*;
 use crate::security::{BrowserCookie, Session, tests::assert_step_up_required};
-use crate::tests::Replicas;
+use crate::{account::AccountApplication, tests::Replicas};
 use axum::{
     body::{Body, to_bytes},
     http::{Method, Request, header},
@@ -46,7 +46,9 @@ impl Harness {
         let settings: PublicUrl = "https://piquel.fr/settings".parse().expect("settings URL");
         let config = EmailConfig::test(&settings, enabled);
         Self {
-            router: EmailApplication::new(database.clone(), &config).routes(),
+            router: EmailApplication::new(database.clone(), &config)
+                .routes()
+                .merge(AccountApplication::owner(database.clone()).routes()),
             database,
             config,
             context: RequestContext::from_ip(IpAddr::V6(Ipv6Addr::from(
