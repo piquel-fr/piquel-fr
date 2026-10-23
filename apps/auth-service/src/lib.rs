@@ -3,7 +3,8 @@
 mod admin;
 /// Embedded auth frontend pages and static resources.
 mod assets;
-/// Creating, changing and rotating the secrets of OIDC clients.
+/// Creating, changing, rotating the secrets of and deleting OIDC clients, and the
+/// account API for the clients an account manages.
 mod clients;
 /// Validated service and application configuration.
 mod config;
@@ -42,7 +43,11 @@ mod tests;
 pub use admin::{
     AdminError, AdminOperations, GracePeriod, HandleIssue, HandleProblem, InviteExpiry, Operator,
 };
-pub use clients::{Applied, ClientRegistry, ClientRegistryError};
+use clients::ClientApplication;
+pub use clients::{
+    Applied, ClientDetails, ClientRegistry, ClientRegistryError, DEFAULT_CLIENT_SCOPES,
+    MAX_DAILY_REGISTRATIONS, MAX_OWNED_CLIENTS,
+};
 pub use config::{AuthConfig, PUBLIC_BASE_URL};
 use federation::FederationApplication;
 use history::HistoryApplication;
@@ -106,6 +111,7 @@ impl AuthConfig {
             .merge(FederationApplication::new(database.clone(), &self.federation)?.routes())
             .merge(HistoryApplication::new(database.clone()).routes())
             .merge(SessionsApplication::new(database.clone()).routes())
+            .merge(ClientApplication::new(database.clone()).routes())
             .merge(OidcApplication::new(database.clone(), &self.oidc)?.routes());
         let policy = security::HttpSecurity::new(self, database);
         let protected = application

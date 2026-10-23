@@ -72,9 +72,9 @@ impl<'a> DatabaseTransaction<'a> {
         Ok(())
     }
 
-    /// Counts the other transactions waiting for a lock this one holds, so tests
-    /// can order concurrent work on what the database is doing rather than on
-    /// sleeps.
+    /// Counts the other transactions waiting for a lock this one holds, directly
+    /// or queued behind another such waiter, so tests can order concurrent work
+    /// on what the database is doing rather than on sleeps.
     ///
     /// # Errors
     ///
@@ -84,10 +84,16 @@ impl<'a> DatabaseTransaction<'a> {
         sqlx::query_scalar!(
             // `pg_locks` is read afresh by every query; `pg_stat_activity` would
             // keep the backends this transaction saw first.
-            r#"SELECT count(DISTINCT pid) AS "count!"
-            FROM pg_locks
-            WHERE NOT granted
-            AND pg_backend_pid() = ANY(pg_blocking_pids(pid))"#
+            // A waiter queued behind another waiter for the same row reports that
+            // waiter as its blocker, so waiters are followed transitively.
+            r#"WITH RECURSIVE waiting (pid) AS (
+                SELECT pid FROM pg_locks
+                WHERE NOT granted AND pg_backend_pid() = ANY(pg_blocking_pids(pid))
+                UNION
+                SELECT l.pid FROM pg_locks l, waiting w
+                WHERE NOT l.granted AND w.pid = ANY(pg_blocking_pids(l.pid))
+            )
+            SELECT count(*) AS "count!" FROM waiting"#
         )
         .fetch_one(&mut *self.inner)
         .await

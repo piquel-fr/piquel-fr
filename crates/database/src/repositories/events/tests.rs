@@ -240,7 +240,7 @@ async fn events_a_newer_release_wrote_read_as_unknown() {
     let mut events = EventRepository::from_pool(&pool);
     let data = serde_json::json!({"client_id": "deleted"});
     for (kind, version) in [
-        ("client_deleted", DomainEvent::FIRST_VERSION),
+        ("from_a_newer_release", DomainEvent::FIRST_VERSION),
         ("passkey_added", DomainEvent::FIRST_VERSION + 1),
     ] {
         events
@@ -263,7 +263,7 @@ async fn events_a_newer_release_wrote_read_as_unknown() {
             .collect::<Vec<_>>(),
         [
             unknown("passkey_added", DomainEvent::FIRST_VERSION + 1),
-            unknown("client_deleted", DomainEvent::FIRST_VERSION),
+            unknown("from_a_newer_release", DomainEvent::FIRST_VERSION),
         ]
     );
 

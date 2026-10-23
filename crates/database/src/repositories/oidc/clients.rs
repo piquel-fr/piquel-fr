@@ -7,20 +7,21 @@
 use super::OidcRedirectKind;
 use crate::{
     DatabaseError,
-    repositories::{JsonArray, OidcRepository, RepositoryExecutor},
+    repositories::{JsonArray, OidcRepository, RepositoryExecutor, Unsigned},
 };
 use chrono::{DateTime, Duration, Utc};
 use piquel_admin_api::Client;
 use piquel_common::{
-    ClientId, ClientSecretId,
-    clients::{ClientKind, ClientRegistration, RedirectUri, ScopeName},
+    ClientId, ClientSecretId, UserId,
+    clients::{ClientField, ClientKind, ClientOwner, ClientRegistration, RedirectUri, ScopeName},
     protocol::oauth::ClientAuthMethod,
 };
 use serde::Serialize;
 use sqlx::types::Json;
 use url::Url;
 
-/// A registered client with its exact URI allowlists.
+/// A registered client with its exact URI allowlists. A deleted client is still
+/// returned, disabled, with its `deleted_at`.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 #[expect(
     clippy::struct_excessive_bools,
@@ -53,51 +54,82 @@ pub struct StoredOidcClient {
     pub created_at: DateTime<Utc>,
     /// When its registration last changed.
     pub updated_at: DateTime<Utc>,
+    /// The account that manages it; `None` for clients operators manage.
+    pub owner_id: Option<UserId>,
+    /// When a token was last issued to it, to within an hour.
+    pub last_used_at: Option<DateTime<Utc>>,
+    /// When it was deleted. Its row stays, disabled, so its ID is never reused.
+    pub deleted_at: Option<DateTime<Utc>>,
+    /// When an operator suspended it. A suspended client stays disabled, and its
+    /// owner cannot enable it.
+    pub suspended_at: Option<DateTime<Utc>>,
+}
+
+/// How many clients an owner manages, and how many it registered recently.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct OwnedClientCounts {
+    /// Clients that are not deleted.
+    pub live: u64,
+    /// Clients registered within the window asked for, deleted ones included.
+    pub registered_recently: u64,
 }
 
 impl StoredOidcClient {
-    /// Whether this client is stored exactly as `registration` describes it, so
-    /// writing it would change nothing. Lists compare as sets, since only their
-    /// members matter.
+    /// The settings that writing `registration` over this client would change;
+    /// empty if it is stored exactly so. Lists compare as sets, since only their
+    /// members matter. The ID and kind never change, so they are not compared.
     #[must_use]
-    pub fn registers(&self, registration: &ClientRegistration) -> bool {
-        let same = |stored: &[String], mut given: Vec<&str>| {
+    pub fn changes(&self, registration: &ClientRegistration) -> Vec<ClientField> {
+        /// The URIs as written.
+        fn uris(uris: &[RedirectUri]) -> Vec<&str> {
+            uris.iter().map(RedirectUri::as_str).collect()
+        }
+        let same = |stored: &[String], given: &[&str]| {
             let mut stored: Vec<&str> = stored.iter().map(String::as_str).collect();
+            let mut given = given.to_vec();
             stored.sort_unstable();
             given.sort_unstable();
             stored == given
         };
-        self.id == registration.id
-            && self.display_name == registration.display_name.as_str()
-            && self.kind == registration.kind
-            && same(
-                &self.redirect_uris,
-                registration
-                    .redirect_uris
-                    .iter()
-                    .map(RedirectUri::as_str)
-                    .collect(),
-            )
-            && same(
-                &self.post_logout_uris,
-                registration
-                    .post_logout_uris
-                    .iter()
-                    .map(RedirectUri::as_str)
-                    .collect(),
-            )
-            && same(
-                &self.allowed_scopes,
-                registration
-                    .allowed_scopes
-                    .iter()
-                    .map(ScopeName::as_str)
-                    .collect(),
-            )
-            && self.allow_refresh == registration.allow_refresh
-            && self.trusted == registration.trusted
-            && self.require_pushed_authorization_requests
-                == registration.require_pushed_authorization_requests
+        let scopes: Vec<&str> = registration
+            .allowed_scopes
+            .iter()
+            .map(ScopeName::as_str)
+            .collect();
+        [
+            (
+                ClientField::DisplayName,
+                self.display_name == registration.display_name.as_str(),
+            ),
+            (
+                ClientField::RedirectUris,
+                same(&self.redirect_uris, &uris(&registration.redirect_uris)),
+            ),
+            (
+                ClientField::PostLogoutUris,
+                same(
+                    &self.post_logout_uris,
+                    &uris(&registration.post_logout_uris),
+                ),
+            ),
+            (
+                ClientField::AllowedScopes,
+                same(&self.allowed_scopes, &scopes),
+            ),
+            (
+                ClientField::AllowRefresh,
+                self.allow_refresh == registration.allow_refresh,
+            ),
+            (ClientField::Trusted, self.trusted == registration.trusted),
+            (
+                ClientField::RequirePushedAuthorizationRequests,
+                self.require_pushed_authorization_requests
+                    == registration.require_pushed_authorization_requests,
+            ),
+        ]
+        .into_iter()
+        .filter_map(|(field, same)| (!same).then_some(field))
+        .collect()
     }
 }
 
@@ -167,8 +199,8 @@ impl RedirectRows {
 }
 
 impl OidcRepository<'_> {
-    /// Registers a new, enabled client. A confidential client has no secret until
-    /// [`Self::insert_client_secret`] adds one.
+    /// Registers a new, enabled client managed by `owner`. A confidential client
+    /// has no secret until [`Self::insert_client_secret`] adds one.
     ///
     /// # Errors
     ///
@@ -177,6 +209,7 @@ impl OidcRepository<'_> {
     pub async fn create_client(
         &mut self,
         registration: &ClientRegistration,
+        owner: ClientOwner,
     ) -> Result<(), DatabaseError> {
         let redirects = RedirectRows::new(registration);
         // The redirect rows reference the client inserted by the same statement.
@@ -187,19 +220,22 @@ impl OidcRepository<'_> {
                 "WITH client AS (
                     INSERT INTO oidc_clients (
                         id, display_name, client_type, allowed_scopes, allowed_audiences,
-                        allow_refresh, trusted, require_pushed_authorization_requests
-                    ) VALUES ($1, $2, $3, $4, jsonb_build_array($1::text), $5, $6, $10)
+                        allow_refresh, trusted, owner_id, created_via,
+                        require_pushed_authorization_requests
+                    ) VALUES ($1, $2, $3, $4, jsonb_build_array($1::text), $5, $6, $7, $8, $12)
                     RETURNING id
                 )
                 INSERT INTO oidc_redirect_uris (client_id, uri, kind, origin)
                 SELECT client.id, r.uri, r.kind, r.origin
-                FROM client, unnest($7::text[], $8::text[], $9::text[]) AS r(uri, kind, origin)",
+                FROM client, unnest($9::text[], $10::text[], $11::text[]) AS r(uri, kind, origin)",
                 registration.id.as_str(),
                 registration.display_name.as_str(),
                 registration.kind.as_str(),
                 Json(Self::scopes(registration)) as _,
                 registration.allow_refresh,
                 registration.trusted,
+                owner.user_id().map(UserId::as_uuid),
+                owner.created_via().as_str(),
                 &redirects.uris,
                 &redirects.kinds,
                 &redirects.origins,
@@ -209,12 +245,12 @@ impl OidcRepository<'_> {
         Ok(())
     }
 
-    /// Replaces a client's registration and redirect URIs. Its kind, enabled state,
-    /// secrets and audiences stay: `ClientRegistry` refuses to change a kind.
+    /// Replaces a client's registration and redirect URIs. Its kind, owner, enabled
+    /// state, secrets and audiences stay: `ClientRegistry` refuses to change a kind.
     ///
     /// # Errors
     ///
-    /// Returns [`DatabaseError::NotFound`] for an unknown client, or another
+    /// Returns [`DatabaseError::NotFound`] for an unknown or deleted client, or another
     /// [`DatabaseError`] if the query fails.
     pub async fn update_client(
         &mut self,
@@ -235,7 +271,7 @@ impl OidcRepository<'_> {
                         trusted = $5,
                         require_pushed_authorization_requests = $9,
                         updated_at = now()
-                    WHERE id = $1
+                    WHERE id = $1 AND deleted_at IS NULL
                     RETURNING id
                 ),
                 desired (uri, kind, origin) AS (
@@ -306,6 +342,139 @@ impl OidcRepository<'_> {
         )
     }
 
+    /// Deletes a client, leaving its row as a tombstone so its ID is never reused:
+    /// disables it, revokes its refresh families, and removes its secrets and
+    /// consents. Pending authorization requests and codes need an enabled client,
+    /// so they stop working too.
+    ///
+    /// The caller locks the client's families first, as
+    /// [`TokenRepository::lock_client_families`](crate::TokenRepository::lock_client_families)
+    /// explains. A family granted since then is skipped if another transaction
+    /// holds it: either that one revokes it, or it is a rotation, which locked the
+    /// family before the client and will find the client disabled. Waiting for it
+    /// would deadlock with that rotation.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`DatabaseError::NotFound`] for an unknown or already deleted
+    /// client, or another [`DatabaseError`] if the query fails.
+    pub async fn delete_client(&mut self, id: &ClientId) -> Result<(), DatabaseError> {
+        // Every CTE runs; the statement returns the deleted ID, so an unknown client
+        // is `NotFound`. The previous release authenticates with
+        // `client_secret_hash`, so it is cleared with the secrets.
+        run!(
+            self,
+            fetch_one,
+            sqlx::query_scalar!(
+                "WITH client AS (
+                    UPDATE oidc_clients
+                    SET deleted_at = now(), enabled = FALSE, client_secret_hash = NULL,
+                        updated_at = now()
+                    WHERE id = $1 AND deleted_at IS NULL
+                    RETURNING id
+                ),
+                secrets AS (
+                    DELETE FROM oidc_client_secrets s USING client WHERE s.client_id = client.id
+                ),
+                consents AS (
+                    DELETE FROM oidc_consents c USING client WHERE c.client_id = client.id
+                ),
+                families AS (
+                    UPDATE refresh_token_families f
+                    SET revoked_at = now()
+                    FROM client, LATERAL (
+                        SELECT id FROM refresh_token_families
+                        WHERE client_id = client.id AND revoked_at IS NULL
+                        ORDER BY id
+                        FOR UPDATE SKIP LOCKED
+                    ) free
+                    WHERE f.id = free.id
+                )
+                SELECT id FROM client",
+                id.as_str(),
+            )
+        )?;
+        Ok(())
+    }
+
+    /// How many clients `owner` manages, deleted ones aside, and how many it
+    /// registered in the last `window`, deleted ones included.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`DatabaseError`] if the query fails.
+    pub async fn count_owned_clients(
+        &mut self,
+        owner: UserId,
+        window: Duration,
+    ) -> Result<OwnedClientCounts, DatabaseError> {
+        run!(
+            self,
+            fetch_one,
+            sqlx::query_as!(
+                OwnedClientCounts,
+                r#"SELECT
+                    count(*) FILTER (WHERE deleted_at IS NULL) AS "live!: Unsigned",
+                    count(*) FILTER (
+                        WHERE created_at > now() - $2::bigint * interval '1 second'
+                    ) AS "registered_recently!: Unsigned"
+                FROM oidc_clients
+                WHERE owner_id = $1"#,
+                owner.as_uuid(),
+                window.num_seconds(),
+            )
+        )
+    }
+
+    /// Suspends a client, which also disables it, or lifts its suspension, which
+    /// leaves it disabled. Returns whether that changed its state.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`DatabaseError`] if the query fails.
+    pub async fn set_client_suspended(
+        &mut self,
+        id: &ClientId,
+        suspended: bool,
+    ) -> Result<bool, DatabaseError> {
+        Ok(run!(
+            self,
+            execute,
+            sqlx::query!(
+                "UPDATE oidc_clients
+                SET suspended_at = CASE WHEN $2 THEN now() END,
+                    enabled = enabled AND NOT $2,
+                    updated_at = now()
+                WHERE id = $1 AND (suspended_at IS NULL) = $2",
+                id.as_str(),
+                suspended,
+            )
+        )?
+        .rows_affected()
+            == 1)
+    }
+
+    /// Records that a token was issued to the client, at most once an hour so
+    /// frequent grants do not write the row each time.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`DatabaseError`] if the query fails.
+    pub async fn touch_client(&mut self, id: &ClientId) -> Result<(), DatabaseError> {
+        run!(
+            self,
+            execute,
+            sqlx::query!(
+                "UPDATE oidc_clients
+                SET last_used_at = now()
+                WHERE id = $1
+                AND (last_used_at IS NULL OR last_used_at < now() - interval '1 hour')",
+                id.as_str(),
+            )
+        )?;
+        Ok(())
+    }
+
     /// Locks a client's row until the transaction ends, so changes that read the
     /// client before writing it, such as an update or a rotation, run one at a time.
     ///
@@ -334,20 +503,37 @@ impl OidcRepository<'_> {
         &mut self,
         id: &str,
     ) -> Result<Option<StoredOidcClient>, DatabaseError> {
-        Ok(self.clients(Some(id)).await?.pop())
+        Ok(self.clients(Some(id), None).await?.pop())
     }
 
-    /// Lists every client, enabled or not, by ID.
+    /// Lists every client, enabled, disabled or deleted, by ID.
     ///
     /// # Errors
     ///
     /// Returns [`DatabaseError`] if the query fails or a row is invalid.
     pub async fn list_clients(&mut self) -> Result<Vec<StoredOidcClient>, DatabaseError> {
-        self.clients(None).await
+        self.clients(None, None).await
     }
 
-    /// The client with ID `id`, or every client when `id` is `None`, by ID.
-    async fn clients(&mut self, id: Option<&str>) -> Result<Vec<StoredOidcClient>, DatabaseError> {
+    /// Lists the clients `owner` manages, deleted ones aside, by ID.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`DatabaseError`] if the query fails or a row is invalid.
+    pub async fn list_owned_clients(
+        &mut self,
+        owner: UserId,
+    ) -> Result<Vec<StoredOidcClient>, DatabaseError> {
+        self.clients(None, Some(owner)).await
+    }
+
+    /// The client with ID `id`, or every client when `id` is `None`, by ID. With
+    /// an `owner`, only the live clients it manages.
+    async fn clients(
+        &mut self,
+        id: Option<&str>,
+        owner: Option<UserId>,
+    ) -> Result<Vec<StoredOidcClient>, DatabaseError> {
         run!(
             self,
             fetch_all,
@@ -357,6 +543,8 @@ impl OidcRepository<'_> {
                     c.id AS "id: ClientId", c.display_name, c.client_type AS "kind: ClientKind",
                     c.enabled, c.allow_refresh, c.trusted,
                     c.require_pushed_authorization_requests, c.created_at, c.updated_at,
+                    c.owner_id AS "owner_id: UserId", c.last_used_at, c.deleted_at,
+                    c.suspended_at,
                     c.allowed_scopes AS "allowed_scopes: JsonArray<String>",
                     c.allowed_audiences AS "allowed_audiences: JsonArray<String>",
                     COALESCE(
@@ -369,10 +557,12 @@ impl OidcRepository<'_> {
                     ) AS "post_logout_uris!: JsonArray<String>"
                 FROM oidc_clients c
                 LEFT JOIN oidc_redirect_uris r ON r.client_id = c.id
-                WHERE $1::text IS NULL OR c.id = $1
+                WHERE ($1::text IS NULL OR c.id = $1)
+                AND ($2::uuid IS NULL OR (c.owner_id = $2 AND c.deleted_at IS NULL))
                 GROUP BY c.id
                 ORDER BY c.id"#,
                 id,
+                owner.map(UserId::as_uuid),
             )
         )
     }

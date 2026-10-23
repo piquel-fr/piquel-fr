@@ -124,3 +124,18 @@ fn bounded_lists_count_distinct_values() {
     );
     assert!(PostLogoutUris::new([]).is_ok());
 }
+
+/// Generated client IDs are valid IDs with the `c_` prefix and 20 base32
+/// characters, and differ with their random input.
+#[test]
+fn generated_client_ids_use_the_prefix_and_base32() {
+    let id = ClientId::generated(&[0xff; 32]);
+    assert_eq!(id.as_str(), format!("c_{}", "7".repeat(20)));
+    assert_eq!(id.as_str().parse::<ClientId>(), Ok(id.clone()));
+    let mut random = [0; 32];
+    random[19] = 1;
+    assert_eq!(
+        ClientId::generated(&random).as_str(),
+        format!("c_{}b", "a".repeat(19))
+    );
+}

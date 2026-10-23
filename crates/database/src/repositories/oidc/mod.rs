@@ -511,17 +511,24 @@ impl OidcRepository<'_> {
             return Ok(None);
         };
         // A separate statement takes a fresh snapshot, which includes a family
-        // committed while the lock above waited. Only the family lock is taken, so
-        // this stays within the user -> session -> family order of rotation.
+        // committed while the lock above waited. Only family locks are taken, in
+        // ID order (see `TokenRepository::lock_client_families`), so this stays
+        // within the user -> session -> family order of rotation.
         let revoked = run!(
             self,
             fetch_all,
             sqlx::query_scalar!(
-                r#"UPDATE refresh_token_families
+                r#"WITH locked AS (
+                    SELECT id FROM refresh_token_families
+                    WHERE authorization_code_id = $1 AND revoked_at IS NULL
+                    ORDER BY id
+                    FOR UPDATE
+                )
+                UPDATE refresh_token_families f
                 SET revoked_at = now()
-                WHERE authorization_code_id = $1
-                AND revoked_at IS NULL
-                RETURNING id AS "id: TokenId""#,
+                FROM locked
+                WHERE f.id = locked.id AND f.revoked_at IS NULL
+                RETURNING f.id AS "id: TokenId""#,
                 id.as_uuid(),
             )
         )?;
@@ -637,7 +644,7 @@ impl OidcRepository<'_> {
 }
 /// Client registrations, secrets and the origins of public clients.
 mod clients;
-pub use clients::{StoredClientSecret, StoredOidcClient};
+pub use clients::{OwnedClientCounts, StoredClientSecret, StoredOidcClient};
 /// Database-backed client registration and migration scenarios.
 #[cfg(test)]
 mod tests;

@@ -4,16 +4,12 @@
 use super::*;
 use crate::tests::{Browser, Replicas};
 use axum::http::{Method, StatusCode};
-use chrono::Duration;
 use piquel_common::{
     PasskeyId, TokenId,
-    clients::ClientKind,
+    clients::{ClientKind, ClientOwner},
     events::{EventContext, JobName},
 };
-use piquel_repository::{
-    InsertAuthorizationCode, InsertRefreshFamily, InsertRefreshToken, RefreshRotationError,
-    SessionAuthentication,
-};
+use piquel_repository::RefreshRotationError;
 use serde_json::{Value, json};
 
 /// The history routes over the test database.
@@ -82,60 +78,18 @@ impl Harness {
         let registration = crate::tests::registration(ClientKind::Public, "https://client.example");
         self.database
             .oidc()
-            .create_client(&registration)
+            .create_client(&registration, ClientOwner::Operator)
             .await
             .expect("client");
         let client = registration.id;
-        let mut tx = self.database.begin().await.expect("transaction");
-        let session = tx
-            .sessions()
-            .find_by_id(account.session_id)
-            .await
-            .expect("lookup")
-            .expect("session");
-        let authentication = SessionAuthentication::from(&session);
-        let code = TokenId::new();
-        tx.oidc()
-            .insert_code(&InsertAuthorizationCode {
-                id: code,
-                secret_digest: code.as_uuid().as_bytes().repeat(2),
-                client_id: client.clone(),
-                user_id: account.user_id,
-                session_id: account.session_id,
-                redirect_uri: "https://client.example/callback".into(),
-                pkce_challenge: "challenge".into(),
-                nonce: None,
-                scopes: vec!["openid".into()],
-                audience: "test".into(),
-                authentication: authentication.clone(),
-                expires_at: Utc::now() + Duration::minutes(1),
-            })
-            .await
-            .expect("code");
-        let (family, token) = (TokenId::new(), TokenId::new());
-        let digest = token.as_uuid().as_bytes().repeat(2);
-        tx.tokens()
-            .insert_family(
-                &InsertRefreshFamily {
-                    id: family,
-                    user_id: account.user_id,
-                    client_id: client.to_string(),
-                    session_id: account.session_id,
-                    authorization_code_id: code,
-                    audience: "test".into(),
-                    scopes: vec!["openid".into()],
-                    authentication,
-                },
-                &InsertRefreshToken {
-                    id: token,
-                    family_id: family,
-                    secret_digest: digest.clone(),
-                    expires_at: Utc::now() + Duration::hours(1),
-                },
-            )
-            .await
-            .expect("family");
-        tx.commit().await.expect("commit");
+        let (token, digest) = crate::tests::refresh_grant(
+            &self.database,
+            account.user_id,
+            account.session_id,
+            &client,
+            TokenId::new(),
+        )
+        .await;
         (client, token, digest)
     }
 }
@@ -264,7 +218,7 @@ async fn events_a_newer_release_wrote_are_hidden() {
     let unknown = harness
         .database
         .events()
-        .insert_written_elsewhere(alice.user_id, "client_deleted", 1, &json!({}))
+        .insert_written_elsewhere(alice.user_id, "from_a_newer_release", 1, &json!({}))
         .await
         .expect("event");
     let page = harness.page(&alice, None).await;

@@ -71,11 +71,16 @@ The router installs origin/CSRF checks, rate limits, a deadline and browser
 isolation headers. Public-client origins for CORS are looked up per request.
 
 `ClientRegistry` (`src/clients/mod.rs`) is the only code that changes OIDC clients: it
-creates, updates, enables, disables and rotates the secrets of clients, recording
-each change's event in its transaction. It takes a `ClientRegistration` from
-`piquel_common::clients`, whose field types validate themselves, so invalid input
-never reaches the repository. The `client` command uses it, and owner,
-registration and admin APIs should too. Handlers read clients from the database on
+creates, updates, enables, disables, deletes and rotates the secrets of clients,
+recording each change's event. It works in the caller's transaction, so a handler
+can lock its session and check its passkey confirmation in the transaction that
+makes the change. It takes a `ClientRegistration` from `piquel_common::clients`,
+whose field types validate themselves, so invalid input never reaches the
+repository. The `client` command and the account API (`src/clients/api`) use it,
+and registration and admin APIs should too. The account API's body types are the
+policy for clients accounts own: they hold no ID or trust, and only standard
+scopes. Its `OwnedClient` extractor answers 404 for any client the caller does not
+own, so handlers never check ownership. Handlers read clients from the database on
 each request and cache nothing, so changes apply at once on every replica.
 
 Periodic work implements `ExclusiveJob` in `apps/auth-service/src/jobs.rs`, and

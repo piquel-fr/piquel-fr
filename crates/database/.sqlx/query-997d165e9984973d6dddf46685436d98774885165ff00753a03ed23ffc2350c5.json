@@ -1,0 +1,20 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "WITH RECURSIVE waiting (pid) AS (\n                SELECT pid FROM pg_locks\n                WHERE NOT granted AND pg_backend_pid() = ANY(pg_blocking_pids(pid))\n                UNION\n                SELECT l.pid FROM pg_locks l, waiting w\n                WHERE NOT l.granted AND w.pid = ANY(pg_blocking_pids(l.pid))\n            )\n            SELECT count(*) AS \"count!\" FROM waiting",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "count!",
+        "type_info": "Int8"
+      }
+    ],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": [
+      null
+    ]
+  },
+  "hash": "997d165e9984973d6dddf46685436d98774885165ff00753a03ed23ffc2350c5"
+}

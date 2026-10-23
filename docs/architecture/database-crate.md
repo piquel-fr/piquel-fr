@@ -79,6 +79,23 @@ Important invariants:
   transaction, under the session row lock, against the action's maximum age. It
   belongs to one session and ends with it.
 - Account locking protects the last-passkey guard from concurrent removals.
+- A deleted client stays as a disabled tombstone (a check constraint keeps it
+  disabled), so its ID, which tokens carry as `aud`, is never reused. Deleting it
+  revokes its refresh families and removes its secrets and consents in the same
+  statement. A suspended client is likewise always disabled. Registering a client
+  for an account locks the account first, then counts its live clients and
+  those it registered that day, deleted ones included, so concurrent
+  registrations cannot exceed the quota, and tombstones stay bounded. Purging
+  an account keeps its tombstones without their owner, but a check constraint
+  refuses it while the account owns a live client: delete those first.
+- Refresh families are locked after their account and session, and before their
+  client: a rotation locks its family, then share-locks the client, so a
+  deletion locks the client's families before the client. A family granted after
+  that is skipped if another transaction holds it, since that is a revocation or
+  a rotation that will find the client disabled. Every statement that
+  locks several families (a deletion's, a logout's, an account-wide or a
+  code-replay revocation) locks them in ID order, so two never wait for each
+  other's families.
 - Grants and revocations of administrator rights take `administrators().lock()`
   first, so the last-administrator check stays true until they commit. An
   administrator's mutation that changes an account locks it first, as a grant

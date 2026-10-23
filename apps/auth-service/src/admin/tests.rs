@@ -2,6 +2,7 @@
 
 use super::*;
 use crate::security::{RequestContext, Session};
+use crate::tests::until_blocked;
 use axum::{
     body::{Body, to_bytes},
     http::{HeaderMap, Method, Request, header},
@@ -19,7 +20,7 @@ use piquel_common::{
     },
 };
 use piquel_crypto::Rs256Key;
-use piquel_repository::{DatabaseConfig, DatabaseTransaction, InsertUser, SessionScope};
+use piquel_repository::{DatabaseConfig, InsertUser, SessionScope};
 use serde_json::{Value, json};
 use std::sync::Arc;
 use tower::ServiceExt;
@@ -519,7 +520,7 @@ async fn events_a_newer_release_wrote_are_listed() {
     harness
         .database
         .events()
-        .insert_written_elsewhere(user.user_id, "client_deleted", 1, &data)
+        .insert_written_elsewhere(user.user_id, "from_a_newer_release", 1, &data)
         .await
         .expect("event");
     let token = harness.token(admin, Acr::PhishingResistant, Duration::zero());
@@ -534,7 +535,7 @@ async fn events_a_newer_release_wrote_are_listed() {
     assert_eq!(status, StatusCode::OK);
     assert_eq!(
         page["events"][0]["event"],
-        json!({"kind": "client_deleted", "version": 1, "data": data})
+        json!({"kind": "from_a_newer_release", "version": 1, "data": data})
     );
 }
 
@@ -689,17 +690,6 @@ fn operator(admin: Account, auth_time: chrono::DateTime<Utc>) -> Operator {
     }
 }
 
-/// Waits until another transaction waits for a lock `holder` holds.
-async fn until_blocked(holder: &mut DatabaseTransaction<'_>) {
-    tokio::time::timeout(std::time::Duration::from_secs(10), async {
-        while holder.blocked_transactions().await.expect("lock waits") == 0 {
-            tokio::time::sleep(std::time::Duration::from_millis(10)).await;
-        }
-    })
-    .await
-    .expect("the operation waits for the holder's lock");
-}
-
 /// A mutation checks its caller's confirmation after its last write: one admitted
 /// just inside the window, that then waited for a logout holding the target's
 /// session, is refused with the step-up and changes nothing.
@@ -722,7 +712,7 @@ async fn mutations_recheck_the_confirmation_after_waiting() {
     let (result, ()) = tokio::join!(
         operations.disable_user(&operator, user.user_id, reason),
         async {
-            until_blocked(&mut logout).await;
+            until_blocked(&mut logout, 1).await;
             let expired = auth_time + Duration::seconds(301) - Utc::now();
             tokio::time::sleep(expired.to_std().unwrap_or_default()).await;
             logout.commit().await.expect("logout");
@@ -763,7 +753,7 @@ async fn waiting_mutations_hold_no_caller_locks() {
     let (result, ()) = tokio::join!(
         operations.disable_user(&operator, user.user_id, reason),
         async {
-            until_blocked(&mut switch).await;
+            until_blocked(&mut switch, 1).await;
             switch
                 .sessions()
                 .revoke(admin.user_id, SessionScope::One(admin.session_id))
@@ -838,7 +828,7 @@ async fn invitation_revocation_waits_for_signup() {
     let (result, ()) = tokio::join!(
         operations.revoke_invitation(&operator, invitation.id),
         async {
-            until_blocked(&mut signup).await;
+            until_blocked(&mut signup, 1).await;
             signup
                 .sessions()
                 .revoke(admin.user_id, SessionScope::One(admin.session_id))

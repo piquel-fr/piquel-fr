@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "WITH locked AS (\n                    SELECT id FROM refresh_token_families\n                    WHERE session_id = ANY($1)\n                    ORDER BY id\n                    FOR UPDATE\n                )\n                UPDATE refresh_token_families f\n                SET revoked_at = COALESCE(f.revoked_at, now())\n                FROM locked\n                WHERE f.id = locked.id",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "UuidArray"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "7f656ccf92a52e009b2179367dbc7450123ffa71d7bddbf322170a20804ddee7"
+}

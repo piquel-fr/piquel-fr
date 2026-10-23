@@ -7,7 +7,8 @@ use chrono::{DateTime, Duration, Utc};
 use piquel_common::{
     ClientId, TokenId, UserId,
     clients::{
-        AllowedScopes, ClientKind, ClientRegistration, PostLogoutUris, RedirectUris, ScopeName,
+        AllowedScopes, ClientKind, ClientOwner, ClientRegistration, PostLogoutUris, RedirectUris,
+        ScopeName,
     },
     protocol::oauth::Scope,
 };
@@ -56,7 +57,9 @@ async fn rotation_caps_earlier_secrets_without_reviving_or_extending_them() {
     let pool = Database::test_pool().await;
     let mut oidc = OidcRepository::from_pool(&pool);
     let client = registration(ClientKind::Confidential, &origin());
-    oidc.create_client(&client).await.expect("create");
+    oidc.create_client(&client, ClientOwner::Operator)
+        .await
+        .expect("create");
     let [one, two, three, four, five] = [1, 2, 3, 4, 5].map(|byte| [byte; 32]);
     let rotate = async |digest: [u8; 32], grace: Duration| {
         let mut oidc = OidcRepository::from_pool(&pool);
@@ -110,7 +113,7 @@ async fn pushed_requests_are_claimed_only_before_they_expire() {
     let origin = origin();
     let client = registration(ClientKind::Public, &origin);
     OidcRepository::from_pool(&pool)
-        .create_client(&client)
+        .create_client(&client, ClientOwner::Operator)
         .await
         .expect("create");
     let claim = async |expires_at: DateTime<Utc>| {
@@ -161,10 +164,15 @@ async fn public_client_origins_follow_registrations() {
     let mut oidc = OidcRepository::from_pool(&pool);
     let (first, second, confidential) = (origin(), origin(), origin());
     let mut client = registration(ClientKind::Public, &first);
-    oidc.create_client(&client).await.expect("public client");
-    oidc.create_client(&registration(ClientKind::Confidential, &confidential))
+    oidc.create_client(&client, ClientOwner::Operator)
         .await
-        .expect("confidential client");
+        .expect("public client");
+    oidc.create_client(
+        &registration(ClientKind::Confidential, &confidential),
+        ClientOwner::Operator,
+    )
+    .await
+    .expect("confidential client");
     assert!(oidc.public_client_origin(&first).await.expect("lookup"));
     assert!(
         !oidc
@@ -173,7 +181,9 @@ async fn public_client_origins_follow_registrations() {
             .expect("lookup")
     );
     assert!(
-        oidc.create_client(&client).await.is_err(),
+        oidc.create_client(&client, ClientOwner::Operator)
+            .await
+            .is_err(),
         "client IDs are unique"
     );
 
@@ -204,6 +214,44 @@ async fn public_client_origins_follow_registrations() {
         "nothing changed"
     );
     assert!(!oidc.public_client_origin(&second).await.expect("lookup"));
+}
+
+/// Purging an account keeps its deleted clients' tombstones, without their
+/// owner, and is refused while it owns a live client, which would otherwise
+/// become a client no account manages.
+#[tokio::test]
+#[ignore = "requires a disposable TEST_DATABASE_URL"]
+async fn purging_an_owner_needs_its_live_clients_deleted() {
+    let pool = Database::test_pool().await;
+    let owner = UserId::new();
+    sqlx::query("INSERT INTO users(id,username,display_name) VALUES($1,$2,'Owner test')")
+        .bind(owner.as_uuid())
+        .bind(format!("owner_{owner}"))
+        .execute(&pool)
+        .await
+        .expect("user");
+    let client = registration(ClientKind::Public, &origin());
+    let mut oidc = OidcRepository::from_pool(&pool);
+    oidc.create_client(&client, ClientOwner::Account(owner))
+        .await
+        .expect("create");
+    let purge = async || {
+        sqlx::query("DELETE FROM users WHERE id = $1")
+            .bind(owner.as_uuid())
+            .execute(&pool)
+            .await
+    };
+    assert!(purge().await.is_err(), "a live client keeps its owner");
+    oidc.delete_client(&client.id).await.expect("delete");
+    purge()
+        .await
+        .expect("tombstones never block purging their owner");
+    let tombstone = oidc
+        .find_client(client.id.as_str())
+        .await
+        .expect("find")
+        .expect("the tombstone stays");
+    assert_eq!(tombstone.owner_id, None);
 }
 
 /// Clients the startup file registered keep working after the migration: a
@@ -237,6 +285,7 @@ async fn migration_keeps_file_clients_and_their_secrets() {
             .await
             .expect("earlier migration");
     }
+    // A public client, and a confidential one whose secret digest is `digest`.
     let digest = [9; 32];
     sqlx::raw_sql(
         "INSERT INTO oidc_clients (id, display_name, allowed_scopes, allowed_audiences)
@@ -244,24 +293,19 @@ async fn migration_keeps_file_clients_and_their_secrets() {
         INSERT INTO oidc_redirect_uris (client_id, uri, kind)
         VALUES
             ('web', 'https://Web.Example:0443/callback', 'authorization'),
-            ('web', 'https://bücher.example/callback', 'authorization');",
-    )
-    .execute(&mut connection)
-    .await
-    .expect("public client");
-    sqlx::query(
-        "INSERT INTO oidc_clients (
+            ('web', 'https://bücher.example/callback', 'authorization');
+        INSERT INTO oidc_clients (
             id, display_name, allowed_scopes, allowed_audiences, client_secret_hash
-        ) VALUES ('api', 'API', '[\"openid\"]', '[\"api\"]', $1)",
+        ) VALUES ('api', 'API', '[\"openid\"]', '[\"api\"]', decode(repeat('09', 32), 'hex'));",
     )
-    .bind(digest.as_slice())
     .execute(&mut connection)
     .await
-    .expect("confidential client");
+    .expect("file clients");
     // This migration, then the later ones the current release reads with.
     sqlx::raw_sql(concat!(
         include_str!("../../../migrations/0008_oidc_client_registry.sql"),
         include_str!("../../../migrations/0009_pushed_authorization_requests.sql"),
+        include_str!("../../../migrations/0012_client_owners.sql"),
     ))
     .execute(&mut connection)
     .await
@@ -304,7 +348,7 @@ async fn migration_keeps_file_clients_and_their_secrets() {
         ("legacy", ClientKind::Confidential),
     ] {
         let client = oidc.find_client(id).await.expect("find").expect("migrated");
-        assert_eq!(client.kind, kind, "{id}");
+        assert_eq!((client.kind, client.owner_id), (kind, None), "{id}");
     }
     assert_eq!(
         oidc.active_secret_digests("api").await.expect("secrets"),

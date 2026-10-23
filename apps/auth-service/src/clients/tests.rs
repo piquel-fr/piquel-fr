@@ -1,7 +1,7 @@
 //! Client changes reach running replicas on their next request, and each records
 //! its event as made by the operator.
 use super::*;
-use crate::tests::{Replicas, operator, registration};
+use crate::tests::{Browser, Replicas, change, operator, register, registration, replace};
 use axum::{
     Router,
     body::Body,
@@ -68,15 +68,11 @@ async fn authenticates(replica: &Router, id: &ClientId, origin: &str) -> bool {
 async fn changes_apply_to_the_next_request_on_every_replica() {
     let replicas = Replicas::new().await;
     let database = Replicas::database().await;
-    let registry = ClientRegistry::new(database.clone());
     let [first, second] = [(); 2].map(|()| format!("https://{}.example", UserId::new()));
     let mut client = registration(ClientKind::Public, &first);
     assert!(!cors(&replicas.a, &first).await, "not registered yet");
 
-    let secret = registry
-        .create(&operator(), &client, None)
-        .await
-        .expect("create");
+    let secret = register(&database, &client).await.expect("create");
     assert!(secret.is_none(), "public clients have no secret");
     assert!(cors(&replicas.b, &first).await);
     assert!(authenticates(&replicas.a, &client.id, &first).await);
@@ -84,28 +80,25 @@ async fn changes_apply_to_the_next_request_on_every_replica() {
     client.redirect_uris =
         RedirectUris::new([format!("{second}/callback").parse().expect("callback")])
             .expect("one callback");
-    registry
-        .update(&operator(), &client.id, |_| {
-            Ok::<_, ClientRegistryError>(client.clone())
-        })
-        .await
-        .expect("update");
+    replace(&database, &client).await.expect("update");
     assert!(
         !cors(&replicas.a, &first).await,
         "the old origin is dropped"
     );
     assert!(cors(&replicas.b, &second).await);
 
-    registry
-        .set_enabled(&operator(), &client.id, false)
-        .await
-        .expect("disable");
+    change(&database, async |registry| {
+        registry.set_enabled(&client.id, false).await
+    })
+    .await
+    .expect("disable");
     assert!(!cors(&replicas.a, &second).await);
     assert!(!authenticates(&replicas.b, &client.id, &second).await);
-    registry
-        .set_enabled(&operator(), &client.id, true)
-        .await
-        .expect("enable");
+    change(&database, async |registry| {
+        registry.set_enabled(&client.id, true).await
+    })
+    .await
+    .expect("enable");
     assert!(authenticates(&replicas.a, &client.id, &second).await);
 
     let history = database
@@ -132,7 +125,8 @@ async fn changes_apply_to_the_next_request_on_every_replica() {
                 client_id: client_id.clone()
             },
             DomainEvent::ClientUpdated {
-                client_id: client_id.clone()
+                client_id: client_id.clone(),
+                changed: vec![ClientField::RedirectUris],
             },
             DomainEvent::ClientRegistered {
                 client_id,
@@ -148,7 +142,7 @@ async fn changes_apply_to_the_next_request_on_every_replica() {
 #[ignore = "requires TEST_DATABASE_URL"]
 async fn rotated_secrets_overlap_until_their_grace_period_ends() {
     let replicas = Replicas::new().await;
-    let registry = ClientRegistry::new(Replicas::database().await);
+    let database = Replicas::database().await;
     let client = registration(ClientKind::Confidential, "https://api.example");
     // Revocation answers 200 for any token once the client authenticates.
     let revokes = async |secret: &ClientSecret| {
@@ -164,58 +158,58 @@ async fn rotated_secrets_overlap_until_their_grace_period_ends() {
         .status()
             == StatusCode::OK
     };
-    let first = registry
-        .create(&operator(), &client, None)
+    let first = register(&database, &client)
         .await
         .expect("create")
         .expect("confidential clients get a secret");
     assert!(revokes(&first).await);
 
-    let second = registry
-        .rotate_secret(&operator(), &client.id, "1h".parse().expect("grace"))
+    let rotate = async |id: &ClientId, grace: &str| {
+        let grace = grace.parse().expect("grace");
+        change(&database, async |registry| {
+            registry.rotate_secret(id, grace).await
+        })
         .await
-        .expect("rotate");
+    };
+    let second = rotate(&client.id, "1h").await.expect("rotate");
     assert!(revokes(&first).await, "still in its grace period");
     assert!(revokes(&second).await);
 
-    let third = registry
-        .rotate_secret(&operator(), &client.id, "0".parse().expect("grace"))
-        .await
-        .expect("rotate and revoke");
+    let third = rotate(&client.id, "0").await.expect("rotate and revoke");
     assert!(!revokes(&first).await);
     assert!(!revokes(&second).await);
     assert!(revokes(&third).await);
 
     let public = registration(ClientKind::Public, "https://web.example");
-    registry
-        .create(&operator(), &public, None)
-        .await
-        .expect("public client");
+    register(&database, &public).await.expect("public client");
     assert!(matches!(
-        registry
-            .rotate_secret(&operator(), &public.id, "0".parse().expect("grace"))
-            .await,
+        rotate(&public.id, "0").await,
         Err(ClientRegistryError::Public(_))
     ));
     assert!(matches!(
-        registry.create(&operator(), &public, None).await,
+        register(&database, &public).await,
         Err(ClientRegistryError::Exists { .. })
     ));
     assert!(matches!(
-        registry
-            .update(&operator(), &public.id, |_| {
-                Ok(ClientRegistration {
-                    kind: ClientKind::Confidential,
-                    ..public.clone()
+        change(&database, async |registry| {
+            registry
+                .update(&public.id, |_| {
+                    Ok(ClientRegistration {
+                        kind: ClientKind::Confidential,
+                        ..public.clone()
+                    })
                 })
-            })
-            .await,
+                .await
+        })
+        .await,
         Err(ClientRegistryError::Immutable(_))
     ));
+    let unknown = "unknown-client".parse().expect("ID");
     assert!(matches!(
-        registry
-            .set_enabled(&operator(), &"unknown-client".parse().expect("ID"), false)
-            .await,
+        change(&database, async |registry| {
+            registry.set_enabled(&unknown, false).await
+        })
+        .await,
         Err(ClientRegistryError::Unknown(_))
     ));
 }
@@ -229,15 +223,16 @@ async fn rotated_secrets_overlap_until_their_grace_period_ends() {
 async fn apply_changes_only_what_differs() {
     let replicas = Replicas::new().await;
     let database = Replicas::database().await;
-    let registry = ClientRegistry::new(database.clone());
     let origin = format!("https://{}.example", UserId::new());
     let mut client = registration(ClientKind::Confidential, &origin);
     let [first, second] = [(); 2].map(|()| Secret::generate().expect("secret").encoded());
     let apply = async |client: &ClientRegistration, secret: Option<&str>, grace: &str| {
         let secret = secret.map(|secret| ClientSecret::parse(secret).expect("secret"));
-        registry
-            .apply(&operator(), client, secret, grace.parse().expect("grace"))
-            .await
+        let grace = grace.parse().expect("grace");
+        change(&database, async |registry| {
+            registry.apply(client, secret, grace).await
+        })
+        .await
     };
     let revokes = async |secret: &str| {
         send(
@@ -324,14 +319,16 @@ async fn apply_changes_only_what_differs() {
 #[tokio::test]
 #[ignore = "requires TEST_DATABASE_URL"]
 async fn apply_refuses_mismatched_secrets_and_kinds() {
-    let registry = ClientRegistry::new(Replicas::database().await);
+    let database = Replicas::database().await;
     let client = registration(ClientKind::Confidential, "https://api.example");
     let first = Secret::generate().expect("secret").encoded();
     let apply = async |client: &ClientRegistration, secret: Option<&str>| {
         let secret = secret.map(|secret| ClientSecret::parse(secret).expect("secret"));
-        registry
-            .apply(&operator(), client, secret, "1h".parse().expect("grace"))
-            .await
+        let grace = "1h".parse().expect("grace");
+        change(&database, async |registry| {
+            registry.apply(client, secret, grace).await
+        })
+        .await
     };
     apply(&client, Some(&first)).await.expect("register");
     assert!(matches!(
@@ -350,4 +347,73 @@ async fn apply_refuses_mismatched_secrets_and_kinds() {
         apply(&public, None).await,
         Err(ClientRegistryError::Immutable(_))
     ));
+}
+
+/// Concurrent registrations by one account count one another: exactly
+/// [`MAX_OWNED_CLIENTS`] succeed. Deleting one frees a place, until the account
+/// registered [`MAX_DAILY_REGISTRATIONS`] clients that day.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+#[ignore = "requires TEST_DATABASE_URL"]
+async fn the_quota_holds_under_concurrent_registrations() {
+    let database = Replicas::database().await;
+    let owner = Browser::new_account(&database).await.user_id;
+    let attempts = MAX_OWNED_CLIENTS + 4;
+    let mut registrations = tokio::task::JoinSet::new();
+    for _ in 0..attempts {
+        let database = database.clone();
+        registrations.spawn(async move {
+            let client = registration(ClientKind::Public, "https://quota.example");
+            change(&database, async |registry| {
+                registry
+                    .create(ClientOwner::Account(owner), &client, None)
+                    .await
+            })
+            .await
+            .map(|_| client.id)
+        });
+    }
+    let (mut registered, mut refused) = (Vec::new(), 0);
+    while let Some(result) = registrations.join_next().await {
+        match result.expect("task") {
+            Ok(id) => registered.push(id),
+            Err(ClientRegistryError::QuotaExceeded) => refused += 1,
+            Err(error) => panic!("unexpected failure: {error}"),
+        }
+    }
+    assert_eq!(registered.len(), MAX_OWNED_CLIENTS as usize);
+    assert_eq!(refused, attempts - MAX_OWNED_CLIENTS);
+    assert_eq!(
+        database
+            .oidc()
+            .count_owned_clients(owner, chrono::Duration::days(1))
+            .await
+            .expect("count")
+            .live,
+        u64::from(MAX_OWNED_CLIENTS)
+    );
+
+    // Deleting frees a place, but deleted clients still count against the
+    // daily limit, so an account cannot pile up tombstones.
+    for registration_number in MAX_OWNED_CLIENTS..=MAX_DAILY_REGISTRATIONS {
+        let freed = registered.pop().expect("a client to delete");
+        change(&database, async |registry| registry.delete(&freed).await)
+            .await
+            .expect("delete");
+        let client = registration(ClientKind::Public, "https://quota.example");
+        let created = change(&database, async |registry| {
+            registry
+                .create(ClientOwner::Account(owner), &client, None)
+                .await
+        })
+        .await;
+        if registration_number < MAX_DAILY_REGISTRATIONS {
+            created.expect("a deletion frees a place");
+            registered.push(client.id);
+        } else {
+            assert!(matches!(
+                created,
+                Err(ClientRegistryError::DailyLimitExceeded)
+            ));
+        }
+    }
 }

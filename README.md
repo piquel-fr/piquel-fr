@@ -178,6 +178,8 @@ just auth client show notes          # registration and secret lifetimes
 just auth client update piquel-web --add-redirect-uri https://piquel.fr/auth/callback
 just auth client disable notes       # enable undoes it
 just auth client rotate-secret notes --grace 24h
+just auth client suspend notes       # its owner cannot enable it; unsuspend lifts it
+just auth client delete notes        # for good: the ID is never reused
 ```
 
 Clients are public by default and authenticate with PKCE alone (`none`).
@@ -206,6 +208,17 @@ userinfo endpoints from a browser. Scopes default to `openid`, `profile` and
 `offline_access`; `--trusted` skips the consent screen and is meant for
 first-party clients only. `--require-par` makes the client push its authorization
 requests (`update --no-require-par` lifts it).
+
+Accounts can also register clients for their own applications, through the
+account API: see [Managing your own OIDC clients](docs/guides/client-management.md).
+Auth generates their IDs and limits their scopes to `openid`, `profile`, `email`
+and `offline_access`; they are never trusted, and an account can have 10 and
+register 20 a day. They never appear in the account API of other accounts, while
+`client list` shows every client. Owners can disable and enable their clients;
+`client suspend` disables one so that its owner cannot enable it until
+`client unsuspend`, which leaves it disabled. Deleting a client, from either side, disables it, revokes its
+refresh tokens and removes its secrets and consents. Its ID stays reserved, since
+tokens carry it as `aud`.
 
 `AUTH_CLIENTS_FILE` was removed, and startup refuses to run while it is set. The
 clients it registered are already in the database.

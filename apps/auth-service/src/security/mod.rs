@@ -84,6 +84,12 @@ impl ApiError {
         }
     }
 
+    /// Adds the machine-readable `code` a frontend can resolve the error with.
+    pub(crate) fn with_code(mut self, code: ErrorCode) -> Self {
+        self.code = Some(code);
+        self
+    }
+
     /// Logs a failure with every preserved cause, once, at the HTTP boundary.
     pub(crate) fn log_error(error: &dyn std::error::Error) {
         tracing::error!(error = %ErrorChain(error), "authentication operation failed");
@@ -112,12 +118,6 @@ impl ApiError {
     /// Rejects a write that collides with existing data, naming what is already in use.
     pub(crate) fn conflict(message: impl Into<Cow<'static, str>>) -> Self {
         Self::new(StatusCode::CONFLICT, message)
-    }
-
-    /// Adds the machine-readable `code` a frontend reacts to.
-    pub(crate) const fn with_code(mut self, code: ErrorCode) -> Self {
-        self.code = Some(code);
-        self
     }
 
     /// Logs an internal source chain and returns a generic browser message.
@@ -277,10 +277,10 @@ impl From<SessionError> for ApiError {
     fn from(error: SessionError) -> Self {
         match error {
             SessionError::Missing => Self::unauthorized("Sign in to continue."),
-            SessionError::StepUpRequired { max_age } => Self {
-                code: Some(ErrorCode::StepUpRequired { max_age }),
-                ..Self::forbidden("Confirm with your passkey to continue.")
-            },
+            SessionError::StepUpRequired { max_age } => {
+                Self::forbidden("Confirm with your passkey to continue.")
+                    .with_code(ErrorCode::StepUpRequired { max_age })
+            }
             SessionError::PasskeyRequired => {
                 Self::forbidden("Sign in with your passkey to continue.")
             }
@@ -624,8 +624,9 @@ impl<const MAX_AGE: u32> Confirmed<MAX_AGE> {
     /// What the session's authentication must meet.
     const REQUIREMENT: StepUpRequirement = StepUpRequirement::passkey_within(MAX_AGE);
 
-    /// Rejects a session without a recent enough passkey confirmation.
-    fn check(session: &StoredSession) -> Result<(), SessionError> {
+    /// Rejects a session without a recent enough passkey confirmation. Handlers
+    /// that need one only for some changes call it on the session they locked.
+    pub(crate) fn check(session: &StoredSession) -> Result<(), SessionError> {
         let authentication = SessionAuthentication::from(session);
         Self::REQUIREMENT
             .check(

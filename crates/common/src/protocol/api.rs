@@ -13,7 +13,7 @@
 //! # Ok::<(), serde_json::Error>(())
 //! ```
 
-use crate::{PasskeyId, Provider};
+use crate::{PasskeyId, Provider, clients::ClientField};
 use serde::{Deserialize, Serialize};
 
 /// The body of an error response: `{"error": message}`, plus a machine-readable
@@ -28,7 +28,7 @@ pub struct ErrorBody {
 }
 
 /// Errors a caller can resolve, serialized as `"code"` with their parameters beside it.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "code", rename_all = "snake_case")]
 pub enum ErrorCode {
     /// The action needs a passkey confirmation of this session. Frontends confirm
@@ -43,6 +43,29 @@ pub enum ErrorCode {
     HandleReserved,
     /// Another account holds the handle.
     HandleTaken,
+    /// A redirect or post-logout URI of a client is invalid, as RFC 7591 §3.2.2 names it.
+    InvalidRedirectUri {
+        /// The list holding it.
+        field: ClientField,
+    },
+    /// Another setting of a client is invalid, as RFC 7591 §3.2.2 names it.
+    InvalidClientMetadata {
+        /// The rejected setting.
+        field: ClientField,
+    },
+    /// The account already owns as many clients as it may; it can delete one.
+    ClientQuotaExceeded {
+        /// How many live clients an account may own.
+        limit: u32,
+    },
+    /// The account registered as many clients in the last day as it may, deleted
+    /// ones included; it can register more later.
+    DailyClientLimitExceeded {
+        /// How many clients an account may register a day.
+        limit: u32,
+    },
+    /// An operator suspended the client, so only an operator can let it work again.
+    ClientSuspended,
 }
 
 /// An active passkey of an account, without its cryptographic contents.

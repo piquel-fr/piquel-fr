@@ -102,8 +102,7 @@ impl Flow {
             trusted,
             ..crate::tests::registration(ClientKind::Public, "https://client.example")
         };
-        let secret = crate::ClientRegistry::new(db.clone())
-            .create(&crate::tests::operator(), &client, None)
+        let secret = crate::tests::register(&db, &client)
             .await
             .expect("register test OIDC client")
             .map(|secret| secret.expose().to_owned());
@@ -807,15 +806,12 @@ async fn concurrent_refresh_across_replicas_rotates_once() {
 async fn policy_reduction_blocks_outstanding_codes_and_refresh() {
     let mut flow = Flow::new(false, true).await;
     let code = flow.code(EMAIL_SCOPES).await;
-    let registry = crate::ClientRegistry::new(flow.app.database.clone());
+    let database = flow.app.database.clone();
     flow.client.allowed_scopes =
         AllowedScopes::new([Scope::OpenId, Scope::OfflineAccess].map(ScopeName::from))
             .expect("reduced scopes");
     let client = flow.client.clone();
-    registry
-        .update(&crate::tests::operator(), &client.id, |_| {
-            Ok::<_, crate::ClientRegistryError>(client.clone())
-        })
+    crate::tests::replace(&database, &client)
         .await
         .expect("apply reduced client scope policy");
     assert_eq!(
@@ -833,10 +829,7 @@ async fn policy_reduction_blocks_outstanding_codes_and_refresh() {
     let tokens = Flow::json(flow.exchange(&code, Flow::verifier(), None).await).await;
     flow.client.allow_refresh = false;
     let client = flow.client.clone();
-    registry
-        .update(&crate::tests::operator(), &client.id, |_| {
-            Ok::<_, crate::ClientRegistryError>(client.clone())
-        })
+    crate::tests::replace(&database, &client)
         .await
         .expect("disable client refresh permission");
     assert_eq!(
@@ -1192,8 +1185,7 @@ async fn pushed_requests_are_one_time_client_bound_and_authoritative() {
         );
     };
     let other = crate::tests::registration(ClientKind::Public, "https://other.example");
-    crate::ClientRegistry::new(flow.app.database.clone())
-        .create(&crate::tests::operator(), &other, None)
+    crate::tests::register(&flow.app.database, &other)
         .await
         .expect("register another client");
     rejected(other.id.as_str(), &request_uri).await;
@@ -1229,10 +1221,7 @@ async fn pushed_requests_are_one_time_client_bound_and_authoritative() {
     rejected(&id, &request_uri).await;
     flow.client.require_pushed_authorization_requests = true;
     let client = flow.client.clone();
-    crate::ClientRegistry::new(flow.app.database.clone())
-        .update(&crate::tests::operator(), &client.id, |_| {
-            Ok::<_, crate::ClientRegistryError>(client.clone())
-        })
+    crate::tests::replace(&flow.app.database, &client)
         .await
         .expect("require pushed requests");
     assert_eq!(

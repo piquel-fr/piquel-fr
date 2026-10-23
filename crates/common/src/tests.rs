@@ -90,6 +90,10 @@ fn trace_ids_are_lower_case_hex() {
 /// `DomainEvent::kind` is the serde tag each variant is stored under.
 #[cfg(feature = "events")]
 #[test]
+#[expect(
+    clippy::too_many_lines,
+    reason = "one literal per event kind, so it grows with `DomainEvent`"
+)]
 fn event_kinds_match_their_serde_tags() {
     use events::{DomainEvent, GrantRevocation, RevocationReason, SignInFailure};
     use serde_json::json;
@@ -169,11 +173,21 @@ fn event_kinds_match_their_serde_tags() {
         },
         DomainEvent::ClientUpdated {
             client_id: client_id.clone(),
+            changed: vec![clients::ClientField::DisplayName],
         },
         DomainEvent::ClientEnabled {
             client_id: client_id.clone(),
         },
         DomainEvent::ClientDisabled {
+            client_id: client_id.clone(),
+        },
+        DomainEvent::ClientSuspended {
+            client_id: client_id.clone(),
+        },
+        DomainEvent::ClientSuspensionLifted {
+            client_id: client_id.clone(),
+        },
+        DomainEvent::ClientDeleted {
             client_id: client_id.clone(),
         },
         DomainEvent::ClientSecretRotated {
