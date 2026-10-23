@@ -16,7 +16,7 @@ mod telemetry;
 /// Explicit transactions spanning typed repository operations.
 mod transaction;
 
-pub use connection::{Database, DatabaseConfig};
+pub use connection::{Database, DatabaseConfig, RuntimeRole};
 pub use error::{DatabaseConnectionError, DatabaseError};
 pub use exclusive::{ExclusiveConnection, LockKey};
 pub use repositories::{

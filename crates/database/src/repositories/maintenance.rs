@@ -157,13 +157,14 @@ impl MaintenanceRepository<'_> {
                 FOR UPDATE OF secret SKIP LOCKED
             )",
             // Events are kept indefinitely; the personal data beside them is not.
+            // No FOR UPDATE: it needs the UPDATE privilege, which the runtime role
+            // lacks here. Requests never update these rows, so none hold their locks.
             "DELETE FROM event_personal_data
             WHERE ctid IN (
                 SELECT ctid
                 FROM event_personal_data
                 WHERE created_at < now() - interval '90 days'
                 LIMIT $1
-                FOR UPDATE SKIP LOCKED
             )",
             // Ordered failures hold back their key, so only
             // `DatabaseTransaction::abandon_stuck_deliveries` removes them.

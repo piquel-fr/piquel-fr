@@ -10,7 +10,9 @@ for the layout and invariants. Run migrations through the single service binary:
 `just db migrate`.
 
 Every query is an SQLx `query!`, `query_as!` or `query_scalar!` macro, checked at
-compile time against the committed cache in `.sqlx/`. After changing a query or a
+compile time against the committed cache in `.sqlx/`. The one exception is the
+role provisioning script, whose DDL takes no bind parameters; a checked query
+renders it. After changing a query or a
 migration, run `just db prepare` and commit the cache with the change.
 
 Integration tests apply the schema and insert uniquely named fixtures into one

@@ -68,6 +68,12 @@ pub enum DatabaseConnectionError {
     /// TCP requires authenticated TLS or an explicit plaintext choice.
     #[error("database TCP transport requires sslmode=verify-full or explicit sslmode=disable")]
     InsecureTransport,
+    /// A role the database provisions must have a name no SQL needs to quote.
+    #[error(
+        "database runtime user must be at most 63 lowercase letters, digits and underscores, \
+         not starting with a digit"
+    )]
+    RoleName,
     /// `SQLx` rejected otherwise validated connection options.
     #[error("database connection options could not be parsed")]
     Options(#[source] Source),

@@ -92,16 +92,22 @@ over TCP to `postgres:5432` on the application's private network, which ingress
 and other environments cannot reach, so the URL opts into plaintext with
 `sslmode=disable`; connections require SCRAM password authentication.
 
-The `migrate` job applies migrations before every rollout, once PostgreSQL is
-healthy. Environment volumes survive deletion. PostgreSQL major upgrades require
+Auth connects as `piquel_auth`, a role with only row access to the app tables
+(see `docs/architecture/database-crate.md`). Only the `migrate` job gets the
+superuser `piquel`'s password. It applies migrations before every rollout, once
+PostgreSQL is healthy, then creates `piquel_auth` or resets its privileges and
+password. Environment volumes survive deletion. PostgreSQL major upgrades require
 an explicit data migration.
 
 ## Auth
 
-piqueld generates `database-password`, `signing-key` and `admin-client-secret`
-for each environment and preview on its first deployment and never changes them;
-`piquelctl env secret piquel-fr --env ENV regenerate NAME` rotates one. A new
-password does not change the one an existing database volume stores.
+piqueld generates `database-password`, `database-runtime-password`, `signing-key`
+and `admin-client-secret` for each environment and preview on its first
+deployment and never changes them; `piquelctl env secret piquel-fr --env ENV
+regenerate NAME` rotates one. A new `database-password` does not change the one an
+existing database volume stores. A new `database-runtime-password` takes effect on
+the next deploy, whose `migrate` job sets it; sessions already open keep working
+until they close.
 
 Staging and production require invitations:
 

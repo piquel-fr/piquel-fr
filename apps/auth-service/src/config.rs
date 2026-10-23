@@ -7,7 +7,7 @@ use piquel_common::{
     config::{ConfigurationError, Origin, PublicUrl, SecretBytes, SecretReference, Variable},
 };
 use piquel_crypto::{Rs256Key, Secret};
-use piquel_repository::DatabaseConfig;
+use piquel_repository::{DatabaseConfig, RuntimeRole};
 use serde::{Serialize, Serializer};
 use std::{
     collections::{BTreeMap, BTreeSet},
@@ -48,6 +48,20 @@ const ADMIN_LISTENER: Variable = Variable::new("AUTH_ADMIN_LISTENER");
 const DATABASE_URL: Variable = Variable::new("AUTH_DATABASE_URL");
 /// Optional separately mounted database password.
 const DATABASE_PASSWORD: Variable = Variable::new("AUTH_DATABASE_PASSWORD");
+/// Optional schema owner `migrate` connects as, to provision the runtime role.
+const DATABASE_OWNER_URL: Variable = Variable::new("AUTH_DATABASE_OWNER_URL");
+/// Optional separately mounted schema owner password.
+const DATABASE_OWNER_PASSWORD: Variable = Variable::new("AUTH_DATABASE_OWNER_PASSWORD");
+/// The connection every command uses.
+const RUNTIME_DATABASE: DatabaseVariables = DatabaseVariables {
+    url: DATABASE_URL,
+    password: DATABASE_PASSWORD,
+};
+/// The schema owner's connection, used only by `migrate`.
+const OWNER_DATABASE: DatabaseVariables = DatabaseVariables {
+    url: DATABASE_OWNER_URL,
+    password: DATABASE_OWNER_PASSWORD,
+};
 /// Required persistent signing-key reference.
 const KEY_PROVIDER: Variable = Variable::new("AUTH_KEY_PROVIDER");
 /// Stable public signing-key identifier.
@@ -257,6 +271,52 @@ impl OidcConfig {
     }
 }
 
+/// A database connection's URL variable and its optional password variable.
+#[derive(Clone, Copy)]
+struct DatabaseVariables {
+    /// `PostgreSQL` transport, database and user.
+    url: Variable,
+    /// Separately mounted password, for URLs without one.
+    password: Variable,
+}
+
+impl DatabaseVariables {
+    /// Reads the connection to `url`, the value of [`Self::url`], and returns it
+    /// with its separately mounted password.
+    fn read(self, url: &str) -> Result<(DatabaseConfig, Option<String>), ConfigurationError> {
+        let config = DatabaseConfig::new(url, DATABASE_POOL_SIZE, DATABASE_CONNECT_TIMEOUT)
+            .map_err(|source| {
+                self.url.error(
+                    "must be a postgres:// URL with sslmode=verify-full, explicit \
+                     sslmode=disable, or a Unix socket",
+                    source,
+                )
+            })?;
+        let Some(reference) = self.password.optional()? else {
+            return Ok((config, None));
+        };
+        let parsed = url::Url::parse(url)
+            .map_err(|source| self.url.error("must be a postgres:// URL", source))?;
+        if parsed.password().is_some() {
+            return Err(self
+                .password
+                .invalid("must be omitted when the database URL contains a password"));
+        }
+        let secret = SecretReference::parse(&reference)
+            .and_then(|reference| reference.resolve())
+            .map_err(|source| {
+                self.password
+                    .error("must resolve through env://NAME or file://PATH", source)
+            })?;
+        let password = secret
+            .utf8()
+            .map_err(|source| self.password.error("must contain UTF-8 text", source))?
+            .trim_end_matches('\n')
+            .to_owned();
+        Ok((config.with_password(&password), Some(password)))
+    }
+}
+
 /// Validated service configuration combining one section per application.
 pub struct AuthConfig {
     /// Address bound by the HTTP listener behind piqueld.
@@ -275,38 +335,37 @@ pub struct AuthConfig {
 }
 
 impl AuthConfig {
-    /// Loads the database independently for migration and invitation commands.
+    /// Loads the runtime connection, which every command but an owner `migrate` uses.
     ///
     /// # Errors
     /// Names invalid transport settings or unresolved password references.
     pub fn database_from_environment() -> Result<DatabaseConfig, ConfigurationError> {
-        let url = DATABASE_URL.required()?;
-        let config = DatabaseConfig::new(&url, DATABASE_POOL_SIZE, DATABASE_CONNECT_TIMEOUT)
-            .map_err(|source| {
-                DATABASE_URL.error(
-                    "must be a postgres:// URL with sslmode=verify-full, explicit \
-                     sslmode=disable, or a Unix socket",
-                    source,
-                )
-            })?;
-        let Some(reference) = DATABASE_PASSWORD.optional()? else {
-            return Ok(config);
+        Ok(RUNTIME_DATABASE.read(&DATABASE_URL.required()?)?.0)
+    }
+
+    /// Loads what `migrate` connects with: the schema owner when
+    /// `AUTH_DATABASE_OWNER_URL` is set, along with the runtime role it then
+    /// provisions, `AUTH_DATABASE_URL`'s user with `AUTH_DATABASE_PASSWORD`.
+    /// Otherwise, the runtime connection alone.
+    ///
+    /// # Errors
+    /// Names invalid transport settings, unresolved password references, or a
+    /// runtime role that cannot be provisioned.
+    pub fn migration_from_environment()
+    -> Result<(DatabaseConfig, Option<RuntimeRole>), ConfigurationError> {
+        let (runtime, password) = RUNTIME_DATABASE.read(&DATABASE_URL.required()?)?;
+        let Some(url) = DATABASE_OWNER_URL.optional()? else {
+            return Ok((runtime, None));
         };
-        let parsed = url::Url::parse(&url)
-            .map_err(|source| DATABASE_URL.error("must be a postgres:// URL", source))?;
-        if parsed.password().is_some() {
-            return Err(DATABASE_PASSWORD
-                .invalid("must be omitted when AUTH_DATABASE_URL contains a password"));
-        }
-        let secret = SecretReference::parse(&reference)
-            .and_then(|reference| reference.resolve())
-            .map_err(|source| {
-                DATABASE_PASSWORD.error("must resolve through env://NAME or file://PATH", source)
-            })?;
-        let password = secret
-            .utf8()
-            .map_err(|source| DATABASE_PASSWORD.error("must contain UTF-8 text", source))?;
-        Ok(config.with_password(password.trim_end_matches('\n')))
+        let (owner, _) = OWNER_DATABASE.read(&url)?;
+        let password = password.ok_or(
+            DATABASE_PASSWORD
+                .invalid("must be set with AUTH_DATABASE_OWNER_URL, for the runtime role"),
+        )?;
+        let role = RuntimeRole::new(&runtime, &password).map_err(|source| {
+            DATABASE_URL.error("must name a role migrate can provision", source)
+        })?;
+        Ok((owner, Some(role)))
     }
 
     /// Validates all service and application settings before startup. The removed

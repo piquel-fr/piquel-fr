@@ -2,7 +2,7 @@
 
 use crate::{DatabaseConnectionError, DatabaseError, DatabaseTransaction};
 use sqlx::{
-    PgPool,
+    ConnectOptions, Connection, PgConnection, PgPool,
     migrate::Migrator,
     postgres::{PgConnectOptions, PgPoolOptions, PgSslMode},
 };
@@ -29,6 +29,9 @@ static MIGRATOR: Migrator = sqlx::migrate!("./migrations");
 
 /// Readiness must fail quickly when the database stops responding.
 const HEALTH_CHECK_TIMEOUT: Duration = Duration::from_secs(2);
+
+/// Longest role name `PostgreSQL` keeps; it truncates longer ones.
+const MAX_ROLE_NAME_LENGTH: usize = 63;
 
 /// Validated database connection configuration.
 #[derive(Clone)]
@@ -142,6 +145,39 @@ impl DatabaseConfig {
     }
 }
 
+/// The login role `serve` connects as, which [`Database::provision`] creates or
+/// resets with exactly the privileges the service needs.
+pub struct RuntimeRole {
+    /// A plain lowercase identifier, so SQL never needs to quote it.
+    name: String,
+    /// What the role logs in with.
+    password: String,
+}
+
+impl RuntimeRole {
+    /// The role `runtime` connects as, logging in with `password`.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`DatabaseConnectionError::RoleName`] unless the connection's user
+    /// is a plain lowercase identifier, like `piquel_auth`.
+    pub fn new(runtime: &DatabaseConfig, password: &str) -> Result<Self, DatabaseConnectionError> {
+        let name = runtime.options.get_username();
+        let mut chars = name.chars();
+        let plain = chars
+            .next()
+            .is_some_and(|first| first.is_ascii_lowercase() || first == '_')
+            && chars.all(|next| next.is_ascii_lowercase() || next.is_ascii_digit() || next == '_');
+        if !plain || name.len() > MAX_ROLE_NAME_LENGTH {
+            return Err(DatabaseConnectionError::RoleName);
+        }
+        Ok(Self {
+            name: name.to_owned(),
+            password: password.to_owned(),
+        })
+    }
+}
+
 /// Typed database boundary. Its pool is intentionally private.
 #[derive(Clone)]
 pub struct Database {
@@ -208,6 +244,29 @@ impl Database {
             .await
             .map_err(|error| DatabaseError::Operation(Box::new(error)))?;
         self.oidc().fill_redirect_origins().await
+    }
+
+    /// Creates `role`, or resets its attributes and password, then grants it row
+    /// access to the app tables and nothing else; see `runtime_role.sql`. Run it as
+    /// the schema owner after migrations, so the grants cover every table.
+    ///
+    /// The script holds the password, so it runs on a dedicated connection that
+    /// never logs statements, as one implicit transaction.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`DatabaseError::Operation`] if `role` is the schema owner or a
+    /// superuser, or if a statement fails, e.g. without the right to create roles.
+    pub async fn provision(&self, role: &RuntimeRole) -> Result<(), DatabaseError> {
+        let options = self.pool.connect_options().as_ref().clone();
+        let mut connection =
+            PgConnection::connect_with(&options.disable_statement_logging()).await?;
+        let script =
+            sqlx::query_file_scalar!("src/connection/runtime_role.sql", role.name, role.password)
+                .fetch_one(&mut connection)
+                .await?;
+        sqlx::raw_sql(&script).execute(&mut connection).await?;
+        Ok(connection.close().await?)
     }
 }
 
