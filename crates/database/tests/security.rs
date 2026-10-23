@@ -1,7 +1,13 @@
 //! Persistence guarantees behind invitations and session passkey confirmations.
 use chrono::{Duration, Utc};
-use piquel_common::{AuthenticationMethod, SessionId, TokenId, UserId};
-use piquel_repository::{Database, DatabaseConfig, DatabaseError, InsertSession, InsertUser};
+use piquel_common::{
+    AuthenticationMethod, SessionId, TokenId, UserId,
+    events::{Browser, Platform, UserAgentFamily},
+};
+use piquel_repository::{
+    Database, DatabaseConfig, DatabaseError, InsertSession, InsertUser, SessionScope,
+};
+use std::net::IpAddr;
 /// Invitations are single-use, and passkey confirmations belong to one session and end with it.
 #[expect(
     clippy::too_many_lines,
@@ -64,7 +70,11 @@ async fn invitation_redemption_and_confirmation_lifecycle() {
                 authentication_methods: vec![AuthenticationMethod::Federation],
                 authenticated_at: now,
                 expires_at: now + Duration::minutes(1),
-                user_agent_family: None,
+                user_agent_family: UserAgentFamily {
+                    browser: Browser::Firefox,
+                    platform: Platform::Linux,
+                },
+                ip: IpAddr::from([192, 0, 2, 1]),
                 passkey_confirmed_at: None,
             })
             .await
@@ -96,7 +106,7 @@ async fn invitation_redemption_and_confirmation_lifecycle() {
         "stored as given"
     );
     db.sessions()
-        .revoke_other(user, session)
+        .revoke(user, SessionScope::AllExcept(session))
         .await
         .expect("revoke others");
     assert!(
@@ -108,7 +118,10 @@ async fn invitation_redemption_and_confirmation_lifecycle() {
         "revoking other sessions clears their confirmation"
     );
     assert!(confirmed_at(session).await.is_some(), "current preserved");
-    db.sessions().revoke(session).await.expect("logout");
+    db.sessions()
+        .revoke(user, SessionScope::One(session))
+        .await
+        .expect("logout");
     assert!(
         matches!(
             db.sessions().confirm_passkey(session, Utc::now()).await,

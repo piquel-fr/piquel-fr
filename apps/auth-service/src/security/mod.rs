@@ -28,8 +28,8 @@ use piquel_common::{
 };
 use piquel_crypto::{CryptoError, Digest, Secret};
 use piquel_repository::{
-    Database, DatabaseError, DatabaseTransaction, InsertSession, SessionAuthentication,
-    StoredSession,
+    Database, DatabaseError, DatabaseTransaction, InsertSession, LAST_SEEN_INTERVAL,
+    SessionAuthentication, SessionScope, StoredSession,
 };
 use std::{
     borrow::Cow,
@@ -281,6 +281,21 @@ impl Session {
             .await?)
     }
 
+    /// Looks up the browser's session like [`Self::optional`] and records its activity.
+    /// The session extractors and authorization requests resolve sessions this way,
+    /// so a browser that only signs in to applications still shows as active.
+    pub(crate) async fn resolve(
+        database: &Database,
+        context: RequestContext,
+        headers: &HeaderMap,
+    ) -> Result<Option<StoredSession>, SessionError> {
+        let session = Self::optional(database, headers).await?;
+        if let Some(session) = &session {
+            Self::touch(database, context, session).await?;
+        }
+        Ok(session)
+    }
+
     /// Requires a live browser session.
     pub(crate) async fn required(
         database: &Database,
@@ -351,17 +366,14 @@ impl Session {
                 Ok(secret)
             }
             Some(other) => {
-                if tx.sessions().revoke(other.id).await? {
-                    tx.record(
-                        &context.user(&other),
-                        Some(other.user_id),
-                        DomainEvent::SessionRevoked {
-                            session_id: other.id,
-                            reason: RevocationReason::AccountSwitched,
-                        },
-                    )
-                    .await?;
-                }
+                Self::revoke(
+                    tx,
+                    context,
+                    &other,
+                    SessionScope::One(other.id),
+                    RevocationReason::AccountSwitched,
+                )
+                .await?;
                 Self::create(tx, context, user_id, method).await
             }
             None => Self::create(tx, context, user_id, method).await,
@@ -416,7 +428,8 @@ impl Session {
                 authentication_methods: vec![method],
                 authenticated_at: now,
                 expires_at: now + Duration::days(i64::from(SESSION_LIFETIME_DAYS)),
-                user_agent_family: None,
+                user_agent_family: context.user_agent_family,
+                ip: context.client_ip,
                 passkey_confirmed_at: matches!(method, AuthenticationMethod::Passkey)
                     .then_some(now),
             })
@@ -440,58 +453,82 @@ impl Session {
         Ok(secret)
     }
 
-    /// Revokes every other session of `session`'s account inside the caller's
-    /// transaction, recording one revocation per session.
-    pub(crate) async fn revoke_other(
+    /// Revokes the `scope` sessions of `session`'s account inside the caller's
+    /// transaction, with their refresh grants, recording one revocation per session,
+    /// attributed to `session`. Returns the revoked sessions.
+    pub(crate) async fn revoke(
         tx: &mut DatabaseTransaction<'_>,
         context: RequestContext,
         session: &StoredSession,
+        scope: SessionScope,
         reason: RevocationReason,
-    ) -> Result<(), DatabaseError> {
+    ) -> Result<Vec<SessionId>, DatabaseError> {
         let context = context.user(session);
-        for revoked in tx
-            .sessions()
-            .revoke_other(session.user_id, session.id)
-            .await?
-        {
+        let revoked = tx.sessions().revoke(session.user_id, scope).await?;
+        for &session_id in &revoked {
             tx.record(
                 &context,
                 Some(session.user_id),
                 DomainEvent::SessionRevoked {
-                    session_id: revoked,
+                    session_id,
                     reason: reason.clone(),
                 },
             )
             .await?;
         }
-        Ok(())
+        Ok(revoked)
+    }
+
+    /// Records the session's activity from `context`, at most once every
+    /// [`LAST_SEEN_INTERVAL`]: a session seen more recently is not written.
+    async fn touch(
+        database: &Database,
+        context: RequestContext,
+        session: &StoredSession,
+    ) -> Result<(), DatabaseError> {
+        if session.last_seen_at > Utc::now() - LAST_SEEN_INTERVAL {
+            return Ok(());
+        }
+        database
+            .sessions()
+            .touch(session.id, context.client_ip)
+            .await
     }
 }
 
 /// Where a request came from, attached by [`HttpSecurity::protect`] to every
-/// rate-limited route and extracted by handlers that record events.
+/// rate-limited route and extracted by handlers that record events and by the
+/// session extractors. The raw `User-Agent` header is classified, never kept.
 #[derive(Clone, Copy, Debug)]
-pub(crate) struct RequestContext(RequestOrigin);
+pub(crate) struct RequestContext {
+    /// The client's IP address.
+    pub client_ip: IpAddr,
+    /// The coarse browser and platform of its `User-Agent` header.
+    pub user_agent_family: UserAgentFamily,
+}
 
 impl RequestContext {
-    /// The client IP and the coarse browser family of its `User-Agent` header.
+    /// The client IP and the coarse family of its `User-Agent` header.
     fn new(client_ip: IpAddr, headers: &HeaderMap) -> Self {
-        Self(RequestOrigin {
-            client_ip: Some(client_ip),
-            user_agent_family: Some(
+        Self {
+            client_ip,
+            user_agent_family: UserAgentFamily::classify(
                 headers
                     .get(header::USER_AGENT)
                     .and_then(|value| value.to_str().ok())
-                    .map_or(UserAgentFamily::Other, UserAgentFamily::classify),
+                    .unwrap_or_default(),
             ),
-        })
+        }
     }
 
     /// Attributes events of this request to `actor`.
     pub(crate) fn actor(self, actor: Actor) -> EventContext {
         EventContext {
             actor,
-            origin: self.0,
+            origin: RequestOrigin {
+                client_ip: Some(self.client_ip),
+                user_agent_family: Some(self.user_agent_family),
+            },
         }
     }
 
@@ -595,29 +632,34 @@ where
     }
 }
 
-/// Implements the common database-backed extraction contract for session variants.
-macro_rules! session_extractor {
-    ($name:ident, $lookup:ident) => {
-        impl<S> FromRequestParts<S> for $name
-        where
-            Database: FromRef<S>,
-            S: Send + Sync,
-        {
-            type Rejection = ApiError;
-            /// Extracts the requested session policy using the application database state.
-            async fn from_request_parts(
-                parts: &mut Parts,
-                state: &S,
-            ) -> Result<Self, Self::Rejection> {
-                Ok(Self(
-                    Session::$lookup(&Database::from_ref(state), &parts.headers).await?,
-                ))
-            }
-        }
-    };
+impl<S> FromRequestParts<S> for OptionalSession
+where
+    Database: FromRef<S>,
+    S: Send + Sync,
+{
+    type Rejection = ApiError;
+    /// Resolves the browser's session with [`Session::resolve`], so no handler
+    /// records its activity by hand.
+    async fn from_request_parts(parts: &mut Parts, state: &S) -> Result<Self, Self::Rejection> {
+        let context = RequestContext::from_request_parts(parts, state).await?;
+        Ok(Self(
+            Session::resolve(&Database::from_ref(state), context, &parts.headers).await?,
+        ))
+    }
 }
-session_extractor!(Session, required);
-session_extractor!(OptionalSession, optional);
+
+impl<S> FromRequestParts<S> for Session
+where
+    Database: FromRef<S>,
+    S: Send + Sync,
+{
+    type Rejection = ApiError;
+    /// Extracts the [`OptionalSession`], requiring that there is one.
+    async fn from_request_parts(parts: &mut Parts, state: &S) -> Result<Self, Self::Rejection> {
+        let OptionalSession(session) = OptionalSession::from_request_parts(parts, state).await?;
+        Ok(Self(session.ok_or(SessionError::Missing)?))
+    }
+}
 
 /// How the HTTP boundary treats a route. Origin, CSRF and rate policy all read this one
 /// classification, so it must list every route that differs from `Other`.

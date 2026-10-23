@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "WITH active_user AS (\n                    SELECT id\n                    FROM users\n                    WHERE id = $2\n                    AND status = 'active'\n                    FOR NO KEY UPDATE\n                )\n                INSERT INTO sessions (\n                    id, user_id, authentication_methods, authenticated_at, expires_at,\n                    last_seen_at, user_agent_family, passkey_confirmed_at\n                )\n                SELECT $1, id, $3, $4, $5, $4, $6, $7\n                FROM active_user\n                RETURNING\n                    id AS \"id: SessionId\", user_id AS \"user_id: UserId\",\n                    authentication_methods AS \"authentication_methods: JsonArray<AuthenticationMethod>\",\n                    authenticated_at, expires_at, last_seen_at, revoked_at, passkey_confirmed_at",
+  "query": "SELECT\n                    id AS \"id: SessionId\", user_id AS \"user_id: UserId\",\n                    authentication_methods AS \"authentication_methods: JsonArray<AuthenticationMethod>\",\n                    authenticated_at, expires_at, last_seen_at, revoked_at, passkey_confirmed_at,\n                    user_agent_family AS \"user_agent_family: UserAgentFamily\",\n                    last_seen_ip AS \"last_seen_ip: IpAddr\"\n                FROM sessions\n                WHERE user_id = $1\n                AND revoked_at IS NULL\n                AND expires_at > now()\n                ORDER BY last_seen_at DESC, id DESC",
   "describe": {
     "columns": [
       {
@@ -42,17 +42,21 @@
         "ordinal": 7,
         "name": "passkey_confirmed_at",
         "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 8,
+        "name": "user_agent_family: UserAgentFamily",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 9,
+        "name": "last_seen_ip: IpAddr",
+        "type_info": "Inet"
       }
     ],
     "parameters": {
       "Left": [
-        "Uuid",
-        "Uuid",
-        "Jsonb",
-        "Timestamptz",
-        "Timestamptz",
-        "Text",
-        "Timestamptz"
+        "Uuid"
       ]
     },
     "nullable": [
@@ -63,8 +67,10 @@
       false,
       false,
       true,
+      true,
+      true,
       true
     ]
   },
-  "hash": "e0da3550652601d52fd016c3d40f56383f71b8a41396ae11b89c23f8143c7351"
+  "hash": "73d41b429bf9a26674bef96cbe415ea63025df9236a9e6edaaf9020ae141390d"
 }

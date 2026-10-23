@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE refresh_token_families\n                SET revoked_at = COALESCE(revoked_at, now())\n                WHERE session_id = ANY($1)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "UuidArray"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "fcd622bd410e4311dfcd505f9602e48848bd4a3648668f1c3e40ec9124090e65"
+}

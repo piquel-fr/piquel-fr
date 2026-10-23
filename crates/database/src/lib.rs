@@ -36,7 +36,9 @@ pub use repositories::{
         StoredClientSecret, StoredOidcClient,
     },
     passkeys::{CeremonyKind, ConsumedCeremony, InsertCeremony, InsertPasskey, StoredPasskey},
-    sessions::{InsertSession, SessionAuthentication, StoredSession},
+    sessions::{
+        InsertSession, LAST_SEEN_INTERVAL, SessionAuthentication, SessionScope, StoredSession,
+    },
     tokens::{
         InsertRefreshFamily, InsertRefreshToken, RefreshRotationError, RevokedFamily,
         RotatedRefreshToken,

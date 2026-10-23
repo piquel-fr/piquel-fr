@@ -5,10 +5,16 @@ use crate::{
     AuthConfig, Operator,
     config::{FederationConfig, FrontendOrigins, OidcConfig, PasskeyConfig},
     passkey::DecoyKey,
+    security::{BrowserCookie, RequestContext, Session},
 };
-use axum::{Extension, Router, extract::ConnectInfo};
+use axum::{
+    Extension, Router,
+    body::{Body, to_bytes},
+    extract::ConnectInfo,
+    http::{Method, Request, StatusCode, header},
+};
 use piquel_common::{
-    UserId,
+    AuthenticationMethod, SessionId, UserId,
     clients::{
         AllowedScopes, ClientKind, ClientRegistration, PostLogoutUris, RedirectUris, ScopeName,
     },
@@ -16,12 +22,14 @@ use piquel_common::{
     protocol::oauth::Scope,
 };
 use piquel_crypto::{Rs256Key, Secret};
-use piquel_repository::{Database, DatabaseConfig};
+use piquel_repository::{Database, DatabaseConfig, InsertUser};
+use serde_json::Value;
 use std::{
     collections::BTreeMap,
     net::{IpAddr, Ipv6Addr, SocketAddr},
     sync::Arc,
 };
+use tower::ServiceExt;
 
 /// Auth origin of the replicas, and of the fixtures that send requests to them.
 pub(crate) const AUTH_ORIGIN: &str = "https://auth.piquel.fr";
@@ -92,6 +100,91 @@ impl Replicas {
         .expect("database");
         database.run_migrations().await.expect("migrations");
         database
+    }
+}
+
+/// Largest response body [`Browser::call`] reads.
+const MAX_RESPONSE_BYTES: usize = 256 * 1024;
+
+/// A browser signed in to a test account, for handler tests.
+pub(crate) struct Browser {
+    /// The account.
+    pub user_id: UserId,
+    /// The browser's session.
+    pub session_id: SessionId,
+    /// The browser's session cookie pair.
+    pub cookie: String,
+}
+
+impl Browser {
+    /// Creates an account and signs a browser in to it with a passkey.
+    pub(crate) async fn new_account(database: &Database) -> Self {
+        let user_id = UserId::new();
+        database
+            .users()
+            .insert(&InsertUser {
+                id: user_id,
+                username: format!("browser_{}", &user_id.to_string()[24..]),
+                display_name: "Browser test".into(),
+            })
+            .await
+            .expect("user");
+        Self::sign_in(database, user_id).await
+    }
+
+    /// Signs another browser in to `user_id` with a passkey, from
+    /// [`RequestContext::TEST`].
+    pub(crate) async fn sign_in(database: &Database, user_id: UserId) -> Self {
+        let mut tx = database.begin().await.expect("transaction");
+        let secret = Session::create(
+            &mut tx,
+            RequestContext::TEST,
+            user_id,
+            AuthenticationMethod::Passkey,
+        )
+        .await
+        .expect("session");
+        let session_id = tx
+            .sessions()
+            .find_active_by_browser_secret(secret.digest().as_bytes())
+            .await
+            .expect("lookup")
+            .expect("session")
+            .id;
+        tx.commit().await.expect("commit");
+        Self {
+            user_id,
+            session_id,
+            cookie: format!("{}={}", BrowserCookie::Session.as_str(), secret.encoded()),
+        }
+    }
+
+    /// Sends a request to `router` as this browser, with the context
+    /// `HttpSecurity` would attach, and returns its status and JSON body.
+    pub(crate) async fn call(
+        &self,
+        router: &Router,
+        method: Method,
+        path: &str,
+    ) -> (StatusCode, Value) {
+        let response = router
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .extension(RequestContext::TEST)
+                    .method(method)
+                    .uri(path)
+                    .header(header::COOKIE, &self.cookie)
+                    .body(Body::empty())
+                    .expect("request"),
+            )
+            .await
+            .expect("response");
+        let status = response.status();
+        let body = to_bytes(response.into_body(), MAX_RESPONSE_BYTES)
+            .await
+            .expect("body");
+        (status, serde_json::from_slice(&body).unwrap_or(Value::Null))
     }
 }
 

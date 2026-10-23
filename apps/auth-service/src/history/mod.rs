@@ -14,7 +14,7 @@ use piquel_common::{
         UserAgentFamily,
     },
 };
-use piquel_repository::{Database, EventFilter, StoredEvent};
+use piquel_repository::{Database, EventFilter, SessionScope, StoredEvent};
 use serde::{Deserialize, Serialize};
 use std::{collections::BTreeMap, net::IpAddr};
 
@@ -69,9 +69,10 @@ struct HistoryItem {
     client: Option<ClientView>,
     /// The request's IP address, while kept.
     ip: Option<IpAddr>,
-    /// The request's browser family, while kept.
-    browser: Option<UserAgentFamily>,
-    /// Whether retention or a purge deleted the IP address and browser.
+    /// The request's browser and platform, while kept. Entries recorded before
+    /// platforms were have `other` for theirs.
+    device: Option<UserAgentFamily>,
+    /// Whether retention or a purge deleted the IP address and device.
     erased: bool,
 }
 
@@ -115,7 +116,7 @@ impl HistoryItem {
             actor: HistoryActor::from(&stored.actor),
             client,
             ip: origin.client_ip,
-            browser: origin.user_agent_family,
+            device: origin.user_agent_family,
             erased,
         })
     }
@@ -228,10 +229,11 @@ impl HistoryApplication {
             DomainEvent::CompromiseReported { event_id },
         )
         .await?;
-        security::Session::revoke_other(
+        security::Session::revoke(
             &mut tx,
             context,
             &session,
+            SessionScope::AllExcept(session.id),
             RevocationReason::CompromiseReported,
         )
         .await?;

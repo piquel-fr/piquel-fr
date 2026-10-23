@@ -33,6 +33,8 @@ mod routes;
 mod security;
 /// Built-in public configuration, liveness and readiness.
 mod service;
+/// The signed-in user's sessions, and signing them out.
+mod sessions;
 /// Fixtures shared by the applications' tests.
 #[cfg(test)]
 mod tests;
@@ -46,6 +48,7 @@ pub use jobs::Jobs;
 use oidc::OidcApplication;
 use passkey::PasskeyApplication;
 use service::ServiceApplication;
+use sessions::SessionsApplication;
 
 use assets::EmbeddedAssets;
 use axum::{
@@ -93,6 +96,7 @@ impl AuthConfig {
             .merge(PasskeyApplication::new(database.clone(), &self.passkey)?.routes())
             .merge(FederationApplication::new(database.clone(), &self.federation)?.routes())
             .merge(HistoryApplication::new(database.clone()).routes())
+            .merge(SessionsApplication::new(database.clone()).routes())
             .merge(OidcApplication::new(database.clone(), &self.oidc)?.routes());
         let policy = security::HttpSecurity::new(self, database);
         Ok(application

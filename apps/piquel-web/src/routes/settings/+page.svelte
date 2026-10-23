@@ -1,5 +1,5 @@
 <script lang="ts">
-  import Settings from '$lib/Settings.svelte';
+  import SignInMethods from '$lib/SignInMethods.svelte';
 </script>
 
-<Settings />
+<SignInMethods />

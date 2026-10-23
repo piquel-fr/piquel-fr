@@ -12,7 +12,9 @@ use piquel_common::{
     events::{DomainEvent, RevocationReason},
 };
 use piquel_crypto::Secret;
-use piquel_repository::{Database, DatabaseError, DatabaseTransaction, EventFilter, StoredUser};
+use piquel_repository::{
+    Database, DatabaseError, DatabaseTransaction, EventFilter, SessionScope, StoredUser,
+};
 
 /// Accounts per search page.
 const USER_PAGE_SIZE: u16 = 50;
@@ -136,7 +138,13 @@ impl AdminOperations {
             emails: tx.emails().list_for_user(user_id).await?,
             passkeys: Self::views(tx.passkeys().list_active(user_id).await?),
             identities: Self::views(tx.federation().list_active(user_id).await?),
-            sessions: tx.sessions().list_active_for_user(user_id).await?,
+            sessions: tx
+                .sessions()
+                .list_active_for_user(user_id)
+                .await?
+                .into_iter()
+                .map(Into::into)
+                .collect(),
             consents: tx.oidc().list_consents(user_id).await?,
             user: user.into(),
         };
@@ -233,7 +241,7 @@ impl AdminOperations {
     ) -> Result<Vec<DomainEvent>, AdminError> {
         let events = tx
             .sessions()
-            .revoke_all_for_user(user_id)
+            .revoke(user_id, SessionScope::All)
             .await?
             .into_iter()
             .map(|session_id| DomainEvent::SessionRevoked {
@@ -259,7 +267,12 @@ impl AdminOperations {
             .await?
             .ok_or(AdminError::SessionNotFound)?;
         Self::lock_target(&mut tx, operator, session.user_id).await?;
-        if !tx.oidc().revoke_session(session_id).await? {
+        if tx
+            .sessions()
+            .revoke(session.user_id, SessionScope::One(session_id))
+            .await?
+            .is_empty()
+        {
             return Err(AdminError::SessionNotFound);
         }
         let revoked = DomainEvent::SessionRevoked {

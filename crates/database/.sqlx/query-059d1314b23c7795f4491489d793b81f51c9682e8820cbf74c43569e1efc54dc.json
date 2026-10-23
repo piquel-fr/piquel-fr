@@ -1,0 +1,16 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE sessions SET last_seen_at = now(), last_seen_ip = $2\n                WHERE id = $1 AND last_seen_at < $3",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Inet",
+        "Timestamptz"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "059d1314b23c7795f4491489d793b81f51c9682e8820cbf74c43569e1efc54dc"
+}

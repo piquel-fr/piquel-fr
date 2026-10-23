@@ -4,7 +4,11 @@ use super::*;
 use crate::routes::federation;
 use crate::tests::Replicas;
 use axum::{Router, body::Body, http::Request as HttpRequest, middleware, routing::any};
-use piquel_common::{TokenId, clients::ClientKind};
+use piquel_common::{
+    TokenId,
+    clients::ClientKind,
+    events::{Browser, Platform},
+};
 use piquel_crypto::Secret;
 use piquel_repository::{DatabaseConfig, InsertSession, InsertUser};
 use std::net::{IpAddr, Ipv6Addr};
@@ -13,10 +17,13 @@ use tower::ServiceExt;
 impl RequestContext {
     /// The context of a request from a documentation address, for handler tests
     /// that bypass [`HttpSecurity::protect`].
-    pub(crate) const TEST: Self = Self(RequestOrigin {
-        client_ip: Some(IpAddr::V4(std::net::Ipv4Addr::new(192, 0, 2, 1))),
-        user_agent_family: Some(UserAgentFamily::Firefox),
-    });
+    pub(crate) const TEST: Self = Self {
+        client_ip: IpAddr::V4(std::net::Ipv4Addr::new(192, 0, 2, 1)),
+        user_agent_family: UserAgentFamily {
+            browser: Browser::Firefox,
+            platform: Platform::Linux,
+        },
+    };
 }
 
 /// Asserts that `response` asks the frontend to confirm the session with a passkey
@@ -703,6 +710,8 @@ fn confirmation_age_is_fixed_from_its_timestamp() {
             last_seen_at: now,
             revoked_at: None,
             passkey_confirmed_at: age.map(|age| now - Duration::seconds(age)),
+            user_agent_family: None,
+            last_seen_ip: None,
         }
     };
     assert!(Confirmed::<CONFIRMATION_MAX_AGE>::check(&session(Some(290))).is_ok());
@@ -761,12 +770,17 @@ async fn confirmed_changes_serialize_with_logout() {
         .expect("passkey sign-in confirms");
     let logout = tokio::spawn({
         let database = database.clone();
-        async move { database.sessions().revoke(id).await }
+        async move {
+            database
+                .sessions()
+                .revoke(user_id, SessionScope::One(id))
+                .await
+        }
     });
     tokio::time::sleep(std::time::Duration::from_millis(200)).await;
     assert!(!logout.is_finished(), "logout must wait for the change");
     change.commit().await.expect("commit change");
-    assert!(logout.await.expect("logout task").expect("logout"));
+    assert_eq!(logout.await.expect("logout task").expect("logout"), [id]);
     let mut change = database.begin().await.expect("change transaction");
     assert!(matches!(
         confirmed.lock(&mut change).await,
@@ -800,7 +814,8 @@ async fn session_lock_rechecks_expiry_after_waiting() {
             authentication_methods: vec![AuthenticationMethod::Passkey],
             authenticated_at: now,
             expires_at: now + Duration::seconds(1),
-            user_agent_family: None,
+            user_agent_family: RequestContext::TEST.user_agent_family,
+            ip: RequestContext::TEST.client_ip,
             passkey_confirmed_at: Some(now),
         })
         .await

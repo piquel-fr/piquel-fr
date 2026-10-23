@@ -634,36 +634,6 @@ impl OidcRepository<'_> {
             )
         )
     }
-
-    /// Revokes a session (OIDC logout) and every refresh token family issued
-    /// from it. Returns `false` if the session was already revoked or unknown.
-    ///
-    /// # Errors
-    ///
-    /// Returns [`DatabaseError`] if a query fails.
-    pub async fn revoke_session(&mut self, session: SessionId) -> Result<bool, DatabaseError> {
-        let revoked = run!(
-            self,
-            execute,
-            sqlx::query!(
-                "UPDATE sessions SET revoked_at=now() WHERE id=$1 AND revoked_at IS NULL",
-                session.as_uuid(),
-            )
-        )?
-        .rows_affected()
-            == 1;
-        run!(
-            self,
-            execute,
-            sqlx::query!(
-                "UPDATE refresh_token_families
-                SET revoked_at = COALESCE(revoked_at, now())
-                WHERE session_id = $1",
-                session.as_uuid(),
-            )
-        )?;
-        Ok(revoked)
-    }
 }
 /// Client registrations, secrets and the origins of public clients.
 mod clients;

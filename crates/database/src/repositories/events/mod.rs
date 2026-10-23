@@ -10,18 +10,13 @@ use crate::DatabaseError;
 use chrono::{DateTime, Utc};
 use piquel_common::{
     ClientId, EventId, Personal, SessionId, UserId,
-    events::{Actor, DomainEvent, EventContext, RequestOrigin, UserAgentFamily},
+    events::{Actor, Browser, DomainEvent, EventContext, Platform, RequestOrigin, UserAgentFamily},
 };
 use serde::{Deserialize, Serialize, de::value::MapDeserializer};
 use serde_json::{Map, Value};
 use sqlx::types::Json;
 use std::{fmt::Display, iter, net::IpAddr};
 
-/// Payload version recorded with every event. Versions are per kind: a kind whose
-/// payload changes shape gets a new version of its own, never a new value of this
-/// constant for every kind, and reads keep accepting the old one. A newer version
-/// was written by a newer release, so it reads as [`RecordedEvent::Unknown`].
-const EVENT_VERSION: i16 = 1;
 /// Key under which a [`Personal`] value serializes; matches its serde rename.
 const PERSONAL_KEY: &str = "$personal";
 /// What a [`Personal`] value leaves in the stored payload; matches the serde
@@ -164,8 +159,10 @@ struct EventRow {
     personal: bool,
     /// The client's IP address.
     client_ip: Option<IpAddr>,
-    /// The client's browser family.
-    user_agent_family: Option<UserAgentFamily>,
+    /// The client's browser, stored in `user_agent_family`.
+    browser: Option<Browser>,
+    /// The client's platform; `None` in rows written before it was recorded.
+    platform: Option<Platform>,
     /// Personal payload values by JSON pointer.
     details: Option<Value>,
 }
@@ -188,25 +185,32 @@ impl TryFrom<EventRow> for StoredEvent {
                 .restore(&mut payload);
             Personal::Value(RequestOrigin {
                 client_ip: row.client_ip,
-                user_agent_family: row.user_agent_family,
+                user_agent_family: row.browser.map(|browser| UserAgentFamily {
+                    browser,
+                    platform: row.platform.unwrap_or(Platform::Other),
+                }),
             })
         } else {
             Personal::Erased
         };
-        let event = if row.version > EVENT_VERSION || !KindProbe::knows(&row.kind) {
-            RecordedEvent::Unknown {
+        // Known only if it decodes to an event this release writes in the same
+        // version. A version this release does not write came from a newer one.
+        let decoded = KindProbe::knows(&row.kind).then(|| {
+            DomainEvent::deserialize(&Value::Object(Map::from_iter([
+                ("kind".to_owned(), Value::String(row.kind.clone())),
+                ("data".to_owned(), payload.clone()),
+            ])))
+        });
+        let event = match decoded {
+            Some(Ok(event)) if event.version() == row.version => RecordedEvent::Known(event),
+            Some(Err(source)) if row.version == DomainEvent::FIRST_VERSION => {
+                return Err(invalid("payload", source));
+            }
+            Some(_) | None => RecordedEvent::Unknown {
                 kind: row.kind,
                 version: row.version,
                 data: payload,
-            }
-        } else {
-            RecordedEvent::Known(
-                serde_json::from_value(Value::Object(Map::from_iter([
-                    ("kind".to_owned(), Value::String(row.kind)),
-                    ("data".to_owned(), payload),
-                ])))
-                .map_err(|source| invalid("payload", source))?,
-            )
+            },
         };
         Ok(Self {
             id: row.id,
@@ -294,6 +298,7 @@ impl EventRepository<'_> {
             serde_json::from_value(serde_json::to_value(event).map_err(serialization)?)
                 .map_err(serialization)?;
         let details = PersonalDetails::extract(&mut data);
+        let family = context.origin.user_agent_family;
         let id = EventId::new();
         run!(
             self,
@@ -304,7 +309,7 @@ impl EventRepository<'_> {
                 ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)",
                 id.as_uuid(),
                 kind,
-                EVENT_VERSION,
+                event.version(),
                 data,
                 Json(&context.actor) as _,
                 subject.map(UserId::as_uuid),
@@ -322,14 +327,13 @@ impl EventRepository<'_> {
             self,
             execute,
             sqlx::query!(
-                "INSERT INTO event_personal_data (event_id, client_ip, user_agent_family, details)
-                VALUES ($1, $2, $3, $4)",
+                "INSERT INTO event_personal_data (
+                    event_id, client_ip, user_agent_family, platform, details
+                ) VALUES ($1, $2, $3, $4, $5)",
                 id.as_uuid(),
                 context.origin.client_ip as _,
-                context
-                    .origin
-                    .user_agent_family
-                    .map(UserAgentFamily::as_str),
+                family.map(|family| family.browser.as_str()),
+                family.map(|family| family.platform.as_str()),
                 Json(&details) as _,
             )
         )?;
@@ -374,7 +378,8 @@ impl EventRepository<'_> {
                     e.occurred_at, e.kind, e.version, e.payload, e.actor AS "actor: Json<Actor>",
                     e.subject_user_id AS "subject_user_id: UserId",
                     p.event_id IS NOT NULL AS "personal!", p.client_ip AS "client_ip?: IpAddr",
-                    p.user_agent_family AS "user_agent_family?: UserAgentFamily",
+                    p.user_agent_family AS "browser?: Browser",
+                    p.platform AS "platform?: Platform",
                     p.details AS "details?"
                 FROM domain_events e
                 LEFT JOIN event_personal_data p ON p.event_id = e.id
@@ -424,7 +429,8 @@ impl EventRepository<'_> {
                     e.occurred_at, e.kind, e.version, e.payload, e.actor AS "actor: Json<Actor>",
                     e.subject_user_id AS "subject_user_id: UserId",
                     p.event_id IS NOT NULL AS "personal!", p.client_ip AS "client_ip?: IpAddr",
-                    p.user_agent_family AS "user_agent_family?: UserAgentFamily",
+                    p.user_agent_family AS "browser?: Browser",
+                    p.platform AS "platform?: Platform",
                     p.details AS "details?"
                 FROM domain_events e
                 LEFT JOIN event_personal_data p ON p.event_id = e.id
@@ -501,7 +507,8 @@ impl EventRepository<'_> {
                     e.occurred_at, e.kind, e.version, e.payload, e.actor AS "actor: Json<Actor>",
                     e.subject_user_id AS "subject_user_id: UserId",
                     p.event_id IS NOT NULL AS "personal!", p.client_ip AS "client_ip?: IpAddr",
-                    p.user_agent_family AS "user_agent_family?: UserAgentFamily",
+                    p.user_agent_family AS "browser?: Browser",
+                    p.platform AS "platform?: Platform",
                     p.details AS "details?"
                 FROM domain_events e
                 LEFT JOIN event_personal_data p ON p.event_id = e.id

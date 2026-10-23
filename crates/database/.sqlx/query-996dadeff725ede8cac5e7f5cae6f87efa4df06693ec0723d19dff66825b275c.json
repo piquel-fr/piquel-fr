@@ -1,0 +1,18 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO event_personal_data (\n                    event_id, client_ip, user_agent_family, platform, details\n                ) VALUES ($1, $2, $3, $4, $5)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Inet",
+        "Text",
+        "Text",
+        "Jsonb"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "996dadeff725ede8cac5e7f5cae6f87efa4df06693ec0723d19dff66825b275c"
+}

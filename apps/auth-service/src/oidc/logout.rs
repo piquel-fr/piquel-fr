@@ -11,10 +11,8 @@ use axum::{
     http::HeaderMap,
     response::{IntoResponse, Redirect, Response},
 };
-use piquel_common::{
-    ClientId,
-    events::{DomainEvent, RevocationReason},
-};
+use piquel_common::{ClientId, events::RevocationReason};
+use piquel_repository::SessionScope;
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use url::Url;
@@ -167,21 +165,18 @@ impl OidcApplication {
         }
         let (destination, client) = app.logout_destination(&q).await?;
         if let Some(session) = Session::optional(&app.database, &headers).await? {
+            let reason = client.map_or(RevocationReason::Logout, |client_id| {
+                RevocationReason::RelyingPartyLogout { client_id }
+            });
             let mut tx = app.database.begin().await?;
-            if tx.oidc().revoke_session(session.id).await? {
-                let reason = client.map_or(RevocationReason::Logout, |client_id| {
-                    RevocationReason::RelyingPartyLogout { client_id }
-                });
-                tx.record(
-                    &context.user(&session),
-                    Some(session.user_id),
-                    DomainEvent::SessionRevoked {
-                        session_id: session.id,
-                        reason,
-                    },
-                )
-                .await?;
-            }
+            Session::revoke(
+                &mut tx,
+                context,
+                &session,
+                SessionScope::One(session.id),
+                reason,
+            )
+            .await?;
             tx.commit().await?;
         }
         let mut response = Json(json!({"redirect_url":destination})).into_response();

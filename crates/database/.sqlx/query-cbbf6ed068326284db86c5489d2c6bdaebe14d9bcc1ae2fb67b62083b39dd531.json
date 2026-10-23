@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "SELECT\n                    s.id AS \"id: SessionId\", s.user_id AS \"user_id: UserId\",\n                    s.authentication_methods AS \"authentication_methods: JsonArray<AuthenticationMethod>\",\n                    s.authenticated_at, s.expires_at, s.last_seen_at, s.revoked_at,\n                    s.passkey_confirmed_at\n                FROM browser_session_secrets b\n                JOIN sessions s ON s.id = b.session_id\n                JOIN users u ON u.id = s.user_id\n                WHERE b.secret_digest = $1\n                AND s.revoked_at IS NULL\n                AND s.expires_at > now()\n                AND u.status = 'active'",
+  "query": "SELECT\n                    id AS \"id: SessionId\", user_id AS \"user_id: UserId\",\n                    authentication_methods AS \"authentication_methods: JsonArray<AuthenticationMethod>\",\n                    authenticated_at, expires_at, last_seen_at, revoked_at, passkey_confirmed_at,\n                    user_agent_family AS \"user_agent_family: UserAgentFamily\",\n                    last_seen_ip AS \"last_seen_ip: IpAddr\"\n                FROM sessions\n                WHERE id = $1",
   "describe": {
     "columns": [
       {
@@ -42,11 +42,21 @@
         "ordinal": 7,
         "name": "passkey_confirmed_at",
         "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 8,
+        "name": "user_agent_family: UserAgentFamily",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 9,
+        "name": "last_seen_ip: IpAddr",
+        "type_info": "Inet"
       }
     ],
     "parameters": {
       "Left": [
-        "Bytea"
+        "Uuid"
       ]
     },
     "nullable": [
@@ -57,8 +67,10 @@
       false,
       false,
       true,
+      true,
+      true,
       true
     ]
   },
-  "hash": "8b1d5caf9e71a42cd5e550204377e52cbfe2a0937ecc99fe6f1ef86ebbf6c88e"
+  "hash": "cbbf6ed068326284db86c5489d2c6bdaebe14d9bcc1ae2fb67b62083b39dd531"
 }
