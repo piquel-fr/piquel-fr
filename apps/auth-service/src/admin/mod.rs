@@ -136,11 +136,13 @@ impl AdminApplication {
     /// Searches accounts by ID, username, display name or email.
     async fn search_users(
         State(app): State<Self>,
-        _: Admin,
+        Admin(operator): Admin,
         Query(search): Query<UserSearch>,
     ) -> Result<Json<UserPage>, AdminError> {
         Ok(Json(
-            app.service.search_users(&search.q, search.cursor).await?,
+            app.service
+                .search_users(&operator, &search.q, search.cursor)
+                .await?,
         ))
     }
 
@@ -198,9 +200,9 @@ impl AdminApplication {
     /// Lists invitations without their secrets.
     async fn list_invitations(
         State(app): State<Self>,
-        _: Admin,
+        Admin(operator): Admin,
     ) -> Result<Json<Vec<Invitation>>, AdminError> {
-        Ok(Json(app.service.list_invitations().await?))
+        Ok(Json(app.service.list_invitations(&operator).await?))
     }
 
     /// Creates an invitation and returns its link, which is shown only this once.
@@ -236,35 +238,35 @@ impl AdminApplication {
     /// Lists every OIDC client.
     async fn list_clients(
         State(app): State<Self>,
-        _: Admin,
+        Admin(operator): Admin,
     ) -> Result<Json<Vec<Client>>, AdminError> {
-        Ok(Json(app.service.list_clients().await?))
+        Ok(Json(app.service.list_clients(&operator).await?))
     }
 
     /// Describes one OIDC client.
     async fn client(
         State(app): State<Self>,
-        _: Admin,
+        Admin(operator): Admin,
         Path(id): Path<String>,
     ) -> Result<Json<Client>, AdminError> {
-        Ok(Json(app.service.client(&id).await?))
+        Ok(Json(app.service.client(&operator, &id).await?))
     }
 
     /// Pages through domain events, newest first.
     async fn events(
         State(app): State<Self>,
-        _: Admin,
+        Admin(operator): Admin,
         Query(search): Query<EventSearch>,
     ) -> Result<Json<EventPage>, AdminError> {
-        Ok(Json(app.service.events(search).await?))
+        Ok(Json(app.service.events(&operator, search).await?))
     }
 
     /// Lists every administrator.
     async fn list_administrators(
         State(app): State<Self>,
-        _: Admin,
+        Admin(operator): Admin,
     ) -> Result<Json<Vec<Administrator>>, AdminError> {
-        Ok(Json(app.service.list_administrators().await?))
+        Ok(Json(app.service.list_administrators(&operator).await?))
     }
 
     /// Makes an active account an administrator.

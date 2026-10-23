@@ -46,17 +46,20 @@ impl AdminCommand {
                 service.revoke_administrator(operator, id).await?;
             }
             Self::List { output } => {
-                output.print(&service.list_administrators().await?, |administrators| {
-                    println!("USERNAME\tID\tGRANTED");
-                    for administrator in administrators {
-                        println!(
-                            "{}\t{}\t{}",
-                            administrator.username,
-                            administrator.user_id,
-                            administrator.granted_at.to_rfc3339()
-                        );
-                    }
-                })?;
+                output.print(
+                    &service.list_administrators(operator).await?,
+                    |administrators| {
+                        println!("USERNAME\tID\tGRANTED");
+                        for administrator in administrators {
+                            println!(
+                                "{}\t{}\t{}",
+                                administrator.username,
+                                administrator.user_id,
+                                administrator.granted_at.to_rfc3339()
+                            );
+                        }
+                    },
+                )?;
             }
         }
         Ok(())

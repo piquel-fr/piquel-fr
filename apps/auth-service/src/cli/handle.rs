@@ -31,7 +31,7 @@ impl HandleCommand {
         } = console;
         match self {
             Self::Check => {
-                let problems = service.check_handles().await?;
+                let problems = service.check_handles(operator).await?;
                 for problem in &problems {
                     println!(
                         "{}\t{}\t{}",

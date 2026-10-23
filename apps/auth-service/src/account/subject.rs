@@ -182,11 +182,15 @@ impl Viewer {
         }
     }
 
-    /// Records that an administrator or operator read the account's settings,
-    /// which hold personal data, as `user show` is recorded. An owner reading
-    /// their own is not.
-    pub(crate) async fn viewed(&self, database: &Database) -> Result<(), AccountError> {
+    /// Authorizes a read before it reads. An administrator must still hold their
+    /// rights and session, signed in with a passkey, as every admin read requires
+    /// ([`Operator::authorize_read`]), and an administrator's or operator's read
+    /// is recorded as a view, as `user show` is, since settings hold personal
+    /// data. The extractor already checked an owner's session, and an owner's
+    /// reads of their own are not recorded.
+    pub(crate) async fn authorize(&self, database: &Database) -> Result<(), AccountError> {
         if let Reading::Operator(operator) = &self.by {
+            operator.authorize_read(database).await?;
             let mut tx = database.begin().await?;
             tx.record(
                 &operator.context(),

@@ -18,7 +18,7 @@ use piquel_common::{
     },
 };
 use piquel_crypto::Rs256Key;
-use piquel_repository::{Database, DatabaseTransaction, StoredUser};
+use piquel_repository::{Database, DatabaseTransaction, StoredSession, StoredUser};
 use std::sync::Arc;
 
 /// The operating system user running a command, recorded on the events it causes.
@@ -161,25 +161,54 @@ impl Operator {
         &self,
         tx: &mut DatabaseTransaction<'_>,
     ) -> Result<(), AdminError> {
-        let Self::Admin(AdminSession {
-            user_id,
-            session_id,
-            acr,
-            auth_time,
-        }) = *self
-        else {
+        let Self::Admin(session) = self else {
             return Ok(());
         };
-        if !tx.administrators().contains_for_share(user_id).await? {
+        let held = tx
+            .administrators()
+            .contains_for_share(session.user_id)
+            .await?;
+        let stored = tx.sessions().find_active_by_id(session.session_id).await?;
+        session.check(stored, held, RECENT_PASSKEY)
+    }
+
+    /// Requires an administrator to still hold their rights and their session,
+    /// signed in with a passkey: what every read needs, before it reads. Reads
+    /// lock nothing, so this reads `database` directly. The CLI may always read.
+    pub(crate) async fn authorize_read(&self, database: &Database) -> Result<(), AdminError> {
+        let Self::Admin(session) = self else {
+            return Ok(());
+        };
+        session.check(
+            database
+                .sessions()
+                .find_active_by_id(session.session_id)
+                .await?,
+            database.administrators().contains(session.user_id).await?,
+            PASSKEY,
+        )
+    }
+}
+
+impl AdminSession {
+    /// Requires `stored`, this session as read now, to be active and this
+    /// administrator's, the account to still be an administrator (`held`), and the
+    /// session's sign-in to meet `requirement`. Every check of an administrator
+    /// comes down to this one.
+    fn check(
+        &self,
+        stored: Option<StoredSession>,
+        held: bool,
+        requirement: StepUpRequirement,
+    ) -> Result<(), AdminError> {
+        stored
+            .filter(|session| session.user_id == self.user_id && session.expires_at > Utc::now())
+            .ok_or(AdminError::SessionEnded)?;
+        if !held {
             return Err(AdminError::NotAdministrator);
         }
-        tx.sessions()
-            .find_active_by_id(session_id)
-            .await?
-            .filter(|session| session.user_id == user_id && session.expires_at > Utc::now())
-            .ok_or(AdminError::SessionEnded)?;
-        RECENT_PASSKEY
-            .check(acr.as_ref(), auth_time, Utc::now())
+        requirement
+            .check(self.acr.as_ref(), self.auth_time, Utc::now())
             .map_err(AdminError::StepUpRequired)
     }
 }
@@ -215,28 +244,21 @@ impl AdminTokens {
             .sid
             .filter(|_| claims.aud.contains(AUDIENCE))
             .ok_or(AdminError::WrongToken)?;
-        self.database
-            .sessions()
-            .find_active_by_id(session_id)
-            .await?
-            .filter(|session| session.user_id == user_id)
-            .ok_or(AdminError::SessionEnded)?;
-        if !self.database.administrators().contains(user_id).await? {
-            return Err(AdminError::NotAdministrator);
-        }
-        requirement
-            .check(
-                claims.authentication.acr.as_ref(),
-                claims.authentication.auth_time,
-                Utc::now(),
-            )
-            .map_err(AdminError::StepUpRequired)?;
-        Ok(Operator::Admin(AdminSession {
+        let session = AdminSession {
             user_id,
             session_id,
             acr: claims.authentication.acr,
             auth_time: claims.authentication.auth_time,
-        }))
+        };
+        session.check(
+            self.database
+                .sessions()
+                .find_active_by_id(session_id)
+                .await?,
+            self.database.administrators().contains(user_id).await?,
+            requirement,
+        )?;
+        Ok(Operator::Admin(session))
     }
 
     /// The token of the request's one `Authorization: Bearer` header. Another scheme

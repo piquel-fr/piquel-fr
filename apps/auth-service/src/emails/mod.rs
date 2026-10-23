@@ -345,7 +345,7 @@ impl EmailApplication {
 impl AccountService {
     /// Lists the account's addresses, primary first.
     pub(crate) async fn emails(&self, viewer: &Viewer) -> Result<Vec<EmailView>, AccountError> {
-        viewer.viewed(&self.database).await?;
+        viewer.authorize(&self.database).await?;
         let emails = self.database.emails().list(viewer.user()).await?;
         Ok(emails.into_iter().map(EmailView::from).collect())
     }

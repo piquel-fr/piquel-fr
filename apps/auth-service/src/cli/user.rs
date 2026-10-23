@@ -61,7 +61,7 @@ impl UserCommand {
                 cursor,
                 output,
             } => output.print(
-                &service.search_users(&query, cursor).await?,
+                &service.search_users(operator, &query, cursor).await?,
                 Self::print_page,
             )?,
             Self::Show { user, output } => {

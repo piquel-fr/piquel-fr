@@ -42,7 +42,7 @@ impl InviteCommand {
                 println!("{}", invitation.url);
             }
             Self::List { output } => {
-                output.print(&service.list_invitations().await?, |invitations| {
+                output.print(&service.list_invitations(operator).await?, |invitations| {
                     println!("ID\tCREATED\tEXPIRES\tREDEEMED\tREVOKED");
                     for invitation in invitations {
                         let time = |at: Option<chrono::DateTime<chrono::Utc>>| {

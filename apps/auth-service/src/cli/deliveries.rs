@@ -35,7 +35,11 @@ pub(super) enum DeliveriesCommand {
 impl DeliveriesCommand {
     /// Runs this command through the console's service.
     pub(super) async fn run(self, console: &Console) -> Result<(), CliError> {
-        let admin = &console.service;
+        let Console {
+            service: admin,
+            operator,
+            ..
+        } = console;
         match self {
             Self::List {
                 status,
@@ -43,7 +47,7 @@ impl DeliveriesCommand {
                 limit,
             } => {
                 let deliveries = admin
-                    .list_deliveries(status, channel.as_deref(), limit)
+                    .list_deliveries(operator, status, channel.as_deref(), limit)
                     .await?;
                 println!(
                     "ID\tCHANNEL\tSTATUS\tATTEMPTS\tORDER\tDUE OR FINISHED\tLAST ERROR\tDESTINATION"
@@ -65,8 +69,8 @@ impl DeliveriesCommand {
                     );
                 }
             }
-            Self::Retry { id } => admin.retry_delivery(id).await?,
-            Self::Cancel { id } => admin.cancel_delivery(id).await?,
+            Self::Retry { id } => admin.retry_delivery(operator, id).await?,
+            Self::Cancel { id } => admin.cancel_delivery(operator, id).await?,
         }
         Ok(())
     }

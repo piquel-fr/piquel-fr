@@ -35,8 +35,12 @@ const INVITATION_PARAMETER: &str = "invitation";
 /// account's details, records a domain event attributed to it in the same
 /// transaction.
 ///
-/// Mutations recheck that an administrator still holds their rights, session and
-/// confirmation after their last write, just before committing. Those on accounts refuse
+/// Every operation takes its [`Operator`] and checks it, so a caller in the same
+/// process, such as the dashboard, needs no check of its own. Reads first require
+/// an administrator to still hold their rights and session, signed in with a
+/// passkey (`Operator::authorize_read`). Mutations recheck that an administrator
+/// still holds their rights, session and recent confirmation after their last
+/// write, just before committing. Those on accounts refuse
 /// administrator accounts unless the CLI acts, so a stolen admin token cannot lock
 /// other administrators out; revoking their rights comes first, and is itself
 /// guarded.
@@ -72,7 +76,12 @@ impl AdminService {
 
     /// The ID of the account `user` names, in any status; an email names only the
     /// active account that verified it.
-    pub(crate) async fn find_user(&self, user: &UserRef) -> Result<UserId, AdminError> {
+    pub(crate) async fn find_user(
+        &self,
+        operator: &Operator,
+        user: &UserRef,
+    ) -> Result<UserId, AdminError> {
+        operator.authorize_read(&self.database).await?;
         let found = match user {
             UserRef::Id(id) => self
                 .database
@@ -103,9 +112,11 @@ impl AdminService {
     /// Lists accounts matching `query`, by ID, after the `cursor` of a previous page.
     pub(crate) async fn search_users(
         &self,
+        operator: &Operator,
         query: &str,
         cursor: Option<UserId>,
     ) -> Result<UserPage, AdminError> {
+        operator.authorize_read(&self.database).await?;
         let users = self
             .database
             .users()
@@ -124,6 +135,7 @@ impl AdminService {
         operator: &Operator,
         user_id: UserId,
     ) -> Result<UserDetail, AdminError> {
+        operator.authorize_read(&self.database).await?;
         let mut tx = self.database.begin().await?;
         let user = tx
             .users()
@@ -286,7 +298,11 @@ impl AdminService {
     }
 
     /// Lists invitations that have not been purged yet, newest first.
-    pub(crate) async fn list_invitations(&self) -> Result<Vec<Invitation>, AdminError> {
+    pub(crate) async fn list_invitations(
+        &self,
+        operator: &Operator,
+    ) -> Result<Vec<Invitation>, AdminError> {
+        operator.authorize_read(&self.database).await?;
         Ok(self.database.security().list_invitations().await?)
     }
 
@@ -335,12 +351,17 @@ impl AdminService {
     }
 
     /// Lists every OIDC client, enabled or not.
-    pub(crate) async fn list_clients(&self) -> Result<Vec<Client>, AdminError> {
+    pub(crate) async fn list_clients(
+        &self,
+        operator: &Operator,
+    ) -> Result<Vec<Client>, AdminError> {
+        operator.authorize_read(&self.database).await?;
         Ok(Self::views(self.database.oidc().list_clients().await?))
     }
 
     /// Describes one OIDC client.
-    pub(crate) async fn client(&self, id: &str) -> Result<Client, AdminError> {
+    pub(crate) async fn client(&self, operator: &Operator, id: &str) -> Result<Client, AdminError> {
+        operator.authorize_read(&self.database).await?;
         self.database
             .oidc()
             .find_client(id)
@@ -350,7 +371,12 @@ impl AdminService {
     }
 
     /// Describes one OIDC client as stored, with the lifetimes of its secrets.
-    pub(crate) async fn client_details(&self, id: &ClientId) -> Result<ClientDetails, AdminError> {
+    pub(crate) async fn client_details(
+        &self,
+        operator: &Operator,
+        id: &ClientId,
+    ) -> Result<ClientDetails, AdminError> {
+        operator.authorize_read(&self.database).await?;
         let mut tx = self.database.begin().await?;
         let client = tx
             .oidc()
@@ -473,7 +499,12 @@ impl AdminService {
     }
 
     /// Returns a page of the events matching `search`, newest first.
-    pub(crate) async fn events(&self, search: EventSearch) -> Result<EventPage, AdminError> {
+    pub(crate) async fn events(
+        &self,
+        operator: &Operator,
+        search: EventSearch,
+    ) -> Result<EventPage, AdminError> {
+        operator.authorize_read(&self.database).await?;
         let filter = EventFilter {
             subject: search.user,
             kind: search.kind,
@@ -510,7 +541,11 @@ impl AdminService {
     ///
     /// # Errors
     /// Fails when the query fails.
-    pub async fn check_handles(&self) -> Result<Vec<HandleProblem>, AdminError> {
+    pub async fn check_handles(
+        &self,
+        operator: &Operator,
+    ) -> Result<Vec<HandleProblem>, AdminError> {
+        operator.authorize_read(&self.database).await?;
         let names: Vec<_> = self
             .database
             .users()
@@ -607,7 +642,11 @@ impl AdminService {
     ///
     /// # Errors
     /// Fails when the query fails.
-    pub async fn list_administrators(&self) -> Result<Vec<Administrator>, AdminError> {
+    pub async fn list_administrators(
+        &self,
+        operator: &Operator,
+    ) -> Result<Vec<Administrator>, AdminError> {
+        operator.authorize_read(&self.database).await?;
         Ok(self.database.administrators().list().await?)
     }
 
@@ -671,10 +710,12 @@ impl AdminService {
     /// given, at most `limit`.
     pub(crate) async fn list_deliveries(
         &self,
+        operator: &Operator,
         status: Option<DeliveryStatus>,
         channel: Option<&str>,
         limit: u32,
     ) -> Result<Vec<DeliverySummary>, AdminError> {
+        operator.authorize_read(&self.database).await?;
         Ok(self
             .database
             .deliveries()
@@ -683,21 +724,31 @@ impl AdminService {
     }
 
     /// Attempts a failed delivery, or a cancelled unordered one, again now.
-    pub(crate) async fn retry_delivery(&self, id: DeliveryId) -> Result<(), AdminError> {
-        self.database
-            .deliveries()
+    pub(crate) async fn retry_delivery(
+        &self,
+        operator: &Operator,
+        id: DeliveryId,
+    ) -> Result<(), AdminError> {
+        let mut tx = self.database.begin().await?;
+        tx.deliveries()
             .retry(id)
             .await
-            .map_err(AdminError::delivery(id, "failed or cancelled unordered"))
+            .map_err(AdminError::delivery(id, "failed or cancelled unordered"))?;
+        Self::finish(tx, operator, None, vec![]).await
     }
 
     /// Cancels a pending or failed delivery, which unblocks the deliveries ordered
     /// after it.
-    pub(crate) async fn cancel_delivery(&self, id: DeliveryId) -> Result<(), AdminError> {
-        self.database
-            .deliveries()
+    pub(crate) async fn cancel_delivery(
+        &self,
+        operator: &Operator,
+        id: DeliveryId,
+    ) -> Result<(), AdminError> {
+        let mut tx = self.database.begin().await?;
+        tx.deliveries()
             .cancel(id)
             .await
-            .map_err(AdminError::delivery(id, "pending or failed"))
+            .map_err(AdminError::delivery(id, "pending or failed"))?;
+        Self::finish(tx, operator, None, vec![]).await
     }
 }

@@ -35,8 +35,10 @@ impl AuditCommand {
             kind: self.kind,
             before: self.before,
         };
-        self.output
-            .print(&console.service.events(search).await?, Self::print_page)
+        self.output.print(
+            &console.service.events(&console.operator, search).await?,
+            Self::print_page,
+        )
     }
 
     /// Prints one event per line, and how to continue if there may be more.
