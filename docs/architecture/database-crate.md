@@ -123,7 +123,8 @@ constraint the previous release could violate, only in a later release, once no
 deployed code uses the old shape. Migration `0003` dropped
 `sessions.management_expires_at` in the release that stopped reading it: a one-time
 exception while there were few users, not a precedent. SQLx's migrator takes an
-advisory lock, so concurrent `migrate` runs are safe.
+advisory lock, and provisioning the runtime role takes another, so concurrent
+`migrate` runs are safe.
 
 Every five minutes, one replica drains expired ephemeral state in bounded batches
 through `maintenance()`, for up to one minute per pass. The same pass deletes event
@@ -158,8 +159,10 @@ the runtime role or resets its attributes and password, and grants it:
   - `_sqlx_migrations` and `security_audit_log`: nothing.
 
 Grants are reset on every run, so they cover tables that new migrations add. A
-migration that needs another exception, or drops a listed table, updates the
-script in the same change. Provisioning refuses a role that is the owner or a superuser.
+migration that drops a listed table, or a new table that needs an exception,
+updates the script in the same change. Narrowing a grant on an existing table is a
+contract step: the previous release keeps running as the same role during a
+deploy, so revoke only once no deployed release needs the privilege. Provisioning refuses a role that is the owner or a superuser.
 The role cannot change the schema, disable triggers, change
 `session_replication_role` or run programs on the server. It still takes the
 advisory locks `try_exclusive` uses, and may create temporary tables.

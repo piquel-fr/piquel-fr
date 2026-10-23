@@ -1,8 +1,10 @@
 -- Renders the script `Database::provision` runs as the schema owner after
 -- migrations. It creates the runtime role $1, or resets it, with the password $2,
 -- and grants it row access to the app tables and nothing else. `RuntimeRole`
--- only accepts plain identifiers, so the name is safe inside the DO block.
+-- only accepts plain identifiers, so the name is safe inside the DO block. The
+-- advisory lock $3 serializes overlapping runs, whose catalog updates conflict.
 SELECT format($script$
+SELECT pg_advisory_xact_lock(%4$s);
 DO $$
 BEGIN
     IF EXISTS (SELECT FROM pg_roles WHERE rolname = %1$L AND (rolsuper OR rolname = current_user)) THEN
@@ -25,4 +27,4 @@ REVOKE ALL ON _sqlx_migrations, security_audit_log FROM %1$I;
 REVOKE UPDATE, DELETE ON domain_events FROM %1$I;
 REVOKE UPDATE ON event_personal_data FROM %1$I;
 REVOKE DELETE ON event_consumers FROM %1$I;
-$script$, $1::text, $2::text, current_database()) AS "script!"
+$script$, $1::text, $2::text, current_database(), $3::bigint) AS "script!"

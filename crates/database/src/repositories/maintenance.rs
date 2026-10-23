@@ -14,7 +14,8 @@ impl MaintenanceRepository<'_> {
     /// rows were deleted. Failed ordered deliveries are left to
     /// [`DatabaseTransaction::abandon_stuck_deliveries`](crate::DatabaseTransaction::abandon_stuck_deliveries). `batch_size` is clamped to 1..=1000 rows per table.
     ///
-    /// Each batch skips rows that live requests have locked. Outside a transaction,
+    /// Each batch skips rows that live requests have locked, except event personal
+    /// data, which requests never lock. Outside a transaction,
     /// each table's batch commits on its own, so cleanup never holds locks across
     /// tables; inside one, all of them commit or roll back with it. Deleting a
     /// session or an authorization code can still wait briefly on a locked child row

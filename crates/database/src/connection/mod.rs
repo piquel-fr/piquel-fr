@@ -1,6 +1,6 @@
 //! Validated `PostgreSQL` transport, bounded pools and explicit maintenance.
 
-use crate::{DatabaseConnectionError, DatabaseError, DatabaseTransaction};
+use crate::{DatabaseConnectionError, DatabaseError, DatabaseTransaction, LockKey};
 use sqlx::{
     ConnectOptions, Connection, PgConnection, PgPool,
     migrate::Migrator,
@@ -251,20 +251,26 @@ impl Database {
     /// the schema owner after migrations, so the grants cover every table.
     ///
     /// The script holds the password, so it runs on a dedicated connection that
-    /// never logs statements, as one implicit transaction.
+    /// never logs statements, as one implicit transaction: concurrent queries see
+    /// the old grants or the new ones, never none. It takes an advisory lock, so
+    /// overlapping runs wait for each other.
     ///
     /// # Errors
     ///
     /// Returns [`DatabaseError::Operation`] if `role` is the schema owner or a
-    /// superuser, or if a statement fails, e.g. without the right to create roles.
+    /// superuser, or if a statement fails, e.g. when the owner is not a superuser.
     pub async fn provision(&self, role: &RuntimeRole) -> Result<(), DatabaseError> {
         let options = self.pool.connect_options().as_ref().clone();
         let mut connection =
             PgConnection::connect_with(&options.disable_statement_logging()).await?;
-        let script =
-            sqlx::query_file_scalar!("src/connection/runtime_role.sql", role.name, role.password)
-                .fetch_one(&mut connection)
-                .await?;
+        let script = sqlx::query_file_scalar!(
+            "src/connection/runtime_role.sql",
+            role.name,
+            role.password,
+            LockKey::Provisioning.id()
+        )
+        .fetch_one(&mut connection)
+        .await?;
         sqlx::raw_sql(&script).execute(&mut connection).await?;
         Ok(connection.close().await?)
     }

@@ -306,7 +306,7 @@ fn runtime_roles_need_plain_names() {
 
 /// The runtime role reads and writes app rows, and appends history, but cannot
 /// rewrite history, reach migrations, change the schema or run programs. The
-/// service's cleanup still works with it, and provisioning again resets it.
+/// service's cleanup still works with it, and overlapping provisioning runs are safe.
 #[tokio::test]
 #[ignore = "requires a disposable TEST_DATABASE_URL"]
 async fn runtime_role_has_only_row_privileges() {
@@ -320,8 +320,11 @@ async fn runtime_role_has_only_row_privileges() {
     url.set_password(None).expect("password");
     let config = DatabaseConfig::new(url.as_str(), 1, Duration::from_secs(5)).expect("config");
     let role = RuntimeRole::new(&config, "runtime password").expect("role");
-    owner.provision(&role).await.expect("create");
-    owner.provision(&role).await.expect("reset");
+    // Overlapping runs, as two `migrate` jobs: one creates the role, the other
+    // waits for it, then resets it.
+    let (first, second) = tokio::join!(owner.provision(&role), owner.provision(&role));
+    first.expect("create or reset");
+    second.expect("create or reset");
     let runtime = Database::connect(config.with_password("runtime password"))
         .await
         .expect("log in as the runtime role");
@@ -353,10 +356,13 @@ async fn runtime_role_has_only_row_privileges() {
         "SET session_replication_role = replica",
         "COPY (SELECT 1) TO PROGRAM 'true'",
     ] {
+        // Rolled back, so a regressed grant cannot harm concurrent tests.
+        let mut probe = runtime.pool.begin().await.expect("begin");
         let error = sqlx::query(statement)
-            .execute(&runtime.pool)
+            .execute(&mut *probe)
             .await
             .expect_err(statement);
+        probe.rollback().await.expect("rollback");
         let code = error
             .as_database_error()
             .and_then(sqlx::error::DatabaseError::code);
