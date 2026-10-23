@@ -67,4 +67,14 @@ test('an administrator disables a user from the dashboard, and the user is signe
   await user.goto(settingsUrl);
   await expect(user.getByRole('link', { name: 'Sign in', exact: true })).toBeVisible();
   await expect(user.getByText(`@user-${suffix}`, { exact: true })).toHaveCount(0);
+
+  // The dashboard sends no referrer, so its sign-out form posts with `Origin: null`.
+  // The dashboard ends its session and hands over to auth, which asks to confirm,
+  // then returns to the dashboard, which asks to sign in again.
+  await admin.getByRole('button', { name: 'Sign out', exact: true }).click();
+  await expect(admin.getByRole('heading', { name: 'Ready to sign out?' })).toBeVisible();
+  await admin.getByRole('button', { name: 'Sign out', exact: true }).click();
+  await expect(
+    admin.getByRole('button', { name: 'Sign in with a passkey', exact: true })
+  ).toBeVisible();
 });

@@ -8,10 +8,10 @@ Keep implementations simple. Follow neighbouring modules and share repeated logi
   no other workspace crate. IDs, account status, authentication methods,
   providers, `Personal<T>`, error-chain formatting, `str_enum!`, and under
   `protocol` the wire types shared with the SDKs: token claims, metadata, JWK sets,
-  OAuth/OIDC vocabulary and errors, bearer challenges. Server-only parts are
-  features: `config` (environment variables, validated URLs, secret references),
-  `email` (address normalization), `events` (domain events) and `sqlx` (column
-  decoding).
+  OAuth/OIDC vocabulary and errors, bearer challenges, and the same-origin rule
+  for browser requests. Server-only parts are features: `config` (environment
+  variables, validated URLs, secret references), `email` (address normalization),
+  `events` (domain events) and `sqlx` (column decoding).
 - `piquel-crypto` (`crates/crypto`): random secrets, digests, HMAC, constant-time
   comparison, PKCE and RS256 signing.
 - `piquel-auth` (`crates/auth-sdk`): the public Rust SDK, following

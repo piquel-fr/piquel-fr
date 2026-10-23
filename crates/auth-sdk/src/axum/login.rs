@@ -19,6 +19,7 @@ use axum::{
 };
 use base64::{Engine, engine::general_purpose::URL_SAFE_NO_PAD};
 use chrono::{DateTime, TimeDelta, Utc};
+use piquel_common::protocol::same_origin::BrowserRequest;
 use serde::{Deserialize, Serialize};
 use std::{
     fmt,
@@ -489,25 +490,15 @@ impl Login {
         response
     }
 
-    /// Whether a browser request comes from this app's own pages: its `Origin` is the
-    /// app's, whose callback is the client's redirect URI, or, without `Origin`,
-    /// `Sec-Fetch-Site` says same-origin. `SameSite=Lax` alone would still let a
-    /// sibling site under the same domain post with the cookie.
+    /// Whether a browser request comes from this app's own pages, whose origin is the
+    /// client's redirect URI's ([`BrowserRequest::is_same_origin`]).
     fn same_origin(&self, headers: &HeaderMap) -> bool {
-        let text =
-            |name: header::HeaderName| headers.get(name).and_then(|value| value.to_str().ok());
-        match text(header::ORIGIN) {
-            Some(origin) => {
-                origin
-                    == self
-                        .client
-                        .config()
-                        .redirect_uri
-                        .origin()
-                        .ascii_serialization()
-            }
-            None => text(header::HeaderName::from_static("sec-fetch-site")) == Some("same-origin"),
+        let text = |name: &str| headers.get(name).and_then(|value| value.to_str().ok());
+        BrowserRequest {
+            fetch_site: text("sec-fetch-site"),
+            origin: text(header::ORIGIN.as_str()),
         }
+        .is_same_origin(&self.client.config().redirect_uri.origin())
     }
 
     /// `POST /logout`: deletes the session and redirects to RP-initiated logout.
