@@ -1,7 +1,14 @@
 <script lang="ts">
   import { onMount } from 'svelte';
   import { Passkeys, StepUp, errorMessage, providerName, type Provider } from '@piquel/auth-sdk';
-  import { Account, Task, type Device, type Identity, type Passkey } from '$lib/account.svelte';
+  import {
+    Account,
+    Task,
+    type Device,
+    type Email,
+    type Identity,
+    type Passkey
+  } from '$lib/account.svelte';
 
   type Method = 'passkey' | 'federation';
   /** An entry of `GET /account/history`, newest first. */
@@ -20,6 +27,8 @@
     | { kind: 'session.revoked'; reason: { type: string } }
     | { kind: 'passkey.added' | 'passkey.renamed' | 'passkey.removed'; passkey_id: string }
     | { kind: 'identity.linked' | 'identity.unlinked'; provider: Provider }
+    | { kind: 'email.added'; email_id: string; address: string | null }
+    | { kind: 'email.verified' | 'email.primary_changed' | 'email.removed'; email_id: string }
     | { kind: 'consent.granted'; scopes: string[] }
     | { kind: 'compromise.reported'; event_id: string }
     | { kind: 'legacy'; action: string; outcome: string }
@@ -39,7 +48,8 @@
   /** What undoes a reported entry; it needs a recent passkey confirmation. */
   type FollowUp =
     | { action: 'remove_passkey'; passkey_id: string }
-    | { action: 'unlink_identity'; provider: Provider };
+    | { action: 'unlink_identity'; provider: Provider }
+    | { action: 'remove_email'; email_id: string };
 
   const actors: Record<Entry['actor'], string | null> = {
     account: null,
@@ -80,6 +90,7 @@
   let next = $state<string | null>(null);
   let passkeys = $state<Passkey[]>([]);
   let identities = $state<Identity[]>([]);
+  let emails = $state<Email[]>([]);
   let loading = $state(true);
   // The entry whose report confirmation is open.
   let reporting = $state<string | null>(null);
@@ -95,6 +106,11 @@
     unlink: async (provider) => {
       await account.unlinkIdentity(provider);
       notice = `${providerName(provider as Provider)} sign-in was unlinked.`;
+      await refresh();
+    },
+    removeEmail: async (id) => {
+      await account.removeEmail(id);
+      notice = 'The email address was removed.';
       await refresh();
     }
   });
@@ -123,6 +139,10 @@
       const linked = identities.some((identity) => identity.provider === followUp.provider);
       return linked && { followUp, label: `Unlink ${providerName(followUp.provider)} sign-in` };
     }
+    if (followUp?.action === 'remove_email') {
+      const email = emails.find((value) => value.id === followUp.email_id);
+      return email && { followUp, label: `Remove ${email.address}` };
+    }
     return null;
   });
   onMount(() => {
@@ -142,10 +162,11 @@
   async function refresh() {
     // Credentials too: a report's follow-up may name one added since the page loaded.
     let page: HistoryPage;
-    [page, passkeys, identities] = await Promise.all([
+    [page, passkeys, identities, emails] = await Promise.all([
       account.api.request<HistoryPage>('/account/history'),
       account.passkeys(),
-      account.identities()
+      account.identities(),
+      account.emailsOrNone()
     ]);
     ({ entries, next } = page);
   }
@@ -173,15 +194,25 @@
     });
   }
   async function undo(followUp: FollowUp) {
-    await task.run(() =>
-      followUp.action === 'remove_passkey'
-        ? stepUp.run('remove', followUp.passkey_id)
-        : stepUp.run('unlink', followUp.provider)
-    );
+    await task.run(() => {
+      switch (followUp.action) {
+        case 'remove_passkey':
+          return stepUp.run('remove', followUp.passkey_id);
+        case 'unlink_identity':
+          return stepUp.run('unlink', followUp.provider);
+        case 'remove_email':
+          return stepUp.run('removeEmail', followUp.email_id);
+      }
+    });
   }
   function passkeyName(id: string) {
     const passkey = passkeys.find((key) => key.id === id);
     return passkey ? ` “${passkey.friendly_name}”` : '';
+  }
+  /** The address `id`, while it is still on the account, with a leading space. */
+  function emailAddress(id: string) {
+    const email = emails.find((value) => value.id === id);
+    return email ? ` ${email.address}` : '';
   }
   function describe(entry: Entry): string {
     switch (entry.kind) {
@@ -207,6 +238,16 @@
         return `${providerName(entry.provider)} sign-in linked`;
       case 'identity.unlinked':
         return `${providerName(entry.provider)} sign-in unlinked`;
+      case 'email.added': {
+        const address = entry.address ? ` ${entry.address}` : emailAddress(entry.email_id);
+        return `Email address${address} added`;
+      }
+      case 'email.verified':
+        return `Email address${emailAddress(entry.email_id)} confirmed`;
+      case 'email.primary_changed':
+        return `Primary email address changed${emailAddress(entry.email_id) ? ` to${emailAddress(entry.email_id)}` : ''}`;
+      case 'email.removed':
+        return 'Email address removed';
       case 'consent.granted':
         return `Access approved: ${entry.scopes.join(', ')}`;
       case 'token.reused':
@@ -294,7 +335,8 @@
                   This signs out every device but this one, and every app you use with Piquel must
                   sign in again, including on this device. Your passkeys keep working.
                 </p>
-                {#if entry.kind === 'passkey.added' || entry.kind === 'identity.linked'}<p>
+                {#if entry.kind === 'passkey.added' || entry.kind === 'identity.linked' || entry.kind === 'email.added'}<p
+                  >
                     Afterwards, you can confirm with your passkey to undo this change.
                   </p>{/if}
                 <div class="row actions">

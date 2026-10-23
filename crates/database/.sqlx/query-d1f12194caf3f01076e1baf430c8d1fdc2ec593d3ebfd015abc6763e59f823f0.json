@@ -1,0 +1,23 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE user_emails SET is_primary = false\n                WHERE user_id = $1 AND is_primary AND id <> $2\n                RETURNING id AS \"id: EmailId\"",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id: EmailId",
+        "type_info": "Uuid"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "d1f12194caf3f01076e1baf430c8d1fdc2ec593d3ebfd015abc6763e59f823f0"
+}

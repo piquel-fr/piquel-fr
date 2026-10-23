@@ -197,7 +197,7 @@ impl TestApp {
         if let Some(email) = email {
             tx.emails()
                 .insert_verified(&InsertVerifiedEmail {
-                    id: TokenId::new(),
+                    id: piquel_common::EmailId::new(),
                     user_id: id,
                     normalized_email: email.into(),
                     is_primary: true,

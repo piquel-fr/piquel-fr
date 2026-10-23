@@ -10,7 +10,8 @@ Keep implementations simple. Follow neighbouring modules and share repeated logi
   `protocol` the wire types shared with the SDKs: token claims, metadata, JWK sets,
   OAuth/OIDC vocabulary and errors, bearer challenges. Server-only parts are
   features: `config` (environment variables, validated URLs, secret references),
-  `events` (domain events) and `sqlx` (column decoding).
+  `email` (address normalization), `events` (domain events) and `sqlx` (column
+  decoding).
 - `piquel-crypto` (`crates/crypto`): random secrets, digests, HMAC, constant-time
   comparison, PKCE and RS256 signing.
 - `piquel-auth` (`crates/auth-sdk`): the public Rust SDK, following

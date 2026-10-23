@@ -3,10 +3,10 @@
 //! `docs/architecture/federation-providers.md` to add one.
 
 use super::{FederationApplication, FederationConfigError, Provider};
-use crate::email::NormalizedEmail;
 use axum::http::{StatusCode, header};
 use piquel_common::{
-    config::ConfigurationError, events::SignInFailure, protocol::oauth::GrantType,
+    config::ConfigurationError, email::NormalizedEmail, events::SignInFailure,
+    protocol::oauth::GrantType,
 };
 use piquel_telemetry::SendTraced;
 use serde::{Deserialize, de::DeserializeOwned};

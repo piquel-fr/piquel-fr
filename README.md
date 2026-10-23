@@ -57,6 +57,9 @@ piquel-web with Vite against an auth service on `http://localhost:3000`.
 | `AUTH_INVITE_REQUIRED` | `true` by default; set `false` to allow public registration |
 | `AUTH_GITHUB_CLIENT_ID`, `AUTH_GITHUB_CLIENT_SECRET` | Both required to enable GitHub; secret is an env/file reference |
 | `AUTH_GOOGLE_CLIENT_ID`, `AUTH_GOOGLE_CLIENT_SECRET` | Both required to enable Google; secret is an env/file reference |
+| `AUTH_SMTP_URL` | Optional SMTP relay, `smtps://USER@HOST:465` (implicit TLS) or `smtp://USER@HOST:587` (STARTTLS required); unset disables email. Only a loopback host, such as a local Mailpit, may be reached without TLS |
+| `AUTH_SMTP_PASSWORD` | Env/file reference for the URL user's password; required with a user, never in the URL |
+| `AUTH_EMAIL_FROM` | Sender of every message; defaults to `Piquel <security@piquel.fr>` |
 | `OTEL_EXPORTER_OTLP_ENDPOINT` | Optional OTLP/HTTP base URL that traces, metrics and logs are exported to; unset, logs only go to stderr |
 | `OTEL_RESOURCE_ATTRIBUTES`, other `OTEL_*`, `RUST_LOG` | Standard telemetry settings, e.g. `deployment.environment.name=staging`; see `docs/architecture/telemetry.md` |
 
@@ -146,10 +149,35 @@ remain. `rename` refuses a handle another account has, but not a look-alike: run
 relying parties refresh `preferred_username`, and is recorded as a domain event with
 its CLI operator.
 
+### Email
+
+Accounts add, verify, choose the primary of and remove their addresses on
+`piquel.fr/settings/emails`; the OIDC `email` claim reports the primary verified
+address. Adding an address sends a link to `settings/emails/verify#token=…`,
+which works once for 24 hours. The page verifies only when its button is pressed,
+since mail scanners follow links, and needs no session. Adding an address,
+changing the primary one and removing one need a passkey confirmation, like other
+sensitive changes. An account sends at most 5 verification emails an hour, a
+client IP at most 10, and one mailbox, whatever the case and `+` tag of its
+address, receives at most 3. An address another active account verified cannot be
+verified again; adding it is allowed, so adding reveals nothing. The email names
+the account the address would join, and a browser signed in to another account
+cannot confirm it. An address that stops being primary, or is removed, is told.
+
+Auth sends email through the delivery queue, never from a request. Messages are
+transactional security notices: no tracking, no remote images, and links only to
+the settings site. Without `AUTH_SMTP_URL`, adding an address is refused and
+queued messages are dropped. Any SMTP provider works; deployments use Resend's
+relay, as `infra/README.md` describes. The provider must not depend on Piquel's own
+sign-in. For development, `just auth mailpit` runs a local Mailpit: set
+`AUTH_SMTP_URL=smtp://localhost:1025` and read the mail at
+`http://localhost:8025`. Sending domains need SPF, DKIM and DMARC; see
+[infra/README.md](infra/README.md#email).
+
 ### Outbound deliveries
 
-Messages for other systems, such as back-channel logout tokens, wait in a queue
-in the database until a worker sends them. Inspect and repair it with:
+Messages for other systems, such as back-channel logout tokens and email, wait in
+a queue in the database until a worker sends them. Inspect and repair it with:
 
 ```sh
 just auth deliveries list --status failed
@@ -331,8 +359,8 @@ explains how to choose a requirement and handle the challenge.
   a registration that names the pending identity shown on the signup page attaches
   it; plain registration ignores it. A social login can never replace an
   established account's passkeys.
-- Sensitive changes (adding or removing a passkey, linking or unlinking a provider)
-  need a passkey confirmation of the current browser session from the last five
+- Sensitive changes (adding or removing a passkey, linking or unlinking a provider,
+  adding, removing or changing the primary email address) need a passkey confirmation of the current browser session from the last five
   minutes. A passkey sign-in counts; social sign-in never does. The age counts from
   the confirmation and is never extended by use, and it never applies to another
   session. Without one, the API answers `403` with `"code": "step_up_required"` and

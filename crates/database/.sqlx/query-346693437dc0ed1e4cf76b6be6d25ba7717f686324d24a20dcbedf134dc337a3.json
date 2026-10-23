@@ -1,0 +1,18 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "WITH email AS (\n                    INSERT INTO user_emails (id, user_id, normalized_email)\n                    VALUES ($1, $2, $3)\n                    RETURNING id\n                )\n                INSERT INTO email_verification_secrets (email_id, secret_digest, expires_at)\n                SELECT id, $4, $5 FROM email",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid",
+        "Text",
+        "Bytea",
+        "Timestamptz"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "346693437dc0ed1e4cf76b6be6d25ba7717f686324d24a20dcbedf134dc337a3"
+}

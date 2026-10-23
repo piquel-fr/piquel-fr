@@ -5,6 +5,7 @@ use crate::DatabaseError;
 use chrono::{DateTime, Utc};
 use piquel_admin_api::Invitation;
 use piquel_common::TokenId;
+use std::time::Duration;
 
 impl SecurityRepository<'_> {
     /// Stores an invitation by the 32-byte digest of its secret.
@@ -122,9 +123,9 @@ impl SecurityRepository<'_> {
             == 1)
     }
 
-    /// Counts a request in `bucket`'s one-minute fixed window and reports
-    /// whether the window is still within `limit` requests. The counter is
-    /// shared by all service processes.
+    /// Counts a request in `bucket`'s fixed `window` and reports whether the
+    /// window is still within `limit` requests. The counter is shared by all
+    /// service processes. Each bucket must always use the same window.
     ///
     /// # Errors
     ///
@@ -133,24 +134,26 @@ impl SecurityRepository<'_> {
         &mut self,
         bucket: &[u8],
         limit: i32,
+        window: Duration,
     ) -> Result<bool, DatabaseError> {
         let requests = run!(
             self,
             fetch_one,
             sqlx::query_scalar!(
                 "INSERT INTO request_limits (bucket, requests, expires_at)
-                VALUES ($1, 1, now() + interval '1 minute')
+                VALUES ($1, 1, now() + $2)
                 ON CONFLICT (bucket) DO UPDATE
                 SET requests = CASE
                         WHEN request_limits.expires_at <= now() THEN 1
                         ELSE request_limits.requests + 1
                     END,
                     expires_at = CASE
-                        WHEN request_limits.expires_at <= now() THEN now() + interval '1 minute'
+                        WHEN request_limits.expires_at <= now() THEN now() + $2
                         ELSE request_limits.expires_at
                     END
                 RETURNING requests",
                 bucket,
+                window as _,
             )
         )?;
         Ok(requests <= limit)

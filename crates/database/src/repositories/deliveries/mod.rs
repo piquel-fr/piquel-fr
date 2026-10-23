@@ -55,7 +55,7 @@ pub(crate) trait Channels {
 }
 
 /// Every channel `record` fans out to. Add a channel here once it is implemented.
-pub(crate) type Registered = (BackchannelLogout, ());
+pub(crate) type Registered = (BackchannelLogout, (Email, ()));
 
 impl Channels for () {
     /// The end of the list.
@@ -604,6 +604,9 @@ impl DeliveryRepository<'_> {
 /// Back-channel logout tokens for the clients of revoked sessions.
 mod backchannel;
 pub use backchannel::{BackchannelLogout, LogoutRecipient};
+/// Messages to account holders.
+mod email;
+pub use email::{Email, EmailMessage, PendingAddress};
 /// Database tests for fan-out, claims, leases and ordering.
 #[cfg(test)]
 mod tests;

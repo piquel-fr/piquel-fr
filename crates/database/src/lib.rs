@@ -25,9 +25,9 @@ pub use repositories::{
     SecurityRepository, SessionRepository, TokenRepository, UserRepository,
     deliveries::{
         BackchannelLogout, Channel, Delivery, DeliveryOutcome, DeliveryStatus, DeliverySummary,
-        LogoutRecipient, NewDelivery,
+        Email, EmailMessage, LogoutRecipient, NewDelivery, PendingAddress,
     },
-    emails::{InsertVerifiedEmail, StoredEmail},
+    emails::{InsertUnverifiedEmail, InsertVerifiedEmail, PendingVerification, StoredEmail},
     events::{EventCursor, EventFilter, RecordedEvent, StoredEvent},
     federation::{
         ConsumedFederationTransaction, InsertExternalIdentity, InsertFederationTransaction,

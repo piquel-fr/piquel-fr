@@ -6,6 +6,7 @@
 //! the vocabulary macros. Servers add:
 //!
 //! - `config`: environment variables, validated URLs and secret references.
+//! - `email`: email address normalization.
 //! - `events`: the domain events auth records.
 //! - `sqlx`: decoding identifiers and vocabularies from `PostgreSQL` columns.
 
@@ -14,6 +15,9 @@ pub mod clients;
 /// Environment variables, validated URLs and secret references.
 #[cfg(feature = "config")]
 pub mod config;
+/// Conservative email normalization; see `docs/security/email-normalization.md`.
+#[cfg(feature = "email")]
+pub mod email;
 /// Typed domain events: what changed in an account, and who changed it.
 #[cfg(feature = "events")]
 pub mod events;
@@ -375,6 +379,10 @@ uuid_id!(SessionId, "Opaque central-session identifier.");
 uuid_id!(TokenId, "Identifier for a token record or JWT.");
 uuid_id!(PasskeyId, "Identifier of a stored passkey credential.");
 uuid_id!(EventId, "Identifier of a recorded domain event.");
+uuid_id!(
+    EmailId,
+    "Identifier of an email address attached to an account."
+);
 uuid_id!(
     ClientSecretId,
     "Identifier of one of an OAuth client's secrets."

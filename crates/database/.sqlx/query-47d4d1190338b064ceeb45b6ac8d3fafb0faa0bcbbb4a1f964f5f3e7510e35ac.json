@@ -1,0 +1,23 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "DELETE FROM email_verification_secrets\n                WHERE email_id = $1 AND secret_digest = $2 AND expires_at > now()\n                RETURNING email_id",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "email_id",
+        "type_info": "Uuid"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Bytea"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "47d4d1190338b064ceeb45b6ac8d3fafb0faa0bcbbb4a1f964f5f3e7510e35ac"
+}

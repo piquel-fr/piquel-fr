@@ -34,6 +34,11 @@ admin *ARGS:
 handle *ARGS:
     @just auth run handle "$@"
 
+# A local Mailpit SMTP server: set AUTH_SMTP_URL=smtp://localhost:1025 and read
+# the mail at http://localhost:8025. Stops with Ctrl-C.
+mailpit:
+    @docker run --rm --name piquel-mailpit -p 127.0.0.1:1025:1025 -p 127.0.0.1:8025:8025 axllent/mailpit
+
 # Write a new RSA signing key; refuses to overwrite an existing file.
 generate-key PATH:
     #!/usr/bin/env bash

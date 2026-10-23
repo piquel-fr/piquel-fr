@@ -1,0 +1,34 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT\n                    e.id AS \"email_id: EmailId\", e.user_id AS \"user_id: UserId\",\n                    e.normalized_email AS address\n                FROM email_verification_secrets s\n                JOIN user_emails e ON e.id = s.email_id AND e.verified_at IS NULL\n                JOIN users u ON u.id = e.user_id AND u.status = 'active'\n                WHERE s.secret_digest = $1 AND s.expires_at > now()",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "email_id: EmailId",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "user_id: UserId",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 2,
+        "name": "address",
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Bytea"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "abf257e75aa8025bfdb4aea08a4e031fc4ca805c82e34ab57a55ad3ffbf4fb8a"
+}

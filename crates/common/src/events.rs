@@ -6,9 +6,10 @@
 //! [`RequestOrigin`](crate::events::RequestOrigin) apart from the event so both can be deleted on their own.
 
 use crate::{
-    AuthenticationMethod, ClientId, EventId, Handle, PasskeyId, Personal, Provider, SessionId,
-    TokenId, UserId,
+    AuthenticationMethod, ClientId, EmailId, EventId, Handle, PasskeyId, Personal, Provider,
+    SessionId, TokenId, UserId,
     clients::{ClientField, ClientKind},
+    email::NormalizedEmail,
 };
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
@@ -83,6 +84,33 @@ pub enum DomainEvent {
     IdentityUnlinked {
         /// The identity's provider.
         provider: Provider,
+    },
+    /// An unverified email address was added to the account. Its verification
+    /// email is queued with it.
+    EmailAdded {
+        /// The new address.
+        email_id: EmailId,
+        /// The address itself.
+        address: Personal<NormalizedEmail>,
+    },
+    /// Someone holding the address's verification link confirmed it.
+    EmailVerified {
+        /// The verified address.
+        email_id: EmailId,
+    },
+    /// Another verified address became the account's primary one, which the
+    /// OIDC `email` claim reports. The previous primary address is told.
+    PrimaryEmailChanged {
+        /// The new primary address.
+        email_id: EmailId,
+        /// The previous one; `None` when the account had no verified address.
+        #[serde(default)]
+        previous_email_id: Option<EmailId>,
+    },
+    /// An email address was removed from the account.
+    EmailRemoved {
+        /// The removed address.
+        email_id: EmailId,
     },
     /// The user approved a client's access, adding to any earlier consent.
     ConsentGranted {
@@ -258,6 +286,10 @@ impl DomainEvent {
             | Self::PasskeyRemoved { .. }
             | Self::IdentityLinked { .. }
             | Self::IdentityUnlinked { .. }
+            | Self::EmailAdded { .. }
+            | Self::EmailVerified { .. }
+            | Self::PrimaryEmailChanged { .. }
+            | Self::EmailRemoved { .. }
             | Self::InvitationCreated { .. }
             | Self::InvitationRevoked { .. }
             | Self::AccountDisabled { .. }
@@ -285,6 +317,10 @@ impl DomainEvent {
             | Self::PasskeyRemoved { .. }
             | Self::IdentityLinked { .. }
             | Self::IdentityUnlinked { .. }
+            | Self::EmailAdded { .. }
+            | Self::EmailVerified { .. }
+            | Self::PrimaryEmailChanged { .. }
+            | Self::EmailRemoved { .. }
             | Self::ConsentGranted { .. }
             | Self::GrantIssued { .. }
             | Self::GrantRevoked { .. }
@@ -324,6 +360,10 @@ impl DomainEvent {
             Self::PasskeyRemoved { .. } => "passkey_removed",
             Self::IdentityLinked { .. } => "identity_linked",
             Self::IdentityUnlinked { .. } => "identity_unlinked",
+            Self::EmailAdded { .. } => "email_added",
+            Self::EmailVerified { .. } => "email_verified",
+            Self::PrimaryEmailChanged { .. } => "primary_email_changed",
+            Self::EmailRemoved { .. } => "email_removed",
             Self::ConsentGranted { .. } => "consent_granted",
             Self::GrantIssued { .. } => "grant_issued",
             Self::GrantRevoked { .. } => "grant_revoked",
@@ -389,6 +429,22 @@ impl DomainEvent {
             },
             Self::IdentityUnlinked { provider } => HistoryEntry::IdentityUnlinked {
                 provider: *provider,
+            },
+            Self::EmailAdded { email_id, address } => HistoryEntry::EmailAdded {
+                email_id: *email_id,
+                address: match address {
+                    Personal::Value(address) => Some(address.clone()),
+                    Personal::Erased => None,
+                },
+            },
+            Self::EmailVerified { email_id } => HistoryEntry::EmailVerified {
+                email_id: *email_id,
+            },
+            Self::PrimaryEmailChanged { email_id, .. } => HistoryEntry::PrimaryEmailChanged {
+                email_id: *email_id,
+            },
+            Self::EmailRemoved { email_id } => HistoryEntry::EmailRemoved {
+                email_id: *email_id,
             },
             Self::ConsentGranted { scopes, .. } => HistoryEntry::ConsentGranted {
                 scopes: scopes.clone(),
@@ -492,6 +548,32 @@ pub enum HistoryEntry {
         /// Its provider.
         provider: Provider,
     },
+    /// An email address was added, unverified.
+    #[serde(rename = "email.added")]
+    EmailAdded {
+        /// The address's ID.
+        email_id: EmailId,
+        /// The address, until retention deletes it.
+        address: Option<NormalizedEmail>,
+    },
+    /// An email address was verified.
+    #[serde(rename = "email.verified")]
+    EmailVerified {
+        /// The address's ID.
+        email_id: EmailId,
+    },
+    /// Another address became the primary one.
+    #[serde(rename = "email.primary_changed")]
+    PrimaryEmailChanged {
+        /// The new primary address's ID.
+        email_id: EmailId,
+    },
+    /// An email address was removed.
+    #[serde(rename = "email.removed")]
+    EmailRemoved {
+        /// The address's ID.
+        email_id: EmailId,
+    },
     /// The user approved an application's access.
     #[serde(rename = "consent.granted")]
     ConsentGranted {
@@ -538,8 +620,9 @@ pub enum HistoryEntry {
 
 impl HistoryEntry {
     /// What the user should still do after reporting this entry as not theirs:
-    /// undo the credential it added. Those actions need a passkey confirmation, so
-    /// a stolen cookie that can report an entry still cannot change credentials.
+    /// undo the credential or email address it added. Those actions need a passkey
+    /// confirmation, so a stolen cookie that can report an entry still cannot
+    /// change credentials.
     #[must_use]
     #[deny(clippy::wildcard_enum_match_arm)]
     pub const fn follow_up(&self) -> Option<FollowUp> {
@@ -550,6 +633,9 @@ impl HistoryEntry {
             Self::IdentityLinked { provider } => Some(FollowUp::UnlinkIdentity {
                 provider: *provider,
             }),
+            Self::EmailAdded { email_id, .. } => Some(FollowUp::RemoveEmail {
+                email_id: *email_id,
+            }),
             Self::AccountCreated { .. }
             | Self::SignedIn { .. }
             | Self::SignedOut
@@ -557,6 +643,9 @@ impl HistoryEntry {
             | Self::PasskeyRenamed { .. }
             | Self::PasskeyRemoved { .. }
             | Self::IdentityUnlinked { .. }
+            | Self::EmailVerified { .. }
+            | Self::PrimaryEmailChanged { .. }
+            | Self::EmailRemoved { .. }
             | Self::ConsentGranted { .. }
             | Self::TokenReused
             | Self::AccountDisabled
@@ -585,6 +674,11 @@ pub enum FollowUp {
     UnlinkIdentity {
         /// Its provider.
         provider: Provider,
+    },
+    /// Remove the email address the entry added.
+    RemoveEmail {
+        /// The address.
+        email_id: EmailId,
     },
 }
 

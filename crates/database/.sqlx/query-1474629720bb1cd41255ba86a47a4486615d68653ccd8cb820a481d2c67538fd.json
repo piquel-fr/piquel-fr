@@ -1,0 +1,23 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE user_emails\n                SET verified_at = now(),\n                    is_primary = NOT EXISTS (\n                        SELECT 1 FROM user_emails WHERE user_id = $2 AND is_primary\n                    )\n                WHERE id = $1 AND user_id = $2 AND verified_at IS NULL\n                RETURNING is_primary",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "is_primary",
+        "type_info": "Bool"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "1474629720bb1cd41255ba86a47a4486615d68653ccd8cb820a481d2c67538fd"
+}

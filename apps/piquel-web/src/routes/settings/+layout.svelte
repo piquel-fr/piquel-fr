@@ -10,6 +10,7 @@
   // Every settings page, in navigation order.
   const sections = [
     { href: '/settings', label: 'Sign-in methods' },
+    { href: '/settings/emails', label: 'Email addresses' },
     { href: '/settings/sessions', label: 'Devices' },
     { href: '/settings/history', label: 'Security history' }
   ];

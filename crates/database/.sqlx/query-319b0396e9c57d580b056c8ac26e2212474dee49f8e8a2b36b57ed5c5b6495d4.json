@@ -1,0 +1,23 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO request_limits (bucket, requests, expires_at)\n                VALUES ($1, 1, now() + $2)\n                ON CONFLICT (bucket) DO UPDATE\n                SET requests = CASE\n                        WHEN request_limits.expires_at <= now() THEN 1\n                        ELSE request_limits.requests + 1\n                    END,\n                    expires_at = CASE\n                        WHEN request_limits.expires_at <= now() THEN now() + $2\n                        ELSE request_limits.expires_at\n                    END\n                RETURNING requests",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "requests",
+        "type_info": "Int4"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Bytea",
+        "Interval"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "319b0396e9c57d580b056c8ac26e2212474dee49f8e8a2b36b57ed5c5b6495d4"
+}

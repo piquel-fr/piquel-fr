@@ -12,8 +12,8 @@ mod clients;
 mod config;
 /// Sending the outbound delivery queue.
 mod deliveries;
-/// Shared normalized email validation.
-mod email;
+/// The account's email addresses and their verification.
+mod emails;
 /// External identity provider applications and linking.
 mod federation;
 /// The signed-in user's security history and its reports.
@@ -46,6 +46,7 @@ pub use clients::{
     MAX_DAILY_REGISTRATIONS, MAX_OWNED_CLIENTS,
 };
 pub use config::{AuthConfig, PUBLIC_BASE_URL};
+use emails::EmailApplication;
 use federation::FederationApplication;
 use history::HistoryApplication;
 pub use jobs::Jobs;
@@ -112,6 +113,7 @@ impl AuthConfig {
             .merge(HistoryApplication::new(database.clone()).routes())
             .merge(SessionsApplication::new(database.clone()).routes())
             .merge(ClientApplication::new(database.clone()).routes())
+            .merge(EmailApplication::new(database.clone(), &self.email).routes())
             .merge(OidcApplication::new(database.clone(), &self.oidc)?.routes());
         let policy = security::HttpSecurity::new(self, database);
         let protected = application
