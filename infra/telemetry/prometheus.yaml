@@ -1,0 +1,12 @@
+# Prometheus 3.15: receives metrics over OTLP from the collector, keeps them for
+# 30 days (see --storage.tsdb.retention.time), and scrapes nothing.
+storage:
+  tsdb:
+    # OTLP pushes can arrive out of order.
+    out_of_order_time_window: 30m
+
+otlp:
+  # `service.name` becomes `job`; the environment becomes a label too, so
+  # dashboards tell staging and production apart.
+  promote_resource_attributes:
+    - deployment.environment.name

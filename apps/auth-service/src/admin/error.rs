@@ -95,6 +95,39 @@ pub enum AdminError {
 }
 
 impl AdminError {
+    /// Names the failure in its log line. Outside `step_up_required` and
+    /// `session_ended`, a refused caller sent a token the dashboard never would:
+    /// a stolen, forged or non-administrator one.
+    const fn reason(&self) -> &'static str {
+        match self {
+            Self::MissingToken => "missing_token",
+            Self::MalformedAuthorization => "malformed_authorization",
+            Self::InvalidToken(_) => "invalid_token",
+            Self::WrongToken => "wrong_token",
+            Self::SessionEnded => "session_ended",
+            Self::NotAdministrator => "not_administrator",
+            Self::StepUpRequired(_) => "step_up_required",
+            Self::UserNotFound => "user_not_found",
+            Self::SessionNotFound => "session_not_found",
+            Self::InvitationNotFound => "invitation_not_found",
+            Self::ClientNotFound => "client_not_found",
+            Self::AdministratorTarget => "administrator_target",
+            Self::AlreadyDisabled => "already_disabled",
+            Self::AlreadyActive => "already_active",
+            Self::EmailClaimed(_) => "email_claimed",
+            Self::InvalidReason => "invalid_reason",
+            Self::InvalidInviteExpiry(_) => "invalid_invite_expiry",
+            Self::AccountDisabled => "account_disabled",
+            Self::AlreadyAdministrator => "already_administrator",
+            Self::NotAnAdministrator => "not_an_administrator",
+            Self::OwnRights => "own_rights",
+            Self::LastAdministrator => "last_administrator",
+            Self::Database(_) => "database",
+            Self::Crypto(_) => "crypto",
+            Self::Event(_) => "event",
+        }
+    }
+
     /// The `WWW-Authenticate` challenge of a caller failure (RFC 6750, RFC 9470).
     fn challenge(&self) -> Option<BearerChallenge> {
         match self {
@@ -164,8 +197,11 @@ impl From<AdminError> for ApiError {
 }
 
 impl IntoResponse for AdminError {
-    /// Answers `{"error": message}`, with the challenge of a caller failure.
+    /// Answers `{"error": message}`, with the challenge of a caller failure, and
+    /// logs the failure's reason in the request's trace, so every refusal can be
+    /// counted and followed. The CLI reports its own failures.
     fn into_response(self) -> Response {
+        tracing::info!(admin.failure = self.reason(), "admin API request failed");
         let challenge = self
             .challenge()
             .and_then(|challenge| HeaderValue::try_from(challenge.to_string()).ok());

@@ -272,6 +272,41 @@ impl DomainEvent {
         }
     }
 
+    /// The variant's serde tag, e.g. `signed_in`: the `kind` it is stored under.
+    #[must_use]
+    pub const fn kind(&self) -> &'static str {
+        match self {
+            Self::AccountCreated { .. } => "account_created",
+            Self::SignedIn { .. } => "signed_in",
+            Self::SignInFailed { .. } => "sign_in_failed",
+            Self::SessionRevoked { .. } => "session_revoked",
+            Self::PasskeyConfirmed { .. } => "passkey_confirmed",
+            Self::PasskeyAdded { .. } => "passkey_added",
+            Self::PasskeyRenamed { .. } => "passkey_renamed",
+            Self::PasskeyRemoved { .. } => "passkey_removed",
+            Self::IdentityLinked { .. } => "identity_linked",
+            Self::IdentityUnlinked { .. } => "identity_unlinked",
+            Self::ConsentGranted { .. } => "consent_granted",
+            Self::GrantIssued { .. } => "grant_issued",
+            Self::GrantRevoked { .. } => "grant_revoked",
+            Self::CodeReplayed { .. } => "code_replayed",
+            Self::InvitationCreated { .. } => "invitation_created",
+            Self::InvitationRevoked { .. } => "invitation_revoked",
+            Self::AccountDisabled { .. } => "account_disabled",
+            Self::AccountEnabled {} => "account_enabled",
+            Self::AccountViewed {} => "account_viewed",
+            Self::AdministratorGranted {} => "administrator_granted",
+            Self::AdministratorRevoked {} => "administrator_revoked",
+            Self::ClientRegistered { .. } => "client_registered",
+            Self::ClientUpdated { .. } => "client_updated",
+            Self::ClientEnabled { .. } => "client_enabled",
+            Self::ClientDisabled { .. } => "client_disabled",
+            Self::ClientSecretRotated { .. } => "client_secret_rotated",
+            Self::CompromiseReported { .. } => "compromise_reported",
+            Self::Imported(_) => "imported",
+        }
+    }
+
     /// The entry this event shows in its subject's own security history, or `None`
     /// for what only auth needs: ceremonies, rejected attempts, token bookkeeping
     /// and invitations. Every variant is named, so a new one cannot be added
@@ -539,18 +574,18 @@ impl From<&Actor> for HistoryActor {
     }
 }
 
-/// Why an authentication was rejected.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum SignInFailure {
-    /// The assertion or provider evidence did not verify against the account.
-    InvalidCredential,
-    /// A passkey's signature counter did not increase, so it may have been copied.
-    CounterRegression,
-    /// No active account holds the credential or username.
-    UnknownAccount,
-    /// The account is disabled, or cannot sign in this way any more.
-    AccountUnavailable,
+crate::str_enum! {
+    /// Why an authentication was rejected.
+    pub enum SignInFailure {
+        /// The assertion or provider evidence did not verify against the account.
+        InvalidCredential = "invalid_credential",
+        /// A passkey's signature counter did not increase, so it may have been copied.
+        CounterRegression = "counter_regression",
+        /// No active account holds the credential or username.
+        UnknownAccount = "unknown_account",
+        /// The account is disabled, or cannot sign in this way any more.
+        AccountUnavailable = "account_unavailable",
+    }
 }
 
 /// Why a session was revoked.
@@ -587,18 +622,18 @@ pub enum RevocationReason {
     UserRevoked,
 }
 
-/// Why a refresh family was revoked.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum GrantRevocation {
-    /// The client revoked it (RFC 7009).
-    ClientRevoked,
-    /// One of its refresh tokens was used twice.
-    RefreshReplay,
-    /// The client's policy no longer allows it.
-    PolicyRejected,
-    /// The authorization code it came from was redeemed twice.
-    CodeReplay,
+crate::str_enum! {
+    /// Why a refresh family was revoked.
+    pub enum GrantRevocation {
+        /// The client revoked it (RFC 7009).
+        ClientRevoked = "client_revoked",
+        /// One of its refresh tokens was used twice.
+        RefreshReplay = "refresh_replay",
+        /// The client's policy no longer allows it.
+        PolicyRejected = "policy_rejected",
+        /// The authorization code it came from was redeemed twice.
+        CodeReplay = "code_replay",
+    }
 }
 
 /// Who caused an event. Every feature attributes events with this one type.

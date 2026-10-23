@@ -31,6 +31,7 @@ use piquel_repository::{
     Database, DatabaseError, DatabaseTransaction, InsertSession, LAST_SEEN_INTERVAL,
     SessionAuthentication, SessionScope, StoredSession,
 };
+use piquel_telemetry::{Counter, HttpTelemetry, Label};
 use std::{
     borrow::Cow,
     net::{IpAddr, SocketAddr},
@@ -45,6 +46,12 @@ pub(crate) const CSRF_HEADER: &str = "x-piquel-csrf";
 const FORWARDED_FOR_HEADER: &str = "x-forwarded-for";
 /// Request budget per category and client in the repository's one-minute window.
 const REQUESTS_PER_MINUTE: i32 = 120;
+/// Requests refused because their client's budget was exhausted, by category.
+static THROTTLED: Counter<[Label; 1]> = Counter::new(
+    "piquel.auth.throttled",
+    "{request}",
+    "Requests refused by rate limits, by rate category.",
+);
 /// Retry delay matching the request-limit window.
 const RETRY_AFTER_SECONDS: &str = "60";
 /// Deadline includes origin checks, rate-limit persistence and the handler.
@@ -1052,6 +1059,7 @@ impl HttpSecurity {
                 .allow_request(bucket.as_bytes(), REQUESTS_PER_MINUTE)
                 .await?
             {
+                THROTTLED.add(1, &[("category", category.as_str())]);
                 return Err(HttpSecurityError::RateLimited);
             }
             let context = RequestContext::new(client_ip, request.headers());
@@ -1141,6 +1149,11 @@ impl HttpSecurity {
         ] {
             headers.insert(name, HeaderValue::from_static(value));
         }
+        // Lets the frontends show the trace ID of a failed request.
+        headers.insert(
+            header::ACCESS_CONTROL_EXPOSE_HEADERS,
+            HttpTelemetry::TRACE_ID_HEADER.into(),
+        );
     }
 }
 

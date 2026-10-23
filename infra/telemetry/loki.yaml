@@ -1,0 +1,51 @@
+# Loki 3.7, single binary: receives logs from the collector over OTLP/HTTP and
+# keeps them for 30 days.
+auth_enabled: false
+
+server:
+  http_listen_port: 3100
+  log_level: warn
+
+common:
+  instance_addr: 127.0.0.1
+  path_prefix: /loki
+  storage:
+    filesystem:
+      chunks_directory: /loki/chunks
+      rules_directory: /loki/rules
+  replication_factor: 1
+  ring:
+    kvstore:
+      store: inmemory
+
+schema_config:
+  configs:
+    - from: 2026-01-01
+      store: tsdb
+      object_store: filesystem
+      schema: v13
+      index:
+        prefix: index_
+        period: 24h
+
+compactor:
+  working_directory: /loki/compactor
+  retention_enabled: true
+  delete_request_store: filesystem
+
+limits_config:
+  retention_period: 720h
+  otlp_config:
+    # Index logs by service and environment only, as `service_name` and
+    # `deployment_environment_name`. Everything else, such as `trace_id` and
+    # an event's `event_kind`, is structured metadata.
+    resource_attributes:
+      ignore_defaults: true
+      attributes_config:
+        - action: index_label
+          attributes:
+            - service.name
+            - deployment.environment.name
+
+analytics:
+  reporting_enabled: false

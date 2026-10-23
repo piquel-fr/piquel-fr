@@ -3,10 +3,11 @@
 use crate::{
     DatabaseError,
     repositories::deliveries::{Channels, Registered},
+    telemetry::Committed,
 };
 use piquel_common::{
     UserId,
-    events::{DomainEvent, EventContext},
+    events::{Actor, DomainEvent, EventContext, HistoryActor},
 };
 use sqlx::{Postgres, Transaction};
 
@@ -16,19 +17,25 @@ use sqlx::{Postgres, Transaction};
 pub struct DatabaseTransaction<'a> {
     /// Private `SQLx` transaction borrowed by generated repository accessors.
     pub(crate) inner: Transaction<'a, Postgres>,
+    /// Events recorded so far, published to telemetry once the transaction commits.
+    recorded: Vec<Committed>,
 }
 
 impl<'a> DatabaseTransaction<'a> {
     /// Wraps a begun `SQLx` transaction without exposing its connection.
     pub(crate) const fn new(inner: Transaction<'a, Postgres>) -> Self {
-        Self { inner }
+        Self {
+            inner,
+            recorded: Vec::new(),
+        }
     }
 
     /// Records `event`, caused as `context` says and concerning the `subject`
     /// account, in this transaction, with the outbound deliveries it causes: they
     /// all commit or roll back with the change they describe. An operation that
     /// changes nothing, such as a failed sign-in, records its event in a
-    /// transaction of its own.
+    /// transaction of its own. Once the transaction commits, each event is logged
+    /// and counted in telemetry, with the current trace ID it is also stored with.
     ///
     /// # Errors
     ///
@@ -50,8 +57,19 @@ impl<'a> DatabaseTransaction<'a> {
         subject: Option<UserId>,
         event: DomainEvent,
     ) -> Result<(), DatabaseError> {
-        let event_id = self.events().insert(context, subject, &event).await?;
-        C::fan_out(self, event_id, subject, &event).await
+        let id = self.events().insert(context, subject, &event).await?;
+        C::fan_out(self, id, subject, &event).await?;
+        self.recorded.push(Committed {
+            id,
+            actor: HistoryActor::from(&context.actor),
+            administrator: match context.actor {
+                Actor::Admin { user_id, .. } => Some(user_id),
+                _ => None,
+            },
+            subject,
+            event,
+        });
+        Ok(())
     }
 
     /// Counts the other transactions waiting for a lock this one holds, so tests
@@ -76,14 +94,19 @@ impl<'a> DatabaseTransaction<'a> {
         .map_err(Into::into)
     }
 
-    /// Commits every change made through this transaction.
+    /// Commits every change made through this transaction, then publishes the
+    /// events it recorded.
     ///
     /// # Errors
     ///
     /// Returns [`DatabaseError`] if the commit fails, e.g. when a deferred
     /// constraint is violated.
     pub async fn commit(self) -> Result<(), DatabaseError> {
-        self.inner.commit().await.map_err(Into::into)
+        self.inner.commit().await?;
+        for committed in &self.recorded {
+            committed.publish();
+        }
+        Ok(())
     }
 
     /// Discards every change made through this transaction.

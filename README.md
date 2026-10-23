@@ -56,6 +56,8 @@ piquel-web with Vite against an auth service on `http://localhost:3000`.
 | `AUTH_INVITE_REQUIRED` | `true` by default; set `false` to allow public registration |
 | `AUTH_GITHUB_CLIENT_ID`, `AUTH_GITHUB_CLIENT_SECRET` | Both required to enable GitHub; secret is an env/file reference |
 | `AUTH_GOOGLE_CLIENT_ID`, `AUTH_GOOGLE_CLIENT_SECRET` | Both required to enable Google; secret is an env/file reference |
+| `OTEL_EXPORTER_OTLP_ENDPOINT` | Optional OTLP/HTTP base URL that traces, metrics and logs are exported to; unset, logs only go to stderr |
+| `OTEL_RESOURCE_ATTRIBUTES`, other `OTEL_*`, `RUST_LOG` | Standard telemetry settings, e.g. `deployment.environment.name=staging`; see `docs/architecture/telemetry.md` |
 
 For a local Unix socket, use `localhost` as the URL host and an absolute socket
 directory in the `host` query parameter, e.g.

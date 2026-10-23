@@ -5,6 +5,7 @@ use super::{
     ProviderRejection, VerifiedIdentity,
 };
 use axum::http::StatusCode;
+use piquel_telemetry::SendTraced;
 use serde::Deserialize;
 use thiserror::Error;
 
@@ -76,7 +77,7 @@ impl FederationApplication {
             self.client
                 .get(&protocol.user)
                 .bearer_auth(&token)
-                .send()
+                .send_traced()
                 .await?,
         )
         .await?;
@@ -87,7 +88,7 @@ impl FederationApplication {
             .client
             .get(&protocol.emails)
             .bearer_auth(&token)
-            .send()
+            .send_traced()
             .await?;
         // GitHub can withhold email access without invalidating its authenticated subject.
         let emails: Vec<GitHubEmail> = if response.status() == StatusCode::FORBIDDEN {

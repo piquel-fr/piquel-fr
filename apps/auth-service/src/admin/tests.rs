@@ -318,6 +318,7 @@ async fn callers_must_be_administrators_with_a_passkey() {
 #[tokio::test]
 #[ignore = "requires TEST_DATABASE_URL"]
 async fn disabling_ends_sessions_and_is_recorded() {
+    let capture = piquel_telemetry::Telemetry::capture(crate::TELEMETRY_FILTER);
     let harness = Harness::new().await;
     let admin = harness.admin().await;
     let user = harness.account().await;
@@ -349,6 +350,18 @@ async fn disabling_ends_sessions_and_is_recorded() {
         .expect("lookup")
         .expect("user");
     assert_eq!(stored.status, AccountStatus::Disabled);
+    let administrator = admin.user_id.to_string();
+    assert!(
+        capture.logs().iter().any(|log| {
+            let has = |key: &str, value: &str| {
+                log.attributes_iter().any(|(name, logged)| {
+                    name.as_str() == key && format!("{logged:?}").contains(value)
+                })
+            };
+            has("event.kind", "account_disabled") && has("event.administrator", &administrator)
+        }),
+        "the disablement's log line names its administrator"
+    );
     assert!(
         harness
             .database

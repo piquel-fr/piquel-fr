@@ -6,6 +6,7 @@ use super::{DeliveryError, Failure, SEND_TIMEOUT};
 use axum::http::{HeaderMap, Method, StatusCode, header::RETRY_AFTER};
 use chrono::{DateTime, NaiveDateTime, Utc};
 use ipnet::{Ipv4Net, Ipv6Net};
+use piquel_telemetry::SendTraced;
 use reqwest::{
     RequestBuilder,
     dns::{Addrs, Name, Resolve, Resolving},
@@ -141,7 +142,7 @@ impl OutboundClient {
         let url = self.check(destination)?;
         let transport = |error: reqwest::Error| Self::transport_error(&error);
         let mut response = request(self.client.request(method, url))
-            .send()
+            .send_traced()
             .await
             .map_err(transport)?;
         Self::check_status(response.status(), response.headers(), Utc::now())?;

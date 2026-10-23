@@ -19,5 +19,8 @@ serde_json.workspace = true
 thiserror = { workspace = true, optional = true }
 url.workspace = true
 
+[dev-dependencies]
+tokio.workspace = true
+
 [lints]
 workspace = true

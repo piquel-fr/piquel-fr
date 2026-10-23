@@ -1,0 +1,216 @@
+#:schema https://raw.githubusercontent.com/piquel-fr/piqueld/main/docs/application-manifest.schema.json
+# Telemetry of piquel.fr on piqueld: an OpenTelemetry Collector receiving auth's
+# and the admin dashboard's traces, metrics and logs, Prometheus, Tempo and Loki
+# storing them, and Grafana showing them. One environment serves both piquel-fr
+# environments, which `deployment.environment.name` tells apart. See
+# "Telemetry" in infra/README.md.
+#
+# Grafana never signs in through auth.piquel.fr: it is needed most when auth is
+# down. Its private route and its own admin login keep it to the tailnet.
+api_version = "piqueld.dev/v1alpha1"
+kind = "Application"
+
+[metadata]
+name = "telemetry"
+
+[spec.manifest]
+path = "infra/telemetry.toml"
+sync = { mode = "webhook" }
+
+[spec.manifest.repository]
+url = "https://github.com/piquel-fr/piquel-fr.git"
+branch = "main"
+
+[spec.environments.production]
+sync = true
+visibility = "private"
+
+[spec.environments.production.variables]
+grafana_host = "grafana.piquel.fr"
+
+[[spec.secrets]]
+name = "grafana-admin-password"
+generate = { type = "random", bytes = 24, encoding = "base64url" }
+
+# OTLP/HTTP on port 4318, for the applications importing it below. Strips query
+# strings, request headers and client addresses that reach it anyway.
+[[spec.services]]
+name = "collector"
+depends_on = ["prometheus", "tempo", "loki"]
+
+[spec.services.source]
+type = "image"
+image = "otel/opentelemetry-collector-contrib:0.163.2"
+
+[[spec.services.files]]
+target = "/etc/otelcol-contrib/config.yaml"
+path = "infra/telemetry/collector.yaml"
+
+[spec.services.healthcheck]
+type = "http"
+port = 13133
+path = "/"
+
+[spec.services.resources]
+cpu_millis = 500
+memory_bytes = 536870912
+
+[[spec.services]]
+name = "prometheus"
+arguments = [
+  "--config.file=/etc/prometheus/prometheus.yml",
+  "--storage.tsdb.path=/prometheus",
+  "--storage.tsdb.retention.time=30d",
+  "--web.enable-otlp-receiver",
+  # Counters start from zero at their OTLP start time, so `increase()` counts
+  # their first increment.
+  "--enable-feature=created-timestamp-zero-ingestion",
+]
+
+[spec.services.source]
+type = "image"
+image = "prom/prometheus:v3.15.1"
+
+[[spec.services.files]]
+target = "/etc/prometheus/prometheus.yml"
+path = "infra/telemetry/prometheus.yaml"
+
+[[spec.services.mounts]]
+volume = "prometheus"
+target = "/prometheus"
+
+[spec.services.healthcheck]
+type = "http"
+port = 9090
+path = "/-/ready"
+
+[spec.services.resources]
+cpu_millis = 1000
+memory_bytes = 2147483648
+
+[[spec.services]]
+name = "tempo"
+arguments = ["-config.file=/etc/tempo/tempo.yaml"]
+
+[spec.services.source]
+type = "image"
+image = "grafana/tempo:3.1.1"
+
+[[spec.services.files]]
+target = "/etc/tempo/tempo.yaml"
+path = "infra/telemetry/tempo.yaml"
+
+[[spec.services.mounts]]
+volume = "tempo"
+target = "/var/tempo"
+
+[spec.services.healthcheck]
+type = "http"
+port = 3200
+path = "/ready"
+interval_seconds = 15
+
+[spec.services.resources]
+cpu_millis = 1000
+memory_bytes = 2147483648
+
+[[spec.services]]
+name = "loki"
+arguments = ["-config.file=/etc/loki/loki.yaml"]
+
+[spec.services.source]
+type = "image"
+image = "grafana/loki:3.7.9"
+
+[[spec.services.files]]
+target = "/etc/loki/loki.yaml"
+path = "infra/telemetry/loki.yaml"
+
+[[spec.services.mounts]]
+volume = "loki"
+target = "/loki"
+
+[spec.services.healthcheck]
+type = "http"
+port = 3100
+path = "/ready"
+interval_seconds = 15
+
+[spec.services.resources]
+cpu_millis = 1000
+memory_bytes = 1073741824
+
+[[spec.services]]
+name = "grafana"
+
+[spec.services.source]
+type = "image"
+image = "grafana/grafana:13.2.4"
+
+# Grafana's own admin login; sign-in through auth is deliberately not set up.
+[spec.services.environment]
+GF_SECURITY_ADMIN_PASSWORD__FILE = "/run/secrets/grafana-admin-password"
+GF_SERVER_ROOT_URL = "https://${{ vars.grafana_host }}"
+GF_AUTH_ANONYMOUS_ENABLED = "false"
+GF_USERS_ALLOW_SIGN_UP = "false"
+GF_ANALYTICS_REPORTING_ENABLED = "false"
+GF_ANALYTICS_CHECK_FOR_UPDATES = "false"
+
+[[spec.services.secrets]]
+name = "grafana-admin-password"
+target = "/run/secrets/grafana-admin-password"
+
+[[spec.services.files]]
+target = "/etc/grafana/provisioning/datasources/datasources.yaml"
+path = "infra/telemetry/grafana/datasources.yaml"
+
+[[spec.services.files]]
+target = "/etc/grafana/provisioning/dashboards/dashboards.yaml"
+path = "infra/telemetry/grafana/dashboards.yaml"
+
+[[spec.services.files]]
+target = "/etc/grafana/dashboards/auth-overview.json"
+path = "infra/telemetry/grafana/dashboards/auth-overview.json"
+
+[[spec.services.files]]
+target = "/etc/grafana/dashboards/admin-activity.json"
+path = "infra/telemetry/grafana/dashboards/admin-activity.json"
+
+[[spec.services.mounts]]
+volume = "grafana"
+target = "/var/lib/grafana"
+
+[spec.services.healthcheck]
+type = "http"
+port = 3000
+path = "/api/health"
+
+[spec.services.resources]
+cpu_millis = 500
+memory_bytes = 536870912
+
+[[spec.volumes]]
+name = "prometheus"
+
+[[spec.volumes]]
+name = "tempo"
+
+[[spec.volumes]]
+name = "loki"
+
+[[spec.volumes]]
+name = "grafana"
+
+# Tailnet only; its DNS record points at the apps node, like staging.piquel.fr.
+[[spec.routes]]
+name = "grafana"
+hostname = "${{ vars.grafana_host }}"
+service = "grafana"
+port = 3000
+visibility = "private"
+
+# piquel-fr's staging and production send telemetry here, as
+# `http://collector.telemetry:4318`. Previews do not.
+[[spec.exports]]
+service = "collector"
+applications = ["piquel-fr"]

@@ -18,7 +18,8 @@ Keep implementations simple. Follow neighbouring modules and share repeated logi
   the workspace crates, since it is published.
 - `piquel-repository` (`crates/database`): the only SQLx consumer; typed
   repositories, transactions and storage vocabulary.
-- `piquel-telemetry` (`crates/telemetry`): tracing setup.
+- `piquel-telemetry` (`crates/telemetry`): logs, traces and metrics, following
+  [telemetry.md](telemetry.md).
 
 Application code uses `Secret`, `Digest`, `Pkce` and `Rs256Key` instead of calling
 `openssl`, `sha2` or `rand` directly. Environment reads go through `Variable`.

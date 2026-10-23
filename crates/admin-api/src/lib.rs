@@ -19,7 +19,7 @@ pub use piquel_common::protocol::{
     step_up::CONFIRMATION_MAX_AGE,
 };
 use piquel_common::{
-    AccountStatus, AuthenticationMethod, ClientId, EventId, SessionId, TokenId, UserId,
+    AccountStatus, AuthenticationMethod, ClientId, EventId, SessionId, TokenId, TraceId, UserId,
     protocol::oauth::ClientAuthMethod,
 };
 use serde::{Deserialize, Serialize};
@@ -280,6 +280,11 @@ pub struct Event {
     pub actor: serde_json::Value,
     /// The account it concerns, if any.
     pub subject: Option<UserId>,
+    /// The trace of the request or job that recorded it, to look up in telemetry
+    /// while the trace is kept. Absent for events recorded outside a trace, such as
+    /// by the command line.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub trace_id: Option<TraceId>,
     /// What happened: `{"kind": …, "data": …}`, as auth stores it. Personal values
     /// read `{"$personal": value}`, or `"$erased"` once deleted. An event of a kind
     /// or payload version the serving release does not know, written by a newer

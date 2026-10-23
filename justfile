@@ -16,7 +16,7 @@ mod auth 'just/auth.just'
 # The admin dashboard with the caller's configuration.
 mod admin 'just/admin.just'
 
-# piqueld previews of this worktree.
+# piqueld previews of this worktree, and a local telemetry backend.
 mod infra 'just/infra.just'
 
 alias format := fmt

@@ -1,0 +1,48 @@
+# Grafana 13 data sources, linked to each other: traces to their logs, and logs
+# to their trace. `$$` escapes Grafana's provisioning interpolation.
+apiVersion: 1
+
+datasources:
+  - name: Prometheus
+    type: prometheus
+    uid: prometheus
+    url: http://prometheus:9090
+    isDefault: true
+    editable: false
+    jsonData:
+      timeInterval: 30s
+
+  - name: Tempo
+    type: tempo
+    uid: tempo
+    url: http://tempo:3200
+    editable: false
+    jsonData:
+      tracesToLogsV2:
+        datasourceUid: loki
+        spanStartTimeShift: -5m
+        spanEndTimeShift: 5m
+        tags:
+          - key: service.name
+            value: service_name
+        customQuery: true
+        query: '{$${__tags}} | trace_id = "$${__trace.traceId}"'
+      nodeGraph:
+        enabled: true
+      streamingEnabled:
+        search: true
+
+  - name: Loki
+    type: loki
+    uid: loki
+    url: http://loki:3100
+    editable: false
+    jsonData:
+      derivedFields:
+        # Every log line inside a request or job carries its trace ID.
+        - name: Trace
+          matcherType: label
+          matcherRegex: trace_id
+          datasourceUid: tempo
+          url: '$${__value.raw}'
+          urlDisplayLabel: View trace

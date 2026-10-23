@@ -1,0 +1,22 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO domain_events (\n                    id, kind, version, payload, actor, subject_user_id, client_id, session_id,\n                    trace_id\n                ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Text",
+        "Int2",
+        "Jsonb",
+        "Jsonb",
+        "Uuid",
+        "Text",
+        "Uuid",
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "40f7a8e7a7d64ab3f65e9ee91e2e41d3be994819cf5ef2f9730afd0c32452a06"
+}

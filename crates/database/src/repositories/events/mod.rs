@@ -9,9 +9,10 @@ use super::{EventRepository, RepositoryExecutor};
 use crate::DatabaseError;
 use chrono::{DateTime, Utc};
 use piquel_common::{
-    ClientId, EventId, Personal, SessionId, UserId,
+    ClientId, EventId, Personal, SessionId, TraceId, UserId,
     events::{Actor, Browser, DomainEvent, EventContext, Platform, RequestOrigin, UserAgentFamily},
 };
+use piquel_telemetry::Telemetry;
 use serde::{Deserialize, Serialize, de::value::MapDeserializer};
 use serde_json::{Map, Value};
 use sqlx::types::Json;
@@ -61,6 +62,8 @@ pub struct StoredEvent {
     pub actor: Actor,
     /// The account it concerns, if any. The account may no longer exist.
     pub subject: Option<UserId>,
+    /// The trace of the request or job that recorded it, to find in telemetry.
+    pub trace_id: Option<TraceId>,
     /// What happened.
     pub event: RecordedEvent,
     /// Where the request came from, until its personal data is deleted.
@@ -155,6 +158,8 @@ struct EventRow {
     actor: Json<Actor>,
     /// The account it concerns.
     subject_user_id: Option<UserId>,
+    /// The trace that recorded it.
+    trace_id: Option<TraceId>,
     /// Whether the personal data row still exists.
     personal: bool,
     /// The client's IP address.
@@ -221,6 +226,7 @@ impl TryFrom<EventRow> for StoredEvent {
             occurred_at: row.occurred_at,
             actor: row.actor.0,
             subject: row.subject_user_id,
+            trace_id: row.trace_id,
             event,
             origin,
         })
@@ -286,7 +292,8 @@ impl PersonalDetails {
 impl EventRepository<'_> {
     /// Writes an event and its personal data, and returns the event's ID. Only
     /// [`DatabaseTransaction::record`](crate::DatabaseTransaction::record) calls it,
-    /// so both rows always commit or roll back with the change they describe.
+    /// so both rows always commit or roll back with the change they describe. The
+    /// event keeps the current trace ID, which links it to the request's telemetry.
     pub(crate) async fn insert(
         &mut self,
         context: &EventContext,
@@ -305,8 +312,9 @@ impl EventRepository<'_> {
             execute,
             sqlx::query!(
                 "INSERT INTO domain_events (
-                    id, kind, version, payload, actor, subject_user_id, client_id, session_id
-                ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)",
+                    id, kind, version, payload, actor, subject_user_id, client_id, session_id,
+                    trace_id
+                ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)",
                 id.as_uuid(),
                 kind,
                 event.version(),
@@ -321,6 +329,7 @@ impl EventRepository<'_> {
                     .session_id()
                     .or(context.actor.session_id())
                     .map(SessionId::as_uuid),
+                Telemetry::current_trace_id().map(String::from),
             )
         )?;
         run!(
@@ -377,6 +386,7 @@ impl EventRepository<'_> {
                     e.id AS "id: EventId", e.txid::text::bigint AS "txid!", e.sequence,
                     e.occurred_at, e.kind, e.version, e.payload, e.actor AS "actor: Json<Actor>",
                     e.subject_user_id AS "subject_user_id: UserId",
+                    e.trace_id AS "trace_id: TraceId",
                     p.event_id IS NOT NULL AS "personal!", p.client_ip AS "client_ip?: IpAddr",
                     p.user_agent_family AS "browser?: Browser",
                     p.platform AS "platform?: Platform",
@@ -428,6 +438,7 @@ impl EventRepository<'_> {
                     e.id AS "id: EventId", e.txid::text::bigint AS "txid!", e.sequence,
                     e.occurred_at, e.kind, e.version, e.payload, e.actor AS "actor: Json<Actor>",
                     e.subject_user_id AS "subject_user_id: UserId",
+                    e.trace_id AS "trace_id: TraceId",
                     p.event_id IS NOT NULL AS "personal!", p.client_ip AS "client_ip?: IpAddr",
                     p.user_agent_family AS "browser?: Browser",
                     p.platform AS "platform?: Platform",
@@ -506,6 +517,7 @@ impl EventRepository<'_> {
                     e.id AS "id: EventId", e.txid::text::bigint AS "txid!", e.sequence,
                     e.occurred_at, e.kind, e.version, e.payload, e.actor AS "actor: Json<Actor>",
                     e.subject_user_id AS "subject_user_id: UserId",
+                    e.trace_id AS "trace_id: TraceId",
                     p.event_id IS NOT NULL AS "personal!", p.client_ip AS "client_ip?: IpAddr",
                     p.user_agent_family AS "browser?: Browser",
                     p.platform AS "platform?: Platform",

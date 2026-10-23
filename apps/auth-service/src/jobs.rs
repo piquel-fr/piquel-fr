@@ -2,12 +2,14 @@
 //! workers every replica runs (see `crate::deliveries`).
 
 use piquel_repository::{Database, DatabaseError, ExclusiveConnection, LockKey};
+use piquel_telemetry::{Counter, Histogram};
 use std::{sync::Arc, time::Duration};
 use tokio::{
     sync::watch,
     task::{JoinError, JoinSet},
     time::{Instant, MissedTickBehavior},
 };
+use tracing::Instrument;
 
 /// How long running jobs may take to finish after shutdown starts.
 const SHUTDOWN_GRACE: Duration = Duration::from_secs(10);
@@ -130,7 +132,17 @@ impl Jobs {
                 };
                 match connection {
                     Ok(Some(connection)) => {
-                        Self::run(Arc::clone(&job), connection, shutdown.clone()).await;
+                        // Each run is a trace of its own: its queries, the events it
+                        // records, and how it ended.
+                        let span = tracing::info_span!(
+                            parent: None,
+                            "job",
+                            otel.name = J::NAME,
+                            job = J::NAME,
+                        );
+                        Self::run(Arc::clone(&job), connection, shutdown.clone())
+                            .instrument(span)
+                            .await;
                     }
                     Ok(None) => tracing::debug!(job = J::NAME, "another replica runs this job"),
                     Err(error) => {
@@ -143,17 +155,21 @@ impl Jobs {
 
     /// Runs `job` once on its own task, so a panic ends only this run: the job runs
     /// again at its next interval. The task lives in a set that aborts it when
-    /// dropped, so cancelling the caller cancels the run and frees the lock.
+    /// dropped, so cancelling the caller cancels the run and frees the lock. The
+    /// run's task stays in the caller's span.
     async fn run<J: ExclusiveJob>(
         job: Arc<J>,
         mut connection: ExclusiveConnection,
         shutdown: Shutdown,
     ) {
         let mut run = JoinSet::new();
-        run.spawn(async move {
-            let result = job.run(&mut connection, &shutdown).await;
-            (connection, result)
-        });
+        run.spawn(
+            async move {
+                let result = job.run(&mut connection, &shutdown).await;
+                (connection, result)
+            }
+            .in_current_span(),
+        );
         match run.join_next().await {
             Some(Ok((connection, result))) => {
                 if let Err(error) = result {
@@ -170,6 +186,26 @@ impl Jobs {
         }
     }
 }
+
+/// Rows each cleanup pass deleted or changed.
+static CLEANUP_CHANGED: Counter = Counter::new(
+    "piquel.auth.cleanup.changed",
+    "{row}",
+    "Rows cleanup deleted or changed: expired state, personal data past retention and stuck deliveries.",
+);
+/// How long each cleanup pass took.
+static CLEANUP_DURATION: Histogram = Histogram::new(
+    "piquel.auth.cleanup.duration",
+    "s",
+    "Duration of cleanup passes.",
+    &[0.01, 0.1, 1.0, 5.0, 15.0, 30.0, 60.0, 90.0],
+);
+/// Cleanup passes that ran out of budget with rows left.
+static CLEANUP_OVERRUNS: Counter = Counter::new(
+    "piquel.auth.cleanup.overruns",
+    "{pass}",
+    "Cleanup passes that stopped at their time budget with rows left to clean.",
+);
 
 /// Drains expired authentication state, event personal data and finished
 /// deliveries past their retention, and abandons delivery ordering keys stuck
@@ -213,9 +249,13 @@ impl ExclusiveJob for Cleanup {
         connection: &mut ExclusiveConnection,
         shutdown: &Shutdown,
     ) -> Result<(), DatabaseError> {
-        let deadline = Instant::now() + Self::BUDGET;
-        while Self::batch(connection).await? > 0 {
+        let started = Instant::now();
+        let deadline = started + Self::BUDGET;
+        let mut changed = Self::batch(connection).await?;
+        while changed > 0 {
+            CLEANUP_CHANGED.add(changed, &());
             if Instant::now() >= deadline {
+                CLEANUP_OVERRUNS.add(1, &());
                 tracing::warn!("expired authentication state cleanup is falling behind");
                 break;
             }
@@ -224,7 +264,9 @@ impl ExclusiveJob for Cleanup {
                 () = shutdown.requested() => break,
                 () = tokio::time::sleep(Self::PAUSE) => {}
             }
+            changed = Self::batch(connection).await?;
         }
+        CLEANUP_DURATION.record(started.elapsed().as_secs_f64(), &());
         Ok(())
     }
 }

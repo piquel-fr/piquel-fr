@@ -23,6 +23,9 @@ branch = "main"
 invite_required = "true"
 # See "Running several replicas" in infra/README.md before raising it.
 auth_replicas = 1
+# Where auth and the admin dashboard send telemetry: the `telemetry`
+# application's collector, imported below. Empty sends none.
+otlp_endpoint = "http://collector.telemetry:4318"
 
 [spec.environments.production]
 promote_from = "staging"
@@ -54,6 +57,8 @@ auth_host = "auth-${{ env.slug }}.dev.piquel.fr"
 www_host = "www-${{ env.slug }}.dev.piquel.fr"
 admin_host = "admin-${{ env.slug }}.dev.piquel.fr"
 invite_required = "false"
+# Previews keep their telemetry on stderr: the collector does not export to them.
+otlp_endpoint = ""
 
 [[spec.routes]]
 name = "web"
@@ -84,6 +89,14 @@ name = "www"
 hostname = "${{ vars.www_host }}"
 redirect = { to = "https://${{ vars.web_host }}", status = 308, preserve_path = true }
 visibility = "public"
+
+# The collector of the `telemetry` application (infra/telemetry.toml), as
+# `collector.telemetry`. It has only a production environment, which staging
+# and production share; `deployment.environment.name` tells them apart.
+[[spec.imports]]
+application = "telemetry"
+service = "collector"
+environment = "production"
 
 [[spec.secrets]]
 name = "database-password"
@@ -146,6 +159,8 @@ AUTH_ADMIN_LISTENER = "0.0.0.0:8081"
 AUTH_PUBLIC_BASE_URL = "https://${{ vars.auth_host }}"
 AUTH_SETTINGS_URL = "https://${{ vars.web_host }}/settings"
 AUTH_INVITE_REQUIRED = "${{ vars.invite_required }}"
+OTEL_EXPORTER_OTLP_ENDPOINT = "${{ vars.otlp_endpoint }}"
+OTEL_RESOURCE_ATTRIBUTES = "deployment.environment.name=${{ env.name }}"
 
 [[spec.services.secrets]]
 name = "database-password"
@@ -206,6 +221,8 @@ ADMIN_API_URL = "http://auth:8081"
 ADMIN_ORIGIN = "https://${{ vars.admin_host }}"
 ADMIN_CLIENT_SECRET = "file:///run/secrets/admin-client-secret"
 ADMIN_LISTENER = "0.0.0.0:8080"
+OTEL_EXPORTER_OTLP_ENDPOINT = "${{ vars.otlp_endpoint }}"
+OTEL_RESOURCE_ATTRIBUTES = "deployment.environment.name=${{ env.name }}"
 
 [[spec.services.secrets]]
 name = "admin-client-secret"

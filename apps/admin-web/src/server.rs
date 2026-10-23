@@ -17,6 +17,7 @@ use piquel_auth::{
     axum::{LoginRoutes, MemoryBackend},
 };
 use piquel_common::{ErrorChain, protocol::oauth::Scope};
+use piquel_telemetry::HttpTelemetry;
 use std::{
     sync::{Arc, OnceLock},
     time::Duration,
@@ -24,6 +25,8 @@ use std::{
 use topcoat::router::tower::TowerService;
 use tower::ServiceExt;
 
+/// The health check piqueld probes.
+const HEALTH: &str = "/healthz";
 /// How long one discovery request may take.
 const DISCOVERY_TIMEOUT: Duration = Duration::from_secs(10);
 /// How long to wait before discovering auth again after a failure.
@@ -66,14 +69,16 @@ impl Dashboard {
 
     /// The service to serve.
     pub fn router(&self) -> Router {
-        Router::new()
-            .route("/healthz", get(|| async { "ok" }))
-            .fallback(Self::forward)
-            .with_state(Arc::clone(&self.ready))
-            .layer(middleware::map_response_with_state(
-                Arc::clone(&self.headers),
-                Self::secure,
-            ))
+        HttpTelemetry::default().quiet(&[HEALTH]).wrap(
+            Router::new()
+                .route(HEALTH, get(|| async { "ok" }))
+                .fallback(Self::forward)
+                .with_state(Arc::clone(&self.ready))
+                .layer(middleware::map_response_with_state(
+                    Arc::clone(&self.headers),
+                    Self::secure,
+                )),
+        )
     }
 
     /// Headers that keep account data on the administrator's screen only: no page
