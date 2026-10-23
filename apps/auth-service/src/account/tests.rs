@@ -4,8 +4,8 @@
 
 use super::*;
 use crate::{
-    AdminError, AdminService, Operator, Reason,
-    admin::tests::{Account, Harness, cli, operator},
+    AdminError, Operator, Reason,
+    admin::tests::{Account, Harness, assert_refused, cli, operator},
     passkey::PasskeyError,
     security::ApiError,
     security::CONFIRMATION_MAX_AGE,
@@ -226,28 +226,24 @@ impl AccountOperation {
 }
 
 /// Every settings read checks an administrator as admin reads do, before it
-/// reads or records anything: one whose rights were revoked reads nothing, and no
-/// view of the account is recorded.
+/// reads or records anything: one whose rights were revoked, whose session ended,
+/// or who signed in without a passkey reads nothing, and no view of the account
+/// is recorded.
 #[tokio::test]
 #[ignore = "requires TEST_DATABASE_URL"]
 async fn every_settings_read_checks_its_administrator() {
     let fixture = Fixture::new().await;
     let (target, _) = fixture.target(1).await;
-    let revoked = fixture.harness.admin().await;
-    AdminService::new(fixture.harness.database.clone())
-        .revoke_administrator(&cli(), revoked.user_id)
-        .await
-        .expect("revoke");
-    let viewer = Viewer::operator(target.user_id, operator(revoked, Utc::now()));
-    for read in AccountOperation::ALL {
-        if let Some(result) = read.read(&fixture.service, &viewer).await {
-            assert!(
-                matches!(
-                    result,
-                    Err(AccountError::Operator(AdminError::NotAdministrator))
-                ),
-                "{read:?}: {result:?}"
-            );
+    for (operator, refusal) in fixture.harness.refused_readers().await {
+        let viewer = Viewer::operator(target.user_id, operator);
+        for read in AccountOperation::ALL {
+            match read.read(&fixture.service, &viewer).await {
+                None => {}
+                Some(Err(AccountError::Operator(refused))) => {
+                    assert_refused(&refused, &refusal, &format!("{read:?}"));
+                }
+                Some(result) => panic!("{read:?}: {result:?}"),
+            }
         }
     }
     let history = fixture
