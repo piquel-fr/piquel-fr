@@ -1,9 +1,21 @@
-The piquel.fr SvelteKit server. Today it serves account settings under
-`/settings`, to which `/` redirects, and `GET /healthz` for piqueld. The settings
-layout loads the signed-in account, shares it with its pages and links them:
-sign-in methods at `/settings`, signed-in devices at `/settings/sessions` and the
-security history at `/settings/history`. A new settings page adds itself to the
-layout's `sections`.
+The piquel.fr SvelteKit server. It serves account settings under `/settings`, to
+which `/` redirects, the developer console under `/developers`, and `GET /healthz`
+for piqueld. The root layout links the two areas. Each area's layout wraps its
+pages in `SignedIn`, which loads the signed-in account and shares it with them, or
+asks visitors to sign in.
+
+The settings layout links sign-in methods at `/settings`, signed-in devices at
+`/settings/sessions` and the security history at `/settings/history`. A new
+settings page adds itself to the layout's `sections`.
+
+The developer console manages the account's OIDC clients through auth's client API
+(`docs/guides/client-management.md`): the list at `/developers`, registration at
+`/developers/new`, and each client's overview (OIDC settings and an axum example),
+settings and secrets under `/developers/clients/<id>`. Forms repeat only cheap
+checks and show auth's `field` errors beside their input. A secret auth returns
+lives only in the page's state until the user dismisses it: it is never stored or
+put in a URL, and a step-up that resumes a registration or rotation saves only
+its settings.
 
 It runs on Node with `@sveltejs/adapter-node`: `just web build-settings`
 produces `build/`, which `AUTH_ORIGIN=https://auth.piquel.fr node build` serves

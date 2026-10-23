@@ -31,6 +31,11 @@ password-manager synchronization and live Google/GitHub callbacks also need a
 manual check with actual providers/devices; this suite does not claim to verify
 those external systems.
 
+`developers.spec.ts` registers a confidential client in the developer console,
+checks that its secret never reaches storage or URLs, and signs in with it through
+the authorization code flow. It needs no pre-registered client, so it also runs
+against a preview.
+
 `admin.spec.ts` checks the admin dashboard against a deployment that has one,
 such as a preview: a non-administrator sees no admin data, and an administrator
 disables an account, whose settings page then loses its session. Set

@@ -7,7 +7,7 @@ This is the target design; parts not built yet are marked *(planned)*.
 | Host | Serves | Used by |
 | --- | --- | --- |
 | `auth.piquel.fr` | OIDC/OAuth endpoints, ceremony pages and the JSON APIs | every application and user |
-| `piquel.fr` | Account settings; security center, developer console, public profiles *(planned)* | signed-in users |
+| `piquel.fr` | Account settings and the developer console; security center, public profiles *(planned)* | signed-in users |
 | `admin.piquel.fr` | Admin dashboard; auth's private admin API behind it | administrators |
 
 ## auth.piquel.fr
