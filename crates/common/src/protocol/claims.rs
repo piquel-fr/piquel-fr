@@ -269,36 +269,18 @@ pub const BACKCHANNEL_LOGOUT_EVENT: &str = "http://schemas.openid.net/event/back
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct LogoutEvents;
 
-/// One event's payload: any JSON object, read without keeping its members.
-#[derive(Clone, Copy, Debug)]
-struct EventPayload;
-
-impl Serialize for EventPayload {
-    /// Writes an empty object.
-    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        use serde::ser::SerializeMap;
-        serializer.serialize_map(Some(0))?.end()
-    }
-}
-
-impl<'de> Deserialize<'de> for EventPayload {
-    /// Requires an object.
-    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        BTreeMap::<String, IgnoredAny>::deserialize(deserializer).map(|_| Self)
-    }
-}
-
 impl Serialize for LogoutEvents {
     /// Writes the one event, with an empty object.
     fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        BTreeMap::from([(BACKCHANNEL_LOGOUT_EVENT, EventPayload)]).serialize(serializer)
+        BTreeMap::from([(BACKCHANNEL_LOGOUT_EVENT, BTreeMap::<&str, ()>::new())])
+            .serialize(serializer)
     }
 }
 
 impl<'de> Deserialize<'de> for LogoutEvents {
-    /// Requires the back-channel logout event.
+    /// Requires an object for every event, and the back-channel logout event.
     fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        let events = BTreeMap::<String, EventPayload>::deserialize(deserializer)?;
+        let events = BTreeMap::<String, BTreeMap<String, IgnoredAny>>::deserialize(deserializer)?;
         if events.contains_key(BACKCHANNEL_LOGOUT_EVENT) {
             Ok(Self)
         } else {
@@ -312,27 +294,13 @@ impl<'de> Deserialize<'de> for LogoutEvents {
 /// A claim that must be absent, such as a logout token's `nonce` (OIDC Back-Channel
 /// Logout 1.0 §2.4). Reading the claim fails whatever its value, even `null`, so an
 /// ID token can never pass as a logout token; it is never written.
-#[derive(Clone, Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct Absent;
-
-impl Absent {
-    /// Whether to skip writing the claim: always. serde passes the field.
-    const fn skip(_: &Self) -> bool {
-        true
-    }
-}
 
 impl<'de> Deserialize<'de> for Absent {
     /// Fails: the claim is present.
     fn deserialize<D: serde::Deserializer<'de>>(_: D) -> Result<Self, D::Error> {
         Err(serde::de::Error::custom("this claim must be absent"))
-    }
-}
-
-impl Serialize for Absent {
-    /// Never called: the field is always skipped.
-    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        serializer.serialize_unit()
     }
 }
 
@@ -387,7 +355,7 @@ pub struct LogoutTokenClaims {
     /// Marks the token as a back-channel logout.
     pub events: LogoutEvents,
     /// Never present.
-    #[serde(default, skip_serializing_if = "Absent::skip")]
+    #[serde(default, skip_serializing)]
     pub nonce: Absent,
 }
 
