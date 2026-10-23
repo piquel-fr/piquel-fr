@@ -11,7 +11,7 @@ mod token;
 
 use crate::config::OidcConfig;
 use crate::routes;
-use crate::security::CSRF_HEADER;
+use crate::security::{CSRF_HEADER, CacheClass, Cached};
 pub use error::OidcConfigError;
 use error::{OAuthCode, OAuthError, Reject};
 use piquel_crypto::{ClientSecret, Digest, Rs256Key, Secret};
@@ -291,7 +291,9 @@ struct PublicDocument(Bytes);
 
 impl PublicDocument {
     /// How long caches may reuse the document.
-    const CACHE_CONTROL: &str = "public, max-age=3600";
+    const CACHE: CacheClass = CacheClass::Public {
+        max_age: std::time::Duration::from_secs(3600),
+    };
 
     /// Serializes `value` once.
     fn new(value: &impl Serialize) -> Result<Self, serde_json::Error> {
@@ -302,14 +304,11 @@ impl PublicDocument {
 impl IntoResponse for PublicDocument {
     /// Sends the stored bytes as cacheable JSON.
     fn into_response(self) -> Response {
-        (
-            [
-                (header::CONTENT_TYPE, "application/json"),
-                (header::CACHE_CONTROL, Self::CACHE_CONTROL),
-            ],
-            self.0,
+        Cached(
+            Self::CACHE,
+            ([(header::CONTENT_TYPE, "application/json")], self.0),
         )
-            .into_response()
+        .into_response()
     }
 }
 

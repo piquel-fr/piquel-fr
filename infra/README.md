@@ -122,6 +122,30 @@ the gateway ranges in `PIQUELD_INGRESS_PROXIES` to trust ingress's overwritten
 `X-Forwarded-For` address and throttle each client separately.
 `AUTH_TRUSTED_PROXIES` overrides those ranges when set.
 
+### Caching
+
+Auth decides every response's `Cache-Control` itself; the edge needs no rule.
+Handlers mark a response cacheable with `Cached` (`apps/auth-service/src/security`),
+and anything else, including any error and any response that sets a cookie, is
+`no-store`:
+
+| Class | `Cache-Control` | Responses |
+| --- | --- | --- |
+| `NoStore` | `no-store` | APIs, OAuth, errors, everything not below |
+| `Immutable` | `public, max-age=31536000, immutable` | content-hashed bundles under `/_app/immutable/` |
+| `Revalidate` | `private, no-cache` | pages, `/_app/version.json` and the other unhashed files |
+| `Public` | `public, max-age=N` | discovery and JWKS, for an hour |
+
+Every embedded file has an `ETag` computed at build time, so a browser
+revalidates a page with `If-None-Match` and gets a `304` without a body until a
+deploy changes it. Pages stay out of shared caches: an edge-cached old page
+could reference bundles the new binary no longer serves. The Cloudflare Tunnel
+caches the immutable bundles, as it does any static file type the origin lets it
+store. `Public` responses are the same for everyone, with
+`Access-Control-Allow-Origin: *` and no credentials; cached pages and bundles
+carry no CORS headers. Staging and previews are private routes and bypass
+Cloudflare.
+
 ### Running several replicas
 
 `auth_replicas` sets how many auth replicas run (default 1). Two already overlap

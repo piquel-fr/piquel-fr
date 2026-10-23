@@ -425,8 +425,8 @@ async fn metadata_is_one_document_whose_endpoints_are_routed() {
         let response = flow.request(Method::GET, path, &[], None).await;
         assert_eq!(response.status(), StatusCode::OK, "{path}");
         assert_eq!(
-            response.headers()[header::CACHE_CONTROL],
-            PublicDocument::CACHE_CONTROL
+            response.extensions().get::<CacheClass>(),
+            Some(&PublicDocument::CACHE)
         );
         documents.push(
             to_bytes(response.into_body(), 1024 * 1024)

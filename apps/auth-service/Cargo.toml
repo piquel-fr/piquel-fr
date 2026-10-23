@@ -30,6 +30,10 @@ url.workspace = true
 webauthn-rs.workspace = true
 webauthn-rs-proto.workspace = true
 
+[build-dependencies]
+base64.workspace = true
+sha2.workspace = true
+
 [dev-dependencies]
 piquel-auth = { workspace = true, features = ["axum", "test-util"] }
 rcgen.workspace = true

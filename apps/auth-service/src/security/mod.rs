@@ -709,6 +709,71 @@ enum CorsGrant {
     Credentialed(HeaderValue),
 }
 
+/// Who may store a response, and for how long. Handlers choose a class with [`Cached`];
+/// [`HttpSecurity::decorate`] enforces it on every response.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[cfg_attr(
+    not(any(embedded_frontend, test)),
+    expect(
+        dead_code,
+        reason = "only embedded frontend files are Immutable or Revalidate"
+    )
+)]
+pub(crate) enum CacheClass {
+    /// Never stored: APIs, OAuth, errors and every response without a class.
+    NoStore,
+    /// Content-addressed build assets, which any cache may keep for a year.
+    Immutable,
+    /// Pages and their unhashed files: browsers keep them and revalidate them on every
+    /// use, so a deploy shows at once; shared caches never store them.
+    Revalidate,
+    /// Public, credential-free data, the same for every caller and readable from any
+    /// origin. Its route must accept any `Origin` and never read the session.
+    Public { max_age: StdDuration },
+}
+
+impl CacheClass {
+    /// The class a response keeps: its handler's, unless it sets a cookie or is
+    /// anything but a success or a revalidation.
+    fn enforced(response: &Response) -> Self {
+        match response.extensions().get::<Self>() {
+            Some(&class)
+                if matches!(response.status(), StatusCode::OK | StatusCode::NOT_MODIFIED)
+                    && !response.headers().contains_key(header::SET_COOKIE) =>
+            {
+                class
+            }
+            _ => Self::NoStore,
+        }
+    }
+
+    /// The `Cache-Control` value of this class.
+    fn cache_control(self) -> HeaderValue {
+        HeaderValue::from_static(match self {
+            Self::NoStore => "no-store",
+            Self::Immutable => "public, max-age=31536000, immutable",
+            Self::Revalidate => "private, no-cache",
+            Self::Public { max_age } => {
+                // Digits and fixed text always form a valid header value.
+                return HeaderValue::try_from(format!("public, max-age={}", max_age.as_secs()))
+                    .unwrap_or(HeaderValue::from_static("no-store"));
+            }
+        })
+    }
+}
+
+/// The only way to mark a response cacheable: wraps a handler's response with its class.
+pub(crate) struct Cached<T>(pub CacheClass, pub T);
+
+impl<T: IntoResponse> IntoResponse for Cached<T> {
+    /// Attaches the class for [`HttpSecurity::decorate`] to enforce.
+    fn into_response(self) -> Response {
+        let mut response = self.1.into_response();
+        response.extensions_mut().insert(self.0);
+        response
+    }
+}
+
 /// Failures in shared HTTP trust checks, preserving actionable internal sources.
 #[derive(Debug, Error)]
 enum HttpSecurityError {
@@ -885,6 +950,7 @@ impl HttpSecurity {
 
     /// Middleware: runs the trust checks and the handler under one deadline, then adds the
     /// cache, isolation and CORS headers to every response, errors included.
+    /// Discovery's errors and preflights get the public grant from their endpoint.
     pub(crate) async fn protect(
         State(policy): State<Self>,
         request: Request,
@@ -978,13 +1044,19 @@ impl HttpSecurity {
         Ok(())
     }
 
-    /// Adds cache and browser isolation headers, plus the CORS `grant` when set.
+    /// Adds the enforced [`CacheClass`] and browser isolation headers, plus the CORS
+    /// `grant` when set. A cacheable response is the same for every origin, so public
+    /// data is granted to all origins and other cached responses to none.
     fn decorate(response: &mut Response, grant: Option<CorsGrant>) {
+        let class = CacheClass::enforced(response);
+        let grant = match class {
+            CacheClass::NoStore => grant,
+            CacheClass::Public { .. } => Some(CorsGrant::Public),
+            CacheClass::Immutable | CacheClass::Revalidate => None,
+        };
         let headers = response.headers_mut();
-        // Private by default; static assets set their own cache policy.
-        headers
-            .entry(header::CACHE_CONTROL)
-            .or_insert(HeaderValue::from_static("no-store"));
+        // Replaces any handler value: only the class decides.
+        headers.insert(header::CACHE_CONTROL, class.cache_control());
         for (name, value) in [
             // No MIME sniffing.
             (header::X_CONTENT_TYPE_OPTIONS, "nosniff"),

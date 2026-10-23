@@ -48,7 +48,13 @@ use passkey::PasskeyApplication;
 use service::ServiceApplication;
 
 use assets::EmbeddedAssets;
-use axum::{Router, extract::DefaultBodyLimit, http::Uri, middleware};
+use axum::{
+    Router,
+    extract::DefaultBodyLimit,
+    http::{HeaderMap, Uri},
+    middleware,
+    routing::get,
+};
 use piquel_repository::Database;
 use thiserror::Error;
 
@@ -81,7 +87,7 @@ impl AuthConfig {
     /// # Errors
     /// Fails when the frontend is not embedded or an application cannot initialize.
     pub fn router(&self, database: Database) -> Result<Router, StartupError> {
-        let assets = EmbeddedAssets::new()?;
+        EmbeddedAssets::check()?;
         let application = Router::new()
             .merge(ServiceApplication::new(database.clone(), self).routes())
             .merge(PasskeyApplication::new(database.clone(), &self.passkey)?.routes())
@@ -90,7 +96,10 @@ impl AuthConfig {
             .merge(OidcApplication::new(database.clone(), &self.oidc)?.routes());
         let policy = security::HttpSecurity::new(self, database);
         Ok(application
-            .fallback(move |uri: Uri| async move { assets.serve(uri.path()) })
+            // Static pages answer GET and HEAD only, so preconditions need no 412.
+            .fallback(get(|uri: Uri, headers: HeaderMap| async move {
+                EmbeddedAssets::serve(uri.path(), &headers)
+            }))
             .layer(DefaultBodyLimit::max(MAX_REQUEST_BODY_BYTES))
             .layer(middleware::from_fn_with_state(
                 policy,
