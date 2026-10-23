@@ -1,5 +1,6 @@
 //! What administrative commands share: the service and its operator, output
-//! formats, and confirmation before changes that end access or remove something.
+//! formats, and confirmation before changes that cut off a whole account,
+//! administrator or client.
 
 use super::CliError;
 use crate::{AdminService, Operator, UserRef};
@@ -72,7 +73,9 @@ impl Output {
     }
 }
 
-/// The `--yes` option of commands that end access or remove something.
+/// The `--yes` option of commands that cut off a whole account, administrator or
+/// client. Ending one session does not ask: the command names it exactly, and its
+/// owner can sign in again.
 #[derive(Args)]
 pub(super) struct Confirm {
     /// Do not ask for confirmation. Required when standard input is not a terminal.
