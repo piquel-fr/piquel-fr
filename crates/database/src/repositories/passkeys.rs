@@ -3,7 +3,7 @@
 use super::{PasskeyRepository, RepositoryExecutor};
 use crate::DatabaseError;
 use chrono::{DateTime, Utc};
-use piquel_common::{PasskeyId, SessionId, TokenId, UserId, protocol::api::Passkey};
+use piquel_common::{Handle, PasskeyId, SessionId, TokenId, UserId, protocol::api::Passkey};
 use serde_json::Value;
 
 piquel_common::str_enum! {
@@ -147,16 +147,16 @@ impl PasskeyRepository<'_> {
         )
     }
 
-    /// Lists the unrevoked credentials of the active account named `username`,
+    /// Lists the unrevoked credentials of the active account whose handle is `handle`,
     /// oldest first. A missing, inactive or passkey-less account returns none,
     /// in the same single query, so callers cannot tell those cases apart.
     ///
     /// # Errors
     ///
     /// Returns [`DatabaseError`] if the query fails or a row is invalid.
-    pub async fn list_active_by_username(
+    pub async fn list_active_by_handle(
         &mut self,
-        username: &str,
+        handle: &Handle,
     ) -> Result<Vec<StoredPasskey>, DatabaseError> {
         run!(
             self,
@@ -168,11 +168,12 @@ impl PasskeyRepository<'_> {
                     p.credential, p.friendly_name, p.revoked_at
                 FROM passkey_credentials p
                 JOIN users u ON u.id = p.user_id
-                WHERE u.username = $1
+                JOIN handles h ON h.user_id = u.id AND h.released_at IS NULL
+                WHERE h.handle = $1
                 AND u.status = 'active'
                 AND p.revoked_at IS NULL
                 ORDER BY p.created_at"#,
-                username,
+                handle.as_str(),
             )
         )
     }
@@ -387,27 +388,25 @@ impl PasskeyRepository<'_> {
     }
 }
 
-/// Username lookups against a running database.
+/// Handle lookups against a running database.
 #[cfg(test)]
 mod tests {
     use super::{InsertPasskey, PasskeyRepository};
-    use crate::Database;
-    use piquel_common::{PasskeyId, UserId};
+    use crate::{Database, InsertUser, repositories::UserRepository};
+    use piquel_common::PasskeyId;
 
     /// A disabled account and an account whose only passkey is revoked list no
-    /// credentials, like a username nobody holds.
+    /// credentials, like a handle nobody holds.
     #[tokio::test]
     #[ignore = "requires a disposable TEST_DATABASE_URL"]
-    async fn username_lookup_hides_disabled_accounts_and_revoked_passkeys() {
+    async fn handle_lookup_hides_disabled_accounts_and_revoked_passkeys() {
         let pool = Database::test_pool().await;
         let mut passkeys = PasskeyRepository::from_pool(&pool);
         for disable in [true, false] {
-            let user = UserId::new();
-            let username = format!("passkey_{user}");
-            sqlx::query("INSERT INTO users(id,username,display_name) VALUES($1,$2,'Passkey test')")
-                .bind(user.as_uuid())
-                .bind(&username)
-                .execute(&pool)
+            let account = InsertUser::named("passkey");
+            let user = account.id;
+            UserRepository::from_pool(&pool)
+                .insert(&account)
                 .await
                 .expect("user");
             let key = passkeys
@@ -422,7 +421,7 @@ mod tests {
                 .expect("passkey");
             let listed = || async {
                 PasskeyRepository::from_pool(&pool)
-                    .list_active_by_username(&username)
+                    .list_active_by_handle(&account.handle)
                     .await
                     .expect("lookup")
                     .len()

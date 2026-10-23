@@ -1,7 +1,7 @@
 //! Validated names and the browser API's request and response bodies.
 
 use super::PasskeyError;
-use piquel_common::{TokenId, UserId};
+use piquel_common::{Handle, TokenId, UserId};
 use serde::{Deserialize, Serialize};
 use webauthn_rs::prelude::{PublicKeyCredential, RegisterPublicKeyCredential};
 
@@ -96,7 +96,7 @@ pub(super) struct RegistrationStart {
     #[serde(default)]
     pub(super) passkey_kind: PasskeyKind,
     /// Account handle, validated before starting `WebAuthn`.
-    pub(super) username: String,
+    pub(super) handle: String,
     /// Account display name; an empty value defaults to the handle.
     #[serde(default)]
     pub(super) display_name: String,
@@ -125,11 +125,11 @@ impl RegistrationFinish {
     }
 }
 
-/// Username-based login, or account-picker login when absent or empty.
+/// Handle-based login, or account-picker login when absent or empty.
 #[derive(Deserialize)]
 pub(super) struct LoginStart {
-    /// Existing username; login deliberately does not apply signup validation.
-    pub(super) username: Option<String>,
+    /// An account's handle, trimmed and lowercased like signup's.
+    pub(super) handle: Option<String>,
 }
 
 /// Browser assertion response for login and session confirmation.
@@ -164,8 +164,8 @@ pub(super) struct UserView {
     pub(super) display_name: String,
     /// Immutable account identifier.
     pub(super) id: UserId,
-    /// Account username.
-    pub(super) username: String,
+    /// Account handle.
+    pub(super) handle: Handle,
 }
 
 /// Signed-in account of the browser session.

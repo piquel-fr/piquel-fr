@@ -5,7 +5,10 @@
  */
 export type Provider = 'github' | 'google';
 export type PasskeyKind = 'standard' | 'google_password_manager';
-export type Session = { user: { id: string; username: string; display_name: string } };
+export type Session = { user: { id: string; handle: string; display_name: string } };
+/** Whether a handle can be claimed, or the error and `handle_*` code a claim would get. */
+export type HandleAvailability =
+  { available: true } | { available: false; error: string; code: string };
 export type Configuration = {
   settings_url: string;
   /** Frontend origins, such as https://piquel.fr, that sign-in may return to. */
@@ -143,8 +146,8 @@ export function passkeysAvailable(): boolean {
 export class Passkeys {
   constructor(readonly api: AuthApi) {}
   /** Signs in, which also confirms the new session for actions that need a passkey. */
-  authenticate(username?: string): Promise<void> {
-    return this.assert('/webauthn/authenticate', username ? { username } : {});
+  authenticate(handle?: string): Promise<void> {
+    return this.assert('/webauthn/authenticate', handle ? { handle } : {});
   }
   /** Confirms the current session with a passkey, for actions that need a recent one. */
   confirm(): Promise<void> {
@@ -185,7 +188,7 @@ export class Passkeys {
    */
   async register(
     friendlyName: string,
-    account?: { username: string; invitation?: string; pending_signup?: string },
+    account?: { handle: string; invitation?: string; pending_signup?: string },
     kind: PasskeyKind = 'standard'
   ): Promise<void> {
     const path = account ? '/webauthn/register' : '/account/passkeys/enroll';
@@ -220,6 +223,73 @@ export class Passkeys {
       }
     });
   }
+}
+
+/** Handles: an account's public identifier and login name. */
+export class Handles {
+  constructor(readonly api: AuthApi) {}
+  /** Whether the signed-in account, or a new one, could take `handle`. */
+  availability(handle: string): Promise<HandleAvailability> {
+    return this.api.request(`/handles/${encodeURIComponent(handle)}/availability`);
+  }
+  /**
+   * Checks a handle being typed once typing pauses, and reports why it cannot be
+   * taken, or `''`. Returns the cleanup of a Svelte `$effect`, which drops a check
+   * the next keystroke made stale.
+   */
+  watch(handle: string, report: (refusal: string) => void): () => void {
+    report('');
+    const candidate = handle.trim();
+    let current = candidate.length >= 3;
+    const timer = setTimeout(() => {
+      if (!current) return;
+      void this.availability(candidate)
+        .then((answer) => {
+          if (current && !answer.available) report(answer.error);
+        })
+        .catch(() => undefined);
+    }, 300);
+    return () => {
+      current = false;
+      clearTimeout(timer);
+    };
+  }
+  /** Changes the signed-in account's handle. Needs a recent passkey confirmation. */
+  rename(handle: string): Promise<{ handle: string }> {
+    return this.api.request('/account/handle', 'PUT', { handle });
+  }
+}
+
+/** The WebAuthn Signal API method, which not every browser has. */
+type SignalCurrentUserDetails = (details: {
+  rpId: string;
+  userId: string;
+  name: string;
+  displayName: string;
+}) => Promise<void>;
+
+/**
+ * Tells the password manager the account's current handle and display name (WebAuthn
+ * Signal API), so its passkeys show them after a rename. Call it on the auth origin,
+ * the passkeys' relying party. Does nothing where unsupported.
+ */
+export function signalCurrentUser(user: Session['user']): void {
+  if (!passkeysAvailable()) return;
+  const signal = (
+    PublicKeyCredential as unknown as { signalCurrentUserDetails?: SignalCurrentUserDetails }
+  ).signalCurrentUserDetails;
+  // Passkeys carry the account ID's 16 bytes as their user handle.
+  const id = Uint8Array.from(user.id.replace(/-/g, '').match(/../g) ?? [], (byte) =>
+    parseInt(byte, 16)
+  );
+  void signal
+    ?.call(PublicKeyCredential, {
+      rpId: window.location.hostname,
+      userId: encode(id.buffer),
+      name: user.handle,
+      displayName: user.display_name
+    })
+    .catch(() => undefined);
 }
 
 export function errorMessage(error: unknown): string {

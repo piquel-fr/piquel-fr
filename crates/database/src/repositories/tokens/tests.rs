@@ -105,9 +105,8 @@ impl Grant {
             code_digest: TokenId::new().as_uuid().as_bytes().repeat(2),
         };
         let mut tx = pool.begin().await.expect("transaction");
-        sqlx::query("INSERT INTO users(id,username,display_name) VALUES($1,$2,'Lock test')")
+        sqlx::query("INSERT INTO users(id,display_name) VALUES($1,'Lock test')")
             .bind(grant.user.as_uuid())
-            .bind(format!("lock_{}", grant.user))
             .execute(&mut *tx)
             .await
             .expect("user");

@@ -1,8 +1,8 @@
 //! Client registrations against a real database: the migration from the clients
 //! file's rows, secret rotation, the origins public clients may call from, and
 //! when pushed authorization requests can be claimed.
-use crate::repositories::OidcRepository;
-use crate::{Database, InsertAuthorizationRequest};
+use crate::repositories::{OidcRepository, UserRepository};
+use crate::{Database, InsertAuthorizationRequest, InsertUser};
 use chrono::{DateTime, Duration, Utc};
 use piquel_common::{
     ClientId, TokenId, UserId,
@@ -223,13 +223,12 @@ async fn public_client_origins_follow_registrations() {
 #[ignore = "requires a disposable TEST_DATABASE_URL"]
 async fn purging_an_owner_needs_its_live_clients_deleted() {
     let pool = Database::test_pool().await;
-    let owner = UserId::new();
-    sqlx::query("INSERT INTO users(id,username,display_name) VALUES($1,$2,'Owner test')")
-        .bind(owner.as_uuid())
-        .bind(format!("owner_{owner}"))
-        .execute(&pool)
+    let account = InsertUser::named("owner");
+    UserRepository::from_pool(&pool)
+        .insert(&account)
         .await
         .expect("user");
+    let owner = account.id;
     let client = registration(ClientKind::Public, &origin());
     let mut oidc = OidcRepository::from_pool(&pool);
     oidc.create_client(&client, ClientOwner::Account(owner))

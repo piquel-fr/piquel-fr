@@ -3,10 +3,11 @@
 
 use super::{
     Administrator, Client, CreateInvitation, CreatedInvitation, DisableUser, ErrorBody, EventPage,
-    EventSearch, GrantAdministrator, Invitation, UserDetail, UserPage, UserSearch, paths,
+    EventSearch, GrantAdministrator, Invitation, RenameHandle, UserDetail, UserPage, UserSearch,
+    paths,
 };
 use piquel_common::{
-    SessionId, TokenId, UserId,
+    Handle, SessionId, TokenId, UserId,
     protocol::{
         challenge::{BearerChallenge, BearerError},
         step_up::StepUpRequirement,
@@ -155,6 +156,32 @@ impl AdminClient {
     /// See [`ApiError`].
     pub async fn revoke_user_sessions(&self, token: &str, user: UserId) -> Result<(), ApiError> {
         self.send(self.request(token, Method::DELETE, paths::USER_SESSIONS, &[&user]))
+            .await
+    }
+
+    /// Gives an account a new handle. Operators skip the rename cooldown.
+    ///
+    /// # Errors
+    /// See [`ApiError`].
+    pub async fn rename_handle(
+        &self,
+        token: &str,
+        user: UserId,
+        input: &RenameHandle,
+    ) -> Result<(), ApiError> {
+        self.send(
+            self.request(token, Method::PUT, paths::USER_HANDLE, &[&user])
+                .json(input),
+        )
+        .await
+    }
+
+    /// Deletes a released handle, so anyone may claim it again.
+    ///
+    /// # Errors
+    /// See [`ApiError`].
+    pub async fn release_handle(&self, token: &str, handle: &Handle) -> Result<(), ApiError> {
+        self.send(self.request(token, Method::DELETE, paths::HANDLE, &[handle]))
             .await
     }
 

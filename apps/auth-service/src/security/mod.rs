@@ -1,7 +1,7 @@
 //! Shared browser-session, passkey confirmation and HTTP trust boundaries.
 
 use crate::config::FrontendOrigins;
-use crate::routes::{ACCOUNT_PREFIX, LOGIN_PREFIX, oidc, passkey, service};
+use crate::routes::{ACCOUNT_PREFIX, HANDLES_PREFIX, LOGIN_PREFIX, oidc, passkey, service};
 use axum::{
     Json,
     extract::{ConnectInfo, FromRef, FromRequestParts, MatchedPath, Request, State},
@@ -120,6 +120,14 @@ impl ApiError {
         Self::new(StatusCode::CONFLICT, message)
     }
 
+    /// The JSON body this error answers with.
+    pub(crate) fn body(self) -> ErrorBody {
+        ErrorBody {
+            error: self.message.into_owned(),
+            code: self.code,
+        }
+    }
+
     /// Logs an internal source chain and returns a generic browser message.
     pub(crate) fn internal(error: impl std::error::Error) -> Self {
         Self::log_error(&error);
@@ -159,15 +167,9 @@ impl From<HandleError> for ApiError {
 impl IntoResponse for ApiError {
     /// Serializes the fixed browser error and adds the retry delay for rate limits.
     fn into_response(self) -> Response {
-        let mut response = (
-            self.status,
-            Json(ErrorBody {
-                error: self.message.into_owned(),
-                code: self.code,
-            }),
-        )
-            .into_response();
-        if self.status == StatusCode::TOO_MANY_REQUESTS {
+        let status = self.status;
+        let mut response = (status, Json(self.body())).into_response();
+        if status == StatusCode::TOO_MANY_REQUESTS {
             response.headers_mut().insert(
                 header::RETRY_AFTER,
                 HeaderValue::from_static(RETRY_AFTER_SECONDS),
@@ -705,7 +707,8 @@ enum Endpoint {
     Logout,
     /// Account and session APIs shared with the first-party frontends.
     Account,
-    /// Social sign-in, also started from the first-party frontends.
+    /// Social sign-in, also started from the first-party frontends, and handle
+    /// availability, which they check.
     Login,
     /// Auth-origin pages and ceremonies.
     Other,
@@ -723,7 +726,8 @@ impl Endpoint {
             oidc::LOGOUT => Self::Logout,
             service::CONFIG | passkey::SESSION | passkey::SESSION_LOGOUT => Self::Account,
             _ if path.starts_with(ACCOUNT_PREFIX) => Self::Account,
-            _ if path.starts_with(LOGIN_PREFIX) => Self::Login,
+            // Availability answers which handles exist, so it shares sign-in's budget.
+            _ if path.starts_with(LOGIN_PREFIX) || path.starts_with(HANDLES_PREFIX) => Self::Login,
             _ => Self::Other,
         }
     }

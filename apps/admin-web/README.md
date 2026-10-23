@@ -32,7 +32,7 @@ The dashboard is a convenience: every operation is also an `auth-service` comman
 
 | Page | Content and actions |
 | --- | --- |
-| `/users` | Search by username, display name, email or ID |
+| `/users` | Search by handle, display name, email or ID |
 | `/users/{id}` | Profile, emails, passkeys, identities, sessions, consents, recent events; disable, enable, revoke one or all sessions |
 | `/administrators` | List, grant, revoke |
 | `/invitations` | While signup requires invitations: list, create (the link is shown once), revoke |

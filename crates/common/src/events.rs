@@ -147,6 +147,12 @@ pub enum DomainEvent {
         /// The new handle.
         new: Personal<Handle>,
     },
+    /// An operator deleted a released handle, so anyone may claim it again. Its
+    /// former owner, if not purged, is the subject.
+    HandleReleased {
+        /// The released handle.
+        handle: Personal<Handle>,
+    },
     /// An OIDC client was registered, enabled. A confidential client got its first secret.
     ClientRegistered {
         /// The new client.
@@ -266,6 +272,7 @@ impl DomainEvent {
             | Self::AdministratorGranted {}
             | Self::AdministratorRevoked {}
             | Self::HandleChanged { .. }
+            | Self::HandleReleased { .. }
             | Self::CompromiseReported { .. }
             | Self::Imported(_) => None,
         }
@@ -297,6 +304,7 @@ impl DomainEvent {
             | Self::AdministratorGranted {}
             | Self::AdministratorRevoked {}
             | Self::HandleChanged { .. }
+            | Self::HandleReleased { .. }
             | Self::ClientRegistered { .. }
             | Self::ClientUpdated { .. }
             | Self::ClientEnabled { .. }
@@ -336,6 +344,7 @@ impl DomainEvent {
             Self::AdministratorGranted {} => "administrator_granted",
             Self::AdministratorRevoked {} => "administrator_revoked",
             Self::HandleChanged { .. } => "handle_changed",
+            Self::HandleReleased { .. } => "handle_released",
             Self::ClientRegistered { .. } => "client_registered",
             Self::ClientUpdated { .. } => "client_updated",
             Self::ClientEnabled { .. } => "client_enabled",
@@ -420,6 +429,8 @@ impl DomainEvent {
             | Self::GrantIssued { .. }
             | Self::InvitationCreated { .. }
             | Self::InvitationRevoked { .. }
+            // The handle was the account's no more.
+            | Self::HandleReleased { .. }
             // Changes to an application concern no account.
             | Self::ClientRegistered { .. }
             | Self::ClientUpdated { .. }

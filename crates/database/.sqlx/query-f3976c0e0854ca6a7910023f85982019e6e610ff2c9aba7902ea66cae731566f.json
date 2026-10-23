@@ -1,0 +1,66 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "WITH u AS (\n                    INSERT INTO users (id, display_name) VALUES ($1, $3) RETURNING *\n                ), h AS (\n                    INSERT INTO handles (handle, user_id) VALUES ($2, $1) RETURNING handle\n                )\n                SELECT\n                    u.id AS \"id: UserId\", h.handle AS \"handle: Handle\", u.handle_changed_at,\n                    u.display_name, u.profile_version AS \"profile_version: Unsigned\",\n                    u.status AS \"status: AccountStatus\", u.created_at, u.updated_at\n                FROM u, h",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id: UserId",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "handle: Handle",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 2,
+        "name": "handle_changed_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 3,
+        "name": "display_name",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 4,
+        "name": "profile_version: Unsigned",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 5,
+        "name": "status: AccountStatus",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 6,
+        "name": "created_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 7,
+        "name": "updated_at",
+        "type_info": "Timestamptz"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Text",
+        "Text"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "f3976c0e0854ca6a7910023f85982019e6e610ff2c9aba7902ea66cae731566f"
+}

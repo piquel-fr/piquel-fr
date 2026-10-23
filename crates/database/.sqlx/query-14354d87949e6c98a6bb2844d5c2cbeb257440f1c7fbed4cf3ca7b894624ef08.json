@@ -1,0 +1,40 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "DELETE FROM handles\n                WHERE handle = $1 AND released_at IS NOT NULL\n                RETURNING handle AS \"handle: Handle\", user_id AS \"user_id: UserId\", claimed_at,\n                    released_at",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "handle: Handle",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 1,
+        "name": "user_id: UserId",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 2,
+        "name": "claimed_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 3,
+        "name": "released_at",
+        "type_info": "Timestamptz"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text"
+      ]
+    },
+    "nullable": [
+      false,
+      true,
+      false,
+      true
+    ]
+  },
+  "hash": "14354d87949e6c98a6bb2844d5c2cbeb257440f1c7fbed4cf3ca7b894624ef08"
+}

@@ -1,6 +1,7 @@
 //! Browser-bound `WebAuthn` ceremonies, passkey management and session confirmation.
 use crate::config::PasskeyConfig;
 use crate::federation::FederationApplication;
+use crate::handles::{HandleApplication, HandlesError};
 use crate::routes;
 use crate::security::{self, ApiError, BrowserCookie, RequestContext};
 use axum::{
@@ -201,7 +202,7 @@ impl PasskeyApplication {
     fn registration(
         &self,
         user_id: UserId,
-        username: &str,
+        handle: &str,
         name: &str,
         exclusions: Option<Vec<CredentialID>>,
         kind: PasskeyKind,
@@ -223,7 +224,7 @@ impl PasskeyApplication {
                     .webauthn
                     .start_google_passkey_in_google_password_manager_only_registration(
                         user_id.as_uuid(),
-                        username,
+                        handle,
                         name,
                         exclusions,
                     )?)
@@ -231,7 +232,7 @@ impl PasskeyApplication {
             PasskeyKind::Standard => {
                 let (mut challenge, state) = self.webauthn.start_passkey_registration(
                     user_id.as_uuid(),
-                    username,
+                    handle,
                     name,
                     exclusions,
                 )?;
@@ -369,10 +370,11 @@ impl PasskeyApplication {
         headers: HeaderMap,
         Json(input): Json<RegistrationStart>,
     ) -> Result<Response, ApiError> {
-        let username = Handle::parse(&input.username)?;
-        username.ensure_unreserved()?;
+        let handle = HandleApplication::check(&app.database, &input.handle, None)
+            .await
+            .map_err(PasskeyError::from)?;
         let display_name = DisplayName::parse(if input.display_name.is_empty() {
-            username.as_str().to_owned()
+            handle.as_str().to_owned()
         } else {
             input.display_name
         })?;
@@ -398,7 +400,7 @@ impl PasskeyApplication {
         let user_id = UserId::new();
         let (challenge, state) = app.registration(
             user_id,
-            username.as_str(),
+            handle.as_str(),
             display_name.as_str(),
             None,
             input.passkey_kind,
@@ -409,7 +411,7 @@ impl PasskeyApplication {
                 &headers,
                 Ceremony::Register(RegistrationCeremony {
                     user_id,
-                    username,
+                    handle,
                     display_name,
                     invitation,
                     pending,
@@ -430,7 +432,7 @@ impl PasskeyApplication {
         let friendly_name = PasskeyName::parse(input.friendly_name)?;
         let RegistrationCeremony {
             user_id,
-            username,
+            handle,
             display_name,
             invitation,
             pending,
@@ -455,20 +457,23 @@ impl PasskeyApplication {
         {
             return Err(PasskeyError::InvitationExpired.into());
         }
-        tx.users()
+        let inserted = tx
+            .users()
             .insert(&InsertUser {
                 id: user_id,
-                handle: username,
+                handle: handle.clone(),
                 display_name: display_name.into(),
             })
-            .await
-            .map_err(|error| match error {
-                DatabaseError::Conflict(_) => PasskeyError::HandleTaken(error),
-                DatabaseError::NotFound
-                | DatabaseError::Timeout(_)
-                | DatabaseError::InvalidStoredData { .. }
-                | DatabaseError::Operation(_) => error.into(),
-            })?;
+            .await;
+        if let Err(DatabaseError::Conflict(_)) = inserted {
+            // Another account claimed the handle, or one like it, since the start.
+            let refused = HandleApplication::claimable(&app.database, &handle, None)
+                .await
+                .err()
+                .unwrap_or(HandlesError::Taken);
+            return Err(PasskeyError::from(refused).into());
+        }
+        inserted?;
         let actor = context.actor(Actor::User {
             user_id,
             session_id: None,
@@ -503,22 +508,28 @@ impl PasskeyApplication {
 
     /// Starts username-based authentication or lets the authenticator identify the account.
     ///
-    /// A username without an active account or passkey gets the same response as one
+    /// A handle without an active account or passkey gets the same response as one
     /// with them: one lookup query, a stored ceremony and a challenge built by the same
     /// call, listing stable decoy credentials. That ceremony fails at finish like an
-    /// unregistered passkey, so the username field reveals no account.
+    /// unregistered passkey, so the handle field reveals no account. Text that is not
+    /// a handle names no account, so it skips the lookup and gets decoys too.
     async fn start_login(
         State(app): State<Self>,
         headers: HeaderMap,
         Json(input): Json<LoginStart>,
     ) -> Result<Response, ApiError> {
         let (ceremony, challenge) =
-            if let Some(username) = input.username.filter(|username| !username.is_empty()) {
-                let keys = app
-                    .database
-                    .passkeys()
-                    .list_active_by_username(&username)
-                    .await?;
+            if let Some(input) = input.handle.filter(|handle| !handle.is_empty()) {
+                let handle = Handle::parse(&input);
+                let keys = match &handle {
+                    Ok(handle) => {
+                        app.database
+                            .passkeys()
+                            .list_active_by_handle(handle)
+                            .await?
+                    }
+                    Err(_) => Vec::new(),
+                };
                 let user_id = keys.first().map(|key| key.user_id);
                 let (mut challenge, state) = app
                     .webauthn
@@ -529,7 +540,7 @@ impl PasskeyApplication {
                 } else {
                     challenge.public_key.allow_credentials = app
                         .decoy_key
-                        .credentials(&username)
+                        .credentials(handle.as_ref().map_or(&input, Handle::as_str))
                         .map_err(PasskeyError::Crypto)?;
                     Ceremony::Decoy
                 };
@@ -706,7 +717,7 @@ impl PasskeyApplication {
             .collect();
         let (challenge, state) = app.registration(
             user.id,
-            &user.username,
+            user.handle.as_str(),
             &user.display_name,
             Some(exclusions),
             input
@@ -854,7 +865,7 @@ impl PasskeyApplication {
         Ok(Json(SessionView {
             user: UserView {
                 id: user.id,
-                username: user.username,
+                handle: user.handle,
                 display_name: user.display_name,
             },
         }))

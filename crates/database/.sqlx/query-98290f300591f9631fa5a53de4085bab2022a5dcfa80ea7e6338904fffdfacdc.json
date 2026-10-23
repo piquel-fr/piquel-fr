@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE users\n                SET handle_changed_at = now(), profile_version = profile_version + 1,\n                    updated_at = now()\n                WHERE id = $1",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "98290f300591f9631fa5a53de4085bab2022a5dcfa80ea7e6338904fffdfacdc"
+}

@@ -2,7 +2,7 @@
 //!
 //! Tests share one database, so each claims from a channel of its own.
 use super::*;
-use crate::{Database, EventRepository, MaintenanceRepository, StoredEvent};
+use crate::{Database, EventRepository, InsertUser, MaintenanceRepository, StoredEvent};
 use piquel_common::{
     Personal,
     events::{Actor, EventContext, RequestOrigin},
@@ -49,7 +49,7 @@ test_channels! {
     Abandoned = "test_abandoned";
 }
 
-/// Copies the subject's username into each event's delivery, as back-channel
+/// Copies the subject's handle into each event's delivery, as back-channel
 /// logout copies a session's `sid` before purges can delete it.
 struct Recorder;
 
@@ -58,7 +58,7 @@ impl Channel for Recorder {
     type Recipient = String;
     type Payload = u32;
 
-    /// One delivery per event about an account, naming its username.
+    /// One delivery per event about an account, naming its handle.
     async fn deliveries(
         _: &DomainEvent,
         subject: Option<UserId>,
@@ -67,13 +67,15 @@ impl Channel for Recorder {
         let Some(subject) = subject else {
             return Ok(vec![]);
         };
-        let username = sqlx::query_scalar("SELECT username FROM users WHERE id = $1")
-            .bind(subject.as_uuid())
-            .fetch_one(&mut *tx.inner)
-            .await?;
+        let handle = sqlx::query_scalar(
+            "SELECT handle FROM handles WHERE user_id = $1 AND released_at IS NULL",
+        )
+        .bind(subject.as_uuid())
+        .fetch_one(&mut *tx.inner)
+        .await?;
         Ok(vec![NewDelivery {
             destination: "https://rp.example/logout".into(),
-            recipient: username,
+            recipient: handle,
             payload: 1,
             ordering_key: None,
         }])
@@ -140,12 +142,11 @@ fn failed() -> DeliveryOutcome {
 #[ignore = "requires a disposable TEST_DATABASE_URL"]
 async fn deliveries_commit_with_their_event_and_outlive_the_account() {
     let pool = Database::test_pool().await;
-    let user = UserId::new();
-    let username = format!("delivery_{user}");
-    sqlx::query("INSERT INTO users(id,username,display_name) VALUES($1,$2,'Delivery test')")
-        .bind(user.as_uuid())
-        .bind(&username)
-        .execute(&pool)
+    let account = InsertUser::named("delivery");
+    let (user, username) = (account.id, account.handle.to_string());
+    Database { pool: pool.clone() }
+        .users()
+        .insert(&account)
         .await
         .expect("user");
     let record = async |commit: bool| {

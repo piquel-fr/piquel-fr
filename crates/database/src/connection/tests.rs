@@ -168,7 +168,7 @@ async fn cleanup_keeps_redeemed_codes_while_their_session_is_live() {
     // One statement keeps the fixture short; foreign keys are checked at its end.
     sqlx::query(
         "WITH account AS (
-            INSERT INTO users (id, username, display_name) VALUES ($1, $5, 'Purge')
+            INSERT INTO users (id, display_name) VALUES ($1, 'Purge')
         ), browser AS (
             INSERT INTO sessions (
                 id, user_id, authentication_methods, authenticated_at, expires_at, last_seen_at

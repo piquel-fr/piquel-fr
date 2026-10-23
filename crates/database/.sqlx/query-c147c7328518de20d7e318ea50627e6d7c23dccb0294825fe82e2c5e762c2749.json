@@ -1,0 +1,38 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT handle AS \"handle: Handle\", user_id AS \"user_id: UserId\", claimed_at,\n                    released_at\n                FROM handles\n                WHERE released_at IS NULL\n                ORDER BY handle",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "handle: Handle",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 1,
+        "name": "user_id: UserId",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 2,
+        "name": "claimed_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 3,
+        "name": "released_at",
+        "type_info": "Timestamptz"
+      }
+    ],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": [
+      false,
+      true,
+      false,
+      true
+    ]
+  },
+  "hash": "c147c7328518de20d7e318ea50627e6d7c23dccb0294825fe82e2c5e762c2749"
+}

@@ -5,18 +5,18 @@
 //! [`Admin`] and mutations [`ConfirmedAdmin`], which answer RFC 6750 and RFC 9470
 //! challenges, so the dashboard signs the administrator in again when a mutation
 //! needs a fresh passkey.
-use crate::{AuthConfig, routes::admin};
+use crate::{AuthConfig, handles::HandlesError, routes::admin};
 use axum::{
     Json, Router,
     extract::{FromRef, Path, Query, State},
     http::StatusCode,
-    routing::{delete, get, post},
+    routing::{delete, get, post, put},
 };
 use piquel_admin_api::{
     Administrator, Client, CreateInvitation, CreatedInvitation, DisableUser, EventPage,
-    EventSearch, GrantAdministrator, Invitation, UserDetail, UserPage, UserSearch,
+    EventSearch, GrantAdministrator, Invitation, RenameHandle, UserDetail, UserPage, UserSearch,
 };
-use piquel_common::{SessionId, TokenId, UserId, config::Origin};
+use piquel_common::{Handle, SessionId, TokenId, UserId, config::Origin};
 use piquel_repository::Database;
 
 /// The administrators the API serves, and how their tokens are checked.
@@ -32,7 +32,7 @@ pub use caller::Operator;
 use caller::{Admin, AdminTokens, ConfirmedAdmin};
 pub use error::AdminError;
 pub use operations::AdminOperations;
-pub use types::{GracePeriod, HandleIssue, HandleProblem, InvalidLifetime, InviteExpiry, Reason};
+pub use types::{GracePeriod, HandleProblem, InvalidLifetime, InviteExpiry, Reason};
 
 /// Admin API routes and the operations behind them.
 #[derive(Clone)]
@@ -77,6 +77,8 @@ impl AdminApplication {
             .route(admin::USER_DISABLE, post(Self::disable_user))
             .route(admin::USER_ENABLE, post(Self::enable_user))
             .route(admin::USER_SESSIONS, delete(Self::revoke_user_sessions))
+            .route(admin::USER_HANDLE, put(Self::rename_handle))
+            .route(admin::HANDLE, delete(Self::release_handle))
             .route(admin::SESSION, delete(Self::revoke_session))
             .route(admin::CLIENTS, get(Self::list_clients))
             .route(admin::CLIENT, get(Self::client))
@@ -97,7 +99,7 @@ impl AdminApplication {
         router.with_state(self)
     }
 
-    /// Searches accounts by ID, username, display name or email.
+    /// Searches accounts by ID, handle, display name or email.
     async fn search_users(
         State(app): State<Self>,
         _: Admin,
@@ -148,6 +150,31 @@ impl AdminApplication {
         Path(id): Path<UserId>,
     ) -> Result<StatusCode, AdminError> {
         app.operations.revoke_user_sessions(&operator, id).await?;
+        Ok(StatusCode::NO_CONTENT)
+    }
+
+    /// Gives an account a new handle, without the settings cooldown.
+    async fn rename_handle(
+        State(app): State<Self>,
+        ConfirmedAdmin(operator): ConfirmedAdmin,
+        Path(id): Path<UserId>,
+        Json(input): Json<RenameHandle>,
+    ) -> Result<StatusCode, AdminError> {
+        let handle = Handle::parse(&input.handle).map_err(HandlesError::from)?;
+        app.operations
+            .rename_handle(&operator, id, handle, input.allow_reserved)
+            .await?;
+        Ok(StatusCode::NO_CONTENT)
+    }
+
+    /// Deletes a released handle, so anyone may claim it again.
+    async fn release_handle(
+        State(app): State<Self>,
+        ConfirmedAdmin(operator): ConfirmedAdmin,
+        Path(handle): Path<String>,
+    ) -> Result<StatusCode, AdminError> {
+        let handle = Handle::parse(&handle).map_err(HandlesError::from)?;
+        app.operations.release_handle(&operator, handle).await?;
         Ok(StatusCode::NO_CONTENT)
     }
 

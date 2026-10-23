@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "SELECT\n                    p.id AS \"id: PasskeyId\", p.credential_id, p.user_id AS \"user_id: UserId\",\n                    p.credential, p.friendly_name, p.revoked_at\n                FROM passkey_credentials p\n                JOIN users u ON u.id = p.user_id\n                WHERE u.username = $1\n                AND u.status = 'active'\n                AND p.revoked_at IS NULL\n                ORDER BY p.created_at",
+  "query": "SELECT\n                    p.id AS \"id: PasskeyId\", p.credential_id, p.user_id AS \"user_id: UserId\",\n                    p.credential, p.friendly_name, p.revoked_at\n                FROM passkey_credentials p\n                JOIN users u ON u.id = p.user_id\n                JOIN handles h ON h.user_id = u.id AND h.released_at IS NULL\n                WHERE h.handle = $1\n                AND u.status = 'active'\n                AND p.revoked_at IS NULL\n                ORDER BY p.created_at",
   "describe": {
     "columns": [
       {
@@ -48,5 +48,5 @@
       true
     ]
   },
-  "hash": "4da126b8d8edb2fa348d7ab077840a0d1f1fe78602238f0942cd46753fbcdcc2"
+  "hash": "00bc5c1c99d290995368c91591f96b8318673bf01b17e737fa3f65405a2762b3"
 }

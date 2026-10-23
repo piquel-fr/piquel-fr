@@ -3,7 +3,7 @@
 use super::{AdministratorRepository, RepositoryExecutor};
 use crate::DatabaseError;
 use piquel_admin_api::Administrator;
-use piquel_common::UserId;
+use piquel_common::{Handle, UserId};
 
 impl AdministratorRepository<'_> {
     /// Serializes changes to the administrator list until the transaction ends:
@@ -106,9 +106,9 @@ impl AdministratorRepository<'_> {
             fetch_all,
             sqlx::query_as!(
                 Administrator,
-                r#"SELECT a.user_id AS "user_id: UserId", u.username, a.granted_at
+                r#"SELECT a.user_id AS "user_id: UserId", h.handle AS "handle: Handle", a.granted_at
                 FROM administrators a
-                JOIN users u ON u.id = a.user_id
+                JOIN handles h ON h.user_id = a.user_id AND h.released_at IS NULL
                 ORDER BY a.granted_at, a.user_id"#
             )
         )

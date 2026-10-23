@@ -25,7 +25,7 @@ const HOST_ADDRESS_PARAMETER: &str = "hostaddr";
 const SOCKET_HOST: &str = "localhost";
 
 /// The schema migrations embedded at compile time, in version order.
-static MIGRATOR: Migrator = sqlx::migrate!("./migrations");
+pub(crate) static MIGRATOR: Migrator = sqlx::migrate!("./migrations");
 
 /// Readiness must fail quickly when the database stops responding.
 const HEALTH_CHECK_TIMEOUT: Duration = Duration::from_secs(2);

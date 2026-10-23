@@ -83,7 +83,7 @@ pub(crate) struct PasskeyConfig {
     pub origin: Origin,
     /// Registration admission policy.
     pub invite_required: bool,
-    /// Domain-separated key for the stable decoy credentials of unknown usernames.
+    /// Domain-separated key for the stable decoy credentials of unknown handles.
     pub decoy_key: DecoyKey,
 }
 impl PasskeyConfig {

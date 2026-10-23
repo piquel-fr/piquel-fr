@@ -45,7 +45,7 @@
     <div class="row between">
       <div>
         <strong>{account.session.user.display_name}</strong>
-        <p class="help">@{account.session.user.username}</p>
+        <p class="help">@{account.session.user.handle}</p>
       </div>
       <button
         class="text-button"
