@@ -4,11 +4,11 @@
 
 use super::*;
 use crate::{
-    AdminService, Operator, Reason,
+    AdminError, Operator, Reason,
     admin::tests::{Account, Harness, cli, operator},
     routes,
     security::CSRF_HEADER,
-    tests::{AUTH_ORIGIN, Browser, Replicas},
+    tests::{AUTH_ORIGIN, Browser, Replicas, until_blocked},
 };
 use axum::{
     body::Body,
@@ -312,59 +312,97 @@ async fn the_admin_mount_checks_who_acts_and_why() {
 }
 
 /// A change checks its administrator again under the account lock and before
-/// committing: rights revoked after the request was admitted, or a target made an
-/// administrator meanwhile, refuse it and change nothing. The CLI may change an
-/// administrator's account.
+/// committing: rights revoked, or a target made an administrator, while the
+/// change waits for the account refuse it, and nothing it wrote commits. The CLI
+/// may change an administrator's account.
 #[tokio::test]
 #[ignore = "requires TEST_DATABASE_URL"]
-async fn changes_check_the_administrator_again() {
+async fn changes_check_the_administrator_again_after_waiting() {
     let fixture = Fixture::new().await;
-    let service = AccountService::new(fixture.harness.database.clone());
-    let admins = AdminService::new(fixture.harness.database.clone());
-    let reason = || Some(Reason::parse("Support ticket".into()).expect("reason"));
+    let database = &fixture.harness.database;
+    let service = AccountService::new(database.clone());
     let rename = async |operator: Operator, user: UserId, passkey: PasskeyId| {
+        let reason = Reason::parse("Support ticket".into()).expect("reason");
+        let subject = Subject::operator(user, operator, Some(reason));
         service
-            .rename_passkey(
-                &Subject::operator(user, operator, reason()),
-                passkey,
-                "Renamed".into(),
-            )
+            .rename_passkey(&subject, passkey, "Renamed".into())
             .await
     };
-
     let (target, passkeys) = fixture.target(1).await;
+    let user = target.user_id;
+
+    // The acting administrator's rights are revoked while the change waits.
     let revoked = fixture.harness.admin().await;
-    let admitted = operator(revoked, Utc::now());
-    admins
-        .revoke_administrator(&cli(), revoked.user_id)
+    let mut revocation = database.begin().await.expect("transaction");
+    revocation
+        .users()
+        .find_by_id_for_update(user)
+        .await
+        .expect("target lock");
+    revocation
+        .administrators()
+        .revoke(revoked.user_id)
         .await
         .expect("revoke");
-    assert!(matches!(
-        rename(admitted, target.user_id, passkeys[0]).await,
-        Err(AccountError::Operator(crate::AdminError::NotAdministrator))
-    ));
+    let (result, ()) = tokio::join!(
+        rename(operator(revoked, Utc::now()), user, passkeys[0]),
+        async {
+            until_blocked(&mut revocation, 1).await;
+            revocation.commit().await.expect("commit");
+        }
+    );
+    assert!(
+        matches!(
+            result,
+            Err(AccountError::Operator(AdminError::NotAdministrator))
+        ),
+        "{result:?}"
+    );
 
-    let admitted = operator(fixture.admin, Utc::now());
-    admins
-        .grant_administrator(&cli(), target.user_id)
+    // The target becomes an administrator while the change waits.
+    let mut grant = database.begin().await.expect("transaction");
+    grant
+        .users()
+        .find_by_id_for_update(user)
         .await
-        .expect("grant");
-    assert!(matches!(
-        rename(admitted, target.user_id, passkeys[0]).await,
-        Err(AccountError::Operator(
-            crate::AdminError::AdministratorTarget
-        ))
-    ));
-    let keys = fixture
-        .harness
-        .database
+        .expect("target lock");
+    grant.administrators().grant(user).await.expect("grant");
+    let (result, ()) = tokio::join!(
+        rename(operator(fixture.admin, Utc::now()), user, passkeys[0]),
+        async {
+            until_blocked(&mut grant, 1).await;
+            grant.commit().await.expect("commit");
+        }
+    );
+    assert!(
+        matches!(
+            result,
+            Err(AccountError::Operator(AdminError::AdministratorTarget))
+        ),
+        "{result:?}"
+    );
+
+    let keys = database
         .passkeys()
-        .list_active(target.user_id)
+        .list_active(user)
         .await
         .expect("passkeys");
     assert_eq!(keys[0].friendly_name, "Key 0", "nothing changed");
-
-    rename(cli(), target.user_id, passkeys[0])
+    let renamed = DomainEvent::PasskeyRenamed {
+        passkey_id: passkeys[0],
+    };
+    let history = database
+        .events()
+        .history_for_user(user, 20)
+        .await
+        .expect("history");
+    assert!(
+        history
+            .iter()
+            .all(|stored| stored.event.known() != Some(&renamed)),
+        "no rename recorded"
+    );
+    rename(cli(), user, passkeys[0])
         .await
         .expect("the CLI changes an administrator's account");
 }
