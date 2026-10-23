@@ -1165,7 +1165,7 @@ impl HttpSecurity {
             ),
             (
                 header::ACCESS_CONTROL_ALLOW_METHODS,
-                "GET, POST, PATCH, DELETE, OPTIONS",
+                "GET, POST, PUT, PATCH, DELETE, OPTIONS",
             ),
             (header::VARY, "Origin"),
         ] {

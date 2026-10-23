@@ -310,6 +310,13 @@ async fn router_enforces_exact_browser_origins_csrf_and_public_client_cors_bound
                 .expect("allowed headers")
                 .contains("x-piquel-csrf")
         );
+        // Every method the account API routes, such as `PUT /account/handle`.
+        let methods = response.headers()[header::ACCESS_CONTROL_ALLOW_METHODS]
+            .to_str()
+            .expect("allowed methods");
+        for method in ["POST", "PUT", "PATCH", "DELETE"] {
+            assert!(methods.contains(method), "{method} in {methods}");
+        }
     }
     let response = fixture
         .request(
