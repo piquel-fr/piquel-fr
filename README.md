@@ -132,6 +132,18 @@ Administrators cannot grant or revoke their own rights, and nobody can revoke th
 administrator's. Every change is recorded as a domain event with its administrator
 or CLI operator.
 
+### Handles
+
+```sh
+just auth handle check                      # accounts whose handle breaks the rules
+just auth handle rename old_name new-name   # --allow-reserved to assign a reserved name
+```
+
+`check` lists every account whose handle breaks the syntax, is reserved or looks like
+another account's (see [Security behavior](#security-behavior)), and fails while any
+remain. A rename bumps the account's profile version, so relying parties refresh
+`preferred_username`, and is recorded as a domain event with its CLI operator.
+
 ### Outbound deliveries
 
 Messages for other systems wait in a queue in the database until a worker sends
@@ -258,7 +270,14 @@ explains how to choose a requirement and handle the challenge.
 - Passkeys require user verification and prefer resident credentials. Synced
   passkeys and security keys are accepted. Android enrollment offers an explicit
   Google Password Manager option for devices with Google services. Authentication supports the browser
-  account picker and a username fallback.
+  account picker and a handle fallback.
+- An account's handle is its public identifier and login name, released as
+  `preferred_username`: 3–32 characters of `[a-z0-9-]`, without a leading, trailing
+  or double hyphen, so it is a valid DNS label. Signup trims and lowercases it, and
+  refuses reserved names (infrastructure labels such as `auth` and `www`, RFC 2142
+  mailboxes, piquel.fr routes and the brand) and names that look like one: hyphens
+  are dropped, and `0`, `1` or `i`, `5`, `rn` and `vv` read as `o`, `l`, `s`, `m` and
+  `w`. Usernames from before these rules still sign in until an operator renames them.
 - Social-first signup remains pending until its first passkey is committed. Only
   a registration that names the pending identity shown on the signup page attaches
   it; plain registration ignores it. A social login can never replace an

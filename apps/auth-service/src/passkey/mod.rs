@@ -11,7 +11,7 @@ use axum::{
     routing::{get, patch, post},
 };
 use piquel_common::{
-    AuthenticationMethod, PasskeyId, UserId,
+    AuthenticationMethod, Handle, PasskeyId, UserId,
     events::{Actor, DomainEvent, EventContext, RevocationReason},
     protocol::api,
 };
@@ -43,7 +43,7 @@ pub use error::PasskeyConfigError;
 use error::PasskeyError;
 use types::{
     AuthenticationFinish, DisplayName, EnrollmentStart, LoginStart, PasskeyKind, PasskeyName,
-    RegistrationFinish, RegistrationStart, Rename, SessionView, UserView, Username,
+    RegistrationFinish, RegistrationStart, Rename, SessionView, UserView,
 };
 
 /// Browser passkey ceremonies, passkey management and session confirmation.
@@ -369,7 +369,8 @@ impl PasskeyApplication {
         headers: HeaderMap,
         Json(input): Json<RegistrationStart>,
     ) -> Result<Response, ApiError> {
-        let username = Username::parse(input.username)?;
+        let username = Handle::parse(&input.username)?;
+        username.ensure_unreserved()?;
         let display_name = DisplayName::parse(if input.display_name.is_empty() {
             username.as_str().to_owned()
         } else {
@@ -457,12 +458,12 @@ impl PasskeyApplication {
         tx.users()
             .insert(&InsertUser {
                 id: user_id,
-                username: username.into(),
+                handle: username,
                 display_name: display_name.into(),
             })
             .await
             .map_err(|error| match error {
-                DatabaseError::Conflict(_) => PasskeyError::UsernameTaken(error),
+                DatabaseError::Conflict(_) => PasskeyError::HandleTaken(error),
                 DatabaseError::NotFound
                 | DatabaseError::Timeout(_)
                 | DatabaseError::InvalidStoredData { .. }

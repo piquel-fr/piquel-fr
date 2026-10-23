@@ -39,7 +39,9 @@ mod sessions;
 #[cfg(test)]
 mod tests;
 
-pub use admin::{AdminError, AdminOperations, GracePeriod, InviteExpiry, Operator};
+pub use admin::{
+    AdminError, AdminOperations, GracePeriod, HandleIssue, HandleProblem, InviteExpiry, Operator,
+};
 pub use clients::{Applied, ClientRegistry, ClientRegistryError};
 pub use config::{AuthConfig, PUBLIC_BASE_URL};
 use federation::FederationApplication;

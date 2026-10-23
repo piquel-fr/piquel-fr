@@ -159,6 +159,10 @@ fn event_kinds_match_their_serde_tags() {
         DomainEvent::AccountViewed {},
         DomainEvent::AdministratorGranted {},
         DomainEvent::AdministratorRevoked {},
+        DomainEvent::HandleChanged {
+            old: Personal::Value("a_b".into()),
+            new: Personal::Value(Handle::parse("a-b").expect("handle")),
+        },
         DomainEvent::ClientRegistered {
             client_id: client_id.clone(),
             kind: clients::ClientKind::Public,

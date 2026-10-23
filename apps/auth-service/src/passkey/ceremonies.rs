@@ -2,7 +2,7 @@
 
 use super::{
     BrowserCookie, PasskeyApplication, PasskeyError,
-    types::{CeremonyResponse, DisplayName, Username},
+    types::{CeremonyResponse, DisplayName},
 };
 use axum::{
     Json,
@@ -10,7 +10,7 @@ use axum::{
     response::{IntoResponse, Response},
 };
 use chrono::{Duration, Utc};
-use piquel_common::{SessionId, TokenId, UserId};
+use piquel_common::{Handle, SessionId, TokenId, UserId};
 use piquel_crypto::Secret;
 use piquel_repository::{CeremonyKind, InsertCeremony};
 use serde::{Deserialize, Serialize};
@@ -26,8 +26,8 @@ const CEREMONY_LIFETIME: Duration = Duration::minutes(5);
 pub(super) struct RegistrationCeremony {
     /// New account identifier included in the authenticator's user handle.
     pub(super) user_id: UserId,
-    /// Validated account username.
-    pub(super) username: Username,
+    /// Validated, unreserved account handle.
+    pub(super) username: Handle,
     /// Validated account display name.
     pub(super) display_name: DisplayName,
     /// Digest redeemed atomically with account creation when admission is gated.

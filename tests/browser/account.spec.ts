@@ -38,7 +38,7 @@ test('passkey lifecycle, passkey confirmation and browser OIDC consent with SSO'
     await page.goto(
       `/register${invitation ? `?invitation=${encodeURIComponent(invitation)}` : ''}`
     );
-    await page.getByLabel('Username', { exact: true }).fill(username);
+    await page.getByLabel('Handle', { exact: true }).fill(username);
     await page.getByLabel('Passkey name', { exact: true }).fill('Synced passkey');
     await page.getByRole('button', { name: 'Create account with a passkey' }).click();
     await expect(page).toHaveURL(settingsUrl);

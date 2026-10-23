@@ -32,7 +32,7 @@ pub use caller::Operator;
 use caller::{Admin, AdminTokens, ConfirmedAdmin};
 pub use error::AdminError;
 pub use operations::AdminOperations;
-pub use types::{GracePeriod, InvalidLifetime, InviteExpiry, Reason};
+pub use types::{GracePeriod, HandleIssue, HandleProblem, InvalidLifetime, InviteExpiry, Reason};
 
 /// Admin API routes and the operations behind them.
 #[derive(Clone)]

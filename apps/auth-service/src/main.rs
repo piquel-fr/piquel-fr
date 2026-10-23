@@ -5,7 +5,7 @@ use auth_service::{
 };
 use clap::{Args, Parser, Subcommand, ValueEnum};
 use piquel_common::{
-    ClientId, DeliveryId, ErrorChain,
+    ClientId, DeliveryId, ErrorChain, Handle,
     clients::{
         AllowedScopes, ClientKind, ClientRegistration, DisplayName, InvalidCount,
         InvalidDisplayName, InvalidRedirectUri, InvalidScopeName, PostLogoutUris, RedirectUri,
@@ -61,6 +61,9 @@ enum CliError {
     /// An administrative operation was refused or failed.
     #[error(transparent)]
     Admin(#[from] AdminError),
+    /// `handle check` found accounts to fix.
+    #[error("{0} accounts break the handle rules")]
+    HandleProblems(usize),
     /// A client change was refused.
     #[error(transparent)]
     Client(#[from] ClientRegistryError),
@@ -150,6 +153,59 @@ enum Command {
     /// Grant, revoke or list administrators.
     #[command(subcommand)]
     Admin(AdminCommand),
+    /// Check accounts against the handle rules, and change their handles.
+    #[command(subcommand)]
+    Handle(HandleCommand),
+}
+
+/// Handle checks and changes. The CLI may act on any account.
+#[derive(Subcommand)]
+enum HandleCommand {
+    /// List accounts whose handle breaks the syntax, is reserved, or looks like
+    /// another account's. Fails while any remain.
+    Check,
+    /// Give an account a new handle, and record the change.
+    Rename {
+        /// The account's current handle.
+        handle: String,
+        /// Its new handle.
+        new: String,
+        /// Allow a reserved name, or one that looks like it.
+        #[arg(long)]
+        allow_reserved: bool,
+    },
+}
+
+impl HandleCommand {
+    /// Runs the check, or the change as the operator at this terminal.
+    async fn run(self, admin: &AdminOperations) -> Result<(), CliError> {
+        match self {
+            Self::Check => {
+                let problems = admin.check_handles().await?;
+                for problem in &problems {
+                    println!(
+                        "{}\t{}\t{}",
+                        problem.username, problem.user_id, problem.issue
+                    );
+                }
+                if !problems.is_empty() {
+                    return Err(CliError::HandleProblems(problems.len()));
+                }
+            }
+            Self::Rename {
+                handle,
+                new,
+                allow_reserved,
+            } => {
+                let user = admin.user_named(&handle).await?;
+                let new = Handle::parse(&new).map_err(AdminError::from)?;
+                admin
+                    .rename_handle(&Command::operator()?, user, new, allow_reserved)
+                    .await?;
+            }
+        }
+        Ok(())
+    }
 }
 
 /// Changes to the administrator list. The CLI may act on any account, and is how
@@ -229,6 +285,7 @@ impl Command {
             Self::Deliveries(command) => command.run(&database).await,
             // Grant, revoke and list need only the database, for a bare recovery shell.
             Self::Admin(command) => command.run(&AdminOperations::new(database)).await,
+            Self::Handle(command) => command.run(&AdminOperations::new(database)).await,
         }
     }
 

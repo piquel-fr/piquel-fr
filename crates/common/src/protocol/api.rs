@@ -37,6 +37,12 @@ pub enum ErrorCode {
         /// Maximum confirmation age the action accepts, in seconds.
         max_age: u32,
     },
+    /// The handle breaks the syntax rules.
+    HandleInvalid,
+    /// The handle is reserved, or looks like a reserved name.
+    HandleReserved,
+    /// Another account holds the handle.
+    HandleTaken,
 }
 
 /// An active passkey of an account, without its cryptographic contents.

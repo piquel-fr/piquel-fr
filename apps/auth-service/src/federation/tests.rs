@@ -10,7 +10,7 @@ use axum::{
     routing::post,
 };
 use piquel_auth::{KeyCache, KeySet};
-use piquel_common::{config::SecretReference, protocol::jwt::TokenType};
+use piquel_common::{Handle, config::SecretReference, protocol::jwt::TokenType};
 use piquel_crypto::Rs256Key;
 use piquel_crypto::Secret;
 use piquel_repository::{
@@ -188,7 +188,8 @@ impl TestApp {
         tx.users()
             .insert(&InsertUser {
                 id,
-                username: format!("fed_{}", TokenId::new()).replace('-', ""),
+                handle: Handle::parse(&format!("fed-{}", &TokenId::new().to_string()[24..]))
+                    .expect("handle"),
                 display_name: "Federation Test".into(),
             })
             .await

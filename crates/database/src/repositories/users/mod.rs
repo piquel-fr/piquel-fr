@@ -4,7 +4,7 @@ use super::{RepositoryExecutor, Unsigned, UserRepository};
 use crate::DatabaseError;
 use chrono::{DateTime, Utc};
 use piquel_admin_api::User;
-use piquel_common::{AccountStatus, UserId};
+use piquel_common::{AccountStatus, Handle, UserId};
 
 /// A user account row.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -37,13 +37,22 @@ impl From<StoredUser> for User {
     }
 }
 
+/// An account's ID and login name, for checking every name against the handle rules.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct AccountName {
+    /// Account identifier.
+    pub id: UserId,
+    /// Login name, which may predate the handle rules.
+    pub username: String,
+}
+
 /// A new active account.
 #[derive(Clone, Debug)]
 pub struct InsertUser {
     /// Identifier for the new account.
     pub id: UserId,
-    /// Login name; must be unique.
-    pub username: String,
+    /// Handle, also the login name; must be unique.
+    pub handle: Handle,
     /// Name shown to the user and to relying parties.
     pub display_name: String,
 }
@@ -68,7 +77,7 @@ impl UserRepository<'_> {
                     profile_version AS "profile_version: Unsigned",
                     status AS "status: AccountStatus", created_at, updated_at"#,
                 input.id.as_uuid(),
-                input.username,
+                input.handle.as_str(),
                 input.display_name,
             )
         )
@@ -202,6 +211,44 @@ impl UserRepository<'_> {
                 username,
             )
         )
+    }
+
+    /// Lists every account's login name, in any status, ordered by name.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`DatabaseError`] if the query fails or a row is invalid.
+    pub async fn list_names(&mut self) -> Result<Vec<AccountName>, DatabaseError> {
+        run!(
+            self,
+            fetch_all,
+            sqlx::query_as!(
+                AccountName,
+                r#"SELECT id AS "id: UserId", username FROM users ORDER BY username"#,
+            )
+        )
+    }
+
+    /// Gives the account `handle` as its login name and bumps its profile version,
+    /// so relying parties refresh `preferred_username`.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`DatabaseError::Conflict`] if another account has the name, or
+    /// another [`DatabaseError`] if the query fails.
+    pub async fn rename(&mut self, id: UserId, handle: &Handle) -> Result<(), DatabaseError> {
+        run!(
+            self,
+            execute,
+            sqlx::query!(
+                "UPDATE users
+                SET username = $2, profile_version = profile_version + 1, updated_at = now()
+                WHERE id = $1",
+                id.as_uuid(),
+                handle.as_str(),
+            )
+        )?;
+        Ok(())
     }
 
     /// Changes the account's status. Returns `false` if it already had it.

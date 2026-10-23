@@ -22,31 +22,6 @@ use webauthn_authenticator_rs::{WebauthnAuthenticator, softpasskey::SoftPasskey}
 /// Maximum JSON response accepted by the software browser fixture.
 const MAX_RESPONSE_BYTES: usize = 64 * 1024;
 
-/// Checks the precise signup alphabet and both username length boundaries.
-#[test]
-fn usernames_preserve_the_existing_ascii_contract() {
-    for valid in ["abc".to_owned(), "a_0-b".to_owned(), "a".repeat(32)] {
-        assert_eq!(
-            Username::parse(valid.clone()).expect("username").as_str(),
-            valid
-        );
-    }
-    for invalid in [
-        String::new(),
-        "ab".into(),
-        "a".repeat(33),
-        "Uppercase".into(),
-        "café".into(),
-        "abc def".into(),
-        "abc\n".into(),
-    ] {
-        assert!(matches!(
-            Username::parse(invalid),
-            Err(PasskeyError::InvalidUsername)
-        ));
-    }
-}
-
 /// Names count Unicode characters, preserve spacing and reject blank/control input.
 #[test]
 fn display_and_passkey_names_share_unicode_validation() {
@@ -160,7 +135,7 @@ impl Fixture {
         )
         .expect("passkey app");
         let user_id = UserId::new();
-        let username = format!("key_{}", &TokenId::new().to_string()[24..]);
+        let username = format!("key-{}", &TokenId::new().to_string()[24..]);
         let key_id = PasskeyId::new();
         // This software authenticator supports UV and signed counters, but not
         // resident credentials. Browser tests cover production resident signup;
@@ -181,7 +156,7 @@ impl Fixture {
         tx.users()
             .insert(&InsertUser {
                 id: user_id,
-                username: username.clone(),
+                handle: Handle::parse(&username).expect("handle"),
                 display_name: "Test user".into(),
             })
             .await
@@ -334,6 +309,36 @@ impl Fixture {
     }
 }
 
+/// Signup normalizes the handle, and refuses invalid and reserved ones with their codes.
+#[tokio::test]
+#[ignore = "requires TEST_DATABASE_URL"]
+async fn signup_applies_the_handle_rules() {
+    let fixture = Fixture::new().await;
+    for (handle, code) in [("a_b", "handle_invalid"), ("adm1n", "handle_reserved")] {
+        let response = fixture
+            .request(
+                "/webauthn/register/start",
+                Method::POST,
+                "",
+                json!({"username": handle}),
+            )
+            .await;
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST, "{handle}");
+        assert_eq!(Fixture::json(response).await["code"], code, "{handle}");
+    }
+    let (started, _) = fixture
+        .start(
+            "/webauthn/register/start",
+            "",
+            json!({"username": " New-User "}),
+        )
+        .await;
+    assert_eq!(
+        started["public_key"]["publicKey"]["user"]["name"],
+        "new-user"
+    );
+}
+
 /// Checks that abandoned social signup state never attaches to unrelated registration.
 #[tokio::test]
 #[ignore = "requires TEST_DATABASE_URL"]
@@ -374,7 +379,7 @@ async fn registration_attaches_a_pending_social_signup_only_when_it_names_it() {
         .await;
     assert_eq!(response.status(), StatusCode::BAD_REQUEST);
     for (explicit, attached) in [(None, false), (Some(pending.id), true)] {
-        let username = format!("reg_{}", &TokenId::new().to_string()[24..]);
+        let username = format!("reg-{}", &TokenId::new().to_string()[24..]);
         let response = fixture
             .register(
                 &social,

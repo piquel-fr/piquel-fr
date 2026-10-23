@@ -2,7 +2,7 @@
 
 use super::ApiError;
 use crate::security::SessionError;
-use piquel_common::{InvalidValue, events::SignInFailure};
+use piquel_common::{HandleError, InvalidValue, events::SignInFailure, protocol::api::ErrorCode};
 use piquel_crypto::CryptoError;
 use piquel_repository::DatabaseError;
 use std::borrow::Cow;
@@ -11,12 +11,12 @@ use webauthn_rs::prelude::WebauthnError;
 /// Failures while validating, persisting or completing a passkey operation.
 #[derive(Debug, thiserror::Error)]
 pub(super) enum PasskeyError {
-    /// The signup username violates the account naming rules.
-    #[error("invalid username")]
-    InvalidUsername,
-    /// Another account registered the username while this signup was in progress.
-    #[error("username is taken")]
-    UsernameTaken(#[source] DatabaseError),
+    /// The signup handle breaks the handle rules or is reserved.
+    #[error("invalid handle")]
+    InvalidHandle(#[from] HandleError),
+    /// Another account holds the handle, perhaps since this signup started.
+    #[error("handle is taken")]
+    HandleTaken(#[source] DatabaseError),
     /// The authenticator's credential is already registered to an account.
     #[error("passkey credential is already registered")]
     PasskeyAlreadyRegistered(#[source] DatabaseError),
@@ -113,12 +113,11 @@ impl From<PasskeyError> for ApiError {
     /// Maps each failure to its browser status and message; internal details stay in the logs.
     fn from(error: PasskeyError) -> Self {
         match error {
-            PasskeyError::InvalidUsername => Self::bad_request(
-                "Use 3–32 lowercase letters, numbers, underscores or hyphens for your username.",
-            ),
-            PasskeyError::UsernameTaken(_) => Self::conflict(
-                "This username is taken. Choose another one and create your passkey again.",
-            ),
+            PasskeyError::InvalidHandle(error) => error.into(),
+            PasskeyError::HandleTaken(_) => Self::conflict(
+                "This handle is taken. Choose another one and create your passkey again.",
+            )
+            .with_code(ErrorCode::HandleTaken),
             PasskeyError::PasskeyAlreadyRegistered(_) => {
                 Self::conflict("This passkey is already registered to an account.")
             }
@@ -198,8 +197,8 @@ impl PasskeyError {
             | Self::InvalidUserHandle(_)
             | Self::UserVerificationRequired
             | Self::CredentialRevoked => Some(SignInFailure::InvalidCredential),
-            Self::InvalidUsername
-            | Self::UsernameTaken(_)
+            Self::InvalidHandle(_)
+            | Self::HandleTaken(_)
             | Self::PasskeyAlreadyRegistered(_)
             | Self::InvalidDisplayName
             | Self::InvalidPasskeyName

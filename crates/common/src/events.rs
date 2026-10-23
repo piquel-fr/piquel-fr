@@ -6,8 +6,8 @@
 //! [`RequestOrigin`](crate::events::RequestOrigin) apart from the event so both can be deleted on their own.
 
 use crate::{
-    AuthenticationMethod, ClientId, EventId, PasskeyId, Personal, Provider, SessionId, TokenId,
-    UserId, clients::ClientKind,
+    AuthenticationMethod, ClientId, EventId, Handle, PasskeyId, Personal, Provider, SessionId,
+    TokenId, UserId, clients::ClientKind,
 };
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
@@ -137,6 +137,15 @@ pub enum DomainEvent {
     AdministratorGranted {},
     /// The account's administrator rights were removed.
     AdministratorRevoked {},
+    /// The account's handle changed. Relying parties see it as a new
+    /// `preferred_username` once they refresh the profile.
+    HandleChanged {
+        /// The previous handle. A username from before the handle rules may break
+        /// them, so it stays text.
+        old: Personal<String>,
+        /// The new handle.
+        new: Personal<Handle>,
+    },
     /// An OIDC client was registered, enabled. A confidential client got its first secret.
     ClientRegistered {
         /// The new client.
@@ -232,6 +241,7 @@ impl DomainEvent {
             | Self::AccountViewed {}
             | Self::AdministratorGranted {}
             | Self::AdministratorRevoked {}
+            | Self::HandleChanged { .. }
             | Self::CompromiseReported { .. }
             | Self::Imported(_) => None,
         }
@@ -262,6 +272,7 @@ impl DomainEvent {
             | Self::AccountViewed {}
             | Self::AdministratorGranted {}
             | Self::AdministratorRevoked {}
+            | Self::HandleChanged { .. }
             | Self::ClientRegistered { .. }
             | Self::ClientUpdated { .. }
             | Self::ClientEnabled { .. }
@@ -297,6 +308,7 @@ impl DomainEvent {
             Self::AccountViewed {} => "account_viewed",
             Self::AdministratorGranted {} => "administrator_granted",
             Self::AdministratorRevoked {} => "administrator_revoked",
+            Self::HandleChanged { .. } => "handle_changed",
             Self::ClientRegistered { .. } => "client_registered",
             Self::ClientUpdated { .. } => "client_updated",
             Self::ClientEnabled { .. } => "client_enabled",
@@ -365,6 +377,7 @@ impl DomainEvent {
             Self::AccountViewed {} => HistoryEntry::AccountViewed,
             Self::AdministratorGranted {} => HistoryEntry::AdministratorGranted,
             Self::AdministratorRevoked {} => HistoryEntry::AdministratorRevoked,
+            Self::HandleChanged { .. } => HistoryEntry::HandleChanged,
             Self::CompromiseReported { event_id } => HistoryEntry::CompromiseReported {
                 event_id: *event_id,
             },
@@ -471,6 +484,9 @@ pub enum HistoryEntry {
     /// The account's administrator rights were removed.
     #[serde(rename = "administrator.revoked")]
     AdministratorRevoked,
+    /// The account's handle changed.
+    #[serde(rename = "account.handle_changed")]
+    HandleChanged,
     /// The user reported an entry as not theirs.
     #[serde(rename = "compromise.reported")]
     CompromiseReported {
@@ -515,6 +531,7 @@ impl HistoryEntry {
             | Self::AccountViewed
             | Self::AdministratorGranted
             | Self::AdministratorRevoked
+            | Self::HandleChanged
             | Self::CompromiseReported { .. }
             | Self::Legacy { .. } => None,
         }

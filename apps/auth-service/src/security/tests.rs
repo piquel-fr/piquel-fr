@@ -5,7 +5,7 @@ use crate::routes::federation;
 use crate::tests::Replicas;
 use axum::{Router, body::Body, http::Request as HttpRequest, middleware, routing::any};
 use piquel_common::{
-    TokenId,
+    Handle, TokenId,
     clients::ClientKind,
     events::{Browser, Platform},
 };
@@ -741,7 +741,8 @@ async fn confirmed_changes_serialize_with_logout() {
     tx.users()
         .insert(&InsertUser {
             id: user_id,
-            username: format!("lock_{}", &TokenId::new().to_string()[24..]),
+            handle: Handle::parse(&format!("lock-{}", &TokenId::new().to_string()[24..]))
+                .expect("handle"),
             display_name: "Lock test".into(),
         })
         .await
@@ -801,7 +802,8 @@ async fn session_lock_rechecks_expiry_after_waiting() {
     tx.users()
         .insert(&InsertUser {
             id: user_id,
-            username: format!("lock_{}", &TokenId::new().to_string()[24..]),
+            handle: Handle::parse(&format!("lock-{}", &TokenId::new().to_string()[24..]))
+                .expect("handle"),
             display_name: "Lock test".into(),
         })
         .await
