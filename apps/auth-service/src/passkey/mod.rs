@@ -1,14 +1,15 @@
 //! Browser-bound `WebAuthn` ceremonies, passkey management and session confirmation.
+use crate::account::{AccountError, AccountService, ConfirmedSubject, Subject, Viewer};
 use crate::config::PasskeyConfig;
 use crate::federation::FederationApplication;
 use crate::routes;
 use crate::security::{self, ApiError, BrowserCookie, RequestContext};
 use axum::{
     Json, Router,
-    extract::{Path, State},
+    extract::State,
     http::{HeaderMap, StatusCode, header},
     response::{IntoResponse, Response},
-    routing::{get, patch, post},
+    routing::{get, post},
 };
 use piquel_common::{
     AuthenticationMethod, Handle, PasskeyId, UserId,
@@ -40,10 +41,11 @@ use ceremonies::{
     LoginCeremony, RegistrationCeremony,
 };
 pub use error::PasskeyConfigError;
-use error::PasskeyError;
+pub(crate) use error::PasskeyError;
+pub(crate) use types::Rename;
 use types::{
     AuthenticationFinish, DisplayName, EnrollmentStart, LoginStart, PasskeyKind, PasskeyName,
-    RegistrationFinish, RegistrationStart, Rename, SessionView, UserView,
+    RegistrationFinish, RegistrationStart, SessionView, UserView,
 };
 
 /// Browser passkey ceremonies, passkey management and session confirmation.
@@ -88,7 +90,9 @@ impl PasskeyApplication {
         })
     }
 
-    /// Returns every passkey and browser-session endpoint.
+    /// Returns the passkey ceremonies and browser-session endpoints. Listing,
+    /// renaming and removing passkeys are shared settings, which
+    /// [`AccountService`] serves.
     pub(crate) fn routes(self) -> Router {
         Router::new()
             .route(
@@ -116,11 +120,6 @@ impl PasskeyApplication {
             .route(
                 routes::passkey::ENROLL_FINISH,
                 post(Self::finish_enrollment),
-            )
-            .route(routes::passkey::LIST, get(Self::list))
-            .route(
-                routes::passkey::ITEM,
-                patch(Self::rename).delete(Self::revoke),
             )
             .route(routes::passkey::SESSION, get(Self::session_view))
             .route(routes::passkey::SESSION_LOGOUT, post(Self::logout))
@@ -768,78 +767,6 @@ impl PasskeyApplication {
         Ok(StatusCode::NO_CONTENT)
     }
 
-    /// Lists public labels and identifiers of the account's active passkeys.
-    async fn list(
-        State(app): State<Self>,
-        security::Session(session): security::Session,
-    ) -> Result<Json<Vec<api::Passkey>>, ApiError> {
-        let passkeys = app.database.passkeys().list_active(session.user_id).await?;
-        Ok(Json(passkeys.into_iter().map(Into::into).collect()))
-    }
-
-    /// Changes a credential label. A name grants nothing, so a session is enough.
-    async fn rename(
-        State(app): State<Self>,
-        context: RequestContext,
-        security::Session(session): security::Session,
-        Path(id): Path<PasskeyId>,
-        Json(input): Json<Rename>,
-    ) -> Result<StatusCode, ApiError> {
-        let friendly_name = PasskeyName::parse(input.friendly_name)?;
-
-        let mut tx = app.database.begin().await?;
-        if !tx
-            .passkeys()
-            .rename(id, session.user_id, friendly_name.as_str())
-            .await?
-        {
-            return Err(PasskeyError::PasskeyNotFound.into());
-        }
-        tx.record(
-            &context.user(&session),
-            Some(session.user_id),
-            DomainEvent::PasskeyRenamed { passkey_id: id },
-        )
-        .await?;
-        tx.commit().await?;
-        Ok(StatusCode::NO_CONTENT)
-    }
-
-    /// Removes a passkey while retaining another and revoking the account's other sessions.
-    async fn revoke(
-        State(app): State<Self>,
-        context: RequestContext,
-        confirmed: security::Confirmed,
-        Path(id): Path<PasskeyId>,
-    ) -> Result<StatusCode, ApiError> {
-        let session = &confirmed.0;
-        let mut tx = app.database.begin().await?;
-        confirmed.lock(&mut tx).await?;
-        if !tx
-            .passkeys()
-            .revoke_if_not_last(id, session.user_id)
-            .await?
-        {
-            return Err(PasskeyError::LastPasskey.into());
-        }
-        tx.record(
-            &context.user(session),
-            Some(session.user_id),
-            DomainEvent::PasskeyRemoved { passkey_id: id },
-        )
-        .await?;
-        security::Session::revoke(
-            &mut tx,
-            context,
-            session,
-            SessionScope::AllExcept(session.id),
-            RevocationReason::CredentialRemoved,
-        )
-        .await?;
-        tx.commit().await?;
-        Ok(StatusCode::NO_CONTENT)
-    }
-
     /// Returns the current account identity.
     async fn session_view(
         State(app): State<Self>,
@@ -883,6 +810,76 @@ impl PasskeyApplication {
             .clear_on(&mut response)
             .map_err(PasskeyError::CookieHeader)?;
         Ok(response)
+    }
+}
+
+/// Passkey settings any administrator may also change: listing, renaming and
+/// removing.
+impl AccountService {
+    /// Lists public labels and identifiers of the account's active passkeys.
+    pub(crate) async fn passkeys(
+        &self,
+        viewer: &Viewer,
+    ) -> Result<Vec<api::Passkey>, AccountError> {
+        viewer.viewed(&self.database).await?;
+        let passkeys = self.database.passkeys().list_active(viewer.user()).await?;
+        Ok(passkeys.into_iter().map(Into::into).collect())
+    }
+
+    /// Changes a passkey's label. A name grants nothing, so the owner needs no
+    /// passkey confirmation.
+    pub(crate) async fn rename_passkey(
+        &self,
+        subject: &Subject,
+        id: PasskeyId,
+        name: String,
+    ) -> Result<(), AccountError> {
+        let friendly_name = PasskeyName::parse(name)?;
+        let mut tx = self.database.begin().await?;
+        subject.lock(&mut tx).await?;
+        if !tx
+            .passkeys()
+            .rename(id, subject.user(), friendly_name.as_str())
+            .await?
+        {
+            return Err(PasskeyError::PasskeyNotFound.into());
+        }
+        tx.record(
+            &subject.context(),
+            Some(subject.user()),
+            DomainEvent::PasskeyRenamed { passkey_id: id },
+        )
+        .await?;
+        subject.commit(tx).await
+    }
+
+    /// Removes a passkey and signs the account out elsewhere. One active passkey
+    /// always remains, even with a social identity linked.
+    pub(crate) async fn revoke_passkey(
+        &self,
+        subject: &ConfirmedSubject,
+        id: PasskeyId,
+    ) -> Result<(), AccountError> {
+        let mut tx = self.database.begin().await?;
+        subject.lock(&mut tx).await?;
+        if !tx.passkeys().revoke_if_not_last(id, subject.user()).await? {
+            return Err(PasskeyError::LastPasskey.into());
+        }
+        let context = subject.context();
+        tx.record(
+            &context,
+            Some(subject.user()),
+            DomainEvent::PasskeyRemoved { passkey_id: id },
+        )
+        .await?;
+        tx.revoke_sessions(
+            &context,
+            subject.user(),
+            subject.others(),
+            &RevocationReason::CredentialRemoved,
+        )
+        .await?;
+        subject.commit(tx).await
     }
 }
 

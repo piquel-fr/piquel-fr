@@ -113,6 +113,7 @@ async fn invitation_redemption_and_confirmation_lifecycle() {
             session_id: Some(session),
         },
         origin: RequestOrigin::default(),
+        reason: None,
     };
     let revoke = |scope, reason| {
         let context = &context;

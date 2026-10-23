@@ -3,38 +3,35 @@
 //! reports. Adding, changing the primary address and removing one are sensitive,
 //! since the addresses receive security notices, so they need a recent passkey
 //! confirmation. Verifying needs only the link's token: possessing it proves
-//! control of the mailbox.
+//! control of the mailbox. Administrators may list, change the primary address and
+//! remove, but only the owner adds an address.
 //!
 //! The token is never stored, not even in the delivery that sends it: it is
 //! derived from the address's ID with [`VerificationKey`], once here to store its
 //! digest, and again by the email sender. See `docs/architecture/delivery-queue.md`.
 use crate::{
+    account::{AccountError, AccountService, ConfirmedSubject, Viewer},
     config::EmailConfig,
     routes,
-    security::{self, ApiError, Confirmed, OptionalSession, RequestContext},
+    security::{ApiError, Confirmed, OptionalSession, RequestContext},
 };
-use axum::{
-    Json, Router,
-    extract::{Path, State},
-    http::StatusCode,
-    routing::{delete, get, post},
-};
+use axum::{Json, Router, extract::State, http::StatusCode, routing::post};
 use chrono::{Duration, Utc};
 use piquel_common::{
     EmailId, Personal, UserId,
     email::NormalizedEmail,
-    events::{Actor, DomainEvent},
+    events::{Actor, DomainEvent, EventContext},
 };
 use piquel_crypto::{CryptoError, Digest, Secret};
 use piquel_repository::{
-    Database, DatabaseError, DatabaseTransaction, InsertUnverifiedEmail, StoredEmail, StoredSession,
+    Database, DatabaseError, DatabaseTransaction, InsertUnverifiedEmail, StoredEmail,
 };
 use serde::{Deserialize, Serialize};
 use std::{net::IpAddr, sync::Arc, time::Duration as StdDuration};
 
 /// Email failures and their browser response mapping.
 mod error;
-use error::EmailError;
+pub(crate) use error::EmailError;
 
 /// How long a verification link works.
 pub(crate) const VERIFICATION_LIFETIME: Duration = Duration::hours(24);
@@ -84,15 +81,15 @@ pub(crate) struct EmailApplication {
 
 /// An address as the account sees it.
 #[derive(Serialize)]
-struct EmailView {
+pub(crate) struct EmailView {
     /// Address ID.
-    id: EmailId,
+    pub(crate) id: EmailId,
     /// The normalized address.
-    address: String,
+    pub(crate) address: String,
     /// Whether someone followed its verification link.
-    verified: bool,
+    pub(crate) verified: bool,
     /// Whether it is the primary address, which applications receive.
-    primary: bool,
+    pub(crate) primary: bool,
 }
 
 impl From<StoredEmail> for EmailView {
@@ -139,23 +136,15 @@ impl EmailApplication {
         }
     }
 
-    /// Returns the address endpoints with this application as state.
+    /// Returns the routes that add and verify addresses, with this application as
+    /// state. Only the owner can add a channel that receives the account's email;
+    /// listing, changing the primary address and removing are shared settings,
+    /// which [`AccountService`] serves.
     pub(crate) fn routes(self) -> Router {
         Router::new()
-            .route(routes::emails::LIST, get(Self::list).post(Self::add))
+            .route(routes::emails::LIST, post(Self::add))
             .route(routes::emails::VERIFY, post(Self::verify))
-            .route(routes::emails::PRIMARY, post(Self::make_primary))
-            .route(routes::emails::ITEM, delete(Self::remove))
             .with_state(self)
-    }
-
-    /// Lists the account's addresses, primary first.
-    async fn list(
-        State(app): State<Self>,
-        security::Session(session): security::Session,
-    ) -> Result<Json<Vec<EmailView>>, ApiError> {
-        let emails = app.database.emails().list(session.user_id).await?;
-        Ok(Json(emails.into_iter().map(EmailView::from).collect()))
     }
 
     /// Adds an unverified address and queues its verification email, in one
@@ -190,7 +179,13 @@ impl EmailApplication {
             if existing.verified_at.is_some() {
                 return Err(EmailError::AlreadyAdded.into());
             }
-            Self::delete(&mut tx, context, session, existing.id).await?;
+            Self::delete(
+                &mut tx,
+                &context.user(session),
+                session.user_id,
+                existing.id,
+            )
+            .await?;
             count -= 1;
         }
         if count >= MAX_EMAILS {
@@ -294,86 +289,22 @@ impl EmailApplication {
         }))
     }
 
-    /// Makes a verified address the primary one, and queues a notice to the
-    /// previous primary address.
-    async fn make_primary(
-        State(app): State<Self>,
-        context: RequestContext,
-        confirmed: Confirmed,
-        Path(id): Path<EmailId>,
-    ) -> Result<StatusCode, ApiError> {
-        let session = &confirmed.0;
-        let mut tx = app.database.begin().await?;
-        confirmed.lock(&mut tx).await?;
-        let email = tx
-            .emails()
-            .find(session.user_id, id)
-            .await?
-            .ok_or(EmailError::NotFound)?;
-        if email.verified_at.is_none() {
-            return Err(EmailError::NotVerified.into());
-        }
-        if !email.is_primary {
-            let previous_email_id = tx.emails().set_primary(session.user_id, id).await?;
-            tx.record(
-                &context.user(session),
-                Some(session.user_id),
-                DomainEvent::PrimaryEmailChanged {
-                    email_id: id,
-                    previous_email_id,
-                },
-            )
-            .await?;
-        }
-        tx.commit().await?;
-        Ok(StatusCode::NO_CONTENT)
-    }
-
-    /// Removes an address, and queues a notice to it if it was verified. The
-    /// primary address can only be removed once no other verified address could
-    /// replace it: another one must be made primary first, which notifies it too.
-    async fn remove(
-        State(app): State<Self>,
-        context: RequestContext,
-        confirmed: Confirmed,
-        Path(id): Path<EmailId>,
-    ) -> Result<StatusCode, ApiError> {
-        let session = &confirmed.0;
-        let mut tx = app.database.begin().await?;
-        confirmed.lock(&mut tx).await?;
-        let emails = tx.emails().list(session.user_id).await?;
-        let email = emails
-            .iter()
-            .find(|email| email.id == id)
-            .ok_or(EmailError::NotFound)?;
-        if email.is_primary
-            && emails
-                .iter()
-                .any(|other| other.id != id && other.verified_at.is_some())
-        {
-            return Err(EmailError::PrimaryInUse.into());
-        }
-        Self::delete(&mut tx, context, session, id).await?;
-        tx.commit().await?;
-        Ok(StatusCode::NO_CONTENT)
-    }
-
-    /// Records the removal of the session's account's address `id`, then deletes
-    /// it. In that order, so the `email` channel still reads a verified address
-    /// and copies it into the notice of its removal.
+    /// Records the removal of `user_id`'s address `id` as `context`'s, then
+    /// deletes it. In that order, so the `email` channel still reads a verified
+    /// address and copies it into the notice of its removal.
     async fn delete(
         tx: &mut DatabaseTransaction<'_>,
-        context: RequestContext,
-        session: &StoredSession,
+        context: &EventContext,
+        user_id: UserId,
         id: EmailId,
     ) -> Result<(), DatabaseError> {
         tx.record(
-            &context.user(session),
-            Some(session.user_id),
+            context,
+            Some(user_id),
             DomainEvent::EmailRemoved { email_id: id },
         )
         .await?;
-        tx.emails().remove(session.user_id, id).await
+        tx.emails().remove(user_id, id).await
     }
 
     /// Counts one verification email against the hourly limits of the account,
@@ -405,6 +336,76 @@ impl EmailApplication {
             }
         }
         Ok(())
+    }
+}
+
+/// Address settings any administrator may also change: listing, choosing the
+/// primary address among verified ones, and removing. Each change queues the same
+/// notices, whoever makes it.
+impl AccountService {
+    /// Lists the account's addresses, primary first.
+    pub(crate) async fn emails(&self, viewer: &Viewer) -> Result<Vec<EmailView>, AccountError> {
+        viewer.viewed(&self.database).await?;
+        let emails = self.database.emails().list(viewer.user()).await?;
+        Ok(emails.into_iter().map(EmailView::from).collect())
+    }
+
+    /// Makes a verified address the primary one, and queues a notice to the
+    /// previous primary address.
+    pub(crate) async fn make_primary_email(
+        &self,
+        subject: &ConfirmedSubject,
+        id: EmailId,
+    ) -> Result<(), AccountError> {
+        let mut tx = self.database.begin().await?;
+        subject.lock(&mut tx).await?;
+        let email = tx
+            .emails()
+            .find(subject.user(), id)
+            .await?
+            .ok_or(EmailError::NotFound)?;
+        if email.verified_at.is_none() {
+            return Err(EmailError::NotVerified.into());
+        }
+        if !email.is_primary {
+            let previous_email_id = tx.emails().set_primary(subject.user(), id).await?;
+            tx.record(
+                &subject.context(),
+                Some(subject.user()),
+                DomainEvent::PrimaryEmailChanged {
+                    email_id: id,
+                    previous_email_id,
+                },
+            )
+            .await?;
+        }
+        subject.commit(tx).await
+    }
+
+    /// Removes an address, and queues a notice to it if it was verified. The
+    /// primary address can only be removed once no other verified address could
+    /// replace it: another one must be made primary first, which notifies it too.
+    pub(crate) async fn remove_email(
+        &self,
+        subject: &ConfirmedSubject,
+        id: EmailId,
+    ) -> Result<(), AccountError> {
+        let mut tx = self.database.begin().await?;
+        subject.lock(&mut tx).await?;
+        let emails = tx.emails().list(subject.user()).await?;
+        let email = emails
+            .iter()
+            .find(|email| email.id == id)
+            .ok_or(EmailError::NotFound)?;
+        if email.is_primary
+            && emails
+                .iter()
+                .any(|other| other.id != id && other.verified_at.is_some())
+        {
+            return Err(EmailError::PrimaryInUse.into());
+        }
+        EmailApplication::delete(&mut tx, &subject.context(), subject.user(), id).await?;
+        subject.commit(tx).await
     }
 }
 

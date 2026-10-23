@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "SELECT\n                    e.id AS \"id: EventId\", e.txid::text::bigint AS \"txid!\", e.sequence,\n                    e.occurred_at, e.kind, e.version, e.payload, e.actor AS \"actor: Json<Actor>\",\n                    e.subject_user_id AS \"subject_user_id: UserId\",\n                    e.trace_id AS \"trace_id: TraceId\",\n                    p.event_id IS NOT NULL AS \"personal!\", p.client_ip AS \"client_ip?: IpAddr\",\n                    p.user_agent_family AS \"browser?: Browser\",\n                    p.platform AS \"platform?: Platform\",\n                    p.details AS \"details?\"\n                FROM domain_events e\n                LEFT JOIN event_personal_data p ON p.event_id = e.id\n                WHERE ($1::uuid IS NULL OR e.subject_user_id = $1)\n                AND ($2::text IS NULL OR e.kind = $2)\n                AND (\n                    $3::uuid IS NULL\n                    OR e.sequence < (\n                        SELECT sequence FROM domain_events\n                        WHERE id = $3\n                        AND ($1::uuid IS NULL OR subject_user_id = $1)\n                    )\n                )\n                AND ($5::uuid IS NULL OR e.id = $5)\n                ORDER BY e.sequence DESC\n                LIMIT $4",
+  "query": "SELECT\n                    e.id AS \"id: EventId\", e.txid::text::bigint AS \"txid!\", e.sequence,\n                    e.occurred_at, e.kind, e.version, e.payload, e.actor AS \"actor: Json<Actor>\",\n                    e.subject_user_id AS \"subject_user_id: UserId\",\n                    e.trace_id AS \"trace_id: TraceId\",\n                    p.event_id IS NOT NULL AS \"personal!\", p.client_ip AS \"client_ip?: IpAddr\",\n                    p.user_agent_family AS \"browser?: Browser\",\n                    p.platform AS \"platform?: Platform\",\n                    p.details AS \"details?\", p.reason AS \"reason?\"\n                FROM domain_events e\n                LEFT JOIN event_personal_data p ON p.event_id = e.id\n                WHERE ($1::uuid IS NULL OR e.subject_user_id = $1)\n                AND ($2::text IS NULL OR e.kind = $2)\n                AND (\n                    $3::uuid IS NULL\n                    OR e.sequence < (\n                        SELECT sequence FROM domain_events\n                        WHERE id = $3\n                        AND ($1::uuid IS NULL OR subject_user_id = $1)\n                    )\n                )\n                AND ($5::uuid IS NULL OR e.id = $5)\n                ORDER BY e.sequence DESC\n                LIMIT $4",
   "describe": {
     "columns": [
       {
@@ -77,6 +77,11 @@
         "ordinal": 14,
         "name": "details?",
         "type_info": "Jsonb"
+      },
+      {
+        "ordinal": 15,
+        "name": "reason?",
+        "type_info": "Text"
       }
     ],
     "parameters": {
@@ -103,8 +108,9 @@
       true,
       true,
       true,
-      false
+      false,
+      true
     ]
   },
-  "hash": "52b2b94c31a434f5e5a3843637f7975ef66d5fb5fc4fb09ff96628b8430f5751"
+  "hash": "541618e02510feb91705bd2a2b159a72deb3c100b617b192255cf984b4fee39b"
 }

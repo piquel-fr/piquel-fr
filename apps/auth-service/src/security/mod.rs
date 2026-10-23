@@ -555,6 +555,7 @@ impl RequestContext {
                 client_ip: Some(self.client_ip),
                 user_agent_family: Some(self.user_agent_family),
             },
+            reason: None,
         }
     }
 

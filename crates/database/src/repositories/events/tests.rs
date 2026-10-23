@@ -31,6 +31,7 @@ fn context(user: UserId) -> EventContext {
                 platform: Platform::Linux,
             }),
         },
+        reason: Some("Reported for spam".into()),
     }
 }
 
@@ -43,9 +44,10 @@ async fn record(pool: &PgPool, user: UserId, event: DomainEvent) {
     tx.commit().await.expect("commit");
 }
 
-/// Events commit and roll back with their transaction. Personal values and the
-/// request origin stay out of the event row, read back while kept, and read as
-/// erased once their row is deleted. Deleting the account leaves its history.
+/// Events commit and roll back with their transaction. Personal values, the
+/// request origin and the reason stay out of the event row, read back while kept,
+/// and read as erased once their row is deleted. Deleting the account leaves its
+/// history.
 #[tokio::test]
 #[ignore = "requires a disposable TEST_DATABASE_URL"]
 async fn personal_data_is_stored_apart_and_erases() {
@@ -78,6 +80,7 @@ async fn personal_data_is_stored_apart_and_erases() {
     assert_eq!(stored.event, RecordedEvent::Known(linked()));
     assert_eq!(stored.actor, context(user).actor);
     assert_eq!(stored.origin, Personal::Value(context(user).origin));
+    assert_eq!(stored.reason, context(user).reason);
     let (event_row, personal_row): (String, String) = sqlx::query_as(
         "SELECT to_jsonb(e)::text, to_jsonb(p)::text
         FROM domain_events e JOIN event_personal_data p ON p.event_id = e.id
@@ -87,7 +90,12 @@ async fn personal_data_is_stored_apart_and_erases() {
     .fetch_one(&pool)
     .await
     .expect("rows");
-    for personal in [subject.as_str(), "192.0.2.7", "firefox"] {
+    for personal in [
+        subject.as_str(),
+        "192.0.2.7",
+        "firefox",
+        "Reported for spam",
+    ] {
         assert!(!event_row.contains(personal), "{personal} in {event_row}");
         assert!(
             personal_row.contains(personal),
@@ -109,6 +117,7 @@ async fn personal_data_is_stored_apart_and_erases() {
         })
     );
     assert_eq!(erased.origin, Personal::Erased);
+    assert_eq!(erased.reason, None);
 
     sqlx::query("DELETE FROM users WHERE id = $1")
         .bind(user.as_uuid())
@@ -339,6 +348,7 @@ async fn migration_imports_the_audit_log() {
         include_str!("../../../migrations/0008_oidc_client_registry.sql"),
         include_str!("../../../migrations/0009_pushed_authorization_requests.sql"),
         include_str!("../../../migrations/0010_session_devices.sql"),
+        include_str!("../../../migrations/0015_event_reasons.sql"),
     ] {
         sqlx::raw_sql(migration)
             .execute(&mut connection)

@@ -10,7 +10,7 @@ use axum::{
     extract::{Path, Query, State},
     http::HeaderMap,
     response::{IntoResponse, Redirect, Response},
-    routing::{delete, get, post},
+    routing::{get, post},
 };
 use chrono::{Duration, Utc};
 use piquel_common::{
@@ -34,7 +34,8 @@ mod error;
 /// Pending evidence, signup attachment, linking and unlinking.
 mod identities;
 pub use error::FederationConfigError;
-use error::{FederationError, InvalidReturnTo};
+pub(crate) use error::FederationError;
+use error::InvalidReturnTo;
 /// Provider protocol facts and verified identity exchange.
 mod providers;
 use providers::{ProviderEndpoints, VerifiedIdentity};
@@ -211,7 +212,10 @@ impl FederationApplication {
             .join(&routes::federation::CALLBACK.replace("{provider}", provider.as_str()))
     }
 
-    /// Returns all social authentication and identity-management routes.
+    /// Returns the social sign-in and linking routes. Listing and unlinking
+    /// identities are shared settings, which [`AccountService`] serves.
+    ///
+    /// [`AccountService`]: crate::account::AccountService
     pub(crate) fn routes(self) -> Router {
         Router::new()
             .route(routes::federation::PROVIDERS, get(Self::providers))
@@ -220,8 +224,6 @@ impl FederationApplication {
             .route(routes::federation::PENDING, get(Self::pending_view))
             .route(routes::federation::LINK, post(Self::confirm_link))
             .route(routes::federation::CANCEL, post(Self::cancel))
-            .route(routes::federation::IDENTITIES, get(Self::list_identities))
-            .route(routes::federation::IDENTITY, delete(Self::unlink))
             .with_state(self)
     }
 

@@ -2,9 +2,17 @@
 //! ones each sign-out ends.
 
 use super::*;
-use crate::tests::{Browser, Replicas};
-use axum::http::Method;
-use piquel_common::events::{Actor, DomainEvent};
+use crate::{
+    account::AccountApplication,
+    routes,
+    tests::{Browser, Replicas},
+};
+use axum::{
+    Router,
+    http::{Method, StatusCode},
+};
+use piquel_common::events::{Actor, DomainEvent, RevocationReason};
+use piquel_repository::Database;
 use serde_json::{Value, json};
 
 /// The session routes over the test database.
@@ -20,7 +28,7 @@ impl Harness {
     async fn new() -> Self {
         let database = Replicas::database().await;
         Self {
-            router: SessionsApplication::new(database.clone()).routes(),
+            router: AccountApplication::new(database.clone()).routes(),
             database,
         }
     }

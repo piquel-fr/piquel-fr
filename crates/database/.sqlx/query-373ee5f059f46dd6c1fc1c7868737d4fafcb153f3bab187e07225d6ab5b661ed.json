@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "SELECT\n                    e.id AS \"id: EventId\", e.txid::text::bigint AS \"txid!\", e.sequence,\n                    e.occurred_at, e.kind, e.version, e.payload, e.actor AS \"actor: Json<Actor>\",\n                    e.subject_user_id AS \"subject_user_id: UserId\",\n                    e.trace_id AS \"trace_id: TraceId\",\n                    p.event_id IS NOT NULL AS \"personal!\", p.client_ip AS \"client_ip?: IpAddr\",\n                    p.user_agent_family AS \"browser?: Browser\",\n                    p.platform AS \"platform?: Platform\",\n                    p.details AS \"details?\"\n                FROM domain_events e\n                LEFT JOIN event_personal_data p ON p.event_id = e.id\n                WHERE e.client_id = $1\n                ORDER BY e.sequence DESC\n                LIMIT $2",
+  "query": "SELECT\n                    e.id AS \"id: EventId\", e.txid::text::bigint AS \"txid!\", e.sequence,\n                    e.occurred_at, e.kind, e.version, e.payload, e.actor AS \"actor: Json<Actor>\",\n                    e.subject_user_id AS \"subject_user_id: UserId\",\n                    e.trace_id AS \"trace_id: TraceId\",\n                    p.event_id IS NOT NULL AS \"personal!\", p.client_ip AS \"client_ip?: IpAddr\",\n                    p.user_agent_family AS \"browser?: Browser\",\n                    p.platform AS \"platform?: Platform\",\n                    p.details AS \"details?\", p.reason AS \"reason?\"\n                FROM domain_events e\n                LEFT JOIN event_personal_data p ON p.event_id = e.id\n                WHERE e.client_id = $1\n                ORDER BY e.sequence DESC\n                LIMIT $2",
   "describe": {
     "columns": [
       {
@@ -77,6 +77,11 @@
         "ordinal": 14,
         "name": "details?",
         "type_info": "Jsonb"
+      },
+      {
+        "ordinal": 15,
+        "name": "reason?",
+        "type_info": "Text"
       }
     ],
     "parameters": {
@@ -100,8 +105,9 @@
       true,
       true,
       true,
-      false
+      false,
+      true
     ]
   },
-  "hash": "cb4031c7eea94edf30000967e9264a79975c434b4f6e9cff65312de667fab6b2"
+  "hash": "373ee5f059f46dd6c1fc1c7868737d4fafcb153f3bab187e07225d6ab5b661ed"
 }

@@ -4,6 +4,7 @@ use super::{
     providers::{GoogleClaims, GoogleProtocol, IdentityStrategy, ProviderEndpoints},
     *,
 };
+use crate::account::AccountApplication;
 use axum::{
     body::{Body, to_bytes},
     http::{HeaderValue, Method, Request, StatusCode, header},
@@ -41,6 +42,14 @@ impl Drop for TestApp {
     }
 }
 impl TestApp {
+    /// The federation routes and the shared settings, as the public listener
+    /// serves them.
+    fn routes(&self) -> axum::Router {
+        self.app
+            .clone()
+            .routes()
+            .merge(AccountApplication::new(self.app.database.clone()).routes())
+    }
     /// Creates a provider fixture with no verified contact address.
     async fn new() -> Self {
         Self::with_email(None).await
@@ -142,7 +151,7 @@ impl TestApp {
     }
     /// Runs [`Self::callback`] in a browser that may hold a `session` cookie pair.
     async fn callback_from(&self, session: Option<&str>) -> Response {
-        let router = self.app.clone().routes();
+        let router = self.routes();
         let response = router
             .clone()
             .oneshot(TestApp::request(
@@ -434,7 +443,7 @@ fn return_destinations_and_browser_bindings_are_strict() {
 #[ignore = "requires TEST_DATABASE_URL"]
 async fn provider_mock_callback_requires_browser_state_and_stays_pending() {
     let test = TestApp::new().await;
-    let router = test.app.clone().routes();
+    let router = test.routes();
     let response = router
         .clone()
         .oneshot(TestApp::request(
@@ -609,7 +618,7 @@ async fn linking_requires_target_confirmation_and_unlink_releases_subject_withou
     let pending_cookie = pending_headers[header::COOKIE]
         .to_str()
         .expect("pending cookie");
-    let router = test.app.clone().routes();
+    let router = test.routes();
     let response = router
         .clone()
         .oneshot(TestApp::request(
@@ -905,8 +914,6 @@ async fn callback_email_collision_never_links_and_known_subject_never_bootstraps
         "social sign-in never confirms a passkey"
     );
     let response = test
-        .app
-        .clone()
         .routes()
         .oneshot(TestApp::request(
             Method::DELETE,
@@ -1035,7 +1042,7 @@ async fn failed_provider_preserves_stored_continuation_and_consumes_state() {
         .expect("GitHub facts")
         .token
         .push_str("/missing");
-    let router = test.app.clone().routes();
+    let router = test.routes();
     let destination = "/oauth/authorize/resume?transaction=trusted-transaction";
     for (callback_query, error) in [
         ("error=access_denied", "social_cancelled"),

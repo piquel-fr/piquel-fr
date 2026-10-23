@@ -18,7 +18,7 @@ use piquel_common::{
     },
 };
 use piquel_crypto::Rs256Key;
-use piquel_repository::{Database, DatabaseTransaction};
+use piquel_repository::{Database, DatabaseTransaction, StoredUser};
 use std::sync::Arc;
 
 /// The operating system user running a command, recorded on the events it causes.
@@ -43,16 +43,7 @@ const RECENT_PASSKEY: StepUpRequirement = StepUpRequirement::passkey_within(CONF
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Operator {
     /// An administrator, authenticated by an access token the dashboard holds.
-    Admin {
-        /// The administrator's account.
-        user_id: UserId,
-        /// The session the token was issued from.
-        session_id: SessionId,
-        /// How that session had authenticated, as the token reports it.
-        acr: Option<Acr>,
-        /// When it had, as the token reports it.
-        auth_time: Option<DateTime<Utc>>,
-    },
+    Admin(AdminSession),
     /// An operator running `auth-service`.
     Cli {
         /// The operating system user, from `$USER`.
@@ -60,6 +51,21 @@ pub enum Operator {
         /// The machine's host name.
         host: String,
     },
+}
+
+/// An administrator signed in to the admin API. Its fields are private to the
+/// admin module, so only [`AdminTokens`] creates one, from a token it verified: no
+/// other code can act as an administrator.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct AdminSession {
+    /// The administrator's account.
+    pub(super) user_id: UserId,
+    /// The session the token was issued from.
+    pub(super) session_id: SessionId,
+    /// How that session had authenticated, as the token reports it.
+    pub(super) acr: Option<Acr>,
+    /// When it had, as the token reports it.
+    pub(super) auth_time: Option<DateTime<Utc>>,
 }
 
 impl Operator {
@@ -84,26 +90,23 @@ impl Operator {
     #[must_use]
     pub fn context(&self) -> EventContext {
         let actor = match self.clone() {
-            Self::Admin {
-                user_id,
-                session_id,
-                ..
-            } => Actor::Admin {
-                user_id,
-                session_id,
+            Self::Admin(session) => Actor::Admin {
+                user_id: session.user_id,
+                session_id: session.session_id,
             },
             Self::Cli { os_user, host } => Actor::Cli { os_user, host },
         };
         EventContext {
             actor,
             origin: RequestOrigin::default(),
+            reason: None,
         }
     }
 
     /// The administrator's account, if an administrator acts.
     pub(super) const fn administrator(&self) -> Option<UserId> {
         match self {
-            Self::Admin { user_id, .. } => Some(*user_id),
+            Self::Admin(session) => Some(session.user_id),
             Self::Cli { .. } => None,
         }
     }
@@ -114,6 +117,31 @@ impl Operator {
             Some(administrator) if administrator == user_id => Err(AdminError::OwnRights),
             _ => Ok(()),
         }
+    }
+
+    /// Locks the account `user_id` for a change, and returns it. An administrator
+    /// may not change another administrator's account, which only the CLI may:
+    /// granting rights takes the same account lock, so the account cannot become an
+    /// administrator before `tx` commits, and a known administrator is refused
+    /// before waiting for the lock, too.
+    pub(crate) async fn lock(
+        &self,
+        tx: &mut DatabaseTransaction<'_>,
+        user_id: UserId,
+    ) -> Result<StoredUser, AdminError> {
+        let checked = self.administrator().is_some();
+        if checked && tx.administrators().contains(user_id).await? {
+            return Err(AdminError::AdministratorTarget);
+        }
+        let user = tx
+            .users()
+            .find_by_id_for_update(user_id)
+            .await?
+            .ok_or(AdminError::UserNotFound)?;
+        if checked && tx.administrators().contains(user_id).await? {
+            return Err(AdminError::AdministratorTarget);
+        }
+        Ok(user)
     }
 
     /// Requires an administrator to still hold their rights, their session and a
@@ -129,16 +157,16 @@ impl Operator {
     /// waits for one of this one's, such as the caller's own sign-in or social
     /// linking. A sign-out or account disablement that commits between this read
     /// and the commit does not stop the operation.
-    pub(super) async fn authorize(
+    pub(crate) async fn authorize(
         &self,
         tx: &mut DatabaseTransaction<'_>,
     ) -> Result<(), AdminError> {
-        let Self::Admin {
+        let Self::Admin(AdminSession {
             user_id,
             session_id,
             acr,
             auth_time,
-        } = *self
+        }) = *self
         else {
             return Ok(());
         };
@@ -203,12 +231,12 @@ impl AdminTokens {
                 Utc::now(),
             )
             .map_err(AdminError::StepUpRequired)?;
-        Ok(Operator::Admin {
+        Ok(Operator::Admin(AdminSession {
             user_id,
             session_id,
             acr: claims.authentication.acr,
             auth_time: claims.authentication.auth_time,
-        })
+        }))
     }
 
     /// The token of the request's one `Authorization: Bearer` header. Another scheme

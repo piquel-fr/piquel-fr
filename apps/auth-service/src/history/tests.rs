@@ -2,7 +2,10 @@
 //! continue, and what a report changes.
 
 use super::*;
-use crate::tests::{Browser, Replicas};
+use crate::{
+    account::AccountApplication,
+    tests::{Browser, Replicas},
+};
 use axum::http::{Method, StatusCode};
 use piquel_common::{
     PasskeyId, TokenId,
@@ -25,7 +28,9 @@ impl Harness {
     async fn new() -> Self {
         let database = Replicas::database().await;
         Self {
-            router: HistoryApplication::new(database.clone()).routes(),
+            router: HistoryApplication::new(database.clone())
+                .routes()
+                .merge(AccountApplication::new(database.clone()).routes()),
             database,
         }
     }
@@ -35,6 +40,7 @@ impl Harness {
         let context = EventContext {
             actor,
             origin: RequestOrigin::default(),
+            reason: None,
         };
         let mut tx = self.database.begin().await.expect("transaction");
         for event in events {

@@ -71,7 +71,7 @@ pub(crate) mod emails {
     pub(crate) const ITEM: &str = "/account/emails/{id}";
 }
 
-/// The signed-in user's security history.
+/// The account's security history.
 pub(crate) mod history {
     /// Pages through the account's history, newest first.
     pub(crate) const LIST: &str = "/account/history";
@@ -79,7 +79,7 @@ pub(crate) mod history {
     pub(crate) const REPORT: &str = "/account/history/{event_id}/report";
 }
 
-/// The signed-in user's sessions, one per signed-in browser.
+/// The account's sessions, one per signed-in browser.
 pub(crate) mod sessions {
     /// Lists the account's active sessions, most recently active first.
     pub(crate) const LIST: &str = "/account/sessions";

@@ -1,4 +1,7 @@
 //! One authentication authority: browser flows, settings API, OIDC and the admin API.
+/// Settings any administrator may also change, as operations both the owner's
+/// routes and the CLI run.
+mod account;
 /// The private admin API and the operations it shares with the CLI.
 mod admin;
 /// Embedded auth frontend pages and static resources.
@@ -22,6 +25,8 @@ mod history;
 mod jobs;
 /// OAuth and `OpenID` Connect protocol application.
 mod oidc;
+/// Lists of operations every surface serving them must cover.
+mod operations;
 /// `WebAuthn` ceremonies and account/session management.
 mod passkey;
 /// Every HTTP path the service serves.
@@ -30,7 +35,7 @@ mod routes;
 mod security;
 /// Built-in public configuration, liveness and readiness.
 mod service;
-/// The signed-in user's sessions, and signing them out.
+/// The account's sessions, and signing them out.
 mod sessions;
 /// Fixtures shared by the applications' tests.
 #[cfg(test)]
@@ -54,8 +59,8 @@ pub use jobs::Jobs;
 use oidc::OidcApplication;
 use passkey::PasskeyApplication;
 use service::ServiceApplication;
-use sessions::SessionsApplication;
 
+use account::AccountApplication;
 use assets::EmbeddedAssets;
 use axum::{
     Router,
@@ -112,7 +117,7 @@ impl AuthConfig {
             .merge(PasskeyApplication::new(database.clone(), &self.passkey)?.routes())
             .merge(FederationApplication::new(database.clone(), &self.federation)?.routes())
             .merge(HistoryApplication::new(database.clone()).routes())
-            .merge(SessionsApplication::new(database.clone()).routes())
+            .merge(AccountApplication::new(database.clone()).routes())
             .merge(ClientApplication::new(database.clone()).routes())
             .merge(EmailApplication::new(database.clone(), &self.email).routes())
             .merge(OidcApplication::new(database.clone(), &self.oidc)?.routes());

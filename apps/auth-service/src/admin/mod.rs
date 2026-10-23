@@ -290,5 +290,6 @@ impl AdminApplication {
     }
 }
 
+/// Admin API scenarios, and the harness the shared settings' tests also use.
 #[cfg(test)]
-mod tests;
+pub(crate) mod tests;

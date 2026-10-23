@@ -32,7 +32,9 @@ pub(super) enum AdminCommand {
 impl AdminCommand {
     /// Runs the change as the operator at this terminal.
     pub(super) async fn run(self, console: &Console) -> Result<(), CliError> {
-        let Console { service, operator } = console;
+        let Console {
+            service, operator, ..
+        } = console;
         match self {
             Self::Grant { user } => {
                 let user = console.user(&user).await?;

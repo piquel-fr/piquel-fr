@@ -143,9 +143,9 @@ pub(super) struct AuthenticationFinish {
 
 /// New label for an existing credential.
 #[derive(Deserialize)]
-pub(super) struct Rename {
+pub(crate) struct Rename {
     /// Label validated before the rename transaction.
-    pub(super) friendly_name: String,
+    pub(crate) friendly_name: String,
 }
 
 /// Challenge and opaque ceremony identifier returned to the browser.

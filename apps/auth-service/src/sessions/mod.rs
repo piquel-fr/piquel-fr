@@ -1,65 +1,50 @@
-//! The signed-in user's sessions, one per signed-in browser, and signing them out.
-use crate::routes;
-use crate::security::{self, ApiError, RequestContext};
-use axum::{
-    Json, Router,
-    extract::{Path, State},
-    http::StatusCode,
-    routing::{delete, get, post},
-};
+//! The account's sessions, one per signed-in browser, and signing them out:
+//! settings any administrator may also change, which [`AccountService`] serves.
+use crate::account::{AccountError, AccountService, Subject, Viewer};
 use chrono::{DateTime, Utc};
-use piquel_common::{
-    AuthenticationMethod, SessionId,
-    events::{RevocationReason, UserAgentFamily},
-};
-use piquel_repository::{Database, SessionScope, StoredSession};
+use piquel_common::{AuthenticationMethod, SessionId, events::UserAgentFamily};
+use piquel_repository::{SessionScope, StoredSession};
 use serde::Serialize;
 use std::net::IpAddr;
 
 /// Sign-out failures and their browser response mapping.
 mod error;
-use error::SessionsError;
-
-/// The account's sessions.
-#[derive(Clone)]
-pub(crate) struct SessionsApplication {
-    /// Sessions, their refresh families and events.
-    database: Database,
-}
+pub(crate) use error::SessionsError;
 
 /// One active session of the account.
 #[derive(Serialize)]
-struct SessionItem {
+pub(crate) struct SessionItem {
     /// Session ID, to sign it out.
-    id: SessionId,
-    /// Whether it is the session making the request.
-    current: bool,
+    pub(crate) id: SessionId,
+    /// Whether it is the session making the request; never, when someone other
+    /// than the owner asks.
+    pub(crate) current: bool,
     /// The browser and platform it signed in with, if recorded.
-    device: Option<UserAgentFamily>,
+    pub(crate) device: Option<UserAgentFamily>,
     /// The IP address of its last recorded activity, if recorded.
-    ip: Option<IpAddr>,
+    pub(crate) ip: Option<IpAddr>,
     /// How it authenticated.
-    methods: Vec<AuthenticationMethod>,
+    pub(crate) methods: Vec<AuthenticationMethod>,
     /// When it signed in.
-    authenticated_at: DateTime<Utc>,
+    pub(crate) authenticated_at: DateTime<Utc>,
     /// Its last recorded activity, refreshed at most every few minutes.
-    last_seen_at: DateTime<Utc>,
+    pub(crate) last_seen_at: DateTime<Utc>,
     /// When it expires.
-    expires_at: DateTime<Utc>,
+    pub(crate) expires_at: DateTime<Utc>,
 }
 
 /// The answer to signing every other session out.
 #[derive(Serialize)]
-struct Revoked {
+pub(crate) struct Revoked {
     /// How many sessions were signed out.
-    revoked: usize,
+    pub(crate) revoked: usize,
 }
 
 impl SessionItem {
     /// Shows `session`, marking it if it is the `current` one.
-    fn new(session: StoredSession, current: SessionId) -> Self {
+    fn new(session: StoredSession, current: Option<SessionId>) -> Self {
         Self {
-            current: session.id == current,
+            current: Some(session.id) == current,
             id: session.id,
             device: session.user_agent_family,
             ip: session.last_seen_ip,
@@ -71,106 +56,73 @@ impl SessionItem {
     }
 }
 
-impl SessionsApplication {
-    /// Serves the sessions from `database`.
-    pub(crate) const fn new(database: Database) -> Self {
-        Self { database }
+/// Sessions any administrator may also sign out. Signing out needs no passkey
+/// confirmation: it only removes access, and a user who suspects a stolen cookie
+/// must be able to act at once.
+impl AccountService {
+    /// Lists the account's active sessions, most recently active first. On the
+    /// owner's routes, the extractor has just recorded the owner's own activity.
+    pub(crate) async fn sessions(&self, viewer: &Viewer) -> Result<Vec<SessionItem>, AccountError> {
+        viewer.viewed(&self.database).await?;
+        Ok(self
+            .database
+            .sessions()
+            .list_active_for_user(viewer.user())
+            .await?
+            .into_iter()
+            .map(|session| SessionItem::new(session, viewer.own_session()))
+            .collect())
     }
 
-    /// Returns the session endpoints with this application as state.
-    ///
-    /// Signing out needs a session but no passkey confirmation: it only removes
-    /// access, and a user who suspects a stolen cookie must be able to act at once.
-    pub(crate) fn routes(self) -> Router {
-        Router::new()
-            .route(routes::sessions::LIST, get(Self::list))
-            .route(routes::sessions::ITEM, delete(Self::revoke))
-            .route(routes::sessions::REVOKE_OTHERS, post(Self::revoke_others))
-            .with_state(self)
-    }
-
-    /// Lists the account's active sessions, most recently active first. The
-    /// extractor has just recorded the current session's activity.
-    async fn list(
-        State(app): State<Self>,
-        security::Session(session): security::Session,
-    ) -> Result<Json<Vec<SessionItem>>, ApiError> {
-        Ok(Json(
-            app.database
-                .sessions()
-                .list_active_for_user(session.user_id)
-                .await?
-                .into_iter()
-                .map(|item| SessionItem::new(item, session.id))
-                .collect(),
-        ))
-    }
-
-    /// Signs one other session of the account out, with its applications' refresh
-    /// grants. The current session signs out through `/session/logout`, which also
-    /// clears its cookie.
-    async fn revoke(
-        State(app): State<Self>,
-        context: RequestContext,
-        security::Session(session): security::Session,
-        Path(id): Path<SessionId>,
-    ) -> Result<StatusCode, ApiError> {
-        if id == session.id {
+    /// Signs one session of the account out, with its applications' refresh
+    /// grants. The owner's own session signs out through `/session/logout`, which
+    /// also clears its cookie.
+    pub(crate) async fn revoke_session(
+        &self,
+        subject: &Subject,
+        id: SessionId,
+    ) -> Result<(), AccountError> {
+        if subject.own_session() == Some(id) {
             return Err(SessionsError::Current.into());
         }
-        if app
-            .end(context, &session, SessionScope::One(id))
-            .await?
-            .is_empty()
-        {
+        if self.end(subject, SessionScope::One(id)).await?.is_empty() {
             return Err(SessionsError::NotFound.into());
         }
-        Ok(StatusCode::NO_CONTENT)
+        Ok(())
     }
 
     /// Signs every other session of the account out, with their applications'
-    /// refresh grants, and says how many there were.
-    async fn revoke_others(
-        State(app): State<Self>,
-        context: RequestContext,
-        security::Session(session): security::Session,
-    ) -> Result<Json<Revoked>, ApiError> {
-        let revoked = app
-            .end(context, &session, SessionScope::AllExcept(session.id))
-            .await?;
-        Ok(Json(Revoked {
+    /// refresh grants, and says how many there were: all but the owner's own, or
+    /// every one when someone else acts.
+    pub(crate) async fn revoke_other_sessions(
+        &self,
+        subject: &Subject,
+    ) -> Result<Revoked, AccountError> {
+        let revoked = self.end(subject, subject.others()).await?;
+        Ok(Revoked {
             revoked: revoked.len(),
-        }))
+        })
     }
 
-    /// Ends the `scope` sessions of `session`'s account in one transaction, under
-    /// [`security::Session::lock`], and returns the ones it ended.
+    /// Ends the `scope` sessions of the account in one transaction, under the
+    /// account lock, and returns the ones it ended.
     async fn end(
         &self,
-        context: RequestContext,
-        session: &StoredSession,
+        subject: &Subject,
         scope: SessionScope,
-    ) -> Result<Vec<SessionId>, ApiError> {
+    ) -> Result<Vec<SessionId>, AccountError> {
         let mut tx = self.database.begin().await?;
-        security::Session::lock(&mut tx, session).await?;
-        let revoked = security::Session::revoke(
-            &mut tx,
-            context,
-            session,
-            scope,
-            RevocationReason::UserRevoked,
-        )
-        .await?;
-        tx.commit().await?;
+        subject.lock(&mut tx).await?;
+        let revoked = tx
+            .revoke_sessions(
+                &subject.context(),
+                subject.user(),
+                scope,
+                &subject.revocation(),
+            )
+            .await?;
+        subject.commit(tx).await?;
         Ok(revoked)
-    }
-}
-
-/// Supplies the shared database boundary to browser-session extractors.
-impl axum::extract::FromRef<SessionsApplication> for Database {
-    /// Shares persistence with the session extractors.
-    fn from_ref(application: &SessionsApplication) -> Self {
-        application.database.clone()
     }
 }
 

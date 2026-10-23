@@ -26,7 +26,9 @@ pub(super) enum SessionCommand {
 impl SessionCommand {
     /// Runs this command as the operator at this terminal.
     pub(super) async fn run(self, console: &Console) -> Result<(), CliError> {
-        let Console { service, operator } = console;
+        let Console {
+            service, operator, ..
+        } = console;
         match self {
             Self::Revoke { session } => service.revoke_session(operator, session).await?,
             Self::RevokeAll { user, confirm } => {

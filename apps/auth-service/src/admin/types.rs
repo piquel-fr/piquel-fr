@@ -171,7 +171,7 @@ impl Reason {
     }
 
     /// Unwraps the validated text.
-    pub(super) fn into_inner(self) -> String {
+    pub(crate) fn into_inner(self) -> String {
         self.0
     }
 }

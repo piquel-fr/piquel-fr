@@ -153,6 +153,7 @@ async fn deliveries_commit_with_their_event_and_outlive_the_account() {
         let context = EventContext {
             actor: Actor::Anonymous,
             origin: RequestOrigin::default(),
+            reason: None,
         };
         let event = DomainEvent::IdentityUnlinked {
             provider: piquel_common::Provider::GitHub,
@@ -516,6 +517,7 @@ async fn revoking_a_session_queues_a_logout_token_for_each_client_to_tell() {
         let context = EventContext {
             actor: Actor::Anonymous,
             origin: RequestOrigin::default(),
+            reason: None,
         };
         let revoked = tx
             .revoke_sessions(

@@ -110,7 +110,9 @@ Administrators can also list, create and revoke invitations through the admin AP
 ### Administration
 
 Every administrative operation has a command, which runs the same code as the
-admin API (`AdminService` in `apps/auth-service/src/admin`). Commands need only
+admin API (`AdminService` in `apps/auth-service/src/admin`), and so does every
+setting administrators may change on another account (`AccountService` in
+`apps/auth-service/src/account`). Commands need only
 `AUTH_DATABASE_URL` (`invite create` also needs `AUTH_PUBLIC_BASE_URL`, to build its
 link), so they work while auth is down: they are the break-glass path when the
 dashboard or auth's frontends are unreachable. In deployed environments,
@@ -128,15 +130,26 @@ just auth user enable alice
 just auth session revoke <session-id>     # one session, as `user show` lists it
 just auth session revoke-all alice        # every session of the account
 just auth audit --user alice --kind session_revoked
+just auth account alice passkeys list     # the account's settings, as its owner sees them
+just auth account alice passkeys revoke <passkey-id> --reason "Phone stolen"
+just auth account alice emails remove <email-id> --reason "Asked by email"
 ```
 
 - Accounts are named by username, ID or a verified email of an active account.
 - `--output json` prints the admin API's body for `user search` (`UserPage`), `user
   show` (`UserDetail`), `audit` (`EventPage`), `client list`, `invite list` and
   `admin list`, as defined in `crates/admin-api`. It changes only as the API does.
-- `user disable`, `session revoke-all`, `admin revoke` and `client
-  disable|suspend|delete` describe what they will change and ask for confirmation.
+- `user disable`, `session revoke-all`, `admin revoke`, `client
+  disable|suspend|delete`, and `account … passkeys revoke`, `identities unlink` and
+  `sessions revoke-all` describe what they will change and ask for confirmation.
   Without a terminal they refuse unless given `--yes`.
+- `account <user>` reads and changes the settings administrators share with the
+  owner: passkeys, social identities, email addresses, sessions and the security
+  history, with the owner's own operations. It never adds a way to sign in or an
+  address. Every change needs `--reason`, which the owner sees in their history;
+  reads are recorded as views. See
+  [surfaces.md](docs/architecture/surfaces.md#changing-an-account-on-its-owners-behalf)
+  for what is shared.
 - Each change is recorded as a domain event with the operator: `$USER` and the host
   name. Unlike the admin API, the CLI may act on administrators' accounts.
 - Failures print their causes and exit with 1; usage errors exit with 2.

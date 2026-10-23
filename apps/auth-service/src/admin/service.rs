@@ -17,7 +17,7 @@ use piquel_common::{
 use piquel_crypto::{ClientSecret, Secret};
 use piquel_repository::{
     Database, DatabaseError, DatabaseTransaction, DeliveryStatus, DeliverySummary, EventFilter,
-    SessionScope, StoredOidcClient, StoredUser,
+    SessionScope, StoredOidcClient,
 };
 use std::collections::BTreeMap;
 
@@ -51,30 +51,6 @@ impl AdminService {
     #[must_use]
     pub const fn new(database: Database) -> Self {
         Self { database }
-    }
-
-    /// Locks the account `user_id` and refuses an administrator's unless the CLI
-    /// acts. Granting rights takes the same account lock, so the account cannot
-    /// become an administrator before `tx` commits. A known administrator is
-    /// refused before waiting for the lock, too.
-    async fn lock_target(
-        tx: &mut DatabaseTransaction<'_>,
-        operator: &Operator,
-        user_id: UserId,
-    ) -> Result<StoredUser, AdminError> {
-        let checked = operator.administrator().is_some();
-        if checked && tx.administrators().contains(user_id).await? {
-            return Err(AdminError::AdministratorTarget);
-        }
-        let user = tx
-            .users()
-            .find_by_id_for_update(user_id)
-            .await?
-            .ok_or(AdminError::UserNotFound)?;
-        if checked && tx.administrators().contains(user_id).await? {
-            return Err(AdminError::AdministratorTarget);
-        }
-        Ok(user)
     }
 
     /// Ends every mutation: rechecks `operator`, records `events` about `subject`,
@@ -199,7 +175,7 @@ impl AdminService {
         reason: Reason,
     ) -> Result<(), AdminError> {
         let mut tx = self.database.begin().await?;
-        Self::lock_target(&mut tx, operator, user_id).await?;
+        operator.lock(&mut tx, user_id).await?;
         if !tx
             .users()
             .set_status(user_id, AccountStatus::Disabled)
@@ -230,7 +206,7 @@ impl AdminService {
         user_id: UserId,
     ) -> Result<(), AdminError> {
         let mut tx = self.database.begin().await?;
-        Self::lock_target(&mut tx, operator, user_id).await?;
+        operator.lock(&mut tx, user_id).await?;
         let changed = tx
             .users()
             .set_status(user_id, AccountStatus::Active)
@@ -261,7 +237,7 @@ impl AdminService {
         user_id: UserId,
     ) -> Result<(), AdminError> {
         let mut tx = self.database.begin().await?;
-        Self::lock_target(&mut tx, operator, user_id).await?;
+        operator.lock(&mut tx, user_id).await?;
         Self::end_sessions(&mut tx, operator, user_id, RevocationReason::Admin).await?;
         Self::finish(tx, operator, Some(user_id), vec![]).await
     }
@@ -293,7 +269,7 @@ impl AdminService {
             .find_by_id(session_id)
             .await?
             .ok_or(AdminError::SessionNotFound)?;
-        Self::lock_target(&mut tx, operator, session.user_id).await?;
+        operator.lock(&mut tx, session.user_id).await?;
         if tx
             .revoke_sessions(
                 &operator.context(),
@@ -606,7 +582,7 @@ impl AdminService {
             handle.ensure_unreserved()?;
         }
         let mut tx = self.database.begin().await?;
-        let user = Self::lock_target(&mut tx, operator, user_id).await?;
+        let user = operator.lock(&mut tx, user_id).await?;
         if user.username == handle.as_str() {
             return Err(AdminError::SameHandle);
         }

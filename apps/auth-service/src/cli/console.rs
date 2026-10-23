@@ -3,7 +3,7 @@
 //! administrator or client.
 
 use super::CliError;
-use crate::{AdminService, Operator, UserRef};
+use crate::{AdminService, Operator, UserRef, account::AccountService};
 use clap::{Args, ValueEnum};
 use piquel_common::UserId;
 use piquel_repository::Database;
@@ -15,6 +15,8 @@ use std::io::{BufRead, IsTerminal};
 pub(super) struct Console {
     /// Every administrative operation.
     pub(super) service: AdminService,
+    /// Every shared settings operation, run on an account as its owner would.
+    pub(super) account: AccountService,
     /// Who runs them, recorded on their events.
     pub(super) operator: Operator,
 }
@@ -23,7 +25,8 @@ impl Console {
     /// Runs operations on `database` as the operator at this terminal.
     pub(super) fn new(database: Database) -> Result<Self, CliError> {
         Ok(Self {
-            service: AdminService::new(database),
+            service: AdminService::new(database.clone()),
+            account: AccountService::new(database),
             operator: Operator::terminal()?,
         })
     }
@@ -60,7 +63,7 @@ pub(super) struct Output {
 
 impl Output {
     /// Prints `value` as pretty JSON, or as `table` writes it for people.
-    pub(super) fn print<T: Serialize>(
+    pub(super) fn print<T: Serialize + ?Sized>(
         &self,
         value: &T,
         table: impl FnOnce(&T),

@@ -1,9 +1,10 @@
-//! The command line covers every admin operation, confirms changes that end
-//! access, and runs the operations the admin API runs.
+//! The command line covers every admin and shared settings operation, confirms
+//! changes that cut off access, and runs the operations the HTTP APIs run.
 
 use super::*;
 use crate::{
     AdminService,
+    account::{AccountOperation, AccountService},
     admin::AdminOperation,
     tests::{Browser, Replicas, operator},
 };
@@ -66,6 +67,52 @@ impl AdminOperation {
     }
 }
 
+impl AccountOperation {
+    /// A full command line that runs this operation, after `auth-service`. The
+    /// match is exhaustive, so a new operation does not compile without one.
+    const fn invocation(self) -> &'static [&'static str] {
+        match self {
+            Self::ListPasskeys => &["account", "alice", "passkeys", "list"],
+            Self::RenamePasskey => &[
+                "account", "alice", "passkeys", "rename", AN_ID, "Phone", "--reason", "Asked",
+            ],
+            Self::RevokePasskey => &[
+                "account", "alice", "passkeys", "revoke", AN_ID, "--reason", "Lost",
+            ],
+            Self::ListIdentities => &["account", "alice", "identities", "list"],
+            Self::UnlinkIdentity => &[
+                "account",
+                "alice",
+                "identities",
+                "unlink",
+                "github",
+                "--reason",
+                "Asked",
+            ],
+            Self::ListEmails => &["account", "alice", "emails", "list"],
+            Self::MakeEmailPrimary => &[
+                "account", "alice", "emails", "primary", AN_ID, "--reason", "Asked",
+            ],
+            Self::RemoveEmail => &[
+                "account", "alice", "emails", "remove", AN_ID, "--reason", "Asked",
+            ],
+            Self::ListSessions => &["account", "alice", "sessions", "list"],
+            Self::RevokeSession => &[
+                "account", "alice", "sessions", "revoke", AN_ID, "--reason", "Lost",
+            ],
+            Self::RevokeOtherSessions => &[
+                "account",
+                "alice",
+                "sessions",
+                "revoke-all",
+                "--reason",
+                "Lost",
+            ],
+            Self::ViewHistory => &["account", "alice", "history"],
+        }
+    }
+}
+
 /// A well-formed UUID for commands that take an ID.
 const AN_ID: &str = "0199a000-0000-7000-8000-000000000001";
 
@@ -73,14 +120,20 @@ const AN_ID: &str = "0199a000-0000-7000-8000-000000000001";
 /// parses to a command naming that operation.
 #[test]
 fn every_operation_has_its_command() {
-    for operation in AdminOperation::ALL {
-        let arguments = std::iter::once(&"auth-service").chain(operation.invocation());
+    let admin = AdminOperation::ALL
+        .iter()
+        .map(|operation| (Operation::Admin(*operation), operation.invocation()));
+    let account = AccountOperation::ALL
+        .iter()
+        .map(|operation| (Operation::Account(*operation), operation.invocation()));
+    for (operation, invocation) in admin.chain(account) {
+        let arguments = std::iter::once(&"auth-service").chain(invocation);
         let parsed =
             Cli::try_parse_from(arguments).unwrap_or_else(|error| panic!("{operation:?}: {error}"));
         let Some(Command::Administration(command)) = parsed.command else {
             panic!("{operation:?}: not an administrative command");
         };
-        assert_eq!(command.operation(), *operation);
+        assert_eq!(command.operation(), operation);
     }
 }
 
@@ -125,6 +178,7 @@ async fn user_disable_runs_the_admin_operation() {
     };
     let console = Console {
         service: AdminService::new(database.clone()),
+        account: AccountService::new(database.clone()),
         operator: operator(),
     };
     command.run(&console).await.expect("disable");
@@ -155,4 +209,52 @@ async fn user_disable_runs_the_admin_operation() {
         event.event.known(),
         Some(DomainEvent::SessionRevoked { session_id, .. }) if *session_id == browser.session_id
     )));
+}
+
+/// `account … sessions revoke-all` runs the shared operation as the operator: every
+/// session of the account ends, recorded as the operator's with the reason.
+#[tokio::test]
+#[ignore = "requires TEST_DATABASE_URL"]
+async fn account_commands_run_the_shared_operation() {
+    let database = Replicas::database().await;
+    let browser = Browser::new_account(&database).await;
+    let user = browser.user_id.to_string();
+    let Some(Command::Administration(command)) = Cli::try_parse_from([
+        "auth-service",
+        "account",
+        &user,
+        "sessions",
+        "revoke-all",
+        "--reason",
+        "Lost phone",
+        "--yes",
+    ])
+    .expect("arguments")
+    .command
+    else {
+        panic!("an administrative command");
+    };
+    let console = Console {
+        service: AdminService::new(database.clone()),
+        account: AccountService::new(database.clone()),
+        operator: operator(),
+    };
+    command.run(&console).await.expect("revoke");
+
+    let history = database
+        .events()
+        .history_for_user(browser.user_id, 10)
+        .await
+        .expect("history");
+    let revoked = history
+        .iter()
+        .find(|event| {
+            matches!(
+                event.event.known(),
+                Some(DomainEvent::SessionRevoked { session_id, .. }) if *session_id == browser.session_id
+            )
+        })
+        .expect("recorded");
+    assert!(matches!(&revoked.actor, Actor::Cli { os_user, .. } if os_user == "test"));
+    assert_eq!(revoked.reason.as_deref(), Some("Lost phone"));
 }

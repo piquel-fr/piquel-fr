@@ -88,7 +88,9 @@ impl ClientCommand {
     /// with its event before anything is printed, so a script never captures a
     /// secret that was not stored.
     pub(super) async fn run(self, console: &Console) -> Result<(), CliError> {
-        let Console { service, operator } = console;
+        let Console {
+            service, operator, ..
+        } = console;
         let done = match self {
             Self::Create(create) => ClientChange::Secret(
                 service

@@ -64,11 +64,47 @@ authorization. Auth checks every call:
 
 Administrators manage the administrator list too, but never their own rights or
 the last administrator's, and the API never changes an administrator's account.
-Administrators will be able to change the settings of users who are not
-administrators, through the same handlers as the owner, but never add a credential
-or email to their account *(planned)*. Every admin operation is also an
-`auth-service` CLI command *(partly planned)*; granting the first administrator is
-one.
+Every admin operation is also an `auth-service` CLI command; granting the first
+administrator is one.
+
+### Changing an account on its owner's behalf
+
+Administrators change other users' settings with the owner's own operations,
+never by signing in as them. Each setting an administrator may share with the
+owner is an `AccountService` operation: a change takes a `Subject`, the account and
+who acts on it, and a read a `Viewer`, the account and who reads it. The owner's
+`/account` routes run them as the owner of the session cookie, the only way to act
+as an owner. The `auth-service account <user> …`
+command runs them as the operator at the terminal, and the dashboard will call
+them in-process as an administrator *(planned)*. Both run the same safety rules:
+for example, one active passkey always remains, whoever removes the others.
+
+The rule for what is shared: administrators may view, edit and remove, but never
+add a way to sign in or to receive the account's email, since that would let them
+take the account over.
+
+| Area | Shared | Owner only |
+| --- | --- | --- |
+| Passkeys | list, rename, remove | add, confirm |
+| Social identities | list, unlink | link |
+| Email addresses | list, choose the primary among verified, remove | add, verify |
+| Sessions | list, sign out one, sign out all | |
+| Security history | read | report an entry |
+| OIDC clients | | all; administrators use `AdminService`'s |
+
+When an administrator or operator acts:
+
+- Every change needs their reason. It is stored with each event as personal data,
+  and the owner sees it in their security history, next to "By a Piquel
+  administrator".
+- Events record the administrator or operator as their actor. A read is recorded
+  as a view of the account, as `user show` is.
+- An administrator may not change another administrator's account: it is refused
+  before waiting for the account lock and again under it. A change checks the
+  administrator's rights, session and passkey confirmation once more before it
+  commits. The CLI may change administrators' accounts.
+- A change that signs the owner out elsewhere, such as removing a passkey, signs
+  out every session, since an administrator has none of the owner's to keep.
 
 ## Contracts
 
