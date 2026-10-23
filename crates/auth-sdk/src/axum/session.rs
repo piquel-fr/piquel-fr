@@ -737,11 +737,11 @@ impl Sessions {
     /// scope, then remembers its `jti` until its expiry and the leeway. A session
     /// logout also ends the `sid` until `ended_until`, so a sign-in that completes
     /// later cannot join it. Returns `false`, changing nothing, if the token was
-    /// applied before: a replay.
+    /// applied before, as when auth sends it again after losing the answer.
     ///
     /// The `jti` is remembered only once the deletion is done, so a request cut short
     /// by a failure, a crash or auth hanging up is applied again on auth's retry
-    /// rather than refused as a replay. Two copies racing may both apply, which ends
+    /// rather than skipped as applied. Two copies racing may both apply, which ends
     /// the same sessions twice.
     pub(super) async fn log_out(
         &self,

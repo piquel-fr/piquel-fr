@@ -773,8 +773,9 @@ fn status(response: &Response) -> (StatusCode, Option<&str>) {
     )
 }
 
-/// A logout by `sid` ends the sessions of that auth session only, a replay of it is
-/// refused, and a logout by `sub` alone ends every session of that user.
+/// A logout by `sid` ends the sessions of that auth session only, and a logout by
+/// `sub` alone ends every session of that user. A token sent again, as auth does
+/// when it lost the answer, is answered 200 and ends no session started since.
 #[tokio::test]
 async fn backchannel_logout_ends_the_named_sessions() {
     let backend = MemoryBackend::default();
@@ -786,24 +787,31 @@ async fn backchannel_logout_ends_the_named_sessions() {
     let (second, _) = session(&backend, &stored_login(USER, SessionId::new(), 300)).await;
     let (stranger, _) = session(&backend, &stored_login(other, SessionId::new(), 300)).await;
 
-    let token = logout(Some(USER), Some(ended));
-    let response = post_logout(&app, format!("logout_token={token}")).await;
+    let response = post_logout(
+        &app,
+        format!("logout_token={}", logout(Some(USER), Some(ended))),
+    )
+    .await;
     assert_eq!(status(&response), (StatusCode::OK, Some("no-store")));
     assert!(load(&backend, &first).await.is_none());
     assert!(
         load(&backend, &second).await.is_some(),
         "another auth session"
     );
-    let replayed = post_logout(&app, format!("logout_token={token}")).await;
-    assert_eq!(
-        status(&replayed),
-        (StatusCode::BAD_REQUEST, Some("no-store"))
-    );
 
-    let response = post_logout(&app, format!("logout_token={}", logout(Some(USER), None))).await;
+    let by_user = format!("logout_token={}", logout(Some(USER), None));
+    let response = post_logout(&app, by_user.clone()).await;
     assert_eq!(status(&response), (StatusCode::OK, Some("no-store")));
     assert!(load(&backend, &second).await.is_none());
     assert!(load(&backend, &stranger).await.is_some(), "another user");
+
+    let (third, _) = session(&backend, &stored_login(USER, SessionId::new(), 300)).await;
+    let again = post_logout(&app, by_user).await;
+    assert_eq!(status(&again), (StatusCode::OK, Some("no-store")));
+    assert!(
+        load(&backend, &third).await.is_some(),
+        "a sign-in after the logout"
+    );
 }
 
 /// An invalid token, or none, is refused with the OAuth error and `no-store`.

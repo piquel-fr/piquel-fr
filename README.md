@@ -242,12 +242,13 @@ The token is signed with auth's token key, with the header `typ: logout+jwt`:
 
 `sid` is the `sid` of the ID tokens the client received. A client must validate the
 token as Back-Channel Logout 1.0 §2.6 says (signature, `iss`, `aud`, `iat`, `exp`,
-`events`, no `nonce`, an unused `jti`), end its sessions with that `sid`, and answer
-`200`. The Rust SDK's login routes do all of this at
-`POST <mount>/backchannel-logout`. A `400` fails the delivery for good; timeouts and
-`5xx` are retried with backoff for up to an hour. Every attempt is signed afresh and
-carries the same `jti`, so a receiver's replay check also drops a repeat. The URI
-must be HTTPS and resolve to public addresses, and redirects are not followed.
+`events`, no `nonce`), end its sessions with that `sid` unless it already applied the
+token's `jti`, and answer `200` either way. The Rust SDK's login routes do all of
+this at `POST <mount>/backchannel-logout`. A `400` fails the delivery for good;
+timeouts and `5xx` are retried with backoff for up to an hour. Every attempt is
+signed afresh and carries the same `jti`, so a receiver applies a repeat only once.
+The URI must be HTTPS and resolve to public addresses, and redirects are not
+followed.
 Delivery is asynchronous: an application's session may outlive auth's by the few
 seconds a delivery takes, or until it expires if the client cannot be reached.
 

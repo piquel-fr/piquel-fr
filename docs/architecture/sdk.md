@@ -222,13 +222,14 @@ each client that received tokens from it, as an `application/x-www-form-urlencod
 `logout_token` field. Server-side integrations receive it at
 `POST <mount>/backchannel-logout` next to their login routes, which the client
 registers as its back-channel logout URI. The signed token is the authentication, so
-there is no origin check. The token is validated as above, then its `jti` must not
-have been applied before.
+there is no origin check. The token is validated as above, and one whose `jti` was
+applied before changes nothing.
 
 The route answers 200 once the matching sessions are gone, including when there
-were none, and 400 with `{"error":"invalid_request"}` for an invalid or replayed
-token. It answers 503 when signing keys cannot be fetched and 500 when the backend
-fails, so auth retries. Every answer has `Cache-Control: no-store`.
+were none or it applied the token before, and 400 with
+`{"error":"invalid_request"}` for an invalid token. It answers 503 when signing keys
+cannot be fetched and 500 when the backend fails, so auth retries. Every answer has
+`Cache-Control: no-store`.
 
 A token with `sid` ends every session started under that auth session; one with only
 `sub` ends every session of that user. The SDK finds them through records it keeps
@@ -248,11 +249,13 @@ in the application's backend, with the same four operations:
   listed it can survive; auth sends no such logout until subject logout (#80), which
   must close this race. Sessions stored before the indexes existed are not read, so
   their users sign in again.
-- **Replays.** A token whose `jti` is recorded is refused. Once its sessions are
-  deleted, the SDK records the `jti` until the token's `exp` plus the leeway, so
-  every replica refuses a replay. Recording it last means a request cut short by a
-  failure, a crash or auth hanging up is applied again on auth's retry; two copies
-  racing may both apply, which ends the same sessions twice.
+- **Replays.** A token whose `jti` is recorded was applied: it changes nothing and
+  is answered 200, so auth's retry after a lost answer succeeds, and a copy cannot
+  end sessions started since. Once its sessions are deleted, the SDK records the
+  `jti` until the token's `exp` plus the leeway, so every replica knows it.
+  Recording it last means a request cut short by a failure, a crash or auth hanging
+  up is applied again on auth's retry; two copies racing may both apply, which ends
+  the same sessions twice.
 - **Versions.** A new index or `jti` record starts at the current time in
   microseconds rather than 1, so a sign-in that read an expired record the backend
   has since deleted cannot overwrite the logout's replacement with its stale version.

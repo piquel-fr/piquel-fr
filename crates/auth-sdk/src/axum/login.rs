@@ -156,9 +156,10 @@ struct Login {
 ///   Logout 1.0) and deletes the sessions they name: every session started under the
 ///   token's `sid`, or without one, every session of its `sub`. Register
 ///   `https://<app><mount>/backchannel-logout` as the client's back-channel logout
-///   URI. It answers 200 once the sessions are gone, 400 with
-///   `{"error":"invalid_request"}` for an invalid or replayed token, 503 when auth's
-///   keys cannot be fetched and 500 when the backend fails, so auth retries those.
+///   URI. It answers 200 once the sessions are gone, also for a token it applied
+///   before, which auth sends again when it lost the answer; 400 with
+///   `{"error":"invalid_request"}` for an invalid token; 503 when auth's keys cannot
+///   be fetched and 500 when the backend fails, so auth retries those.
 ///
 /// Mount the router at `/auth`, or tell [`Self::mounted_at`], and add
 /// [`Self::layer`] around every route that uses [`SignedIn`] or [`MaybeSignedIn`].
@@ -589,10 +590,11 @@ impl Login {
             .log_out(&token, now + self.lifetime, now)
             .await
         {
-            Ok(true) => StatusCode::OK.into_response(),
-            Ok(false) => {
-                tracing::warn!("replayed back-channel logout token");
-                invalid()
+            Ok(applied) => {
+                if !applied {
+                    tracing::debug!("back-channel logout token applied before");
+                }
+                StatusCode::OK.into_response()
             }
             Err(error) => Self::store_failure(&error),
         }
