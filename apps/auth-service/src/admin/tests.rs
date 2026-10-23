@@ -9,7 +9,7 @@ use axum::{
 };
 use caller::AdminSession;
 use chrono::{Duration, Utc};
-use piquel_admin_api::{AUDIENCE, CONFIRMATION_MAX_AGE, paths};
+use piquel_admin_api::{AUDIENCE, paths};
 use piquel_common::{
     AccountStatus, AuthenticationMethod, Handle, HandleError, Personal,
     config::Origin,
@@ -964,11 +964,15 @@ async fn every_read_checks_its_administrator() {
         acr: Some(Acr::Social),
         auth_time: Some(Utc::now()),
     });
-    let step_up = StepUpRequirement::passkey_within(CONFIRMATION_MAX_AGE);
+    // Any passkey sign-in, however old, as the admin API's reads require.
+    let passkey = StepUpRequirement {
+        acr: Some(Acr::PhishingResistant),
+        max_age: None,
+    };
     for (operator, refusal) in [
         (operator(revoked, Utc::now()), AdminError::NotAdministrator),
         (operator(ended, Utc::now()), AdminError::SessionEnded),
-        (social, AdminError::StepUpRequired(step_up)),
+        (social, AdminError::StepUpRequired(passkey)),
     ] {
         for read in AdminOperation::ALL {
             let Some(results) = read.read(&service, &operator).await else {
@@ -976,11 +980,16 @@ async fn every_read_checks_its_administrator() {
             };
             for result in results {
                 let refused = result.expect_err("refused");
-                assert_eq!(
-                    discriminant(&refused),
-                    discriminant(&refusal),
-                    "{read:?}: {refused:?}"
-                );
+                match (&refused, &refusal) {
+                    (AdminError::StepUpRequired(actual), AdminError::StepUpRequired(expected)) => {
+                        assert_eq!(actual, expected, "{read:?}");
+                    }
+                    _ => assert_eq!(
+                        discriminant(&refused),
+                        discriminant(&refusal),
+                        "{read:?}: {refused:?}"
+                    ),
+                }
             }
         }
     }
