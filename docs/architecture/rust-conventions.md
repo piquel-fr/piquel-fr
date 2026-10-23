@@ -73,9 +73,11 @@ isolation headers. Public-client origins for CORS are looked up per request.
 
 Administrative operations are methods of `AdminService` (`src/admin/service.rs`);
 the admin API's handlers and the CLI's commands (`src/cli`) are thin adapters that
-say which `Operator` acts. `AdminOperation` lists them: the admin router maps each
-to its route, or to none when only the CLI runs it, and a CLI test maps each to its
-command. Both matches are exhaustive, so a new operation needs both.
+say which `Operator` acts. Each operation joins `AdminOperation`: the admin router
+maps it to its route, or to none when only the CLI runs it, and every CLI command
+names the operation it runs. A test parses a command line for each operation and
+checks that it names that operation. The matches are exhaustive, so a new operation
+does not compile until both sides handle it.
 
 `ClientRegistry` (`src/clients/mod.rs`) is the only code that changes OIDC clients: it
 creates, updates, enables, disables, deletes and rotates the secrets of clients,

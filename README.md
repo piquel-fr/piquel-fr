@@ -111,8 +111,9 @@ Administrators can also list, create and revoke invitations through the admin AP
 
 Every administrative operation has a command, which runs the same code as the
 admin API (`AdminService` in `apps/auth-service/src/admin`). Commands need only
-`AUTH_DATABASE_URL`, so they work while auth is down: they are the break-glass path
-when the dashboard or auth's frontends are unreachable. In deployed environments,
+`AUTH_DATABASE_URL` (`invite create` also needs `AUTH_PUBLIC_BASE_URL`, to build its
+link), so they work while auth is down: they are the break-glass path when the
+dashboard or auth's frontends are unreachable. In deployed environments,
 run them with `piquelctl app exec piquel-fr auth --env ENV -- auth-service …` (see
 [infra/README.md](infra/README.md)).
 

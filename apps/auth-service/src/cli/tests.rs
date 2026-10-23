@@ -7,61 +7,80 @@ use crate::{
     admin::AdminOperation,
     tests::{Browser, Replicas, operator},
 };
-use clap::CommandFactory;
 use piquel_common::{
     AccountStatus,
     events::{Actor, DomainEvent},
 };
 
 impl AdminOperation {
-    /// The command that runs this operation, as words after `auth-service`. The
+    /// A full command line that runs this operation, after `auth-service`. The
     /// match is exhaustive, so a new operation does not compile without one.
-    const fn command(self) -> &'static [&'static str] {
+    const fn invocation(self) -> &'static [&'static str] {
         match self {
-            Self::SearchUsers => &["user", "search"],
-            Self::ViewUser => &["user", "show"],
-            Self::DisableUser => &["user", "disable"],
-            Self::EnableUser => &["user", "enable"],
-            Self::RevokeUserSessions => &["session", "revoke-all"],
-            Self::RevokeSession => &["session", "revoke"],
+            Self::SearchUsers => &["user", "search", "ali"],
+            Self::ViewUser => &["user", "show", "alice"],
+            Self::DisableUser => &["user", "disable", "alice", "--reason", "Spam"],
+            Self::EnableUser => &["user", "enable", "alice"],
+            Self::RevokeUserSessions => &["session", "revoke-all", "alice"],
+            Self::RevokeSession => &["session", "revoke", AN_ID],
             Self::ListInvitations => &["invite", "list"],
             Self::CreateInvitation => &["invite", "create"],
-            Self::RevokeInvitation => &["invite", "revoke"],
+            Self::RevokeInvitation => &["invite", "revoke", AN_ID],
             Self::ListClients => &["client", "list"],
-            Self::ViewClient => &["client", "show"],
-            Self::CreateClient => &["client", "create"],
-            Self::ApplyClient => &["client", "apply"],
-            Self::UpdateClient => &["client", "update"],
-            Self::EnableClient => &["client", "enable"],
-            Self::DisableClient => &["client", "disable"],
-            Self::SuspendClient => &["client", "suspend"],
-            Self::UnsuspendClient => &["client", "unsuspend"],
-            Self::DeleteClient => &["client", "delete"],
-            Self::RotateClientSecret => &["client", "rotate-secret"],
+            Self::ViewClient => &["client", "show", "notes"],
+            Self::CreateClient => &[
+                "client",
+                "create",
+                "notes",
+                "--name",
+                "Notes",
+                "--redirect-uri",
+                "https://notes.example/callback",
+            ],
+            Self::ApplyClient => &[
+                "client",
+                "apply",
+                "notes",
+                "--name",
+                "Notes",
+                "--redirect-uri",
+                "https://notes.example/callback",
+            ],
+            Self::UpdateClient => &["client", "update", "notes", "--trusted"],
+            Self::EnableClient => &["client", "enable", "notes"],
+            Self::DisableClient => &["client", "disable", "notes"],
+            Self::SuspendClient => &["client", "suspend", "notes"],
+            Self::UnsuspendClient => &["client", "unsuspend", "notes"],
+            Self::DeleteClient => &["client", "delete", "notes"],
+            Self::RotateClientSecret => &["client", "rotate-secret", "notes"],
             Self::ListEvents => &["audit"],
             Self::ListAdministrators => &["admin", "list"],
-            Self::GrantAdministrator => &["admin", "grant"],
-            Self::RevokeAdministrator => &["admin", "revoke"],
+            Self::GrantAdministrator => &["admin", "grant", "alice"],
+            Self::RevokeAdministrator => &["admin", "revoke", "alice"],
             Self::CheckHandles => &["handle", "check"],
-            Self::RenameHandle => &["handle", "rename"],
+            Self::RenameHandle => &["handle", "rename", "alice", "alicia"],
             Self::ListDeliveries => &["deliveries", "list"],
-            Self::RetryDelivery => &["deliveries", "retry"],
-            Self::CancelDelivery => &["deliveries", "cancel"],
+            Self::RetryDelivery => &["deliveries", "retry", AN_ID],
+            Self::CancelDelivery => &["deliveries", "cancel", AN_ID],
         }
     }
 }
 
-/// Every operation names a command that exists, so none is out of the CLI's reach.
+/// A well-formed UUID for commands that take an ID.
+const AN_ID: &str = "0199a000-0000-7000-8000-000000000001";
+
+/// Every operation has a command, and that command runs it: its command line
+/// parses to a command naming that operation.
 #[test]
-fn every_operation_has_a_command() {
-    let cli = Cli::command();
+fn every_operation_has_its_command() {
     for operation in AdminOperation::ALL {
-        let mut command = &cli;
-        for word in operation.command() {
-            command = command
-                .find_subcommand(word)
-                .unwrap_or_else(|| panic!("{operation:?}: no `{word}` command"));
-        }
+        let arguments = std::iter::once(&"auth-service").chain(operation.invocation());
+        let parsed =
+            Cli::try_parse_from(arguments).unwrap_or_else(|error| panic!("{operation:?}: {error}"));
+        let Some(Command::Administration(command)) = parsed.command else {
+            panic!("{operation:?}: not an administrative command");
+        };
+        assert_eq!(command.operation(), *operation);
     }
 }
 

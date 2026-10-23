@@ -5,11 +5,12 @@
 /// listing every one, so the list cannot miss a variant.
 macro_rules! operations {
     ($($(#[doc = $doc:literal])+ $name:ident,)+) => {
-        /// Every operation [`AdminService`](super::AdminService) performs. The admin
-        /// API's router maps each to its route, or to none when only the CLI may
-        /// run it, and the CLI's tests map each to its command and check that it
-        /// exists. Both matches are exhaustive, so a new operation does not compile
-        /// until both say how they run it.
+        /// Every operation [`AdminService`](super::AdminService) performs, which
+        /// each new operation must join. The admin API's router maps each to its
+        /// route, or to none when only the CLI may run it. Every CLI command names
+        /// the operation it runs, and a CLI test checks that each operation has a
+        /// command naming it. All three matches are exhaustive, so a new operation
+        /// or command does not compile until the others say how they run it.
         #[derive(Clone, Copy, Debug, PartialEq, Eq)]
         pub(crate) enum AdminOperation {
             $($(#[doc = $doc])+ $name,)+

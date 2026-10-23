@@ -1,8 +1,8 @@
 //! The `auth-service` command line: serving, migrations and break-glass
 //! administration. Administrative commands need only the database, so they work
 //! while the service is down, and run through [`AdminService`](crate::AdminService)
-//! like the admin API: every `AdminOperation` has a command, which a test checks
-//! exhaustively.
+//! like the admin API. Every command names the [`AdminOperation`] it runs, and a
+//! test checks that every operation has a command.
 
 /// Granting, revoking and listing administrators.
 mod admin;
@@ -27,7 +27,7 @@ mod session;
 /// Finding, showing, disabling and reactivating accounts.
 mod user;
 
-use crate::{AuthConfig, SERVICE_NAME, TELEMETRY_FILTER};
+use crate::{AuthConfig, SERVICE_NAME, TELEMETRY_FILTER, admin::AdminOperation};
 use admin::AdminCommand;
 use audit::AuditCommand;
 use clap::{Parser, Subcommand};
@@ -42,6 +42,7 @@ use piquel_repository::Database;
 use piquel_telemetry::Telemetry;
 use session::SessionCommand;
 use std::process::ExitCode;
+use tracing::Instrument;
 use user::UserCommand;
 
 /// Piquel authentication service. Runs `serve` when no command is given.
@@ -123,8 +124,66 @@ impl Command {
 }
 
 impl Administration {
-    /// Runs this command through `console`.
+    /// The operation this command runs. The match is exhaustive, so a new command
+    /// does not compile until it names one.
+    const fn operation(&self) -> AdminOperation {
+        type Op = AdminOperation;
+        match self {
+            Self::User(command) => match command {
+                UserCommand::Search { .. } => Op::SearchUsers,
+                UserCommand::Show { .. } => Op::ViewUser,
+                UserCommand::Disable { .. } => Op::DisableUser,
+                UserCommand::Enable { .. } => Op::EnableUser,
+            },
+            Self::Session(command) => match command {
+                SessionCommand::Revoke { .. } => Op::RevokeSession,
+                SessionCommand::RevokeAll { .. } => Op::RevokeUserSessions,
+            },
+            Self::Invite(command) => match command {
+                InviteCommand::Create { .. } => Op::CreateInvitation,
+                InviteCommand::List { .. } => Op::ListInvitations,
+                InviteCommand::Revoke { .. } => Op::RevokeInvitation,
+            },
+            Self::Client(command) => match **command {
+                ClientCommand::Create(_) => Op::CreateClient,
+                ClientCommand::Apply(_) => Op::ApplyClient,
+                ClientCommand::List { .. } => Op::ListClients,
+                ClientCommand::Show { .. } => Op::ViewClient,
+                ClientCommand::Update(_) => Op::UpdateClient,
+                ClientCommand::Disable { .. } => Op::DisableClient,
+                ClientCommand::Delete { .. } => Op::DeleteClient,
+                ClientCommand::Enable { .. } => Op::EnableClient,
+                ClientCommand::Suspend { .. } => Op::SuspendClient,
+                ClientCommand::Unsuspend { .. } => Op::UnsuspendClient,
+                ClientCommand::RotateSecret { .. } => Op::RotateClientSecret,
+            },
+            Self::Audit(_) => Op::ListEvents,
+            Self::Admin(command) => match command {
+                AdminCommand::Grant { .. } => Op::GrantAdministrator,
+                AdminCommand::Revoke { .. } => Op::RevokeAdministrator,
+                AdminCommand::List { .. } => Op::ListAdministrators,
+            },
+            Self::Handle(command) => match command {
+                HandleCommand::Check => Op::CheckHandles,
+                HandleCommand::Rename { .. } => Op::RenameHandle,
+            },
+            Self::Deliveries(command) => match command {
+                DeliveriesCommand::List { .. } => Op::ListDeliveries,
+                DeliveriesCommand::Retry { .. } => Op::RetryDelivery,
+                DeliveriesCommand::Cancel { .. } => Op::CancelDelivery,
+            },
+        }
+    }
+
+    /// Runs this command through `console`, in a span naming its operation, so
+    /// its events and failures can be traced to it.
     async fn run(self, console: &Console) -> Result<(), CliError> {
+        let span = tracing::info_span!("admin command", admin.operation = ?self.operation());
+        self.dispatch(console).instrument(span).await
+    }
+
+    /// Runs this command's own code.
+    async fn dispatch(self, console: &Console) -> Result<(), CliError> {
         match self {
             Self::User(command) => command.run(console).await,
             Self::Session(command) => command.run(console).await,
