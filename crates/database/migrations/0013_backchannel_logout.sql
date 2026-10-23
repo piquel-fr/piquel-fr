@@ -16,7 +16,10 @@ CREATE TABLE oidc_session_clients (
 -- previous one during a deploy or after a rollback too. An exchange that fails
 -- rolls back the redemption, so only clients that received tokens are recorded.
 -- It runs as its owner: `migrate` grants the runtime role this table only after
--- the migrations, and the previous release keeps redeeming codes meanwhile.
+-- the migrations, and the previous release keeps redeeming codes meanwhile. No one
+-- else may execute it: on a temporary table of its own, with a type whose cast to
+-- uuid it wrote, the runtime role would run that cast as the owner. A trigger
+-- already attached still fires.
 CREATE FUNCTION oidc_session_clients_record_redeemed_code() RETURNS trigger
 LANGUAGE plpgsql SECURITY DEFINER SET search_path = pg_catalog, public, pg_temp AS $$
 BEGIN
@@ -26,6 +29,7 @@ BEGIN
     RETURN NULL;
 END
 $$;
+REVOKE ALL ON FUNCTION oidc_session_clients_record_redeemed_code() FROM PUBLIC;
 CREATE TRIGGER authorization_codes_record_session_client
 AFTER UPDATE OF consumed_at ON authorization_codes
 FOR EACH ROW WHEN (OLD.consumed_at IS NULL AND NEW.consumed_at IS NOT NULL)
