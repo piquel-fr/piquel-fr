@@ -3,8 +3,8 @@
 
 use super::{
     AUTHORIZATION_CODE_MINUTES, AUTHORIZATION_REQUEST_MINUTES, Claim, CodeChallengeMethod,
-    MAX_STATE_BYTES, OAuthCode, OAuthError, OidcApplication, OpaqueToken, PUSHED_REQUEST_SECONDS,
-    Prompt, Reject, ResponseMode, ResponseType, Scopes, TokenPrefix,
+    DescribedScope, MAX_STATE_BYTES, OAuthCode, OAuthError, OidcApplication, OpaqueToken,
+    PUSHED_REQUEST_SECONDS, Prompt, Reject, ResponseMode, ResponseType, Scopes, TokenPrefix,
 };
 use crate::{
     routes,
@@ -26,8 +26,8 @@ use piquel_common::{
     protocol::{claims::Acr, step_up::StepUpRequirement},
 };
 use piquel_repository::{
-    InsertAuthorizationCode, InsertAuthorizationRequest, SessionAuthentication,
-    StoredAuthorizationRequest, StoredOidcClient, StoredSession,
+    Approval, InsertAuthorizationCode, InsertAuthorizationRequest, OidcRepository,
+    SessionAuthentication, StoredAuthorizationRequest, StoredOidcClient, StoredSession,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
@@ -278,7 +278,7 @@ pub(super) struct AuthorizationTransactionView {
     /// Client's registered display name.
     client_name: String,
     /// Requested scopes.
-    scopes: Vec<String>,
+    scopes: Vec<DescribedScope>,
     /// Resource the access token is for.
     audience: String,
 }
@@ -479,7 +479,7 @@ impl OidcApplication {
         Self::require_authorization_session(&request, &session)?;
         Ok(Json(AuthorizationTransactionView {
             client_name: request.client_display_name,
-            scopes: request.scopes,
+            scopes: request.scopes.into_iter().map(Into::into).collect(),
             audience: request.audience,
         }))
     }
@@ -501,9 +501,10 @@ impl OidcApplication {
     }
 
     /// Consumes the pending authorization and returns the client redirect: an error
-    /// for a denial, or a new authorization code. Explicit decisions come from the
-    /// consent page, whose request is `consent`, and save and record consent;
-    /// implicit ones must already be allowed.
+    /// for a denial, or a new authorization code under the user's grant to the
+    /// client, which an approval creates or extends. Explicit decisions come from the
+    /// consent page, whose request is `consent`, and record consent; implicit ones
+    /// must already be allowed.
     async fn decide(
         &self,
         headers: &HeaderMap,
@@ -511,12 +512,6 @@ impl OidcApplication {
         consent: Option<RequestContext>,
     ) -> Result<Url, OAuthError> {
         let session = Session::required(&self.database, headers).await?;
-        let pending = self.find_authorization_request(&input.transaction).await?;
-        if consent.is_none() && !self.can_authorize(&pending, &session).await? {
-            return Err(
-                OAuthCode::InvalidRequest.reject("this authorization needs the user's consent")
-            );
-        }
         let opaque = OpaqueToken::parse(TokenPrefix::AuthorizationRequest, &input.transaction)?;
         let digest = self.token_digest(&opaque)?;
         let mut transaction = self.database.begin().await?;
@@ -537,23 +532,39 @@ impl OidcApplication {
             ConsentDecision::Deny => OAuthCode::AccessDenied
                 .redirect_url(&client_redirect, "the user denied the request"),
             ConsentDecision::Approve => {
-                // Lock the account before writing consent: the consent row's foreign key
-                // would otherwise take a key-share lock that deadlocks with a concurrent login.
+                // Lock the account before writing the grant: the grant row's foreign key
+                // would otherwise take a key-share lock that deadlocks with a concurrent
+                // login, and grant writes serialize on it.
                 transaction
                     .users()
                     .find_active_by_id_for_update(session.user_id)
                     .await?
                     .ok_or_else(|| OAuthCode::InvalidToken.reject("this account is disabled"))?;
+                // Checked under the lock, so a revocation committed since the browser
+                // was sent on cannot be granted again without consent.
+                if consent.is_none()
+                    && !Self::can_authorize(&mut transaction.oidc(), &request, session.user_id)
+                        .await?
+                {
+                    return Err(OAuthCode::InvalidRequest
+                        .reject("this authorization needs the user's consent"));
+                }
+                let approval = if consent.is_some() {
+                    Approval::Consented
+                } else {
+                    Approval::Implicit
+                };
+                let grant_generation = transaction
+                    .oidc()
+                    .grant(
+                        session.user_id,
+                        &request.client_id,
+                        &request.audience,
+                        &request.scopes,
+                        approval,
+                    )
+                    .await?;
                 if let Some(context) = consent {
-                    transaction
-                        .oidc()
-                        .save_consent(
-                            session.user_id,
-                            &request.client_id,
-                            &request.audience,
-                            &request.scopes,
-                        )
-                        .await?;
                     transaction
                         .record(
                             &context.user(&session),
@@ -580,6 +591,7 @@ impl OidcApplication {
                         scopes: request.scopes,
                         audience: request.audience,
                         authentication: SessionAuthentication::from(&session),
+                        grant_generation,
                         expires_at: Utc::now() + Duration::minutes(AUTHORIZATION_CODE_MINUTES),
                     })
                     .await?;
@@ -712,7 +724,7 @@ impl OidcApplication {
                 request.target_acr,
             ));
         };
-        if self.can_authorize(&request, &session).await? {
+        if Self::can_authorize(&mut self.database.oidc(), &request, session.user_id).await? {
             let input = AuthorizationDecision {
                 transaction,
                 decision: ConsentDecision::Approve,
@@ -729,34 +741,25 @@ impl OidcApplication {
         Ok(self.continuation_page(routes::page::CONSENT, &transaction, None))
     }
 
-    /// Whether the authorization may skip the consent page: the client is trusted or
-    /// the user already consented, and the request did not ask for `prompt=consent`.
+    /// Whether `user`'s authorization may skip the consent page: the client is trusted
+    /// or the user already consented, and the request did not ask for `prompt=consent`.
     async fn can_authorize(
-        &self,
+        oidc: &mut OidcRepository<'_>,
         request: &StoredAuthorizationRequest,
-        session: &StoredSession,
+        user: UserId,
     ) -> Result<bool, OAuthError> {
         if request.force_consent {
             return Ok(false);
         }
-        let client = self
-            .database
-            .oidc()
+        let client = oidc
             .find_client(request.client_id.as_str())
             .await?
             .ok_or_else(|| {
                 OAuthCode::InvalidRequest.reject("the client is no longer registered")
             })?;
         Ok(client.trusted
-            || self
-                .database
-                .oidc()
-                .consented(
-                    session.user_id,
-                    &request.client_id,
-                    &request.audience,
-                    &request.scopes,
-                )
+            || oidc
+                .consented(user, &request.client_id, &request.audience, &request.scopes)
                 .await?)
     }
 }

@@ -17,11 +17,25 @@ use serde_json::{Map, Value};
 use sqlx::types::Json;
 use std::{fmt::Display, iter, net::IpAddr};
 
-/// Payload version recorded with every event. Versions are per kind: a kind whose
-/// payload changes shape gets a new version of its own, never a new value of this
-/// constant for every kind, and reads keep accepting the old one. A newer version
-/// was written by a newer release, so it reads as [`RecordedEvent::Unknown`].
+/// Payload version of the kinds that never changed. Versions are per kind: a kind
+/// whose payload changes shape, or gains a value the previous release cannot
+/// decode, gets a new version of its own in [`KIND_VERSIONS`], never a new value of
+/// this constant, and reads keep accepting its older versions. A newer version was
+/// written by a newer release, so it reads as [`RecordedEvent::Unknown`].
 const EVENT_VERSION: i16 = 1;
+/// The kinds written in a version newer than [`EVENT_VERSION`].
+const KIND_VERSIONS: [(&str, i16); 1] = [
+    // 2: the `user_revoked` reason, which version 1 readers fail to decode.
+    ("grant_revoked", 2),
+];
+
+/// The version this release writes `kind` in, and the newest of it that it reads.
+fn kind_version(kind: &str) -> i16 {
+    KIND_VERSIONS
+        .iter()
+        .find(|(known, _)| *known == kind)
+        .map_or(EVENT_VERSION, |&(_, version)| version)
+}
 /// Key under which a [`Personal`] value serializes; matches its serde rename.
 const PERSONAL_KEY: &str = "$personal";
 /// What a [`Personal`] value leaves in the stored payload; matches the serde
@@ -193,7 +207,7 @@ impl TryFrom<EventRow> for StoredEvent {
         } else {
             Personal::Erased
         };
-        let event = if row.version > EVENT_VERSION || !KindProbe::knows(&row.kind) {
+        let event = if row.version > kind_version(&row.kind) || !KindProbe::knows(&row.kind) {
             RecordedEvent::Unknown {
                 kind: row.kind,
                 version: row.version,
@@ -304,7 +318,7 @@ impl EventRepository<'_> {
                 ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)",
                 id.as_uuid(),
                 kind,
-                EVENT_VERSION,
+                kind_version(&kind),
                 data,
                 Json(&context.actor) as _,
                 subject.map(UserId::as_uuid),

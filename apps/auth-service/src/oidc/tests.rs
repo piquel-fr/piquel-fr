@@ -398,6 +398,25 @@ impl Flow {
             .expect("verify ID token");
         (tokens, claims)
     }
+    /// Sends a request to the signed-in user's connected applications.
+    async fn apps(&self, method: Method, path: &str) -> Response {
+        let routes = crate::grants::GrantApplication::new(self.app.database.clone()).routes();
+        self.on(&routes).request(method, path, &[], None).await
+    }
+    /// Lists the signed-in user's connected applications.
+    async fn connected_apps(&self) -> Value {
+        let response = self.apps(Method::GET, routes::grants::LIST).await;
+        assert_eq!(response.status(), StatusCode::OK);
+        Self::json(response).await
+    }
+    /// Asserts that a token response rejected its grant as `invalid_grant`.
+    async fn assert_invalid_grant(response: Response) {
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+        assert_eq!(
+            Self::json(response).await["error"],
+            OAuthCode::InvalidGrant.as_str()
+        );
+    }
     /// Rotates a scenario refresh token using its registered client credentials.
     async fn refresh(&self, token: &str) -> Response {
         self.request(
@@ -857,6 +876,122 @@ async fn policy_reduction_blocks_outstanding_codes_and_refresh() {
         )
         .await;
     assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+}
+
+/// Removing an app revokes its grant, refresh family and outstanding code at once:
+/// none of them works afterwards, even once the user authorizes the app again.
+#[tokio::test]
+#[ignore = "requires TEST_DATABASE_URL"]
+async fn removing_an_app_rejects_what_it_was_issued_before() {
+    let flow = Flow::new(false, false).await;
+    let code = flow.code(REFRESH_SCOPES).await;
+    let tokens = Flow::json(flow.exchange(&code, Flow::verifier(), None).await).await;
+    let issued = flow.connected_apps().await;
+    let response = flow
+        .refresh(tokens["refresh_token"].as_str().expect("refresh token"))
+        .await;
+    let refresh = Flow::json(response).await["refresh_token"]
+        .as_str()
+        .expect("rotated refresh token")
+        .to_owned();
+    let apps = flow.connected_apps().await;
+    assert_eq!(
+        apps,
+        json!([{
+            "client_id": flow.client.id,
+            "name": "Test app",
+            "first_party": false,
+            "scopes": [{"scope": "openid", "description": Scope::OpenId.description()}],
+            "offline_access": true,
+            "granted_at": issued[0]["granted_at"],
+            "last_used_at": apps[0]["last_used_at"],
+        }])
+    );
+    let last_used = |apps: &Value| {
+        serde_json::from_value::<chrono::DateTime<Utc>>(apps[0]["last_used_at"].clone())
+            .expect("last use")
+    };
+    assert!(
+        last_used(&apps) > last_used(&issued),
+        "rotation marks the grant used"
+    );
+    let outstanding = flow.code(REFRESH_SCOPES).await;
+    let item = format!("/account/apps/{}", flow.client.id);
+    let response = flow.apps(Method::DELETE, &item).await;
+    assert_eq!(response.status(), StatusCode::NO_CONTENT);
+    let response = flow.apps(Method::DELETE, &item).await;
+    assert_eq!(response.status(), StatusCode::NOT_FOUND);
+    assert_eq!(flow.connected_apps().await, json!([]));
+    let events = flow.events().await;
+    assert!(
+        matches!(
+            &events[..2],
+            [
+                DomainEvent::GrantRevoked {
+                    reason: GrantRevocation::UserRevoked,
+                    ..
+                },
+                DomainEvent::ConsentRevoked { client_id },
+            ] if *client_id == flow.client.id
+        ),
+        "{events:?}"
+    );
+    let response = flow
+        .authorize(REFRESH_SCOPES, Some(Prompt::None.as_str()))
+        .await;
+    assert_eq!(
+        Flow::parameter(&flow.client_redirect(&response), "error"),
+        OAuthCode::ConsentRequired.as_str(),
+        "removal forgets consent"
+    );
+    let again = flow.code(REFRESH_SCOPES).await;
+    for _ in 0..2 {
+        Flow::assert_invalid_grant(flow.refresh(&refresh).await).await;
+        Flow::assert_invalid_grant(flow.exchange(&outstanding, Flow::verifier(), None).await).await;
+    }
+    let response = flow.exchange(&again, Flow::verifier(), None).await;
+    assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(
+        flow.connected_apps().await.as_array().map(Vec::len),
+        Some(1)
+    );
+}
+
+/// A trusted client's sign-in records an implicit grant. It lists the app, but never
+/// lets the client skip the consent screen once it stops being trusted, and a
+/// disabled client is not listed.
+#[tokio::test]
+#[ignore = "requires TEST_DATABASE_URL"]
+async fn implicit_grants_never_skip_consent() {
+    let mut flow = Flow::new(false, true).await;
+    let response = flow
+        .authorize(Scope::OpenId.as_str(), Some(Prompt::None.as_str()))
+        .await;
+    let code = Flow::parameter(&flow.client_redirect(&response), "code");
+    let response = flow.exchange(&code, Flow::verifier(), None).await;
+    assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(flow.connected_apps().await[0]["first_party"], true);
+    let registry = crate::ClientRegistry::new(flow.app.database.clone());
+    flow.client.trusted = false;
+    let client = flow.client.clone();
+    registry
+        .update(&crate::tests::operator(), &client.id, |_| {
+            Ok::<_, crate::ClientRegistryError>(client.clone())
+        })
+        .await
+        .expect("stop trusting the client");
+    let response = flow
+        .authorize(Scope::OpenId.as_str(), Some(Prompt::None.as_str()))
+        .await;
+    assert_eq!(
+        Flow::parameter(&flow.client_redirect(&response), "error"),
+        OAuthCode::ConsentRequired.as_str()
+    );
+    registry
+        .set_enabled(&crate::tests::operator(), &client.id, false)
+        .await
+        .expect("disable the client");
+    assert_eq!(flow.connected_apps().await, json!([]));
 }
 
 /// Checks that ID hints bind the account across initial, resumed and consent requests.

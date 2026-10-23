@@ -9,6 +9,19 @@ export type Passkey = {
 };
 /** A social identity linked to the account. */
 export type Identity = { provider: Provider; linked_email: string | null };
+/** An application the account granted access, from `GET /account/apps`. */
+export type ConnectedApp = {
+  client_id: string;
+  name: string;
+  /** Made by Piquel: it gets access again without asking on its next sign-in. */
+  first_party: boolean;
+  /** What it can read. Scopes without a description are shown by name. */
+  scopes: { scope: string; description: string | null }[];
+  /** Whether it can act while the user is away. */
+  offline_access: boolean;
+  granted_at: string;
+  last_used_at: string;
+};
 
 /** The account settings API on the auth origin, shared by the settings pages. */
 export class Account {
@@ -25,6 +38,13 @@ export class Account {
   }
   identities(): Promise<Identity[]> {
     return this.api.request('/account/social-identities');
+  }
+  apps(): Promise<ConnectedApp[]> {
+    return this.api.request('/account/apps');
+  }
+  /** Needs only a session: it removes access, it grants none. */
+  removeApp(clientId: string): Promise<void> {
+    return this.api.request(`/account/apps/${encodeURIComponent(clientId)}`, 'DELETE');
   }
   /** Needs a recent passkey confirmation; run it through `StepUp`. */
   removePasskey(id: string): Promise<void> {

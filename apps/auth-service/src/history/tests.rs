@@ -15,7 +15,7 @@ use piquel_common::{
     events::{EventContext, JobName},
 };
 use piquel_repository::{
-    InsertAuthorizationCode, InsertRefreshFamily, InsertRefreshToken, InsertUser,
+    GrantGeneration, InsertAuthorizationCode, InsertRefreshFamily, InsertRefreshToken, InsertUser,
     RefreshRotationError, SessionAuthentication,
 };
 use serde_json::{Value, json};
@@ -190,6 +190,7 @@ impl Harness {
                 scopes: vec!["openid".into()],
                 audience: "test".into(),
                 authentication: authentication.clone(),
+                grant_generation: GrantGeneration::FIRST,
                 expires_at: Utc::now() + Duration::minutes(1),
             })
             .await
@@ -207,6 +208,7 @@ impl Harness {
                     audience: "test".into(),
                     scopes: vec!["openid".into()],
                     authentication,
+                    grant_generation: GrantGeneration::FIRST,
                 },
                 &InsertRefreshToken {
                     id: token,

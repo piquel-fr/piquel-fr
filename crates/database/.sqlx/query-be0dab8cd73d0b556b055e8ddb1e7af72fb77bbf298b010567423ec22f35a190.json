@@ -1,0 +1,25 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT EXISTS (\n                    SELECT\n                    FROM oidc_consents\n                    WHERE user_id = $1\n                    AND client_id = $2\n                    AND audience = $3\n                    AND scopes @> $4\n                    AND NOT implicit\n                    AND revoked_at IS NULL\n                ) AS \"consented!\"",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "consented!",
+        "type_info": "Bool"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Text",
+        "Text",
+        "Jsonb"
+      ]
+    },
+    "nullable": [
+      null
+    ]
+  },
+  "hash": "be0dab8cd73d0b556b055e8ddb1e7af72fb77bbf298b010567423ec22f35a190"
+}

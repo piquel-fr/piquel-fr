@@ -99,6 +99,14 @@ Important invariants:
   signed in. Cleanup keeps a redeemed code for at least a day, and for as long as
   a family it produced is unrevoked and its session live, so a replay is detected
   while it could still revoke tokens.
+- Every successful authorization creates or extends the user's grant to the client
+  and audience (`oidc_consents`), trusted clients included. Only a grant approved
+  on the consent screen lets an untrusted client skip it. Codes and refresh
+  families record the grant's generation; code exchange and refresh rotation
+  accept them only through `use_grant`, while the grant is unrevoked at that
+  generation. Removing an app moves its grants to a new generation, revokes its
+  refresh families and expires its codes in one transaction. Every write to a
+  grant locks the account first.
 
 The schema starts with the initial migration, `migrations/0001_initial.sql`. The
 prototype schema is disposable and the release requires a fresh database. Released

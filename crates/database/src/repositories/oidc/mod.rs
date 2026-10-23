@@ -5,6 +5,7 @@ use crate::{DatabaseError, SessionAuthentication};
 use chrono::{DateTime, Utc};
 use piquel_admin_api::Consent;
 use piquel_common::{ClientId, SessionId, TokenId, UserId, protocol::claims::Acr};
+use serde::Serialize;
 use sqlx::types::Json;
 
 piquel_common::str_enum! {
@@ -15,6 +16,47 @@ piquel_common::str_enum! {
         /// Receives the browser after RP-initiated logout.
         PostLogout = "post_logout",
     }
+}
+
+/// The revocation count of a user's grant to a client. Codes and refresh families
+/// record the generation they were issued under, and stop working once the grant
+/// moves past it (see [`OidcRepository::use_grant`]).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, sqlx::Type)]
+#[serde(transparent)]
+#[sqlx(transparent)]
+pub struct GrantGeneration(pub(crate) i64);
+
+impl GrantGeneration {
+    /// The generation of a grant that was never revoked.
+    pub const FIRST: Self = Self(1);
+}
+
+/// How the user granted a client access, recorded by [`OidcRepository::grant`].
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Approval {
+    /// On the consent screen.
+    Consented,
+    /// Without the consent screen: to a trusted client, or within earlier consent.
+    Implicit,
+}
+
+/// A client the user granted access, with its grants for every audience merged.
+#[derive(Clone, Debug)]
+pub struct StoredGrant {
+    /// The client.
+    pub client_id: ClientId,
+    /// The client's consent-screen name.
+    pub client_name: String,
+    /// Whether the client is trusted, i.e. first-party.
+    pub trusted: bool,
+    /// Whether the client may receive refresh tokens.
+    pub allow_refresh: bool,
+    /// The granted scopes.
+    pub scopes: Vec<String>,
+    /// When the user first granted access, since any revocation.
+    pub granted_at: DateTime<Utc>,
+    /// When the client last exchanged a code or refreshed a token.
+    pub last_used_at: DateTime<Utc>,
 }
 
 /// A validated authorization request, stored while the user logs in and
@@ -127,6 +169,8 @@ pub struct InsertAuthorizationCode {
     pub audience: String,
     /// How the session had authenticated when the code was issued.
     pub authentication: SessionAuthentication,
+    /// Generation of the grant the code was issued under.
+    pub grant_generation: GrantGeneration,
     /// When the code stops being accepted.
     pub expires_at: DateTime<Utc>,
 }
@@ -155,6 +199,8 @@ pub struct ConsumedAuthorizationCode {
     pub audience: String,
     /// How the session had authenticated when the code was issued.
     pub authentication: SessionAuthentication,
+    /// Generation of the grant the code was issued under.
+    pub grant_generation: GrantGeneration,
 }
 
 /// Why [`OidcRepository::consume_code`] could not redeem a code.
@@ -380,8 +426,9 @@ impl OidcRepository<'_> {
             sqlx::query!(
                 "INSERT INTO authorization_codes (
                     id, secret_digest, client_id, user_id, session_id, redirect_uri,
-                    pkce_challenge, nonce, scopes, audience, expires_at, authentication
-                ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)",
+                    pkce_challenge, nonce, scopes, audience, expires_at, authentication,
+                    grant_generation
+                ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)",
                 input.id.as_uuid(),
                 input.secret_digest,
                 input.client_id.as_str(),
@@ -394,6 +441,7 @@ impl OidcRepository<'_> {
                 input.audience,
                 input.expires_at,
                 Json(&input.authentication) as _,
+                input.grant_generation.0,
             )
         )?;
         Ok(())
@@ -456,7 +504,8 @@ impl OidcRepository<'_> {
                     c.user_id AS "user_id: UserId",
                     c.session_id AS "session_id: SessionId", c.redirect_uri, c.pkce_challenge,
                     c.nonce, c.scopes AS "scopes: JsonArray<String>", c.audience,
-                    c.authentication AS "authentication: SessionAuthentication""#,
+                    c.authentication AS "authentication: SessionAuthentication",
+                    c.grant_generation AS "grant_generation: GrantGeneration""#,
                 id.as_uuid(),
                 digest,
             )
@@ -528,8 +577,9 @@ impl OidcRepository<'_> {
         Ok(Some((code.user_id, revoked)))
     }
 
-    /// Reports whether the user already consented to all of `scopes` for this
-    /// client and audience.
+    /// Reports whether the user approved all of `scopes` for this client and
+    /// audience on the consent screen. An implicit or revoked grant never counts, so
+    /// a client that stops being trusted asks again.
     ///
     /// # Errors
     ///
@@ -552,6 +602,8 @@ impl OidcRepository<'_> {
                     AND client_id = $2
                     AND audience = $3
                     AND scopes @> $4
+                    AND NOT implicit
+                    AND revoked_at IS NULL
                 ) AS "consented!""#,
                 user.as_uuid(),
                 client.as_str(),
@@ -561,7 +613,7 @@ impl OidcRepository<'_> {
         )
     }
 
-    /// Lists the user's remembered consents, by client and audience.
+    /// Lists the user's unrevoked grants, by client and audience.
     ///
     /// # Errors
     ///
@@ -575,42 +627,251 @@ impl OidcRepository<'_> {
                 r#"SELECT client_id, audience, scopes AS "scopes: JsonArray<String>"
                 FROM oidc_consents
                 WHERE user_id = $1
+                AND revoked_at IS NULL
                 ORDER BY client_id, audience"#,
                 user.as_uuid(),
             )
         )
     }
 
-    /// Adds `scopes` to the user's consent for this client and audience.
+    /// Records an authorization: adds `scopes` to the user's grant for this client
+    /// and audience, and returns the generation its code must record. A revoked
+    /// grant is granted again at its current generation, so nothing issued before
+    /// the revocation works again.
+    ///
+    /// The grant is implicit while some of its scopes were never approved on the
+    /// consent screen: approving them all there makes it explicit, and granting a
+    /// new scope implicitly makes it implicit again.
+    ///
+    /// Lock the account first. Every write to a grant does, so they serialize
+    /// with each other and with refresh rotation.
     ///
     /// # Errors
     ///
     /// Returns [`DatabaseError`] if the query fails.
-    pub async fn save_consent(
+    pub async fn grant(
         &mut self,
         user: UserId,
         client: &ClientId,
         audience: &str,
         scopes: &[String],
-    ) -> Result<(), DatabaseError> {
+        approval: Approval,
+    ) -> Result<GrantGeneration, DatabaseError> {
         run!(
             self,
-            execute,
-            sqlx::query!(
-                "INSERT INTO oidc_consents (user_id, client_id, audience, scopes)
-                VALUES ($1, $2, $3, $4)
+            fetch_one,
+            sqlx::query_scalar!(
+                r#"INSERT INTO oidc_consents (user_id, client_id, audience, scopes, implicit)
+                VALUES ($1, $2, $3, $4, $5)
                 ON CONFLICT (user_id, client_id, audience) DO UPDATE
                 SET scopes = (
-                    SELECT jsonb_agg(DISTINCT value)
-                    FROM jsonb_array_elements(oidc_consents.scopes || EXCLUDED.scopes)
-                )",
+                        SELECT jsonb_agg(DISTINCT value)
+                        FROM jsonb_array_elements(oidc_consents.scopes || EXCLUDED.scopes)
+                    ),
+                    implicit = CASE
+                        WHEN EXCLUDED.implicit
+                        THEN oidc_consents.implicit OR NOT oidc_consents.scopes @> EXCLUDED.scopes
+                        ELSE oidc_consents.implicit AND NOT EXCLUDED.scopes @> oidc_consents.scopes
+                    END,
+                    granted_at = CASE
+                        WHEN oidc_consents.revoked_at IS NULL THEN oidc_consents.granted_at
+                        ELSE now()
+                    END,
+                    revoked_at = NULL
+                RETURNING generation AS "generation: GrantGeneration""#,
                 user.as_uuid(),
                 client.as_str(),
                 audience,
                 Json(scopes) as _,
+                approval == Approval::Implicit,
+            )
+        )
+    }
+
+    /// The check every use of a grant's credentials passes: code exchange and
+    /// refresh rotation, and introspection once it exists (#72). Returns whether the
+    /// user's grant to `client` for `audience` is unrevoked at `generation`, and if
+    /// so marks it used. The update waits for a concurrent revocation to commit, then
+    /// sees it.
+    ///
+    /// A credential without any grant was issued by the release before grants,
+    /// during the deploy that added them. Its grant is created implicit, with the
+    /// credential's `scopes` and generation: grants are never deleted, and
+    /// [`Self::revoke_grants`] covers every credential, so a missing one was never
+    /// revoked. That release may also have issued scopes the grant lacks, which are
+    /// added to it as implicit.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`DatabaseError`] if the query fails.
+    pub async fn use_grant(
+        &mut self,
+        user: UserId,
+        client: &ClientId,
+        audience: &str,
+        scopes: &[String],
+        generation: GrantGeneration,
+    ) -> Result<bool, DatabaseError> {
+        Ok(run!(
+            self,
+            execute,
+            sqlx::query!(
+                "INSERT INTO oidc_consents (user_id, client_id, audience, scopes, implicit, generation)
+                VALUES ($1, $2, $3, $4, TRUE, $5)
+                ON CONFLICT (user_id, client_id, audience) DO UPDATE
+                SET last_used_at = now(),
+                    scopes = (
+                        SELECT jsonb_agg(DISTINCT value)
+                        FROM jsonb_array_elements(oidc_consents.scopes || EXCLUDED.scopes)
+                    ),
+                    implicit = oidc_consents.implicit
+                        OR NOT oidc_consents.scopes @> EXCLUDED.scopes
+                WHERE oidc_consents.generation = $5
+                AND oidc_consents.revoked_at IS NULL",
+                user.as_uuid(),
+                client.as_str(),
+                audience,
+                Json(scopes) as _,
+                generation.0,
+            )
+        )?
+        .rows_affected()
+            == 1)
+    }
+
+    /// Lists the enabled clients the user has an unrevoked grant to, most recently
+    /// used first. Grants for several audiences of one client are merged.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`DatabaseError`] if the query fails or a row is invalid.
+    pub async fn list_grants(&mut self, user: UserId) -> Result<Vec<StoredGrant>, DatabaseError> {
+        run!(
+            self,
+            fetch_all,
+            sqlx::query_as!(
+                StoredGrant,
+                r#"SELECT
+                    g.client_id AS "client_id: ClientId", c.display_name AS client_name,
+                    c.trusted, c.allow_refresh,
+                    COALESCE(
+                        jsonb_agg(DISTINCT s.scope) FILTER (WHERE s.scope IS NOT NULL),
+                        '[]'
+                    ) AS "scopes!: JsonArray<String>",
+                    min(g.granted_at) AS "granted_at!",
+                    max(g.last_used_at) AS "last_used_at!"
+                FROM oidc_consents g
+                JOIN oidc_clients c ON c.id = g.client_id
+                LEFT JOIN LATERAL jsonb_array_elements_text(g.scopes) AS s(scope) ON TRUE
+                WHERE g.user_id = $1
+                AND g.revoked_at IS NULL
+                AND c.enabled
+                GROUP BY g.client_id, c.display_name, c.trusted, c.allow_refresh
+                ORDER BY max(g.last_used_at) DESC, g.client_id"#,
+                user.as_uuid(),
+            )
+        )
+    }
+
+    /// Revokes the user's grants to `client` across audiences, with one for each
+    /// audience of its outstanding credentials, a code being exchanged right now
+    /// included: each moves to a new generation, marked revoked and without
+    /// scopes. Then revokes the client's
+    /// refresh families of the user and expires its outstanding codes, which the new
+    /// generation already rejects. Codes expire rather than count as redeemed, so
+    /// presenting one later is not taken for a replay. Returns the revoked families,
+    /// or `None` if the user had no unrevoked grant to `client`.
+    ///
+    /// Run it in a transaction, after locking the account. A code that an exchange
+    /// holds is skipped rather than waited for, since that exchange locks the code
+    /// before the account: it fails the generation check once this commits.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`DatabaseError`] if a query fails.
+    pub async fn revoke_grants(
+        &mut self,
+        user: UserId,
+        client: &ClientId,
+    ) -> Result<Option<Vec<TokenId>>, DatabaseError> {
+        // A credential the release before grants issued may have none yet. Give it
+        // one to revoke, so that using it later cannot create a fresh grant.
+        run!(
+            self,
+            execute,
+            sqlx::query!(
+                "INSERT INTO oidc_consents (user_id, client_id, audience, scopes, implicit)
+                SELECT DISTINCT $1::UUID, $2::TEXT, audience, '[]'::JSONB, TRUE
+                FROM (
+                    SELECT audience
+                    FROM refresh_token_families
+                    WHERE user_id = $1
+                    AND client_id = $2
+                    AND revoked_at IS NULL
+                    UNION ALL
+                    SELECT audience
+                    FROM authorization_codes
+                    WHERE user_id = $1
+                    AND client_id = $2
+                    AND consumed_at IS NULL
+                    AND expires_at > now()
+                ) credentials
+                ON CONFLICT (user_id, client_id, audience) DO NOTHING",
+                user.as_uuid(),
+                client.as_str(),
             )
         )?;
-        Ok(())
+        let revoked = run!(
+            self,
+            execute,
+            sqlx::query!(
+                "UPDATE oidc_consents
+                SET revoked_at = now(), generation = generation + 1, scopes = '[]'
+                WHERE user_id = $1
+                AND client_id = $2
+                AND revoked_at IS NULL",
+                user.as_uuid(),
+                client.as_str(),
+            )
+        )?
+        .rows_affected();
+        if revoked == 0 {
+            return Ok(None);
+        }
+        let families = run!(
+            self,
+            fetch_all,
+            sqlx::query_scalar!(
+                r#"UPDATE refresh_token_families
+                SET revoked_at = now()
+                WHERE user_id = $1
+                AND client_id = $2
+                AND revoked_at IS NULL
+                RETURNING id AS "id: TokenId""#,
+                user.as_uuid(),
+                client.as_str(),
+            )
+        )?;
+        run!(
+            self,
+            execute,
+            sqlx::query!(
+                "UPDATE authorization_codes
+                SET expires_at = now()
+                WHERE id IN (
+                    SELECT id
+                    FROM authorization_codes
+                    WHERE user_id = $1
+                    AND client_id = $2
+                    AND consumed_at IS NULL
+                    AND expires_at > now()
+                    FOR UPDATE SKIP LOCKED
+                )",
+                user.as_uuid(),
+                client.as_str(),
+            )
+        )?;
+        Ok(Some(families))
     }
 
     /// Returns the user's verified email for the `email` claim, preferring the

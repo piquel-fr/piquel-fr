@@ -85,6 +85,20 @@ crate::str_enum! {
     }
 }
 
+impl Scope {
+    /// What the scope gives an application, as the consent screen and the user's
+    /// connected apps describe it.
+    #[must_use]
+    pub const fn description(self) -> &'static str {
+        match self {
+            Self::OpenId => "Your account identifier",
+            Self::Profile => "Your username and display name",
+            Self::Email => "Your verified email address",
+            Self::OfflineAccess => "Access to your account while you are away",
+        }
+    }
+}
+
 /// A set of scope tokens (RFC 6749 §3.3), deduplicated and sorted so its space-separated
 /// wire form is stable. Holds strings because applications declare their own scopes
 /// besides the standard [`Scope`] values.

@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "SELECT client_id, audience, scopes AS \"scopes: JsonArray<String>\"\n                FROM oidc_consents\n                WHERE user_id = $1\n                ORDER BY client_id, audience",
+  "query": "SELECT client_id, audience, scopes AS \"scopes: JsonArray<String>\"\n                FROM oidc_consents\n                WHERE user_id = $1\n                AND revoked_at IS NULL\n                ORDER BY client_id, audience",
   "describe": {
     "columns": [
       {
@@ -30,5 +30,5 @@
       false
     ]
   },
-  "hash": "b65fa93ee413d6af8ac77d9b945fb204415f91e74664c6f22e688c31306d58b7"
+  "hash": "0efd2ca1e33cee157c539887b02e6f15b2647072ec234c10fecfce33e0e8ccd0"
 }

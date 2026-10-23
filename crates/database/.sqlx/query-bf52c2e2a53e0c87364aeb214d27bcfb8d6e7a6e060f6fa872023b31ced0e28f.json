@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE oidc_consents\n                SET revoked_at = now(), generation = generation + 1, scopes = '[]'\n                WHERE user_id = $1\n                AND client_id = $2\n                AND revoked_at IS NULL",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "bf52c2e2a53e0c87364aeb214d27bcfb8d6e7a6e060f6fa872023b31ced0e28f"
+}

@@ -1,7 +1,7 @@
 //! Transactional refresh-token families, rotation and replay revocation.
 
 use super::{RepositoryExecutor, TokenRepository};
-use crate::{DatabaseError, SessionAuthentication};
+use crate::{DatabaseError, GrantGeneration, SessionAuthentication};
 use chrono::{DateTime, Utc};
 use piquel_common::{SessionId, TokenId, UserId};
 use sqlx::types::Json;
@@ -28,6 +28,9 @@ pub struct InsertRefreshFamily {
     /// How the session had authenticated when the code was issued. Every token
     /// of the family reports it (OIDC Core §12.2).
     pub authentication: SessionAuthentication,
+    /// Generation of the grant the code was issued under; the family stops
+    /// refreshing once the grant moves past it.
+    pub grant_generation: GrantGeneration,
 }
 
 /// A new refresh token within a family.
@@ -61,6 +64,8 @@ pub struct RotatedRefreshToken {
     pub scopes: Vec<String>,
     /// How the session had authenticated when the grant's code was issued.
     pub authentication: SessionAuthentication,
+    /// Generation of the grant the family was issued under.
+    pub grant_generation: GrantGeneration,
 }
 
 /// A refresh family that a revocation ended.
@@ -117,8 +122,8 @@ impl TokenRepository<'_> {
             sqlx::query!(
                 "INSERT INTO refresh_token_families (
                     id, user_id, client_id, session_id, authorization_code_id, audience, scopes,
-                    authentication
-                ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)",
+                    authentication, grant_generation
+                ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)",
                 family.id.as_uuid(),
                 family.user_id.as_uuid(),
                 family.client_id,
@@ -127,6 +132,7 @@ impl TokenRepository<'_> {
                 family.audience,
                 Json(&family.scopes) as _,
                 Json(&family.authentication) as _,
+                family.grant_generation.0,
             )
         )?;
         self.insert_token(token).await
@@ -295,7 +301,8 @@ impl TokenRepository<'_> {
                     t.family_id AS "family_id: TokenId", t.consumed_at,
                     f.user_id AS "user_id: UserId", f.client_id,
                     f.session_id AS "session_id: SessionId", f.audience, f.scopes,
-                    f.authentication, c.allow_refresh, c.allowed_scopes, c.allowed_audiences
+                    f.authentication, f.grant_generation AS "grant_generation: GrantGeneration",
+                    c.allow_refresh, c.allowed_scopes, c.allowed_audiences
                 FROM refresh_tokens t
                 JOIN refresh_token_families f ON f.id = t.family_id
                 JOIN oidc_clients c ON c.id = f.client_id
@@ -356,6 +363,7 @@ impl TokenRepository<'_> {
             audience: row.audience,
             scopes,
             authentication: decode("authentication", row.authentication)?,
+            grant_generation: row.grant_generation,
         })
     }
 

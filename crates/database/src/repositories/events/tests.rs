@@ -1,7 +1,7 @@
 //! Recording, personal data, the consumer cursor and the audit log import.
 use super::*;
 use crate::{Database, DatabaseTransaction};
-use piquel_common::{PasskeyId, Provider};
+use piquel_common::{PasskeyId, Provider, TokenId};
 use sqlx::{Connection, PgConnection, PgPool};
 use std::time::Duration;
 
@@ -192,6 +192,7 @@ async fn events_a_newer_release_wrote_read_as_unknown() {
     for (kind, version) in [
         ("client_deleted", EVENT_VERSION),
         ("passkey_added", EVENT_VERSION + 1),
+        ("grant_revoked", kind_version("grant_revoked") + 1),
     ] {
         events
             .insert_written_elsewhere(user, kind, version, &data)
@@ -212,6 +213,7 @@ async fn events_a_newer_release_wrote_read_as_unknown() {
             .map(|stored| stored.event)
             .collect::<Vec<_>>(),
         [
+            unknown("grant_revoked", kind_version("grant_revoked") + 1),
             unknown("passkey_added", EVENT_VERSION + 1),
             unknown("client_deleted", EVENT_VERSION),
         ]
@@ -228,6 +230,22 @@ async fn events_a_newer_release_wrote_read_as_unknown() {
         Err(DatabaseError::InvalidStoredData { .. })
     ));
     tx.rollback().await.expect("rollback");
+
+    // Every version of a kind up to this release's reads as known.
+    let revoked = |reason: &str| serde_json::json!({"client_id": "app", "family_id": TokenId::new(), "reason": reason});
+    for (version, reason) in [(1, "refresh_replay"), (2, "user_revoked")] {
+        events
+            .insert_written_elsewhere(user, "grant_revoked", version, &revoked(reason))
+            .await
+            .expect("event");
+    }
+    let latest = events.history_for_user(user, 2).await.expect("history");
+    assert!(
+        latest
+            .iter()
+            .all(|stored| matches!(stored.event, RecordedEvent::Known(_))),
+        "{latest:?}"
+    );
 }
 
 /// The migration turns audit rows into imported events with their action, outcome

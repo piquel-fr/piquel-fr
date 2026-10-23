@@ -1,0 +1,22 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO refresh_token_families (\n                    id, user_id, client_id, session_id, authorization_code_id, audience, scopes,\n                    authentication, grant_generation\n                ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid",
+        "Text",
+        "Uuid",
+        "Uuid",
+        "Text",
+        "Jsonb",
+        "Jsonb",
+        "Int8"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "160f012dd37bf423d9f7a0d918f3134e14003d5636c683fd03f7b9ee27022caa"
+}

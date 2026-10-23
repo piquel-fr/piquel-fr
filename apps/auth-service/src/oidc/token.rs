@@ -23,8 +23,8 @@ use piquel_common::{
     },
 };
 use piquel_repository::{
-    CodeRedemptionError, ConsumedAuthorizationCode, DatabaseTransaction, InsertRefreshFamily,
-    InsertRefreshToken, RefreshRotationError, SessionAuthentication,
+    CodeRedemptionError, ConsumedAuthorizationCode, DatabaseTransaction, GrantGeneration,
+    InsertRefreshFamily, InsertRefreshToken, RefreshRotationError, SessionAuthentication,
 };
 use serde::{Deserialize, Serialize};
 
@@ -82,6 +82,14 @@ pub(super) struct TokenResponse {
     refresh_token: Option<String>,
 }
 
+/// Auth's private access token claims.
+#[derive(Serialize)]
+struct GrantClaims {
+    /// Generation of the grant the token was issued under, so introspection (#72)
+    /// can report it inactive once the user revokes the grant.
+    grant_gen: GrantGeneration,
+}
+
 /// Client-bound claim policy shared by initial exchanges and refresh rotation.
 struct TokenGrant<'a> {
     /// Client identifier bound into the token claims.
@@ -96,6 +104,8 @@ struct TokenGrant<'a> {
     session: SessionId,
     /// How that session had authenticated when the grant's code was issued.
     authentication: &'a SessionAuthentication,
+    /// Generation of the user's grant to the client.
+    generation: GrantGeneration,
 }
 
 impl TokenGrant<'_> {
@@ -113,6 +123,7 @@ impl TokenGrant<'_> {
             nonce,
             session,
             authentication,
+            generation,
         } = self;
         let issued_at = Utc::now();
         let expires_at = issued_at + Duration::seconds(ACCESS_TOKEN_SECONDS);
@@ -145,7 +156,9 @@ impl TokenGrant<'_> {
                 act: None,
                 cnf: None,
                 profile: profile.clone(),
-                extra: (),
+                extra: GrantClaims {
+                    grant_gen: *generation,
+                },
             },
         )?;
         let id_token = if scopes.contains(Scope::OpenId) {
@@ -219,8 +232,9 @@ impl OidcApplication {
     }
 
     /// Exchanges a one-use code for the authenticated client after checking its client,
-    /// redirect and PKCE binding, and records the grant. A replayed code has its
-    /// refresh family revoked and committed before the rejection.
+    /// redirect and PKCE binding, and that the user has not revoked the client since
+    /// the code was issued, then records the grant. A replayed code has its refresh
+    /// family revoked and committed before the rejection.
     async fn exchange_code(
         &self,
         form: TokenForm,
@@ -270,6 +284,19 @@ impl OidcApplication {
             .await?
             .filter(|session| session.user_id == user.id)
             .ok_or_else(|| OAuthCode::InvalidGrant.reject(SESSION_ENDED))?;
+        if !tx
+            .oidc()
+            .use_grant(
+                user.id,
+                &code.client_id,
+                &code.audience,
+                &code.scopes,
+                code.grant_generation,
+            )
+            .await?
+        {
+            return Err(OAuthCode::InvalidGrant.reject(GRANT_REVOKED));
+        }
         let client = tx
             .oidc()
             .find_client(code.client_id.as_str())
@@ -284,6 +311,7 @@ impl OidcApplication {
             nonce: code.nonce.as_deref(),
             session: session.id,
             authentication: &code.authentication,
+            generation: code.grant_generation,
         }
         .issue(self, &user, email.as_deref())?;
         let (family_id, refresh) = if client.allow_refresh && scopes.contains(Scope::OfflineAccess)
@@ -310,8 +338,9 @@ impl OidcApplication {
         })
     }
 
-    /// Rotates the authenticated client's valid token, and commits replay or policy
-    /// revocation before rejecting it. The new tokens report the grant's original
+    /// Rotates the authenticated client's valid token, unless the user revoked the
+    /// client since its family was issued, and commits replay or policy revocation
+    /// before rejecting it. The new tokens report the grant's original
     /// authentication, not the session's current one (OIDC Core §12.2).
     async fn rotate_refresh(
         &self,
@@ -341,6 +370,19 @@ impl OidcApplication {
             return Err(
                 OAuthCode::InvalidGrant.reject("refresh_token was issued to another client")
             );
+        }
+        if !tx
+            .oidc()
+            .use_grant(
+                rotated.user_id,
+                client_id,
+                &rotated.audience,
+                &rotated.scopes,
+                rotated.grant_generation,
+            )
+            .await?
+        {
+            return Err(OAuthCode::InvalidGrant.reject(GRANT_REVOKED));
         }
         let scopes = form.refresh_scopes(&rotated.scopes)?;
         let user = tx
@@ -372,6 +414,7 @@ impl OidcApplication {
             nonce: None,
             session: session.id,
             authentication: &rotated.authentication,
+            generation: rotated.grant_generation,
         }
         .issue(self, &user, email.as_deref())?;
         tokens.refresh_token = Some(raw);
@@ -407,6 +450,7 @@ impl OidcApplication {
                     audience: code.audience,
                     scopes: code.scopes,
                     authentication: code.authentication,
+                    grant_generation: code.grant_generation,
                 },
                 &InsertRefreshToken {
                     id: opaque.id,
@@ -605,6 +649,8 @@ impl OidcApplication {
 
 /// Rejection of a grant whose account was disabled.
 const ACCOUNT_DISABLED: &str = "the account is disabled";
+/// Rejection of a credential whose grant the user revoked.
+const GRANT_REVOKED: &str = "the user removed this application's access";
 /// Rejection of a grant whose browser session ended.
 const SESSION_ENDED: &str = "the sign-in session behind this grant has ended";
 

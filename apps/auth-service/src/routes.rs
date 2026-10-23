@@ -67,6 +67,14 @@ pub(crate) mod history {
     pub(crate) const REPORT: &str = "/account/history/{event_id}/report";
 }
 
+/// The applications the signed-in user has granted access.
+pub(crate) mod grants {
+    /// Lists them, most recently used first.
+    pub(crate) const LIST: &str = "/account/apps";
+    /// Removes one application's access.
+    pub(crate) const ITEM: &str = "/account/apps/{client_id}";
+}
+
 /// OAuth 2.0 and `OpenID` Connect endpoints.
 pub(crate) mod oidc {
     use piquel_common::protocol::metadata;
