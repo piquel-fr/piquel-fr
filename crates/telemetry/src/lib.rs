@@ -67,6 +67,11 @@ const SCOPE: &str = "piquel";
 /// Added to every filter: this crate's spans and access logs, and the SDK's own
 /// warnings, such as failed exports.
 const OWN_DIRECTIVES: &str = "piquel_telemetry=info,opentelemetry=warn";
+/// Targets never exported as logs: the SDK, which logs its own failures, and the
+/// HTTP stack export requests run on, outside the SDK's suppression of its own
+/// telemetry. Exporting either would feed the exporter its own traffic. They still
+/// log to stderr.
+const UNEXPORTED_TARGETS: [&str; 5] = ["opentelemetry", "reqwest", "hyper", "h2", "rustls"];
 /// `true` keeps telemetry on stderr only, as the SDK specification says.
 const SDK_DISABLED: Variable = Variable::new("OTEL_SDK_DISABLED");
 /// Where OTLP is sent; unset or empty means nothing is exported.
@@ -243,11 +248,11 @@ impl Telemetry {
         let spans = tracing_opentelemetry::layer()
             .with_tracer(opentelemetry::trace::TracerProvider::tracer(tracer, SCOPE))
             .with_filter(EnvFilter::try_new(&directives)?);
-        // The SDK logs its own failures through `tracing`; exporting those would
-        // feed the exporter that failed.
         let exported = logger.map(|logger| {
             OpenTelemetryTracingBridge::new(logger).with_filter(FilterFn::new(|metadata| {
-                !metadata.target().starts_with("opentelemetry")
+                !UNEXPORTED_TARGETS
+                    .iter()
+                    .any(|target| metadata.target().starts_with(target))
             }))
         });
         let stderr = tracing_subscriber::fmt::layer()
