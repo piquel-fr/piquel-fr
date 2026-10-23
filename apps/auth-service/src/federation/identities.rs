@@ -1,7 +1,7 @@
 //! Pending and linked social identities: signup, linking, listing and unlinking.
 
 use super::{FederationApplication, FederationError, Provider};
-use crate::account::{AccountError, AccountService, ConfirmedSubject, Subject};
+use crate::account::{AccountError, AccountService, ConfirmedSubject, Viewer};
 use crate::security::{self, ApiError, BrowserCookie, RequestContext};
 use axum::{
     Json,
@@ -228,15 +228,12 @@ impl FederationApplication {
 /// Linking adds a way to sign in, so only the owner can.
 impl AccountService {
     /// Lists the account's active social identities.
-    pub(crate) async fn identities(
-        &self,
-        subject: &Subject,
-    ) -> Result<Vec<Identity>, AccountError> {
-        subject.viewed(&self.database).await?;
+    pub(crate) async fn identities(&self, viewer: &Viewer) -> Result<Vec<Identity>, AccountError> {
+        viewer.viewed(&self.database).await?;
         let identities = self
             .database
             .federation()
-            .list_active(subject.user())
+            .list_active(viewer.user())
             .await?;
         Ok(identities.into_iter().map(Into::into).collect())
     }

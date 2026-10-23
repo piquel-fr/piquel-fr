@@ -1,5 +1,5 @@
 //! Browser-bound `WebAuthn` ceremonies, passkey management and session confirmation.
-use crate::account::{AccountError, AccountService, ConfirmedSubject, Subject};
+use crate::account::{AccountError, AccountService, ConfirmedSubject, Subject, Viewer};
 use crate::config::PasskeyConfig;
 use crate::federation::FederationApplication;
 use crate::routes;
@@ -819,10 +819,10 @@ impl AccountService {
     /// Lists public labels and identifiers of the account's active passkeys.
     pub(crate) async fn passkeys(
         &self,
-        subject: &Subject,
+        viewer: &Viewer,
     ) -> Result<Vec<api::Passkey>, AccountError> {
-        subject.viewed(&self.database).await?;
-        let passkeys = self.database.passkeys().list_active(subject.user()).await?;
+        viewer.viewed(&self.database).await?;
+        let passkeys = self.database.passkeys().list_active(viewer.user()).await?;
         Ok(passkeys.into_iter().map(Into::into).collect())
     }
 

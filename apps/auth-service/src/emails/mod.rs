@@ -10,7 +10,7 @@
 //! derived from the address's ID with [`VerificationKey`], once here to store its
 //! digest, and again by the email sender. See `docs/architecture/delivery-queue.md`.
 use crate::{
-    account::{AccountError, AccountService, ConfirmedSubject, Subject},
+    account::{AccountError, AccountService, ConfirmedSubject, Viewer},
     config::EmailConfig,
     routes,
     security::{ApiError, Confirmed, OptionalSession, RequestContext},
@@ -344,9 +344,9 @@ impl EmailApplication {
 /// notices, whoever makes it.
 impl AccountService {
     /// Lists the account's addresses, primary first.
-    pub(crate) async fn emails(&self, subject: &Subject) -> Result<Vec<EmailView>, AccountError> {
-        subject.viewed(&self.database).await?;
-        let emails = self.database.emails().list(subject.user()).await?;
+    pub(crate) async fn emails(&self, viewer: &Viewer) -> Result<Vec<EmailView>, AccountError> {
+        viewer.viewed(&self.database).await?;
+        let emails = self.database.emails().list(viewer.user()).await?;
         Ok(emails.into_iter().map(EmailView::from).collect())
     }
 

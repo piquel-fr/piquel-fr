@@ -4,7 +4,7 @@
 use super::{CliError, Confirm, Console, Output};
 use crate::{
     Reason, UserRef,
-    account::{AccountOperation, ConfirmedSubject, Subject},
+    account::{AccountOperation, ConfirmedSubject, Subject, Viewer},
     emails::EmailView,
     history::HistoryPage,
     sessions::{Revoked, SessionItem},
@@ -221,7 +221,7 @@ impl AccountCommand {
         let Self { user, setting } = self;
         let id = console.user(&user).await?;
         let account = &console.account;
-        let read = || Subject::reading(id, console.operator.clone());
+        let read = || Viewer::operator(id, console.operator.clone());
         match setting {
             Setting::Passkeys(Passkeys::List { output }) => {
                 output.print(&account.passkeys(&read()).await?[..], Self::print_passkeys)?;

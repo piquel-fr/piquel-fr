@@ -1,5 +1,6 @@
 //! Account settings any administrator may also change, as [`AccountService`]
-//! operations on a [`Subject`]: the account, and who acts on it. The owner's
+//! operations on a [`Subject`], for changes, or a [`Viewer`], for reads: the
+//! account, and who acts on it. The owner's
 //! `/account` routes run them with the subject of their session cookie, and the
 //! `account` command with the operator at the terminal. The admin dashboard will
 //! call them in-process, as an administrator.
@@ -16,7 +17,7 @@ mod error;
 mod subject;
 
 pub(crate) use error::AccountError;
-pub(crate) use subject::{ConfirmedSubject, Subject};
+pub(crate) use subject::{ConfirmedSubject, Subject, Viewer};
 
 use crate::{
     emails::EmailView,
@@ -146,9 +147,9 @@ impl AccountApplication {
     /// Lists the account's active passkeys.
     async fn passkeys(
         State(app): State<Self>,
-        subject: Subject,
+        viewer: Viewer,
     ) -> Result<Json<Vec<Passkey>>, AccountError> {
-        Ok(Json(app.service.passkeys(&subject).await?))
+        Ok(Json(app.service.passkeys(&viewer).await?))
     }
 
     /// Renames a passkey. A name grants nothing, so the owner's session is enough.
@@ -177,9 +178,9 @@ impl AccountApplication {
     /// Lists the account's linked social identities.
     async fn identities(
         State(app): State<Self>,
-        subject: Subject,
+        viewer: Viewer,
     ) -> Result<Json<Vec<Identity>>, AccountError> {
-        Ok(Json(app.service.identities(&subject).await?))
+        Ok(Json(app.service.identities(&viewer).await?))
     }
 
     /// Unlinks the provider the path names.
@@ -198,9 +199,9 @@ impl AccountApplication {
     /// Lists the account's addresses, primary first.
     async fn emails(
         State(app): State<Self>,
-        subject: Subject,
+        viewer: Viewer,
     ) -> Result<Json<Vec<EmailView>>, AccountError> {
-        Ok(Json(app.service.emails(&subject).await?))
+        Ok(Json(app.service.emails(&viewer).await?))
     }
 
     /// Makes a verified address the primary one.
@@ -226,9 +227,9 @@ impl AccountApplication {
     /// Lists the account's active sessions, most recently active first.
     async fn sessions(
         State(app): State<Self>,
-        subject: Subject,
+        viewer: Viewer,
     ) -> Result<Json<Vec<SessionItem>>, AccountError> {
-        Ok(Json(app.service.sessions(&subject).await?))
+        Ok(Json(app.service.sessions(&viewer).await?))
     }
 
     /// Signs one session out.
@@ -252,10 +253,10 @@ impl AccountApplication {
     /// Returns a page of the account's history, newest first.
     async fn history(
         State(app): State<Self>,
-        subject: Subject,
+        viewer: Viewer,
         Query(query): Query<HistoryQuery>,
     ) -> Result<Json<HistoryPage>, AccountError> {
-        Ok(Json(app.service.history(&subject, query.before).await?))
+        Ok(Json(app.service.history(&viewer, query.before).await?))
     }
 }
 

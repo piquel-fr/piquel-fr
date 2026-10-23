@@ -2,7 +2,7 @@
 //! administration. Administrative commands need only the database, so they work
 //! while the service is down. They run through [`AdminService`](crate::AdminService)
 //! like the admin API, and through [`AccountService`](crate::account::AccountService)
-//! like the shared settings mounts. Every command names the [`Operation`] it runs,
+//! like the owner's settings routes. Every command names the [`Operation`] it runs,
 //! and tests check that every operation has a command.
 
 /// Changing one account's settings on its owner's behalf.

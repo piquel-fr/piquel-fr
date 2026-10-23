@@ -13,12 +13,12 @@ use piquel_common::{
 use piquel_repository::{Database, DatabaseTransaction, SessionScope, StoredSession};
 use std::ops::Deref;
 
-/// The account a settings operation reads or changes, and who acts on it.
-/// Operations take it instead of a session, so they serve the owner and
-/// operators alike. Its fields are private: an owner's comes only from their
-/// session cookie, through the extractor, and an operator's from
-/// [`Self::operator`] or [`Self::reading`], with an [`Operator`] only the admin
-/// API's authenticator or the CLI creates.
+/// The account a settings change applies to, and who makes it. Changes take it
+/// instead of a session, so they serve the owner and operators alike. Its fields
+/// are private: an owner's comes only from their session cookie, through the
+/// extractor, and an operator's from [`Self::operator`], with their reason and an
+/// [`Operator`] only the admin API's authenticator or the CLI creates. An operator
+/// cannot make a change without a reason: a read takes a [`Viewer`] instead.
 pub(crate) struct Subject {
     /// The account.
     user: UserId,
@@ -35,14 +35,31 @@ enum ActingAs {
         /// Where the request came from.
         context: RequestContext,
     },
-    /// An administrator or operator. A change carries their reason; a read has
-    /// none.
+    /// An administrator or operator, and why they make the change.
     Operator {
         /// Who acts.
         operator: Operator,
-        /// Why, for a change.
-        reason: Option<Reason>,
+        /// Why.
+        reason: Reason,
     },
+}
+
+/// The account a settings read shows, and who reads it. A read changes nothing,
+/// so it needs no reason. Its fields are private, like [`Subject`]'s: an owner's
+/// comes only from their session cookie, through the extractor.
+pub(crate) struct Viewer {
+    /// The account.
+    user: UserId,
+    /// Who reads it.
+    by: Reading,
+}
+
+/// Who reads a [`Viewer`]'s account.
+enum Reading {
+    /// The account's own user, signed in with this session.
+    Owner(SessionId),
+    /// An administrator or operator.
+    Operator(Operator),
 }
 
 /// A [`Subject`] whose owner confirmed their session with a passkey at most
@@ -55,21 +72,7 @@ impl Subject {
     pub(crate) const fn operator(user: UserId, operator: Operator, reason: Reason) -> Self {
         Self {
             user,
-            by: ActingAs::Operator {
-                operator,
-                reason: Some(reason),
-            },
-        }
-    }
-
-    /// An administrator or operator reading `user`'s settings.
-    pub(crate) const fn reading(user: UserId, operator: Operator) -> Self {
-        Self {
-            user,
-            by: ActingAs::Operator {
-                operator,
-                reason: None,
-            },
+            by: ActingAs::Operator { operator, reason },
         }
     }
 
@@ -84,7 +87,7 @@ impl Subject {
         match &self.by {
             ActingAs::Owner { session, context } => context.user(session),
             ActingAs::Operator { operator, reason } => EventContext {
-                reason: reason.clone().map(Reason::into_inner),
+                reason: Some(reason.clone().into_inner()),
                 ..operator.context()
             },
         }
@@ -141,23 +144,6 @@ impl Subject {
         Ok(tx.commit().await?)
     }
 
-    /// Records that an administrator or operator read the account's settings,
-    /// which hold personal data, as `user show` is recorded. An owner reading
-    /// their own is not.
-    pub(crate) async fn viewed(&self, database: &Database) -> Result<(), AccountError> {
-        if let ActingAs::Operator { .. } = &self.by {
-            let mut tx = database.begin().await?;
-            tx.record(
-                &self.context(),
-                Some(self.user),
-                DomainEvent::AccountViewed {},
-            )
-            .await?;
-            tx.commit().await?;
-        }
-        Ok(())
-    }
-
     /// The owner signed in with `session`, acting from the request `parts`
     /// describes. Only the extractors call it, with the session of the request's
     /// cookie.
@@ -170,6 +156,61 @@ impl Subject {
         Ok(Self {
             user: session.user_id,
             by: ActingAs::Owner { session, context },
+        })
+    }
+}
+
+impl Viewer {
+    /// An administrator or operator reading `user`'s settings.
+    pub(crate) const fn operator(user: UserId, operator: Operator) -> Self {
+        Self {
+            user,
+            by: Reading::Operator(operator),
+        }
+    }
+
+    /// The account.
+    pub(crate) const fn user(&self) -> UserId {
+        self.user
+    }
+
+    /// The owner's own session, if the owner reads.
+    pub(crate) const fn own_session(&self) -> Option<SessionId> {
+        match &self.by {
+            Reading::Owner(session) => Some(*session),
+            Reading::Operator(_) => None,
+        }
+    }
+
+    /// Records that an administrator or operator read the account's settings,
+    /// which hold personal data, as `user show` is recorded. An owner reading
+    /// their own is not.
+    pub(crate) async fn viewed(&self, database: &Database) -> Result<(), AccountError> {
+        if let Reading::Operator(operator) = &self.by {
+            let mut tx = database.begin().await?;
+            tx.record(
+                &operator.context(),
+                Some(self.user),
+                DomainEvent::AccountViewed {},
+            )
+            .await?;
+            tx.commit().await?;
+        }
+        Ok(())
+    }
+}
+
+impl FromRequestParts<AccountApplication> for Viewer {
+    type Rejection = ApiError;
+    /// The owner of the request's browser session.
+    async fn from_request_parts(
+        parts: &mut Parts,
+        app: &AccountApplication,
+    ) -> Result<Self, Self::Rejection> {
+        let Session(session) = Session::from_request_parts(parts, app).await?;
+        Ok(Self {
+            user: session.user_id,
+            by: Reading::Owner(session.id),
         })
     }
 }

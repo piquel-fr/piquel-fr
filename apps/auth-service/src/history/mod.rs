@@ -1,7 +1,7 @@
 //! The account's security history, and the owner's reports of entries that were
 //! not theirs. Any administrator may also read the history, which
 //! [`AccountService`] serves; only the owner can report an entry.
-use crate::account::{AccountError, AccountService, Subject};
+use crate::account::{AccountError, AccountService, Viewer};
 use crate::routes;
 use crate::security::{self, ApiError, RequestContext};
 use axum::{
@@ -206,10 +206,10 @@ impl AccountService {
     /// the account's own events are read: the repository query filters on its ID.
     pub(crate) async fn history(
         &self,
-        subject: &Subject,
+        viewer: &Viewer,
         before: Option<EventId>,
     ) -> Result<HistoryPage, AccountError> {
-        subject.viewed(&self.database).await?;
+        viewer.viewed(&self.database).await?;
         let clients: BTreeMap<_, _> = self
             .database
             .oidc()
@@ -219,7 +219,7 @@ impl AccountService {
             .map(|client| (client.id, client.display_name))
             .collect();
         let mut filter = EventFilter {
-            subject: Some(subject.user()),
+            subject: Some(viewer.user()),
             before,
             ..EventFilter::default()
         };

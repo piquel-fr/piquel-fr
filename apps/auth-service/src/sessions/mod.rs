@@ -1,6 +1,6 @@
 //! The account's sessions, one per signed-in browser, and signing them out:
 //! settings any administrator may also change, which [`AccountService`] serves.
-use crate::account::{AccountError, AccountService, Subject};
+use crate::account::{AccountError, AccountService, Subject, Viewer};
 use chrono::{DateTime, Utc};
 use piquel_common::{AuthenticationMethod, SessionId, events::UserAgentFamily};
 use piquel_repository::{SessionScope, StoredSession};
@@ -61,19 +61,16 @@ impl SessionItem {
 /// must be able to act at once.
 impl AccountService {
     /// Lists the account's active sessions, most recently active first. On the
-    /// owner mount, the extractor has just recorded the owner's own activity.
-    pub(crate) async fn sessions(
-        &self,
-        subject: &Subject,
-    ) -> Result<Vec<SessionItem>, AccountError> {
-        subject.viewed(&self.database).await?;
+    /// owner's routes, the extractor has just recorded the owner's own activity.
+    pub(crate) async fn sessions(&self, viewer: &Viewer) -> Result<Vec<SessionItem>, AccountError> {
+        viewer.viewed(&self.database).await?;
         Ok(self
             .database
             .sessions()
-            .list_active_for_user(subject.user())
+            .list_active_for_user(viewer.user())
             .await?
             .into_iter()
-            .map(|session| SessionItem::new(session, subject.own_session()))
+            .map(|session| SessionItem::new(session, viewer.own_session()))
             .collect())
     }
 
