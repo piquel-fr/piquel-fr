@@ -241,6 +241,74 @@ async fn sensitive_changes_need_a_recent_confirmation() {
     );
 }
 
+/// A request sent with a cookie its session had before a passkey confirmation
+/// never gains that confirmation, even when it commits while the request waits
+/// for the account lock: the confirmation replaced the cookie.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+#[ignore = "requires TEST_DATABASE_URL"]
+async fn confirmations_never_reach_requests_sent_before_them() {
+    let harness = Harness::new().await;
+    let owner = Browser::new_account(&harness.database).await;
+    let id = harness.create(&owner, "confidential").await;
+    let item = format!("/account/clients/{id}");
+    for (method, path, body) in [
+        (
+            Method::PATCH,
+            item.clone(),
+            Some(json!({"redirect_uris": ["https://attacker.example/callback"]})),
+        ),
+        (Method::POST, format!("{item}/secrets"), Some(json!({}))),
+        (Method::DELETE, item.clone(), None),
+    ] {
+        let stale = Browser::sign_in_with(
+            &harness.database,
+            owner.user_id,
+            AuthenticationMethod::Federation,
+        )
+        .await;
+        let mut holder = harness.database.begin().await.expect("transaction");
+        holder
+            .users()
+            .find_active_by_id_for_update(owner.user_id)
+            .await
+            .expect("lock")
+            .expect("account");
+        let ((status, _), ()) = tokio::join!(
+            stale.send(&harness.router, method.clone(), &path, body),
+            async {
+                until_blocked(&mut holder, 1).await;
+                let session = holder
+                    .sessions()
+                    .find_by_id(stale.session_id)
+                    .await
+                    .expect("lookup")
+                    .expect("session");
+                Session::reauthenticate(&mut holder, &session, AuthenticationMethod::Passkey)
+                    .await
+                    .expect("confirm");
+                holder.commit().await.expect("commit");
+            },
+        );
+        assert_eq!(status, StatusCode::FORBIDDEN, "{method} {path}");
+    }
+    let client = harness
+        .database
+        .oidc()
+        .find_client(&id)
+        .await
+        .expect("lookup")
+        .expect("client");
+    assert_eq!(client.redirect_uris, ["https://notes.example/callback"]);
+    assert!(client.deleted_at.is_none());
+    let secrets = harness
+        .database
+        .oidc()
+        .client_secrets(&client.id)
+        .await
+        .expect("secrets");
+    assert_eq!(secrets.len(), 1, "no secret was added");
+}
+
 /// No body makes an owner's client trusted, and owners may grant only the
 /// standard scopes. Invalid settings name their field with RFC 7591's codes.
 #[tokio::test]

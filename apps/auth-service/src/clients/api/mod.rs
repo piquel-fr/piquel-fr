@@ -6,7 +6,7 @@
 use super::{ClientDetails, ClientRegistry, DEFAULT_CLIENT_SCOPES};
 use crate::{
     GracePeriod, routes,
-    security::{ApiError, Confirmed, RequestContext, Session},
+    security::{ApiError, Confirmed, RequestContext, Session, SessionError},
 };
 use axum::{
     Json, Router,
@@ -220,11 +220,21 @@ impl OwnedClient {
         Ok(Session::lock(tx, &self.session).await?)
     }
 
-    /// [`Self::lock`], then requires a recent passkey confirmation of the session.
+    /// [`Self::lock`], then requires a recent passkey confirmation, as
+    /// [`Self::confirmed`] does.
     async fn confirm(&self, tx: &mut DatabaseTransaction<'_>) -> Result<StoredSession, ApiError> {
         let session = self.lock(tx).await?;
-        <Confirmed>::check(&session)?;
+        self.confirmed(&session)?;
         Ok(session)
+    }
+
+    /// Requires a recent passkey confirmation of the session both as the request's
+    /// cookie found it and as `locked` holds it now, as [`Confirmed`] does. A
+    /// confirmation replaces the cookie, so a request sent with the old one never
+    /// gains a confirmation that commits while it waits for the lock.
+    fn confirmed(&self, locked: &StoredSession) -> Result<(), SessionError> {
+        <Confirmed>::check(&self.session)?;
+        <Confirmed>::check(locked)
     }
 }
 
@@ -349,7 +359,7 @@ impl ClientApplication {
             })
             .await?;
         if changed.iter().any(ClientField::redirects) {
-            <Confirmed>::check(&session)?;
+            owned.confirmed(&session)?;
         }
         let client = Self::read(&mut tx, &owned.client.id).await?;
         tx.commit().await?;
