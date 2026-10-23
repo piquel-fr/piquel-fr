@@ -1,0 +1,52 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT\n                    id AS \"id: TokenId\", client_id AS \"client_id: ClientId\", audience,\n                    scopes AS \"scopes: JsonArray<String>\", created_at, revoked_at\n                FROM refresh_token_families\n                WHERE user_id = $1\n                ORDER BY created_at, id",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id: TokenId",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "client_id: ClientId",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 2,
+        "name": "audience",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 3,
+        "name": "scopes: JsonArray<String>",
+        "type_info": "Jsonb"
+      },
+      {
+        "ordinal": 4,
+        "name": "created_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 5,
+        "name": "revoked_at",
+        "type_info": "Timestamptz"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false,
+      true
+    ]
+  },
+  "hash": "74b1b491a36ffda117fd96640af6e91265cdd9fe1957f95c0fc450715ae7e4d6"
+}

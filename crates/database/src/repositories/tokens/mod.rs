@@ -1,9 +1,10 @@
 //! Transactional refresh-token families, rotation and replay revocation.
 
-use super::{RepositoryExecutor, TokenRepository};
+use super::{JsonArray, RepositoryExecutor, TokenRepository};
 use crate::{DatabaseError, SessionAuthentication};
 use chrono::{DateTime, Utc};
 use piquel_common::{ClientId, SessionId, TokenId, UserId};
+use serde::Serialize;
 use sqlx::types::Json;
 use thiserror::Error;
 
@@ -61,6 +62,23 @@ pub struct RotatedRefreshToken {
     pub scopes: Vec<String>,
     /// How the session had authenticated when the grant's code was issued.
     pub authentication: SessionAuthentication,
+}
+
+/// A refresh grant of an account: one family, without its tokens.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+pub struct StoredGrant {
+    /// Family identifier.
+    pub id: TokenId,
+    /// Client the grant was issued to.
+    pub client_id: ClientId,
+    /// Audience of the grant's access tokens.
+    pub audience: String,
+    /// Granted scopes.
+    pub scopes: Vec<String>,
+    /// When the grant was issued.
+    pub created_at: DateTime<Utc>,
+    /// When it was revoked; `None` while it can refresh.
+    pub revoked_at: Option<DateTime<Utc>>,
 }
 
 /// A refresh family that a revocation ended.
@@ -464,6 +482,32 @@ impl TokenRepository<'_> {
             )
         )?;
         Ok(())
+    }
+
+    /// Lists every refresh grant of the account cleanup has not deleted yet,
+    /// revoked ones included, oldest first.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`DatabaseError`] if the query fails or a row is invalid.
+    pub async fn list_for_user(
+        &mut self,
+        user_id: UserId,
+    ) -> Result<Vec<StoredGrant>, DatabaseError> {
+        run!(
+            self,
+            fetch_all,
+            sqlx::query_as!(
+                StoredGrant,
+                r#"SELECT
+                    id AS "id: TokenId", client_id AS "client_id: ClientId", audience,
+                    scopes AS "scopes: JsonArray<String>", created_at, revoked_at
+                FROM refresh_token_families
+                WHERE user_id = $1
+                ORDER BY created_at, id"#,
+                user_id.as_uuid(),
+            )
+        )
     }
 
     /// Revokes every active family of the account and returns how many were

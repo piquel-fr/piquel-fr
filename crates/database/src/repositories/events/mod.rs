@@ -332,18 +332,31 @@ impl EventRepository<'_> {
                 Telemetry::current_trace_id().map(String::from),
             )
         )?;
+        // Personal data is kept only while the accounts the event names, as subject
+        // or actor, exist: a request still in flight when its account is purged must
+        // not store it again. Key-share locking each account makes this insert and a
+        // purge wait for each other: either the purge sees this row and deletes it,
+        // or this insert finds the account gone, and skips it.
         run!(
             self,
             execute,
             sqlx::query!(
                 "INSERT INTO event_personal_data (
                     event_id, client_ip, user_agent_family, platform, details
-                ) VALUES ($1, $2, $3, $4, $5)",
+                )
+                SELECT $1, $2, $3, $4, $5
+                WHERE NOT EXISTS (
+                    SELECT FROM unnest(ARRAY[$6::uuid, $7::uuid]) AS named(id)
+                    WHERE named.id IS NOT NULL
+                    AND NOT EXISTS (SELECT FROM users WHERE id = named.id FOR KEY SHARE)
+                )",
                 id.as_uuid(),
                 context.origin.client_ip as _,
                 family.map(|family| family.browser.as_str()),
                 family.map(|family| family.platform.as_str()),
                 Json(&details) as _,
+                subject.map(UserId::as_uuid),
+                context.actor.user_id().map(UserId::as_uuid),
             )
         )?;
         Ok(id)

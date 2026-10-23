@@ -24,7 +24,7 @@ mod invite;
 mod serve;
 /// Ending sessions.
 mod session;
-/// Finding, showing, disabling and reactivating accounts.
+/// Finding, showing, disabling, reactivating, deleting and restoring accounts.
 mod user;
 
 use crate::{AuthConfig, SERVICE_NAME, TELEMETRY_FILTER, admin::AdminOperation};
@@ -134,6 +134,13 @@ impl Administration {
                 UserCommand::Show { .. } => Op::ViewUser,
                 UserCommand::Disable { .. } => Op::DisableUser,
                 UserCommand::Enable { .. } => Op::EnableUser,
+                UserCommand::Delete {
+                    immediately: false, ..
+                } => Op::ScheduleDeletion,
+                UserCommand::Delete {
+                    immediately: true, ..
+                } => Op::PurgeUser,
+                UserCommand::Restore { .. } => Op::RestoreUser,
             },
             Self::Session(command) => match command {
                 SessionCommand::Revoke { .. } => Op::RevokeSession,

@@ -32,6 +32,12 @@ operations! {
     DisableUser,
     /// Reactivate a disabled account.
     EnableUser,
+    /// Schedule an account's deletion, with a grace period.
+    ScheduleDeletion,
+    /// Restore an account scheduled for deletion.
+    RestoreUser,
+    /// Delete an account at once, without a grace period.
+    PurgeUser,
     /// End every session of an account.
     RevokeUserSessions,
     /// End one session.

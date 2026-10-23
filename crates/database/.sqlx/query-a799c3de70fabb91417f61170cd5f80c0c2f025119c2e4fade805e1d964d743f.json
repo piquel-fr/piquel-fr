@@ -1,0 +1,22 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT EXISTS (\n                    SELECT FROM administrators a\n                    JOIN users u ON u.id = a.user_id\n                    WHERE a.user_id <> $1\n                    AND u.status = 'active'\n                ) AS \"others!\"",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "others!",
+        "type_info": "Bool"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      null
+    ]
+  },
+  "hash": "a799c3de70fabb91417f61170cd5f80c0c2f025119c2e4fade805e1d964d743f"
+}

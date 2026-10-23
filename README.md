@@ -125,6 +125,8 @@ just auth user search ali                 # by ID, or part of a username, name o
 just auth user show alice                 # recorded, since it shows personal data
 just auth user disable alice --reason "Spam"
 just auth user enable alice
+just auth user delete alice               # see Data export and account deletion
+just auth user restore alice
 just auth session revoke <session-id>     # one session, as `user show` lists it
 just auth session revoke-all alice        # every session of the account
 just auth audit --user alice --kind session_revoked
@@ -134,7 +136,7 @@ just auth audit --user alice --kind session_revoked
 - `--output json` prints the admin API's body for `user search` (`UserPage`), `user
   show` (`UserDetail`), `audit` (`EventPage`), `client list`, `invite list` and
   `admin list`, as defined in `crates/admin-api`. It changes only as the API does.
-- `user disable`, `session revoke-all`, `admin revoke` and `client
+- `user disable|delete`, `session revoke-all`, `admin revoke` and `client
   disable|suspend|delete` describe what they will change and ask for confirmation.
   Without a terminal they refuse unless given `--yes`.
 - Each change is recorded as a domain event with the operator: `$USER` and the host
@@ -200,6 +202,42 @@ sign-in. For development, `just auth mailpit` runs a local Mailpit: set
 `AUTH_SMTP_URL=smtp://localhost:1025` and read the mail at
 `http://localhost:8025`. Sending domains need SPF, DKIM and DMARC; see
 [infra/README.md](infra/README.md#email).
+
+### Data export and account deletion
+
+Users download their data and delete their account from `piquel.fr/settings/data`.
+Both need a passkey confirmation from the last five minutes.
+
+- `GET /account/export` returns one versioned JSON document
+  (`"format": "piquel.account-export"`): profile, emails, passkeys (label, dates
+  and backup state, no key material), linked identities, devices, consents, refresh
+  grants, the clients the account manages and the security history. It is read
+  from one snapshot, holds no secret or digest, and is recorded in the history.
+- `POST /account/deletion` with `{"confirm_username": …}` schedules the deletion:
+  the account becomes `deleting`, every session and refresh grant ends, their
+  clients receive back-channel logout tokens, and it can no longer sign in or
+  authorize. For 30 days, a passkey sign-in answers with an offer to restore it
+  instead of a session, and its single-use token, valid for five minutes, restores
+  the account and signs in through `POST /account/deletion/cancel`.
+- Every five minutes, one replica purges the accounts past their grace period. The
+  purge deletes the clients the account manages, leaving tombstones without an
+  owner, then the account, its emails, passkeys, identities, sessions, grants and
+  consents, and the personal data (IP, device, provider subjects) of every event
+  it is the subject or actor of. The events stay, with pseudonymous IDs only. Its
+  handle is retired: no account can take it again.
+
+Administrators schedule and restore deletions from the admin dashboard; the CLI can
+also purge an account at once, in any status:
+
+```sh
+just auth user delete alice                  # schedule, 30 days of grace
+just auth user restore alice
+just auth user delete mallory --immediately  # purge now; cannot be undone
+```
+
+Nobody can delete the last active administrator's account. Auth does not email
+the account about its deletion yet, and the signals that tell applications to erase
+their records come with #66 and #97.
 
 ### Outbound deliveries
 
@@ -416,7 +454,7 @@ explains how to choose a requirement and handle the challenge.
   at a reverse proxy so users do not share the proxy’s budget. Untrusted headers
   are ignored; missing/ambiguous headers from a trusted proxy fail closed. Security events are
   retained; the IP addresses, browser families and provider subjects recorded with
-  them are deleted after 90 days. Readiness checks PostgreSQL; startup validates configured signing/provider
+  them are deleted after 90 days, or when their account is purged. Readiness checks PostgreSQL; startup validates configured signing/provider
   secrets. Request and provider calls have bounded timeouts.
 
 ## Validation

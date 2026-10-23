@@ -12,7 +12,8 @@
     { href: '/settings', label: 'Sign-in methods' },
     { href: '/settings/emails', label: 'Email addresses' },
     { href: '/settings/sessions', label: 'Devices' },
-    { href: '/settings/history', label: 'Security history' }
+    { href: '/settings/history', label: 'Security history' },
+    { href: '/settings/data', label: 'Your data' }
   ];
   onMount(() => {
     void task.run(() => account.load());
@@ -35,6 +36,18 @@
         onclick={() => {
           window.location.reload();
         }}>Try again</button
+      >
+    </div>
+  {:else if account.purgeAfter}<div class="card stack">
+      <h2>Your account is scheduled for deletion</h2>
+      <p>
+        Every device was signed out. Your account will be deleted for good on {new Date(
+          account.purgeAfter
+        ).toLocaleDateString(undefined, { dateStyle: 'long' })}. Changed your mind? Sign in with
+        your passkey before then to restore it.
+      </p>
+      <a class="button secondary" href={account.page('login', account.config.settings_url)}
+        >Restore my account</a
       >
     </div>
   {:else if !account.session}<div class="card stack">

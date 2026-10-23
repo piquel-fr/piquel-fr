@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "INSERT INTO passkey_credentials (\n                    id, credential_id, user_id, credential, friendly_name\n                ) VALUES ($1, $2, $3, $4, $5)\n                RETURNING\n                    id AS \"id: PasskeyId\", credential_id, user_id AS \"user_id: UserId\", credential,\n                    friendly_name, revoked_at",
+  "query": "INSERT INTO passkey_credentials (\n                    id, credential_id, user_id, credential, friendly_name\n                ) VALUES ($1, $2, $3, $4, $5)\n                RETURNING\n                    id AS \"id: PasskeyId\", credential_id, user_id AS \"user_id: UserId\", credential,\n                    friendly_name, created_at, last_used_at, revoked_at",
   "describe": {
     "columns": [
       {
@@ -30,6 +30,16 @@
       },
       {
         "ordinal": 5,
+        "name": "created_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 6,
+        "name": "last_used_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 7,
         "name": "revoked_at",
         "type_info": "Timestamptz"
       }
@@ -49,8 +59,10 @@
       false,
       false,
       false,
+      false,
+      true,
       true
     ]
   },
-  "hash": "b15dfd62e6aa276d903444db25d73d6e52dce81a8470bbc8113117af851e8899"
+  "hash": "be55b5f4507a982545a8226b5ef4a660d4f6516828d8ca7f403aeeedc54f4767"
 }

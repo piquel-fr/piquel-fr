@@ -11,6 +11,7 @@
     type Configuration,
     type PasskeyKind,
     type Provider,
+    type RestoreOffer,
     type Session
   } from '@piquel/auth-sdk';
   let { mode = 'login' }: { mode?: 'login' | 'register' | 'confirm' | 'enroll' | 'link' } =
@@ -42,6 +43,8 @@
   let available = $state(false);
   let android = $state(false);
   let passkeyKind = $state<PasskeyKind>('standard');
+  // A passkey signed in to an account scheduled for deletion, which can be restored.
+  let restoreOffer = $state<RestoreOffer | null>(null);
   const registration = $derived(mode === 'register' || pending?.kind === 'signup');
   const linking = $derived(pending?.kind === 'link' || pending?.kind === 'explicit_link');
   // Pages that act on the signed-in account rather than sign someone in.
@@ -112,7 +115,8 @@
   // session, so the action after it prompts no more.
   async function signIn() {
     if (session) return;
-    await passkeys.authenticate(username.trim() || undefined);
+    restoreOffer = (await passkeys.authenticate(username.trim() || undefined)) ?? null;
+    if (restoreOffer) throw new Error('Restore your account to continue.');
     session = await api.request<Session>('/session');
   }
   async function submit() {
@@ -137,9 +141,21 @@
       } else if (mode === 'confirm' && session) {
         await passkeys.confirm();
       } else {
-        await passkeys.authenticate(username.trim() || undefined);
+        restoreOffer = (await passkeys.authenticate(username.trim() || undefined)) ?? null;
+        if (restoreOffer) return;
       }
       window.location.assign(target);
+    });
+  }
+  // Restoring signs in. Sign-in continues to its destination; other pages continue
+  // with the action the user started.
+  async function restore(offer: RestoreOffer) {
+    await run(async () => {
+      const target = destination();
+      await passkeys.restore(offer);
+      restoreOffer = null;
+      if (!security && !linking && !registration) window.location.assign(target);
+      else session = await api.request<Session>('/session');
     });
   }
   async function social(provider: Provider) {
@@ -226,8 +242,26 @@
   {:else if passkeyOnly}<p>This app asks you to sign in with a passkey.</p>
   {:else}<p>Sign in with a passkey, or use a linked social account.</p>{/if}
   {#if error}<p class="notice error" role="alert">{error}</p>{/if}
+  {#if restoreOffer}{@const offer = restoreOffer}
+    <div class="notice stack" role="status">
+      <strong>Your account is scheduled for deletion.</strong>
+      <p>
+        It will be deleted for good on {new Date(
+          offer.deletion_scheduled.purge_after
+        ).toLocaleDateString(undefined, { dateStyle: 'long' })}. Restore it to keep your account and
+        sign in again.
+      </p>
+      <div class="row actions">
+        <button disabled={busy} onclick={() => restore(offer)}>Restore my account</button><button
+          class="secondary"
+          disabled={busy}
+          onclick={() => (restoreOffer = null)}>Keep it scheduled</button
+        >
+      </div>
+    </div>{/if}
   {#if !ready && !error}<p role="status">Loading your sign-in options…</p>{/if}
-  {#if ready && config}
+  <!-- While a restore is offered, it is the only choice on the page. -->
+  {#if ready && config && !restoreOffer}
     <div class="stack">
       {#if available}
         <form

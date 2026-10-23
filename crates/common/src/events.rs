@@ -232,6 +232,19 @@ pub enum DomainEvent {
         /// The reported event.
         event_id: EventId,
     },
+    /// The user downloaded a copy of their account's data.
+    AccountExported {},
+    /// The account was scheduled for deletion. Its sessions follow as
+    /// [`Self::SessionRevoked`], and every refresh family is revoked with them.
+    AccountDeletionScheduled {
+        /// When the account is purged, unless it is restored first.
+        purge_after: DateTime<Utc>,
+    },
+    /// An account scheduled for deletion was restored.
+    AccountRestored {},
+    /// The account was deleted with everything auth knew about the person: the
+    /// personal data of every event it was the subject or actor of went with it.
+    AccountPurged {},
     /// A row of the security audit log that preceded typed events. Only
     /// migrations write these; its fields are private, so one is only ever read back.
     Imported(ImportedAudit),
@@ -299,6 +312,10 @@ impl DomainEvent {
             | Self::AdministratorRevoked {}
             | Self::HandleChanged { .. }
             | Self::CompromiseReported { .. }
+            | Self::AccountExported {}
+            | Self::AccountDeletionScheduled { .. }
+            | Self::AccountRestored {}
+            | Self::AccountPurged {}
             | Self::Imported(_) => None,
         }
     }
@@ -342,6 +359,10 @@ impl DomainEvent {
             | Self::ClientDeleted { .. }
             | Self::ClientSecretRotated { .. }
             | Self::CompromiseReported { .. }
+            | Self::AccountExported {}
+            | Self::AccountDeletionScheduled { .. }
+            | Self::AccountRestored {}
+            | Self::AccountPurged {}
             | Self::Imported(_) => None,
         }
     }
@@ -385,6 +406,10 @@ impl DomainEvent {
             Self::ClientDeleted { .. } => "client_deleted",
             Self::ClientSecretRotated { .. } => "client_secret_rotated",
             Self::CompromiseReported { .. } => "compromise_reported",
+            Self::AccountExported {} => "account_exported",
+            Self::AccountDeletionScheduled { .. } => "account_deletion_scheduled",
+            Self::AccountRestored {} => "account_restored",
+            Self::AccountPurged {} => "account_purged",
             Self::Imported(_) => "imported",
         }
     }
@@ -467,6 +492,11 @@ impl DomainEvent {
             Self::CompromiseReported { event_id } => HistoryEntry::CompromiseReported {
                 event_id: *event_id,
             },
+            Self::AccountExported {} => HistoryEntry::AccountExported,
+            Self::AccountDeletionScheduled { purge_after } => HistoryEntry::DeletionScheduled {
+                purge_after: *purge_after,
+            },
+            Self::AccountRestored {} => HistoryEntry::AccountRestored,
             Self::Imported(audit) => HistoryEntry::Legacy {
                 action: audit.action.clone(),
                 outcome: audit.outcome.clone(),
@@ -484,7 +514,9 @@ impl DomainEvent {
             | Self::ClientSuspended { .. }
             | Self::ClientSuspensionLifted { .. }
             | Self::ClientDeleted { .. }
-            | Self::ClientSecretRotated { .. } => return None,
+            | Self::ClientSecretRotated { .. }
+            // Nobody can read the history of an account that no longer exists.
+            | Self::AccountPurged {} => return None,
         })
     }
 }
@@ -608,6 +640,18 @@ pub enum HistoryEntry {
         /// The reported entry.
         event_id: EventId,
     },
+    /// The user downloaded their data.
+    #[serde(rename = "account.exported")]
+    AccountExported,
+    /// The account was scheduled for deletion.
+    #[serde(rename = "account.deletion_scheduled")]
+    DeletionScheduled {
+        /// When it is purged, unless it is restored first.
+        purge_after: DateTime<Utc>,
+    },
+    /// The account was restored before its deletion.
+    #[serde(rename = "account.restored")]
+    AccountRestored,
     /// A row of the audit log that preceded typed events.
     #[serde(rename = "legacy")]
     Legacy {
@@ -655,6 +699,9 @@ impl HistoryEntry {
             | Self::AdministratorRevoked
             | Self::HandleChanged
             | Self::CompromiseReported { .. }
+            | Self::AccountExported
+            | Self::DeletionScheduled { .. }
+            | Self::AccountRestored
             | Self::Legacy { .. } => None,
         }
     }
@@ -833,6 +880,19 @@ impl Actor {
             Self::User { .. }
             | Self::Admin { .. }
             | Self::Cli { .. }
+            | Self::System { .. }
+            | Self::Anonymous
+            | Self::Unrecorded => None,
+        }
+    }
+
+    /// The account acting, if any: a user's or an administrator's.
+    #[must_use]
+    pub const fn user_id(&self) -> Option<UserId> {
+        match self {
+            Self::User { user_id, .. } | Self::Admin { user_id, .. } => Some(*user_id),
+            Self::Cli { .. }
+            | Self::Client { .. }
             | Self::System { .. }
             | Self::Anonymous
             | Self::Unrecorded => None,

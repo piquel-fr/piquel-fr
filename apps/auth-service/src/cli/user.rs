@@ -1,4 +1,4 @@
-//! Finding, showing, disabling and reactivating accounts.
+//! Finding, showing, disabling, reactivating, deleting and restoring accounts.
 
 use super::{CliError, Confirm, Console, Output};
 use crate::{Reason, UserRef};
@@ -47,6 +47,25 @@ pub(super) enum UserCommand {
         /// The account: its username, ID or verified email.
         user: UserRef,
     },
+    /// Schedule an active account's deletion: it can no longer sign in, its
+    /// sessions end, and it is purged after 30 days unless restored first. Never
+    /// the last active administrator's.
+    Delete {
+        /// The account: its username, ID or verified email.
+        user: UserRef,
+        /// Purge the account now, in any status, without a grace period. This
+        /// cannot be undone.
+        #[arg(long)]
+        immediately: bool,
+        /// Confirmation.
+        #[command(flatten)]
+        confirm: Confirm,
+    },
+    /// Restore an account scheduled for deletion, so it can sign in again.
+    Restore {
+        /// The account: its username, ID or verified email.
+        user: UserRef,
+    },
 }
 
 impl UserCommand {
@@ -78,6 +97,30 @@ impl UserCommand {
             Self::Enable { user } => {
                 let id = console.user(&user).await?;
                 service.enable_user(operator, id).await?;
+            }
+            Self::Delete {
+                user,
+                immediately: true,
+                confirm,
+            } => {
+                let id = console.user(&user).await?;
+                confirm.ask(&format!(
+                    "Purge {user} ({id}) and everything that identifies its person now; this cannot be undone"
+                ))?;
+                service.purge_user(operator, id).await?;
+            }
+            Self::Delete {
+                user,
+                immediately: false,
+                confirm,
+            } => {
+                let id = console.user(&user).await?;
+                confirm.ask(&format!("Schedule the deletion of {user} ({id})"))?;
+                service.schedule_deletion(operator, id).await?;
+            }
+            Self::Restore { user } => {
+                let id = console.user(&user).await?;
+                service.restore_user(operator, id).await?;
             }
         }
         Ok(())

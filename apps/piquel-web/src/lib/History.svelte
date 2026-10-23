@@ -31,6 +31,7 @@
     | { kind: 'email.verified' | 'email.primary_changed' | 'email.removed'; email_id: string }
     | { kind: 'consent.granted'; scopes: string[] }
     | { kind: 'compromise.reported'; event_id: string }
+    | { kind: 'account.deletion_scheduled'; purge_after: string }
     | { kind: 'legacy'; action: string; outcome: string }
     | {
         kind:
@@ -41,7 +42,9 @@
           | 'account.viewed'
           | 'account.handle_changed'
           | 'administrator.granted'
-          | 'administrator.revoked';
+          | 'administrator.revoked'
+          | 'account.exported'
+          | 'account.restored';
       }
   );
   type HistoryPage = { entries: Entry[]; next: string | null };
@@ -266,6 +269,12 @@
         return 'Administrator rights removed';
       case 'compromise.reported':
         return 'You reported activity that wasn’t you';
+      case 'account.exported':
+        return 'Account data downloaded';
+      case 'account.deletion_scheduled':
+        return `Account deletion scheduled for ${new Date(entry.purge_after).toLocaleDateString(undefined, { dateStyle: 'long' })}`;
+      case 'account.restored':
+        return 'Account restored';
       case 'legacy':
         return `${legacy[entry.action] ?? entry.action}${entry.outcome === 'success' ? '' : ' (failed)'}`;
     }

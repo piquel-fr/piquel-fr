@@ -1,4 +1,5 @@
 //! Browser-bound `WebAuthn` ceremonies, passkey management and session confirmation.
+use crate::account::AccountApplication;
 use crate::config::PasskeyConfig;
 use crate::federation::FederationApplication;
 use crate::routes;
@@ -11,7 +12,7 @@ use axum::{
     routing::{get, patch, post},
 };
 use piquel_common::{
-    AuthenticationMethod, Handle, PasskeyId, UserId,
+    AccountStatus, AuthenticationMethod, Handle, PasskeyId, UserId,
     events::{Actor, DomainEvent, EventContext, RevocationReason},
     protocol::api,
 };
@@ -245,18 +246,28 @@ impl PasskeyApplication {
         }
     }
 
-    /// Checks the latest stored counter under lock before updating the credential.
+    /// Checks the latest stored counter under lock before updating the credential,
+    /// and returns the account's status. The account must be active, or scheduled
+    /// for deletion when `restorable`.
     async fn update_credential(
         tx: &mut DatabaseTransaction<'_>,
         user_id: UserId,
         result: &AuthenticationResult,
-    ) -> Result<(), PasskeyError> {
+        restorable: bool,
+    ) -> Result<AccountStatus, PasskeyError> {
         if !result.user_verified() {
             return Err(PasskeyError::UserVerificationRequired);
         }
-        tx.users()
-            .find_active_by_id_for_update(user_id)
+        let status = tx
+            .users()
+            .find_by_id_for_update(user_id)
             .await?
+            .map(|user| user.status)
+            .filter(|status| match status {
+                AccountStatus::Active => true,
+                AccountStatus::Deleting => restorable,
+                AccountStatus::Disabled => false,
+            })
             .ok_or(PasskeyError::AccountInactive)?;
         let stored = tx
             .passkeys()
@@ -289,26 +300,29 @@ impl PasskeyApplication {
         {
             return Err(PasskeyError::CredentialRevoked);
         }
-        Ok(())
+        Ok(status)
     }
 
     /// Takes `WebAuthn`'s verdict on an assertion for `user_id` and, once the latest
     /// credential state also accepts it, opens the transaction that completes the
-    /// authentication. The ceremony was already consumed. A rejection rolls back any
-    /// transaction it opened, then is recorded as `actor`'s failed sign-in in a
-    /// transaction of its own, so the record outlives the rejection.
+    /// authentication, with the account locked, and returns the account's status:
+    /// active, or scheduled for deletion when `restorable`. The ceremony was already
+    /// consumed. A rejection rolls back any transaction it opened, then is recorded
+    /// as `actor`'s failed sign-in in a transaction of its own, so the record
+    /// outlives the rejection.
     async fn accept_credential(
         &self,
         context: RequestContext,
         actor: Actor,
         user_id: UserId,
         verified: Result<AuthenticationResult, WebauthnError>,
-    ) -> Result<DatabaseTransaction<'_>, PasskeyError> {
+        restorable: bool,
+    ) -> Result<(DatabaseTransaction<'_>, AccountStatus), PasskeyError> {
         let (error, tx) = match verified {
             Ok(result) => {
                 let mut tx = self.database.begin().await?;
-                match Self::update_credential(&mut tx, user_id, &result).await {
-                    Ok(()) => return Ok(tx),
+                match Self::update_credential(&mut tx, user_id, &result, restorable).await {
+                    Ok(status) => return Ok((tx, status)),
                     Err(error) => (error, Some(tx)),
                 }
             }
@@ -545,7 +559,9 @@ impl PasskeyApplication {
         Ok(app.start(&headers, ceremony, challenge).await?)
     }
 
-    /// Verifies the assertion and latest credential state before signing the browser in.
+    /// Verifies the assertion and latest credential state before signing the browser
+    /// in. An account scheduled for deletion gets no session: it gets the offer to
+    /// restore it instead, `{"deletion_scheduled": …, "restore_token": …}`.
     async fn finish_login(
         State(app): State<Self>,
         context: RequestContext,
@@ -592,9 +608,14 @@ impl PasskeyApplication {
                 )
             }
         };
-        let tx = app
-            .accept_credential(context, Actor::Anonymous, user_id, verified)
+        let (tx, status) = app
+            .accept_credential(context, Actor::Anonymous, user_id, verified, true)
             .await?;
+        if status == AccountStatus::Deleting {
+            return Ok(AccountApplication::offer_restore(tx, user_id)
+                .await?
+                .into_response());
+        }
         Ok(Self::complete_sign_in(tx, context, &headers, user_id).await?)
     }
 
@@ -665,8 +686,8 @@ impl PasskeyApplication {
             user_id,
             session_id: Some(session_id),
         };
-        let mut tx = app
-            .accept_credential(context, actor, user_id, verified)
+        let (mut tx, _) = app
+            .accept_credential(context, actor, user_id, verified, false)
             .await?;
         let secret =
             security::Session::reauthenticate(&mut tx, &session, AuthenticationMethod::Passkey)

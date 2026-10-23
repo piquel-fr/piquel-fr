@@ -13,6 +13,8 @@ pub enum LockKey {
     /// Runtime role provisioning, held for its transaction, so overlapping
     /// `migrate` runs take turns.
     Provisioning = 2,
+    /// The purge of accounts whose deletion grace period ended.
+    AccountPurge = 3,
     /// Job runner tests in other crates; no release takes it.
     #[cfg(feature = "test-support")]
     Test = -1,

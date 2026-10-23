@@ -47,6 +47,10 @@ pub mod paths {
     pub const USER_DISABLE: &str = "/users/{user_id}/disable";
     /// `POST`: reactivates a disabled account.
     pub const USER_ENABLE: &str = "/users/{user_id}/enable";
+    /// `POST`: schedules an active account's deletion: it can no longer sign in,
+    /// its sessions end, and it is purged after a 30-day grace period. `DELETE`:
+    /// restores it during that period. Immediate purges are only offered by the CLI.
+    pub const USER_DELETION: &str = "/users/{user_id}/deletion";
     /// `DELETE`: ends every session and refresh grant of an account.
     pub const USER_SESSIONS: &str = "/users/{user_id}/sessions";
     /// `DELETE`: ends one session and its refresh grants.

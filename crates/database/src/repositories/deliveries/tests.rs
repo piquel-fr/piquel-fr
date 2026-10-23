@@ -359,21 +359,25 @@ async fn a_cancelled_attempt_holds_back_its_key_until_its_lease_expires() {
     let key = format!("key-{}", Uuid::now_v7());
     let first = insert::<Interrupted>(&pool, Some(&key)).await;
     let second = insert::<Interrupted>(&pool, Some(&key)).await;
-    let lease = Duration::from_millis(300);
 
-    let attempt = claim::<Interrupted>(&pool, lease).await.expect("first");
+    let attempt = claim::<Interrupted>(&pool, LEASE).await.expect("first");
     assert_eq!(attempt.id, first);
     DeliveryRepository::from_pool(&pool)
         .cancel(first)
         .await
         .expect("cancel");
-    assert!(claim::<Interrupted>(&pool, lease).await.is_none());
+    assert!(claim::<Interrupted>(&pool, LEASE).await.is_none());
     assert!(matches!(
         finish(&pool, &attempt, &DeliveryOutcome::Succeeded).await,
         Err(DatabaseError::NotFound)
     ));
-    tokio::time::sleep(lease).await;
-    let next = claim::<Interrupted>(&pool, lease).await.expect("second");
+    // Expires the lease explicitly, so a slow runner cannot expire it early.
+    sqlx::query("UPDATE deliveries SET leased_until = now() - interval '1 second' WHERE id = $1")
+        .bind(first.as_uuid())
+        .execute(&pool)
+        .await
+        .expect("expire the lease");
+    let next = claim::<Interrupted>(&pool, LEASE).await.expect("second");
     assert_eq!(next.id, second);
 }
 

@@ -1,0 +1,20 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO event_personal_data (\n                    event_id, client_ip, user_agent_family, platform, details\n                )\n                SELECT $1, $2, $3, $4, $5\n                WHERE NOT EXISTS (\n                    SELECT FROM unnest(ARRAY[$6::uuid, $7::uuid]) AS named(id)\n                    WHERE named.id IS NOT NULL\n                    AND NOT EXISTS (SELECT FROM users WHERE id = named.id FOR KEY SHARE)\n                )",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Inet",
+        "Text",
+        "Text",
+        "Jsonb",
+        "Uuid",
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "f81ec8b9963681c86a626e2faec02fec4109403085d19ec77421c8063609ffca"
+}

@@ -119,8 +119,11 @@ pub async fn detail(cx: &Cx) -> Result<impl View> {
                     refused_action(label: "Disable", reason: ADMINISTRATOR_TARGET)
                 } else if user.status == AccountStatus::Active {
                     <a class="button danger" href=(href!(disable, Account(id)))>"Disable"</a>
-                } else {
+                    <a class="button danger" href=(href!(delete, Account(id)))>"Delete"</a>
+                } else if user.status == AccountStatus::Disabled {
                     <a class="button secondary" href=(href!(enable, Account(id)))>"Enable"</a>
+                } else {
+                    <a class="button secondary" href=(href!(restore, Account(id)))>"Restore"</a>
                 }
             </div>
         </section>
@@ -265,7 +268,7 @@ async fn session_list(
 #[component]
 async fn account_status(status: AccountStatus) -> Result<impl View> {
     Ok(view! {
-        <span class=(class!("badge", "disabled" if status == AccountStatus::Disabled))>
+        <span class=(class!("badge", "disabled" if status != AccountStatus::Active))>
             (status.to_string())
         </span>
     })
@@ -322,6 +325,53 @@ pub async fn enable(cx: &Cx, form: Option<Form<IgnoredAny>>) -> Result<impl View
             title: "Enable this account",
             description: "The account can sign in again with its passkeys.",
             button: "Enable",
+            back: back,
+            refusal: refusal,
+        )
+    })
+}
+
+/// `/users/{account}/delete`: schedules the account's deletion.
+#[page([GET, POST] "/users/{account}/delete")]
+pub async fn delete(cx: &Cx, form: Option<Form<IgnoredAny>>) -> Result<impl View> {
+    let admin = Admin::of(cx).await?;
+    admin.confirm(cx)?;
+    let id = *path_param::<Account>(cx)?;
+    let back = href!(detail, Account(id)).resolve(cx);
+    let refusal = admin
+        .submit(cx, form, back.clone(), |api, token, _| {
+            api.schedule_deletion(token, id)
+        })
+        .await?;
+    Ok(view! {
+        change_form(
+            title: "Delete this account",
+            description: "The account can no longer sign in, and every session and refresh grant ends now. It is deleted for good after 30 days, unless it is restored first.",
+            button: "Delete",
+            back: back,
+            refusal: refusal,
+            danger: true,
+        )
+    })
+}
+
+/// `/users/{account}/restore`: restores an account scheduled for deletion.
+#[page([GET, POST] "/users/{account}/restore")]
+pub async fn restore(cx: &Cx, form: Option<Form<IgnoredAny>>) -> Result<impl View> {
+    let admin = Admin::of(cx).await?;
+    admin.confirm(cx)?;
+    let id = *path_param::<Account>(cx)?;
+    let back = href!(detail, Account(id)).resolve(cx);
+    let refusal = admin
+        .submit(cx, form, back.clone(), |api, token, _| {
+            api.restore_user(token, id)
+        })
+        .await?;
+    Ok(view! {
+        change_form(
+            title: "Restore this account",
+            description: "The account is no longer deleted, and can sign in again with its passkeys.",
+            button: "Restore",
             back: back,
             refusal: refusal,
         )
