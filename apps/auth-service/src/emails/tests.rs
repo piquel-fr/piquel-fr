@@ -72,7 +72,7 @@ impl Harness {
             .await
             .expect("user");
         let mut tx = self.database.begin().await.expect("transaction");
-        let secret = Session::create(&mut tx, self.context, user_id, method)
+        let secret = Session::create(&mut tx, self.context, user_id, method.into())
             .await
             .expect("session");
         tx.commit().await.expect("commit");

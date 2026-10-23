@@ -592,7 +592,7 @@ async fn ceremonies_require_browser_binding_and_confirmation_belongs_to_one_sess
         &mut tx,
         security::RequestContext::TEST,
         fixture.user_id,
-        AuthenticationMethod::Federation,
+        AuthenticationMethod::Federation.into(),
     )
     .await
     .expect("social session");
@@ -696,7 +696,11 @@ async fn ceremonies_require_browser_binding_and_confirmation_belongs_to_one_sess
         .app
         .database
         .sessions()
-        .confirm_passkey(session_id, confirmed - chrono::Duration::hours(1))
+        .confirm_passkey(
+            session_id,
+            PasskeyId::new(),
+            confirmed - chrono::Duration::hours(1),
+        )
         .await
         .expect("stale confirmation");
     let challenge =
@@ -717,7 +721,7 @@ async fn ceremonies_require_browser_binding_and_confirmation_belongs_to_one_sess
         .app
         .database
         .sessions()
-        .confirm_passkey(session_id, confirmed)
+        .confirm_passkey(session_id, PasskeyId::new(), confirmed)
         .await
         .expect("restore confirmation");
     // Removal revokes both other sessions, the passkey sign-in and this one.
@@ -726,7 +730,7 @@ async fn ceremonies_require_browser_binding_and_confirmation_belongs_to_one_sess
         &mut tx,
         security::RequestContext::TEST,
         fixture.user_id,
-        AuthenticationMethod::Federation,
+        AuthenticationMethod::Federation.into(),
     )
     .await
     .expect("third session");
@@ -886,7 +890,9 @@ async fn unknown_usernames_get_stable_decoys_that_fail_like_unregistered_passkey
 }
 
 /// Signing in with a passkey in a browser holding a social session of the same
-/// account confirms that session, keeping its ID but replacing its cookie.
+/// account confirms that session, keeping its ID but replacing its cookie. A
+/// session records the passkey that signed it in, or confirmed it since; a social
+/// one names none.
 #[tokio::test]
 #[ignore = "requires TEST_DATABASE_URL"]
 async fn passkey_sign_in_confirms_the_browsers_session() {
@@ -896,7 +902,7 @@ async fn passkey_sign_in_confirms_the_browsers_session() {
         &mut tx,
         security::RequestContext::TEST,
         fixture.user_id,
-        AuthenticationMethod::Federation,
+        AuthenticationMethod::Federation.into(),
     )
     .await
     .expect("social session");
@@ -920,6 +926,37 @@ async fn passkey_sign_in_confirms_the_browsers_session() {
         "both methods are reported"
     );
     assert!(authentication.auth_time > before.authenticated_at);
+
+    let database = fixture.app.database.clone();
+    let passkey = async |session| {
+        let mut sessions = database.sessions();
+        sessions.passkey(session).await.expect("passkey")
+    };
+    assert_eq!(
+        passkey(before.id).await,
+        Some(fixture.key_id),
+        "confirmed by it"
+    );
+    let mut tx = fixture.app.database.begin().await.expect("transaction");
+    let other = security::Session::create(
+        &mut tx,
+        security::RequestContext::TEST,
+        fixture.user_id,
+        AuthenticationMethod::Federation.into(),
+    )
+    .await
+    .expect("another social session");
+    tx.commit().await.expect("commit");
+    let other = format!("{}={}", BrowserCookie::Session.as_str(), other.encoded());
+    let other = fixture.session(&other).await.expect("social session").id;
+    assert_eq!(passkey(other).await, None, "a social sign-in names none");
+    let fresh = fixture.login().await;
+    let fresh = fixture.session(&fresh).await.expect("new session").id;
+    assert_eq!(
+        passkey(fresh).await,
+        Some(fixture.key_id),
+        "signed in by it"
+    );
 }
 
 /// A sign-in started on one replica finishes on the other, and logging out on one

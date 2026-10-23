@@ -1,7 +1,7 @@
 //! Persistence guarantees behind invitations and session passkey confirmations.
 use chrono::{Duration, Utc};
 use piquel_common::{
-    AuthenticationMethod, Handle, SessionId, TokenId, UserId,
+    AuthenticationMethod, Handle, PasskeyId, SessionId, TokenId, UserId,
     events::{
         Actor, Browser, EventContext, Platform, RequestOrigin, RevocationReason, UserAgentFamily,
     },
@@ -78,6 +78,7 @@ async fn invitation_redemption_and_confirmation_lifecycle() {
                 },
                 ip: IpAddr::from([192, 0, 2, 1]),
                 passkey_confirmed_at: None,
+                passkey_id: None,
             })
             .await
             .expect("session");
@@ -98,7 +99,7 @@ async fn invitation_redemption_and_confirmation_lifecycle() {
     let at = Utc::now() - Duration::seconds(30);
     for id in [session, other] {
         db.sessions()
-            .confirm_passkey(id, at)
+            .confirm_passkey(id, PasskeyId::new(), at)
             .await
             .expect("confirm");
     }
@@ -142,7 +143,9 @@ async fn invitation_redemption_and_confirmation_lifecycle() {
     revoke(SessionScope::One(session), RevocationReason::Logout).await;
     assert!(
         matches!(
-            db.sessions().confirm_passkey(session, Utc::now()).await,
+            db.sessions()
+                .confirm_passkey(session, PasskeyId::new(), Utc::now())
+                .await,
             Err(DatabaseError::NotFound)
         ),
         "a revoked session cannot be confirmed"

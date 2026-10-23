@@ -10,6 +10,7 @@ use axum::{
     response::Response,
 };
 use chrono::Utc;
+use piquel_common::PasskeyId;
 use piquel_common::{
     AuthenticationMethod, Handle, UserId,
     clients::{AllowedScopes, ClientKind, ClientOwner, ClientRegistration, RedirectUri, ScopeName},
@@ -92,7 +93,7 @@ impl Flow {
             &mut tx,
             RequestContext::TEST,
             user_id,
-            AuthenticationMethod::Passkey,
+            AuthenticationMethod::Passkey.into(),
         )
         .await
         .expect("create test browser session");
@@ -149,7 +150,7 @@ impl Flow {
     /// Signs the scenario's browser in again with `method`, as a new session.
     async fn sign_in_again(&mut self, method: AuthenticationMethod) {
         let mut tx = self.app.database.begin().await.expect("transaction");
-        let session = Session::create(&mut tx, RequestContext::TEST, self.user_id, method)
+        let session = Session::create(&mut tx, RequestContext::TEST, self.user_id, method.into())
             .await
             .expect("session");
         tx.commit().await.expect("commit");
@@ -1106,7 +1107,11 @@ async fn acr_targets_and_grants_keep_their_authentication() {
     flow.app
         .database
         .sessions()
-        .confirm_passkey(session, Utc::now() + chrono::Duration::minutes(5))
+        .confirm_passkey(
+            session,
+            PasskeyId::new(),
+            Utc::now() + chrono::Duration::minutes(5),
+        )
         .await
         .expect("re-authenticate");
     let (_, refreshed) = flow
@@ -1992,7 +1997,7 @@ async fn sdk_step_up_runs_against_the_provider() {
         .app
         .database
         .sessions()
-        .confirm_passkey(session, Utc::now())
+        .confirm_passkey(session, PasskeyId::new(), Utc::now())
         .await
         .expect("passkey confirmation");
     let browser = app.authorize(&authorize).await;

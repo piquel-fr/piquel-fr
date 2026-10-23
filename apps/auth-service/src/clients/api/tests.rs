@@ -303,9 +303,13 @@ async fn confirmations_never_reach_requests_sent_before_them() {
                     .await
                     .expect("lookup")
                     .expect("session");
-                Session::reauthenticate(&mut holder, &session, AuthenticationMethod::Passkey)
-                    .await
-                    .expect("confirm");
+                Session::reauthenticate(
+                    &mut holder,
+                    &session,
+                    AuthenticationMethod::Passkey.into(),
+                )
+                .await
+                .expect("confirm");
                 holder.commit().await.expect("commit");
             },
         );

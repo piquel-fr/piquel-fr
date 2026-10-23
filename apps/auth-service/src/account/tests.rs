@@ -522,7 +522,7 @@ async fn a_confirmation_while_waiting_does_not_count() {
         until_blocked(&mut confirmation, 1).await;
         confirmation
             .sessions()
-            .confirm_passkey(social.session_id, Utc::now())
+            .confirm_passkey(social.session_id, PasskeyId::new(), Utc::now())
             .await
             .expect("confirm");
         confirmation.commit().await.expect("commit");

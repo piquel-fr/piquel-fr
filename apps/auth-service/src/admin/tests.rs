@@ -116,7 +116,7 @@ impl Harness {
             &mut tx,
             RequestContext::TEST,
             user_id,
-            AuthenticationMethod::Passkey,
+            AuthenticationMethod::Passkey.into(),
         )
         .await
         .expect("session");

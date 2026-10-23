@@ -760,7 +760,7 @@ async fn confirmed_changes_serialize_with_logout() {
         &mut tx,
         RequestContext::TEST,
         user_id,
-        AuthenticationMethod::Passkey,
+        AuthenticationMethod::Passkey.into(),
     )
     .await
     .expect("session");
@@ -835,6 +835,7 @@ async fn session_lock_rechecks_expiry_after_waiting() {
             user_agent_family: RequestContext::TEST.user_agent_family,
             ip: RequestContext::TEST.client_ip,
             passkey_confirmed_at: Some(now),
+            passkey_id: None,
         })
         .await
         .expect("session");

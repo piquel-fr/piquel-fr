@@ -11,6 +11,7 @@ use axum::{
     routing::post,
 };
 use piquel_auth::{KeyCache, KeySet};
+use piquel_common::PasskeyId;
 use piquel_common::{Handle, config::SecretReference, protocol::jwt::TokenType};
 use piquel_crypto::Rs256Key;
 use piquel_crypto::Secret;
@@ -283,7 +284,7 @@ impl TestApp {
             &mut tx,
             security::RequestContext::TEST,
             user_id,
-            AuthenticationMethod::Federation,
+            AuthenticationMethod::Federation.into(),
         )
         .await
         .expect("session");
@@ -298,7 +299,7 @@ impl TestApp {
             self.app
                 .database
                 .sessions()
-                .confirm_passkey(session.id, chrono::Utc::now())
+                .confirm_passkey(session.id, PasskeyId::new(), chrono::Utc::now())
                 .await
                 .expect("confirm");
         }
@@ -675,7 +676,7 @@ async fn linking_requires_target_confirmation_and_unlink_releases_subject_withou
     test.app
         .database
         .sessions()
-        .confirm_passkey(target_session, chrono::Utc::now())
+        .confirm_passkey(target_session, PasskeyId::new(), chrono::Utc::now())
         .await
         .expect("confirm");
     let response = router

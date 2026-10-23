@@ -16,7 +16,7 @@ use axum::{
 use chrono::{Duration, Utc};
 use ipnet::IpNet;
 use piquel_common::{
-    AuthenticationMethod, ClientId, ErrorChain, HandleError, SessionId, UserId,
+    AuthenticationMethod, ClientId, ErrorChain, HandleError, PasskeyId, SessionId, UserId,
     events::{
         Actor, DomainEvent, EventContext, RequestOrigin, RevocationReason, SignInFailure,
         UserAgentFamily,
@@ -262,6 +262,46 @@ impl BrowserCookie {
     }
 }
 
+/// What a browser proved who it is with, signing in or confirming its session: a
+/// passkey, named so the session records which one, or a provider.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum Credential {
+    /// This passkey's assertion.
+    Passkey(PasskeyId),
+    /// A provider's verified identity.
+    Federation,
+}
+
+impl Credential {
+    /// The method sessions and events record.
+    pub(crate) const fn method(self) -> AuthenticationMethod {
+        match self {
+            Self::Passkey(_) => AuthenticationMethod::Passkey,
+            Self::Federation => AuthenticationMethod::Federation,
+        }
+    }
+
+    /// The passkey, if one was used.
+    const fn passkey(self) -> Option<PasskeyId> {
+        match self {
+            Self::Passkey(passkey) => Some(passkey),
+            Self::Federation => None,
+        }
+    }
+}
+
+/// For fixtures signing in without a real ceremony: a passkey sign-in names a
+/// fresh passkey that is never stored.
+#[cfg(test)]
+impl From<AuthenticationMethod> for Credential {
+    fn from(method: AuthenticationMethod) -> Self {
+        match method {
+            AuthenticationMethod::Passkey => Self::Passkey(PasskeyId::new()),
+            AuthenticationMethod::Federation => Self::Federation,
+        }
+    }
+}
+
 /// Browser session failures before they are mapped to an HTTP response.
 #[derive(Debug, Error)]
 pub(crate) enum SessionError {
@@ -375,7 +415,7 @@ impl Session {
         context: RequestContext,
         headers: &HeaderMap,
         user_id: UserId,
-        method: AuthenticationMethod,
+        credential: Credential,
     ) -> Result<Secret, SessionError> {
         tx.users()
             .find_active_by_id_for_update(user_id)
@@ -391,13 +431,13 @@ impl Session {
         };
         match current {
             Some(current) if current.user_id == user_id => {
-                let secret = Self::reauthenticate(tx, &current, method).await?;
+                let secret = Self::reauthenticate(tx, &current, credential).await?;
                 tx.record(
                     &context.user(&current),
                     Some(user_id),
                     DomainEvent::SignedIn {
                         session_id: current.id,
-                        method,
+                        method: credential.method(),
                     },
                 )
                 .await?;
@@ -412,29 +452,33 @@ impl Session {
                     RevocationReason::AccountSwitched,
                 )
                 .await?;
-                Self::create(tx, context, user_id, method).await
+                Self::create(tx, context, user_id, credential).await
             }
-            None => Self::create(tx, context, user_id, method).await,
+            None => Self::create(tx, context, user_id, credential).await,
         }
     }
 
-    /// Records a new authentication of `session` with `method` inside the caller's
-    /// transaction, keeping its `sid`, and returns the secret for its new cookie. A
-    /// passkey confirms the session. A social sign-in renews it unless a passkey
-    /// confirmed it, since that would lower its `acr`. Callers record the event that
-    /// says why.
+    /// Records a new authentication of `session` with `credential` inside the
+    /// caller's transaction, keeping its `sid`, and returns the secret for its new
+    /// cookie. A passkey confirms the session, which records it. A social sign-in
+    /// renews it unless a passkey confirmed it, since that would lower its `acr`.
+    /// Callers record the event that says why.
     ///
     /// The old cookie stops working, so a copy of it never gains the new
     /// authentication. Callers set the new cookie only after the transaction commits.
     pub(crate) async fn reauthenticate(
         tx: &mut DatabaseTransaction<'_>,
         session: &StoredSession,
-        method: AuthenticationMethod,
+        credential: Credential,
     ) -> Result<Secret, SessionError> {
         let now = Utc::now();
-        match method {
-            AuthenticationMethod::Passkey => tx.sessions().confirm_passkey(session.id, now).await?,
-            AuthenticationMethod::Federation => {
+        match credential {
+            Credential::Passkey(passkey) => {
+                tx.sessions()
+                    .confirm_passkey(session.id, passkey, now)
+                    .await?;
+            }
+            Credential::Federation => {
                 if session.passkey_confirmed_at.is_some() {
                     return Err(SessionError::PasskeyRequired);
                 }
@@ -450,13 +494,15 @@ impl Session {
 
     /// Creates a session inside the caller's transaction, records the sign-in, and
     /// returns the secret for its cookie. A passkey sign-in also confirms the session,
-    /// so an action right after it prompts no more.
+    /// so an action right after it prompts no more, and the session records which
+    /// passkey it was.
     pub(crate) async fn create(
         tx: &mut DatabaseTransaction<'_>,
         context: RequestContext,
         user_id: UserId,
-        method: AuthenticationMethod,
+        credential: Credential,
     ) -> Result<Secret, SessionError> {
+        let method = credential.method();
         let now = Utc::now();
         let id = SessionId::new();
         tx.sessions()
@@ -468,8 +514,8 @@ impl Session {
                 expires_at: now + Duration::days(i64::from(SESSION_LIFETIME_DAYS)),
                 user_agent_family: context.user_agent_family,
                 ip: context.client_ip,
-                passkey_confirmed_at: matches!(method, AuthenticationMethod::Passkey)
-                    .then_some(now),
+                passkey_confirmed_at: credential.passkey().map(|_| now),
+                passkey_id: credential.passkey(),
             })
             .await?;
         let secret = Secret::generate()?;

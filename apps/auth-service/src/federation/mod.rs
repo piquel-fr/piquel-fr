@@ -503,7 +503,7 @@ impl FederationApplication {
             context,
             headers,
             existing.user_id,
-            AuthenticationMethod::Federation,
+            security::Credential::Federation,
         )
         .await?;
         tx.federation().record_login(existing.id).await?;
