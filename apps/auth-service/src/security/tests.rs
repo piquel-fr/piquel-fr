@@ -6,7 +6,7 @@ use crate::tests::Replicas;
 use axum::{Router, body::Body, http::Request as HttpRequest, middleware, routing::any};
 use piquel_common::{
     Handle, TokenId,
-    clients::ClientKind,
+    clients::{ClientKind, ClientOwner},
     events::{Browser, Platform},
 };
 use piquel_crypto::Secret;
@@ -74,10 +74,10 @@ impl SecurityFixture {
         database.run_migrations().await.expect("migrations");
         database
             .oidc()
-            .create_client(&crate::tests::registration(
-                ClientKind::Public,
-                "https://external.example",
-            ))
+            .create_client(
+                &crate::tests::registration(ClientKind::Public, "https://external.example"),
+                ClientOwner::Operator,
+            )
             .await
             .expect("public client");
         let policy = HttpSecurity {

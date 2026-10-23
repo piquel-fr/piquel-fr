@@ -7,7 +7,8 @@
 
 use crate::{
     AuthenticationMethod, ClientId, EventId, Handle, PasskeyId, Personal, Provider, SessionId,
-    TokenId, UserId, clients::ClientKind,
+    TokenId, UserId,
+    clients::{ClientField, ClientKind},
 };
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
@@ -157,6 +158,9 @@ pub enum DomainEvent {
     ClientUpdated {
         /// The changed client.
         client_id: ClientId,
+        /// The settings that changed; empty in events recorded before they were.
+        #[serde(default)]
+        changed: Vec<ClientField>,
     },
     /// A disabled client was enabled again.
     ClientEnabled {
@@ -166,6 +170,23 @@ pub enum DomainEvent {
     /// A client was disabled: it can no longer authorize, exchange or refresh.
     ClientDisabled {
         /// The disabled client.
+        client_id: ClientId,
+    },
+    /// An operator suspended a client: it is disabled, and its owner cannot enable
+    /// it until an operator lifts the suspension.
+    ClientSuspended {
+        /// The suspended client.
+        client_id: ClientId,
+    },
+    /// An operator lifted a client's suspension. It stays disabled until enabled.
+    ClientSuspensionLifted {
+        /// The client.
+        client_id: ClientId,
+    },
+    /// A client was deleted. Its ID stays reserved, it is disabled, its refresh
+    /// families are revoked, and its secrets and consents are removed.
+    ClientDeleted {
+        /// The deleted client.
         client_id: ClientId,
     },
     /// A confidential client got a new secret. Its earlier secrets keep working until
@@ -216,9 +237,12 @@ impl DomainEvent {
             | Self::GrantRevoked { client_id, .. }
             | Self::CodeReplayed { client_id }
             | Self::ClientRegistered { client_id, .. }
-            | Self::ClientUpdated { client_id }
+            | Self::ClientUpdated { client_id, .. }
             | Self::ClientEnabled { client_id }
             | Self::ClientDisabled { client_id }
+            | Self::ClientSuspended { client_id }
+            | Self::ClientSuspensionLifted { client_id }
+            | Self::ClientDeleted { client_id }
             | Self::ClientSecretRotated { client_id, .. }
             | Self::SessionRevoked {
                 reason: RevocationReason::RelyingPartyLogout { client_id },
@@ -277,6 +301,9 @@ impl DomainEvent {
             | Self::ClientUpdated { .. }
             | Self::ClientEnabled { .. }
             | Self::ClientDisabled { .. }
+            | Self::ClientSuspended { .. }
+            | Self::ClientSuspensionLifted { .. }
+            | Self::ClientDeleted { .. }
             | Self::ClientSecretRotated { .. }
             | Self::CompromiseReported { .. }
             | Self::Imported(_) => None,
@@ -313,6 +340,9 @@ impl DomainEvent {
             Self::ClientUpdated { .. } => "client_updated",
             Self::ClientEnabled { .. } => "client_enabled",
             Self::ClientDisabled { .. } => "client_disabled",
+            Self::ClientSuspended { .. } => "client_suspended",
+            Self::ClientSuspensionLifted { .. } => "client_suspension_lifted",
+            Self::ClientDeleted { .. } => "client_deleted",
             Self::ClientSecretRotated { .. } => "client_secret_rotated",
             Self::CompromiseReported { .. } => "compromise_reported",
             Self::Imported(_) => "imported",
@@ -395,6 +425,9 @@ impl DomainEvent {
             | Self::ClientUpdated { .. }
             | Self::ClientEnabled { .. }
             | Self::ClientDisabled { .. }
+            | Self::ClientSuspended { .. }
+            | Self::ClientSuspensionLifted { .. }
+            | Self::ClientDeleted { .. }
             | Self::ClientSecretRotated { .. } => return None,
         })
     }

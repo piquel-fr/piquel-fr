@@ -1094,8 +1094,7 @@ async fn telemetry_exports_no_secret_of_a_sign_in_and_code_exchange() {
             "https://client.example",
         )
     };
-    crate::ClientRegistry::new(fixture.app.database.clone())
-        .create(&crate::tests::operator(), &client, None)
+    crate::tests::register(&fixture.app.database, &client)
         .await
         .expect("client");
     let (session, mut secrets) = fixture.on(&replicas.a).login_with_secrets().await;

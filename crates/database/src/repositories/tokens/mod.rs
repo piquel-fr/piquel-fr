@@ -3,7 +3,7 @@
 use super::{RepositoryExecutor, TokenRepository};
 use crate::{DatabaseError, SessionAuthentication};
 use chrono::{DateTime, Utc};
-use piquel_common::{SessionId, TokenId, UserId};
+use piquel_common::{ClientId, SessionId, TokenId, UserId};
 use sqlx::types::Json;
 use thiserror::Error;
 
@@ -420,6 +420,52 @@ impl TokenRepository<'_> {
         )
     }
 
+    /// Locks one family until the transaction ends, for tests that order
+    /// concurrent revocations on what holds which lock.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`DatabaseError`] if the query fails.
+    #[cfg(feature = "test-support")]
+    pub async fn lock_family(&mut self, id: TokenId) -> Result<(), DatabaseError> {
+        run!(
+            self,
+            fetch_all,
+            sqlx::query_scalar!(
+                "SELECT id FROM refresh_token_families WHERE id = $1 FOR UPDATE",
+                id.as_uuid(),
+            )
+        )?;
+        Ok(())
+    }
+
+    /// Locks the client's live families until the transaction ends, in ID order.
+    /// A rotation locks its family before its client, so a change that locks the
+    /// client and then writes its families, such as a deletion, takes these
+    /// first; otherwise each could hold the lock the other waits for.
+    ///
+    /// Every statement that locks several families locks them in ID order, as
+    /// this one does, so two of them never wait for each other's families: a
+    /// deletion's for a client and a logout's for a session can share some.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`DatabaseError`] if the query fails.
+    pub async fn lock_client_families(&mut self, client: &ClientId) -> Result<(), DatabaseError> {
+        run!(
+            self,
+            fetch_all,
+            sqlx::query_scalar!(
+                "SELECT id FROM refresh_token_families
+                WHERE client_id = $1 AND revoked_at IS NULL
+                ORDER BY id
+                FOR UPDATE",
+                client.as_str(),
+            )
+        )?;
+        Ok(())
+    }
+
     /// Revokes every active family of the account and returns how many were
     /// revoked.
     ///
@@ -427,14 +473,21 @@ impl TokenRepository<'_> {
     ///
     /// Returns [`DatabaseError`] if the query fails.
     pub async fn revoke_all_for_user(&mut self, user_id: UserId) -> Result<u64, DatabaseError> {
+        // Locked in ID order, as `lock_client_families` explains.
         Ok(run!(
             self,
             execute,
             sqlx::query!(
-                "UPDATE refresh_token_families
+                "WITH locked AS (
+                    SELECT id FROM refresh_token_families
+                    WHERE user_id = $1 AND revoked_at IS NULL
+                    ORDER BY id
+                    FOR UPDATE
+                )
+                UPDATE refresh_token_families f
                 SET revoked_at = now()
-                WHERE user_id = $1
-                AND revoked_at IS NULL",
+                FROM locked
+                WHERE f.id = locked.id AND f.revoked_at IS NULL",
                 user_id.as_uuid(),
             )
         )?

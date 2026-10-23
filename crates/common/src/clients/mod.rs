@@ -19,7 +19,10 @@
 //! # Ok::<(), Box<dyn std::error::Error>>(())
 //! ```
 
-use crate::protocol::oauth::{Scope, Scopes};
+use crate::{
+    UserId,
+    protocol::oauth::{Scope, Scopes},
+};
 use serde::{Deserialize, Serialize};
 use std::{fmt, ops::Deref, str::FromStr};
 use thiserror::Error;
@@ -29,9 +32,16 @@ use url::{Host, Url};
 const MAX_IDENTIFIER_LENGTH: usize = 64;
 /// Longest display name, in characters.
 const MAX_DISPLAY_NAME_CHARS: usize = 80;
+/// Starts every client ID auth generates.
+const GENERATED_ID_PREFIX: &str = "c_";
+/// Characters after [`GENERATED_ID_PREFIX`], 5 random bits each.
+const GENERATED_ID_CHARS: usize = 20;
+/// The RFC 4648 base32 alphabet, lowercased so generated IDs read well in URLs.
+const BASE32: &[u8; 32] = b"abcdefghijklmnopqrstuvwxyz234567";
 
 /// A registered OAuth client's identifier: 1 to 64 ASCII letters, digits, `.`, `_`
-/// or `-`. It is chosen at registration and appears in tokens as `client_id` and `azp`.
+/// or `-`. It is fixed at registration and appears in tokens as `client_id`, `azp`
+/// and `aud`, so no other client may ever take it, even after a deletion.
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 #[serde(try_from = "String", into = "String")]
 pub struct ClientId(String);
@@ -46,6 +56,19 @@ impl ClientId {
     #[must_use]
     pub fn as_str(&self) -> &str {
         &self.0
+    }
+
+    /// The ID auth gives a client an account registers: `c_` and 20 base32
+    /// characters, one per byte of `random`, 100 bits in all. Only operators and
+    /// administrators choose IDs, so an account can never claim a name such as
+    /// `piquel-web`.
+    #[must_use]
+    pub fn generated(random: &[u8; 32]) -> Self {
+        let suffix = random
+            .iter()
+            .take(GENERATED_ID_CHARS)
+            .map(|byte| char::from(BASE32[usize::from(byte & 0x1f)]));
+        Self(GENERATED_ID_PREFIX.chars().chain(suffix).collect())
     }
 }
 
@@ -98,6 +121,87 @@ crate::str_enum! {
         Public = "public",
         /// Runs on a server. It authenticates with a secret auth generates.
         Confidential = "confidential",
+    }
+}
+
+/// Who manages a client, fixed when it is registered.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ClientOwner {
+    /// An operator, with the `client` command. No account manages it, and the
+    /// account API never shows it.
+    Operator,
+    /// The account that registered it through the account API, which alone may
+    /// change it there.
+    Account(UserId),
+}
+
+crate::str_enum! {
+    /// How a client was registered, stored beside its owner.
+    pub enum CreatedVia {
+        /// By an operator, with the `client` command.
+        Cli = "cli",
+        /// By its owner, through the account API.
+        Account = "account",
+    }
+}
+
+impl ClientOwner {
+    /// The managing account, if any.
+    #[must_use]
+    pub const fn user_id(self) -> Option<UserId> {
+        match self {
+            Self::Operator => None,
+            Self::Account(user_id) => Some(user_id),
+        }
+    }
+
+    /// How a client with this owner was registered.
+    #[must_use]
+    pub const fn created_via(self) -> CreatedVia {
+        match self {
+            Self::Operator => CreatedVia::Cli,
+            Self::Account(_) => CreatedVia::Account,
+        }
+    }
+}
+
+crate::open_str_enum! {
+    /// A setting of a [`ClientRegistration`], named as the account API's bodies
+    /// name it. Errors name the field they reject, and `ClientUpdated` events the
+    /// fields that changed. Open, since a newer release adds settings (branding,
+    /// #45; back-channel logout, #65) to events this release still reads.
+    pub enum ClientField {
+        /// [`ClientRegistration::display_name`].
+        DisplayName = "display_name",
+        /// [`ClientRegistration::redirect_uris`].
+        RedirectUris = "redirect_uris",
+        /// [`ClientRegistration::post_logout_uris`].
+        PostLogoutUris = "post_logout_uris",
+        /// [`ClientRegistration::allowed_scopes`].
+        AllowedScopes = "allowed_scopes",
+        /// [`ClientRegistration::allow_refresh`].
+        AllowRefresh = "allow_refresh",
+        /// [`ClientRegistration::trusted`].
+        Trusted = "trusted",
+        /// [`ClientRegistration::require_pushed_authorization_requests`].
+        RequirePushedAuthorizationRequests = "require_pushed_authorization_requests",
+    }
+}
+
+impl ClientField {
+    /// Whether changing this field changes where auth may send the browser, which
+    /// would let whoever changes it collect authorization codes.
+    #[must_use]
+    pub const fn redirects(&self) -> bool {
+        match self {
+            Self::RedirectUris | Self::PostLogoutUris => true,
+            Self::DisplayName
+            | Self::AllowedScopes
+            | Self::AllowRefresh
+            | Self::Trusted
+            | Self::RequirePushedAuthorizationRequests
+            | Self::Other(_) => false,
+        }
     }
 }
 

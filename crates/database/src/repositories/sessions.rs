@@ -309,7 +309,8 @@ impl SessionRepository<'_> {
     ///
     /// The families are revoked by a second statement: a code exchange that held a
     /// session's lock may have committed a family while the first one waited, and
-    /// only a new statement's snapshot sees it.
+    /// only a new statement's snapshot sees it. They are locked in ID order, like
+    /// every statement that locks several families.
     ///
     /// # Errors
     ///
@@ -342,9 +343,16 @@ impl SessionRepository<'_> {
             self,
             execute,
             sqlx::query!(
-                "UPDATE refresh_token_families
-                SET revoked_at = COALESCE(revoked_at, now())
-                WHERE session_id = ANY($1)",
+                "WITH locked AS (
+                    SELECT id FROM refresh_token_families
+                    WHERE session_id = ANY($1)
+                    ORDER BY id
+                    FOR UPDATE
+                )
+                UPDATE refresh_token_families f
+                SET revoked_at = COALESCE(f.revoked_at, now())
+                FROM locked
+                WHERE f.id = locked.id",
                 &ids,
             )
         )?;

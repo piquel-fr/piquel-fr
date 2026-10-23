@@ -3,6 +3,7 @@
 use super::AdminError;
 use chrono::Duration;
 use piquel_common::{HandleError, UserId};
+use serde::Deserialize;
 use std::{fmt, str::FromStr};
 use thiserror::Error;
 
@@ -37,6 +38,8 @@ const MINUTES_PER_HOUR: i64 = 60;
 const MINUTES_PER_DAY: i64 = 24 * MINUTES_PER_HOUR;
 /// Invitation lifetime when none is given: seven days.
 const DEFAULT_INVITE_EXPIRY: i64 = 7 * MINUTES_PER_DAY;
+/// Grace period of a rotation when none is given: a day.
+const DEFAULT_GRACE_PERIOD: i64 = MINUTES_PER_DAY;
 
 /// A whole number of minutes, written in its largest whole unit, e.g. `365d`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -59,8 +62,10 @@ impl fmt::Display for Minutes {
 }
 
 /// A lifetime written as a whole number of minutes, hours or days, such as `30m`,
-/// `24h` or `7d`, or `0`. It lies between `MIN` and `MAX` minutes.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+/// `24h` or `7d`, or `0`. It lies between `MIN` and `MAX` minutes. JSON bodies
+/// write it the same way, as a string.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Deserialize)]
+#[serde(try_from = "String")]
 pub struct Lifetime<const MIN: i64, const MAX: i64>(Minutes);
 
 /// How long a signup link stays valid: 1 hour to 365 days.
@@ -93,6 +98,21 @@ impl Default for InviteExpiry {
     /// Seven days.
     fn default() -> Self {
         Self(Minutes(DEFAULT_INVITE_EXPIRY))
+    }
+}
+
+impl Default for GracePeriod {
+    /// A day.
+    fn default() -> Self {
+        Self(Minutes(DEFAULT_GRACE_PERIOD))
+    }
+}
+
+impl<const MIN: i64, const MAX: i64> TryFrom<String> for Lifetime<MIN, MAX> {
+    type Error = InvalidLifetime;
+    /// Parses owned text, as serde reads it.
+    fn try_from(value: String) -> Result<Self, Self::Error> {
+        value.parse()
     }
 }
 

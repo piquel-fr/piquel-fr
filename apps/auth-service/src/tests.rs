@@ -2,7 +2,7 @@
 //! and the fixtures shared by the applications' tests.
 
 use crate::{
-    AuthConfig, Operator,
+    AuthConfig, ClientRegistry, ClientRegistryError, Operator,
     config::{FederationConfig, FrontendOrigins, OidcConfig, PasskeyConfig},
     passkey::DecoyKey,
     security::{BrowserCookie, RequestContext, Session},
@@ -13,16 +13,21 @@ use axum::{
     extract::ConnectInfo,
     http::{Method, Request, StatusCode, header},
 };
+use chrono::{Duration, Utc};
 use piquel_common::{
-    AuthenticationMethod, Handle, SessionId, UserId,
+    AuthenticationMethod, ClientId, Handle, SessionId, TokenId, UserId,
     clients::{
-        AllowedScopes, ClientKind, ClientRegistration, PostLogoutUris, RedirectUris, ScopeName,
+        AllowedScopes, ClientField, ClientKind, ClientOwner, ClientRegistration, PostLogoutUris,
+        RedirectUris, ScopeName,
     },
     config::{Origin, PublicUrl},
     protocol::oauth::Scope,
 };
-use piquel_crypto::{Rs256Key, Secret};
-use piquel_repository::{Database, DatabaseConfig, InsertUser};
+use piquel_crypto::{ClientSecret, Rs256Key, Secret};
+use piquel_repository::{
+    Database, DatabaseConfig, DatabaseTransaction, InsertAuthorizationCode, InsertRefreshFamily,
+    InsertRefreshToken, InsertUser, SessionAuthentication,
+};
 use serde_json::Value;
 use std::{
     collections::BTreeMap,
@@ -136,15 +141,20 @@ impl Browser {
     /// Signs another browser in to `user_id` with a passkey, from
     /// [`RequestContext::TEST`].
     pub(crate) async fn sign_in(database: &Database, user_id: UserId) -> Self {
+        Self::sign_in_with(database, user_id, AuthenticationMethod::Passkey).await
+    }
+
+    /// Signs another browser in to `user_id` with `method`, from
+    /// [`RequestContext::TEST`]. Only a passkey sign-in confirms the session.
+    pub(crate) async fn sign_in_with(
+        database: &Database,
+        user_id: UserId,
+        method: AuthenticationMethod,
+    ) -> Self {
         let mut tx = database.begin().await.expect("transaction");
-        let secret = Session::create(
-            &mut tx,
-            RequestContext::TEST,
-            user_id,
-            AuthenticationMethod::Passkey,
-        )
-        .await
-        .expect("session");
+        let secret = Session::create(&mut tx, RequestContext::TEST, user_id, method)
+            .await
+            .expect("session");
         let session_id = tx
             .sessions()
             .find_active_by_browser_secret(secret.digest().as_bytes())
@@ -168,6 +178,17 @@ impl Browser {
         method: Method,
         path: &str,
     ) -> (StatusCode, Value) {
+        self.send(router, method, path, None).await
+    }
+
+    /// Like [`Self::call`], sending `body`, if any, as JSON.
+    pub(crate) async fn send(
+        &self,
+        router: &Router,
+        method: Method,
+        path: &str,
+        body: Option<Value>,
+    ) -> (StatusCode, Value) {
         let response = router
             .clone()
             .oneshot(
@@ -176,7 +197,8 @@ impl Browser {
                     .method(method)
                     .uri(path)
                     .header(header::COOKIE, &self.cookie)
-                    .body(Body::empty())
+                    .header(header::CONTENT_TYPE, "application/json")
+                    .body(body.map_or_else(Body::empty, |body| Body::from(body.to_string())))
                     .expect("request"),
             )
             .await
@@ -196,6 +218,42 @@ pub(crate) fn operator() -> Operator {
         os_user: "test".into(),
         host: "test".into(),
     }
+}
+
+/// Makes `change` with a registry over a transaction of its own, as [`operator`],
+/// and commits it if it succeeds.
+pub(crate) async fn change<T, E: From<ClientRegistryError>>(
+    database: &Database,
+    change: impl AsyncFnOnce(&mut ClientRegistry<'_, '_>) -> Result<T, E>,
+) -> Result<T, E> {
+    let mut tx = database.begin().await.map_err(ClientRegistryError::from)?;
+    let value = change(&mut ClientRegistry::new(&mut tx, operator().context())).await?;
+    tx.commit().await.map_err(ClientRegistryError::from)?;
+    Ok(value)
+}
+
+/// Registers `client` as an operator, returning a confidential client's secret.
+pub(crate) async fn register(
+    database: &Database,
+    client: &ClientRegistration,
+) -> Result<Option<ClientSecret>, ClientRegistryError> {
+    change(database, async |registry| {
+        registry.create(ClientOwner::Operator, client, None).await
+    })
+    .await
+}
+
+/// Writes `client` over its stored registration, as an operator.
+pub(crate) async fn replace(
+    database: &Database,
+    client: &ClientRegistration,
+) -> Result<Vec<ClientField>, ClientRegistryError> {
+    change(database, async |registry| {
+        registry
+            .update(&client.id, |_| Ok::<_, ClientRegistryError>(client.clone()))
+            .await
+    })
+    .await
 }
 
 /// A refresh-capable, untrusted client of `kind` with a fresh ID, calling back to
@@ -227,6 +285,80 @@ pub(crate) fn registration(kind: ClientKind, origin: &str) -> ClientRegistration
         trusted: false,
         require_pushed_authorization_requests: false,
     }
+}
+
+/// Waits until `waiters` other transactions wait for a lock `holder` holds.
+pub(crate) async fn until_blocked(holder: &mut DatabaseTransaction<'_>, waiters: i64) {
+    tokio::time::timeout(std::time::Duration::from_secs(10), async {
+        while holder.blocked_transactions().await.expect("lock waits") < waiters {
+            tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+        }
+    })
+    .await
+    .expect("the operation waits for the holder's lock");
+}
+
+/// Issues the refresh grant `family` to `client` from `user_id`'s session
+/// `session_id`, as a code exchange would, and returns its first refresh token's
+/// ID and digest.
+pub(crate) async fn refresh_grant(
+    database: &Database,
+    user_id: UserId,
+    session_id: SessionId,
+    client: &ClientId,
+    family: TokenId,
+) -> (TokenId, Vec<u8>) {
+    let mut tx = database.begin().await.expect("transaction");
+    let session = tx
+        .sessions()
+        .find_by_id(session_id)
+        .await
+        .expect("lookup")
+        .expect("session");
+    let authentication = SessionAuthentication::from(&session);
+    let code = TokenId::new();
+    tx.oidc()
+        .insert_code(&InsertAuthorizationCode {
+            id: code,
+            secret_digest: code.as_uuid().as_bytes().repeat(2),
+            client_id: client.clone(),
+            user_id,
+            session_id,
+            redirect_uri: "https://client.example/callback".into(),
+            pkce_challenge: "challenge".into(),
+            nonce: None,
+            scopes: vec!["openid".into()],
+            audience: client.to_string(),
+            authentication: authentication.clone(),
+            expires_at: Utc::now() + Duration::minutes(1),
+        })
+        .await
+        .expect("code");
+    let token = TokenId::new();
+    let digest = token.as_uuid().as_bytes().repeat(2);
+    tx.tokens()
+        .insert_family(
+            &InsertRefreshFamily {
+                id: family,
+                user_id,
+                client_id: client.to_string(),
+                session_id,
+                authorization_code_id: code,
+                audience: client.to_string(),
+                scopes: vec!["openid".into()],
+                authentication,
+            },
+            &InsertRefreshToken {
+                id: token,
+                family_id: family,
+                secret_digest: digest.clone(),
+                expires_at: Utc::now() + Duration::hours(1),
+            },
+        )
+        .await
+        .expect("family");
+    tx.commit().await.expect("commit");
+    (token, digest)
 }
 
 /// HTTPS on a local port with a self-signed `localhost` certificate, so clients

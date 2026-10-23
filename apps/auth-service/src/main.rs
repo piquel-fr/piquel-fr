@@ -1,26 +1,25 @@
 //! Authentication service and its administrative CLI.
 use auth_service::{
-    AdminError, AdminOperations, Applied, AuthConfig, ClientRegistry, ClientRegistryError,
-    GracePeriod, InviteExpiry, Jobs, Operator, PUBLIC_BASE_URL, SERVICE_NAME, TELEMETRY_FILTER,
+    AdminError, AdminOperations, Applied, AuthConfig, ClientDetails, ClientRegistry,
+    ClientRegistryError, DEFAULT_CLIENT_SCOPES, GracePeriod, InviteExpiry, Jobs, Operator,
+    PUBLIC_BASE_URL, SERVICE_NAME, TELEMETRY_FILTER,
 };
 use clap::{Args, Parser, Subcommand, ValueEnum};
 use piquel_common::{
     ClientId, DeliveryId, ErrorChain, Handle,
     clients::{
-        AllowedScopes, ClientKind, ClientRegistration, DisplayName, InvalidCount,
+        AllowedScopes, ClientKind, ClientOwner, ClientRegistration, DisplayName, InvalidCount,
         InvalidDisplayName, InvalidRedirectUri, InvalidScopeName, PostLogoutUris, RedirectUri,
         RedirectUris, ScopeName,
     },
     config::{ConfigurationError, SecretError, SecretReference, Variable},
-    protocol::oauth::Scope,
 };
 use piquel_crypto::{ClientSecret, CryptoError};
 use piquel_repository::{
-    Database, DatabaseConnectionError, DatabaseError, DeliveryStatus, StoredClientSecret,
+    Database, DatabaseConnectionError, DatabaseError, DatabaseTransaction, DeliveryStatus,
     StoredOidcClient,
 };
 use piquel_telemetry::{Telemetry, TelemetryError};
-use serde::Serialize;
 use thiserror::Error;
 
 use axum::Router;
@@ -35,8 +34,6 @@ const HOST_NAME: Variable = Variable::new("HOSTNAME");
 const HOST_NAME_FILE: &str = "/proc/sys/kernel/hostname";
 /// Recorded when the operator's user or host name cannot be read.
 const UNKNOWN_OPERATOR: &str = "unknown";
-/// Scopes a new client may request when `--scope` is not given.
-const DEFAULT_CLIENT_SCOPES: [Scope; 3] = [Scope::OpenId, Scope::Profile, Scope::Email];
 
 /// Failures of startup and administrative commands, preserving their original causes.
 #[derive(Debug, Error)]
@@ -421,8 +418,25 @@ enum ClientCommand {
         /// The client's ID.
         id: ClientId,
     },
+    /// Delete a client: it stops working at once, its refresh tokens, secrets and
+    /// consents go, and its ID can never be registered again.
+    Delete {
+        /// The client's ID.
+        id: ClientId,
+    },
     /// Let a disabled client work again.
     Enable {
+        /// The client's ID.
+        id: ClientId,
+    },
+    /// Block a client: it is disabled, and its owner cannot enable it again
+    /// until `unsuspend`.
+    Suspend {
+        /// The client's ID.
+        id: ClientId,
+    },
+    /// Lift a client's suspension. It stays disabled until enabled.
+    Unsuspend {
         /// The client's ID.
         id: ClientId,
     },
@@ -446,43 +460,29 @@ enum OutputFormat {
     Json,
 }
 
-/// A client's registration and the lifetimes of its secrets, as `client show` prints them.
-#[derive(Serialize)]
-struct ClientDetails {
-    /// The registration.
-    #[serde(flatten)]
-    client: StoredOidcClient,
-    /// Its secrets, oldest first; never their values.
-    secrets: Vec<StoredClientSecret>,
-}
-
 impl ClientCommand {
-    /// Runs this command on `database`, recording changes as made by the operator.
+    /// Runs this command on `database` in one transaction, recording changes as
+    /// made by the operator. What a change prints is printed only once it
+    /// committed, so a script never captures a secret that was not stored.
     async fn run(self, database: Database) -> Result<(), CliError> {
-        let registry = ClientRegistry::new(database.clone());
-        let context = Command::operator()?;
-        match self {
-            Self::Create(create) => {
-                let secret = registry
-                    .create(&context, &create.registration()?, None)
-                    .await?;
-                Self::print_secret(secret.as_ref());
-            }
+        let mut tx = database.begin().await?;
+        let mut registry = ClientRegistry::new(&mut tx, Command::operator()?.context());
+        let done = match self {
+            Self::Create(create) => ClientChange::Secret(
+                registry
+                    .create(ClientOwner::Operator, &create.registration()?, None)
+                    .await?,
+            ),
             Self::Apply(apply) => {
                 let secret = apply.secret()?;
                 let id = apply.client.id.clone();
                 let applied = registry
-                    .apply(&context, &apply.client.registration()?, secret, apply.grace)
+                    .apply(&apply.client.registration()?, secret, apply.grace)
                     .await?;
-                let applied = match applied {
-                    Applied::Registered => "registered",
-                    Applied::Updated => "updated",
-                    Applied::Unchanged => "unchanged",
-                };
-                eprintln!("Client {id}: {applied}.");
+                ClientChange::Applied(id, applied)
             }
             Self::List { output } => {
-                let clients = database.oidc().list_clients().await?;
+                let clients = tx.oidc().list_clients().await?;
                 match output {
                     OutputFormat::Json => println!("{}", serde_json::to_string_pretty(&clients)?),
                     OutputFormat::Table => {
@@ -492,10 +492,11 @@ impl ClientCommand {
                                 "{}\t{}\t{}\t{}\t{}\t{}\t{}",
                                 client.id,
                                 client.kind,
-                                if client.enabled {
-                                    "enabled"
-                                } else {
-                                    "disabled"
+                                match (client.deleted_at, client.suspended_at, client.enabled) {
+                                    (Some(_), _, _) => "deleted",
+                                    (None, Some(_), _) => "suspended",
+                                    (None, None, true) => "enabled",
+                                    (None, None, false) => "disabled",
                                 },
                                 client.allow_refresh,
                                 client.trusted,
@@ -505,44 +506,90 @@ impl ClientCommand {
                         }
                     }
                 }
+                ClientChange::Silent
             }
             Self::Show { id } => {
                 let details = ClientDetails {
-                    client: Self::find(&database, &id).await?,
-                    secrets: database.oidc().client_secrets(&id).await?,
+                    client: Self::find(&mut tx, &id).await?,
+                    secrets: tx.oidc().client_secrets(&id).await?,
                 };
                 println!("{}", serde_json::to_string_pretty(&details)?);
+                ClientChange::Silent
             }
             Self::Update(update) => {
                 let id = update.id.clone();
-                registry
-                    .update(&context, &id, |client| update.apply(client))
-                    .await?;
+                registry.update(&id, |client| update.apply(client)).await?;
+                ClientChange::Silent
             }
-            Self::Disable { id } => registry.set_enabled(&context, &id, false).await?,
-            Self::Enable { id } => registry.set_enabled(&context, &id, true).await?,
+            Self::Disable { id } => {
+                registry.set_enabled(&id, false).await?;
+                ClientChange::Silent
+            }
+            Self::Enable { id } => {
+                registry.set_enabled(&id, true).await?;
+                ClientChange::Silent
+            }
+            Self::Suspend { id } => {
+                registry.set_suspended(&id, true).await?;
+                ClientChange::Silent
+            }
+            Self::Unsuspend { id } => {
+                registry.set_suspended(&id, false).await?;
+                ClientChange::Silent
+            }
+            Self::Delete { id } => {
+                registry.delete(&id).await?;
+                ClientChange::Silent
+            }
             Self::RotateSecret { id, grace } => {
-                let secret = registry.rotate_secret(&context, &id, grace).await?;
-                Self::print_secret(Some(&secret));
+                ClientChange::Secret(Some(registry.rotate_secret(&id, grace).await?))
             }
-        }
+        };
+        tx.commit().await?;
+        done.print();
         Ok(())
     }
 
     /// The registered client `id`.
-    async fn find(database: &Database, id: &ClientId) -> Result<StoredOidcClient, CliError> {
-        database
-            .oidc()
+    async fn find(
+        tx: &mut DatabaseTransaction<'_>,
+        id: &ClientId,
+    ) -> Result<StoredOidcClient, CliError> {
+        tx.oidc()
             .find_client(id.as_str())
             .await?
             .ok_or_else(|| ClientRegistryError::Unknown(id.clone()).into())
     }
+}
 
-    /// Prints a new secret alone on standard output, so scripts can capture it.
-    fn print_secret(secret: Option<&ClientSecret>) {
-        if let Some(secret) = secret {
-            println!("{}", secret.expose());
-            eprintln!("Store this client secret now: it cannot be shown again.");
+/// What a committed client command still prints.
+enum ClientChange {
+    /// A new secret, if the client is confidential.
+    Secret(Option<ClientSecret>),
+    /// What `client apply` did to the client.
+    Applied(ClientId, Applied),
+    /// Nothing, or it was printed already: reads print as they go.
+    Silent,
+}
+
+impl ClientChange {
+    /// Prints a new secret alone on standard output, so scripts can capture it,
+    /// or what `apply` did on standard error.
+    fn print(self) {
+        match self {
+            Self::Secret(Some(secret)) => {
+                println!("{}", secret.expose());
+                eprintln!("Store this client secret now: it cannot be shown again.");
+            }
+            Self::Applied(id, applied) => {
+                let applied = match applied {
+                    Applied::Registered => "registered",
+                    Applied::Updated => "updated",
+                    Applied::Unchanged => "unchanged",
+                };
+                eprintln!("Client {id}: {applied}.");
+            }
+            Self::Secret(None) | Self::Silent => {}
         }
     }
 }
@@ -690,7 +737,7 @@ struct UpdateClient {
 impl UpdateClient {
     /// Applies the changes to `client`'s stored registration, which must still be
     /// valid where it is kept.
-    fn apply(self, client: StoredOidcClient) -> Result<ClientRegistration, CliError> {
+    fn apply(self, client: &StoredOidcClient) -> Result<ClientRegistration, CliError> {
         let scopes = if self.scopes.is_empty() {
             client
                 .allowed_scopes
@@ -704,13 +751,13 @@ impl UpdateClient {
             display_name: self.name.map_or_else(|| client.display_name.parse(), Ok)?,
             kind: client.kind,
             redirect_uris: RedirectUris::new(Self::edit(
-                client.redirect_uris,
+                &client.redirect_uris,
                 &self.remove_redirect_uris,
                 self.add_redirect_uris,
             )?)
             .map_err(CliError::count("redirect URIs"))?,
             post_logout_uris: PostLogoutUris::new(Self::edit(
-                client.post_logout_uris,
+                &client.post_logout_uris,
                 &self.remove_post_logout_uris,
                 self.add_post_logout_uris,
             )?)
@@ -720,14 +767,14 @@ impl UpdateClient {
             trusted: self.trusted || (client.trusted && !self.untrusted),
             require_pushed_authorization_requests: self.require_par
                 || (client.require_pushed_authorization_requests && !self.no_require_par),
-            id: client.id,
+            id: client.id.clone(),
         })
     }
 
     /// Removes `remove` from the `stored` URIs as written, so one registered under
     /// older rules can still be removed, then adds `add`.
     fn edit(
-        stored: Vec<String>,
+        stored: &[String],
         remove: &[String],
         add: Vec<RedirectUri>,
     ) -> Result<Vec<RedirectUri>, CliError> {
@@ -735,7 +782,7 @@ impl UpdateClient {
             return Err(CliError::NotRegistered(missing.clone()));
         }
         let kept = stored
-            .into_iter()
+            .iter()
             .filter(|uri| !remove.contains(uri))
             .map(|uri| uri.parse())
             .collect::<Result<Vec<_>, _>>()?;

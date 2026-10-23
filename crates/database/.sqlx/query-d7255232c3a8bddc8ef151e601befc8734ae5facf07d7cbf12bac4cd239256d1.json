@@ -1,0 +1,22 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "WITH client AS (\n                    UPDATE oidc_clients\n                    SET deleted_at = now(), enabled = FALSE, client_secret_hash = NULL,\n                        updated_at = now()\n                    WHERE id = $1 AND deleted_at IS NULL\n                    RETURNING id\n                ),\n                secrets AS (\n                    DELETE FROM oidc_client_secrets s USING client WHERE s.client_id = client.id\n                ),\n                consents AS (\n                    DELETE FROM oidc_consents c USING client WHERE c.client_id = client.id\n                ),\n                families AS (\n                    UPDATE refresh_token_families f\n                    SET revoked_at = now()\n                    FROM client\n                    WHERE f.client_id = client.id AND f.revoked_at IS NULL\n                )\n                SELECT id FROM client",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "d7255232c3a8bddc8ef151e601befc8734ae5facf07d7cbf12bac4cd239256d1"
+}

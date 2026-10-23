@@ -4,7 +4,7 @@ use super::{
     ACCESS_TOKEN_SECONDS, AuthScheme, GrantType, OAuthCode, OAuthError, OidcApplication,
     OpaqueToken, Reject, Scope, Scopes, TokenPrefix, TokenType,
 };
-use crate::security::RequestContext;
+use crate::security::{ApiError, RequestContext};
 use axum::{
     Form, Json,
     extract::State,
@@ -236,6 +236,14 @@ impl OidcApplication {
             GrantType::RefreshToken => app.rotate_refresh(form, &client.id, &context).await,
         }?;
         tokens.count(grant);
+        // After the grant committed, outside its transaction: concurrent rotations
+        // of one client each hold their family and share-lock the client, so the
+        // hourly write, which needs the client exclusively, would deadlock them if
+        // two made it inside. The tokens are issued, so a failure here only leaves
+        // the time older, and is logged rather than answered.
+        if let Err(error) = app.database.oidc().touch_client(&client.id).await {
+            ApiError::log_error(&error);
+        }
         Ok(Json(tokens))
     }
 

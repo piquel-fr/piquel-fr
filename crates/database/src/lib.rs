@@ -34,8 +34,8 @@ pub use repositories::{
     },
     oidc::{
         CodeRedemptionError, ConsumedAuthorizationCode, InsertAuthorizationCode,
-        InsertAuthorizationRequest, OidcRedirectKind, StoredAuthorizationRequest,
-        StoredClientSecret, StoredOidcClient,
+        InsertAuthorizationRequest, OidcRedirectKind, OwnedClientCounts,
+        StoredAuthorizationRequest, StoredClientSecret, StoredOidcClient,
     },
     passkeys::{CeremonyKind, ConsumedCeremony, InsertCeremony, InsertPasskey, StoredPasskey},
     sessions::{

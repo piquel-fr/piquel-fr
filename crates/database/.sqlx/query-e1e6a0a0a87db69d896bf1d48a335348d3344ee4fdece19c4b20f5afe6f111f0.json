@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE oidc_clients\n                SET suspended_at = CASE WHEN $2 THEN now() END,\n                    enabled = enabled AND NOT $2,\n                    updated_at = now()\n                WHERE id = $1 AND (suspended_at IS NULL) = $2",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Bool"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "e1e6a0a0a87db69d896bf1d48a335348d3344ee4fdece19c4b20f5afe6f111f0"
+}

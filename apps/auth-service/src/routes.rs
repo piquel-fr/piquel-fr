@@ -77,6 +77,20 @@ pub(crate) mod sessions {
     pub(crate) const REVOKE_OTHERS: &str = "/account/sessions/revoke-others";
 }
 
+/// OIDC clients the signed-in account manages.
+pub(crate) mod clients {
+    /// Lists the account's clients, or registers one.
+    pub(crate) const LIST: &str = "/account/clients";
+    /// Shows, changes or deletes one client.
+    pub(crate) const ITEM: &str = "/account/clients/{id}";
+    /// Pauses a client without deleting it.
+    pub(crate) const DISABLE: &str = "/account/clients/{id}/disable";
+    /// Lets a disabled client work again.
+    pub(crate) const ENABLE: &str = "/account/clients/{id}/enable";
+    /// Rotates a confidential client's secret.
+    pub(crate) const SECRETS: &str = "/account/clients/{id}/secrets";
+}
+
 /// OAuth 2.0 and `OpenID` Connect endpoints.
 pub(crate) mod oidc {
     use piquel_common::protocol::metadata;

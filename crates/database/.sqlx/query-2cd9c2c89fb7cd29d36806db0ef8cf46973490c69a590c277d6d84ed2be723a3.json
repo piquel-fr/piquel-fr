@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE oidc_clients\n                SET last_used_at = now()\n                WHERE id = $1\n                AND (last_used_at IS NULL OR last_used_at < now() - interval '1 hour')",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "2cd9c2c89fb7cd29d36806db0ef8cf46973490c69a590c277d6d84ed2be723a3"
+}
