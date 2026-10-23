@@ -88,7 +88,9 @@ Important invariants:
   registrations cannot exceed the quota, and tombstones stay bounded.
 - Refresh families are locked after their account and session, and before their
   client: a rotation locks its family, then share-locks the client, so a
-  deletion locks the client's families before the client. Every statement that
+  deletion locks the client's families before the client. A family granted after
+  that is skipped if another transaction holds it, since that is a revocation or
+  a rotation that will find the client disabled. Every statement that
   locks several families (a deletion's, a logout's, an account-wide or a
   code-replay revocation) locks them in ID order, so two never wait for each
   other's families.

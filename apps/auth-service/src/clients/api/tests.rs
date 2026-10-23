@@ -474,6 +474,69 @@ async fn deletion_and_refresh_rotation_never_deadlock() {
     ));
 }
 
+/// A family granted after a deletion locked the client's families is locked by
+/// no one else but a rotation that will find the client deleted, so the deletion
+/// skips it instead of waiting, which could deadlock with that rotation. Here the
+/// deletion queues behind a held family while the grant commits, then a second
+/// transaction holds the new family.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+#[ignore = "requires TEST_DATABASE_URL"]
+async fn deletion_skips_families_granted_while_it_waits() {
+    let harness = Harness::new().await;
+    let (owner, user) = (
+        Browser::new_account(&harness.database).await,
+        Browser::new_account(&harness.database).await,
+    );
+    let client_id: ClientId = harness
+        .create(&owner, "public")
+        .await
+        .parse()
+        .expect("client ID");
+    let grant = async |family: TokenId| {
+        refresh_grant(
+            &harness.database,
+            user.user_id,
+            user.session_id,
+            &client_id,
+            family,
+        )
+        .await
+    };
+    let (held, fresh) = (TokenId::new(), TokenId::new());
+    grant(held).await;
+    let mut holder = harness.database.begin().await.expect("transaction");
+    holder
+        .tokens()
+        .lock_family(held)
+        .await
+        .expect("hold the family");
+    let deletion = tokio::spawn({
+        let (database, id) = (harness.database.clone(), client_id.clone());
+        async move { change(&database, async |registry| registry.delete(&id).await).await }
+    });
+    until_blocked(&mut holder, 1).await;
+    let (token, digest) = grant(fresh).await;
+    let mut rotation = harness.database.begin().await.expect("transaction");
+    rotation
+        .tokens()
+        .lock_family(fresh)
+        .await
+        .expect("hold the fresh family");
+    holder.commit().await.expect("commit");
+    tokio::time::timeout(std::time::Duration::from_secs(10), deletion)
+        .await
+        .expect("the deletion does not wait for the fresh family")
+        .expect("task")
+        .expect("deletion");
+    assert!(matches!(
+        rotation
+            .tokens()
+            .consume_for_rotation(token, &digest, client_id.as_str())
+            .await,
+        Err(RefreshRotationError::Invalid)
+    ));
+}
+
 /// A deletion and a logout that share families lock them in the same order, so
 /// they never deadlock. The families are inserted highest ID first, so a scan
 /// meets them out of ID order; a transaction holds the lowest while the deletion,

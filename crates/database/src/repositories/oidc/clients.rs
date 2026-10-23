@@ -347,6 +347,13 @@ impl OidcRepository<'_> {
     /// consents. Pending authorization requests and codes need an enabled client,
     /// so they stop working too.
     ///
+    /// The caller locks the client's families first, as
+    /// [`TokenRepository::lock_client_families`](crate::TokenRepository::lock_client_families)
+    /// explains. A family granted since then is skipped if another transaction
+    /// holds it: either that one revokes it, or it is a rotation, which locked the
+    /// family before the client and will find the client disabled. Waiting for it
+    /// would deadlock with that rotation.
+    ///
     /// # Errors
     ///
     /// Returns [`DatabaseError::NotFound`] for an unknown or already deleted
@@ -375,8 +382,13 @@ impl OidcRepository<'_> {
                 families AS (
                     UPDATE refresh_token_families f
                     SET revoked_at = now()
-                    FROM client
-                    WHERE f.client_id = client.id AND f.revoked_at IS NULL
+                    FROM client, LATERAL (
+                        SELECT id FROM refresh_token_families
+                        WHERE client_id = client.id AND revoked_at IS NULL
+                        ORDER BY id
+                        FOR UPDATE SKIP LOCKED
+                    ) free
+                    WHERE f.id = free.id
                 )
                 SELECT id FROM client",
                 id.as_str(),
