@@ -358,10 +358,10 @@ impl AuthConfig {
             return Ok((runtime, None));
         };
         let (owner, _) = OWNER_DATABASE.read(&url)?;
-        let password = password.ok_or(
-            DATABASE_PASSWORD
-                .invalid("must be set with AUTH_DATABASE_OWNER_URL, for the runtime role"),
-        )?;
+        let password = password.ok_or(DATABASE_PASSWORD.invalid(
+            "must be set with AUTH_DATABASE_OWNER_URL, for the runtime role, and \
+             AUTH_DATABASE_URL must then omit its password",
+        ))?;
         let role = RuntimeRole::new(&runtime, &password).map_err(|source| {
             DATABASE_URL.error("must name a role migrate can provision", source)
         })?;
