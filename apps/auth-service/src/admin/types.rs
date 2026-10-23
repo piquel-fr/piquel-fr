@@ -176,6 +176,51 @@ impl Reason {
     }
 }
 
+impl FromStr for Reason {
+    type Err = AdminError;
+    /// Parses a reason given on the command line.
+    fn from_str(value: &str) -> Result<Self, Self::Err> {
+        Self::parse(value.to_owned())
+    }
+}
+
+/// An account as an operator names it: its ID, a verified email of an active
+/// account (anything with an `@`), or its username.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum UserRef {
+    /// The account's ID.
+    Id(UserId),
+    /// A verified address an active account owns.
+    Email(String),
+    /// The account's login name, in any status.
+    Username(String),
+}
+
+impl FromStr for UserRef {
+    type Err = std::convert::Infallible;
+    /// Reads a UUID as an ID, a value with an `@` as an email, and anything else as
+    /// a username.
+    fn from_str(value: &str) -> Result<Self, Self::Err> {
+        Ok(if let Ok(id) = value.parse() {
+            Self::Id(id)
+        } else if value.contains('@') {
+            Self::Email(value.to_owned())
+        } else {
+            Self::Username(value.to_owned())
+        })
+    }
+}
+
+impl fmt::Display for UserRef {
+    /// Writes the reference as the operator gave it.
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Id(id) => id.fmt(formatter),
+            Self::Email(value) | Self::Username(value) => formatter.write_str(value),
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     //! Invitation lifetime parsing and reason bounds.

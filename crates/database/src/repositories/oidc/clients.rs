@@ -162,6 +162,10 @@ impl From<StoredOidcClient> for Client {
             trusted: client.trusted,
             require_pushed_authorization_requests: client.require_pushed_authorization_requests,
             backchannel_logout_uri: client.backchannel_logout_uri,
+            owner_id: client.owner_id,
+            last_used_at: client.last_used_at,
+            suspended_at: client.suspended_at,
+            deleted_at: client.deleted_at,
         }
     }
 }

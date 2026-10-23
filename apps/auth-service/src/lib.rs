@@ -38,6 +38,7 @@ mod tests;
 
 pub use admin::{
     AdminError, AdminService, GracePeriod, HandleIssue, HandleProblem, InviteExpiry, Operator,
+    Reason, UserRef,
 };
 pub use cli::Cli;
 use clients::ClientApplication;

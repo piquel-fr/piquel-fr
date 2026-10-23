@@ -1,21 +1,18 @@
-//! Registering, inspecting and changing OIDC clients, through [`ClientRegistry`].
+//! Registering, inspecting and changing OIDC clients.
 
-use super::{CliError, OutputFormat};
-use crate::{
-    Applied, ClientDetails, ClientRegistry, ClientRegistryError, DEFAULT_CLIENT_SCOPES,
-    GracePeriod, Operator,
-};
+use super::{CliError, Confirm, Console, Output};
+use crate::{Applied, DEFAULT_CLIENT_SCOPES, GracePeriod};
 use clap::{Args, Subcommand};
 use piquel_common::{
     ClientId,
     clients::{
-        AllowedScopes, ClientKind, ClientOwner, ClientRegistration, DisplayName, PostLogoutUris,
-        RedirectUri, RedirectUris, ScopeName,
+        AllowedScopes, ClientKind, ClientRegistration, DisplayName, PostLogoutUris, RedirectUri,
+        RedirectUris, ScopeName,
     },
     config::SecretReference,
 };
 use piquel_crypto::ClientSecret;
-use piquel_repository::{Database, DatabaseTransaction, StoredOidcClient};
+use piquel_repository::StoredOidcClient;
 
 /// Registering, inspecting and changing OIDC clients.
 #[derive(Subcommand)]
@@ -26,11 +23,11 @@ pub(super) enum ClientCommand {
     /// generated: for clients a deployment manages, such as the admin dashboard.
     /// Records nothing when the client already matches.
     Apply(ApplyClient),
-    /// List every client.
+    /// List every client, deleted ones included.
     List {
-        /// A table for people, or JSON for scripts.
-        #[arg(long, value_enum, default_value_t = OutputFormat::Table)]
-        output: OutputFormat,
+        /// Output format.
+        #[command(flatten)]
+        output: Output,
     },
     /// Print a client's registration and its secrets' lifetimes as JSON.
     Show {
@@ -43,12 +40,18 @@ pub(super) enum ClientCommand {
     Disable {
         /// The client's ID.
         id: ClientId,
+        /// Confirmation.
+        #[command(flatten)]
+        confirm: Confirm,
     },
     /// Delete a client: it stops working at once, its refresh tokens, secrets and
     /// consents go, and its ID can never be registered again.
     Delete {
         /// The client's ID.
         id: ClientId,
+        /// Confirmation.
+        #[command(flatten)]
+        confirm: Confirm,
     },
     /// Let a disabled client work again.
     Enable {
@@ -60,6 +63,9 @@ pub(super) enum ClientCommand {
     Suspend {
         /// The client's ID.
         id: ClientId,
+        /// Confirmation.
+        #[command(flatten)]
+        confirm: Confirm,
     },
     /// Lift a client's suspension. It stays disabled until enabled.
     Unsuspend {
@@ -78,104 +84,91 @@ pub(super) enum ClientCommand {
 }
 
 impl ClientCommand {
-    /// Runs this command on `database` in one transaction, recording changes as
-    /// made by the operator. What a change prints is printed only once it
-    /// committed, so a script never captures a secret that was not stored.
-    pub(super) async fn run(self, database: Database) -> Result<(), CliError> {
-        let mut tx = database.begin().await?;
-        let mut registry = ClientRegistry::new(&mut tx, Operator::terminal()?.context());
+    /// Runs this command as the operator at this terminal. Each change commits
+    /// with its event before anything is printed, so a script never captures a
+    /// secret that was not stored.
+    pub(super) async fn run(self, console: &Console) -> Result<(), CliError> {
+        let Console { service, operator } = console;
         let done = match self {
             Self::Create(create) => ClientChange::Secret(
-                registry
-                    .create(ClientOwner::Operator, &create.registration()?, None)
+                service
+                    .create_client(operator, &create.registration()?)
                     .await?,
             ),
             Self::Apply(apply) => {
                 let secret = apply.secret()?;
                 let id = apply.client.id.clone();
-                let applied = registry
-                    .apply(&apply.client.registration()?, secret, apply.grace)
+                let applied = service
+                    .apply_client(operator, &apply.client.registration()?, secret, apply.grace)
                     .await?;
                 ClientChange::Applied(id, applied)
             }
             Self::List { output } => {
-                let clients = tx.oidc().list_clients().await?;
-                match output {
-                    OutputFormat::Json => println!("{}", serde_json::to_string_pretty(&clients)?),
-                    OutputFormat::Table => {
-                        println!("ID\tTYPE\tSTATUS\tREFRESH\tTRUSTED\tPAR\tNAME");
-                        for client in clients {
-                            println!(
-                                "{}\t{}\t{}\t{}\t{}\t{}\t{}",
-                                client.id,
-                                client.kind,
-                                match (client.deleted_at, client.suspended_at, client.enabled) {
-                                    (Some(_), _, _) => "deleted",
-                                    (None, Some(_), _) => "suspended",
-                                    (None, None, true) => "enabled",
-                                    (None, None, false) => "disabled",
-                                },
-                                client.allow_refresh,
-                                client.trusted,
-                                client.require_pushed_authorization_requests,
-                                client.display_name,
-                            );
-                        }
+                output.print(&service.list_clients().await?, |clients| {
+                    println!("ID\tAUTH\tSTATUS\tREFRESH\tTRUSTED\tPAR\tOWNER\tNAME");
+                    for client in clients {
+                        println!(
+                            "{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}",
+                            client.id,
+                            client.token_endpoint_auth_method,
+                            client.status(),
+                            client.allow_refresh,
+                            client.trusted,
+                            client.require_pushed_authorization_requests,
+                            client
+                                .owner_id
+                                .map_or_else(|| "operator".to_owned(), |id| id.to_string()),
+                            client.display_name,
+                        );
                     }
-                }
+                })?;
                 ClientChange::Silent
             }
             Self::Show { id } => {
-                let details = ClientDetails {
-                    client: Self::find(&mut tx, &id).await?,
-                    secrets: tx.oidc().client_secrets(&id).await?,
-                };
+                let details = service.client_details(&id).await?;
                 println!("{}", serde_json::to_string_pretty(&details)?);
                 ClientChange::Silent
             }
             Self::Update(update) => {
                 let id = update.id.clone();
-                registry.update(&id, |client| update.apply(client)).await?;
+                service
+                    .update_client(operator, &id, |client| update.apply(client))
+                    .await?;
                 ClientChange::Silent
             }
-            Self::Disable { id } => {
-                registry.set_enabled(&id, false).await?;
+            Self::Disable { id, confirm } => {
+                confirm.ask(&format!("Disable client {id}: it stops working at once"))?;
+                service.set_client_enabled(operator, &id, false).await?;
                 ClientChange::Silent
             }
             Self::Enable { id } => {
-                registry.set_enabled(&id, true).await?;
+                service.set_client_enabled(operator, &id, true).await?;
                 ClientChange::Silent
             }
-            Self::Suspend { id } => {
-                registry.set_suspended(&id, true).await?;
+            Self::Suspend { id, confirm } => {
+                confirm.ask(&format!(
+                    "Suspend client {id}: it stops working, and its owner cannot enable it"
+                ))?;
+                service.set_client_suspended(operator, &id, true).await?;
                 ClientChange::Silent
             }
             Self::Unsuspend { id } => {
-                registry.set_suspended(&id, false).await?;
+                service.set_client_suspended(operator, &id, false).await?;
                 ClientChange::Silent
             }
-            Self::Delete { id } => {
-                registry.delete(&id).await?;
+            Self::Delete { id, confirm } => {
+                confirm.ask(&format!(
+                    "Delete client {id}: it stops working at once, and its ID can never be reused"
+                ))?;
+                service.delete_client(operator, &id).await?;
                 ClientChange::Silent
             }
-            Self::RotateSecret { id, grace } => {
-                ClientChange::Secret(Some(registry.rotate_secret(&id, grace).await?))
-            }
+            Self::RotateSecret { id, grace } => ClientChange::Secret(Some(
+                service.rotate_client_secret(operator, &id, grace).await?,
+            )),
         };
-        tx.commit().await?;
         done.print();
         Ok(())
-    }
-
-    /// The registered client `id`.
-    async fn find(
-        tx: &mut DatabaseTransaction<'_>,
-        id: &ClientId,
-    ) -> Result<StoredOidcClient, CliError> {
-        tx.oidc()
-            .find_client(id.as_str())
-            .await?
-            .ok_or_else(|| ClientRegistryError::Unknown(id.clone()).into())
     }
 }
 

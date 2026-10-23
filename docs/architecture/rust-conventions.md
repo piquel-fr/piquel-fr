@@ -71,14 +71,20 @@ build two on one database as replicas (`Replicas` in `src/tests.rs`).
 The router installs origin/CSRF checks, rate limits, a deadline and browser
 isolation headers. Public-client origins for CORS are looked up per request.
 
+Administrative operations are methods of `AdminService` (`src/admin/service.rs`);
+the admin API's handlers and the CLI's commands (`src/cli`) are thin adapters that
+say which `Operator` acts. `AdminOperation` lists them: the admin router maps each
+to its route, or to none when only the CLI runs it, and a CLI test maps each to its
+command. Both matches are exhaustive, so a new operation needs both.
+
 `ClientRegistry` (`src/clients/mod.rs`) is the only code that changes OIDC clients: it
 creates, updates, enables, disables, deletes and rotates the secrets of clients,
 recording each change's event. It works in the caller's transaction, so a handler
 can lock its session and check its passkey confirmation in the transaction that
 makes the change. It takes a `ClientRegistration` from `piquel_common::clients`,
 whose field types validate themselves, so invalid input never reaches the
-repository. The `client` command and the account API (`src/clients/api`) use it,
-and registration and admin APIs should too. The account API's body types are the
+repository. `AdminService` (for the `client` command) and the account API
+(`src/clients/api`) use it, and the registration API should too. The account API's body types are the
 policy for clients accounts own: they hold no ID or trust, and only standard
 scopes. Its `OwnedClient` extractor answers 404 for any client the caller does not
 own, so handlers never check ownership. Handlers read clients from the database on

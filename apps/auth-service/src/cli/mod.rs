@@ -1,40 +1,54 @@
 //! The `auth-service` command line: serving, migrations and break-glass
 //! administration. Administrative commands need only the database, so they work
-//! while the service is down, and run through [`AdminService`] like the admin API.
+//! while the service is down, and run through [`AdminService`](crate::AdminService)
+//! like the admin API: every `AdminOperation` has a command, which a test checks
+//! exhaustively.
 
 /// Granting, revoking and listing administrators.
 mod admin;
+/// The audit history.
+mod audit;
 /// Registering, inspecting and changing OIDC clients.
 mod client;
+/// The service and operator, output formats and confirmation.
+mod console;
 /// The outbound delivery queue.
 mod deliveries;
 /// Command failures.
 mod error;
 /// Checking and changing handles.
 mod handle;
+/// Signup invitations.
+mod invite;
 /// Serving the public and admin listeners.
 mod serve;
+/// Ending sessions.
+mod session;
+/// Finding, showing, disabling and reactivating accounts.
+mod user;
 
-use crate::{
-    AdminService, AuthConfig, InviteExpiry, Operator, PUBLIC_BASE_URL, SERVICE_NAME,
-    TELEMETRY_FILTER,
-};
+use crate::{AuthConfig, SERVICE_NAME, TELEMETRY_FILTER};
 use admin::AdminCommand;
-use clap::{Parser, Subcommand, ValueEnum};
+use audit::AuditCommand;
+use clap::{Parser, Subcommand};
 use client::ClientCommand;
+use console::{Confirm, Console, Output};
 use deliveries::DeliveriesCommand;
 use error::CliError;
 use handle::HandleCommand;
+use invite::InviteCommand;
 use piquel_common::ErrorChain;
 use piquel_repository::Database;
 use piquel_telemetry::Telemetry;
+use session::SessionCommand;
 use std::process::ExitCode;
+use user::UserCommand;
 
 /// Piquel authentication service. Runs `serve` when no command is given.
 #[derive(Parser)]
 #[command(
     after_help = "Every command uses AUTH_DATABASE_URL, except migrate when AUTH_DATABASE_OWNER_URL is \
-                  set. See README.md for configuration."
+                  set. See README.md for configuration and administration."
 )]
 pub struct Cli {
     /// Defaults to serving when no administrative command is supplied.
@@ -50,33 +64,38 @@ enum Command {
     /// Apply database migrations. Connected as the schema owner, also create or
     /// reset the role other commands connect as.
     Migrate,
-    /// Print a single-use signup link.
-    Invite {
-        /// How long the link stays valid, in hours or days (e.g. 24h, 7d).
-        #[arg(long, default_value = "7d")]
-        expires_in: InviteExpiry,
-    },
+    /// Administrative commands.
+    #[command(flatten)]
+    Administration(Administration),
+}
+
+/// Administrative commands. They record what they change as the operator at this
+/// terminal: `$USER` and the host name.
+#[derive(Subcommand)]
+enum Administration {
+    /// Search, show, disable and reactivate accounts.
+    #[command(subcommand)]
+    User(UserCommand),
+    /// End an account's sessions.
+    #[command(subcommand)]
+    Session(SessionCommand),
+    /// Create, list and revoke signup invitations.
+    #[command(subcommand)]
+    Invite(InviteCommand),
     /// Register, inspect and change OIDC clients. Changes apply to the next request.
     #[command(subcommand)]
     Client(Box<ClientCommand>),
-    /// Inspect, retry and cancel outbound deliveries.
-    #[command(subcommand)]
-    Deliveries(DeliveriesCommand),
+    /// Page through the audit history, newest first.
+    Audit(AuditCommand),
     /// Grant, revoke or list administrators.
     #[command(subcommand)]
     Admin(AdminCommand),
     /// Check accounts against the handle rules, and change their handles.
     #[command(subcommand)]
     Handle(HandleCommand),
-}
-
-/// How list commands print their results.
-#[derive(Clone, Copy, ValueEnum)]
-enum OutputFormat {
-    /// One tab-separated line per item.
-    Table,
-    /// A JSON array.
-    Json,
+    /// Inspect, retry and cancel outbound deliveries.
+    #[command(subcommand)]
+    Deliveries(DeliveriesCommand),
 }
 
 impl Command {
@@ -98,23 +117,23 @@ impl Command {
                 }
                 Ok(())
             }
-            Self::Invite { expires_in } => {
-                // Only the secret's digest is stored, so the link is printed once.
-                let invitation = AdminService::new(database)
-                    .create_invitation(
-                        &Operator::terminal()?,
-                        &PUBLIC_BASE_URL.parse()?,
-                        expires_in,
-                    )
-                    .await?;
-                println!("{}", invitation.url);
-                Ok(())
-            }
-            Self::Client(command) => command.run(database).await,
-            // The rest need only the database, for a bare recovery shell.
-            Self::Deliveries(command) => command.run(&AdminService::new(database)).await,
-            Self::Admin(command) => command.run(&AdminService::new(database)).await,
-            Self::Handle(command) => command.run(&AdminService::new(database)).await,
+            Self::Administration(command) => command.run(&Console::new(database)?).await,
+        }
+    }
+}
+
+impl Administration {
+    /// Runs this command through `console`.
+    async fn run(self, console: &Console) -> Result<(), CliError> {
+        match self {
+            Self::User(command) => command.run(console).await,
+            Self::Session(command) => command.run(console).await,
+            Self::Invite(command) => command.run(console).await,
+            Self::Client(command) => command.run(console).await,
+            Self::Audit(command) => command.run(console).await,
+            Self::Admin(command) => command.run(console).await,
+            Self::Handle(command) => command.run(console).await,
+            Self::Deliveries(command) => command.run(console).await,
         }
     }
 }
@@ -142,3 +161,6 @@ impl Cli {
         }
     }
 }
+
+#[cfg(test)]
+mod tests;

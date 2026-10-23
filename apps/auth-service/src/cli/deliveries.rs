@@ -1,7 +1,6 @@
 //! The break-glass view of the outbound delivery queue.
 
-use super::CliError;
-use crate::AdminService;
+use super::{CliError, Console};
 use clap::Subcommand;
 use piquel_common::DeliveryId;
 use piquel_repository::DeliveryStatus;
@@ -34,8 +33,9 @@ pub(super) enum DeliveriesCommand {
 }
 
 impl DeliveriesCommand {
-    /// Runs this command through `admin`.
-    pub(super) async fn run(self, admin: &AdminService) -> Result<(), CliError> {
+    /// Runs this command through the console's service.
+    pub(super) async fn run(self, console: &Console) -> Result<(), CliError> {
+        let admin = &console.service;
         match self {
             Self::List {
                 status,

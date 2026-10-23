@@ -247,6 +247,32 @@ pub struct Client {
     /// Where logout tokens are posted when a session it holds tokens from ends.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub backchannel_logout_uri: Option<String>,
+    /// The account that manages it; absent for clients operators manage.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub owner_id: Option<UserId>,
+    /// When a token was last issued to it, to within an hour.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub last_used_at: Option<DateTime<Utc>>,
+    /// When an operator suspended it: it stays disabled, and its owner cannot
+    /// enable it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub suspended_at: Option<DateTime<Utc>>,
+    /// When it was deleted. It stays listed, disabled, so its ID is never reused.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub deleted_at: Option<DateTime<Utc>>,
+}
+
+impl Client {
+    /// `deleted`, `suspended`, `enabled` or `disabled`: the first that applies.
+    #[must_use]
+    pub const fn status(&self) -> &'static str {
+        match (&self.deleted_at, &self.suspended_at, self.enabled) {
+            (Some(_), _, _) => "deleted",
+            (None, Some(_), _) => "suspended",
+            (None, None, true) => "enabled",
+            (None, None, false) => "disabled",
+        }
+    }
 }
 
 /// The query of [`paths::EVENTS`]. Every filter is optional.

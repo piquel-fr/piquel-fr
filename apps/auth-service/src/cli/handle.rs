@@ -1,7 +1,7 @@
 //! Checking accounts against the handle rules, and changing their handles.
 
-use super::CliError;
-use crate::{AdminError, AdminService, Operator};
+use super::{CliError, Console};
+use crate::{AdminError, UserRef};
 use clap::Subcommand;
 use piquel_common::Handle;
 
@@ -13,8 +13,8 @@ pub(super) enum HandleCommand {
     Check,
     /// Give an account a new handle, and record the change.
     Rename {
-        /// The account's current handle.
-        handle: String,
+        /// The account: its current handle, ID or verified email.
+        user: UserRef,
         /// Its new handle.
         new: String,
         /// Allow a reserved name, or one that looks like it.
@@ -25,10 +25,11 @@ pub(super) enum HandleCommand {
 
 impl HandleCommand {
     /// Runs the check, or the change as the operator at this terminal.
-    pub(super) async fn run(self, admin: &AdminService) -> Result<(), CliError> {
+    pub(super) async fn run(self, console: &Console) -> Result<(), CliError> {
+        let Console { service, operator } = console;
         match self {
             Self::Check => {
-                let problems = admin.check_handles().await?;
+                let problems = service.check_handles().await?;
                 for problem in &problems {
                     println!(
                         "{}\t{}\t{}",
@@ -40,14 +41,14 @@ impl HandleCommand {
                 }
             }
             Self::Rename {
-                handle,
+                user,
                 new,
                 allow_reserved,
             } => {
-                let user = admin.user_named(&handle).await?;
+                let user = console.user(&user).await?;
                 let new = Handle::parse(&new).map_err(AdminError::from)?;
-                admin
-                    .rename_handle(&Operator::terminal()?, user, new, allow_reserved)
+                service
+                    .rename_handle(operator, user, new, allow_reserved)
                     .await?;
             }
         }
