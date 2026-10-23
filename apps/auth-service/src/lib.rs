@@ -107,15 +107,16 @@ impl AuthConfig {
     /// Fails when the frontend is not embedded or an application cannot initialize.
     pub fn router(&self, database: Database) -> Result<Router, StartupError> {
         EmbeddedAssets::check()?;
+        let oidc = OidcApplication::new(database.clone(), &self.oidc)?;
         let application = Router::new()
             .merge(ServiceApplication::new(database.clone(), self).routes())
-            .merge(PasskeyApplication::new(database.clone(), &self.passkey)?.routes())
+            .merge(PasskeyApplication::new(database.clone(), &self.passkey, oidc.clone())?.routes())
             .merge(FederationApplication::new(database.clone(), &self.federation)?.routes())
             .merge(HistoryApplication::new(database.clone()).routes())
             .merge(SessionsApplication::new(database.clone()).routes())
             .merge(ClientApplication::new(database.clone()).routes())
             .merge(EmailApplication::new(database.clone(), &self.email).routes())
-            .merge(OidcApplication::new(database.clone(), &self.oidc)?.routes());
+            .merge(oidc.routes());
         let policy = security::HttpSecurity::new(self, database);
         let protected = application
             // Static pages answer GET and HEAD only, so preconditions need no 412.

@@ -125,6 +125,9 @@ impl AdminApplication {
             | Op::UnsuspendClient
             | Op::DeleteClient
             | Op::RotateClientSecret
+            | Op::ListRelatedOrigins
+            | Op::ApproveRelatedOrigin
+            | Op::RemoveRelatedOrigin
             | Op::CheckHandles
             | Op::RenameHandle
             | Op::ListDeliveries

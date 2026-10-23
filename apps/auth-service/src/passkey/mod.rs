@@ -1,6 +1,8 @@
-//! Browser-bound `WebAuthn` ceremonies, passkey management and session confirmation.
+//! Browser-bound `WebAuthn` ceremonies, passkey management and session confirmation,
+//! and passkey sign-in on the pages of approved related origins.
 use crate::config::PasskeyConfig;
 use crate::federation::FederationApplication;
+use crate::oidc::OidcApplication;
 use crate::routes;
 use crate::security::{self, ApiError, BrowserCookie, RequestContext};
 use axum::{
@@ -12,6 +14,8 @@ use axum::{
 };
 use piquel_common::{
     AuthenticationMethod, Handle, PasskeyId, UserId,
+    clients::RelatedOrigin,
+    config::Origin,
     events::{Actor, DomainEvent, EventContext, RevocationReason},
     protocol::api,
 };
@@ -32,6 +36,8 @@ mod decoy;
 pub(crate) use decoy::DecoyKey;
 /// Passkey failures and their browser response mapping.
 mod error;
+/// Passkey sign-in on the pages of approved related origins.
+mod related;
 /// Validated names and browser request/response bodies.
 mod types;
 
@@ -51,8 +57,12 @@ use types::{
 pub struct PasskeyApplication {
     /// Database holding users, passkeys, ceremonies and sessions.
     database: Database,
-    /// Configured relying party and credential verifier.
+    /// Auth's origin, whose host is the `WebAuthn` RP ID.
+    origin: Origin,
+    /// Configured relying party and credential verifier for auth's own pages.
     webauthn: Arc<Webauthn>,
+    /// Completes the authorization requests of related origins' sign-ins.
+    oidc: OidcApplication,
     /// Whether ordinary registration needs an invitation.
     invite_required: bool,
     /// Derives the decoy credentials of unknown usernames.
@@ -70,22 +80,34 @@ const COUNTER_REGRESSION_EVENT: &str = "auth.passkey_counter_regression";
 
 impl PasskeyApplication {
     /// Builds `WebAuthn` from the already validated origin and admission policy.
+    /// `oidc` completes the authorization requests of related origins' sign-ins.
     pub(crate) fn new(
         database: Database,
         config: &PasskeyConfig,
+        oidc: OidcApplication,
     ) -> Result<Self, PasskeyConfigError> {
-        let origin = config.origin.as_url();
-        let rp_id = config.origin.host();
         Ok(Self {
             database,
-            webauthn: Arc::new(
-                WebauthnBuilder::new(rp_id, origin)?
-                    .rp_name(RELYING_PARTY_NAME)
-                    .build()?,
-            ),
+            webauthn: Arc::new(Self::webauthn(&config.origin, None)?),
+            origin: config.origin.clone(),
+            oidc,
             invite_required: config.invite_required,
             decoy_key: config.decoy_key.clone(),
         })
+    }
+
+    /// A verifier for auth's RP ID that accepts assertions signed for `origin`, and
+    /// for `related` too when given.
+    fn webauthn(
+        origin: &Origin,
+        related: Option<&RelatedOrigin>,
+    ) -> Result<Webauthn, WebauthnError> {
+        let mut builder =
+            WebauthnBuilder::new(origin.host(), origin.as_url())?.rp_name(RELYING_PARTY_NAME);
+        if let Some(related) = related {
+            builder = builder.append_allowed_origin(related.url());
+        }
+        builder.build()
     }
 
     /// Returns every passkey and browser-session endpoint.
@@ -103,6 +125,15 @@ impl PasskeyApplication {
             .route(
                 routes::passkey::AUTHENTICATE_FINISH,
                 post(Self::finish_login),
+            )
+            .route(routes::passkey::RELATED_ORIGINS, get(Self::related_origins))
+            .route(
+                routes::passkey::RELATED_START,
+                post(Self::start_related_login),
+            )
+            .route(
+                routes::passkey::RELATED_FINISH,
+                post(Self::finish_related_login),
             )
             .route(
                 routes::passkey::CONFIRM_START,
@@ -535,14 +566,17 @@ impl PasskeyApplication {
                 };
                 (ceremony, challenge)
             } else {
-                let (mut challenge, state) = app
-                    .webauthn
-                    .start_discoverable_authentication()
-                    .map_err(PasskeyError::from)?;
-                challenge.mediation = None;
-                (Ceremony::Discover(DiscoverCeremony { state }), challenge)
+                let (challenge, state) = app.discoverable()?;
+                (Ceremony::Discover(state), challenge)
             };
         Ok(app.start(&headers, ceremony, challenge).await?)
+    }
+
+    /// Starts an account-picker sign-in, whose account the authenticator names.
+    fn discoverable(&self) -> Result<(RequestChallengeResponse, DiscoverCeremony), PasskeyError> {
+        let (mut challenge, state) = self.webauthn.start_discoverable_authentication()?;
+        challenge.mediation = None;
+        Ok((challenge, DiscoverCeremony { state }))
     }
 
     /// Verifies the assertion and latest credential state before signing the browser in.
@@ -552,50 +586,52 @@ impl PasskeyApplication {
         headers: HeaderMap,
         Json(input): Json<AuthenticationFinish>,
     ) -> Result<Response, ApiError> {
-        let (user_id, verified) = match app
+        let ceremony = app
             .consume::<AuthenticationCeremony>(&headers, input.ceremony_id)
-            .await?
-        {
-            AuthenticationCeremony::Login(LoginCeremony { user_id, state }) => (
-                user_id,
-                app.webauthn
-                    .finish_passkey_authentication(&input.credential, &state),
-            ),
-            AuthenticationCeremony::Decoy => {
-                return Err(app
-                    .reject(
-                        context,
-                        Actor::Anonymous,
-                        None,
-                        PasskeyError::AccountUnavailable,
-                    )
-                    .await
-                    .into());
-            }
-            AuthenticationCeremony::Discover(DiscoverCeremony { state }) => {
-                let (user_id, keys) = match app.discover(&input.credential).await {
-                    Ok(discovered) => discovered,
-                    Err(error) => {
-                        return Err(app
-                            .reject(context, Actor::Anonymous, None, error)
-                            .await
-                            .into());
-                    }
-                };
-                (
-                    user_id,
-                    app.webauthn.finish_discoverable_authentication(
-                        &input.credential,
-                        state,
-                        &keys,
-                    ),
-                )
-            }
-        };
+            .await?;
+        let (user_id, verified) = app
+            .verify(&app.webauthn, context, ceremony, &input.credential)
+            .await?;
         let tx = app
             .accept_credential(context, Actor::Anonymous, user_id, verified)
             .await?;
         Ok(Self::complete_sign_in(tx, context, &headers, user_id).await?)
+    }
+
+    /// Checks `credential` against a sign-in `ceremony` with `webauthn`, and
+    /// returns the account it signs in to with `WebAuthn`'s verdict, which
+    /// [`Self::accept_credential`] takes. A ceremony that names no account is
+    /// rejected, and recorded, here.
+    async fn verify(
+        &self,
+        webauthn: &Webauthn,
+        context: RequestContext,
+        ceremony: AuthenticationCeremony,
+        credential: &PublicKeyCredential,
+    ) -> Result<(UserId, Result<AuthenticationResult, WebauthnError>), PasskeyError> {
+        match ceremony {
+            AuthenticationCeremony::Login(LoginCeremony { user_id, state }) => Ok((
+                user_id,
+                webauthn.finish_passkey_authentication(credential, &state),
+            )),
+            AuthenticationCeremony::Decoy => Err(self
+                .reject(
+                    context,
+                    Actor::Anonymous,
+                    None,
+                    PasskeyError::AccountUnavailable,
+                )
+                .await),
+            AuthenticationCeremony::Discover(DiscoverCeremony { state }) => {
+                match self.discover(credential).await {
+                    Ok((user_id, keys)) => Ok((
+                        user_id,
+                        webauthn.finish_discoverable_authentication(credential, state, &keys),
+                    )),
+                    Err(error) => Err(self.reject(context, Actor::Anonymous, None, error).await),
+                }
+            }
+        }
     }
 
     /// Reads the account a discoverable credential names, and that account's keys.

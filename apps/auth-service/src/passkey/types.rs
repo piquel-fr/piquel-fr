@@ -1,7 +1,8 @@
 //! Validated names and the browser API's request and response bodies.
 
 use super::PasskeyError;
-use piquel_common::{TokenId, UserId};
+use axum::Json;
+use piquel_common::{TokenId, UserId, clients::RelatedOrigin};
 use serde::{Deserialize, Serialize};
 use webauthn_rs::prelude::{PublicKeyCredential, RegisterPublicKeyCredential};
 
@@ -148,13 +149,38 @@ pub(super) struct Rename {
     pub(super) friendly_name: String,
 }
 
+/// A related origin's page signing in for a client's pushed authorization request.
+#[derive(Deserialize)]
+pub(super) struct RelatedStart {
+    /// The `request_uri` the client got from the pushed authorization endpoint.
+    pub(super) request_uri: String,
+}
+
+/// The `/.well-known/webauthn` document (`WebAuthn` Level 3 §5.11.1).
+#[derive(Serialize)]
+pub(super) struct RelatedOrigins {
+    /// The approved origins.
+    pub(super) origins: Vec<RelatedOrigin>,
+}
+
 /// Challenge and opaque ceremony identifier returned to the browser.
 #[derive(Serialize)]
 pub(super) struct CeremonyResponse {
     /// Opaque identifier of the stored ceremony.
-    pub(super) ceremony_id: TokenId,
+    ceremony_id: TokenId,
     /// `WebAuthn` options passed directly to the browser authenticator API.
-    pub(super) public_key: serde_json::Value,
+    public_key: serde_json::Value,
+}
+
+impl CeremonyResponse {
+    /// The response for stored ceremony `id` and its library `challenge`.
+    pub(super) fn new(id: TokenId, challenge: impl Serialize) -> Result<Json<Self>, PasskeyError> {
+        Ok(Json(Self {
+            ceremony_id: id,
+            // Preserve the existing nested JSON map ordering from the library's challenge.
+            public_key: serde_json::to_value(challenge).map_err(PasskeyError::Serialization)?,
+        }))
+    }
 }
 
 /// Account identity shown in the browser session view.

@@ -64,6 +64,12 @@ operations! {
     DeleteClient,
     /// Give a confidential client a new secret.
     RotateClientSecret,
+    /// List the origins approved for clients' pages to sign users in.
+    ListRelatedOrigins,
+    /// Approve an origin for a client's pages to sign users in.
+    ApproveRelatedOrigin,
+    /// Remove an approved origin.
+    RemoveRelatedOrigin,
     /// Page through domain events.
     ListEvents,
     /// List administrators.

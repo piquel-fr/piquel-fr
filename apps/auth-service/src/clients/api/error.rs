@@ -95,6 +95,12 @@ impl From<ClientRegistryError> for ApiError {
             error @ (ClientRegistryError::Exists { .. }
             | ClientRegistryError::MissingSecret(_)
             | ClientRegistryError::Immutable(_)
+            | ClientRegistryError::Untrusted(_)
+            | ClientRegistryError::NotRedirectOrigin { .. }
+            | ClientRegistryError::PublicSuffix(_)
+            | ClientRegistryError::TooManyDomains(_)
+            | ClientRegistryError::OriginApproved { .. }
+            | ClientRegistryError::OriginNotApproved { .. }
             | ClientRegistryError::Crypto(_)) => Self::internal(error),
         }
     }

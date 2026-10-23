@@ -1,15 +1,15 @@
 //! Registering, inspecting and changing OIDC clients.
 
 use super::{CliError, Confirm, Console, Output};
-use crate::{Applied, DEFAULT_CLIENT_SCOPES, GracePeriod};
+use crate::{Applied, DEFAULT_CLIENT_SCOPES, GracePeriod, PUBLIC_BASE_URL};
 use clap::{Args, Subcommand};
 use piquel_common::{
     ClientId,
     clients::{
         AllowedScopes, ClientKind, ClientRegistration, DisplayName, PostLogoutUris, RedirectUri,
-        RedirectUris, ScopeName,
+        RedirectUris, RelatedOrigin, ScopeName,
     },
-    config::SecretReference,
+    config::{Origin, SecretReference},
 };
 use piquel_crypto::ClientSecret;
 use piquel_repository::StoredOidcClient;
@@ -81,6 +81,72 @@ pub(super) enum ClientCommand {
         #[arg(long, default_value = "24h")]
         grace: GracePeriod,
     },
+    /// Approve, remove or list the origins whose pages may sign users in with
+    /// their passkeys, without sending them to auth's pages.
+    #[command(subcommand)]
+    Origin(OriginCommand),
+}
+
+/// The origins approved for a client's pages to sign users in with passkeys,
+/// which `/.well-known/webauthn` lists as `WebAuthn` related origins.
+#[derive(Subcommand)]
+pub(super) enum OriginCommand {
+    /// Approve an origin. The client must be trusted and have a redirect URI on it,
+    /// and approved origins may span at most 5 domains, as browsers honour.
+    Add {
+        /// The client's ID.
+        id: ClientId,
+        /// The origin, as browsers send it, e.g. `https://notes.example`.
+        origin: RelatedOrigin,
+    },
+    /// Remove an origin: its pages stop signing users in.
+    Remove {
+        /// The client's ID.
+        id: ClientId,
+        /// The origin, as approved.
+        origin: RelatedOrigin,
+    },
+    /// List every approved origin.
+    List {
+        /// Output format.
+        #[command(flatten)]
+        output: Output,
+    },
+}
+
+impl OriginCommand {
+    /// Runs this command as the operator at this terminal.
+    async fn run(self, console: &Console) -> Result<(), CliError> {
+        let Console { service, operator } = console;
+        match self {
+            Self::Add { id, origin } => {
+                // Origins within auth's own domain need no approval from browsers.
+                let auth: Origin = PUBLIC_BASE_URL.parse()?;
+                service
+                    .approve_related_origin(operator, &id, &origin, auth.host())
+                    .await?;
+            }
+            Self::Remove { id, origin } => {
+                service
+                    .remove_related_origin(operator, &id, &origin)
+                    .await?;
+            }
+            Self::List { output } => {
+                output.print(&service.list_related_origins().await?, |origins| {
+                    println!("ORIGIN\tCLIENT\tAPPROVED");
+                    for approved in origins {
+                        println!(
+                            "{}\t{}\t{}",
+                            approved.origin,
+                            approved.client_id,
+                            approved.approved_at.to_rfc3339()
+                        );
+                    }
+                })?;
+            }
+        }
+        Ok(())
+    }
 }
 
 impl ClientCommand {
@@ -166,6 +232,10 @@ impl ClientCommand {
             Self::RotateSecret { id, grace } => ClientChange::Secret(Some(
                 service.rotate_client_secret(operator, &id, grace).await?,
             )),
+            Self::Origin(command) => {
+                command.run(console).await?;
+                ClientChange::Silent
+            }
         };
         done.print();
         Ok(())

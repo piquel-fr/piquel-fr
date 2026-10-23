@@ -43,10 +43,15 @@ export class StepUpRequired extends ApiError {
 /** The auth cookie remains HttpOnly on the auth host, including for settings requests. */
 export class AuthApi {
   constructor(readonly origin = '') {}
-  async request<T = void>(path: string, method = 'GET', body?: unknown): Promise<T> {
+  async request<T = void>(
+    path: string,
+    method = 'GET',
+    body?: unknown,
+    credentials: RequestCredentials = 'include'
+  ): Promise<T> {
     const response = await fetch(`${this.origin}${path}`, {
       method,
-      credentials: 'include',
+      credentials,
       headers: method === 'GET' ? {} : { 'content-type': 'application/json', 'x-piquel-csrf': '1' },
       ...(body === undefined ? {} : { body: JSON.stringify(body) })
     });
@@ -124,6 +129,11 @@ type RequestOptions = Omit<PublicKeyCredentialRequestOptions, 'challenge' | 'all
   allowCredentials?: EncodedDescriptor[];
 };
 type Ceremony<T> = { ceremony_id: string; public_key: { publicKey: T } };
+/**
+ * An authorization response returned to the application's page. Check `state` and
+ * `iss`, then redeem `code` with the pushed request's PKCE verifier.
+ */
+export type InlineAuthorization = { code: string; state: string; iss: string };
 function decode(value: string): ArrayBuffer {
   return Uint8Array.from(atob(value.replace(/-/g, '+').replace(/_/g, '/')), (c) => c.charCodeAt(0))
     .buffer;
@@ -140,8 +150,20 @@ function descriptor(value: EncodedDescriptor): PublicKeyCredentialDescriptor {
 export function passkeysAvailable(): boolean {
   return typeof window !== 'undefined' && window.isSecureContext && 'PublicKeyCredential' in window;
 }
+/** Whether this page may use the passkeys of a site that lists it as a related origin. */
+async function relatedOriginsAvailable(): Promise<boolean> {
+  if (!passkeysAvailable()) return false;
+  const credential = PublicKeyCredential as {
+    getClientCapabilities?: () => Promise<Record<string, boolean | undefined>>;
+  };
+  const capabilities = await credential.getClientCapabilities?.().catch(() => undefined);
+  return capabilities?.relatedOrigins === true;
+}
 
-/** All ceremonies run on the auth origin; serialized WebAuthn wrappers contain publicKey. */
+/**
+ * Ceremonies run on the auth origin, except `signInWithPasskey`, which runs on an
+ * application's page; serialized WebAuthn wrappers contain publicKey.
+ */
 export class Passkeys {
   constructor(readonly api: AuthApi) {}
   /** Signs in, which also confirms the new session for actions that need a passkey. */
@@ -152,9 +174,63 @@ export class Passkeys {
   confirm(): Promise<void> {
     return this.assert('/account/passkeys/confirm', {});
   }
+  /**
+   * Signs the user in on this page, an origin auth approved for the application with
+   * client ID `clientId`, and resolves to the authorization response. `push` pushes
+   * the application's authorization request (RFC 9126) and returns its `request_uri`.
+   * Where this browser cannot sign in here, or auth refuses to, it sends the browser
+   * to auth's authorization endpoint instead, with a request auth has not claimed,
+   * pushing another when the first may be, and never resolves. A cancelled passkey
+   * prompt rejects, so the page can retry.
+   */
+  async signInWithPasskey(
+    clientId: string,
+    push: () => Promise<string>
+  ): Promise<InlineAuthorization> {
+    const path = '/webauthn/related';
+    let requestUri = await push();
+    if (await relatedOriginsAvailable()) {
+      const start = await this.api
+        .request<Ceremony<RequestOptions>>(
+          `${path}/start`,
+          'POST',
+          { request_uri: requestUri },
+          'omit'
+        )
+        .catch(() => null);
+      try {
+        if (start !== null)
+          return await this.api.request<InlineAuthorization>(
+            `${path}/finish`,
+            'POST',
+            await this.sign(start),
+            'omit'
+          );
+      } catch (error) {
+        // The browser refused auth's passkeys on this page, e.g. with a stale
+        // /.well-known/webauthn. Anything else, such as a cancelled prompt, is the
+        // page's to report.
+        if (!(error instanceof DOMException && error.name === 'SecurityError')) throw error;
+      }
+      // Auth may have claimed the request before the failure, so push another.
+      requestUri = await push();
+    }
+    const authorize = new URL('/oauth/authorize', this.api.origin || window.location.origin);
+    authorize.search = new URLSearchParams({
+      client_id: clientId,
+      request_uri: requestUri
+    }).toString();
+    window.location.assign(authorize.href);
+    // The page is unloading: keep the caller busy instead of reporting a result.
+    return new Promise<never>(() => undefined);
+  }
   /** Runs an assertion ceremony against `path`'s start and finish endpoints. */
   private async assert(path: string, body: object): Promise<void> {
     const start = await this.api.request<Ceremony<RequestOptions>>(`${path}/start`, 'POST', body);
+    await this.api.request(`${path}/finish`, 'POST', await this.sign(start));
+  }
+  /** Asks the authenticator to sign a started assertion; returns the finish body. */
+  private async sign(start: Ceremony<RequestOptions>): Promise<object> {
     const options = start.public_key.publicKey;
     const credential = (await navigator.credentials.get({
       publicKey: {
@@ -165,7 +241,7 @@ export class Passkeys {
     })) as PublicKeyCredential | null;
     if (!credential) throw new Error('Passkey verification was cancelled.');
     const response = credential.response as AuthenticatorAssertionResponse;
-    await this.api.request(`${path}/finish`, 'POST', {
+    return {
       ceremony_id: start.ceremony_id,
       credential: {
         id: credential.id,
@@ -179,7 +255,7 @@ export class Passkeys {
         },
         clientExtensionResults: credential.getClientExtensionResults()
       }
-    });
+    };
   }
   /**
    * Creates an account when `account` is given, else enrolls a key for the signed-in user.

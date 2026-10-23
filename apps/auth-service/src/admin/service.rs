@@ -9,7 +9,7 @@ use piquel_admin_api::{
 };
 use piquel_common::{
     AccountStatus, ClientId, DeliveryId, Handle, Personal, SessionId, TokenId, UserId,
-    clients::{ClientField, ClientOwner, ClientRegistration},
+    clients::{ClientField, ClientOwner, ClientRegistration, RelatedOrigin},
     config::Origin,
     email::NormalizedEmail,
     events::{DomainEvent, RevocationReason},
@@ -17,7 +17,7 @@ use piquel_common::{
 use piquel_crypto::{ClientSecret, Secret};
 use piquel_repository::{
     Database, DatabaseError, DatabaseTransaction, DeliveryStatus, DeliverySummary, EventFilter,
-    SessionScope, StoredOidcClient, StoredUser,
+    SessionScope, StoredOidcClient, StoredRelatedOrigin, StoredUser,
 };
 use std::collections::BTreeMap;
 
@@ -492,6 +492,41 @@ impl AdminService {
     ) -> Result<ClientSecret, AdminError> {
         self.change_clients(operator, async |clients| {
             Ok(clients.rotate_secret(id, grace).await?)
+        })
+        .await
+    }
+
+    /// Lists every origin approved for clients' pages to sign users in.
+    pub(crate) async fn list_related_origins(
+        &self,
+    ) -> Result<Vec<StoredRelatedOrigin>, AdminError> {
+        Ok(self.database.oidc().related_origins().await?)
+    }
+
+    /// Approves `origin` for client `id`'s pages to sign users in with passkeys
+    /// for `rp_id`, auth's `WebAuthn` RP ID.
+    pub(crate) async fn approve_related_origin(
+        &self,
+        operator: &Operator,
+        id: &ClientId,
+        origin: &RelatedOrigin,
+        rp_id: &str,
+    ) -> Result<(), AdminError> {
+        self.change_clients(operator, async |clients| {
+            Ok(clients.approve_origin(id, origin, rp_id).await?)
+        })
+        .await
+    }
+
+    /// Removes `origin` from client `id`'s approved origins.
+    pub(crate) async fn remove_related_origin(
+        &self,
+        operator: &Operator,
+        id: &ClientId,
+        origin: &RelatedOrigin,
+    ) -> Result<(), AdminError> {
+        self.change_clients(operator, async |clients| {
+            Ok(clients.remove_origin(id, origin).await?)
         })
         .await
     }

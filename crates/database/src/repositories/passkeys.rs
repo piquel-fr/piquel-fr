@@ -17,6 +17,8 @@ piquel_common::str_enum! {
         Enrollment = "enrollment",
         /// Passkey confirmation of an existing session.
         PurposeAuthentication = "purpose_authentication",
+        /// Sign-in on a related origin, completing a pushed authorization request.
+        RelatedAuthentication = "related_authentication",
     }
 }
 

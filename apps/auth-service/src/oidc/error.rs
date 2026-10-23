@@ -236,6 +236,20 @@ impl IntoResponse for OAuthError {
     }
 }
 
+impl From<OAuthError> for ApiError {
+    /// A rejection reaching a browser API, such as inline sign-in's, is a 400 that
+    /// explains it; internal failures stay internal.
+    fn from(error: OAuthError) -> Self {
+        match error {
+            OAuthError::Protocol { description, .. } => Self::bad_request(description),
+            OAuthError::Database(error) => error.into(),
+            error @ (OAuthError::Crypto(_) | OAuthError::Url(_) | OAuthError::CookieHeader(_)) => {
+                Self::internal(error)
+            }
+        }
+    }
+}
+
 impl From<SessionError> for OAuthError {
     /// A missing session is `invalid_token`, as OIDC and the consent page expect.
     fn from(error: SessionError) -> Self {
