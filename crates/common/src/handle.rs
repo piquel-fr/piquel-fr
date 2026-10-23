@@ -60,6 +60,10 @@ const RESERVED: &[&str] = &[
     // The brand.
     "piquel",
     "piquelfr",
+    // Other
+    "admin",
+    "system",
+    "origin",
 ];
 
 /// A lowercase DNS label: [`MIN_LENGTH`] to [`MAX_LENGTH`] characters of `[a-z0-9-]`,
