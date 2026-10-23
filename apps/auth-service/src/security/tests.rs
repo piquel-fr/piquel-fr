@@ -772,12 +772,9 @@ async fn confirmed_changes_serialize_with_logout() {
         .expect("lookup")
         .expect("session");
     let id = session.id;
-    let confirmed: Confirmed = Confirmed(session);
     let mut change = database.begin().await.expect("change transaction");
-    confirmed
-        .lock(&mut change)
-        .await
-        .expect("passkey sign-in confirms");
+    let locked = Session::lock(&mut change, &session).await.expect("lock");
+    <Confirmed>::check(&locked).expect("passkey sign-in confirms");
     let logout = tokio::spawn({
         let database = database.clone();
         async move {
@@ -803,7 +800,7 @@ async fn confirmed_changes_serialize_with_logout() {
     assert_eq!(logout.await.expect("logout task").expect("logout"), [id]);
     let mut change = database.begin().await.expect("change transaction");
     assert!(matches!(
-        confirmed.lock(&mut change).await,
+        Session::lock(&mut change, &session).await,
         Err(SessionError::Missing)
     ));
 }
@@ -853,9 +850,7 @@ async fn session_lock_rechecks_expiry_after_waiting() {
         let database = database.clone();
         async move {
             let mut change = database.begin().await.expect("change transaction");
-            Confirmed::<CONFIRMATION_MAX_AGE>(session)
-                .lock(&mut change)
-                .await
+            Session::lock(&mut change, &session).await.map(drop)
         }
     });
     tokio::time::sleep(std::time::Duration::from_millis(1500)).await;

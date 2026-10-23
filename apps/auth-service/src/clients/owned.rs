@@ -1,0 +1,451 @@
+//! The clients an account owns: the policy owners register and change them
+//! under, and the [`AccountService`] operations that apply it, for the owner
+//! only. The policy lives in the input types rather than in callers: an owner
+//! never chooses a client's ID, which auth generates, or its trust, so its
+//! clients always show the consent screen, scopes are limited to the standard
+//! [`Scope`]s, and only an operator sets a back-channel logout URI.
+
+use super::{
+    ClientDetails, ClientRegistry, ClientRegistryError, DEFAULT_CLIENT_SCOPES,
+    MAX_DAILY_REGISTRATIONS, MAX_OWNED_CLIENTS,
+};
+use crate::{
+    GracePeriod,
+    account::{AccountError, AccountService, Owner},
+    security::ApiError,
+};
+use piquel_common::{
+    ClientId,
+    clients::{
+        AllowedScopes, ClientField, ClientKind, ClientOwner, ClientRegistration, PostLogoutUris,
+        RedirectUri, RedirectUris, ScopeName,
+    },
+    protocol::{api::ErrorCode, oauth::Scope},
+};
+use piquel_crypto::{ClientSecret, Secret};
+use piquel_repository::{DatabaseTransaction, StoredOidcClient};
+use serde::Deserialize;
+use std::error::Error;
+use thiserror::Error;
+
+/// The settings an owner chooses, in the shape the account API's `GET` returns
+/// them.
+#[derive(Deserialize)]
+pub(crate) struct ClientSettings {
+    /// The name consent screens show.
+    pub(crate) display_name: String,
+    /// Authorization callbacks, matched exactly.
+    pub(crate) redirect_uris: Vec<String>,
+    /// Pages the browser may return to after logout.
+    #[serde(default)]
+    pub(crate) post_logout_uris: Vec<String>,
+    /// Scopes the client may request; `openid`, `profile` and `email` when omitted.
+    #[serde(default = "ClientSettings::default_scopes")]
+    pub(crate) allowed_scopes: Vec<String>,
+    /// Whether the client may receive refresh tokens, with `offline_access`.
+    #[serde(default)]
+    pub(crate) allow_refresh: bool,
+    /// Whether the client must push its authorization requests (RFC 9126).
+    #[serde(default)]
+    pub(crate) require_pushed_authorization_requests: bool,
+    /// Where auth posts logout tokens. Only the operator sets it for now, so a
+    /// registration has none and a change keeps the stored one.
+    #[serde(skip)]
+    backchannel_logout_uri: Option<RedirectUri>,
+}
+
+/// A client an owner registers.
+#[derive(Deserialize)]
+pub(crate) struct NewClient {
+    /// Public, or confidential with a secret auth generates.
+    pub(crate) kind: ClientKind,
+    /// Everything else.
+    #[serde(flatten)]
+    pub(crate) settings: ClientSettings,
+}
+
+/// A change an owner makes: each given setting replaces the stored one.
+#[derive(Deserialize)]
+pub(crate) struct ClientPatch {
+    /// A new consent-screen name.
+    pub(crate) display_name: Option<String>,
+    /// New authorization callbacks; changing them needs a passkey confirmation.
+    pub(crate) redirect_uris: Option<Vec<String>>,
+    /// New post-logout pages; changing them needs a passkey confirmation.
+    pub(crate) post_logout_uris: Option<Vec<String>>,
+    /// New scopes.
+    pub(crate) allowed_scopes: Option<Vec<String>>,
+    /// Whether refresh tokens are allowed.
+    pub(crate) allow_refresh: Option<bool>,
+    /// Whether authorization requests must be pushed.
+    pub(crate) require_pushed_authorization_requests: Option<bool>,
+}
+
+/// A secret rotation an owner asks for.
+#[derive(Deserialize)]
+pub(crate) struct Rotation {
+    /// How long earlier secrets keep working, e.g. `30m`, `24h` or `7d`; `0`
+    /// revokes them now. A day when omitted, 30 days at most.
+    #[serde(default)]
+    pub(crate) grace: GracePeriod,
+}
+
+/// Why an owner's request about their clients was refused.
+#[derive(Debug, Error)]
+pub(crate) enum OwnedClientError {
+    /// The account owns no live client with this ID: another account's and a
+    /// deleted one's included, so probing IDs reveals nothing.
+    #[error("client not found")]
+    NotFound,
+    /// A setting is invalid.
+    #[error(transparent)]
+    InvalidSetting(#[from] InvalidSetting),
+    /// The registry refused the change, or failed.
+    #[error(transparent)]
+    Registry(#[from] ClientRegistryError),
+}
+
+/// A setting an owner gave that is invalid, with the field it was given for, so
+/// a form can show the message next to it.
+#[derive(Debug, Error)]
+#[error("{field}: {source}")]
+pub(crate) struct InvalidSetting {
+    /// The rejected setting.
+    field: ClientField,
+    /// What is wrong with it, from the type that validates it.
+    source: Box<dyn Error + Send + Sync>,
+}
+
+impl ClientSettings {
+    /// The scopes a client gets when none are given.
+    fn default_scopes() -> Vec<String> {
+        DEFAULT_CLIENT_SCOPES
+            .map(|scope| scope.as_str().to_owned())
+            .into()
+    }
+
+    /// Validates every setting, naming the first one that is invalid, and builds
+    /// the registration of an untrusted client `id` of `kind`.
+    fn registration(
+        self,
+        id: ClientId,
+        kind: ClientKind,
+    ) -> Result<ClientRegistration, InvalidSetting> {
+        let scopes = self
+            .allowed_scopes
+            .iter()
+            .map(|scope| {
+                scope.parse::<Scope>().map(ScopeName::from).map_err(|_| {
+                    let allowed = Scope::ALL.map(Scope::as_str).join(", ");
+                    InvalidSetting::new(
+                        ClientField::AllowedScopes,
+                        format!("scope {scope:?} is not one of {allowed}"),
+                    )
+                })
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+        Ok(ClientRegistration {
+            id,
+            display_name: self
+                .display_name
+                .parse()
+                .map_err(InvalidSetting::with(ClientField::DisplayName))?,
+            kind,
+            redirect_uris: RedirectUris::new(Self::uris(
+                &ClientField::RedirectUris,
+                &self.redirect_uris,
+            )?)
+            .map_err(InvalidSetting::with(ClientField::RedirectUris))?,
+            post_logout_uris: PostLogoutUris::new(Self::uris(
+                &ClientField::PostLogoutUris,
+                &self.post_logout_uris,
+            )?)
+            .map_err(InvalidSetting::with(ClientField::PostLogoutUris))?,
+            allowed_scopes: AllowedScopes::new(scopes)
+                .map_err(InvalidSetting::with(ClientField::AllowedScopes))?,
+            allow_refresh: self.allow_refresh,
+            trusted: false,
+            require_pushed_authorization_requests: self.require_pushed_authorization_requests,
+            backchannel_logout_uri: self.backchannel_logout_uri,
+        })
+    }
+
+    /// Parses the URIs of `field`.
+    fn uris(field: &ClientField, uris: &[String]) -> Result<Vec<RedirectUri>, InvalidSetting> {
+        uris.iter()
+            .map(|uri| uri.parse().map_err(InvalidSetting::with(field.clone())))
+            .collect()
+    }
+}
+
+impl ClientPatch {
+    /// The registration of `current` with the given settings replaced. It is
+    /// validated as a new one is, so a change cannot do what registration may not.
+    fn apply(self, current: &StoredOidcClient) -> Result<ClientRegistration, InvalidSetting> {
+        ClientSettings {
+            display_name: self
+                .display_name
+                .unwrap_or_else(|| current.display_name.clone()),
+            redirect_uris: self
+                .redirect_uris
+                .unwrap_or_else(|| current.redirect_uris.clone()),
+            post_logout_uris: self
+                .post_logout_uris
+                .unwrap_or_else(|| current.post_logout_uris.clone()),
+            allowed_scopes: self
+                .allowed_scopes
+                .unwrap_or_else(|| current.allowed_scopes.clone()),
+            allow_refresh: self.allow_refresh.unwrap_or(current.allow_refresh),
+            require_pushed_authorization_requests: self
+                .require_pushed_authorization_requests
+                .unwrap_or(current.require_pushed_authorization_requests),
+            backchannel_logout_uri: current
+                .backchannel_logout_uri
+                .as_deref()
+                .map(str::parse)
+                .transpose()
+                .map_err(InvalidSetting::with(ClientField::BackchannelLogoutUri))?,
+        }
+        .registration(current.id.clone(), current.kind)
+    }
+}
+
+impl InvalidSetting {
+    /// Rejects `field` for `reason`.
+    fn new(field: ClientField, reason: impl Into<Box<dyn Error + Send + Sync>>) -> Self {
+        Self {
+            field,
+            source: reason.into(),
+        }
+    }
+
+    /// Rejects `field` for the error the mapped function receives.
+    fn with<E: Error + Send + Sync + 'static>(field: ClientField) -> impl Fn(E) -> Self {
+        move |error| Self::new(field.clone(), error)
+    }
+
+    /// The rejected setting.
+    pub(crate) const fn field(&self) -> &ClientField {
+        &self.field
+    }
+}
+
+/// The clients only their owner registers and changes. Administrators manage
+/// every client through `AdminService` instead.
+impl AccountService {
+    /// Lists the owner's live clients. Clients operators manage are never shown.
+    pub(crate) async fn clients(
+        &self,
+        owner: &Owner,
+    ) -> Result<Vec<StoredOidcClient>, AccountError> {
+        Ok(self
+            .database
+            .oidc()
+            .list_owned_clients(owner.user())
+            .await?)
+    }
+
+    /// Shows the owner's client `id` with the lifetimes of its secrets, never
+    /// their values.
+    pub(crate) async fn client(
+        &self,
+        owner: &Owner,
+        id: &str,
+    ) -> Result<ClientDetails, AccountError> {
+        let client = self.owned(owner, id).await?;
+        let secrets = self.database.oidc().client_secrets(&client.id).await?;
+        Ok(ClientDetails { client, secrets })
+    }
+
+    /// Registers a client the owner manages, with an ID auth generates, once they
+    /// confirmed with a passkey, and returns it with a confidential client's
+    /// secret, which nothing shows again. Fails once the account manages
+    /// [`MAX_OWNED_CLIENTS`](super::MAX_OWNED_CLIENTS) clients.
+    pub(crate) async fn create_client(
+        &self,
+        owner: &Owner,
+        new: NewClient,
+    ) -> Result<(StoredOidcClient, Option<ClientSecret>), AccountError> {
+        let random = Secret::generate()
+            .map_err(ClientRegistryError::from)
+            .map_err(OwnedClientError::from)?;
+        let registration = new
+            .settings
+            .registration(ClientId::generated(random.as_bytes()), new.kind)
+            .map_err(OwnedClientError::from)?;
+        let mut tx = self.database.begin().await?;
+        owner.lock_confirmed(&mut tx).await?;
+        let secret = ClientRegistry::new(&mut tx, owner.context())
+            .create(ClientOwner::Account(owner.user()), &registration, None)
+            .await
+            .map_err(OwnedClientError::from)?;
+        let client = Self::read_client(&mut tx, &registration.id).await?;
+        tx.commit().await?;
+        Ok((client, secret))
+    }
+
+    /// Changes the given settings of the owner's client `id`, and returns it.
+    /// Changing where auth may send the browser needs a passkey confirmation: with
+    /// a stolen session cookie, someone could otherwise add their own redirect URI
+    /// and collect authorization codes. Only the change shows whether it does, so
+    /// the confirmation is checked after it, before committing.
+    pub(crate) async fn update_client(
+        &self,
+        owner: &Owner,
+        id: &str,
+        patch: ClientPatch,
+    ) -> Result<StoredOidcClient, AccountError> {
+        let client = self.owned(owner, id).await?;
+        let mut tx = self.database.begin().await?;
+        let session = owner.lock(&mut tx).await?;
+        let changed = ClientRegistry::new(&mut tx, owner.context())
+            .update(&client.id, |current| {
+                patch.apply(current).map_err(OwnedClientError::from)
+            })
+            .await?;
+        if changed.iter().any(ClientField::redirects) {
+            owner.confirmed(&session)?;
+        }
+        let client = Self::read_client(&mut tx, &client.id).await?;
+        tx.commit().await?;
+        Ok(client)
+    }
+
+    /// Enables or disables the owner's client `id`. The session is enough: either
+    /// is undone as easily. A suspended client stays disabled.
+    pub(crate) async fn set_client_enabled(
+        &self,
+        owner: &Owner,
+        id: &str,
+        enabled: bool,
+    ) -> Result<(), AccountError> {
+        let client = self.owned(owner, id).await?;
+        let mut tx = self.database.begin().await?;
+        owner.lock(&mut tx).await?;
+        ClientRegistry::new(&mut tx, owner.context())
+            .set_enabled(&client.id, enabled)
+            .await
+            .map_err(OwnedClientError::from)?;
+        Ok(tx.commit().await?)
+    }
+
+    /// Gives the owner's confidential client `id` a new secret, once they
+    /// confirmed with a passkey, and returns it, which nothing shows again.
+    /// Earlier secrets keep working for `grace`.
+    pub(crate) async fn rotate_client_secret(
+        &self,
+        owner: &Owner,
+        id: &str,
+        grace: GracePeriod,
+    ) -> Result<ClientSecret, AccountError> {
+        let client = self.owned(owner, id).await?;
+        let mut tx = self.database.begin().await?;
+        owner.lock_confirmed(&mut tx).await?;
+        let secret = ClientRegistry::new(&mut tx, owner.context())
+            .rotate_secret(&client.id, grace)
+            .await
+            .map_err(OwnedClientError::from)?;
+        tx.commit().await?;
+        Ok(secret)
+    }
+
+    /// Deletes the owner's client `id` for good, once they confirmed with a
+    /// passkey: it stops working at once, and its ID is never used again.
+    pub(crate) async fn delete_client(&self, owner: &Owner, id: &str) -> Result<(), AccountError> {
+        let client = self.owned(owner, id).await?;
+        let mut tx = self.database.begin().await?;
+        owner.lock_confirmed(&mut tx).await?;
+        ClientRegistry::new(&mut tx, owner.context())
+            .delete(&client.id)
+            .await
+            .map_err(OwnedClientError::from)?;
+        Ok(tx.commit().await?)
+    }
+
+    /// The owner's live client `id`, as it is now. Any other ID, a deleted
+    /// client's or another account's included, is not found. Callers never check
+    /// ownership again: it never changes, and the registry refuses a client
+    /// deleted since.
+    async fn owned(&self, owner: &Owner, id: &str) -> Result<StoredOidcClient, AccountError> {
+        Ok(self
+            .database
+            .oidc()
+            .find_client(id)
+            .await?
+            .filter(|client| client.owner_id == Some(owner.user()) && client.deleted_at.is_none())
+            .ok_or(OwnedClientError::NotFound)?)
+    }
+
+    /// Reads back client `id` as the transaction changed it.
+    async fn read_client(
+        tx: &mut DatabaseTransaction<'_>,
+        id: &ClientId,
+    ) -> Result<StoredOidcClient, AccountError> {
+        Ok(tx
+            .oidc()
+            .find_client(id.as_str())
+            .await?
+            .ok_or(OwnedClientError::NotFound)?)
+    }
+}
+
+impl From<OwnedClientError> for ApiError {
+    /// Answers as each failure's own mapping does.
+    fn from(error: OwnedClientError) -> Self {
+        match error {
+            OwnedClientError::NotFound => Self::not_found("You have no client with this ID."),
+            OwnedClientError::InvalidSetting(error) => error.into(),
+            OwnedClientError::Registry(error) => error.into(),
+        }
+    }
+}
+
+impl From<InvalidSetting> for ApiError {
+    /// Names the field, with RFC 7591's code for redirect URIs or other metadata.
+    fn from(error: InvalidSetting) -> Self {
+        let field = error.field().clone();
+        let code = if field.redirects() {
+            ErrorCode::InvalidRedirectUri { field }
+        } else {
+            ErrorCode::InvalidClientMetadata { field }
+        };
+        Self::bad_request(error.to_string()).with_code(code)
+    }
+}
+
+impl From<ClientRegistryError> for ApiError {
+    /// A deleted client is as unknown as one that never existed. Failures the
+    /// account API cannot cause are internal.
+    fn from(error: ClientRegistryError) -> Self {
+        match error {
+            ClientRegistryError::Unknown(_) | ClientRegistryError::Deleted(_) => {
+                OwnedClientError::NotFound.into()
+            }
+            ClientRegistryError::Public(_) => {
+                Self::bad_request("This client is public, so it has no secret to rotate.")
+            }
+            ClientRegistryError::QuotaExceeded => Self::conflict(format!(
+                "You can have at most {MAX_OWNED_CLIENTS} clients. Delete one to register another."
+            ))
+            .with_code(ErrorCode::ClientQuotaExceeded {
+                limit: MAX_OWNED_CLIENTS,
+            }),
+            ClientRegistryError::DailyLimitExceeded => Self::conflict(format!(
+                "You can register at most {MAX_DAILY_REGISTRATIONS} clients a day, deleted ones \
+                 included. Try again tomorrow."
+            ))
+            .with_code(ErrorCode::DailyClientLimitExceeded {
+                limit: MAX_DAILY_REGISTRATIONS,
+            }),
+            ClientRegistryError::Suspended(_) => Self::forbidden(
+                "This client was suspended by an administrator. Contact them to restore it.",
+            )
+            .with_code(ErrorCode::ClientSuspended),
+            ClientRegistryError::Database(error) => error.into(),
+            error @ (ClientRegistryError::Exists { .. }
+            | ClientRegistryError::MissingSecret(_)
+            | ClientRegistryError::Immutable(_)
+            | ClientRegistryError::Crypto(_)) => Self::internal(error),
+        }
+    }
+}

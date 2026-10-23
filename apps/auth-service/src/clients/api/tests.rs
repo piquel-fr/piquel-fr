@@ -4,14 +4,16 @@
 
 use super::*;
 use crate::{
-    ClientRegistryError,
+    ClientRegistryError, GracePeriod,
+    security::Session,
     tests::{
         Browser, Replicas, change, refresh_grant, register, registration, sign_out, until_blocked,
     },
 };
 use axum::http::Method;
 use piquel_common::{
-    AuthenticationMethod, TokenId,
+    AuthenticationMethod, ClientId, TokenId,
+    clients::{ClientKind, ClientRegistration},
     events::{Actor, DomainEvent},
 };
 use piquel_repository::RefreshRotationError;
@@ -156,16 +158,17 @@ async fn sensitive_changes_need_a_recent_confirmation() {
         "code": "step_up_required",
         "max_age": crate::security::CONFIRMATION_MAX_AGE,
     });
+    let new = json!({
+        "kind": "public",
+        "display_name": "Other",
+        "redirect_uris": ["https://other.example/callback"],
+    });
+    // Asked before the settings are read, even invalid ones.
+    let invalid = json!({"kind": "public", "display_name": "", "redirect_uris": ["not a URI"]});
+    let list = "/account/clients".to_owned();
     for (method, path, body) in [
-        (
-            Method::POST,
-            "/account/clients".to_owned(),
-            Some(json!({
-                "kind": "public",
-                "display_name": "Other",
-                "redirect_uris": ["https://other.example/callback"],
-            })),
-        ),
+        (Method::POST, list.clone(), Some(new)),
+        (Method::POST, list, Some(invalid)),
         (
             Method::PATCH,
             item.clone(),
