@@ -19,8 +19,8 @@ pub use piquel_common::protocol::{
     step_up::CONFIRMATION_MAX_AGE,
 };
 use piquel_common::{
-    AccountStatus, AuthenticationMethod, ClientId, EventId, SessionId, TokenId, TraceId, UserId,
-    protocol::oauth::ClientAuthMethod,
+    AccountStatus, AuthenticationMethod, ClientId, EventId, Handle, SessionId, TokenId, TraceId,
+    UserId, protocol::oauth::ClientAuthMethod,
 };
 use serde::{Deserialize, Serialize};
 use url::Url;
@@ -49,6 +49,10 @@ pub mod paths {
     pub const USER_ENABLE: &str = "/users/{user_id}/enable";
     /// `DELETE`: ends every session and refresh grant of an account.
     pub const USER_SESSIONS: &str = "/users/{user_id}/sessions";
+    /// `PUT`: gives an account a new handle ([`RenameHandle`](super::RenameHandle)).
+    pub const USER_HANDLE: &str = "/users/{user_id}/handle";
+    /// `DELETE`: deletes a released handle, so anyone may claim it again.
+    pub const HANDLE: &str = "/handles/{handle}";
     /// `DELETE`: ends one session and its refresh grants.
     pub const SESSION: &str = "/sessions/{session_id}";
     /// `GET`: lists invitations ([`Invitation`](super::Invitation)). `POST`: creates
@@ -79,8 +83,9 @@ pub mod paths {
 pub struct User {
     /// Account ID.
     pub id: UserId,
-    /// Login name.
-    pub username: String,
+    /// Public identifier and login name; `username` in the release before handles.
+    #[serde(alias = "username")]
+    pub handle: Handle,
     /// Name shown to the user and to applications.
     pub display_name: String,
     /// Whether the account can sign in.
@@ -92,7 +97,7 @@ pub struct User {
 /// The query of [`paths::USERS`].
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct UserSearch {
-    /// An account ID, or part of a username, display name or email, ignoring case.
+    /// An account ID, or part of a handle, display name or email, ignoring case.
     /// Empty matches every account.
     #[serde(default)]
     pub q: String,
@@ -297,10 +302,21 @@ pub struct Event {
 pub struct Administrator {
     /// The administrator's account.
     pub user_id: UserId,
-    /// The account's login name.
-    pub username: String,
+    /// The account's handle; `username` in the release before handles.
+    #[serde(alias = "username")]
+    pub handle: Handle,
     /// When the rights were granted.
     pub granted_at: DateTime<Utc>,
+}
+
+/// The body of `PUT` [`paths::USER_HANDLE`].
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RenameHandle {
+    /// The new handle; it is trimmed and lowercased, then checked.
+    pub handle: String,
+    /// Allow a reserved name, or one that looks like it.
+    #[serde(default)]
+    pub allow_reserved: bool,
 }
 
 /// The body of `POST` [`paths::ADMINISTRATORS`].

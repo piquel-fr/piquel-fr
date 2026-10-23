@@ -42,7 +42,9 @@ test('passkey lifecycle, passkey confirmation and browser OIDC consent with SSO'
     await page.getByLabel('Passkey name', { exact: true }).fill('Synced passkey');
     await page.getByRole('button', { name: 'Create account with a passkey' }).click();
     await expect(page).toHaveURL(settingsUrl);
-    await expect(page.getByText(`@${username}`, { exact: true })).toBeVisible();
+    await expect(
+      page.getByRole('region', { name: 'Handle' }).getByText(`@${username}`, { exact: true })
+    ).toBeVisible();
 
     const redirectUri = new URL('/callback', settingsUrl).href;
     const atCallback = (url: URL) =>
@@ -303,7 +305,9 @@ test('passkey lifecycle, passkey confirmation and browser OIDC consent with SSO'
     await page.getByRole('link', { name: 'Sign in', exact: true }).click();
     await page.getByRole('button', { name: 'Sign in with a passkey', exact: true }).click();
     await expect(page).toHaveURL(settingsUrl);
-    await expect(page.getByText(`@${username}`, { exact: true })).toBeVisible();
+    await expect(
+      page.getByRole('region', { name: 'Handle' }).getByText(`@${username}`, { exact: true })
+    ).toBeVisible();
   } finally {
     await cdp.send('WebAuthn.removeVirtualAuthenticator', { authenticatorId });
   }

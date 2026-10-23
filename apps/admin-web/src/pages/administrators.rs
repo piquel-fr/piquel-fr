@@ -34,7 +34,7 @@ pub async fn list(cx: &Cx) -> Result<impl View> {
                         <tr>
                             <td>
                                 <a href=(href!(users::detail, users::Account(administrator.user_id)))>
-                                    (administrator.username)
+                                    (administrator.handle.to_string())
                                 </a>
                             </td>
                             <td>time(at: administrator.granted_at)</td>

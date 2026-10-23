@@ -251,7 +251,7 @@ impl Fixture {
             .start(
                 "/webauthn/authenticate/start",
                 "",
-                json!({"username":self.username}),
+                json!({"handle":self.username}),
             )
             .await;
         let assertion = self.assertion(&started);
@@ -309,28 +309,37 @@ impl Fixture {
     }
 }
 
-/// Signup normalizes the handle, and refuses invalid and reserved ones with their codes.
+/// Signup normalizes the handle, and refuses invalid, reserved and taken ones with
+/// their codes.
 #[tokio::test]
 #[ignore = "requires TEST_DATABASE_URL"]
 async fn signup_applies_the_handle_rules() {
     let fixture = Fixture::new().await;
-    for (handle, code) in [("a_b", "handle_invalid"), ("adm1n", "handle_reserved")] {
+    for (handle, status, code) in [
+        ("a_b", StatusCode::BAD_REQUEST, "handle_invalid"),
+        ("adm1n", StatusCode::BAD_REQUEST, "handle_reserved"),
+        (
+            fixture.username.as_str(),
+            StatusCode::CONFLICT,
+            "handle_taken",
+        ),
+    ] {
         let response = fixture
             .request(
                 "/webauthn/register/start",
                 Method::POST,
                 "",
-                json!({"username": handle}),
+                json!({"handle": handle}),
             )
             .await;
-        assert_eq!(response.status(), StatusCode::BAD_REQUEST, "{handle}");
+        assert_eq!(response.status(), status, "{handle}");
         assert_eq!(Fixture::json(response).await["code"], code, "{handle}");
     }
     let (started, _) = fixture
         .start(
             "/webauthn/register/start",
             "",
-            json!({"username": " New-User "}),
+            json!({"handle": " New-User "}),
         )
         .await;
     assert_eq!(
@@ -374,7 +383,7 @@ async fn registration_attaches_a_pending_social_signup_only_when_it_names_it() {
             "/webauthn/register/start",
             Method::POST,
             &social,
-            json!({"username":"unrelated","pending_signup":TokenId::new()}),
+            json!({"handle":"unrelated","pending_signup":TokenId::new()}),
         )
         .await;
     assert_eq!(response.status(), StatusCode::BAD_REQUEST);
@@ -383,13 +392,13 @@ async fn registration_attaches_a_pending_social_signup_only_when_it_names_it() {
         let response = fixture
             .register(
                 &social,
-                json!({"username":username,"pending_signup":explicit}),
+                json!({"handle":username,"pending_signup":explicit}),
             )
             .await;
         assert_eq!(response.status(), StatusCode::NO_CONTENT);
         let user = database
             .users()
-            .find_active_by_username(&username)
+            .find_active_by_handle(&Handle::parse(&username).expect("handle"))
             .await
             .expect("user")
             .expect("registered");
@@ -413,14 +422,14 @@ async fn overlapping_assertions_reject_old_counter_after_new_counter_commits() {
         .start(
             "/webauthn/authenticate/start",
             "",
-            json!({"username":fixture.username}),
+            json!({"handle":fixture.username}),
         )
         .await;
     let (newer, _) = fixture
         .start(
             "/webauthn/authenticate/start",
             &browser,
-            json!({"username":fixture.username}),
+            json!({"handle":fixture.username}),
         )
         .await;
     let older_assertion = fixture.assertion(&older);
@@ -514,7 +523,7 @@ async fn lagging_counter_copy_is_rejected_and_recorded() {
         .start(
             "/webauthn/authenticate/start",
             "",
-            json!({"username":fixture.username}),
+            json!({"handle":fixture.username}),
         )
         .await;
     let assertion = fixture.assertion(&started);
@@ -551,7 +560,7 @@ async fn ceremonies_require_browser_binding_and_confirmation_belongs_to_one_sess
         .start(
             "/webauthn/authenticate/start",
             "",
-            json!({"username":fixture.username}),
+            json!({"handle":fixture.username}),
         )
         .await;
     let assertion = fixture.assertion(&started);
@@ -795,7 +804,7 @@ async fn unknown_usernames_get_stable_decoys_that_fail_like_unregistered_passkey
         fixture.start(
             "/webauthn/authenticate/start",
             "",
-            json!({"username":username}),
+            json!({"handle":username}),
         )
     };
     let (known, known_browser) = start(&fixture.username).await;
@@ -923,7 +932,7 @@ async fn passkey_sign_in_confirms_the_browsers_session() {
 async fn sign_in_and_logout_span_replicas() {
     let mut fixture = Fixture::new().await;
     let replicas = Replicas::new().await;
-    let username = json!({"username":fixture.username});
+    let username = json!({"handle":fixture.username});
     let (started, browser) = fixture
         .on(&replicas.a)
         .start("/webauthn/authenticate/start", "", username)
@@ -954,7 +963,7 @@ impl Fixture {
     /// Signs in with the passkey, and returns the session cookie pair and every
     /// secret the ceremony carried: its cookie and ID, the challenge and signature.
     async fn login_with_secrets(&mut self) -> (String, Vec<String>) {
-        let username = json!({"username": self.username});
+        let username = json!({"handle": self.username});
         let (started, browser) = self
             .start("/webauthn/authenticate/start", "", username)
             .await;

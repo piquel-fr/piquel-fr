@@ -20,6 +20,8 @@ mod deliveries;
 mod email;
 /// External identity provider applications and linking.
 mod federation;
+/// Handle availability and renames.
+mod handles;
 /// The signed-in user's security history and its reports.
 mod history;
 /// Periodic background work, coordinated across replicas.
@@ -40,9 +42,7 @@ mod sessions;
 #[cfg(test)]
 mod tests;
 
-pub use admin::{
-    AdminError, AdminOperations, GracePeriod, HandleIssue, HandleProblem, InviteExpiry, Operator,
-};
+pub use admin::{AdminError, AdminOperations, GracePeriod, HandleProblem, InviteExpiry, Operator};
 use clients::ClientApplication;
 pub use clients::{
     Applied, ClientDetails, ClientRegistry, ClientRegistryError, DEFAULT_CLIENT_SCOPES,
@@ -50,6 +50,8 @@ pub use clients::{
 };
 pub use config::{AuthConfig, PUBLIC_BASE_URL};
 use federation::FederationApplication;
+use handles::HandleApplication;
+pub use handles::HandlesError;
 use history::HistoryApplication;
 pub use jobs::Jobs;
 use oidc::OidcApplication;
@@ -112,6 +114,7 @@ impl AuthConfig {
             .merge(HistoryApplication::new(database.clone()).routes())
             .merge(SessionsApplication::new(database.clone()).routes())
             .merge(ClientApplication::new(database.clone()).routes())
+            .merge(HandleApplication::new(database.clone()).routes())
             .merge(OidcApplication::new(database.clone(), &self.oidc)?.routes());
         let policy = security::HttpSecurity::new(self, database);
         let protected = application

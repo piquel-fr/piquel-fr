@@ -14,6 +14,7 @@
 //! ```
 
 use crate::{PasskeyId, Provider, clients::ClientField};
+use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 
 /// The body of an error response: `{"error": message}`, plus a machine-readable
@@ -43,6 +44,17 @@ pub enum ErrorCode {
     HandleReserved,
     /// Another account holds the handle.
     HandleTaken,
+    /// The handle belonged to another account, and is never reassigned.
+    HandleRetired,
+    /// The handle looks like another handle, perhaps one the account held before.
+    HandleConfusable,
+    /// The account already has the handle.
+    HandleCurrent,
+    /// The handle changed too recently to change again.
+    HandleCooldown {
+        /// When it may change again.
+        retry_after: DateTime<Utc>,
+    },
     /// A redirect or post-logout URI of a client is invalid, as RFC 7591 §3.2.2 names it.
     InvalidRedirectUri {
         /// The list holding it.

@@ -2,12 +2,14 @@
   import { onMount } from 'svelte';
   import {
     AuthApi,
+    Handles,
     Passkeys,
     StepUp,
     errorMessage,
     passkeysAvailable,
     providerName,
     safeDestination,
+    signalCurrentUser,
     type Configuration,
     type PasskeyKind,
     type Provider,
@@ -17,6 +19,7 @@
     $props();
   const api = new AuthApi();
   const passkeys = new Passkeys(api);
+  const handles = new Handles(api);
   let config = $state<Configuration | null>(null);
   let session = $state<Session | null>(null);
   // `link` comes from an email match; `explicit_link` from settings, bound to that session.
@@ -28,7 +31,9 @@
     email: string | null;
     return_to: string;
   } | null>(null);
-  let username = $state('');
+  let handle = $state('');
+  // Why the handle typed at signup cannot be taken, checked as the user types.
+  let handleRefusal = $state('');
   let friendlyName = $state('My passkey');
   let invitation = $state('');
   let transaction = $state('');
@@ -80,11 +85,27 @@
       if (query.has('social') || mode === 'link')
         pending = await api.request('/login/social/pending');
       if (security || linking) session = await api.request<Session>('/session').catch(() => null);
+      if (session) signalCurrentUser(session.user);
       ready = true;
     } catch (cause) {
       error = errorMessage(cause);
     }
   });
+  $effect(() =>
+    handles.watch(registration ? handle : '', (refusal) => {
+      handleRefusal = refusal;
+    })
+  );
+  // Password managers label passkeys with the handle they were saved under; this
+  // updates them after a rename, wherever the browser supports it.
+  async function signalSession() {
+    await api
+      .request<Session>('/session')
+      .then((current) => {
+        signalCurrentUser(current.user);
+      })
+      .catch(() => undefined);
+  }
   function destination() {
     if (transaction)
       return `/oauth/authorize/resume?transaction=${encodeURIComponent(transaction)}`;
@@ -112,8 +133,9 @@
   // session, so the action after it prompts no more.
   async function signIn() {
     if (session) return;
-    await passkeys.authenticate(username.trim() || undefined);
+    await passkeys.authenticate(handle.trim() || undefined);
     session = await api.request<Session>('/session');
+    signalCurrentUser(session.user);
   }
   async function submit() {
     await run(async () => {
@@ -123,7 +145,7 @@
         await passkeys.register(
           friendlyName.trim(),
           {
-            username: username.trim(),
+            handle: handle.trim(),
             ...(invitation ? { invitation } : {}),
             // Only the social signup page joins its pending identity, never plain registration.
             ...(pending?.kind === 'signup' ? { pending_signup: pending.id } : {})
@@ -137,7 +159,8 @@
       } else if (mode === 'confirm' && session) {
         await passkeys.confirm();
       } else {
-        await passkeys.authenticate(username.trim() || undefined);
+        await passkeys.authenticate(handle.trim() || undefined);
+        await signalSession();
       }
       window.location.assign(target);
     });
@@ -170,7 +193,7 @@
     await run(async () => {
       await api.request('/session/logout', 'POST', {});
       session = null;
-      username = '';
+      handle = '';
       fallback = false;
     });
   }
@@ -207,7 +230,7 @@
         account with its passkey to add this provider.
       </p>{/if}
     {#if pending.email}<p class="notice">{pending.email}</p>{/if}
-    {#if session}<p class="help">Signed in as @{session.user.username}.</p>{/if}
+    {#if session}<p class="help">Signed in as @{session.user.handle}.</p>{/if}
   {:else if registration}
     <p>
       Create a passkey with your device or password manager. You’ll use it to sign in and protect
@@ -239,7 +262,7 @@
           {#if registration || fallback}
             <label
               >Handle<input
-                bind:value={username}
+                bind:value={handle}
                 autocomplete="username webauthn"
                 autocapitalize="none"
                 spellcheck="false"
@@ -250,8 +273,10 @@
               /></label
             >
             {#if registration}<small
-                >3–32 lowercase letters, numbers, or single hyphens between them.</small
+                >3–32 lowercase letters, numbers, or single hyphens between them. It’s your public
+                name on Piquel, and how you sign in.</small
               >{/if}
+            {#if handleRefusal}<p class="notice error" role="status">{handleRefusal}</p>{/if}
           {/if}
           {#if registration || mode === 'enroll'}<label
               >Passkey name<input

@@ -58,9 +58,6 @@ enum CliError {
     /// An administrative operation was refused or failed.
     #[error(transparent)]
     Admin(#[from] AdminError),
-    /// `handle check` found accounts to fix.
-    #[error("{0} accounts break the handle rules")]
-    HandleProblems(usize),
     /// A client change was refused.
     #[error(transparent)]
     Client(#[from] ClientRegistryError),
@@ -158,18 +155,28 @@ enum Command {
 /// Handle checks and changes. The CLI may act on any account.
 #[derive(Subcommand)]
 enum HandleCommand {
-    /// List accounts whose handle breaks the syntax, is reserved, or looks like
-    /// another account's. Fails while any remain.
+    /// List accounts whose handle is reserved.
     Check,
-    /// Give an account a new handle, and record the change.
+    /// Give an account a new handle, without the settings cooldown, and record the
+    /// change.
     Rename {
         /// The account's current handle.
-        handle: String,
+        #[arg(value_parser = Handle::parse)]
+        handle: Handle,
         /// Its new handle.
-        new: String,
+        #[arg(value_parser = Handle::parse)]
+        new: Handle,
         /// Allow a reserved name, or one that looks like it.
         #[arg(long)]
         allow_reserved: bool,
+    },
+    /// Delete a released handle, so anyone may claim it again, e.g. after a
+    /// trademark dispute. A current handle is never released: rename its account
+    /// first.
+    Release {
+        /// The released handle.
+        #[arg(value_parser = Handle::parse)]
+        handle: Handle,
     },
 }
 
@@ -178,15 +185,8 @@ impl HandleCommand {
     async fn run(self, admin: &AdminOperations) -> Result<(), CliError> {
         match self {
             Self::Check => {
-                let problems = admin.check_handles().await?;
-                for problem in &problems {
-                    println!(
-                        "{}\t{}\t{}",
-                        problem.username, problem.user_id, problem.issue
-                    );
-                }
-                if !problems.is_empty() {
-                    return Err(CliError::HandleProblems(problems.len()));
+                for problem in admin.check_handles().await? {
+                    println!("{}\t{}\t{}", problem.handle, problem.user_id, problem.error);
                 }
             }
             Self::Rename {
@@ -195,10 +195,12 @@ impl HandleCommand {
                 allow_reserved,
             } => {
                 let user = admin.user_named(&handle).await?;
-                let new = Handle::parse(&new).map_err(AdminError::from)?;
                 admin
                     .rename_handle(&Command::operator()?, user, new, allow_reserved)
                     .await?;
+            }
+            Self::Release { handle } => {
+                admin.release_handle(&Command::operator()?, handle).await?;
             }
         }
         Ok(())
@@ -211,13 +213,15 @@ impl HandleCommand {
 enum AdminCommand {
     /// Make an active account an administrator.
     Grant {
-        /// The account's username.
-        username: String,
+        /// The account's handle.
+        #[arg(value_parser = Handle::parse)]
+        handle: Handle,
     },
     /// Remove an account's administrator rights. The last administrator keeps theirs.
     Revoke {
-        /// The account's username.
-        username: String,
+        /// The account's handle.
+        #[arg(value_parser = Handle::parse)]
+        handle: Handle,
     },
     /// List administrators, oldest grant first.
     List,
@@ -228,19 +232,19 @@ impl AdminCommand {
     async fn run(self, admin: &AdminOperations) -> Result<(), CliError> {
         let operator = Command::operator()?;
         match self {
-            Self::Grant { username } => {
-                let user = admin.user_named(&username).await?;
+            Self::Grant { handle } => {
+                let user = admin.user_named(&handle).await?;
                 admin.grant_administrator(&operator, user).await?;
             }
-            Self::Revoke { username } => {
-                let user = admin.user_named(&username).await?;
+            Self::Revoke { handle } => {
+                let user = admin.user_named(&handle).await?;
                 admin.revoke_administrator(&operator, user).await?;
             }
             Self::List => {
                 for administrator in admin.list_administrators().await? {
                     println!(
                         "{}\t{}\t{}",
-                        administrator.username,
+                        administrator.handle,
                         administrator.user_id,
                         administrator.granted_at.to_rfc3339()
                     );

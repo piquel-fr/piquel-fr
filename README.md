@@ -68,9 +68,9 @@ Generate a persistent RSA key with `just auth generate-key /absolute/path/key.pe
 OpenSSL CLI; piqueld generates its own, see `infra/README.md`).
 Keep the same key and ID across restarts. Replacing the only configured key
 invalidates issued tokens; overlapping signing-key rotation is not implemented.
-It also changes the decoy passkey IDs that username sign-in returns for unknown
-usernames, while real accounts keep theirs, so comparing responses from before and
-after a replacement reveals which usernames exist.
+It also changes the decoy passkey IDs that handle sign-in returns for unknown
+handles, while real accounts keep theirs, so comparing responses from before and
+after a replacement reveals which handles exist.
 
 Provider callback URLs are `/login/github/callback` and `/login/google/callback`
 on the auth origin. GitHub uses `read:user user:email`; Google uses `openid email profile`.
@@ -135,16 +135,23 @@ or CLI operator.
 ### Handles
 
 ```sh
-just auth handle check                      # accounts whose handle breaks the rules
-just auth handle rename old_name new-name   # --allow-reserved to assign a reserved name
+just auth handle check                      # accounts whose handle is reserved
+just auth handle rename old-name new-name   # --allow-reserved to assign a reserved name
+just auth handle release old-name           # let anyone claim a released handle again
 ```
 
-`check` lists every account whose handle breaks the syntax, is reserved or looks like
-another account's (see [Security behavior](#security-behavior)), and fails while any
-remain. `rename` refuses a handle another account has, but not a look-alike: run
-`check` again after renaming. A rename bumps the account's profile version, so
-relying parties refresh `preferred_username`, and is recorded as a domain event with
-its CLI operator.
+Operators rename without the 30-day cooldown of settings renames, but not to a
+handle another account holds or held, or one that looks like it (see
+[Security behavior](#security-behavior)). A rename bumps the account's profile
+version, so relying parties refresh `preferred_username`. `release` deletes a
+handle no account holds anymore, the only way one returns to the pool, for cases
+like a trademark dispute; to free a current handle, rename its account first.
+Administrators do the same through the admin API. Every change is recorded as a
+domain event with its operator.
+
+Upgrading from a release that stored usernames: run its `handle check`, and rename
+every account it lists with its `handle rename`, before deploying. The migration
+that moves usernames into handles refuses to run, naming them, while any remain.
 
 ### Outbound deliveries
 
@@ -292,14 +299,19 @@ explains how to choose a requirement and handle the challenge.
   refuses reserved names (infrastructure labels such as `auth` and `www`, RFC 2142
   mailboxes, piquel.fr routes and the brand) and names that look like one: hyphens
   are dropped, and `0`, `1` or `i`, `5`, `rn` and `vv` read as `o`, `l`, `s`, `m` and
-  `w`. Look-alikes of other accounts' handles are refused from the next release,
-  which enforces them in the database; until then `handle check` lists them.
-  Usernames from before these rules still sign in until an operator renames them.
+  `w`. Every handle and look-alike stays unique, current or not: a handle is never
+  reassigned to another account, though its former owner may take it back.
+  `GET /handles/{handle}/availability` answers whether one is free, and why not,
+  under the sign-in rate budget. Settings change the handle with
+  `PUT /account/handle`, which needs a passkey confirmation like other sensitive
+  changes and refuses a change within 30 days of the last one (`409` with
+  `"code": "handle_cooldown"` and `retry_after`). Auth pages tell supporting
+  password managers the current handle (WebAuthn Signal API).
 - Social-first signup remains pending until its first passkey is committed. Only
   a registration that names the pending identity shown on the signup page attaches
   it; plain registration ignores it. A social login can never replace an
   established account's passkeys.
-- Sensitive changes (adding or removing a passkey, linking or unlinking a provider)
+- Sensitive changes (changing the handle, adding or removing a passkey, linking or unlinking a provider)
   need a passkey confirmation of the current browser session from the last five
   minutes. A passkey sign-in counts; social sign-in never does. The age counts from
   the confirmation and is never extended by use, and it never applies to another

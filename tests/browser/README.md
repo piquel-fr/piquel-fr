@@ -35,6 +35,6 @@ those external systems.
 such as a preview: a non-administrator sees no admin data, and an administrator
 disables an account, whose settings page then loses its session. Set
 `E2E_ADMIN_URL` to the dashboard's origin and `E2E_GRANT_ADMIN` to a command that
-grants administrator rights to the username appended to it, e.g.
+grants administrator rights to the handle appended to it, e.g.
 `just auth admin grant` with the deployment's configuration. Without them, the test
 is skipped.

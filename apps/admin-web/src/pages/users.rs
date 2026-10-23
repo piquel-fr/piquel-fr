@@ -28,7 +28,7 @@ struct SearchQuery {
     cursor: Option<UserId>,
 }
 
-/// `/users`: searches accounts by username, display name, email or ID.
+/// `/users`: searches accounts by handle, display name, email or ID.
 #[page("/users")]
 pub async fn search(cx: &Cx) -> Result<impl View> {
     let admin = Admin::of(cx).await?;
@@ -68,7 +68,7 @@ pub async fn search(cx: &Cx) -> Result<impl View> {
                     <tbody>
                         for user in page.users {
                             <tr>
-                                <td><a href=(href!(detail, Account(user.id)))>(user.username)</a></td>
+                                <td><a href=(href!(detail, Account(user.id)))>(user.handle.to_string())</a></td>
                                 <td>(user.display_name)</td>
                                 <td>account_status(status: user.status)</td>
                                 <td>time(at: user.created_at)</td>
@@ -101,7 +101,7 @@ pub async fn detail(cx: &Cx) -> Result<impl View> {
     let changeable = !detail.administrator;
     Ok(view! {
         <div class="row between">
-            heading(title: &user.display_name, lead: Some(format!("@{}", user.username)))
+            heading(title: &user.display_name, lead: Some(format!("@{}", user.handle)))
             <div class="row">
                 account_status(status: user.status)
                 if detail.administrator {

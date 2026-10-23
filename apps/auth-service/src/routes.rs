@@ -67,6 +67,14 @@ pub(crate) mod history {
     pub(crate) const REPORT: &str = "/account/history/{event_id}/report";
 }
 
+/// Handles: whether one is free, and changing the signed-in user's.
+pub(crate) mod handles {
+    /// Changes the signed-in account's handle.
+    pub(crate) const ACCOUNT: &str = "/account/handle";
+    /// Says whether a handle can be claimed, for signup and settings.
+    pub(crate) const AVAILABILITY: &str = "/handles/{handle}/availability";
+}
+
 /// The signed-in user's sessions, one per signed-in browser.
 pub(crate) mod sessions {
     /// Lists the account's active sessions, most recently active first.
@@ -141,3 +149,5 @@ pub(crate) mod page {
 pub(crate) const ACCOUNT_PREFIX: &str = "/account/";
 /// Prefix shared by social sign-in, which the settings site may also start.
 pub(crate) const LOGIN_PREFIX: &str = "/login/";
+/// Prefix of handle availability, which signup and the settings site check.
+pub(crate) const HANDLES_PREFIX: &str = "/handles/";

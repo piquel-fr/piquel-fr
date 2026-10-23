@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE users SET handle_changed_at = handle_changed_at - make_interval(days => $2)\n                WHERE id = $1",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Int4"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "001dd8232459cde4745be1af36cec43a781f0d46476b731b5bd078b053cbb62b"
+}

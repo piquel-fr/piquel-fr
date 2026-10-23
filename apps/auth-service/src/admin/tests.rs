@@ -427,85 +427,113 @@ async fn disabling_ends_sessions_and_is_recorded() {
     );
 }
 
-/// `handle check` lists look-alike handles. Renaming one away fixes it, bumps the
-/// profile version and is recorded; taken, reserved and unchanged handles are
-/// refused.
+/// Operators rename without the cooldown, but not to a taken, retired, look-alike,
+/// reserved or unchanged handle. A released handle stays its former owner's until
+/// an operator releases it; `handle check` lists reserved handles operators assign.
 #[tokio::test]
 #[ignore = "requires TEST_DATABASE_URL"]
-async fn handles_are_checked_and_renamed() {
+async fn operators_rename_and_release_handles() {
     let harness = Harness::new().await;
     let operations = harness.operations();
     let suffix = &TokenId::new().to_string()[24..];
-    let original = harness.named(&format!("look-{suffix}")).await;
-    let lookalike = harness.named(&format!("l0ok-{suffix}")).await;
-    let problems = |problems: Vec<HandleProblem>| {
-        problems
-            .into_iter()
-            .filter(|problem| [original, lookalike].contains(&problem.user_id))
-            .map(|problem| (problem.username, problem.issue))
-            .collect::<Vec<_>>()
-    };
-    assert_eq!(
-        problems(operations.check_handles().await.expect("check")),
-        [
-            (
-                format!("l0ok-{suffix}"),
-                HandleIssue::LooksLike(vec![format!("look-{suffix}")])
-            ),
-            (
-                format!("look-{suffix}"),
-                HandleIssue::LooksLike(vec![format!("l0ok-{suffix}")])
-            ),
-        ]
-    );
-    let rename = |handle: String, allow_reserved| {
+    let handle = |name: &str| Handle::parse(&format!("{name}-{suffix}")).expect("handle");
+    let first = harness.named(handle("first").as_str()).await;
+    let second = harness.named(handle("second").as_str()).await;
+    let rename = |user, handle: Handle, allow_reserved| {
         let operations = operations.clone();
         async move {
             operations
-                .rename_handle(
-                    &cli(),
-                    lookalike,
-                    Handle::parse(&handle).expect("handle"),
-                    allow_reserved,
-                )
+                .rename_handle(&cli(), user, handle, allow_reserved)
                 .await
         }
     };
+    let refused = |result: Result<(), AdminError>| match result {
+        Err(AdminError::Handle(error)) => error,
+        other => panic!("not a handle refusal: {other:?}"),
+    };
     assert!(matches!(
-        rename(format!("look-{suffix}"), false).await,
-        Err(AdminError::HandleTaken(_))
+        refused(rename(second, handle("first"), false).await),
+        HandlesError::Taken
     ));
     assert!(matches!(
-        rename("admin".into(), false).await,
-        Err(AdminError::InvalidHandle(HandleError::Reserved(_)))
+        refused(rename(second, Handle::parse(&format!("f1rst{suffix}")).expect("handle"), false).await),
+        HandlesError::Confusable(other) if other == handle("first")
     ));
     assert!(matches!(
-        rename(format!("l0ok-{suffix}"), false).await,
-        Err(AdminError::SameHandle)
+        refused(rename(second, Handle::parse("adm1n").expect("handle"), false).await),
+        HandlesError::Refused(HandleError::Reserved(_))
     ));
-    rename(format!("renamed-{suffix}"), false)
+    assert!(matches!(
+        refused(rename(second, handle("second"), false).await),
+        HandlesError::Current
+    ));
+    rename(second, handle("renamed"), false)
         .await
         .expect("rename");
     let renamed = harness
         .database
         .users()
-        .find_by_id(lookalike)
+        .find_by_id(second)
         .await
         .expect("lookup")
         .expect("user");
-    assert_eq!(renamed.username, format!("renamed-{suffix}"));
+    assert_eq!(renamed.handle, handle("renamed"));
     assert_eq!(renamed.profile_version, 2);
     assert_eq!(
-        harness.events(lookalike).await[..1],
+        harness.events(second).await[..1],
         [DomainEvent::HandleChanged {
-            old: Personal::Value(format!("l0ok-{suffix}")),
-            new: Personal::Value(Handle::parse(&format!("renamed-{suffix}")).expect("handle")),
+            old: Personal::Value(handle("second").to_string()),
+            new: Personal::Value(handle("renamed")),
         }]
     );
+    // The old handle stays the second account's: the first cannot take it, but
+    // its owner can, at once, as operators skip the cooldown.
+    assert!(matches!(
+        refused(rename(first, handle("second"), false).await),
+        HandlesError::Retired
+    ));
+    rename(second, handle("second"), false)
+        .await
+        .expect("reclaim");
+    assert!(matches!(
+        operations.release_handle(&cli(), handle("second")).await,
+        Err(AdminError::HandleNotReleased)
+    ));
+    operations
+        .release_handle(&cli(), handle("renamed"))
+        .await
+        .expect("release");
     assert_eq!(
-        problems(operations.check_handles().await.expect("check")),
-        []
+        harness.events(second).await[..1],
+        [DomainEvent::HandleReleased {
+            handle: Personal::Value(handle("renamed")),
+        }]
     );
+    rename(first, handle("renamed"), false)
+        .await
+        .expect("a released handle is free");
+    // A reserved handle is listed while an account holds it.
+    let reserved = Handle::parse("piquel").expect("handle");
+    let listed = || async {
+        operations
+            .check_handles()
+            .await
+            .expect("check")
+            .into_iter()
+            .any(|problem| problem.user_id == first)
+    };
+    rename(first, reserved.clone(), true)
+        .await
+        .expect("reserved rename");
+    assert!(listed().await);
+    rename(first, handle("first"), false)
+        .await
+        .expect("reclaim");
+    assert!(!listed().await);
+    operations
+        .release_handle(&cli(), reserved)
+        .await
+        .expect("release");
 }
 
 /// An event a newer release wrote, of a kind this one does not know, is listed

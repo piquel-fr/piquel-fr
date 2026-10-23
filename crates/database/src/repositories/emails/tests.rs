@@ -14,9 +14,8 @@ async fn verified_email_updates_preserve_and_release_ownership() {
     let mut tx = pool.begin().await.expect("transaction");
     let users = [UserId::new(), UserId::new()];
     for user in users {
-        sqlx::query("INSERT INTO users(id,username,display_name) VALUES($1,$2,'Email test')")
+        sqlx::query("INSERT INTO users(id,display_name) VALUES($1,'Email test')")
             .bind(user.as_uuid())
-            .bind(format!("email_{user}"))
             .execute(&mut *tx)
             .await
             .expect("user");

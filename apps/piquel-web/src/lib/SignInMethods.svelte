@@ -1,6 +1,13 @@
 <script lang="ts">
   import { onMount } from 'svelte';
-  import { Passkeys, StepUp, errorMessage, providerName, type Provider } from '@piquel/auth-sdk';
+  import {
+    Handles,
+    Passkeys,
+    StepUp,
+    errorMessage,
+    providerName,
+    type Provider
+  } from '@piquel/auth-sdk';
   import { Account, Task, type Identity, type Passkey } from '$lib/account.svelte';
   const account = Account.current();
   const task = new Task();
@@ -10,9 +17,19 @@
   let editing = $state<string | null>(null);
   let name = $state('');
   let removing = $state<string | null>(null);
-  // Removing a passkey or unlinking a provider needs a recent passkey confirmation.
-  // When the session has none, auth confirms it and sends the user back to finish.
+  const handles = new Handles(account.api);
+  // The new handle while it is being edited, and why it cannot be taken.
+  let handle = $state<string | null>(null);
+  let handleRefusal = $state('');
+  // Changing the handle, removing a passkey or unlinking a provider needs a recent
+  // passkey confirmation. When the session has none, auth confirms it and sends the
+  // user back to finish.
   const stepUp = new StepUp(new Passkeys(account.api), () => account.session?.user.id, {
+    handle: async (value) => {
+      const renamed = await handles.rename(value);
+      if (account.session) account.session.user.handle = renamed.handle;
+      handle = null;
+    },
     remove: async (id) => {
       await account.removePasskey(id);
       passkeys = passkeys.filter((key) => key.id !== id);
@@ -43,6 +60,12 @@
       loading = false;
     }
   }
+  // The current handle needs no check: renaming to it is refused anyway.
+  $effect(() =>
+    handles.watch(handle === account.session?.user.handle ? '' : (handle ?? ''), (refusal) => {
+      handleRefusal = refusal;
+    })
+  );
   function authPage(page: string) {
     return account.page(page, account.config?.settings_url ?? window.location.href);
   }
@@ -77,6 +100,59 @@
 {#if task.error}<p class="notice error" role="alert">{task.error}</p>{/if}
 {#if loading}<p role="status">Loading your sign-in methods…</p>
 {:else}
+  <section class="card" aria-labelledby="handle-heading">
+    <h2 id="handle-heading">Handle</h2>
+    <p class="help">
+      Your public name on Piquel and the name you sign in with. Apps you use see it as your
+      username.
+    </p>
+    {#if handle === null}<div class="row between">
+        <strong>@{account.session?.user.handle}</strong>
+        <button
+          class="text-button"
+          disabled={task.busy}
+          onclick={() => (handle = account.session?.user.handle ?? '')}>Change</button
+        >
+      </div>
+    {:else}<form
+        onsubmit={(event) => {
+          event.preventDefault();
+          void task.run(() => stepUp.run('handle', handle?.trim() ?? ''));
+        }}
+      >
+        <label
+          >New handle<input
+            bind:value={handle}
+            autocapitalize="none"
+            autocomplete="off"
+            spellcheck="false"
+            pattern="[A-Za-z0-9]+(-[A-Za-z0-9]+)*"
+            minlength="3"
+            maxlength="32"
+            required
+          /></label
+        >
+        <small>3–32 lowercase letters, numbers, or single hyphens between them.</small>
+        {#if handleRefusal}<p class="notice error" role="status">{handleRefusal}</p>{/if}
+        <div class="notice stack">
+          <p>
+            <strong>@{account.session?.user.handle} stops working right away.</strong> Links to it, and
+            apps and services that look you up by it, stop finding you.
+          </p>
+          <p>
+            Nobody else can ever take it; you can take it back later. You can change your handle
+            once every 30 days.
+          </p>
+        </div>
+        <div class="row actions">
+          <button disabled={task.busy || !!handleRefusal}>Change handle</button><button
+            class="secondary"
+            type="button"
+            onclick={() => (handle = null)}>Cancel</button
+          >
+        </div>
+      </form>{/if}
+  </section>
   <section class="card" aria-labelledby="passkeys-heading">
     <div class="row between">
       <h2 id="passkeys-heading">Passkeys</h2>

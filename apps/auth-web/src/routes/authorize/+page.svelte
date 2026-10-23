@@ -53,7 +53,7 @@
             {scope === 'openid'
               ? 'Your account identifier'
               : scope === 'profile'
-                ? 'Your username and display name'
+                ? 'Your handle and display name'
                 : scope === 'email'
                   ? 'Your verified email address'
                   : scope === 'offline_access'

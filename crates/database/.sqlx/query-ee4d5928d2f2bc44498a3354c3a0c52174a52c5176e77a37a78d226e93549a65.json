@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO handles (handle, user_id) VALUES ($1, $2)\n                ON CONFLICT (handle) DO UPDATE SET released_at = NULL\n                WHERE handles.user_id = $2 AND handles.released_at IS NOT NULL",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "ee4d5928d2f2bc44498a3354c3a0c52174a52c5176e77a37a78d226e93549a65"
+}

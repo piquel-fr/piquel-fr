@@ -146,7 +146,7 @@ impl TokenGrant<'_> {
             acr: Some(authentication.acr),
         };
         let profile = scopes.release(ProfileClaims {
-            preferred_username: Some(user.username.clone()),
+            preferred_username: Some(user.handle.to_string()),
             name: Some(user.display_name.clone()),
             profile_version: Some(user.profile_version),
             email: email.map(str::to_owned),
