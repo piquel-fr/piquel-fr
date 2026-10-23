@@ -25,17 +25,22 @@ a {
   text-underline-offset: 3px;
 }
 button,
-input {
+input,
+textarea,
+select {
   font: inherit;
 }
 button,
 a,
-input {
+input,
+select {
   touch-action: manipulation;
 }
 button:focus-visible,
 a:focus-visible,
-input:focus-visible {
+input:focus-visible,
+textarea:focus-visible,
+select:focus-visible {
   outline: 3px solid #ab7900;
   outline-offset: 4px;
 }
@@ -81,7 +86,9 @@ button:disabled {
   min-height: 36px;
   font-size: 0.9rem;
 }
-input {
+input,
+textarea,
+select {
   width: 100%;
   min-height: 46px;
   border: 1px solid #a9b8aa;
@@ -95,6 +102,93 @@ label {
   gap: 0.45rem;
   font-size: 0.9rem;
   font-weight: 600;
+}
+textarea {
+  resize: vertical;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.85rem;
+}
+[aria-invalid='true'] {
+  border-color: #a1252b;
+}
+.field-error {
+  color: #86272b;
+  font-size: 0.85rem;
+  margin: -0.5rem 0 0;
+}
+fieldset {
+  display: grid;
+  gap: 0.6rem;
+  border: 0;
+  padding: 0;
+  margin: 0;
+}
+legend {
+  font-size: 0.9rem;
+  font-weight: 600;
+  margin-bottom: 0.6rem;
+}
+/* A checkbox or radio button beside its label and description. */
+.choice {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.6rem;
+  font-weight: 500;
+}
+.choice input {
+  width: auto;
+  min-height: 0;
+  margin: 0.2rem 0 0;
+}
+label small {
+  font-weight: 400;
+}
+.choice small {
+  display: block;
+}
+code,
+pre {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.85rem;
+  overflow-wrap: anywhere;
+}
+pre {
+  margin: 0;
+  padding: 1rem;
+  overflow-x: auto;
+  border-radius: 9px;
+  background: #f1f3ec;
+  line-height: 1.5;
+}
+pre code {
+  overflow-wrap: normal;
+}
+code.block {
+  display: block;
+}
+/* A value with a copy button beside it. */
+.row.code-line {
+  flex-wrap: nowrap;
+  padding: 0.3rem 0 0.3rem 0.7rem;
+  border-radius: 8px;
+  background: #f1f3ec;
+}
+.code-line code {
+  flex: 1;
+  min-width: 0;
+}
+.settings-list {
+  display: grid;
+  gap: 0.9rem;
+  margin: 1rem 0;
+}
+.settings-list dt {
+  font-size: 0.85rem;
+  font-weight: 600;
+  margin-bottom: 0.3rem;
+}
+.settings-list dd {
+  margin: 0;
 }
 form,
 .stack {
@@ -216,6 +310,10 @@ p {
   color: var(--green);
   background: #e9f0e4;
 }
+.badge.warning {
+  color: #7a4b00;
+  background: #fbefd5;
+}
 .list {
   list-style: none;
   padding: 0;
@@ -252,6 +350,18 @@ p {
   color: var(--muted);
   text-decoration: none;
   white-space: nowrap;
+}
+.site-nav {
+  display: flex;
+  gap: 1.2rem;
+}
+.site-nav a {
+  color: var(--muted);
+  text-decoration: none;
+  font-weight: 600;
+}
+.site-nav a[aria-current='page'] {
+  color: var(--green);
 }
 .tabs a[aria-current='page'] {
   border-bottom-color: var(--green);

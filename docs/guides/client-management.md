@@ -1,7 +1,8 @@
 # Managing your own OIDC clients
 
 Any account can register OIDC clients for its own applications through the
-account API on auth. Operators manage first-party clients with
+account API on auth. The developer console, at `piquel.fr/developers`, is its
+frontend. Operators manage first-party clients with
 `auth-service client` instead (see "OIDC clients" in the README), and those
 never appear here.
 

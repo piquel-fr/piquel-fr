@@ -1,7 +1,8 @@
 # piquel.fr
 
 A monorepo for piquel.fr and its services. The first release is a passkey-first
-OIDC/SSO authority at `auth.piquel.fr`, with account settings on `piquel.fr`.
+OIDC/SSO authority at `auth.piquel.fr`, with account settings and a developer console
+on `piquel.fr`.
 
 The authentication service is **one Rust executable** containing its login,
 onboarding, consent and passkey pages. PostgreSQL is its only external data
@@ -209,8 +210,9 @@ userinfo endpoints from a browser. Scopes default to `openid`, `profile` and
 first-party clients only. `--require-par` makes the client push its authorization
 requests (`update --no-require-par` lifts it).
 
-Accounts can also register clients for their own applications, through the
-account API: see [Managing your own OIDC clients](docs/guides/client-management.md).
+Accounts can also register clients for their own applications, in the developer
+console at `piquel.fr/developers`, which calls the account API: see
+[Managing your own OIDC clients](docs/guides/client-management.md).
 Auth generates their IDs and limits their scopes to `openid`, `profile`, `email`
 and `offline_access`; they are never trusted, and an account can have 10 and
 register 20 a day. They never appear in the account API of other accounts, while

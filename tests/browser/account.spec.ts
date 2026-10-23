@@ -1,4 +1,5 @@
 import { expect, test } from '@playwright/test';
+import { addAuthenticator, deployment, pkce, signUp } from './helpers';
 
 // Response shapes this test reads; anything else stays unknown.
 type Tokens = { id_token: string; access_token: string };
@@ -12,57 +13,15 @@ test('passkey lifecycle, passkey confirmation and browser OIDC consent with SSO'
   page,
   context
 }) => {
-  const settingsUrl = process.env.E2E_SETTINGS_URL;
-  if (!settingsUrl)
-    throw new Error(
-      'Set E2E_SETTINGS_URL to the separately served piquel-web frontend, with AUTH_ORIGIN matching E2E_AUTH_URL.'
-    );
-  const authUrl = process.env.E2E_AUTH_URL ?? 'http://localhost:3000';
-  const username = `browser-${Date.now().toString(36)}`;
-  const cdp = await context.newCDPSession(page);
-  await cdp.send('WebAuthn.enable');
-  const { authenticatorId } = await cdp.send('WebAuthn.addVirtualAuthenticator', {
-    options: {
-      protocol: 'ctap2',
-      transport: 'internal',
-      hasResidentKey: true,
-      hasUserVerification: true,
-      isUserVerified: true,
-      automaticPresenceSimulation: true,
-      defaultBackupEligibility: true,
-      defaultBackupState: true
-    }
-  });
+  const { authUrl, settingsUrl } = deployment();
+  const { cdp, authenticatorId } = await addAuthenticator(context, page);
   try {
-    const invitation = process.env.E2E_INVITATION;
-    await page.goto(
-      `/register${invitation ? `?invitation=${encodeURIComponent(invitation)}` : ''}`
-    );
-    await page.getByLabel('Handle', { exact: true }).fill(username);
-    await page.getByLabel('Passkey name', { exact: true }).fill('Synced passkey');
-    await page.getByRole('button', { name: 'Create account with a passkey' }).click();
-    await expect(page).toHaveURL(settingsUrl);
-    await expect(page.getByText(`@${username}`, { exact: true })).toBeVisible();
+    const username = await signUp(page);
 
     const redirectUri = new URL('/callback', settingsUrl).href;
     const atCallback = (url: URL) =>
       url.origin === new URL(redirectUri).origin && url.pathname === '/callback';
-    const oidc = await page.evaluate(async () => {
-      const encode = (bytes: Uint8Array) =>
-        btoa(String.fromCharCode(...bytes))
-          .replace(/\+/g, '-')
-          .replace(/\//g, '_')
-          .replace(/=+$/, '');
-      const verifier = encode(crypto.getRandomValues(new Uint8Array(32)));
-      return {
-        verifier,
-        challenge: encode(
-          new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(verifier)))
-        ),
-        state: crypto.randomUUID(),
-        nonce: crypto.randomUUID()
-      };
-    });
+    const oidc = pkce();
     const authorization = new URL('/oauth/authorize', authUrl);
     authorization.search = new URLSearchParams({
       client_id: 'browser-e2e',

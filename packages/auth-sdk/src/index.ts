@@ -15,11 +15,17 @@ export type Configuration = {
 };
 export const providerName = (provider: Provider) => (provider === 'github' ? 'GitHub' : 'Google');
 
-/** A failed auth request, with a message the page can show as is. */
+/**
+ * A failed auth request, with a message the page can show as is. `code` and `field`
+ * are the account API's machine-readable `code`, such as `invalid_redirect_uri`, and
+ * the setting it rejects, when the answer names them.
+ */
 export class ApiError extends Error {
   constructor(
     message: string,
-    readonly status: number
+    readonly status: number,
+    readonly code: string | null = null,
+    readonly field: string | null = null
   ) {
     super(message);
     this.name = 'ApiError';
@@ -33,7 +39,7 @@ export class StepUpRequired extends ApiError {
     status: number,
     readonly maxAge: number
   ) {
-    super(message, status);
+    super(message, status, 'step_up_required');
     this.name = 'StepUpRequired';
   }
 }
@@ -63,8 +69,9 @@ export class AuthApi {
     // code in `error` and what to fix in `error_description`.
     const error = text('error');
     const description = text('error_description');
+    const code = text('code');
     const maxAge = (problem as Record<string, unknown> | null)?.max_age;
-    if (text('code') === 'step_up_required' && typeof maxAge === 'number')
+    if (code === 'step_up_required' && typeof maxAge === 'number')
       return new StepUpRequired(
         error ?? 'Confirm with your passkey to continue.',
         response.status,
@@ -93,7 +100,9 @@ export class AuthApi {
             (response.status === 401
               ? 'Please sign in again.'
               : 'This action could not be completed. Please try again.')),
-      response.status
+      response.status,
+      code,
+      text('field')
     );
   }
   async form(path: string, body: URLSearchParams): Promise<{ redirect_url: string }> {

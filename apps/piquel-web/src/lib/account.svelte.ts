@@ -38,8 +38,8 @@ const platforms: Record<string, string> = {
 const key = Symbol('account');
 
 /**
- * The account settings API on the auth origin, and the signed-in account. The
- * settings layout loads it and shares it with its pages through `provide`.
+ * The account API on the auth origin, and the signed-in account. `SignedIn` loads it
+ * and shares it with the pages it wraps through `provide`.
  */
 export class Account {
   readonly api: AuthApi;
@@ -53,7 +53,7 @@ export class Account {
   static provide(account: Account): Account {
     return setContext(key, account);
   }
-  /** The account the settings layout provides. */
+  /** The account `SignedIn` provides. */
   static current(): Account {
     return getContext<Account>(key);
   }
