@@ -678,40 +678,50 @@ async fn refresh_failures_end_sessions_only_when_the_token_may_be_spent() {
     }
 }
 
-/// Logout is accepted only from the app's own pages.
+/// Logout is accepted only from the app's own pages: `Sec-Fetch-Site` decides when
+/// sent, and `Origin` only without it. A form on a `no-referrer` page sends
+/// `Origin: null` with `Sec-Fetch-Site: same-origin`.
 #[tokio::test]
 async fn logout_refuses_other_origins() {
-    let backend = MemoryBackend::default();
     let issuer = issuer_with_token_endpoint("http://127.0.0.1:9/token".parse().expect("URL"));
-    let (app, _) = login_app(&issuer, &backend);
-    let login = stored_login(
-        "01936f3e-8c00-7000-8000-000000000001",
-        SessionId::new(),
-        300,
+    let (own, sibling) = (
+        Some("https://notes.example.com"),
+        Some("https://evil.notes.example.com"),
     );
-    let (key, cookie) = session(&backend, &login).await;
-    let logout = |origin: Option<&'static str>| {
-        let (app, cookie) = (app.clone(), cookie.clone());
-        async move {
-            let mut request = Request::post("/auth/logout").header(header::COOKIE, cookie);
-            if let Some(origin) = origin {
-                request = request.header(header::ORIGIN, origin);
-            }
-            app.oneshot(request.body(Body::empty()).expect("request"))
-                .await
-                .expect("response")
-                .status()
+    for (fetch_site, origin, expected) in [
+        (Some("same-origin"), Some("null"), StatusCode::SEE_OTHER),
+        (Some("same-origin"), None, StatusCode::SEE_OTHER),
+        (None, own, StatusCode::SEE_OTHER),
+        (Some("same-site"), own, StatusCode::FORBIDDEN),
+        (Some("cross-site"), own, StatusCode::FORBIDDEN),
+        (None, Some("null"), StatusCode::FORBIDDEN),
+        (None, None, StatusCode::FORBIDDEN),
+        (None, sibling, StatusCode::FORBIDDEN),
+    ] {
+        let backend = MemoryBackend::default();
+        let (app, _) = login_app(&issuer, &backend);
+        let login = stored_login(
+            "01936f3e-8c00-7000-8000-000000000001",
+            SessionId::new(),
+            300,
+        );
+        let (key, cookie) = session(&backend, &login).await;
+        let mut request = Request::post("/auth/logout").header(header::COOKIE, cookie);
+        if let Some(fetch_site) = fetch_site {
+            request = request.header("sec-fetch-site", fetch_site);
         }
-    };
-    for origin in [Some("https://evil.notes.example.com"), None] {
-        assert_eq!(logout(origin).await, StatusCode::FORBIDDEN, "{origin:?}");
-        assert!(load(&backend, &key).await.is_some());
+        if let Some(origin) = origin {
+            request = request.header(header::ORIGIN, origin);
+        }
+        let response = app
+            .oneshot(request.body(Body::empty()).expect("request"))
+            .await
+            .expect("response");
+        let case = format!("{fetch_site:?} {origin:?}");
+        assert_eq!(response.status(), expected, "{case}");
+        let signed_out = expected == StatusCode::SEE_OTHER;
+        assert_eq!(load(&backend, &key).await.is_none(), signed_out, "{case}");
     }
-    assert_eq!(
-        logout(Some("https://notes.example.com")).await,
-        StatusCode::SEE_OTHER
-    );
-    assert!(load(&backend, &key).await.is_none());
 }
 
 /// Signs `claims` as auth signs logout tokens, with the vectors' `key-2025`.

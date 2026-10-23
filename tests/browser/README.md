@@ -32,8 +32,9 @@ manual check with actual providers/devices; this suite does not claim to verify
 those external systems.
 
 `admin.spec.ts` checks the admin dashboard against a deployment that has one,
-such as a preview: a non-administrator sees no admin data, and an administrator
-disables an account, whose settings page then loses its session. Set
+such as a preview: a non-administrator sees no admin data, an administrator
+disables an account, whose settings page then loses its session, and the
+administrator signs out of the dashboard. Set
 `E2E_ADMIN_URL` to the dashboard's origin and `E2E_GRANT_ADMIN` to a command that
 grants administrator rights to the username appended to it, e.g.
 `just auth admin grant` with the deployment's configuration. Without them, the test

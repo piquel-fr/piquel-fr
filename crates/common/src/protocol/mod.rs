@@ -51,6 +51,8 @@ pub mod jwt;
 pub mod metadata;
 /// OAuth and OpenID Connect vocabulary shared by clients and the provider.
 pub mod oauth;
+/// Whether a browser request comes from a site's own pages.
+pub mod same_origin;
 /// Error codes shared by the SDKs and their test vectors.
 pub mod sdk;
 /// What a protected operation needs from the user's authentication (RFC 9470).
