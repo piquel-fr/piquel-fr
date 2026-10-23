@@ -45,6 +45,6 @@ pub use repositories::{
         InsertRefreshFamily, InsertRefreshToken, RefreshRotationError, RevokedFamily,
         RotatedRefreshToken,
     },
-    users::{InsertUser, StoredUser},
+    users::{AccountName, InsertUser, StoredUser},
 };
 pub use transaction::DatabaseTransaction;

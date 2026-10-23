@@ -7,10 +7,6 @@ use webauthn_rs::prelude::{PublicKeyCredential, RegisterPublicKeyCredential};
 
 /// Maximum Unicode characters in display names and credential labels.
 const MAX_NAME_CHARS: usize = 80;
-/// Smallest supported ASCII username.
-const MIN_USERNAME_LEN: usize = 3;
-/// Largest supported ASCII username.
-const MAX_USERNAME_LEN: usize = 32;
 /// Friendly name used when the browser omits a credential label.
 const DEFAULT_PASSKEY_NAME: &str = "Passkey";
 
@@ -57,14 +53,6 @@ macro_rules! validated_name {
 }
 
 validated_name! {
-    /// An account username: 3 to 32 lower-case ASCII letters, digits, `_` or `-`.
-    Username, InvalidUsername, |value: &str| {
-        (MIN_USERNAME_LEN..=MAX_USERNAME_LEN).contains(&value.len())
-            && value.bytes().all(|byte| byte.is_ascii_lowercase()
-                || byte.is_ascii_digit() || matches!(byte, b'_' | b'-'))
-    }
-}
-validated_name! {
     /// A display name: not blank, no control characters, at most `MAX_NAME_CHARS` characters.
     DisplayName, InvalidDisplayName, |value: &str| {
         !value.trim().is_empty()
@@ -107,9 +95,9 @@ pub(super) struct RegistrationStart {
     /// Requested authenticator selection.
     #[serde(default)]
     pub(super) passkey_kind: PasskeyKind,
-    /// Account username, validated before starting `WebAuthn`.
+    /// Account handle, validated before starting `WebAuthn`.
     pub(super) username: String,
-    /// Account display name; an empty value defaults to the username.
+    /// Account display name; an empty value defaults to the handle.
     #[serde(default)]
     pub(super) display_name: String,
     /// Invitation secret, required only when admission is gated.

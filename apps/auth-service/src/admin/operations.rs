@@ -1,13 +1,13 @@
 //! Every administrative operation, shared by the admin API and the CLI.
 
-use super::{AdminError, InviteExpiry, Operator, Reason};
+use super::{AdminError, HandleIssue, HandleProblem, InviteExpiry, Operator, Reason};
 use chrono::Utc;
 use piquel_admin_api::{
     Administrator, Client, CreatedInvitation, Event, EventPage, EventSearch, Invitation,
     UserDetail, UserPage,
 };
 use piquel_common::{
-    AccountStatus, Personal, SessionId, TokenId, UserId,
+    AccountStatus, Handle, Personal, SessionId, TokenId, UserId,
     config::Origin,
     events::{DomainEvent, RevocationReason},
 };
@@ -15,6 +15,7 @@ use piquel_crypto::Secret;
 use piquel_repository::{
     Database, DatabaseError, DatabaseTransaction, EventFilter, SessionScope, StoredUser,
 };
+use std::collections::BTreeMap;
 
 /// Accounts per search page.
 const USER_PAGE_SIZE: u16 = 50;
@@ -376,6 +377,105 @@ impl AdminOperations {
             })
             .collect::<Result<_, serde_json::Error>>()?;
         Ok(EventPage { events, next })
+    }
+
+    /// Lists the accounts whose login name the handle rules refuse, by name: it
+    /// breaks the syntax, is reserved, or shares its skeleton with another account's.
+    /// Reserved names an operator assigned on purpose are listed too.
+    ///
+    /// # Errors
+    /// Fails when the query fails.
+    pub async fn check_handles(&self) -> Result<Vec<HandleProblem>, AdminError> {
+        let names: Vec<_> = self
+            .database
+            .users()
+            .list_names()
+            .await?
+            .into_iter()
+            .map(|name| {
+                let handle = name.username.parse::<Handle>();
+                (name, handle)
+            })
+            .collect();
+        let mut skeletons = BTreeMap::<String, Vec<&str>>::new();
+        for (name, handle) in &names {
+            if let Ok(handle) = handle {
+                skeletons
+                    .entry(handle.skeleton())
+                    .or_default()
+                    .push(&name.username);
+            }
+        }
+        Ok(names
+            .iter()
+            .filter_map(|(name, handle)| {
+                let issue = match handle.clone().and_then(|handle| {
+                    handle.ensure_unreserved()?;
+                    Ok(handle)
+                }) {
+                    Err(error) => HandleIssue::Refused(error),
+                    Ok(handle) => {
+                        let others: Vec<String> = skeletons[&handle.skeleton()]
+                            .iter()
+                            .filter(|other| **other != name.username)
+                            .map(|other| (*other).to_owned())
+                            .collect();
+                        if others.is_empty() {
+                            return None;
+                        }
+                        HandleIssue::LooksLike(others)
+                    }
+                };
+                Some(HandleProblem {
+                    user_id: name.id,
+                    username: name.username.clone(),
+                    issue,
+                })
+            })
+            .collect())
+    }
+
+    /// Gives the account `user_id` the handle `handle`, unless another account has
+    /// it. Reserved names are refused unless `allow_reserved`. The account's profile
+    /// version is bumped, so relying parties refresh `preferred_username`.
+    ///
+    /// Look-alikes are not checked here: only the next release's `handles` table can
+    /// enforce them atomically, and with an index. [`Self::check_handles`] lists
+    /// them, and that release's migration refuses to run while any remain.
+    ///
+    /// # Errors
+    /// Fails when the account is unknown or already has the handle, or the handle is
+    /// reserved or taken.
+    pub async fn rename_handle(
+        &self,
+        operator: &Operator,
+        user_id: UserId,
+        handle: Handle,
+        allow_reserved: bool,
+    ) -> Result<(), AdminError> {
+        if !allow_reserved {
+            handle.ensure_unreserved()?;
+        }
+        let mut tx = self.database.begin().await?;
+        let user = Self::lock_target(&mut tx, operator, user_id).await?;
+        if user.username == handle.as_str() {
+            return Err(AdminError::SameHandle);
+        }
+        tx.users()
+            .rename(user_id, &handle)
+            .await
+            .map_err(|error| match error {
+                DatabaseError::Conflict(_) => AdminError::HandleTaken(error),
+                DatabaseError::NotFound
+                | DatabaseError::Timeout(_)
+                | DatabaseError::InvalidStoredData { .. }
+                | DatabaseError::Operation(_) => error.into(),
+            })?;
+        let changed = DomainEvent::HandleChanged {
+            old: Personal::Value(user.username),
+            new: Personal::Value(handle),
+        };
+        Self::finish(tx, operator, Some(user_id), vec![changed]).await
     }
 
     /// Lists every administrator, oldest grant first.

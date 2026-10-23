@@ -14,7 +14,7 @@ use axum::{
     http::{Method, Request, StatusCode, header},
 };
 use piquel_common::{
-    AuthenticationMethod, SessionId, UserId,
+    AuthenticationMethod, Handle, SessionId, UserId,
     clients::{
         AllowedScopes, ClientKind, ClientRegistration, PostLogoutUris, RedirectUris, ScopeName,
     },
@@ -124,7 +124,8 @@ impl Browser {
             .users()
             .insert(&InsertUser {
                 id: user_id,
-                username: format!("browser_{}", &user_id.to_string()[24..]),
+                handle: Handle::parse(&format!("browser-{}", &user_id.to_string()[24..]))
+                    .expect("handle"),
                 display_name: "Browser test".into(),
             })
             .await

@@ -17,6 +17,8 @@ pub mod config;
 /// Typed domain events: what changed in an account, and who changed it.
 #[cfg(feature = "events")]
 pub mod events;
+/// Handles: an account's public identifier and login name.
+pub mod handle;
 /// The auth protocol's wire documents, shared by auth and the SDKs.
 pub mod protocol;
 
@@ -26,6 +28,7 @@ use thiserror::Error;
 use uuid::Uuid;
 
 pub use clients::ClientId;
+pub use handle::{Handle, HandleError};
 
 /// Formats an error followed by each of its causes, e.g.
 /// `AUTH_PUBLIC_BASE_URL is invalid: must use https://`.

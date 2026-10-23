@@ -16,7 +16,7 @@ use axum::{
 use chrono::{Duration, Utc};
 use ipnet::IpNet;
 use piquel_common::{
-    AuthenticationMethod, ClientId, ErrorChain, SessionId, UserId,
+    AuthenticationMethod, ClientId, ErrorChain, HandleError, SessionId, UserId,
     events::{
         Actor, DomainEvent, EventContext, RequestOrigin, RevocationReason, SignInFailure,
         UserAgentFamily,
@@ -114,6 +114,12 @@ impl ApiError {
         Self::new(StatusCode::CONFLICT, message)
     }
 
+    /// Adds the machine-readable `code` a frontend reacts to.
+    pub(crate) const fn with_code(mut self, code: ErrorCode) -> Self {
+        self.code = Some(code);
+        self
+    }
+
     /// Logs an internal source chain and returns a generic browser message.
     pub(crate) fn internal(error: impl std::error::Error) -> Self {
         Self::log_error(&error);
@@ -136,6 +142,17 @@ impl From<DatabaseError> for ApiError {
             | DatabaseError::InvalidStoredData { .. }
             | DatabaseError::Operation(_)) => Self::internal(error),
         }
+    }
+}
+
+impl From<HandleError> for ApiError {
+    /// Says how to fix a refused handle, with `handle_invalid` or `handle_reserved`.
+    fn from(error: HandleError) -> Self {
+        let code = match error {
+            HandleError::Length | HandleError::Charset => ErrorCode::HandleInvalid,
+            HandleError::Reserved(_) => ErrorCode::HandleReserved,
+        };
+        Self::bad_request(format!("Choose another handle: {error}.")).with_code(code)
     }
 }
 

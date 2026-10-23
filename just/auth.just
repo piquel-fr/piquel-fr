@@ -29,6 +29,11 @@ deliveries *ARGS:
 admin *ARGS:
     @just auth run admin "$@"
 
+# Check or rename handles, e.g. `just auth handle check`.
+[positional-arguments]
+handle *ARGS:
+    @just auth run handle "$@"
+
 # Write a new RSA signing key; refuses to overwrite an existing file.
 generate-key PATH:
     #!/usr/bin/env bash

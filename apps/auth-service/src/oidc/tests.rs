@@ -10,7 +10,7 @@ use axum::{
 };
 use chrono::Utc;
 use piquel_common::{
-    AuthenticationMethod, UserId,
+    AuthenticationMethod, Handle, UserId,
     clients::{AllowedScopes, ClientKind, ClientRegistration, ScopeName},
     events::{DomainEvent, GrantRevocation, RevocationReason},
     protocol::{
@@ -67,7 +67,8 @@ impl Flow {
         tx.users()
             .insert(&InsertUser {
                 id: user_id,
-                username: format!("oidc_{}", &user_id.to_string()[24..]),
+                handle: Handle::parse(&format!("oidc-{}", &user_id.to_string()[24..]))
+                    .expect("handle"),
                 display_name: "OIDC Test".into(),
             })
             .await

@@ -9,7 +9,7 @@ use axum::{
 use chrono::{Duration, Utc};
 use piquel_admin_api::{AUDIENCE, paths};
 use piquel_common::{
-    AccountStatus, AuthenticationMethod, Personal,
+    AccountStatus, AuthenticationMethod, Handle, HandleError, Personal,
     config::Origin,
     events::{DomainEvent, RevocationReason},
     protocol::{
@@ -76,18 +76,26 @@ impl Harness {
         }
     }
 
-    /// Creates an account signed in with a passkey.
-    async fn account(&self) -> Account {
+    /// Creates an account with the handle `handle`, without a session.
+    async fn named(&self, handle: &str) -> UserId {
         let user_id = UserId::new();
-        let mut tx = self.database.begin().await.expect("transaction");
-        tx.users()
+        self.database
+            .users()
             .insert(&InsertUser {
                 id: user_id,
-                username: format!("admin_{}", &user_id.to_string()[24..]),
+                handle: Handle::parse(handle).expect("handle"),
                 display_name: "Admin test".into(),
             })
             .await
             .expect("user");
+        user_id
+    }
+
+    /// Creates an account signed in with a passkey.
+    async fn account(&self) -> Account {
+        let suffix = TokenId::new().to_string();
+        let user_id = self.named(&format!("admin-{}", &suffix[24..])).await;
+        let mut tx = self.database.begin().await.expect("transaction");
         let secret = Session::create(
             &mut tx,
             RequestContext::TEST,
@@ -415,6 +423,87 @@ async fn disabling_ends_sessions_and_is_recorded() {
     assert_eq!(
         page["events"][0]["event"]["data"]["reason"],
         json!({"$personal": "Spam"})
+    );
+}
+
+/// `handle check` lists look-alike handles. Renaming one away fixes it, bumps the
+/// profile version and is recorded; taken, reserved and unchanged handles are
+/// refused.
+#[tokio::test]
+#[ignore = "requires TEST_DATABASE_URL"]
+async fn handles_are_checked_and_renamed() {
+    let harness = Harness::new().await;
+    let operations = harness.operations();
+    let suffix = &TokenId::new().to_string()[24..];
+    let original = harness.named(&format!("look-{suffix}")).await;
+    let lookalike = harness.named(&format!("l0ok-{suffix}")).await;
+    let problems = |problems: Vec<HandleProblem>| {
+        problems
+            .into_iter()
+            .filter(|problem| [original, lookalike].contains(&problem.user_id))
+            .map(|problem| (problem.username, problem.issue))
+            .collect::<Vec<_>>()
+    };
+    assert_eq!(
+        problems(operations.check_handles().await.expect("check")),
+        [
+            (
+                format!("l0ok-{suffix}"),
+                HandleIssue::LooksLike(vec![format!("look-{suffix}")])
+            ),
+            (
+                format!("look-{suffix}"),
+                HandleIssue::LooksLike(vec![format!("l0ok-{suffix}")])
+            ),
+        ]
+    );
+    let rename = |handle: String, allow_reserved| {
+        let operations = operations.clone();
+        async move {
+            operations
+                .rename_handle(
+                    &cli(),
+                    lookalike,
+                    Handle::parse(&handle).expect("handle"),
+                    allow_reserved,
+                )
+                .await
+        }
+    };
+    assert!(matches!(
+        rename(format!("look-{suffix}"), false).await,
+        Err(AdminError::HandleTaken(_))
+    ));
+    assert!(matches!(
+        rename("admin".into(), false).await,
+        Err(AdminError::InvalidHandle(HandleError::Reserved(_)))
+    ));
+    assert!(matches!(
+        rename(format!("l0ok-{suffix}"), false).await,
+        Err(AdminError::SameHandle)
+    ));
+    rename(format!("renamed-{suffix}"), false)
+        .await
+        .expect("rename");
+    let renamed = harness
+        .database
+        .users()
+        .find_by_id(lookalike)
+        .await
+        .expect("lookup")
+        .expect("user");
+    assert_eq!(renamed.username, format!("renamed-{suffix}"));
+    assert_eq!(renamed.profile_version, 2);
+    assert_eq!(
+        harness.events(lookalike).await[..1],
+        [DomainEvent::HandleChanged {
+            old: Personal::Value(format!("l0ok-{suffix}")),
+            new: Personal::Value(Handle::parse(&format!("renamed-{suffix}")).expect("handle")),
+        }]
+    );
+    assert_eq!(
+        problems(operations.check_handles().await.expect("check")),
+        []
     );
 }
 

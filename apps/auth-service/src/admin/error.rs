@@ -5,9 +5,13 @@ use axum::{
     http::{HeaderValue, header},
     response::{IntoResponse, Response},
 };
-use piquel_common::protocol::{
-    challenge::{BearerChallenge, BearerError},
-    step_up::StepUpRequirement,
+use piquel_common::{
+    HandleError,
+    protocol::{
+        api::ErrorCode,
+        challenge::{BearerChallenge, BearerError},
+        step_up::StepUpRequirement,
+    },
 };
 use piquel_crypto::CryptoError;
 use piquel_repository::DatabaseError;
@@ -83,6 +87,15 @@ pub enum AdminError {
     /// The last administrator's rights cannot be revoked.
     #[error("the last administrator's rights cannot be revoked")]
     LastAdministrator,
+    /// The new handle breaks the handle rules, or is reserved.
+    #[error(transparent)]
+    InvalidHandle(#[from] HandleError),
+    /// The account already has this handle.
+    #[error("the account already has this handle")]
+    SameHandle,
+    /// Another account has this handle.
+    #[error("another account has this handle")]
+    HandleTaken(#[source] DatabaseError),
     /// Persistence failed.
     #[error(transparent)]
     Database(#[from] DatabaseError),
@@ -122,6 +135,9 @@ impl AdminError {
             Self::NotAnAdministrator => "not_an_administrator",
             Self::OwnRights => "own_rights",
             Self::LastAdministrator => "last_administrator",
+            Self::InvalidHandle(_) => "invalid_handle",
+            Self::SameHandle => "same_handle",
+            Self::HandleTaken(_) => "handle_taken",
             Self::Database(_) => "database",
             Self::Crypto(_) => "crypto",
             Self::Event(_) => "event",
@@ -156,6 +172,9 @@ impl AdminError {
             | Self::NotAnAdministrator
             | Self::OwnRights
             | Self::LastAdministrator
+            | Self::InvalidHandle(_)
+            | Self::SameHandle
+            | Self::HandleTaken(_)
             | Self::Database(_)
             | Self::Crypto(_)
             | Self::Event(_) => None,
@@ -171,6 +190,7 @@ impl From<AdminError> for ApiError {
             AdminError::MalformedAuthorization
             | AdminError::InvalidReason
             | AdminError::InvalidInviteExpiry(_) => Self::bad_request(message),
+            AdminError::InvalidHandle(error) => error.into(),
             AdminError::MissingToken
             | AdminError::InvalidToken(_)
             | AdminError::WrongToken
@@ -189,7 +209,9 @@ impl From<AdminError> for ApiError {
             | AdminError::EmailClaimed(_)
             | AdminError::AccountDisabled
             | AdminError::AlreadyAdministrator
-            | AdminError::NotAnAdministrator => Self::conflict(message),
+            | AdminError::NotAnAdministrator
+            | AdminError::SameHandle => Self::conflict(message),
+            AdminError::HandleTaken(_) => Self::conflict(message).with_code(ErrorCode::HandleTaken),
             AdminError::Database(error) => error.into(),
             error @ (AdminError::Crypto(_) | AdminError::Event(_)) => Self::internal(error),
         }

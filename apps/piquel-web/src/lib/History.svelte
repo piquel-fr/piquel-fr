@@ -30,6 +30,7 @@
           | 'account.disabled'
           | 'account.enabled'
           | 'account.viewed'
+          | 'account.handle_changed'
           | 'administrator.granted'
           | 'administrator.revoked';
       }
@@ -216,6 +217,8 @@
         return 'Account re-enabled';
       case 'account.viewed':
         return 'Account details viewed';
+      case 'account.handle_changed':
+        return 'Handle changed';
       case 'administrator.granted':
         return 'Administrator rights granted';
       case 'administrator.revoked':

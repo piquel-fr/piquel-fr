@@ -1,7 +1,7 @@
 //! Persistence guarantees behind invitations and session passkey confirmations.
 use chrono::{Duration, Utc};
 use piquel_common::{
-    AuthenticationMethod, SessionId, TokenId, UserId,
+    AuthenticationMethod, Handle, SessionId, TokenId, UserId,
     events::{Browser, Platform, UserAgentFamily},
 };
 use piquel_repository::{
@@ -54,7 +54,7 @@ async fn invitation_redemption_and_confirmation_lifecycle() {
     db.users()
         .insert(&InsertUser {
             id: user,
-            username: format!("test_{user}"),
+            handle: Handle::parse(&format!("test-{}", &user.to_string()[24..])).expect("handle"),
             display_name: "Security test".into(),
         })
         .await

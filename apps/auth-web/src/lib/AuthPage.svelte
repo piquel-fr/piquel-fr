@@ -238,19 +238,19 @@
         >
           {#if registration || fallback}
             <label
-              >Username<input
+              >Handle<input
                 bind:value={username}
                 autocomplete="username webauthn"
                 autocapitalize="none"
                 spellcheck="false"
-                pattern={'[a-z0-9_\\-]{3,32}'}
+                pattern={registration ? '[a-z0-9]+(-[a-z0-9]+)*' : undefined}
                 minlength="3"
                 maxlength="32"
                 required={registration || fallback}
               /></label
             >
             {#if registration}<small
-                >3–32 lowercase letters, numbers, underscores, or hyphens.</small
+                >3–32 lowercase letters, numbers, or single hyphens between them.</small
               >{/if}
           {/if}
           {#if registration || mode === 'enroll'}<label
@@ -295,7 +295,7 @@
         {#if !registration && !fallback && !session}<button
             class="text-button"
             disabled={busy}
-            onclick={() => (fallback = true)}>Use a username instead</button
+            onclick={() => (fallback = true)}>Use a handle instead</button
           >{/if}
       {:else}<p class="notice">
           Passkeys need a supported browser and a secure connection. Open this page in Safari,

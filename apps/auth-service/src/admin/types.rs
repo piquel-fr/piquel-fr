@@ -2,8 +2,31 @@
 
 use super::AdminError;
 use chrono::Duration;
+use piquel_common::{HandleError, UserId};
 use std::{fmt, str::FromStr};
 use thiserror::Error;
+
+/// An account whose login name the handle rules refuse, as `handle check` lists it.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct HandleProblem {
+    /// The account.
+    pub user_id: UserId,
+    /// Its current login name.
+    pub username: String,
+    /// What is wrong with it.
+    pub issue: HandleIssue,
+}
+
+/// Why a login name is not an acceptable handle.
+#[derive(Clone, Debug, PartialEq, Eq, Error)]
+pub enum HandleIssue {
+    /// It breaks the syntax, or is reserved.
+    #[error(transparent)]
+    Refused(#[from] HandleError),
+    /// It shares its skeleton with these other accounts' names.
+    #[error("looks like {}", .0.join(", "))]
+    LooksLike(Vec<String>),
+}
 
 /// Maximum Unicode characters in an administrator's reason.
 const MAX_REASON_CHARS: usize = 500;
