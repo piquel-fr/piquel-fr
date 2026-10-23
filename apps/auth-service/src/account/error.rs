@@ -8,8 +8,8 @@ use piquel_repository::DatabaseError;
 /// settings, the admin API, the CLI or the purge job.
 #[derive(Debug, thiserror::Error)]
 pub enum AccountError {
-    /// The username typed to confirm a deletion is not the account's.
-    #[error("the username does not match the account")]
+    /// The handle typed to confirm a deletion is not the account's.
+    #[error("the handle does not match the account")]
     UsernameMismatch,
     /// Deleting the last active administrator would leave nobody to administer.
     #[error(
@@ -45,7 +45,7 @@ impl From<AccountError> for ApiError {
     fn from(error: AccountError) -> Self {
         match error {
             AccountError::UsernameMismatch => {
-                Self::bad_request("Type your username exactly as shown to confirm.")
+                Self::bad_request("Type your handle exactly as shown to confirm.")
             }
             AccountError::RestoreExpired => Self::bad_request(
                 "This restore request has expired. Sign in with your passkey again to restore your account.",

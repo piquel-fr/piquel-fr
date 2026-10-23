@@ -165,10 +165,11 @@ impl AccountDeletionRepository<'_> {
     /// Deletes, in order: the personal data of every event the account is the
     /// subject or actor of, so those events read it as erased; the grants,
     /// consents, sessions and administrator rights that reference the account
-    /// without cascading; then the account, which cascades to its emails,
-    /// passkeys, identities, ceremonies, legacy audit rows and scheduled deletion.
-    /// Callers delete the clients it manages first. The events themselves stay:
-    /// they hold only pseudonymous IDs.
+    /// without cascading, and its email deliveries; then the account, which
+    /// cascades to its emails, passkeys, identities, ceremonies, legacy audit rows
+    /// and scheduled deletion. Callers end its sessions, which queues their
+    /// clients' logout tokens, and delete the clients it manages first. The events
+    /// themselves stay: they hold only pseudonymous IDs.
     ///
     /// # Errors
     ///
@@ -185,7 +186,8 @@ impl AccountDeletionRepository<'_> {
             "INSERT INTO retired_usernames (username)
             SELECT username FROM users WHERE id = $1
             ON CONFLICT DO NOTHING",
-            // Users and administrators act as `{"type": …, "user_id": …}`.
+            // Users and administrators act as `{"type": …, "user_id": …}`. Events
+            // recorded after this keep none, as migration 0015's trigger ensures.
             "DELETE FROM event_personal_data p
             USING domain_events e
             WHERE p.event_id = e.id
@@ -198,6 +200,9 @@ impl AccountDeletionRepository<'_> {
             // Cascades to cookie digests, ceremonies and provider redirects.
             "DELETE FROM sessions WHERE user_id = $1",
             "DELETE FROM administrators WHERE user_id = $1",
+            // Notices to removed or replaced addresses copy them; the account's
+            // other channels' deliveries hold no personal data.
+            "DELETE FROM deliveries WHERE channel = 'email' AND recipient = to_jsonb($1::uuid::text)",
         );
         Ok(run!(
             self,

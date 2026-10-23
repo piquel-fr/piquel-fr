@@ -378,7 +378,10 @@ impl<'a, 't> ClientRegistry<'a, 't> {
     /// fails.
     pub async fn delete(&mut self, id: &ClientId) -> Result<(), ClientRegistryError> {
         // Families before the client, in the order a refresh rotation locks them.
-        self.tx.tokens().lock_client_families(id).await?;
+        self.tx
+            .tokens()
+            .lock_client_families(std::slice::from_ref(id))
+            .await?;
         self.locked(id).await?;
         self.tx
             .oidc()

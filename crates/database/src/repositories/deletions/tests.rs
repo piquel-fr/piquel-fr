@@ -3,7 +3,7 @@ use super::*;
 use crate::{Database, DatabaseTransaction, EventRepository};
 use chrono::Duration;
 use piquel_common::{
-    Personal, Provider, SessionId, TokenId,
+    AccountStatus, Personal, Provider, SessionId, TokenId,
     events::{Actor, Browser, DomainEvent, EventContext, Platform, RequestOrigin, UserAgentFamily},
 };
 use sqlx::PgPool;
@@ -125,6 +125,23 @@ async fn restore_tokens_expire_and_end_with_the_deletion() {
         None,
         "an account that is not scheduled gets no token"
     );
+
+    // Leaving 'deleting' any other way, as the previous release's enable and
+    // disable do, ends the schedule too.
+    let mut users = crate::UserRepository::from_pool(&pool);
+    users
+        .set_status(user, AccountStatus::Deleting)
+        .await
+        .expect("deleting");
+    deletions
+        .schedule(user, purge_after)
+        .await
+        .expect("schedule again");
+    users
+        .set_status(user, AccountStatus::Disabled)
+        .await
+        .expect("disable");
+    assert_eq!(deletions.find(user).await.expect("find"), None);
 }
 
 /// After a purge no row of any table references the account through a foreign
@@ -182,7 +199,12 @@ async fn purge_leaves_nothing_that_references_or_identifies_the_account() {
             id, user_id, client_id, session_id, audience, scopes, authentication, authorization_code_id
         ) VALUES ('{family}', '{user}', '{client}', '{session}', 'test', '[]', '{{}}', '{code}');
         INSERT INTO refresh_tokens (id, family_id, secret_digest, expires_at)
-        VALUES (uuidv7(), '{family}', uuid_send('{family}'), now() + interval '1 day');"
+        VALUES (uuidv7(), '{family}', uuid_send('{family}'), now() + interval '1 day');
+        INSERT INTO deliveries (id, channel, destination, recipient, payload, status) VALUES
+            (uuidv7(), 'email', 'account', to_jsonb('{user}'::text),
+                '{{\"type\": \"address_removed\", \"address\": \"{client}@example.com\"}}', 'succeeded'),
+            (uuidv7(), 'backchannel_logout', 'https://client.example/logout', to_jsonb('{user}'::text),
+                '{{}}', 'pending');"
     ))
     .execute(&pool)
     .await
@@ -329,6 +351,16 @@ async fn purge_leaves_nothing_that_references_or_identifies_the_account() {
         .await
         .expect("history");
     assert_eq!(latest[0].origin, Personal::Erased);
+
+    // Its email deliveries copied its addresses; a logout token still goes out.
+    let channels: Vec<String> = sqlx::query_scalar(
+        "SELECT channel FROM deliveries WHERE recipient = to_jsonb($1::text) ORDER BY channel",
+    )
+    .bind(user.to_string())
+    .fetch_all(&pool)
+    .await
+    .expect("deliveries");
+    assert_eq!(channels, ["backchannel_logout"]);
 
     let retired: bool =
         sqlx::query_scalar("SELECT EXISTS (SELECT FROM retired_usernames WHERE username = $1)")

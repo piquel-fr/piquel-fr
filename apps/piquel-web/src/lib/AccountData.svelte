@@ -4,7 +4,7 @@
   import { Account, Task } from '$lib/account.svelte';
   const account = Account.current();
   const task = new Task();
-  // The danger zone's username confirmation, while open.
+  // The danger zone's handle confirmation, while open.
   let deleting = $state(false);
   let confirmation = $state('');
   // Downloading the account's data and deleting it need a recent passkey
@@ -64,7 +64,7 @@
       }}
     >
       <label
-        ><span>Type your username, <strong>{username}</strong>, to confirm</span><input
+        ><span>Type your handle, <strong>{username}</strong>, to confirm</span><input
           bind:value={confirmation}
           autocomplete="off"
           autocapitalize="none"

@@ -886,19 +886,6 @@ impl Actor {
         }
     }
 
-    /// The account acting, if any: a user's or an administrator's.
-    #[must_use]
-    pub const fn user_id(&self) -> Option<UserId> {
-        match self {
-            Self::User { user_id, .. } | Self::Admin { user_id, .. } => Some(*user_id),
-            Self::Cli { .. }
-            | Self::Client { .. }
-            | Self::System { .. }
-            | Self::Anonymous
-            | Self::Unrecorded => None,
-        }
-    }
-
     /// The session acting, if any.
     #[must_use]
     pub const fn session_id(&self) -> Option<SessionId> {

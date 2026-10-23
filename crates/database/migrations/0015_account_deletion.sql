@@ -38,8 +38,12 @@ CREATE TABLE retired_usernames (
 -- name in one transaction. A signup for that name first waits on the account's
 -- row: once the purge commits, the row is gone and the next statement, which reads
 -- a fresh snapshot, sees the retired name.
-CREATE FUNCTION reject_retired_username() RETURNS TRIGGER LANGUAGE plpgsql
-SET search_path = pg_catalog, public, pg_temp AS $$
+--
+-- It runs as its owner: `migrate` grants the runtime role retired_usernames only
+-- after the migrations, and the previous release keeps signing up meanwhile. No
+-- one else may execute it, as migration 0013 explains; the trigger still fires.
+CREATE FUNCTION reject_retired_username() RETURNS TRIGGER
+LANGUAGE plpgsql SECURITY DEFINER SET search_path = pg_catalog, public, pg_temp AS $$
 BEGIN
     PERFORM 1 FROM users WHERE username = NEW.username AND id <> NEW.id FOR KEY SHARE;
     IF EXISTS (SELECT 1 FROM retired_usernames WHERE username = NEW.username) THEN
@@ -47,9 +51,51 @@ BEGIN
     END IF;
     RETURN NEW;
 END $$;
+REVOKE ALL ON FUNCTION reject_retired_username() FROM PUBLIC;
 CREATE TRIGGER users_reject_retired_username
     BEFORE INSERT OR UPDATE OF username ON users
     FOR EACH ROW EXECUTE FUNCTION reject_retired_username();
+
+-- An account that stops being 'deleting' is no longer scheduled, however it left:
+-- restored, or enabled or disabled by the previous release, which does not know
+-- the schedule. Otherwise the purge would skip it forever, and it could never be
+-- scheduled again.
+CREATE FUNCTION end_account_deletion() RETURNS TRIGGER
+LANGUAGE plpgsql SET search_path = pg_catalog, public, pg_temp AS $$
+BEGIN
+    DELETE FROM account_deletions WHERE user_id = NEW.id;
+    RETURN NULL;
+END $$;
+CREATE TRIGGER users_end_account_deletion
+    AFTER UPDATE OF status ON users
+    FOR EACH ROW WHEN (OLD.status = 'deleting' AND NEW.status <> 'deleting')
+    EXECUTE FUNCTION end_account_deletion();
+
+-- An event keeps personal data only while every account it names, as subject or
+-- actor, exists: a request still in flight when its account is purged must not
+-- store it again, whichever release recorded it. Each named account is
+-- key-share locked, which the purge's lock on the account conflicts with: either
+-- the purge waits, then deletes this row, or this insert waits, finds the account
+-- gone and is skipped.
+CREATE FUNCTION skip_personal_data_of_purged_accounts() RETURNS TRIGGER
+LANGUAGE plpgsql SET search_path = pg_catalog, public, pg_temp AS $$
+BEGIN
+    IF EXISTS (
+        SELECT FROM domain_events e
+        CROSS JOIN LATERAL (
+            VALUES (e.subject_user_id), ((e.actor ->> 'user_id')::uuid)
+        ) AS named(id)
+        WHERE e.id = NEW.event_id
+        AND named.id IS NOT NULL
+        AND NOT EXISTS (SELECT FROM users WHERE id = named.id FOR KEY SHARE)
+    ) THEN
+        RETURN NULL;
+    END IF;
+    RETURN NEW;
+END $$;
+CREATE TRIGGER event_personal_data_skip_purged_accounts
+    BEFORE INSERT ON event_personal_data
+    FOR EACH ROW EXECUTE FUNCTION skip_personal_data_of_purged_accounts();
 
 -- The legacy audit log names accounts too. The runtime role cannot touch it, so
 -- deleting the account deletes its rows, which the cascade does as the owner.

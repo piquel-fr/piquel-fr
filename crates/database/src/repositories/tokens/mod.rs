@@ -457,28 +457,34 @@ impl TokenRepository<'_> {
         Ok(())
     }
 
-    /// Locks the client's live families until the transaction ends, in ID order.
-    /// A rotation locks its family before its client, so a change that locks the
-    /// client and then writes its families, such as a deletion, takes these
-    /// first; otherwise each could hold the lock the other waits for.
+    /// Locks the live families of `clients` until the transaction ends, in ID
+    /// order. A rotation locks its family before its client, so a change that
+    /// locks the client and then writes its families, such as a deletion, takes
+    /// these first; otherwise each could hold the lock the other waits for.
     ///
     /// Every statement that locks several families locks them in ID order, as
     /// this one does, so two of them never wait for each other's families: a
-    /// deletion's for a client and a logout's for a session can share some.
+    /// deletion's for a client and a logout's for a session can share some. A
+    /// change to several clients, such as a purge deleting an account's clients,
+    /// locks all their families in this one statement.
     ///
     /// # Errors
     ///
     /// Returns [`DatabaseError`] if the query fails.
-    pub async fn lock_client_families(&mut self, client: &ClientId) -> Result<(), DatabaseError> {
+    pub async fn lock_client_families(
+        &mut self,
+        clients: &[ClientId],
+    ) -> Result<(), DatabaseError> {
+        let clients: Vec<&str> = clients.iter().map(ClientId::as_str).collect();
         run!(
             self,
             fetch_all,
             sqlx::query_scalar!(
                 "SELECT id FROM refresh_token_families
-                WHERE client_id = $1 AND revoked_at IS NULL
+                WHERE client_id = ANY($1) AND revoked_at IS NULL
                 ORDER BY id
                 FOR UPDATE",
-                client.as_str(),
+                &clients as &[&str],
             )
         )?;
         Ok(())

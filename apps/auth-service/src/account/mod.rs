@@ -18,7 +18,7 @@ use axum::{
 };
 use chrono::{DateTime, Duration, Utc};
 use piquel_common::{
-    AccountStatus, AuthenticationMethod, UserId,
+    AccountStatus, AuthenticationMethod, ClientId, UserId,
     events::{Actor, DomainEvent, EventContext, RevocationReason},
 };
 use piquel_crypto::Secret;
@@ -186,10 +186,16 @@ impl AccountApplication {
     ) -> Result<(), AccountError> {
         security::Session::end_all(tx, context, user.id, RevocationReason::AccountDeletion).await?;
         // Each becomes a tombstone without an owner, so its ID is never reused.
-        let owned = tx.oidc().list_owned_clients(user.id).await?;
+        // Their families are locked together first, in the one order every
+        // statement locks families in.
+        let owned: Vec<ClientId> = (tx.oidc().list_owned_clients(user.id).await?)
+            .into_iter()
+            .map(|client| client.id)
+            .collect();
+        tx.tokens().lock_client_families(&owned).await?;
         let mut clients = ClientRegistry::new(tx, context.clone());
-        for client in owned {
-            clients.delete(&client.id).await?;
+        for client in &owned {
+            clients.delete(client).await?;
         }
         if !tx.deletions().purge(user.id).await? {
             return Err(AccountError::NotFound);
