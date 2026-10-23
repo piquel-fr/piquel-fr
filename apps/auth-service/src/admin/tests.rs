@@ -427,8 +427,8 @@ async fn disabling_ends_sessions_and_is_recorded() {
 }
 
 /// `handle check` lists look-alike handles. Renaming one away fixes it, bumps the
-/// profile version and is recorded; taken, look-alike, reserved and unchanged
-/// handles are refused.
+/// profile version and is recorded; taken, reserved and unchanged handles are
+/// refused.
 #[tokio::test]
 #[ignore = "requires TEST_DATABASE_URL"]
 async fn handles_are_checked_and_renamed() {
@@ -473,10 +473,6 @@ async fn handles_are_checked_and_renamed() {
     assert!(matches!(
         rename(format!("look-{suffix}"), false).await,
         Err(AdminError::HandleTaken(_))
-    ));
-    assert!(matches!(
-        rename(format!("look{suffix}"), false).await,
-        Err(AdminError::HandleConfusable(name)) if name == format!("look-{suffix}")
     ));
     assert!(matches!(
         rename("admin".into(), false).await,

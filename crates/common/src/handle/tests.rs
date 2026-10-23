@@ -96,3 +96,17 @@ fn reserved_names() {
         assert_eq!(reserved(handle), Ok(()), "{handle}");
     }
 }
+
+/// Every reserved name is a canonical handle, so it can match, and no two share a
+/// skeleton, so none is listed twice.
+#[test]
+fn reserved_names_are_distinct_handles() {
+    let mut skeletons = std::collections::BTreeSet::new();
+    for name in super::RESERVED {
+        let handle = name.parse::<Handle>().expect("a canonical handle");
+        assert!(
+            skeletons.insert(handle.skeleton()),
+            "{name} is listed twice"
+        );
+    }
+}

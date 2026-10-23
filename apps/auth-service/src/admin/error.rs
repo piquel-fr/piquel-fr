@@ -96,9 +96,6 @@ pub enum AdminError {
     /// Another account has this handle.
     #[error("another account has this handle")]
     HandleTaken(#[source] DatabaseError),
-    /// The handle looks like another account's, named here.
-    #[error("the handle looks like the handle of {0}")]
-    HandleConfusable(String),
     /// Persistence failed.
     #[error(transparent)]
     Database(#[from] DatabaseError),
@@ -141,7 +138,6 @@ impl AdminError {
             Self::InvalidHandle(_) => "invalid_handle",
             Self::SameHandle => "same_handle",
             Self::HandleTaken(_) => "handle_taken",
-            Self::HandleConfusable(_) => "handle_confusable",
             Self::Database(_) => "database",
             Self::Crypto(_) => "crypto",
             Self::Event(_) => "event",
@@ -179,7 +175,6 @@ impl AdminError {
             | Self::InvalidHandle(_)
             | Self::SameHandle
             | Self::HandleTaken(_)
-            | Self::HandleConfusable(_)
             | Self::Database(_)
             | Self::Crypto(_)
             | Self::Event(_) => None,
@@ -215,8 +210,7 @@ impl From<AdminError> for ApiError {
             | AdminError::AccountDisabled
             | AdminError::AlreadyAdministrator
             | AdminError::NotAnAdministrator
-            | AdminError::SameHandle
-            | AdminError::HandleConfusable(_) => Self::conflict(message),
+            | AdminError::SameHandle => Self::conflict(message),
             AdminError::HandleTaken(_) => Self::conflict(message).with_code(ErrorCode::HandleTaken),
             AdminError::Database(error) => error.into(),
             error @ (AdminError::Crypto(_) | AdminError::Event(_)) => Self::internal(error),

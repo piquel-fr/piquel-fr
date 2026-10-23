@@ -61,7 +61,6 @@ const RESERVED: &[&str] = &[
     "piquel",
     "piquelfr",
     // Other
-    "admin",
     "system",
     "origin",
 ];
@@ -132,7 +131,8 @@ impl Handle {
     /// The key two handles collide on when they look alike: hyphens dropped, `0`
     /// read as `o`, `1` and `i` as `l`, `5` as `s`, then `rn` as `m` and `vv` as
     /// `w`. Handles are ASCII, so this small table stands in for a UTS #39 skeleton.
-    /// No two accounts' handles may share one.
+    /// No two accounts' handles may share one; `auth-service handle check` lists
+    /// those that do.
     #[must_use]
     pub fn skeleton(&self) -> String {
         Self::fold(&self.0)

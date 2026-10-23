@@ -436,13 +436,16 @@ impl AdminOperations {
     }
 
     /// Gives the account `user_id` the handle `handle`, unless another account has
-    /// it or one that looks like it. Reserved names are refused unless
-    /// `allow_reserved`. The account's profile version is bumped, so relying parties
-    /// refresh `preferred_username`.
+    /// it. Reserved names are refused unless `allow_reserved`. The account's profile
+    /// version is bumped, so relying parties refresh `preferred_username`.
+    ///
+    /// Look-alikes are not checked here: only the next release's `handles` table can
+    /// enforce them atomically, and with an index. [`Self::check_handles`] lists
+    /// them, and that release's migration refuses to run while any remain.
     ///
     /// # Errors
     /// Fails when the account is unknown or already has the handle, or the handle is
-    /// reserved, taken or confusable.
+    /// reserved or taken.
     pub async fn rename_handle(
         &self,
         operator: &Operator,
@@ -457,19 +460,6 @@ impl AdminOperations {
         let user = Self::lock_target(&mut tx, operator, user_id).await?;
         if user.username == handle.as_str() {
             return Err(AdminError::SameHandle);
-        }
-        // An identical name is a conflict the update reports; only look-alikes are
-        // checked here.
-        let skeleton = handle.skeleton();
-        if let Some(other) = tx.users().list_names().await?.into_iter().find(|other| {
-            other.id != user_id
-                && other.username != handle.as_str()
-                && other
-                    .username
-                    .parse::<Handle>()
-                    .is_ok_and(|other| other.skeleton() == skeleton)
-        }) {
-            return Err(AdminError::HandleConfusable(other.username));
         }
         tx.users()
             .rename(user_id, &handle)

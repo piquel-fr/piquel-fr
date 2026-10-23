@@ -141,8 +141,10 @@ just auth handle rename old_name new-name   # --allow-reserved to assign a reser
 
 `check` lists every account whose handle breaks the syntax, is reserved or looks like
 another account's (see [Security behavior](#security-behavior)), and fails while any
-remain. A rename bumps the account's profile version, so relying parties refresh
-`preferred_username`, and is recorded as a domain event with its CLI operator.
+remain. `rename` refuses a handle another account has, but not a look-alike: run
+`check` again after renaming. A rename bumps the account's profile version, so
+relying parties refresh `preferred_username`, and is recorded as a domain event with
+its CLI operator.
 
 ### Outbound deliveries
 
@@ -277,7 +279,9 @@ explains how to choose a requirement and handle the challenge.
   refuses reserved names (infrastructure labels such as `auth` and `www`, RFC 2142
   mailboxes, piquel.fr routes and the brand) and names that look like one: hyphens
   are dropped, and `0`, `1` or `i`, `5`, `rn` and `vv` read as `o`, `l`, `s`, `m` and
-  `w`. Usernames from before these rules still sign in until an operator renames them.
+  `w`. Look-alikes of other accounts' handles are refused from the next release,
+  which enforces them in the database; until then `handle check` lists them.
+  Usernames from before these rules still sign in until an operator renames them.
 - Social-first signup remains pending until its first passkey is committed. Only
   a registration that names the pending identity shown on the signup page attaches
   it; plain registration ignores it. A social login can never replace an
