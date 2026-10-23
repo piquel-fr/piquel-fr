@@ -2,9 +2,7 @@
 //!
 //! Tests share one database, so each claims from a channel of its own.
 use super::*;
-use crate::{
-    Database, EventRepository, MaintenanceRepository, OidcRepository, SessionScope, StoredEvent,
-};
+use crate::{Database, EventRepository, MaintenanceRepository, SessionScope, StoredEvent};
 use piquel_common::{
     Personal, SessionId,
     events::{Actor, EventContext, RequestOrigin, RevocationReason},
@@ -451,7 +449,7 @@ async fn cleanup_abandons_a_key_stuck_behind_an_old_failure() {
 }
 
 /// Ending a session queues, in the revocation's transaction, one logout token per
-/// client that received tokens from it and registered a back-channel logout URI,
+/// client that redeemed a code from it and registered a back-channel logout URI,
 /// with the facts the token needs. Other clients are not told.
 #[tokio::test]
 #[ignore = "requires a disposable TEST_DATABASE_URL"]
@@ -477,7 +475,7 @@ async fn revoking_a_session_queues_a_logout_token_for_each_client_to_tell() {
     // Told; without a URI; and with a URI but no tokens from the session.
     let told = format!("told-{user}");
     let told_uri = "https://told.example/backchannel-logout";
-    for (client, uri, issued) in [
+    for (client, uri, redeemed) in [
         (told.clone(), Some(told_uri), true),
         (format!("silent-{user}"), None, true),
         (
@@ -486,21 +484,32 @@ async fn revoking_a_session_queues_a_logout_token_for_each_client_to_tell() {
             false,
         ),
     ] {
+        // Each client gets a code from the session, which it redeems as every
+        // release does, the previous one included.
         sqlx::query(
-            "INSERT INTO oidc_clients(id,display_name,allowed_scopes,allowed_audiences,backchannel_logout_uri)
-            VALUES($1,'Logout test','[]','[]',$2)",
+            "WITH client AS (
+                INSERT INTO oidc_clients(id,display_name,allowed_scopes,allowed_audiences,backchannel_logout_uri)
+                VALUES($1,'Logout test','[]','[]',$2) RETURNING id
+            )
+            INSERT INTO authorization_codes(id,secret_digest,client_id,user_id,session_id,
+                redirect_uri,pkce_challenge,scopes,audience,expires_at,authentication)
+            SELECT gen_random_uuid(),uuid_send(gen_random_uuid()),id,$3,$4,
+                'https://app.example/callback','challenge','[]',id,now()+interval '1 minute','{}'
+            FROM client",
         )
         .bind(&client)
         .bind(uri)
+        .bind(user.as_uuid())
+        .bind(session.as_uuid())
         .execute(&pool)
         .await
-        .expect("client");
-        if issued {
-            OidcRepository::from_pool(&pool)
-                .record_session_client(session, &client.parse().expect("client ID"))
-                .await
-                .expect("record the session's client");
-        }
+        .expect("client and code");
+        sqlx::query("UPDATE authorization_codes SET consumed_at=now() WHERE client_id=$1 AND $2")
+            .bind(&client)
+            .bind(redeemed)
+            .execute(&pool)
+            .await
+            .expect("redeem");
     }
     let revoke = async |commit: bool| {
         let mut tx = DatabaseTransaction::new(pool.begin().await.expect("transaction"));

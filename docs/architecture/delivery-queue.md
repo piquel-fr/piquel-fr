@@ -101,8 +101,9 @@ deliveries ordered after it wait for its lease to expire.
 - **`backchannel_logout`**: OIDC Back-Channel Logout 1.0 tokens. Every early end of
   a session goes through `DatabaseTransaction::revoke_sessions`, which records one
   `SessionRevoked` per session. Its fan-out creates one unordered delivery per
-  client that received tokens from the session (`oidc_session_clients`, written at
-  code exchange) and registered a back-channel logout URI. The recipient copies the
+  client that received tokens from the session (`oidc_session_clients`, which a
+  trigger fills whenever any release redeems a code) and registered a back-channel
+  logout URI. The recipient copies the
   client ID, `sub` and `sid`. `BackchannelLogoutSender` signs a token per attempt,
   with `iat` the attempt's time and `exp` two minutes later, and posts it as the
   `logout_token` form field. `jti` is the delivery ID. `MAX_AGE` is one hour.

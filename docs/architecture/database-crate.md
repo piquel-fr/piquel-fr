@@ -184,6 +184,12 @@ The role cannot change the schema, disable triggers, change
 `session_replication_role` or run programs on the server. It still takes the
 advisory locks `try_exclusive` uses, and may create temporary tables.
 
+Trigger functions run as the role that fires them, except a trigger that writes to
+a table its own migration creates: the runtime role is granted that table only
+after the migrations, while the previous release already fires the trigger. That
+function runs as its owner (`SECURITY DEFINER`), like the one migration `0012`
+uses to record redeemed codes in `oidc_session_clients`.
+
 ## Domain events
 
 `piquel_common::events` defines `DomainEvent`, one variant per account or security
@@ -197,7 +203,8 @@ theirs in a short transaction of their own. Sessions end early only through
 `DatabaseTransaction::revoke_sessions`, which revokes them with their refresh
 families and records one `SessionRevoked` per session, whose fan-out queues the
 back-channel logout tokens of the clients that received tokens from it
-(`oidc_session_clients`). The repository method underneath is private to the crate,
+(`oidc_session_clients`, which a trigger fills whenever any release redeems a
+code). The repository method underneath is private to the crate,
 so no revocation can skip the event. Refresh rotations are too frequent to be
 events. `Imported` holds the rows of `security_audit_log`, the log events replace,
 verbatim; only migrations write it, and its fields are private, so it can only be

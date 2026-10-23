@@ -642,33 +642,9 @@ impl OidcRepository<'_> {
         )
     }
 
-    /// Records that `client` received tokens from `session`, so ending the session
-    /// sends it a logout token. Recording it again changes nothing.
-    ///
-    /// # Errors
-    ///
-    /// Returns [`DatabaseError`] if the query fails.
-    pub async fn record_session_client(
-        &mut self,
-        session: SessionId,
-        client: &ClientId,
-    ) -> Result<(), DatabaseError> {
-        run!(
-            self,
-            execute,
-            sqlx::query!(
-                "INSERT INTO oidc_session_clients (session_id, client_id)
-                VALUES ($1, $2)
-                ON CONFLICT DO NOTHING",
-                session.as_uuid(),
-                client.as_str(),
-            )
-        )?;
-        Ok(())
-    }
-
     /// The clients that received tokens from `session` and registered a back-channel
-    /// logout URI, with the session's account.
+    /// logout URI, with the session's account. A trigger records each client when it
+    /// redeems a code.
     pub(crate) async fn logout_clients(
         &mut self,
         session: SessionId,
