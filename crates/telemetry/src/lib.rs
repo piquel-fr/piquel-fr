@@ -50,12 +50,12 @@ use piquel_common::{
 };
 use std::io::IsTerminal;
 use thiserror::Error;
-use tracing::Subscriber;
+use tracing::{Metadata, Subscriber, subscriber::Interest};
 use tracing_opentelemetry::OpenTelemetrySpanExt;
 use tracing_subscriber::{
     EnvFilter, Layer,
     field::{RecordFields, Visit},
-    filter::{FilterFn, ParseError},
+    filter::{FilterFn, LevelFilter, ParseError},
     fmt::{FormatFields, format::Writer},
     layer::SubscriberExt,
     util::SubscriberInitExt,
@@ -263,7 +263,26 @@ impl Telemetry {
             .fmt_fields(StderrFields);
         Ok(tracing_subscriber::registry()
             .with(spans)
-            .with(stderr.and_then(exported).with_filter(logs)))
+            .with(stderr.and_then(exported).with_filter(logs))
+            .with(Recheck))
+    }
+}
+
+/// Makes every callsite ask the filters each time. Per-layer filters keep their
+/// decisions in a thread-local that only such a check overwrites, and a callsite
+/// cached as always enabled skips it. It would read what a check no event followed
+/// left, e.g. `LogTracer`'s for a dependency's `log::log_enabled!`, and reach no
+/// layer: a span lost that way splits its trace.
+struct Recheck;
+
+impl<S: Subscriber> Layer<S> for Recheck {
+    fn register_callsite(&self, _: &'static Metadata<'static>) -> Interest {
+        Interest::sometimes()
+    }
+
+    /// No opinion: the filters below decide the most verbose level.
+    fn max_level_hint(&self) -> Option<LevelFilter> {
+        Some(LevelFilter::OFF)
     }
 }
 
@@ -307,5 +326,36 @@ impl Visit for StderrVisitor<'_> {
         };
         self.separator = " ";
         self.result = self.result.and(written);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    //! How the installed layers filter.
+    use super::*;
+    use tracing::{Callsite, Level, metadata::Kind};
+
+    /// A span right after a check that no event followed is still exported, as
+    /// after `log::log_enabled!` in a dependency, which `LogTracer` forwards.
+    #[test]
+    fn a_span_after_a_refused_check_is_exported() {
+        let capture = Telemetry::capture("piquel_telemetry=info");
+        let refused = tracing::callsite!(
+            name: "refused",
+            kind: Kind::EVENT,
+            target: "elsewhere",
+            level: Level::INFO,
+            fields: []
+        );
+        tracing::dispatcher::get_default(|dispatch| dispatch.enabled(refused.metadata()));
+        drop(tracing::info_span!("exported"));
+        let spans = capture.spans();
+        assert_eq!(
+            spans
+                .iter()
+                .map(|span| span.name.as_ref())
+                .collect::<Vec<_>>(),
+            ["exported"]
+        );
     }
 }

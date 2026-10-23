@@ -181,12 +181,19 @@ impl AdminOperations {
         {
             return Err(AdminError::AlreadyDisabled);
         }
-        let mut events = vec![DomainEvent::AccountDisabled {
+        let disabled = DomainEvent::AccountDisabled {
             reason: Personal::Value(reason.into_inner()),
-        }];
-        events
-            .extend(Self::end_sessions(&mut tx, user_id, RevocationReason::AccountDisabled).await?);
-        Self::finish(tx, operator, Some(user_id), events).await
+        };
+        tx.record(&operator.context(), Some(user_id), disabled)
+            .await?;
+        Self::end_sessions(
+            &mut tx,
+            operator,
+            user_id,
+            RevocationReason::AccountDisabled,
+        )
+        .await?;
+        Self::finish(tx, operator, Some(user_id), vec![]).await
     }
 
     /// Reactivates a disabled account. Fails if another active account claimed one
@@ -229,29 +236,22 @@ impl AdminOperations {
     ) -> Result<(), AdminError> {
         let mut tx = self.database.begin().await?;
         Self::lock_target(&mut tx, operator, user_id).await?;
-        let events = Self::end_sessions(&mut tx, user_id, RevocationReason::Admin).await?;
-        Self::finish(tx, operator, Some(user_id), events).await
+        Self::end_sessions(&mut tx, operator, user_id, RevocationReason::Admin).await?;
+        Self::finish(tx, operator, Some(user_id), vec![]).await
     }
 
-    /// Revokes the account's sessions, then its refresh grants, and returns one
-    /// event per revoked session. Callers hold the account lock.
+    /// Revokes the account's sessions, recording each as `operator`'s, then its
+    /// refresh grants. Callers hold the account lock.
     async fn end_sessions(
         tx: &mut DatabaseTransaction<'_>,
+        operator: &Operator,
         user_id: UserId,
         reason: RevocationReason,
-    ) -> Result<Vec<DomainEvent>, AdminError> {
-        let events = tx
-            .sessions()
-            .revoke(user_id, SessionScope::All)
-            .await?
-            .into_iter()
-            .map(|session_id| DomainEvent::SessionRevoked {
-                session_id,
-                reason: reason.clone(),
-            })
-            .collect();
+    ) -> Result<(), AdminError> {
+        tx.revoke_sessions(&operator.context(), user_id, SessionScope::All, &reason)
+            .await?;
         tx.tokens().revoke_all_for_user(user_id).await?;
-        Ok(events)
+        Ok(())
     }
 
     /// Ends one active session and the refresh grants issued from it.
@@ -269,18 +269,18 @@ impl AdminOperations {
             .ok_or(AdminError::SessionNotFound)?;
         Self::lock_target(&mut tx, operator, session.user_id).await?;
         if tx
-            .sessions()
-            .revoke(session.user_id, SessionScope::One(session_id))
+            .revoke_sessions(
+                &operator.context(),
+                session.user_id,
+                SessionScope::One(session_id),
+                &RevocationReason::Admin,
+            )
             .await?
             .is_empty()
         {
             return Err(AdminError::SessionNotFound);
         }
-        let revoked = DomainEvent::SessionRevoked {
-            session_id,
-            reason: RevocationReason::Admin,
-        };
-        Self::finish(tx, operator, Some(session.user_id), vec![revoked]).await
+        Self::finish(tx, operator, Some(session.user_id), vec![]).await
     }
 
     /// Lists invitations that have not been purged yet, newest first.

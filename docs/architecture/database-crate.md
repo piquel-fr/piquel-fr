@@ -184,6 +184,15 @@ The role cannot change the schema, disable triggers, change
 `session_replication_role` or run programs on the server. It still takes the
 advisory locks `try_exclusive` uses, and may create temporary tables.
 
+Trigger functions run as the role that fires them, except a trigger that writes to
+a table its own migration creates: the runtime role is granted that table only
+after the migrations, while the previous release already fires the trigger. That
+function runs as its owner (`SECURITY DEFINER`), like the one migration `0013`
+uses to record redeemed codes in `oidc_session_clients`, and only its owner may
+execute it. The runtime role may create temporary tables and types, so it could
+otherwise attach the function to a table of its own and have it run that type's
+cast as the owner. A test fails for any such function others may execute.
+
 ## Domain events
 
 `piquel_common::events` defines `DomainEvent`, one variant per account or security
@@ -193,8 +202,13 @@ background job, or an anonymous browser. Handlers record an event with
 `tx.record(&context, subject, event)` in the transaction that makes the change, so a
 rolled-back change leaves no event. `record` also creates the outbound deliveries
 the event causes, in the same transaction; see [the delivery queue](delivery-queue.md). Failed sign-ins change nothing, so they record
-theirs in a short transaction of their own. A revocation that ends several sessions
-records one `SessionRevoked` per session. Refresh rotations are too frequent to be
+theirs in a short transaction of their own. Sessions end early only through
+`DatabaseTransaction::revoke_sessions`, which revokes them with their refresh
+families and records one `SessionRevoked` per session, whose fan-out queues the
+back-channel logout tokens of the clients that received tokens from it
+(`oidc_session_clients`, which a trigger fills whenever any release redeems a
+code). The repository method underneath is private to the crate,
+so no revocation can skip the event. Refresh rotations are too frequent to be
 events. `Imported` holds the rows of `security_audit_log`, the log events replace,
 verbatim; only migrations write it, and its fields are private, so it can only be
 read back. `repositories/events/` stores events: the personal data split below,

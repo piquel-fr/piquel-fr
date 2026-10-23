@@ -2,7 +2,9 @@
 use chrono::{Duration, Utc};
 use piquel_common::{
     AuthenticationMethod, Handle, SessionId, TokenId, UserId,
-    events::{Browser, Platform, UserAgentFamily},
+    events::{
+        Actor, Browser, EventContext, Platform, RequestOrigin, RevocationReason, UserAgentFamily,
+    },
 };
 use piquel_repository::{
     Database, DatabaseConfig, DatabaseError, InsertSession, InsertUser, SessionScope,
@@ -105,10 +107,28 @@ async fn invitation_redemption_and_confirmation_lifecycle() {
         (stored - at).abs() < Duration::milliseconds(1),
         "stored as given"
     );
-    db.sessions()
-        .revoke(user, SessionScope::AllExcept(session))
-        .await
-        .expect("revoke others");
+    let context = EventContext {
+        actor: Actor::User {
+            user_id: user,
+            session_id: Some(session),
+        },
+        origin: RequestOrigin::default(),
+    };
+    let revoke = |scope, reason| {
+        let context = &context;
+        async move {
+            let mut tx = database.begin().await.expect("transaction");
+            tx.revoke_sessions(context, user, scope, &reason)
+                .await
+                .expect("revoke");
+            tx.commit().await.expect("commit revocation");
+        }
+    };
+    revoke(
+        SessionScope::AllExcept(session),
+        RevocationReason::CredentialRemoved,
+    )
+    .await;
     assert!(
         db.sessions()
             .find_by_id(other)
@@ -118,10 +138,7 @@ async fn invitation_redemption_and_confirmation_lifecycle() {
         "revoking other sessions clears their confirmation"
     );
     assert!(confirmed_at(session).await.is_some(), "current preserved");
-    db.sessions()
-        .revoke(user, SessionScope::One(session))
-        .await
-        .expect("logout");
+    revoke(SessionScope::One(session), RevocationReason::Logout).await;
     assert!(
         matches!(
             db.sessions().confirm_passkey(session, Utc::now()).await,

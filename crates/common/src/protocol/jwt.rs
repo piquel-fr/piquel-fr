@@ -9,6 +9,8 @@ crate::str_enum! {
         Access = "at+jwt",
         /// ID token, also accepted back as an `id_token_hint`.
         Id = "JWT",
+        /// Back-channel logout token (OIDC Back-Channel Logout 1.0 §2.4).
+        Logout = "logout+jwt",
     }
 }
 crate::str_enum! {

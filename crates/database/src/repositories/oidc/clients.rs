@@ -50,6 +50,8 @@ pub struct StoredOidcClient {
     pub trusted: bool,
     /// Whether the client must push its authorization requests.
     pub require_pushed_authorization_requests: bool,
+    /// Where logout tokens are posted when a session it holds tokens from ends.
+    pub backchannel_logout_uri: Option<String>,
     /// When the client was registered.
     pub created_at: DateTime<Utc>,
     /// When its registration last changed.
@@ -126,6 +128,14 @@ impl StoredOidcClient {
                 self.require_pushed_authorization_requests
                     == registration.require_pushed_authorization_requests,
             ),
+            (
+                ClientField::BackchannelLogoutUri,
+                self.backchannel_logout_uri.as_deref()
+                    == registration
+                        .backchannel_logout_uri
+                        .as_ref()
+                        .map(RedirectUri::as_str),
+            ),
         ]
         .into_iter()
         .filter_map(|(field, same)| (!same).then_some(field))
@@ -151,6 +161,7 @@ impl From<StoredOidcClient> for Client {
             enabled: client.enabled,
             trusted: client.trusted,
             require_pushed_authorization_requests: client.require_pushed_authorization_requests,
+            backchannel_logout_uri: client.backchannel_logout_uri,
         }
     }
 }
@@ -221,8 +232,10 @@ impl OidcRepository<'_> {
                     INSERT INTO oidc_clients (
                         id, display_name, client_type, allowed_scopes, allowed_audiences,
                         allow_refresh, trusted, owner_id, created_via,
-                        require_pushed_authorization_requests
-                    ) VALUES ($1, $2, $3, $4, jsonb_build_array($1::text), $5, $6, $7, $8, $12)
+                        require_pushed_authorization_requests, backchannel_logout_uri
+                    ) VALUES (
+                        $1, $2, $3, $4, jsonb_build_array($1::text), $5, $6, $7, $8, $12, $13
+                    )
                     RETURNING id
                 )
                 INSERT INTO oidc_redirect_uris (client_id, uri, kind, origin)
@@ -240,6 +253,10 @@ impl OidcRepository<'_> {
                 &redirects.kinds,
                 &redirects.origins,
                 registration.require_pushed_authorization_requests,
+                registration
+                    .backchannel_logout_uri
+                    .as_ref()
+                    .map(RedirectUri::as_str),
             )
         )?;
         Ok(())
@@ -270,6 +287,7 @@ impl OidcRepository<'_> {
                         allow_refresh = $4,
                         trusted = $5,
                         require_pushed_authorization_requests = $9,
+                        backchannel_logout_uri = $10,
                         updated_at = now()
                     WHERE id = $1 AND deleted_at IS NULL
                     RETURNING id
@@ -301,6 +319,10 @@ impl OidcRepository<'_> {
                 &redirects.kinds,
                 &redirects.origins,
                 registration.require_pushed_authorization_requests,
+                registration
+                    .backchannel_logout_uri
+                    .as_ref()
+                    .map(RedirectUri::as_str),
             )
         )?;
         Ok(())
@@ -542,7 +564,8 @@ impl OidcRepository<'_> {
                 r#"SELECT
                     c.id AS "id: ClientId", c.display_name, c.client_type AS "kind: ClientKind",
                     c.enabled, c.allow_refresh, c.trusted,
-                    c.require_pushed_authorization_requests, c.created_at, c.updated_at,
+                    c.require_pushed_authorization_requests, c.backchannel_logout_uri,
+                    c.created_at, c.updated_at,
                     c.owner_id AS "owner_id: UserId", c.last_used_at, c.deleted_at,
                     c.suspended_at,
                     c.allowed_scopes AS "allowed_scopes: JsonArray<String>",

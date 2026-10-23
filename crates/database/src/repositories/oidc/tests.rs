@@ -1,11 +1,12 @@
 //! Client registrations against a real database: the migration from the clients
-//! file's rows, secret rotation, the origins public clients may call from, and
-//! when pushed authorization requests can be claimed.
+//! file's rows, secret rotation, the origins public clients may call from, when
+//! pushed authorization requests can be claimed, and which clients of live sessions
+//! the back-channel logout migration finds.
 use crate::repositories::OidcRepository;
-use crate::{Database, InsertAuthorizationRequest};
+use crate::{Database, InsertAuthorizationRequest, connection::MIGRATOR};
 use chrono::{DateTime, Duration, Utc};
 use piquel_common::{
-    ClientId, TokenId, UserId,
+    ClientId, SessionId, TokenId, UserId,
     clients::{
         AllowedScopes, ClientKind, ClientOwner, ClientRegistration, PostLogoutUris, RedirectUris,
         ScopeName,
@@ -13,6 +14,7 @@ use piquel_common::{
     protocol::oauth::Scope,
 };
 use sqlx::{Connection, PgConnection, PgPool};
+use std::ops::RangeBounds;
 
 /// A registration of `kind` named after a fresh ID, redirecting to `origin`.
 fn registration(kind: ClientKind, origin: &str) -> ClientRegistration {
@@ -31,6 +33,7 @@ fn registration(kind: ClientKind, origin: &str) -> ClientRegistration {
         allow_refresh: false,
         trusted: false,
         require_pushed_authorization_requests: false,
+        backchannel_logout_uri: None,
     }
 }
 
@@ -254,6 +257,28 @@ async fn purging_an_owner_needs_its_live_clients_deleted() {
     assert_eq!(tombstone.owner_id, None);
 }
 
+/// A connection to a new scratch schema with the migrations in `versions` applied,
+/// and the schema's name, for tests of a migration: the test database is already
+/// migrated.
+async fn scratch_schema(versions: impl RangeBounds<i64>) -> (PgConnection, String) {
+    let url = std::env::var("TEST_DATABASE_URL").expect("TEST_DATABASE_URL");
+    let mut connection = PgConnection::connect(&url).await.expect("connect");
+    let schema = format!("migration_{}", UserId::new().as_uuid().simple());
+    sqlx::raw_sql(&format!(
+        "CREATE SCHEMA {schema}; SET search_path TO {schema}"
+    ))
+    .execute(&mut connection)
+    .await
+    .expect("schema");
+    for migration in MIGRATOR.iter().filter(|m| versions.contains(&m.version)) {
+        sqlx::raw_sql(&migration.sql)
+            .execute(&mut connection)
+            .await
+            .expect("earlier migration");
+    }
+    (connection, schema)
+}
+
 /// Clients the startup file registered keep working after the migration: a
 /// confidential client keeps its secret, redirect origins are filled in as URL
 /// parsing serializes them, and the previous release's writes are mirrored, even
@@ -262,29 +287,7 @@ async fn purging_an_owner_needs_its_live_clients_deleted() {
 #[tokio::test]
 #[ignore = "requires a disposable TEST_DATABASE_URL"]
 async fn migration_keeps_file_clients_and_their_secrets() {
-    let url = std::env::var("TEST_DATABASE_URL").expect("TEST_DATABASE_URL");
-    let mut connection = PgConnection::connect(&url).await.expect("connect");
-    let schema = format!("clients_{}", UserId::new().as_uuid().simple());
-    sqlx::raw_sql(&format!(
-        "CREATE SCHEMA {schema}; SET search_path TO {schema}"
-    ))
-    .execute(&mut connection)
-    .await
-    .expect("schema");
-    for migration in [
-        include_str!("../../../migrations/0001_initial.sql"),
-        include_str!("../../../migrations/0002_refresh_family_authorization_code.sql"),
-        include_str!("../../../migrations/0003_session_passkey_confirmation.sql"),
-        include_str!("../../../migrations/0004_authentication_claims.sql"),
-        include_str!("../../../migrations/0005_domain_events.sql"),
-        include_str!("../../../migrations/0006_deliveries.sql"),
-        include_str!("../../../migrations/0007_administrators.sql"),
-    ] {
-        sqlx::raw_sql(migration)
-            .execute(&mut connection)
-            .await
-            .expect("earlier migration");
-    }
+    let (mut connection, schema) = scratch_schema(..8).await;
     // A public client, and a confidential one whose secret digest is `digest`.
     let digest = [9; 32];
     sqlx::raw_sql(
@@ -306,6 +309,7 @@ async fn migration_keeps_file_clients_and_their_secrets() {
         include_str!("../../../migrations/0008_oidc_client_registry.sql"),
         include_str!("../../../migrations/0009_pushed_authorization_requests.sql"),
         include_str!("../../../migrations/0012_client_owners.sql"),
+        include_str!("../../../migrations/0013_backchannel_logout.sql"),
     ))
     .execute(&mut connection)
     .await
@@ -360,6 +364,75 @@ async fn migration_keeps_file_clients_and_their_secrets() {
             "{origin}"
         );
     }
+    sqlx::raw_sql(&format!("DROP SCHEMA {schema} CASCADE"))
+        .execute(&mut connection)
+        .await
+        .expect("drop schema");
+}
+
+/// The back-channel logout migration finds the clients of live sessions in what is
+/// left of their exchanges: redeemed codes and refresh families. Unredeemed codes
+/// and sessions that ended are left out.
+#[tokio::test]
+#[ignore = "requires a disposable TEST_DATABASE_URL"]
+async fn migration_finds_the_clients_of_live_sessions() {
+    let (mut connection, schema) = scratch_schema(..13).await;
+    let user = UserId::new();
+    let (live, revoked, expired) = (SessionId::new(), SessionId::new(), SessionId::new());
+    sqlx::raw_sql(&format!(
+        "INSERT INTO users (id, username, display_name) VALUES ('{user}', 'backfill', 'Backfill');
+        INSERT INTO oidc_clients (id, display_name, allowed_scopes, allowed_audiences)
+        SELECT id, id, '[]'::jsonb, '[]'::jsonb
+        FROM unnest(array['coded', 'refreshed', 'unredeemed']) id;
+        INSERT INTO sessions (
+            id, user_id, authentication_methods, authenticated_at, expires_at,
+            last_seen_at, revoked_at
+        ) VALUES
+            ('{live}', '{user}', '[]', now(), now() + interval '1 day', now(), NULL),
+            ('{revoked}', '{user}', '[]', now(), now() + interval '1 day', now(), now()),
+            ('{expired}', '{user}', '[]', now() - interval '2 days', now() - interval '1 day',
+                now(), NULL);
+        INSERT INTO authorization_codes (
+            id, secret_digest, client_id, user_id, session_id, redirect_uri,
+            pkce_challenge, scopes, audience, expires_at, authentication, consumed_at
+        )
+        SELECT gen_random_uuid(), uuid_send(gen_random_uuid()), client, '{user}', session,
+            'https://app.example/callback', 'challenge', '[]'::jsonb, client, now(),
+            '{{}}'::jsonb, consumed
+        FROM (VALUES
+            ('coded', '{live}'::uuid, now()),
+            ('unredeemed', '{live}', NULL),
+            ('coded', '{revoked}', now())
+        ) code(client, session, consumed);
+        INSERT INTO refresh_token_families (
+            id, user_id, client_id, session_id, audience, scopes, authentication
+        )
+        SELECT gen_random_uuid(), '{user}', 'refreshed', session, 'refreshed', '[]'::jsonb,
+            '{{}}'::jsonb
+        FROM unnest(array['{live}', '{expired}']::uuid[]) session;"
+    ))
+    .execute(&mut connection)
+    .await
+    .expect("sessions and their exchanges");
+
+    sqlx::raw_sql(include_str!(
+        "../../../migrations/0013_backchannel_logout.sql"
+    ))
+    .execute(&mut connection)
+    .await
+    .expect("migration");
+    let found: Vec<(uuid::Uuid, String)> =
+        sqlx::query_as("SELECT session_id, client_id FROM oidc_session_clients ORDER BY client_id")
+            .fetch_all(&mut connection)
+            .await
+            .expect("session clients");
+    assert_eq!(
+        found,
+        [
+            (live.as_uuid(), "coded".to_owned()),
+            (live.as_uuid(), "refreshed".to_owned()),
+        ]
+    );
     sqlx::raw_sql(&format!("DROP SCHEMA {schema} CASCADE"))
         .execute(&mut connection)
         .await

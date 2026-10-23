@@ -1,0 +1,26 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "WITH client AS (\n                    INSERT INTO oidc_clients (\n                        id, display_name, client_type, allowed_scopes, allowed_audiences,\n                        allow_refresh, trusted, owner_id, created_via,\n                        require_pushed_authorization_requests, backchannel_logout_uri\n                    ) VALUES (\n                        $1, $2, $3, $4, jsonb_build_array($1::text), $5, $6, $7, $8, $12, $13\n                    )\n                    RETURNING id\n                )\n                INSERT INTO oidc_redirect_uris (client_id, uri, kind, origin)\n                SELECT client.id, r.uri, r.kind, r.origin\n                FROM client, unnest($9::text[], $10::text[], $11::text[]) AS r(uri, kind, origin)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Text",
+        "Text",
+        "Jsonb",
+        "Bool",
+        "Bool",
+        "Uuid",
+        "Text",
+        "TextArray",
+        "TextArray",
+        "TextArray",
+        "Bool",
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "bb5b31befeb3c388b335bf6ea58c058a4862848f5509b4ec85277fcb8fa23700"
+}

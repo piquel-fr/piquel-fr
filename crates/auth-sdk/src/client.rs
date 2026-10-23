@@ -2,7 +2,7 @@
 //! and logout.
 
 use crate::{
-    IdToken, Issuer, TokenError,
+    IdToken, Issuer, LogoutToken, TokenError,
     http::{Authorization, NetworkError, Reply},
 };
 use base64::{Engine, engine::general_purpose::URL_SAFE_NO_PAD};
@@ -10,7 +10,8 @@ use chrono::{DateTime, TimeDelta, Utc};
 use piquel_common::{
     ClientId,
     protocol::{
-        claims::UserInfo,
+        claims::{LogoutTokenClaims, UserInfo},
+        jwt::TokenType,
         oauth::{
             CodeChallengeMethod, ErrorResponse, GrantType, Prompt, ResponseType, Scope, Scopes,
         },
@@ -721,6 +722,38 @@ impl Client {
             }
         }
         url
+    }
+
+    /// Validates a back-channel logout token auth posted to this client (OIDC
+    /// Back-Channel Logout 1.0 §2.6). It is checked like an ID token, with `typ`
+    /// `logout+jwt` and an `aud` naming only this client, then must be valid for at
+    /// most 10 minutes, carry the logout event, have no `nonce`, and name `sub` or
+    /// `sid`. Rejecting a `jti` seen before is left to the caller, as the axum login
+    /// routes do.
+    ///
+    /// # Errors
+    /// See [`TokenError`]. [`TokenError::Keys`] is the server's failure: answer 503 so
+    /// auth retries. Any other error answers 400.
+    ///
+    /// ```no_run
+    /// # async fn run(client: piquel_auth::Client, logout_token: &str) -> Result<(), piquel_auth::TokenError> {
+    /// use piquel_auth::LogoutScope;
+    ///
+    /// // The `logout_token` form field auth posted.
+    /// let logout = client.logout_token(logout_token).await?;
+    /// match logout.scope() {
+    ///     LogoutScope::Session(sid) => println!("end the sessions of auth session {sid}"),
+    ///     LogoutScope::Subject(sub) => println!("end every session of {sub}"),
+    /// }
+    /// # Ok(()) }
+    /// ```
+    pub async fn logout_token(&self, token: &str) -> Result<LogoutToken, TokenError> {
+        let client = self.config().client_id.as_str();
+        let claims: LogoutTokenClaims = self
+            .issuer()
+            .decode(token, TokenType::Logout, client)
+            .await?;
+        LogoutToken::from_claims(claims)
     }
 
     /// Posts a grant to the token endpoint.

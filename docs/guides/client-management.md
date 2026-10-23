@@ -41,6 +41,10 @@ kind never change.
 | `allow_refresh` | Whether the client may receive refresh tokens when it requests `offline_access`; `false` by default |
 | `require_pushed_authorization_requests` | Whether the client must push its authorization requests to `/oauth/par` (RFC 9126), so none of their parameters travel through the browser; `false` by default |
 
+A client also shows its `backchannel_logout_uri`, where auth tells it that a
+user's session ended ([back-channel logout](../../README.md#back-channel-logout)).
+Only an operator sets it for now, and your changes keep it.
+
 Auth chooses the ID, `c_` followed by 20 random characters, so nobody can claim a
 name like `piquel-web`. Your clients are never trusted: users always see the
 consent screen. Changing where auth may send the browser needs a confirmation,

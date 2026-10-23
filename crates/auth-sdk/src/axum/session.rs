@@ -1,17 +1,21 @@
 //! Session storage. Applications implement [`SessionBackend`], four plain operations
 //! on opaque records, wherever they want to keep sessions. The SDK keeps everything
-//! else: the record format and its validation, expiry, pending logins, and the
-//! refresh lease that stops two requests from redeeming one refresh token.
+//! else: the record format and its validation, expiry, pending logins, the refresh
+//! lease that stops two requests from redeeming one refresh token, and the indexes
+//! back-channel logout finds sessions with.
 
-use super::ReturnTo;
-use crate::{BearerToken, IdToken, PendingLogin, RefreshToken, Scopes, SessionId, Tokens};
+use super::{ReturnTo, bearer::ErrorChain};
+use crate::{
+    BearerToken, IdToken, LEEWAY, LogoutScope, LogoutToken, PendingLogin, RefreshToken, Scopes,
+    SessionId, Tokens,
+};
 use base64::{Engine, engine::general_purpose::URL_SAFE_NO_PAD};
 use chrono::{DateTime, TimeDelta, Utc};
 use rand::{RngCore, rngs::OsRng};
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
 use sha2::{Digest, Sha256};
 use std::{
-    collections::HashMap,
+    collections::{BTreeMap, HashMap, hash_map::Entry},
     convert::Infallible,
     fmt,
     future::{Future, ready},
@@ -24,6 +28,8 @@ use std::{
 const KEY_BYTES: usize = 32;
 /// Random bytes in a lease ID.
 const LEASE_BYTES: usize = 16;
+/// Tries at writing an index or logout record before giving up on contention.
+const UPDATE_ATTEMPTS: usize = 8;
 
 /// A record a [`SessionBackend`] stores. The SDK writes `data` and reads it back
 /// through its own validated types, so a backend stores it as an opaque string.
@@ -59,10 +65,12 @@ impl fmt::Debug for SessionRecord {
 /// `test-util` feature) against a real database.
 ///
 /// The SDK keeps all the logic, so a backend needs no knowledge of sessions. It
-/// only has to make [`Self::replace`] and [`Self::remove`] atomic: two replicas
-/// refreshing one session at once would otherwise both redeem its refresh token, and
-/// auth answers a reused refresh token by revoking the whole family, signing the user
-/// out.
+/// only has to make [`Self::insert`], [`Self::replace`] and [`Self::remove`] atomic:
+/// two replicas refreshing one session at once would otherwise both redeem its
+/// refresh token, and auth answers a reused refresh token by revoking the whole
+/// family, signing the user out. Back-channel logout uses the same operations: the
+/// SDK keeps records of its own listing the sessions of each auth session and user,
+/// and of the logout tokens already applied.
 ///
 /// Refresh leases expire by the issuer clock, the system clock by default, which
 /// replicas compare with each other: keep their clocks synchronized, for example with
@@ -88,7 +96,7 @@ impl fmt::Debug for SessionRecord {
 /// | Operation | Statement |
 /// | --- | --- |
 /// | `load` | `SELECT version, data, expires_at FROM auth_sessions WHERE key = $1` |
-/// | `insert` | `INSERT INTO auth_sessions (key, version, data, expires_at) VALUES ($1, $2, $3, $4)` |
+/// | `insert` | `INSERT INTO auth_sessions (key, version, data, expires_at) VALUES ($1, $2, $3, $4) ON CONFLICT (key) DO NOTHING`, `true` if one row was inserted |
 /// | `replace` | `UPDATE auth_sessions SET version = $3, data = $4, expires_at = $5 WHERE key = $1 AND version = $2`, `true` if one row changed |
 /// | `remove` | `DELETE FROM auth_sessions WHERE key = $1`, `true` if one row went |
 ///
@@ -115,9 +123,13 @@ impl fmt::Debug for SessionRecord {
 ///         Ok(self.0.lock().unwrap().get(key).cloned())
 ///     }
 ///
-///     async fn insert(&self, key: &str, record: &SessionRecord) -> Result<(), Infallible> {
-///         self.0.lock().unwrap().insert(key.to_owned(), record.clone());
-///         Ok(())
+///     async fn insert(&self, key: &str, record: &SessionRecord) -> Result<bool, Infallible> {
+///         let mut records = self.0.lock().unwrap();
+///         if records.contains_key(key) {
+///             return Ok(false);
+///         }
+///         records.insert(key.to_owned(), record.clone());
+///         Ok(true)
 ///     }
 ///
 ///     async fn replace(
@@ -151,12 +163,15 @@ pub trait SessionBackend: Clone + Send + Sync + 'static {
         key: &str,
     ) -> impl Future<Output = Result<Option<SessionRecord>, Self::Error>> + Send;
 
-    /// Stores a record under a new `key`. Keys are random, so they never collide.
+    /// Stores `record` under `key` only if no record is there, in one atomic step.
+    /// Returns whether it stored: of two concurrent calls for one key, only one may
+    /// return `true`. A record still stored counts as there even once expired; the SDK
+    /// replaces expired records itself.
     fn insert(
         &self,
         key: &str,
         record: &SessionRecord,
-    ) -> impl Future<Output = Result<(), Self::Error>> + Send;
+    ) -> impl Future<Output = Result<bool, Self::Error>> + Send;
 
     /// Replaces the record under `key` with `record`, but only if the stored record
     /// is still at version `expected`, in one atomic step. Returns whether it wrote.
@@ -218,9 +233,16 @@ impl SessionBackend for MemoryBackend {
         &self,
         key: &str,
         record: &SessionRecord,
-    ) -> impl Future<Output = Result<(), Infallible>> + Send {
-        self.with(|records| records.insert(key.to_owned(), record.clone()));
-        ready(Ok(()))
+    ) -> impl Future<Output = Result<bool, Infallible>> + Send {
+        ready(Ok(self.with(|records| {
+            match records.entry(key.to_owned()) {
+                Entry::Occupied(_) => false,
+                Entry::Vacant(vacant) => {
+                    vacant.insert(record.clone());
+                    true
+                }
+            }
+        })))
     }
 
     fn replace(
@@ -357,11 +379,15 @@ impl SessionKey {
     /// The backend key of this session's record of `kind`: the SHA-256 of the key,
     /// namespaced so sessions and pending logins never collide.
     fn record(&self, kind: &str) -> String {
-        format!(
-            "{kind}:{}",
-            URL_SAFE_NO_PAD.encode(Sha256::digest(self.0.as_bytes()))
-        )
+        hashed(kind, &[&self.0])
     }
+}
+
+/// The backend key of the record of `kind` for `parts`: their SHA-256, joined by NUL,
+/// never the values themselves, namespaced by `kind` so record kinds never collide.
+fn hashed(kind: &str, parts: &[&str]) -> String {
+    let digest = Sha256::digest(parts.join("\0"));
+    format!("{kind}:{}", URL_SAFE_NO_PAD.encode(digest))
 }
 
 /// `bytes` random bytes, base64url-encoded.
@@ -398,6 +424,45 @@ struct SessionData {
     login: StoredLogin,
     /// The refresh lease, while an attempt holds it.
     lease: Option<LeaseState>,
+}
+
+/// What an index record's `data` holds: the sessions started under one auth session
+/// (`sid`) or for one user (`sub`), which a back-channel logout ends.
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
+struct IndexData {
+    /// Backend keys of the sessions, each with when it expires.
+    sessions: BTreeMap<String, DateTime<Utc>>,
+    /// Whether auth ended this `sid`, so no session may join it. Only `sid` indexes
+    /// are ended.
+    #[serde(default)]
+    ended: bool,
+}
+
+impl IndexData {
+    /// This index with `session` added until `expires_at` and the sessions expired at
+    /// `now` dropped, and when its record expires: with its last session.
+    fn join(
+        mut self,
+        session: &str,
+        expires_at: DateTime<Utc>,
+        now: DateTime<Utc>,
+    ) -> (Self, DateTime<Utc>) {
+        self.sessions.retain(|_, until| *until > now);
+        self.sessions.insert(session.to_owned(), expires_at);
+        let last = self.sessions.values().max().copied().unwrap_or(expires_at);
+        (self, last)
+    }
+}
+
+/// A write the SDK gave up on for reasons of its own, not the backend's.
+#[derive(Debug, thiserror::Error)]
+enum WriteError {
+    /// A fresh random key already holds a record.
+    #[error("a fresh random key is already in use")]
+    KeyTaken,
+    /// Other writers changed a record between every read and write.
+    #[error("a record kept changing over {UPDATE_ATTEMPTS} attempts to write it")]
+    Contended,
 }
 
 /// A session as read: its login, record version, and whether a refresh holds it.
@@ -471,7 +536,7 @@ macro_rules! erased_backend {
 
 erased_backend! {
     load(key: &'a str) -> Option<SessionRecord>;
-    insert(key: &'a str, record: &'a SessionRecord) -> ();
+    insert(key: &'a str, record: &'a SessionRecord) -> bool;
     replace(key: &'a str, expected: u64, record: &'a SessionRecord) -> bool;
     remove(key: &'a str) -> bool;
 }
@@ -481,10 +546,18 @@ erased_backend! {
 #[derive(Clone)]
 pub(super) struct Sessions(Arc<dyn ErasedBackend>);
 
-/// Record kind of a signed-in session.
-const SESSION: &str = "session";
+/// Record kind of a signed-in session. `v2` sessions are listed in the logout
+/// indexes; earlier ones are not, so back-channel logout could not find them, and
+/// they are no longer read: their users sign in again.
+const SESSION: &str = "session-v2";
 /// Record kind of a pending login.
 const PENDING: &str = "pending";
+/// Record kind of the sessions of one auth session, by issuer and `sid`.
+const SID_INDEX: &str = "logout-sid";
+/// Record kind of the sessions of one user, by issuer and `sub`.
+const SUB_INDEX: &str = "logout-sub";
+/// Record kind of an applied logout token, by issuer and `jti`.
+const LOGOUT_JTI: &str = "logout-jti";
 
 impl Sessions {
     /// Sessions in `backend`.
@@ -492,9 +565,20 @@ impl Sessions {
         Self(Arc::new(backend))
     }
 
+    /// The decoded data of `record`, unless it is expired or unreadable. An unreadable
+    /// record, written by another version or corrupted, is treated as missing rather
+    /// than trusted.
+    fn decode<T: DeserializeOwned>(record: &SessionRecord, now: DateTime<Utc>) -> Option<T> {
+        if record.expires_at <= now {
+            return None;
+        }
+        serde_json::from_str(&record.data)
+            .inspect_err(|error| tracing::warn!(%error, "ignoring an unreadable session record"))
+            .ok()
+    }
+
     /// The record under `key` and its decoded data, unless it is missing, expired or
-    /// unreadable. An unreadable record, written by another version or corrupted, is
-    /// treated as missing rather than trusted.
+    /// unreadable.
     async fn read<T: DeserializeOwned>(
         &self,
         key: &str,
@@ -503,16 +587,62 @@ impl Sessions {
         let Some(record) = self.0.load(key).await? else {
             return Ok(None);
         };
-        if record.expires_at <= now {
-            return Ok(None);
+        Ok(Self::decode(&record, now).map(|data| (record, data)))
+    }
+
+    /// Stores `data` under the fresh random `key`, until `expires_at`.
+    async fn create(
+        &self,
+        key: &str,
+        data: &impl Serialize,
+        expires_at: DateTime<Utc>,
+    ) -> Result<(), BackendError> {
+        if self
+            .0
+            .insert(key, &Self::record(data, 1, expires_at)?)
+            .await?
+        {
+            Ok(())
+        } else {
+            Err(WriteError::KeyTaken.into())
         }
-        match serde_json::from_str(&record.data) {
-            Ok(data) => Ok(Some((record, data))),
-            Err(error) => {
-                tracing::warn!(%error, "ignoring an unreadable session record");
-                Ok(None)
+    }
+
+    /// Rewrites the record under `key`. `change` gets its data, `None` when it is
+    /// missing, expired or unreadable, and returns the data to write with its expiry,
+    /// or `None` to leave the record alone. A write that loses to another writer is
+    /// retried from a fresh read. Returns whether `change` wrote, and the data it last
+    /// got.
+    async fn update<T: Serialize + DeserializeOwned>(
+        &self,
+        key: &str,
+        now: DateTime<Utc>,
+        change: impl Fn(Option<&T>) -> Option<(T, DateTime<Utc>)> + Send,
+    ) -> Result<(bool, Option<T>), BackendError> {
+        for _ in 0..UPDATE_ATTEMPTS {
+            let stored = self.0.load(key).await?;
+            let current = stored.as_ref().and_then(|record| Self::decode(record, now));
+            let Some((data, expires_at)) = change(current.as_ref()) else {
+                return Ok((false, current));
+            };
+            // An expired or unreadable record is still stored, so it is replaced.
+            // A new record starts at the current time in microseconds, a version a
+            // deleted record under the key has not reached, so a writer that read
+            // the deleted one cannot overwrite its successor.
+            let written = if let Some(record) = &stored {
+                let next = Self::record(&data, record.version + 1, expires_at)?;
+                self.0.replace(key, record.version, &next).await?
+            } else {
+                let version = u64::try_from(now.timestamp_micros()).unwrap_or(1);
+                self.0
+                    .insert(key, &Self::record(&data, version, expires_at)?)
+                    .await?
+            };
+            if written {
+                return Ok((true, current));
             }
         }
+        Err(WriteError::Contended.into())
     }
 
     /// A record holding `data` at `version`, expiring at `expires_at`.
@@ -542,19 +672,133 @@ impl Sessions {
         }))
     }
 
-    /// Starts a session under `key`, until `expires_at`.
+    /// Starts a session under `key`, until `expires_at`, and lists it under its `sid`
+    /// and `sub` for back-channel logout. Returns `false`, keeping no session, when
+    /// auth already ended its `sid`: a logout overtook the sign-in.
     pub(super) async fn insert(
         &self,
         key: &SessionKey,
         login: &StoredLogin,
         expires_at: DateTime<Utc>,
-    ) -> Result<(), BackendError> {
+        now: DateTime<Utc>,
+    ) -> Result<bool, BackendError> {
+        let name = key.record(SESSION);
         let data = SessionData {
             login: login.clone(),
             lease: None,
         };
-        let record = Self::record(&data, 1, expires_at)?;
-        self.0.insert(&key.record(SESSION), &record).await
+        self.create(&name, &data, expires_at).await?;
+        let listed = self.list(&name, login, expires_at, now).await;
+        if !matches!(listed, Ok(true))
+            && let Err(error) = self.0.remove(&name).await
+        {
+            // The browser never gets this session's key, so the record is unreachable.
+            tracing::warn!(error = %ErrorChain(error.as_ref()), "could not delete a session that failed to start");
+        }
+        listed
+    }
+
+    /// Lists the session `name` under its `sid`, unless auth ended it, then under its
+    /// `sub`. Returns whether it was listed: a session missing from either index would
+    /// survive a back-channel logout.
+    async fn list(
+        &self,
+        name: &str,
+        login: &StoredLogin,
+        expires_at: DateTime<Utc>,
+        now: DateTime<Utc>,
+    ) -> Result<bool, BackendError> {
+        if let Some(sid) = login.sid() {
+            let index = hashed(SID_INDEX, &[&login.issuer, &sid.to_string()]);
+            let (joined, _) = self
+                .update(&index, now, |index: Option<&IndexData>| {
+                    let index = index.cloned().unwrap_or_default();
+                    (!index.ended).then(|| index.join(name, expires_at, now))
+                })
+                .await?;
+            if !joined {
+                return Ok(false);
+            }
+        }
+        let index = hashed(SUB_INDEX, &[&login.issuer, login.subject()]);
+        self.update(&index, now, |index: Option<&IndexData>| {
+            Some(
+                index
+                    .cloned()
+                    .unwrap_or_default()
+                    .join(name, expires_at, now),
+            )
+        })
+        .await?;
+        Ok(true)
+    }
+
+    /// Applies a validated back-channel logout: deletes every session listed for its
+    /// scope, then remembers its `jti` until its expiry and the leeway. A session
+    /// logout also ends the `sid` until `ended_until`, so a sign-in that completes
+    /// later cannot join it. Returns `false`, changing nothing, if the token was
+    /// applied before, as when auth sends it again after losing the answer.
+    ///
+    /// The `jti` is remembered only once the deletion is done, so a request cut short
+    /// by a failure, a crash or auth hanging up is applied again on auth's retry
+    /// rather than skipped as applied. Two copies racing may both apply, which ends
+    /// the same sessions twice.
+    pub(super) async fn log_out(
+        &self,
+        token: &LogoutToken,
+        ended_until: DateTime<Utc>,
+        now: DateTime<Utc>,
+    ) -> Result<bool, BackendError> {
+        let claims = token.claims();
+        let jti = hashed(LOGOUT_JTI, &[&claims.iss, &claims.jti.to_string()]);
+        if self.read::<()>(&jti, now).await?.is_some() {
+            return Ok(false);
+        }
+        self.end(&claims.iss, token.scope(), ended_until, now)
+            .await?;
+        let until = claims.exp.checked_add_signed(LEEWAY).unwrap_or(claims.exp);
+        self.update(&jti, now, |used: Option<&()>| {
+            used.is_none().then_some(((), until))
+        })
+        .await?;
+        Ok(true)
+    }
+
+    /// Deletes every session listed for `scope` at `issuer`, ending a `sid` until
+    /// `ended_until`. Sessions stay listed, so a retry after a failed deletion finds
+    /// them again.
+    async fn end(
+        &self,
+        issuer: &str,
+        scope: &LogoutScope,
+        ended_until: DateTime<Utc>,
+        now: DateTime<Utc>,
+    ) -> Result<(), BackendError> {
+        let index = match scope {
+            LogoutScope::Session(sid) => {
+                let key = hashed(SID_INDEX, &[issuer, &sid.to_string()]);
+                let mark_ended = |index: Option<&IndexData>| {
+                    let sessions = index.map(|index| index.sessions.clone());
+                    let ended = IndexData {
+                        sessions: sessions.unwrap_or_default(),
+                        ended: true,
+                    };
+                    Some((ended, ended_until))
+                };
+                self.update(&key, now, mark_ended).await?.1
+            }
+            LogoutScope::Subject(sub) => self
+                .read(&hashed(SUB_INDEX, &[issuer, sub]), now)
+                .await?
+                .map(|(_, index)| index),
+        };
+        for session in index
+            .into_iter()
+            .flat_map(|index| index.sessions.into_keys())
+        {
+            self.0.remove(&session).await?;
+        }
+        Ok(())
     }
 
     /// Ends the session under `key`.
@@ -647,8 +891,7 @@ impl Sessions {
         pending: &PendingAuthorization,
         expires_at: DateTime<Utc>,
     ) -> Result<(), BackendError> {
-        let record = Self::record(pending, 1, expires_at)?;
-        self.0.insert(&key.record(PENDING), &record).await
+        self.create(&key.record(PENDING), pending, expires_at).await
     }
 
     /// Takes the pending login under `key`, at most once: only the request whose
@@ -699,9 +942,10 @@ const CHECK_COMPETITORS: usize = 4;
 /// # });
 /// ```
 ///
-/// It checks that records round-trip, that `replace` and `remove` refuse missing
-/// records and never create one, and that of several callers racing `replace` at
-/// one version, or `remove`, exactly one wins, and the stored record is the winner's.
+/// It checks that records round-trip, that `insert` stores only where no record is,
+/// that `replace` and `remove` refuse missing records and never create one, and that
+/// of several callers racing `insert` of one key, `replace` at one version, or
+/// `remove`, exactly one wins, and the stored record is the winner's.
 /// The races run on separate tasks over 25 rounds, which catches a
 /// read-then-write backend in practice but cannot prove atomicity: keep each
 /// operation a single atomic statement. It writes and removes records under random
@@ -742,11 +986,21 @@ pub async fn check_backend<B: SessionBackend>(backend: &B) -> Result<(), Backend
         return Err(Contract("remove reported a record that does not exist"));
     }
     let first = record(1, "first".into());
-    backend.insert(&key, &first).await.map_err(failed)?;
+    if !backend.insert(&key, &first).await.map_err(failed)? {
+        return Err(Contract("insert refused a key that holds no record"));
+    }
     if backend.load(&key).await.map_err(failed)?.as_ref() != Some(&first) {
         return Err(Contract(
             "load did not return the inserted record unchanged",
         ));
+    }
+    if backend
+        .insert(&key, &record(1, "again".into()))
+        .await
+        .map_err(failed)?
+        || backend.load(&key).await.map_err(failed)?.as_ref() != Some(&first)
+    {
+        return Err(Contract("insert replaced a record already there"));
     }
     let second = record(2, "second".into());
     if backend.replace(&key, 7, &second).await.map_err(failed)? {
@@ -778,25 +1032,26 @@ fn check_key() -> Result<String, BackendCheckError> {
         .map_err(|error| BackendCheckError::Backend(Box::new(error)))
 }
 
-/// One round of contention: racing `replace` calls at one version, then racing
-/// `remove` calls, each on its own task, released together.
+/// The record competitor `competitor` writes at `version` in [`race`].
+#[cfg(any(test, feature = "test-util"))]
+fn competitor_record(version: u64, competitor: usize) -> SessionRecord {
+    SessionRecord {
+        version,
+        data: format!("competitor {competitor}"),
+        expires_at: Utc::now() + TimeDelta::minutes(5),
+    }
+}
+
+/// One round of contention on a fresh key: racing `insert` calls, then racing
+/// `replace` calls at one version, then racing `remove` calls, each on its own task,
+/// released together.
 #[cfg(any(test, feature = "test-util"))]
 async fn race<B: SessionBackend>(backend: &B) -> Result<(), BackendCheckError> {
     use BackendCheckError::{Backend, Contract};
     use tokio::sync::Barrier;
     let key = Arc::new(check_key()?);
-    let expires_at = Utc::now() + TimeDelta::minutes(5);
-    let initial = SessionRecord {
-        version: 1,
-        data: "initial".into(),
-        expires_at,
-    };
-    backend
-        .insert(&key, &initial)
-        .await
-        .map_err(|error| Backend(Box::new(error)))?;
     // Every competitor starts its call at once, on its own task.
-    let spawn = |call: fn(B, Arc<String>, usize) -> _| {
+    let spawn = |call: fn(B, Arc<String>, usize) -> BackendFuture<'static, bool>| {
         let barrier = Arc::new(Barrier::new(CHECK_COMPETITORS));
         (0..CHECK_COMPETITORS)
             .map(|competitor| {
@@ -808,57 +1063,68 @@ async fn race<B: SessionBackend>(backend: &B) -> Result<(), BackendCheckError> {
             })
             .collect::<Vec<_>>()
     };
-    let winners = |tasks: Vec<tokio::task::JoinHandle<Result<bool, B::Error>>>| async move {
+    // The one competitor whose call succeeded, or `message`.
+    let winner = |tasks: Vec<tokio::task::JoinHandle<Result<bool, BackendError>>>,
+                  message: &'static str| async move {
         let mut winners = Vec::new();
         for (competitor, task) in tasks.into_iter().enumerate() {
             if task
                 .await
                 .map_err(|error| Backend(Box::new(error)))?
-                .map_err(|error| Backend(Box::new(error)))?
+                .map_err(Backend)?
             {
                 winners.push(competitor);
             }
         }
-        Ok::<_, BackendCheckError>(winners)
+        match winners[..] {
+            [winner] => Ok(winner),
+            _ => Err(Contract(message)),
+        }
     };
-    let replaces = spawn(|backend, key, competitor| {
+    // The data of the stored record, if any.
+    let stored = || async {
+        let record = backend
+            .load(&key)
+            .await
+            .map_err(|error| Backend(Box::new(error)))?;
+        Ok::<_, BackendCheckError>(record.map(|record| record.data))
+    };
+    let insert_calls = spawn(|backend, key, competitor| {
         Box::pin(async move {
-            let record = SessionRecord {
-                version: 2,
-                data: format!("competitor {competitor}"),
-                expires_at: Utc::now() + TimeDelta::minutes(5),
-            };
-            backend.replace(&key, 1, &record).await
-        }) as Pin<Box<dyn Future<Output = Result<bool, B::Error>> + Send>>
+            let record = competitor_record(1, competitor);
+            Ok(backend.insert(&key, &record).await?)
+        })
     });
-    let won = winners(replaces).await?;
-    let [winner] = won[..] else {
-        return Err(Contract(
-            "of racing replaces at one version, exactly one must write",
-        ));
-    };
-    let stored = backend
-        .load(&key)
-        .await
-        .map_err(|error| Backend(Box::new(error)))?;
-    if stored.map(|record| record.data) != Some(format!("competitor {winner}")) {
+    let inserter = winner(
+        insert_calls,
+        "of racing inserts of one key, exactly one must store",
+    )
+    .await?;
+    if stored().await? != Some(format!("competitor {inserter}")) {
+        return Err(Contract("the stored record is not the winning insert's"));
+    }
+    let replace_calls = spawn(|backend, key, competitor| {
+        Box::pin(async move {
+            let record = competitor_record(2, competitor);
+            Ok(backend.replace(&key, 1, &record).await?)
+        })
+    });
+    let replacer = winner(
+        replace_calls,
+        "of racing replaces at one version, exactly one must write",
+    )
+    .await?;
+    if stored().await? != Some(format!("competitor {replacer}")) {
         return Err(Contract("the stored record is not the winning replace's"));
     }
-    let removes = spawn(|backend, key, _| {
-        Box::pin(async move { backend.remove(&key).await })
-            as Pin<Box<dyn Future<Output = Result<bool, B::Error>> + Send>>
-    });
-    if winners(removes).await?.len() != 1 {
-        return Err(Contract(
-            "of racing removes, exactly one must report the record",
-        ));
-    }
-    if backend
-        .load(&key)
-        .await
-        .map_err(|error| Backend(Box::new(error)))?
-        .is_some()
-    {
+    let remove_calls =
+        spawn(|backend, key, _| Box::pin(async move { Ok(backend.remove(&key).await?) }));
+    winner(
+        remove_calls,
+        "of racing removes, exactly one must report the record",
+    )
+    .await?;
+    if stored().await?.is_some() {
         return Err(Contract("a record survived the racing removes"));
     }
     Ok(())

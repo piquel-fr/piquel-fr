@@ -5,14 +5,16 @@
 use super::*;
 use crate::{
     ClientRegistryError,
-    tests::{Browser, Replicas, change, refresh_grant, register, registration, until_blocked},
+    tests::{
+        Browser, Replicas, change, refresh_grant, register, registration, sign_out, until_blocked,
+    },
 };
 use axum::http::Method;
 use piquel_common::{
     AuthenticationMethod, TokenId,
     events::{Actor, DomainEvent},
 };
-use piquel_repository::{RefreshRotationError, SessionScope};
+use piquel_repository::RefreshRotationError;
 use serde_json::json;
 
 /// The client routes over the test database.
@@ -646,14 +648,10 @@ async fn deletion_and_logout_never_deadlock() {
     });
     until_blocked(&mut holder, 1).await;
     let logout = tokio::spawn({
-        let (database, user, session) = (
-            harness.database.clone(),
-            user.user_id,
-            SessionScope::One(user.session_id),
-        );
+        let (database, user, session) = (harness.database.clone(), user.user_id, user.session_id);
         async move {
             let mut tx = database.begin().await?;
-            tx.sessions().revoke(user, session).await?;
+            sign_out(&mut tx, user, session).await?;
             tx.commit().await
         }
     });

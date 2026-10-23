@@ -1,6 +1,10 @@
 //! Background work: periodic jobs coordinated across replicas, and the delivery
 //! workers every replica runs (see `crate::deliveries`).
 
+use crate::{
+    AuthConfig, StartupError,
+    deliveries::{BackchannelLogoutSender, OutboundClient},
+};
 use piquel_repository::{Database, DatabaseError, ExclusiveConnection, LockKey};
 use piquel_telemetry::{Counter, Histogram};
 use std::{sync::Arc, time::Duration};
@@ -56,12 +60,21 @@ pub struct Jobs {
 }
 
 impl Jobs {
-    /// Starts every job on `database`.
-    #[must_use]
-    pub fn start(database: &Database) -> Self {
+    /// Starts every job on `database`, and the delivery workers, which sign with
+    /// `config`'s keys.
+    ///
+    /// # Errors
+    /// Fails if the outbound HTTP client cannot initialize.
+    pub fn start(database: &Database, config: &AuthConfig) -> Result<Self, StartupError> {
         let mut jobs = Self::new();
         jobs.exclusive(Cleanup, database.clone());
-        jobs
+        let logout = BackchannelLogoutSender::new(
+            config.oidc.origin.serialized(),
+            config.oidc.keys.clone(),
+            OutboundClient::new().map_err(StartupError::Outbound)?,
+        );
+        jobs.deliveries(logout, database);
+        Ok(jobs)
     }
 
     /// A runner without jobs.

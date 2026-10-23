@@ -143,7 +143,7 @@ enum Command {
     },
     /// Register, inspect and change OIDC clients. Changes apply to the next request.
     #[command(subcommand)]
-    Client(ClientCommand),
+    Client(Box<ClientCommand>),
     /// Inspect, retry and cancel outbound deliveries.
     #[command(subcommand)]
     Deliveries(DeliveriesCommand),
@@ -343,7 +343,7 @@ impl Command {
         let router = config.router(database.clone())?;
         let admin_router = config.admin_router(database.clone());
         database.observe_connections();
-        let jobs = Jobs::start(&database);
+        let jobs = Jobs::start(&database, &config)?;
         tracing::info!(address=%config.public_listener,"authentication service listening");
         let (stop, _) = watch::channel(false);
         let admin = async {
@@ -629,6 +629,10 @@ struct CreateClient {
     /// their parameters travel through the browser.
     #[arg(long)]
     require_par: bool,
+    /// Where auth posts a logout token when a session the client holds tokens from
+    /// ends (OIDC Back-Channel Logout); HTTPS with a public address.
+    #[arg(long)]
+    backchannel_logout_uri: Option<RedirectUri>,
 }
 
 /// A client a deployment manages, as `client apply` makes it.
@@ -683,6 +687,7 @@ impl CreateClient {
             allow_refresh: self.refresh,
             trusted: self.trusted,
             require_pushed_authorization_requests: self.require_par,
+            backchannel_logout_uri: self.backchannel_logout_uri,
         })
     }
 }
@@ -732,6 +737,12 @@ struct UpdateClient {
     /// Accept authorization requests sent through the browser again.
     #[arg(long)]
     no_require_par: bool,
+    /// Post logout tokens to this URI instead.
+    #[arg(long, conflicts_with = "no_backchannel_logout_uri")]
+    backchannel_logout_uri: Option<RedirectUri>,
+    /// Stop posting logout tokens to the client.
+    #[arg(long)]
+    no_backchannel_logout_uri: bool,
 }
 
 impl UpdateClient {
@@ -767,6 +778,15 @@ impl UpdateClient {
             trusted: self.trusted || (client.trusted && !self.untrusted),
             require_pushed_authorization_requests: self.require_par
                 || (client.require_pushed_authorization_requests && !self.no_require_par),
+            backchannel_logout_uri: match self.backchannel_logout_uri {
+                Some(uri) => Some(uri),
+                None if self.no_backchannel_logout_uri => None,
+                None => client
+                    .backchannel_logout_uri
+                    .as_deref()
+                    .map(str::parse)
+                    .transpose()?,
+            },
             id: client.id.clone(),
         })
     }

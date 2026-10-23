@@ -9,12 +9,6 @@ mod clients;
 /// Validated service and application configuration.
 mod config;
 /// Sending the outbound delivery queue.
-// No channel sends deliveries yet: back-channel logout (#65) adds the first. Until
-// then only tests use this module, and `expect` fails the build once it is used.
-#[cfg_attr(
-    not(test),
-    expect(dead_code, reason = "No channel sends deliveries until #65.")
-)]
 mod deliveries;
 /// Shared normalized email validation.
 mod email;
@@ -90,6 +84,9 @@ pub enum StartupError {
     /// The OIDC metadata or signing keys could not be serialized.
     #[error("could not initialize OIDC application")]
     Oidc(#[from] oidc::OidcConfigError),
+    /// The HTTP client that sends deliveries could not initialize.
+    #[error("could not initialize the outbound HTTP client")]
+    Outbound(#[source] reqwest::Error),
     /// The executable lacks the required browser assets.
     #[error(
         "build the auth frontend with pnpm --filter @piquel/auth-web build before compiling auth-service"

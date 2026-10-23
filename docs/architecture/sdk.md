@@ -19,9 +19,9 @@ The wire format is defined by types in `piquel_common::protocol`, not by prose.
 The Rust SDK re-exports them by name as `piquel_auth::protocol`, so that list is
 its contract:
 
-- `claims`: `AccessTokenClaims`, `IdTokenClaims`, `UserInfo`, and the parts they
-  share (`AuthenticationClaims`, `ProfileClaims`, `Audience`, `Actor`,
-  `Confirmation`, `Amr`, `Acr`).
+- `claims`: `AccessTokenClaims`, `IdTokenClaims`, `LogoutTokenClaims`, `UserInfo`,
+  and the parts they share (`AuthenticationClaims`, `ProfileClaims`, `Audience`,
+  `Actor`, `Confirmation`, `Amr`, `Acr`).
 - `metadata::ServerMetadata`, the discovery document.
 - `step_up::StepUpRequirement`, what an operation needs from the user's
   authentication.
@@ -62,20 +62,23 @@ Checks run in this order, and the first failure is reported. Each failure is an
    JSON header (`malformed`).
 2. The header has no `crit`: the SDKs understand no JWS extensions, so a critical one
    must be refused (RFC 7515 §4.1.11) (`unsupported_critical_header`).
-3. `typ` is `at+jwt` for access tokens (RFC 9068) or `JWT` for ID tokens, as auth
-   issues them, compared case-insensitively with or without the `application/`
-   prefix (`wrong_type`).
+3. `typ` is `at+jwt` for access tokens (RFC 9068), `JWT` for ID tokens or
+   `logout+jwt` for logout tokens, as auth issues them, compared case-insensitively
+   with or without the `application/` prefix (`wrong_type`).
 4. `alg` is both advertised by the issuer and in the SDK's allowlist. The allowlist
    is `RS256` today; `none` and HMAC algorithms are never accepted
    (`unsupported_algorithm`).
 5. `kid` names a known key, after at most one refetch (`unknown_key`).
 6. The signature verifies (`bad_signature`).
 7. The claims parse as the shared claim type, so required claims are present and
-   well typed (`invalid_claims`).
+   well typed (`invalid_claims`). A logout token's `events` must hold the
+   back-channel logout event with an object value, and it must have no `nonce`,
+   not even `null`, so an ID token never passes as one.
 8. `iss` equals the issuer exactly (`issuer_mismatch`).
 9. `aud` contains the expected value: the resource for access tokens, the client
-   for ID tokens. An ID token's `aud` must name no other client, since the SDKs
-   trust no other audience (OIDC Core §3.1.3.7) (`wrong_audience`).
+   for ID and logout tokens. An ID or logout token's `aud` must name no other
+   client, since the SDKs trust no other audience (OIDC Core §3.1.3.7)
+   (`wrong_audience`).
 10. Time, with a 30-second leeway, matching auth's own `iat` skew:
    - expired when `now >= exp + 30` (`expired`);
    - not yet valid when `nbf > now + 30`, for both token types (`not_yet_valid`);
@@ -85,6 +88,10 @@ Checks run in this order, and the first failure is reported. Each failure is an
     - `azp`, when present, is this client (`wrong_authorized_party`);
     - when the login sent `max_age`, `auth_time` must be present and
       `now <= auth_time + max_age + 30` (`authentication_too_old`).
+12. Logout tokens only (OIDC Back-Channel Logout 1.0 §2.6):
+    - `exp - iat` is at most 10 minutes (`lifetime_too_long`); auth signs each
+      delivery attempt for two minutes;
+    - `sub` or `sid` is present (`invalid_claims`).
 
 Scope and step-up requirements are checked after validation, and fail with their
 own categories.
@@ -184,9 +191,10 @@ and give the browser only a random session key, in a `__Host-` cookie that is
 fresh key. Refresh tokens never reach the browser.
 
 Applications choose where sessions live by implementing a small storage backend:
-load, insert, a compare-and-swap replace, and a remove that reports whether the
-record existed. The SDK keeps everything else: the record format and its validation,
-expiry, pending logins, and the refresh lease. Backends see only opaque records under
+load, an insert that stores only where no record is, a compare-and-swap replace, and
+a remove that reports whether the record existed. The SDK keeps everything else: the
+record format and its validation, expiry, pending logins, the refresh lease, and the
+records back-channel logout needs. Backends see only opaque records under
 the SHA-256 of each session key, so reading the backend does not give access to
 sessions. The SDK ships an in-memory backend for development and tests, and a check
 applications run against their own backend.
@@ -207,7 +215,50 @@ the family. `invalid_grant` ends the session too. Any other error answer from au
 keeps it, as does a refresh that could not connect to auth. Logout accepts only
 requests from the app's own origin.
 
-Back-channel logout is added to the SDKs together with auth's side (#65).
+## Back-channel logout
+
+When auth ends a session, it posts a logout token (OIDC Back-Channel Logout 1.0) to
+each client that received tokens from it, as an `application/x-www-form-urlencoded`
+`logout_token` field. Server-side integrations receive it at
+`POST <mount>/backchannel-logout` next to their login routes, which the client
+registers as its back-channel logout URI. The signed token is the authentication, so
+there is no origin check. The token is validated as above, and one whose `jti` was
+applied before changes nothing.
+
+The route answers 200 once the matching sessions are gone, including when there
+were none or it applied the token before, and 400 with
+`{"error":"invalid_request"}` for an invalid token. It answers 503 when signing keys
+cannot be fetched and 500 when the backend fails, so auth retries. Every answer has
+`Cache-Control: no-store`.
+
+A token with `sid` ends every session started under that auth session; one with only
+`sub` ends every session of that user. The SDK finds them through records it keeps
+in the application's backend, with the same four operations:
+
+- **Indexes.** One record per issuer and `sid`, and one per issuer and `sub`, keyed
+  by their SHA-256, lists the backend keys of the sessions started under it, each
+  with its expiry. A sign-in stores its session, then adds it to both indexes by
+  insert or compare-and-swap, retrying on conflict. Each write drops expired
+  entries, and the record expires with its last session.
+- **Ended sessions.** A logout with `sid` marks that index ended and keeps it for a
+  session lifetime, then deletes the sessions it lists, which stay listed so a retry
+  finds them again. A sign-in whose `sid` is ended deletes its session and fails, so
+  a logout that overtakes a sign-in never leaves a live session; auth never accepts
+  an ended session again. A logout with only `sub` deletes the sessions listed for
+  the user and leaves no mark, so a sign-in that stored its session but had not yet
+  listed it can survive; auth sends no such logout until subject logout (#80), which
+  must close this race. Sessions stored before the indexes existed are not read, so
+  their users sign in again.
+- **Replays.** A token whose `jti` is recorded was applied: it changes nothing and
+  is answered 200, so auth's retry after a lost answer succeeds, and a copy cannot
+  end sessions started since. Once its sessions are deleted, the SDK records the
+  `jti` until the token's `exp` plus the leeway, so every replica knows it.
+  Recording it last means a request cut short by a failure, a crash or auth hanging
+  up is applied again on auth's retry; two copies racing may both apply, which ends
+  the same sessions twice.
+- **Versions.** A new index or `jti` record starts at the current time in
+  microseconds rather than 1, so a sign-in that read an expired record the backend
+  has since deleted cannot overwrite the logout's replacement with its stale version.
 
 ## Step-up
 

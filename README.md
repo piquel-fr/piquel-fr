@@ -148,9 +148,8 @@ its CLI operator.
 
 ### Outbound deliveries
 
-Messages for other systems wait in a queue in the database until a worker sends
-them. No channel uses it yet; back-channel logout (#65) will be the first.
-Inspect and repair it with:
+Messages for other systems, such as back-channel logout tokens, wait in a queue
+in the database until a worker sends them. Inspect and repair it with:
 
 ```sh
 just auth deliveries list --status failed
@@ -176,6 +175,7 @@ just auth client create notes --name Notes --confidential --refresh \
 just auth client list                # --output json for scripts
 just auth client show notes          # registration and secret lifetimes
 just auth client update piquel-web --add-redirect-uri https://piquel.fr/auth/callback
+just auth client update notes --backchannel-logout-uri https://notes.example/auth/backchannel-logout
 just auth client disable notes       # enable undoes it
 just auth client rotate-secret notes --grace 24h
 just auth client suspend notes       # its owner cannot enable it; unsuspend lifts it
@@ -220,6 +220,38 @@ register 20 a day. They never appear in the account API of other accounts, while
 refresh tokens and removes its secrets and consents. Its ID stays reserved, since
 tokens carry it as `aud`.
 
+### Back-channel logout
+
+When a session at auth ends, every client that received tokens from it and
+registered a `--backchannel-logout-uri` is told (OIDC Back-Channel Logout 1.0), so
+it can end its own session for the user. Every way a session ends early does
+this: signing out, RP-initiated logout, signing in to another account, signing out
+other devices, removing a passkey, unlinking a provider, reporting a history entry,
+and an administrator revoking sessions or disabling the account.
+`--no-backchannel-logout-uri` stops it.
+
+Auth posts `logout_token=<JWT>` as `application/x-www-form-urlencoded` to the URI.
+The token is signed with auth's token key, with the header `typ: logout+jwt`:
+
+```json
+{ "iss": "https://auth.piquel.fr", "aud": "<client_id>", "iat": 1760000000,
+  "exp": 1760000120, "jti": "<delivery id>", "sub": "<user id>",
+  "sid": "<session id>",
+  "events": { "http://schemas.openid.net/event/backchannel-logout": {} } }
+```
+
+`sid` is the `sid` of the ID tokens the client received. A client must validate the
+token as Back-Channel Logout 1.0 §2.6 says (signature, `iss`, `aud`, `iat`, `exp`,
+`events`, no `nonce`), end its sessions with that `sid` unless it already applied the
+token's `jti`, and answer `200` either way. The Rust SDK's login routes do all of
+this at `POST <mount>/backchannel-logout`. A `400` fails the delivery for good;
+timeouts and `5xx` are retried with backoff for up to an hour. Every attempt is
+signed afresh and carries the same `jti`, so a receiver applies a repeat only once.
+The URI must be HTTPS and resolve to public addresses, and redirects are not
+followed.
+Delivery is asynchronous: an application's session may outlive auth's by the few
+seconds a delivery takes, or until it expires if the client cannot be reached.
+
 `AUTH_CLIENTS_FILE` was removed, and startup refuses to run while it is set. The
 clients it registered are already in the database.
 
@@ -241,7 +273,7 @@ come back as JSON. Discovery advertises `pushed_authorization_request_endpoint`.
 Client-hosted request objects (`request` and `request_uri` from RFC 9101) are not
 supported.
 The endpoints implement code exchange, RS256 ID/access tokens, userinfo, opt-in
-rotating refresh tokens, revocation and RP-initiated logout. Access tokens are
+rotating refresh tokens, revocation, RP-initiated and back-channel logout. Access tokens are
 intended for the configured client audience. Only requested claims are released;
 passkey-only accounts have no email claim. Browser clients should keep tokens in
 memory and use SSO again after reload. Refresh permission is off unless explicitly
@@ -316,8 +348,9 @@ explains how to choose a requirement and handle the challenge.
 - The last passkey cannot be removed. Removing a passkey/provider revokes other
   central sessions. There is no recovery if every passkey is lost.
 - Sessions last at most 30 days. Access tokens last five minutes. Refresh rotation
-  detects reuse and stops when its central session expires or is revoked. Logout
-  does not destroy application-owned sessions or already issued access tokens.
+  detects reuse and stops when its central session expires or is revoked. Ending a
+  session tells the clients that registered a back-channel logout URI, which end
+  their own sessions; already issued access tokens stay valid until they expire.
 - Browser state and opaque secrets are random, hashed where lookup is needed, and
   bound to the initiating browser. Auth cookies are host-only, Secure and HttpOnly.
   Mutations require an exact allowed origin and CSRF header; OIDC back-channel

@@ -641,6 +641,43 @@ impl OidcRepository<'_> {
             )
         )
     }
+
+    /// The clients that received tokens from `session` and registered a back-channel
+    /// logout URI, with the session's account. A trigger records each client when it
+    /// redeems a code.
+    pub(crate) async fn logout_clients(
+        &mut self,
+        session: SessionId,
+    ) -> Result<Vec<LogoutClient>, DatabaseError> {
+        run!(
+            self,
+            fetch_all,
+            sqlx::query_as!(
+                LogoutClient,
+                r#"SELECT
+                    c.id AS "client_id: ClientId",
+                    c.backchannel_logout_uri AS "backchannel_logout_uri!",
+                    s.user_id AS "user_id: UserId"
+                FROM oidc_session_clients sc
+                JOIN oidc_clients c ON c.id = sc.client_id
+                JOIN sessions s ON s.id = sc.session_id
+                WHERE sc.session_id = $1
+                AND c.backchannel_logout_uri IS NOT NULL
+                ORDER BY c.id"#,
+                session.as_uuid(),
+            )
+        )
+    }
+}
+
+/// A client to send a logout token to when a session it holds tokens from ends.
+pub(crate) struct LogoutClient {
+    /// The client.
+    pub(crate) client_id: ClientId,
+    /// Where it receives logout tokens.
+    pub(crate) backchannel_logout_uri: String,
+    /// The session's account, the token's `sub`.
+    pub(crate) user_id: UserId,
 }
 /// Client registrations, secrets and the origins of public clients.
 mod clients;

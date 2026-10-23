@@ -150,7 +150,7 @@ fn jwks_vectors() {
     }
 }
 
-/// Access and ID tokens pass or fail exactly as the vectors say.
+/// Access, ID and logout tokens pass or fail exactly as the vectors say.
 #[tokio::test]
 async fn token_vectors() {
     for case in Case::all("tokens") {
@@ -183,6 +183,20 @@ async fn token_vectors() {
                     .await;
                 case.assert(
                     result
+                        .map(|token| token.claims().clone())
+                        .map_err(|error| error.code()),
+                );
+            }
+            "logout" => {
+                let client = issuer.client(ClientConfig {
+                    client_id: audience.parse::<ClientId>().expect("client ID"),
+                    credentials: Credentials::None,
+                    redirect_uri: "https://client.example.com/callback".parse().expect("URL"),
+                });
+                case.assert(
+                    client
+                        .logout_token(token)
+                        .await
                         .map(|token| token.claims().clone())
                         .map_err(|error| error.code()),
                 );

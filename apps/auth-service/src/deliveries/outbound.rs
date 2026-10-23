@@ -64,6 +64,12 @@ const NAT64: Ipv6Net = Ipv6Net::new_assert(Ipv6Addr::new(0x64, 0xff9b, 0, 0, 0, 
 const SIX_TO_FOUR: Ipv6Net = Ipv6Net::new_assert(Ipv6Addr::new(0x2002, 0, 0, 0, 0, 0, 0, 0), 16);
 
 /// A successful response, with at most [`MAX_RESPONSE_BYTES`] of its body.
+// Back-channel logout needs only the status class; channels that read answers,
+// such as SCIM, will read these. `expect` fails the build once one does.
+#[cfg_attr(
+    not(test),
+    expect(dead_code, reason = "No channel reads response contents yet.")
+)]
 #[derive(Debug)]
 pub(crate) struct OutboundResponse {
     /// The successful status.

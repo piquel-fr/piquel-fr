@@ -1,0 +1,31 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "WITH client AS (\n                    UPDATE oidc_clients\n                    SET display_name = $2,\n                        allowed_scopes = $3,\n                        allow_refresh = $4,\n                        trusted = $5,\n                        require_pushed_authorization_requests = $9,\n                        backchannel_logout_uri = $10,\n                        updated_at = now()\n                    WHERE id = $1 AND deleted_at IS NULL\n                    RETURNING id\n                ),\n                desired (uri, kind, origin) AS (\n                    SELECT * FROM unnest($6::text[], $7::text[], $8::text[])\n                ),\n                upserted AS (\n                    INSERT INTO oidc_redirect_uris (client_id, uri, kind, origin)\n                    SELECT client.id, d.uri, d.kind, d.origin\n                    FROM client, desired d\n                    ON CONFLICT (client_id, uri, kind) DO UPDATE SET origin = EXCLUDED.origin\n                ),\n                removed AS (\n                    DELETE FROM oidc_redirect_uris r\n                    USING client\n                    WHERE r.client_id = client.id\n                    AND NOT EXISTS (\n                        SELECT 1 FROM desired d WHERE d.uri = r.uri AND d.kind = r.kind\n                    )\n                )\n                SELECT id FROM client",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Text",
+        "Jsonb",
+        "Bool",
+        "Bool",
+        "TextArray",
+        "TextArray",
+        "TextArray",
+        "Bool",
+        "Text"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "b42a39ca612b69d1dfbff749f8bb410c061d72233741411f03b1d510f525bf31"
+}

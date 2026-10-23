@@ -772,10 +772,20 @@ async fn confirmed_changes_serialize_with_logout() {
     let logout = tokio::spawn({
         let database = database.clone();
         async move {
-            database
-                .sessions()
-                .revoke(user_id, SessionScope::One(id))
-                .await
+            let context = RequestContext::TEST.actor(Actor::User {
+                user_id,
+                session_id: Some(id),
+            });
+            let mut logout = database.begin().await?;
+            let revoked = logout
+                .revoke_sessions(
+                    &context,
+                    user_id,
+                    SessionScope::One(id),
+                    &RevocationReason::Logout,
+                )
+                .await?;
+            logout.commit().await.map(|()| revoked)
         }
     });
     tokio::time::sleep(std::time::Duration::from_millis(200)).await;

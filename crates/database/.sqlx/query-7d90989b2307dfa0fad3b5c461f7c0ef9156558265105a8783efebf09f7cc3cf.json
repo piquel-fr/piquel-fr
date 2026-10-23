@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "SELECT\n                    c.id AS \"id: ClientId\", c.display_name, c.client_type AS \"kind: ClientKind\",\n                    c.enabled, c.allow_refresh, c.trusted,\n                    c.require_pushed_authorization_requests, c.created_at, c.updated_at,\n                    c.owner_id AS \"owner_id: UserId\", c.last_used_at, c.deleted_at,\n                    c.suspended_at,\n                    c.allowed_scopes AS \"allowed_scopes: JsonArray<String>\",\n                    c.allowed_audiences AS \"allowed_audiences: JsonArray<String>\",\n                    COALESCE(\n                        jsonb_agg(r.uri ORDER BY r.uri) FILTER (WHERE r.kind = 'authorization'),\n                        '[]'::jsonb\n                    ) AS \"redirect_uris!: JsonArray<String>\",\n                    COALESCE(\n                        jsonb_agg(r.uri ORDER BY r.uri) FILTER (WHERE r.kind = 'post_logout'),\n                        '[]'::jsonb\n                    ) AS \"post_logout_uris!: JsonArray<String>\"\n                FROM oidc_clients c\n                LEFT JOIN oidc_redirect_uris r ON r.client_id = c.id\n                WHERE ($1::text IS NULL OR c.id = $1)\n                AND ($2::uuid IS NULL OR (c.owner_id = $2 AND c.deleted_at IS NULL))\n                GROUP BY c.id\n                ORDER BY c.id",
+  "query": "SELECT\n                    c.id AS \"id: ClientId\", c.display_name, c.client_type AS \"kind: ClientKind\",\n                    c.enabled, c.allow_refresh, c.trusted,\n                    c.require_pushed_authorization_requests, c.backchannel_logout_uri,\n                    c.created_at, c.updated_at,\n                    c.owner_id AS \"owner_id: UserId\", c.last_used_at, c.deleted_at,\n                    c.suspended_at,\n                    c.allowed_scopes AS \"allowed_scopes: JsonArray<String>\",\n                    c.allowed_audiences AS \"allowed_audiences: JsonArray<String>\",\n                    COALESCE(\n                        jsonb_agg(r.uri ORDER BY r.uri) FILTER (WHERE r.kind = 'authorization'),\n                        '[]'::jsonb\n                    ) AS \"redirect_uris!: JsonArray<String>\",\n                    COALESCE(\n                        jsonb_agg(r.uri ORDER BY r.uri) FILTER (WHERE r.kind = 'post_logout'),\n                        '[]'::jsonb\n                    ) AS \"post_logout_uris!: JsonArray<String>\"\n                FROM oidc_clients c\n                LEFT JOIN oidc_redirect_uris r ON r.client_id = c.id\n                WHERE ($1::text IS NULL OR c.id = $1)\n                AND ($2::uuid IS NULL OR (c.owner_id = $2 AND c.deleted_at IS NULL))\n                GROUP BY c.id\n                ORDER BY c.id",
   "describe": {
     "columns": [
       {
@@ -40,51 +40,56 @@
       },
       {
         "ordinal": 7,
+        "name": "backchannel_logout_uri",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 8,
         "name": "created_at",
         "type_info": "Timestamptz"
       },
       {
-        "ordinal": 8,
+        "ordinal": 9,
         "name": "updated_at",
         "type_info": "Timestamptz"
       },
       {
-        "ordinal": 9,
+        "ordinal": 10,
         "name": "owner_id: UserId",
         "type_info": "Uuid"
       },
       {
-        "ordinal": 10,
+        "ordinal": 11,
         "name": "last_used_at",
         "type_info": "Timestamptz"
       },
       {
-        "ordinal": 11,
+        "ordinal": 12,
         "name": "deleted_at",
         "type_info": "Timestamptz"
       },
       {
-        "ordinal": 12,
+        "ordinal": 13,
         "name": "suspended_at",
         "type_info": "Timestamptz"
       },
       {
-        "ordinal": 13,
+        "ordinal": 14,
         "name": "allowed_scopes: JsonArray<String>",
         "type_info": "Jsonb"
       },
       {
-        "ordinal": 14,
+        "ordinal": 15,
         "name": "allowed_audiences: JsonArray<String>",
         "type_info": "Jsonb"
       },
       {
-        "ordinal": 15,
+        "ordinal": 16,
         "name": "redirect_uris!: JsonArray<String>",
         "type_info": "Jsonb"
       },
       {
-        "ordinal": 16,
+        "ordinal": 17,
         "name": "post_logout_uris!: JsonArray<String>",
         "type_info": "Jsonb"
       }
@@ -103,6 +108,7 @@
       false,
       false,
       false,
+      true,
       false,
       false,
       true,
@@ -115,5 +121,5 @@
       null
     ]
   },
-  "hash": "d5377c4e162adcd325e4ab6fbb6c4cb833e5b04b398f9541b0fc36c5bbb288cf"
+  "hash": "7d90989b2307dfa0fad3b5c461f7c0ef9156558265105a8783efebf09f7cc3cf"
 }

@@ -1,0 +1,44 @@
+{
+  "description": "a token valid for exactly 10 minutes is accepted",
+  "now": 1767225600,
+  "input": {
+    "audience": "notes-web",
+    "issuer": "https://auth.example.com",
+    "jwks": {
+      "keys": [
+        {
+          "alg": "RS256",
+          "e": "AQAB",
+          "kid": "key-2025",
+          "kty": "RSA",
+          "n": "wVpUJ5o9UePaQeyX8a6XFDVyAyN6HSiT6ColCm4AedZEuCaz5mMWQeintQvevJB0fYReqVFmSXr69OSf8d04wUthRmwfMns-wW5rT2LKuZcN02rXaiRsQepuC0nsqY-HaRTike3nvRhuzZlobtl8rxvxG0mzbfN27NSRJWQdOAWTkrzLzi58IAbg2umQB6h7P7g3AYMHRunx7Rc5xaReeWyvK8CPUA2CbGQOzDi468bl0BKMX3y-ibNq4gPCqWzeVZjpY4rP0EYbz3i3bV9PMo4qRFtQd77UNzF6ibxmWL1gX8u348H3ia_Fvug-t9MJO3HqFVvV5REx5O1nIOWz8Q",
+          "use": "sig"
+        },
+        {
+          "alg": "RS256",
+          "e": "AQAB",
+          "kid": "key-2026",
+          "kty": "RSA",
+          "n": "uIyTduvpF-LYSdNmHoK0TI0HtTEEAlE17LrpIGe4t4RmG8pG-Nocs_FXJB0ErRwoCmiIxxW9dxni9MFsnOPpOgj2YVZJnSlFgvXioU3bpOc9xyTmQtXoarWe96RO50W7vHsuuHrMmGuwRFyN_6Uw7w1FK-mS5Jf5TwBYJjwLpvdmyAiqoOwQv0z4zHfZnaN6AY4QocMJOTB8IdOV4-ej0p2xCKSL5FQS8nkMKg9bT9vxdDjp8CTjFh3Yfb-hgyipDvZ-rB8v41NISDsxJ_yjmxFsYdiEGCrgVaRGHtzfHfar-873Ciz8SqjTK-p7dqKd7LfijdoVLZHQEbaKEZvxsw",
+          "use": "sig"
+        }
+      ]
+    },
+    "kind": "logout",
+    "token": "eyJhbGciOiJSUzI1NiIsImtpZCI6ImtleS0yMDI1IiwidHlwIjoibG9nb3V0K2p3dCJ9.eyJpc3MiOiJodHRwczovL2F1dGguZXhhbXBsZS5jb20iLCJhdWQiOiJub3Rlcy13ZWIiLCJpYXQiOjE3NjcyMjU1OTAsImV4cCI6MTc2NzIyNjE5MCwianRpIjoiMDE5MzZmM2UtOGMwMC03MDAwLTgwMDAtMDAwMDAwMDAwMDA2Iiwic3ViIjoiMDE5MzZmM2UtOGMwMC03MDAwLTgwMDAtMDAwMDAwMDAwMDAxIiwic2lkIjoiMDE5MzZmM2UtOGMwMC03MDAwLTgwMDAtMDAwMDAwMDAwMDAyIiwiZXZlbnRzIjp7Imh0dHA6Ly9zY2hlbWFzLm9wZW5pZC5uZXQvZXZlbnQvYmFja2NoYW5uZWwtbG9nb3V0Ijp7fX19.TL4OrWv8tCcbDnmAVyGE9zgEOllhf-IFU5aWIjc4ZzQ5v-2D6yhMCr7pFk5u9OKGDeCN5CtrzTcTZ84YdnB1CVZR4y2xYTfwdZcfdKthTandSKM5ip7440HdhHDh0bxPA09Yt9f3FI1IfdkAYbkow66aqMAtLXSQOb4nKFET1SL5zfvblFOvMZT4JilKCDif7GkJPG7fPvISyjurMqQ1fo6n3Thz_420n9M-UhVa9Fu55rOS2Ouu0oGnjG7pvueZu7_Yl7q6ik6D_4sh5wxvMWKooJ6JgtAtWHbC7LZzpSmgiUcSGpUwoxwrMuxmmqb5GA48ADpnYJDO7j4LEli75g"
+  },
+  "expected": {
+    "ok": {
+      "aud": "notes-web",
+      "events": {
+        "http://schemas.openid.net/event/backchannel-logout": {}
+      },
+      "exp": 1767226190,
+      "iat": 1767225590,
+      "iss": "https://auth.example.com",
+      "jti": "01936f3e-8c00-7000-8000-000000000006",
+      "sid": "01936f3e-8c00-7000-8000-000000000002",
+      "sub": "01936f3e-8c00-7000-8000-000000000001"
+    }
+  }
+}

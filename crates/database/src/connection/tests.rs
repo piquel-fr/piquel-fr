@@ -406,3 +406,27 @@ async fn functions_pin_their_search_path() {
     .expect("functions");
     assert!(unpinned.is_empty(), "unpinned functions: {unpinned:?}");
 }
+
+/// Only their owner may execute functions that run as their owner, so the runtime
+/// role cannot attach one to a table of its own and have it run its SQL.
+#[tokio::test]
+#[ignore = "requires a disposable TEST_DATABASE_URL"]
+async fn functions_running_as_their_owner_are_not_executable_by_others() {
+    let pool = Database::test_pool().await;
+    let executable: Vec<String> = sqlx::query_scalar(
+        "SELECT proname::text FROM pg_proc
+        WHERE pronamespace = 'public'::regnamespace
+        AND prosecdef
+        AND EXISTS (
+            SELECT FROM aclexplode(coalesce(proacl, acldefault('f', proowner))) privilege
+            WHERE privilege.grantee <> proowner AND privilege.privilege_type = 'EXECUTE'
+        )",
+    )
+    .fetch_all(&pool)
+    .await
+    .expect("functions");
+    assert!(
+        executable.is_empty(),
+        "executable by others: {executable:?}"
+    );
+}

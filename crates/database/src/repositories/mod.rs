@@ -143,8 +143,12 @@ macro_rules! run {
 
 impl RepositoryExecutor<'_> {
     /// A client span for one query, recording its parameterized `sql` as
-    /// `db.query.text`, never its bind values.
+    /// `db.query.text`, never its bind values. A query outside any trace, such as an
+    /// idle delivery worker's poll, gets none: each would be a trace of its own.
     fn span(sql: &str) -> tracing::Span {
+        if tracing::Span::current().is_none() {
+            return tracing::Span::none();
+        }
         let operation = sql.split_whitespace().next().unwrap_or("query");
         tracing::info_span!(
             "db.query",

@@ -8,6 +8,8 @@
       ],
       "authorization_endpoint": "https://auth.example.com/oauth/authorize",
       "authorization_response_iss_parameter_supported": true,
+      "backchannel_logout_session_supported": true,
+      "backchannel_logout_supported": true,
       "claims_parameter_supported": false,
       "claims_supported": [
         "sub",

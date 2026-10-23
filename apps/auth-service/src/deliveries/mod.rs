@@ -6,11 +6,16 @@
 //! a worker that stops after sending but before recording lets its lease expire,
 //! and the delivery is sent again. See `docs/architecture/delivery-queue.md`.
 
-/// The HTTP client for destinations third parties supply, [`outbound::OutboundClient`].
+/// Back-channel logout tokens, [`BackchannelLogoutSender`].
+mod backchannel;
+/// The HTTP client for destinations third parties supply, [`OutboundClient`].
 mod outbound;
 /// Retry policy, the HTTP client's safety checks and the worker loop.
 #[cfg(test)]
 mod tests;
+
+pub(crate) use backchannel::BackchannelLogoutSender;
+pub(crate) use outbound::OutboundClient;
 
 use crate::jobs::{Jobs, Shutdown};
 use axum::http::StatusCode;
@@ -23,6 +28,7 @@ use std::{
 };
 use thiserror::Error;
 use tokio::task::JoinSet;
+use tracing::Instrument;
 
 /// How long a worker holds a claimed delivery: well beyond [`SEND_TIMEOUT`].
 const LEASE: Duration = Duration::from_mins(1);
@@ -101,6 +107,9 @@ pub(crate) enum Failure {
     /// attempted again.
     #[error("maximum age exceeded")]
     Expired,
+    /// The message could not be signed.
+    #[error("signing failed")]
+    Signing,
 }
 
 impl DeliveryError {
@@ -219,13 +228,19 @@ impl<S: Sender> Worker<S> {
 
     /// Sends `delivery` once and records the outcome. The attempt runs on its own
     /// task, so a panic ends only the attempt: its lease expires and it is retried.
+    /// Each attempt is a trace of its own: its send, its queries and its outcome.
     async fn attempt(&self, delivery: Delivery<S::Channel>) {
+        let span = tracing::info_span!(
+            parent: None,
+            "delivery",
+            otel.name = S::Channel::NAME,
+            channel = S::Channel::NAME,
+            delivery.id = %delivery.id,
+        );
         let mut attempt = JoinSet::new();
-        attempt.spawn(Self::send(
-            Arc::clone(&self.sender),
-            self.database.clone(),
-            delivery,
-        ));
+        attempt.spawn(
+            Self::send(Arc::clone(&self.sender), self.database.clone(), delivery).instrument(span),
+        );
         if let Some(Err(error)) = attempt.join_next().await {
             tracing::error!(
                 ?error,

@@ -1,12 +1,12 @@
 //! Active browser sessions, cookie digests and passkey confirmations.
 
 use super::{JsonArray, RepositoryExecutor, SessionRepository};
-use crate::DatabaseError;
+use crate::{DatabaseError, DatabaseTransaction};
 use chrono::{DateTime, TimeDelta, Utc};
 use piquel_admin_api::Session;
 use piquel_common::{
     AuthenticationMethod, SessionId, UserId,
-    events::UserAgentFamily,
+    events::{DomainEvent, EventContext, RevocationReason, UserAgentFamily},
     protocol::claims::{Acr, Amr},
 };
 use serde::{Deserialize, Serialize};
@@ -69,7 +69,7 @@ pub struct StoredSession {
     pub last_seen_ip: Option<IpAddr>,
 }
 
-/// Which of an account's sessions [`SessionRepository::revoke`] ends.
+/// Which of an account's sessions [`DatabaseTransaction::revoke_sessions`] ends.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum SessionScope {
     /// This session only.
@@ -301,11 +301,11 @@ impl SessionRepository<'_> {
     }
 
     /// Revokes the active `scope` sessions of `user_id`, with the refresh token
-    /// families issued from them, and returns the IDs of the sessions it revoked, so
-    /// the caller can record each revocation. Sessions of other accounts are never
-    /// touched, whatever the scope names, and expired ones are already over: no
-    /// refresh family of theirs rotates. This is the only way sessions end early;
-    /// callers run it in a transaction, so both updates commit together.
+    /// families issued from them, and returns the IDs of the sessions it revoked.
+    /// Sessions of other accounts are never touched, whatever the scope names, and
+    /// expired ones are already over: no refresh family of theirs rotates. Only
+    /// [`DatabaseTransaction::revoke_sessions`] calls it outside tests, so every
+    /// revocation is recorded.
     ///
     /// The families are revoked by a second statement: a code exchange that held a
     /// session's lock may have committed a family while the first one waited, and
@@ -315,7 +315,7 @@ impl SessionRepository<'_> {
     /// # Errors
     ///
     /// Returns [`DatabaseError`] if the query fails.
-    pub async fn revoke(
+    pub(crate) async fn revoke(
         &mut self,
         user_id: UserId,
         scope: SessionScope,
@@ -565,5 +565,34 @@ impl SessionRepository<'_> {
             return Err(DatabaseError::NotFound);
         }
         Ok(())
+    }
+}
+
+impl DatabaseTransaction<'_> {
+    /// Ends the `scope` sessions of `user_id` early, with the refresh token families
+    /// issued from them, and records one [`DomainEvent::SessionRevoked`] each, caused
+    /// as `context` says. Recording the event queues the logout tokens of the
+    /// session's clients, so this is the only way sessions end early: none can end
+    /// without its clients being told. Returns the revoked sessions.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`DatabaseError`] if a query fails or an event cannot be recorded.
+    pub async fn revoke_sessions(
+        &mut self,
+        context: &EventContext,
+        user_id: UserId,
+        scope: SessionScope,
+        reason: &RevocationReason,
+    ) -> Result<Vec<SessionId>, DatabaseError> {
+        let revoked = self.sessions().revoke(user_id, scope).await?;
+        for &session_id in &revoked {
+            let event = DomainEvent::SessionRevoked {
+                session_id,
+                reason: reason.clone(),
+            };
+            self.record(context, Some(user_id), event).await?;
+        }
+        Ok(revoked)
     }
 }

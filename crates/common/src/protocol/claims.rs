@@ -3,9 +3,10 @@
 //! on the wire format. Times are whole Unix seconds (RFC 7519 `NumericDate`).
 
 use super::{known, known_one, oauth::Scopes};
-use crate::{ClientId, SessionId, TokenId};
+use crate::{ClientId, DeliveryId, SessionId, TokenId};
 use chrono::{DateTime, Utc};
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Serialize, de::IgnoredAny};
+use std::collections::BTreeMap;
 
 crate::str_enum! {
     /// `amr` values (RFC 8176): how the user authenticated. This is the wire view,
@@ -257,6 +258,105 @@ pub struct IdTokenClaims {
     /// Profile and email claims allowed by the granted scopes.
     #[serde(flatten)]
     pub profile: ProfileClaims,
+}
+
+/// The `events` member every logout token carries (OIDC Back-Channel Logout 1.0 §2.4).
+pub const BACKCHANNEL_LOGOUT_EVENT: &str = "http://schemas.openid.net/event/backchannel-logout";
+
+/// A logout token's `events` claim, which must name [`BACKCHANNEL_LOGOUT_EVENT`].
+/// Every member's value must be a JSON object (RFC 8417 §2.2); their contents are
+/// ignored. Serializes as `{"http://schemas.openid.net/event/backchannel-logout": {}}`.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct LogoutEvents;
+
+impl Serialize for LogoutEvents {
+    /// Writes the one event, with an empty object.
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        BTreeMap::from([(BACKCHANNEL_LOGOUT_EVENT, BTreeMap::<&str, ()>::new())])
+            .serialize(serializer)
+    }
+}
+
+impl<'de> Deserialize<'de> for LogoutEvents {
+    /// Requires an object for every event, and the back-channel logout event.
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let events = BTreeMap::<String, BTreeMap<String, IgnoredAny>>::deserialize(deserializer)?;
+        if events.contains_key(BACKCHANNEL_LOGOUT_EVENT) {
+            Ok(Self)
+        } else {
+            Err(serde::de::Error::custom(format!(
+                "events must hold {BACKCHANNEL_LOGOUT_EVENT}"
+            )))
+        }
+    }
+}
+
+/// A claim that must be absent, such as a logout token's `nonce` (OIDC Back-Channel
+/// Logout 1.0 §2.4). Reading the claim fails whatever its value, even `null`, so an
+/// ID token can never pass as a logout token; it is never written.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct Absent;
+
+impl<'de> Deserialize<'de> for Absent {
+    /// Fails: the claim is present.
+    fn deserialize<D: serde::Deserializer<'de>>(_: D) -> Result<Self, D::Error> {
+        Err(serde::de::Error::custom("this claim must be absent"))
+    }
+}
+
+/// Claims of a back-channel logout token (OIDC Back-Channel Logout 1.0 §2.4), signed
+/// with `typ: logout+jwt` and posted to a client's back-channel logout URI. It ends
+/// one session (`sid`), or with `sub` alone every session of that user at the client.
+/// Auth always sends `sub`, and sends `sid` for a session logout.
+///
+/// ```
+/// use piquel_common::protocol::claims::LogoutTokenClaims;
+///
+/// let claims: LogoutTokenClaims = serde_json::from_str(r#"{
+///     "iss": "https://auth.piquel.fr",
+///     "aud": "notes-web",
+///     "iat": 1767225540,
+///     "exp": 1767225660,
+///     "jti": "01936f3e-8c00-7000-8000-000000000004",
+///     "sub": "01936f3e-8c00-7000-8000-000000000001",
+///     "sid": "01936f3e-8c00-7000-8000-000000000002",
+///     "events": {"http://schemas.openid.net/event/backchannel-logout": {}}
+/// }"#)?;
+/// assert!(claims.sid.is_some());
+///
+/// // A nonce, even null, means the token is not a logout token.
+/// let with_nonce = r#"{"iss": "https://auth.piquel.fr", "aud": "notes-web",
+///     "iat": 1767225540, "exp": 1767225660, "jti": "01936f3e-8c00-7000-8000-000000000004",
+///     "sub": "01936f3e-8c00-7000-8000-000000000001", "nonce": null,
+///     "events": {"http://schemas.openid.net/event/backchannel-logout": {}}}"#;
+/// assert!(serde_json::from_str::<LogoutTokenClaims>(with_nonce).is_err());
+/// # Ok::<(), serde_json::Error>(())
+/// ```
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct LogoutTokenClaims {
+    /// Issuer, exactly as in discovery.
+    pub iss: String,
+    /// The client being told.
+    pub aud: Audience,
+    /// When this attempt to deliver the token was made.
+    #[serde(with = "chrono::serde::ts_seconds")]
+    pub iat: DateTime<Utc>,
+    /// Expiry time.
+    #[serde(with = "chrono::serde::ts_seconds")]
+    pub exp: DateTime<Utc>,
+    /// The delivery's ID, the same on every attempt, so receivers can drop repeats.
+    pub jti: DeliveryId,
+    /// The user whose sessions end.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sub: Option<String>,
+    /// The auth session that ended, as the ID token's `sid` named it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sid: Option<SessionId>,
+    /// Marks the token as a back-channel logout.
+    pub events: LogoutEvents,
+    /// Never present.
+    #[serde(default, skip_serializing)]
+    pub nonce: Absent,
 }
 
 /// The `UserInfo` response (OIDC Core §5.3.2).
