@@ -82,9 +82,10 @@ for example, one active passkey always remains, whoever removes the others.
 The rule for what is shared: administrators may view, edit and remove, but never
 add a way to sign in or to receive the account's email, since that would let them
 take the account over. The operations only the owner may run take an `Owner`,
-which only the session cookie builds, so calling one for an administrator does not
-compile. Verifying an address is the exception: its link's token authorizes it, so
-it works signed out.
+which only the session cookie builds, or for a client the `OwnedClient` built from
+one, so calling one for an administrator does not compile. Two owner-only actions
+are authorized otherwise: verifying an address by its link's token, so it works
+signed out, and confirming with a passkey by the session it confirms.
 
 | Area | Shared | Owner only |
 | --- | --- | --- |

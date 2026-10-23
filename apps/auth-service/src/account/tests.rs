@@ -1,31 +1,35 @@
-//! Database-backed scenarios of administrators acting on another account through
-//! [`AccountService`]: what they may change, how it is recorded, and what refuses
-//! them.
+//! Database-backed scenarios of [`AccountService`]: what administrators may change
+//! on another account, how it is recorded and what refuses them, and what owners
+//! must confirm.
 
 use super::*;
 use crate::{
-    AdminError, Operator, Reason,
+    AdminError, GracePeriod, Operator, Reason,
     admin::tests::{Account, Harness, assert_refused, cli, operator},
+    config::EmailConfig,
     passkey::PasskeyError,
     security::ApiError,
     security::CONFIRMATION_MAX_AGE,
-    tests::{Browser, Replicas, sign_out, until_blocked},
+    tests::{Browser, Replicas, change, registration, sign_out, until_blocked},
 };
 use axum::{
     Router,
-    extract::{Path, State},
+    extract::{FromRef, Path, State},
     http::Method,
-    routing::delete,
+    routing::{delete, post},
 };
 use chrono::{Duration, Utc};
+use piquel_common::clients::{ClientId, ClientKind, ClientOwner};
 use piquel_common::{
     AuthenticationMethod, EmailId, Provider, TokenId, UserId,
     events::{Actor, DomainEvent, RevocationReason},
     protocol::step_up::StepUpRequirement,
 };
+use piquel_crypto::Secret;
+use piquel_repository::InsertVerifiedEmail;
 use piquel_repository::{InsertExternalIdentity, InsertPasskey};
 use serde_json::json;
-use std::mem::discriminant;
+use std::{fmt::Debug, mem::discriminant};
 
 /// The reason the scenarios give.
 const REASON: &str = "Le propriétaire a perdu son téléphone";
@@ -526,5 +530,232 @@ async fn a_confirmation_while_waiting_does_not_count() {
     assert_eq!(
         (status, body["code"].as_str()),
         (StatusCode::FORBIDDEN, Some("step_up_required"))
+    );
+}
+
+operations! {
+    /// The account operations that need the owner's recent confirmation, which the
+    /// table below calls directly, as an in-process caller would.
+    enum Confirming {
+        /// Add an address.
+        AddEmail,
+        /// Make another verified address the primary one.
+        MakeEmailPrimary,
+        /// Remove an address.
+        RemoveEmail,
+        /// Link an identity.
+        LinkIdentity,
+        /// Unlink an identity.
+        UnlinkIdentity,
+        /// Remove a passkey.
+        RevokePasskey,
+        /// Register a client.
+        CreateClient,
+        /// Change a client's redirect URIs.
+        UpdateClientRedirects,
+        /// Rotate a client's secret.
+        RotateClientSecret,
+        /// Delete a client.
+        DeleteClient,
+    }
+}
+
+/// An account with something for each confirming operation to act on.
+#[derive(Clone)]
+struct Confirmation {
+    /// The operations.
+    service: AccountService,
+    /// Email settings that send, so an address could be added.
+    email: EmailConfig,
+    /// The account.
+    user: UserId,
+    /// A verified address that is not the primary one.
+    address: EmailId,
+    /// One of two passkeys.
+    passkey: PasskeyId,
+    /// The account's confidential client.
+    client: ClientId,
+}
+
+impl FromRef<Confirmation> for Database {
+    /// The owner extractor's database.
+    fn from_ref(state: &Confirmation) -> Self {
+        state.service.database.clone()
+    }
+}
+
+impl Confirmation {
+    /// Creates an account with two passkeys, a GitHub identity, two verified
+    /// addresses and a confidential client.
+    async fn new(fixture: &Fixture) -> Self {
+        let database = &fixture.harness.database;
+        let (account, passkeys) = fixture.target(2).await;
+        let user = account.user_id;
+        let mut tx = database.begin().await.expect("transaction");
+        let mut addresses = Vec::new();
+        for (index, is_primary) in [(1, true), (2, false)] {
+            let email = tx
+                .emails()
+                .insert_verified(&InsertVerifiedEmail {
+                    id: EmailId::new(),
+                    user_id: user,
+                    normalized_email: format!("{user}-{index}@example.com"),
+                    is_primary,
+                    verified_at: Utc::now(),
+                })
+                .await
+                .expect("address");
+            addresses.push(email.id);
+        }
+        tx.commit().await.expect("commit");
+        let client = registration(ClientKind::Confidential, "https://notes.example");
+        change(database, async |registry| {
+            registry
+                .create(ClientOwner::Account(user), &client, None)
+                .await
+        })
+        .await
+        .expect("client");
+        let settings = "https://piquel.fr/settings".parse().expect("settings URL");
+        Self {
+            service: fixture.service.clone(),
+            email: EmailConfig::test(&settings, true),
+            user,
+            address: addresses[1],
+            passkey: passkeys[0],
+            client: client.id,
+        }
+    }
+
+    /// What the operations could change: the addresses and which is primary,
+    /// how many passkeys, identities and clients there are, the client's redirect
+    /// URIs and secrets, and how many events the account has.
+    async fn snapshot(&self) -> impl Debug + PartialEq {
+        let database = &self.service.database;
+        let emails = database.emails().list(self.user).await.expect("emails");
+        let emails: Vec<_> = emails
+            .iter()
+            .map(|email| (email.id, email.is_primary))
+            .collect();
+        let passkeys = database.passkeys().list_active(self.user).await;
+        let identities = database.federation().list_active(self.user).await;
+        let clients = database.oidc().list_owned_clients(self.user).await;
+        let clients: Vec<_> = clients
+            .expect("clients")
+            .into_iter()
+            .map(|client| client.redirect_uris)
+            .collect();
+        let secrets = database.oidc().client_secrets(&self.client).await;
+        let events = database.events().history_for_user(self.user, 1000).await;
+        (
+            emails,
+            passkeys.expect("passkeys").len(),
+            identities.expect("identities").len(),
+            clients,
+            secrets.expect("secrets").len(),
+            events.expect("history").len(),
+        )
+    }
+}
+
+impl Confirming {
+    /// Runs this operation as `owner` on `state`'s account.
+    async fn run(self, state: &Confirmation, owner: Owner) -> Result<(), AccountError> {
+        let service = &state.service;
+        match self {
+            Self::AddEmail => service
+                .add_email(&owner, &state.email, "added@example.com")
+                .await
+                .map(drop),
+            Self::MakeEmailPrimary => {
+                let subject = Subject::from(owner);
+                service.make_primary_email(&subject, state.address).await
+            }
+            Self::RemoveEmail => {
+                let subject = Subject::from(owner);
+                service.remove_email(&subject, state.address).await
+            }
+            Self::LinkIdentity => {
+                let pending = Secret::generate().expect("pending evidence");
+                service.link_identity(&owner, &pending).await.map(drop)
+            }
+            Self::UnlinkIdentity => {
+                let subject = Subject::from(owner);
+                service.unlink_identity(&subject, Provider::GitHub).await
+            }
+            Self::RevokePasskey => {
+                let subject = Subject::from(owner);
+                service.revoke_passkey(&subject, state.passkey).await
+            }
+            Self::CreateClient => {
+                let new = json!({
+                    "kind": "public",
+                    "display_name": "Other",
+                    "redirect_uris": ["https://other.example/callback"],
+                });
+                let new = serde_json::from_value(new).expect("new client");
+                service.create_client(&owner, new).await.map(drop)
+            }
+            Self::UpdateClientRedirects => {
+                let client = service.owned_client(owner, state.client.as_str()).await?;
+                let patch = json!({"redirect_uris": ["https://attacker.example/callback"]});
+                let patch = serde_json::from_value(patch).expect("patch");
+                service.update_client(&client, patch).await.map(drop)
+            }
+            Self::RotateClientSecret => {
+                let client = service.owned_client(owner, state.client.as_str()).await?;
+                service
+                    .rotate_client_secret(&client, GracePeriod::default())
+                    .await
+                    .map(drop)
+            }
+            Self::DeleteClient => {
+                let client = service.owned_client(owner, state.client.as_str()).await?;
+                service.delete_client(&client).await
+            }
+        }
+    }
+}
+
+/// Every operation that needs the owner's recent confirmation checks it itself,
+/// not only through its route's early check: called directly from a session that
+/// never confirmed one, each answers `step_up_required` and changes nothing.
+#[tokio::test]
+#[ignore = "requires TEST_DATABASE_URL"]
+async fn every_confirmed_operation_checks_the_owner_itself() {
+    let fixture = Fixture::new().await;
+    let state = Confirmation::new(&fixture).await;
+    let database = &fixture.harness.database;
+    let social =
+        Browser::sign_in_with(database, state.user, AuthenticationMethod::Federation).await;
+    let before = state.snapshot().await;
+    let routes = Router::new()
+        .route(
+            "/{index}",
+            post(
+                |State(state): State<Confirmation>, owner: Owner, Path(index): Path<usize>| async move {
+                    Confirming::ALL[index]
+                        .run(&state, owner)
+                        .await
+                        .map_err(ApiError::from)
+                },
+            ),
+        )
+        .with_state(state.clone());
+
+    for (index, operation) in Confirming::ALL.iter().enumerate() {
+        let (status, body) = social
+            .call(&routes, Method::POST, &format!("/{index}"))
+            .await;
+        assert_eq!(
+            (status, body["code"].as_str()),
+            (StatusCode::FORBIDDEN, Some("step_up_required")),
+            "{operation:?}"
+        );
+    }
+    assert_eq!(
+        state.snapshot().await,
+        before,
+        "nothing changed or recorded"
     );
 }

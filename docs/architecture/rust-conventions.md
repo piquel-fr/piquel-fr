@@ -91,10 +91,11 @@ their setting's module, such as `src/passkey`. Each takes the account and who ac
 on it:
 
 - an `Owner`, for what only the owner may do, such as adding a passkey or an
-  address. Only the session cookie builds one, so these cannot be called for an
-  administrator. Verifying an address is authorized by its link's token instead,
-  and takes an optional `Owner` only to refuse a browser signed in to another
-  account;
+  address, or managing the account's clients. Only the session cookie builds one,
+  so these cannot be called for an administrator. Verifying an address is
+  authorized by its link's token instead, and takes an optional `Owner`: it refuses
+  a browser signed in to another account, and records the owner as the actor when
+  theirs confirms it;
 - a `Subject`, for changes an administrator may also make: the owner, or an
   `Operator` with the reason it must give;
 - a `Viewer`, for reads, which need no reason. For an operator,
