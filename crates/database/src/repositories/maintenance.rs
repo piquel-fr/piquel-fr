@@ -60,6 +60,19 @@ impl MaintenanceRepository<'_> {
                 LIMIT $1
                 FOR UPDATE SKIP LOCKED
             )",
+            // An unverified address goes with its expired verification link; the
+            // secret's row cascades. Both rows are locked, skipping any a
+            // verification holds, so cleanup never waits on one.
+            "DELETE FROM user_emails
+            WHERE id IN (
+                SELECT secret.email_id
+                FROM email_verification_secrets secret
+                JOIN user_emails email ON email.id = secret.email_id
+                WHERE secret.expires_at < now()
+                AND email.verified_at IS NULL
+                LIMIT $1
+                FOR UPDATE OF secret, email SKIP LOCKED
+            )",
             "DELETE FROM pending_federation
             WHERE ctid IN (
                 SELECT ctid

@@ -7,6 +7,8 @@ export type Provider = 'github' | 'google';
 export type PasskeyKind = 'standard' | 'google_password_manager';
 export type Session = { user: { id: string; username: string; display_name: string } };
 export type Configuration = {
+  /** Whether auth sends email, so accounts can add addresses. */
+  email_enabled: boolean;
   settings_url: string;
   /** Frontend origins, such as https://piquel.fr, that sign-in may return to. */
   frontend_origins: string[];
@@ -83,7 +85,7 @@ export class AuthApi {
     const protocolMessage = error === null ? undefined : protocolErrors[error];
     return new ApiError(
       response.status === 429
-        ? 'Too many attempts. Wait a moment and try again.'
+        ? (error ?? 'Too many attempts. Wait a moment and try again.')
         : protocolMessage
           ? description && response.status < 500
             ? `${protocolMessage} (${description})`

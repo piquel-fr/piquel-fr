@@ -17,7 +17,8 @@ Auth-service owns sending: the workers, the retry policy and the HTTP client
 - **Self-contained.** A delivery copies everything a send needs when it is
   created: the destination, and facts about the recipient such as `client_id`,
   `sub` and `sid`. Purging an account, deleting its sessions or changing a client
-  afterwards does not change or lose a pending delivery.
+  afterwards does not change or lose a pending delivery. Email is the exception,
+  on purpose: see [Email](#email).
 - **At least once, with possible duplicates.** A worker that stops after sending
   but before recording the outcome lets its lease expire, and another worker sends
   the delivery again. Every attempt carries the same delivery ID, which receivers
@@ -82,6 +83,39 @@ Destinations come from client registrations, which third parties can supply.
 HTTP 408, 429 and 5xx, timeouts, connection and DNS failures are retryable. Other
 statuses, refused destinations and redirects fail at once.
 
+## Email
+
+The `email` channel (`deliveries/email.rs` in both crates) sends account holders
+transactional messages over SMTP. A delivery stores the account's ID as its
+recipient and a typed `EmailMessage` as its payload. A verification link stores
+only the address's ID: the sender reads the address, and the account's username
+the message names, when it sends, so a link to an address removed, replaced or
+verified meanwhile is not sent, and the delivery succeeds without a send. The
+notices that an address stopped being primary, or was removed, copy the address
+instead, read in the event's transaction, so removing the address right after
+cannot cancel them. They are the channel's only personal data, deleted with the
+delivery. The `destination` column names the account and the address's ID, for
+operators.
+
+A verification link's token is never stored, not even in the payload: it is an
+HMAC of the address's ID under a key derived from the signing key. Settings store
+its SHA-256 digest when the address is added, and the sender derives it again.
+Every attempt therefore sends the same content and link, with the `Message-ID`
+`<delivery ID@sender's domain>`. If the connection breaks after the
+relay accepted a message, the delivery is retried and the mail may arrive twice;
+mail clients that deduplicate on `Message-ID` hide the copy.
+
+A permanent (5xx) SMTP reply fails the delivery. Temporary (4xx) replies, a
+rejected login (`530`, `534`, `535`), timeouts, and connection or TLS failures
+retry, for up to 24 hours, as long as a link works: a login fails on the relay's
+key, not the message, so sending resumes once the key is fixed. The error recorded is the reply code, never its text, which can quote
+the recipient. Without `AUTH_SMTP_URL`, the workers still run and drop every
+delivery, so none waits forever.
+
+Templates live in `apps/auth-service/templates/email/` and are checked at
+compile time: each `EmailMessage` becomes a `Content` variant, which both the
+plain-text and the HTML template must match.
+
 ## Operations
 
 ```sh
@@ -107,6 +141,7 @@ deliveries ordered after it wait for its lease to expire.
   client ID, `sub` and `sid`. `BackchannelLogoutSender` signs a token per attempt,
   with `iat` the attempt's time and `exp` two minutes later, and posts it as the
   `logout_token` form field. `jti` is the delivery ID. `MAX_AGE` is one hour.
+- **`email`**: messages to account holders, sent over SMTP; see [Email](#email).
 
 ## Adding a channel
 

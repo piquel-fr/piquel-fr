@@ -1,0 +1,421 @@
+//! The account's email addresses: adding one sends a verification link, and a
+//! verified address can become the primary one, which the OIDC `email` claim
+//! reports. Adding, changing the primary address and removing one are sensitive,
+//! since the addresses receive security notices, so they need a recent passkey
+//! confirmation. Verifying needs only the link's token: possessing it proves
+//! control of the mailbox.
+//!
+//! The token is never stored, not even in the delivery that sends it: it is
+//! derived from the address's ID with [`VerificationKey`], once here to store its
+//! digest, and again by the email sender. See `docs/architecture/delivery-queue.md`.
+use crate::{
+    config::EmailConfig,
+    routes,
+    security::{self, ApiError, Confirmed, OptionalSession, RequestContext},
+};
+use axum::{
+    Json, Router,
+    extract::{Path, State},
+    http::StatusCode,
+    routing::{delete, get, post},
+};
+use chrono::{Duration, Utc};
+use piquel_common::{
+    EmailId, Personal, UserId,
+    email::NormalizedEmail,
+    events::{Actor, DomainEvent},
+};
+use piquel_crypto::{CryptoError, Digest, Secret};
+use piquel_repository::{
+    Database, DatabaseError, DatabaseTransaction, InsertUnverifiedEmail, StoredEmail, StoredSession,
+};
+use serde::{Deserialize, Serialize};
+use std::{net::IpAddr, sync::Arc, time::Duration as StdDuration};
+
+/// Email failures and their browser response mapping.
+mod error;
+use error::EmailError;
+
+/// How long a verification link works.
+pub(crate) const VERIFICATION_LIFETIME: Duration = Duration::hours(24);
+/// The most addresses an account may have, verified or not.
+const MAX_EMAILS: usize = 10;
+/// The window verification email limits count in.
+const VERIFICATION_WINDOW: StdDuration = StdDuration::from_hours(1);
+/// Verification emails one account may send per [`VERIFICATION_WINDOW`].
+const VERIFICATIONS_PER_ACCOUNT: i32 = 5;
+/// Verification emails one client IP may send per [`VERIFICATION_WINDOW`], across
+/// accounts.
+const VERIFICATIONS_PER_IP: i32 = 10;
+/// Verification emails one address may receive per [`VERIFICATION_WINDOW`], across
+/// accounts and clients.
+const VERIFICATIONS_PER_ADDRESS: i32 = 3;
+
+/// HMAC key deriving each address's verification token from its ID. It is derived
+/// from persistent key material, so every replica and the email sender derive the
+/// same token, and a restart does not break links already sent.
+#[derive(Clone)]
+pub(crate) struct VerificationKey(Arc<Secret>);
+
+impl VerificationKey {
+    /// Wraps a key reserved for verification tokens.
+    pub(crate) fn new(key: Secret) -> Self {
+        Self(Arc::new(key))
+    }
+
+    /// The token of address `id`'s verification link.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`CryptoError`] if the HMAC provider fails.
+    pub(crate) fn token(&self, id: EmailId) -> Result<Secret, CryptoError> {
+        Secret::derive(self.0.as_bytes(), id.as_uuid().as_bytes())
+    }
+}
+
+/// The account's addresses and their verification.
+#[derive(Clone)]
+pub(crate) struct EmailApplication {
+    /// Addresses, sessions and events.
+    database: Database,
+    /// Whether email is sent, and the verification key.
+    config: EmailConfig,
+}
+
+/// An address as the account sees it.
+#[derive(Serialize)]
+struct EmailView {
+    /// Address ID.
+    id: EmailId,
+    /// The normalized address.
+    address: String,
+    /// Whether someone followed its verification link.
+    verified: bool,
+    /// Whether it is the primary address, which applications receive.
+    primary: bool,
+}
+
+impl From<StoredEmail> for EmailView {
+    /// Keeps what the account sees.
+    fn from(email: StoredEmail) -> Self {
+        Self {
+            id: email.id,
+            verified: email.verified_at.is_some(),
+            address: email.normalized_email,
+            primary: email.is_primary,
+        }
+    }
+}
+
+/// The body of [`routes::emails::LIST`] mutations.
+#[derive(Deserialize)]
+struct AddEmail {
+    /// The address to add.
+    email: String,
+}
+
+/// The body of [`routes::emails::VERIFY`].
+#[derive(Deserialize)]
+struct VerifyEmail {
+    /// The token from the verification link.
+    token: String,
+}
+
+/// The answer to a verification.
+#[derive(Serialize)]
+struct Verified {
+    /// The verified address.
+    address: String,
+    /// Whether it became the primary address, being the account's first.
+    primary: bool,
+}
+
+impl EmailApplication {
+    /// Manages addresses in `database`, sending email as `config` says.
+    pub(crate) fn new(database: Database, config: &EmailConfig) -> Self {
+        Self {
+            database,
+            config: config.clone(),
+        }
+    }
+
+    /// Returns the address endpoints with this application as state.
+    pub(crate) fn routes(self) -> Router {
+        Router::new()
+            .route(routes::emails::LIST, get(Self::list).post(Self::add))
+            .route(routes::emails::VERIFY, post(Self::verify))
+            .route(routes::emails::PRIMARY, post(Self::make_primary))
+            .route(routes::emails::ITEM, delete(Self::remove))
+            .with_state(self)
+    }
+
+    /// Lists the account's addresses, primary first.
+    async fn list(
+        State(app): State<Self>,
+        security::Session(session): security::Session,
+    ) -> Result<Json<Vec<EmailView>>, ApiError> {
+        let emails = app.database.emails().list(session.user_id).await?;
+        Ok(Json(emails.into_iter().map(EmailView::from).collect()))
+    }
+
+    /// Adds an unverified address and queues its verification email, in one
+    /// transaction. Adding an address that is still waiting for verification
+    /// replaces it, which sends a new link. The address may be another account's:
+    /// rejecting it here would tell anyone which addresses have accounts, so only
+    /// verification, by whoever controls the mailbox, finds out.
+    async fn add(
+        State(app): State<Self>,
+        context: RequestContext,
+        confirmed: Confirmed,
+        Json(body): Json<AddEmail>,
+    ) -> Result<(StatusCode, Json<EmailView>), ApiError> {
+        if app.config.smtp.is_none() {
+            return Err(EmailError::Disabled.into());
+        }
+        let address = NormalizedEmail::parse(&body.email).map_err(EmailError::Invalid)?;
+        // The sender must be able to send to it, or its link would never arrive.
+        address
+            .as_str()
+            .parse::<lettre::Address>()
+            .map_err(EmailError::Unsendable)?;
+        let session = &confirmed.0;
+        let mut tx = app.database.begin().await?;
+        confirmed.lock(&mut tx).await?;
+        let emails = tx.emails().list(session.user_id).await?;
+        let mut count = emails.len();
+        if let Some(existing) = emails
+            .iter()
+            .find(|email| email.normalized_email == address.as_str())
+        {
+            if existing.verified_at.is_some() {
+                return Err(EmailError::AlreadyAdded.into());
+            }
+            Self::delete(&mut tx, context, session, existing.id).await?;
+            count -= 1;
+        }
+        if count >= MAX_EMAILS {
+            return Err(EmailError::TooMany { max: MAX_EMAILS }.into());
+        }
+        Self::limit(&mut tx, session.user_id, context.client_ip, &address).await?;
+        let id = EmailId::new();
+        let digest = app
+            .config
+            .verification_key
+            .token(id)
+            .map_err(EmailError::Crypto)?
+            .digest();
+        tx.emails()
+            .insert_unverified(&InsertUnverifiedEmail {
+                id,
+                user_id: session.user_id,
+                normalized_email: address.as_str(),
+                secret_digest: digest.as_bytes(),
+                expires_at: Utc::now() + VERIFICATION_LIFETIME,
+            })
+            .await?;
+        tx.record(
+            &context.user(session),
+            Some(session.user_id),
+            DomainEvent::EmailAdded {
+                email_id: id,
+                address: Personal::Value(address.clone()),
+            },
+        )
+        .await?;
+        tx.commit().await?;
+        Ok((
+            StatusCode::CREATED,
+            Json(EmailView {
+                id,
+                address: address.into(),
+                verified: false,
+                primary: false,
+            }),
+        ))
+    }
+
+    /// Verifies the address whose link holds `token`, once. It becomes primary if
+    /// the account had none. No session is needed: the token proves control of the
+    /// mailbox, and whoever holds it may be signed out or on another device. A
+    /// `GET` never verifies, since mail scanners follow links.
+    async fn verify(
+        State(app): State<Self>,
+        context: RequestContext,
+        OptionalSession(session): OptionalSession,
+        Json(body): Json<VerifyEmail>,
+    ) -> Result<Json<Verified>, ApiError> {
+        // A token that does not parse cannot match: answer as for an unknown one.
+        let digest = Secret::parse(&body.token)
+            .map_err(|_| EmailError::InvalidToken)?
+            .digest();
+        let mut tx = app.database.begin().await?;
+        let pending = tx
+            .emails()
+            .find_verification(digest.as_bytes())
+            .await?
+            .ok_or(EmailError::InvalidToken)?;
+        tx.users()
+            .find_active_by_id_for_update(pending.user_id)
+            .await?
+            .ok_or(EmailError::InvalidToken)?;
+        // A browser signed in to another account would otherwise confirm the
+        // address for an account that is not theirs, as a phishing link could ask.
+        let context = match &session {
+            Some(session) if session.user_id == pending.user_id => context.user(session),
+            Some(_) => return Err(EmailError::OtherAccount.into()),
+            None => context.actor(Actor::Anonymous),
+        };
+        let primary = match tx
+            .emails()
+            .consume_verification(&pending, digest.as_bytes())
+            .await
+        {
+            Ok(primary) => primary,
+            Err(DatabaseError::NotFound) => return Err(EmailError::InvalidToken.into()),
+            // The ownership trigger: another active account verified it first.
+            Err(DatabaseError::Conflict(_)) => return Err(EmailError::OwnedElsewhere.into()),
+            Err(error) => return Err(error.into()),
+        };
+        let email_id = pending.email_id;
+        let subject = Some(pending.user_id);
+        tx.record(&context, subject, DomainEvent::EmailVerified { email_id })
+            .await?;
+        if primary {
+            let event = DomainEvent::PrimaryEmailChanged {
+                email_id,
+                previous_email_id: None,
+            };
+            tx.record(&context, subject, event).await?;
+        }
+        tx.commit().await?;
+        Ok(Json(Verified {
+            address: pending.address,
+            primary,
+        }))
+    }
+
+    /// Makes a verified address the primary one, and queues a notice to the
+    /// previous primary address.
+    async fn make_primary(
+        State(app): State<Self>,
+        context: RequestContext,
+        confirmed: Confirmed,
+        Path(id): Path<EmailId>,
+    ) -> Result<StatusCode, ApiError> {
+        let session = &confirmed.0;
+        let mut tx = app.database.begin().await?;
+        confirmed.lock(&mut tx).await?;
+        let email = tx
+            .emails()
+            .find(session.user_id, id)
+            .await?
+            .ok_or(EmailError::NotFound)?;
+        if email.verified_at.is_none() {
+            return Err(EmailError::NotVerified.into());
+        }
+        if !email.is_primary {
+            let previous_email_id = tx.emails().set_primary(session.user_id, id).await?;
+            tx.record(
+                &context.user(session),
+                Some(session.user_id),
+                DomainEvent::PrimaryEmailChanged {
+                    email_id: id,
+                    previous_email_id,
+                },
+            )
+            .await?;
+        }
+        tx.commit().await?;
+        Ok(StatusCode::NO_CONTENT)
+    }
+
+    /// Removes an address, and queues a notice to it if it was verified. The
+    /// primary address can only be removed once no other verified address could
+    /// replace it: another one must be made primary first, which notifies it too.
+    async fn remove(
+        State(app): State<Self>,
+        context: RequestContext,
+        confirmed: Confirmed,
+        Path(id): Path<EmailId>,
+    ) -> Result<StatusCode, ApiError> {
+        let session = &confirmed.0;
+        let mut tx = app.database.begin().await?;
+        confirmed.lock(&mut tx).await?;
+        let emails = tx.emails().list(session.user_id).await?;
+        let email = emails
+            .iter()
+            .find(|email| email.id == id)
+            .ok_or(EmailError::NotFound)?;
+        if email.is_primary
+            && emails
+                .iter()
+                .any(|other| other.id != id && other.verified_at.is_some())
+        {
+            return Err(EmailError::PrimaryInUse.into());
+        }
+        Self::delete(&mut tx, context, session, id).await?;
+        tx.commit().await?;
+        Ok(StatusCode::NO_CONTENT)
+    }
+
+    /// Records the removal of the session's account's address `id`, then deletes
+    /// it. In that order, so the `email` channel still reads a verified address
+    /// and copies it into the notice of its removal.
+    async fn delete(
+        tx: &mut DatabaseTransaction<'_>,
+        context: RequestContext,
+        session: &StoredSession,
+        id: EmailId,
+    ) -> Result<(), DatabaseError> {
+        tx.record(
+            &context.user(session),
+            Some(session.user_id),
+            DomainEvent::EmailRemoved { email_id: id },
+        )
+        .await?;
+        tx.emails().remove(session.user_id, id).await
+    }
+
+    /// Counts one verification email against the hourly limits of the account,
+    /// the client IP and the address's mailbox, so neither one account, nor one client, nor
+    /// many of both can flood a mailbox. In the caller's transaction, so a rejected
+    /// or failed addition counts nothing.
+    async fn limit(
+        tx: &mut DatabaseTransaction<'_>,
+        user_id: UserId,
+        client_ip: IpAddr,
+        address: &NormalizedEmail,
+    ) -> Result<(), EmailError> {
+        let buckets = [
+            (format!("account:{user_id}"), VERIFICATIONS_PER_ACCOUNT),
+            (format!("ip:{client_ip}"), VERIFICATIONS_PER_IP),
+            (
+                format!("address:{}", address.mailbox()),
+                VERIFICATIONS_PER_ADDRESS,
+            ),
+        ];
+        for (key, limit) in buckets {
+            let bucket = Digest::sha256(format!("verification-email:{key}").as_bytes());
+            if !tx
+                .security()
+                .allow_request(bucket.as_bytes(), limit, VERIFICATION_WINDOW)
+                .await?
+            {
+                return Err(EmailError::RateLimited { limit });
+            }
+        }
+        Ok(())
+    }
+}
+
+/// Supplies the shared database boundary to browser-session extractors.
+impl axum::extract::FromRef<EmailApplication> for Database {
+    /// Shares persistence with the session extractors.
+    fn from_ref(application: &EmailApplication) -> Self {
+        application.database.clone()
+    }
+}
+
+/// Database-backed address scenarios.
+#[cfg(test)]
+mod tests;

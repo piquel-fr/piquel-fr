@@ -3,7 +3,7 @@
 
 use crate::{
     AuthConfig, StartupError,
-    deliveries::{BackchannelLogoutSender, OutboundClient},
+    deliveries::{BackchannelLogoutSender, EmailSender, OutboundClient},
 };
 use piquel_repository::{Database, DatabaseError, ExclusiveConnection, LockKey};
 use piquel_telemetry::{Counter, Histogram};
@@ -60,8 +60,8 @@ pub struct Jobs {
 }
 
 impl Jobs {
-    /// Starts every job on `database`, and the delivery workers, which sign with
-    /// `config`'s keys.
+    /// Starts every job on `database`, and the delivery workers of every channel,
+    /// configured by `config`.
     ///
     /// # Errors
     /// Fails if the outbound HTTP client cannot initialize.
@@ -74,6 +74,7 @@ impl Jobs {
             OutboundClient::new().map_err(StartupError::Outbound)?,
         );
         jobs.deliveries(logout, database);
+        jobs.deliveries(EmailSender::new(database.clone(), &config.email), database);
         Ok(jobs)
     }
 

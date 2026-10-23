@@ -44,7 +44,7 @@ use thiserror::Error;
 pub(crate) const CSRF_HEADER: &str = "x-piquel-csrf";
 /// Trusted ingress must overwrite this header with exactly one client address.
 const FORWARDED_FOR_HEADER: &str = "x-forwarded-for";
-/// Request budget per category and client in the repository's one-minute window.
+/// Request budget per category and client in each [`RATE_WINDOW`].
 const REQUESTS_PER_MINUTE: i32 = 120;
 /// Requests refused because their client's budget was exhausted, by category.
 static THROTTLED: Counter<[Label; 1]> = Counter::new(
@@ -52,8 +52,8 @@ static THROTTLED: Counter<[Label; 1]> = Counter::new(
     "{request}",
     "Requests refused by rate limits, by rate category.",
 );
-/// Retry delay matching the request-limit window.
-const RETRY_AFTER_SECONDS: &str = "60";
+/// The fixed window request budgets count in.
+const RATE_WINDOW: StdDuration = StdDuration::from_mins(1);
 /// Deadline includes origin checks, rate-limit persistence and the handler.
 const REQUEST_TIMEOUT: StdDuration = StdDuration::from_secs(30);
 /// Browser session lifetime, also used by its host cookie.
@@ -72,6 +72,8 @@ pub(crate) struct ApiError {
     message: Cow<'static, str>,
     /// Stable reason a frontend can react to, serialized next to the message.
     code: Option<ErrorCode>,
+    /// When a rate-limited client may try again, sent as `Retry-After`.
+    retry_after: Option<StdDuration>,
 }
 
 impl ApiError {
@@ -81,6 +83,7 @@ impl ApiError {
             status,
             message: message.into(),
             code: None,
+            retry_after: None,
         }
     }
 
@@ -118,6 +121,17 @@ impl ApiError {
     /// Rejects a write that collides with existing data, naming what is already in use.
     pub(crate) fn conflict(message: impl Into<Cow<'static, str>>) -> Self {
         Self::new(StatusCode::CONFLICT, message)
+    }
+
+    /// Rejects a request over its rate limit until its window ends.
+    pub(crate) fn too_many_requests(
+        message: impl Into<Cow<'static, str>>,
+        window: StdDuration,
+    ) -> Self {
+        Self {
+            retry_after: Some(window),
+            ..Self::new(StatusCode::TOO_MANY_REQUESTS, message)
+        }
     }
 
     /// Logs an internal source chain and returns a generic browser message.
@@ -167,10 +181,10 @@ impl IntoResponse for ApiError {
             }),
         )
             .into_response();
-        if self.status == StatusCode::TOO_MANY_REQUESTS {
+        if let Some(retry_after) = self.retry_after {
             response.headers_mut().insert(
                 header::RETRY_AFTER,
-                HeaderValue::from_static(RETRY_AFTER_SECONDS),
+                HeaderValue::from(retry_after.as_secs()),
             );
         }
         response
@@ -899,10 +913,9 @@ impl From<HttpSecurityError> for ApiError {
             HttpSecurityError::ForwardedAddress(_) => Self::bad_request(
                 "The proxy's X-Forwarded-For header must hold exactly one IP address.",
             ),
-            HttpSecurityError::RateLimited => Self::new(
-                StatusCode::TOO_MANY_REQUESTS,
-                "Too many requests. Please wait a minute.",
-            ),
+            HttpSecurityError::RateLimited => {
+                Self::too_many_requests("Too many requests. Please wait a minute.", RATE_WINDOW)
+            }
             HttpSecurityError::Timeout(_) => {
                 Self::new(StatusCode::GATEWAY_TIMEOUT, "Request timed out.")
             }
@@ -1062,7 +1075,7 @@ impl HttpSecurity {
             if !self
                 .database
                 .security()
-                .allow_request(bucket.as_bytes(), REQUESTS_PER_MINUTE)
+                .allow_request(bucket.as_bytes(), REQUESTS_PER_MINUTE, RATE_WINDOW)
                 .await?
             {
                 THROTTLED.add(1, &[("category", category.as_str())]);

@@ -1,0 +1,50 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO user_emails (id, user_id, normalized_email, verified_at, is_primary)\n                VALUES ($1, $2, $3, $4, $5)\n                RETURNING\n                    id AS \"id: EmailId\", user_id AS \"user_id: UserId\", normalized_email,\n                    verified_at, is_primary",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id: EmailId",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "user_id: UserId",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 2,
+        "name": "normalized_email",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 3,
+        "name": "verified_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 4,
+        "name": "is_primary",
+        "type_info": "Bool"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid",
+        "Text",
+        "Timestamptz",
+        "Bool"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      true,
+      false
+    ]
+  },
+  "hash": "261fa111bf90ce4a5b4231c082f7b6ab3702e57e0ae8d5833e97529ea7c2e901"
+}

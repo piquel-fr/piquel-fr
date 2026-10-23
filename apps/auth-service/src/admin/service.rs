@@ -3,7 +3,7 @@
 use super::{AdminError, HandleIssue, HandleProblem, InviteExpiry, Operator, Reason};
 use chrono::Utc;
 use piquel_admin_api::{
-    Administrator, Client, CreatedInvitation, Event, EventPage, EventSearch, Invitation,
+    Administrator, Client, CreatedInvitation, Email, Event, EventPage, EventSearch, Invitation,
     UserDetail, UserPage,
 };
 use piquel_common::{
@@ -137,7 +137,13 @@ impl AdminService {
             .ok_or(AdminError::UserNotFound)?;
         let detail = UserDetail {
             administrator: tx.administrators().contains(user_id).await?,
-            emails: tx.emails().list_for_user(user_id).await?,
+            emails: tx
+                .emails()
+                .list(user_id)
+                .await?
+                .into_iter()
+                .map(Email::from)
+                .collect(),
             passkeys: Self::views(tx.passkeys().list_active(user_id).await?),
             identities: Self::views(tx.federation().list_active(user_id).await?),
             sessions: tx

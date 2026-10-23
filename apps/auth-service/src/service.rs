@@ -9,6 +9,8 @@ use serde::Serialize;
 #[derive(Clone, Serialize)]
 struct PublicConfig {
     // Keep fields in the original JSON object's sorted order for byte-for-byte replies.
+    /// Whether the service sends email, so accounts can add addresses.
+    email_enabled: bool,
     /// Frontend origins that sign-in may return to.
     frontend_origins: FrontendOrigins,
     /// Whether signup requires a single-use invitation.
@@ -38,6 +40,7 @@ impl ServiceApplication {
         Self {
             database,
             public_config: PublicConfig {
+                email_enabled: config.email.smtp.is_some(),
                 frontend_origins: config.federation.frontends.clone(),
                 settings_url: config.federation.settings_url.as_url().clone(),
                 providers,

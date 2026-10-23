@@ -19,6 +19,8 @@ export type Passkey = {
 export type Identity = { provider: Provider; linked_email: string | null };
 /** The coarse browser and platform auth records for a request. */
 export type Device = { browser: string; platform: string };
+/** An email address of the account. Only a verified one can be primary. */
+export type Email = { id: string; address: string; verified: boolean; primary: boolean };
 
 const browsers: Record<string, string> = {
   chrome: 'Chrome',
@@ -91,6 +93,27 @@ export class Account {
   }
   identities(): Promise<Identity[]> {
     return this.api.request('/account/social-identities');
+  }
+  /** Primary first. */
+  emails(): Promise<Email[]> {
+    return this.api.request('/account/emails');
+  }
+  /** Like `emails`, but empty if auth cannot list them, such as an older release
+   * without the endpoint, for pages that only mention addresses. */
+  emailsOrNone(): Promise<Email[]> {
+    return this.emails().catch(() => []);
+  }
+  /** Sends a verification link. Needs a recent passkey confirmation; run it through `StepUp`. */
+  addEmail(email: string): Promise<Email> {
+    return this.api.request('/account/emails', 'POST', { email });
+  }
+  /** Needs a recent passkey confirmation; run it through `StepUp`. */
+  makePrimaryEmail(id: string): Promise<void> {
+    return this.api.request(`/account/emails/${id}/primary`, 'POST', {});
+  }
+  /** Needs a recent passkey confirmation; run it through `StepUp`. */
+  removeEmail(id: string): Promise<void> {
+    return this.api.request(`/account/emails/${id}`, 'DELETE');
   }
   /** Needs a recent passkey confirmation; run it through `StepUp`. */
   removePasskey(id: string): Promise<void> {

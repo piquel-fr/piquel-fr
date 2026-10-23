@@ -3,7 +3,7 @@
 use super::{FederationRepository, RepositoryExecutor};
 use crate::DatabaseError;
 use chrono::{DateTime, Utc};
-use piquel_common::{Provider, SessionId, TokenId, UserId, protocol::api::Identity};
+use piquel_common::{EmailId, Provider, SessionId, TokenId, UserId, protocol::api::Identity};
 
 /// An in-flight redirect to a social login provider, bound to the initiating
 /// browser.
@@ -437,9 +437,10 @@ impl FederationRepository<'_> {
     }
 
     /// Adds `email` as the verified primary address of an account that has
-    /// none. Does nothing if the account already has a verified address or
-    /// another active account owns `email`: a provider observation never
-    /// replaces the first local address or takes another account's address.
+    /// none. Does nothing if the account already has a verified address or has
+    /// `email` waiting for verification, or another active account owns `email`:
+    /// a provider observation never replaces the first local address or takes
+    /// another account's address.
     ///
     /// # Errors
     ///
@@ -463,11 +464,17 @@ impl FederationRepository<'_> {
                 )
                 AND NOT EXISTS (
                     SELECT 1
+                    FROM user_emails
+                    WHERE user_id = $2
+                    AND normalized_email = $3
+                )
+                AND NOT EXISTS (
+                    SELECT 1
                     FROM active_verified_email_ownership
                     WHERE normalized_email = $3
                     AND user_id <> $2
                 )",
-                TokenId::new().as_uuid(),
+                EmailId::new().as_uuid(),
                 user_id.as_uuid(),
                 email,
             )

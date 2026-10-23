@@ -26,13 +26,15 @@ pub trait Channel: Sized + Send + Sync + 'static {
     /// Stored in `deliveries.channel`. Never rename a released channel.
     const NAME: &'static str;
     /// Facts about the recipient copied at creation, such as `client_id`, `sub` and
-    /// `sid`, so a send never reads rows that may have changed since.
+    /// `sid`, so a send never reads rows that may have changed since. The `email`
+    /// channel's verification links are the exception: they must see later changes.
     type Recipient: Serialize + DeserializeOwned + Send + Sync;
     /// The message. Never a plaintext secret: payloads are stored as they are.
     type Payload: Serialize + DeserializeOwned + Send + Sync;
 
     /// The deliveries `event`, concerning `subject`, causes. Runs inside the
-    /// event's transaction, which sees the rows as the change left them, so a
+    /// event's transaction, which sees the rows as the change left them, or as they
+    /// were for an event recorded before its change, such as `EmailRemoved`. A
     /// committed event has all its deliveries and a rolled-back one has none.
     fn deliveries(
         event: &DomainEvent,
@@ -55,7 +57,7 @@ pub(crate) trait Channels {
 }
 
 /// Every channel `record` fans out to. Add a channel here once it is implemented.
-pub(crate) type Registered = (BackchannelLogout, ());
+pub(crate) type Registered = (BackchannelLogout, (Email, ()));
 
 impl Channels for () {
     /// The end of the list.
@@ -604,6 +606,9 @@ impl DeliveryRepository<'_> {
 /// Back-channel logout tokens for the clients of revoked sessions.
 mod backchannel;
 pub use backchannel::{BackchannelLogout, LogoutRecipient};
+/// Messages to account holders.
+mod email;
+pub use email::{Email, EmailMessage, PendingAddress};
 /// Database tests for fan-out, claims, leases and ordering.
 #[cfg(test)]
 mod tests;

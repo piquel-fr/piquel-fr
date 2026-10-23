@@ -1,0 +1,16 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO user_emails (id, user_id, normalized_email, verified_at, is_primary)\n                SELECT $1, $2, $3, now(), true\n                WHERE NOT EXISTS (\n                    SELECT 1\n                    FROM user_emails\n                    WHERE user_id = $2\n                    AND verified_at IS NOT NULL\n                )\n                AND NOT EXISTS (\n                    SELECT 1\n                    FROM user_emails\n                    WHERE user_id = $2\n                    AND normalized_email = $3\n                )\n                AND NOT EXISTS (\n                    SELECT 1\n                    FROM active_verified_email_ownership\n                    WHERE normalized_email = $3\n                    AND user_id <> $2\n                )",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid",
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "cbd24018c193806d303741c333cc84ac9b026fc3fe3d1d7b214fec691cc7aeec"
+}

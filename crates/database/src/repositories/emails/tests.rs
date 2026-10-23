@@ -1,7 +1,8 @@
 //! Focused persistence and security contract tests.
-use crate::Database;
-
-use piquel_common::UserId;
+use super::InsertUnverifiedEmail;
+use crate::{Database, InsertUser};
+use chrono::{Duration, Utc};
+use piquel_common::{EmailId, Handle, UserId};
 /// Verified email ownership follows active account status and verification changes.
 #[expect(
     clippy::too_many_lines,
@@ -123,4 +124,56 @@ async fn verified_email_updates_preserve_and_release_ownership() {
         .await
         .expect("primary invariants");
     tx.rollback().await.expect("rollback");
+}
+
+/// Cleanup deletes an unverified address once its verification link expired, and
+/// keeps addresses whose link still works and verified ones.
+#[tokio::test]
+#[ignore = "requires a disposable TEST_DATABASE_URL"]
+async fn cleanup_deletes_unverified_addresses_with_expired_links() {
+    let database = Database {
+        pool: Database::test_pool().await,
+    };
+    let user_id = UserId::new();
+    database
+        .users()
+        .insert(&InsertUser {
+            id: user_id,
+            handle: Handle::parse(&format!("cleanup-{}", &user_id.to_string()[24..]))
+                .expect("handle"),
+            display_name: "Cleanup test".into(),
+        })
+        .await
+        .expect("user");
+    let [expired, pending] = [EmailId::new(), EmailId::new()];
+    for (id, expires_at) in [
+        (expired, Utc::now() - Duration::seconds(1)),
+        (pending, Utc::now() + Duration::hours(1)),
+    ] {
+        database
+            .emails()
+            .insert_unverified(&InsertUnverifiedEmail {
+                id,
+                user_id,
+                normalized_email: &format!("{id}@example.test"),
+                secret_digest: id.as_uuid().as_u128().to_be_bytes().repeat(2).as_slice(),
+                expires_at,
+            })
+            .await
+            .expect("unverified address");
+    }
+    database
+        .maintenance()
+        .purge_expired_auth_state(1000)
+        .await
+        .expect("purge");
+    let remaining: Vec<_> = database
+        .emails()
+        .list(user_id)
+        .await
+        .expect("addresses")
+        .into_iter()
+        .map(|email| email.id)
+        .collect();
+    assert_eq!(remaining, [pending]);
 }

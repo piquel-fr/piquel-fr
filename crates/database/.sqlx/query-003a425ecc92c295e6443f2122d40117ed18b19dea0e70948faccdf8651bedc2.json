@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "DELETE FROM user_emails\n            WHERE id IN (\n                SELECT secret.email_id\n                FROM email_verification_secrets secret\n                JOIN user_emails email ON email.id = secret.email_id\n                WHERE secret.expires_at < now()\n                AND email.verified_at IS NULL\n                LIMIT $1\n                FOR UPDATE OF secret, email SKIP LOCKED\n            )",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Int8"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "003a425ecc92c295e6443f2122d40117ed18b19dea0e70948faccdf8651bedc2"
+}

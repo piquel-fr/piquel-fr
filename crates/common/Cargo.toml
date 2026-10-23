@@ -9,8 +9,10 @@ repository.workspace = true
 [features]
 # Environment variables, validated URLs and secret references, for servers.
 config = []
+# Email address normalization, for servers that store or compare addresses.
+email = ["dep:unicode-normalization"]
 # Domain events recorded by auth.
-events = ["dep:serde_json"]
+events = ["dep:serde_json", "email"]
 # SQLx decoding for identifiers and `str_enum!` vocabularies; only `crates/database` enables it.
 sqlx = ["dep:sqlx"]
 
@@ -20,6 +22,7 @@ serde.workspace = true
 serde_json = { workspace = true, optional = true }
 sqlx = { workspace = true, optional = true }
 thiserror.workspace = true
+unicode-normalization = { workspace = true, optional = true }
 url.workspace = true
 uuid.workspace = true
 

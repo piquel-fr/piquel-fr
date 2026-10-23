@@ -24,6 +24,15 @@ impl RequestContext {
             platform: Platform::Linux,
         },
     };
+
+    /// The context of a request from `client_ip`, for handler tests that keep
+    /// their per-IP limits apart from other tests'.
+    pub(crate) const fn from_ip(client_ip: IpAddr) -> Self {
+        Self {
+            client_ip,
+            ..Self::TEST
+        }
+    }
 }
 
 /// Asserts that `response` asks the frontend to confirm the session with a passkey
@@ -419,7 +428,7 @@ async fn rate_limit_deadline_includes_a_blocked_database_query() {
     let mut transaction = fixture.policy.database.begin().await.expect("transaction");
     transaction
         .security()
-        .allow_request(bucket.as_bytes(), 120)
+        .allow_request(bucket.as_bytes(), 120, std::time::Duration::from_mins(1))
         .await
         .expect("hold bucket lock");
     // The deadline also bounds the request after the lock is released, so it
@@ -467,7 +476,7 @@ async fn rate_budgets_are_separate_and_unknown_paths_do_not_consume_them() {
             .policy
             .database
             .security()
-            .allow_request(bucket.as_bytes(), 120)
+            .allow_request(bucket.as_bytes(), 120, std::time::Duration::from_mins(1))
             .await
             .expect("fill token budget");
     }
@@ -509,7 +518,7 @@ async fn reads_exhaust_their_own_budget() {
         .request(Method::GET, "/oidc/userinfo", None, false)
         .await;
     assert_eq!(response.status(), StatusCode::TOO_MANY_REQUESTS);
-    assert_eq!(response.headers()[header::RETRY_AFTER], RETRY_AFTER_SECONDS);
+    assert_eq!(response.headers()[header::RETRY_AFTER], "60");
     assert_eq!(
         fixture
             .request(Method::GET, "/session", None, false)
@@ -557,7 +566,7 @@ async fn trusted_proxy_clients_have_independent_budgets() {
             .policy
             .database
             .security()
-            .allow_request(bucket.as_bytes(), 120)
+            .allow_request(bucket.as_bytes(), 120, std::time::Duration::from_mins(1))
             .await
             .expect("fill first client's budget");
     }

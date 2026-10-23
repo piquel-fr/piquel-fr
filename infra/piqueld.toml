@@ -18,7 +18,11 @@ url = "https://github.com/piquel-fr/piquel-fr.git"
 branch = "main"
 
 # Hostnames have no default: an environment without its own fails to deploy
-# instead of competing for another one's.
+# instead of competing for another one's. Neither do `smtp_secret`, the stored
+# Resend key an environment sends with, and `email_from`: production sends as
+# piquel.fr with its own key, staging and previews as dev.piquel.fr with
+# another, so their mail never spends production's reputation. See "Email" in
+# infra/README.md.
 [spec.variables]
 invite_required = "true"
 # See "Running several replicas" in infra/README.md before raising it.
@@ -35,6 +39,8 @@ web_host = "piquel.fr"
 auth_host = "auth.piquel.fr"
 www_host = "www.piquel.fr"
 admin_host = "admin.piquel.fr"
+smtp_secret = "resend-production"
+email_from = "Piquel <security@piquel.fr>"
 
 [spec.environments.staging]
 sync = true
@@ -45,6 +51,8 @@ web_host = "staging.piquel.fr"
 auth_host = "auth.staging.piquel.fr"
 www_host = "www.staging.piquel.fr"
 admin_host = "admin.staging.piquel.fr"
+smtp_secret = "resend-dev"
+email_from = "Piquel <security@dev.piquel.fr>"
 
 # Flat hostnames, so the `*.dev.piquel.fr` certificate covers every preview.
 # Preview databases start empty, so anyone on the tailnet may register.
@@ -56,6 +64,8 @@ web_host = "${{ env.slug }}.dev.piquel.fr"
 auth_host = "auth-${{ env.slug }}.dev.piquel.fr"
 www_host = "www-${{ env.slug }}.dev.piquel.fr"
 admin_host = "admin-${{ env.slug }}.dev.piquel.fr"
+smtp_secret = "resend-dev"
+email_from = "Piquel <security@dev.piquel.fr>"
 invite_required = "false"
 # Previews keep their telemetry on stderr: the collector does not export to them.
 otlp_endpoint = ""
@@ -176,6 +186,9 @@ AUTH_ADMIN_LISTENER = "0.0.0.0:8081"
 AUTH_PUBLIC_BASE_URL = "https://${{ vars.auth_host }}"
 AUTH_SETTINGS_URL = "https://${{ vars.web_host }}/settings"
 AUTH_INVITE_REQUIRED = "${{ vars.invite_required }}"
+AUTH_SMTP_URL = "smtps://resend@smtp.resend.com:465"
+AUTH_SMTP_PASSWORD = "file:///run/secrets/smtp-password"
+AUTH_EMAIL_FROM = "${{ vars.email_from }}"
 OTEL_EXPORTER_OTLP_ENDPOINT = "${{ vars.otlp_endpoint }}"
 OTEL_RESOURCE_ATTRIBUTES = "deployment.environment.name=${{ env.name }}"
 
@@ -190,6 +203,12 @@ target = "/run/secrets/signing-key"
 [[spec.services.secrets]]
 name = "admin-client-secret"
 target = "/run/secrets/admin-client-secret"
+
+# Set by hand with `piquelctl app secret`, not generated: see "Email" in
+# infra/README.md.
+[[spec.services.secrets]]
+name = "${{ vars.smtp_secret }}"
+target = "/run/secrets/smtp-password"
 
 [spec.services.healthcheck]
 type = "http"

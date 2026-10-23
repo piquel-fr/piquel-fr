@@ -67,6 +67,14 @@ unicode-normalization = "0.1"
 uuid = { version = "1.19", features = ["v7", "serde"] }
 webauthn-rs = { version = "0.5.5", features = ["danger-allow-state-serialisation", "conditional-ui", "workaround-google-passkey-specific-issues"] }
 
+# Transactional email: SMTP over implicit TLS or required STARTTLS, with rustls
+# (ring, as reqwest uses) and webpki roots, never native-tls/OpenSSL.
+lettre = { version = "0.11", default-features = false, features = ["builder", "smtp-transport", "tokio1-rustls-tls"] }
+# Decodes the SMTP user in AUTH_SMTP_URL; already in the tree through url and lettre.
+percent-encoding = "2.3"
+# Email bodies, from templates checked at compile time.
+askama = { version = "0.16", default-features = false, features = ["derive", "std"] }
+
 # JWS signature checks only; the SDK validates claims itself. aws-lc-rs is
 # constant-time and avoids the RustCrypto `rsa` crate's RUSTSEC-2023-0071.
 jsonwebtoken = { version = "11.1", default-features = false, features = ["aws_lc_rs"] }

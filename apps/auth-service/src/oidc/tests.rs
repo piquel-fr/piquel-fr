@@ -80,7 +80,7 @@ impl Flow {
             .expect("insert test account");
         tx.emails()
             .insert_verified(&InsertVerifiedEmail {
-                id: TokenId::new(),
+                id: piquel_common::EmailId::new(),
                 user_id,
                 normalized_email: format!("{user_id}@example.com"),
                 is_primary: true,

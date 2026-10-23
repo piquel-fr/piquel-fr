@@ -1,0 +1,23 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE user_emails SET is_primary = true\n                WHERE user_id = $1 AND id = $2 AND verified_at IS NOT NULL\n                RETURNING id",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "c58dd563b85a0c58df62e6362cc787cf3e076c4270777a4a4b7308d67118fa72"
+}

@@ -3,7 +3,7 @@
 
 use crate::{
     AuthConfig, ClientRegistry, ClientRegistryError, Operator,
-    config::{FederationConfig, FrontendOrigins, OidcConfig, PasskeyConfig},
+    config::{EmailConfig, FederationConfig, FrontendOrigins, OidcConfig, PasskeyConfig},
     passkey::DecoyKey,
     security::{BrowserCookie, RequestContext, Session},
 };
@@ -64,6 +64,7 @@ impl Replicas {
                 invite_required: false,
                 decoy_key: DecoyKey::new(Secret::generate().expect("decoy key")),
             },
+            email: EmailConfig::test(&settings_url, true),
             federation: FederationConfig {
                 origin: origin.clone(),
                 frontends: FrontendOrigins::new([&settings_url]),

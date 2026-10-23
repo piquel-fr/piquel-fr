@@ -59,6 +59,18 @@ pub(crate) mod federation {
     pub(crate) const IDENTITY: &str = "/account/social-identities/{provider}";
 }
 
+/// The account's email addresses.
+pub(crate) mod emails {
+    /// Lists the account's addresses, or adds one.
+    pub(crate) const LIST: &str = "/account/emails";
+    /// Verifies an address with the token of its verification link.
+    pub(crate) const VERIFY: &str = "/account/emails/verify";
+    /// Makes a verified address the primary one.
+    pub(crate) const PRIMARY: &str = "/account/emails/{id}/primary";
+    /// Removes an address.
+    pub(crate) const ITEM: &str = "/account/emails/{id}";
+}
+
 /// The signed-in user's security history.
 pub(crate) mod history {
     /// Pages through the account's history, newest first.

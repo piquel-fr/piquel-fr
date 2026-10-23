@@ -1,0 +1,23 @@
+Hello,
+{% match content %}
+{%- when Content::VerifyAddress { address, username, link, hours } %}
+Someone, hopefully you, added {{ address }} to the Piquel account @{{ username }}. If that is your account, open this link and select "Confirm this address":
+
+{{ link }}
+
+The link works once, for {{ hours }} hours. If you did not add this address, ignore this email: the address will be removed when the link expires.
+{%- when Content::PrimaryAddressChanged { address, history } %}
+Another email address replaced {{ address }} as the primary address of your Piquel account. Piquel's security emails now go there.
+
+If you made this change, there is nothing to do. If you did not, sign in and review your account's security history:
+
+{{ history }}
+{%- when Content::AddressRemoved { address, history } %}
+{{ address }} was removed from your Piquel account.
+
+If you made this change, there is nothing to do. If you did not, sign in and review your account's security history:
+
+{{ history }}
+{%- endmatch %}
+
+Piquel

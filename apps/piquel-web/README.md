@@ -1,9 +1,11 @@
 The piquel.fr SvelteKit server. Today it serves account settings under
 `/settings`, to which `/` redirects, and `GET /healthz` for piqueld. The settings
 layout loads the signed-in account, shares it with its pages and links them:
-sign-in methods at `/settings`, signed-in devices at `/settings/sessions` and the
-security history at `/settings/history`. A new settings page adds itself to the
-layout's `sections`.
+sign-in methods at `/settings`, email addresses at `/settings/emails`, signed-in
+devices at `/settings/sessions` and the security history at `/settings/history`.
+A new settings page adds itself to the layout's `sections`. The page verification
+links open, `/settings/emails/verify`, resets to the root layout, since whoever
+opens one may not be signed in.
 
 It runs on Node with `@sveltejs/adapter-node`: `just web build-settings`
 produces `build/`, which `AUTH_ORIGIN=https://auth.piquel.fr node build` serves

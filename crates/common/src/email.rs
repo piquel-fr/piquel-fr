@@ -1,5 +1,7 @@
 //! Conservative email equality policy; see `docs/security/email-normalization.md`.
 
+use serde::{Deserialize, Serialize};
+use std::fmt;
 use thiserror::Error;
 use unicode_normalization::UnicodeNormalization;
 
@@ -12,7 +14,7 @@ const MAX_DOMAIN_LABEL_BYTES: usize = 63;
 
 /// Reasons an address cannot be used for conservative email equality.
 #[derive(Clone, Debug, PartialEq, Eq, Error)]
-pub(super) enum InvalidEmail {
+pub enum InvalidEmail {
     /// The address is empty.
     #[error("email is empty")]
     Empty,
@@ -58,13 +60,20 @@ pub(super) enum InvalidEmail {
 }
 
 /// An NFC-normalized address whose local part retains case, dots and plus tags.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub(super) struct NormalizedEmail(String);
+/// It deserializes through [`Self::parse`], which leaves a normalized address
+/// unchanged, so a stored one reads back as it was written.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(try_from = "String", into = "String")]
+pub struct NormalizedEmail(String);
 
 impl NormalizedEmail {
     /// Applies the conservative equality policy documented in `docs/security/email-normalization.md`.
     /// Provider-specific local-part equivalence never grants account ownership.
-    pub(super) fn parse(value: &str) -> Result<Self, InvalidEmail> {
+    ///
+    /// # Errors
+    ///
+    /// Returns the [`InvalidEmail`] reason the address cannot be used.
+    pub fn parse(value: &str) -> Result<Self, InvalidEmail> {
         if value.is_empty() {
             return Err(InvalidEmail::Empty);
         }
@@ -110,8 +119,19 @@ impl NormalizedEmail {
     }
 
     /// Returns the normalized representation used for exact database equality.
-    pub(super) fn as_str(&self) -> &str {
+    #[must_use]
+    pub fn as_str(&self) -> &str {
         &self.0
+    }
+
+    /// The mailbox most providers deliver this address to: the local part
+    /// lowercased and without its `+` tag. Only for limits on what is sent to an
+    /// address, never for equality, so `Ada+jobs@` and `ada@` share one budget.
+    #[must_use]
+    pub fn mailbox(&self) -> String {
+        let (local, domain) = self.0.rsplit_once('@').unwrap_or(("", &self.0));
+        let local = local.split_once('+').map_or(local, |(local, _)| local);
+        format!("{}@{domain}", local.to_lowercase())
     }
 
     /// Requires at least two nonempty DNS-style labels without leading or trailing hyphens.
@@ -140,6 +160,28 @@ impl NormalizedEmail {
     }
 }
 
+impl TryFrom<String> for NormalizedEmail {
+    type Error = InvalidEmail;
+    /// Parses owned text, as stored events hold it.
+    fn try_from(value: String) -> Result<Self, Self::Error> {
+        Self::parse(&value)
+    }
+}
+
+impl From<NormalizedEmail> for String {
+    /// The normalized address.
+    fn from(value: NormalizedEmail) -> Self {
+        value.0
+    }
+}
+
+impl fmt::Display for NormalizedEmail {
+    /// Writes the normalized address.
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.write_str(&self.0)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     //! Focused coverage of the conservative equality and rejection policies.
@@ -158,6 +200,19 @@ mod tests {
             NormalizedEmail::parse("a.da@example.com"),
             NormalizedEmail::parse("ada@example.com")
         );
+    }
+
+    /// Case and plus tags of one mailbox fold together for sending limits only.
+    #[test]
+    fn mailbox_folds_case_and_plus_tags() {
+        let mailbox = |value| {
+            NormalizedEmail::parse(value)
+                .expect("valid email")
+                .mailbox()
+        };
+        assert_eq!(mailbox("Ada+jobs@Example.COM"), "ada@example.com");
+        assert_eq!(mailbox("ADA@example.com"), mailbox("ada+1@example.com"));
+        assert_ne!(mailbox("a.da@example.com"), mailbox("ada@example.com"));
     }
 
     /// Ambiguous addresses fail with a useful policy reason.

@@ -8,6 +8,8 @@
 
 /// Back-channel logout tokens, [`BackchannelLogoutSender`].
 mod backchannel;
+/// Account holders' email, sent over SMTP, [`EmailSender`].
+mod email;
 /// The HTTP client for destinations third parties supply, [`OutboundClient`].
 mod outbound;
 /// Retry policy, the HTTP client's safety checks and the worker loop.
@@ -15,6 +17,7 @@ mod outbound;
 mod tests;
 
 pub(crate) use backchannel::BackchannelLogoutSender;
+pub(crate) use email::EmailSender;
 pub(crate) use outbound::OutboundClient;
 
 use crate::jobs::{Jobs, Shutdown};
@@ -110,6 +113,18 @@ pub(crate) enum Failure {
     /// The message could not be signed.
     #[error("signing failed")]
     Signing,
+    /// The SMTP relay answered with an unsuccessful reply code.
+    #[error("SMTP {0}")]
+    Smtp(u16),
+    /// The stored address is not one the SMTP client can send to.
+    #[error("invalid recipient address")]
+    InvalidAddress,
+    /// The message could not be rendered or built.
+    #[error("message could not be built")]
+    Message,
+    /// The recipient could not be read from the database.
+    #[error("recipient lookup failed")]
+    Database,
 }
 
 impl DeliveryError {
