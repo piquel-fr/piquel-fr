@@ -115,7 +115,7 @@ watch, and fix forward if it fails: a retry reuses the same secret.
 Staging and production require invitations:
 
 ```sh
-piquelctl app exec piquel-fr auth --env production -- auth-service invite
+piquelctl app exec piquel-fr auth --env production -- auth-service invite create
 ```
 
 OIDC clients are registered and changed the same way, with the `client` command

@@ -1,20 +1,23 @@
 //! Every administrative operation, shared by the admin API and the CLI.
 
-use super::{AdminError, HandleIssue, HandleProblem, InviteExpiry, Operator, Reason};
+use super::{AdminError, HandleIssue, HandleProblem, InviteExpiry, Operator, Reason, UserRef};
+use crate::{Applied, ClientDetails, ClientRegistry, ClientRegistryError, GracePeriod};
 use chrono::Utc;
 use piquel_admin_api::{
     Administrator, Client, CreatedInvitation, Email, Event, EventPage, EventSearch, Invitation,
     UserDetail, UserPage,
 };
 use piquel_common::{
-    AccountStatus, DeliveryId, Handle, Personal, SessionId, TokenId, UserId,
+    AccountStatus, ClientId, DeliveryId, Handle, Personal, SessionId, TokenId, UserId,
+    clients::{ClientField, ClientOwner, ClientRegistration},
     config::Origin,
+    email::NormalizedEmail,
     events::{DomainEvent, RevocationReason},
 };
-use piquel_crypto::Secret;
+use piquel_crypto::{ClientSecret, Secret};
 use piquel_repository::{
     Database, DatabaseError, DatabaseTransaction, DeliveryStatus, DeliverySummary, EventFilter,
-    SessionScope, StoredUser,
+    SessionScope, StoredOidcClient, StoredUser,
 };
 use std::collections::BTreeMap;
 
@@ -39,7 +42,7 @@ const INVITATION_PARAMETER: &str = "invitation";
 /// guarded.
 #[derive(Clone)]
 pub struct AdminService {
-    /// Accounts, sessions, invitations, clients, events and administrators.
+    /// Accounts, sessions, invitations, clients, events, deliveries and administrators.
     database: Database,
 }
 
@@ -91,18 +94,34 @@ impl AdminService {
         Ok(tx.commit().await?)
     }
 
-    /// The ID of the account named `username`, in any status.
-    ///
-    /// # Errors
-    /// Fails when no account has this username.
-    pub async fn user_named(&self, username: &str) -> Result<UserId, AdminError> {
-        Ok(self
-            .database
-            .users()
-            .find_by_username(username)
-            .await?
-            .ok_or(AdminError::UserNotFound)?
-            .id)
+    /// The ID of the account `user` names, in any status; an email names only the
+    /// active account that verified it.
+    pub(crate) async fn find_user(&self, user: &UserRef) -> Result<UserId, AdminError> {
+        let found = match user {
+            UserRef::Id(id) => self
+                .database
+                .users()
+                .find_by_id(*id)
+                .await?
+                .map(|user| user.id),
+            UserRef::Username(username) => self
+                .database
+                .users()
+                .find_by_username(username)
+                .await?
+                .map(|user| user.id),
+            // An address that cannot be normalized was never stored.
+            UserRef::Email(address) => match NormalizedEmail::parse(address) {
+                Ok(address) => self
+                    .database
+                    .emails()
+                    .find_active_verified(address.as_str())
+                    .await?
+                    .map(|email| email.user_id),
+                Err(_) => None,
+            },
+        };
+        found.ok_or(AdminError::UserNotFound)
     }
 
     /// Lists accounts matching `query`, by ID, after the `cursor` of a previous page.
@@ -352,6 +371,129 @@ impl AdminService {
             .await?
             .map(Into::into)
             .ok_or(AdminError::ClientNotFound)
+    }
+
+    /// Describes one OIDC client as stored, with the lifetimes of its secrets.
+    pub(crate) async fn client_details(&self, id: &ClientId) -> Result<ClientDetails, AdminError> {
+        let mut tx = self.database.begin().await?;
+        let client = tx
+            .oidc()
+            .find_client(id.as_str())
+            .await?
+            .ok_or(AdminError::ClientNotFound)?;
+        let secrets = tx.oidc().client_secrets(id).await?;
+        tx.commit().await?;
+        Ok(ClientDetails { client, secrets })
+    }
+
+    /// Runs `change` on the client registry in one transaction, attributed to
+    /// `operator`, and commits once the operator is authorized again. The
+    /// registry records each change's event itself.
+    async fn change_clients<T, E: From<AdminError>>(
+        &self,
+        operator: &Operator,
+        change: impl AsyncFnOnce(&mut ClientRegistry<'_, '_>) -> Result<T, E>,
+    ) -> Result<T, E> {
+        let mut tx = self.database.begin().await.map_err(AdminError::from)?;
+        let value = change(&mut ClientRegistry::new(&mut tx, operator.context())).await?;
+        Self::finish(tx, operator, None, Vec::new()).await?;
+        Ok(value)
+    }
+
+    /// Registers a client operators manage, and returns a confidential client's
+    /// first secret, which is shown only this once.
+    pub(crate) async fn create_client(
+        &self,
+        operator: &Operator,
+        registration: &ClientRegistration,
+    ) -> Result<Option<ClientSecret>, AdminError> {
+        self.change_clients(operator, async |clients| {
+            Ok(clients
+                .create(ClientOwner::Operator, registration, None)
+                .await?)
+        })
+        .await
+    }
+
+    /// Registers a client a deployment manages, or updates it to match, with the
+    /// secret its deployment generated. Earlier secrets keep working for `grace`.
+    pub(crate) async fn apply_client(
+        &self,
+        operator: &Operator,
+        registration: &ClientRegistration,
+        secret: Option<ClientSecret>,
+        grace: GracePeriod,
+    ) -> Result<Applied, AdminError> {
+        self.change_clients(operator, async |clients| {
+            Ok(clients.apply(registration, secret, grace).await?)
+        })
+        .await
+    }
+
+    /// Replaces client `id`'s registration with what `edit` makes of the stored
+    /// one, and returns the settings that changed.
+    pub(crate) async fn update_client<E>(
+        &self,
+        operator: &Operator,
+        id: &ClientId,
+        edit: impl FnOnce(&StoredOidcClient) -> Result<ClientRegistration, E>,
+    ) -> Result<Vec<ClientField>, E>
+    where
+        E: From<AdminError> + From<ClientRegistryError>,
+    {
+        self.change_clients(operator, async |clients| clients.update(id, edit).await)
+            .await
+    }
+
+    /// Enables or disables client `id`. A suspended client cannot be enabled.
+    pub(crate) async fn set_client_enabled(
+        &self,
+        operator: &Operator,
+        id: &ClientId,
+        enabled: bool,
+    ) -> Result<(), AdminError> {
+        self.change_clients(operator, async |clients| {
+            Ok(clients.set_enabled(id, enabled).await?)
+        })
+        .await
+    }
+
+    /// Suspends client `id`, which disables it until the suspension is lifted, or
+    /// lifts its suspension, which leaves it disabled.
+    pub(crate) async fn set_client_suspended(
+        &self,
+        operator: &Operator,
+        id: &ClientId,
+        suspended: bool,
+    ) -> Result<(), AdminError> {
+        self.change_clients(operator, async |clients| {
+            Ok(clients.set_suspended(id, suspended).await?)
+        })
+        .await
+    }
+
+    /// Deletes client `id`: it stops working at once, and its ID is never reused.
+    pub(crate) async fn delete_client(
+        &self,
+        operator: &Operator,
+        id: &ClientId,
+    ) -> Result<(), AdminError> {
+        self.change_clients(operator, async |clients| Ok(clients.delete(id).await?))
+            .await
+    }
+
+    /// Gives confidential client `id` a new secret, shown only this once. Earlier
+    /// secrets keep working for `grace`.
+    pub(crate) async fn rotate_client_secret(
+        &self,
+        operator: &Operator,
+        id: &ClientId,
+        grace: GracePeriod,
+    ) -> Result<ClientSecret, AdminError> {
+        self.change_clients(operator, async |clients| {
+            Ok(clients.rotate_secret(id, grace).await?)
+        })
+        .await
     }
 
     /// Returns a page of the events matching `search`, newest first.

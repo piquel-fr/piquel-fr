@@ -96,10 +96,12 @@ there is no migration path for prototype account data.
 ### Invitations
 
 ```sh
-just auth invite --expires-in 7d
+just auth invite create --expires-in 7d
+just auth invite list
+just auth invite revoke <id>
 ```
 
-This prints one signup link. The database stores a digest, expiry and redemption
+`create` prints one signup link. The database stores a digest, expiry and redemption
 time. Tokens expire after seven days by default; `h` and `d` are supported. A token
 is redeemed atomically with account creation, so a failed signup does not spend it.
 Disabling invitation enforcement affects signup only; existing users keep access.
@@ -107,12 +109,37 @@ Administrators can also list, create and revoke invitations through the admin AP
 
 ### Administration
 
+Every administrative operation has a command, which runs the same code as the
+admin API (`AdminService` in `apps/auth-service/src/admin`). Commands need only
+`AUTH_DATABASE_URL` (`invite create` also needs `AUTH_PUBLIC_BASE_URL`, to build its
+link), so they work while auth is down: they are the break-glass path when the
+dashboard or auth's frontends are unreachable. In deployed environments,
+run them with `piquelctl app exec piquel-fr auth --env ENV -- auth-service …` (see
+[infra/README.md](infra/README.md)).
+
 ```sh
-just auth admin grant alice    # the first administrator is granted here
-just auth admin grant bob
+just auth admin grant alice               # the first administrator is granted here
 just auth admin list
-just auth admin revoke bob     # the last administrator's rights stay
+just auth admin revoke bob                # the last administrator's rights stay
+just auth user search ali                 # by ID, or part of a username, name or email
+just auth user show alice                 # recorded, since it shows personal data
+just auth user disable alice --reason "Spam"
+just auth user enable alice
+just auth session revoke <session-id>     # one session, as `user show` lists it
+just auth session revoke-all alice        # every session of the account
+just auth audit --user alice --kind session_revoked
 ```
+
+- Accounts are named by username, ID or a verified email of an active account.
+- `--output json` prints the admin API's body for `user search` (`UserPage`), `user
+  show` (`UserDetail`), `audit` (`EventPage`), `client list`, `invite list` and
+  `admin list`, as defined in `crates/admin-api`. It changes only as the API does.
+- `user disable`, `session revoke-all`, `admin revoke` and `client
+  disable|suspend|delete` describe what they will change and ask for confirmation.
+  Without a terminal they refuse unless given `--yes`.
+- Each change is recorded as a domain event with the operator: `$USER` and the host
+  name. Unlike the admin API, the CLI may act on administrators' accounts.
+- Failures print their causes and exit with 1; usage errors exit with 2.
 
 Administrators manage accounts, sessions, invitations and other administrators
 through the admin API, from the admin dashboard
@@ -418,7 +445,7 @@ Use individual recipes while iterating:
 | Dependency audits | `just audit` (`just rust audit` runs cargo-deny, `just web audit` pnpm) |
 | SvelteKit generated types/config | `just web generate` |
 | Frontends / embedded debug binary / release binary | `just web build` / `just rust build` / `just build` |
-| Run with caller-provided auth configuration | `just auth serve`, `just db migrate`, `just auth invite --expires-in 7d`, `just auth admin list` |
+| Run with caller-provided auth configuration | `just auth serve`, `just db migrate`, `just auth invite create --expires-in 7d`, `just auth admin list` |
 
 CI runs these recipes on every pull request whose changes they can affect,
 including the database and browser tests, and on every push to `main`.

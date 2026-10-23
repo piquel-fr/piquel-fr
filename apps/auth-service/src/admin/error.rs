@@ -1,6 +1,6 @@
 //! Admin failures, from the API or the CLI, and their one conversion to responses.
 
-use crate::security::ApiError;
+use crate::{ClientRegistryError, security::ApiError};
 use axum::{
     http::{HeaderValue, header},
     response::{IntoResponse, Response},
@@ -41,8 +41,8 @@ pub enum AdminError {
     /// for mutations.
     #[error("sign in again with a passkey to continue")]
     StepUpRequired(StepUpRequirement),
-    /// No account has this ID or username.
-    #[error("no account has this ID or username")]
+    /// No account has this ID or username, or no active one this verified email.
+    #[error("no account has this ID, username or verified email")]
     UserNotFound,
     /// No active session has this ID.
     #[error("no active session has this ID")]
@@ -107,6 +107,9 @@ pub enum AdminError {
     /// Persistence failed.
     #[error(transparent)]
     Database(#[from] DatabaseError),
+    /// A client change was refused or failed.
+    #[error(transparent)]
+    Client(#[from] ClientRegistryError),
     /// Secret generation failed.
     #[error(transparent)]
     Crypto(#[from] CryptoError),
@@ -159,6 +162,7 @@ impl AdminError {
             Self::SameHandle => "same_handle",
             Self::HandleTaken(_) => "handle_taken",
             Self::Database(_) => "database",
+            Self::Client(_) => "client",
             Self::Crypto(_) => "crypto",
             Self::Event(_) => "event",
         }
@@ -197,6 +201,7 @@ impl AdminError {
             | Self::SameHandle
             | Self::HandleTaken(_)
             | Self::Database(_)
+            | Self::Client(_)
             | Self::Crypto(_)
             | Self::Event(_) => None,
         }
@@ -235,6 +240,7 @@ impl From<AdminError> for ApiError {
             | AdminError::SameHandle => Self::conflict(message),
             AdminError::HandleTaken(_) => Self::conflict(message).with_code(ErrorCode::HandleTaken),
             AdminError::Database(error) => error.into(),
+            AdminError::Client(error) => error.into(),
             error @ (AdminError::Crypto(_) | AdminError::Event(_)) => Self::internal(error),
         }
     }

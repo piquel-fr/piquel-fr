@@ -10,9 +10,25 @@ serve:
     @just web build-auth
     @just auth run serve
 
+# Create, list or revoke signup invitations, e.g. `just auth invite create --expires-in 7d`.
 [positional-arguments]
 invite *ARGS:
     @just auth run invite "$@"
+
+# Search, show, disable or reactivate accounts, e.g. `just auth user show alice`.
+[positional-arguments]
+user *ARGS:
+    @just auth run user "$@"
+
+# End sessions, e.g. `just auth session revoke-all alice`.
+[positional-arguments]
+session *ARGS:
+    @just auth run session "$@"
+
+# Page through the audit history, e.g. `just auth audit --user alice`.
+[positional-arguments]
+audit *ARGS:
+    @just auth run audit "$@"
 
 # Register, inspect and change OIDC clients, e.g. `just auth client list`.
 [positional-arguments]

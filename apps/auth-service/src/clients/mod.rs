@@ -1,9 +1,9 @@
 //! The one place that changes OIDC client registrations. Each change happens in
 //! the caller's transaction, with the event that records it, so the caller can
-//! check inside the same transaction that its user still may make it. The `client`
-//! command uses it, as do the deployment job that registers the admin dashboard
-//! and the account API, through which accounts manage their own clients; dynamic
-//! registration (#44) and the admin API (#38) will too.
+//! check inside the same transaction that its user still may make it.
+//! `AdminService` uses it for the `client` command and the deployment job that
+//! registers the admin dashboard, and the account API for the clients accounts
+//! manage; dynamic registration (#44) will too.
 //!
 //! Nothing is cached: every request reads the registration it needs from the
 //! database, so a change applies to the next request on every replica.

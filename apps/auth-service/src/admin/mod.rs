@@ -10,7 +10,7 @@ use axum::{
     Json, Router,
     extract::{FromRef, Path, Query, State},
     http::StatusCode,
-    routing::{delete, get, post},
+    routing::{MethodRouter, delete, get, post},
 };
 use piquel_admin_api::{
     Administrator, Client, CreateInvitation, CreatedInvitation, DisableUser, EventPage,
@@ -23,6 +23,8 @@ use piquel_repository::Database;
 mod caller;
 /// Admin failures and their response mapping.
 mod error;
+/// The list of operations both the API and the CLI cover.
+mod operation;
 /// The service shared by the admin API and the CLI.
 mod service;
 /// Validated inputs.
@@ -31,8 +33,11 @@ mod types;
 pub use caller::Operator;
 use caller::{Admin, AdminTokens, ConfirmedAdmin};
 pub use error::AdminError;
+pub(crate) use operation::AdminOperation;
 pub use service::AdminService;
-pub use types::{GracePeriod, HandleIssue, HandleProblem, InvalidLifetime, InviteExpiry, Reason};
+pub use types::{
+    GracePeriod, HandleIssue, HandleProblem, InvalidLifetime, InviteExpiry, Reason, UserRef,
+};
 
 /// Admin API routes and the service behind them.
 #[derive(Clone)]
@@ -69,32 +74,63 @@ impl AdminApplication {
         }
     }
 
-    /// Returns every admin endpoint with this application as state.
+    /// Returns every admin endpoint with this application as state: one route
+    /// per operation the API serves. Methods on one path merge.
     pub(crate) fn routes(self) -> Router {
-        let mut router = Router::new()
-            .route(admin::USERS, get(Self::search_users))
-            .route(admin::USER, get(Self::view_user))
-            .route(admin::USER_DISABLE, post(Self::disable_user))
-            .route(admin::USER_ENABLE, post(Self::enable_user))
-            .route(admin::USER_SESSIONS, delete(Self::revoke_user_sessions))
-            .route(admin::SESSION, delete(Self::revoke_session))
-            .route(admin::CLIENTS, get(Self::list_clients))
-            .route(admin::CLIENT, get(Self::client))
-            .route(admin::EVENTS, get(Self::events))
-            .route(
-                admin::ADMINISTRATORS,
-                get(Self::list_administrators).post(Self::grant_administrator),
-            )
-            .route(admin::ADMINISTRATOR, delete(Self::revoke_administrator));
-        if self.invitations {
-            router = router
-                .route(
-                    admin::INVITATIONS,
-                    get(Self::list_invitations).post(Self::create_invitation),
-                )
-                .route(admin::INVITATION, delete(Self::revoke_invitation));
-        }
-        router.with_state(self)
+        AdminOperation::ALL
+            .iter()
+            .filter_map(|operation| self.route(*operation))
+            .fold(Router::new(), |router, (path, method)| {
+                router.route(path, method)
+            })
+            .with_state(self)
+    }
+
+    /// The path and method serving `operation`, or `None` if only the CLI runs it.
+    /// Invitations are served only while signup requires them.
+    fn route(&self, operation: AdminOperation) -> Option<(&'static str, MethodRouter<Self>)> {
+        type Op = AdminOperation;
+        Some(match operation {
+            Op::SearchUsers => (admin::USERS, get(Self::search_users)),
+            Op::ViewUser => (admin::USER, get(Self::view_user)),
+            Op::DisableUser => (admin::USER_DISABLE, post(Self::disable_user)),
+            Op::EnableUser => (admin::USER_ENABLE, post(Self::enable_user)),
+            Op::RevokeUserSessions => (admin::USER_SESSIONS, delete(Self::revoke_user_sessions)),
+            Op::RevokeSession => (admin::SESSION, delete(Self::revoke_session)),
+            Op::ListInvitations if self.invitations => {
+                (admin::INVITATIONS, get(Self::list_invitations))
+            }
+            Op::CreateInvitation if self.invitations => {
+                (admin::INVITATIONS, post(Self::create_invitation))
+            }
+            Op::RevokeInvitation if self.invitations => {
+                (admin::INVITATION, delete(Self::revoke_invitation))
+            }
+            Op::ListClients => (admin::CLIENTS, get(Self::list_clients)),
+            Op::ViewClient => (admin::CLIENT, get(Self::client)),
+            Op::ListEvents => (admin::EVENTS, get(Self::events)),
+            Op::ListAdministrators => (admin::ADMINISTRATORS, get(Self::list_administrators)),
+            Op::GrantAdministrator => (admin::ADMINISTRATORS, post(Self::grant_administrator)),
+            Op::RevokeAdministrator => (admin::ADMINISTRATOR, delete(Self::revoke_administrator)),
+            // Client changes, handles and the delivery queue are CLI-only, for now.
+            Op::ListInvitations
+            | Op::CreateInvitation
+            | Op::RevokeInvitation
+            | Op::CreateClient
+            | Op::ApplyClient
+            | Op::UpdateClient
+            | Op::EnableClient
+            | Op::DisableClient
+            | Op::SuspendClient
+            | Op::UnsuspendClient
+            | Op::DeleteClient
+            | Op::RotateClientSecret
+            | Op::CheckHandles
+            | Op::RenameHandle
+            | Op::ListDeliveries
+            | Op::RetryDelivery
+            | Op::CancelDelivery => return None,
+        })
     }
 
     /// Searches accounts by ID, username, display name or email.

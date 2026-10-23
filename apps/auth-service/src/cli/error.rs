@@ -1,6 +1,6 @@
 //! Failures of startup and administrative commands.
 
-use crate::{AdminError, ClientRegistryError, StartupError};
+use crate::{AdminError, ClientRegistryError, StartupError, UserRef};
 use piquel_common::{
     clients::{InvalidCount, InvalidDisplayName, InvalidRedirectUri, InvalidScopeName},
     config::{ConfigurationError, SecretError},
@@ -25,6 +25,24 @@ pub(super) enum CliError {
     /// An administrative operation was refused or failed.
     #[error(transparent)]
     Admin(#[from] AdminError),
+    /// The account an operator named could not be found.
+    #[error("account {user}")]
+    User {
+        /// The reference, as given.
+        user: UserRef,
+        /// Why it was not found.
+        #[source]
+        source: AdminError,
+    },
+    /// A change that needs confirmation ran without a terminal or `--yes`.
+    #[error("this command needs confirmation: run it on a terminal, or pass --yes")]
+    Unconfirmed,
+    /// The operator did not confirm a change.
+    #[error("cancelled")]
+    Declined,
+    /// The confirmation could not be read.
+    #[error("could not read the confirmation")]
+    Prompt(#[source] std::io::Error),
     /// `handle check` found accounts to fix.
     #[error("{0} accounts break the handle rules")]
     HandleProblems(usize),

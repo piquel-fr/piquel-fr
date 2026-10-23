@@ -81,4 +81,4 @@ first-party; they change together with the frontends in this repository.
 Nothing auth runs on may require auth to log in: piqueld, server access, the
 tailnet, PostgreSQL, DNS and the tunnel. If auth or its frontends are down, the
 CLI, given database access, can still do every admin operation and repair
-accounts.
+accounts: see [Administration](../../README.md#administration).
