@@ -85,7 +85,9 @@ Important invariants:
   statement. A suspended client is likewise always disabled. Registering a client
   for an account locks the account first, then counts its live clients and
   those it registered that day, deleted ones included, so concurrent
-  registrations cannot exceed the quota, and tombstones stay bounded.
+  registrations cannot exceed the quota, and tombstones stay bounded. Purging
+  an account keeps its tombstones without their owner, but a check constraint
+  refuses it while the account owns a live client: delete those first.
 - Refresh families are locked after their account and session, and before their
   client: a rotation locks its family, then share-locks the client, so a
   deletion locks the client's families before the client. A family granted after

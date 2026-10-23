@@ -216,6 +216,44 @@ async fn public_client_origins_follow_registrations() {
     assert!(!oidc.public_client_origin(&second).await.expect("lookup"));
 }
 
+/// Purging an account keeps its deleted clients' tombstones, without their
+/// owner, and is refused while it owns a live client, which would otherwise
+/// become a client no account manages.
+#[tokio::test]
+#[ignore = "requires a disposable TEST_DATABASE_URL"]
+async fn purging_an_owner_needs_its_live_clients_deleted() {
+    let pool = Database::test_pool().await;
+    let owner = UserId::new();
+    sqlx::query("INSERT INTO users(id,username,display_name) VALUES($1,$2,'Owner test')")
+        .bind(owner.as_uuid())
+        .bind(format!("owner_{owner}"))
+        .execute(&pool)
+        .await
+        .expect("user");
+    let client = registration(ClientKind::Public, &origin());
+    let mut oidc = OidcRepository::from_pool(&pool);
+    oidc.create_client(&client, ClientOwner::Account(owner))
+        .await
+        .expect("create");
+    let purge = async || {
+        sqlx::query("DELETE FROM users WHERE id = $1")
+            .bind(owner.as_uuid())
+            .execute(&pool)
+            .await
+    };
+    assert!(purge().await.is_err(), "a live client keeps its owner");
+    oidc.delete_client(&client.id).await.expect("delete");
+    purge()
+        .await
+        .expect("tombstones never block purging their owner");
+    let tombstone = oidc
+        .find_client(client.id.as_str())
+        .await
+        .expect("find")
+        .expect("the tombstone stays");
+    assert_eq!(tombstone.owner_id, None);
+}
+
 /// Clients the startup file registered keep working after the migration: a
 /// confidential client keeps its secret, redirect origins are filled in as URL
 /// parsing serializes them, and the previous release's writes are mirrored, even
