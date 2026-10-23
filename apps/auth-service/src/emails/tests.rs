@@ -189,6 +189,30 @@ impl Harness {
     }
 }
 
+/// Adding an address asks an unconfirmed session to confirm before anything
+/// else, so the browser confirms first: even an invalid address, or one that
+/// email is off for, answers `step_up_required`.
+#[tokio::test]
+#[ignore = "requires TEST_DATABASE_URL"]
+async fn adding_asks_for_confirmation_first() {
+    for enabled in [true, false] {
+        let harness = Harness::new(enabled).await;
+        let social = harness.account(AuthenticationMethod::Federation).await;
+        let body = json!({ "email": "not an address" });
+        assert_step_up_required(
+            harness
+                .send(
+                    Some(&social),
+                    Method::POST,
+                    routes::emails::LIST,
+                    Some(body),
+                )
+                .await,
+        )
+        .await;
+    }
+}
+
 /// Adding, changing the primary address and removing need a passkey
 /// confirmation; a link verifies its address once, without a session, and makes
 /// the first one primary. A new primary address notifies the previous one, which

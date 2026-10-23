@@ -1,7 +1,7 @@
 //! Pending and linked social identities: signup, linking, listing and unlinking.
 
 use super::{FederationApplication, FederationError, Provider};
-use crate::account::{AccountError, AccountService, Owner, Subject, Viewer};
+use crate::account::{AccountError, AccountService, ConfirmedOwner, Owner, Subject, Viewer};
 use crate::security::{ApiError, BrowserCookie};
 use axum::{
     Json,
@@ -133,7 +133,7 @@ impl FederationApplication {
     /// account, then clears the evidence's cookie and says where to continue.
     pub(super) async fn confirm_link(
         State(app): State<Self>,
-        owner: Owner,
+        owner: ConfirmedOwner,
         headers: HeaderMap,
     ) -> Result<Response, ApiError> {
         let browser = BrowserCookie::FederationPending

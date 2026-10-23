@@ -7,9 +7,11 @@
 //!
 //! The rule for sharing: administrators may view, edit and remove, but never add
 //! a way to sign in or to receive the account's email, which would let them take
-//! the account over. Adding a passkey, linking an identity, adding or verifying
-//! an address, and reporting a history entry take an [`Owner`], which only the
-//! session cookie builds, so an administrator cannot call them. The owner's
+//! the account over. Adding a passkey, linking an identity, adding an address
+//! and reporting a history entry take an [`Owner`], which only the session cookie
+//! builds, so an administrator cannot call them. Verifying an address is
+//! authorized by its link's token instead, and takes the signed-in owner only if
+//! there is one, to refuse a browser signed in to another account. The owner's
 //! clients, which administrators manage through `AdminService`, are the owner's
 //! too.
 
@@ -19,7 +21,7 @@ mod error;
 mod subject;
 
 pub(crate) use error::AccountError;
-pub(crate) use subject::{Owner, Subject, Viewer};
+pub(crate) use subject::{ConfirmedOwner, ConfirmedSubject, Owner, Subject, Viewer};
 
 use crate::{
     emails::EmailView,
@@ -170,7 +172,7 @@ impl AccountApplication {
     /// Removes a passkey, keeping at least one.
     async fn revoke_passkey(
         State(app): State<Self>,
-        subject: Subject,
+        subject: ConfirmedSubject,
         Path(id): Path<PasskeyId>,
     ) -> Result<StatusCode, AccountError> {
         app.service.revoke_passkey(&subject, id).await?;
@@ -188,7 +190,7 @@ impl AccountApplication {
     /// Unlinks the provider the path names.
     async fn unlink_identity(
         State(app): State<Self>,
-        subject: Subject,
+        subject: ConfirmedSubject,
         Path(provider): Path<String>,
     ) -> Result<StatusCode, AccountError> {
         let provider = provider
@@ -209,7 +211,7 @@ impl AccountApplication {
     /// Makes a verified address the primary one.
     async fn make_primary_email(
         State(app): State<Self>,
-        subject: Subject,
+        subject: ConfirmedSubject,
         Path(id): Path<EmailId>,
     ) -> Result<StatusCode, AccountError> {
         app.service.make_primary_email(&subject, id).await?;
@@ -219,7 +221,7 @@ impl AccountApplication {
     /// Removes an address.
     async fn remove_email(
         State(app): State<Self>,
-        subject: Subject,
+        subject: ConfirmedSubject,
         Path(id): Path<EmailId>,
     ) -> Result<StatusCode, AccountError> {
         app.service.remove_email(&subject, id).await?;

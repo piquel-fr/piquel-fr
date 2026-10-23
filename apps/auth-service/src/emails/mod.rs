@@ -10,7 +10,7 @@
 //! derived from the address's ID with [`VerificationKey`], once here to store its
 //! digest, and again by the email sender. See `docs/architecture/delivery-queue.md`.
 use crate::{
-    account::{AccountError, AccountService, Owner, Subject, Viewer},
+    account::{AccountError, AccountService, ConfirmedOwner, Owner, Subject, Viewer},
     config::EmailConfig,
     routes,
     security::{ApiError, RequestContext},
@@ -151,7 +151,7 @@ impl EmailApplication {
     /// verification email.
     async fn add(
         State(app): State<Self>,
-        owner: Owner,
+        owner: ConfirmedOwner,
         Json(body): Json<AddEmail>,
     ) -> Result<(StatusCode, Json<EmailView>), ApiError> {
         let added = AccountService::new(app.database.clone())
@@ -224,9 +224,10 @@ impl EmailApplication {
     }
 }
 
-/// Address settings any administrator may also change: listing, choosing the
-/// primary address among verified ones, and removing. Each change queues the same
-/// notices, whoever makes it.
+/// The account's addresses. Any administrator may also list them, choose the
+/// primary one among verified ones, and remove one; each change queues the same
+/// notices, whoever makes it. Only the owner adds an address, since it receives
+/// the account's mail, and verifying one is authorized by its link's token.
 impl AccountService {
     /// Lists the account's addresses, primary first.
     pub(crate) async fn emails(&self, viewer: &Viewer) -> Result<Vec<EmailView>, AccountError> {

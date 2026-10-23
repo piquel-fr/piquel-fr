@@ -14,6 +14,7 @@ use piquel_common::{
     events::{DomainEvent, EventContext, RevocationReason},
 };
 use piquel_repository::{Database, DatabaseTransaction, SessionScope, StoredSession};
+use std::ops::Deref;
 
 /// The signed-in owner of an account, acting through their browser session. Its
 /// fields are private and only the extractors build one, from the session cookie,
@@ -62,6 +63,18 @@ pub(crate) struct Viewer {
     /// Who reads it.
     by: Reading,
 }
+
+/// An [`Owner`] whose session the request's cookie showed confirmed with a passkey
+/// recently, for routes whose operation needs it. Checked when extracted, before
+/// the path and body, so such a route answers `step_up_required` before any other
+/// error and the browser confirms first. It only gates the request: the
+/// operation takes the [`Owner`] and checks the confirmation again under the
+/// account lock.
+pub(crate) struct ConfirmedOwner(Owner);
+
+/// A [`Subject`] whose owner's session was confirmed when extracted, as
+/// [`ConfirmedOwner`]'s, for the routes of changes that need it.
+pub(crate) struct ConfirmedSubject(Subject);
 
 /// Who reads a [`Viewer`]'s account.
 enum Reading {
@@ -314,6 +327,48 @@ where
             Some(session) => Ok(Some(Self::new(parts, state, session).await?)),
             None => Ok(None),
         }
+    }
+}
+
+impl<S> FromRequestParts<S> for ConfirmedOwner
+where
+    Database: FromRef<S>,
+    S: Send + Sync,
+{
+    type Rejection = ApiError;
+    /// The owner of the request's browser session, confirmed recently.
+    async fn from_request_parts(parts: &mut Parts, state: &S) -> Result<Self, Self::Rejection> {
+        let Confirmed(session) = <Confirmed>::from_request_parts(parts, state).await?;
+        Owner::new(parts, state, session).await.map(Self)
+    }
+}
+
+impl<S> FromRequestParts<S> for ConfirmedSubject
+where
+    Database: FromRef<S>,
+    S: Send + Sync,
+{
+    type Rejection = ApiError;
+    /// The owner of the request's browser session, confirmed recently.
+    async fn from_request_parts(parts: &mut Parts, state: &S) -> Result<Self, Self::Rejection> {
+        let ConfirmedOwner(owner) = ConfirmedOwner::from_request_parts(parts, state).await?;
+        Ok(Self(Subject::from(owner)))
+    }
+}
+
+impl Deref for ConfirmedOwner {
+    type Target = Owner;
+    /// The owner, whose session was confirmed when extracted.
+    fn deref(&self) -> &Owner {
+        &self.0
+    }
+}
+
+impl Deref for ConfirmedSubject {
+    type Target = Subject;
+    /// The subject, whose owner's session was confirmed when extracted.
+    fn deref(&self) -> &Subject {
+        &self.0
     }
 }
 

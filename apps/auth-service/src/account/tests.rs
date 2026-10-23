@@ -7,10 +7,16 @@ use crate::{
     AdminError, AdminService, Operator, Reason,
     admin::tests::{Account, Harness, cli, operator},
     passkey::PasskeyError,
+    security::ApiError,
     security::CONFIRMATION_MAX_AGE,
     tests::{Browser, Replicas, sign_out, until_blocked},
 };
-use axum::http::Method;
+use axum::{
+    Router,
+    extract::{Path, State},
+    http::Method,
+    routing::delete,
+};
 use chrono::{Duration, Utc};
 use piquel_common::{
     AuthenticationMethod, EmailId, Provider, TokenId, UserId,
@@ -444,9 +450,9 @@ async fn the_last_passkey_stays_whoever_removes_it() {
 }
 
 /// The shared changes that could cut the owner off need their recent passkey
-/// confirmation, checked under the account lock before anything is looked up: a
-/// session that never confirmed one is refused, whichever passkey, identity or
-/// address it names.
+/// confirmation, checked before anything else, and again under the account lock:
+/// a session that never confirmed one is refused, whichever passkey, identity or
+/// address it names, even a malformed one.
 #[tokio::test]
 #[ignore = "requires TEST_DATABASE_URL"]
 async fn owners_confirm_the_changes_that_need_it() {
@@ -455,15 +461,20 @@ async fn owners_confirm_the_changes_that_need_it() {
     let social =
         Browser::sign_in_with(&database, owner.user_id, AuthenticationMethod::Federation).await;
     let routes = AccountApplication::new(database).routes();
-    let item = |template: &str| template.replace("{id}", &EmailId::new().to_string());
+    let item = |template: &str, id: &str| template.replace("{id}", id);
+    let id = EmailId::new().to_string();
+    let identity = |provider| federation::IDENTITY.replace("{provider}", provider);
+    // Before anything else: malformed IDs and unknown providers too, so the
+    // browser confirms first.
     for (method, path) in [
-        (Method::DELETE, item(passkey::ITEM)),
-        (
-            Method::DELETE,
-            federation::IDENTITY.replace("{provider}", "github"),
-        ),
-        (Method::POST, item(emails::PRIMARY)),
-        (Method::DELETE, item(emails::ITEM)),
+        (Method::DELETE, item(passkey::ITEM, &id)),
+        (Method::DELETE, item(passkey::ITEM, "not-an-id")),
+        (Method::DELETE, identity("github")),
+        (Method::DELETE, identity("myspace")),
+        (Method::POST, item(emails::PRIMARY, &id)),
+        (Method::POST, item(emails::PRIMARY, "not-an-id")),
+        (Method::DELETE, item(emails::ITEM, &id)),
+        (Method::DELETE, item(emails::ITEM, "not-an-id")),
     ] {
         let (status, body) = social.call(&routes, method.clone(), &path).await;
         assert_eq!(
@@ -474,10 +485,12 @@ async fn owners_confirm_the_changes_that_need_it() {
     }
 }
 
-/// A change that needs the owner's confirmation checks it on the session as the
-/// request's cookie found it, too: a request whose session was confirmed only
-/// while it waited for the account lock is refused, so a cookie from before a
-/// confirmation never gains it.
+/// A change that needs the owner's confirmation checks it under the account lock
+/// on the session as the request's cookie found it, too: an owner whose session
+/// was confirmed only while the change waited for the lock is refused, so a
+/// cookie from before a confirmation never gains it. The account routes refuse
+/// such a request before it waits; this one calls the operation from a plain
+/// [`Owner`], as an in-process caller does.
 #[tokio::test]
 #[ignore = "requires TEST_DATABASE_URL"]
 async fn a_confirmation_while_waiting_does_not_count() {
@@ -485,7 +498,19 @@ async fn a_confirmation_while_waiting_does_not_count() {
     let owner = Browser::new_account(&database).await;
     let social =
         Browser::sign_in_with(&database, owner.user_id, AuthenticationMethod::Federation).await;
-    let routes = AccountApplication::new(database.clone()).routes();
+    let routes = Router::new()
+        .route(
+            passkey::ITEM,
+            delete(
+                |State(database): State<Database>, owner: Owner, Path(id): Path<PasskeyId>| async move {
+                    AccountService::new(database)
+                        .revoke_passkey(&Subject::from(owner), id)
+                        .await
+                        .map_err(ApiError::from)
+                },
+            ),
+        )
+        .with_state(database.clone());
     let mut confirmation = database.begin().await.expect("transaction");
     confirmation
         .users()

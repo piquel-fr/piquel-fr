@@ -90,7 +90,9 @@ on it:
 
 - an `Owner`, for what only the owner may do, such as adding a passkey or an
   address. Only the session cookie builds one, so these cannot be called for an
-  administrator;
+  administrator. Verifying an address is authorized by its link's token instead,
+  and takes an optional `Owner` only to refuse a browser signed in to another
+  account;
 - a `Subject`, for changes an administrator may also make: the owner, or an
   `Operator` with the reason it must give;
 - a `Viewer`, for reads, which need no reason. For an operator,
@@ -99,7 +101,9 @@ on it:
 
 Only the extractors build an owner's `Owner`, `Subject` or `Viewer`, from the
 session cookie, and only the admin API's authenticator builds an
-`Operator::Admin`. Each operation says what it needs: it locks with `lock`, or
+`Operator::Admin`. Routes whose operation needs a recent confirmation extract
+`ConfirmedOwner` or `ConfirmedSubject` instead, which check it before the path and
+body, so the browser is asked to confirm before any other error. Each operation says what it needs: it locks with `lock`, or
 `lock_confirmed` when the owner must have confirmed with a passkey recently
 (operators confirm their own before committing), records events with `context`,
 and ends a `Subject`'s change with `Subject::commit`, which checks an
