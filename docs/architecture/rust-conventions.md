@@ -88,9 +88,10 @@ Settings an administrator may also change on another account are methods of
 `AccountService` (`src/account`), written with their setting's module, such as
 `src/passkey`. Changes take a `Subject`: the account and who acts, the owner with
 their session or an `Operator` with the reason it must give. Reads take a
-`Viewer`, which needs no reason; `Viewer::authorize` checks an operator as admin
-reads are checked and records their read as a view. Only the
-extractors build an owner's, from the session cookie, and only the admin API's
+`Viewer`, which needs no reason. For an operator, `Viewer::authorize` calls
+`Operator::authorize_read`, as every admin read does, and records the read as a
+view; an owner's reads are not recorded. Only the extractors build an owner's
+`Subject` or `Viewer`, from the session cookie, and only the admin API's
 authenticator builds an `Operator::Admin`. Changes lock with `Subject::lock` (or
 `ConfirmedSubject::lock` when the owner must have confirmed recently), record
 events with `Subject::context`, and end with `Subject::commit`, which checks an
