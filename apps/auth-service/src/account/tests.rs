@@ -473,3 +473,37 @@ async fn owners_confirm_the_changes_that_need_it() {
         );
     }
 }
+
+/// A change that needs the owner's confirmation checks it on the session as the
+/// request's cookie found it, too: a request whose session was confirmed only
+/// while it waited for the account lock is refused, so a cookie from before a
+/// confirmation never gains it.
+#[tokio::test]
+#[ignore = "requires TEST_DATABASE_URL"]
+async fn a_confirmation_while_waiting_does_not_count() {
+    let database = Replicas::database().await;
+    let owner = Browser::new_account(&database).await;
+    let social =
+        Browser::sign_in_with(&database, owner.user_id, AuthenticationMethod::Federation).await;
+    let routes = AccountApplication::new(database.clone()).routes();
+    let mut confirmation = database.begin().await.expect("transaction");
+    confirmation
+        .users()
+        .find_active_by_id_for_update(owner.user_id)
+        .await
+        .expect("account lock");
+    let path = passkey::ITEM.replace("{id}", &PasskeyId::new().to_string());
+    let ((status, body), ()) = tokio::join!(social.call(&routes, Method::DELETE, &path), async {
+        until_blocked(&mut confirmation, 1).await;
+        confirmation
+            .sessions()
+            .confirm_passkey(social.session_id, Utc::now())
+            .await
+            .expect("confirm");
+        confirmation.commit().await.expect("commit");
+    });
+    assert_eq!(
+        (status, body["code"].as_str()),
+        (StatusCode::FORBIDDEN, Some("step_up_required"))
+    );
+}

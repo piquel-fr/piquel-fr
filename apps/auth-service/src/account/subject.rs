@@ -115,15 +115,25 @@ impl Owner {
         Session::lock(tx, &self.session).await
     }
 
-    /// [`Self::lock`], then requires the session's passkey confirmation, as it is
-    /// now, to be recent: what adding a way to sign in or an address needs.
+    /// [`Self::lock`], then requires a recent passkey confirmation, as
+    /// [`Self::confirmed`] does: what adding a way to sign in or an address needs.
     pub(crate) async fn lock_confirmed(
         &self,
         tx: &mut DatabaseTransaction<'_>,
     ) -> Result<StoredSession, SessionError> {
         let session = self.lock(tx).await?;
-        <Confirmed>::check(&session)?;
+        self.confirmed(&session)?;
         Ok(session)
+    }
+
+    /// Requires a recent passkey confirmation of the owner's session both as the
+    /// request's cookie found it and as `locked` holds it now. A confirmation
+    /// replaces the cookie, so a request sent with the old one never gains a
+    /// confirmation that commits while it waits for the lock. Operations whose
+    /// need for one depends on what they change call it last, before committing.
+    pub(crate) fn confirmed(&self, locked: &StoredSession) -> Result<(), SessionError> {
+        <Confirmed>::check(&self.session)?;
+        <Confirmed>::check(locked)
     }
 }
 
