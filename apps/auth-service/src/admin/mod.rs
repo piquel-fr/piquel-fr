@@ -1,4 +1,4 @@
-//! The admin API: thin HTTP adapters over [`AdminOperations`], served only on the
+//! The admin API: thin HTTP adapters over [`AdminService`], served only on the
 //! private admin listener.
 //!
 //! The dashboard calls it with an administrator's access token. Reads take
@@ -23,22 +23,22 @@ use piquel_repository::Database;
 mod caller;
 /// Admin failures and their response mapping.
 mod error;
-/// The operations shared by the admin API and the CLI.
-mod operations;
+/// The service shared by the admin API and the CLI.
+mod service;
 /// Validated inputs.
 mod types;
 
 pub use caller::Operator;
 use caller::{Admin, AdminTokens, ConfirmedAdmin};
 pub use error::AdminError;
-pub use operations::AdminOperations;
+pub use service::AdminService;
 pub use types::{GracePeriod, HandleIssue, HandleProblem, InvalidLifetime, InviteExpiry, Reason};
 
-/// Admin API routes and the operations behind them.
+/// Admin API routes and the service behind them.
 #[derive(Clone)]
 pub(crate) struct AdminApplication {
     /// Every administrative operation.
-    operations: AdminOperations,
+    service: AdminService,
     /// Authenticates each request's administrator.
     tokens: AdminTokens,
     /// Auth's origin, whose registration page invitations link to.
@@ -58,7 +58,7 @@ impl AdminApplication {
     /// Builds the admin API from auth's issuer, keys and admission policy.
     pub(crate) fn new(database: Database, config: &AuthConfig) -> Self {
         Self {
-            operations: AdminOperations::new(database.clone()),
+            service: AdminService::new(database.clone()),
             tokens: AdminTokens {
                 keys: config.oidc.keys.clone(),
                 issuer: config.oidc.origin.serialized(),
@@ -104,9 +104,7 @@ impl AdminApplication {
         Query(search): Query<UserSearch>,
     ) -> Result<Json<UserPage>, AdminError> {
         Ok(Json(
-            app.operations
-                .search_users(&search.q, search.cursor)
-                .await?,
+            app.service.search_users(&search.q, search.cursor).await?,
         ))
     }
 
@@ -116,7 +114,7 @@ impl AdminApplication {
         Admin(operator): Admin,
         Path(id): Path<UserId>,
     ) -> Result<Json<UserDetail>, AdminError> {
-        Ok(Json(app.operations.view_user(&operator, id).await?))
+        Ok(Json(app.service.view_user(&operator, id).await?))
     }
 
     /// Disables an account and ends its sessions and refresh grants.
@@ -127,7 +125,7 @@ impl AdminApplication {
         Json(input): Json<DisableUser>,
     ) -> Result<StatusCode, AdminError> {
         let reason = Reason::parse(input.reason)?;
-        app.operations.disable_user(&operator, id, reason).await?;
+        app.service.disable_user(&operator, id, reason).await?;
         Ok(StatusCode::NO_CONTENT)
     }
 
@@ -137,7 +135,7 @@ impl AdminApplication {
         ConfirmedAdmin(operator): ConfirmedAdmin,
         Path(id): Path<UserId>,
     ) -> Result<StatusCode, AdminError> {
-        app.operations.enable_user(&operator, id).await?;
+        app.service.enable_user(&operator, id).await?;
         Ok(StatusCode::NO_CONTENT)
     }
 
@@ -147,7 +145,7 @@ impl AdminApplication {
         ConfirmedAdmin(operator): ConfirmedAdmin,
         Path(id): Path<UserId>,
     ) -> Result<StatusCode, AdminError> {
-        app.operations.revoke_user_sessions(&operator, id).await?;
+        app.service.revoke_user_sessions(&operator, id).await?;
         Ok(StatusCode::NO_CONTENT)
     }
 
@@ -157,7 +155,7 @@ impl AdminApplication {
         ConfirmedAdmin(operator): ConfirmedAdmin,
         Path(id): Path<SessionId>,
     ) -> Result<StatusCode, AdminError> {
-        app.operations.revoke_session(&operator, id).await?;
+        app.service.revoke_session(&operator, id).await?;
         Ok(StatusCode::NO_CONTENT)
     }
 
@@ -166,7 +164,7 @@ impl AdminApplication {
         State(app): State<Self>,
         _: Admin,
     ) -> Result<Json<Vec<Invitation>>, AdminError> {
-        Ok(Json(app.operations.list_invitations().await?))
+        Ok(Json(app.service.list_invitations().await?))
     }
 
     /// Creates an invitation and returns its link, which is shown only this once.
@@ -182,7 +180,7 @@ impl AdminApplication {
         Ok((
             StatusCode::CREATED,
             Json(
-                app.operations
+                app.service
                     .create_invitation(&operator, &app.origin, expires_in)
                     .await?,
             ),
@@ -195,7 +193,7 @@ impl AdminApplication {
         ConfirmedAdmin(operator): ConfirmedAdmin,
         Path(id): Path<TokenId>,
     ) -> Result<StatusCode, AdminError> {
-        app.operations.revoke_invitation(&operator, id).await?;
+        app.service.revoke_invitation(&operator, id).await?;
         Ok(StatusCode::NO_CONTENT)
     }
 
@@ -204,7 +202,7 @@ impl AdminApplication {
         State(app): State<Self>,
         _: Admin,
     ) -> Result<Json<Vec<Client>>, AdminError> {
-        Ok(Json(app.operations.list_clients().await?))
+        Ok(Json(app.service.list_clients().await?))
     }
 
     /// Describes one OIDC client.
@@ -213,7 +211,7 @@ impl AdminApplication {
         _: Admin,
         Path(id): Path<String>,
     ) -> Result<Json<Client>, AdminError> {
-        Ok(Json(app.operations.client(&id).await?))
+        Ok(Json(app.service.client(&id).await?))
     }
 
     /// Pages through domain events, newest first.
@@ -222,7 +220,7 @@ impl AdminApplication {
         _: Admin,
         Query(search): Query<EventSearch>,
     ) -> Result<Json<EventPage>, AdminError> {
-        Ok(Json(app.operations.events(search).await?))
+        Ok(Json(app.service.events(search).await?))
     }
 
     /// Lists every administrator.
@@ -230,7 +228,7 @@ impl AdminApplication {
         State(app): State<Self>,
         _: Admin,
     ) -> Result<Json<Vec<Administrator>>, AdminError> {
-        Ok(Json(app.operations.list_administrators().await?))
+        Ok(Json(app.service.list_administrators().await?))
     }
 
     /// Makes an active account an administrator.
@@ -239,7 +237,7 @@ impl AdminApplication {
         ConfirmedAdmin(operator): ConfirmedAdmin,
         Json(input): Json<GrantAdministrator>,
     ) -> Result<StatusCode, AdminError> {
-        app.operations
+        app.service
             .grant_administrator(&operator, input.user_id)
             .await?;
         Ok(StatusCode::NO_CONTENT)
@@ -251,7 +249,7 @@ impl AdminApplication {
         ConfirmedAdmin(operator): ConfirmedAdmin,
         Path(id): Path<UserId>,
     ) -> Result<StatusCode, AdminError> {
-        app.operations.revoke_administrator(&operator, id).await?;
+        app.service.revoke_administrator(&operator, id).await?;
         Ok(StatusCode::NO_CONTENT)
     }
 }

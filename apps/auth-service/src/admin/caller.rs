@@ -9,6 +9,7 @@ use chrono::{DateTime, Utc};
 use piquel_admin_api::{AUDIENCE, CONFIRMATION_MAX_AGE};
 use piquel_common::{
     SessionId, UserId,
+    config::{ConfigurationError, Variable},
     events::{Actor, EventContext, RequestOrigin},
     protocol::{
         claims::{AccessTokenClaims, Acr},
@@ -19,6 +20,15 @@ use piquel_common::{
 use piquel_crypto::Rs256Key;
 use piquel_repository::{Database, DatabaseTransaction};
 use std::sync::Arc;
+
+/// The operating system user running a command, recorded on the events it causes.
+const OS_USER: Variable = Variable::new("USER");
+/// The machine's host name, for systems without `/proc`.
+const HOST_NAME: Variable = Variable::new("HOSTNAME");
+/// Where Linux exposes the host name.
+const HOST_NAME_FILE: &str = "/proc/sys/kernel/hostname";
+/// Recorded when the operator's user or host name cannot be read.
+const UNKNOWN_OPERATOR: &str = "unknown";
 
 /// Any passkey sign-in, however old: what every admin API request needs.
 const PASSKEY: StepUpRequirement = StepUpRequirement {
@@ -53,6 +63,22 @@ pub enum Operator {
 }
 
 impl Operator {
+    /// The operator running a command at this terminal: `$USER` and the host name,
+    /// or `unknown` where they cannot be read, as in some containers.
+    pub(crate) fn terminal() -> Result<Self, ConfigurationError> {
+        let host = std::fs::read_to_string(HOST_NAME_FILE)
+            .ok()
+            .map(|host| host.trim().to_owned())
+            .or(HOST_NAME.optional()?)
+            .filter(|host| !host.is_empty());
+        Ok(Self::Cli {
+            os_user: OS_USER
+                .optional()?
+                .unwrap_or_else(|| UNKNOWN_OPERATOR.to_owned()),
+            host: host.unwrap_or_else(|| UNKNOWN_OPERATOR.to_owned()),
+        })
+    }
+
     /// Attributes events to this operator. Neither carries a client origin: the
     /// admin API's caller is the dashboard's server, not the administrator's browser.
     #[must_use]
@@ -97,7 +123,7 @@ impl Operator {
     /// ever lock that row, so this lock joins no cycle.
     ///
     /// Mutations call it after their last write, just before committing (see
-    /// `AdminOperations::finish`), so the times are compared with the clock when
+    /// `AdminService::finish`), so the times are compared with the clock when
     /// nothing is left to wait for. The session is read then, not locked: a
     /// session lock taken last could still meet a transaction that holds it and
     /// waits for one of this one's, such as the caller's own sign-in or social

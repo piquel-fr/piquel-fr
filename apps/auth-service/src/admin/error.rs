@@ -6,7 +6,7 @@ use axum::{
     response::{IntoResponse, Response},
 };
 use piquel_common::{
-    HandleError,
+    DeliveryId, HandleError,
     protocol::{
         api::ErrorCode,
         challenge::{BearerChallenge, BearerError},
@@ -53,6 +53,14 @@ pub enum AdminError {
     /// No OIDC client has this ID.
     #[error("no OIDC client has this ID")]
     ClientNotFound,
+    /// No delivery with this ID is in a state the operation applies to.
+    #[error("no {states} delivery has ID {id}")]
+    DeliveryNotFound {
+        /// The requested delivery.
+        id: DeliveryId,
+        /// The states the operation applies to.
+        states: &'static str,
+    },
     /// The admin API never acts on administrator accounts, so a stolen admin token
     /// cannot lock other administrators out. Revoke their rights first, or use the CLI.
     #[error("administrator accounts can only be changed after revoking their rights")]
@@ -108,6 +116,17 @@ pub enum AdminError {
 }
 
 impl AdminError {
+    /// Reports `NotFound` as no delivery `id` in `states`.
+    pub(super) fn delivery(
+        id: DeliveryId,
+        states: &'static str,
+    ) -> impl FnOnce(DatabaseError) -> Self {
+        move |error| match error {
+            DatabaseError::NotFound => Self::DeliveryNotFound { id, states },
+            error => error.into(),
+        }
+    }
+
     /// Names the failure in its log line. Outside `step_up_required` and
     /// `session_ended`, a refused caller sent a token the dashboard never would:
     /// a stolen, forged or non-administrator one.
@@ -124,6 +143,7 @@ impl AdminError {
             Self::SessionNotFound => "session_not_found",
             Self::InvitationNotFound => "invitation_not_found",
             Self::ClientNotFound => "client_not_found",
+            Self::DeliveryNotFound { .. } => "delivery_not_found",
             Self::AdministratorTarget => "administrator_target",
             Self::AlreadyDisabled => "already_disabled",
             Self::AlreadyActive => "already_active",
@@ -161,6 +181,7 @@ impl AdminError {
             | Self::SessionNotFound
             | Self::InvitationNotFound
             | Self::ClientNotFound
+            | Self::DeliveryNotFound { .. }
             | Self::AdministratorTarget
             | Self::AlreadyDisabled
             | Self::AlreadyActive
@@ -203,7 +224,8 @@ impl From<AdminError> for ApiError {
             AdminError::UserNotFound
             | AdminError::SessionNotFound
             | AdminError::InvitationNotFound
-            | AdminError::ClientNotFound => Self::not_found(message),
+            | AdminError::ClientNotFound
+            | AdminError::DeliveryNotFound { .. } => Self::not_found(message),
             AdminError::AlreadyDisabled
             | AdminError::AlreadyActive
             | AdminError::EmailClaimed(_)
