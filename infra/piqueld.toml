@@ -98,8 +98,16 @@ application = "telemetry"
 service = "collector"
 environment = "production"
 
+# The PostgreSQL superuser's password, which only the database and the `migrate`
+# job get.
 [[spec.secrets]]
 name = "database-password"
+generate = { type = "random", bytes = 32, encoding = "hex" }
+
+# The password of `piquel_auth`, the restricted role auth connects as. `migrate`
+# sets it on every deploy.
+[[spec.secrets]]
+name = "database-runtime-password"
 generate = { type = "random", bytes = 32, encoding = "hex" }
 
 [[spec.secrets]]
@@ -112,11 +120,20 @@ generate = { type = "rsa", bits = 3072 }
 name = "admin-client-secret"
 generate = { type = "random", bytes = 32, encoding = "base64url" }
 
+# Applies migrations as the superuser, then creates or resets `piquel_auth`.
 [[spec.jobs]]
 name = "migrate"
 service = "auth"
 command = ["auth-service", "migrate"]
 run = "before-rollout"
+
+[spec.jobs.environment]
+AUTH_DATABASE_OWNER_URL = "postgres://piquel@postgres:5432/piquel?sslmode=disable"
+AUTH_DATABASE_OWNER_PASSWORD = "file:///run/secrets/database-password"
+
+[[spec.jobs.secrets]]
+name = "database-password"
+target = "/run/secrets/database-password"
 
 # Registers the admin dashboard as the trusted OIDC client `piquel-admin`, or
 # brings its registration and secret in line, on every deploy after migrations.
@@ -148,8 +165,8 @@ dockerfile = "infra/auth.Dockerfile"
 
 [spec.services.environment]
 # Plaintext stays on the application's private network, which ingress cannot reach.
-AUTH_DATABASE_URL = "postgres://piquel@postgres:5432/piquel?sslmode=disable"
-AUTH_DATABASE_PASSWORD = "file:///run/secrets/database-password"
+AUTH_DATABASE_URL = "postgres://piquel_auth@postgres:5432/piquel?sslmode=disable"
+AUTH_DATABASE_PASSWORD = "file:///run/secrets/database-runtime-password"
 AUTH_KEY_PROVIDER = "file:///run/secrets/signing-key"
 AUTH_PUBLIC_LISTENER = "0.0.0.0:8080"
 # The admin API. No route exposes this port, so only services on the
@@ -163,8 +180,8 @@ OTEL_EXPORTER_OTLP_ENDPOINT = "${{ vars.otlp_endpoint }}"
 OTEL_RESOURCE_ATTRIBUTES = "deployment.environment.name=${{ env.name }}"
 
 [[spec.services.secrets]]
-name = "database-password"
-target = "/run/secrets/database-password"
+name = "database-runtime-password"
+target = "/run/secrets/database-runtime-password"
 
 [[spec.services.secrets]]
 name = "signing-key"

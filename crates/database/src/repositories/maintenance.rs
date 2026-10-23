@@ -14,7 +14,8 @@ impl MaintenanceRepository<'_> {
     /// rows were deleted. Failed ordered deliveries are left to
     /// [`DatabaseTransaction::abandon_stuck_deliveries`](crate::DatabaseTransaction::abandon_stuck_deliveries). `batch_size` is clamped to 1..=1000 rows per table.
     ///
-    /// Each batch skips rows that live requests have locked. Outside a transaction,
+    /// Each batch skips rows that live requests have locked, except event personal
+    /// data, which requests never lock. Outside a transaction,
     /// each table's batch commits on its own, so cleanup never holds locks across
     /// tables; inside one, all of them commit or roll back with it. Deleting a
     /// session or an authorization code can still wait briefly on a locked child row
@@ -157,13 +158,14 @@ impl MaintenanceRepository<'_> {
                 FOR UPDATE OF secret SKIP LOCKED
             )",
             // Events are kept indefinitely; the personal data beside them is not.
+            // No FOR UPDATE: it needs the UPDATE privilege, which the runtime role
+            // lacks here. Requests never update these rows, so none hold their locks.
             "DELETE FROM event_personal_data
             WHERE ctid IN (
                 SELECT ctid
                 FROM event_personal_data
                 WHERE created_at < now() - interval '90 days'
                 LIMIT $1
-                FOR UPDATE SKIP LOCKED
             )",
             // Ordered failures hold back their key, so only
             // `DatabaseTransaction::abandon_stuck_deliveries` removes them.

@@ -46,6 +46,7 @@ piquel-web with Vite against an auth service on `http://localhost:3000`.
 | --- | --- |
 | `AUTH_DATABASE_URL` | PostgreSQL URL; TCP requires `sslmode=verify-full`, or an explicit `sslmode=disable` on a trusted private network; local Unix sockets are also supported |
 | `AUTH_DATABASE_PASSWORD` | Optional env/file reference for the database password, when omitted from the URL |
+| `AUTH_DATABASE_OWNER_URL`, `AUTH_DATABASE_OWNER_PASSWORD` | Optional schema owner `migrate` connects as instead, in the same formats. It then creates or resets the role `AUTH_DATABASE_URL` names, with the `AUTH_DATABASE_PASSWORD` password and only row access to the app tables. The owner must be a superuser |
 | `AUTH_PUBLIC_BASE_URL` | Exact auth origin, normally `https://auth.piquel.fr` |
 | `AUTH_SETTINGS_URL` | Exact settings destination; defaults to `https://piquel.fr/settings`. Its origin is a frontend origin: it may call the account API, and sign-in may return to any URL on it |
 | `AUTH_TRUSTED_PROXIES` | Optional comma-separated proxy peer IPs or CIDRs; these peers must overwrite `X-Forwarded-For` with one client IP. Defaults to piqueld's `PIQUELD_INGRESS_PROXIES` |

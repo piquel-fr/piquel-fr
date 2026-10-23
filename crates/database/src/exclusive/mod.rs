@@ -3,13 +3,16 @@
 use crate::{Database, DatabaseError, DatabaseTransaction};
 use sqlx::{Connection, PgConnection};
 
-/// Session-level advisory lock keys, one per exclusive job. The values are stable
-/// and never reused, so replicas running different releases agree on them.
+/// Advisory lock keys, one per exclusive job or step. The values are stable and
+/// never reused, so replicas running different releases agree on them.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 #[repr(i64)]
 pub enum LockKey {
     /// Expired-state cleanup.
     Cleanup = 1,
+    /// Runtime role provisioning, held for its transaction, so overlapping
+    /// `migrate` runs take turns.
+    Provisioning = 2,
     /// Job runner tests in other crates; no release takes it.
     #[cfg(feature = "test-support")]
     Test = -1,
@@ -17,7 +20,7 @@ pub enum LockKey {
 
 impl LockKey {
     /// The `bigint` key passed to `PostgreSQL`'s advisory lock functions.
-    const fn id(self) -> i64 {
+    pub(crate) const fn id(self) -> i64 {
         self as i64
     }
 }

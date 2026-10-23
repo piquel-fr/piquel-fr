@@ -1,6 +1,6 @@
 //! Focused persistence and security contract tests.
 
-use super::{Database, DatabaseConfig, MIGRATOR};
+use super::{Database, DatabaseConfig, MIGRATOR, RuntimeRole};
 use sqlx::postgres::PgSslMode;
 use std::time::Duration;
 /// TCP requires verified TLS unless plaintext is explicitly selected.
@@ -276,4 +276,133 @@ fn migration_versions_are_unique_and_contiguous() {
             migration.version, migration.description,
         );
     }
+}
+
+/// Only plain lowercase identifiers can be provisioned, so SQL never quotes them.
+#[test]
+fn runtime_roles_need_plain_names() {
+    let role = |user: &str| {
+        let url = format!("postgres://{user}@localhost/piquel?host=/run/postgresql");
+        RuntimeRole::new(
+            &DatabaseConfig::new(&url, 1, Duration::from_secs(1)).expect("config"),
+            "password",
+        )
+    };
+    assert!(role("piquel_auth").is_ok());
+    assert!(role(&"a".repeat(63)).is_ok());
+    for user in [
+        "Piquel",
+        "1auth",
+        "auth-service",
+        "a%24%24b",
+        &"a".repeat(64),
+    ] {
+        assert!(
+            matches!(role(user), Err(crate::DatabaseConnectionError::RoleName)),
+            "accepted {user}"
+        );
+    }
+}
+
+/// The runtime role reads and writes app rows, and appends history, but cannot
+/// rewrite history, reach migrations, change the schema or run programs. The
+/// service's cleanup still works with it, and overlapping provisioning runs are safe.
+#[tokio::test]
+#[ignore = "requires a disposable TEST_DATABASE_URL"]
+async fn runtime_role_has_only_row_privileges() {
+    let owner = Database {
+        pool: Database::test_pool().await,
+    };
+    let name = format!("piquel_auth_{}", uuid::Uuid::now_v7().simple());
+    let mut url = url::Url::parse(&std::env::var("TEST_DATABASE_URL").expect("TEST_DATABASE_URL"))
+        .expect("test URL");
+    url.set_username(&name).expect("user");
+    url.set_password(None).expect("password");
+    let config = DatabaseConfig::new(url.as_str(), 1, Duration::from_secs(5)).expect("config");
+    let role = RuntimeRole::new(&config, "runtime password").expect("role");
+    // Overlapping runs, as two `migrate` jobs: one creates the role, the other
+    // waits for it, then resets it.
+    let (first, second) = tokio::join!(owner.provision(&role), owner.provision(&role));
+    first.expect("create or reset");
+    second.expect("create or reset");
+    let runtime = Database::connect(config.with_password("runtime password"))
+        .await
+        .expect("log in as the runtime role");
+
+    // Rolled back, since other tests consume every event.
+    let mut append = runtime.pool.begin().await.expect("begin");
+    sqlx::query(
+        "INSERT INTO domain_events (id, kind, version, payload, actor)
+        VALUES (uuidv7(), 'test', 1, '{}', '{}')",
+    )
+    .execute(&mut *append)
+    .await
+    .expect("append an event");
+    append.rollback().await.expect("rollback");
+    runtime
+        .maintenance()
+        .purge_expired_auth_state(1000)
+        .await
+        .expect("cleanup");
+    for statement in [
+        "UPDATE domain_events SET kind = kind",
+        "DELETE FROM domain_events",
+        "UPDATE event_personal_data SET details = details",
+        "DELETE FROM event_consumers",
+        "SELECT FROM _sqlx_migrations",
+        "SELECT FROM security_audit_log",
+        "CREATE TABLE shadow (id INT)",
+        "ALTER TABLE users DISABLE TRIGGER ALL",
+        "SET session_replication_role = replica",
+        "COPY (SELECT 1) TO PROGRAM 'true'",
+    ] {
+        // Rolled back, so a regressed grant cannot harm concurrent tests.
+        let mut probe = runtime.pool.begin().await.expect("begin");
+        let error = sqlx::query(statement)
+            .execute(&mut *probe)
+            .await
+            .expect_err(statement);
+        probe.rollback().await.expect("rollback");
+        let code = error
+            .as_database_error()
+            .and_then(sqlx::error::DatabaseError::code);
+        assert_eq!(code.as_deref(), Some("42501"), "{statement}: {error}");
+    }
+    runtime.pool.close().await;
+
+    let owner_name = sqlx::query_scalar::<_, String>("SELECT current_user::text")
+        .fetch_one(&owner.pool)
+        .await
+        .expect("owner");
+    url.set_username(&owner_name).expect("user");
+    let config = DatabaseConfig::new(url.as_str(), 1, Duration::from_secs(5)).expect("config");
+    let error = owner
+        .provision(&RuntimeRole::new(&config, "password").expect("role"))
+        .await
+        .expect_err("the owner is refused");
+    assert!(format!("{error:?}").contains("must not be the schema owner"));
+
+    sqlx::raw_sql(&format!("DROP OWNED BY {name}; DROP ROLE {name}"))
+        .execute(&owner.pool)
+        .await
+        .expect("drop the role");
+}
+
+/// Every function pins its `search_path`, so temporary tables cannot shadow the
+/// tables it reads.
+#[tokio::test]
+#[ignore = "requires a disposable TEST_DATABASE_URL"]
+async fn functions_pin_their_search_path() {
+    let pool = Database::test_pool().await;
+    let unpinned: Vec<String> = sqlx::query_scalar(
+        "SELECT proname::text FROM pg_proc
+        WHERE pronamespace = 'public'::regnamespace
+        AND NOT EXISTS (
+            SELECT FROM unnest(proconfig) setting WHERE setting LIKE 'search_path=%'
+        )",
+    )
+    .fetch_all(&pool)
+    .await
+    .expect("functions");
+    assert!(unpinned.is_empty(), "unpinned functions: {unpinned:?}");
 }

@@ -46,6 +46,10 @@ rejects, like a non-v7 ID or JSON outside the record's type, becomes
 decoding error as its source. Uniqueness conflicts and deadline failures retain
 their sources too.
 
+Only `Database::provision` runs unchecked SQL: DDL takes no bind parameters, so a
+checked query renders its script (`src/connection/runtime_role.sql`) with
+`format`, which quotes the values, and `raw_sql` runs it.
+
 Queries only the admin API reads decode straight into its bodies from
 `piquel-admin-api`. Records that auth also uses elsewhere convert into those bodies
 with `From`, leaving out what the API never shows, so no record repeats an API body.
@@ -107,6 +111,10 @@ count up from `0001` without gaps or repeats, which a unit test enforces, so a
 branch rebased past another migration must renumber its own. Run
 migrations with `just db migrate` (`auth-service migrate` in deployed images); startup does not silently mutate the schema.
 
+Functions pin their `search_path` (`SET search_path = pg_catalog, public,
+pg_temp`), which a session cannot override. Otherwise `pg_temp` comes first, and a
+temporary table could shadow one they read. A test fails for any function without it.
+
 Migrations expand, then contract. A deploy runs `migrate` first, and the previous
 release keeps serving against the new schema until its replacement is healthy, so
 every migration must keep the previous release working. Add tables, and columns
@@ -115,7 +123,8 @@ constraint the previous release could violate, only in a later release, once no
 deployed code uses the old shape. Migration `0003` dropped
 `sessions.management_expires_at` in the release that stopped reading it: a one-time
 exception while there were few users, not a precedent. SQLx's migrator takes an
-advisory lock, so concurrent `migrate` runs are safe.
+advisory lock, and provisioning the runtime role takes another, so concurrent
+`migrate` runs are safe.
 
 Every five minutes, one replica drains expired ephemeral state in bounded batches
 through `maintenance()`, for up to one minute per pass. The same pass deletes event
@@ -131,6 +140,32 @@ Tests that use `TEST_DATABASE_URL` are explicitly
 marked ignored by the ordinary unit test runner; other crates' tests read stored state
 through helpers behind the `test-support` feature. `just db test` runs them in a
 throwaway PostgreSQL cluster, or against an explicit, disposable `TEST_DATABASE_URL`.
+
+## Roles
+
+Deployments use two roles, so a SQL-level compromise of auth reaches only rows.
+The schema owner, PostgreSQL's superuser, only runs `migrate`. Everything else,
+including `serve`, connects as a restricted runtime role, `piquel_auth`. When `migrate` has an owner connection
+(`AUTH_DATABASE_OWNER_URL`), it then calls `Database::provision`, which creates
+the runtime role or resets its attributes and password, and grants it:
+
+- `CONNECT` on the database and `USAGE` on the schema;
+- `SELECT, INSERT, UPDATE, DELETE` on every table, except:
+  - `domain_events`: `SELECT, INSERT`, so history cannot be rewritten;
+  - `event_personal_data`: `SELECT, INSERT, DELETE`, so it can be erased but not
+    rewritten. Queries on it therefore cannot use `FOR UPDATE`, which needs
+    `UPDATE`;
+  - `event_consumers`: `SELECT, INSERT, UPDATE`;
+  - `_sqlx_migrations` and `security_audit_log`: nothing.
+
+Grants are reset on every run, so they cover tables that new migrations add. A
+migration that drops a listed table, or a new table that needs an exception,
+updates the script in the same change. Narrowing a grant on an existing table is a
+contract step: the previous release keeps running as the same role during a
+deploy, so revoke only once no deployed release needs the privilege. Provisioning refuses a role that is the owner or a superuser.
+The role cannot change the schema, disable triggers, change
+`session_replication_role` or run programs on the server. It still takes the
+advisory locks `try_exclusive` uses, and may create temporary tables.
 
 ## Domain events
 

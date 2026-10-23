@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "DELETE FROM event_personal_data\n            WHERE ctid IN (\n                SELECT ctid\n                FROM event_personal_data\n                WHERE created_at < now() - interval '90 days'\n                LIMIT $1\n            )",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Int8"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "452b28fbbeedd7f5e7124f8289fe65e25d5eb05cbb4d5cef380240abd92463fb"
+}

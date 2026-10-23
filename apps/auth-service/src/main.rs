@@ -117,19 +117,23 @@ impl CliError {
 
 /// Piquel authentication service. Runs `serve` when no command is given.
 #[derive(Parser)]
-#[command(after_help = "Every command uses AUTH_DATABASE_URL. See README.md for configuration.")]
+#[command(
+    after_help = "Every command uses AUTH_DATABASE_URL, except migrate when AUTH_DATABASE_OWNER_URL is \
+                  set. See README.md for configuration."
+)]
 struct Cli {
     /// Defaults to serving when no administrative command is supplied.
     #[command(subcommand)]
     command: Option<Command>,
 }
 
-/// Commands, each of which connects to `AUTH_DATABASE_URL` first.
+/// Commands, each of which connects to the database first.
 #[derive(Subcommand)]
 enum Command {
     /// Serve the authentication service.
     Serve,
-    /// Apply database migrations.
+    /// Apply database migrations. Connected as the schema owner, also create or
+    /// reset the role other commands connect as.
     Migrate,
     /// Print a single-use signup link.
     Invite {
@@ -197,10 +201,22 @@ impl AdminCommand {
 impl Command {
     /// Executes this command and returns the original startup or operation failure.
     async fn run(self) -> Result<(), CliError> {
-        let database = Database::connect(AuthConfig::database_from_environment()?).await?;
+        // `migrate` connects as the schema owner when one is configured, then
+        // provisions the role every other command connects as.
+        let (config, runtime_role) = match self {
+            Self::Migrate => AuthConfig::migration_from_environment()?,
+            _ => (AuthConfig::database_from_environment()?, None),
+        };
+        let database = Database::connect(config).await?;
         match self {
             Self::Serve => Self::serve(database).await,
-            Self::Migrate => Ok(database.run_migrations().await?),
+            Self::Migrate => {
+                database.run_migrations().await?;
+                if let Some(role) = runtime_role {
+                    database.provision(&role).await?;
+                }
+                Ok(())
+            }
             Self::Invite { expires_in } => {
                 // Only the secret's digest is stored, so the link is printed once.
                 let invitation = AdminOperations::new(database)
