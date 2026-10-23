@@ -112,7 +112,7 @@ Administrators can also list, create and revoke invitations through the admin AP
 Every administrative operation has a command, which runs the same code as the
 admin API (`AdminService` in `apps/auth-service/src/admin`). Commands need only
 `AUTH_DATABASE_URL` (`invite create` also needs `AUTH_PUBLIC_BASE_URL`, to build its
-link), so they work while auth is down: they are the break-glass path when the
+link, and `client origin add`, to tell auth's own domain apart), so they work while auth is down: they are the break-glass path when the
 dashboard or auth's frontends are unreachable. In deployed environments,
 run them with `piquelctl app exec piquel-fr auth --env ENV -- auth-service …` (see
 [infra/README.md](infra/README.md)).
@@ -132,8 +132,8 @@ just auth audit --user alice --kind session_revoked
 
 - Accounts are named by username, ID or a verified email of an active account.
 - `--output json` prints the admin API's body for `user search` (`UserPage`), `user
-  show` (`UserDetail`), `audit` (`EventPage`), `client list`, `invite list` and
-  `admin list`, as defined in `crates/admin-api`. It changes only as the API does.
+  show` (`UserDetail`), `audit` (`EventPage`), `client list`, `client origin list`,
+  `invite list` and `admin list`, as defined in `crates/admin-api`. It changes only as the API does.
 - `user disable`, `session revoke-all`, `admin revoke` and `client
   disable|suspend|delete` describe what they will change and ask for confirmation.
   Without a terminal they refuse unless given `--yes`.
@@ -141,8 +141,8 @@ just auth audit --user alice --kind session_revoked
   name. Unlike the admin API, the CLI may act on administrators' accounts.
 - Failures print their causes and exit with 1; usage errors exit with 2.
 
-Administrators manage accounts, sessions, invitations and other administrators
-through the admin API, from the admin dashboard
+Administrators manage accounts, sessions, invitations, other administrators and
+clients' related origins through the admin API, from the admin dashboard
 ([apps/admin-web](apps/admin-web/README.md)). Auth serves the API only on
 `AUTH_ADMIN_LISTENER`, which no ingress route reaches: the dashboard calls it from
 its server, over the application's private network. Its routes, bodies and typed
@@ -327,6 +327,40 @@ with it. A pushed request is validated exactly like a browser one, but its error
 come back as JSON. Discovery advertises `pushed_authorization_request_endpoint`.
 Client-hosted request objects (`request` and `request_uri` from RFC 9101) are not
 supported.
+
+#### Passkey sign-in on an application's own pages
+
+A trusted client's pages can sign users in with their auth passkeys without
+leaving for auth's pages, through WebAuthn related origins (WebAuthn Level 3
+§5.11). An administrator approves each origin, from the dashboard's Clients page
+or the CLI:
+
+```sh
+just auth client origin add piquel-web https://piquel.fr
+just auth client origin list
+just auth client origin remove piquel-web https://piquel.fr
+```
+
+The client must be trusted, since this sign-in skips the consent page, and the
+origin must be the origin of one of its redirect URIs. Browsers honour only a few
+distinct domains in the list, so approved origins may span at most 5 registrable
+domains (`example` counts once for `app.example.co.uk` and `www.example.co.uk`).
+Browsers count origins within auth's own domain too, as `piquel`; a host without a
+registrable domain, such as `localhost`, counts none and is accepted only within
+auth's domain. `/.well-known/webauthn` lists the approved origins, cacheable for
+five minutes. Auth refuses a removed origin's sign-ins at once.
+
+The page pushes an authorization request with PKCE, then posts its `request_uri`
+to `/webauthn/related/start` and the signed assertion to
+`/webauthn/related/finish`, which answers `{code, state, iss}` as JSON instead of
+redirecting. The page redeems the code with its verifier as usual. These calls send
+no cookies and get none: the sign-in creates a session that only the client's
+tokens use, recorded with the page's origin in the user's security history. A
+request with `prompt=consent` or `prompt=none` is refused with
+`interaction_required` and left unclaimed, for the redirect flow. `@piquel/auth-sdk`
+wraps this as `Passkeys.signInWithPasskey()`, given a function that pushes the
+request. It falls back to that redirect when the browser lacks related origins,
+auth refuses to start, or the browser refuses auth's passkeys on the page.
 The endpoints implement code exchange, RS256 ID/access tokens, userinfo, opt-in
 rotating refresh tokens, revocation, RP-initiated and back-channel logout. Access tokens are
 intended for the configured client audience. Only requested claims are released;

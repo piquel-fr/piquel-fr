@@ -23,7 +23,9 @@
     /** Retention deleted the IP address and device. */
     erased: boolean;
   } & (
-    | { kind: 'account.created' | 'session.signed_in'; method: Method }
+    | { kind: 'account.created'; method: Method }
+    /** `origin` is set when an app's own page signed the user in. */
+    | { kind: 'session.signed_in'; method: Method; origin?: string }
     | { kind: 'session.revoked'; reason: { type: string } }
     | { kind: 'passkey.added' | 'passkey.renamed' | 'passkey.removed'; passkey_id: string }
     | { kind: 'identity.linked' | 'identity.unlinked'; provider: Provider }
@@ -221,6 +223,7 @@
           ? 'Account created with a passkey'
           : 'Account created with social sign-in';
       case 'session.signed_in':
+        if (entry.origin) return `Signed in with a passkey on ${new URL(entry.origin).host}`;
         return entry.method === 'passkey'
           ? 'Signed in with a passkey'
           : 'Signed in with a social provider';

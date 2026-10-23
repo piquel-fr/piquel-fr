@@ -26,8 +26,8 @@ use piquel_common::{
     protocol::{claims::Acr, step_up::StepUpRequirement},
 };
 use piquel_repository::{
-    InsertAuthorizationCode, InsertAuthorizationRequest, SessionAuthentication,
-    StoredAuthorizationRequest, StoredOidcClient, StoredSession,
+    DatabaseTransaction, InsertAuthorizationCode, InsertAuthorizationRequest, OidcRepository,
+    SessionAuthentication, StoredAuthorizationRequest, StoredOidcClient, StoredSession,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
@@ -420,10 +420,10 @@ impl OidcApplication {
         ))
     }
 
-    /// Continues a pushed request from its `request_uri` (RFC 9126 §4). Only
-    /// `client_id` can claim it, and only once; the request's other parameters are
-    /// ignored, so none can override a pushed one. From then on, the browser carries
-    /// a fresh transaction, as for a request it sent itself.
+    /// Continues a pushed request from its `request_uri` (RFC 9126 §4). The
+    /// request's other parameters are ignored, so none can override a pushed one.
+    /// From then on, the browser carries a fresh transaction, as for a request it
+    /// sent itself.
     async fn claim_pushed(
         &self,
         context: RequestContext,
@@ -431,6 +431,22 @@ impl OidcApplication {
         client_id: &str,
         request_uri: &str,
     ) -> Result<Redirect, OAuthError> {
+        let (opaque, _) = self
+            .claim(self.database.oidc(), client_id, request_uri)
+            .await?;
+        self.continue_authorization(context, headers, opaque.encoded())
+            .await
+    }
+
+    /// Claims the pushed request `request_uri` through `oidc`. Only `client_id` can
+    /// claim it, and only once. Returns the request and the transaction token that
+    /// now continues it.
+    pub(super) async fn claim(
+        &self,
+        mut oidc: OidcRepository<'_>,
+        client_id: &str,
+        request_uri: &str,
+    ) -> Result<(OpaqueToken, StoredAuthorizationRequest), OAuthError> {
         let unknown = || OAuthCode::InvalidRequestUri.reject(UNKNOWN_REQUEST_URI);
         // RFC 9126 §5: a pushed `request_uri` works whatever
         // `request_uri_parameter_supported` says, so the parameter is supported and
@@ -446,8 +462,7 @@ impl OidcApplication {
                 OAuthCode::InvalidRequestUri.reject_with(UNKNOWN_REQUEST_URI, error)
             })?;
         let opaque = pushed.renewed()?;
-        self.database
-            .oidc()
+        let request = oidc
             .claim_pushed_authorization_request(
                 pushed.id,
                 self.token_digest(&pushed)?.as_bytes(),
@@ -457,8 +472,7 @@ impl OidcApplication {
             )
             .await?
             .ok_or_else(unknown)?;
-        self.continue_authorization(context, headers, opaque.encoded())
-            .await
+        Ok((opaque, request))
     }
 
     /// Resumes an authorization after the browser signs in.
@@ -573,29 +587,42 @@ impl OidcApplication {
                         )
                         .await?;
                 }
-                let code = OpaqueToken::new(TokenPrefix::AuthorizationCode)?;
-                transaction
-                    .oidc()
-                    .insert_code(&InsertAuthorizationCode {
-                        id: code.id,
-                        secret_digest: self.token_digest(&code)?.as_bytes().to_vec(),
-                        client_id: request.client_id,
-                        user_id: session.user_id,
-                        session_id: session.id,
-                        redirect_uri: request.redirect_uri,
-                        pkce_challenge: request.pkce_challenge,
-                        nonce: request.nonce,
-                        scopes: request.scopes,
-                        audience: request.audience,
-                        authentication: SessionAuthentication::from(&session),
-                        expires_at: Utc::now() + Duration::minutes(AUTHORIZATION_CODE_MINUTES),
-                    })
+                let code = self
+                    .issue_code(&mut transaction, &request, &session)
                     .await?;
                 client_redirect.url(&[("code", &code.encoded())])
             }
         };
         transaction.commit().await?;
         Ok(redirect)
+    }
+
+    /// Issues a code for the consumed `request` to `session` inside `transaction`.
+    pub(super) async fn issue_code(
+        &self,
+        transaction: &mut DatabaseTransaction<'_>,
+        request: &StoredAuthorizationRequest,
+        session: &StoredSession,
+    ) -> Result<OpaqueToken, OAuthError> {
+        let code = OpaqueToken::new(TokenPrefix::AuthorizationCode)?;
+        transaction
+            .oidc()
+            .insert_code(&InsertAuthorizationCode {
+                id: code.id,
+                secret_digest: self.token_digest(&code)?.as_bytes().to_vec(),
+                client_id: request.client_id.clone(),
+                user_id: session.user_id,
+                session_id: session.id,
+                redirect_uri: request.redirect_uri.clone(),
+                pkce_challenge: request.pkce_challenge.clone(),
+                nonce: request.nonce.clone(),
+                scopes: request.scopes.clone(),
+                audience: request.audience.clone(),
+                authentication: SessionAuthentication::from(session),
+                expires_at: Utc::now() + Duration::minutes(AUTHORIZATION_CODE_MINUTES),
+            })
+            .await?;
+        Ok(code)
     }
 
     /// Finds a live pending authorization by its opaque token.

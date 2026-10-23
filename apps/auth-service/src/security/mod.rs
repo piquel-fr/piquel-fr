@@ -18,8 +18,8 @@ use ipnet::IpNet;
 use piquel_common::{
     AuthenticationMethod, ClientId, ErrorChain, HandleError, SessionId, UserId,
     events::{
-        Actor, DomainEvent, EventContext, RequestOrigin, RevocationReason, SignInFailure,
-        UserAgentFamily,
+        Actor, DomainEvent, EventContext, InlineSignIn, RequestOrigin, RevocationReason,
+        SignInFailure, UserAgentFamily,
     },
     protocol::{
         api::{ErrorBody, ErrorCode},
@@ -116,6 +116,15 @@ impl ApiError {
     /// Rejects an operation the browser is not allowed to perform, explaining why.
     pub(crate) fn forbidden(message: impl Into<Cow<'static, str>>) -> Self {
         Self::new(StatusCode::FORBIDDEN, message)
+    }
+
+    /// Tells an application's page to send the user to auth's pages instead,
+    /// explaining why.
+    pub(crate) fn interaction_required(message: impl Into<Cow<'static, str>>) -> Self {
+        Self {
+            code: Some(ErrorCode::InteractionRequired),
+            ..Self::bad_request(message)
+        }
     }
 
     /// Rejects a write that collides with existing data, naming what is already in use.
@@ -398,6 +407,7 @@ impl Session {
                     DomainEvent::SignedIn {
                         session_id: current.id,
                         method,
+                        inline: None,
                     },
                 )
                 .await?;
@@ -457,11 +467,46 @@ impl Session {
         user_id: UserId,
         method: AuthenticationMethod,
     ) -> Result<Secret, SessionError> {
-        let now = Utc::now();
-        let id = SessionId::new();
+        let session = Self::insert(tx, context, user_id, method, None).await?;
+        let secret = Secret::generate()?;
         tx.sessions()
+            .insert_browser_secret(session.id, secret.digest().as_bytes())
+            .await?;
+        Ok(secret)
+    }
+
+    /// Creates the session of a passkey sign-in on an application's page, inside
+    /// the caller's transaction, and records the sign-in. It has no browser secret,
+    /// so no auth cookie: only the tokens the client gets from it use it.
+    pub(crate) async fn create_inline(
+        tx: &mut DatabaseTransaction<'_>,
+        context: RequestContext,
+        user_id: UserId,
+        inline: InlineSignIn,
+    ) -> Result<StoredSession, SessionError> {
+        Self::insert(
+            tx,
+            context,
+            user_id,
+            AuthenticationMethod::Passkey,
+            Some(inline),
+        )
+        .await
+    }
+
+    /// Inserts a session, confirmed if `method` is a passkey, and records the sign-in.
+    async fn insert(
+        tx: &mut DatabaseTransaction<'_>,
+        context: RequestContext,
+        user_id: UserId,
+        method: AuthenticationMethod,
+        inline: Option<InlineSignIn>,
+    ) -> Result<StoredSession, SessionError> {
+        let now = Utc::now();
+        let session = tx
+            .sessions()
             .insert(&InsertSession {
-                id,
+                id: SessionId::new(),
                 user_id,
                 authentication_methods: vec![method],
                 authenticated_at: now,
@@ -472,23 +517,17 @@ impl Session {
                     .then_some(now),
             })
             .await?;
-        let secret = Secret::generate()?;
-        tx.sessions()
-            .insert_browser_secret(id, secret.digest().as_bytes())
-            .await?;
         tx.record(
-            &context.actor(Actor::User {
-                user_id,
-                session_id: Some(id),
-            }),
+            &context.user(&session),
             Some(user_id),
             DomainEvent::SignedIn {
-                session_id: id,
+                session_id: session.id,
                 method,
+                inline,
             },
         )
         .await?;
-        Ok(secret)
+        Ok(session)
     }
 
     /// Revokes the `scope` sessions of `session`'s account inside the caller's
@@ -697,7 +736,7 @@ enum Endpoint {
     OAuthBackChannel,
     /// Bearer-authenticated `UserInfo`.
     UserInfo,
-    /// Public metadata and signing keys, served from memory and readable from any origin.
+    /// Public metadata, signing keys and related origins, readable from any origin.
     Discovery,
     /// Liveness and readiness probes polled by the orchestrator.
     Health,
@@ -709,6 +748,8 @@ enum Endpoint {
     Account,
     /// Social sign-in, also started from the first-party frontends.
     Login,
+    /// Passkey sign-in on the pages of approved related origins, without cookies.
+    RelatedLogin,
     /// Auth-origin pages and ceremonies.
     Other,
 }
@@ -719,7 +760,10 @@ impl Endpoint {
         match path {
             oidc::TOKEN | oidc::REVOKE | oidc::PAR => Self::OAuthBackChannel,
             oidc::USERINFO => Self::UserInfo,
-            oidc::DISCOVERY | oidc::OAUTH_METADATA | oidc::JWKS => Self::Discovery,
+            oidc::DISCOVERY | oidc::OAUTH_METADATA | oidc::JWKS | passkey::RELATED_ORIGINS => {
+                Self::Discovery
+            }
+            passkey::RELATED_START | passkey::RELATED_FINISH => Self::RelatedLogin,
             service::LIVE | service::READY => Self::Health,
             oidc::AUTHORIZE => Self::Authorize,
             oidc::LOGOUT => Self::Logout,
@@ -734,21 +778,29 @@ impl Endpoint {
     const fn is_protocol(self) -> bool {
         match self {
             Self::OAuthBackChannel | Self::UserInfo | Self::Authorize | Self::Logout => true,
-            Self::Discovery | Self::Health | Self::Account | Self::Login | Self::Other => false,
+            Self::Discovery
+            | Self::Health
+            | Self::Account
+            | Self::Login
+            | Self::RelatedLogin
+            | Self::Other => false,
         }
     }
 
     /// Selects the budget of a matched route, reads included: they verify token
     /// signatures or hold a connection from the small database pool. Only routes that
-    /// do neither are free. Discovery is served from memory and cacheable, and a
-    /// throttled health probe would take the service out of rotation; readiness costs
-    /// one `SELECT 1`, no more than the budget's own upsert would.
+    /// do neither are free. Discovery is cacheable, and served from memory but for
+    /// the related origins' one small query. A throttled health probe would take the
+    /// service out of rotation; readiness costs one `SELECT 1`, no more than the
+    /// budget's own upsert would.
     const fn rate_category(self) -> Option<RateCategory> {
         match self {
             Self::OAuthBackChannel => Some(RateCategory::Token),
             Self::UserInfo => Some(RateCategory::UserInfo),
             Self::Account => Some(RateCategory::Account),
-            Self::Login | Self::Authorize | Self::Logout | Self::Other => Some(RateCategory::Login),
+            Self::Login | Self::RelatedLogin | Self::Authorize | Self::Logout | Self::Other => {
+                Some(RateCategory::Login)
+            }
             Self::Discovery | Self::Health => None,
         }
     }
@@ -776,6 +828,8 @@ enum CorsGrant {
     Public,
     /// An approved origin, which may send the browser's cookies.
     Credentialed(HeaderValue),
+    /// An approved related origin, which signs users in without cookies.
+    Related(HeaderValue),
 }
 
 /// Who may store a response, and for how long. Handlers choose a class with [`Cached`];
@@ -996,8 +1050,9 @@ impl HttpSecurity {
 
     /// Determines whether an exact browser origin may access this endpoint family.
     /// The back-channel and `UserInfo` endpoints also serve the redirect origins
-    /// of enabled public clients. Those are looked up per request, so registration
-    /// changes apply at once; same-origin and first-party requests skip the query.
+    /// of enabled public clients, and related sign-in the approved origins of
+    /// trusted clients. Those are looked up per request, so registration changes
+    /// apply at once; same-origin and first-party requests skip the query.
     async fn allowed_origin(
         &self,
         endpoint: Endpoint,
@@ -1010,10 +1065,24 @@ impl HttpSecurity {
         {
             return Ok(true);
         }
-        if !matches!(endpoint, Endpoint::OAuthBackChannel | Endpoint::UserInfo) {
-            return Ok(false);
-        }
-        Ok(self.database.oidc().public_client_origin(origin).await?)
+        Ok(match endpoint {
+            Endpoint::OAuthBackChannel | Endpoint::UserInfo => {
+                self.database.oidc().public_client_origin(origin).await?
+            }
+            Endpoint::RelatedLogin => self
+                .database
+                .oidc()
+                .related_origin_client(origin)
+                .await?
+                .is_some(),
+            Endpoint::Discovery
+            | Endpoint::Health
+            | Endpoint::Authorize
+            | Endpoint::Logout
+            | Endpoint::Account
+            | Endpoint::Login
+            | Endpoint::Other => false,
+        })
     }
 
     /// Middleware: runs the trust checks and the handler under one deadline, then adds the
@@ -1040,9 +1109,11 @@ impl HttpSecurity {
         .map_err(HttpSecurityError::from)
         .flatten()
         .unwrap_or_else(|error| ApiError::from(error).into_response());
+        let origin = origin.filter(|_| allowed);
         let grant = match endpoint {
             Endpoint::Discovery => Some(CorsGrant::Public),
-            _ => origin.filter(|_| allowed).map(CorsGrant::Credentialed),
+            Endpoint::RelatedLogin => origin.map(CorsGrant::Related),
+            _ => origin.map(CorsGrant::Credentialed),
         };
         Self::decorate(&mut response, grant);
         response
@@ -1138,7 +1209,7 @@ impl HttpSecurity {
         ] {
             headers.insert(name, HeaderValue::from_static(value));
         }
-        let origin = match grant {
+        let (origin, granted): (_, &[_]) = match grant {
             None => return,
             Some(CorsGrant::Public) => {
                 for (name, value) in [
@@ -1150,22 +1221,35 @@ impl HttpSecurity {
                 }
                 return;
             }
-            Some(CorsGrant::Credentialed(origin)) => origin,
+            Some(CorsGrant::Credentialed(origin)) => (
+                origin,
+                &[
+                    // Approved origins may send the browser's host cookies.
+                    (header::ACCESS_CONTROL_ALLOW_CREDENTIALS, "true"),
+                    (
+                        header::ACCESS_CONTROL_ALLOW_HEADERS,
+                        "content-type, x-piquel-csrf, authorization",
+                    ),
+                    (
+                        header::ACCESS_CONTROL_ALLOW_METHODS,
+                        "GET, POST, PATCH, DELETE, OPTIONS",
+                    ),
+                ],
+            ),
+            Some(CorsGrant::Related(origin)) => (
+                origin,
+                &[
+                    (
+                        header::ACCESS_CONTROL_ALLOW_HEADERS,
+                        "content-type, x-piquel-csrf",
+                    ),
+                    (header::ACCESS_CONTROL_ALLOW_METHODS, "POST, OPTIONS"),
+                ],
+            ),
         };
         headers.insert(header::ACCESS_CONTROL_ALLOW_ORIGIN, origin);
-        for (name, value) in [
-            // Approved origins may send the browser's host cookies.
-            (header::ACCESS_CONTROL_ALLOW_CREDENTIALS, "true"),
-            (
-                header::ACCESS_CONTROL_ALLOW_HEADERS,
-                "content-type, x-piquel-csrf, authorization",
-            ),
-            (
-                header::ACCESS_CONTROL_ALLOW_METHODS,
-                "GET, POST, PATCH, DELETE, OPTIONS",
-            ),
-            (header::VARY, "Origin"),
-        ] {
+        headers.insert(header::VARY, HeaderValue::from_static("Origin"));
+        for (name, value) in granted {
             headers.insert(name, HeaderValue::from_static(value));
         }
         // Lets the frontends show the trace ID of a failed request.

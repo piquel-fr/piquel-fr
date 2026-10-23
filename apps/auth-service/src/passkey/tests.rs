@@ -1,7 +1,7 @@
 //! Focused name validation and database-backed `WebAuthn` ceremony invariants.
 
 use super::*;
-use crate::tests::{AUTH_ORIGIN, Replicas};
+use crate::tests::{AUTH_ORIGIN, Replicas, change, register};
 use axum::{
     body::{Body, to_bytes},
     http::{Method, Request},
@@ -17,10 +17,14 @@ use piquel_repository::{DatabaseConfig, PendingFederation, SessionAuthentication
 use serde_json::json;
 use tower::ServiceExt;
 use url::Url;
-use webauthn_authenticator_rs::{WebauthnAuthenticator, softpasskey::SoftPasskey};
+use webauthn_authenticator_rs::{
+    AuthenticatorBackend, WebauthnAuthenticator, softpasskey::SoftPasskey,
+};
 
 /// Maximum JSON response accepted by the software browser fixture.
 const MAX_RESPONSE_BYTES: usize = 64 * 1024;
+/// Milliseconds the software authenticator is given; it answers at once.
+const AUTHENTICATOR_TIMEOUT_MS: u32 = 60_000;
 
 /// Names count Unicode characters, preserve spacing and reject blank/control input.
 #[test]
@@ -98,8 +102,9 @@ struct Fixture {
     app: PasskeyApplication,
     /// Where requests go: the passkey routes, or a replica of the whole service.
     router: axum::Router,
-    /// Software credential capable of user verification and monotonic counters.
-    authenticator: WebauthnAuthenticator<SoftPasskey>,
+    /// Software credential capable of user verification and monotonic counters. Its
+    /// backend is used directly, since it signs for any origin, related ones included.
+    authenticator: SoftPasskey,
     /// HTTPS origin passed to the authenticator.
     origin: Url,
     /// Seeded account owning the software credential.
@@ -108,6 +113,8 @@ struct Fixture {
     key_id: PasskeyId,
     /// Unique seeded username for identified authentication.
     username: String,
+    /// The software credential's ID.
+    credential_id: Vec<u8>,
 }
 impl Fixture {
     /// Seeds an account and passkey in the explicitly configured isolated database.
@@ -122,16 +129,24 @@ impl Fixture {
         .expect("database");
         database.run_migrations().await.expect("migrations");
         let origin = Url::parse(AUTH_ORIGIN).expect("origin");
+        let auth: piquel_common::config::Origin = AUTH_ORIGIN.parse().expect("origin");
+        let oidc = OidcApplication::new(
+            database.clone(),
+            &crate::config::OidcConfig {
+                origin: auth.clone(),
+                keys: Arc::new(piquel_crypto::Rs256Key::generate("passkey-tests").expect("key")),
+                refresh_key: Arc::new(Secret::generate().expect("refresh key")),
+            },
+        )
+        .expect("OIDC app");
         let app = PasskeyApplication::new(
             database,
             &PasskeyConfig {
-                origin: origin
-                    .as_str()
-                    .parse::<piquel_common::config::Origin>()
-                    .expect("origin"),
+                origin: auth,
                 invite_required: false,
                 decoy_key: DecoyKey::new(Secret::generate().expect("decoy key")),
             },
+            oidc,
         )
         .expect("passkey app");
         let user_id = UserId::new();
@@ -144,9 +159,13 @@ impl Fixture {
             .webauthn
             .start_passkey_registration(user_id.as_uuid(), &username, "Test user", None)
             .expect("registration");
-        let mut authenticator = WebauthnAuthenticator::new(SoftPasskey::new(true));
+        let mut authenticator = SoftPasskey::new(true);
         let registration = authenticator
-            .do_registration(origin.clone(), challenge)
+            .perform_register(
+                origin.clone(),
+                challenge.public_key,
+                AUTHENTICATOR_TIMEOUT_MS,
+            )
             .expect("software registration");
         let key = app
             .webauthn
@@ -161,10 +180,11 @@ impl Fixture {
             })
             .await
             .expect("user");
+        let credential_id = key.cred_id().as_ref().to_vec();
         tx.passkeys()
             .insert(&InsertPasskey {
                 id: key_id,
-                credential_id: key.cred_id().as_ref().to_vec(),
+                credential_id: credential_id.clone(),
                 user_id,
                 credential: serde_json::to_value(key).expect("credential"),
                 friendly_name: "Original key".into(),
@@ -180,6 +200,7 @@ impl Fixture {
             user_id,
             key_id,
             username,
+            credential_id,
         }
     }
     /// Sends the next requests to `router`, such as one of [`Replicas`].
@@ -189,18 +210,23 @@ impl Fixture {
     }
     /// Sends a JSON request from the auth origin with the supplied cookies.
     async fn request(&self, path: &str, method: Method, cookies: &str, body: Value) -> Response {
+        let request = Request::builder()
+            .method(method)
+            .uri(path)
+            .header(header::ORIGIN, AUTH_ORIGIN)
+            .header(header::CONTENT_TYPE, "application/json")
+            .header(header::COOKIE, cookies);
+        self.send(request, body.to_string()).await
+    }
+    /// Sends `request` with the CSRF header and `body`.
+    async fn send(&self, request: axum::http::request::Builder, body: String) -> Response {
         self.router
             .clone()
             .oneshot(
-                Request::builder()
+                request
                     .extension(crate::security::RequestContext::TEST)
-                    .method(method)
-                    .uri(path)
-                    .header(header::ORIGIN, AUTH_ORIGIN)
                     .header("x-piquel-csrf", "1")
-                    .header(header::CONTENT_TYPE, "application/json")
-                    .header(header::COOKIE, cookies)
-                    .body(Body::from(body.to_string()))
+                    .body(Body::from(body))
                     .expect("request"),
             )
             .await
@@ -234,11 +260,32 @@ impl Fixture {
     }
     /// Signs a started authentication challenge using the software credential.
     fn assertion(&mut self, started: &Value) -> PublicKeyCredential {
-        let challenge = serde_json::from_value(started["public_key"].clone())
-            .expect("authentication challenge");
-        self.authenticator
-            .do_authentication(self.origin.clone(), challenge)
-            .expect("software assertion")
+        self.assertion_for(self.origin.clone(), started)
+    }
+    /// Signs a started authentication challenge for a page on `origin`. The software
+    /// credential is not discoverable, so an account picker's challenge gets it
+    /// listed, and the answer names its account as a discoverable one would.
+    fn assertion_for(&mut self, origin: Url, started: &Value) -> PublicKeyCredential {
+        let mut challenge: RequestChallengeResponse =
+            serde_json::from_value(started["public_key"].clone())
+                .expect("authentication challenge");
+        let picker = challenge.public_key.allow_credentials.is_empty();
+        if picker {
+            challenge.public_key.allow_credentials = vec![webauthn_rs_proto::AllowCredentials {
+                type_: "public-key".into(),
+                id: self.credential_id.clone().into(),
+                transports: None,
+            }];
+        }
+        let mut credential = self
+            .authenticator
+            .perform_auth(origin, challenge.public_key, AUTHENTICATOR_TIMEOUT_MS)
+            .expect("software assertion");
+        if picker {
+            credential.response.user_handle =
+                Some(self.user_id.as_uuid().as_bytes().to_vec().into());
+        }
+        credential
     }
     /// Completes an identified login and returns the new session cookie.
     async fn login(&mut self) -> String {
@@ -1142,4 +1189,339 @@ async fn telemetry_exports_no_secret_of_a_sign_in_and_code_exchange() {
         Some(trace),
         "the event's log line links to the exchange's trace"
     );
+}
+
+/// PKCE verifier of the pushed requests related pages complete.
+const PAGE_VERIFIER: &str = "related-page-verifier-0123456789-abcdefghijklmnop";
+
+/// A trusted client whose page, on its approved origin, signs the fixture's account in.
+struct RelatedPage {
+    /// The page's client.
+    client: piquel_common::clients::ClientRegistration,
+    /// The page's approved origin.
+    origin: RelatedOrigin,
+}
+
+impl RelatedPage {
+    /// Registers a trusted public client on a fresh subdomain of auth's own domain,
+    /// which counts against no browser limit, and approves its origin.
+    async fn approved(database: &Database) -> Self {
+        let origin: RelatedOrigin = format!("https://{}.auth.piquel.fr", TokenId::new())
+            .parse()
+            .expect("origin");
+        let client = piquel_common::clients::ClientRegistration {
+            trusted: true,
+            ..crate::tests::registration(
+                piquel_common::clients::ClientKind::Public,
+                origin.as_str(),
+            )
+        };
+        register(database, &client).await.expect("client");
+        change(database, async |registry| {
+            registry
+                .approve_origin(&client.id, &origin, "auth.piquel.fr")
+                .await
+        })
+        .await
+        .expect("approved origin");
+        Self { client, origin }
+    }
+}
+
+impl Fixture {
+    /// Pushes `page`'s authorization request, with `extra` parameters, and returns
+    /// its `request_uri`.
+    async fn push(&self, page: &RelatedPage, extra: &[(&str, &str)]) -> String {
+        let challenge = piquel_crypto::Pkce::challenge(PAGE_VERIFIER).expect("PKCE");
+        let form = url::form_urlencoded::Serializer::new(String::new())
+            .extend_pairs([
+                ("client_id", page.client.id.as_str()),
+                ("response_type", "code"),
+                ("redirect_uri", page.client.redirect_uris[0].as_str()),
+                ("scope", "openid"),
+                ("state", "page-state"),
+                ("code_challenge_method", "S256"),
+                ("code_challenge", &challenge),
+            ])
+            .extend_pairs(extra.iter().copied())
+            .finish();
+        let request = Request::builder()
+            .method(Method::POST)
+            .uri(routes::oidc::PAR)
+            .header(header::CONTENT_TYPE, "application/x-www-form-urlencoded");
+        let response = self.send(request, form).await;
+        assert_eq!(response.status(), StatusCode::CREATED);
+        Self::json(response).await["request_uri"]
+            .as_str()
+            .expect("request_uri")
+            .to_owned()
+    }
+    /// Posts JSON from a page on `origin`, which sends no cookies.
+    async fn post_from(&self, origin: &str, path: &str, body: Value) -> Response {
+        let request = Request::builder()
+            .method(Method::POST)
+            .uri(path)
+            .header(header::ORIGIN, origin)
+            .header(header::CONTENT_TYPE, "application/json");
+        self.send(request, body.to_string()).await
+    }
+    /// Starts `page`'s sign-in for `request_uri`.
+    async fn start_related(&self, page: &RelatedPage, request_uri: &str) -> Response {
+        self.post_from(
+            page.origin.as_str(),
+            routes::passkey::RELATED_START,
+            json!({"request_uri":request_uri}),
+        )
+        .await
+    }
+    /// Signs `page`'s started sign-in for its own origin and finishes it from there.
+    async fn finish_related(&mut self, page: &RelatedPage, started: &Value) -> Response {
+        let assertion = self.assertion_for(page.origin.url().clone(), started);
+        self.post_from(
+            page.origin.as_str(),
+            routes::passkey::RELATED_FINISH,
+            json!({"ceremony_id":started["ceremony_id"],"credential":assertion}),
+        )
+        .await
+    }
+    /// Redeems `code` for `page`'s client with `verifier`.
+    async fn redeem(&self, page: &RelatedPage, code: &str, verifier: &str) -> Response {
+        let form = url::form_urlencoded::Serializer::new(String::new())
+            .extend_pairs([
+                ("grant_type", "authorization_code"),
+                ("client_id", page.client.id.as_str()),
+                ("redirect_uri", page.client.redirect_uris[0].as_str()),
+                ("code", code),
+                ("code_verifier", verifier),
+            ])
+            .finish();
+        let request = Request::builder()
+            .method(Method::POST)
+            .uri(routes::oidc::TOKEN)
+            .header(header::CONTENT_TYPE, "application/x-www-form-urlencoded");
+        self.send(request, form).await
+    }
+    /// Lists the origins `/.well-known/webauthn` publishes.
+    async fn related_origins(&self) -> Vec<String> {
+        let request = Request::builder()
+            .method(Method::GET)
+            .uri(routes::passkey::RELATED_ORIGINS);
+        let response = self.send(request, String::new()).await;
+        assert_eq!(response.status(), StatusCode::OK);
+        assert_eq!(
+            response.headers()[header::CACHE_CONTROL],
+            "public, max-age=300"
+        );
+        assert_eq!(response.headers()[header::ACCESS_CONTROL_ALLOW_ORIGIN], "*");
+        serde_json::from_value(Self::json(response).await["origins"].take()).expect("origins")
+    }
+}
+
+/// A page on an approved origin signs its account in without a cookie, and gets a
+/// code that only its PKCE verifier redeems, once. The sign-in creates a session
+/// recorded with the page's client and origin.
+#[tokio::test]
+#[ignore = "requires TEST_DATABASE_URL"]
+async fn related_pages_sign_in_for_pkce_bound_codes() {
+    let mut fixture = Fixture::new().await;
+    let replicas = Replicas::new().await;
+    fixture.on(&replicas.a);
+    let page = RelatedPage::approved(&fixture.app.database).await;
+    assert!(
+        fixture
+            .related_origins()
+            .await
+            .contains(&page.origin.to_string())
+    );
+    let mut codes = Vec::new();
+    for _ in 0..2 {
+        let request_uri = fixture.push(&page, &[]).await;
+        let started = fixture.start_related(&page, &request_uri).await;
+        assert_eq!(started.status(), StatusCode::OK);
+        let headers = started.headers().clone();
+        assert_eq!(
+            headers[header::ACCESS_CONTROL_ALLOW_ORIGIN],
+            page.origin.as_str()
+        );
+        assert!(
+            headers
+                .get(header::ACCESS_CONTROL_ALLOW_CREDENTIALS)
+                .is_none(),
+            "pages sign in without cookies"
+        );
+        assert!(headers.get(header::SET_COOKIE).is_none());
+        let started = Fixture::json(started).await;
+        // Signed on one replica, finished on the other.
+        let finished = fixture
+            .on(&replicas.b)
+            .finish_related(&page, &started)
+            .await;
+        assert_eq!(finished.status(), StatusCode::OK);
+        assert!(finished.headers().get(header::SET_COOKIE).is_none());
+        let answer = Fixture::json(finished).await;
+        assert_eq!(answer["state"], "page-state");
+        assert_eq!(answer["iss"], AUTH_ORIGIN);
+        codes.push(answer["code"].as_str().expect("code").to_owned());
+        // The ceremony and its request are spent.
+        let assertion = fixture.assertion_for(page.origin.url().clone(), &started);
+        let replay = fixture
+            .post_from(
+                page.origin.as_str(),
+                routes::passkey::RELATED_FINISH,
+                json!({"ceremony_id":started["ceremony_id"],"credential":assertion}),
+            )
+            .await;
+        assert_eq!(replay.status(), StatusCode::BAD_REQUEST);
+        let reused = fixture.start_related(&page, &request_uri).await;
+        assert_eq!(reused.status(), StatusCode::BAD_REQUEST);
+    }
+    let wrong = "another-verifier-0123456789-abcdefghijklmnopqrstu";
+    let redeemed = fixture.redeem(&page, &codes[0], wrong).await;
+    assert_eq!(redeemed.status(), StatusCode::BAD_REQUEST);
+    let redeemed = fixture.redeem(&page, &codes[1], PAGE_VERIFIER).await;
+    assert_eq!(redeemed.status(), StatusCode::OK);
+    let DomainEvent::SignedIn {
+        session_id,
+        method: AuthenticationMethod::Passkey,
+        inline: Some(inline),
+    } = fixture
+        .events()
+        .await
+        .into_iter()
+        .find(|event| matches!(event, DomainEvent::SignedIn { .. }))
+        .expect("sign-in")
+    else {
+        panic!("an inline passkey sign-in");
+    };
+    assert_eq!(inline.client_id, page.client.id);
+    assert_eq!(inline.origin, page.origin);
+    let session = fixture
+        .app
+        .database
+        .sessions()
+        .find_active_by_id(session_id)
+        .await
+        .expect("session lookup")
+        .expect("active session");
+    assert_eq!(
+        SessionAuthentication::from(&session).acr,
+        Acr::PhishingResistant
+    );
+}
+
+/// Sign-in is refused to unapproved origins, for another client's request, from
+/// another origin than its start, for an assertion signed for another origin and
+/// without user verification. A request needing auth's pages stays usable there.
+#[tokio::test]
+#[ignore = "requires TEST_DATABASE_URL"]
+async fn related_sign_in_refuses_other_origins_requests_and_unverified_users() {
+    let mut fixture = Fixture::new().await;
+    let replicas = Replicas::new().await;
+    fixture.on(&replicas.a);
+    let page = RelatedPage::approved(&fixture.app.database).await;
+    let other = RelatedPage::approved(&fixture.app.database).await;
+
+    let request_uri = fixture.push(&page, &[]).await;
+    let unapproved = fixture
+        .post_from(
+            "https://unapproved.example",
+            routes::passkey::RELATED_START,
+            json!({"request_uri":request_uri}),
+        )
+        .await;
+    assert_eq!(unapproved.status(), StatusCode::FORBIDDEN);
+    assert!(
+        unapproved
+            .headers()
+            .get(header::ACCESS_CONTROL_ALLOW_ORIGIN)
+            .is_none()
+    );
+    // Another client's page cannot claim the request, which stays its client's.
+    let claimed = fixture.start_related(&other, &request_uri).await;
+    assert_eq!(claimed.status(), StatusCode::BAD_REQUEST);
+    let started = fixture.start_related(&page, &request_uri).await;
+    assert_eq!(started.status(), StatusCode::OK);
+    let started = Fixture::json(started).await;
+    // The ceremony finishes only on the page that started it.
+    let assertion = fixture.assertion_for(other.origin.url().clone(), &started);
+    let moved = fixture
+        .post_from(
+            other.origin.as_str(),
+            routes::passkey::RELATED_FINISH,
+            json!({"ceremony_id":started["ceremony_id"],"credential":assertion}),
+        )
+        .await;
+    assert_eq!(moved.status(), StatusCode::FORBIDDEN);
+
+    // The verifier accepts auth's own origin too, but the page must have signed.
+    let started = Fixture::json(
+        fixture
+            .start_related(&page, &fixture.push(&page, &[]).await)
+            .await,
+    )
+    .await;
+    let assertion = fixture.assertion(&started);
+    let elsewhere = fixture
+        .post_from(
+            page.origin.as_str(),
+            routes::passkey::RELATED_FINISH,
+            json!({"ceremony_id":started["ceremony_id"],"credential":assertion}),
+        )
+        .await;
+    assert_eq!(elsewhere.status(), StatusCode::BAD_REQUEST);
+
+    let mut started = Fixture::json(
+        fixture
+            .start_related(&page, &fixture.push(&page, &[]).await)
+            .await,
+    )
+    .await;
+    started["public_key"]["publicKey"]["userVerification"] = json!("discouraged");
+    let unverified = fixture.finish_related(&page, &started).await;
+    assert_eq!(unverified.status(), StatusCode::BAD_REQUEST);
+    assert_eq!(
+        fixture.events().await.first(),
+        Some(&DomainEvent::SignInFailed {
+            method: AuthenticationMethod::Passkey,
+            reason: SignInFailure::InvalidCredential,
+        })
+    );
+
+    // `prompt=consent` needs the consent page: the request is left for it.
+    let request_uri = fixture.push(&page, &[("prompt", "consent")]).await;
+    let refused = fixture.start_related(&page, &request_uri).await;
+    assert_eq!(refused.status(), StatusCode::BAD_REQUEST);
+    assert_eq!(Fixture::json(refused).await["code"], "interaction_required");
+    let query = url::form_urlencoded::Serializer::new(String::new())
+        .extend_pairs([
+            ("client_id", page.client.id.as_str()),
+            ("request_uri", &request_uri),
+        ])
+        .finish();
+    let redirect = fixture
+        .request(
+            &format!("{}?{query}", routes::oidc::AUTHORIZE),
+            Method::GET,
+            "",
+            json!({}),
+        )
+        .await;
+    assert_eq!(redirect.status(), StatusCode::SEE_OTHER);
+
+    // A removed origin's pages stop at once.
+    change(&fixture.app.database, async |registry| {
+        registry.remove_origin(&page.client.id, &page.origin).await
+    })
+    .await
+    .expect("removed");
+    assert!(
+        !fixture
+            .related_origins()
+            .await
+            .contains(&page.origin.to_string())
+    );
+    let removed = fixture
+        .start_related(&page, &fixture.push(&page, &[]).await)
+        .await;
+    assert_eq!(removed.status(), StatusCode::FORBIDDEN);
 }

@@ -36,7 +36,7 @@ The dashboard is a convenience: every operation is also an `auth-service` comman
 | `/users/{id}` | Profile, emails, passkeys, identities, sessions, consents, recent events; disable, enable, revoke one or all sessions |
 | `/administrators` | List, grant, revoke |
 | `/invitations` | While signup requires invitations: list, create (the link is shown once), revoke |
-| `/clients` | Every OIDC client and its settings, read-only |
+| `/clients` | Every OIDC client and its settings; approve and remove the origins whose pages sign users in with passkeys |
 | `/events` | Domain events, filtered by account and kind |
 
 ## Configuration

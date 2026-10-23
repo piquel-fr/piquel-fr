@@ -44,6 +44,16 @@ pub(super) enum PasskeyError {
     /// The stored ceremony payload does not match its expected purpose.
     #[error("wrong ceremony payload")]
     WrongCeremony,
+    /// The page's origin is not approved for its client's passkey sign-in, or is
+    /// not the origin that started the ceremony.
+    #[error("page origin is not approved for related passkey sign-in")]
+    OriginNotApproved,
+    /// The browser signed the assertion for another origin than the page's.
+    #[error("assertion was signed for another origin")]
+    SignedForAnotherOrigin,
+    /// The assertion's client data is not JSON naming an origin.
+    #[error("assertion client data is malformed")]
+    ClientData(#[source] serde_json::Error),
     /// The confirmation or enrollment proof belongs to another session.
     #[error("ceremony session changed")]
     SessionChanged,
@@ -140,6 +150,9 @@ impl From<PasskeyError> for ApiError {
             PasskeyError::GooglePasswordManagerRequiresAndroid => Self::bad_request(
                 "Choose Google Password Manager only on an Android device with Google services.",
             ),
+            PasskeyError::OriginNotApproved => Self::forbidden(
+                "This page is not approved for passkey sign-in to this application.",
+            ),
             PasskeyError::AccountInactive => {
                 Self::unauthorized("This account is disabled, or this passkey was removed from it.")
             }
@@ -157,7 +170,10 @@ impl From<PasskeyError> for ApiError {
             // so showing them would reveal which credentials an account has. A decoy
             // ceremony gets the same answer as an unregistered passkey, so finishing
             // one reveals no more than starting it.
-            error @ (PasskeyError::Webauthn(_) | PasskeyError::AccountUnavailable) => {
+            error @ (PasskeyError::Webauthn(_)
+            | PasskeyError::AccountUnavailable
+            | PasskeyError::SignedForAnotherOrigin
+            | PasskeyError::ClientData(_)) => {
                 error.rejected("This passkey could not be verified. Please try again.")
             }
             error @ PasskeyError::InvalidUserHandle(_) => {
@@ -194,6 +210,8 @@ impl PasskeyError {
             Self::AccountInactive => Some(SignInFailure::AccountUnavailable),
             Self::AccountUnavailable => Some(SignInFailure::UnknownAccount),
             Self::Webauthn(_)
+            | Self::SignedForAnotherOrigin
+            | Self::ClientData(_)
             | Self::InvalidUserHandle(_)
             | Self::UserVerificationRequired
             | Self::CredentialRevoked => Some(SignInFailure::InvalidCredential),
@@ -206,6 +224,7 @@ impl PasskeyError {
             | Self::InvitationMissingAtFinish
             | Self::InvitationExpired
             | Self::CeremonyBrowserMissing
+            | Self::OriginNotApproved
             | Self::BrowserMismatch
             | Self::WrongCeremony
             | Self::SessionChanged

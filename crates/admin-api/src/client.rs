@@ -2,11 +2,13 @@
 //! it from its server with the signed-in administrator's access token.
 
 use super::{
-    Administrator, Client, CreateInvitation, CreatedInvitation, DisableUser, ErrorBody, EventPage,
-    EventSearch, GrantAdministrator, Invitation, UserDetail, UserPage, UserSearch, paths,
+    Administrator, ApproveOrigin, ApprovedOrigin, Client, CreateInvitation, CreatedInvitation,
+    DisableUser, ErrorBody, EventPage, EventSearch, GrantAdministrator, Invitation, UserDetail,
+    UserPage, UserSearch, paths,
 };
 use piquel_common::{
-    SessionId, TokenId, UserId,
+    ClientId, SessionId, TokenId, UserId,
+    clients::RelatedOrigin,
     protocol::{
         challenge::{BearerChallenge, BearerError},
         step_up::StepUpRequirement,
@@ -212,6 +214,51 @@ impl AdminClient {
     pub async fn clients(&self, token: &str) -> Result<Vec<Client>, ApiError> {
         self.send(self.request(token, Method::GET, paths::CLIENTS, &[]))
             .await
+    }
+
+    /// Lists the origins approved for clients' pages to sign users in.
+    ///
+    /// # Errors
+    /// See [`ApiError`].
+    pub async fn related_origins(&self, token: &str) -> Result<Vec<ApprovedOrigin>, ApiError> {
+        self.send(self.request(token, Method::GET, paths::RELATED_ORIGINS, &[]))
+            .await
+    }
+
+    /// Approves an origin for client `client`'s pages to sign users in.
+    ///
+    /// # Errors
+    /// See [`ApiError`].
+    pub async fn approve_related_origin(
+        &self,
+        token: &str,
+        client: &ClientId,
+        input: &ApproveOrigin,
+    ) -> Result<(), ApiError> {
+        self.send(
+            self.request(token, Method::POST, paths::CLIENT_ORIGINS, &[client])
+                .json(input),
+        )
+        .await
+    }
+
+    /// Removes an origin approved for client `client`.
+    ///
+    /// # Errors
+    /// See [`ApiError`].
+    pub async fn remove_related_origin(
+        &self,
+        token: &str,
+        client: &ClientId,
+        origin: &RelatedOrigin,
+    ) -> Result<(), ApiError> {
+        self.send(self.request(
+            token,
+            Method::DELETE,
+            paths::CLIENT_ORIGIN,
+            &[client, origin],
+        ))
+        .await
     }
 
     /// Pages through domain events, newest first.

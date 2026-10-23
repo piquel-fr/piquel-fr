@@ -20,7 +20,7 @@ pub use piquel_common::protocol::{
 };
 use piquel_common::{
     AccountStatus, AuthenticationMethod, ClientId, EventId, SessionId, TokenId, TraceId, UserId,
-    protocol::oauth::ClientAuthMethod,
+    clients::RelatedOrigin, protocol::oauth::ClientAuthMethod,
 };
 use serde::{Deserialize, Serialize};
 use url::Url;
@@ -62,6 +62,16 @@ pub mod paths {
     pub const CLIENTS: &str = "/clients";
     /// `GET`: describes one OIDC client ([`Client`](super::Client)).
     pub const CLIENT: &str = "/clients/{client_id}";
+    /// `GET`: lists the origins approved for clients' pages to sign users in with
+    /// passkeys ([`ApprovedOrigin`](super::ApprovedOrigin)), which browsers read as
+    /// `WebAuthn` related origins.
+    pub const RELATED_ORIGINS: &str = "/related-origins";
+    /// `POST`: approves an origin for a trusted client's pages
+    /// ([`ApproveOrigin`](super::ApproveOrigin)).
+    pub const CLIENT_ORIGINS: &str = "/clients/{client_id}/related-origins";
+    /// `DELETE`: removes an approved origin, given percent-encoded, e.g.
+    /// `https%3A%2F%2Fnotes.example`.
+    pub const CLIENT_ORIGIN: &str = "/clients/{client_id}/related-origins/{origin}";
     /// `GET`: pages through domain events, newest first
     /// ([`EventSearch`](super::EventSearch) → [`EventPage`](super::EventPage)).
     pub const EVENTS: &str = "/events";
@@ -273,6 +283,26 @@ impl Client {
             (None, None, false) => "disabled",
         }
     }
+}
+
+/// An origin whose pages may sign users in with their passkeys.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ApprovedOrigin {
+    /// The origin, as browsers send it.
+    pub origin: RelatedOrigin,
+    /// The client whose pages are on it.
+    pub client_id: ClientId,
+    /// When it was approved.
+    pub approved_at: DateTime<Utc>,
+}
+
+/// The body of `POST` [`paths::CLIENT_ORIGINS`]. The client must be trusted and have
+/// a redirect URI on the origin, and approved origins may span at most 5 domains,
+/// as many as every browser honours.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ApproveOrigin {
+    /// The origin, as browsers send it, e.g. `https://notes.example`.
+    pub origin: RelatedOrigin,
 }
 
 /// The query of [`paths::EVENTS`]. Every filter is optional.

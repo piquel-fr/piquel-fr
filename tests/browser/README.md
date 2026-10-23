@@ -10,10 +10,12 @@ provide an unused `E2E_INVITATION`. Previews allow registration without one.
 
 The OIDC checks sign in through a public, untrusted `browser-e2e` client that
 calls back to the web origin's `/callback`, returns to its `/settings` after
-logout, and may request `openid`, `profile` and `email`.
-`just web browser-client ORIGIN` registers it with the auth database configured
+logout, and may request `openid`, `profile` and `email`. `related-origins.spec.ts`
+signs in on the web origin itself, through a trusted `browser-e2e-inline` client
+whose redirect URI is on that origin, and which is approved as a related origin.
+`just web browser-client ORIGIN` registers both with the auth database configured
 in the environment, e.g. `just web browser-client https://localhost:4443`, as CI
-does. Previews do not register it by default. The callback is a test
+does. Previews do not register them by default. The callback is a test
 destination; the suite captures its code before exchanging it.
 
 The suite checks consent, the `iss` on each authorization response, a browser

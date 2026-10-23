@@ -1,18 +1,19 @@
-//! Typed, single-use `WebAuthn` state bound to the browser that started it.
+//! Typed, single-use `WebAuthn` state bound to the browser that started it, or for
+//! a related origin's page, to that origin and the request it completes.
 
 use super::{
     BrowserCookie, PasskeyApplication, PasskeyError,
     types::{CeremonyResponse, DisplayName},
 };
+use crate::oidc::InlineClaim;
 use axum::{
-    Json,
     http::HeaderMap,
     response::{IntoResponse, Response},
 };
 use chrono::{Duration, Utc};
-use piquel_common::{Handle, SessionId, TokenId, UserId};
-use piquel_crypto::Secret;
-use piquel_repository::{CeremonyKind, InsertCeremony};
+use piquel_common::{ClientId, Handle, SessionId, TokenId, UserId, clients::RelatedOrigin};
+use piquel_crypto::{Digest, Secret};
+use piquel_repository::{CeremonyKind, DatabaseTransaction, InsertCeremony};
 use serde::{Deserialize, Serialize};
 use webauthn_rs::prelude::{
     DiscoverableAuthentication, PasskeyAuthentication, PasskeyRegistration,
@@ -164,6 +165,7 @@ ceremony_state!(ConfirmationCeremony, Confirm, PurposeAuthentication);
 ceremony_state!(EnrollmentCeremony, Enroll, Enrollment);
 
 /// Either supported account sign-in payload, sharing one database purpose.
+#[derive(Serialize, Deserialize)]
 pub(super) enum AuthenticationCeremony {
     /// Account identified by username before the challenge.
     Login(LoginCeremony),
@@ -171,6 +173,21 @@ pub(super) enum AuthenticationCeremony {
     Decoy,
     /// Account identified by the authenticator's response.
     Discover(DiscoverCeremony),
+}
+
+/// Sign-in on the page of an approved related origin. That page cannot send the
+/// ceremony cookie, so the ceremony is bound to its origin and to the pushed
+/// request it completes instead. It is stored as is, under its own purpose.
+#[derive(Serialize, Deserialize)]
+pub(super) struct RelatedCeremony {
+    /// The page's origin, which must finish the ceremony and sign the assertion.
+    pub(super) origin: RelatedOrigin,
+    /// The client the origin was approved for.
+    pub(super) client_id: ClientId,
+    /// The client's pushed request, claimed when the ceremony started.
+    pub(super) claim: InlineClaim,
+    /// The hinted account's sign-in, or else an account picker; never a decoy.
+    pub(super) sign_in: AuthenticationCeremony,
 }
 
 impl CeremonyState for AuthenticationCeremony {
@@ -217,14 +234,49 @@ impl PasskeyApplication {
                 expires_at: Utc::now() + CEREMONY_LIFETIME,
             })
             .await?;
-        let mut response = Json(CeremonyResponse {
-            ceremony_id: id,
-            // Preserve the existing nested JSON map ordering from the library's challenge.
-            public_key: serde_json::to_value(challenge).map_err(PasskeyError::Serialization)?,
-        })
-        .into_response();
+        let mut response = CeremonyResponse::new(id, challenge)?.into_response();
         BrowserCookie::Ceremony.set_on(&mut response, &browser)?;
         Ok(response)
+    }
+
+    /// Persists a related origin's ceremony inside `tx`, which also holds the claim
+    /// of its request, so both commit together or not at all.
+    pub(super) async fn start_related(
+        tx: &mut DatabaseTransaction<'_>,
+        ceremony: RelatedCeremony,
+        challenge: impl Serialize,
+    ) -> Result<Response, PasskeyError> {
+        let id = TokenId::new();
+        tx.passkeys()
+            .insert_ceremony(&InsertCeremony {
+                id,
+                user_id: match &ceremony.sign_in {
+                    AuthenticationCeremony::Login(state) => Some(state.user_id),
+                    AuthenticationCeremony::Decoy | AuthenticationCeremony::Discover(_) => None,
+                },
+                session_id: None,
+                kind: CeremonyKind::RelatedAuthentication,
+                challenge_digest: Digest::sha256(ceremony.origin.as_str().as_bytes())
+                    .as_bytes()
+                    .to_vec(),
+                state: serde_json::to_value(ceremony).map_err(PasskeyError::Serialization)?,
+                expires_at: Utc::now() + CEREMONY_LIFETIME,
+            })
+            .await?;
+        Ok(CeremonyResponse::new(id, challenge)?.into_response())
+    }
+
+    /// Consumes a related origin's ceremony once. The caller checks its origin.
+    pub(super) async fn consume_related(
+        &self,
+        id: TokenId,
+    ) -> Result<RelatedCeremony, PasskeyError> {
+        let record = self
+            .database
+            .passkeys()
+            .consume_ceremony(id, CeremonyKind::RelatedAuthentication)
+            .await?;
+        serde_json::from_value(record.state).map_err(PasskeyError::StoredCeremony)
     }
 
     /// Consumes the expected payload once, checking its browser binding before extraction.

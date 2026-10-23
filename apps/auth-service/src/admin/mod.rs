@@ -13,10 +13,11 @@ use axum::{
     routing::{MethodRouter, delete, get, post},
 };
 use piquel_admin_api::{
-    Administrator, Client, CreateInvitation, CreatedInvitation, DisableUser, EventPage,
-    EventSearch, GrantAdministrator, Invitation, UserDetail, UserPage, UserSearch,
+    Administrator, ApproveOrigin, ApprovedOrigin, Client, CreateInvitation, CreatedInvitation,
+    DisableUser, EventPage, EventSearch, GrantAdministrator, Invitation, UserDetail, UserPage,
+    UserSearch,
 };
-use piquel_common::{SessionId, TokenId, UserId, config::Origin};
+use piquel_common::{ClientId, SessionId, TokenId, UserId, clients::RelatedOrigin, config::Origin};
 use piquel_repository::Database;
 
 /// The administrators the API serves, and how their tokens are checked.
@@ -46,7 +47,8 @@ pub(crate) struct AdminApplication {
     service: AdminService,
     /// Authenticates each request's administrator.
     tokens: AdminTokens,
-    /// Auth's origin, whose registration page invitations link to.
+    /// Auth's origin, whose registration page invitations link to, and whose host
+    /// is the `WebAuthn` RP ID related origins sign in for.
     origin: Origin,
     /// Invitation routes exist only while signup requires invitations.
     invitations: bool,
@@ -108,11 +110,14 @@ impl AdminApplication {
             }
             Op::ListClients => (admin::CLIENTS, get(Self::list_clients)),
             Op::ViewClient => (admin::CLIENT, get(Self::client)),
+            Op::ListRelatedOrigins => (admin::RELATED_ORIGINS, get(Self::related_origins)),
+            Op::ApproveRelatedOrigin => (admin::CLIENT_ORIGINS, post(Self::approve_origin)),
+            Op::RemoveRelatedOrigin => (admin::CLIENT_ORIGIN, delete(Self::remove_origin)),
             Op::ListEvents => (admin::EVENTS, get(Self::events)),
             Op::ListAdministrators => (admin::ADMINISTRATORS, get(Self::list_administrators)),
             Op::GrantAdministrator => (admin::ADMINISTRATORS, post(Self::grant_administrator)),
             Op::RevokeAdministrator => (admin::ADMINISTRATOR, delete(Self::revoke_administrator)),
-            // Client changes, handles and the delivery queue are CLI-only, for now.
+            // Other client changes, handles and the delivery queue are CLI-only, for now.
             Op::ListInvitations
             | Op::CreateInvitation
             | Op::RevokeInvitation
@@ -248,6 +253,39 @@ impl AdminApplication {
         Path(id): Path<String>,
     ) -> Result<Json<Client>, AdminError> {
         Ok(Json(app.service.client(&id).await?))
+    }
+
+    /// Lists the origins approved for clients' pages to sign users in.
+    async fn related_origins(
+        State(app): State<Self>,
+        _: Admin,
+    ) -> Result<Json<Vec<ApprovedOrigin>>, AdminError> {
+        Ok(Json(app.service.list_related_origins().await?))
+    }
+
+    /// Approves an origin for a trusted client's pages to sign users in.
+    async fn approve_origin(
+        State(app): State<Self>,
+        ConfirmedAdmin(operator): ConfirmedAdmin,
+        Path(id): Path<ClientId>,
+        Json(input): Json<ApproveOrigin>,
+    ) -> Result<StatusCode, AdminError> {
+        app.service
+            .approve_related_origin(&operator, &id, &input.origin, app.origin.host())
+            .await?;
+        Ok(StatusCode::NO_CONTENT)
+    }
+
+    /// Removes an approved origin: its pages stop signing users in.
+    async fn remove_origin(
+        State(app): State<Self>,
+        ConfirmedAdmin(operator): ConfirmedAdmin,
+        Path((id, origin)): Path<(ClientId, RelatedOrigin)>,
+    ) -> Result<StatusCode, AdminError> {
+        app.service
+            .remove_related_origin(&operator, &id, &origin)
+            .await?;
+        Ok(StatusCode::NO_CONTENT)
     }
 
     /// Pages through domain events, newest first.

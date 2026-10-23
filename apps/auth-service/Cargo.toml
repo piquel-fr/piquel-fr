@@ -21,6 +21,7 @@ ipnet.workspace = true
 lettre.workspace = true
 percent-encoding.workspace = true
 clap.workspace = true
+psl.workspace = true
 reqwest.workspace = true
 tower-http.workspace = true
 serde.workspace = true

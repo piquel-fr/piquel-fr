@@ -6,14 +6,17 @@
 
 use super::OidcRedirectKind;
 use crate::{
-    DatabaseError,
+    DatabaseError, LockKey,
     repositories::{JsonArray, OidcRepository, RepositoryExecutor, Unsigned},
 };
 use chrono::{DateTime, Duration, Utc};
-use piquel_admin_api::Client;
+use piquel_admin_api::{ApprovedOrigin, Client};
 use piquel_common::{
     ClientId, ClientSecretId, UserId,
-    clients::{ClientField, ClientKind, ClientOwner, ClientRegistration, RedirectUri, ScopeName},
+    clients::{
+        ClientField, ClientKind, ClientOwner, ClientRegistration, RedirectUri, RelatedOrigin,
+        ScopeName,
+    },
     protocol::oauth::ClientAuthMethod,
 };
 use serde::Serialize;
@@ -788,6 +791,125 @@ impl OidcRepository<'_> {
                 WHERE client_id = $1
                 ORDER BY created_at, id"#,
                 id.as_str(),
+            )
+        )
+    }
+
+    /// Locks the approved related origins until the transaction ends, so approvals,
+    /// which count the domains of every approved origin, run one at a time.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`DatabaseError`] if the query fails.
+    pub async fn lock_related_origins(&mut self) -> Result<(), DatabaseError> {
+        run!(
+            self,
+            execute,
+            sqlx::query!(
+                "SELECT pg_advisory_xact_lock($1)",
+                LockKey::RelatedOrigins.id()
+            )
+        )?;
+        Ok(())
+    }
+
+    /// Every approved related origin, by origin.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`DatabaseError`] if the query fails or a row is invalid.
+    pub async fn related_origins(&mut self) -> Result<Vec<ApprovedOrigin>, DatabaseError> {
+        run!(
+            self,
+            fetch_all,
+            sqlx::query_as!(
+                ApprovedOrigin,
+                r#"SELECT
+                    origin AS "origin: RelatedOrigin", client_id AS "client_id: ClientId",
+                    approved_at
+                FROM client_webauthn_origins
+                ORDER BY origin"#,
+            )
+        )
+    }
+
+    /// Approves `origin` for client `id`.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`DatabaseError::Conflict`] if the origin is already approved, for
+    /// this client or another, or another [`DatabaseError`] if the query fails.
+    pub async fn approve_related_origin(
+        &mut self,
+        id: &ClientId,
+        origin: &RelatedOrigin,
+    ) -> Result<(), DatabaseError> {
+        run!(
+            self,
+            execute,
+            sqlx::query!(
+                "INSERT INTO client_webauthn_origins (origin, client_id) VALUES ($1, $2)",
+                origin.as_str(),
+                id.as_str(),
+            )
+        )?;
+        Ok(())
+    }
+
+    /// Removes `origin` from client `id`'s approved origins, and returns whether it
+    /// was approved for it.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`DatabaseError`] if the query fails.
+    pub async fn remove_related_origin(
+        &mut self,
+        id: &ClientId,
+        origin: &RelatedOrigin,
+    ) -> Result<bool, DatabaseError> {
+        Ok(run!(
+            self,
+            execute,
+            sqlx::query!(
+                "DELETE FROM client_webauthn_origins WHERE origin = $1 AND client_id = $2",
+                origin.as_str(),
+                id.as_str(),
+            )
+        )?
+        .rows_affected()
+            == 1)
+    }
+
+    /// The client whose pages on `origin`, serialized as browsers send it in an
+    /// `Origin` header, may sign users in: an enabled, trusted client the origin
+    /// is approved for. Its trust and redirect URIs may change after approval, so
+    /// both are checked again here.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`DatabaseError`] if the query fails or the row is invalid.
+    pub async fn related_origin_client(
+        &mut self,
+        origin: &str,
+    ) -> Result<Option<ClientId>, DatabaseError> {
+        run!(
+            self,
+            fetch_optional,
+            sqlx::query_scalar!(
+                r#"SELECT c.id AS "id: ClientId"
+                FROM client_webauthn_origins o
+                JOIN oidc_clients c ON c.id = o.client_id
+                WHERE o.origin = $1
+                AND c.enabled
+                AND c.trusted
+                AND EXISTS (
+                    SELECT 1
+                    FROM oidc_redirect_uris r
+                    WHERE r.client_id = c.id
+                    AND r.kind = 'authorization'
+                    AND r.origin = o.origin
+                )"#,
+                origin,
             )
         )
     }

@@ -31,7 +31,7 @@ use crate::{AuthConfig, SERVICE_NAME, TELEMETRY_FILTER, admin::AdminOperation};
 use admin::AdminCommand;
 use audit::AuditCommand;
 use clap::{Parser, Subcommand};
-use client::ClientCommand;
+use client::{ClientCommand, OriginCommand};
 use console::{Confirm, Console, Output};
 use deliveries::DeliveriesCommand;
 use error::CliError;
@@ -156,6 +156,9 @@ impl Administration {
                 ClientCommand::Suspend { .. } => Op::SuspendClient,
                 ClientCommand::Unsuspend { .. } => Op::UnsuspendClient,
                 ClientCommand::RotateSecret { .. } => Op::RotateClientSecret,
+                ClientCommand::Origin(OriginCommand::List { .. }) => Op::ListRelatedOrigins,
+                ClientCommand::Origin(OriginCommand::Add { .. }) => Op::ApproveRelatedOrigin,
+                ClientCommand::Origin(OriginCommand::Remove { .. }) => Op::RemoveRelatedOrigin,
             },
             Self::Audit(_) => Op::ListEvents,
             Self::Admin(command) => match command {

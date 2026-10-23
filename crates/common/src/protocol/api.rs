@@ -66,6 +66,10 @@ pub enum ErrorCode {
     },
     /// An operator suspended the client, so only an operator can let it work again.
     ClientSuspended,
+    /// An application page cannot sign the user in itself, because the browser or
+    /// the authorization request needs auth's own pages. It sends the user through
+    /// the redirect flow instead.
+    InteractionRequired,
 }
 
 /// An active passkey of an account, without its cryptographic contents.
