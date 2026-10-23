@@ -61,6 +61,8 @@ pub fn router(api: AdminClient) -> Router {
         .page(invitations::create)
         .page(invitations::revoke)
         .page(clients::list)
+        .page(clients::approve_origin)
+        .page(clients::remove_origin)
         .page(events::list)
         .build()
 }

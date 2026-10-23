@@ -10,7 +10,7 @@ use crate::{
     repositories::{JsonArray, OidcRepository, RepositoryExecutor, Unsigned},
 };
 use chrono::{DateTime, Duration, Utc};
-use piquel_admin_api::Client;
+use piquel_admin_api::{ApprovedOrigin, Client};
 use piquel_common::{
     ClientId, ClientSecretId, UserId,
     clients::{
@@ -171,17 +171,6 @@ impl From<StoredOidcClient> for Client {
             deleted_at: client.deleted_at,
         }
     }
-}
-
-/// An origin approved for inline passkey sign-in, and the client whose pages are on it.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
-pub struct StoredRelatedOrigin {
-    /// The origin, as browsers send it.
-    pub origin: RelatedOrigin,
-    /// The client it was approved for.
-    pub client_id: ClientId,
-    /// When it was approved.
-    pub approved_at: DateTime<Utc>,
 }
 
 /// One of a confidential client's secrets. Its digest stays in the database.
@@ -829,12 +818,12 @@ impl OidcRepository<'_> {
     /// # Errors
     ///
     /// Returns [`DatabaseError`] if the query fails or a row is invalid.
-    pub async fn related_origins(&mut self) -> Result<Vec<StoredRelatedOrigin>, DatabaseError> {
+    pub async fn related_origins(&mut self) -> Result<Vec<ApprovedOrigin>, DatabaseError> {
         run!(
             self,
             fetch_all,
             sqlx::query_as!(
-                StoredRelatedOrigin,
+                ApprovedOrigin,
                 r#"SELECT
                     origin AS "origin: RelatedOrigin", client_id AS "client_id: ClientId",
                     approved_at

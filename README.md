@@ -132,8 +132,8 @@ just auth audit --user alice --kind session_revoked
 
 - Accounts are named by username, ID or a verified email of an active account.
 - `--output json` prints the admin API's body for `user search` (`UserPage`), `user
-  show` (`UserDetail`), `audit` (`EventPage`), `client list`, `invite list` and
-  `admin list`, as defined in `crates/admin-api`. It changes only as the API does.
+  show` (`UserDetail`), `audit` (`EventPage`), `client list`, `client origin list`,
+  `invite list` and `admin list`, as defined in `crates/admin-api`. It changes only as the API does.
 - `user disable`, `session revoke-all`, `admin revoke` and `client
   disable|suspend|delete` describe what they will change and ask for confirmation.
   Without a terminal they refuse unless given `--yes`.
@@ -141,8 +141,8 @@ just auth audit --user alice --kind session_revoked
   name. Unlike the admin API, the CLI may act on administrators' accounts.
 - Failures print their causes and exit with 1; usage errors exit with 2.
 
-Administrators manage accounts, sessions, invitations and other administrators
-through the admin API, from the admin dashboard
+Administrators manage accounts, sessions, invitations, other administrators and
+clients' related origins through the admin API, from the admin dashboard
 ([apps/admin-web](apps/admin-web/README.md)). Auth serves the API only on
 `AUTH_ADMIN_LISTENER`, which no ingress route reaches: the dashboard calls it from
 its server, over the application's private network. Its routes, bodies and typed
@@ -332,7 +332,8 @@ supported.
 
 A trusted client's pages can sign users in with their auth passkeys without
 leaving for auth's pages, through WebAuthn related origins (WebAuthn Level 3
-§5.11). An operator approves each origin:
+§5.11). An administrator approves each origin, from the dashboard's Clients page
+or the CLI:
 
 ```sh
 just auth client origin add piquel-web https://piquel.fr
@@ -343,10 +344,11 @@ just auth client origin remove piquel-web https://piquel.fr
 The client must be trusted, since this sign-in skips the consent page, and the
 origin must be the origin of one of its redirect URIs. Browsers honour only a few
 distinct domains in the list, so approved origins may span at most 5 registrable
-domains (`example` counts once for `app.example.co.uk` and `www.example.co.uk`);
-origins within auth's own domain count none. `/.well-known/webauthn` lists the
-approved origins, cacheable for five minutes, so a removed origin stops working
-within that time.
+domains (`example` counts once for `app.example.co.uk` and `www.example.co.uk`).
+Browsers count origins within auth's own domain too, as `piquel`; a host without a
+registrable domain, such as `localhost`, counts none and is accepted only within
+auth's domain. `/.well-known/webauthn` lists the approved origins, cacheable for
+five minutes. Auth refuses a removed origin's sign-ins at once.
 
 The page pushes an authorization request with PKCE, then posts its `request_uri`
 to `/webauthn/related/start` and the signed assertion to

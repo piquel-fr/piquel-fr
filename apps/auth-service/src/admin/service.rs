@@ -4,8 +4,8 @@ use super::{AdminError, HandleIssue, HandleProblem, InviteExpiry, Operator, Reas
 use crate::{Applied, ClientDetails, ClientRegistry, ClientRegistryError, GracePeriod};
 use chrono::Utc;
 use piquel_admin_api::{
-    Administrator, Client, CreatedInvitation, Email, Event, EventPage, EventSearch, Invitation,
-    UserDetail, UserPage,
+    Administrator, ApprovedOrigin, Client, CreatedInvitation, Email, Event, EventPage, EventSearch,
+    Invitation, UserDetail, UserPage,
 };
 use piquel_common::{
     AccountStatus, ClientId, DeliveryId, Handle, Personal, SessionId, TokenId, UserId,
@@ -17,7 +17,7 @@ use piquel_common::{
 use piquel_crypto::{ClientSecret, Secret};
 use piquel_repository::{
     Database, DatabaseError, DatabaseTransaction, DeliveryStatus, DeliverySummary, EventFilter,
-    SessionScope, StoredOidcClient, StoredRelatedOrigin, StoredUser,
+    SessionScope, StoredOidcClient, StoredUser,
 };
 use std::collections::BTreeMap;
 
@@ -497,9 +497,7 @@ impl AdminService {
     }
 
     /// Lists every origin approved for clients' pages to sign users in.
-    pub(crate) async fn list_related_origins(
-        &self,
-    ) -> Result<Vec<StoredRelatedOrigin>, AdminError> {
+    pub(crate) async fn list_related_origins(&self) -> Result<Vec<ApprovedOrigin>, AdminError> {
         Ok(self.database.oidc().related_origins().await?)
     }
 

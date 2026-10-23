@@ -29,7 +29,7 @@ test('passkey sign-in on an approved related origin', async ({ page, context }) 
     await page.goto(
       `/register${invitation ? `?invitation=${encodeURIComponent(invitation)}` : ''}`
     );
-    await page.getByLabel('Username', { exact: true }).fill(`related-${Date.now().toString(36)}`);
+    await page.getByLabel('Handle', { exact: true }).fill(`related-${Date.now().toString(36)}`);
     await page.getByLabel('Passkey name', { exact: true }).fill('Related passkey');
     await page.getByRole('button', { name: 'Create account with a passkey' }).click();
     await expect(page).toHaveURL(settingsUrl);

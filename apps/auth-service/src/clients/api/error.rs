@@ -64,8 +64,9 @@ impl From<InvalidSetting> for ApiError {
 }
 
 impl From<ClientRegistryError> for ApiError {
-    /// A deleted client is as unknown as one that never existed. Failures the
-    /// account API cannot cause are internal.
+    /// A deleted client is as unknown as one that never existed. Related-origin
+    /// refusals, which only the admin API causes, name what to fix. Other failures
+    /// the account API cannot cause are internal.
     fn from(error: ClientRegistryError) -> Self {
         match error {
             ClientRegistryError::Unknown(_) | ClientRegistryError::Deleted(_) => {
@@ -91,16 +92,18 @@ impl From<ClientRegistryError> for ApiError {
                 "This client was suspended by an administrator. Contact them to restore it.",
             )
             .with_code(ErrorCode::ClientSuspended),
+            error @ (ClientRegistryError::Untrusted(_)
+            | ClientRegistryError::NotRedirectOrigin { .. }
+            | ClientRegistryError::PublicSuffix(_)) => Self::bad_request(error.to_string()),
+            error @ (ClientRegistryError::TooManyDomains(_)
+            | ClientRegistryError::OriginApproved { .. }) => Self::conflict(error.to_string()),
+            error @ ClientRegistryError::OriginNotApproved { .. } => {
+                Self::not_found(error.to_string())
+            }
             ClientRegistryError::Database(error) => error.into(),
             error @ (ClientRegistryError::Exists { .. }
             | ClientRegistryError::MissingSecret(_)
             | ClientRegistryError::Immutable(_)
-            | ClientRegistryError::Untrusted(_)
-            | ClientRegistryError::NotRedirectOrigin { .. }
-            | ClientRegistryError::PublicSuffix(_)
-            | ClientRegistryError::TooManyDomains(_)
-            | ClientRegistryError::OriginApproved { .. }
-            | ClientRegistryError::OriginNotApproved { .. }
             | ClientRegistryError::Crypto(_)) => Self::internal(error),
         }
     }

@@ -681,7 +681,7 @@ pub(crate) struct LogoutClient {
 }
 /// Client registrations, secrets and the origins of public clients.
 mod clients;
-pub use clients::{OwnedClientCounts, StoredClientSecret, StoredOidcClient, StoredRelatedOrigin};
+pub use clients::{OwnedClientCounts, StoredClientSecret, StoredOidcClient};
 /// Database-backed client registration and migration scenarios.
 #[cfg(test)]
 mod tests;

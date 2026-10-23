@@ -864,3 +864,68 @@ async fn administrators_acting_on_each_other_are_refused() {
         );
     }
 }
+
+/// Administrators approve and remove a trusted client's related origins, given
+/// percent-encoded in the path, and refusals name what to fix.
+#[tokio::test]
+#[ignore = "requires TEST_DATABASE_URL"]
+async fn related_origins_are_approved_and_removed() {
+    let harness = Harness::new().await;
+    let token = harness.token(
+        harness.admin().await,
+        Acr::PhishingResistant,
+        Duration::zero(),
+    );
+    // Within auth's domain, so the test counts against no browser limit.
+    let origin = format!("https://{}.auth.piquel.fr", TokenId::new());
+    let client = crate::tests::registration(piquel_common::clients::ClientKind::Public, &origin);
+    crate::tests::register(&harness.database, &client)
+        .await
+        .expect("client");
+    let approvals = paths::CLIENT_ORIGINS.replace("{client_id}", client.id.as_str());
+    let approve = || {
+        harness.call(
+            Method::POST,
+            &approvals,
+            Some(&token),
+            Some(json!({"origin": origin})),
+        )
+    };
+    let (status, _, body) = approve().await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+    assert!(
+        body["error"]
+            .as_str()
+            .is_some_and(|error| error.contains("not trusted"))
+    );
+    crate::tests::replace(
+        &harness.database,
+        &piquel_common::clients::ClientRegistration {
+            trusted: true,
+            ..client.clone()
+        },
+    )
+    .await
+    .expect("trusted");
+    assert_eq!(approve().await.0, StatusCode::NO_CONTENT);
+    assert_eq!(approve().await.0, StatusCode::CONFLICT);
+    let (status, _, listed) = harness
+        .call(Method::GET, paths::RELATED_ORIGINS, Some(&token), None)
+        .await;
+    assert_eq!(status, StatusCode::OK);
+    assert!(
+        listed
+            .as_array()
+            .expect("origins")
+            .iter()
+            .any(|approved| approved["origin"] == origin.as_str()
+                && approved["client_id"] == client.id.as_str())
+    );
+    let removal = format!(
+        "{approvals}/{}",
+        url::form_urlencoded::byte_serialize(origin.as_bytes()).collect::<String>()
+    );
+    let remove = || harness.call(Method::DELETE, &removal, Some(&token), None);
+    assert_eq!(remove().await.0, StatusCode::NO_CONTENT);
+    assert_eq!(remove().await.0, StatusCode::NOT_FOUND);
+}
