@@ -176,7 +176,9 @@ impl RecoveryRepository<'_> {
     }
 
     /// Records that `user_id`'s recovery `id` enrolled `passkey_id` through its
-    /// link, once. Returns `false` if the link no longer works.
+    /// link, once. Returns `false` if the link no longer works. Expiry is checked
+    /// against the clock, not the transaction's start, which may precede a wait
+    /// for the account lock.
     ///
     /// # Errors
     ///
@@ -194,7 +196,7 @@ impl RecoveryRepository<'_> {
                 "UPDATE account_recoveries SET completed_at = now(), passkey_id = $3
                 WHERE user_id = $1 AND id = $2
                 AND completed_at IS NULL AND cancelled_at IS NULL AND undone_at IS NULL
-                AND expires_at > now()",
+                AND expires_at > clock_timestamp()",
                 user_id.as_uuid(),
                 id.as_uuid(),
                 passkey_id.as_uuid(),
