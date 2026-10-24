@@ -10,7 +10,8 @@ use piquel_repository::{
     Database, DatabaseConfig, DatabaseError, InsertSession, InsertUser, SessionScope,
 };
 use std::net::IpAddr;
-/// Invitations are single-use, and passkey confirmations belong to one session and end with it.
+/// Invitations are single-use, and passkey confirmations belong to one session and
+/// end with it; the latest confirming passkey is the session's.
 #[expect(
     clippy::too_many_lines,
     reason = "Keep the invitation rollback and session lifecycle scenario together."
@@ -97,12 +98,22 @@ async fn invitation_redemption_and_confirmation_lifecycle() {
         "social sign-in has no confirmation"
     );
     let at = Utc::now() - Duration::seconds(30);
+    let (first, second) = (PasskeyId::new(), PasskeyId::new());
     for id in [session, other] {
         db.sessions()
-            .confirm_passkey(id, PasskeyId::new(), at)
+            .confirm_passkey(id, first, at)
             .await
             .expect("confirm");
     }
+    db.sessions()
+        .confirm_passkey(session, second, at)
+        .await
+        .expect("confirm again");
+    assert_eq!(
+        db.sessions().passkey(session).await.expect("passkey"),
+        Some(second),
+        "the latest confirming passkey replaces the earlier one"
+    );
     let stored = confirmed_at(session).await.expect("confirmation");
     assert!(
         (stored - at).abs() < Duration::milliseconds(1),

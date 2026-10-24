@@ -140,24 +140,8 @@ impl Fixture {
         .expect("passkey app");
         let user_id = UserId::new();
         let username = format!("key-{}", &TokenId::new().to_string()[24..]);
-        let key_id = PasskeyId::new();
-        // This software authenticator supports UV and signed counters, but not
-        // resident credentials. Browser tests cover production resident signup;
-        // use the library's normal registration to seed this assertion fixture.
-        let (challenge, state) = app
-            .webauthn
-            .start_passkey_registration(user_id.as_uuid(), &username, "Test user", None)
-            .expect("registration");
-        let mut authenticator = WebauthnAuthenticator::new(SoftPasskey::new(true));
-        let registration = authenticator
-            .do_registration(origin.clone(), challenge)
-            .expect("software registration");
-        let key = app
-            .webauthn
-            .finish_passkey_registration(&registration, &state)
-            .expect("verified registration");
-        let mut tx = app.database.begin().await.expect("transaction");
-        tx.users()
+        app.database
+            .users()
             .insert(&InsertUser {
                 id: user_id,
                 handle: Handle::parse(&username).expect("handle"),
@@ -165,17 +149,8 @@ impl Fixture {
             })
             .await
             .expect("user");
-        tx.passkeys()
-            .insert(&InsertPasskey {
-                id: key_id,
-                credential_id: key.cred_id().as_ref().to_vec(),
-                user_id,
-                credential: serde_json::to_value(key).expect("credential"),
-                friendly_name: "Original key".into(),
-            })
-            .await
-            .expect("stored key");
-        tx.commit().await.expect("commit");
+        let (key_id, authenticator) =
+            Self::seed_passkey(&app, &origin, user_id, &username, "Original key").await;
         Self {
             router: app
                 .clone()
@@ -188,6 +163,51 @@ impl Fixture {
             key_id,
             username,
         }
+    }
+    /// Stores a new software authenticator's passkey named `name` for `user_id`.
+    /// The authenticator supports UV and signed counters, but not resident
+    /// credentials. Browser tests cover production resident signup; this uses the
+    /// library's normal registration.
+    async fn seed_passkey(
+        app: &PasskeyApplication,
+        origin: &Url,
+        user_id: UserId,
+        username: &str,
+        name: &str,
+    ) -> (PasskeyId, WebauthnAuthenticator<SoftPasskey>) {
+        let (challenge, state) = app
+            .webauthn
+            .start_passkey_registration(user_id.as_uuid(), username, "Test user", None)
+            .expect("registration");
+        let mut authenticator = WebauthnAuthenticator::new(SoftPasskey::new(true));
+        let registration = authenticator
+            .do_registration(origin.clone(), challenge)
+            .expect("software registration");
+        let key = app
+            .webauthn
+            .finish_passkey_registration(&registration, &state)
+            .expect("verified registration");
+        let id = PasskeyId::new();
+        app.database
+            .passkeys()
+            .insert(&InsertPasskey {
+                id,
+                credential_id: key.cred_id().as_ref().to_vec(),
+                user_id,
+                credential: serde_json::to_value(key).expect("credential"),
+                friendly_name: name.into(),
+            })
+            .await
+            .expect("stored key");
+        (id, authenticator)
+    }
+    /// Stores another passkey named `name` on the account, and signs with it from
+    /// now on.
+    pub(crate) async fn switch_passkey(&mut self, name: &str) -> PasskeyId {
+        let (id, authenticator) =
+            Self::seed_passkey(&self.app, &self.origin, self.user_id, &self.username, name).await;
+        self.authenticator = authenticator;
+        id
     }
     /// Sends the next requests to `router`, such as one of [`Replicas`].
     fn on(&mut self, router: &axum::Router) -> &mut Self {
@@ -421,6 +441,20 @@ async fn registration_attaches_a_pending_social_signup_only_when_it_names_it() {
             .expect("identity")
             .map(|identity| identity.user_id);
         assert_eq!(owner, attached.then_some(user.id), "{username}");
+        let passkeys = database.passkeys().list_active(user.id).await;
+        let sessions = database.sessions().list_active_for_user(user.id).await;
+        let [session] = &sessions.expect("sessions")[..] else {
+            panic!("one session");
+        };
+        let recorded = database.sessions().passkey(session.id).await;
+        let [passkey] = &passkeys.expect("passkeys")[..] else {
+            panic!("one passkey");
+        };
+        assert_eq!(
+            recorded.expect("passkey"),
+            Some(passkey.id),
+            "signed in by it"
+        );
     }
 }
 
@@ -688,6 +722,8 @@ async fn ceremonies_require_browser_binding_and_confirmation_belongs_to_one_sess
         fixture.events().await.first(),
         Some(&DomainEvent::PasskeyConfirmed { session_id })
     );
+    let confirming = fixture.app.database.sessions().passkey(session_id).await;
+    assert_eq!(confirming.expect("passkey"), Some(fixture.key_id));
     let confirmed_at = || async {
         fixture
             .app
@@ -968,6 +1004,27 @@ async fn passkey_sign_in_confirms_the_browsers_session() {
         Some(fixture.key_id),
         "signed in by it"
     );
+
+    // With two passkeys, the asserting one is recorded: signing in with the
+    // newer one, and confirming with it a session the older one signed in.
+    let newer = fixture.switch_passkey("Newer key").await;
+    let signed_in = fixture.login().await;
+    let signed_in = fixture.session(&signed_in).await.expect("new session").id;
+    assert_eq!(passkey(signed_in).await, Some(newer), "signed in by it");
+    let (started, browser) = fixture
+        .start("/account/passkeys/confirm/start", &cookie, json!({}))
+        .await;
+    let assertion = fixture.assertion(&started);
+    let response = fixture
+        .request(
+            "/account/passkeys/confirm/finish",
+            Method::POST,
+            &format!("{cookie}; {browser}"),
+            json!({"ceremony_id":started["ceremony_id"],"credential":assertion}),
+        )
+        .await;
+    assert_eq!(response.status(), StatusCode::NO_CONTENT);
+    assert_eq!(passkey(before.id).await, Some(newer), "confirmed by it");
 }
 
 /// A sign-in started on one replica finishes on the other, and logging out on one
