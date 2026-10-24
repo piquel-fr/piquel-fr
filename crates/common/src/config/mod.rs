@@ -13,7 +13,7 @@ pub enum ConfigurationError {
         /// Variable to set.
         variable: &'static str,
     },
-    /// A value violates its contract, e.g. `AUTH_SIGNING_KEY_ID must contain 1 to 128 characters without whitespace`.
+    /// A value violates its contract, e.g. `AUTH_TOKEN_DIGEST_KEY must contain at least 32 bytes`.
     #[error("{variable} {reason}")]
     Invalid {
         /// Variable to correct.

@@ -36,7 +36,7 @@ just preview
 
 This snapshots this checkout, including uncommitted changes, builds both frontends
 and auth, applies migrations, and prints the web and auth URLs. The preview has its
-own database and signing key. URLs work from devices on the tailnet. Run the same
+own database and keys. URLs work from devices on the tailnet. Run the same
 command after changing code. `just preview-delete` removes it. `just dev` serves
 piquel-web with Vite against an auth service on `http://localhost:3000`.
 
@@ -52,8 +52,9 @@ piquel-web with Vite against an auth service on `http://localhost:3000`.
 | `AUTH_TRUSTED_PROXIES` | Optional comma-separated proxy peer IPs or CIDRs; these peers must overwrite `X-Forwarded-For` with one client IP. Defaults to piqueld's `PIQUELD_INGRESS_PROXIES` |
 | `AUTH_PUBLIC_LISTENER` | Listener address; defaults to `127.0.0.1:8080` |
 | `AUTH_ADMIN_LISTENER` | Optional address of the private admin API listener, e.g. `0.0.0.0:8081`. No ingress route may reach it. Without it, auth serves no admin API |
-| `AUTH_KEY_PROVIDER` | Required persistent RSA private-key reference, `file:///absolute/path/key.pem` or `env://VARIABLE_NAME` |
-| `AUTH_SIGNING_KEY_ID` | Stable ID for that signing key; defaults to `primary` |
+| `AUTH_KEY_ENCRYPTION_KEY` | Required env/file reference to the key that seals [signing keys](#signing-keys) in the database: 32 bytes as unpadded base64url text. A trailing newline is ignored |
+| `AUTH_TOKEN_DIGEST_KEY` | Required env/file reference to the key under which refresh tokens, authorization codes and pending logins are stored as HMAC digests. Its raw bytes are the key, at least 32 of them. Passkey decoys and email verification links derive from it too |
+| `AUTH_TOKEN_DIGEST_KEY_ACCEPTED` | Optional env/file reference to another token digest key, accepted but never used for new digests: the next key, or the old one (see [changing the token digest key](#changing-the-token-digest-key)) |
 | `AUTH_INVITE_REQUIRED` | `true` by default; set `false` to allow public registration |
 | `AUTH_GITHUB_CLIENT_ID`, `AUTH_GITHUB_CLIENT_SECRET` | Both required to enable GitHub; secret is an env/file reference |
 | `AUTH_GOOGLE_CLIENT_ID`, `AUTH_GOOGLE_CLIENT_SECRET` | Both required to enable Google; secret is an env/file reference |
@@ -67,13 +68,17 @@ For a local Unix socket, use `localhost` as the URL host and an absolute socket
 directory in the `host` query parameter, e.g.
 `postgres://USER:PASSWORD@localhost/piquel?host=/run/postgresql&sslmode=disable`.
 
-Generate a persistent RSA key with `just auth generate-key /absolute/path/key.pem` (uses the
-OpenSSL CLI; piqueld generates its own, see `infra/README.md`).
-Keep the same key and ID across restarts. Replacing the only configured key
-invalidates issued tokens; overlapping signing-key rotation is not implemented.
-It also changes the decoy passkey IDs that username sign-in returns for unknown
-usernames, while real accounts keep theirs, so comparing responses from before and
-after a replacement reveals which usernames exist.
+Generate either key with `just auth generate-secret /absolute/path` (uses the
+OpenSSL CLI; piqueld generates its own, see `infra/README.md`). Keep both across
+restarts, and give every replica the same ones. The key-encryption key cannot be
+changed yet: the stored signing keys would no longer open. Replacing the token
+digest key at once ends every refresh token and every login in progress, so
+change it in two deploys (see below). Changing it also changes the decoy
+passkey IDs that username sign-in returns for unknown usernames, while real
+accounts keep theirs, so comparing responses from before and after a
+replacement reveals which usernames exist. Verification links already sent keep
+working, but a verification email still queued at the change carries a link
+that does not.
 
 Provider callback URLs are `/login/github/callback` and `/login/google/callback`
 on the auth origin. GitHub uses `read:user user:email`; Google uses `openid email profile`.
@@ -92,6 +97,81 @@ just auth serve
 
 The schema intentionally replaces the throwaway prototype. Use a fresh database;
 there is no migration path for prototype account data.
+
+### Signing keys
+
+Auth signs ID and access tokens with RSA keys kept in PostgreSQL, each private
+key sealed with AES-256-GCM under `AUTH_KEY_ENCRYPTION_KEY`. Keys rotate without
+a deploy, and every replica reloads them each minute:
+
+| State | Signs | In JWKS | Its tokens verify | Lasts |
+| --- | --- | --- | --- | --- |
+| `next` | no | yes | yes | 24 hours, then it signs |
+| `active` | yes | yes | yes | 90 days, then a `next` key is published |
+| `retiring` | no | yes | yes | 65 minutes: the 5-minute token lifetime plus the JWKS cache lifetime |
+| `retired` | no | no | as `id_token_hint` only | 30 days, the longest session, then it is deleted with its public key |
+
+JWKS is served with `Cache-Control: public, max-age=3600`, so a `next` key is
+published long before any verifier needs it. A retired key's private key is
+erased, but logout and authorization still accept the expired ID tokens it
+signed as hints. On first start with no keys, auth generates one that signs at
+once. One replica at a time takes each step, under a PostgreSQL advisory lock
+that the `keys` commands take too. None of them needs the service running:
+
+```sh
+just auth keys list                  # IDs, states and dates
+just auth keys rotate                # publish a next key; it signs in 24 hours
+just auth keys rotate --now          # or sign with it at once
+just auth keys revoke <id>           # delete a key at once
+just auth keys digest-usage          # stored token digests per digest key
+just auth keys import file:///path/key.pem   # import a PEM key into an empty key set
+```
+
+`keys rotate` publishes the next key ahead of schedule. It still waits 24 hours
+before signing, so no verifier meets an unknown key. `--now` skips the wait:
+verifiers with a cached key set reject the new key's tokens until they fetch
+keys again, which the SDKs do on an unknown `kid`, at most every 30 seconds.
+Auth's own replicas reload within a minute, so until then a token from one may
+fail at another.
+
+#### Revoking a compromised key
+
+`keys revoke <id>` deletes the key. If it was signing, the `next` and `retiring`
+keys go with it, since their private keys were stored alongside, and a new key
+signs at once.
+Revocation takes effect in two places, at different times:
+
+- **At auth:** within a minute, every replica stops accepting the key, for
+  access tokens at `UserInfo` and the admin API, and for `id_token_hint`s. The
+  tokens it legitimately signed stop working at auth too, so their users sign
+  in again through SSO.
+- **Downstream:** verifiers that cached JWKS keep accepting the key until their
+  cache expires: up to an hour with `max-age=3600`, and longer for verifiers
+  that ignore `Cache-Control`. Whoever holds the key can mint tokens with any
+  `exp`, so token lifetimes do not shorten this window; only the cache does.
+
+After revoking, restart first-party resource servers, which drops their cached
+keys; the SDKs keep a known key until their cache expires. Treat the hour as
+the remaining exposure at third parties.
+
+#### Changing the token digest key
+
+Nothing rotates the token digest key; change it by hand, rarely, in two deploys,
+so that during each rolling deploy, and after a rollback, every release accepts
+what the other issues:
+
+1. Set the new key as `AUTH_TOKEN_DIGEST_KEY_ACCEPTED` and deploy.
+2. Swap them: the new key as `AUTH_TOKEN_DIGEST_KEY`, the old one as
+   `AUTH_TOKEN_DIGEST_KEY_ACCEPTED`, and deploy. New digests use the new key.
+3. Remove `AUTH_TOKEN_DIGEST_KEY_ACCEPTED` once `keys digest-usage` lists only
+   `current`: about 30 days later, since refresh tokens end with their session,
+   and a redeemed code is kept while the grant it produced lives.
+   Removing it sooner ends the refresh tokens still under it.
+
+Each stored digest records a fingerprint of its key, and `keys digest-usage`
+counts them per key, until cleanup deletes them, named `current`, `accepted`, `unrecorded`
+(made before fingerprints were recorded, under the old PEM signing key) or
+`unknown`.
 
 ### Invitations
 

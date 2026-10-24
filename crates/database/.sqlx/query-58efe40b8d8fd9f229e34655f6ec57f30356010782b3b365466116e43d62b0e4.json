@@ -1,0 +1,32 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT\n                    secret AS \"secret!: DigestedSecret\", digest_key,\n                    count(*) AS \"stored!: Unsigned\"\n                FROM (\n                    SELECT 'authorization_request' AS secret, digest_key\n                    FROM authorization_requests\n                    UNION ALL\n                    SELECT 'authorization_code', digest_key\n                    FROM authorization_codes\n                    UNION ALL\n                    SELECT 'refresh_token', digest_key\n                    FROM refresh_tokens\n                ) digests\n                GROUP BY secret, digest_key\n                ORDER BY secret, digest_key",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "secret!: DigestedSecret",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 1,
+        "name": "digest_key",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 2,
+        "name": "stored!: Unsigned",
+        "type_info": "Int8"
+      }
+    ],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": [
+      null,
+      null,
+      null
+    ]
+  },
+  "hash": "58efe40b8d8fd9f229e34655f6ec57f30356010782b3b365466116e43d62b0e4"
+}

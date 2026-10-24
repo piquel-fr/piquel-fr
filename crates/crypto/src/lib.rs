@@ -1,7 +1,10 @@
 //! Auditable cryptographic primitives for authentication; no browser or database policy.
-/// RSA signing and verification of compact JWTs.
+/// AES-256-GCM sealing of private keys at rest.
+mod sealing;
+/// RSA signing and verification of compact JWTs, by key set.
 mod signing;
-pub use signing::Rs256Key;
+pub use sealing::KeyEncryptionKey;
+pub use signing::{KeySet, PublicKey, Rs256Key};
 
 use base64::{Engine, engine::general_purpose::URL_SAFE_NO_PAD};
 use openssl::{hash::MessageDigest, pkey::PKey, sign::Signer};
@@ -52,6 +55,15 @@ pub enum CryptoError {
     /// A JWT has expired.
     #[error("JWT has expired")]
     Expired,
+    /// A JWT names a key outside the key set: unknown, revoked or deleted.
+    #[error("JWT names a key outside the key set")]
+    UnknownKey,
+    /// A key set would not publish its signing key, or names a key twice.
+    #[error("key set must publish its signing key and name each key once")]
+    KeySet,
+    /// A sealed value was made with another key or associated data, or modified.
+    #[error("sealed value cannot be opened with this key-encryption key")]
+    Unsealable,
     /// The PKCE verifier violates RFC 7636.
     #[error("PKCE verifier must contain 43 to 128 unreserved ASCII characters")]
     PkceVerifier,

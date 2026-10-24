@@ -1,6 +1,8 @@
 //! JWT claims and JOSE metadata shared by token issuers and verifiers.
 
 use serde::{Deserialize, Serialize};
+use std::{fmt, str::FromStr};
+use thiserror::Error;
 
 crate::str_enum! {
     /// JWT `typ` headers. Distinct types stop an ID token being accepted as an access token.
@@ -83,6 +85,66 @@ crate::str_enum! {
         Signature = "sig",
     }
 }
+
+/// Longest key identifier, in bytes.
+const MAX_KEY_ID_LENGTH: usize = 128;
+
+/// A signing key's `kid`: 1 to 128 characters without whitespace. Auth gives each
+/// key it generates a random one and never reuses it; an imported key keeps its own.
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+#[serde(try_from = "String", into = "String")]
+pub struct KeyId(String);
+
+/// A key identifier that is empty, longer than 128 bytes or contains whitespace.
+#[derive(Clone, Debug, PartialEq, Eq, Error)]
+#[error("key ID {0:?} must contain 1 to 128 characters without whitespace")]
+pub struct InvalidKeyId(String);
+
+impl KeyId {
+    /// The identifier, as in JWT headers and JWKS.
+    #[must_use]
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
+impl FromStr for KeyId {
+    type Err = InvalidKeyId;
+    /// Accepts 1 to 128 bytes without whitespace.
+    fn from_str(value: &str) -> Result<Self, Self::Err> {
+        if value.is_empty()
+            || value.len() > MAX_KEY_ID_LENGTH
+            || value.chars().any(char::is_whitespace)
+        {
+            return Err(InvalidKeyId(value.to_owned()));
+        }
+        Ok(Self(value.to_owned()))
+    }
+}
+
+impl TryFrom<String> for KeyId {
+    type Error = InvalidKeyId;
+    /// Validates owned text, as serde reads it.
+    fn try_from(value: String) -> Result<Self, Self::Error> {
+        value.parse()
+    }
+}
+
+impl From<KeyId> for String {
+    /// The identifier unchanged.
+    fn from(value: KeyId) -> Self {
+        value.0
+    }
+}
+
+impl fmt::Display for KeyId {
+    /// Writes the identifier unchanged.
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.write_str(&self.0)
+    }
+}
+
+crate::__str_enum_sqlx!(KeyId);
 
 /// A JSON Web Key Set (RFC 7517 §5). Auth publishes `JwkSet<Jwk>`. Verifiers read the
 /// keys as raw JSON and parse each one alone, because RFC 7517 §5 says a key of an

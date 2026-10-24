@@ -443,7 +443,7 @@ async fn deleted_clients_stay_deleted() {
     let mut tx = harness.database.begin().await.expect("transaction");
     assert!(matches!(
         tx.tokens()
-            .consume_for_rotation(token, &digest, client_id.as_str())
+            .consume_for_rotation(token, std::slice::from_ref(&digest), client_id.as_str())
             .await,
         Err(RefreshRotationError::Invalid)
     ));
@@ -538,7 +538,7 @@ async fn deletion_and_refresh_rotation_never_deadlock() {
     let mut holder = harness.database.begin().await.expect("transaction");
     holder
         .tokens()
-        .revoke_family_for_token(held, &held_digest)
+        .revoke_family_for_token(held, std::slice::from_ref(&held_digest))
         .await
         .expect("hold the first family");
     let deletion = tokio::spawn({
@@ -548,7 +548,11 @@ async fn deletion_and_refresh_rotation_never_deadlock() {
     until_blocked(&mut holder, 1).await;
     holder
         .tokens()
-        .consume_for_rotation(rotated, &rotated_digest, client_id.as_str())
+        .consume_for_rotation(
+            rotated,
+            std::slice::from_ref(&rotated_digest),
+            client_id.as_str(),
+        )
         .await
         .expect("the rotation locks the client while the deletion waits");
     holder.commit().await.expect("commit");
@@ -560,7 +564,11 @@ async fn deletion_and_refresh_rotation_never_deadlock() {
     let mut tx = harness.database.begin().await.expect("transaction");
     assert!(matches!(
         tx.tokens()
-            .consume_for_rotation(rotated, &rotated_digest, client_id.as_str())
+            .consume_for_rotation(
+                rotated,
+                std::slice::from_ref(&rotated_digest),
+                client_id.as_str()
+            )
             .await,
         Err(RefreshRotationError::Invalid | RefreshRotationError::Replay { .. })
     ));
@@ -623,7 +631,7 @@ async fn deletion_skips_families_granted_while_it_waits() {
     assert!(matches!(
         rotation
             .tokens()
-            .consume_for_rotation(token, &digest, client_id.as_str())
+            .consume_for_rotation(token, std::slice::from_ref(&digest), client_id.as_str())
             .await,
         Err(RefreshRotationError::Invalid)
     ));

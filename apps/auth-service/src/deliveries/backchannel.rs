@@ -7,15 +7,16 @@
 //! attempt: a receiver's replay check also drops repeated sends.
 
 use super::{DeliveryError, Failure, Sender, outbound::OutboundClient};
+use crate::SigningKeys;
 use axum::http::Method;
 use chrono::{DateTime, TimeDelta, Utc};
 use piquel_common::protocol::{
     claims::{Absent, Audience, LogoutEvents, LogoutTokenClaims},
     jwt::TokenType,
 };
-use piquel_crypto::{CryptoError, Rs256Key};
+use piquel_crypto::CryptoError;
 use piquel_repository::{BackchannelLogout, Delivery};
-use std::{sync::Arc, time::Duration};
+use std::time::Duration;
 
 /// How long a logout token is accepted after the attempt that signed it.
 const TOKEN_LIFETIME: TimeDelta = TimeDelta::minutes(2);
@@ -26,13 +27,14 @@ pub(crate) struct BackchannelLogoutSender {
     outbound: OutboundClient,
     /// The `iss` of every token.
     issuer: String,
-    /// Auth's token signing key, the one clients already trust for ID tokens.
-    keys: Arc<Rs256Key>,
+    /// Auth's signing keys, which clients already trust for ID tokens; each
+    /// attempt signs with the key active at the time.
+    keys: SigningKeys,
 }
 
 impl BackchannelLogoutSender {
     /// Signs as `issuer` with `keys`, and posts with `outbound`.
-    pub(crate) const fn new(issuer: String, keys: Arc<Rs256Key>, outbound: OutboundClient) -> Self {
+    pub(crate) const fn new(issuer: String, keys: SigningKeys, outbound: OutboundClient) -> Self {
         Self {
             outbound,
             issuer,
@@ -47,7 +49,7 @@ impl BackchannelLogoutSender {
         now: DateTime<Utc>,
     ) -> Result<String, CryptoError> {
         let recipient = &delivery.recipient;
-        self.keys.sign(
+        self.keys.current().sign(
             TokenType::Logout,
             &LogoutTokenClaims {
                 iss: self.issuer.clone(),

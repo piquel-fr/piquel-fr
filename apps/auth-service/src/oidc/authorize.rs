@@ -130,10 +130,12 @@ impl AuthorizationParameters {
             Duration::minutes(AUTHORIZATION_REQUEST_MINUTES)
         };
         let token = OpaqueToken::new(TokenPrefix::AuthorizationRequest)?;
+        let (secret_digest, digest_key) = app.token_digest(&token)?;
         let request = InsertAuthorizationRequest {
             id: token.id,
-            secret_digest: app.token_digest(&token)?.as_bytes().to_vec(),
+            secret_digest,
             pushed,
+            digest_key,
             client_id: client.id.clone(),
             redirect_uri: self.redirect_uri.clone(),
             client_state: self.state.clone(),
@@ -179,6 +181,7 @@ impl AuthorizationParameters {
         // An expired ID token still identifies the account.
         let claims = app
             .keys
+            .current()
             .verify_id_token_hint(hint, &app.issuer)
             .map_err(|error| {
                 OAuthCode::InvalidRequest
@@ -446,13 +449,15 @@ impl OidcApplication {
                 OAuthCode::InvalidRequestUri.reject_with(UNKNOWN_REQUEST_URI, error)
             })?;
         let opaque = pushed.renewed()?;
+        let (new_digest, new_digest_key) = self.token_digest(&opaque)?;
         self.database
             .oidc()
             .claim_pushed_authorization_request(
                 pushed.id,
-                self.token_digest(&pushed)?.as_bytes(),
+                &self.accepted_digests(&pushed)?,
                 client_id,
-                self.token_digest(&opaque)?.as_bytes(),
+                &new_digest,
+                &new_digest_key,
                 Utc::now() + Duration::minutes(AUTHORIZATION_REQUEST_MINUTES),
             )
             .await?
@@ -526,11 +531,11 @@ impl OidcApplication {
             );
         }
         let opaque = OpaqueToken::parse(TokenPrefix::AuthorizationRequest, &input.transaction)?;
-        let digest = self.token_digest(&opaque)?;
+        let digests = self.accepted_digests(&opaque)?;
         let mut transaction = self.database.begin().await?;
         let request = transaction
             .oidc()
-            .consume_authorization_request(opaque.id, digest.as_bytes())
+            .consume_authorization_request(opaque.id, &digests)
             .await
             .map_err(|error| {
                 OAuthError::database(error, OAuthCode::InvalidRequest, UNKNOWN_TRANSACTION)
@@ -574,11 +579,13 @@ impl OidcApplication {
                         .await?;
                 }
                 let code = OpaqueToken::new(TokenPrefix::AuthorizationCode)?;
+                let (secret_digest, digest_key) = self.token_digest(&code)?;
                 transaction
                     .oidc()
                     .insert_code(&InsertAuthorizationCode {
                         id: code.id,
-                        secret_digest: self.token_digest(&code)?.as_bytes().to_vec(),
+                        secret_digest,
+                        digest_key,
                         client_id: request.client_id,
                         user_id: session.user_id,
                         session_id: session.id,
@@ -604,10 +611,10 @@ impl OidcApplication {
         value: &str,
     ) -> Result<StoredAuthorizationRequest, OAuthError> {
         let opaque = OpaqueToken::parse(TokenPrefix::AuthorizationRequest, value)?;
-        let digest = self.token_digest(&opaque)?;
+        let digests = self.accepted_digests(&opaque)?;
         self.database
             .oidc()
-            .find_authorization_request(opaque.id, digest.as_bytes())
+            .find_authorization_request(opaque.id, &digests)
             .await?
             .ok_or_else(|| OAuthCode::InvalidRequest.reject(UNKNOWN_TRANSACTION))
     }

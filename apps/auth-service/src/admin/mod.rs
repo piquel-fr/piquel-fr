@@ -5,7 +5,7 @@
 //! [`Admin`] and mutations [`ConfirmedAdmin`], which answer RFC 6750 and RFC 9470
 //! challenges, so the dashboard signs the administrator in again when a mutation
 //! needs a fresh passkey.
-use crate::{AuthConfig, routes::admin};
+use crate::{AuthConfig, SigningKeys, routes::admin};
 use axum::{
     Json, Router,
     extract::{FromRef, Path, Query, State},
@@ -61,11 +61,11 @@ impl FromRef<AdminApplication> for AdminTokens {
 
 impl AdminApplication {
     /// Builds the admin API from auth's issuer, keys and admission policy.
-    pub(crate) fn new(database: Database, config: &AuthConfig) -> Self {
+    pub(crate) fn new(database: Database, config: &AuthConfig, keys: SigningKeys) -> Self {
         Self {
             service: AdminService::new(database.clone()),
             tokens: AdminTokens {
-                keys: config.oidc.keys.clone(),
+                keys,
                 issuer: config.oidc.origin.serialized(),
                 database,
             },

@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "SELECT\n                    r.id AS \"id: TokenId\", r.client_id AS \"client_id: ClientId\",\n                    c.display_name AS client_display_name,\n                    r.redirect_uri, r.client_state, r.nonce, r.pkce_challenge,\n                    r.scopes AS \"scopes: JsonArray<String>\", r.audience, r.force_login,\n                    r.force_consent, r.prompt_none, r.max_age,\n                    r.hinted_user_id AS \"hinted_user_id: UserId\",\n                    r.target_acr AS \"target_acr: Acr\",\n                    COALESCE(r.claimed_at, r.created_at) AS \"started_at!\"\n                FROM authorization_requests r\n                JOIN oidc_clients c ON c.id = r.client_id\n                WHERE r.id = $1\n                AND r.secret_digest = $2\n                AND r.consumed_at IS NULL\n                AND r.expires_at > now()\n                AND (NOT r.pushed OR r.claimed_at IS NOT NULL)\n                AND c.enabled",
+  "query": "UPDATE authorization_requests r\n                SET claimed_at = now(), secret_digest = $4, digest_key = $5, expires_at = $6\n                FROM oidc_clients c\n                WHERE r.id = $1\n                AND r.secret_digest = ANY($2)\n                AND r.client_id = $3\n                AND r.pushed\n                AND r.claimed_at IS NULL\n                AND r.consumed_at IS NULL\n                AND r.expires_at > now()\n                AND c.id = r.client_id\n                AND c.enabled\n                RETURNING\n                    r.id AS \"id: TokenId\", r.client_id AS \"client_id: ClientId\",\n                    c.display_name AS client_display_name,\n                    r.redirect_uri, r.client_state, r.nonce, r.pkce_challenge,\n                    r.scopes AS \"scopes: JsonArray<String>\", r.audience, r.force_login,\n                    r.force_consent, r.prompt_none, r.max_age,\n                    r.hinted_user_id AS \"hinted_user_id: UserId\",\n                    r.target_acr AS \"target_acr: Acr\",\n                    r.claimed_at AS \"started_at!\"",
   "describe": {
     "columns": [
       {
@@ -87,7 +87,11 @@
     "parameters": {
       "Left": [
         "Uuid",
-        "Bytea"
+        "ByteaArray",
+        "Text",
+        "Bytea",
+        "Text",
+        "Timestamptz"
       ]
     },
     "nullable": [
@@ -106,8 +110,8 @@
       true,
       true,
       true,
-      null
+      true
     ]
   },
-  "hash": "5833384883c089f40e5c1530c302d3408a718024db8925fbda563ee52f4c2af6"
+  "hash": "3ecc3cb2444e2c210ac992a3ee4da4cad2806b7a9ac0355b16d71c5c3f1dc4e2"
 }

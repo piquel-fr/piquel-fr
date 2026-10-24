@@ -115,18 +115,25 @@ fn jwt_persistence_and_trust_boundaries() {
     let now = chrono::Utc::now().timestamp();
     let claims = serde_json::json!({"iss":"https://auth.example", "iat":now, "exp":now+300});
     let token = key.sign(TokenType::Id, &claims).expect("sign");
+    let restored = KeySet::single(restored);
     assert_eq!(
         restored
             .verify::<serde_json::Value>(&token, TokenType::Id, "https://auth.example")
             .expect("verify"),
         claims
     );
-    let unrelated = Rs256Key::generate("persistent").expect("different RSA key with the same ID");
+    let der = Rs256Key::from_der("persistent", &key.private_key_der().expect("export DER"))
+        .expect("restore DER");
+    assert_eq!(der.jwks(), key.jwks());
+    let unrelated = KeySet::single(
+        Rs256Key::generate("persistent").expect("different RSA key with the same ID"),
+    );
     assert!(
         unrelated
             .verify::<serde_json::Value>(&token, TokenType::Id, "https://auth.example")
             .is_err()
     );
+    let key = KeySet::single(key);
     for token in [
         String::new(),
         "one.two".to_owned(),

@@ -22,7 +22,7 @@ pub use exclusive::{ExclusiveConnection, LockKey};
 pub use repositories::{
     AdministratorRepository, DeliveryRepository, EmailRepository, EventRepository,
     FederationRepository, MaintenanceRepository, OidcRepository, PasskeyRepository,
-    SecurityRepository, SessionRepository, TokenRepository, UserRepository,
+    SecurityRepository, SessionRepository, SigningKeyRepository, TokenRepository, UserRepository,
     deliveries::{
         BackchannelLogout, Channel, Delivery, DeliveryOutcome, DeliveryStatus, DeliverySummary,
         Email, EmailMessage, LogoutRecipient, NewDelivery, PendingAddress,
@@ -33,6 +33,7 @@ pub use repositories::{
         ConsumedFederationTransaction, InsertExternalIdentity, InsertFederationTransaction,
         PendingFederation, StoredExternalIdentity,
     },
+    maintenance::{DigestUsage, DigestedSecret},
     oidc::{
         CodeRedemptionError, ConsumedAuthorizationCode, InsertAuthorizationCode,
         InsertAuthorizationRequest, OidcRedirectKind, OwnedClientCounts,
@@ -42,6 +43,7 @@ pub use repositories::{
     sessions::{
         InsertSession, LAST_SEEN_INTERVAL, SessionAuthentication, SessionScope, StoredSession,
     },
+    signing_keys::{InsertSigningKey, SigningKeyState, SigningKeyType, StoredSigningKey},
     tokens::{
         InsertRefreshFamily, InsertRefreshToken, RefreshRotationError, RevokedFamily,
         RotatedRefreshToken,

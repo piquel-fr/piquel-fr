@@ -1,13 +1,71 @@
 //! Bounded deletion of expired ephemeral authentication state, event personal data
-//! and finished deliveries.
+//! and finished deliveries, and what is left of the digests of opaque tokens.
 
-use super::{MaintenanceRepository, RepositoryExecutor};
+use super::{MaintenanceRepository, RepositoryExecutor, Unsigned};
 use crate::DatabaseError;
+
+piquel_common::str_enum! {
+    /// The records that store an opaque token's secret as a keyed digest.
+    pub enum DigestedSecret {
+        /// A pending authorization request.
+        AuthorizationRequest = "authorization_request",
+        /// An authorization code.
+        AuthorizationCode = "authorization_code",
+        /// A refresh token.
+        RefreshToken = "refresh_token",
+    }
+}
+
+/// How many stored digests of one kind a digest key made.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct DigestUsage {
+    /// The kind of record.
+    pub secret: DigestedSecret,
+    /// The digest key's fingerprint; `None` for digests made before fingerprints
+    /// were recorded, under the key derived from the PEM signing key.
+    pub digest_key: Option<String>,
+    /// How many of them are stored.
+    pub stored: u64,
+}
 
 /// Maximum rows removed from each table in one maintenance batch.
 const MAX_PURGE_BATCH: u32 = 1_000;
 
 impl MaintenanceRepository<'_> {
+    /// Counts stored digests per kind and digest key. Every stored one counts,
+    /// expired and consumed ones too: cleanup deletes each digest once no lookup
+    /// can match it, and until then one may still be presented, e.g. as a code
+    /// replay that revokes the grant it produced. A digest key can be dropped
+    /// once it made none.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`DatabaseError`] if the query fails or a row is invalid.
+    pub async fn digest_usage(&mut self) -> Result<Vec<DigestUsage>, DatabaseError> {
+        run!(
+            self,
+            fetch_all,
+            sqlx::query_as!(
+                DigestUsage,
+                r#"SELECT
+                    secret AS "secret!: DigestedSecret", digest_key,
+                    count(*) AS "stored!: Unsigned"
+                FROM (
+                    SELECT 'authorization_request' AS secret, digest_key
+                    FROM authorization_requests
+                    UNION ALL
+                    SELECT 'authorization_code', digest_key
+                    FROM authorization_codes
+                    UNION ALL
+                    SELECT 'refresh_token', digest_key
+                    FROM refresh_tokens
+                ) digests
+                GROUP BY secret, digest_key
+                ORDER BY secret, digest_key"#
+            )
+        )
+    }
+
     /// Purges a bounded batch of expired ephemeral authentication state, of event
     /// personal data older than 90 days, and of deliveries that succeeded over 7
     /// days ago or failed or were cancelled over 30 days ago, and returns how many

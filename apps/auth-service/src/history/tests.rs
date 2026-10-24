@@ -332,7 +332,7 @@ async fn reporting_ends_other_sessions_and_every_grant() {
         let mut tx = harness.database.begin().await.expect("transaction");
         assert!(matches!(
             tx.tokens()
-                .consume_for_rotation(token, &digest, client.as_str())
+                .consume_for_rotation(token, std::slice::from_ref(&digest), client.as_str())
                 .await,
             Err(RefreshRotationError::Invalid)
         ));

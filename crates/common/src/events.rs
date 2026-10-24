@@ -10,6 +10,7 @@ use crate::{
     Provider, SessionId, TokenId, UserId,
     clients::{ClientField, ClientKind},
     email::NormalizedEmail,
+    protocol::jwt::KeyId,
 };
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
@@ -243,6 +244,14 @@ pub enum DomainEvent {
         /// The reported event.
         event_id: EventId,
     },
+    /// A signing key moved through its lifecycle (see [`SigningKeyChange`]). It
+    /// concerns no account.
+    SigningKeyChanged {
+        /// The key's `kid`.
+        key_id: KeyId,
+        /// What happened to it.
+        change: SigningKeyChange,
+    },
     /// A row of the security audit log that preceded typed events. Only
     /// migrations write these; its fields are private, so one is only ever read back.
     Imported(ImportedAudit),
@@ -312,6 +321,7 @@ impl DomainEvent {
             | Self::DeliveryRetried { .. }
             | Self::DeliveryCancelled { .. }
             | Self::CompromiseReported { .. }
+            | Self::SigningKeyChanged { .. }
             | Self::Imported(_) => None,
         }
     }
@@ -357,6 +367,7 @@ impl DomainEvent {
             | Self::DeliveryRetried { .. }
             | Self::DeliveryCancelled { .. }
             | Self::CompromiseReported { .. }
+            | Self::SigningKeyChanged { .. }
             | Self::Imported(_) => None,
         }
     }
@@ -402,6 +413,7 @@ impl DomainEvent {
             Self::DeliveryRetried { .. } => "delivery_retried",
             Self::DeliveryCancelled { .. } => "delivery_cancelled",
             Self::CompromiseReported { .. } => "compromise_reported",
+            Self::SigningKeyChanged { .. } => "signing_key_changed",
             Self::Imported(_) => "imported",
         }
     }
@@ -504,7 +516,8 @@ impl DomainEvent {
             | Self::ClientSecretRotated { .. }
             // The delivery queue is operations' business; the audit keeps it.
             | Self::DeliveryRetried { .. }
-            | Self::DeliveryCancelled { .. } => return None,
+            | Self::DeliveryCancelled { .. }
+            | Self::SigningKeyChanged { .. } => return None,
         })
     }
 }
@@ -882,6 +895,32 @@ pub enum JobName {
     Cleanup,
     /// The purge of accounts whose deletion grace period ended.
     AccountPurge,
+    /// Signing key rotation. Nothing records it yet: a release may write a new
+    /// value only once the previous release reads it (see `database-crate.md`).
+    KeyRotation,
+}
+
+crate::str_enum! {
+    /// A step in a signing key's lifecycle: published as `next`, signing as
+    /// `active`, still published as `retiring`, then kept for `id_token_hint`
+    /// alone as `retired`, until it is deleted.
+    pub enum SigningKeyChange {
+        /// A key was generated: published as `next`, or signing at once when no
+        /// key signed or the key it replaces was revoked.
+        Generated = "generated",
+        /// A key was imported from the deployment's PEM key, signing at once.
+        Imported = "imported",
+        /// A `next` key started signing.
+        Activated = "activated",
+        /// A key stopped signing; it stays published for tokens it signed.
+        Retiring = "retiring",
+        /// A key left the key set; its private key was erased.
+        Retired = "retired",
+        /// A retired key was deleted, once no `id_token_hint` it signed could be valid.
+        Deleted = "deleted",
+        /// An operator removed a key at once, e.g. because it was compromised.
+        Revoked = "revoked",
+    }
 }
 
 /// A security audit log row, kept verbatim by the migrations to typed events.

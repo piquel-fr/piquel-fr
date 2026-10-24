@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "UPDATE authorization_requests r\n                SET claimed_at = now(), secret_digest = $4, expires_at = $5\n                FROM oidc_clients c\n                WHERE r.id = $1\n                AND r.secret_digest = $2\n                AND r.client_id = $3\n                AND r.pushed\n                AND r.claimed_at IS NULL\n                AND r.consumed_at IS NULL\n                AND r.expires_at > now()\n                AND c.id = r.client_id\n                AND c.enabled\n                RETURNING\n                    r.id AS \"id: TokenId\", r.client_id AS \"client_id: ClientId\",\n                    c.display_name AS client_display_name,\n                    r.redirect_uri, r.client_state, r.nonce, r.pkce_challenge,\n                    r.scopes AS \"scopes: JsonArray<String>\", r.audience, r.force_login,\n                    r.force_consent, r.prompt_none, r.max_age,\n                    r.hinted_user_id AS \"hinted_user_id: UserId\",\n                    r.target_acr AS \"target_acr: Acr\",\n                    r.claimed_at AS \"started_at!\"",
+  "query": "UPDATE authorization_requests r\n                SET consumed_at = now()\n                FROM oidc_clients c\n                WHERE r.id = $1\n                AND r.secret_digest = ANY($2)\n                AND r.consumed_at IS NULL\n                AND r.expires_at > now()\n                AND (NOT r.pushed OR r.claimed_at IS NOT NULL)\n                AND c.id = r.client_id\n                AND c.enabled\n                AND c.allowed_scopes @> r.scopes\n                AND c.allowed_audiences ? r.audience\n                AND EXISTS (\n                    SELECT 1\n                    FROM oidc_redirect_uris d\n                    WHERE d.client_id = c.id\n                    AND d.kind = 'authorization'\n                    AND d.uri = r.redirect_uri\n                )\n                RETURNING\n                    r.id AS \"id: TokenId\", r.client_id AS \"client_id: ClientId\",\n                    c.display_name AS client_display_name,\n                    r.redirect_uri, r.client_state, r.nonce, r.pkce_challenge,\n                    r.scopes AS \"scopes: JsonArray<String>\", r.audience, r.force_login,\n                    r.force_consent, r.prompt_none, r.max_age,\n                    r.hinted_user_id AS \"hinted_user_id: UserId\",\n                    r.target_acr AS \"target_acr: Acr\",\n                    COALESCE(r.claimed_at, r.created_at) AS \"started_at!\"",
   "describe": {
     "columns": [
       {
@@ -87,10 +87,7 @@
     "parameters": {
       "Left": [
         "Uuid",
-        "Bytea",
-        "Text",
-        "Bytea",
-        "Timestamptz"
+        "ByteaArray"
       ]
     },
     "nullable": [
@@ -109,8 +106,8 @@
       true,
       true,
       true,
-      true
+      null
     ]
   },
-  "hash": "5df4d40d4323f889eb5d87b3f4e706244182d294a7ad5393b6cc313b1391d5c6"
+  "hash": "2033785ea439c13e7ed6e4442ed12fb5f372adcb8848f0e2b81bd310ef58e2af"
 }

@@ -127,6 +127,7 @@ async fn pushed_requests_are_claimed_only_before_they_expire() {
             id,
             secret_digest: digest.clone(),
             pushed: true,
+            digest_key: "test".into(),
             client_id: client.id.clone(),
             redirect_uri: format!("{origin}/callback"),
             client_state: "state".into(),
@@ -146,9 +147,10 @@ async fn pushed_requests_are_claimed_only_before_they_expire() {
         .expect("push");
         oidc.claim_pushed_authorization_request(
             id,
-            &digest,
+            std::slice::from_ref(&digest),
             client.id.as_str(),
             TokenId::new().as_uuid().as_bytes(),
+            "test",
             Utc::now() + Duration::minutes(10),
         )
         .await

@@ -23,6 +23,8 @@ mod error;
 mod handle;
 /// Signup invitations.
 mod invite;
+/// Signing keys and token digest keys.
+mod keys;
 /// Serving the public and admin listeners.
 mod serve;
 /// Ending sessions.
@@ -43,6 +45,7 @@ use deliveries::DeliveriesCommand;
 use error::CliError;
 use handle::HandleCommand;
 use invite::InviteCommand;
+use keys::KeysCommand;
 use piquel_common::ErrorChain;
 use piquel_repository::Database;
 use piquel_telemetry::Telemetry;
@@ -71,6 +74,10 @@ enum Command {
     /// Apply database migrations. Connected as the schema owner, also create or
     /// reset the role other commands connect as.
     Migrate,
+    /// Inspect, rotate, revoke and import signing keys, and check token digest
+    /// keys. Every replica picks up a change within a minute.
+    #[command(subcommand)]
+    Keys(KeysCommand),
     /// Administrative commands.
     #[command(flatten)]
     Administration(Administration),
@@ -135,6 +142,7 @@ impl Command {
                 }
                 Ok(())
             }
+            Self::Keys(command) => command.run(database).await,
             Self::Administration(command) => command.run(&Console::new(database)?).await,
         }
     }

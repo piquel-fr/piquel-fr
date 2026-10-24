@@ -61,15 +61,21 @@ handle *ARGS:
 mailpit:
     @docker run --rm --name piquel-mailpit -p 127.0.0.1:1025:1025 -p 127.0.0.1:8025:8025 axllent/mailpit
 
-# Write a new RSA signing key; refuses to overwrite an existing file.
-generate-key PATH:
+# Inspect, rotate, revoke and import signing keys, e.g. `just auth keys list`.
+[positional-arguments]
+keys *ARGS:
+    @just auth run keys "$@"
+
+# Write 32 random bytes in unpadded base64url, as AUTH_KEY_ENCRYPTION_KEY and
+# AUTH_TOKEN_DIGEST_KEY take them; refuses to overwrite an existing file.
+generate-secret PATH:
     #!/usr/bin/env bash
     set -euo pipefail
     path={{ quote(PATH) }}
     if [[ -e "$path" ]]; then echo "$path already exists" >&2; exit 1; fi
     umask 077
     mkdir -p "$(dirname "$path")"
-    key_tmp=$(mktemp "$path.XXXXXX")
-    trap 'rm -f "$key_tmp"' EXIT
-    openssl genpkey -algorithm RSA -pkeyopt rsa_keygen_bits:3072 -out "$key_tmp"
-    mv -n "$key_tmp" "$path"
+    secret_tmp=$(mktemp "$path.XXXXXX")
+    trap 'rm -f "$secret_tmp"' EXIT
+    openssl rand -base64 32 | tr '+/' '-_' | tr -d '=\n' > "$secret_tmp"
+    mv -n "$secret_tmp" "$path"

@@ -168,6 +168,7 @@ impl Grant {
                     id: token,
                     family_id: family,
                     secret_digest: digest.clone(),
+                    digest_key: "test".into(),
                     expires_at: Utc::now() + Duration::hours(1),
                 },
             )
@@ -194,7 +195,7 @@ async fn independent_refreshes_share_client_and_logout_does_not_deadlock() {
         .await;
     let mut first_tx = pool.begin().await.expect("first transaction");
     TokenRepository::from_connection(&mut first_tx)
-        .consume_for_rotation(first, &digest_first, client.as_str())
+        .consume_for_rotation(first, std::slice::from_ref(&digest_first), client.as_str())
         .await
         .expect("first refresh");
     let mut second_tx = pool.begin().await.expect("second transaction");
@@ -202,7 +203,7 @@ async fn independent_refreshes_share_client_and_logout_does_not_deadlock() {
         Wait::from_secs(2),
         TokenRepository::from_connection(&mut second_tx).consume_for_rotation(
             second,
-            &digest_second,
+            std::slice::from_ref(&digest_second),
             client.as_str(),
         ),
     )
@@ -222,7 +223,7 @@ async fn independent_refreshes_share_client_and_logout_does_not_deadlock() {
     let rotation_backend = backend(&mut rotation).await;
     let rotation_task = tokio::spawn(async move {
         let result = TokenRepository::from_connection(&mut rotation)
-            .consume_for_rotation(first, &digest_first, client.as_str())
+            .consume_for_rotation(first, std::slice::from_ref(&digest_first), client.as_str())
             .await;
         rotation.rollback().await.expect("rollback rotation");
         result
@@ -268,7 +269,7 @@ async fn replay_revokes_family_despite_invalid_scopes() {
     }
     let mut tx = pool.begin().await.expect("transaction");
     let result = TokenRepository::from_connection(&mut tx)
-        .consume_for_rotation(token, &digest, client.as_str())
+        .consume_for_rotation(token, std::slice::from_ref(&digest), client.as_str())
         .await;
     assert!(
         matches!(result, Err(RefreshRotationError::Replay { .. })),
@@ -302,7 +303,11 @@ async fn code_replay_waits_for_first_redemption_and_revokes_its_family() {
         let mut first = DatabaseTransaction::new(pool.begin().await.expect("first redemption"));
         first
             .oidc()
-            .consume_code(grant.code, &grant.code_digest, &client)
+            .consume_code(
+                grant.code,
+                std::slice::from_ref(&grant.code_digest),
+                &client,
+            )
             .await
             .expect("first redemption");
         let (token, digest) = grant.family(&mut first.tokens(), &client).await;
@@ -320,7 +325,7 @@ async fn code_replay_waits_for_first_redemption_and_revokes_its_family() {
         let replay_task = tokio::spawn(async move {
             let result = replay
                 .oidc()
-                .consume_code(code, &code_digest, &replay_client)
+                .consume_code(code, std::slice::from_ref(&code_digest), &replay_client)
                 .await;
             replay.commit().await.expect("commit replay");
             result
@@ -334,7 +339,7 @@ async fn code_replay_waits_for_first_redemption_and_revokes_its_family() {
         );
         let mut rotation = pool.begin().await.expect("rotation transaction");
         let result = TokenRepository::from_connection(&mut rotation)
-            .consume_for_rotation(token, &digest, client.as_str())
+            .consume_for_rotation(token, std::slice::from_ref(&digest), client.as_str())
             .await;
         assert!(
             matches!(result, Err(RefreshRotationError::Invalid)),
@@ -351,16 +356,20 @@ async fn code_replay_by_another_client_revokes_nothing() {
     let client = client(&pool).await;
     let grant = Grant::new(&pool, &client).await;
     let mut oidc = OidcRepository::from_pool(&pool);
-    oidc.consume_code(grant.code, &grant.code_digest, &client)
-        .await
-        .expect("first redemption");
+    oidc.consume_code(
+        grant.code,
+        std::slice::from_ref(&grant.code_digest),
+        &client,
+    )
+    .await
+    .expect("first redemption");
     let (token, digest) = grant
         .family(&mut TokenRepository::from_pool(&pool), &client)
         .await;
     let result = oidc
         .consume_code(
             grant.code,
-            &grant.code_digest,
+            std::slice::from_ref(&grant.code_digest),
             &"another-client".parse().expect("client ID"),
         )
         .await;
@@ -370,7 +379,7 @@ async fn code_replay_by_another_client_revokes_nothing() {
     );
     let mut rotation = pool.begin().await.expect("rotation transaction");
     TokenRepository::from_connection(&mut rotation)
-        .consume_for_rotation(token, &digest, client.as_str())
+        .consume_for_rotation(token, std::slice::from_ref(&digest), client.as_str())
         .await
         .expect("the family still rotates");
 }

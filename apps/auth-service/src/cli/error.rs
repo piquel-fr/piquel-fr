@@ -1,6 +1,8 @@
 //! Failures of startup and administrative commands.
 
-use crate::{AdminError, ClientRegistryError, StartupError, UserRef, account::AccountError};
+use crate::{
+    AdminError, ClientRegistryError, KeyError, StartupError, UserRef, account::AccountError,
+};
 use piquel_common::{
     clients::{InvalidCount, InvalidDisplayName, InvalidRedirectUri, InvalidScopeName},
     config::{ConfigurationError, SecretError},
@@ -28,6 +30,15 @@ pub(super) enum CliError {
     /// A change to an account's settings was refused or failed.
     #[error(transparent)]
     Account(#[from] AccountError),
+    /// A signing key change was refused or failed.
+    #[error(transparent)]
+    Keys(#[from] KeyError),
+    /// The PEM key given to `keys import` could not be read.
+    #[error("could not read the PEM key to import")]
+    PemUnreadable(#[source] SecretError),
+    /// The PEM key given to `keys import` is not an RSA key of at least 2048 bits.
+    #[error("the key to import must be an RSA private PEM key of at least 2048 bits")]
+    InvalidPem(#[source] CryptoError),
     /// The account an operator named could not be found.
     #[error("account {user}")]
     User {

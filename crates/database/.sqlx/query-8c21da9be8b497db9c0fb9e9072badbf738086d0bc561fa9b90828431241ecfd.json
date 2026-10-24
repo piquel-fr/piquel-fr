@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "UPDATE authorization_requests r\n                SET consumed_at = now()\n                FROM oidc_clients c\n                WHERE r.id = $1\n                AND r.secret_digest = $2\n                AND r.consumed_at IS NULL\n                AND r.expires_at > now()\n                AND (NOT r.pushed OR r.claimed_at IS NOT NULL)\n                AND c.id = r.client_id\n                AND c.enabled\n                AND c.allowed_scopes @> r.scopes\n                AND c.allowed_audiences ? r.audience\n                AND EXISTS (\n                    SELECT 1\n                    FROM oidc_redirect_uris d\n                    WHERE d.client_id = c.id\n                    AND d.kind = 'authorization'\n                    AND d.uri = r.redirect_uri\n                )\n                RETURNING\n                    r.id AS \"id: TokenId\", r.client_id AS \"client_id: ClientId\",\n                    c.display_name AS client_display_name,\n                    r.redirect_uri, r.client_state, r.nonce, r.pkce_challenge,\n                    r.scopes AS \"scopes: JsonArray<String>\", r.audience, r.force_login,\n                    r.force_consent, r.prompt_none, r.max_age,\n                    r.hinted_user_id AS \"hinted_user_id: UserId\",\n                    r.target_acr AS \"target_acr: Acr\",\n                    COALESCE(r.claimed_at, r.created_at) AS \"started_at!\"",
+  "query": "SELECT\n                    r.id AS \"id: TokenId\", r.client_id AS \"client_id: ClientId\",\n                    c.display_name AS client_display_name,\n                    r.redirect_uri, r.client_state, r.nonce, r.pkce_challenge,\n                    r.scopes AS \"scopes: JsonArray<String>\", r.audience, r.force_login,\n                    r.force_consent, r.prompt_none, r.max_age,\n                    r.hinted_user_id AS \"hinted_user_id: UserId\",\n                    r.target_acr AS \"target_acr: Acr\",\n                    COALESCE(r.claimed_at, r.created_at) AS \"started_at!\"\n                FROM authorization_requests r\n                JOIN oidc_clients c ON c.id = r.client_id\n                WHERE r.id = $1\n                AND r.secret_digest = ANY($2)\n                AND r.consumed_at IS NULL\n                AND r.expires_at > now()\n                AND (NOT r.pushed OR r.claimed_at IS NOT NULL)\n                AND c.enabled",
   "describe": {
     "columns": [
       {
@@ -87,7 +87,7 @@
     "parameters": {
       "Left": [
         "Uuid",
-        "Bytea"
+        "ByteaArray"
       ]
     },
     "nullable": [
@@ -109,5 +109,5 @@
       null
     ]
   },
-  "hash": "fc0a8f170edda7e63bfa3fc7e3d319bee795096d8d58c6b4ab5afd5034c8cf4d"
+  "hash": "8c21da9be8b497db9c0fb9e9072badbf738086d0bc561fa9b90828431241ecfd"
 }

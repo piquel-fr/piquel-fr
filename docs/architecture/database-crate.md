@@ -157,7 +157,10 @@ on one replica at a time call `Database::try_exclusive(LockKey)`, which takes a
 session-level advisory lock on a dedicated connection outside the pool. The lock
 ends with that connection, even when the job is cancelled or the process dies, so
 it needs no lease or expiry, and a lock holder never returns to the pool. Give each
-job its own `LockKey` value and never reuse one.
+job its own `LockKey` value and never reuse one. `LockKey::SigningKeys` is instead
+taken per transaction, by `signing_keys().lock()` or `try_lock()`: it serializes
+every change to `signing_keys`, so rotation runs on one replica at a time and never
+races a `keys` command.
 Tests that use `TEST_DATABASE_URL` are explicitly
 marked ignored by the ordinary unit test runner; other crates' tests read stored state
 through helpers behind the `test-support` feature. `just db test` runs them in a

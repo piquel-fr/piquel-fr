@@ -983,7 +983,7 @@ async fn google_signed_tokens_require_well_typed_trusted_issuer_and_audience() {
         panic!("Google must use signed ID tokens");
     };
     protocol.keys = KeyCache::fixed(
-        KeySet::parse(&serde_json::to_vec(rsa.jwks()).expect("JWKS")).expect("key set"),
+        KeySet::parse(&serde_json::to_vec(&rsa.jwks()).expect("JWKS")).expect("key set"),
     );
     let valid = serde_json::json!({"iss":"https://accounts.google.com","aud":"client","sub":"subject","iat":Utc::now().timestamp(),"exp":Utc::now().timestamp()+300,"nonce":"nonce"});
     let verify = async |claims: &serde_json::Value| {

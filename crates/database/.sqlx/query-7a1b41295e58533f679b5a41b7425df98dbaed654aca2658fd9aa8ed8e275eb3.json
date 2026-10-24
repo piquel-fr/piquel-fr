@@ -1,0 +1,19 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO signing_keys (\n                    id, key_type, state, public_jwk, sealed_private_key, created_at, activated_at\n                ) VALUES (\n                    $1, $2, $3, $4, $5, $6::timestamptz,\n                    CASE WHEN $3::text = 'active' THEN $6::timestamptz END\n                )",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Text",
+        "Text",
+        "Jsonb",
+        "Bytea",
+        "Timestamptz"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "7a1b41295e58533f679b5a41b7425df98dbaed654aca2658fd9aa8ed8e275eb3"
+}
