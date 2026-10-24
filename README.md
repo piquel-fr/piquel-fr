@@ -236,7 +236,7 @@ just auth account alice emails remove <email-id> --reason "Asked by email"
   for what is shared.
 - `user recover` is not usable yet: the page its link opens comes with the
   server-rendered pages. It is for an owner who lost every passkey. It signs the
-  account out everywhere, and emails its primary verified address a link that
+  account out everywhere, and emails the primary address it records a link that
   enrolls one passkey, once, within a day; it prints the link too, for an owner
   without an address. The owner can undo a recovery with a passkey they had
   before it, for 30 days after the link was used, which takes back every passkey,

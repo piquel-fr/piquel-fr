@@ -962,7 +962,7 @@ async fn support_takes_back_every_passkey_added_since() {
 #[tokio::test]
 #[ignore = "requires TEST_DATABASE_URL"]
 async fn a_forced_recovery_mails_only_the_primary_from_before() {
-    let scenario = Scenario::new().await;
+    let mut scenario = Scenario::new().await;
     let database = scenario.database().clone();
     let user = scenario.user();
     let owners = scenario.address("owner", true).await;
@@ -989,6 +989,9 @@ async fn a_forced_recovery_mails_only_the_primary_from_before() {
     let signed_in = scenario.signed_in_with(scenario.keys.key_id).await;
     let view = scenario.status(&signed_in).await;
     assert_eq!(view["rollback"]["primary"]["id"], owners.to_string());
+    assert_eq!(scenario.undo(&view["id"]).await.0, StatusCode::NO_CONTENT);
+    let primary = scenario.emails().await.into_iter().find(|email| email.1);
+    assert_eq!(primary, Some((owners, true)), "restored");
 
     // An account that had no address when the first recovery started.
     let scenario = Scenario::new().await;

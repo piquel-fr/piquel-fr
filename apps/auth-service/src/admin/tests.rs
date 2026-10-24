@@ -1185,4 +1185,25 @@ async fn no_grant_while_a_recovery_can_be_undone() {
         .grant_administrator(&cli(), target, WhileUndoable::Proceed)
         .await
         .expect("the CLI, once the owner is confirmed");
+
+    // Once support undid the recovery, nothing is left to refuse.
+    let other = harness.account().await.user_id;
+    let reason = || Reason::parse("Lost every passkey".into()).expect("reason");
+    let service = harness.service();
+    service
+        .recover_account(&cli(), other, reason(), &links, WhileUndoable::Proceed)
+        .await
+        .expect("recovery");
+    let recent = service
+        .recent_recoveries(&cli(), other)
+        .await
+        .expect("recent");
+    service
+        .undo_recovery(&cli(), other, recent[0].recovery.id, reason())
+        .await
+        .expect("support undoes the unused link");
+    service
+        .grant_administrator(&cli(), other, WhileUndoable::Refuse)
+        .await
+        .expect("granted without the flag");
 }

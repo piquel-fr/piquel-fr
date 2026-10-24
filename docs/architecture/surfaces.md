@@ -117,7 +117,7 @@ When an administrator or operator acts:
 An owner who lost every passkey cannot add one: adding a way to sign in needs a
 passkey confirmation. `AdminService::recover_account` helps without giving the
 administrator a way in. It signs the account out everywhere and emails the
-owner's primary verified address a link that enrolls one passkey, once, within a
+primary address it records a link that enrolls one passkey, once, within a
 day, then signs that browser in with it. The link's token alone authorizes it;
 only its digest is stored, and the email's delivery stores neither. Only an
 operator at the terminal sees the link (`user recover`), which also reaches an
@@ -138,7 +138,7 @@ recovery's passkey sign-in counts as a fresh confirmation, so they could add mor
 ways in right away. Undoing therefore takes back everything the account gained
 since the recovery started: it stops a link not used yet, removes every passkey
 enrolled, identity linked, OIDC consent given and address added or verified
-since, makes the primary address the recovery started with primary again (or the
+since, makes the primary address the recovery recorded primary again (or the
 oldest address verified before it), ends every session and signs the undoing
 browser in. Revoking the consents means an app they approved cannot sign the
 owner in again without asking. The owner loses what they added themselves

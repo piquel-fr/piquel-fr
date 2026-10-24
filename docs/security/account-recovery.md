@@ -354,10 +354,14 @@ Before `user recover`:
    `auth-service account <user> history`, which shows each change and sign-in
    with its device and IP. Look for signs the account is already compromised:
    identities linked, addresses added or a primary change in the last 30 days,
-   sign-ins from new devices. The link always goes to the current primary, so if
-   the primary changed recently, establish the owner through older channels,
-   then restore the older primary first with `auth-service account <user> emails
-   primary <id> --reason "…"`, or do not run `user recover`.
+   sign-ins from new devices. The link goes to the primary address the recovery
+   records (L4): the current primary, or, while an earlier recovery can still be
+   undone, the one the oldest of them recorded, whatever the primary is now. So
+   while an earlier recovery can be undone, changing the primary redirects
+   nothing: undo that recovery first. Otherwise, if the primary changed
+   recently, establish the owner through older channels, then restore the older
+   primary first with `auth-service account <user> emails primary <id> --reason
+   "…"`, or do not run `user recover`.
 2. **Read the listing `user recover` prints.** If a recovery can still be undone,
    find out who used it before anything else. If it was not the requester, undo
    it with `user undo-recovery` first, under the rules below, so the next link
@@ -375,8 +379,8 @@ Before `user recover`:
 5. **Write the reason as the evidence:** who asked, through which channel, which
    checks passed. The owner sees it.
 6. **Prefer the email to the printed link.** Print the link to the requester only
-   for an account with no address, and only through the channel confirmed in 3,
-   never through the channel the request came from.
+   when the recovery has no address to mail (L4), and only through the channel
+   confirmed in 3, never through the channel the request came from.
 
 Before `user undo-recovery`, on a claim that a recovery was not the owner's:
 
@@ -392,12 +396,15 @@ Before `user undo-recovery`, on a claim that a recovery was not the owner's:
 Before `admin grant --despite-undoable`, which re-grants an administrator's
 rights while its recovery can still be undone (A3):
 
-1. **Confirm the owner as for an undo,** through evidence from before the
-   recovery, and check that the recovery's rollback lists nothing the owner does
-   not recognize. If it does, undo the recovery first.
-2. **Prefer waiting** until the recovery settles, when the flag is no longer
+1. **Undo every unused link first** with `user undo-recovery`: confirming the
+   owner says nothing about who holds a link nobody has used yet, and whoever
+   holds it could use it after the grant.
+2. **Review every undoable recovery in the listing,** not only the newest, and
+   confirm the owner as for an undo, through evidence from before them. Undo any
+   whose rollback lists something the owner does not recognize.
+3. **Prefer waiting** until the recovery settles, when the flag is no longer
    needed, unless the owner's rights are needed sooner.
-3. **Never grant on a request** that comes through anything the rollback lists.
+4. **Never grant on a request** that comes through anything a rollback lists.
 
 Never enough on its own:
 
