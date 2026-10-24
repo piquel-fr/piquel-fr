@@ -1,7 +1,7 @@
 //! Validated names and the browser API's request and response bodies.
 
 use super::PasskeyError;
-use piquel_common::{TokenId, UserId};
+use piquel_common::{RecoveryId, TokenId, UserId};
 use serde::{Deserialize, Serialize};
 use webauthn_rs::prelude::{PublicKeyCredential, RegisterPublicKeyCredential};
 
@@ -87,6 +87,13 @@ pub(super) struct EnrollmentStart {
     /// Defaults to the compatible standard registration path.
     #[serde(default)]
     pub(super) passkey_kind: PasskeyKind,
+}
+
+/// The recovery an undo page showed, which the undo must still be about.
+#[derive(Deserialize)]
+pub(super) struct RecoveryUndo {
+    /// The recovery.
+    pub(super) recovery_id: RecoveryId,
 }
 
 /// A recovery link's token, from its page's fragment.

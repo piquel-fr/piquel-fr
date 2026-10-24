@@ -87,7 +87,7 @@ enum Command {
 /// terminal: `$USER` and the host name.
 #[derive(Subcommand)]
 enum Administration {
-    /// Search, show, disable and reactivate accounts.
+    /// Search, show, disable, reactivate and recover accounts.
     #[command(subcommand)]
     User(UserCommand),
     /// End an account's sessions.

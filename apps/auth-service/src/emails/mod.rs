@@ -177,7 +177,7 @@ impl EmailApplication {
     /// Records the removal of `user_id`'s address `id` as `context`'s, then
     /// deletes it. In that order, so the `email` channel still reads a verified
     /// address and copies it into the notice of its removal.
-    async fn delete(
+    pub(crate) async fn delete(
         tx: &mut DatabaseTransaction<'_>,
         context: &EventContext,
         user_id: UserId,

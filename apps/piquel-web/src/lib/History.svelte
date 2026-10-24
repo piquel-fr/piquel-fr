@@ -270,7 +270,7 @@
       case 'account.recovery_started':
         return 'Account recovery started';
       case 'account.recovered':
-        return `Passkey${passkeyName(entry.passkey_id)} added with a recovery link`;
+        return 'Account recovered with a new passkey';
       case 'account.recovery_undone':
         return 'Account recovery undone';
       case 'administrator.granted':

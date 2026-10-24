@@ -1,0 +1,41 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT id AS \"id: EmailId\", normalized_email AS address,\n                    created_at AS added_at, verified_at\n                FROM user_emails\n                WHERE user_id = $1 AND (created_at >= $2 OR verified_at >= $2)\n                ORDER BY created_at, id",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id: EmailId",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "address",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 2,
+        "name": "added_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 3,
+        "name": "verified_at",
+        "type_info": "Timestamptz"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Timestamptz"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      true
+    ]
+  },
+  "hash": "0fb3a7076054ba004ad1f0dc3d3c1d3e4696a3847ed2d3a11a567ebcdee5e2b8"
+}

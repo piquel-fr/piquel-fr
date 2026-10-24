@@ -9,10 +9,14 @@
 //!
 //! The owner can undo a recovery from a session signed in, or confirmed, by a
 //! passkey enrolled before it started. The recovery's own passkey and a social
-//! sign-in do not count. Undoing it stops a link not used yet, or removes the
-//! passkey it enrolled and signs out every other session: the recovery signed out
-//! all of them, so each was signed in since, perhaps with a social sign-in that
-//! passkey linked.
+//! sign-in do not count. The recovery's passkey sign-in counts as a fresh
+//! confirmation, so whoever used the link could add more ways in at once. Undoing
+//! it therefore takes back everything the account gained since it started (a
+//! [`Rollback`]): it stops a link not used yet, removes the passkeys enrolled, the
+//! identities linked and the addresses added or verified since, restores the
+//! primary address, and signs out every other session, each of which was signed
+//! in since. The owner loses what they added themselves meanwhile too; the undo
+//! page lists all of it first.
 
 /// Recovery failures and their browser response mapping.
 mod error;
@@ -20,17 +24,19 @@ pub(crate) use error::RecoveryError;
 
 use crate::{
     account::{AccountError, AccountService, Owner},
+    emails::EmailApplication,
     routes,
 };
 use chrono::{DateTime, Duration, Utc};
 use piquel_common::{
     AccountStatus, RecoveryId, UserId,
     config::Origin,
-    events::{DomainEvent, RevocationReason},
-    protocol::api::Passkey,
+    events::{DomainEvent, EventContext, RevocationReason},
 };
 use piquel_crypto::{CryptoError, Secret};
-use piquel_repository::{DatabaseTransaction, SessionScope, StoredRecovery};
+use piquel_repository::{
+    DatabaseError, DatabaseTransaction, Rollback, SessionScope, StoredRecovery,
+};
 use serde::Serialize;
 use std::sync::Arc;
 use url::Url;
@@ -72,17 +78,18 @@ pub(crate) struct RecoveryAccount {
     pub(crate) expires_at: DateTime<Utc>,
 }
 
-/// The account's newest recovery its owner could undo, as settings show it.
+/// The account's newest recovery its owner could undo, as the undo page shows
+/// it.
 #[derive(Serialize)]
 pub(crate) struct RecoveryView {
-    /// The recovery.
+    /// The recovery, which undoing it names.
     id: RecoveryId,
     /// When it started.
     started_at: DateTime<Utc>,
     /// When its link enrolled a passkey; `None` while the link still works.
     completed_at: Option<DateTime<Utc>>,
-    /// The passkey it enrolled, while it is active.
-    passkey: Option<Passkey>,
+    /// Exactly what undoing it would take back now.
+    rollback: Rollback,
     /// Whether this session may undo it: a passkey enrolled before the recovery
     /// signed it in, or confirmed it since.
     can_undo: bool,
@@ -106,16 +113,21 @@ impl RecoveryLinks {
         Secret::derive(self.key.as_bytes(), id.as_uuid().as_bytes())
     }
 
-    /// Recovery `id`'s link: the recovery page, with the token in its fragment so
-    /// it never reaches a server log.
+    /// Recovery `id`'s link, as [`Self::url`] builds it.
     ///
     /// # Errors
     ///
     /// Returns [`CryptoError`] if the HMAC provider fails.
     pub(crate) fn link(&self, id: RecoveryId) -> Result<Url, CryptoError> {
+        Ok(self.url(&self.token(id)?))
+    }
+
+    /// The link holding `token`: the recovery page, with the token in its
+    /// fragment so it never reaches a server log.
+    pub(crate) fn url(&self, token: &Secret) -> Url {
         let mut link = self.origin.url(routes::page::RECOVER);
-        link.set_fragment(Some(&format!("token={}", self.token(id)?.encoded())));
-        Ok(link)
+        link.set_fragment(Some(&format!("token={}", token.encoded())));
+        link
     }
 }
 
@@ -174,8 +186,8 @@ impl AccountService {
         })
     }
 
-    /// The account's newest recovery its owner could undo, and whether the
-    /// owner's session may undo it.
+    /// The account's newest recovery its owner could undo, what undoing it would
+    /// take back, and whether the owner's session may undo it.
     pub(crate) async fn recovery(
         &self,
         owner: &Owner,
@@ -184,32 +196,27 @@ impl AccountService {
         let Some(recovery) = tx.recoveries().latest_undoable(owner.user()).await? else {
             return Ok(None);
         };
-        let passkey = match recovery.passkey_id {
-            Some(id) => tx
-                .passkeys()
-                .list_active(owner.user())
-                .await?
-                .into_iter()
-                .find(|passkey| passkey.id == id)
-                .map(Passkey::from),
-            None => None,
-        };
+        let rollback = tx.recoveries().rollback(&recovery).await?;
         let can_undo = Self::predates(&mut tx, owner, &recovery).await?;
         tx.commit().await?;
         Ok(Some(RecoveryView {
             id: recovery.id,
             started_at: recovery.started_at,
             completed_at: recovery.completed_at,
-            passkey,
+            rollback,
             can_undo,
         }))
     }
 
-    /// Undoes the account's newest recovery, for an owner whose session a passkey
-    /// enrolled before it signed in or confirmed. A link not used yet stops
-    /// working. Once it enrolled a passkey, that passkey is removed and every other
-    /// session ends; the owner's own session stays.
-    pub(crate) async fn undo_recovery(&self, owner: &Owner) -> Result<(), AccountError> {
+    /// Undoes recovery `id`, the account's newest one, for an owner whose session
+    /// a passkey enrolled before it signed in or confirmed. Takes back its
+    /// [`Rollback`], records each change as the owner's, and signs out every other
+    /// session; the owner's own session stays.
+    pub(crate) async fn undo_recovery(
+        &self,
+        owner: &Owner,
+        id: RecoveryId,
+    ) -> Result<(), AccountError> {
         let user = owner.user();
         let mut tx = self.database.begin().await?;
         owner.lock(&mut tx).await?;
@@ -218,10 +225,15 @@ impl AccountService {
             .latest_undoable(user)
             .await?
             .ok_or(RecoveryError::NothingToUndo)?;
+        if recovery.id != id {
+            return Err(RecoveryError::Changed.into());
+        }
         if !Self::predates(&mut tx, owner, &recovery).await? {
             return Err(RecoveryError::OlderPasskeyRequired.into());
         }
         let context = owner.context();
+        let rollback = tx.recoveries().rollback(&recovery).await?;
+        Self::take_back(&mut tx, &context, user, rollback).await?;
         tx.recoveries().undo(recovery.id).await?;
         tx.record(
             &context,
@@ -231,21 +243,53 @@ impl AccountService {
             },
         )
         .await?;
-        if let Some(passkey_id) = recovery.passkey_id {
-            // The owner may have removed it already.
-            if tx.passkeys().revoke_if_not_last(passkey_id, user).await? {
-                let removed = DomainEvent::PasskeyRemoved { passkey_id };
-                tx.record(&context, Some(user), removed).await?;
-            }
-            tx.revoke_sessions(
-                &context,
-                user,
-                SessionScope::AllExcept(owner.session().id),
-                &RevocationReason::CredentialRemoved,
-            )
-            .await?;
-        }
+        tx.revoke_sessions(
+            &context,
+            user,
+            SessionScope::AllExcept(owner.session().id),
+            &RevocationReason::CredentialRemoved,
+        )
+        .await?;
         Ok(tx.commit().await?)
+    }
+
+    /// Applies `rollback` to `user`'s account in `tx`, recording each change in
+    /// `context`. The primary address moves back before the added ones go, since
+    /// one of them may be primary. The undoing session's passkey predates the
+    /// recovery, so a passkey always remains.
+    async fn take_back(
+        tx: &mut DatabaseTransaction<'_>,
+        context: &EventContext,
+        user: UserId,
+        rollback: Rollback,
+    ) -> Result<(), DatabaseError> {
+        for passkey in rollback.passkeys {
+            if tx.passkeys().revoke_if_not_last(passkey.id, user).await? {
+                let removed = DomainEvent::PasskeyRemoved {
+                    passkey_id: passkey.id,
+                };
+                tx.record(context, Some(user), removed).await?;
+            }
+        }
+        for identity in rollback.identities {
+            let provider = identity.provider;
+            if tx.federation().unlink(user, provider).await? {
+                let unlinked = DomainEvent::IdentityUnlinked { provider };
+                tx.record(context, Some(user), unlinked).await?;
+            }
+        }
+        if let Some(primary) = rollback.primary {
+            let previous_email_id = tx.emails().set_primary(user, primary.id).await?;
+            let changed = DomainEvent::PrimaryEmailChanged {
+                email_id: primary.id,
+                previous_email_id,
+            };
+            tx.record(context, Some(user), changed).await?;
+        }
+        for email in rollback.emails {
+            EmailApplication::delete(tx, context, user, email.id).await?;
+        }
+        Ok(())
     }
 
     /// Whether a passkey enrolled before `recovery` started, still active,

@@ -14,8 +14,8 @@ This is the target design; parts not built yet are marked *(planned)*.
 
 The auth executable owns everything that authenticates someone or issues a
 credential: discovery, JWKS, authorization, token, userinfo, logout, and the
-pages a ceremony needs (login, signup, consent, passkey confirmation, device
-verification *(planned)*). It never hosts settings, developer or admin pages.
+pages a ceremony needs (login, signup, consent, passkey confirmation, account
+recovery and device verification *(planned)*). It never hosts settings, developer or admin pages.
 
 The account and admin APIs are routes in the same executable. They are small
 next to the pages that use them, and keeping them there keeps one binary, one
@@ -120,16 +120,24 @@ administrator a way in. It signs the account out everywhere and emails the
 owner's primary verified address a link that enrolls one passkey, once, within a
 day, then signs that browser in with it. The link's token alone authorizes it;
 only its digest is stored, and the email's delivery stores neither. Only an
-operator at the terminal sees the link (`user recover`), for an owner without an
-address, so an administrator may recover only an account with one. A new recovery
-replaces an older link, and every verified address hears when a recovery enrolls
-a passkey.
+operator at the terminal sees the link (`user recover`), which also reaches an
+owner without an address. An administrator never sees it, so they may recover
+only an account with a primary address; the dashboard's way to start one is
+*(planned)*. A new recovery, or disabling the account, stops an unused link, and
+every verified address hears when a recovery enrolls a passkey.
 
 The owner undoes a recovery from a session that a passkey enrolled before it signed
 in or confirmed: neither the recovery's passkey nor a social sign-in counts, since
-whoever holds them may not be the owner. Undoing it stops a link not used yet, or
-removes the passkey it enrolled and ends that passkey's sessions. The pages that
-use the link and offer the undo are *(planned)*; until then nothing can use a link.
+whoever holds them may not be the owner. The recovery's passkey sign-in counts as
+a fresh confirmation, so whoever used the link could add more ways in right away.
+Undoing therefore takes back everything the account gained since the recovery
+started: it stops a link not used yet, removes every passkey enrolled, identity
+linked and address added or verified since, makes the primary address the
+recovery started with primary again (or the oldest address verified before it),
+and signs out every other session. The owner loses what they added themselves
+meanwhile too, so the undo page lists exactly what goes first. Consents, owned
+clients and profile edits stay: they are not ways in. The pages that use the link
+and offer the undo are *(planned)*; until then nothing can use a link.
 
 ## Contracts
 

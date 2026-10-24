@@ -1,9 +1,12 @@
 //! Retries, address resolution and rendering, with a fake relay.
 
 use super::*;
-use crate::{recovery::LINK_LIFETIME, tests::Replicas};
-use piquel_common::{EmailId, Handle, RecoveryId};
-use piquel_repository::{InsertRecovery, InsertUnverifiedEmail, InsertUser, InsertVerifiedEmail};
+use crate::{
+    recovery::LINK_LIFETIME,
+    tests::{Replicas, verified_address},
+};
+use piquel_common::{AccountStatus, EmailId, Handle, RecoveryId};
+use piquel_repository::{InsertRecovery, InsertUnverifiedEmail, InsertUser};
 use std::sync::{
     Arc, Mutex,
     atomic::{AtomicBool, Ordering},
@@ -160,7 +163,7 @@ async fn retries_resend_the_same_message_to_the_current_address() {
 }
 
 /// A recovery's link goes to its address, naming the account, only while the
-/// link works. The notice that a recovery enrolled a passkey links to settings,
+/// link works and the account is active. The notice that a recovery enrolled a passkey links to settings,
 /// where an older passkey undoes it.
 #[tokio::test]
 #[ignore = "requires TEST_DATABASE_URL"]
@@ -169,19 +172,8 @@ async fn a_recovery_link_is_sent_while_it_works() {
     let settings = "https://piquel.fr/settings".parse().expect("settings URL");
     let config = EmailConfig::test(&settings, true);
     let user_id = account(&database).await;
-    let email_id = EmailId::new();
     let address = format!("{user_id}@example.com");
-    database
-        .emails()
-        .insert_verified(&InsertVerifiedEmail {
-            id: email_id,
-            user_id,
-            normalized_email: address.clone(),
-            is_primary: true,
-            verified_at: chrono::Utc::now(),
-        })
-        .await
-        .expect("address");
+    let email_id = verified_address(&database, user_id, &address, true).await;
     let recovery_id = RecoveryId::new();
     let token = config.recovery_links.token(recovery_id).expect("token");
     database
@@ -190,6 +182,7 @@ async fn a_recovery_link_is_sent_while_it_works() {
             id: recovery_id,
             user_id,
             secret_digest: token.digest().as_bytes(),
+            primary_email_id: Some(email_id),
             expires_at: chrono::Utc::now() + LINK_LIFETIME,
         })
         .await
@@ -227,7 +220,20 @@ async fn a_recovery_link_is_sent_while_it_works() {
         sender.assert_renders(user_id, message).await;
     }
 
-    // A replaced recovery's link is not sent.
+    // A disabled account's link is not sent, nor a replaced recovery's.
+    let disable = async |status| {
+        let changed = database.users().set_status(user_id, status).await;
+        assert!(changed.expect("status"));
+    };
+    disable(AccountStatus::Disabled).await;
+    assert!(
+        sender
+            .content(user_id, &link)
+            .await
+            .expect("content")
+            .is_none()
+    );
+    disable(AccountStatus::Active).await;
     database
         .recoveries()
         .cancel_open(user_id)

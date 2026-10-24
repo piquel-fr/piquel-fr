@@ -183,7 +183,7 @@ impl Channel for Email {
 
 impl EmailRepository<'_> {
     /// `user_id`'s verified address `email_id`, if recovery `recovery_id` of the
-    /// account still has a working link, with the account's username.
+    /// active account still has a working link, with the account's username.
     ///
     /// # Errors
     ///
@@ -205,7 +205,8 @@ impl EmailRepository<'_> {
                 JOIN account_recoveries r ON r.user_id = e.user_id
                 WHERE e.user_id = $1 AND e.id = $3 AND e.verified_at IS NOT NULL
                 AND r.id = $2 AND r.completed_at IS NULL AND r.cancelled_at IS NULL
-                AND r.undone_at IS NULL AND r.expires_at > now()",
+                AND r.undone_at IS NULL AND r.expires_at > now()
+                AND u.status = 'active'",
                 user_id.as_uuid(),
                 recovery_id.as_uuid(),
                 email_id.as_uuid(),

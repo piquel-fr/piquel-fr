@@ -1,0 +1,52 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT\n                    id AS \"id: RecoveryId\", user_id AS \"user_id: UserId\",\n                    primary_email_id AS \"primary_email_id: EmailId\", started_at,\n                    expires_at, completed_at\n                FROM account_recoveries\n                WHERE user_id = $1\n                AND cancelled_at IS NULL AND undone_at IS NULL\n                AND (completed_at IS NOT NULL OR expires_at > now())\n                ORDER BY started_at DESC, id DESC\n                LIMIT 1",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id: RecoveryId",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "user_id: UserId",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 2,
+        "name": "primary_email_id: EmailId",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 3,
+        "name": "started_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 4,
+        "name": "expires_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 5,
+        "name": "completed_at",
+        "type_info": "Timestamptz"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      true,
+      false,
+      false,
+      true
+    ]
+  },
+  "hash": "9ca64090fcb320b1946ace7dc293c8cd7429295e5e705f7205b307072fa9cb9a"
+}

@@ -45,7 +45,7 @@ pub use error::PasskeyConfigError;
 pub(crate) use error::PasskeyError;
 use types::{
     AuthenticationFinish, DisplayName, EnrollmentStart, LoginStart, PasskeyKind, RecoveryStart,
-    RecoveryToken, RegistrationFinish, RegistrationStart, SessionView, UserView,
+    RecoveryToken, RecoveryUndo, RegistrationFinish, RegistrationStart, SessionView, UserView,
 };
 pub(crate) use types::{PasskeyName, Rename};
 
@@ -859,10 +859,16 @@ impl PasskeyApplication {
         Ok(Json(app.service().recovery(&owner).await?))
     }
 
-    /// Undoes the owner's newest recovery, from a session an older passkey signed
-    /// in.
-    async fn undo_recovery(State(app): State<Self>, owner: Owner) -> Result<StatusCode, ApiError> {
-        app.service().undo_recovery(&owner).await?;
+    /// Undoes the recovery the owner's undo page showed, from a session an older
+    /// passkey signed in.
+    async fn undo_recovery(
+        State(app): State<Self>,
+        owner: Owner,
+        Json(input): Json<RecoveryUndo>,
+    ) -> Result<StatusCode, ApiError> {
+        app.service()
+            .undo_recovery(&owner, input.recovery_id)
+            .await?;
         Ok(StatusCode::NO_CONTENT)
     }
 
@@ -912,14 +918,13 @@ impl PasskeyApplication {
     }
 }
 
-/// Passkey settings any administrator may also change: listing, renaming and
-/// removing. Only the owner adds a passkey, since it is a way to sign in.
+/// The passkey a recovery's link enrolls, which its token authorizes.
 impl AccountService {
     /// Completes recovery `recovery_id` of `user_id` with `key`, a passkey its
     /// link's ceremony verified, in the caller's transaction, which signs the
     /// browser in with it on commit. Stores the passkey and records the completion
-    /// as the browser's, which the link authorized, not a session. Fails if the
-    /// link stopped working since the ceremony started.
+    /// as the browser's, which the link authorized, not a session. Fails, rolling
+    /// the passkey back, if the link stopped working since the ceremony started.
     pub(crate) async fn complete_recovery(
         tx: &mut DatabaseTransaction<'_>,
         recovery_id: RecoveryId,
@@ -932,15 +937,14 @@ impl AccountService {
             .find_active_by_id_for_update(user_id)
             .await?
             .ok_or(RecoveryError::InvalidLink)?;
-        tx.recoveries()
-            .find_open(recovery_id)
-            .await?
-            .filter(|recovery| recovery.user_id == user_id)
-            .ok_or(RecoveryError::InvalidLink)?;
         let context = request.actor(Actor::Anonymous);
         let passkey_id =
             PasskeyApplication::insert_passkey(tx, &context, user_id, key, friendly_name).await?;
-        if !tx.recoveries().complete(recovery_id, passkey_id).await? {
+        if !tx
+            .recoveries()
+            .complete(user_id, recovery_id, passkey_id)
+            .await?
+        {
             return Err(RecoveryError::InvalidLink.into());
         }
         tx.record(
@@ -954,7 +958,11 @@ impl AccountService {
         .await?;
         Ok(passkey_id)
     }
+}
 
+/// Passkey settings any administrator may also change: listing, renaming and
+/// removing. Only the owner adds a passkey, since it is a way to sign in.
+impl AccountService {
     /// Adds `key`, a passkey the owner's browser registered and the enrollment
     /// ceremony verified, under the owner's session lock. A recent confirmation
     /// authorized the ceremony at its start, and the ceremony belongs to this

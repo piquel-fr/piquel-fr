@@ -1,4 +1,4 @@
-//! Finding, showing, disabling and reactivating accounts.
+//! Finding, showing, disabling, reactivating and recovering accounts.
 
 use super::{CliError, Confirm, Console, Output};
 use crate::{AuthConfig, Reason, UserRef};
@@ -47,12 +47,14 @@ pub(super) enum UserCommand {
         /// The account: its username, ID or verified email.
         user: UserRef,
     },
-    /// Not usable yet: the recovery page its link opens comes with the
-    /// server-rendered pages. Start recovering an account whose owner lost every
-    /// passkey: end its sessions, and send its primary verified address a link
-    /// that enrolls one passkey, within a day. Prints the link too, for an owner
-    /// without an address. The owner can undo it with an older passkey. Needs
-    /// `AUTH_PUBLIC_BASE_URL` and the token digest key, which derives the link.
+    /// Recover an account whose owner lost every passkey (not usable yet).
+    ///
+    /// The recovery page its link opens comes with the server-rendered pages.
+    /// Ends the account's sessions and sends its primary address a link that
+    /// enrolls one passkey, within a day. Prints the link too, for an owner
+    /// without an address. The owner can undo it with an older passkey, which
+    /// takes back everything added since. Needs `AUTH_PUBLIC_BASE_URL` and the
+    /// token digest key, which derives the link.
     Recover {
         /// The account: its username, ID or verified email.
         user: UserRef,

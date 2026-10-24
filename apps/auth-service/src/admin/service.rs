@@ -183,7 +183,8 @@ impl AdminService {
     }
 
     /// Disables an account and ends all its sessions and refresh grants in one
-    /// transaction, so its next request and token refresh fail.
+    /// transaction, so its next request and token refresh fail. A recovery link
+    /// not used yet stops working, so re-enabling the account does not revive it.
     pub(crate) async fn disable_user(
         &self,
         operator: &Operator,
@@ -204,6 +205,7 @@ impl AdminService {
         };
         tx.record(&operator.context(), Some(user_id), disabled)
             .await?;
+        tx.recoveries().cancel_open(user_id).await?;
         Self::end_sessions(
             &mut tx,
             &operator.context(),
@@ -248,13 +250,15 @@ impl AdminService {
 
     /// Starts recovering the active account `user_id`, whose owner lost every
     /// passkey, for `reason`. Its sessions and refresh grants end, an older
-    /// recovery's unused link stops working, and its primary verified address is
-    /// sent a link that enrolls one passkey, once, within a day. Returns the link
-    /// only to an operator at the terminal, for an owner without an address; an
-    /// administrator never sees it, so a recovery needs a verified address. An
-    /// administrator may not recover another administrator, which the CLI may.
+    /// recovery's unused link stops working, and its primary address is sent a
+    /// link that enrolls one passkey, once, within a day. An operator at the
+    /// terminal is also given the link, which also reaches an owner without an
+    /// address. An administrator never sees it, so they may recover only an
+    /// account with a primary address, and never another administrator's.
     ///
-    /// The owner can undo the recovery with a passkey enrolled before it.
+    /// The owner can undo the recovery with a passkey enrolled before it, which
+    /// takes back what the account gained since and restores this primary
+    /// address.
     pub(crate) async fn recover_account(
         &self,
         operator: &Operator,
@@ -267,23 +271,27 @@ impl AdminService {
         if user.status != AccountStatus::Active {
             return Err(AdminError::RecoveryOfDisabledAccount);
         }
-        let reachable = tx
+        // The link goes to the primary address, which is always verified.
+        let primary = tx
             .emails()
             .list(user_id)
             .await?
-            .iter()
-            .any(|email| email.verified_at.is_some());
-        if !reachable && operator.administrator().is_some() {
+            .into_iter()
+            .find(|email| email.is_primary);
+        let shown = matches!(operator, Operator::Cli { .. });
+        if primary.is_none() && !shown {
             return Err(AdminError::RecoveryNeedsEmail);
         }
         tx.recoveries().cancel_open(user_id).await?;
         let id = RecoveryId::new();
+        let token = links.token(id)?;
         let expires_at = Utc::now() + LINK_LIFETIME;
         tx.recoveries()
             .insert(&InsertRecovery {
                 id,
                 user_id,
-                secret_digest: links.token(id)?.digest().as_bytes(),
+                secret_digest: token.digest().as_bytes(),
+                primary_email_id: primary.map(|email| email.id),
                 expires_at,
             })
             .await?;
@@ -297,11 +305,9 @@ impl AdminService {
         };
         tx.record(&context, Some(user_id), started).await?;
         Self::end_sessions(&mut tx, &context, user_id, RevocationReason::Admin).await?;
+        let link = shown.then(|| links.url(&token));
         Self::finish(tx, operator, Some(user_id), vec![]).await?;
-        Ok(match operator {
-            Operator::Cli { .. } => Some(links.link(id)?),
-            Operator::Admin(_) => None,
-        })
+        Ok(link)
     }
 
     /// Ends every session and refresh grant of an account.

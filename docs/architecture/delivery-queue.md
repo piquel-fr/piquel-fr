@@ -96,7 +96,7 @@ notices that an address stopped being primary, or was removed, copy the address
 instead, read in the event's transaction, so removing the address right after
 cannot cancel them. A recovery's link stores the recovery's ID and the primary
 address's, and is not sent once the link was used, replaced or undone, or
-expired; the notice that a recovery enrolled a passkey goes to every verified
+expired, or the account was disabled; the notice that a recovery enrolled a passkey goes to every verified
 address, copying it. The copied addresses are the channel's only personal data,
 deleted with the delivery. The `destination` column names the account and the address's ID, for
 operators.

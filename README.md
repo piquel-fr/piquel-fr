@@ -237,7 +237,8 @@ just auth account alice emails remove <email-id> --reason "Asked by email"
   account out everywhere, and emails its primary verified address a link that
   enrolls one passkey, once, within a day; it prints the link too, for an owner
   without an address. Running it again replaces the older link. The owner
-  can undo a recovery from a session of a passkey they had before it.
+  can undo a recovery from a session of a passkey they had before it, which takes
+  back every passkey, social sign-in and address added since.
 - Each change is recorded as a domain event with the operator: `$USER` and the host
   name. Unlike the admin API, the CLI may act on administrators' accounts.
 - Failures print their causes and exit with 1; usage errors exit with 2.
@@ -503,7 +504,8 @@ explains how to choose a requirement and handle the challenge.
   Settings keep listing identities of disabled providers so they can be unlinked.
 - The last passkey cannot be removed. Removing a passkey/provider revokes other
   central sessions. An owner who lost every passkey is recovered with a link that
-  enrolls one new passkey; a passkey enrolled before the recovery can undo it (see
+  enrolls one new passkey; a passkey enrolled before the recovery can undo it,
+  taking back everything added since (see
   [surfaces.md](docs/architecture/surfaces.md#recovering-an-account)). Until its page
   ships, nothing can use the link.
 - Sessions last at most 30 days. Access tokens last five minutes. Refresh rotation
