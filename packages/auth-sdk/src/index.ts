@@ -98,16 +98,6 @@ export class AuthApi {
       response.status
     );
   }
-  async form(path: string, body: URLSearchParams): Promise<{ redirect_url: string }> {
-    const response = await fetch(`${this.origin}${path}`, {
-      method: 'POST',
-      credentials: 'include',
-      headers: { 'x-piquel-csrf': '1' },
-      body
-    });
-    if (!response.ok) throw await this.failure(response);
-    return response.json() as Promise<{ redirect_url: string }>;
-  }
 }
 
 type EncodedDescriptor = Omit<PublicKeyCredentialDescriptor, 'id'> & { id: string };
@@ -316,3 +306,18 @@ export function safeDestination(value: string | null, config: Configuration): st
   }
   return config.settings_url;
 }
+
+/**
+ * On auth's server-rendered pages, which load this module as their only script: a
+ * form marked `data-submit-once` ignores a second submission, such as a double
+ * click, while the first is under way. Its buttons stay enabled, so the clicked one
+ * still sends its value. Without a document, as during SvelteKit's server render,
+ * this does nothing.
+ */
+if (typeof document !== 'undefined')
+  document.addEventListener('submit', (event) => {
+    const form = event.target;
+    if (!(form instanceof HTMLFormElement) || !form.hasAttribute('data-submit-once')) return;
+    if (form.dataset.submitted) event.preventDefault();
+    else form.dataset.submitted = 'true';
+  });

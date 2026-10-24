@@ -5,16 +5,17 @@ is authentication and the piquel.fr account settings frontend.
 
 | Location | Responsibility |
 | --- | --- |
-| `apps/auth-service` | Rust auth authority, browser ceremonies, social adapters, OIDC, settings and admin APIs, CLI |
-| `apps/auth-web` | Static SvelteKit auth pages embedded by the Rust build |
+| `apps/auth-service` | Rust auth authority, browser ceremonies, social adapters, OIDC, server-rendered pages, settings and admin APIs, CLI |
+| `apps/auth-web` | Static SvelteKit sign-in pages embedded by the Rust build |
 | `apps/piquel-web` | piquel.fr's SvelteKit server on Node: account settings calling the auth API |
 | `apps/admin-web` | The admin dashboard at admin.piquel.fr: server-rendered Topcoat pages calling auth's private admin API |
-| `packages/auth-sdk` | Browser auth SDK: API client, WebAuthn passkey ceremonies, redirect helpers, shared styles; `/server`: auth origin validation and security headers for SvelteKit servers |
+| `packages/auth-sdk` | Browser auth SDK: API client, WebAuthn passkey ceremonies, redirect helpers, shared styles; `/server`: auth origin validation and security headers for SvelteKit servers. `build` compiles it to the one script auth's pages may load |
 | `crates/database` | `piquel-repository`: PostgreSQL connections, migrations and typed persistence operations |
 | `crates/auth-sdk` | `piquel-auth`, the public Rust SDK: token validation, typed scopes, login and the JWKS cache auth also uses for Google; `axum` feature: extractors, bearer layer, login routes over an application's own session backend |
 | `crates/admin-api` | `piquel-admin-api`: the paths and JSON bodies of auth's private admin API, shared with the admin dashboard; `client` feature: the dashboard's typed client |
 | `crates/common` | `piquel-common`, the one home for shared types: IDs, string enums, `Personal<T>`, and the wire types shared by auth and the SDKs (token claims, discovery metadata, JWK sets, OAuth/OIDC vocabulary and errors, bearer challenges, SDK error codes, and the bodies auth's settings and admin APIs share); `config` feature: environment variables, validated URLs, secret references; `events` feature: domain events |
 | `crates/crypto` | Random secrets, SHA-256, HMAC, PKCE and RS256 signing |
+| `crates/ui` | `piquel-ui`: the Topcoat components and layouts of auth's server-rendered pages, rendering plain data and taking URLs as props |
 | `crates/telemetry` | `piquel-telemetry`: stderr logs, and OpenTelemetry traces, metrics and logs over OTLP; request spans and access logs for axum routers, client spans, and typed metric instruments; see [telemetry.md](telemetry.md) |
 | `tests/sdk-vectors` | Generated cases both SDKs must pass; see [sdk.md](sdk.md) |
 
@@ -26,11 +27,13 @@ enabled only by the database crate, that lets its IDs and vocabularies decode fr
 columns. Its other server-only parts sit behind the `config` and `events` features,
 so the SDKs compile only IDs and wire types. Auth-service owns authentication policy;
 frontends never receive database credentials or provider secrets. Shared types
-go in `piquel-common`; add new crates only for independently auditable primitives.
+go in `piquel-common`; add new crates only for independently auditable primitives,
+or, as `piquel-ui`, to compile slow view code beside the database crate instead of
+after it.
 
 The auth runtime is one executable with one public HTTP listener, plus a private
-listener for the admin API when it is configured. Login assets are built
-before Rust and embedded in the executable. Account settings remain on piquel.fr;
+listener for the admin API when it is configured. Login assets, the shared styles
+and the SDK script are built before Rust and embedded in the executable. Account settings remain on piquel.fr;
 its exact origin can call the public auth API with the auth host's cookie. Passkey
 operations redirect to auth.piquel.fr. The permanent WebAuthn RP ID is the auth
 hostname, never a wildcard over piquel.fr subdomains.

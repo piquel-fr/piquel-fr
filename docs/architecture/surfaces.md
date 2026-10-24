@@ -21,8 +21,10 @@ The account and admin APIs are routes in the same executable. They are small
 next to the pages that use them, and keeping them there keeps one binary, one
 database owner and one policy layer. The account API is on the public listener; the
 admin API has a private listener of its own (see admin.piquel.fr below). Auth keeps its state in PostgreSQL, so it runs
-as several replicas (see "Running several replicas" in `infra/README.md`). Its pages are static assets embedded at build time
-and are cacheable (see "Caching" in `infra/README.md`).
+as several replicas (see "Running several replicas" in `infra/README.md`). Its sign-in pages are static assets embedded at build time
+and are cacheable (see "Caching" in `infra/README.md`). Consent and logout are
+server-rendered in the executable, with plain forms. Their only script is the SDK's,
+which keeps the consent form from posting twice.
 
 ## piquel.fr
 

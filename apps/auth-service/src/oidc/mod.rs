@@ -12,9 +12,11 @@ mod token;
 use crate::config::{OidcConfig, TokenDigestKeys};
 use crate::keys::SigningKeys;
 use crate::routes;
-use crate::security::{CSRF_HEADER, CacheClass, Cached};
+use crate::security::{CacheClass, Cached};
+pub(crate) use authorize::{AuthorizationDecision, TransactionQuery};
 pub use error::OidcConfigError;
-use error::{OAuthCode, OAuthError, Reject};
+pub(crate) use error::{OAuthCode, OAuthError, Reject};
+pub(crate) use logout::LogoutQuery;
 use piquel_crypto::{ClientSecret, CryptoError, Digest, Secret};
 
 use axum::{
@@ -44,12 +46,6 @@ use serde::Serialize;
 use std::sync::Arc;
 use url::Url;
 
-/// Value the auth frontend sends in the CSRF header.
-const CSRF_HEADER_VALUE: &str = "1";
-/// Fetch metadata header naming the request's site relationship.
-const FETCH_SITE_HEADER: &str = "sec-fetch-site";
-/// `Sec-Fetch-Site` value proving the request came from the issuer's own pages.
-const FETCH_SITE_SAME_ORIGIN: &str = "same-origin";
 /// Lifetime of signed access and ID tokens; kept short because they cannot be revoked.
 pub(crate) const ACCESS_TOKEN_SECONDS: i64 = 300;
 /// Maximum byte length of `state` and `nonce`.
@@ -317,8 +313,8 @@ impl IntoResponse for PublicDocument {
 
 /// Where an authorization response goes: a verified client redirect URI, the request's
 /// `state` and this issuer. Every success and error redirect to the client is built
-/// here, so none can miss `state` or the RFC 9207 `iss`.
-struct ClientRedirect<'a> {
+/// here, so none can miss `state` or the RFC 9207 `iss`. Only this module builds one.
+pub(crate) struct ClientRedirect<'a> {
     /// Redirect URI, already matched against the client's registration.
     uri: &'a Url,
     /// Client value returned unchanged.
@@ -420,14 +416,6 @@ impl OidcApplication {
             )
             .route(routes::oidc::PAR, post(Self::push_authorization))
             .route(routes::oidc::AUTHORIZE_RESUME, get(Self::resume))
-            .route(
-                routes::oidc::AUTHORIZE_TRANSACTION,
-                get(Self::authorization_transaction),
-            )
-            .route(
-                routes::oidc::AUTHORIZE_DECISION,
-                post(Self::authorization_decision),
-            )
             .route(routes::oidc::TOKEN, post(Self::token))
             .route(routes::oidc::REVOKE, post(Self::revoke))
             .route(
@@ -436,7 +424,7 @@ impl OidcApplication {
             )
             .route(
                 routes::oidc::LOGOUT,
-                get(Self::start_logout).post(Self::logout),
+                get(Self::start_logout).post(Self::start_logout),
             )
             .with_state(self)
     }
@@ -578,24 +566,6 @@ impl OidcApplication {
         Ok((decode(id), decode(secret)))
     }
 
-    /// Requires a browser mutation to come from the issuer's own pages: a matching
-    /// `Origin` plus either the CSRF header or `Sec-Fetch-Site: same-origin`.
-    fn require_same_origin(&self, headers: &HeaderMap) -> Result<(), OAuthError> {
-        // Non-text header values cannot match, so they fail like absent ones.
-        let text = |name: &str| headers.get(name).and_then(|value| value.to_str().ok());
-        if text(header::ORIGIN.as_str()) != Some(self.issuer.as_str()) {
-            return Err(OAuthCode::InvalidRequest.reject("Origin must be this issuer"));
-        }
-        let csrf_header = text(CSRF_HEADER) == Some(CSRF_HEADER_VALUE);
-        let same_origin_fetch = text(FETCH_SITE_HEADER) == Some(FETCH_SITE_SAME_ORIGIN);
-        if csrf_header || same_origin_fetch {
-            Ok(())
-        } else {
-            Err(OAuthCode::InvalidRequest.reject(format!(
-                "send {CSRF_HEADER}: {CSRF_HEADER_VALUE}, or make a same-origin request"
-            )))
-        }
-    }
     /// Responses to an authorization request with `state`, sent to its verified `uri`.
     fn client_redirect<'a>(&'a self, uri: &'a Url, state: &'a str) -> ClientRedirect<'a> {
         ClientRedirect {

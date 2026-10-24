@@ -13,7 +13,7 @@ use crate::{
 use axum::{
     Form, Json,
     extract::{
-        Path, Query, State,
+        Query, State,
         rejection::{FormRejection, QueryRejection},
     },
     http::{HeaderMap, StatusCode},
@@ -30,7 +30,7 @@ use piquel_repository::{
     StoredAuthorizationRequest, StoredOidcClient, StoredSession,
 };
 use serde::{Deserialize, Serialize};
-use serde_json::{Value, json};
+use serde_json::Value;
 use url::Url;
 
 /// Rejection of a pending authorization that cannot be found.
@@ -275,34 +275,31 @@ pub(super) struct PushedAuthorization {
     expires_in: i64,
 }
 
-/// What the consent page shows about a pending authorization.
-#[derive(Serialize)]
-pub(super) struct AuthorizationTransactionView {
-    /// Client's registered display name.
-    client_name: String,
-    /// Requested scopes.
-    scopes: Vec<String>,
-    /// Resource the access token is for.
-    audience: String,
-}
-
-/// The consent page's answer for a pending authorization.
+/// The consent page's answer for a pending authorization, as its form posts it.
 #[derive(Deserialize)]
-pub(super) struct AuthorizationDecision {
+pub(crate) struct AuthorizationDecision {
     /// Opaque pending authorization token.
     transaction: String,
     /// Whether the user approved.
     decision: ConsentDecision,
 }
 
-/// Pending authorization the browser returns with after signing in.
-#[derive(Deserialize)]
-pub(super) struct ResumeQuery {
-    /// Opaque pending authorization token.
-    transaction: String,
+impl AuthorizationDecision {
+    /// The pending authorization decided on.
+    pub(crate) fn transaction(&self) -> &str {
+        &self.transaction
+    }
 }
 
-/// Consent choice posted by the auth frontend.
+/// A pending authorization, by its opaque token: the one the browser returns with
+/// after signing in, or the consent page shows.
+#[derive(Deserialize)]
+pub(crate) struct TransactionQuery {
+    /// Opaque pending authorization token.
+    pub(crate) transaction: String,
+}
+
+/// Consent choice posted by the consent page.
 #[derive(Debug, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 enum ConsentDecision {
@@ -471,7 +468,7 @@ impl OidcApplication {
         State(app): State<Self>,
         context: RequestContext,
         headers: HeaderMap,
-        query: Result<Query<ResumeQuery>, QueryRejection>,
+        query: Result<Query<TransactionQuery>, QueryRejection>,
     ) -> Result<Redirect, OAuthError> {
         let Query(q) = query.map_err(|error| {
             OAuthCode::InvalidRequest
@@ -481,43 +478,24 @@ impl OidcApplication {
             .await
     }
 
-    /// Describes a pending authorization to the consent page.
-    pub(super) async fn authorization_transaction(
-        State(app): State<Self>,
-        headers: HeaderMap,
-        Path(transaction): Path<String>,
-    ) -> Result<Json<AuthorizationTransactionView>, OAuthError> {
-        let session = Session::required(&app.database, &headers).await?;
-        let request = app.find_authorization_request(&transaction).await?;
+    /// The pending authorization the consent page shows, once the browser's session
+    /// meets its requirements.
+    pub(crate) async fn consent(
+        &self,
+        headers: &HeaderMap,
+        transaction: &str,
+    ) -> Result<StoredAuthorizationRequest, OAuthError> {
+        let session = Session::required(&self.database, headers).await?;
+        let request = self.find_authorization_request(transaction).await?;
         Self::require_authorization_session(&request, &session)?;
-        Ok(Json(AuthorizationTransactionView {
-            client_name: request.client_display_name,
-            scopes: request.scopes,
-            audience: request.audience,
-        }))
-    }
-
-    /// Records the consent page's decision and returns the client redirect as JSON.
-    pub(super) async fn authorization_decision(
-        State(app): State<Self>,
-        context: RequestContext,
-        headers: HeaderMap,
-        form: Result<Form<AuthorizationDecision>, FormRejection>,
-    ) -> Result<Json<Value>, OAuthError> {
-        app.require_same_origin(&headers)?;
-        let Form(input) = form.map_err(|error| {
-            OAuthCode::InvalidRequest
-                .reject_with(format!("consent decision is malformed: {error}"), error)
-        })?;
-        let redirect = app.decide(&headers, input, Some(context)).await?;
-        Ok(Json(json!({"redirect_url":redirect.as_str()})))
+        Ok(request)
     }
 
     /// Consumes the pending authorization and returns the client redirect: an error
     /// for a denial, or a new authorization code. Explicit decisions come from the
     /// consent page, whose request is `consent`, and save and record consent;
     /// implicit ones must already be allowed.
-    async fn decide(
+    pub(crate) async fn decide(
         &self,
         headers: &HeaderMap,
         input: AuthorizationDecision,
@@ -683,7 +661,7 @@ impl OidcApplication {
             && hinted_user_id.is_none_or(|subject| subject == session.user_id)
     }
 
-    /// Redirects to an auth frontend page, passing the pending authorization along.
+    /// Redirects to the login or consent page, passing the pending authorization along.
     /// A target `acr` is named too, so the login page offers only methods reaching it.
     fn continuation_page(
         &self,

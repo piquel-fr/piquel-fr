@@ -132,6 +132,9 @@ importers:
       '@sveltejs/kit':
         specifier: 'catalog:'
         version: 2.70.3(@sveltejs/vite-plugin-svelte@7.3.0(svelte@5.57.0(@typescript-eslint/types@8.71.1))(vite@8.3.4(@types/node@24.19.2)))(svelte@5.57.0(@typescript-eslint/types@8.71.1))(typescript@6.0.3)(vite@8.3.4(@types/node@24.19.2))
+      typescript:
+        specifier: 'catalog:'
+        version: 6.0.3
 
 packages:
 

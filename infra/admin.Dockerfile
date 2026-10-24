@@ -11,7 +11,8 @@ COPY crates/telemetry crates/telemetry
 COPY apps/auth-service/Cargo.toml apps/auth-service/
 COPY crates/crypto/Cargo.toml crates/crypto/
 COPY crates/database/Cargo.toml crates/database/
-RUN for member in apps/auth-service crates/crypto crates/database; do \
+COPY crates/ui/Cargo.toml crates/ui/
+RUN for member in apps/auth-service crates/crypto crates/database crates/ui; do \
         mkdir -p "$member/src" && touch "$member/src/lib.rs"; \
     done
 COPY apps/admin-web apps/admin-web

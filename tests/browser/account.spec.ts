@@ -76,7 +76,9 @@ test('passkey lifecycle, passkey confirmation and browser OIDC consent with SSO'
     }).toString();
     await page.goto(authorization.href);
     await expect(page.getByRole('heading', { name: /^Continue to / })).toBeVisible();
-    await page.getByRole('button', { name: 'Continue', exact: true }).click();
+    // A double click still reaches the application: the page's script keeps the
+    // form from posting the decision twice, which would find the request used.
+    await page.getByRole('button', { name: 'Continue', exact: true }).dblclick();
     await page.waitForURL(atCallback);
     const callback = new URL(page.url());
     expect(callback.searchParams.get('state')).toBe(oidc.state);

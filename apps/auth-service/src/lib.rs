@@ -42,6 +42,8 @@ mod sessions;
 /// Fixtures shared by the applications' tests.
 #[cfg(test)]
 mod tests;
+/// auth.piquel.fr's server-rendered pages.
+mod web;
 
 pub use admin::{
     AdminError, AdminService, GracePeriod, HandleIssue, HandleProblem, InviteExpiry, Operator,
@@ -62,6 +64,7 @@ pub use keys::{KeyError, KeyStore, SigningKeys};
 use oidc::OidcApplication;
 use passkey::PasskeyApplication;
 use service::ServiceApplication;
+use web::WebApplication;
 
 use account::AccountApplication;
 use assets::EmbeddedAssets;
@@ -102,7 +105,7 @@ pub enum StartupError {
     Outbound(#[source] reqwest::Error),
     /// The executable lacks the required browser assets.
     #[error(
-        "build the auth frontend with pnpm --filter @piquel/auth-web build before compiling auth-service"
+        "build the auth frontend and SDK with pnpm --filter \"@piquel/auth-web...\" build before compiling auth-service"
     )]
     MissingAssets,
 }
@@ -116,6 +119,7 @@ impl AuthConfig {
     /// Fails when the frontend is not embedded or an application cannot initialize.
     pub fn router(&self, database: Database, keys: &SigningKeys) -> Result<Router, StartupError> {
         EmbeddedAssets::check()?;
+        let oidc = OidcApplication::new(database.clone(), &self.oidc, keys.clone())?;
         let application = Router::new()
             .merge(ServiceApplication::new(database.clone(), self).routes())
             .merge(PasskeyApplication::new(database.clone(), &self.passkey)?.routes())
@@ -124,7 +128,8 @@ impl AuthConfig {
             .merge(AccountApplication::new(database.clone()).routes())
             .merge(ClientApplication::new(database.clone()).routes())
             .merge(EmailApplication::new(database.clone(), &self.email).routes())
-            .merge(OidcApplication::new(database.clone(), &self.oidc, keys.clone())?.routes());
+            .merge(WebApplication::new(oidc.clone(), &self.oidc.origin).routes())
+            .merge(oidc.routes());
         let policy = security::HttpSecurity::new(self, database);
         let protected = application
             // Static pages answer GET and HEAD only, so preconditions need no 412.

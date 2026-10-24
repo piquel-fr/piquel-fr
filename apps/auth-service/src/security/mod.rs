@@ -1,12 +1,12 @@
 //! Shared browser-session, passkey confirmation and HTTP trust boundaries.
 
 use crate::config::FrontendOrigins;
-use crate::routes::{ACCOUNT_PREFIX, LOGIN_PREFIX, oidc, passkey, service};
+use crate::routes::{ACCOUNT_PREFIX, LOGIN_PREFIX, oidc, page, passkey, service};
 use axum::{
     Json,
     extract::{ConnectInfo, FromRef, FromRequestParts, MatchedPath, Request, State},
     http::{
-        HeaderMap, HeaderValue, Method, StatusCode,
+        Extensions, HeaderMap, HeaderValue, Method, StatusCode,
         header::{self, InvalidHeaderValue},
         request::Parts,
     },
@@ -23,6 +23,7 @@ use piquel_common::{
     },
     protocol::{
         api::{ErrorBody, ErrorCode},
+        same_origin::BrowserRequest,
         step_up::StepUpRequirement,
     },
 };
@@ -42,6 +43,8 @@ use thiserror::Error;
 
 /// Name of the browser proof required on non-protocol mutations.
 pub(crate) const CSRF_HEADER: &str = "x-piquel-csrf";
+/// Fetch metadata header naming how a request's initiator relates to its target.
+const FETCH_SITE_HEADER: &str = "sec-fetch-site";
 /// Trusted ingress must overwrite this header with exactly one client address.
 const FORWARDED_FOR_HEADER: &str = "x-forwarded-for";
 /// Request budget per category and client in each [`RATE_WINDOW`].
@@ -239,15 +242,18 @@ impl BrowserCookie {
         self.append(response, &secret.encoded(), self.max_age())
     }
 
-    /// Adds a `Set-Cookie` header deleting this cookie.
-    pub(crate) fn clear_on(self, response: &mut Response) -> Result<(), InvalidHeaderValue> {
+    /// Adds a `Set-Cookie` header deleting this cookie, to an axum response or a page's.
+    pub(crate) fn clear_on<B>(
+        self,
+        response: &mut axum::http::Response<B>,
+    ) -> Result<(), InvalidHeaderValue> {
         self.append(response, "", 0)
     }
 
     /// Appends a host-only, `Secure`, `HttpOnly`, `SameSite=Lax` cookie header.
-    fn append(
+    fn append<B>(
         self,
-        response: &mut Response,
+        response: &mut axum::http::Response<B>,
         value: &str,
         max_age: u32,
     ) -> Result<(), InvalidHeaderValue> {
@@ -641,6 +647,17 @@ impl RequestContext {
     }
 }
 
+impl RequestContext {
+    /// The context [`HttpSecurity::protect`] attached to a request's `extensions`. Only
+    /// routes with a rate budget have one.
+    pub(crate) fn of(extensions: &Extensions) -> Result<Self, HttpSecurityError> {
+        extensions
+            .get::<Self>()
+            .copied()
+            .ok_or(HttpSecurityError::MissingContext)
+    }
+}
+
 impl<S: Send + Sync> FromRequestParts<S> for RequestContext {
     type Rejection = ApiError;
     /// Reads the context [`HttpSecurity::protect`] attached.
@@ -648,13 +665,7 @@ impl<S: Send + Sync> FromRequestParts<S> for RequestContext {
         parts: &mut Parts,
         _: &S,
     ) -> impl Future<Output = Result<Self, Self::Rejection>> + Send {
-        std::future::ready(
-            parts
-                .extensions
-                .get::<Self>()
-                .copied()
-                .ok_or_else(|| HttpSecurityError::MissingContext.into()),
-        )
+        std::future::ready(Self::of(&parts.extensions).map_err(ApiError::from))
     }
 }
 
@@ -745,13 +756,16 @@ enum Endpoint {
     Health,
     /// Authorization requests, including cross-site form navigation.
     Authorize,
-    /// RP-initiated logout, validated by its own hint and same-origin checks.
+    /// RP-initiated logout, validated by its own hint, which only sends the browser to
+    /// confirm on the logout page.
     Logout,
     /// Account and session APIs shared with the first-party frontends.
     Account,
     /// Social sign-in, also started from the first-party frontends.
     Login,
-    /// Auth-origin pages and ceremonies.
+    /// Auth's server-rendered pages, which anyone may navigate to, and the forms they post.
+    Page,
+    /// Passkey ceremonies, the frontend's static pages and the other auth-origin routes.
     Other,
 }
 
@@ -766,6 +780,7 @@ impl Endpoint {
             oidc::AUTHORIZE => Self::Authorize,
             oidc::LOGOUT => Self::Logout,
             service::CONFIG | passkey::SESSION | passkey::SESSION_LOGOUT => Self::Account,
+            page::CONSENT | page::LOGOUT => Self::Page,
             _ if path.starts_with(ACCOUNT_PREFIX) => Self::Account,
             _ if path.starts_with(LOGIN_PREFIX) => Self::Login,
             _ => Self::Other,
@@ -776,7 +791,12 @@ impl Endpoint {
     const fn is_protocol(self) -> bool {
         match self {
             Self::OAuthBackChannel | Self::UserInfo | Self::Authorize | Self::Logout => true,
-            Self::Discovery | Self::Health | Self::Account | Self::Login | Self::Other => false,
+            Self::Discovery
+            | Self::Health
+            | Self::Account
+            | Self::Login
+            | Self::Page
+            | Self::Other => false,
         }
     }
 
@@ -791,6 +811,7 @@ impl Endpoint {
             Self::UserInfo => Some(RateCategory::UserInfo),
             Self::Account => Some(RateCategory::Account),
             Self::Login | Self::Authorize | Self::Logout | Self::Other => Some(RateCategory::Login),
+            Self::Page => Some(RateCategory::Page),
             Self::Discovery | Self::Health => None,
         }
     }
@@ -809,6 +830,8 @@ piquel_common::str_enum! {
         Account = "account",
         /// Sign-in, authorization, logout and the other auth-origin routes.
         Login = "login",
+        /// Auth's server-rendered pages and the forms they post.
+        Page = "page",
     }
 }
 
@@ -827,7 +850,7 @@ enum CorsGrant {
     not(any(embedded_frontend, test)),
     expect(
         dead_code,
-        reason = "only embedded frontend files are Immutable or Revalidate"
+        reason = "only the embedded frontend's pages are Revalidate"
     )
 )]
 pub(crate) enum CacheClass {
@@ -887,7 +910,7 @@ impl<T: IntoResponse> IntoResponse for Cached<T> {
 
 /// Failures in shared HTTP trust checks, preserving actionable internal sources.
 #[derive(Debug, Error)]
-enum HttpSecurityError {
+pub(crate) enum HttpSecurityError {
     /// The listener did not attach its peer connection metadata.
     #[error("HTTP peer address missing")]
     MissingPeer,
@@ -904,6 +927,9 @@ enum HttpSecurityError {
     /// A mutation carries no `Origin` header, so its page cannot be checked.
     #[error("mutation has no Origin header")]
     MissingOrigin,
+    /// A form was posted to one of auth's pages from somewhere else.
+    #[error("page form posted from another origin")]
+    ForeignForm,
     /// An approved browser mutation omitted its CSRF proof.
     #[error("browser mutation requires CSRF header")]
     MissingCsrf,
@@ -939,6 +965,9 @@ impl From<HttpSecurityError> for ApiError {
             }
             HttpSecurityError::MissingOrigin => {
                 Self::forbidden("This request must come from a Piquel page, with an Origin header.")
+            }
+            HttpSecurityError::ForeignForm => {
+                Self::forbidden("Submit this form from its page on this site.")
             }
             HttpSecurityError::MissingCsrf => Self::forbidden(format!(
                 "This request must come from a Piquel page, with the {CSRF_HEADER} header."
@@ -978,8 +1007,8 @@ pub(crate) struct HttpSecurity {
     pub trusted_proxies: Arc<Vec<IpNet>>,
     /// Deadline for the whole request, handler included.
     pub request_timeout: StdDuration,
-    /// Origin of the auth frontend, allowed on every endpoint.
-    pub auth_origin: String,
+    /// Origin of auth's own pages, allowed on every endpoint.
+    pub origin: url::Origin,
     /// First-party frontend origins, allowed on account and login endpoints.
     pub frontends: FrontendOrigins,
 }
@@ -991,7 +1020,7 @@ impl HttpSecurity {
             database,
             trusted_proxies: Arc::new(config.trusted_proxies.clone()),
             request_timeout: REQUEST_TIMEOUT,
-            auth_origin: config.passkey.origin.serialized(),
+            origin: config.passkey.origin.as_url().origin(),
             frontends: config.federation.frontends.clone(),
         }
     }
@@ -1046,7 +1075,7 @@ impl HttpSecurity {
         origin: &str,
     ) -> Result<bool, HttpSecurityError> {
         if matches!(endpoint, Endpoint::Discovery)
-            || origin == self.auth_origin
+            || origin == self.origin.ascii_serialization()
             || (self.frontends.contains(origin)
                 && matches!(endpoint, Endpoint::Account | Endpoint::Login))
         {
@@ -1107,7 +1136,7 @@ impl HttpSecurity {
             };
         }
         let mutation = !matches!(*request.method(), Method::GET | Method::HEAD);
-        Self::check_browser(endpoint, request.headers(), allowed, mutation)?;
+        Self::check_browser(endpoint, request.headers(), allowed, mutation, &self.origin)?;
         // Unknown paths have no `MatchedPath`: they never consume a budget or need peer metadata.
         if request.extensions().get::<MatchedPath>().is_some()
             && let Some(category) = endpoint.rate_category()
@@ -1131,14 +1160,30 @@ impl HttpSecurity {
 
     /// Rejects unapproved browser origins and mutations without CSRF proof. Protocol
     /// endpoints are exempt: their handlers check credentials and navigation themselves.
+    /// Pages take any navigation, but a form only from `site`'s own pages
+    /// ([`BrowserRequest::is_same_origin`]): a plain form cannot send the CSRF header,
+    /// and sends `Origin: null` under `Referrer-Policy: no-referrer`.
     fn check_browser(
         endpoint: Endpoint,
         headers: &HeaderMap,
         allowed: bool,
         mutation: bool,
+        site: &url::Origin,
     ) -> Result<(), HttpSecurityError> {
         if endpoint.is_protocol() {
             return Ok(());
+        }
+        if matches!(endpoint, Endpoint::Page) {
+            let text = |name: &str| headers.get(name).and_then(|value| value.to_str().ok());
+            let request = BrowserRequest {
+                fetch_site: text(FETCH_SITE_HEADER),
+                origin: text(header::ORIGIN.as_str()),
+            };
+            return if !mutation || request.is_same_origin(site) {
+                Ok(())
+            } else {
+                Err(HttpSecurityError::ForeignForm)
+            };
         }
         let origin_present = headers
             .get(header::ORIGIN)

@@ -22,9 +22,9 @@ just build
 ```
 
 The executable is `target/release/auth-service`. Auth assets are embedded at compile
-time; rebuild Rust after changing `apps/auth-web`. piquel.fr's settings server builds to
-`apps/piquel-web/build` and runs on Node (see its README). Auth needs Node only
-to build its pages.
+time; rebuild Rust after changing `apps/auth-web` or `packages/auth-sdk`. piquel.fr's
+settings server builds to `apps/piquel-web/build` and runs on Node (see its README).
+Auth needs Node only to build its sign-in pages and the SDK script.
 
 ## Development
 
@@ -502,8 +502,10 @@ explains how to choose a requirement and handle the challenge.
 - Browser state and opaque secrets are random, hashed where lookup is needed, and
   bound to the initiating browser. Auth cookies are host-only, Secure and HttpOnly.
   Mutations require an exact allowed origin and CSRF header; OIDC back-channel
-  endpoints instead validate their protocol credentials.
-- Request throttling and expiring-state cleanup use PostgreSQL. Throttling uses separate login, token, userinfo and account budgets per client IP, and covers every API route except health probes and discovery.
+  endpoints instead validate their protocol credentials. A form posted to one of
+  auth's server-rendered pages must come from auth's own pages: `Sec-Fetch-Site:
+  same-origin`, or the auth origin when the browser sends no `Sec-Fetch-Site`.
+- Request throttling and expiring-state cleanup use PostgreSQL. Throttling uses separate login, token, userinfo, account and page budgets per client IP, and covers every API route except health probes and discovery.
   By default it uses the direct peer IP; only peers in `AUTH_TRUSTED_PROXIES`
   may supply a single overwritten `X-Forwarded-For`. Configure this when terminating TLS
   at a reverse proxy so users do not share the proxy’s budget. Untrusted headers
