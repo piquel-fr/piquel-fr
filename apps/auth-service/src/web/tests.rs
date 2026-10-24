@@ -3,15 +3,31 @@
 
 use super::WebApplication;
 use crate::{
-    routes,
-    tests::{Browser, MAX_RESPONSE_BYTES, Replicas, location, parameter, register, registration},
+    routes::{
+        self,
+        page::{
+            ROOT,
+            developers::{self, APP, APP_SECRETS, APP_SETTINGS},
+            settings,
+        },
+    },
+    security::BrowserCookie,
+    tests::{
+        Browser, MAX_RESPONSE_BYTES, Replicas, location, parameter, redirect, register,
+        registration,
+    },
 };
 use axum::{
     body::to_bytes,
     http::{Method, StatusCode, header},
     response::Response,
 };
-use piquel_common::clients::{ClientKind, ClientRegistration};
+use piquel_common::{
+    ClientId,
+    clients::{ClientKind, ClientRegistration},
+};
+use piquel_ui::{DeviceChange, Section};
+use serde::Serialize;
 use url::{Position, Url, form_urlencoded};
 
 /// A PKCE `S256` challenge (RFC 7636 appendix B). No test redeems its code.
@@ -85,6 +101,78 @@ impl Harness {
         assert_eq!(page.path(), routes::page::CONSENT);
         page
     }
+}
+
+impl Browser {
+    /// This browser as it follows `response`'s redirect, holding the notice it set.
+    pub(super) fn following(&self, response: &Response) -> Self {
+        let (notice, _) = cookie(response, BrowserCookie::Notice);
+        Self {
+            user_id: self.user_id,
+            session_id: self.session_id,
+            cookie: format!(
+                "{}; {}={notice}",
+                self.cookie,
+                BrowserCookie::Notice.as_str()
+            ),
+        }
+    }
+
+    /// Posts `change` to the page at `path` on replica `b`, as the page's form sends
+    /// it.
+    pub(super) async fn post(
+        &self,
+        replicas: &Replicas,
+        path: &str,
+        change: &impl Serialize,
+    ) -> Response {
+        let encoded = serde_urlencoded::to_string(change).expect("change");
+        let fields: Vec<(String, String)> = serde_urlencoded::from_str(&encoded).expect("fields");
+        let fields: Vec<_> = fields
+            .iter()
+            .map(|(name, value)| (name.as_str(), value.as_str()))
+            .collect();
+        self.submit(&replicas.b, path, &fields, OWN_PAGE).await
+    }
+}
+
+/// The value `response` sets the cookie `name` to, and the cookie's attributes.
+pub(super) fn cookie(response: &Response, name: BrowserCookie) -> (&str, &str) {
+    response
+        .headers()
+        .get_all(header::SET_COOKIE)
+        .iter()
+        .filter_map(|cookie| cookie.to_str().ok())
+        .find_map(|cookie| cookie.strip_prefix(name.as_str())?.strip_prefix('='))
+        .and_then(|cookie| cookie.split_once(';'))
+        .unwrap_or_else(|| panic!("{name} is set"))
+}
+
+/// The value `page` writes right after `marker`, up to the next quote or tag, such
+/// as the ID a form sends.
+pub(super) fn value_after<'a>(page: &'a str, marker: &str) -> &'a str {
+    let start = page
+        .find(marker)
+        .unwrap_or_else(|| panic!("{marker} in {page}"))
+        + marker.len();
+    page[start..].split(['"', '<']).next().unwrap_or_default()
+}
+
+/// Every account page's path, and its section: the settings tabs, the console's
+/// own pages, and the pages of the app `app`.
+fn account_pages(app: &ClientId) -> Vec<(String, Section)> {
+    let settings = [
+        settings::HOME,
+        settings::EMAILS,
+        settings::SESSIONS,
+        settings::HISTORY,
+    ]
+    .map(|path| (path.to_owned(), Section::Account));
+    let console =
+        [developers::HOME, developers::NEW].map(|path| (path.to_owned(), Section::Developers));
+    let app = [APP, APP_SETTINGS, APP_SECRETS]
+        .map(|route| (developers::of(route, app), Section::Developers));
+    settings.into_iter().chain(console).chain(app).collect()
 }
 
 /// `response`'s Content-Security-Policy.
@@ -254,6 +342,83 @@ async fn logout_page_ends_the_session_from_its_own_form() {
             .call(&harness.replicas.a, Method::GET, routes::passkey::SESSION)
             .await;
         assert_eq!(status, StatusCode::UNAUTHORIZED, "{state:?}");
+    }
+}
+
+/// Auth's root, and each account page's path ending in a slash, an app's included,
+/// lead to the page, whatever the method. A browser without a session sees each
+/// page offer sign-in, which comes back to the page as it asked for it, under the
+/// pages' policy. Its forms change nothing.
+#[tokio::test]
+#[ignore = "requires TEST_DATABASE_URL"]
+async fn account_pages_ask_a_signed_out_browser_to_sign_in() {
+    let replicas = Replicas::new().await;
+    let browser = Browser::signed_out();
+    let root = browser.visit(&replicas.a, ROOT).await;
+    assert_eq!(root.status(), StatusCode::TEMPORARY_REDIRECT);
+    assert_eq!(redirect(&root), settings::HOME);
+    let unknown = "c_unknown".parse().expect("client ID");
+    for (path, section) in account_pages(&unknown) {
+        let heading = match section {
+            Section::Account => "<h2>Sign in to see your settings</h2>",
+            Section::Developers => "<h2>Sign in to manage your apps</h2>",
+        };
+        let slashed = browser
+            .visit(&replicas.a, &format!("{path}/?remove=1"))
+            .await;
+        assert_eq!(slashed.status(), StatusCode::PERMANENT_REDIRECT, "{path}");
+        assert_eq!(redirect(&slashed), format!("{path}?remove=1"));
+        let response = browser
+            .visit(&replicas.a, &format!("{path}?remove=1"))
+            .await;
+        assert_eq!(response.status(), StatusCode::OK, "{path}");
+        assert!(
+            policy(&response).starts_with("default-src 'none'"),
+            "{path}"
+        );
+        let page = html(response).await;
+        assert!(page.contains(heading), "{page}");
+        let sign_in = format!(
+            r#"href="/login?return_to={}%3Fremove%3D1""#,
+            path.replace('/', "%2F")
+        );
+        assert!(page.contains(&sign_in), "{page}");
+
+        let posted = browser
+            .post(&replicas, &path, &DeviceChange::SignOutOthers)
+            .await;
+        assert_eq!(posted.status(), StatusCode::UNAUTHORIZED, "{path}");
+        assert!(html(posted).await.contains(heading), "{path}");
+        // Only a page's route takes forms from auth's own pages.
+        let posted = browser
+            .post(&replicas, &format!("{path}/"), &DeviceChange::SignOutOthers)
+            .await;
+        assert_eq!(posted.status(), StatusCode::PERMANENT_REDIRECT, "{path}");
+        assert_eq!(redirect(&posted), path);
+    }
+}
+
+/// A form from an older page, whose change no page knows, changes nothing and says
+/// why, on every account page, an app's included.
+#[tokio::test]
+#[ignore = "requires TEST_DATABASE_URL"]
+async fn account_pages_refuse_forms_they_do_not_know() {
+    let replicas = Replicas::new().await;
+    let database = Replicas::database().await;
+    let browser = Browser::new_account(&database).await;
+    let app = browser
+        .register_app(&database, ClientKind::Confidential, "https://stale.example")
+        .await;
+    for (path, _) in account_pages(&app) {
+        let stale = browser
+            .submit(&replicas.b, &path, &[("action", "everything")], OWN_PAGE)
+            .await;
+        assert_eq!(stale.status(), StatusCode::BAD_REQUEST, "{path}");
+        let page = html(stale).await;
+        assert!(
+            page.contains("This page was out of date. Try again."),
+            "{page}"
+        );
     }
 }
 

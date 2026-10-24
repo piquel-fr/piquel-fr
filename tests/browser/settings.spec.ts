@@ -1,30 +1,15 @@
 import { expect, test } from '@playwright/test';
+import { addPasskeys, signUp } from './helpers';
 
 /** Runs against auth's own settings pages, with Chromium's virtual passkey authenticator. */
 test('settings on auth: passkeys, devices, an email link and signing out', async ({ browser }) => {
   const context = await browser.newContext();
   const page = await context.newPage();
-  const cdp = await context.newCDPSession(page);
-  await cdp.send('WebAuthn.enable');
-  const { authenticatorId } = await cdp.send('WebAuthn.addVirtualAuthenticator', {
-    options: {
-      protocol: 'ctap2',
-      transport: 'internal',
-      hasResidentKey: true,
-      hasUserVerification: true,
-      isUserVerified: true,
-      automaticPresenceSimulation: true
-    }
-  });
+  const { cdp, authenticatorId } = await addPasskeys(context, page);
   let assertions = 0;
   cdp.on('WebAuthn.credentialAsserted', () => (assertions += 1));
   const username = `settings-${Date.now().toString(36)}`;
-  const invitation = process.env.E2E_INVITATION;
-  await page.goto(`/register${invitation ? `?invitation=${encodeURIComponent(invitation)}` : ''}`);
-  await page.getByLabel('Handle', { exact: true }).fill(username);
-  await page.getByLabel('Passkey name', { exact: true }).fill('First passkey');
-  await page.getByRole('button', { name: 'Create account with a passkey' }).click();
-  await expect(page).toHaveURL('/settings');
+  await signUp(page, username, 'First passkey');
   await expect(page.getByText(`@${username}`, { exact: true })).toBeVisible();
   await page.getByRole('button', { name: 'Rename First passkey', exact: true }).click();
   await page.getByLabel('Passkey name', { exact: true }).fill('My first passkey');

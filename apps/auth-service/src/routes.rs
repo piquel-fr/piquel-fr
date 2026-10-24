@@ -89,20 +89,6 @@ pub(crate) mod sessions {
     pub(crate) const REVOKE_OTHERS: &str = "/account/sessions/revoke-others";
 }
 
-/// OIDC clients the signed-in account manages.
-pub(crate) mod clients {
-    /// Lists the account's clients, or registers one.
-    pub(crate) const LIST: &str = "/account/clients";
-    /// Shows, changes or deletes one client.
-    pub(crate) const ITEM: &str = "/account/clients/{id}";
-    /// Pauses a client without deleting it.
-    pub(crate) const DISABLE: &str = "/account/clients/{id}/disable";
-    /// Lets a disabled client work again.
-    pub(crate) const ENABLE: &str = "/account/clients/{id}/enable";
-    /// Rotates a confidential client's secret.
-    pub(crate) const SECRETS: &str = "/account/clients/{id}/secrets";
-}
-
 /// OAuth 2.0 and `OpenID` Connect endpoints.
 pub(crate) mod oidc {
     use piquel_common::protocol::metadata;
@@ -163,8 +149,32 @@ pub(crate) mod page {
         pub(crate) const HISTORY: &str = "/settings/history";
     }
 
-    /// Every server-rendered page, which the security layer classifies as pages.
-    pub(crate) const ALL: [&str; 7] = [
+    /// The developer console: the account's apps, and each app's pages, whose
+    /// `{id}` is its client ID.
+    pub(crate) mod developers {
+        use piquel_common::ClientId;
+
+        /// The account's apps.
+        pub(crate) const HOME: &str = "/developers";
+        /// Registering an app.
+        pub(crate) const NEW: &str = "/developers/new";
+        /// An app's overview: what its `OpenID` Connect library needs.
+        pub(crate) const APP: &str = "/developers/clients/{id}";
+        /// An app's settings, disabling and deleting it.
+        pub(crate) const APP_SETTINGS: &str = "/developers/clients/{id}/settings";
+        /// A confidential app's secrets.
+        pub(crate) const APP_SECRETS: &str = "/developers/clients/{id}/secrets";
+
+        /// The page `template` of the app `id`. Client IDs need no escaping in a
+        /// path segment.
+        pub(crate) fn of(template: &str, id: &ClientId) -> String {
+            template.replace("{id}", id.as_str())
+        }
+    }
+
+    /// Every server-rendered page's route, which the security layer classifies as
+    /// pages.
+    pub(crate) const ALL: [&str; 12] = [
         CONSENT,
         LOGOUT,
         settings::HOME,
@@ -172,6 +182,11 @@ pub(crate) mod page {
         settings::VERIFY,
         settings::SESSIONS,
         settings::HISTORY,
+        developers::HOME,
+        developers::NEW,
+        developers::APP,
+        developers::APP_SETTINGS,
+        developers::APP_SECRETS,
     ];
 }
 

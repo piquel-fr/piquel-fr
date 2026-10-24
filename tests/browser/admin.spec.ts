@@ -1,5 +1,6 @@
 import { type Browser, expect, type Page, test } from '@playwright/test';
 import { execFileSync } from 'node:child_process';
+import { addPasskeys, signUp } from './helpers';
 
 const adminUrl = process.env.E2E_ADMIN_URL ?? '';
 // A command that makes the account named by its last argument an administrator,
@@ -7,27 +8,11 @@ const adminUrl = process.env.E2E_ADMIN_URL ?? '';
 const grantAdmin = process.env.E2E_GRANT_ADMIN;
 
 /** A browser of its own, with a passkey authenticator, signed up as `username`. */
-async function signUp(browser: Browser, username: string): Promise<Page> {
+async function signedUp(browser: Browser, username: string): Promise<Page> {
   const context = await browser.newContext();
   const page = await context.newPage();
-  const cdp = await context.newCDPSession(page);
-  await cdp.send('WebAuthn.enable');
-  await cdp.send('WebAuthn.addVirtualAuthenticator', {
-    options: {
-      protocol: 'ctap2',
-      transport: 'internal',
-      hasResidentKey: true,
-      hasUserVerification: true,
-      isUserVerified: true,
-      automaticPresenceSimulation: true
-    }
-  });
-  const invitation = process.env.E2E_INVITATION;
-  await page.goto(`/register${invitation ? `?invitation=${encodeURIComponent(invitation)}` : ''}`);
-  await page.getByLabel('Handle', { exact: true }).fill(username);
-  await page.getByLabel('Passkey name', { exact: true }).fill('Passkey');
-  await page.getByRole('button', { name: 'Create account with a passkey' }).click();
-  await expect(page).toHaveURL('/settings');
+  await addPasskeys(context, page);
+  await signUp(page, username);
   return page;
 }
 
@@ -40,10 +25,10 @@ test('an administrator disables a user from the dashboard, and the user is signe
     'Set E2E_ADMIN_URL and E2E_GRANT_ADMIN to run the dashboard test.'
   );
   const suffix = Date.now().toString(36);
-  const admin = await signUp(browser, `admin-${suffix}`);
+  const admin = await signedUp(browser, `admin-${suffix}`);
   const [command, ...args] = (grantAdmin ?? '').split(' ');
   execFileSync(command, [...args, `admin-${suffix}`], { stdio: 'inherit' });
-  const user = await signUp(browser, `user-${suffix}`);
+  const user = await signedUp(browser, `user-${suffix}`);
 
   // A non-administrator signs in to the dashboard, and sees none of its data. The
   // first sign-in to a dashboard that just started can take longer than usual.

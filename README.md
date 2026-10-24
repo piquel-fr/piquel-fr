@@ -1,10 +1,11 @@
 # piquel.fr
 
 A monorepo for piquel.fr and its services. The first release is a passkey-first
-OIDC/SSO authority at `auth.piquel.fr`, which also serves the account settings.
+OIDC/SSO authority at `auth.piquel.fr`, which also serves the account settings and
+the developer console.
 
 The authentication service is **one Rust executable** containing its login,
-onboarding, consent, passkey and settings pages. PostgreSQL is its only external
+onboarding, consent, passkey, settings and developer console pages. PostgreSQL is its only external
 data service. GitHub and Google are optional login providers. The admin dashboard
 (`apps/admin-web`, at `admin.piquel.fr`) calls its private admin API, and
 `piquel.fr` redirects to auth, keeping the path. See
@@ -35,7 +36,7 @@ just preview
 
 This snapshots this checkout, including uncommitted changes, builds auth and the
 admin dashboard, applies migrations, and prints the preview's URLs; the settings
-are at `/settings` on its auth URL. The preview has its own database and keys. URLs
+are at `/settings`, and the developer console at `/developers`, on its auth URL. The preview has its own database and keys. URLs
 work from devices on the tailnet. Run the same command after changing code.
 `just preview-delete` removes it.
 
@@ -355,11 +356,12 @@ userinfo endpoints from a browser. Scopes default to `openid`, `profile` and
 first-party clients only. `--require-par` makes the client push its authorization
 requests (`update --no-require-par` lifts it).
 
-Accounts can also register clients for their own applications, through the
-account API: see [Managing your own OIDC clients](docs/guides/client-management.md).
+Accounts can also register clients for their own applications in the developer
+console, at `auth.piquel.fr/developers`: see
+[Managing your own OIDC clients](docs/guides/client-management.md).
 Auth generates their IDs and limits their scopes to `openid`, `profile`, `email`
 and `offline_access`; they are never trusted, and an account can have 10 and
-register 20 a day. They never appear in the account API of other accounts, while
+register 20 a day. They never appear in other accounts' consoles, while
 `client list` shows every client. Owners can disable and enable their clients;
 `client suspend` disables one so that its owner cannot enable it until
 `client unsuspend`, which leaves it disabled. Deleting a client, from either side, disables it, revokes its
@@ -478,12 +480,15 @@ explains how to choose a requirement and handle the challenge.
   it; plain registration ignores it. A social login can never replace an
   established account's passkeys.
 - Sensitive changes (adding or removing a passkey, linking or unlinking a provider,
-  adding, removing or changing the primary email address) need a passkey confirmation of the current browser session from the last five
+  adding, removing or changing the primary email address, and registering an OIDC
+  client, rotating its secret, deleting it or changing its redirect or post-logout
+  URIs) need a passkey confirmation of the current browser session from the last five
   minutes. A passkey sign-in counts; social sign-in never does. The age counts from
   the confirmation and is never extended by use, and it never applies to another
-  session. Without one, a settings page asks for the passkey before it posts the
-  change, and the API answers `403` with `"code": "step_up_required"` and `max_age`.
-  Reads and renaming a passkey need only ordinary login.
+  session. Without one, a page asks for the passkey before it posts the change, or,
+  for a client's URIs, once the change is refused; the API answers `403` with
+  `"code": "step_up_required"` and `max_age`. Reads, renaming a passkey and a
+  client's other settings need only ordinary login.
 - Matching verified email suggests linking; it never grants account access.
   Linking requires possession of the provider account and the target account's
   passkey confirmation. Explicit linking, started from settings, permits

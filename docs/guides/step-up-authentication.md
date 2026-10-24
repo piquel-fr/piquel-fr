@@ -72,12 +72,13 @@ check that the new token's `sub` is unchanged before retrying.
 Server-rendered apps should do this in their server hook: a challenge from an
 API becomes a redirect to the app's login route, with the requirement attached.
 
-## Auth's own settings
+## Auth's own pages
 
-Auth's settings pages and account API use the session cookie, not bearer
-tokens, so they don't send RFC 9470 challenges. They check the same requirement.
-A settings form whose change needs it confirms the passkey on the page before it
-posts. The account API answers
+Auth's settings pages, developer console and account API use the session cookie,
+not bearer tokens, so they don't send RFC 9470 challenges. They check the same
+requirement. A form whose change needs it confirms the passkey on the page before
+it posts; a change refused without it, such as an app's new redirect URIs, shows
+its form again asking for the passkey. The account API answers
 `403 {"error": "...", "code": "step_up_required", "max_age": 300}`, and auth's
 own pages then confirm the passkey and retry once.
 

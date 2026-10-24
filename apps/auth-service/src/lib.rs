@@ -9,7 +9,7 @@ mod assets;
 /// The command line: serving, migrations and break-glass administration.
 mod cli;
 /// Creating, changing, rotating the secrets of and deleting OIDC clients, and the
-/// account API for the clients an account manages.
+/// owner's operations on the clients an account manages.
 mod clients;
 /// Validated service and application configuration.
 mod config;
@@ -50,7 +50,6 @@ pub use admin::{
     Reason, UserRef,
 };
 pub use cli::Cli;
-use clients::ClientApplication;
 pub use clients::{
     Applied, ClientDetails, ClientRegistry, ClientRegistryError, DEFAULT_CLIENT_SCOPES,
     MAX_DAILY_REGISTRATIONS, MAX_OWNED_CLIENTS,
@@ -127,7 +126,6 @@ impl AuthConfig {
             .merge(federation.clone().routes())
             .merge(HistoryApplication::new(database.clone()).routes())
             .merge(AccountApplication::new(database.clone()).routes())
-            .merge(ClientApplication::new(database.clone()).routes())
             .merge(EmailApplication::new(database.clone(), &self.email).routes())
             .merge(WebApplication::new(database.clone(), self, oidc.clone(), federation).routes())
             .merge(oidc.routes());

@@ -642,6 +642,44 @@ fn routes_doing_real_work_have_budgets() {
     }
 }
 
+/// A request is classified by the route it matched, so the pages of an app, whose
+/// path names it, and their twins ending in a slash are pages. A request no route
+/// matched is classified by its path.
+#[tokio::test]
+async fn requests_are_classified_by_their_route() {
+    // Answers whether the request is a page's.
+    let classified = || {
+        any(|request: Request| async move {
+            if Endpoint::of(&request).rate_category() == Some(RateCategory::Page) {
+                StatusCode::ACCEPTED
+            } else {
+                StatusCode::NO_CONTENT
+            }
+        })
+    };
+    let router = page::ALL
+        .into_iter()
+        .fold(Router::new(), |router, path| {
+            router
+                .route(path, classified())
+                .route(&format!("{path}/"), classified())
+        })
+        .fallback(classified());
+    for (path, status) in [
+        ("/developers/clients/c_any", StatusCode::ACCEPTED),
+        ("/developers/clients/c_any/settings", StatusCode::ACCEPTED),
+        ("/developers/clients/c_any/secrets/", StatusCode::ACCEPTED),
+        (
+            "/developers/clients/c_any/elsewhere",
+            StatusCode::NO_CONTENT,
+        ),
+    ] {
+        let request = HttpRequest::get(path).body(Body::empty()).expect("request");
+        let response = router.clone().oneshot(request).await.expect("response");
+        assert_eq!(response.status(), status, "{path}");
+    }
+}
+
 /// The origin of auth's own pages in the policy tests.
 fn site() -> url::Origin {
     url::Url::parse("https://auth.piquel.fr")
