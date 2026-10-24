@@ -3,7 +3,7 @@
 use crate::{
     AuthConfig,
     config::ProviderConfig,
-    routes::page::settings,
+    routes::page::{ROOT, settings},
     security::BrowserCookie,
     tests::{AUTH_ORIGIN, Browser, Replicas, parameter, redirect},
     web::tests::{OWN_PAGE, html, policy},
@@ -74,14 +74,23 @@ fn id_after<'a>(page: &'a str, marker: &str) -> &'a str {
     &page[start..start + 36]
 }
 
-/// A browser without a session sees each page offer sign-in, which comes back to
-/// the page as it asked for it, under the pages' policy. Its forms change nothing.
+/// Auth's root, and each page's path ending in a slash, lead to the settings. A
+/// browser without a session sees each page offer sign-in, which comes back to the
+/// page as it asked for it, under the pages' policy. Its forms change nothing.
 #[tokio::test]
 #[ignore = "requires TEST_DATABASE_URL"]
 async fn settings_pages_ask_a_signed_out_browser_to_sign_in() {
     let replicas = Replicas::new().await;
     let browser = Browser::signed_out();
+    let root = browser.visit(&replicas.a, ROOT).await;
+    assert_eq!(root.status(), StatusCode::TEMPORARY_REDIRECT);
+    assert_eq!(redirect(&root), settings::HOME);
     for path in PAGES {
+        let slashed = browser
+            .visit(&replicas.a, &format!("{path}/?remove=1"))
+            .await;
+        assert_eq!(slashed.status(), StatusCode::PERMANENT_REDIRECT, "{path}");
+        assert_eq!(redirect(&slashed), format!("{path}?remove=1"));
         let response = browser
             .visit(&replicas.a, &format!("{path}?remove=1"))
             .await;

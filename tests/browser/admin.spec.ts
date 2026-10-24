@@ -2,7 +2,6 @@ import { type Browser, expect, type Page, test } from '@playwright/test';
 import { execFileSync } from 'node:child_process';
 
 const adminUrl = process.env.E2E_ADMIN_URL ?? '';
-const settingsUrl = process.env.E2E_SETTINGS_URL ?? '';
 // A command that makes the account named by its last argument an administrator,
 // e.g. `just auth admin grant` or `piquelctl app exec … -- auth-service admin grant`.
 const grantAdmin = process.env.E2E_GRANT_ADMIN;
@@ -28,7 +27,7 @@ async function signUp(browser: Browser, username: string): Promise<Page> {
   await page.getByLabel('Handle', { exact: true }).fill(username);
   await page.getByLabel('Passkey name', { exact: true }).fill('Passkey');
   await page.getByRole('button', { name: 'Create account with a passkey' }).click();
-  await expect(page).toHaveURL(settingsUrl);
+  await expect(page).toHaveURL('/settings');
   return page;
 }
 
@@ -37,8 +36,8 @@ test('an administrator disables a user from the dashboard, and the user is signe
   browser
 }) => {
   test.skip(
-    !adminUrl || !grantAdmin || !settingsUrl,
-    'Set E2E_ADMIN_URL, E2E_GRANT_ADMIN and E2E_SETTINGS_URL to run the dashboard test.'
+    !adminUrl || !grantAdmin,
+    'Set E2E_ADMIN_URL and E2E_GRANT_ADMIN to run the dashboard test.'
   );
   const suffix = Date.now().toString(36);
   const admin = await signUp(browser, `admin-${suffix}`);
@@ -64,7 +63,7 @@ test('an administrator disables a user from the dashboard, and the user is signe
   await expect(admin.getByText('disabled', { exact: true })).toBeVisible();
   await expect(admin.getByText('No active session.')).toBeVisible();
 
-  await user.goto(settingsUrl);
+  await user.goto('/settings');
   await expect(user.getByRole('link', { name: 'Sign in', exact: true })).toBeVisible();
   await expect(user.getByText(`@user-${suffix}`, { exact: true })).toHaveCount(0);
 

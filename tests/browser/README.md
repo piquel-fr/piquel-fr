@@ -1,31 +1,29 @@
 The browser suite uses the real auth binary and PostgreSQL, with Chromium's virtual
-WebAuthn authenticator. It does not intercept or mock API responses. Use an isolated
-database: tests create accounts and credentials. CI runs it against the embedded
-production build, as configured below.
+WebAuthn authenticator. It does not intercept or mock auth's responses. Use an
+isolated database: tests create accounts and credentials. CI runs it against the
+embedded production build, as configured below.
 
 `settings.spec.ts` checks auth's own settings pages: renaming, adding and removing
 passkeys, a passkey ceremony that fails, the passkey confirmation the SDK runs,
-devices, an email link's token and signing out. Until piquel.fr redirects to them, registration still returns to
-`E2E_SETTINGS_URL`.
+devices, an email link's token and signing out.
 
-Run `just preview` to build and deploy this checkout over HTTPS on piqueld.
-Set `E2E_AUTH_URL` and `E2E_SETTINGS_URL` to the printed auth origin and web
-settings URL, then run `just web test-browser`. If signup requires an invitation,
-provide an unused `E2E_INVITATION`. Previews allow registration without one.
+`oidc.spec.ts` signs in through `browser-e2e`, a public, untrusted client at
+`https://browser-e2e.test` that may request `openid`, `profile` and `email`. No
+server runs it: the test serves its pages through DevTools, so the client's fetches
+to auth are genuinely cross-origin, under auth's real CORS policy. It checks
+consent, posted once on a double click, the `iss` on each authorization response,
+a PKCE exchange, an ID-token signature verified with JWKS and WebCrypto, userinfo,
+code replay rejection, a `prompt=none` request using remembered consent, and a
+step-up re-authentication. Passkey-only accounts must not acquire email claims.
+`just web browser-client` registers the client with the auth database configured in
+the environment, as CI does. Previews do not register it by default: run
+`auth-service client create browser-e2e --name 'Browser E2E' --redirect-uri
+https://browser-e2e.test/callback` there.
 
-The OIDC checks sign in through a public, untrusted `browser-e2e` client that
-calls back to the web origin's `/callback`, returns to its `/settings` after
-logout, and may request `openid`, `profile` and `email`.
-`just web browser-client ORIGIN` registers it with the auth database configured
-in the environment, e.g. `just web browser-client https://localhost:4443`, as CI
-does. Previews do not register it by default. The callback is a test
-destination; the suite captures its code before exchanging it.
-
-The suite checks consent, the `iss` on each authorization response, a browser
-PKCE exchange, an actual ID-token signature using JWKS and WebCrypto, userinfo
-CORS, code replay rejection, and a subsequent `prompt=none` request using
-remembered consent. Passkey-only
-accounts must not acquire email claims.
+Run `just preview` to build and deploy this checkout over HTTPS on piqueld. Set
+`E2E_AUTH_URL` to the printed auth origin, then run `just web test-browser`. If
+signup requires an invitation, provide an unused `E2E_INVITATION`. Previews allow
+registration without one.
 
 `CHROMIUM_EXECUTABLE` can select an existing Chromium installation.
 `E2E_ALLOW_SELF_SIGNED_TLS=1` permits local test certificates only.

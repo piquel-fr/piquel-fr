@@ -10,14 +10,12 @@ use lettre::{
 };
 use piquel_common::{
     Provider,
-    config::{ConfigurationError, Origin, PublicUrl, SecretBytes, SecretReference, Variable},
+    config::{ConfigurationError, Origin, SecretBytes, SecretReference, Variable},
 };
 use piquel_crypto::{CryptoError, Digest, KeyEncryptionKey, Secret};
 use piquel_repository::{DatabaseConfig, RuntimeRole};
-use serde::{Serialize, Serializer};
 use std::{
-    collections::{BTreeMap, BTreeSet},
-    fmt,
+    collections::BTreeMap,
     net::{IpAddr, SocketAddr},
     sync::Arc,
     time::Duration,
@@ -43,15 +41,11 @@ const DIGEST_KEY_FINGERPRINT_BYTES: usize = 8;
 const DATABASE_POOL_SIZE: u32 = 10;
 /// Maximum startup wait for a pooled database connection.
 const DATABASE_CONNECT_TIMEOUT: Duration = Duration::from_secs(5);
-/// Public settings destination when no override is configured.
-const DEFAULT_SETTINGS_URL: &str = "https://piquel.fr/settings";
 /// Listener address when none is configured; the HTTPS ingress proxies to it.
 const DEFAULT_PUBLIC_LISTENER: &str = "127.0.0.1:8080";
 
 /// Authentication origin, shared by all application sections.
 pub const PUBLIC_BASE_URL: Variable = Variable::new("AUTH_PUBLIC_BASE_URL");
-/// Public settings continuation.
-const SETTINGS_URL: Variable = Variable::new("AUTH_SETTINGS_URL");
 /// HTTP listener behind the HTTPS ingress.
 const PUBLIC_LISTENER: Variable = Variable::new("AUTH_PUBLIC_LISTENER");
 /// Optional private listener serving only the admin API.
@@ -150,8 +144,8 @@ pub(crate) struct EmailConfig {
     pub smtp: Option<AsyncSmtpTransport<Tokio1Executor>>,
     /// The `From` of every message.
     pub from: Mailbox,
-    /// Account settings, which every link in a message points under.
-    pub settings_url: PublicUrl,
+    /// Auth's origin, whose settings pages every link in a message opens.
+    pub origin: Origin,
     /// Derives verification tokens from address IDs.
     pub verification_key: VerificationKey,
 }
@@ -161,7 +155,6 @@ impl EmailConfig {
     /// token digest key.
     fn from_environment(
         origin: &Origin,
-        settings_url: &PublicUrl,
         digest_keys: &TokenDigestKeys,
     ) -> Result<Self, ConfigurationError> {
         let smtp = match SMTP_URL.optional()? {
@@ -174,7 +167,7 @@ impl EmailConfig {
         Ok(Self {
             smtp,
             from: EMAIL_FROM.parse_or(DEFAULT_EMAIL_FROM)?,
-            settings_url: settings_url.clone(),
+            origin: origin.clone(),
             verification_key: VerificationKey::new(digest_keys.current.verification.clone()),
         })
     }
@@ -272,15 +265,15 @@ impl ProviderConfig {
 
 #[cfg(test)]
 impl EmailConfig {
-    /// Test settings for `settings_url` with a fresh verification key. `enabled`
-    /// sets a relay that tests never reach, so accounts can add addresses.
-    pub(crate) fn test(settings_url: &PublicUrl, enabled: bool) -> Self {
+    /// Test settings at `origin` with a fresh verification key. `enabled` sets a
+    /// relay that tests never reach, so accounts can add addresses.
+    pub(crate) fn test(origin: &Origin, enabled: bool) -> Self {
         Self {
             smtp: enabled.then(|| {
                 AsyncSmtpTransport::<Tokio1Executor>::builder_dangerous("localhost").build()
             }),
             from: DEFAULT_EMAIL_FROM.parse().expect("sender"),
-            settings_url: settings_url.clone(),
+            origin: origin.clone(),
             verification_key: VerificationKey::new(Secret::generate().expect("verification key")),
         }
     }
@@ -333,61 +326,18 @@ impl ProviderConfig {
     }
 }
 
-/// Origins of the first-party frontends, such as piquel.fr. They may call the account
-/// and login APIs, and sign-in may return to any URL on them.
-#[derive(Clone, Debug)]
-pub(crate) struct FrontendOrigins(Arc<[String]>);
-
-impl FrontendOrigins {
-    /// Collects the distinct origins of the configured frontend URLs, serialized as
-    /// browsers send them in `Origin` headers.
-    pub(crate) fn new<'a>(urls: impl IntoIterator<Item = &'a PublicUrl>) -> Self {
-        let origins: BTreeSet<_> = urls
-            .into_iter()
-            .map(|url| url.as_url().origin().ascii_serialization())
-            .collect();
-        Self(origins.into_iter().collect())
-    }
-
-    /// Whether `origin`, serialized like an `Origin` header, belongs to a frontend.
-    pub(crate) fn contains(&self, origin: &str) -> bool {
-        self.0.iter().any(|allowed| allowed == origin)
-    }
-}
-
-impl fmt::Display for FrontendOrigins {
-    /// Lists the origins for error messages, e.g. `https://piquel.fr`.
-    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        formatter.write_str(&self.0.join(", "))
-    }
-}
-
-impl Serialize for FrontendOrigins {
-    /// Publishes the origins as a JSON array, for the SDK's return validation.
-    fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        serializer.collect_seq(self.0.iter())
-    }
-}
-
 /// Social authentication configuration, keyed by the shared provider vocabulary.
 #[derive(Clone)]
 pub(crate) struct FederationConfig {
     /// Exact provider callback origin.
     pub origin: Origin,
-    /// Account settings, where sign-in returns by default.
-    pub settings_url: PublicUrl,
-    /// Frontend origins that sign-in may return to.
-    pub frontends: FrontendOrigins,
     /// Enabled provider credentials.
     pub providers: BTreeMap<Provider, ProviderConfig>,
 }
 
 impl FederationConfig {
     /// Loads every provider through its exhaustive environment mapping.
-    pub(crate) fn from_environment(
-        origin: &Origin,
-        settings_url: &PublicUrl,
-    ) -> Result<Self, ConfigurationError> {
+    pub(crate) fn from_environment(origin: &Origin) -> Result<Self, ConfigurationError> {
         let mut providers = BTreeMap::new();
         for provider in Provider::ALL {
             if let Some(config) = ProviderConfig::from_environment(provider)? {
@@ -396,8 +346,6 @@ impl FederationConfig {
         }
         Ok(Self {
             origin: origin.clone(),
-            settings_url: settings_url.clone(),
-            frontends: FrontendOrigins::new([settings_url]),
             providers,
         })
     }
@@ -654,14 +602,13 @@ impl AuthConfig {
             }
         }
         let origin: Origin = PUBLIC_BASE_URL.parse()?;
-        let settings_url: PublicUrl = SETTINGS_URL.parse_or(DEFAULT_SETTINGS_URL)?;
         let digest_keys = Arc::new(TokenDigestKeys::from_environment()?);
         Ok(Self {
             public_listener: PUBLIC_LISTENER.parse_or(DEFAULT_PUBLIC_LISTENER)?,
             admin_listener: ADMIN_LISTENER.parse_optional()?,
             passkey: PasskeyConfig::from_environment(&origin, &digest_keys)?,
-            federation: FederationConfig::from_environment(&origin, &settings_url)?,
-            email: EmailConfig::from_environment(&origin, &settings_url, &digest_keys)?,
+            federation: FederationConfig::from_environment(&origin)?,
+            email: EmailConfig::from_environment(&origin, &digest_keys)?,
             oidc: OidcConfig {
                 origin,
                 digest_keys,

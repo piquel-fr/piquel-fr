@@ -1,7 +1,7 @@
 //! Browser-bound social authentication. Email suggests linking; it never authorizes it.
 
 use crate::account::Owner;
-use crate::config::{FederationConfig, FrontendOrigins, ProviderConfig};
+use crate::config::{FederationConfig, ProviderConfig};
 use crate::routes;
 use crate::security::{
     self, ApiError, BrowserCookie, OptionalSession, RequestContext, SessionError,
@@ -53,8 +53,9 @@ const HTTP_TIMEOUT: StdDuration = StdDuration::from_secs(8);
 const HTTP_CONNECT_TIMEOUT: StdDuration = StdDuration::from_secs(3);
 /// Identifies this service to provider APIs.
 const HTTP_USER_AGENT: &str = "piquel-auth";
-/// Where the browser goes after sign-in when no `return_to` is given.
-const DEFAULT_RETURN_TO: &str = "/";
+/// Where the browser goes after sign-in when no `return_to` is given: the account's
+/// settings.
+const DEFAULT_RETURN_TO: &str = routes::page::settings::HOME;
 
 piquel_common::str_enum! {
     /// Failed-callback reasons, sent to the login page as its `error` query parameter.
@@ -79,13 +80,12 @@ piquel_common::str_enum! {
     }
 }
 
-/// A validated `return_to`: a path on the auth origin or a URL on a frontend origin.
+/// A validated `return_to`: a path on the auth origin.
 struct ReturnTo(String);
 impl ReturnTo {
-    /// Accepts a path that cannot leave the auth origin, or an absolute URL on one of
-    /// `frontends` without credentials. URLs are kept as parsed, so the browser goes
-    /// exactly where validation looked.
-    fn parse(value: Option<&str>, frontends: &FrontendOrigins) -> Result<Self, InvalidReturnTo> {
+    /// Accepts a path that cannot leave the auth origin. Absolute URLs are refused,
+    /// even auth's own: its pages send paths.
+    fn parse(value: Option<&str>) -> Result<Self, InvalidReturnTo> {
         let value = value.unwrap_or(DEFAULT_RETURN_TO);
         if value.len() > MAX_RETURN_TO_BYTES {
             return Err(InvalidReturnTo::TooLong(value.len()));
@@ -103,17 +103,10 @@ impl ReturnTo {
         if value.starts_with("//") {
             return Err(InvalidReturnTo::ProtocolRelative);
         }
-        if value.starts_with('/') {
-            return Ok(Self(value.into()));
+        if !value.starts_with('/') {
+            return Err(InvalidReturnTo::NotAPath);
         }
-        let url = Url::parse(value)
-            .ok()
-            .filter(|url| frontends.contains(&url.origin().ascii_serialization()))
-            .ok_or_else(|| InvalidReturnTo::External(frontends.clone()))?;
-        if !url.username().is_empty() || url.password().is_some() {
-            return Err(InvalidReturnTo::Credentials);
-        }
-        Ok(Self(url.into()))
+        Ok(Self(value.into()))
     }
 }
 
@@ -155,8 +148,6 @@ pub struct FederationApplication {
     client: reqwest::Client,
     /// Exhaustive provider facts; back-channel endpoints can be replaced by test fixtures.
     endpoints: BTreeMap<Provider, ProviderEndpoints>,
-    /// Origins that sign-in may return to, besides auth's own paths.
-    frontends: FrontendOrigins,
 }
 
 impl FederationApplication {
@@ -185,7 +176,6 @@ impl FederationApplication {
                 .into_iter()
                 .map(|provider| Ok((provider, ProviderEndpoints::new(provider, &client)?)))
                 .collect::<Result<_, FederationConfigError>>()?,
-            frontends: config.frontends.clone(),
             client,
         })
     }
@@ -258,16 +248,15 @@ impl FederationApplication {
         provider: Provider,
         return_to: &str,
     ) -> Result<(Url, Secret), FederationError> {
-        let return_to = ReturnTo::parse(Some(return_to), &self.frontends)?;
+        let return_to = ReturnTo::parse(Some(return_to))?;
         self.authorization(provider, Some(owner.session()), return_to)
             .await
     }
 
-    /// Starts a browser-bound authorization request, optionally for explicit linking.
+    /// Starts a browser-bound sign-in. Settings pages link through [`Self::start_link`].
     async fn start(
         State(app): State<Self>,
         Path(provider): Path<String>,
-        OptionalSession(session): OptionalSession,
         Json(input): Json<StartInput>,
     ) -> Result<Response, ApiError> {
         Ok(app
@@ -276,28 +265,19 @@ impl FederationApplication {
                     .parse()
                     .map_err(FederationError::UnsupportedProvider)?,
                 input,
-                session,
             )
             .await?)
     }
 
-    /// Starts a sign-in, or a link for the browser's `session`, as `input` asks,
-    /// and answers with the provider's authorization URL as JSON.
+    /// Starts a sign-in returning where `input` asks, and answers with the
+    /// provider's authorization URL as JSON.
     async fn start_flow(
         &self,
         provider: Provider,
         input: StartInput,
-        session: Option<StoredSession>,
     ) -> Result<Response, FederationError> {
-        // Linking needs only a session here: confirming the pending link needs the passkey.
-        let link = match input.mode {
-            StartMode::Login => None,
-            StartMode::Link => Some(session.ok_or(SessionError::Missing)?),
-        };
-        let return_to = ReturnTo::parse(input.return_to.as_deref(), &self.frontends)?;
-        let (url, browser) = self
-            .authorization(provider, link.as_ref(), return_to)
-            .await?;
+        let return_to = ReturnTo::parse(input.return_to.as_deref())?;
+        let (url, browser) = self.authorization(provider, None, return_to).await?;
         let mut response = Json(StartResponse {
             redirect_url: url.as_str(),
         })
@@ -592,25 +572,11 @@ impl FederationApplication {
     }
 }
 
-/// Whether authorization starts a login or a link to the current account.
-#[derive(Default, Deserialize)]
-#[serde(rename_all = "snake_case")]
-enum StartMode {
-    /// Authenticate a provider subject without assuming an existing session.
-    #[default]
-    Login,
-    /// Bind the verified provider subject to the initiating session.
-    Link,
-}
-
-/// Browser input for a new authorization request.
-#[derive(Default, Deserialize)]
+/// Browser input for a new sign-in.
+#[derive(Deserialize)]
 struct StartInput {
-    /// Requested continuation, checked against the application's URL policy.
+    /// Requested continuation, a path on auth; [`DEFAULT_RETURN_TO`] when omitted.
     return_to: Option<String>,
-    /// Account-linking intent; an omitted value starts an ordinary login.
-    #[serde(default)]
-    mode: StartMode,
 }
 
 /// Authorization destination returned to the browser.

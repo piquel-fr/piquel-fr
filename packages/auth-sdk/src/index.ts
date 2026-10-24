@@ -1,19 +1,18 @@
 /**
- * Browser-side SDK for the piquel auth service, shared by auth-web and piquel-web:
- * a typed API client, WebAuthn passkey ceremonies, step-up and redirect helpers.
+ * Browser-side SDK for the piquel auth service, for pages on the auth origin: auth-web's
+ * sign-in pages use it, and auth's server-rendered pages load it as their only script.
+ * A typed API client, WebAuthn passkey ceremonies and the sign-in redirect check.
  * Shared presentation styles are exported separately as `@piquel/auth-sdk/style.css`.
  */
 export type Provider = 'github' | 'google';
 export type PasskeyKind = 'standard' | 'google_password_manager';
 export type Session = { user: { id: string; username: string; display_name: string } };
+/** auth's public `/config`: what its sign-in pages offer. */
 export type Configuration = {
-  /** Whether auth sends email, so accounts can add addresses. */
-  email_enabled: boolean;
-  settings_url: string;
-  /** Frontend origins, such as https://piquel.fr, that sign-in may return to. */
-  frontend_origins: string[];
-  providers: Provider[];
   invite_required: boolean;
+  providers: Provider[];
+  /** The account settings' path, where sign-in goes without another destination. */
+  settings_url: string;
 };
 export const providerName = (provider: Provider) => (provider === 'github' ? 'GitHub' : 'Google');
 
@@ -40,13 +39,11 @@ export class StepUpRequired extends ApiError {
   }
 }
 
-/** The auth cookie remains HttpOnly on the auth host, including for settings requests. */
+/** Calls auth's JSON API from a page on the auth origin, with its HttpOnly session cookie. */
 export class AuthApi {
-  constructor(readonly origin = '') {}
   async request<T = void>(path: string, method = 'GET', body?: unknown): Promise<T> {
-    const response = await fetch(`${this.origin}${path}`, {
+    const response = await fetch(path, {
       method,
-      credentials: 'include',
       headers: method === 'GET' ? {} : { 'content-type': 'application/json', 'x-piquel-csrf': '1' },
       ...(body === undefined ? {} : { body: JSON.stringify(body) })
     });
@@ -133,7 +130,7 @@ export function passkeysAvailable(): boolean {
 
 /** All ceremonies run on the auth origin; serialized WebAuthn wrappers contain publicKey. */
 export class Passkeys {
-  constructor(readonly api: AuthApi) {}
+  constructor(private readonly api: AuthApi) {}
   /** Signs in, which also confirms the new session for actions that need a passkey. */
   authenticate(username?: string): Promise<void> {
     return this.assert('/webauthn/authenticate', username ? { username } : {});
@@ -234,88 +231,16 @@ export function errorMessage(error: unknown): string {
       ? error.message
       : 'Something went wrong. Please try again.';
 }
-/** Session storage entry for an action waiting on auth's /confirm page. */
-const STEP_UP_STORAGE_KEY = 'piquel.step_up';
-/** How long after leaving for /confirm an action may still resume. */
-const STEP_UP_RESUME_MS = 5 * 60 * 1000;
-type PendingStepUp = { key: string; argument: string; account: string; started_at: number };
-
-/**
- * Runs named actions that may need a recent passkey confirmation. On the auth origin
- * it confirms inline and retries once. Elsewhere it saves the action in this tab,
- * sends the user to auth's /confirm page, and `resume` runs it once on return.
- * Actions take one string argument, such as the ID of the passkey to remove.
- * `account` returns the signed-in account's ID: a saved action only resumes for the
- * account that started it, in case /confirm signed in someone else.
- */
-export class StepUp<Key extends string> {
-  constructor(
-    private readonly passkeys: Passkeys,
-    private readonly account: () => string | undefined,
-    private readonly actions: Record<Key, (argument: string) => Promise<void>>
-  ) {}
-  async run(key: Key, argument = ''): Promise<void> {
-    const action = () => this.actions[key](argument);
-    const authOrigin = this.passkeys.api.origin || window.location.origin;
-    if (authOrigin === window.location.origin) return this.passkeys.withConfirmation(action);
-    try {
-      await action();
-      return;
-    } catch (error) {
-      if (!(error instanceof StepUpRequired)) throw error;
-    }
-    const account = this.account();
-    if (account === undefined) throw new Error('Sign in to continue.');
-    const pending: PendingStepUp = { key, argument, account, started_at: Date.now() };
-    sessionStorage.setItem(STEP_UP_STORAGE_KEY, JSON.stringify(pending));
-    const { origin, pathname, search } = window.location;
-    const query = new URLSearchParams({ return_to: `${origin}${pathname}${search}` });
-    window.location.assign(`${authOrigin}/confirm?${query}`);
-    // The page is unloading: keep the caller busy instead of reporting a result.
-    return new Promise<never>(() => undefined);
-  }
-  /**
-   * Runs the action saved before /confirm once, if it started in this tab less than
-   * five minutes ago for the same account. If the user came back without confirming,
-   * it does nothing.
-   */
-  async resume(): Promise<void> {
-    const saved = sessionStorage.getItem(STEP_UP_STORAGE_KEY);
-    if (saved === null) return;
-    sessionStorage.removeItem(STEP_UP_STORAGE_KEY);
-    const pending = JSON.parse(saved) as PendingStepUp;
-    if (
-      Date.now() - pending.started_at > STEP_UP_RESUME_MS ||
-      pending.account !== this.account() ||
-      !(pending.key in this.actions)
-    )
-      return;
-    try {
-      await this.actions[pending.key as Key](pending.argument);
-    } catch (error) {
-      if (!(error instanceof StepUpRequired)) throw error;
-    }
-  }
-}
 
 /**
  * Returns `value` when the auth service accepts it as `return_to`, else the settings
- * URL: a path on the auth origin, or a URL on a frontend origin without credentials.
- * Neither may contain a fragment, backslash or control character. Never throws, and
- * keeps paths relative so social-login start accepts them.
+ * path: a path on the auth origin, without a fragment, backslash or control character.
+ * Never throws.
  */
 export function safeDestination(value: string | null, config: Configuration): string {
-  if (!value || value.length > 2048 || /[\\#\p{Cc}]/u.test(value) || value.startsWith('//'))
-    return config.settings_url;
-  if (value.startsWith('/')) return value;
-  try {
-    const url = new URL(value);
-    if (!url.username && !url.password && config.frontend_origins.includes(url.origin))
-      return url.href;
-  } catch {
-    // Neither a path nor an absolute URL.
-  }
-  return config.settings_url;
+  if (!value || value.length > 2048 || /[\\#\p{Cc}]/u.test(value)) return config.settings_url;
+  // One leading `/` makes it a path on the auth origin; `//` would leave it.
+  return value.startsWith('/') && !value.startsWith('//') ? value : config.settings_url;
 }
 
 /**

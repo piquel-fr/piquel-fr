@@ -74,9 +74,11 @@ API becomes a redirect to the app's login route, with the requirement attached.
 
 ## Auth's own settings
 
-Auth's account APIs use the session cookie, not bearer tokens, so they don't
-send RFC 9470 challenges. They check the same requirement and answer
-`403 {"error": "...", "code": "step_up_required", "max_age": 300}`. The
-settings frontend then confirms the passkey on auth's `/confirm` page.
+Auth's settings pages and account API use the session cookie, not bearer
+tokens, so they don't send RFC 9470 challenges. They check the same requirement.
+A settings form whose change needs it confirms the passkey on the page before it
+posts. The account API answers
+`403 {"error": "...", "code": "step_up_required", "max_age": 300}`, and auth's
+own pages then confirm the passkey and retry once.
 
 [RFC 9470]: https://www.rfc-editor.org/rfc/rfc9470

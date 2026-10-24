@@ -1,10 +1,9 @@
 //! Configuration validation and secret redaction.
 use super::*;
 
-/// Public URLs reject every insecure or ambiguous component.
+/// Origins reject every insecure or ambiguous component.
 #[test]
 fn urls_validate_once() {
-    assert!("https://piquel.fr/settings".parse::<PublicUrl>().is_ok());
     assert!("https://auth.piquel.fr".parse::<Origin>().is_ok());
     for value in [
         "http://localhost",

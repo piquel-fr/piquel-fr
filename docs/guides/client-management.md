@@ -6,7 +6,7 @@ account API on auth. Operators manage first-party clients with
 never appear here.
 
 These routes are first-party. Like the rest of the account API, they accept only
-the settings site's exact origin and the session cookie, and every request except
+auth's own origin and the session cookie, and every request except
 a `GET` needs the `x-piquel-csrf` header. "Confirmed" means a passkey
 confirmation of the session from the last five minutes. Without one, the answer
 is `403` with `step_up_required` (see
@@ -46,7 +46,7 @@ user's session ended ([back-channel logout](../../README.md#back-channel-logout)
 Only an operator sets it for now, and your changes keep it.
 
 Auth chooses the ID, `c_` followed by 20 random characters, so nobody can claim a
-name like `piquel-web`. Your clients are never trusted: users always see the
+name like `piquel-admin`. Your clients are never trusted: users always see the
 consent screen. Changing where auth may send the browser needs a confirmation,
 so a stolen session cookie cannot add a redirect URI and collect authorization
 codes.
