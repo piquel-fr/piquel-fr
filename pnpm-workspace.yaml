@@ -18,3 +18,12 @@ onlyBuiltDependencies:
 # SvelteKit's cookie API is compatible with the security-patched 0.7 series.
 overrides:
   cookie@<0.7.0: 0.7.2
+
+# Both are fixed only in SvelteKit 3, and neither applies: no app uses
+# `use:enhance` (GHSA-pfhg-q3qv-9q6r, an open redirect from enhanced forms) or
+# `setHeaders` (GHSA-27mw-82g8-phjj, an XSS through a prerendered page's
+# cache-control). Remove both with SvelteKit, which auth's own pages replace.
+auditConfig:
+  ignoreGhsas:
+    - GHSA-pfhg-q3qv-9q6r
+    - GHSA-27mw-82g8-phjj
