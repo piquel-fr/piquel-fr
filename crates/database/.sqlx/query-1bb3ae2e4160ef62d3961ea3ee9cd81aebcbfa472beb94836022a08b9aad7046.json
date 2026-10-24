@@ -1,0 +1,24 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "-- Renders the script `Database::provision` runs as the schema owner after\n-- migrations. It creates the runtime role $1, or resets it, with the password $2,\n-- and grants it row access to the app tables and nothing else. `RuntimeRole`\n-- only accepts plain identifiers, so the name is safe inside the DO block. The\n-- advisory lock $3 serializes overlapping runs, whose catalog updates conflict.\nSELECT format($script$\nSELECT pg_advisory_xact_lock(%4$s);\nDO $$\nBEGIN\n    IF EXISTS (SELECT FROM pg_roles WHERE rolname = %1$L AND (rolsuper OR rolname = current_user)) THEN\n        RAISE EXCEPTION 'the runtime role %1$s must not be the schema owner or a superuser';\n    END IF;\n    IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname = %1$L) THEN\n        CREATE ROLE %1$I;\n    END IF;\nEND $$;\nALTER ROLE %1$I WITH LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS\n    PASSWORD %2$L;\nGRANT CONNECT ON DATABASE %3$I TO %1$I;\nGRANT USAGE ON SCHEMA public TO %1$I;\n-- Start from nothing, so privileges narrowed below never linger.\nREVOKE ALL ON ALL TABLES IN SCHEMA public FROM %1$I;\nGRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO %1$I;\n-- Only migrations read it.\nREVOKE ALL ON _sqlx_migrations FROM %1$I;\n-- History is append-only, and its personal data is erased but never rewritten.\nREVOKE UPDATE, DELETE ON domain_events FROM %1$I;\nREVOKE UPDATE ON event_personal_data FROM %1$I;\nREVOKE DELETE ON event_consumers FROM %1$I;\n$script$, $1::text, $2::text, current_database(), $3::bigint) AS \"script!\"\n",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "script!",
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Text",
+        "Int8"
+      ]
+    },
+    "nullable": [
+      null
+    ]
+  },
+  "hash": "1bb3ae2e4160ef62d3961ea3ee9cd81aebcbfa472beb94836022a08b9aad7046"
+}

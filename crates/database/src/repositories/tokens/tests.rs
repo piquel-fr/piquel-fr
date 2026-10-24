@@ -30,7 +30,8 @@ async fn client(pool: &PgPool) -> ClientId {
     .await
     .expect("client");
     sqlx::query(
-        "INSERT INTO oidc_redirect_uris (client_id, uri, kind) VALUES ($1, $2, 'authorization')",
+        "INSERT INTO oidc_redirect_uris (client_id, uri, kind, origin)
+        VALUES ($1, $2, 'authorization', 'https://client.example')",
     )
     .bind(client.as_str())
     .bind(REDIRECT_URI)

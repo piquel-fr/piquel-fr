@@ -1,7 +1,6 @@
-//! Client registrations against a real database: the migration from the clients
-//! file's rows, secret rotation, the origins public clients may call from, when
-//! pushed authorization requests can be claimed, and which clients of live sessions
-//! the back-channel logout migration finds.
+//! Client registrations against a real database: secret rotation, the origins
+//! public clients may call from, when pushed authorization requests can be claimed,
+//! and which clients of live sessions the back-channel logout migration finds.
 use crate::repositories::OidcRepository;
 use crate::{Database, InsertAuthorizationRequest, connection::MIGRATOR};
 use chrono::{DateTime, Duration, Utc};
@@ -279,97 +278,6 @@ async fn scratch_schema(versions: impl RangeBounds<i64>) -> (PgConnection, Strin
             .expect("earlier migration");
     }
     (connection, schema)
-}
-
-/// Clients the startup file registered keep working after the migration: a
-/// confidential client keeps its secret, redirect origins are filled in as URL
-/// parsing serializes them, and the previous release's writes are mirrored, even
-/// of a secret that had expired.
-/// It runs in a scratch schema, since the test database is migrated.
-#[tokio::test]
-#[ignore = "requires a disposable TEST_DATABASE_URL"]
-async fn migration_keeps_file_clients_and_their_secrets() {
-    let (mut connection, schema) = scratch_schema(..8).await;
-    // A public client, and a confidential one whose secret digest is `digest`.
-    let digest = [9; 32];
-    sqlx::raw_sql(
-        "INSERT INTO oidc_clients (id, display_name, allowed_scopes, allowed_audiences)
-        VALUES ('web', 'Web', '[\"openid\"]', '[\"web\"]');
-        INSERT INTO oidc_redirect_uris (client_id, uri, kind)
-        VALUES
-            ('web', 'https://Web.Example:0443/callback', 'authorization'),
-            ('web', 'https://bücher.example/callback', 'authorization');
-        INSERT INTO oidc_clients (
-            id, display_name, allowed_scopes, allowed_audiences, client_secret_hash
-        ) VALUES ('api', 'API', '[\"openid\"]', '[\"api\"]', decode(repeat('09', 32), 'hex'));",
-    )
-    .execute(&mut connection)
-    .await
-    .expect("file clients");
-    // This migration, then the later ones the current release reads with.
-    sqlx::raw_sql(concat!(
-        include_str!("../../../migrations/0008_oidc_client_registry.sql"),
-        include_str!("../../../migrations/0009_pushed_authorization_requests.sql"),
-        include_str!("../../../migrations/0012_client_owners.sql"),
-        include_str!("../../../migrations/0013_backchannel_logout.sql"),
-    ))
-    .execute(&mut connection)
-    .await
-    .expect("migration");
-
-    // The previous release, still running, registers a confidential client.
-    let legacy = [8_u8; 32];
-    sqlx::query(
-        "INSERT INTO oidc_clients (
-            id, display_name, allowed_scopes, allowed_audiences, client_secret_hash
-        ) VALUES ('legacy', 'Legacy', '[\"openid\"]', '[\"legacy\"]', $1)",
-    )
-    .bind(legacy.as_slice())
-    .execute(&mut connection)
-    .await
-    .expect("legacy confidential client");
-    // It then restarts with a new secret in its file, which replaces the old one,
-    // and a rollback restores its earlier file, whose secret had expired.
-    let replaced = [7_u8; 32];
-    for digest in [replaced, legacy] {
-        sqlx::query("UPDATE oidc_clients SET client_secret_hash = $1 WHERE id = 'legacy'")
-            .bind(digest.as_slice())
-            .execute(&mut connection)
-            .await
-            .expect("legacy secret change");
-        assert_eq!(
-            OidcRepository::from_connection(&mut connection)
-                .active_secret_digests("legacy")
-                .await
-                .expect("secrets"),
-            [digest.to_vec()]
-        );
-    }
-
-    let mut oidc = OidcRepository::from_connection(&mut connection);
-    oidc.fill_redirect_origins().await.expect("origins");
-    for (id, kind) in [
-        ("web", ClientKind::Public),
-        ("api", ClientKind::Confidential),
-        ("legacy", ClientKind::Confidential),
-    ] {
-        let client = oidc.find_client(id).await.expect("find").expect("migrated");
-        assert_eq!((client.kind, client.owner_id), (kind, None), "{id}");
-    }
-    assert_eq!(
-        oidc.active_secret_digests("api").await.expect("secrets"),
-        [digest.to_vec()]
-    );
-    for origin in ["https://web.example", "https://xn--bcher-kva.example"] {
-        assert!(
-            oidc.public_client_origin(origin).await.expect("origin"),
-            "{origin}"
-        );
-    }
-    sqlx::raw_sql(&format!("DROP SCHEMA {schema} CASCADE"))
-        .execute(&mut connection)
-        .await
-        .expect("drop schema");
 }
 
 /// The back-channel logout migration finds the clients of live sessions in what is
