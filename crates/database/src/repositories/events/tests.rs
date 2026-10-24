@@ -347,7 +347,7 @@ async fn migration_imports_the_audit_log() {
         .execute(&mut connection)
         .await
         .expect("migration");
-    // The previous release keeps writing to the log until 0018.
+    // The release before 0005 keeps writing to the log during that deploy.
     audit(&mut connection, "passkey.login", "{}", 1).await;
     // The rest bring the schema to the one this release reads.
     for migration in [
