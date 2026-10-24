@@ -26,8 +26,8 @@ use piquel_common::{
     protocol::step_up::StepUpRequirement,
 };
 use piquel_crypto::Secret;
-use piquel_repository::InsertVerifiedEmail;
 use piquel_repository::{InsertExternalIdentity, InsertPasskey};
+use piquel_repository::{InsertVerifiedEmail, PendingFederation};
 use serde_json::json;
 use std::{fmt::Debug, mem::discriminant};
 
@@ -575,6 +575,9 @@ struct Confirmation {
     passkey: PasskeyId,
     /// The account's confidential client.
     client: ClientId,
+    /// The cookie secret of a browser holding evidence of another identity to
+    /// link, which the owner's session started.
+    pending: Secret,
 }
 
 impl FromRef<Confirmation> for Database {
@@ -586,8 +589,10 @@ impl FromRef<Confirmation> for Database {
 
 impl Confirmation {
     /// Creates an account with two passkeys, a GitHub identity, two verified
-    /// addresses and a confidential client.
-    async fn new(fixture: &Fixture) -> Self {
+    /// addresses and a confidential client, and signs a browser in to it socially,
+    /// which never confirms with a passkey. That session started linking a Google
+    /// identity.
+    async fn new(fixture: &Fixture) -> (Self, Browser) {
         let database = &fixture.harness.database;
         let (account, passkeys) = fixture.target(2).await;
         let user = account.user_id;
@@ -616,15 +621,36 @@ impl Confirmation {
         })
         .await
         .expect("client");
+        let social = Browser::sign_in_with(database, user, AuthenticationMethod::Federation).await;
+        let pending = Secret::generate().expect("browser secret");
+        database
+            .federation()
+            .insert_pending(&PendingFederation {
+                id: TokenId::new(),
+                browser_digest: pending.digest().as_bytes().to_vec(),
+                provider: Provider::Google,
+                issuer: "https://accounts.google.com".into(),
+                subject: TokenId::new().to_string(),
+                email: None,
+                display_name: "Linked".into(),
+                return_to: "/".into(),
+                link_user_id: Some(user),
+                link_session_id: Some(social.session_id),
+                expires_at: Utc::now() + Duration::minutes(5),
+            })
+            .await
+            .expect("pending link");
         let settings = "https://piquel.fr/settings".parse().expect("settings URL");
-        Self {
+        let state = Self {
             service: fixture.service.clone(),
             email: EmailConfig::test(&settings, true),
             user,
             address: addresses[1],
             passkey: passkeys[0],
             client: client.id,
-        }
+            pending,
+        };
+        (state, social)
     }
 
     /// What the operations could change: the addresses and which is primary,
@@ -675,10 +701,10 @@ impl Confirming {
                 let subject = Subject::from(owner);
                 service.remove_email(&subject, state.address).await
             }
-            Self::LinkIdentity => {
-                let pending = Secret::generate().expect("pending evidence");
-                service.link_identity(&owner, &pending).await.map(drop)
-            }
+            Self::LinkIdentity => service
+                .link_identity(&owner, &state.pending)
+                .await
+                .map(drop),
             Self::UnlinkIdentity => {
                 let subject = Subject::from(owner);
                 service.unlink_identity(&subject, Provider::GitHub).await
@@ -724,10 +750,7 @@ impl Confirming {
 #[ignore = "requires TEST_DATABASE_URL"]
 async fn every_confirmed_operation_checks_the_owner_itself() {
     let fixture = Fixture::new().await;
-    let state = Confirmation::new(&fixture).await;
-    let database = &fixture.harness.database;
-    let social =
-        Browser::sign_in_with(database, state.user, AuthenticationMethod::Federation).await;
+    let (state, social) = Confirmation::new(&fixture).await;
     let before = state.snapshot().await;
     let routes = Router::new()
         .route(
