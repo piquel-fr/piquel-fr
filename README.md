@@ -237,10 +237,12 @@ just auth account alice emails remove <email-id> --reason "Asked by email"
   account out everywhere, and emails its primary verified address a link that
   enrolls one passkey, once, within a day; it prints the link too, for an owner
   without an address. Running it again replaces the older link. The owner
-  can undo a recovery from a session of a passkey they had before it, which takes
-  back every passkey, social sign-in and address added or verified since. Until
-  it is undone, only such a session, or an operator, may remove a passkey from
-  before it.
+  can undo a recovery with a passkey they had before it, for 30 days after the
+  link was used, which takes back every passkey, social sign-in, app consent and
+  address added or verified since. Until then, only a session of such a passkey,
+  or an operator, may remove the passkeys, social sign-ins and addresses from
+  before it. `user recover` first lists the account's recoveries of the last 30
+  days and the passkey each enrolled.
 - Each change is recorded as a domain event with the operator: `$USER` and the host
   name. Unlike the admin API, the CLI may act on administrators' accounts.
 - Failures print their causes and exit with 1; usage errors exit with 2.

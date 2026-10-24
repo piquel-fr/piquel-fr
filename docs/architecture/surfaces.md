@@ -126,23 +126,31 @@ only an account with a primary address; the dashboard's way to start one is
 *(planned)*. A new recovery, or disabling the account, stops an unused link, and
 every verified address hears when a recovery enrolls a passkey.
 
-The owner undoes a recovery from a session that a passkey enrolled before it signed
-in or confirmed: neither the recovery's passkey nor a social sign-in counts, since
-whoever holds them may not be the owner. The recovery's passkey sign-in counts as
-a fresh confirmation, so whoever used the link could add more ways in right away.
-Undoing therefore takes back everything the account gained since the recovery
-started: it stops a link not used yet, removes every passkey enrolled, identity
-linked and address added or verified since, makes the primary address the
-recovery started with primary again (or the oldest address verified before it),
-and signs out every other session. The owner loses what they added themselves
+A recovery can be undone until its unused link expires, or for 30 days after the
+link was used (`SETTLE_WINDOW`); then it settles. Undoing is a passkey ceremony of
+its own (`/account/recovery/undo/start` and `/finish`), by a passkey enrolled
+before every recovery that can still be undone: neither a recovery's passkey nor a
+social sign-in counts, since whoever holds them may not be the owner. It needs no
+session, so whoever used the link cannot stop it by signing the owner out. The
+recovery's passkey sign-in counts as a fresh confirmation, so they could add more
+ways in right away. Undoing therefore takes back everything the account gained
+since the recovery started: it stops a link not used yet, removes every passkey
+enrolled, identity linked, OIDC consent given and address added or verified
+since, makes the primary address the recovery started with primary again (or the
+oldest address verified before it), ends every session and signs the undoing
+browser in. Revoking the consents means an app they approved cannot sign the
+owner in again without asking. The owner loses what they added themselves
 meanwhile too, so the undo page lists exactly what goes first. Owned clients and
-profile edits stay, and so do OIDC consents: signing out ends their refresh
-grants, but an app the link's holder consented to can still get a code without
-asking again if the owner's browser follows its link while signed in. While a
-recovery can be undone, only a session a passkey from before it signed in may
-remove such a passkey (an operator still can), so whoever used the link cannot
-make it impossible to undo. The pages that use the link and offer the undo are
-*(planned)*; until then nothing can use a link.
+profile edits stay: they are not ways in.
+
+Until a recovery settles, a session that does not predate it cannot remove the
+passkeys, identities or addresses the account had before it, so whoever used the
+link cannot make it impossible to undo; administrators and operators still can.
+With several recoveries to undo, only what predates all of them is trusted, and
+`user recover` first lists the account's recoveries of the last 30 days and the
+passkey each enrolled, so support can remove a suspicious one before starting
+another. The pages that use the link and offer the undo are *(planned)*; until
+then nothing can use a link.
 
 ## Contracts
 

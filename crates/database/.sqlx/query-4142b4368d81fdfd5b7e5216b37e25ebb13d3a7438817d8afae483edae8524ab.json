@@ -1,0 +1,41 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT\n                    c.client_id AS \"client_id: ClientId\", o.display_name AS client_name,\n                    c.audience, c.granted_at\n                FROM oidc_consents c\n                JOIN oidc_clients o ON o.id = c.client_id\n                WHERE c.user_id = $1 AND c.granted_at >= $2\n                ORDER BY c.granted_at, c.client_id, c.audience",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "client_id: ClientId",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 1,
+        "name": "client_name",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 2,
+        "name": "audience",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 3,
+        "name": "granted_at",
+        "type_info": "Timestamptz"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Timestamptz"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "4142b4368d81fdfd5b7e5216b37e25ebb13d3a7438817d8afae483edae8524ab"
+}

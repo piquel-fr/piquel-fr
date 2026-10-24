@@ -1,20 +1,24 @@
 //! Database-backed recovery scenarios: what a link enrolls, what stops it, who
-//! sees it, who may undo a recovery, and what undoing it takes back.
+//! sees it, who may undo a recovery, what undoing it takes back, what it
+//! protects meanwhile, and when it settles.
 
 use super::*;
 use crate::{
     AdminError, AdminService, Operator, Reason,
     account::Subject,
-    admin::tests::{Harness, cli, operator},
+    admin::tests::{Harness, assert_refused, cli, operator},
     passkey::tests::Fixture,
-    tests::{AUTH_ORIGIN, Browser, verified_address},
+    security::{BrowserCookie, Credential, Session},
+    tests::{AUTH_ORIGIN, Browser, register, registration, verified_address},
 };
 use axum::{
     http::{Method, StatusCode},
     response::Response,
 };
 use piquel_common::events::Actor;
-use piquel_common::{AuthenticationMethod, EmailId, PasskeyId, Provider, TokenId};
+use piquel_common::{
+    AuthenticationMethod, ClientId, EmailId, PasskeyId, Provider, TokenId, clients::ClientKind,
+};
 use piquel_repository::{Database, InsertExternalIdentity, InsertUnverifiedEmail};
 use serde_json::{Value, json};
 use std::collections::HashSet;
@@ -137,24 +141,96 @@ impl Scenario {
         Fixture::json(response).await
     }
 
-    /// Undoes recovery `id` from the browser holding `cookie`.
-    async fn undo(&self, cookie: &str, id: &Value) -> StatusCode {
+    /// Starts undoing recovery `id` from a browser with no session. Returns the
+    /// refusal, or the challenge and the browser's ceremony cookie.
+    async fn undo_start(&self, id: &Value) -> Result<(Value, String), StatusCode> {
         let body = json!({ "recovery_id": id });
         let response = self
             .keys
-            .request(routes::recovery::UNDO, Method::POST, cookie, body)
+            .request(routes::recovery::UNDO_START, Method::POST, "", body)
             .await;
+        if response.status() != StatusCode::OK {
+            return Err(response.status());
+        }
+        let browser = Fixture::cookie(&response);
+        Ok((Fixture::json(response).await, browser))
+    }
+
+    /// Answers the `started` undo with the fixture's passkey from the browser
+    /// holding `browser`.
+    async fn undo_finish(&mut self, started: &Value, browser: &str) -> Response {
+        let body = json!({
+            "ceremony_id": started["ceremony_id"],
+            "credential": self.keys.assertion(started),
+        });
+        self.keys
+            .request(routes::recovery::UNDO_FINISH, Method::POST, browser, body)
+            .await
+    }
+
+    /// Undoes recovery `id` with the fixture's passkey, from a browser with no
+    /// session. Returns the status, and the session cookie it signs in with.
+    async fn undo(&mut self, id: &Value) -> (StatusCode, Option<String>) {
+        let (started, browser) = match self.undo_start(id).await {
+            Ok(started) => started,
+            Err(status) => return (status, None),
+        };
+        let response = self.undo_finish(&started, &browser).await;
+        let signed_in =
+            (response.status() == StatusCode::NO_CONTENT).then(|| Fixture::cookie(&response));
+        (response.status(), signed_in)
+    }
+
+    /// Sends `method` to `path` from the browser holding `cookie`.
+    async fn call(&self, method: Method, path: &str, cookie: &str) -> StatusCode {
+        let response = self.keys.request(path, method, cookie, Value::Null).await;
         response.status()
     }
 
     /// Removes `passkey` from the browser holding `cookie`.
     async fn remove(&self, cookie: &str, passkey: PasskeyId) -> StatusCode {
         let path = routes::passkey::ITEM.replace("{id}", &passkey.to_string());
-        let response = self
-            .keys
-            .request(&path, Method::DELETE, cookie, Value::Null)
-            .await;
-        response.status()
+        self.call(Method::DELETE, &path, cookie).await
+    }
+
+    /// Signs a browser in with `passkey`, as its sign-in would, and returns its
+    /// session cookie.
+    async fn signed_in_with(&self, passkey: PasskeyId) -> String {
+        let mut tx = self.database().begin().await.expect("transaction");
+        let credential = Credential::Passkey(passkey);
+        let secret = Session::create(&mut tx, RequestContext::TEST, self.user(), credential).await;
+        tx.commit().await.expect("commit");
+        let secret = secret.expect("session").encoded();
+        format!("{}={secret}", BrowserCookie::Session.as_str())
+    }
+
+    /// Registers a client and records the account's consent to it, and returns
+    /// the client.
+    async fn consent(&self) -> ClientId {
+        let client = registration(ClientKind::Public, "https://notes.example");
+        register(self.database(), &client).await.expect("client");
+        let scopes = ["openid".to_owned()];
+        self.database()
+            .oidc()
+            .save_consent(self.user(), &client.id, client.id.as_str(), &scopes)
+            .await
+            .expect("consent");
+        client.id
+    }
+
+    /// The clients the account consented to.
+    async fn consents(&self) -> Vec<String> {
+        let consents = self.database().oidc().list_consents(self.user()).await;
+        let consents = consents.expect("consents").into_iter();
+        consents.map(|consent| consent.client_id).collect()
+    }
+
+    /// The account's newest undoable recovery, as the database has it.
+    async fn newest(&self) -> RecoveryId {
+        let settled_before = Utc::now() - SETTLE_WINDOW;
+        let mut recoveries = self.database().recoveries();
+        let undoable = recoveries.undoable(self.user(), settled_before).await;
+        undoable.expect("undoable")[0].id
     }
 
     /// The account's active passkeys.
@@ -300,12 +376,14 @@ async fn a_link_enrolls_one_passkey_and_signs_in_with_it() {
 
 /// A link stops working when a newer recovery replaces it, even mid-ceremony,
 /// when the owner undoes the recovery before using it, and when the account is
-/// disabled, even once it is enabled again.
+/// disabled, even once it is enabled again. An undo names the newest recovery:
+/// a replaced one answers `409`.
 #[tokio::test]
 #[ignore = "requires TEST_DATABASE_URL"]
 async fn replaced_undone_or_disabled_links_stop_working() {
     let mut scenario = Scenario::new().await;
     let replaced = scenario.recover().await;
+    let replaced_id = json!(scenario.newest().await);
     let body = json!({ "token": replaced });
     let (started, browser) = scenario.keys.start(routes::recovery::START, "", body).await;
     let token = scenario.recover().await;
@@ -323,13 +401,15 @@ async fn replaced_undone_or_disabled_links_stop_working() {
     assert_eq!(scenario.check(&replaced).await.0, StatusCode::BAD_REQUEST);
     assert_eq!(scenario.passkeys().await.len(), 1);
     assert_eq!(scenario.check(&token).await.0, StatusCode::OK);
+    assert_eq!(scenario.undo(&replaced_id).await.0, StatusCode::CONFLICT);
 
-    let older = scenario.keys.login().await;
-    let pending = scenario.status(&older).await;
+    let signed_in = scenario.keys.login().await;
+    let pending = scenario.status(&signed_in).await;
     assert_eq!(pending["completed_at"], Value::Null);
-    assert_eq!(pending["can_undo"], true);
+    let undo_with = &pending["undo_with"];
+    assert_eq!(undo_with[0]["id"], scenario.keys.key_id.to_string());
     assert_eq!(
-        scenario.undo(&older, &pending["id"]).await,
+        scenario.undo(&pending["id"]).await.0,
         StatusCode::NO_CONTENT
     );
     assert_eq!(scenario.check(&token).await.0, StatusCode::BAD_REQUEST);
@@ -348,10 +428,10 @@ async fn replaced_undone_or_disabled_links_stop_working() {
     assert_eq!(scenario.check(&token).await.0, StatusCode::BAD_REQUEST);
 }
 
-/// Only a session a passkey enrolled before the recovery signed in may undo it:
-/// not one the recovered passkey or a social sign-in signed in. Undoing names
-/// the recovery its page showed, removes the recovered passkey and signs out
-/// every other session, and leaves nothing to undo.
+/// Only a passkey from before the recovery undoes it: not the recovered one,
+/// whose session may still read what undoing would take back. Undoing is its own
+/// ceremony: it removes the recovered passkey, ends every session, signs the
+/// undoing browser in with its passkey, and leaves nothing to undo.
 #[tokio::test]
 #[ignore = "requires TEST_DATABASE_URL"]
 async fn only_an_older_passkey_undoes_a_recovery() {
@@ -362,73 +442,104 @@ async fn only_an_older_passkey_undoes_a_recovery() {
     let recovered = scenario.enroll(&token).await;
     let social =
         Browser::sign_in_with(&database, scenario.user(), AuthenticationMethod::Federation).await;
-
-    for refused in [&recovered, &social.cookie] {
-        let view = scenario.status(refused).await;
-        assert_eq!(view["can_undo"], false);
-        assert_eq!(
-            scenario.undo(refused, &view["id"]).await,
-            StatusCode::FORBIDDEN
-        );
-    }
-    assert_eq!(scenario.passkeys().await.len(), 2, "nothing undone");
-    let older = scenario.keys.login().await;
-    let view = scenario.status(&older).await;
-    assert_eq!(view["can_undo"], true);
     let passkey = scenario.passkey(&recovered).await;
-    let listed = &view["rollback"]["passkeys"];
-    assert_eq!(listed[0]["id"], passkey.to_string());
-    assert_eq!(view["rollback"]["primary"], Value::Null, "unchanged");
-    let other = json!(RecoveryId::new());
-    assert_eq!(scenario.undo(&older, &other).await, StatusCode::CONFLICT);
 
-    assert_eq!(
-        scenario.undo(&older, &view["id"]).await,
-        StatusCode::NO_CONTENT
-    );
+    for cookie in [&recovered, &social.cookie] {
+        let view = scenario.status(cookie).await;
+        assert_eq!(view["undo_with"].as_array().map(Vec::len), Some(1));
+        assert_eq!(view["undo_with"][0]["id"], scenario.keys.key_id.to_string());
+    }
+    let view = scenario.status(&recovered).await;
+    assert_eq!(view["rollback"]["passkeys"][0]["id"], passkey.to_string());
+    assert_eq!(view["rollback"]["primary"], Value::Null, "unchanged");
+    let id: RecoveryId = serde_json::from_value(view["id"].clone()).expect("id");
+    let mut tx = database.begin().await.expect("transaction");
+    let refused =
+        AccountService::undo_recovery(&mut tx, RequestContext::TEST, scenario.user(), id, passkey)
+            .await;
+    assert!(matches!(
+        refused,
+        Err(AccountError::Recovery(RecoveryError::OlderPasskeyRequired))
+    ));
+    drop(tx);
+    assert_eq!(scenario.passkeys().await.len(), 2, "nothing undone");
+
+    let (status, signed_in) = scenario.undo(&view["id"]).await;
+    assert_eq!(status, StatusCode::NO_CONTENT);
     assert_eq!(scenario.passkeys().await, [scenario.keys.key_id].into());
-    assert!(scenario.keys.session(&recovered).await.is_none(), "ended");
-    assert!(
-        scenario.keys.session(&social.cookie).await.is_none(),
-        "ended"
-    );
-    assert!(scenario.keys.session(&older).await.is_some(), "kept");
+    for ended in [&recovered, &social.cookie] {
+        assert!(scenario.keys.session(ended).await.is_none(), "ended");
+    }
+    let signed_in = signed_in.expect("signed in");
+    assert_eq!(scenario.passkey(&signed_in).await, scenario.keys.key_id);
     let events = scenario.keys.events().await;
     assert!(events.contains(&DomainEvent::PasskeyRemoved {
         passkey_id: passkey
     }));
-    assert!(
-        events
-            .iter()
-            .any(|event| matches!(event, DomainEvent::RecoveryUndone { .. }))
-    );
+    assert!(events.contains(&DomainEvent::RecoveryUndone { recovery_id: id }));
     let primary = |event: &DomainEvent| matches!(event, DomainEvent::PrimaryEmailChanged { .. });
     assert!(!events.iter().any(primary), "the primary stays");
-    assert_eq!(scenario.status(&older).await, Value::Null);
-    assert_eq!(
-        scenario.undo(&older, &view["id"]).await,
-        StatusCode::NOT_FOUND
-    );
+    assert_eq!(scenario.status(&signed_in).await, Value::Null);
+    assert_eq!(scenario.undo(&view["id"]).await.0, StatusCode::NOT_FOUND);
 }
 
-/// Whoever used the link cannot remove the passkeys from before the recovery, so
-/// it always stays possible to undo. A session such a passkey signed in still
-/// can, and so can an operator.
+/// The undo needs no session, so signing the owner out cannot stop it: every
+/// session ending between its start and its finish changes nothing.
 #[tokio::test]
 #[ignore = "requires TEST_DATABASE_URL"]
-async fn the_link_cannot_remove_older_passkeys() {
+async fn undo_needs_no_session() {
+    let mut scenario = Scenario::new().await;
+    let token = scenario.recover().await;
+    let recovered = scenario.enroll(&token).await;
+    let id = json!(scenario.newest().await);
+
+    let (started, browser) = scenario.undo_start(&id).await.expect("started");
+    AdminService::new(scenario.database().clone())
+        .revoke_user_sessions(&cli(), scenario.user())
+        .await
+        .expect("every session ends");
+    let response = scenario.undo_finish(&started, &browser).await;
+    assert_eq!(response.status(), StatusCode::NO_CONTENT);
+    assert!(scenario.keys.session(&recovered).await.is_none());
+    assert_eq!(scenario.passkeys().await, [scenario.keys.key_id].into());
+}
+
+/// While a recovery can be undone, a session that does not predate it cannot
+/// remove the passkeys, identities or addresses the account had before it. A
+/// session such a passkey signed in can, and so can an operator.
+#[tokio::test]
+#[ignore = "requires TEST_DATABASE_URL"]
+async fn what_predates_a_recovery_is_protected() {
     let mut scenario = Scenario::new().await;
     let older = scenario.keys.key_id;
     let other = scenario.keys.switch_passkey("Other key").await;
+    scenario.link(Provider::GitHub).await;
+    scenario.address("primary", true).await;
+    let address = scenario.address("secondary", false).await;
     let token = scenario.recover().await;
     let recovered = scenario.enroll(&token).await;
+    let identity = routes::federation::IDENTITY.replace("{provider}", "github");
+    let email = routes::emails::ITEM.replace("{id}", &address.to_string());
 
     assert_eq!(
         scenario.remove(&recovered, older).await,
         StatusCode::FORBIDDEN
     );
+    let unlink = scenario.call(Method::DELETE, &identity, &recovered).await;
+    assert_eq!(unlink, StatusCode::FORBIDDEN);
+    let removed = scenario.call(Method::DELETE, &email, &recovered).await;
+    assert_eq!(removed, StatusCode::FORBIDDEN);
     assert!(scenario.passkeys().await.contains(&older), "kept");
-    let signed_in = scenario.keys.login().await;
+    assert_eq!(scenario.identities().await, [Provider::GitHub]);
+    assert_eq!(scenario.emails().await.len(), 2);
+
+    let signed_in = scenario.signed_in_with(other).await;
+    let unlink = scenario.call(Method::DELETE, &identity, &signed_in).await;
+    assert_eq!(unlink, StatusCode::NO_CONTENT);
+    let signed_in = scenario.signed_in_with(other).await;
+    let removed = scenario.call(Method::DELETE, &email, &signed_in).await;
+    assert_eq!(removed, StatusCode::NO_CONTENT);
+    let signed_in = scenario.signed_in_with(other).await;
     assert_eq!(
         scenario.remove(&signed_in, older).await,
         StatusCode::NO_CONTENT
@@ -441,11 +552,87 @@ async fn the_link_cannot_remove_older_passkeys() {
         .expect("an operator removes it");
 }
 
+/// With two recoveries to undo, only what predates both is trusted. Whoever used
+/// the first cannot, once a second started, remove what the account had before
+/// the first, nor undo the second with the first one's passkey. The owner
+/// undoes the second, then the first.
+#[tokio::test]
+#[ignore = "requires TEST_DATABASE_URL"]
+async fn a_second_recovery_trusts_only_what_predates_both() {
+    let mut scenario = Scenario::new().await;
+    let older = scenario.keys.key_id;
+    let first = scenario.recover().await;
+    let first_session = scenario.enroll(&first).await;
+    let first_passkey = scenario.passkey(&first_session).await;
+    scenario.recover().await;
+    let attacker = scenario.signed_in_with(first_passkey).await;
+
+    assert_eq!(
+        scenario.remove(&attacker, older).await,
+        StatusCode::FORBIDDEN
+    );
+    let view = scenario.status(&attacker).await;
+    assert_eq!(view["undo_with"].as_array().map(Vec::len), Some(1));
+    assert_eq!(view["undo_with"][0]["id"], older.to_string());
+    let id: RecoveryId = serde_json::from_value(view["id"].clone()).expect("id");
+    let mut tx = scenario.database().begin().await.expect("transaction");
+    let user = scenario.user();
+    let refused =
+        AccountService::undo_recovery(&mut tx, RequestContext::TEST, user, id, first_passkey).await;
+    assert!(matches!(
+        refused,
+        Err(AccountError::Recovery(RecoveryError::OlderPasskeyRequired))
+    ));
+    drop(tx);
+
+    assert_eq!(scenario.undo(&view["id"]).await.0, StatusCode::NO_CONTENT);
+    let (status, signed_in) = scenario.undo(&json!(scenario.newest().await)).await;
+    assert_eq!(status, StatusCode::NO_CONTENT);
+    assert_eq!(scenario.passkeys().await, [older].into());
+    assert_eq!(
+        scenario.status(&signed_in.expect("signed in")).await,
+        Value::Null
+    );
+}
+
+/// A used recovery settles after [`SETTLE_WINDOW`]: until then it can be undone
+/// and protects what the account had before it; after, it cannot, and its
+/// passkey is an ordinary one.
+#[tokio::test]
+#[ignore = "requires TEST_DATABASE_URL"]
+async fn a_used_recovery_settles_after_its_window() {
+    let scenario = Scenario::new().await;
+    let older = scenario.keys.key_id;
+    let token = scenario.recover().await;
+    let recovered = scenario.enroll(&token).await;
+    let id = scenario.newest().await;
+    let moment = Duration::minutes(1);
+    let backdate = async |by| {
+        let database = scenario.database();
+        let backdated = database.recoveries().backdate_completion(id, by).await;
+        backdated.expect("backdate");
+    };
+
+    backdate(SETTLE_WINDOW - moment).await;
+    let view = scenario.status(&recovered).await;
+    assert_eq!(view["id"], id.to_string(), "still undoable");
+    assert_eq!(
+        scenario.remove(&recovered, older).await,
+        StatusCode::FORBIDDEN
+    );
+    backdate(moment * 2).await;
+    assert_eq!(scenario.status(&recovered).await, Value::Null, "settled");
+    assert_eq!(
+        scenario.remove(&recovered, older).await,
+        StatusCode::NO_CONTENT
+    );
+}
+
 /// The recovered passkey's sign-in counts as a fresh confirmation, so the link's
-/// holder can add ways in at once. Undoing takes back every passkey, identity and
-/// address added or verified since, restores the primary address, and leaves everything from
-/// before untouched, recording each change as the owner's. The undo page lists
-/// exactly that.
+/// holder can add ways in at once. Undoing takes back every passkey, identity,
+/// consent and address added or verified since, restores the primary address,
+/// and leaves everything from before untouched, recording each change as the
+/// owner's. The undo page lists exactly that.
 #[tokio::test]
 #[ignore = "requires TEST_DATABASE_URL"]
 async fn undo_takes_back_every_way_in_added_since() {
@@ -453,6 +640,7 @@ async fn undo_takes_back_every_way_in_added_since() {
     let database = scenario.database().clone();
     let user = scenario.user();
     scenario.link(Provider::GitHub).await;
+    let consented = scenario.consent().await;
     // The recovery's primary address is not the oldest, which only a fallback
     // would choose.
     let secondary = scenario.address("secondary", true).await;
@@ -468,6 +656,7 @@ async fn undo_takes_back_every_way_in_added_since() {
         .await;
     assert_eq!(response.status(), StatusCode::NO_CONTENT, "confirmed");
     scenario.link(Provider::Google).await;
+    let client = scenario.consent().await;
     let added = scenario.address("added", false).await;
     scenario.make_primary(added, None).await;
     let (pending, _) = scenario.unverified("pending").await;
@@ -475,8 +664,7 @@ async fn undo_takes_back_every_way_in_added_since() {
     let since: HashSet<_> = &scenario.passkeys().await - &[scenario.keys.key_id].into();
     assert_eq!(since.len(), 2, "the recovered passkey and another");
 
-    let older = scenario.keys.login().await;
-    let view = scenario.status(&older).await;
+    let view = scenario.status(&recovered).await;
     let rollback = &view["rollback"];
     let ids = |list: &Value, key: &str| -> HashSet<String> {
         let list = list.as_array().expect("list").iter();
@@ -489,16 +677,18 @@ async fn undo_takes_back_every_way_in_added_since() {
         ids(&rollback["identities"], "provider"),
         ["google".into()].into()
     );
+    assert_eq!(
+        ids(&rollback["consents"], "client_id"),
+        [client.to_string()].into()
+    );
     let emails = [added, pending, prior].map(|id| id.to_string()).into();
     assert_eq!(ids(&rollback["emails"], "id"), emails);
     assert_eq!(rollback["primary"]["id"], primary.to_string());
 
-    assert_eq!(
-        scenario.undo(&older, &view["id"]).await,
-        StatusCode::NO_CONTENT
-    );
+    assert_eq!(scenario.undo(&view["id"]).await.0, StatusCode::NO_CONTENT);
     assert_eq!(scenario.passkeys().await, [scenario.keys.key_id].into());
     assert_eq!(scenario.identities().await, [Provider::GitHub]);
+    assert_eq!(scenario.consents().await, [consented.to_string()]);
     assert_eq!(
         scenario.emails().await,
         [(primary, true), (secondary, false)]
@@ -512,6 +702,7 @@ async fn undo_takes_back_every_way_in_added_since() {
         DomainEvent::IdentityUnlinked {
             provider: Provider::Google,
         },
+        DomainEvent::ConsentRevoked { client_id: client },
         DomainEvent::PrimaryEmailChanged {
             email_id: primary,
             previous_email_id: Some(added),
@@ -543,23 +734,20 @@ async fn undo_falls_back_to_the_oldest_address_left() {
     let oldest = scenario.address("oldest", false).await;
     let newer = scenario.address("newer", false).await;
     let token = scenario.recover().await;
-    scenario.enroll(&token).await;
+    let recovered = scenario.enroll(&token).await;
     let added = scenario.address("added", false).await;
     scenario.make_primary(added, Some(primary)).await;
 
-    let older = scenario.keys.login().await;
-    let view = scenario.status(&older).await;
+    let view = scenario.status(&recovered).await;
     assert_eq!(view["rollback"]["primary"]["id"], oldest.to_string());
-    assert_eq!(
-        scenario.undo(&older, &view["id"]).await,
-        StatusCode::NO_CONTENT
-    );
+    assert_eq!(scenario.undo(&view["id"]).await.0, StatusCode::NO_CONTENT);
     assert_eq!(scenario.emails().await, [(oldest, true), (newer, false)]);
 }
 
 /// Only an operator at the terminal sees a recovery's link, so an administrator
 /// may recover only an account with a primary address, where the link goes.
-/// Nobody recovers a disabled account.
+/// Nobody recovers a disabled account. Support sees the recent recoveries, and
+/// reading them checks the administrator.
 #[tokio::test]
 #[ignore = "requires TEST_DATABASE_URL"]
 async fn administrators_never_see_the_link() {
@@ -583,6 +771,16 @@ async fn administrators_never_see_the_link() {
     let address = verified_address(&harness.database, user, &address, true).await;
     assert_eq!(recover(&admin).await.expect("administrator"), None);
     assert_eq!(sent(&harness.database, user, address).await, 1);
+    let recent = service
+        .recent_recoveries(&admin, user)
+        .await
+        .expect("recent");
+    assert_eq!(recent.len(), 2);
+    assert!(recent[1].cancelled_at.is_some(), "replaced");
+    for (refused, expected) in harness.refused_readers().await {
+        let read = service.recent_recoveries(&refused, user).await;
+        assert_refused(&read.expect_err("refused"), &expected, "recent recoveries");
+    }
     service
         .disable_user(&cli(), user, reason())
         .await

@@ -270,7 +270,7 @@ impl Fixture {
             .to_owned()
     }
     /// Signs a started authentication challenge using the software credential.
-    fn assertion(&mut self, started: &Value) -> PublicKeyCredential {
+    pub(crate) fn assertion(&mut self, started: &Value) -> PublicKeyCredential {
         let challenge = serde_json::from_value(started["public_key"].clone())
             .expect("authentication challenge");
         self.authenticator

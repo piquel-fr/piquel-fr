@@ -65,6 +65,19 @@ pub(super) struct ConfirmationCeremony {
     pub(super) state: PasskeyAuthentication,
 }
 
+/// Passkey proof that undoes a recovery. It needs no session, so ending the
+/// owner's sessions cannot stop it; the assertion itself is the proof.
+#[derive(Serialize, Deserialize)]
+pub(super) struct UndoCeremony {
+    /// The recovery to undo, which must still be the account's newest undoable one.
+    pub(super) recovery_id: RecoveryId,
+    /// Its account.
+    pub(super) user_id: UserId,
+    /// Server-side authentication challenge, offering only passkeys from before
+    /// every undoable recovery.
+    pub(super) state: PasskeyAuthentication,
+}
+
 /// Additional credential registration bound to an authorized settings session.
 #[derive(Serialize, Deserialize)]
 pub(super) struct EnrollmentCeremony {
@@ -107,6 +120,8 @@ pub(super) enum Ceremony {
     Enroll(EnrollmentCeremony),
     /// Passkey creation through a recovery's link.
     Recover(RecoveryCeremony),
+    /// Passkey proof that undoes a recovery.
+    Undo(UndoCeremony),
 }
 
 impl Ceremony {
@@ -115,7 +130,7 @@ impl Ceremony {
         match self {
             Self::Register(_) => CeremonyKind::Registration,
             Self::Login(_) | Self::Decoy | Self::Discover(_) => CeremonyKind::Authentication,
-            Self::Confirm(_) => CeremonyKind::PurposeAuthentication,
+            Self::Confirm(_) | Self::Undo(_) => CeremonyKind::PurposeAuthentication,
             Self::Enroll(_) | Self::Recover(_) => CeremonyKind::Enrollment,
         }
     }
@@ -128,6 +143,7 @@ impl Ceremony {
             Self::Confirm(state) => Some(state.user_id),
             Self::Enroll(state) => Some(state.user_id),
             Self::Recover(state) => Some(state.user_id),
+            Self::Undo(state) => Some(state.user_id),
         }
     }
 
@@ -138,7 +154,8 @@ impl Ceremony {
             | Self::Login(_)
             | Self::Decoy
             | Self::Discover(_)
-            | Self::Recover(_) => None,
+            | Self::Recover(_)
+            | Self::Undo(_) => None,
             Self::Confirm(state) => Some(state.session_id),
             Self::Enroll(state) => Some(state.session_id),
         }
@@ -182,6 +199,7 @@ ceremony_state!(RegistrationCeremony, Register, Registration);
 ceremony_state!(ConfirmationCeremony, Confirm, PurposeAuthentication);
 ceremony_state!(EnrollmentCeremony, Enroll, Enrollment);
 ceremony_state!(RecoveryCeremony, Recover, Enrollment);
+ceremony_state!(UndoCeremony, Undo, PurposeAuthentication);
 
 /// Either supported account sign-in payload, sharing one database purpose.
 pub(super) enum AuthenticationCeremony {
@@ -204,7 +222,8 @@ impl CeremonyState for AuthenticationCeremony {
             Ceremony::Register(_)
             | Ceremony::Confirm(_)
             | Ceremony::Enroll(_)
-            | Ceremony::Recover(_) => None,
+            | Ceremony::Recover(_)
+            | Ceremony::Undo(_) => None,
         }
     }
 }

@@ -599,7 +599,8 @@ impl OidcRepository<'_> {
         )
     }
 
-    /// Adds `scopes` to the user's consent for this client and audience.
+    /// Adds `scopes` to the user's consent for this client and audience, which
+    /// counts as given now.
     ///
     /// # Errors
     ///
@@ -621,7 +622,8 @@ impl OidcRepository<'_> {
                 SET scopes = (
                     SELECT jsonb_agg(DISTINCT value)
                     FROM jsonb_array_elements(oidc_consents.scopes || EXCLUDED.scopes)
-                )",
+                ),
+                granted_at = now()",
                 user.as_uuid(),
                 client.as_str(),
                 audience,
@@ -629,6 +631,33 @@ impl OidcRepository<'_> {
             )
         )?;
         Ok(())
+    }
+
+    /// Withdraws the user's consent for this client and audience. Returns
+    /// whether there was one.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`DatabaseError`] if the query fails.
+    pub async fn revoke_consent(
+        &mut self,
+        user: UserId,
+        client: &ClientId,
+        audience: &str,
+    ) -> Result<bool, DatabaseError> {
+        Ok(run!(
+            self,
+            execute,
+            sqlx::query!(
+                "DELETE FROM oidc_consents
+                WHERE user_id = $1 AND client_id = $2 AND audience = $3",
+                user.as_uuid(),
+                client.as_str(),
+                audience,
+            )
+        )?
+        .rows_affected()
+            == 1)
     }
 
     /// Returns the user's verified email for the `email` claim, preferring the

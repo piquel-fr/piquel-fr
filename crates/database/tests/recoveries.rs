@@ -92,6 +92,11 @@ async fn the_newest_recovery_is_the_last_stored() {
         .expect("waiting recovery");
     tx.commit().await.expect("commit");
 
-    let newest = db.recoveries().latest_undoable(user).await.expect("newest");
-    assert_eq!(newest.expect("a recovery").id, waiting);
+    let settled_before = Utc::now() - Duration::days(30);
+    let undoable = db.recoveries().undoable(user, settled_before).await;
+    let newest = undoable
+        .expect("undoable")
+        .first()
+        .map(|recovery| recovery.id);
+    assert_eq!(newest, Some(waiting));
 }

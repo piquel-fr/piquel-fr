@@ -147,6 +147,33 @@ impl PasskeyRepository<'_> {
         )
     }
 
+    /// The account's active passkeys enrolled before `at`, oldest first.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`DatabaseError`] if the query fails or a row is invalid.
+    pub async fn enrolled_before(
+        &mut self,
+        user_id: UserId,
+        at: DateTime<Utc>,
+    ) -> Result<Vec<StoredPasskey>, DatabaseError> {
+        run!(
+            self,
+            fetch_all,
+            sqlx::query_as!(
+                StoredPasskey,
+                r#"SELECT
+                    id AS "id: PasskeyId", credential_id, user_id AS "user_id: UserId", credential,
+                    friendly_name, revoked_at
+                FROM passkey_credentials
+                WHERE user_id = $1 AND revoked_at IS NULL AND created_at < $2
+                ORDER BY created_at, id"#,
+                user_id.as_uuid(),
+                at,
+            )
+        )
+    }
+
     /// When the account's unrevoked passkey `id` was enrolled, if it is one.
     ///
     /// # Errors

@@ -7,37 +7,45 @@
 //! in the email's delivery. The token alone authorizes the link: the recovery page
 //! enrolls the passkey, and signs its browser in with it.
 //!
-//! The owner can undo a recovery from a session signed in, or confirmed, by a
-//! passkey enrolled before it started. The recovery's own passkey and a social
-//! sign-in do not count. The recovery's passkey sign-in counts as a fresh
-//! confirmation, so whoever used the link could add more ways in at once. Undoing
-//! it therefore takes back everything the account gained since it started (a
-//! [`Rollback`]): it stops a link not used yet, removes the passkeys enrolled, the
-//! identities linked and the addresses added or verified since, restores the
-//! primary address, and signs out every other session, each of which was signed
-//! in since. The owner loses what they added themselves meanwhile too; the undo
-//! page lists all of it first. While a recovery can be undone, only a session an
-//! older passkey signed in may remove an older passkey, so the link's holder
-//! cannot make the recovery impossible to undo.
+//! A recovery can be undone until its link expires unused, or for
+//! [`SETTLE_WINDOW`] after it was used; then it settles. Undoing it is a passkey
+//! ceremony of its own, by a passkey enrolled before every recovery that can
+//! still be undone: not the recovery's own, nor a social sign-in. It needs no
+//! session, so signing the owner out cannot stop it. The recovery's passkey
+//! sign-in counts as a fresh confirmation, so whoever used the link could add
+//! more ways in at once. Undoing therefore takes back everything the account
+//! gained since it started (a [`Rollback`]): it stops a link not used yet,
+//! removes the passkeys enrolled, the identities linked, the consents given and
+//! the addresses added or verified since, restores the primary address, ends
+//! every session, each of which was signed in since, and signs the undoing
+//! browser in. The owner loses what they added themselves meanwhile too; the undo
+//! page lists all of it first.
+//!
+//! Until a recovery settles, a session that does not predate it cannot remove
+//! the passkeys, identities or addresses the account had before it
+//! ([`AccountService::keep_older`]), so the link's holder cannot make it
+//! impossible to undo; administrators and operators still can.
 
 /// Recovery failures and their browser response mapping.
 mod error;
 pub(crate) use error::RecoveryError;
 
 use crate::{
-    account::{AccountError, AccountService, Owner},
+    account::{AccountError, AccountService, Owner, Subject},
     emails::EmailApplication,
     routes,
+    security::RequestContext,
 };
 use chrono::{DateTime, Duration, Utc};
 use piquel_common::{
-    AccountStatus, PasskeyId, RecoveryId, SessionId, UserId,
+    AccountStatus, PasskeyId, RecoveryId, UserId,
     config::Origin,
-    events::{DomainEvent, EventContext, RevocationReason},
+    events::{Actor, DomainEvent, EventContext, RevocationReason},
+    protocol::api::Passkey,
 };
 use piquel_crypto::{CryptoError, Secret};
 use piquel_repository::{
-    DatabaseError, DatabaseTransaction, Rollback, SessionScope, StoredRecovery,
+    DatabaseError, DatabaseTransaction, Rollback, SessionScope, StoredPasskey, StoredRecovery,
 };
 use serde::Serialize;
 use std::sync::Arc;
@@ -45,6 +53,12 @@ use url::Url;
 
 /// How long a recovery link works.
 pub(crate) const LINK_LIFETIME: Duration = Duration::hours(24);
+
+/// How long after its link was used a recovery can be undone. Until then, what
+/// the account had before it is protected from sessions that do not predate it,
+/// and its passkey does not count as an older one; after, it settles: it can no
+/// longer be undone, and its passkey is an ordinary one.
+pub(crate) const SETTLE_WINDOW: Duration = Duration::days(30);
 
 /// Derives recovery links' tokens from recoveries' IDs, with a key derived from
 /// the current token digest key, so every replica, the email sender and the CLI
@@ -94,11 +108,13 @@ pub(crate) struct RecoveryView {
     started_at: DateTime<Utc>,
     /// When its link enrolled a passkey; `None` while the link still works.
     completed_at: Option<DateTime<Utc>>,
+    /// When it can no longer be undone, once its link was used.
+    settles_at: Option<DateTime<Utc>>,
     /// Exactly what undoing it would take back now.
     rollback: Rollback,
-    /// Whether this session may undo it: a passkey enrolled before the recovery
-    /// signed it in, or confirmed it since.
-    can_undo: bool,
+    /// The passkeys that may undo it: those enrolled before every recovery that
+    /// can still be undone. None, and it cannot be undone.
+    undo_with: Vec<Passkey>,
 }
 
 impl RecoveryLinks {
@@ -174,6 +190,42 @@ impl OpenRecovery {
     }
 }
 
+/// The account's recoveries that can still be undone, newest first: those whose
+/// link still works, and those used less than [`SETTLE_WINDOW`] ago. Whoever
+/// used any of them may not be the owner, so only what predates all of them is
+/// trusted.
+struct Undoable(Vec<StoredRecovery>);
+
+impl Undoable {
+    /// `user`'s undoable recoveries, read in `tx`.
+    async fn load(tx: &mut DatabaseTransaction<'_>, user: UserId) -> Result<Self, DatabaseError> {
+        let settled_before = Utc::now() - SETTLE_WINDOW;
+        Ok(Self(tx.recoveries().undoable(user, settled_before).await?))
+    }
+
+    /// The newest, if it is recovery `id`, which an undo names.
+    fn newest_is(&self, id: RecoveryId) -> Result<&StoredRecovery, RecoveryError> {
+        let newest = self.0.first().ok_or(RecoveryError::NothingToUndo)?;
+        if newest.id == id {
+            Ok(newest)
+        } else {
+            Err(RecoveryError::Changed)
+        }
+    }
+
+    /// When the oldest started: only a passkey enrolled before it may undo.
+    fn trusted_before(&self) -> Option<DateTime<Utc>> {
+        self.0.iter().map(|recovery| recovery.started_at).min()
+    }
+
+    /// When the first of them that started after `added_at` did, which a session
+    /// must predate to remove what was added then.
+    fn protecting(&self, added_at: DateTime<Utc>) -> Option<DateTime<Utc>> {
+        let started = self.0.iter().map(|recovery| recovery.started_at);
+        started.filter(|started| *started > added_at).min()
+    }
+}
+
 /// Recoveries as their link and their owner use them.
 impl AccountService {
     /// The recovery whose link holds `token`, if the link still works and its
@@ -208,76 +260,106 @@ impl AccountService {
     }
 
     /// The account's newest recovery its owner could undo, what undoing it would
-    /// take back, and whether the owner's session may undo it.
+    /// take back, and the passkeys that may undo it.
     pub(crate) async fn recovery(
         &self,
         owner: &Owner,
     ) -> Result<Option<RecoveryView>, AccountError> {
         let mut tx = self.database.begin().await?;
-        let Some(recovery) = tx.recoveries().latest_undoable(owner.user()).await? else {
+        let undoable = Undoable::load(&mut tx, owner.user()).await?;
+        let Some(recovery) = undoable.0.first() else {
             return Ok(None);
         };
-        let rollback = tx.recoveries().rollback(&recovery).await?;
-        let can_undo = Self::predates(&mut tx, owner.user(), owner.session().id, &recovery).await?;
+        let rollback = tx.recoveries().rollback(recovery).await?;
+        let undo_with = Self::trusted(&mut tx, owner.user(), &undoable).await?;
         tx.commit().await?;
         Ok(Some(RecoveryView {
             id: recovery.id,
             started_at: recovery.started_at,
             completed_at: recovery.completed_at,
+            settles_at: recovery.completed_at.map(|at| at + SETTLE_WINDOW),
             rollback,
-            can_undo,
+            undo_with: undo_with.into_iter().map(Passkey::from).collect(),
         }))
     }
 
-    /// Undoes recovery `id`, the account's newest one, for an owner whose session
-    /// a passkey enrolled before it signed in or confirmed. Takes back its
-    /// [`Rollback`], records each change as the owner's, and signs out every other
-    /// session; the owner's own session stays.
-    pub(crate) async fn undo_recovery(
+    /// The account recovery `id` belongs to, and the passkeys that may undo it,
+    /// which its undo ceremony challenges. The recovery must be the account's
+    /// newest undoable one. Needs no session, so ending the owner's sessions
+    /// cannot stop an undo.
+    pub(crate) async fn undo_passkeys(
         &self,
-        owner: &Owner,
         id: RecoveryId,
-    ) -> Result<(), AccountError> {
-        let user = owner.user();
+    ) -> Result<(UserId, Vec<StoredPasskey>), AccountError> {
         let mut tx = self.database.begin().await?;
-        owner.lock(&mut tx).await?;
         let recovery = tx
             .recoveries()
-            .latest_undoable(user)
+            .find(id)
             .await?
             .ok_or(RecoveryError::NothingToUndo)?;
-        if recovery.id != id {
-            return Err(RecoveryError::Changed.into());
-        }
-        if !Self::predates(&mut tx, user, owner.session().id, &recovery).await? {
+        let undoable = Undoable::load(&mut tx, recovery.user_id).await?;
+        undoable.newest_is(id)?;
+        let passkeys = Self::trusted(&mut tx, recovery.user_id, &undoable).await?;
+        tx.commit().await?;
+        if passkeys.is_empty() {
             return Err(RecoveryError::OlderPasskeyRequired.into());
         }
-        let context = owner.context();
-        let rollback = tx.recoveries().rollback(&recovery).await?;
-        Self::take_back(&mut tx, &context, user, rollback).await?;
-        tx.recoveries().undo(recovery.id).await?;
+        Ok((recovery.user_id, passkeys))
+    }
+
+    /// Undoes `user`'s recovery `id`, its newest undoable one, in the caller's
+    /// transaction, in which `passkey` just asserted. The passkey must predate
+    /// every undoable recovery. Takes back its [`Rollback`], records each change
+    /// as the owner's, and ends every session; the caller then signs the
+    /// undoing browser in with `passkey`.
+    pub(crate) async fn undo_recovery(
+        tx: &mut DatabaseTransaction<'_>,
+        request: RequestContext,
+        user: UserId,
+        id: RecoveryId,
+        passkey: PasskeyId,
+    ) -> Result<(), AccountError> {
+        tx.users()
+            .find_active_by_id_for_update(user)
+            .await?
+            .ok_or(RecoveryError::NothingToUndo)?;
+        let undoable = Undoable::load(tx, user).await?;
+        let recovery = undoable.newest_is(id)?;
+        let enrolled = tx.passkeys().enrolled_at(user, passkey).await?;
+        let trusted = matches!(
+            (enrolled, undoable.trusted_before()),
+            (Some(enrolled), Some(before)) if enrolled < before
+        );
+        if !trusted {
+            return Err(RecoveryError::OlderPasskeyRequired.into());
+        }
+        let context = request.actor(Actor::User {
+            user_id: user,
+            session_id: None,
+        });
+        let rollback = tx.recoveries().rollback(recovery).await?;
+        Self::take_back(tx, &context, user, rollback).await?;
+        tx.recoveries().undo(id).await?;
         tx.record(
             &context,
             Some(user),
-            DomainEvent::RecoveryUndone {
-                recovery_id: recovery.id,
-            },
+            DomainEvent::RecoveryUndone { recovery_id: id },
         )
         .await?;
         tx.revoke_sessions(
             &context,
             user,
-            SessionScope::AllExcept(owner.session().id),
+            SessionScope::All,
             &RevocationReason::CredentialRemoved,
         )
         .await?;
-        Ok(tx.commit().await?)
+        Ok(())
     }
 
     /// Applies `rollback` to `user`'s account in `tx`, recording each change in
     /// `context`. The primary address moves back before the added ones go, since
-    /// one of them may be primary. The undoing session's passkey predates the
-    /// recovery, so a passkey always remains.
+    /// one of them may be primary. The undoing passkey predates the recovery, so
+    /// a passkey always remains.
     async fn take_back(
         tx: &mut DatabaseTransaction<'_>,
         context: &EventContext,
@@ -299,6 +381,17 @@ impl AccountService {
                 tx.record(context, Some(user), unlinked).await?;
             }
         }
+        for consent in rollback.consents {
+            let client_id = consent.client_id;
+            if tx
+                .oidc()
+                .revoke_consent(user, &client_id, &consent.audience)
+                .await?
+            {
+                let revoked = DomainEvent::ConsentRevoked { client_id };
+                tx.record(context, Some(user), revoked).await?;
+            }
+        }
         if let Some(primary) = rollback.primary {
             let previous_email_id = tx.emails().set_primary(user, primary.id).await?;
             let changed = DomainEvent::PrimaryEmailChanged {
@@ -313,53 +406,49 @@ impl AccountService {
         Ok(())
     }
 
-    /// Refuses removing `user`'s passkey `id` from the owner's `session` while
-    /// the account has a recovery to undo that the passkey predates and the
-    /// session does not. Whoever used the link could otherwise remove every
-    /// older passkey, and nothing could undo the recovery. Administrators, who
-    /// have no such session, still can. In the removal's transaction, under the
-    /// account lock.
-    pub(crate) async fn keep_older_passkey(
+    /// Refuses the owner's removal of a passkey, identity or address that joined
+    /// the account at `added_at`, while a recovery that started after it can be
+    /// undone and the owner's session does not predate that recovery: a passkey
+    /// enrolled before it must have signed the session in or confirmed it.
+    /// Whoever used the link could otherwise remove what undoing needs, or what
+    /// it would leave the owner. Administrators and operators, who act without
+    /// such a session, still can. In the removal's transaction, under the
+    /// account lock; nothing to check when the setting is gone.
+    pub(crate) async fn keep_older(
         tx: &mut DatabaseTransaction<'_>,
-        user: UserId,
-        session: SessionId,
-        id: PasskeyId,
+        subject: &Subject,
+        added_at: Option<DateTime<Utc>>,
     ) -> Result<(), AccountError> {
-        let Some(recovery) = tx.recoveries().latest_undoable(user).await? else {
+        let (Some(session), Some(added_at)) = (subject.own_session(), added_at) else {
             return Ok(());
         };
-        if Self::older(tx, user, id, &recovery).await?
-            && !Self::predates(tx, user, session, &recovery).await?
-        {
-            return Err(RecoveryError::OlderPasskeyKept.into());
-        }
-        Ok(())
-    }
-
-    /// Whether a passkey enrolled before `recovery` started, still active,
-    /// signed `session` in or confirmed it since.
-    async fn predates(
-        tx: &mut DatabaseTransaction<'_>,
-        user: UserId,
-        session: SessionId,
-        recovery: &StoredRecovery,
-    ) -> Result<bool, AccountError> {
-        let Some(passkey) = tx.sessions().passkey(session).await? else {
-            return Ok(false);
+        let user = subject.user();
+        let undoable = Undoable::load(tx, user).await?;
+        let Some(protecting) = undoable.protecting(added_at) else {
+            return Ok(());
         };
-        Self::older(tx, user, passkey, recovery).await
+        let enrolled = match tx.sessions().passkey(session).await? {
+            Some(passkey) => tx.passkeys().enrolled_at(user, passkey).await?,
+            None => None,
+        };
+        if enrolled.is_some_and(|enrolled| enrolled < protecting) {
+            Ok(())
+        } else {
+            Err(RecoveryError::Protected.into())
+        }
     }
 
-    /// Whether `user`'s passkey `id` is active and was enrolled before
-    /// `recovery` started.
-    async fn older(
+    /// The account's active passkeys that predate every undoable recovery, which
+    /// may undo the newest.
+    async fn trusted(
         tx: &mut DatabaseTransaction<'_>,
         user: UserId,
-        id: PasskeyId,
-        recovery: &StoredRecovery,
-    ) -> Result<bool, AccountError> {
-        let enrolled = tx.passkeys().enrolled_at(user, id).await?;
-        Ok(enrolled.is_some_and(|enrolled| enrolled < recovery.started_at))
+        undoable: &Undoable,
+    ) -> Result<Vec<StoredPasskey>, DatabaseError> {
+        match undoable.trusted_before() {
+            Some(before) => tx.passkeys().enrolled_before(user, before).await,
+            None => Ok(Vec::new()),
+        }
     }
 }
 

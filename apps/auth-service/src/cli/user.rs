@@ -2,9 +2,11 @@
 
 use super::{CliError, Confirm, Console, Output};
 use crate::{AuthConfig, Reason, UserRef};
+use chrono::{DateTime, Utc};
 use clap::Subcommand;
 use piquel_admin_api::{UserDetail, UserPage};
 use piquel_common::UserId;
+use piquel_repository::RecentRecovery;
 
 /// Accounts, in any status.
 #[derive(Subcommand)]
@@ -49,7 +51,9 @@ pub(super) enum UserCommand {
     },
     /// Recover an account whose owner lost every passkey (not usable yet).
     ///
-    /// The recovery page its link opens comes with the server-rendered pages.
+    /// First lists the account's recoveries of the last 30 days and the passkey
+    /// each enrolled, so a suspicious one can be removed first. The recovery
+    /// page its link opens comes with the server-rendered pages.
     /// Ends the account's sessions and sends its primary address a link that
     /// enrolls one passkey, within a day. Prints the link too, for an owner
     /// without an address. The owner can undo it with an older passkey, which
@@ -107,6 +111,7 @@ impl UserCommand {
             } => {
                 let id = console.user(&user).await?;
                 let links = AuthConfig::recovery_links_from_environment()?;
+                Self::print_recent(&service.recent_recoveries(operator, id).await?);
                 confirm.ask(&format!(
                     "Recover {user} ({id}): end its sessions and send it a recovery link"
                 ))?;
@@ -122,6 +127,36 @@ impl UserCommand {
             }
         }
         Ok(())
+    }
+
+    /// Prints the account's recent recoveries, newest first, before another is
+    /// started, so support can remove a suspicious passkey one enrolled first.
+    /// On standard error, which leaves standard output to the new link.
+    fn print_recent(recent: &[RecentRecovery]) {
+        if recent.is_empty() {
+            return;
+        }
+        eprintln!("RECOVERY\tSTARTED\tSTATE\tPASSKEY\tNAME\tACTIVE");
+        for recovery in recent {
+            let at = |at: Option<DateTime<Utc>>| at.map(|at| at.to_rfc3339());
+            let state = at(recovery.undone_at)
+                .map(|at| format!("undone {at}"))
+                .or_else(|| at(recovery.cancelled_at).map(|at| format!("replaced {at}")))
+                .or_else(|| at(recovery.completed_at).map(|at| format!("used {at}")))
+                .unwrap_or_else(|| "link not used".to_owned());
+            eprintln!(
+                "{}\t{}\t{state}\t{}\t{}\t{}",
+                recovery.id,
+                recovery.started_at.to_rfc3339(),
+                recovery
+                    .passkey_id
+                    .map_or_else(|| "-".to_owned(), |id| id.to_string()),
+                recovery.passkey_name.as_deref().unwrap_or("-"),
+                recovery
+                    .passkey_active
+                    .map_or("-", |active| if active { "yes" } else { "no" }),
+            );
+        }
     }
 
     /// Prints one account per line, and how to continue if there may be more.

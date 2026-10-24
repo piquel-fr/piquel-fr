@@ -31,3 +31,8 @@ CREATE INDEX account_recoveries_user_idx ON account_recoveries (user_id, started
 -- An expired one counts until the next replaces it.
 CREATE UNIQUE INDEX account_recoveries_one_open_idx ON account_recoveries (user_id)
     WHERE completed_at IS NULL AND cancelled_at IS NULL AND undone_at IS NULL;
+
+-- When each consent was last given or extended. Undoing an account recovery
+-- withdraws the consents given since it started, which an app the recovery's
+-- holder approved could otherwise use to sign in again without asking.
+ALTER TABLE oidc_consents ADD COLUMN granted_at TIMESTAMPTZ NOT NULL DEFAULT now();

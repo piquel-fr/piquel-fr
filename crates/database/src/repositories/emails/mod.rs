@@ -295,6 +295,29 @@ impl EmailRepository<'_> {
         Ok(previous)
     }
 
+    /// When the account's address `id` joined it: when it was verified, or added
+    /// if it is not verified yet.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`DatabaseError`] if the query fails.
+    pub async fn joined_at(
+        &mut self,
+        user_id: UserId,
+        id: EmailId,
+    ) -> Result<Option<DateTime<Utc>>, DatabaseError> {
+        run!(
+            self,
+            fetch_optional,
+            sqlx::query_scalar!(
+                r#"SELECT COALESCE(verified_at, created_at) AS "joined_at!"
+                FROM user_emails WHERE user_id = $1 AND id = $2"#,
+                user_id.as_uuid(),
+                id.as_uuid(),
+            )
+        )
+    }
+
     /// Removes one of the account's addresses, with its verification secret.
     ///
     /// # Errors

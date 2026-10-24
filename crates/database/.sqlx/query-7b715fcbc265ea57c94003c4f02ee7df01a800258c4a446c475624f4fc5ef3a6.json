@@ -1,0 +1,16 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "DELETE FROM oidc_consents\n                WHERE user_id = $1 AND client_id = $2 AND audience = $3",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Text",
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "7b715fcbc265ea57c94003c4f02ee7df01a800258c4a446c475624f4fc5ef3a6"
+}

@@ -1,0 +1,17 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO oidc_consents (user_id, client_id, audience, scopes)\n                VALUES ($1, $2, $3, $4)\n                ON CONFLICT (user_id, client_id, audience) DO UPDATE\n                SET scopes = (\n                    SELECT jsonb_agg(DISTINCT value)\n                    FROM jsonb_array_elements(oidc_consents.scopes || EXCLUDED.scopes)\n                ),\n                granted_at = now()",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Text",
+        "Text",
+        "Jsonb"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "a9989b85c5f3567c3c7bd3c90495451a50ab9a3ab7a091af85c820d9d651ac34"
+}

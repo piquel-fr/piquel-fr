@@ -39,7 +39,7 @@ mod types;
 
 use ceremonies::{
     AuthenticationCeremony, Ceremony, ConfirmationCeremony, DiscoverCeremony, EnrollmentCeremony,
-    LoginCeremony, RecoveryCeremony, RegistrationCeremony,
+    LoginCeremony, RecoveryCeremony, RegistrationCeremony, UndoCeremony,
 };
 pub use error::PasskeyConfigError;
 pub(crate) use error::PasskeyError;
@@ -128,7 +128,8 @@ impl PasskeyApplication {
             .route(routes::recovery::START, post(Self::start_recovery))
             .route(routes::recovery::FINISH, post(Self::finish_recovery))
             .route(routes::recovery::STATUS, get(Self::recovery))
-            .route(routes::recovery::UNDO, post(Self::undo_recovery))
+            .route(routes::recovery::UNDO_START, post(Self::start_undo))
+            .route(routes::recovery::UNDO_FINISH, post(Self::finish_undo))
             .with_state(self)
     }
 
@@ -859,17 +860,56 @@ impl PasskeyApplication {
         Ok(Json(app.service().recovery(&owner).await?))
     }
 
-    /// Undoes the recovery the owner's undo page showed, from a session an older
-    /// passkey signed in.
-    async fn undo_recovery(
+    /// Starts undoing the recovery the owner's undo page showed, challenging only
+    /// the passkeys from before every undoable recovery. Needs no session: whoever
+    /// used the link cannot stop an undo by signing the owner out.
+    async fn start_undo(
         State(app): State<Self>,
-        owner: Owner,
+        headers: HeaderMap,
         Json(input): Json<RecoveryUndo>,
-    ) -> Result<StatusCode, ApiError> {
-        app.service()
-            .undo_recovery(&owner, input.recovery_id)
+    ) -> Result<Response, ApiError> {
+        let (user_id, passkeys) = app.service().undo_passkeys(input.recovery_id).await?;
+        let (challenge, state) = app
+            .webauthn
+            .start_passkey_authentication(&Self::decode(passkeys)?)
+            .map_err(PasskeyError::from)?;
+        Ok(app
+            .start(
+                &headers,
+                Ceremony::Undo(UndoCeremony {
+                    recovery_id: input.recovery_id,
+                    user_id,
+                    state,
+                }),
+                challenge,
+            )
+            .await?)
+    }
+
+    /// Finishes undoing a recovery with the passkey's assertion, in one
+    /// transaction, and signs the browser in with that passkey; every other
+    /// session ends.
+    async fn finish_undo(
+        State(app): State<Self>,
+        context: RequestContext,
+        headers: HeaderMap,
+        Json(input): Json<AuthenticationFinish>,
+    ) -> Result<Response, ApiError> {
+        let UndoCeremony {
+            recovery_id,
+            user_id,
+            state,
+        } = app
+            .consume::<UndoCeremony>(&headers, input.ceremony_id)
             .await?;
-        Ok(StatusCode::NO_CONTENT)
+        let verified = app
+            .webauthn
+            .finish_passkey_authentication(&input.credential, &state);
+        let (mut tx, passkey) = app
+            .accept_credential(context, Actor::Anonymous, user_id, verified)
+            .await?;
+        AccountService::undo_recovery(&mut tx, context, user_id, recovery_id, passkey).await?;
+        Ok(Self::complete_sign_in(tx, context, &headers, user_id, passkey).await?)
     }
 
     /// Returns the current account identity.
@@ -1027,7 +1067,7 @@ impl AccountService {
     /// Removes a passkey and signs the account out elsewhere. One active passkey
     /// always remains, even with a social identity linked. While a recovery can
     /// be undone, the owner removes a passkey from before it only from a session
-    /// such a passkey signed in.
+    /// such a passkey signed in ([`Self::keep_older`]).
     pub(crate) async fn revoke_passkey(
         &self,
         subject: &Subject,
@@ -1035,9 +1075,8 @@ impl AccountService {
     ) -> Result<(), AccountError> {
         let mut tx = self.database.begin().await?;
         subject.lock_confirmed(&mut tx).await?;
-        if let Some(session) = subject.own_session() {
-            Self::keep_older_passkey(&mut tx, subject.user(), session, id).await?;
-        }
+        let enrolled = tx.passkeys().enrolled_at(subject.user(), id).await?;
+        Self::keep_older(&mut tx, subject, enrolled).await?;
         if !tx.passkeys().revoke_if_not_last(id, subject.user()).await? {
             return Err(PasskeyError::LastPasskey.into());
         }

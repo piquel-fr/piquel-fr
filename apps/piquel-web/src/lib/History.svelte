@@ -47,6 +47,7 @@
           | 'account.handle_changed'
           | 'account.recovery_started'
           | 'account.recovery_undone'
+          | 'consent.revoked'
           | 'administrator.granted'
           | 'administrator.revoked';
       }
@@ -257,6 +258,8 @@
         return 'Email address removed';
       case 'consent.granted':
         return `Access approved: ${entry.scopes.join(', ')}`;
+      case 'consent.revoked':
+        return 'App access withdrawn';
       case 'token.reused':
         return 'An app’s sign-in was used twice, so its access was revoked';
       case 'account.disabled':

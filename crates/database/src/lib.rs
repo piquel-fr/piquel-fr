@@ -42,8 +42,8 @@ pub use repositories::{
     },
     passkeys::{CeremonyKind, ConsumedCeremony, InsertCeremony, InsertPasskey, StoredPasskey},
     recoveries::{
-        AddedEmail, AddedIdentity, AddedPasskey, InsertRecovery, RestoredPrimary, Rollback,
-        StoredRecovery,
+        AddedConsent, AddedEmail, AddedIdentity, AddedPasskey, InsertRecovery, RecentRecovery,
+        RestoredPrimary, Rollback, StoredRecovery,
     },
     sessions::{
         InsertSession, LAST_SEEN_INTERVAL, SessionAuthentication, SessionScope, StoredSession,

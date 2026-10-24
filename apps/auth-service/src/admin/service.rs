@@ -3,7 +3,7 @@
 use super::{AdminError, HandleIssue, HandleProblem, InviteExpiry, Operator, Reason, UserRef};
 use crate::{
     Applied, ClientDetails, ClientRegistry, ClientRegistryError, GracePeriod,
-    recovery::{LINK_LIFETIME, RecoveryLinks},
+    recovery::{LINK_LIFETIME, RecoveryLinks, SETTLE_WINDOW},
 };
 use chrono::Utc;
 use piquel_admin_api::{
@@ -20,7 +20,7 @@ use piquel_common::{
 use piquel_crypto::{ClientSecret, Secret};
 use piquel_repository::{
     Database, DatabaseError, DatabaseTransaction, DeliveryStatus, DeliverySummary, EventFilter,
-    InsertRecovery, SessionScope, StoredOidcClient,
+    InsertRecovery, RecentRecovery, SessionScope, StoredOidcClient,
 };
 use std::collections::BTreeMap;
 use url::Url;
@@ -308,6 +308,29 @@ impl AdminService {
         let link = shown.then(|| links.url(&token));
         Self::finish(tx, operator, Some(user_id), vec![]).await?;
         Ok(link)
+    }
+
+    /// The account's recoveries started within the last [`SETTLE_WINDOW`], the
+    /// time one can still be undone, newest first, with the passkey each
+    /// enrolled. Support reviews them before starting another, and can remove a
+    /// suspicious passkey first. Recorded, as a view of the account.
+    pub(crate) async fn recent_recoveries(
+        &self,
+        operator: &Operator,
+        user_id: UserId,
+    ) -> Result<Vec<RecentRecovery>, AdminError> {
+        operator.authorize_read(&self.database).await?;
+        let mut tx = self.database.begin().await?;
+        let since = Utc::now() - SETTLE_WINDOW;
+        let recent = tx.recoveries().recent(user_id, since).await?;
+        tx.record(
+            &operator.context(),
+            Some(user_id),
+            DomainEvent::AccountViewed {},
+        )
+        .await?;
+        tx.commit().await?;
+        Ok(recent)
     }
 
     /// Ends every session and refresh grant of an account.

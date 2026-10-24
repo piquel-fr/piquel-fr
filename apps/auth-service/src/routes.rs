@@ -81,8 +81,10 @@ pub(crate) mod recovery {
     pub(crate) const FINISH: &str = "/recovery/finish";
     /// Describes the account's newest recovery its owner could undo.
     pub(crate) const STATUS: &str = "/account/recovery";
-    /// Undoes it.
-    pub(crate) const UNDO: &str = "/account/recovery/undo";
+    /// Starts undoing it with a passkey from before it; needs no session.
+    pub(crate) const UNDO_START: &str = "/account/recovery/undo/start";
+    /// Finishes the undo, and signs the browser in with that passkey.
+    pub(crate) const UNDO_FINISH: &str = "/account/recovery/undo/finish";
 }
 
 /// The account's security history.

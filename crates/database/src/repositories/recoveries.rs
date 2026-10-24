@@ -5,7 +5,7 @@
 use super::{RecoveryRepository, RepositoryExecutor};
 use crate::DatabaseError;
 use chrono::{DateTime, Utc};
-use piquel_common::{EmailId, PasskeyId, Provider, RecoveryId, UserId};
+use piquel_common::{ClientId, EmailId, PasskeyId, Provider, RecoveryId, UserId};
 use serde::Serialize;
 
 /// A new recovery, whose link works until `expires_at`.
@@ -50,6 +50,8 @@ pub struct Rollback {
     pub identities: Vec<AddedIdentity>,
     /// Addresses added or verified since.
     pub emails: Vec<AddedEmail>,
+    /// Consents given or extended since.
+    pub consents: Vec<AddedConsent>,
     /// The address made primary again, if the primary changes: the one the
     /// recovery started with, or, if it is gone, the oldest address verified
     /// before it.
@@ -89,6 +91,41 @@ pub struct AddedEmail {
     pub added_at: DateTime<Utc>,
     /// When it was verified, if it was.
     pub verified_at: Option<DateTime<Utc>>,
+}
+
+/// A consent to a client given, or extended, since a recovery started.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+pub struct AddedConsent {
+    /// The client.
+    pub client_id: ClientId,
+    /// Its display name.
+    pub client_name: String,
+    /// The audience consented to.
+    pub audience: String,
+    /// When it was last given.
+    pub granted_at: DateTime<Utc>,
+}
+
+/// A recent recovery of an account, as support reviews it before starting
+/// another: when it started and ended, and the passkey its link enrolled.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+pub struct RecentRecovery {
+    /// The recovery.
+    pub id: RecoveryId,
+    /// When it started.
+    pub started_at: DateTime<Utc>,
+    /// When its link enrolled a passkey, if it did.
+    pub completed_at: Option<DateTime<Utc>>,
+    /// When a newer recovery or the account's disabling replaced it.
+    pub cancelled_at: Option<DateTime<Utc>>,
+    /// When its owner undid it.
+    pub undone_at: Option<DateTime<Utc>>,
+    /// The passkey its link enrolled, if it did.
+    pub passkey_id: Option<PasskeyId>,
+    /// That passkey's label.
+    pub passkey_name: Option<String>,
+    /// Whether that passkey is still active.
+    pub passkey_active: Option<bool>,
 }
 
 /// The address undoing a recovery makes primary again.
@@ -206,16 +243,45 @@ impl RecoveryRepository<'_> {
             == 1)
     }
 
-    /// The account's newest recovery that can still be undone: its link still
-    /// works, or it enrolled a passkey and was not undone.
+    /// The account's recoveries that can still be undone, newest first: those
+    /// whose link still works, and those it was used for after `settled_before`.
+    /// Neither cancelled nor undone.
     ///
     /// # Errors
     ///
     /// Returns [`DatabaseError`] if the query fails.
-    pub async fn latest_undoable(
+    pub async fn undoable(
         &mut self,
         user_id: UserId,
-    ) -> Result<Option<StoredRecovery>, DatabaseError> {
+        settled_before: DateTime<Utc>,
+    ) -> Result<Vec<StoredRecovery>, DatabaseError> {
+        run!(
+            self,
+            fetch_all,
+            sqlx::query_as!(
+                StoredRecovery,
+                r#"SELECT
+                    id AS "id: RecoveryId", user_id AS "user_id: UserId",
+                    primary_email_id AS "primary_email_id: EmailId", started_at,
+                    expires_at, completed_at
+                FROM account_recoveries
+                WHERE user_id = $1
+                AND cancelled_at IS NULL AND undone_at IS NULL
+                AND CASE WHEN completed_at IS NULL THEN expires_at > now()
+                    ELSE completed_at > $2 END
+                ORDER BY started_at DESC, id DESC"#,
+                user_id.as_uuid(),
+                settled_before,
+            )
+        )
+    }
+
+    /// Recovery `id`, whatever its state.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`DatabaseError`] if the query fails.
+    pub async fn find(&mut self, id: RecoveryId) -> Result<Option<StoredRecovery>, DatabaseError> {
         run!(
             self,
             fetch_optional,
@@ -226,14 +292,67 @@ impl RecoveryRepository<'_> {
                     primary_email_id AS "primary_email_id: EmailId", started_at,
                     expires_at, completed_at
                 FROM account_recoveries
-                WHERE user_id = $1
-                AND cancelled_at IS NULL AND undone_at IS NULL
-                AND (completed_at IS NOT NULL OR expires_at > now())
-                ORDER BY started_at DESC, id DESC
-                LIMIT 1"#,
-                user_id.as_uuid(),
+                WHERE id = $1"#,
+                id.as_uuid(),
             )
         )
+    }
+
+    /// The account's recoveries started after `since`, newest first, with the
+    /// passkey each enrolled.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`DatabaseError`] if the query fails.
+    pub async fn recent(
+        &mut self,
+        user_id: UserId,
+        since: DateTime<Utc>,
+    ) -> Result<Vec<RecentRecovery>, DatabaseError> {
+        run!(
+            self,
+            fetch_all,
+            sqlx::query_as!(
+                RecentRecovery,
+                r#"SELECT
+                    r.id AS "id: RecoveryId", r.started_at, r.completed_at, r.cancelled_at,
+                    r.undone_at, r.passkey_id AS "passkey_id: PasskeyId",
+                    p.friendly_name AS "passkey_name?",
+                    (p.revoked_at IS NULL) AS "passkey_active?"
+                FROM account_recoveries r
+                LEFT JOIN passkey_credentials p ON p.id = r.passkey_id
+                WHERE r.user_id = $1 AND r.started_at > $2
+                ORDER BY r.started_at DESC, r.id DESC"#,
+                user_id.as_uuid(),
+                since,
+            )
+        )
+    }
+
+    /// Moves recovery `id`'s use `by` into the past, as if its link had been
+    /// used that long ago: a fixture for the settle window.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`DatabaseError`] if the update fails.
+    #[cfg(feature = "test-support")]
+    pub async fn backdate_completion(
+        &mut self,
+        id: RecoveryId,
+        by: chrono::Duration,
+    ) -> Result<(), DatabaseError> {
+        run!(
+            self,
+            execute,
+            sqlx::query!(
+                "UPDATE account_recoveries
+                SET completed_at = completed_at - $2::bigint * interval '1 millisecond'
+                WHERE id = $1",
+                id.as_uuid(),
+                by.num_milliseconds(),
+            )
+        )?;
+        Ok(())
     }
 
     /// Records that the owner undid recovery `id`.
@@ -318,10 +437,27 @@ impl RecoveryRepository<'_> {
                 recovery.primary_email_id.map(EmailId::as_uuid),
             )
         )?;
+        let consents = run!(
+            self,
+            fetch_all,
+            sqlx::query_as!(
+                AddedConsent,
+                r#"SELECT
+                    c.client_id AS "client_id: ClientId", o.display_name AS client_name,
+                    c.audience, c.granted_at
+                FROM oidc_consents c
+                JOIN oidc_clients o ON o.id = c.client_id
+                WHERE c.user_id = $1 AND c.granted_at >= $2
+                ORDER BY c.granted_at, c.client_id, c.audience"#,
+                user,
+                since,
+            )
+        )?;
         Ok(Rollback {
             passkeys,
             identities,
             emails,
+            consents,
             primary: primary.filter(|primary| !primary.is_primary),
         })
     }

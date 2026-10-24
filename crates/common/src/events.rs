@@ -120,6 +120,12 @@ pub enum DomainEvent {
         /// The approved scopes, drawn from the client's registered allowlist.
         scopes: Vec<String>,
     },
+    /// The account's consent to a client was withdrawn, so the client asks again
+    /// before its next sign-in. Undoing a recovery withdraws those given since.
+    ConsentRevoked {
+        /// The client.
+        client_id: ClientId,
+    },
     /// A client exchanged an authorization code for tokens.
     GrantIssued {
         /// The client the tokens were issued to.
@@ -242,12 +248,12 @@ pub enum DomainEvent {
         /// The passkey it enrolled.
         passkey_id: PasskeyId,
     },
-    /// The owner, signed in with a passkey enrolled before a recovery, undid it:
-    /// its link stopped working, and what the account gained since was taken
-    /// back, recorded before it as [`Self::PasskeyRemoved`],
-    /// [`Self::IdentityUnlinked`], [`Self::PrimaryEmailChanged`] and
-    /// [`Self::EmailRemoved`]. Every other session ends after it
-    /// ([`Self::SessionRevoked`]).
+    /// The owner undid a recovery with a passkey enrolled before it: its link
+    /// stopped working, and what the account gained since was taken back,
+    /// recorded before it as [`Self::PasskeyRemoved`], [`Self::IdentityUnlinked`],
+    /// [`Self::ConsentRevoked`], [`Self::PrimaryEmailChanged`] and
+    /// [`Self::EmailRemoved`]. Every session ends after it
+    /// ([`Self::SessionRevoked`]), and the undoing browser signs in.
     RecoveryUndone {
         /// The recovery.
         recovery_id: RecoveryId,
@@ -307,6 +313,7 @@ impl DomainEvent {
     pub fn client_id(&self) -> Option<&ClientId> {
         match self {
             Self::ConsentGranted { client_id, .. }
+            | Self::ConsentRevoked { client_id }
             | Self::GrantIssued { client_id, .. }
             | Self::GrantRevoked { client_id, .. }
             | Self::CodeReplayed { client_id }
@@ -374,6 +381,7 @@ impl DomainEvent {
             | Self::PrimaryEmailChanged { .. }
             | Self::EmailRemoved { .. }
             | Self::ConsentGranted { .. }
+            | Self::ConsentRevoked { .. }
             | Self::GrantIssued { .. }
             | Self::GrantRevoked { .. }
             | Self::CodeReplayed { .. }
@@ -423,6 +431,7 @@ impl DomainEvent {
             Self::PrimaryEmailChanged { .. } => "primary_email_changed",
             Self::EmailRemoved { .. } => "email_removed",
             Self::ConsentGranted { .. } => "consent_granted",
+            Self::ConsentRevoked { .. } => "consent_revoked",
             Self::GrantIssued { .. } => "grant_issued",
             Self::GrantRevoked { .. } => "grant_revoked",
             Self::CodeReplayed { .. } => "code_replayed",
@@ -513,6 +522,7 @@ impl DomainEvent {
             Self::ConsentGranted { scopes, .. } => HistoryEntry::ConsentGranted {
                 scopes: scopes.clone(),
             },
+            Self::ConsentRevoked { .. } => HistoryEntry::ConsentRevoked,
             Self::GrantRevoked { reason, .. } => match reason {
                 GrantRevocation::RefreshReplay => HistoryEntry::TokenReused,
                 // A replayed code shows once, as its `CodeReplayed`.
@@ -653,6 +663,9 @@ pub enum HistoryEntry {
         /// The approved scopes.
         scopes: Vec<String>,
     },
+    /// An application's access was withdrawn.
+    #[serde(rename = "consent.revoked")]
+    ConsentRevoked,
     /// A refresh token or authorization code was used twice, so the access it
     /// granted was revoked.
     #[serde(rename = "token.reused")]
@@ -732,6 +745,7 @@ impl HistoryEntry {
             | Self::PrimaryEmailChanged { .. }
             | Self::EmailRemoved { .. }
             | Self::ConsentGranted { .. }
+            | Self::ConsentRevoked
             | Self::TokenReused
             | Self::AccountDisabled
             | Self::AccountEnabled

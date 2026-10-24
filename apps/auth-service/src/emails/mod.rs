@@ -406,6 +406,8 @@ impl AccountService {
     /// Removes an address, and queues a notice to it if it was verified. The
     /// primary address can only be removed once no other verified address could
     /// replace it: another one must be made primary first, which notifies it too.
+    /// An address from before an undoable recovery is protected as
+    /// [`AccountService::keep_older`] says.
     pub(crate) async fn remove_email(
         &self,
         subject: &Subject,
@@ -413,6 +415,8 @@ impl AccountService {
     ) -> Result<(), AccountError> {
         let mut tx = self.database.begin().await?;
         subject.lock_confirmed(&mut tx).await?;
+        let joined = tx.emails().joined_at(subject.user(), id).await?;
+        Self::keep_older(&mut tx, subject, joined).await?;
         let emails = tx.emails().list(subject.user()).await?;
         let email = emails
             .iter()
