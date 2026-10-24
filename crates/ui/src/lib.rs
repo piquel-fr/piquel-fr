@@ -16,7 +16,7 @@
 //! # async fn main() -> topcoat::Result<()> {
 //! let cx = Cx::default();
 //! let html = view! { cx =>
-//!     piquel_ui::document(title: "Sign out", stylesheet: "/assets/style.css", home: "/",
+//!     piquel_ui::document(title: "Sign out", stylesheet: "/assets/style.css", home: "/settings",
 //!         piquel_ui::logout(action: "/logout", fields: &[("client_id", "notes")], keep: "/login")
 //!     )
 //! }

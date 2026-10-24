@@ -94,9 +94,6 @@ impl SecurityFixture {
             request_timeout: std::time::Duration::from_secs(30),
             database,
             origin: site(),
-            frontends: FrontendOrigins::new([&"https://piquel.fr/settings"
-                .parse()
-                .expect("settings URL")]),
         };
         let mut router = Router::new();
         for path in [
@@ -158,15 +155,17 @@ impl SecurityFixture {
             .await
             .expect("response")
     }
-    /// Checks credentialed CORS reflects exactly the approved origin.
+    /// Checks CORS reflects exactly the approved origin, without the browser's
+    /// cookies.
     fn exact_cors(response: &Response, origin: &str) {
         assert_eq!(
             response.headers()[header::ACCESS_CONTROL_ALLOW_ORIGIN],
             origin
         );
-        assert_eq!(
-            response.headers()[header::ACCESS_CONTROL_ALLOW_CREDENTIALS],
-            "true"
+        assert!(
+            !response
+                .headers()
+                .contains_key(header::ACCESS_CONTROL_ALLOW_CREDENTIALS)
         );
         assert_eq!(response.headers()[header::VARY], "Origin");
         assert_ne!(response.headers()[header::ACCESS_CONTROL_ALLOW_ORIGIN], "*");
@@ -196,26 +195,26 @@ impl SecurityFixture {
 )]
 async fn router_enforces_exact_browser_origins_csrf_and_public_client_cors_boundaries() {
     let fixture = SecurityFixture::new().await;
-    for origin in ["https://auth.piquel.fr", "https://piquel.fr"] {
-        let response = fixture
-            .request(Method::POST, "/account/passkeys", Some(origin), true)
-            .await;
-        assert_eq!(response.status(), StatusCode::ACCEPTED);
-        SecurityFixture::exact_cors(&response, origin);
-        let response = fixture
-            .request(Method::POST, "/account/passkeys", Some(origin), false)
-            .await;
-        assert_eq!(
-            response.status(),
-            StatusCode::FORBIDDEN,
-            "approved origin still needs CSRF header"
-        );
-    }
+    let own = "https://auth.piquel.fr";
+    let response = fixture
+        .request(Method::POST, "/account/passkeys", Some(own), true)
+        .await;
+    assert_eq!(response.status(), StatusCode::ACCEPTED);
+    SecurityFixture::exact_cors(&response, own);
+    let response = fixture
+        .request(Method::POST, "/account/passkeys", Some(own), false)
+        .await;
+    assert_eq!(
+        response.status(),
+        StatusCode::FORBIDDEN,
+        "approved origin still needs CSRF header"
+    );
     for origin in [
         None,
         Some("null"),
         Some("https://evil.example"),
-        Some("https://piquel.fr.evil.example"),
+        Some("https://piquel.fr"),
+        Some("https://auth.piquel.fr.evil.example"),
         Some("https://auth.piquel.fr:444"),
         Some("http://auth.piquel.fr"),
     ] {
@@ -237,7 +236,7 @@ async fn router_enforces_exact_browser_origins_csrf_and_public_client_cors_bound
         .request(
             Method::POST,
             "/webauthn/authenticate/start",
-            Some("https://auth.piquel.fr"),
+            Some(own),
             true,
         )
         .await;
@@ -307,19 +306,12 @@ async fn router_enforces_exact_browser_origins_csrf_and_public_client_cors_bound
             .await;
         SecurityFixture::denied(&response);
     }
-    for origin in ["https://auth.piquel.fr", "https://piquel.fr"] {
-        let response = fixture
-            .request(Method::OPTIONS, "/account/passkeys", Some(origin), false)
-            .await;
-        assert_eq!(response.status(), StatusCode::NO_CONTENT);
-        SecurityFixture::exact_cors(&response, origin);
-        assert!(
-            response.headers()[header::ACCESS_CONTROL_ALLOW_HEADERS]
-                .to_str()
-                .expect("allowed headers")
-                .contains("x-piquel-csrf")
-        );
-    }
+    let response = fixture
+        .request(Method::OPTIONS, "/account/passkeys", Some(own), false)
+        .await;
+    assert_eq!(response.status(), StatusCode::NO_CONTENT);
+    SecurityFixture::exact_cors(&response, own);
+    // A public client sends its codes and tokens, never cookies or Piquel's CSRF header.
     let response = fixture
         .request(
             Method::OPTIONS,
@@ -330,7 +322,20 @@ async fn router_enforces_exact_browser_origins_csrf_and_public_client_cors_bound
         .await;
     assert_eq!(response.status(), StatusCode::NO_CONTENT);
     SecurityFixture::exact_cors(&response, "https://external.example");
-    for origin in [None, Some("null"), Some("https://evil.example")] {
+    assert_eq!(
+        response.headers()[header::ACCESS_CONTROL_ALLOW_HEADERS],
+        "content-type, authorization"
+    );
+    assert_eq!(
+        response.headers()[header::ACCESS_CONTROL_ALLOW_METHODS],
+        "GET, POST, OPTIONS"
+    );
+    for origin in [
+        None,
+        Some("null"),
+        Some("https://evil.example"),
+        Some("https://piquel.fr"),
+    ] {
         let response = fixture
             .request(Method::OPTIONS, "/account/passkeys", origin, false)
             .await;
@@ -622,7 +627,13 @@ fn routes_doing_real_work_have_budgets() {
     ] {
         assert_eq!(Endpoint::classify(path).rate_category(), budget, "{path}");
     }
-    for path in page::ALL {
+    // The root and a page's path ending in a slash only redirect to a page.
+    let redirects = page::ALL.map(|path| format!("{path}/"));
+    for path in page::ALL
+        .into_iter()
+        .chain([page::ROOT])
+        .chain(redirects.iter().map(String::as_str))
+    {
         assert_eq!(
             Endpoint::classify(path).rate_category(),
             Some(RateCategory::Page),
@@ -654,7 +665,6 @@ fn endpoint_policy_requires_browser_proof_outside_protocol_endpoints() {
         (Endpoint::Authorize, true),
         (Endpoint::Logout, true),
         (Endpoint::Account, false),
-        (Endpoint::Login, false),
         (Endpoint::Other, false),
     ] {
         assert_eq!(endpoint.is_protocol(), protocol);
@@ -920,9 +930,9 @@ fn decorated(response: impl IntoResponse, grant: Option<CorsGrant>) -> Response 
     response
 }
 
-/// The CORS grant of a request from an approved first-party origin.
-fn first_party() -> CorsGrant {
-    CorsGrant::Credentialed(HeaderValue::from_static("https://piquel.fr"))
+/// The CORS grant of an approved origin, such as a public client's.
+fn client() -> CorsGrant {
+    CorsGrant::Client(HeaderValue::from_static("https://external.example"))
 }
 
 /// Each class sends its own `Cache-Control`, on success and on revalidation.
@@ -974,7 +984,7 @@ fn cached_responses_are_the_same_for_every_origin() {
     let public = CacheClass::Public {
         max_age: std::time::Duration::from_secs(3600),
     };
-    for grant in [None, Some(first_party())] {
+    for grant in [None, Some(client())] {
         let response = decorated(Cached(public, StatusCode::OK), grant);
         let headers = response.headers();
         assert_eq!(headers[header::ACCESS_CONTROL_ALLOW_ORIGIN], "*");
@@ -982,7 +992,7 @@ fn cached_responses_are_the_same_for_every_origin() {
         assert!(!headers.contains_key(header::VARY));
     }
     for class in [CacheClass::Revalidate, CacheClass::Immutable] {
-        let response = decorated(Cached(class, StatusCode::OK), Some(first_party()));
+        let response = decorated(Cached(class, StatusCode::OK), Some(client()));
         let headers = response.headers();
         assert!(!headers.contains_key(header::ACCESS_CONTROL_ALLOW_ORIGIN));
         assert!(!headers.contains_key(header::ACCESS_CONTROL_ALLOW_CREDENTIALS));

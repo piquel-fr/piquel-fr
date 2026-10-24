@@ -1,24 +1,21 @@
 //! Built-in health and public configuration routes.
-use crate::{AuthConfig, config::FrontendOrigins, routes, security::ApiError};
+use crate::{AuthConfig, routes, security::ApiError};
 use axum::{Json, Router, extract::State, http::StatusCode, routing::get};
 use piquel_common::Provider;
 use piquel_repository::Database;
 use serde::Serialize;
 
-/// Configuration sent to browser applications; field names are a stable API.
+/// Configuration the embedded sign-in pages read; field names are a stable API.
 #[derive(Clone, Serialize)]
 struct PublicConfig {
     // Keep fields in the original JSON object's sorted order for byte-for-byte replies.
-    /// Whether the service sends email, so accounts can add addresses.
-    email_enabled: bool,
-    /// Frontend origins that sign-in may return to.
-    frontend_origins: FrontendOrigins,
     /// Whether signup requires a single-use invitation.
     invite_required: bool,
     /// Enabled social login choices, in protocol declaration order.
     providers: Vec<Provider>,
-    /// Exact settings continuation after authentication.
-    settings_url: url::Url,
+    /// The account's settings, where sign-in returns by default: a path on auth, as
+    /// `return_to` must be.
+    settings_url: &'static str,
 }
 
 /// Service-wide endpoints with the same construction pattern as feature applications.
@@ -40,9 +37,7 @@ impl ServiceApplication {
         Self {
             database,
             public_config: PublicConfig {
-                email_enabled: config.email.smtp.is_some(),
-                frontend_origins: config.federation.frontends.clone(),
-                settings_url: config.federation.settings_url.as_url().clone(),
+                settings_url: routes::page::settings::HOME,
                 providers,
                 invite_required: config.passkey.invite_required,
             },

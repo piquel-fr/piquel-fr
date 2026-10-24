@@ -10,7 +10,7 @@ use crate::{
     passkey::PasskeyError,
     security::ApiError,
     security::CONFIRMATION_MAX_AGE,
-    tests::{Browser, Replicas, change, registration, sign_out, until_blocked},
+    tests::{AUTH_ORIGIN, Browser, Replicas, change, registration, sign_out, until_blocked},
 };
 use axum::{
     Router,
@@ -640,10 +640,9 @@ impl Confirmation {
             })
             .await
             .expect("pending link");
-        let settings = "https://piquel.fr/settings".parse().expect("settings URL");
         let state = Self {
             service: fixture.service.clone(),
-            email: EmailConfig::test(&settings, true),
+            email: EmailConfig::test(&AUTH_ORIGIN.parse().expect("auth origin"), true),
             user,
             address: addresses[1],
             passkey: passkeys[0],

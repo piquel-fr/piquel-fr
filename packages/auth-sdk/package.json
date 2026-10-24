@@ -8,14 +8,9 @@
   },
   "exports": {
     ".": "./src/index.ts",
-    "./style.css": "./src/style.css",
-    "./server": "./src/server.ts"
-  },
-  "peerDependencies": {
-    "@sveltejs/kit": "catalog:"
+    "./style.css": "./src/style.css"
   },
   "devDependencies": {
-    "@sveltejs/kit": "catalog:",
     "typescript": "catalog:"
   }
 }

@@ -70,11 +70,14 @@ invite_required = "false"
 # Previews keep their telemetry on stderr: the collector does not export to them.
 otlp_endpoint = ""
 
+# piquel.fr serves nothing of its own yet: the gateway sends every path, with its
+# query, to the same one on auth, which serves the account settings. Temporary
+# (307), so browsers cache nothing once piquel.fr serves pages again. See "Web"
+# in infra/README.md.
 [[spec.routes]]
 name = "web"
 hostname = "${{ vars.web_host }}"
-service = "web"
-port = 8080
+redirect = { to = "https://${{ vars.auth_host }}", status = 307, preserve_path = true }
 visibility = "public"
 
 [[spec.routes]]
@@ -209,7 +212,6 @@ AUTH_PUBLIC_LISTENER = "0.0.0.0:8080"
 # administrator's access token.
 AUTH_ADMIN_LISTENER = "0.0.0.0:8081"
 AUTH_PUBLIC_BASE_URL = "https://${{ vars.auth_host }}"
-AUTH_SETTINGS_URL = "https://${{ vars.web_host }}/settings"
 AUTH_INVITE_REQUIRED = "${{ vars.invite_required }}"
 AUTH_SMTP_URL = "smtps://resend@smtp.resend.com:465"
 AUTH_SMTP_PASSWORD = "file:///run/secrets/smtp-password"
@@ -247,28 +249,6 @@ target = "/run/secrets/smtp-password"
 type = "http"
 port = 8080
 path = "/health/ready"
-
-[[spec.services]]
-name = "web"
-
-[spec.services.source]
-type = "git"
-repository = "self"
-
-[spec.services.source.build]
-type = "docker"
-dockerfile = "infra/web.Dockerfile"
-
-# Runtime configuration, not a build argument, so staging's image can be promoted.
-# ORIGIN gives the server its public URL behind ingress.
-[spec.services.environment]
-AUTH_ORIGIN = "https://${{ vars.auth_host }}"
-ORIGIN = "https://${{ vars.web_host }}"
-
-[spec.services.healthcheck]
-type = "http"
-port = 8080
-path = "/healthz"
 
 [[spec.services]]
 name = "admin"

@@ -1,7 +1,6 @@
 //! Shared browser-session, passkey confirmation and HTTP trust boundaries.
 
-use crate::config::FrontendOrigins;
-use crate::routes::{ACCOUNT_PREFIX, LOGIN_PREFIX, oidc, page, passkey, service};
+use crate::routes::{ACCOUNT_PREFIX, oidc, page, passkey, service};
 use axum::{
     Json,
     extract::{ConnectInfo, FromRef, FromRequestParts, MatchedPath, Request, State},
@@ -788,19 +787,18 @@ enum Endpoint {
     /// RP-initiated logout, validated by its own hint, which only sends the browser to
     /// confirm on the logout page.
     Logout,
-    /// Account and session APIs shared with the first-party frontends.
+    /// Account and session JSON APIs, which browsers may call only from auth's own
+    /// pages.
     Account,
-    /// Social sign-in, also started from the first-party frontends.
-    Login,
     /// Auth's server-rendered pages, which anyone may navigate to, and the forms they post.
     Page,
-    /// Passkey ceremonies, the frontend's static pages and the other auth-origin routes.
+    /// Passkey ceremonies, social sign-in, the frontend's static pages and the other
+    /// auth-origin routes.
     Other,
 }
 
 impl Endpoint {
-    /// Classifies exact protocol and page paths, and the account and login route
-    /// families.
+    /// Classifies exact protocol and page paths, and the account route family.
     fn classify(path: &str) -> Self {
         match path {
             oidc::TOKEN | oidc::REVOKE | oidc::PAR => Self::OAuthBackChannel,
@@ -810,9 +808,10 @@ impl Endpoint {
             oidc::AUTHORIZE => Self::Authorize,
             oidc::LOGOUT => Self::Logout,
             service::CONFIG | passkey::SESSION | passkey::SESSION_LOGOUT => Self::Account,
-            _ if page::ALL.contains(&path) => Self::Page,
+            // The root and a page's path ending in a slash redirect to a page.
+            page::ROOT => Self::Page,
+            _ if page::ALL.contains(&path.strip_suffix('/').unwrap_or(path)) => Self::Page,
             _ if path.starts_with(ACCOUNT_PREFIX) => Self::Account,
-            _ if path.starts_with(LOGIN_PREFIX) => Self::Login,
             _ => Self::Other,
         }
     }
@@ -821,12 +820,7 @@ impl Endpoint {
     const fn is_protocol(self) -> bool {
         match self {
             Self::OAuthBackChannel | Self::UserInfo | Self::Authorize | Self::Logout => true,
-            Self::Discovery
-            | Self::Health
-            | Self::Account
-            | Self::Login
-            | Self::Page
-            | Self::Other => false,
+            Self::Discovery | Self::Health | Self::Account | Self::Page | Self::Other => false,
         }
     }
 
@@ -840,7 +834,7 @@ impl Endpoint {
             Self::OAuthBackChannel => Some(RateCategory::Token),
             Self::UserInfo => Some(RateCategory::UserInfo),
             Self::Account => Some(RateCategory::Account),
-            Self::Login | Self::Authorize | Self::Logout | Self::Other => Some(RateCategory::Login),
+            Self::Authorize | Self::Logout | Self::Other => Some(RateCategory::Login),
             Self::Page => Some(RateCategory::Page),
             Self::Discovery | Self::Health => None,
         }
@@ -869,8 +863,10 @@ piquel_common::str_enum! {
 enum CorsGrant {
     /// Public, credential-free documents that any origin may read.
     Public,
-    /// An approved origin, which may send the browser's cookies.
-    Credentialed(HeaderValue),
+    /// An approved origin, which calls without the browser's cookies: a public
+    /// client's, on the back channel and userinfo. Auth's own pages need no grant,
+    /// being same-origin.
+    Client(HeaderValue),
 }
 
 /// Who may store a response, and for how long. Handlers choose a class with [`Cached`];
@@ -1039,8 +1035,6 @@ pub(crate) struct HttpSecurity {
     pub request_timeout: StdDuration,
     /// Origin of auth's own pages, allowed on every endpoint.
     pub origin: url::Origin,
-    /// First-party frontend origins, allowed on account and login endpoints.
-    pub frontends: FrontendOrigins,
 }
 
 impl HttpSecurity {
@@ -1051,7 +1045,6 @@ impl HttpSecurity {
             trusted_proxies: Arc::new(config.trusted_proxies.clone()),
             request_timeout: REQUEST_TIMEOUT,
             origin: config.passkey.origin.as_url().origin(),
-            frontends: config.federation.frontends.clone(),
         }
     }
 
@@ -1095,20 +1088,17 @@ impl HttpSecurity {
         Ok(header.to_str()?.parse()?)
     }
 
-    /// Determines whether an exact browser origin may access this endpoint family.
-    /// The back-channel and `UserInfo` endpoints also serve the redirect origins
-    /// of enabled public clients. Those are looked up per request, so registration
-    /// changes apply at once; same-origin and first-party requests skip the query.
+    /// Determines whether an exact browser origin may access this endpoint family:
+    /// any origin reads discovery, and auth's own pages reach every endpoint. The
+    /// back-channel and `UserInfo` endpoints also serve the redirect origins of
+    /// enabled public clients. Those are looked up per request, so registration
+    /// changes apply at once; same-origin requests skip the query.
     async fn allowed_origin(
         &self,
         endpoint: Endpoint,
         origin: &str,
     ) -> Result<bool, HttpSecurityError> {
-        if matches!(endpoint, Endpoint::Discovery)
-            || origin == self.origin.ascii_serialization()
-            || (self.frontends.contains(origin)
-                && matches!(endpoint, Endpoint::Account | Endpoint::Login))
-        {
+        if matches!(endpoint, Endpoint::Discovery) || origin == self.origin.ascii_serialization() {
             return Ok(true);
         }
         if !matches!(endpoint, Endpoint::OAuthBackChannel | Endpoint::UserInfo) {
@@ -1143,7 +1133,7 @@ impl HttpSecurity {
         .unwrap_or_else(|error| ApiError::from(error).into_response());
         let grant = match endpoint {
             Endpoint::Discovery => Some(CorsGrant::Public),
-            _ => origin.filter(|_| allowed).map(CorsGrant::Credentialed),
+            _ => origin.filter(|_| allowed).map(CorsGrant::Client),
         };
         Self::decorate(&mut response, grant);
         response
@@ -1267,25 +1257,21 @@ impl HttpSecurity {
                 }
                 return;
             }
-            Some(CorsGrant::Credentialed(origin)) => origin,
+            Some(CorsGrant::Client(origin)) => origin,
         };
         headers.insert(header::ACCESS_CONTROL_ALLOW_ORIGIN, origin);
         for (name, value) in [
-            // Approved origins may send the browser's host cookies.
-            (header::ACCESS_CONTROL_ALLOW_CREDENTIALS, "true"),
             (
                 header::ACCESS_CONTROL_ALLOW_HEADERS,
-                "content-type, x-piquel-csrf, authorization",
+                "content-type, authorization",
             ),
-            (
-                header::ACCESS_CONTROL_ALLOW_METHODS,
-                "GET, POST, PATCH, DELETE, OPTIONS",
-            ),
+            (header::ACCESS_CONTROL_ALLOW_METHODS, "GET, POST, OPTIONS"),
             (header::VARY, "Origin"),
         ] {
             headers.insert(name, HeaderValue::from_static(value));
         }
-        // Lets the frontends show the trace ID of a failed request.
+        // Lets cross-origin callers, such as public clients, read the trace ID of a
+        // failed request.
         headers.insert(
             header::ACCESS_CONTROL_EXPOSE_HEADERS,
             HttpTelemetry::TRACE_ID_HEADER.into(),

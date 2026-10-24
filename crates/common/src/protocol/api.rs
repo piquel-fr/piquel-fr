@@ -1,5 +1,5 @@
-//! Bodies shared by auth's first-party JSON APIs: the account settings API, which
-//! the settings frontend calls for its signed-in user, and the admin API.
+//! Bodies shared by auth's first-party JSON APIs: the account API, for the
+//! signed-in user, and the admin API.
 //!
 //! ```
 //! use piquel_common::protocol::api::{ErrorBody, ErrorCode};

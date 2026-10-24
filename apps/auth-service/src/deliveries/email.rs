@@ -11,13 +11,16 @@
 //! deduplicate on `Message-ID` hide the copy.
 
 use super::{DeliveryError, Failure, Sender};
-use crate::{config::EmailConfig, emails::VERIFICATION_LIFETIME, emails::VerificationKey};
+use crate::{
+    config::EmailConfig, emails::VERIFICATION_LIFETIME, emails::VerificationKey,
+    routes::page::settings,
+};
 use askama::Template;
 use lettre::{
     Address, AsyncSmtpTransport, AsyncTransport, Message, Tokio1Executor,
     message::{Mailbox, MultiPart},
 };
-use piquel_common::{DeliveryId, ErrorChain, UserId, config::PublicUrl};
+use piquel_common::{DeliveryId, ErrorChain, UserId, config::Origin};
 use piquel_repository::{Database, Delivery, Email, EmailMessage};
 use std::time::Duration;
 
@@ -67,8 +70,8 @@ pub(crate) struct EmailSender<M> {
     mailer: Option<M>,
     /// The `From` of every message, whose domain ends every `Message-ID`.
     from: Mailbox,
-    /// Account settings, which every link points under.
-    settings_url: PublicUrl,
+    /// Auth's origin, whose settings pages every link opens.
+    origin: Origin,
     /// Derives verification tokens.
     verification_key: VerificationKey,
 }
@@ -87,7 +90,7 @@ impl<M: Mailer> EmailSender<M> {
             database,
             mailer,
             from: config.from.clone(),
-            settings_url: config.settings_url.clone(),
+            origin: config.origin.clone(),
             verification_key: config.verification_key.clone(),
         }
     }
@@ -119,8 +122,7 @@ impl<M: Mailer> EmailSender<M> {
         user_id: UserId,
         message: &EmailMessage,
     ) -> Result<Option<Content>, DeliveryError> {
-        let settings = self.settings_url.as_url().as_str().trim_end_matches('/');
-        let history = format!("{settings}/history");
+        let history = self.origin.join(settings::HISTORY);
         Ok(Some(match message {
             EmailMessage::VerifyAddress { email_id } => {
                 let pending = self
@@ -145,7 +147,11 @@ impl<M: Mailer> EmailSender<M> {
                 Content::VerifyAddress {
                     address: pending.address,
                     username: pending.username,
-                    link: format!("{settings}/emails/verify#token={}", token.encoded()),
+                    link: format!(
+                        "{}#token={}",
+                        self.origin.join(settings::VERIFY),
+                        token.encoded()
+                    ),
                     hours: VERIFICATION_LIFETIME.num_hours(),
                 }
             }
@@ -255,7 +261,7 @@ struct Text<'a> {
 }
 
 /// The HTML body, from `templates/email/message.html`: no images, no tracking,
-/// links only to the settings site.
+/// links only to auth's settings pages.
 #[derive(Template)]
 #[template(path = "email/message.html")]
 struct Html<'a> {

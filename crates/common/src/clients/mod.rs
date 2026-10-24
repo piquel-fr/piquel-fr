@@ -61,7 +61,7 @@ impl ClientId {
     /// The ID auth gives a client an account registers: `c_` and 20 base32
     /// characters, one per byte of `random`, 100 bits in all. Only operators and
     /// administrators choose IDs, so an account can never claim a name such as
-    /// `piquel-web`.
+    /// `piquel-admin`.
     #[must_use]
     pub fn generated(random: &[u8; 32]) -> Self {
         let suffix = random

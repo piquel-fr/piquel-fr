@@ -3,13 +3,16 @@
 
 use super::*;
 use crate::security::{BrowserCookie, Session, tests::assert_step_up_required};
-use crate::{account::AccountApplication, tests::Replicas};
+use crate::{
+    account::AccountApplication,
+    tests::{AUTH_ORIGIN, Replicas},
+};
 use axum::{
     body::{Body, to_bytes},
     http::{Method, Request, header},
     response::Response,
 };
-use piquel_common::{AuthenticationMethod, Handle, config::PublicUrl};
+use piquel_common::{AuthenticationMethod, Handle};
 use piquel_repository::{DeliverySummary, InsertUser};
 use serde_json::{Value, json};
 use std::net::{IpAddr, Ipv6Addr};
@@ -43,8 +46,7 @@ impl Harness {
     /// Builds the routes over a migrated test database, sending email or not.
     async fn new(enabled: bool) -> Self {
         let database = Replicas::database().await;
-        let settings: PublicUrl = "https://piquel.fr/settings".parse().expect("settings URL");
-        let config = EmailConfig::test(&settings, enabled);
+        let config = EmailConfig::test(&AUTH_ORIGIN.parse().expect("auth origin"), enabled);
         Self {
             router: EmailApplication::new(database.clone(), &config)
                 .routes()
