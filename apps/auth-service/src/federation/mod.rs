@@ -1,5 +1,6 @@
 //! Browser-bound social authentication. Email suggests linking; it never authorizes it.
 
+use crate::account::Owner;
 use crate::config::{FederationConfig, FrontendOrigins, ProviderConfig};
 use crate::routes;
 use crate::security::{
@@ -229,12 +230,37 @@ impl FederationApplication {
 
     /// Lists enabled providers in shared protocol vocabulary order.
     fn providers(State(app): State<Self>) -> std::future::Ready<Json<Vec<Provider>>> {
-        std::future::ready(Json(
-            Provider::ALL
-                .into_iter()
-                .filter(|provider| app.providers.contains_key(provider))
-                .collect(),
-        ))
+        std::future::ready(Json(app.enabled().collect()))
+    }
+
+    /// The enabled providers, in the shared vocabulary's order.
+    pub(crate) fn enabled(&self) -> impl Iterator<Item = Provider> + '_ {
+        Provider::ALL
+            .into_iter()
+            .filter(|provider| self.providers.contains_key(provider))
+    }
+
+    /// The authorization endpoints of the enabled providers, which starting a
+    /// sign-in or link sends the browser to; a page's `form-action` names their
+    /// origins.
+    pub(crate) fn authorization_endpoints(&self) -> Result<Vec<Url>, url::ParseError> {
+        self.enabled()
+            .map(|provider| Url::parse(self.endpoints[&provider].authorization))
+            .collect()
+    }
+
+    /// Starts linking `provider` to the owner's account from a settings page, which
+    /// the browser comes back to at `return_to`, a path on auth. Returns where to
+    /// send the browser, and the secret its [`BrowserCookie::Federation`] holds.
+    pub(crate) async fn start_link(
+        &self,
+        owner: &Owner,
+        provider: Provider,
+        return_to: &str,
+    ) -> Result<(Url, Secret), FederationError> {
+        let return_to = ReturnTo::parse(Some(return_to), &self.frontends)?;
+        self.authorization(provider, Some(owner.session()), return_to)
+            .await
     }
 
     /// Starts a browser-bound authorization request, optionally for explicit linking.
@@ -255,28 +281,49 @@ impl FederationApplication {
             .await?)
     }
 
-    /// Persists one-use state and constructs the provider's authorization redirect.
+    /// Starts a sign-in, or a link for the browser's `session`, as `input` asks,
+    /// and answers with the provider's authorization URL as JSON.
     async fn start_flow(
         &self,
         provider: Provider,
         input: StartInput,
         session: Option<StoredSession>,
     ) -> Result<Response, FederationError> {
+        // Linking needs only a session here: confirming the pending link needs the passkey.
+        let link = match input.mode {
+            StartMode::Login => None,
+            StartMode::Link => Some(session.ok_or(SessionError::Missing)?),
+        };
+        let return_to = ReturnTo::parse(input.return_to.as_deref(), &self.frontends)?;
+        let (url, browser) = self
+            .authorization(provider, link.as_ref(), return_to)
+            .await?;
+        let mut response = Json(StartResponse {
+            redirect_url: url.as_str(),
+        })
+        .into_response();
+        BrowserCookie::Federation.set_on(&mut response, &browser)?;
+        Ok(response)
+    }
+
+    /// Persists one-use state for a sign-in, or a link to the account of the `link`
+    /// session, returning to `return_to`. Returns the provider's authorization URL
+    /// and the browser secret the state is bound to.
+    async fn authorization(
+        &self,
+        provider: Provider,
+        link: Option<&StoredSession>,
+        return_to: ReturnTo,
+    ) -> Result<(Url, Secret), FederationError> {
         let config = self
             .providers
             .get(&provider)
             .ok_or(FederationError::ProviderNotConfigured)?;
         let endpoints = &self.endpoints[&provider];
-        // Linking needs only a session here: confirming the pending link needs the passkey.
-        let session = match input.mode {
-            StartMode::Login => None,
-            StartMode::Link => Some(session.ok_or(SessionError::Missing)?),
-        };
         let state = Secret::generate()?;
         let nonce = Secret::generate()?.encoded();
         let verifier = Secret::generate()?.encoded();
         let browser = Secret::generate()?;
-        let return_to = ReturnTo::parse(input.return_to.as_deref(), &self.frontends)?;
         self.database
             .federation()
             .insert_transaction(&InsertFederationTransaction {
@@ -287,8 +334,8 @@ impl FederationApplication {
                 nonce: nonce.clone(),
                 pkce_verifier: verifier.clone(),
                 return_to: return_to.0,
-                link_user_id: session.as_ref().map(|session| session.user_id),
-                link_session_id: session.as_ref().map(|session| session.id),
+                link_user_id: link.map(|session| session.user_id),
+                link_session_id: link.map(|session| session.id),
                 expires_at: Utc::now() + FLOW_LIFETIME,
             })
             .await?;
@@ -302,12 +349,7 @@ impl FederationApplication {
             .append_pair("code_challenge", &Pkce::challenge(&verifier)?)
             .append_pair("code_challenge_method", CodeChallengeMethod::S256.as_str());
         endpoints.identity.extend_authorization(&mut url, &nonce);
-        let mut response = Json(StartResponse {
-            redirect_url: url.as_str(),
-        })
-        .into_response();
-        BrowserCookie::Federation.set_on(&mut response, &browser)?;
-        Ok(response)
+        Ok((url, browser))
     }
 
     /// Converts provider callbacks into a verified login or pending identity.

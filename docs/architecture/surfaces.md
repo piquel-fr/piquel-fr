@@ -15,16 +15,19 @@ This is the target design; parts not built yet are marked *(planned)*.
 The auth executable owns everything that authenticates someone or issues a
 credential: discovery, JWKS, authorization, token, userinfo, logout, and the
 pages a ceremony needs (login, signup, consent, passkey confirmation, device
-verification *(planned)*). It never hosts settings, developer or admin pages.
+verification *(planned)*). Account settings are moving here from piquel.fr: auth
+serves them at `/settings`, with the same paths, and piquel.fr's copy goes once it
+redirects there. It hosts no developer or admin pages yet.
 
 The account and admin APIs are routes in the same executable. They are small
 next to the pages that use them, and keeping them there keeps one binary, one
 database owner and one policy layer. The account API is on the public listener; the
 admin API has a private listener of its own (see admin.piquel.fr below). Auth keeps its state in PostgreSQL, so it runs
 as several replicas (see "Running several replicas" in `infra/README.md`). Its sign-in pages are static assets embedded at build time
-and are cacheable (see "Caching" in `infra/README.md`). Consent and logout are
-server-rendered in the executable, with plain forms. Their only script is the SDK's,
-which keeps the consent form from posting twice.
+and are cacheable (see "Caching" in `infra/README.md`). Consent, logout and the
+settings are server-rendered in the executable, with plain forms. Their only script
+is the SDK's, which runs the passkey ceremonies their forms need and keeps a form
+from posting twice.
 
 ## piquel.fr
 

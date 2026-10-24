@@ -7,7 +7,10 @@ license.workspace = true
 repository.workspace = true
 
 [dependencies]
-piquel-common.workspace = true
+piquel-common = { workspace = true, features = ["events"] }
+chrono.workspace = true
+serde.workspace = true
+serde_urlencoded.workspace = true
 topcoat = { workspace = true, features = ["view"] }
 
 [dev-dependencies]

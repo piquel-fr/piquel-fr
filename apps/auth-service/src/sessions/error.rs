@@ -22,9 +22,9 @@ impl From<SessionsError> for ApiError {
             SessionsError::NotFound => {
                 Self::not_found("You have no such session; it may already be signed out.")
             }
-            SessionsError::Current => Self::bad_request(
-                "This is the session you are using; sign out of it with /session/logout.",
-            ),
+            SessionsError::Current => {
+                Self::bad_request("This is the device you are using; sign out of it instead.")
+            }
         }
     }
 }

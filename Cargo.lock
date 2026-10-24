@@ -285,6 +285,7 @@ dependencies = [
  "reqwest",
  "serde",
  "serde_json",
+ "serde_urlencoded",
  "sha2 0.10.9",
  "thiserror 2.0.18",
  "tokio",
@@ -2129,7 +2130,10 @@ dependencies = [
 name = "piquel-ui"
 version = "0.1.0"
 dependencies = [
+ "chrono",
  "piquel-common",
+ "serde",
+ "serde_urlencoded",
  "tokio",
  "topcoat",
 ]

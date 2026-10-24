@@ -25,17 +25,20 @@ a {
   text-underline-offset: 3px;
 }
 button,
-input {
+input,
+select {
   font: inherit;
 }
 button,
 a,
-input {
+input,
+select {
   touch-action: manipulation;
 }
 button:focus-visible,
 a:focus-visible,
-input:focus-visible {
+input:focus-visible,
+select:focus-visible {
   outline: 3px solid #ab7900;
   outline-offset: 4px;
 }
@@ -81,7 +84,8 @@ button:disabled {
   min-height: 36px;
   font-size: 0.9rem;
 }
-input {
+input,
+select {
   width: 100%;
   min-height: 46px;
   border: 1px solid #a9b8aa;
@@ -281,4 +285,8 @@ small {
   .settings {
     margin-top: 2rem;
   }
+}
+/* Author display rules would otherwise show what a page or its script hides. */
+[hidden] {
+  display: none !important;
 }
