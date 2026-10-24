@@ -597,6 +597,28 @@ async fn onboarding_commits_only_with_first_key_and_browser_and_never_claims_exi
     tx.rollback().await.expect("rollback");
 }
 
+/// Linking asks an unconfirmed session to confirm before anything else, so the
+/// browser confirms first: even without this browser's pending evidence, the
+/// answer is `step_up_required`.
+#[tokio::test]
+#[ignore = "requires TEST_DATABASE_URL"]
+async fn linking_asks_for_confirmation_first() {
+    let test = TestApp::new().await;
+    let user = test.user(None, true).await;
+    let (_, cookie) = test.session(user, false).await;
+    let response = test
+        .routes()
+        .oneshot(TestApp::request(
+            Method::POST,
+            "/login/social/link",
+            Some(&cookie),
+            &serde_json::json!({}),
+        ))
+        .await
+        .expect("link");
+    security::tests::assert_step_up_required(response).await;
+}
+
 /// Linking and unlinking require the intended account’s recent passkey confirmation;
 /// unlink frees the subject and preserves email.
 #[expect(

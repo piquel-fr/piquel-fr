@@ -1,23 +1,27 @@
-//! Account settings any administrator may also change, as [`AccountService`]
-//! operations on a [`Subject`], for changes, or a [`Viewer`], for reads: the
-//! account, and who acts on it. The owner's
-//! `/account` routes run them with the subject of their session cookie, and the
-//! `account` command with the operator at the terminal. The admin dashboard will
-//! call them in-process, as an administrator.
+//! What can be done to an account, as [`AccountService`] operations on the
+//! account and who acts on it: an [`Owner`], only for what the owner alone may
+//! do; a [`Subject`], for changes any administrator may also make; or a
+//! [`Viewer`], for reads. The owner's routes run them with the owner of their
+//! session cookie, and the `account` command with the operator at the terminal.
+//! The admin dashboard will call them in-process, as an administrator.
 //!
 //! The rule for sharing: administrators may view, edit and remove, but never add
 //! a way to sign in or to receive the account's email, which would let them take
-//! the account over. Operations that add one, the owner's own reports, and the
-//! owner's clients, which administrators manage through `AdminService`, stay with
-//! their modules, for the owner only.
+//! the account over. Adding a passkey, linking an identity, adding an address
+//! and reporting a history entry take an [`Owner`], which only the session cookie
+//! builds, so an administrator cannot call them. Verifying an address is
+//! authorized by its link's token instead, and takes the signed-in owner only if
+//! there is one, to refuse a browser signed in to another account. The owner's
+//! clients, which administrators manage through `AdminService`, are the owner's
+//! too.
 
-/// Failures of the shared operations.
+/// Failures of the account operations.
 mod error;
 /// The account acted on, and who acts on it.
 mod subject;
 
 pub(crate) use error::AccountError;
-pub(crate) use subject::{ConfirmedSubject, Subject, Viewer};
+pub(crate) use subject::{ConfirmedOwner, ConfirmedSubject, Owner, Subject, Viewer};
 
 use crate::{
     emails::EmailView,

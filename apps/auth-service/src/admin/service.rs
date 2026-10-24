@@ -310,7 +310,8 @@ impl AdminService {
     /// own. Only the secret's digest is stored, so the link cannot be shown again.
     ///
     /// # Errors
-    /// Fails when secret generation or persistence fails.
+    /// Fails when the operator may not make changes, or secret generation or
+    /// persistence fails.
     pub async fn create_invitation(
         &self,
         operator: &Operator,
@@ -540,7 +541,7 @@ impl AdminService {
     /// Reserved names an operator assigned on purpose are listed too.
     ///
     /// # Errors
-    /// Fails when the query fails.
+    /// Fails when the operator may not read, or the query fails.
     pub async fn check_handles(
         &self,
         operator: &Operator,
@@ -604,8 +605,8 @@ impl AdminService {
     /// them, and that release's migration refuses to run while any remain.
     ///
     /// # Errors
-    /// Fails when the account is unknown or already has the handle, or the handle is
-    /// reserved or taken.
+    /// Fails when the operator may not make changes, the account is unknown or
+    /// already has the handle, or the handle is reserved or taken.
     pub async fn rename_handle(
         &self,
         operator: &Operator,
@@ -641,7 +642,7 @@ impl AdminService {
     /// Lists every administrator, oldest grant first.
     ///
     /// # Errors
-    /// Fails when the query fails.
+    /// Fails when the operator may not read, or the query fails.
     pub async fn list_administrators(
         &self,
         operator: &Operator,
@@ -655,8 +656,8 @@ impl AdminService {
     /// waited would otherwise restore them.
     ///
     /// # Errors
-    /// Fails when the account is unknown, disabled, already an administrator or the
-    /// caller's own.
+    /// Fails when the operator may not make changes, or the account is unknown,
+    /// disabled, already an administrator or the caller's own.
     pub async fn grant_administrator(
         &self,
         operator: &Operator,
@@ -685,7 +686,8 @@ impl AdminService {
     /// left to administer.
     ///
     /// # Errors
-    /// Fails when the account is not an administrator, or either rule forbids it.
+    /// Fails when the operator may not make changes, the account is not an
+    /// administrator, or either rule forbids it.
     pub async fn revoke_administrator(
         &self,
         operator: &Operator,
@@ -734,7 +736,8 @@ impl AdminService {
             .retry(id)
             .await
             .map_err(AdminError::delivery(id, "failed or cancelled unordered"))?;
-        Self::finish(tx, operator, None, vec![]).await
+        let retried = DomainEvent::DeliveryRetried { delivery_id: id };
+        Self::finish(tx, operator, None, vec![retried]).await
     }
 
     /// Cancels a pending or failed delivery, which unblocks the deliveries ordered
@@ -749,6 +752,7 @@ impl AdminService {
             .cancel(id)
             .await
             .map_err(AdminError::delivery(id, "pending or failed"))?;
-        Self::finish(tx, operator, None, vec![]).await
+        let cancelled = DomainEvent::DeliveryCancelled { delivery_id: id };
+        Self::finish(tx, operator, None, vec![cancelled]).await
     }
 }

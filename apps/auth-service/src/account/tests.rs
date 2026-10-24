@@ -4,16 +4,22 @@
 
 use super::*;
 use crate::{
-    AdminError, AdminService, Operator, Reason,
-    admin::tests::{Account, Harness, cli, operator},
+    AdminError, Operator, Reason,
+    admin::tests::{Account, Harness, assert_refused, cli, operator},
     passkey::PasskeyError,
+    security::ApiError,
     security::CONFIRMATION_MAX_AGE,
-    tests::{Browser, sign_out, until_blocked},
+    tests::{Browser, Replicas, sign_out, until_blocked},
 };
-use axum::http::Method;
+use axum::{
+    Router,
+    extract::{Path, State},
+    http::Method,
+    routing::delete,
+};
 use chrono::{Duration, Utc};
 use piquel_common::{
-    Provider, TokenId, UserId,
+    AuthenticationMethod, EmailId, Provider, TokenId, UserId,
     events::{Actor, DomainEvent, RevocationReason},
     protocol::step_up::StepUpRequirement,
 };
@@ -132,7 +138,7 @@ async fn administrators_change_another_account_on_its_behalf() {
         .rename_passkey(&subject, passkeys[0], "Lost phone".into())
         .await
         .expect("rename");
-    let confirmed = || ConfirmedSubject::operator(user, admin(), reason());
+    let confirmed = || Subject::operator(user, admin(), reason());
     service
         .revoke_passkey(&confirmed(), passkeys[1])
         .await
@@ -220,28 +226,24 @@ impl AccountOperation {
 }
 
 /// Every settings read checks an administrator as admin reads do, before it
-/// reads or records anything: one whose rights were revoked reads nothing, and no
-/// view of the account is recorded.
+/// reads or records anything: one whose rights were revoked, whose session ended,
+/// or who signed in without a passkey reads nothing, and no view of the account
+/// is recorded.
 #[tokio::test]
 #[ignore = "requires TEST_DATABASE_URL"]
 async fn every_settings_read_checks_its_administrator() {
     let fixture = Fixture::new().await;
     let (target, _) = fixture.target(1).await;
-    let revoked = fixture.harness.admin().await;
-    AdminService::new(fixture.harness.database.clone())
-        .revoke_administrator(&cli(), revoked.user_id)
-        .await
-        .expect("revoke");
-    let viewer = Viewer::operator(target.user_id, operator(revoked, Utc::now()));
-    for read in AccountOperation::ALL {
-        if let Some(result) = read.read(&fixture.service, &viewer).await {
-            assert!(
-                matches!(
-                    result,
-                    Err(AccountError::Operator(AdminError::NotAdministrator))
-                ),
-                "{read:?}: {result:?}"
-            );
+    for (operator, refusal) in fixture.harness.refused_readers().await {
+        let viewer = Viewer::operator(target.user_id, operator);
+        for read in AccountOperation::ALL {
+            match read.read(&fixture.service, &viewer).await {
+                None => {}
+                Some(Err(AccountError::Operator(refused))) => {
+                    assert_refused(&refused, &refusal, &format!("{read:?}"));
+                }
+                Some(result) => panic!("{read:?}: {result:?}"),
+            }
         }
     }
     let history = fixture
@@ -425,8 +427,7 @@ async fn changes_check_the_administrator_again_after_waiting() {
 async fn the_last_passkey_stays_whoever_removes_it() {
     let fixture = Fixture::new().await;
     let (target, passkeys) = fixture.target(1).await;
-    let subject =
-        ConfirmedSubject::operator(target.user_id, fixture.operator(Duration::zero()), reason());
+    let subject = Subject::operator(target.user_id, fixture.operator(Duration::zero()), reason());
     let removed = fixture.service.revoke_passkey(&subject, passkeys[0]).await;
     assert!(
         matches!(
@@ -442,4 +443,88 @@ async fn the_last_passkey_stays_whoever_removes_it() {
     let (status, _) = browser.call(&owner, Method::DELETE, &path).await;
     assert_eq!(status, StatusCode::BAD_REQUEST);
     assert_eq!(fixture.names(target.user_id).await, ["Key 0"]);
+}
+
+/// The shared changes that could cut the owner off need their recent passkey
+/// confirmation, checked before anything else, and again under the account lock:
+/// a session that never confirmed one is refused, whichever passkey, identity or
+/// address it names, even a malformed one.
+#[tokio::test]
+#[ignore = "requires TEST_DATABASE_URL"]
+async fn owners_confirm_the_changes_that_need_it() {
+    let database = Replicas::database().await;
+    let owner = Browser::new_account(&database).await;
+    let social =
+        Browser::sign_in_with(&database, owner.user_id, AuthenticationMethod::Federation).await;
+    let routes = AccountApplication::new(database).routes();
+    let item = |template: &str, id: &str| template.replace("{id}", id);
+    let id = EmailId::new().to_string();
+    let identity = |provider| federation::IDENTITY.replace("{provider}", provider);
+    // Before anything else: malformed IDs and unknown providers too, so the
+    // browser confirms first.
+    for (method, path) in [
+        (Method::DELETE, item(passkey::ITEM, &id)),
+        (Method::DELETE, item(passkey::ITEM, "not-an-id")),
+        (Method::DELETE, identity("github")),
+        (Method::DELETE, identity("myspace")),
+        (Method::POST, item(emails::PRIMARY, &id)),
+        (Method::POST, item(emails::PRIMARY, "not-an-id")),
+        (Method::DELETE, item(emails::ITEM, &id)),
+        (Method::DELETE, item(emails::ITEM, "not-an-id")),
+    ] {
+        let (status, body) = social.call(&routes, method.clone(), &path).await;
+        assert_eq!(
+            (status, body["code"].as_str()),
+            (StatusCode::FORBIDDEN, Some("step_up_required")),
+            "{method} {path}"
+        );
+    }
+}
+
+/// A change that needs the owner's confirmation checks it under the account lock
+/// on the session as the request's cookie found it, too: an owner whose session
+/// was confirmed only while the change waited for the lock is refused, so a
+/// cookie from before a confirmation never gains it. The account routes refuse
+/// such a request before it waits; this one calls the operation from a plain
+/// [`Owner`], as an in-process caller does.
+#[tokio::test]
+#[ignore = "requires TEST_DATABASE_URL"]
+async fn a_confirmation_while_waiting_does_not_count() {
+    let database = Replicas::database().await;
+    let owner = Browser::new_account(&database).await;
+    let social =
+        Browser::sign_in_with(&database, owner.user_id, AuthenticationMethod::Federation).await;
+    let routes = Router::new()
+        .route(
+            passkey::ITEM,
+            delete(
+                |State(database): State<Database>, owner: Owner, Path(id): Path<PasskeyId>| async move {
+                    AccountService::new(database)
+                        .revoke_passkey(&Subject::from(owner), id)
+                        .await
+                        .map_err(ApiError::from)
+                },
+            ),
+        )
+        .with_state(database.clone());
+    let mut confirmation = database.begin().await.expect("transaction");
+    confirmation
+        .users()
+        .find_active_by_id_for_update(owner.user_id)
+        .await
+        .expect("account lock");
+    let path = passkey::ITEM.replace("{id}", &PasskeyId::new().to_string());
+    let ((status, body), ()) = tokio::join!(social.call(&routes, Method::DELETE, &path), async {
+        until_blocked(&mut confirmation, 1).await;
+        confirmation
+            .sessions()
+            .confirm_passkey(social.session_id, Utc::now())
+            .await
+            .expect("confirm");
+        confirmation.commit().await.expect("commit");
+    });
+    assert_eq!(
+        (status, body["code"].as_str()),
+        (StatusCode::FORBIDDEN, Some("step_up_required"))
+    );
 }

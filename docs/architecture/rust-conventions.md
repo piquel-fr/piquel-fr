@@ -84,21 +84,33 @@ names the operation it runs. A test parses a command line for each operation and
 checks that it names that operation. The matches are exhaustive, so a new operation
 does not compile until both sides handle it.
 
-Settings an administrator may also change on another account are methods of
-`AccountService` (`src/account`), written with their setting's module, such as
-`src/passkey`. Changes take a `Subject`: the account and who acts, the owner with
-their session or an `Operator` with the reason it must give. Reads take a
-`Viewer`, which needs no reason. For an operator, `Viewer::authorize` calls
-`Operator::authorize_read`, as every admin read does, and records the read as a
-view; an owner's reads are not recorded. Only the extractors build an owner's
-`Subject` or `Viewer`, from the session cookie, and only the admin API's
-authenticator builds an `Operator::Admin`. Changes lock with `Subject::lock` (or
-`ConfirmedSubject::lock` when the owner must have confirmed recently), record
-events with `Subject::context`, and end with `Subject::commit`, which checks an
-administrator again. The owner's router serves each `AccountOperation`, and the `account` command
-has a command for each, under the same exhaustive matches and test as
-`AdminOperation`. A new setting either joins `AccountOperation`, if it only views,
-edits or removes, or stays in its module, for the owner only.
+Account operations are methods of `AccountService` (`src/account`), written with
+their setting's module, such as `src/passkey`. Each takes the account and who acts
+on it:
+
+- an `Owner`, for what only the owner may do, such as adding a passkey or an
+  address. Only the session cookie builds one, so these cannot be called for an
+  administrator. Verifying an address is authorized by its link's token instead,
+  and takes an optional `Owner` only to refuse a browser signed in to another
+  account;
+- a `Subject`, for changes an administrator may also make: the owner, or an
+  `Operator` with the reason it must give;
+- a `Viewer`, for reads, which need no reason. For an operator,
+  `Viewer::authorize` calls `Operator::authorize_read`, as every admin read does,
+  and records the read as a view; an owner's reads are not recorded.
+
+Only the extractors build an owner's `Owner`, `Subject` or `Viewer`, from the
+session cookie, and only the admin API's authenticator builds an
+`Operator::Admin`. Routes whose operation needs a recent confirmation extract
+`ConfirmedOwner` or `ConfirmedSubject` instead, which check it before the path and
+body, so the browser is asked to confirm before any other error. Each operation says what it needs: it locks with `lock`, or
+`lock_confirmed` when the owner must have confirmed with a passkey recently
+(operators confirm their own before committing), records events with `context`,
+and ends a `Subject`'s change with `Subject::commit`, which checks an
+administrator again. The owner's router serves each shared `AccountOperation`, and
+the `account` command has a command for each, under the same exhaustive matches and
+test as `AdminOperation`. A new setting either joins `AccountOperation`, if it only
+views, edits or removes, or takes an `Owner`.
 
 `ClientRegistry` (`src/clients/mod.rs`) is the only code that changes OIDC clients: it
 creates, updates, enables, disables, deletes and rotates the secrets of clients,

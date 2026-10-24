@@ -1,8 +1,8 @@
 //! Pending and linked social identities: signup, linking, listing and unlinking.
 
 use super::{FederationApplication, FederationError, Provider};
-use crate::account::{AccountError, AccountService, ConfirmedSubject, Viewer};
-use crate::security::{self, ApiError, BrowserCookie, RequestContext};
+use crate::account::{AccountError, AccountService, ConfirmedOwner, Owner, Subject, Viewer};
+use crate::security::{ApiError, BrowserCookie};
 use axum::{
     Json,
     extract::State,
@@ -14,6 +14,7 @@ use piquel_common::{
     events::{DomainEvent, EventContext, RevocationReason},
     protocol::api::Identity,
 };
+use piquel_crypto::Secret;
 use piquel_repository::{Database, DatabaseTransaction, InsertExternalIdentity, PendingFederation};
 use serde::Serialize;
 
@@ -128,77 +129,23 @@ impl FederationApplication {
         })
     }
 
-    /// Confirms a pending identity using a passkey-confirmed account session.
+    /// Links the identity this browser's pending evidence holds to the owner's
+    /// account, then clears the evidence's cookie and says where to continue.
     pub(super) async fn confirm_link(
         State(app): State<Self>,
-        context: RequestContext,
-        confirmed: security::Confirmed,
+        owner: ConfirmedOwner,
         headers: HeaderMap,
     ) -> Result<Response, ApiError> {
-        Ok(app.link(context, &confirmed, &headers).await?)
-    }
-
-    /// Claims an identity atomically after rechecking the session's confirmation.
-    async fn link(
-        &self,
-        context: RequestContext,
-        confirmed: &security::Confirmed,
-        headers: &HeaderMap,
-    ) -> Result<Response, FederationError> {
-        let session = &confirmed.0;
         let browser = BrowserCookie::FederationPending
-            .read(headers)
+            .read(&headers)
             .ok_or(FederationError::PendingBrowserMissing)?;
-        let mut tx = self.database.begin().await?;
-        confirmed.lock(&mut tx).await?;
-        let pending = tx
-            .federation()
-            .pending(browser.digest().as_bytes())
-            .await?
-            .ok_or(FederationError::PendingSignInExpired)?;
-        if pending.link_user_id != Some(session.user_id)
-            || pending.link_session_id.is_some_and(|id| id != session.id)
-        {
-            return Err(FederationError::LinkAccountMismatch);
-        }
-        let pending = tx
-            .federation()
-            .consume_pending(pending.id, browser.digest().as_bytes())
+        let return_to = AccountService::new(app.database.clone())
+            .link_identity(&owner, &browser)
             .await?;
-        if tx.passkeys().list_active(session.user_id).await?.is_empty() {
-            return Err(FederationError::LinkRequiresPasskey);
-        }
-        // Repeated callbacks may confirm only the identical subject on this account.
-        match tx
-            .federation()
-            .find_active(&pending.issuer, &pending.subject)
-            .await?
-        {
-            Some(identity) if identity.user_id == session.user_id => {}
-            Some(_) => return Err(FederationError::IdentityAlreadyLinked),
-            None => {
-                tx.federation()
-                    .insert_identity(&Self::identity(&pending, session.user_id))
-                    .await?;
-                tx.record(
-                    &context.user(session),
-                    Some(session.user_id),
-                    Self::linked(&pending),
-                )
-                .await?;
-            }
-        }
-        if let Some(email) = &pending.email {
-            tx.federation()
-                .set_first_email(session.user_id, email)
-                .await?;
-        }
-        tx.commit().await?;
-        let mut response = Json(LinkResponse {
-            return_to: pending.return_to,
-        })
-        .into_response();
-        BrowserCookie::FederationPending.clear_on(&mut response)?;
+        let mut response = Json(LinkResponse { return_to }).into_response();
+        BrowserCookie::FederationPending
+            .clear_on(&mut response)
+            .map_err(FederationError::from)?;
         Ok(response)
     }
 
@@ -227,6 +174,66 @@ impl FederationApplication {
 /// Linked identities any administrator may also manage: listing and unlinking.
 /// Linking adds a way to sign in, so only the owner can.
 impl AccountService {
+    /// Links the identity in the pending evidence of the browser holding
+    /// `pending`, its cookie's secret, to the owner's account, once they confirmed
+    /// with a passkey, and returns where the browser continues. The evidence must
+    /// name this account, and this session when settings started the link. The
+    /// account must keep a passkey, and a repeated callback may confirm only the
+    /// identity already linked here.
+    pub(crate) async fn link_identity(
+        &self,
+        owner: &Owner,
+        pending: &Secret,
+    ) -> Result<String, AccountError> {
+        let user = owner.user();
+        let mut tx = self.database.begin().await?;
+        owner.lock_confirmed(&mut tx).await?;
+        let digest = pending.digest();
+        let evidence = tx
+            .federation()
+            .pending(digest.as_bytes())
+            .await?
+            .ok_or(FederationError::PendingSignInExpired)?;
+        if evidence.link_user_id != Some(user)
+            || evidence
+                .link_session_id
+                .is_some_and(|id| id != owner.session().id)
+        {
+            return Err(FederationError::LinkAccountMismatch.into());
+        }
+        let evidence = tx
+            .federation()
+            .consume_pending(evidence.id, digest.as_bytes())
+            .await?;
+        if tx.passkeys().list_active(user).await?.is_empty() {
+            return Err(FederationError::LinkRequiresPasskey.into());
+        }
+        match tx
+            .federation()
+            .find_active(&evidence.issuer, &evidence.subject)
+            .await?
+        {
+            Some(identity) if identity.user_id == user => {}
+            Some(_) => return Err(FederationError::IdentityAlreadyLinked.into()),
+            None => {
+                tx.federation()
+                    .insert_identity(&FederationApplication::identity(&evidence, user))
+                    .await?;
+                tx.record(
+                    &owner.context(),
+                    Some(user),
+                    FederationApplication::linked(&evidence),
+                )
+                .await?;
+            }
+        }
+        if let Some(email) = &evidence.email {
+            tx.federation().set_first_email(user, email).await?;
+        }
+        tx.commit().await?;
+        Ok(evidence.return_to)
+    }
+
     /// Lists the account's active social identities.
     pub(crate) async fn identities(&self, viewer: &Viewer) -> Result<Vec<Identity>, AccountError> {
         viewer.authorize(&self.database).await?;
@@ -242,11 +249,11 @@ impl AccountService {
     /// linking by the account lock, then signs the account out elsewhere.
     pub(crate) async fn unlink_identity(
         &self,
-        subject: &ConfirmedSubject,
+        subject: &Subject,
         provider: Provider,
     ) -> Result<(), AccountError> {
         let mut tx = self.database.begin().await?;
-        subject.lock(&mut tx).await?;
+        subject.lock_confirmed(&mut tx).await?;
         if !tx.federation().unlink(subject.user(), provider).await? {
             return Err(FederationError::IdentityNotLinked.into());
         }

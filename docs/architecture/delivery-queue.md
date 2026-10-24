@@ -27,7 +27,8 @@ Auth-service owns sending: the workers, the retry policy and the HTTP client
 - **Ordered per key.** Deliveries that share an ordering key are sent one at a
   time, in the order their transactions committed, whatever the replicas' clocks
   say. A failed one holds back the rest until an operator retries or cancels it,
-  or for 30 days, after which cleanup abandons the key: the failure is deleted
+  which is recorded as `delivery_retried` or `delivery_cancelled` (cancelling one
+  can hold back a notice to a user), or for 30 days, after which cleanup abandons the key: the failure is deleted
   and the deliveries behind it are cancelled, never sent out of order. A
   cancelled one holds back the rest until its last attempt's lease expires. Deliveries
   without a key are unordered.

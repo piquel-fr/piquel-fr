@@ -6,8 +6,8 @@
 //! [`RequestOrigin`](crate::events::RequestOrigin) apart from the event so both can be deleted on their own.
 
 use crate::{
-    AuthenticationMethod, ClientId, EmailId, EventId, Handle, PasskeyId, Personal, Provider,
-    SessionId, TokenId, UserId,
+    AuthenticationMethod, ClientId, DeliveryId, EmailId, EventId, Handle, PasskeyId, Personal,
+    Provider, SessionId, TokenId, UserId,
     clients::{ClientField, ClientKind},
     email::NormalizedEmail,
 };
@@ -225,6 +225,17 @@ pub enum DomainEvent {
         /// When its earlier secrets stop working; now, for an immediate revocation.
         previous_expire_at: DateTime<Utc>,
     },
+    /// An operator made a failed delivery, or a cancelled unordered one, due again.
+    DeliveryRetried {
+        /// The delivery.
+        delivery_id: DeliveryId,
+    },
+    /// An operator cancelled a pending or failed delivery, such as a notice to a
+    /// user, which unblocks the deliveries ordered after it.
+    DeliveryCancelled {
+        /// The delivery.
+        delivery_id: DeliveryId,
+    },
     /// The user reported an event of their history as not theirs. Their other
     /// sessions follow as [`Self::SessionRevoked`], and every refresh family of the
     /// account is revoked with them.
@@ -298,6 +309,8 @@ impl DomainEvent {
             | Self::AdministratorGranted {}
             | Self::AdministratorRevoked {}
             | Self::HandleChanged { .. }
+            | Self::DeliveryRetried { .. }
+            | Self::DeliveryCancelled { .. }
             | Self::CompromiseReported { .. }
             | Self::Imported(_) => None,
         }
@@ -341,6 +354,8 @@ impl DomainEvent {
             | Self::ClientSuspensionLifted { .. }
             | Self::ClientDeleted { .. }
             | Self::ClientSecretRotated { .. }
+            | Self::DeliveryRetried { .. }
+            | Self::DeliveryCancelled { .. }
             | Self::CompromiseReported { .. }
             | Self::Imported(_) => None,
         }
@@ -384,6 +399,8 @@ impl DomainEvent {
             Self::ClientSuspensionLifted { .. } => "client_suspension_lifted",
             Self::ClientDeleted { .. } => "client_deleted",
             Self::ClientSecretRotated { .. } => "client_secret_rotated",
+            Self::DeliveryRetried { .. } => "delivery_retried",
+            Self::DeliveryCancelled { .. } => "delivery_cancelled",
             Self::CompromiseReported { .. } => "compromise_reported",
             Self::Imported(_) => "imported",
         }
@@ -484,7 +501,10 @@ impl DomainEvent {
             | Self::ClientSuspended { .. }
             | Self::ClientSuspensionLifted { .. }
             | Self::ClientDeleted { .. }
-            | Self::ClientSecretRotated { .. } => return None,
+            | Self::ClientSecretRotated { .. }
+            // The delivery queue is operations' business; the audit keeps it.
+            | Self::DeliveryRetried { .. }
+            | Self::DeliveryCancelled { .. } => return None,
         })
     }
 }
