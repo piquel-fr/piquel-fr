@@ -147,6 +147,55 @@ impl PasskeyRepository<'_> {
         )
     }
 
+    /// The account's active passkeys enrolled before `at`, oldest first.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`DatabaseError`] if the query fails or a row is invalid.
+    pub async fn enrolled_before(
+        &mut self,
+        user_id: UserId,
+        at: DateTime<Utc>,
+    ) -> Result<Vec<StoredPasskey>, DatabaseError> {
+        run!(
+            self,
+            fetch_all,
+            sqlx::query_as!(
+                StoredPasskey,
+                r#"SELECT
+                    id AS "id: PasskeyId", credential_id, user_id AS "user_id: UserId", credential,
+                    friendly_name, revoked_at
+                FROM passkey_credentials
+                WHERE user_id = $1 AND revoked_at IS NULL AND created_at < $2
+                ORDER BY created_at, id"#,
+                user_id.as_uuid(),
+                at,
+            )
+        )
+    }
+
+    /// When the account's unrevoked passkey `id` was enrolled, if it is one.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`DatabaseError`] if the query fails.
+    pub async fn enrolled_at(
+        &mut self,
+        user_id: UserId,
+        id: PasskeyId,
+    ) -> Result<Option<DateTime<Utc>>, DatabaseError> {
+        run!(
+            self,
+            fetch_optional,
+            sqlx::query_scalar!(
+                "SELECT created_at FROM passkey_credentials
+                WHERE user_id = $1 AND id = $2 AND revoked_at IS NULL",
+                user_id.as_uuid(),
+                id.as_uuid(),
+            )
+        )
+    }
+
     /// Lists the unrevoked credentials of the active account named `username`,
     /// oldest first. A missing, inactive or passkey-less account returns none,
     /// in the same single query, so callers cannot tell those cases apart.

@@ -295,6 +295,28 @@ impl FederationRepository<'_> {
         )
     }
 
+    /// When the account's active identity of `provider` was linked, if it has one.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`DatabaseError`] if the query fails.
+    pub async fn linked_at(
+        &mut self,
+        user_id: UserId,
+        provider: Provider,
+    ) -> Result<Option<DateTime<Utc>>, DatabaseError> {
+        run!(
+            self,
+            fetch_optional,
+            sqlx::query_scalar!(
+                "SELECT linked_at FROM external_login_identities
+                WHERE user_id = $1 AND provider_name = $2 AND revoked_at IS NULL",
+                user_id.as_uuid(),
+                provider.as_str(),
+            )
+        )
+    }
+
     /// Revokes the account's active link for a provider, releasing its
     /// subject. Returns `false` if there was none.
     ///

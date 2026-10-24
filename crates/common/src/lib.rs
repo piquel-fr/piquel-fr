@@ -391,6 +391,10 @@ uuid_id!(
     DeliveryId,
     "Identifier of an outbound delivery, reused by every attempt as its `jti` or `Message-ID`."
 );
+uuid_id!(
+    RecoveryId,
+    "Identifier of an account recovery, which its link's token is derived from."
+);
 
 /// The W3C Trace Context ID of a request's trace: 16 bytes, not all zero, written
 /// as 32 lower-case hex digits. Telemetry assigns one to every request and job run;

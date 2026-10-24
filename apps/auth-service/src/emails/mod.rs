@@ -177,7 +177,7 @@ impl EmailApplication {
     /// Records the removal of `user_id`'s address `id` as `context`'s, then
     /// deletes it. In that order, so the `email` channel still reads a verified
     /// address and copies it into the notice of its removal.
-    async fn delete(
+    pub(crate) async fn delete(
         tx: &mut DatabaseTransaction<'_>,
         context: &EventContext,
         user_id: UserId,
@@ -271,6 +271,9 @@ impl AccountService {
             if existing.verified_at.is_some() {
                 return Err(EmailError::AlreadyAdded.into());
             }
+            // Adding it again replaces it, which removes the pending one.
+            let joined = tx.emails().joined_at(user, existing.id).await?;
+            Self::keep_older(&mut tx, user, Some(owner.session().id), joined).await?;
             EmailApplication::delete(&mut tx, &context, user, existing.id).await?;
             count -= 1;
         }
@@ -372,7 +375,9 @@ impl AccountService {
     }
 
     /// Makes a verified address the primary one, and queues a notice to the
-    /// previous primary address.
+    /// previous primary address. Moving the primary away from an address from
+    /// before an undoable recovery is protected as [`AccountService::keep_older`]
+    /// says, so whoever used the link cannot redirect the next one.
     pub(crate) async fn make_primary_email(
         &self,
         subject: &Subject,
@@ -389,6 +394,13 @@ impl AccountService {
             return Err(EmailError::NotVerified.into());
         }
         if !email.is_primary {
+            // Moving it away from an address from before an undoable recovery is
+            // guarded like removing that address.
+            let current = tx.emails().list(subject.user()).await?;
+            if let Some(current) = current.into_iter().find(|email| email.is_primary) {
+                let joined = tx.emails().joined_at(subject.user(), current.id).await?;
+                Self::keep_older(&mut tx, subject.user(), subject.own_session(), joined).await?;
+            }
             let previous_email_id = tx.emails().set_primary(subject.user(), id).await?;
             tx.record(
                 &subject.context(),
@@ -406,6 +418,8 @@ impl AccountService {
     /// Removes an address, and queues a notice to it if it was verified. The
     /// primary address can only be removed once no other verified address could
     /// replace it: another one must be made primary first, which notifies it too.
+    /// An address from before an undoable recovery is protected as
+    /// [`AccountService::keep_older`] says.
     pub(crate) async fn remove_email(
         &self,
         subject: &Subject,
@@ -413,6 +427,8 @@ impl AccountService {
     ) -> Result<(), AccountError> {
         let mut tx = self.database.begin().await?;
         subject.lock_confirmed(&mut tx).await?;
+        let joined = tx.emails().joined_at(subject.user(), id).await?;
+        Self::keep_older(&mut tx, subject.user(), subject.own_session(), joined).await?;
         let emails = tx.emails().list(subject.user()).await?;
         let email = emails
             .iter()

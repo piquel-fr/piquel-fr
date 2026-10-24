@@ -246,7 +246,9 @@ impl AccountService {
     }
 
     /// Unlinks the account's identity at `provider`, serialized with sign-in and
-    /// linking by the account lock, then signs the account out elsewhere.
+    /// linking by the account lock, then signs the account out elsewhere. An
+    /// identity from before an undoable recovery is protected as
+    /// [`AccountService::keep_older`] says.
     pub(crate) async fn unlink_identity(
         &self,
         subject: &Subject,
@@ -254,6 +256,8 @@ impl AccountService {
     ) -> Result<(), AccountError> {
         let mut tx = self.database.begin().await?;
         subject.lock_confirmed(&mut tx).await?;
+        let linked = tx.federation().linked_at(subject.user(), provider).await?;
+        Self::keep_older(&mut tx, subject.user(), subject.own_session(), linked).await?;
         if !tx.federation().unlink(subject.user(), provider).await? {
             return Err(FederationError::IdentityNotLinked.into());
         }

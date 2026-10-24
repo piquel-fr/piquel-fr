@@ -1,0 +1,35 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT provider_name AS \"provider: Provider\", linked_email, linked_at\n                FROM external_login_identities\n                WHERE user_id = $1 AND revoked_at IS NULL AND linked_at >= $2\n                ORDER BY linked_at, id",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "provider: Provider",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 1,
+        "name": "linked_email",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 2,
+        "name": "linked_at",
+        "type_info": "Timestamptz"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Timestamptz"
+      ]
+    },
+    "nullable": [
+      false,
+      true,
+      false
+    ]
+  },
+  "hash": "93bf650a825f73beded0d84ac25a9a224e219fb3e2566f36100ef5aa482050c0"
+}

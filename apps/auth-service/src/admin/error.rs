@@ -80,6 +80,39 @@ pub enum AdminError {
     /// The invitation lifetime is not 1 hour to 365 days.
     #[error("expires_in {0}")]
     InvalidInviteExpiry(#[from] super::InvalidLifetime),
+    /// Only an active account can be recovered.
+    #[error("the account is disabled; enable it before recovering it")]
+    RecoveryOfDisabledAccount,
+    /// An administrator never sees a recovery link, so the account needs a
+    /// verified address to receive it.
+    #[error(
+        "the account has no verified email to send the recovery link to; an operator can recover it with `auth-service user recover`"
+    )]
+    RecoveryNeedsEmail,
+    /// Whoever used an administrator's recovery link could use its rights before
+    /// the owner undoes it, so an administrator is never recovered.
+    #[error(
+        "the account is an administrator: revoke its rights with `auth-service admin revoke` (grant another administrator first if it is the last), recover it, then grant them again once its owner is confirmed"
+    )]
+    RecoveryOfAdministrator,
+    /// A used recovery of the account can still be undone, and starting another
+    /// anyway was not asked for.
+    #[error(
+        "the account has a used recovery that can still be undone, whose additions are listed above: review it, then undo it with `auth-service user undo-recovery`, or pass --despite-undoable to start another anyway"
+    )]
+    RecoveryUndoable,
+    /// A recovery of the account can still be undone, so its link's holder could
+    /// use administrator rights; only the CLI may grant them anyway.
+    #[error(
+        "the account has a recovery that can still be undone: confirm its owner first, then grant with `auth-service admin grant --despite-undoable`, or undo the recovery"
+    )]
+    GrantDuringRecovery,
+    /// The account has no recovery that can still be undone.
+    #[error("the account has no recovery that can still be undone")]
+    NoRecoveryToUndo,
+    /// The recovery to undo is no longer the account's newest undoable one.
+    #[error("the account's newest recovery changed; review it again")]
+    RecoveryChanged,
     /// Only active accounts can become administrators.
     #[error("the account is disabled; enable it before granting administrator rights")]
     AccountDisabled,
@@ -153,6 +186,13 @@ impl AdminError {
             Self::EmailClaimed(_) => "email_claimed",
             Self::InvalidReason => "invalid_reason",
             Self::InvalidInviteExpiry(_) => "invalid_invite_expiry",
+            Self::RecoveryOfDisabledAccount => "recovery_of_disabled_account",
+            Self::RecoveryNeedsEmail => "recovery_needs_email",
+            Self::RecoveryOfAdministrator => "recovery_of_administrator",
+            Self::RecoveryUndoable => "recovery_undoable",
+            Self::NoRecoveryToUndo => "no_recovery_to_undo",
+            Self::RecoveryChanged => "recovery_changed",
+            Self::GrantDuringRecovery => "grant_during_recovery",
             Self::AccountDisabled => "account_disabled",
             Self::AlreadyAdministrator => "already_administrator",
             Self::NotAnAdministrator => "not_an_administrator",
@@ -192,6 +232,13 @@ impl AdminError {
             | Self::EmailClaimed(_)
             | Self::InvalidReason
             | Self::InvalidInviteExpiry(_)
+            | Self::RecoveryOfDisabledAccount
+            | Self::RecoveryNeedsEmail
+            | Self::RecoveryOfAdministrator
+            | Self::RecoveryUndoable
+            | Self::NoRecoveryToUndo
+            | Self::RecoveryChanged
+            | Self::GrantDuringRecovery
             | Self::AccountDisabled
             | Self::AlreadyAdministrator
             | Self::NotAnAdministrator
@@ -234,6 +281,13 @@ impl From<AdminError> for ApiError {
             AdminError::AlreadyDisabled
             | AdminError::AlreadyActive
             | AdminError::EmailClaimed(_)
+            | AdminError::RecoveryOfDisabledAccount
+            | AdminError::RecoveryNeedsEmail
+            | AdminError::RecoveryOfAdministrator
+            | AdminError::RecoveryUndoable
+            | AdminError::NoRecoveryToUndo
+            | AdminError::RecoveryChanged
+            | AdminError::GrantDuringRecovery
             | AdminError::AccountDisabled
             | AdminError::AlreadyAdministrator
             | AdminError::NotAnAdministrator

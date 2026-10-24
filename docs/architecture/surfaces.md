@@ -14,8 +14,8 @@ This is the target design; parts not built yet are marked *(planned)*.
 
 The auth executable owns everything that authenticates someone or issues a
 credential: discovery, JWKS, authorization, token, userinfo, logout, and the
-pages a ceremony needs (login, signup, consent, passkey confirmation, device
-verification *(planned)*). It never hosts settings, developer or admin pages.
+pages a ceremony needs (login, signup, consent, passkey confirmation, account
+recovery *(planned)* and device verification *(planned)*). It never hosts settings, developer or admin pages.
 
 The account and admin APIs are routes in the same executable. They are small
 next to the pages that use them, and keeping them there keeps one binary, one
@@ -112,6 +112,57 @@ When an administrator or operator acts:
 - A change that signs the owner out elsewhere, such as removing a passkey, signs
   out every session, since an administrator has none of the owner's to keep.
 
+### Recovering an account
+
+An owner who lost every passkey cannot add one: adding a way to sign in needs a
+passkey confirmation. `AdminService::recover_account` helps without giving the
+administrator a way in. It signs the account out everywhere and emails the
+primary address it records a link that enrolls one passkey, once, within a
+day, then signs that browser in with it. The link's token alone authorizes it;
+only its digest is stored, and the email's delivery stores neither. Only an
+operator at the terminal sees the link (`user recover`), which also reaches an
+owner without an address. An administrator never sees it, so they may recover
+only an account with a primary address; the dashboard's way to start one is
+*(planned)*. A new recovery, or disabling the account, stops an unused link, and
+every verified address hears when a recovery enrolls a passkey.
+
+A recovery can be undone until its unused link expires, or for 30 days after the
+link was used (`SETTLE_WINDOW`); then it settles. The window runs while the
+account is disabled too, so support investigating a recovery should settle the
+question within it. Undoing is a passkey ceremony of
+its own (`/account/recovery/undo/start` and `/finish`), by a passkey enrolled
+before every recovery that can still be undone: neither a recovery's passkey nor a
+social sign-in counts, since whoever holds them may not be the owner. It needs no
+session, so whoever used the link cannot stop it by signing the owner out. The
+recovery's passkey sign-in counts as a fresh confirmation, so they could add more
+ways in right away. Undoing therefore takes back everything the account gained
+since the recovery started: it stops a link not used yet, removes every passkey
+enrolled, identity linked, OIDC consent given and address added or verified
+since, makes the primary address the recovery recorded primary again (or the
+oldest address verified before it), ends every session and signs the undoing
+browser in. Revoking the consents means an app they approved cannot sign the
+owner in again without asking. The owner loses what they added themselves
+meanwhile too, so the undo page lists exactly what goes first. Owned clients and
+profile edits stay: they are not ways in.
+
+Until a recovery settles, a session that does not predate it cannot remove the
+passkeys, identities or addresses the account had before it, nor move the primary
+address away from one, so whoever used the link can neither make it impossible
+to undo nor redirect the next link; administrators and operators still can. With
+several recoveries to undo, only what predates all of them is trusted.
+
+An owner with no passkey left from before a recovery cannot undo it themselves,
+so support can (`user undo-recovery`, `AdminService::undo_recovery`) once it has
+confirmed them: the same rollback, recorded with the reason. Starting another
+recovery while a used one can be undone is refused unless asked for
+(`--despite-undoable`), its link goes to the primary address the oldest undoable
+recovery recorded, and `user recover` first lists each undoable recovery with
+everything it added. Nobody is made an administrator while a recovery can be
+undone, except by the CLI when asked for. No account is recovered while it holds administrator
+rights: whoever used the link could use them before the owner undoes it, so
+revoking them is the prerequisite.
+The pages that use the link and offer the undo are *(planned)*; until then no page uses a link.
+
 ## Contracts
 
 Third-party applications integrate only through open standards: OIDC, OAuth and
@@ -123,4 +174,7 @@ first-party; they change together with the frontends in this repository.
 Nothing auth runs on may require auth to log in: piqueld, server access, the
 tailnet, PostgreSQL, DNS and the tunnel. If auth or its frontends are down, the
 CLI, given database access, can still do every admin operation and repair
-accounts: see [Administration](../../README.md#administration).
+accounts: see [Administration](../../README.md#administration). Recovering an
+account whose owner lost every passkey follows
+[account recovery](../security/account-recovery.md), including support's
+evidence policy.

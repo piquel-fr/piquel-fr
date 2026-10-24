@@ -71,6 +71,22 @@ pub(crate) mod emails {
     pub(crate) const ITEM: &str = "/account/emails/{id}";
 }
 
+/// Account recoveries: their link's page, and undoing one.
+pub(crate) mod recovery {
+    /// Describes the account a recovery link recovers, without using the link.
+    pub(crate) const CHECK: &str = "/recovery/check";
+    /// Starts enrolling a passkey with a recovery link.
+    pub(crate) const START: &str = "/recovery/start";
+    /// Finishes enrolling it, which uses the link and signs the browser in.
+    pub(crate) const FINISH: &str = "/recovery/finish";
+    /// Describes the account's newest recovery its owner could undo.
+    pub(crate) const STATUS: &str = "/account/recovery";
+    /// Starts undoing it with a passkey from before it; needs no session.
+    pub(crate) const UNDO_START: &str = "/account/recovery/undo/start";
+    /// Finishes the undo, and signs the browser in with that passkey.
+    pub(crate) const UNDO_FINISH: &str = "/account/recovery/undo/finish";
+}
+
 /// The account's security history.
 pub(crate) mod history {
     /// Pages through the account's history, newest first.
@@ -144,6 +160,8 @@ pub(crate) mod page {
     pub(crate) const CONSENT: &str = "/authorize";
     /// RP-initiated logout confirmation, server-rendered.
     pub(crate) const LOGOUT: &str = "/logout";
+    /// Enrolls a passkey with a recovery link, whose token is in the fragment.
+    pub(crate) const RECOVER: &str = "/recover";
 }
 
 /// Prefix shared by the settings APIs, which the settings site may call.

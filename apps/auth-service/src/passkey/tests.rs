@@ -95,8 +95,9 @@ fn typed_ceremonies_preserve_persistence_and_check_the_expected_payload() {
     assert!(EnrollmentCeremony::extract(enrollment).is_some());
 }
 
-/// Isolated account and counter-capable software authenticator for database scenarios.
-struct Fixture {
+/// Isolated account and counter-capable software authenticator for database
+/// scenarios. The recovery scenarios use it too.
+pub(crate) struct Fixture {
     /// Routes and persistence under test.
     app: PasskeyApplication,
     /// Where requests go: the passkey routes, or a replica of the whole service.
@@ -106,15 +107,15 @@ struct Fixture {
     /// HTTPS origin passed to the authenticator.
     origin: Url,
     /// Seeded account owning the software credential.
-    user_id: UserId,
+    pub(crate) user_id: UserId,
     /// Seeded passkey row used for rename and last-key removal checks.
-    key_id: PasskeyId,
+    pub(crate) key_id: PasskeyId,
     /// Unique seeded username for identified authentication.
     username: String,
 }
 impl Fixture {
     /// Seeds an account and passkey in the explicitly configured isolated database.
-    async fn new() -> Self {
+    pub(crate) async fn new() -> Self {
         let url = piquel_common::config::Variable::new("TEST_DATABASE_URL")
             .required()
             .expect("isolated test database");
@@ -139,24 +140,8 @@ impl Fixture {
         .expect("passkey app");
         let user_id = UserId::new();
         let username = format!("key-{}", &TokenId::new().to_string()[24..]);
-        let key_id = PasskeyId::new();
-        // This software authenticator supports UV and signed counters, but not
-        // resident credentials. Browser tests cover production resident signup;
-        // use the library's normal registration to seed this assertion fixture.
-        let (challenge, state) = app
-            .webauthn
-            .start_passkey_registration(user_id.as_uuid(), &username, "Test user", None)
-            .expect("registration");
-        let mut authenticator = WebauthnAuthenticator::new(SoftPasskey::new(true));
-        let registration = authenticator
-            .do_registration(origin.clone(), challenge)
-            .expect("software registration");
-        let key = app
-            .webauthn
-            .finish_passkey_registration(&registration, &state)
-            .expect("verified registration");
-        let mut tx = app.database.begin().await.expect("transaction");
-        tx.users()
+        app.database
+            .users()
             .insert(&InsertUser {
                 id: user_id,
                 handle: Handle::parse(&username).expect("handle"),
@@ -164,17 +149,8 @@ impl Fixture {
             })
             .await
             .expect("user");
-        tx.passkeys()
-            .insert(&InsertPasskey {
-                id: key_id,
-                credential_id: key.cred_id().as_ref().to_vec(),
-                user_id,
-                credential: serde_json::to_value(key).expect("credential"),
-                friendly_name: "Original key".into(),
-            })
-            .await
-            .expect("stored key");
-        tx.commit().await.expect("commit");
+        let (key_id, authenticator) =
+            Self::seed_passkey(&app, &origin, user_id, &username, "Original key").await;
         Self {
             router: app
                 .clone()
@@ -188,13 +164,68 @@ impl Fixture {
             username,
         }
     }
+    /// Stores a new software authenticator's passkey named `name` for `user_id`.
+    /// The authenticator supports UV and signed counters, but not resident
+    /// credentials. Browser tests cover production resident signup; this uses the
+    /// library's normal registration.
+    async fn seed_passkey(
+        app: &PasskeyApplication,
+        origin: &Url,
+        user_id: UserId,
+        username: &str,
+        name: &str,
+    ) -> (PasskeyId, WebauthnAuthenticator<SoftPasskey>) {
+        let (challenge, state) = app
+            .webauthn
+            .start_passkey_registration(user_id.as_uuid(), username, "Test user", None)
+            .expect("registration");
+        let mut authenticator = WebauthnAuthenticator::new(SoftPasskey::new(true));
+        let registration = authenticator
+            .do_registration(origin.clone(), challenge)
+            .expect("software registration");
+        let key = app
+            .webauthn
+            .finish_passkey_registration(&registration, &state)
+            .expect("verified registration");
+        let id = PasskeyId::new();
+        app.database
+            .passkeys()
+            .insert(&InsertPasskey {
+                id,
+                credential_id: key.cred_id().as_ref().to_vec(),
+                user_id,
+                credential: serde_json::to_value(key).expect("credential"),
+                friendly_name: name.into(),
+            })
+            .await
+            .expect("stored key");
+        (id, authenticator)
+    }
+    /// Stores another passkey named `name` on the account, and signs with it from
+    /// now on.
+    pub(crate) async fn switch_passkey(&mut self, name: &str) -> PasskeyId {
+        let (id, authenticator) =
+            Self::seed_passkey(&self.app, &self.origin, self.user_id, &self.username, name).await;
+        self.authenticator = authenticator;
+        id
+    }
     /// Sends the next requests to `router`, such as one of [`Replicas`].
     fn on(&mut self, router: &axum::Router) -> &mut Self {
         self.router = router.clone();
         self
     }
+    /// The scenario database.
+    pub(crate) const fn database(&self) -> &Database {
+        &self.app.database
+    }
     /// Sends a JSON request from the auth origin with the supplied cookies.
-    async fn request(&self, path: &str, method: Method, cookies: &str, body: Value) -> Response {
+    pub(crate) async fn request(
+        &self,
+        path: &str,
+        method: Method,
+        cookies: &str,
+        body: Value,
+    ) -> Response {
         self.router
             .clone()
             .oneshot(
@@ -213,14 +244,14 @@ impl Fixture {
             .expect("response")
     }
     /// Starts a ceremony and returns its challenge JSON and browser-binding cookie.
-    async fn start(&self, path: &str, cookies: &str, body: Value) -> (Value, String) {
+    pub(crate) async fn start(&self, path: &str, cookies: &str, body: Value) -> (Value, String) {
         let response = self.request(path, Method::POST, cookies, body).await;
         assert_eq!(response.status(), StatusCode::OK);
         let cookie = Self::cookie(&response);
         (Self::json(response).await, cookie)
     }
     /// Reads a response's JSON body.
-    async fn json(response: Response) -> Value {
+    pub(crate) async fn json(response: Response) -> Value {
         serde_json::from_slice(
             &to_bytes(response.into_body(), MAX_RESPONSE_BYTES)
                 .await
@@ -229,7 +260,7 @@ impl Fixture {
         .expect("JSON")
     }
     /// Extracts the cookie pair from a response for the next simulated browser request.
-    fn cookie(response: &Response) -> String {
+    pub(crate) fn cookie(response: &Response) -> String {
         response.headers()[header::SET_COOKIE]
             .to_str()
             .expect("cookie")
@@ -239,7 +270,7 @@ impl Fixture {
             .to_owned()
     }
     /// Signs a started authentication challenge using the software credential.
-    fn assertion(&mut self, started: &Value) -> PublicKeyCredential {
+    pub(crate) fn assertion(&mut self, started: &Value) -> PublicKeyCredential {
         let challenge = serde_json::from_value(started["public_key"].clone())
             .expect("authentication challenge");
         self.authenticator
@@ -247,7 +278,7 @@ impl Fixture {
             .expect("software assertion")
     }
     /// Completes an identified login and returns the new session cookie.
-    async fn login(&mut self) -> String {
+    pub(crate) async fn login(&mut self) -> String {
         self.login_from("").await
     }
     /// Completes an identified login in a browser holding the `session` cookie pair,
@@ -273,7 +304,7 @@ impl Fixture {
         Self::cookie(&response)
     }
     /// Finds the active session a cookie pair names.
-    async fn session(&self, cookie: &str) -> Option<StoredSession> {
+    pub(crate) async fn session(&self, cookie: &str) -> Option<StoredSession> {
         let secret = cookie
             .split_once('=')
             .and_then(|(_, value)| Secret::parse(value).ok())
@@ -286,7 +317,7 @@ impl Fixture {
             .expect("session lookup")
     }
     /// Lists the events recorded about the seeded account, newest first.
-    async fn events(&self) -> Vec<DomainEvent> {
+    pub(crate) async fn events(&self) -> Vec<DomainEvent> {
         self.app
             .database
             .events()
@@ -297,14 +328,18 @@ impl Fixture {
             .map(|stored| stored.event.known().cloned().expect("a known event"))
             .collect()
     }
+    /// Answers a started registration challenge with a fresh software credential.
+    pub(crate) fn credential(&self, started: &Value) -> RegisterPublicKeyCredential {
+        let challenge =
+            serde_json::from_value(started["public_key"].clone()).expect("registration challenge");
+        WebauthnAuthenticator::new(SoftPasskey::new(true))
+            .do_registration(self.origin.clone(), challenge)
+            .expect("software registration")
+    }
     /// Registers a new account with a fresh software credential; returns the finish response.
     async fn register(&self, cookies: &str, body: Value) -> Response {
         let (started, browser) = self.start("/webauthn/register/start", cookies, body).await;
-        let challenge =
-            serde_json::from_value(started["public_key"].clone()).expect("registration challenge");
-        let credential = WebauthnAuthenticator::new(SoftPasskey::new(true))
-            .do_registration(self.origin.clone(), challenge)
-            .expect("software registration");
+        let credential = self.credential(&started);
         self.request(
             "/webauthn/register/finish",
             Method::POST,
@@ -406,6 +441,20 @@ async fn registration_attaches_a_pending_social_signup_only_when_it_names_it() {
             .expect("identity")
             .map(|identity| identity.user_id);
         assert_eq!(owner, attached.then_some(user.id), "{username}");
+        let passkeys = database.passkeys().list_active(user.id).await;
+        let sessions = database.sessions().list_active_for_user(user.id).await;
+        let [session] = &sessions.expect("sessions")[..] else {
+            panic!("one session");
+        };
+        let recorded = database.sessions().passkey(session.id).await;
+        let [passkey] = &passkeys.expect("passkeys")[..] else {
+            panic!("one passkey");
+        };
+        assert_eq!(
+            recorded.expect("passkey"),
+            Some(passkey.id),
+            "signed in by it"
+        );
     }
 }
 
@@ -673,6 +722,8 @@ async fn ceremonies_require_browser_binding_and_confirmation_belongs_to_one_sess
         fixture.events().await.first(),
         Some(&DomainEvent::PasskeyConfirmed { session_id })
     );
+    let confirming = fixture.app.database.sessions().passkey(session_id).await;
+    assert_eq!(confirming.expect("passkey"), Some(fixture.key_id));
     let confirmed_at = || async {
         fixture
             .app
@@ -703,11 +754,7 @@ async fn ceremonies_require_browser_binding_and_confirmation_belongs_to_one_sess
         )
         .await
         .expect("stale confirmation");
-    let challenge =
-        serde_json::from_value(started["public_key"].clone()).expect("registration challenge");
-    let credential = WebauthnAuthenticator::new(SoftPasskey::new(true))
-        .do_registration(fixture.origin.clone(), challenge)
-        .expect("software registration");
+    let credential = fixture.credential(&started);
     let response = fixture
         .request(
             "/account/passkeys/enroll/finish",
@@ -957,6 +1004,27 @@ async fn passkey_sign_in_confirms_the_browsers_session() {
         Some(fixture.key_id),
         "signed in by it"
     );
+
+    // With two passkeys, the asserting one is recorded: signing in with the
+    // newer one, and confirming with it a session the older one signed in.
+    let newer = fixture.switch_passkey("Newer key").await;
+    let signed_in = fixture.login().await;
+    let signed_in = fixture.session(&signed_in).await.expect("new session").id;
+    assert_eq!(passkey(signed_in).await, Some(newer), "signed in by it");
+    let (started, browser) = fixture
+        .start("/account/passkeys/confirm/start", &cookie, json!({}))
+        .await;
+    let assertion = fixture.assertion(&started);
+    let response = fixture
+        .request(
+            "/account/passkeys/confirm/finish",
+            Method::POST,
+            &format!("{cookie}; {browser}"),
+            json!({"ceremony_id":started["ceremony_id"],"credential":assertion}),
+        )
+        .await;
+    assert_eq!(response.status(), StatusCode::NO_CONTENT);
+    assert_eq!(passkey(before.id).await, Some(newer), "confirmed by it");
 }
 
 /// A sign-in started on one replica finishes on the other, and logging out on one

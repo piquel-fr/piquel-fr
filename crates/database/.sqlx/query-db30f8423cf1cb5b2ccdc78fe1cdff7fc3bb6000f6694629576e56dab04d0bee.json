@@ -1,0 +1,65 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT\n                    r.id AS \"id: RecoveryId\", r.started_at, r.completed_at, r.cancelled_at,\n                    r.undone_at, r.passkey_id AS \"passkey_id: PasskeyId\",\n                    p.friendly_name AS \"passkey_name?\",\n                    (p.id IS NOT NULL AND p.revoked_at IS NULL) AS \"passkey_active!\"\n                FROM account_recoveries r\n                LEFT JOIN passkey_credentials p ON p.id = r.passkey_id\n                WHERE r.user_id = $1 AND COALESCE(r.completed_at, r.started_at) > $2\n                ORDER BY r.started_at DESC, r.id DESC",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id: RecoveryId",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "started_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 2,
+        "name": "completed_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 3,
+        "name": "cancelled_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 4,
+        "name": "undone_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 5,
+        "name": "passkey_id: PasskeyId",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 6,
+        "name": "passkey_name?",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 7,
+        "name": "passkey_active!",
+        "type_info": "Bool"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Timestamptz"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      true,
+      true,
+      true,
+      true,
+      false,
+      null
+    ]
+  },
+  "hash": "db30f8423cf1cb5b2ccdc78fe1cdff7fc3bb6000f6694629576e56dab04d0bee"
+}

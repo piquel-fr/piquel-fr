@@ -109,6 +109,8 @@ repositories! {
     maintenance: MaintenanceRepository;
     /// Administrator rights.
     administrators: AdministratorRepository;
+    /// Account recoveries and their links.
+    recoveries: RecoveryRepository;
     /// Signing keys and their lifecycle.
     signing_keys: SigningKeyRepository;
 }
@@ -248,6 +250,8 @@ pub(crate) mod maintenance;
 pub(crate) mod oidc;
 /// Passkey credentials and single-use ceremony records.
 pub(crate) mod passkeys;
+/// Account recoveries and their links.
+pub(crate) mod recoveries;
 /// Signup invitations and shared request budgets.
 pub(crate) mod security;
 /// Browser sessions, cookie digests and passkey confirmations.

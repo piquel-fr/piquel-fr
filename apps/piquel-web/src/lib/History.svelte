@@ -27,7 +27,10 @@
   } & (
     | { kind: 'account.created' | 'session.signed_in'; method: Method }
     | { kind: 'session.revoked'; reason: { type: string } }
-    | { kind: 'passkey.added' | 'passkey.renamed' | 'passkey.removed'; passkey_id: string }
+    | {
+        kind: 'passkey.added' | 'passkey.renamed' | 'passkey.removed' | 'account.recovered';
+        passkey_id: string;
+      }
     | { kind: 'identity.linked' | 'identity.unlinked'; provider: Provider }
     | { kind: 'email.added'; email_id: string; address: string | null }
     | { kind: 'email.verified' | 'email.primary_changed' | 'email.removed'; email_id: string }
@@ -42,6 +45,9 @@
           | 'account.enabled'
           | 'account.viewed'
           | 'account.handle_changed'
+          | 'account.recovery_started'
+          | 'account.recovery_undone'
+          | 'consent.revoked'
           | 'administrator.granted'
           | 'administrator.revoked';
       }
@@ -252,6 +258,8 @@
         return 'Email address removed';
       case 'consent.granted':
         return `Access approved: ${entry.scopes.join(', ')}`;
+      case 'consent.revoked':
+        return 'App access withdrawn';
       case 'token.reused':
         return 'An app’s sign-in was used twice, so its access was revoked';
       case 'account.disabled':
@@ -262,6 +270,12 @@
         return 'Account details viewed';
       case 'account.handle_changed':
         return 'Handle changed';
+      case 'account.recovery_started':
+        return 'Account recovery started';
+      case 'account.recovered':
+        return 'Account recovered with a new passkey';
+      case 'account.recovery_undone':
+        return 'Account recovery undone';
       case 'administrator.granted':
         return 'Administrator rights granted';
       case 'administrator.revoked':

@@ -1,0 +1,35 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT id AS \"id: PasskeyId\", friendly_name, created_at AS enrolled_at\n                FROM passkey_credentials\n                WHERE user_id = $1 AND revoked_at IS NULL AND created_at >= $2\n                ORDER BY created_at, id",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id: PasskeyId",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "friendly_name",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 2,
+        "name": "enrolled_at",
+        "type_info": "Timestamptz"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Timestamptz"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "1d99af6d9bd6c00635bb9c6e30ab63a7f4d42e425b59a8df6cc411ca79937683"
+}
