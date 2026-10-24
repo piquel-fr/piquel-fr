@@ -76,10 +76,29 @@ test('passkey lifecycle, passkey confirmation and browser OIDC consent with SSO'
     }).toString();
     await page.goto(authorization.href);
     await expect(page.getByRole('heading', { name: /^Continue to / })).toBeVisible();
-    // A double click still reaches the application: the page's script keeps the
-    // form from posting the decision twice, which would find the request used.
-    await page.getByRole('button', { name: 'Continue', exact: true }).dblclick();
+    // A second click while the decision is on its way still reaches the application:
+    // the page's script keeps the form from posting it again, which would find the
+    // request used. The decision waits for the second click, as on a slow network.
+    const consent = new URL('/authorize', authUrl).href;
+    let decisions = 0;
+    const clickedTwice = Promise.withResolvers<undefined>();
+    await page.route(consent, async (route) => {
+      decisions += 1;
+      await clickedTwice.promise;
+      await route.continue();
+    });
+    // Clicked with the mouse: a locator's click would wait for the held decision.
+    const decide = await page.getByRole('button', { name: 'Continue', exact: true }).boundingBox();
+    if (!decide) throw new Error('the Continue button has no box');
+    const [x, y] = [decide.x + decide.width / 2, decide.y + decide.height / 2];
+    const sent = page.waitForRequest(consent);
+    await page.mouse.click(x, y);
+    await sent;
+    await page.mouse.click(x, y);
+    clickedTwice.resolve(undefined);
     await page.waitForURL(atCallback);
+    expect(decisions).toBe(1);
+    await page.unroute(consent);
     const callback = new URL(page.url());
     expect(callback.searchParams.get('state')).toBe(oidc.state);
     expect(callback.searchParams.get('iss')).toBe(authUrl);
