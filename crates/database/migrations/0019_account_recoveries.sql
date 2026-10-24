@@ -10,7 +10,10 @@ CREATE TABLE account_recoveries (
     -- The primary address when it started, which undoing it restores. Not a
     -- foreign key: the address may be removed meanwhile.
     primary_email_id UUID,
-    started_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    -- The clock when it was stored, after its transaction took the account lock,
+    -- so recoveries sort in the order they happened; `now()` would be when the
+    -- transaction began.
+    started_at TIMESTAMPTZ NOT NULL DEFAULT clock_timestamp(),
     expires_at TIMESTAMPTZ NOT NULL,
     -- When its link enrolled a passkey, and which one.
     completed_at TIMESTAMPTZ,
