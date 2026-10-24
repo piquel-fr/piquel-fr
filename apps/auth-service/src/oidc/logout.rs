@@ -1,4 +1,5 @@
-//! RP-initiated logout.
+//! RP-initiated logout: the request, sent on to the logout page to confirm, and the
+//! end of the session once confirmed.
 
 use super::{Claim, MAX_STATE_BYTES, OAuthCode, OAuthError, OidcApplication, Reject};
 use crate::{
@@ -6,31 +7,58 @@ use crate::{
     security::{RequestContext, Session},
 };
 use axum::{
-    Form, Json,
+    Form,
     extract::{State, rejection::FormRejection},
     http::HeaderMap,
-    response::{IntoResponse, Redirect, Response},
+    response::Redirect,
 };
 use piquel_common::{ClientId, events::RevocationReason};
 use piquel_repository::SessionScope;
-use serde::{Deserialize, Serialize};
-use serde_json::{Value, json};
+use serde::{Deserialize, Deserializer};
+use serde_json::Value;
 use url::Url;
 
-/// RP-initiated logout parameters bound to a registered destination and optional ID hint.
-#[derive(Deserialize, Serialize)]
-pub(super) struct LogoutQuery {
+/// RP-initiated logout parameters bound to a registered destination and optional ID
+/// hint. A parameter sent empty is kept, as sent, whichever decoder reads it, so it
+/// means the same at the endpoint and on the logout page: an included `state` goes
+/// back to the client even when empty (RP-Initiated Logout §2), and Topcoat's own
+/// decoder would read an empty value as absent.
+#[derive(Deserialize)]
+pub(crate) struct LogoutQuery {
     /// Registered relying-party identifier.
+    #[serde(default, deserialize_with = "LogoutQuery::parameter")]
     client_id: Option<String>,
     /// Previously issued signed ID token identifying the client and account.
+    #[serde(default, deserialize_with = "LogoutQuery::parameter")]
     id_token_hint: Option<String>,
     /// Exact registered destination after logout.
+    #[serde(default, deserialize_with = "LogoutQuery::parameter")]
     post_logout_redirect_uri: Option<String>,
     /// Opaque client correlation value returned unchanged.
+    #[serde(default, deserialize_with = "LogoutQuery::parameter")]
     state: Option<String>,
 }
 
 impl LogoutQuery {
+    /// Reads a parameter that is present, an empty one included; `default` makes an
+    /// absent one `None`.
+    fn parameter<'de, D: Deserializer<'de>>(deserializer: D) -> Result<Option<String>, D::Error> {
+        String::deserialize(deserializer).map(Some)
+    }
+
+    /// The parameters that are present, by name, in the order the logout page
+    /// sends them on.
+    pub(crate) fn fields(&self) -> impl Iterator<Item = (&'static str, &str)> {
+        [
+            ("client_id", &self.client_id),
+            ("id_token_hint", &self.id_token_hint),
+            ("post_logout_redirect_uri", &self.post_logout_redirect_uri),
+            ("state", &self.state),
+        ]
+        .into_iter()
+        .filter_map(|(name, value)| Some((name, value.as_deref()?)))
+    }
+
     /// Unwraps the extracted parameters, describing why they could not be read.
     fn parse(form: Result<Form<Self>, FormRejection>) -> Result<Self, OAuthError> {
         form.map(|Form(q)| q).map_err(|error| {
@@ -44,10 +72,10 @@ impl OidcApplication {
     /// Validates the client, hint and exact registered post-logout redirect. Returns
     /// the destination, and the client that asked for the logout when a verified
     /// `id_token_hint` or a registered `post_logout_redirect_uri` names it.
-    async fn logout_destination(
+    pub(crate) async fn logout_destination(
         &self,
         q: &LogoutQuery,
-    ) -> Result<(String, Option<ClientId>), OAuthError> {
+    ) -> Result<(Url, Option<ClientId>), OAuthError> {
         if q.state.as_ref().is_some_and(|s| s.len() > MAX_STATE_BYTES) {
             return Err(OAuthCode::InvalidRequest
                 .reject(format!("state must be at most {MAX_STATE_BYTES} bytes")));
@@ -85,10 +113,8 @@ impl OidcApplication {
                 .reject("client_id does not match the id_token_hint audience"));
         }
         let Some(uri) = q.post_logout_redirect_uri.as_ref() else {
-            return Ok((
-                format!("{}{}", self.issuer, routes::page::LOGIN),
-                hinted_client,
-            ));
+            let login = Url::parse(&format!("{}{}", self.issuer, routes::page::LOGIN))?;
+            return Ok((login, hinted_client));
         };
         let id = q
             .client_id
@@ -119,11 +145,12 @@ impl OidcApplication {
         if let Some(state) = &q.state {
             url.query_pairs_mut().append_pair("state", state);
         }
-        Ok((url.into(), Some(client.id)))
+        Ok((url, Some(client.id)))
     }
 
-    /// Validates RP logout parameters before sending the browser to confirmation.
-    /// `Form` reads the query string of GET requests.
+    /// Validates RP logout parameters, by GET query or form POST, before sending the
+    /// browser to confirm on the logout page. `Form` reads the query string of GET
+    /// requests.
     pub(super) async fn start_logout(
         State(app): State<Self>,
         form: Result<Form<LogoutQuery>, FormRejection>,
@@ -135,41 +162,24 @@ impl OidcApplication {
     async fn confirm_logout(&self, q: &LogoutQuery) -> Result<Redirect, OAuthError> {
         self.logout_destination(q).await?;
         let mut url = Url::parse(&format!("{}{}", self.issuer, routes::page::LOGOUT))?;
-        for (name, value) in [
-            ("client_id", &q.client_id),
-            ("id_token_hint", &q.id_token_hint),
-            ("post_logout_redirect_uri", &q.post_logout_redirect_uri),
-            ("state", &q.state),
-        ] {
-            if let Some(value) = value {
-                url.query_pairs_mut().append_pair(name, value);
-            }
-        }
+        url.query_pairs_mut().extend_pairs(q.fields());
         Ok(Redirect::to(url.as_str()))
     }
 
-    /// Confirms same-origin logout, revokes the session and expires its browser cookie.
-    pub(super) async fn logout(
-        State(app): State<Self>,
+    /// Ends the browser's session, once the logout page confirmed `q`, and returns
+    /// where the browser goes next. The page's caller clears the session cookie.
+    pub(crate) async fn end_session(
+        &self,
         context: RequestContext,
-        headers: HeaderMap,
-        form: Result<Form<LogoutQuery>, FormRejection>,
-    ) -> Result<Response, OAuthError> {
-        let q = LogoutQuery::parse(form)?;
-        // Cross-site RP form submissions navigate to confirmation; only issuer-origin
-        // browser requests may revoke a session.
-        if app.require_same_origin(&headers).is_err() {
-            return app
-                .confirm_logout(&q)
-                .await
-                .map(IntoResponse::into_response);
-        }
-        let (destination, client) = app.logout_destination(&q).await?;
-        if let Some(session) = Session::optional(&app.database, &headers).await? {
+        headers: &HeaderMap,
+        q: &LogoutQuery,
+    ) -> Result<Url, OAuthError> {
+        let (destination, client) = self.logout_destination(q).await?;
+        if let Some(session) = Session::optional(&self.database, headers).await? {
             let reason = client.map_or(RevocationReason::Logout, |client_id| {
                 RevocationReason::RelyingPartyLogout { client_id }
             });
-            let mut tx = app.database.begin().await?;
+            let mut tx = self.database.begin().await?;
             Session::revoke(
                 &mut tx,
                 context,
@@ -180,8 +190,6 @@ impl OidcApplication {
             .await?;
             tx.commit().await?;
         }
-        let mut response = Json(json!({"redirect_url":destination})).into_response();
-        crate::security::BrowserCookie::Session.clear_on(&mut response)?;
-        Ok(response)
+        Ok(destination)
     }
 }

@@ -93,7 +93,7 @@ impl SecurityFixture {
             trusted_proxies: Arc::new(vec![]),
             request_timeout: std::time::Duration::from_secs(30),
             database,
-            auth_origin: "https://auth.piquel.fr".into(),
+            origin: site(),
             frontends: FrontendOrigins::new([&"https://piquel.fr/settings"
                 .parse()
                 .expect("settings URL")]),
@@ -615,7 +615,8 @@ fn routes_doing_real_work_have_budgets() {
         (oidc::LOGOUT, Some(RateCategory::Login)),
         (oidc::AUTHORIZE, Some(RateCategory::Login)),
         (oidc::AUTHORIZE_RESUME, Some(RateCategory::Login)),
-        ("/oauth/authorize/transaction/1", Some(RateCategory::Login)),
+        (page::CONSENT, Some(RateCategory::Page)),
+        (page::LOGOUT, Some(RateCategory::Page)),
         (passkey::SESSION, Some(RateCategory::Account)),
         (passkey::LIST, Some(RateCategory::Account)),
         (federation::IDENTITIES, Some(RateCategory::Account)),
@@ -625,9 +626,21 @@ fn routes_doing_real_work_have_budgets() {
     }
 }
 
-/// Browser origin and mutation proof are required everywhere except protocol endpoints.
+/// The origin of auth's own pages in the policy tests.
+fn site() -> url::Origin {
+    url::Url::parse("https://auth.piquel.fr")
+        .expect("URL")
+        .origin()
+}
+
+/// Browser origin and mutation proof are required everywhere except protocol
+/// endpoints, and pages, which have their own rule.
 #[test]
 fn endpoint_policy_requires_browser_proof_outside_protocol_endpoints() {
+    let site = site();
+    let check = |endpoint, headers: &HeaderMap, allowed, mutation| {
+        HttpSecurity::check_browser(endpoint, headers, allowed, mutation, &site).is_ok()
+    };
     for (endpoint, protocol) in [
         (Endpoint::OAuthBackChannel, true),
         (Endpoint::UserInfo, true),
@@ -647,22 +660,55 @@ fn endpoint_policy_requires_browser_proof_outside_protocol_endpoints() {
             HeaderValue::from_static("https://evil.example"),
         );
         // Unapproved mutations and cross-origin reads only reach protocol handlers.
-        assert_eq!(
-            HttpSecurity::check_browser(endpoint, &anonymous, false, true).is_ok(),
-            protocol
-        );
-        assert_eq!(
-            HttpSecurity::check_browser(endpoint, &browser, false, false).is_ok(),
-            protocol
-        );
-        assert!(HttpSecurity::check_browser(endpoint, &anonymous, false, false).is_ok());
+        assert_eq!(check(endpoint, &anonymous, false, true), protocol);
+        assert_eq!(check(endpoint, &browser, false, false), protocol);
+        assert!(check(endpoint, &anonymous, false, false));
         // Approved mutations still need CSRF proof.
-        assert_eq!(
-            HttpSecurity::check_browser(endpoint, &browser, true, true).is_ok(),
-            protocol
-        );
+        assert_eq!(check(endpoint, &browser, true, true), protocol);
         browser.insert(CSRF_HEADER, HeaderValue::from_static("1"));
-        assert!(HttpSecurity::check_browser(endpoint, &browser, true, true).is_ok());
+        assert!(check(endpoint, &browser, true, true));
+    }
+}
+
+/// Anyone may navigate to a page, but only auth's own pages may post its form:
+/// `Sec-Fetch-Site` decides when the browser sends it, then `Origin`. A form on a
+/// `no-referrer` page sends `Origin: null`, and the CSRF header changes nothing.
+#[test]
+fn pages_take_forms_only_from_auth_pages() {
+    let own = Some("https://auth.piquel.fr");
+    for (fetch_site, origin, csrf, mutation, accepted) in [
+        (None, None, false, false, true),
+        (
+            Some("cross-site"),
+            Some("https://evil.example"),
+            false,
+            false,
+            true,
+        ),
+        (Some("same-origin"), Some("null"), false, true, true),
+        (Some("same-origin"), None, false, true, true),
+        (None, own, false, true, true),
+        (Some("same-site"), own, false, true, false),
+        (Some("cross-site"), Some("null"), true, true, false),
+        (Some("none"), None, false, true, false),
+        (None, Some("null"), false, true, false),
+        (None, None, true, true, false),
+    ] {
+        let mut headers = HeaderMap::new();
+        if let Some(fetch_site) = fetch_site {
+            headers.insert(FETCH_SITE_HEADER, HeaderValue::from_static(fetch_site));
+        }
+        if let Some(origin) = origin {
+            headers.insert(header::ORIGIN, HeaderValue::from_static(origin));
+        }
+        if csrf {
+            headers.insert(CSRF_HEADER, HeaderValue::from_static("1"));
+        }
+        assert_eq!(
+            HttpSecurity::check_browser(Endpoint::Page, &headers, true, mutation, &site()).is_ok(),
+            accepted,
+            "{fetch_site:?} {origin:?} csrf={csrf} mutation={mutation}"
+        );
     }
 }
 

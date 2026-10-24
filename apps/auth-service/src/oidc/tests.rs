@@ -4,7 +4,8 @@ use super::*;
 use crate::config::TokenDigestKey;
 use crate::deliveries::{BackchannelLogoutSender, OutboundClient, Sender};
 use crate::security::{BrowserCookie, RequestContext, Session};
-use crate::tests::{AUTH_ORIGIN, Replicas, TlsListener};
+use crate::tests::{AUTH_ORIGIN, Replicas, TlsListener, location, parameter};
+use crate::web::WebApplication;
 use axum::{
     body::{Body, to_bytes},
     http::{Method, Request, StatusCode},
@@ -36,7 +37,8 @@ use url::Url;
 struct Flow {
     /// Application under test, sharing the scenario database.
     app: OidcApplication,
-    /// Where requests go: the OIDC routes, or a replica of the whole service.
+    /// Where requests go: the OIDC routes and their pages, or a replica of the whole
+    /// service.
     router: axum::Router,
     /// The scenario's client, registered through [`ClientRegistry`](crate::ClientRegistry).
     client: ClientRegistration,
@@ -120,12 +122,13 @@ impl Flow {
                 base64::engine::general_purpose::STANDARD.encode(format!("{}:{secret}", client.id))
             )
         });
+        let origin = origin
+            .parse::<piquel_common::config::Origin>()
+            .expect("issuer");
         let app = OidcApplication::new(
             db,
             &OidcConfig {
-                origin: origin
-                    .parse::<piquel_common::config::Origin>()
-                    .expect("issuer"),
+                origin: origin.clone(),
                 digest_keys: Arc::new(TokenDigestKeys::new(
                     TokenDigestKey::derive(&[7; 32]).expect("digest key"),
                     None,
@@ -137,7 +140,9 @@ impl Flow {
         )
         .expect("OIDC application");
         Self {
-            router: app.clone().routes(),
+            router: WebApplication::new(app.clone(), &origin)
+                .routes()
+                .merge(app.clone().routes()),
             app,
             client,
             secret,
@@ -175,7 +180,7 @@ impl Flow {
             .collect()
     }
 
-    /// Dispatches an encoded protocol request through the OIDC routes.
+    /// Dispatches an encoded protocol request, or a page's form, through the OIDC routes.
     async fn request(
         &self,
         method: Method,
@@ -300,34 +305,14 @@ impl Flow {
     fn verifier() -> &'static str {
         "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
     }
-    /// Reads the absolute destination of a protocol redirect response.
-    fn location(response: &Response) -> Url {
-        Url::parse(
-            response
-                .headers()
-                .get(header::LOCATION)
-                .expect("authorization response has a Location header")
-                .to_str()
-                .expect("Location header is valid text"),
-        )
-        .expect("Location header contains an absolute URL")
-    }
     /// Reads a redirect back to the client, which must name this issuer in `iss` (RFC 9207).
     fn client_redirect(&self, response: &Response) -> Url {
-        self.issued(Self::location(response))
+        self.issued(location(response))
     }
     /// Returns an authorization response URL after checking its `iss`.
     fn issued(&self, url: Url) -> Url {
-        assert_eq!(Self::parameter(&url, "iss"), self.app.issuer);
+        assert_eq!(parameter(&url, "iss"), self.app.issuer);
         url
-    }
-    /// Extracts a required query parameter from a protocol redirect.
-    fn parameter(url: &Url, name: &str) -> String {
-        url.query_pairs()
-            .find(|(key, _)| key == name)
-            .expect("redirect contains expected query parameter")
-            .1
-            .into_owned()
     }
     /// Reads the scenario's text response.
     async fn text(response: Response) -> String {
@@ -351,32 +336,27 @@ impl Flow {
     /// Completes explicit consent when needed and extracts the issued authorization code.
     async fn code(&self, scopes: &str) -> String {
         let response = self.authorize(scopes, None).await;
-        Self::parameter(&self.consent(response).await, "code")
+        parameter(&self.consent(response).await, "code")
     }
     /// Follows an authorization response through consent, when needed, to the client
     /// redirect, whose `iss` it checks.
     async fn consent(&self, response: Response) -> Url {
         assert_eq!(response.status(), StatusCode::SEE_OTHER);
-        let mut location = Self::location(&response);
-        if location.path() == "/authorize" {
-            let transaction = Self::parameter(&location, "transaction");
+        let mut destination = location(&response);
+        if destination.path() == routes::page::CONSENT {
+            let transaction = parameter(&destination, "transaction");
             let response = self
                 .request(
                     Method::POST,
-                    "/oauth/authorize/decision",
+                    routes::page::CONSENT,
                     &[("transaction", &transaction), ("decision", APPROVE_CONSENT)],
                     None,
                 )
                 .await;
-            assert_eq!(response.status(), StatusCode::OK);
-            location = Url::parse(
-                Self::json(response).await["redirect_url"]
-                    .as_str()
-                    .expect("decision response includes redirect_url"),
-            )
-            .expect("decision redirect is a valid URL");
+            assert_eq!(response.status(), StatusCode::SEE_OTHER);
+            destination = location(&response);
         }
-        self.issued(location)
+        self.issued(destination)
     }
     /// Exchanges a scenario code with the requested verifier and client credentials.
     async fn exchange(&self, code: &str, verifier: &str, basic: Option<&str>) -> Response {
@@ -486,7 +466,7 @@ async fn public_consent_pkce_claim_scoping_and_replay() {
         .authorize(Scope::OpenId.as_str(), Some(Prompt::None.as_str()))
         .await;
     assert_eq!(
-        Flow::parameter(&flow.client_redirect(&response), "error"),
+        parameter(&flow.client_redirect(&response), "error"),
         OAuthCode::ConsentRequired.as_str()
     );
     let code = flow.code(Scope::OpenId.as_str()).await;
@@ -528,13 +508,13 @@ async fn public_consent_pkce_claim_scoping_and_replay() {
         .authorize(EMAIL_SCOPES, Some(Prompt::None.as_str()))
         .await;
     assert_eq!(
-        Flow::parameter(&flow.client_redirect(&response), "error"),
+        parameter(&flow.client_redirect(&response), "error"),
         OAuthCode::ConsentRequired.as_str()
     );
     let response = flow
         .authorize(Scope::OpenId.as_str(), Some(Prompt::Login.as_str()))
         .await;
-    assert_eq!(Flow::location(&response).path(), "/login");
+    assert_eq!(location(&response).path(), "/login");
     let client_id = flow.client.id.clone();
     assert_eq!(
         flow.events().await[..3],
@@ -658,7 +638,7 @@ async fn confidential_refresh_rotation_logout_and_client_binding() {
     let response = flow
         .request(
             Method::POST,
-            "/oidc/logout",
+            routes::page::LOGOUT,
             &[
                 ("client_id", flow.client.id.as_str()),
                 (
@@ -669,7 +649,10 @@ async fn confidential_refresh_rotation_logout_and_client_binding() {
             None,
         )
         .await;
-    assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(
+        location(&response).as_str(),
+        flow.client.post_logout_uris[0].as_str()
+    );
     assert!(
         response.headers()[header::SET_COOKIE]
             .to_str()
@@ -687,7 +670,7 @@ async fn confidential_refresh_rotation_logout_and_client_binding() {
         StatusCode::BAD_REQUEST
     );
     assert_eq!(
-        Flow::parameter(
+        parameter(
             &flow.client_redirect(
                 &flow
                     .authorize(Scope::OpenId.as_str(), Some(Prompt::None.as_str()))
@@ -788,12 +771,12 @@ async fn logout_posts_a_logout_token_to_the_clients_of_the_session() {
     let response = flow
         .request(
             Method::POST,
-            "/oidc/logout",
+            routes::page::LOGOUT,
             &[("client_id", told.id.as_str())],
             None,
         )
         .await;
-    assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(response.status(), StatusCode::SEE_OTHER);
 
     // Other scenarios share the database: send only this session's deliveries.
     let mut sent = Vec::new();
@@ -1021,7 +1004,7 @@ async fn policy_reduction_blocks_outstanding_codes_and_refresh() {
         StatusCode::BAD_REQUEST
     );
     assert_eq!(
-        Flow::parameter(
+        parameter(
             &flow.client_redirect(&flow.authorize(EMAIL_SCOPES, None).await),
             "error"
         ),
@@ -1076,10 +1059,7 @@ async fn authorization_hints_bind_initial_resumed_and_consent_requests() {
             &[("id_token_hint", &hint)],
         )
         .await;
-    assert_ne!(
-        Flow::parameter(&flow.client_redirect(&response), "code"),
-        ""
-    );
+    assert_ne!(parameter(&flow.client_redirect(&response), "code"), "");
     for (field, value) in [
         ("iss", json!("https://foreign.example")),
         ("aud", json!("other-client")),
@@ -1101,7 +1081,7 @@ async fn authorization_hints_bind_initial_resumed_and_consent_requests() {
             )
             .await;
         assert_eq!(
-            Flow::parameter(&flow.client_redirect(&response), "error"),
+            parameter(&flow.client_redirect(&response), "error"),
             OAuthCode::InvalidRequest.as_str()
         );
     }
@@ -1122,7 +1102,7 @@ async fn authorization_hints_bind_initial_resumed_and_consent_requests() {
         )
         .await;
     assert_eq!(
-        Flow::parameter(&flow.client_redirect(&response), "error"),
+        parameter(&flow.client_redirect(&response), "error"),
         OAuthCode::LoginRequired.as_str()
     );
     let response = flow
@@ -1133,9 +1113,9 @@ async fn authorization_hints_bind_initial_resumed_and_consent_requests() {
             &[("id_token_hint", &hint)],
         )
         .await;
-    let location = Flow::location(&response);
-    assert_eq!(location.path(), "/login");
-    let transaction = Flow::parameter(&location, "transaction");
+    let login = location(&response);
+    assert_eq!(login.path(), "/login");
+    let transaction = parameter(&login, "transaction");
     let response = flow
         .request(
             Method::GET,
@@ -1144,11 +1124,11 @@ async fn authorization_hints_bind_initial_resumed_and_consent_requests() {
             None,
         )
         .await;
-    assert_eq!(Flow::location(&response).path(), "/login");
+    assert_eq!(location(&response).path(), "/login");
     let response = flow
         .request(
             Method::POST,
-            "/oauth/authorize/decision",
+            routes::page::CONSENT,
             &[("transaction", &transaction), ("decision", APPROVE_CONSENT)],
             None,
         )
@@ -1207,18 +1187,15 @@ async fn acr_targets_and_grants_keep_their_authentication() {
         )
         .await;
     assert_eq!(
-        Flow::parameter(&flow.client_redirect(&response), "error"),
+        parameter(&flow.client_redirect(&response), "error"),
         OAuthCode::LoginRequired.as_str()
     );
     let response = flow
         .authorize_with(Method::GET, Scope::OpenId.as_str(), None, &phr)
         .await;
-    let login = Flow::location(&response);
+    let login = location(&response);
     assert_eq!(login.path(), routes::page::LOGIN);
-    assert_eq!(
-        Flow::parameter(&login, "acr"),
-        Acr::PhishingResistant.as_str()
-    );
+    assert_eq!(parameter(&login, "acr"), Acr::PhishingResistant.as_str());
     for acr_values in ["urn:example:gold", "urn:piquel:acr:social phr"] {
         let response = flow
             .authorize_with(
@@ -1228,7 +1205,7 @@ async fn acr_targets_and_grants_keep_their_authentication() {
                 &[("acr_values", acr_values)],
             )
             .await;
-        let code = Flow::parameter(&flow.client_redirect(&response), "code");
+        let code = parameter(&flow.client_redirect(&response), "code");
         let (_, claims) = flow
             .id_token(
                 flow.exchange(&code, Flow::verifier(), flow.basic.as_deref())
@@ -1271,7 +1248,7 @@ async fn post_protocol_endpoints_and_error_contracts() {
             )
             .await;
         assert_eq!(
-            Flow::parameter(&flow.client_redirect(&response), "error"),
+            parameter(&flow.client_redirect(&response), "error"),
             expected
         );
     }
@@ -1306,7 +1283,7 @@ async fn post_protocol_endpoints_and_error_contracts() {
     let response = flow
         .authorize_with(Method::POST, PROFILE_SCOPES, None, &[])
         .await;
-    let code = Flow::parameter(&flow.client_redirect(&response), "code");
+    let code = parameter(&flow.client_redirect(&response), "code");
     let tokens = Flow::json(flow.exchange(&code, Flow::verifier(), None).await).await;
     let bearer = format!(
         "{} {}",
@@ -1366,7 +1343,7 @@ async fn pushed_requests_are_one_time_client_bound_and_authoritative() {
         .pushed(Scope::OpenId.as_str(), Some(Prompt::None.as_str()))
         .await;
     assert_eq!(
-        Flow::parameter(
+        parameter(
             &flow.client_redirect(&flow.claim(&id, &request_uri, &[]).await),
             "error"
         ),
@@ -1419,8 +1396,8 @@ async fn pushed_requests_are_one_time_client_bound_and_authoritative() {
             .expect("callback")
             .origin()
     );
-    assert_eq!(Flow::parameter(&redirect, "state"), "test-state");
-    let code = Flow::parameter(&redirect, "code");
+    assert_eq!(parameter(&redirect, "state"), "test-state");
+    let code = parameter(&redirect, "code");
     let response = flow
         .exchange(&code, Flow::verifier(), flow.basic.as_deref())
         .await;
@@ -1434,7 +1411,7 @@ async fn pushed_requests_are_one_time_client_bound_and_authoritative() {
         .await
         .expect("require pushed requests");
     assert_eq!(
-        Flow::parameter(
+        parameter(
             &flow.client_redirect(&flow.authorize(Scope::OpenId.as_str(), None).await),
             "error"
         ),
@@ -1443,7 +1420,7 @@ async fn pushed_requests_are_one_time_client_bound_and_authoritative() {
     let request_uri = flow.pushed(Scope::OpenId.as_str(), None).await;
     // The user consented above, so the claim returns a code at once.
     let response = flow.claim(&id, &request_uri, &[]).await;
-    Flow::parameter(&flow.client_redirect(&response), "code");
+    parameter(&flow.client_redirect(&response), "code");
 }
 
 /// A pushed `prompt=login` needs a sign-in after the browser claims the request:
@@ -1457,9 +1434,9 @@ async fn pushed_requests_count_sign_in_freshness_from_the_claim() {
         .await;
     flow.sign_in_again(AuthenticationMethod::Passkey).await;
     let response = flow.claim(flow.client.id.as_str(), &request_uri, &[]).await;
-    let location = Flow::location(&response);
+    let location = location(&response);
     assert_eq!(location.path(), "/login");
-    let transaction = Flow::parameter(&location, "transaction");
+    let transaction = parameter(&location, "transaction");
     flow.sign_in_again(AuthenticationMethod::Passkey).await;
     let response = flow
         .request(
@@ -1469,7 +1446,7 @@ async fn pushed_requests_count_sign_in_freshness_from_the_claim() {
             None,
         )
         .await;
-    Flow::parameter(&flow.consent(response).await, "code");
+    parameter(&flow.consent(response).await, "code");
 }
 
 /// Checks redirect equality, PKCE rejection and opaque-token bounds.
@@ -1696,28 +1673,26 @@ async fn sdk_login_client_runs_against_the_provider() {
         .parse()
         .expect("post-logout URI");
     let logout = client.logout_url(id_token, Some(&post_logout));
-    let confirmation = flow
-        .request(
-            Method::GET,
-            &format!("{}?{}", logout.path(), logout.query().expect("query")),
-            &[],
-            None,
-        )
-        .await;
-    assert_eq!(confirmation.status(), StatusCode::SEE_OTHER);
-    let fields: Vec<(String, String)> = logout.query_pairs().into_owned().collect();
+    let confirmation = location(
+        &flow
+            .request(
+                Method::GET,
+                &format!("{}?{}", logout.path(), logout.query().expect("query")),
+                &[],
+                None,
+            )
+            .await,
+    );
+    assert_eq!(confirmation.path(), routes::page::LOGOUT);
+    let fields: Vec<(String, String)> = confirmation.query_pairs().into_owned().collect();
     let fields: Vec<_> = fields
         .iter()
         .map(|(name, value)| (name.as_str(), value.as_str()))
         .collect();
     let confirmed = flow
-        .request(Method::POST, logout.path(), &fields, None)
+        .request(Method::POST, routes::page::LOGOUT, &fields, None)
         .await;
-    assert_eq!(confirmed.status(), StatusCode::OK);
-    assert_eq!(
-        Flow::json(confirmed).await["redirect_url"],
-        post_logout.as_str()
-    );
+    assert_eq!(location(&confirmed), post_logout);
 }
 
 /// A clock the SDK scenarios move by hand, to reach access token expiry.
@@ -2004,7 +1979,7 @@ async fn sdk_login_routes_run_against_the_provider() {
     let destination = Url::parse(&LoginApp::location(&logout)).expect("logout URL");
     assert_eq!(destination.path(), "/oidc/logout");
     assert_eq!(
-        Flow::parameter(&destination, "post_logout_redirect_uri"),
+        parameter(&destination, "post_logout_redirect_uri"),
         app.flow.client.post_logout_uris[0].as_str()
     );
     assert!(
@@ -2044,11 +2019,11 @@ async fn sdk_step_up_runs_against_the_provider() {
         "/auth/login?return_to=%2Fsettings&acr_values=phr&max_age=300&step_up=true"
     );
     let (pending, authorize) = app.start_login(&login, Some(&first)).await;
-    assert_eq!(Flow::parameter(&authorize, "acr_values"), "phr");
-    assert_eq!(Flow::parameter(&authorize, "max_age"), "300");
+    assert_eq!(parameter(&authorize, "acr_values"), "phr");
+    assert_eq!(parameter(&authorize, "max_age"), "300");
     // The social session is too weak, so the provider asks for a passkey.
     let prompt = app.authorize(&authorize).await;
-    assert_eq!(Flow::location(&prompt).path(), routes::page::LOGIN);
+    assert_eq!(location(&prompt).path(), routes::page::LOGIN);
 
     let access = app.send(Method::GET, "/notes", Some(&first)).await;
     let access = Flow::text(access).await;

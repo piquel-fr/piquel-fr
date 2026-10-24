@@ -21,6 +21,11 @@ Keep implementations simple. Follow neighbouring modules and share repeated logi
   repositories, transactions and storage vocabulary.
 - `piquel-telemetry` (`crates/telemetry`): logs, traces and metrics, following
   [telemetry.md](telemetry.md).
+- `piquel-ui` (`crates/ui`): the Topcoat components and layouts of auth's
+  server-rendered pages. They render plain data (`piquel-common` IDs and
+  vocabularies, the repository's view types) and take URLs as props, and know
+  nothing of the domain, the database or HTTP. It depends only on `piquel-common`
+  and Topcoat's `view`, so it compiles beside the database crate.
 
 Application code uses `Secret`, `Digest`, `Pkce`, `Rs256Key`, `KeySet` and
 `KeyEncryptionKey` instead of calling `openssl`, `sha2` or `rand` directly.
@@ -74,6 +79,24 @@ and clear them with `clear_on`. Both preserve other Set-Cookie headers.
 build two on one database as replicas (`Replicas` in `src/tests.rs`).
 The router installs origin/CSRF checks, rate limits, a deadline and browser
 isolation headers. Public-client origins for CORS are looked up per request.
+
+Server-rendered pages live in `src/web` (`WebApplication`). Each page path in
+`routes::page` gets a Topcoat `RouteFn` for `GET`, showing the page, and one for
+`POST`, its form's result; axum mounts the Topcoat router with `route_service` on
+those paths only, never as the fallback, so the security layer classifies them as
+pages, with a request context and the `page` budget. A page handler resolves who
+acts, calls the service in-process and renders `piquel-ui` components, or returns
+a `Failure`, which `WebApplication::answer` turns into the page explaining it. A
+form's result is a `303`. Pages use no Topcoat browser runtime, `suspense`, `live!`
+or `asset!`, and register every route explicitly. Their Content-Security-Policy
+loads only the stylesheet and the SDK script embedded under `/assets/`, and lets
+forms post only to auth and to the page's redirect target, since browsers apply
+`form-action` to a form's redirects. A target no policy can name, such as an IP
+address, gets a page linking there instead of the `303`. The SDK script keeps a
+form marked `data-submit-once` from posting twice. The security layer accepts a
+page's form only from auth's own pages (`BrowserRequest::is_same_origin`): plain
+forms send no CSRF header, and send `Origin: null` under `Referrer-Policy:
+no-referrer`.
 
 Administrative operations are methods of `AdminService` (`src/admin/service.rs`);
 the admin API's handlers and the CLI's commands (`src/cli`) are thin adapters that

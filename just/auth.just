@@ -5,7 +5,7 @@ set working-directory := '..'
 run *ARGS:
     @cargo run --locked -p auth-service -- "$@"
 
-# Build the auth pages the binary embeds, then serve.
+# Build the auth pages and SDK script the binary embeds, then serve.
 serve:
     @just web build-auth
     @just auth run serve

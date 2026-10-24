@@ -119,17 +119,13 @@ pub(crate) mod oidc {
     pub(crate) const PAR: &str = "/oauth/par";
     /// Continues an authorization after sign-in.
     pub(crate) const AUTHORIZE_RESUME: &str = "/oauth/authorize/resume";
-    /// Describes a pending authorization to the consent page.
-    pub(crate) const AUTHORIZE_TRANSACTION: &str = "/oauth/authorize/transaction/{transaction}";
-    /// Records the consent page's decision.
-    pub(crate) const AUTHORIZE_DECISION: &str = "/oauth/authorize/decision";
     /// Exchanges codes and refresh tokens.
     pub(crate) const TOKEN: &str = "/oauth/token";
     /// Revokes refresh tokens.
     pub(crate) const REVOKE: &str = "/oauth/revoke";
     /// Returns claims for a bearer access token.
     pub(crate) const USERINFO: &str = "/oidc/userinfo";
-    /// RP-initiated logout.
+    /// RP-initiated logout, confirmed on [`page::LOGOUT`](super::page::LOGOUT).
     pub(crate) const LOGOUT: &str = "/oidc/logout";
 }
 
@@ -139,13 +135,14 @@ pub(crate) mod admin {
     pub(crate) use piquel_admin_api::paths::*;
 }
 
-/// Pages of the embedded auth frontend that the service redirects browsers to.
+/// Pages the service redirects browsers to. Each server-rendered page answers `GET`
+/// with the page and `POST` with its form's result.
 pub(crate) mod page {
-    /// Sign-in, social signup and link confirmation.
+    /// Sign-in, social signup and link confirmation, from the embedded frontend.
     pub(crate) const LOGIN: &str = "/login";
-    /// OAuth consent.
+    /// OAuth consent, server-rendered.
     pub(crate) const CONSENT: &str = "/authorize";
-    /// RP-initiated logout confirmation.
+    /// RP-initiated logout confirmation, server-rendered.
     pub(crate) const LOGOUT: &str = "/logout";
 }
 

@@ -20,13 +20,13 @@ use std::{borrow::Cow, error::Error as StdError};
 use thiserror::Error;
 use url::Url;
 
-/// OAuth and OIDC error codes, shared with the SDKs through `piquel-common` and read by
-/// the auth frontend's consent page.
-pub(super) use piquel_common::protocol::oauth::ErrorCode as OAuthCode;
+/// OAuth and OIDC error codes, shared with the SDKs through `piquel-common` and shown by
+/// auth's consent and logout pages.
+pub(crate) use piquel_common::protocol::oauth::ErrorCode as OAuthCode;
 
 /// Builds rejections from an [`OAuthCode`]. A trait because the code type lives in
 /// `piquel-common`; import it wherever rejections are built.
-pub(super) trait Reject {
+pub(crate) trait Reject {
     /// Client redirect carrying this error code and its description.
     fn redirect_url(&self, to: &ClientRedirect<'_>, description: &str) -> Url;
 
@@ -76,10 +76,10 @@ impl Reject for OAuthCode {
     }
 }
 
-/// Error of every OIDC endpoint, the consent page's JSON endpoints included: that page
-/// already reads OAuth codes, so it does not use `ApiError` messages.
+/// Error of every OIDC endpoint and of the consent and logout pages, which show what
+/// its OAuth code means rather than an `ApiError` message.
 #[derive(Debug, Error)]
-pub(super) enum OAuthError {
+pub(crate) enum OAuthError {
     /// The request was rejected with `code` and `description`. The cause, if any, is
     /// logged but never sent.
     #[error("OAuth request rejected with {code}: {description}")]
@@ -190,35 +190,46 @@ impl OAuthError {
     }
 }
 
-impl IntoResponse for OAuthError {
-    /// Redirects or answers with OAuth error JSON. Internal failures are logged as errors;
-    /// rejections with a cause are logged at debug level, since clients trigger them.
-    fn into_response(self) -> Response {
-        let (code, description, redirect) = match &self {
+impl OAuthError {
+    /// What the client is told: the status, the code and its description. Internal
+    /// failures become `server_error` and are logged as errors; rejections with a
+    /// cause are logged at debug level, since clients trigger them.
+    pub(crate) fn public(&self) -> (StatusCode, OAuthCode, &str) {
+        let (code, description) = match self {
             Self::Protocol {
                 code,
                 description,
-                redirect,
                 source,
+                ..
             } => {
                 if source.is_some() {
-                    tracing::debug!(error = %ErrorChain(&self), "OAuth request rejected");
+                    tracing::debug!(error = %ErrorChain(self), "OAuth request rejected");
                 }
-                (code.clone(), description.as_ref(), redirect.as_ref())
+                (code.clone(), description.as_ref())
             }
             Self::Database(_) | Self::Crypto(_) | Self::Url(_) | Self::CookieHeader(_) => {
-                ApiError::log_error(&self);
+                ApiError::log_error(self);
                 (
                     OAuthCode::ServerError,
                     "the request could not be completed; try again",
-                    None,
                 )
             }
         };
-        if let Some(location) = redirect {
+        (Self::status(&code), code, description)
+    }
+}
+
+impl IntoResponse for OAuthError {
+    /// Redirects to the client, or answers with OAuth error JSON.
+    fn into_response(self) -> Response {
+        let (status, code, description) = self.public();
+        if let Self::Protocol {
+            redirect: Some(location),
+            ..
+        } = &self
+        {
             return Redirect::to(location.as_str()).into_response();
         }
-        let status = Self::status(&code);
         let challenge = Self::challenge(&code);
         let body = ErrorResponse {
             error: code,

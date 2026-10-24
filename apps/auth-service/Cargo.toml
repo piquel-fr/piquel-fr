@@ -12,6 +12,7 @@ piquel-crypto.workspace = true
 piquel-repository.workspace = true
 piquel-telemetry.workspace = true
 piquel-auth.workspace = true
+piquel-ui.workspace = true
 
 askama.workspace = true
 axum.workspace = true
@@ -27,6 +28,7 @@ serde.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true
 tokio.workspace = true
+topcoat = { workspace = true, features = ["router", "view", "tower"] }
 tracing.workspace = true
 url.workspace = true
 webauthn-rs.workspace = true

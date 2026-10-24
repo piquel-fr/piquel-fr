@@ -23,8 +23,9 @@ generate:
 
 build: build-auth build-settings
 
+# The pages auth embeds: auth-web, and the SDK script its server-rendered pages use.
 build-auth:
-    @pnpm --filter @piquel/auth-web build
+    @pnpm --filter "@piquel/auth-web..." build
 
 build-settings:
     @pnpm --filter @piquel/piquel-web build

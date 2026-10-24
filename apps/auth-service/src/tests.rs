@@ -15,6 +15,7 @@ use axum::{
     body::{Body, to_bytes},
     extract::ConnectInfo,
     http::{Method, Request, StatusCode, header},
+    response::Response,
 };
 use chrono::{Duration, Utc};
 use piquel_common::{
@@ -130,8 +131,8 @@ impl Replicas {
     }
 }
 
-/// Largest response body [`Browser::call`] reads.
-const MAX_RESPONSE_BYTES: usize = 256 * 1024;
+/// Largest response body [`Browser::call`] and the page tests read.
+pub(crate) const MAX_RESPONSE_BYTES: usize = 256 * 1024;
 
 /// A browser signed in to a test account, for handler tests.
 pub(crate) struct Browser {
@@ -211,26 +212,86 @@ impl Browser {
         path: &str,
         body: Option<Value>,
     ) -> (StatusCode, Value) {
-        let response = router
-            .clone()
-            .oneshot(
-                Request::builder()
-                    .extension(RequestContext::TEST)
-                    .method(method)
-                    .uri(path)
-                    .header(header::COOKIE, &self.cookie)
-                    .header(header::CONTENT_TYPE, "application/json")
-                    .body(body.map_or_else(Body::empty, |body| Body::from(body.to_string())))
-                    .expect("request"),
-            )
-            .await
-            .expect("response");
+        let request = self
+            .request(method, path)
+            .extension(RequestContext::TEST)
+            .header(header::CONTENT_TYPE, "application/json")
+            .body(body.map_or_else(Body::empty, |body| Body::from(body.to_string())))
+            .expect("request");
+        let response = Self::dispatch(router, request).await;
         let status = response.status();
         let body = to_bytes(response.into_body(), MAX_RESPONSE_BYTES)
             .await
             .expect("body");
         (status, serde_json::from_slice(&body).unwrap_or(Value::Null))
     }
+
+    /// Navigates to `path` on the whole service as this browser, and returns the
+    /// whole response.
+    pub(crate) async fn visit(&self, router: &Router, path: &str) -> Response {
+        let request = self
+            .request(Method::GET, path)
+            .body(Body::empty())
+            .expect("request");
+        Self::dispatch(router, request).await
+    }
+
+    /// Posts a page's form, `fields`, to `path` on the whole service as this browser,
+    /// with `headers` such as the `Sec-Fetch-Site` and `Origin` it sends, and returns
+    /// the whole response. The service's security layer attaches the request context.
+    pub(crate) async fn submit(
+        &self,
+        router: &Router,
+        path: &str,
+        fields: &[(&str, &str)],
+        headers: &[(&str, &str)],
+    ) -> Response {
+        let form = url::form_urlencoded::Serializer::new(String::new())
+            .extend_pairs(fields.iter().copied())
+            .finish();
+        let mut request = self
+            .request(Method::POST, path)
+            .header(header::CONTENT_TYPE, "application/x-www-form-urlencoded");
+        for (name, value) in headers {
+            request = request.header(*name, *value);
+        }
+        Self::dispatch(router, request.body(Body::from(form)).expect("request")).await
+    }
+
+    /// A request from this browser, with its session cookie.
+    fn request(&self, method: Method, path: &str) -> axum::http::request::Builder {
+        Request::builder()
+            .method(method)
+            .uri(path)
+            .header(header::COOKIE, &self.cookie)
+    }
+
+    /// `router`'s response to `request`.
+    async fn dispatch(router: &Router, request: Request<Body>) -> Response {
+        router.clone().oneshot(request).await.expect("response")
+    }
+}
+
+/// The value of the query parameter `name` in `url`.
+pub(crate) fn parameter(url: &url::Url, name: &str) -> String {
+    url.query_pairs()
+        .find(|(key, _)| key == name)
+        .expect("URL contains expected query parameter")
+        .1
+        .into_owned()
+}
+
+/// The absolute URL in `response`'s `Location`.
+pub(crate) fn location(response: &Response) -> url::Url {
+    url::Url::parse(
+        response
+            .headers()
+            .get(header::LOCATION)
+            .expect("response has a Location header")
+            .to_str()
+            .expect("Location header is valid text"),
+    )
+    .expect("Location header contains an absolute URL")
 }
 
 /// The operator client changes made by tests are attributed to, as the `client`

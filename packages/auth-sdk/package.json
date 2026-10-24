@@ -3,6 +3,9 @@
   "private": true,
   "version": "0.1.0",
   "type": "module",
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json"
+  },
   "exports": {
     ".": "./src/index.ts",
     "./style.css": "./src/style.css",
@@ -12,6 +15,7 @@
     "@sveltejs/kit": "catalog:"
   },
   "devDependencies": {
-    "@sveltejs/kit": "catalog:"
+    "@sveltejs/kit": "catalog:",
+    "typescript": "catalog:"
   }
 }

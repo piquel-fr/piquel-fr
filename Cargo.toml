@@ -9,6 +9,7 @@ members = [
     "crates/crypto",
     "crates/database",
     "crates/telemetry",
+    "crates/ui",
 ]
 
 [workspace.package]
@@ -33,6 +34,7 @@ piquel-repository    = { path = "crates/database" }
 piquel-telemetry     = { path = "crates/telemetry" }
 piquel-auth          = { path = "crates/auth-sdk" }
 piquel-admin-api     = { path = "crates/admin-api" }
+piquel-ui            = { path = "crates/ui" }
 
 # External crates
 async-trait = "0.1"
@@ -56,6 +58,9 @@ sha2 = "0.10"
 rand = "0.8"
 sqlx = { version = "0.8", default-features = false, features = ["runtime-tokio-rustls", "postgres", "chrono", "uuid", "json", "ipnet", "migrate", "macros"] }
 thiserror = "2.0"
+# Server-rendered pages: the router, `view!` and the tower service only. Its
+# defaults add a browser runtime, `asset!` and discovery, which auth's pages avoid.
+topcoat = { version = "0.10", default-features = false }
 tokio = { version = "1.48", features = ["macros", "rt-multi-thread", "signal", "net", "sync", "time"] }
 tower = { version = "0.5", features = ["util"] }
 tower-http = { version = "0.6", features = ["trace"] }
