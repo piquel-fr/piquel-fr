@@ -254,8 +254,9 @@ just auth account alice emails remove <email-id> --reason "Asked by email"
     address.
   - Before running either, follow the evidence policy in
     [account recovery](docs/security/account-recovery.md#supports-evidence-policy).
-  - It never recovers an administrator, since whoever used the link could use
-    the rights before the owner undoes it. Revoke the rights with `admin revoke`
+  - It never recovers an account while it holds administrator rights, since
+    whoever used the link could use them before the owner undoes it. First
+    revoke the rights with `admin revoke`
     (grant another administrator first if it is the last), recover the account,
     then grant them again once its owner is confirmed.
 - Each change is recorded as a domain event with the operator: `$USER` and the host

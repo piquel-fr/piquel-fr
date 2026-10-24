@@ -15,7 +15,7 @@ This is the target design; parts not built yet are marked *(planned)*.
 The auth executable owns everything that authenticates someone or issues a
 credential: discovery, JWKS, authorization, token, userinfo, logout, and the
 pages a ceremony needs (login, signup, consent, passkey confirmation, account
-recovery and device verification *(planned)*). It never hosts settings, developer or admin pages.
+recovery *(planned)* and device verification *(planned)*). It never hosts settings, developer or admin pages.
 
 The account and admin APIs are routes in the same executable. They are small
 next to the pages that use them, and keeping them there keeps one binary, one
@@ -156,10 +156,10 @@ so support can (`user undo-recovery`, `AdminService::undo_recovery`) once it has
 confirmed them: the same rollback, recorded with the reason. Starting another
 recovery while one can be undone is refused unless asked for
 (`--despite-undoable`), and `user recover` first lists each undoable recovery
-with everything it added. Nobody recovers an administrator: whoever used the link
-could use its rights before the owner undoes it, so support revokes them first.
-The pages that use the link and offer the undo are *(planned)*; until then
-nothing can use a link.
+with everything it added. No account is recovered while it holds administrator
+rights: whoever used the link could use them before the owner undoes it, so
+revoking them is the prerequisite.
+The pages that use the link and offer the undo are *(planned)*; until then no page uses a link.
 
 ## Contracts
 
@@ -172,4 +172,7 @@ first-party; they change together with the frontends in this repository.
 Nothing auth runs on may require auth to log in: piqueld, server access, the
 tailnet, PostgreSQL, DNS and the tunnel. If auth or its frontends are down, the
 CLI, given database access, can still do every admin operation and repair
-accounts: see [Administration](../../README.md#administration).
+accounts: see [Administration](../../README.md#administration). Recovering an
+account whose owner lost every passkey follows
+[account recovery](../security/account-recovery.md), including support's
+evidence policy.
