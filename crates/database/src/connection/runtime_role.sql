@@ -21,8 +21,8 @@ GRANT USAGE ON SCHEMA public TO %1$I;
 -- Start from nothing, so privileges narrowed below never linger.
 REVOKE ALL ON ALL TABLES IN SCHEMA public FROM %1$I;
 GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO %1$I;
--- Only migrations read these. A migration dropping one removes it from here too.
-REVOKE ALL ON _sqlx_migrations, security_audit_log FROM %1$I;
+-- Only migrations read it.
+REVOKE ALL ON _sqlx_migrations FROM %1$I;
 -- History is append-only, and its personal data is erased but never rewritten.
 REVOKE UPDATE, DELETE ON domain_events FROM %1$I;
 REVOKE UPDATE ON event_personal_data FROM %1$I;

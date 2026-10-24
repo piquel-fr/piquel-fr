@@ -18,7 +18,6 @@ use piquel_common::{
 };
 use serde::Serialize;
 use sqlx::types::Json;
-use url::Url;
 
 /// A registered client with its exact URI allowlists. A deleted client is still
 /// returned, disabled, with its `deleted_at`.
@@ -386,16 +385,14 @@ impl OidcRepository<'_> {
     /// client, or another [`DatabaseError`] if the query fails.
     pub async fn delete_client(&mut self, id: &ClientId) -> Result<(), DatabaseError> {
         // Every CTE runs; the statement returns the deleted ID, so an unknown client
-        // is `NotFound`. The previous release authenticates with
-        // `client_secret_hash`, so it is cleared with the secrets.
+        // is `NotFound`.
         run!(
             self,
             fetch_one,
             sqlx::query_scalar!(
                 "WITH client AS (
                     UPDATE oidc_clients
-                    SET deleted_at = now(), enabled = FALSE, client_secret_hash = NULL,
-                        updated_at = now()
+                    SET deleted_at = now(), enabled = FALSE, updated_at = now()
                     WHERE id = $1 AND deleted_at IS NULL
                     RETURNING id
                 ),
@@ -594,46 +591,6 @@ impl OidcRepository<'_> {
         )
     }
 
-    /// Fills in the origin of redirect URIs that have none: those registered before
-    /// migration `0008`, or by the previous release since. Origins are serialized
-    /// by the same URL parser as on registration, which SQL cannot reproduce for
-    /// forms such as `https://app.example:0443/` or Unicode hosts. A URI without a
-    /// tuple origin keeps none, and allows no browser origin.
-    ///
-    /// # Errors
-    ///
-    /// Returns [`DatabaseError`] if a query fails.
-    pub async fn fill_redirect_origins(&mut self) -> Result<(), DatabaseError> {
-        let missing = run!(
-            self,
-            fetch_all,
-            sqlx::query_scalar!("SELECT DISTINCT uri FROM oidc_redirect_uris WHERE origin IS NULL")
-        )?;
-        let (uris, origins): (Vec<String>, Vec<String>) = missing
-            .into_iter()
-            .filter_map(|uri| {
-                let origin = Url::parse(&uri).ok()?.origin();
-                origin
-                    .is_tuple()
-                    .then(|| (uri, origin.ascii_serialization()))
-            })
-            .unzip();
-        run!(
-            self,
-            execute,
-            sqlx::query!(
-                "UPDATE oidc_redirect_uris r
-                SET origin = f.origin
-                FROM unnest($1::text[], $2::text[]) AS f(uri, origin)
-                WHERE r.uri = f.uri
-                AND r.origin IS NULL",
-                &uris,
-                &origins,
-            )
-        )?;
-        Ok(())
-    }
-
     /// Whether an enabled public client has an authorization redirect URI on
     /// `origin`, serialized as browsers send it in an `Origin` header.
     ///
@@ -669,17 +626,12 @@ impl OidcRepository<'_> {
         id: &ClientId,
         digest: &[u8; 32],
     ) -> Result<(), DatabaseError> {
-        // The previous release authenticates with `client_secret_hash`, so it holds the
-        // newest secret too.
         run!(
             self,
             execute,
             sqlx::query!(
-                "WITH secret AS (
-                    INSERT INTO oidc_client_secrets (id, client_id, secret_digest)
-                    VALUES ($1, $2, $3)
-                )
-                UPDATE oidc_clients SET client_secret_hash = $3 WHERE id = $2",
+                "INSERT INTO oidc_client_secrets (id, client_id, secret_digest)
+                VALUES ($1, $2, $3)",
                 ClientSecretId::new().as_uuid(),
                 id.as_str(),
                 digest.as_slice(),

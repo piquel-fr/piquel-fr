@@ -289,8 +289,9 @@ async fn events_a_newer_release_wrote_read_as_unknown() {
     tx.rollback().await.expect("rollback");
 }
 
-/// The migration turns audit rows into imported events with their action, outcome
-/// and metadata. It runs in a scratch schema, since the test database is migrated.
+/// Migration `0005` turns audit rows into imported events with their action, outcome
+/// and metadata, and `0018` imports the rows written since, then drops the log. It
+/// runs in a scratch schema, since the test database is migrated.
 #[tokio::test]
 #[ignore = "requires a disposable TEST_DATABASE_URL"]
 async fn migration_imports_the_audit_log() {
@@ -320,10 +321,7 @@ async fn migration_imports_the_audit_log() {
         .execute(&mut connection)
         .await
         .expect("user");
-    for (action, metadata, age) in [
-        ("passkey.login", "{}", 2),
-        ("federation.link", r#"{"provider":"github"}"#, 1),
-    ] {
+    let audit = async |connection: &mut PgConnection, action: &str, metadata: &str, age: i32| {
         sqlx::query(
             "INSERT INTO security_audit_log(id,user_id,action,outcome,request_metadata,created_at)
             VALUES($1,$2,$3,'success',$4::jsonb,now() - make_interval(hours => $5))",
@@ -333,14 +331,24 @@ async fn migration_imports_the_audit_log() {
         .bind(action)
         .bind(metadata)
         .bind(age)
-        .execute(&mut connection)
+        .execute(connection)
         .await
         .expect("audit row");
-    }
+    };
+    audit(&mut connection, "passkey.login", "{}", 3).await;
+    audit(
+        &mut connection,
+        "federation.link",
+        r#"{"provider":"github"}"#,
+        2,
+    )
+    .await;
     sqlx::raw_sql(include_str!("../../../migrations/0005_domain_events.sql"))
         .execute(&mut connection)
         .await
         .expect("migration");
+    // The release before 0005 keeps writing to the log during that deploy.
+    audit(&mut connection, "passkey.login", "{}", 1).await;
     // The rest bring the schema to the one this release reads.
     for migration in [
         include_str!("../../../migrations/0006_deliveries.sql"),
@@ -349,6 +357,7 @@ async fn migration_imports_the_audit_log() {
         include_str!("../../../migrations/0009_pushed_authorization_requests.sql"),
         include_str!("../../../migrations/0010_session_devices.sql"),
         include_str!("../../../migrations/0015_event_reasons.sql"),
+        include_str!("../../../migrations/0018_contract_audit_log_and_legacy_secrets.sql"),
     ] {
         sqlx::raw_sql(migration)
             .execute(&mut connection)
@@ -373,6 +382,7 @@ async fn migration_imports_the_audit_log() {
     assert_eq!(
         imported,
         [
+            ("passkey.login", "success", serde_json::json!({})),
             (
                 "federation.link",
                 "success",

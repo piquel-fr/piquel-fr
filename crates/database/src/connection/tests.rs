@@ -350,7 +350,6 @@ async fn runtime_role_has_only_row_privileges() {
         "UPDATE event_personal_data SET details = details",
         "DELETE FROM event_consumers",
         "SELECT FROM _sqlx_migrations",
-        "SELECT FROM security_audit_log",
         "CREATE TABLE shadow (id INT)",
         "ALTER TABLE users DISABLE TRIGGER ALL",
         "SET session_replication_role = replica",

@@ -181,7 +181,7 @@ the runtime role or resets its attributes and password, and grants it:
     rewritten. Queries on it therefore cannot use `FOR UPDATE`, which needs
     `UPDATE`;
   - `event_consumers`: `SELECT, INSERT, UPDATE`;
-  - `_sqlx_migrations` and `security_audit_log`: nothing.
+  - `_sqlx_migrations`: nothing.
 
 Grants are reset on every run, so they cover tables that new migrations add. A
 migration that drops a listed table, or a new table that needs an exception,
@@ -217,18 +217,17 @@ back-channel logout tokens of the clients that received tokens from it
 (`oidc_session_clients`, which a trigger fills whenever any release redeems a
 code). The repository method underneath is private to the crate,
 so no revocation can skip the event. Refresh rotations are too frequent to be
-events. `Imported` holds the rows of `security_audit_log`, the log events replace,
+events. `Imported` holds the rows of `security_audit_log`, the log events replaced,
 verbatim; only migrations write it, and its fields are private, so it can only be
 read back. `repositories/events/` stores events: the personal data split below,
 `read_after` and `acknowledge`.
-Migration `0005` imports the log but keeps the table, which the previous release
-writes to during a deploy; a later release imports the rows written since and
-drops it. Migration `0008` likewise keeps `oidc_clients.client_secret_hash`, which
-auth keeps equal to a confidential client's newest secret for the previous
-release, and a trigger mirrors the previous release's writes to it into
-`oidc_client_secrets`. Redirect URI origins need URL parsing, so `run_migrations`
-fills in the ones the previous release leaves empty. A later release drops the
-trigger and the column, and makes `oidc_redirect_uris.origin` NOT NULL.
+Migration `0005` imported the log but kept the table, which the previous release
+wrote to during a deploy; `0018` imports the rows written since and drops it.
+Migration `0008` likewise kept `oidc_clients.client_secret_hash` for the previous
+release, with a trigger mirroring its writes into `oidc_client_secrets`, and left
+the origins of older redirect URIs for `run_migrations` to fill in. `0018` drops
+the trigger and makes `oidc_redirect_uris.origin` NOT NULL; auth no longer writes
+the column, which a later release drops.
 
 Variants hold only typed IDs, enums, scopes, timestamps and counts, so a secret,
 token, `WebAuthn` state or raw header cannot end up in one. Anything that identifies
