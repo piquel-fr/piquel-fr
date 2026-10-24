@@ -4,6 +4,7 @@
 use super::*;
 use crate::{
     AdminError, AdminService, Operator, Reason,
+    account::Subject,
     admin::tests::{Harness, cli, operator},
     passkey::tests::Fixture,
     tests::{AUTH_ORIGIN, Browser, verified_address},
@@ -360,6 +361,31 @@ async fn only_an_older_passkey_undoes_a_recovery() {
         scenario.undo(&older, &view["id"]).await,
         StatusCode::NOT_FOUND
     );
+}
+
+/// Whoever used the link cannot remove the passkeys from before the recovery, so
+/// it always stays possible to undo; an operator still can.
+#[tokio::test]
+#[ignore = "requires TEST_DATABASE_URL"]
+async fn the_link_cannot_remove_older_passkeys() {
+    let scenario = Scenario::new().await;
+    let token = scenario.recover().await;
+    let recovered = scenario.enroll(&token).await;
+    let older = scenario.keys.key_id;
+
+    let path = routes::passkey::ITEM.replace("{id}", &older.to_string());
+    let response = scenario
+        .keys
+        .request(&path, Method::DELETE, &recovered, Value::Null)
+        .await;
+    assert_eq!(response.status(), StatusCode::FORBIDDEN);
+    assert!(scenario.passkeys().await.contains(&older), "kept");
+    let subject = Subject::operator(scenario.user(), cli(), reason());
+    let service = AccountService::new(scenario.database().clone());
+    service
+        .revoke_passkey(&subject, older)
+        .await
+        .expect("an operator removes it");
 }
 
 /// The recovered passkey's sign-in counts as a fresh confirmation, so the link's

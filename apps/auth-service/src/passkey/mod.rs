@@ -1025,7 +1025,9 @@ impl AccountService {
     }
 
     /// Removes a passkey and signs the account out elsewhere. One active passkey
-    /// always remains, even with a social identity linked.
+    /// always remains, even with a social identity linked. While a recovery can
+    /// be undone, the owner removes a passkey from before it only from a session
+    /// such a passkey signed in.
     pub(crate) async fn revoke_passkey(
         &self,
         subject: &Subject,
@@ -1033,6 +1035,9 @@ impl AccountService {
     ) -> Result<(), AccountError> {
         let mut tx = self.database.begin().await?;
         subject.lock_confirmed(&mut tx).await?;
+        if let Some(session) = subject.own_session() {
+            Self::keep_older_passkey(&mut tx, subject.user(), session, id).await?;
+        }
         if !tx.passkeys().revoke_if_not_last(id, subject.user()).await? {
             return Err(PasskeyError::LastPasskey.into());
         }

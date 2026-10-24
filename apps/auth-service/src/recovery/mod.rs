@@ -16,7 +16,9 @@
 //! identities linked and the addresses added or verified since, restores the
 //! primary address, and signs out every other session, each of which was signed
 //! in since. The owner loses what they added themselves meanwhile too; the undo
-//! page lists all of it first.
+//! page lists all of it first. Until then, only a session an older passkey
+//! signed in may remove an older passkey, so the link's holder cannot make the
+//! recovery impossible to undo.
 
 /// Recovery failures and their browser response mapping.
 mod error;
@@ -29,7 +31,7 @@ use crate::{
 };
 use chrono::{DateTime, Duration, Utc};
 use piquel_common::{
-    AccountStatus, RecoveryId, UserId,
+    AccountStatus, PasskeyId, RecoveryId, SessionId, UserId,
     config::Origin,
     events::{DomainEvent, EventContext, RevocationReason},
 };
@@ -197,7 +199,7 @@ impl AccountService {
             return Ok(None);
         };
         let rollback = tx.recoveries().rollback(&recovery).await?;
-        let can_undo = Self::predates(&mut tx, owner, &recovery).await?;
+        let can_undo = Self::predates(&mut tx, owner.user(), owner.session().id, &recovery).await?;
         tx.commit().await?;
         Ok(Some(RecoveryView {
             id: recovery.id,
@@ -228,7 +230,7 @@ impl AccountService {
         if recovery.id != id {
             return Err(RecoveryError::Changed.into());
         }
-        if !Self::predates(&mut tx, owner, &recovery).await? {
+        if !Self::predates(&mut tx, user, owner.session().id, &recovery).await? {
             return Err(RecoveryError::OlderPasskeyRequired.into());
         }
         let context = owner.context();
@@ -292,21 +294,53 @@ impl AccountService {
         Ok(())
     }
 
+    /// Refuses removing `user`'s passkey `id` from the owner's `session` while
+    /// the account has a recovery to undo that the passkey predates and the
+    /// session does not. Whoever used the link could otherwise remove every
+    /// older passkey, and nothing could undo the recovery. Administrators, who
+    /// have no such session, still can. In the removal's transaction, under the
+    /// account lock.
+    pub(crate) async fn keep_older_passkey(
+        tx: &mut DatabaseTransaction<'_>,
+        user: UserId,
+        session: SessionId,
+        id: PasskeyId,
+    ) -> Result<(), AccountError> {
+        let Some(recovery) = tx.recoveries().latest_undoable(user).await? else {
+            return Ok(());
+        };
+        if Self::older(tx, user, id, &recovery).await?
+            && !Self::predates(tx, user, session, &recovery).await?
+        {
+            return Err(RecoveryError::OlderPasskeyKept.into());
+        }
+        Ok(())
+    }
+
     /// Whether a passkey enrolled before `recovery` started, still active,
-    /// signed the owner's session in or confirmed it since.
+    /// signed `session` in or confirmed it since.
     async fn predates(
         tx: &mut DatabaseTransaction<'_>,
-        owner: &Owner,
+        user: UserId,
+        session: SessionId,
         recovery: &StoredRecovery,
     ) -> Result<bool, AccountError> {
-        let Some(passkey) = tx.sessions().passkey(owner.session().id).await? else {
+        let Some(passkey) = tx.sessions().passkey(session).await? else {
             return Ok(false);
         };
-        Ok(tx
-            .passkeys()
-            .enrolled_at(owner.user(), passkey)
-            .await?
-            .is_some_and(|enrolled| enrolled < recovery.started_at))
+        Self::older(tx, user, passkey, recovery).await
+    }
+
+    /// Whether `user`'s passkey `id` is active and was enrolled before
+    /// `recovery` started.
+    async fn older(
+        tx: &mut DatabaseTransaction<'_>,
+        user: UserId,
+        id: PasskeyId,
+        recovery: &StoredRecovery,
+    ) -> Result<bool, AccountError> {
+        let enrolled = tx.passkeys().enrolled_at(user, id).await?;
+        Ok(enrolled.is_some_and(|enrolled| enrolled < recovery.started_at))
     }
 }
 

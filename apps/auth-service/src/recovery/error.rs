@@ -17,6 +17,10 @@ pub(crate) enum RecoveryError {
     /// undoable one.
     #[error("the recovery to undo changed")]
     Changed,
+    /// A session no older passkey signed in tried to remove a passkey from
+    /// before a recovery that can still be undone.
+    #[error("a passkey from before an undoable recovery needs an older passkey to remove")]
+    OlderPasskeyKept,
     /// The session was not signed in, or confirmed, by a passkey enrolled before
     /// the recovery started.
     #[error("undoing a recovery needs a passkey enrolled before it")]
@@ -35,6 +39,9 @@ impl From<RecoveryError> for ApiError {
             }
             RecoveryError::Changed => Self::conflict(
                 "This recovery changed since you opened this page. Reload it to see what undoing it removes.",
+            ),
+            RecoveryError::OlderPasskeyKept => Self::forbidden(
+                "Your account was recovered. Only a passkey you had before the recovery can remove the passkeys from before it; Piquel support can too.",
             ),
             RecoveryError::OlderPasskeyRequired => {
                 Self::forbidden("Sign in with a passkey you had before this recovery to undo it.")
