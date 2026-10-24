@@ -146,13 +146,20 @@ meanwhile too, so the undo page lists exactly what goes first. Owned clients and
 profile edits stay: they are not ways in.
 
 Until a recovery settles, a session that does not predate it cannot remove the
-passkeys, identities or addresses the account had before it, so whoever used the
-link cannot make it impossible to undo; administrators and operators still can.
-With several recoveries to undo, only what predates all of them is trusted, and
-`user recover` first lists the account's recoveries of the last 30 days and the
-passkey each enrolled, so support can remove a suspicious one before starting
-another. The pages that use the link and offer the undo are *(planned)*; until
-then nothing can use a link.
+passkeys, identities or addresses the account had before it, nor move the primary
+address away from one, so whoever used the link can neither make it impossible
+to undo nor redirect the next link; administrators and operators still can. With
+several recoveries to undo, only what predates all of them is trusted.
+
+An owner with no passkey left from before a recovery cannot undo it themselves,
+so support can (`user undo-recovery`, `AdminService::undo_recovery`) once it has
+confirmed them: the same rollback, recorded with the reason. Starting another
+recovery while one can be undone is refused unless asked for
+(`--despite-undoable`), and `user recover` first lists each undoable recovery
+with everything it added. Nobody recovers an administrator: whoever used the link
+could use its rights before the owner undoes it, so support revokes them first.
+The pages that use the link and offer the undo are *(planned)*; until then
+nothing can use a link.
 
 ## Contracts
 

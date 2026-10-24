@@ -209,6 +209,7 @@ just auth user show alice                 # recorded, since it shows personal da
 just auth user disable alice --reason "Spam"
 just auth user enable alice
 just auth user recover alice --reason "Lost every passkey"   # not usable yet, see below
+just auth user undo-recovery alice --reason "Owner confirmed by phone"
 just auth session revoke <session-id>     # one session, as `user show` lists it
 just auth session revoke-all alice        # every session of the account
 just auth audit --user alice --kind session_revoked
@@ -236,15 +237,27 @@ just auth account alice emails remove <email-id> --reason "Asked by email"
   server-rendered pages. It is for an owner who lost every passkey. It signs the
   account out everywhere, and emails its primary verified address a link that
   enrolls one passkey, once, within a day; it prints the link too, for an owner
-  without an address. Running it again replaces the older link. The owner
-  can undo a recovery with a passkey they had before it, for 30 days after the
-  link was used, which takes back every passkey, social sign-in, app consent and
-  address added or verified since. Until then, only a session of such a passkey,
-  or an operator, may remove the passkeys, social sign-ins and addresses from
-  before it. `user recover` first lists the account's recoveries of the last 30
-  days and the passkey each enrolled.
+  without an address. The owner can undo a recovery with a passkey they had
+  before it, for 30 days after the link was used, which takes back every passkey,
+  social sign-in, app consent and address added or verified since. Until then,
+  only a session of such a passkey, or an operator, may remove the passkeys,
+  social sign-ins and addresses from before it, or move the primary address away
+  from one.
+  - It first lists the account's recoveries of the last 30 days, with what each
+    one that can still be undone added since. While one can, it refuses: review
+    it, then either undo it with `user undo-recovery`, or pass
+    `--despite-undoable` when its own owner asks again.
+  - `user undo-recovery` undoes the newest recovery for an owner with no passkey
+    left from before it, once support has confirmed them: whoever used the link
+    loses everything they added, and the next link goes back to the owner's
+    address.
+  - It never recovers an administrator, since whoever used the link could use
+    the rights before the owner undoes it. Revoke the rights with `admin revoke`
+    (grant another administrator first if it is the last), recover the account,
+    then grant them again once its owner is confirmed.
 - Each change is recorded as a domain event with the operator: `$USER` and the host
-  name. Unlike the admin API, the CLI may act on administrators' accounts.
+  name. Unlike the admin API, the CLI may act on administrators' accounts, except
+  to recover one.
 - Failures print their causes and exit with 1; usage errors exit with 2.
 
 Administrators manage accounts, sessions, invitations and other administrators

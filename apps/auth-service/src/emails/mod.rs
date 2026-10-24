@@ -375,7 +375,9 @@ impl AccountService {
     }
 
     /// Makes a verified address the primary one, and queues a notice to the
-    /// previous primary address.
+    /// previous primary address. Moving the primary away from an address from
+    /// before an undoable recovery is protected as [`AccountService::keep_older`]
+    /// says, so whoever used the link cannot redirect the next one.
     pub(crate) async fn make_primary_email(
         &self,
         subject: &Subject,
@@ -392,6 +394,13 @@ impl AccountService {
             return Err(EmailError::NotVerified.into());
         }
         if !email.is_primary {
+            // Moving it away from an address from before an undoable recovery is
+            // guarded like removing that address.
+            let current = tx.emails().list(subject.user()).await?;
+            if let Some(current) = current.into_iter().find(|email| email.is_primary) {
+                let joined = tx.emails().joined_at(subject.user(), current.id).await?;
+                Self::keep_older(&mut tx, subject.user(), subject.own_session(), joined).await?;
+            }
             let previous_email_id = tx.emails().set_primary(subject.user(), id).await?;
             tx.record(
                 &subject.context(),

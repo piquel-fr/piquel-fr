@@ -3,7 +3,11 @@
 use super::{AdminError, HandleIssue, HandleProblem, InviteExpiry, Operator, Reason, UserRef};
 use crate::{
     Applied, ClientDetails, ClientRegistry, ClientRegistryError, GracePeriod,
-    recovery::{LINK_LIFETIME, RecoveryLinks, SETTLE_WINDOW},
+    account::AccountService,
+    recovery::{
+        LINK_LIFETIME, RecoveryError, RecoveryLinks, ReviewedRecovery, SETTLE_WINDOW, Undoable,
+        WhileUndoable,
+    },
 };
 use chrono::Utc;
 use piquel_admin_api::{
@@ -20,7 +24,7 @@ use piquel_common::{
 use piquel_crypto::{ClientSecret, Secret};
 use piquel_repository::{
     Database, DatabaseError, DatabaseTransaction, DeliveryStatus, DeliverySummary, EventFilter,
-    InsertRecovery, RecentRecovery, SessionScope, StoredOidcClient,
+    InsertRecovery, SessionScope, StoredOidcClient,
 };
 use std::collections::BTreeMap;
 use url::Url;
@@ -254,7 +258,13 @@ impl AdminService {
     /// link that enrolls one passkey, once, within a day. An operator at the
     /// terminal is also given the link, which also reaches an owner without an
     /// address. An administrator never sees it, so they may recover only an
-    /// account with a primary address, and never another administrator's.
+    /// account with a primary address.
+    ///
+    /// Nobody recovers an administrator: whoever used the link could use its
+    /// rights before the owner undoes it. While another recovery can still be
+    /// undone, it starts only `WhileUndoable::Proceed`: support reviews that one
+    /// ([`Self::recent_recoveries`]) and undoes it ([`Self::undo_recovery`])
+    /// first.
     ///
     /// The owner can undo the recovery with a passkey enrolled before it, which
     /// takes back what the account gained since and restores this primary
@@ -265,11 +275,19 @@ impl AdminService {
         user_id: UserId,
         reason: Reason,
         links: &RecoveryLinks,
+        while_undoable: WhileUndoable,
     ) -> Result<Option<Url>, AdminError> {
         let mut tx = self.database.begin().await?;
         let user = operator.lock(&mut tx, user_id).await?;
         if user.status != AccountStatus::Active {
             return Err(AdminError::RecoveryOfDisabledAccount);
+        }
+        if tx.administrators().contains(user_id).await? {
+            return Err(AdminError::RecoveryOfAdministrator);
+        }
+        let undoable = Undoable::load(&mut tx, user_id).await?;
+        if undoable.newest().is_some() && while_undoable == WhileUndoable::Refuse {
+            return Err(AdminError::RecoveryUndoable);
         }
         // The link goes to the primary address, which is always verified.
         let primary = tx
@@ -312,17 +330,23 @@ impl AdminService {
 
     /// The account's recoveries started or used within the last
     /// [`SETTLE_WINDOW`], so every one that can still be undone, newest first,
-    /// with the passkey each enrolled. Support reviews them before starting another, and can remove a
-    /// suspicious passkey first. Recorded, as a view of the account.
+    /// with the passkey each enrolled and, while it can be undone, all it would
+    /// take back: what whoever used it added since. Support reviews them before
+    /// starting another, and undoes a suspicious one first. Recorded, as a view
+    /// of the account.
     pub(crate) async fn recent_recoveries(
         &self,
         operator: &Operator,
         user_id: UserId,
-    ) -> Result<Vec<RecentRecovery>, AdminError> {
+    ) -> Result<Vec<ReviewedRecovery>, AdminError> {
         operator.authorize_read(&self.database).await?;
         let mut tx = self.database.begin().await?;
         let since = Utc::now() - SETTLE_WINDOW;
         let recent = tx.recoveries().recent(user_id, since).await?;
+        let reviewed = Undoable::load(&mut tx, user_id)
+            .await?
+            .review(&mut tx, recent)
+            .await?;
         tx.record(
             &operator.context(),
             Some(user_id),
@@ -330,7 +354,38 @@ impl AdminService {
         )
         .await?;
         tx.commit().await?;
-        Ok(recent)
+        Ok(reviewed)
+    }
+
+    /// Undoes recovery `id`, the account's newest undoable one, for `reason`, as
+    /// support does once it has confirmed the owner, who may have no passkey left
+    /// from before it. Takes back the same rollback the owner's undo would, so
+    /// the same notices go out, and ends every session and refresh grant; each
+    /// change records `reason`.
+    pub(crate) async fn undo_recovery(
+        &self,
+        operator: &Operator,
+        user_id: UserId,
+        id: RecoveryId,
+        reason: Reason,
+    ) -> Result<(), AdminError> {
+        let mut tx = self.database.begin().await?;
+        operator.lock(&mut tx, user_id).await?;
+        let undoable = Undoable::load(&mut tx, user_id).await?;
+        let recovery = undoable.newest_is(id).map_err(|error| match error {
+            RecoveryError::Changed => AdminError::RecoveryChanged,
+            RecoveryError::InvalidLink
+            | RecoveryError::NothingToUndo
+            | RecoveryError::Protected
+            | RecoveryError::OlderPasskeyRequired => AdminError::NoRecoveryToUndo,
+        })?;
+        let context = EventContext {
+            reason: Some(reason.into_inner()),
+            ..operator.context()
+        };
+        AccountService::revert(&mut tx, &context, recovery).await?;
+        Self::end_sessions(&mut tx, &context, user_id, RevocationReason::Admin).await?;
+        Self::finish(tx, operator, Some(user_id), vec![]).await
     }
 
     /// Ends every session and refresh grant of an account.

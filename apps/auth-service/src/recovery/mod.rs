@@ -22,9 +22,12 @@
 //! page lists all of it first.
 //!
 //! Until a recovery settles, a session that does not predate it cannot remove
-//! the passkeys, identities or addresses the account had before it
-//! ([`AccountService::keep_older`]), so the link's holder cannot make it
-//! impossible to undo; administrators and operators still can.
+//! the passkeys, identities or addresses the account had before it, nor move the
+//! primary address away from one ([`AccountService::keep_older`]), so the link's
+//! holder can neither make it impossible to undo nor redirect the next link;
+//! administrators and operators still can. An owner left with no passkey from
+//! before it is helped by support, which undoes it for them
+//! (`AdminService::undo_recovery`) with the same [`AccountService::revert`].
 
 /// Recovery failures and their browser response mapping.
 mod error;
@@ -45,7 +48,8 @@ use piquel_common::{
 };
 use piquel_crypto::{CryptoError, Secret};
 use piquel_repository::{
-    DatabaseError, DatabaseTransaction, Rollback, SessionScope, StoredPasskey, StoredRecovery,
+    DatabaseError, DatabaseTransaction, RecentRecovery, Rollback, SessionScope, StoredPasskey,
+    StoredRecovery,
 };
 use serde::Serialize;
 use std::sync::Arc;
@@ -190,26 +194,67 @@ impl OpenRecovery {
     }
 }
 
+/// What starting a recovery does while another can still be undone. Support
+/// reviews and undoes the other first; starting anyway is a deliberate choice.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum WhileUndoable {
+    /// Refuse to start.
+    Refuse,
+    /// Start anyway, replacing an unused link.
+    Proceed,
+}
+
+/// A recent recovery, with what undoing it would take back while it can still
+/// be undone, as support reviews it.
+#[derive(Debug, Serialize)]
+pub(crate) struct ReviewedRecovery {
+    /// The recovery and the passkey its link enrolled.
+    #[serde(flatten)]
+    pub(crate) recovery: RecentRecovery,
+    /// What undoing it would take back now; `None` once it cannot be undone.
+    pub(crate) rollback: Option<Rollback>,
+}
+
 /// The account's recoveries that can still be undone, newest first: those whose
 /// link still works, and those used less than [`SETTLE_WINDOW`] ago. Whoever
 /// used any of them may not be the owner, so only what predates all of them is
 /// trusted.
-struct Undoable(Vec<StoredRecovery>);
+pub(crate) struct Undoable(Vec<StoredRecovery>);
 
 impl Undoable {
     /// `user`'s undoable recoveries, read in `tx`.
-    async fn load(tx: &mut DatabaseTransaction<'_>, user: UserId) -> Result<Self, DatabaseError> {
+    pub(crate) async fn load(
+        tx: &mut DatabaseTransaction<'_>,
+        user: UserId,
+    ) -> Result<Self, DatabaseError> {
         let settled_before = Utc::now() - SETTLE_WINDOW;
         Ok(Self(tx.recoveries().undoable(user, settled_before).await?))
     }
 
     /// The newest.
-    fn newest(&self) -> Option<&StoredRecovery> {
+    pub(crate) fn newest(&self) -> Option<&StoredRecovery> {
         self.0.first()
     }
 
+    /// `recent`, each with what undoing it would take back while it can be.
+    pub(crate) async fn review(
+        &self,
+        tx: &mut DatabaseTransaction<'_>,
+        recent: Vec<RecentRecovery>,
+    ) -> Result<Vec<ReviewedRecovery>, DatabaseError> {
+        let mut reviewed = Vec::with_capacity(recent.len());
+        for recovery in recent {
+            let rollback = match self.0.iter().find(|undoable| undoable.id == recovery.id) {
+                Some(undoable) => Some(tx.recoveries().rollback(undoable).await?),
+                None => None,
+            };
+            reviewed.push(ReviewedRecovery { recovery, rollback });
+        }
+        Ok(reviewed)
+    }
+
     /// The newest, if it is recovery `id`, which an undo names.
-    fn newest_is(&self, id: RecoveryId) -> Result<&StoredRecovery, RecoveryError> {
+    pub(crate) fn newest_is(&self, id: RecoveryId) -> Result<&StoredRecovery, RecoveryError> {
         let newest = self.newest().ok_or(RecoveryError::NothingToUndo)?;
         if newest.id == id {
             Ok(newest)
@@ -348,15 +393,7 @@ impl AccountService {
             user_id: user,
             session_id: None,
         });
-        let rollback = tx.recoveries().rollback(recovery).await?;
-        Self::take_back(tx, &context, user, rollback).await?;
-        tx.recoveries().undo(id).await?;
-        tx.record(
-            &context,
-            Some(user),
-            DomainEvent::RecoveryUndone { recovery_id: id },
-        )
-        .await?;
+        Self::revert(tx, &context, recovery).await?;
         tx.revoke_sessions(
             &context,
             user,
@@ -365,6 +402,24 @@ impl AccountService {
         )
         .await?;
         Ok(())
+    }
+
+    /// Undoes `recovery` in `tx`: takes back its [`Rollback`] and records each
+    /// change, and the undo, in `context`. The owner's undo and support's both
+    /// use it, then end the account's sessions.
+    pub(crate) async fn revert(
+        tx: &mut DatabaseTransaction<'_>,
+        context: &EventContext,
+        recovery: &StoredRecovery,
+    ) -> Result<(), DatabaseError> {
+        let user = recovery.user_id;
+        let rollback = tx.recoveries().rollback(recovery).await?;
+        Self::take_back(tx, context, user, rollback).await?;
+        tx.recoveries().undo(recovery.id).await?;
+        let undone = DomainEvent::RecoveryUndone {
+            recovery_id: recovery.id,
+        };
+        tx.record(context, Some(user), undone).await
     }
 
     /// Applies `rollback` to `user`'s account in `tx`, recording each change in

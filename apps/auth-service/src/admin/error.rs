@@ -89,6 +89,24 @@ pub enum AdminError {
         "the account has no verified email to send the recovery link to; an operator can recover it with `auth-service user recover`"
     )]
     RecoveryNeedsEmail,
+    /// Whoever used an administrator's recovery link could use its rights before
+    /// the owner undoes it, so an administrator is never recovered.
+    #[error(
+        "the account is an administrator: revoke its rights with `auth-service admin revoke` (grant another administrator first if it is the last), recover it, then grant them again once its owner is confirmed"
+    )]
+    RecoveryOfAdministrator,
+    /// Another recovery of the account can still be undone, and starting one
+    /// anyway was not asked for.
+    #[error(
+        "the account has a recovery that can still be undone: review what it added, listed above, then undo it with `auth-service user undo-recovery`, or pass --despite-undoable to start another anyway"
+    )]
+    RecoveryUndoable,
+    /// The account has no recovery that can still be undone.
+    #[error("the account has no recovery that can still be undone")]
+    NoRecoveryToUndo,
+    /// The recovery to undo is no longer the account's newest undoable one.
+    #[error("the account's newest recovery changed; review it again")]
+    RecoveryChanged,
     /// Only active accounts can become administrators.
     #[error("the account is disabled; enable it before granting administrator rights")]
     AccountDisabled,
@@ -164,6 +182,10 @@ impl AdminError {
             Self::InvalidInviteExpiry(_) => "invalid_invite_expiry",
             Self::RecoveryOfDisabledAccount => "recovery_of_disabled_account",
             Self::RecoveryNeedsEmail => "recovery_needs_email",
+            Self::RecoveryOfAdministrator => "recovery_of_administrator",
+            Self::RecoveryUndoable => "recovery_undoable",
+            Self::NoRecoveryToUndo => "no_recovery_to_undo",
+            Self::RecoveryChanged => "recovery_changed",
             Self::AccountDisabled => "account_disabled",
             Self::AlreadyAdministrator => "already_administrator",
             Self::NotAnAdministrator => "not_an_administrator",
@@ -205,6 +227,10 @@ impl AdminError {
             | Self::InvalidInviteExpiry(_)
             | Self::RecoveryOfDisabledAccount
             | Self::RecoveryNeedsEmail
+            | Self::RecoveryOfAdministrator
+            | Self::RecoveryUndoable
+            | Self::NoRecoveryToUndo
+            | Self::RecoveryChanged
             | Self::AccountDisabled
             | Self::AlreadyAdministrator
             | Self::NotAnAdministrator
@@ -249,6 +275,10 @@ impl From<AdminError> for ApiError {
             | AdminError::EmailClaimed(_)
             | AdminError::RecoveryOfDisabledAccount
             | AdminError::RecoveryNeedsEmail
+            | AdminError::RecoveryOfAdministrator
+            | AdminError::RecoveryUndoable
+            | AdminError::NoRecoveryToUndo
+            | AdminError::RecoveryChanged
             | AdminError::AccountDisabled
             | AdminError::AlreadyAdministrator
             | AdminError::NotAnAdministrator

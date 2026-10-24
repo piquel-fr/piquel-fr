@@ -118,6 +118,7 @@ impl AdminApplication {
             | Op::CreateInvitation
             | Op::RevokeInvitation
             | Op::RecoverAccount
+            | Op::UndoRecovery
             | Op::CreateClient
             | Op::ApplyClient
             | Op::UpdateClient

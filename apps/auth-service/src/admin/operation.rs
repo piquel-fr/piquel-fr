@@ -19,6 +19,8 @@ operations! {
         EnableUser,
         /// Start recovering an account whose owner lost every passkey.
         RecoverAccount,
+        /// Undo an account's recovery for its owner, once they are confirmed.
+        UndoRecovery,
         /// End every session of an account.
         RevokeUserSessions,
         /// End one session.

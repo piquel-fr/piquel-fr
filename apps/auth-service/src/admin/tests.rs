@@ -941,7 +941,8 @@ impl AdminOperation {
             | Self::RenameHandle
             | Self::RetryDelivery
             | Self::CancelDelivery
-            | Self::RecoverAccount => return None,
+            | Self::RecoverAccount
+            | Self::UndoRecovery => return None,
         })
     }
 }
