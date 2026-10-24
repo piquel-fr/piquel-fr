@@ -1,7 +1,7 @@
 //! Retries, address resolution and rendering, with a fake relay.
 
 use super::*;
-use crate::tests::Replicas;
+use crate::tests::{AUTH_ORIGIN, Replicas};
 use piquel_common::{EmailId, Handle};
 use piquel_repository::{InsertUnverifiedEmail, InsertUser};
 use std::sync::{
@@ -58,8 +58,7 @@ impl Outbox {
 #[ignore = "requires TEST_DATABASE_URL"]
 async fn retries_resend_the_same_message_to_the_current_address() {
     let database = Replicas::database().await;
-    let settings = "https://piquel.fr/settings".parse().expect("settings URL");
-    let config = EmailConfig::test(&settings, true);
+    let config = EmailConfig::test(&AUTH_ORIGIN.parse().expect("auth origin"), true);
     let user_id = UserId::new();
     database
         .users()
@@ -125,7 +124,7 @@ async fn retries_resend_the_same_message_to_the_current_address() {
     assert_eq!(
         link,
         format!(
-            "https://piquel.fr/settings/emails/verify#token={}",
+            "https://auth.piquel.fr/settings/emails/verify#token={}",
             token.encoded()
         )
     );

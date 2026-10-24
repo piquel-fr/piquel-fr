@@ -1,22 +1,25 @@
 # Piqueld deployments
 
 `infra/piqueld.toml` deploys piquel.fr as one repository-backed piqueld
-application, `piquel-fr`: auth, the web settings frontend, the admin dashboard,
-and PostgreSQL. Its environments and previews share the manifest; variables give
-each its own hostnames. A second application, `telemetry`
-(`infra/telemetry.toml`), stores and shows their traces, metrics and logs; see
-[Telemetry](#telemetry).
+application, `piquel-fr`: auth, which also serves the account settings, the
+admin dashboard, and PostgreSQL. Its environments and previews share the
+manifest; variables give each its own hostnames. A second application,
+`telemetry` (`infra/telemetry.toml`), stores and shows their traces, metrics and
+logs; see [Telemetry](#telemetry).
 
-| Deployment | Source | Web | Auth | Admin | Redirects to web | Reachable from |
+| Deployment | Source | Web, redirects to auth | Auth | Admin | www, redirects to web | Reachable from |
 | --- | --- | --- | --- | --- | --- | --- |
 | `production` | promoted from staging | `piquel.fr` | `auth.piquel.fr` | `admin.piquel.fr` | `www.piquel.fr` | internet; admin from the tailnet |
 | `staging` | `main`, on every push | `staging.piquel.fr` | `auth.staging.piquel.fr` | `admin.staging.piquel.fr` | `www.staging.piquel.fr` | tailnet |
 | previews | a branch or a local worktree | `<slug>.dev.piquel.fr` | `auth-<slug>.dev.piquel.fr` | `admin-<slug>.dev.piquel.fr` | `www-<slug>.dev.piquel.fr` | tailnet |
 
-The `www` route is a permanent (308) redirect that the gateway answers itself,
-keeping the path and query: `www.piquel.fr/settings?x=1` goes to
+The gateway answers both redirects itself, keeping the path and query. `web` is
+temporary (307), so browsers cache nothing once piquel.fr serves pages of its own
+again: `piquel.fr/settings/emails?x=1` goes to
+`auth.piquel.fr/settings/emails?x=1` (see [Web](#web)). `www` is permanent (308)
+and goes to the web host: `www.piquel.fr/settings?x=1` goes to
 `piquel.fr/settings?x=1`. piqueld renders every route in every environment, so
-staging and previews get one too; their names fall under the existing wildcard
+staging and previews get both too; their names fall under the existing wildcard
 records and certificates.
 
 Production never builds. It only receives releases that staging built and ran:
@@ -308,13 +311,19 @@ live in its memory. That is silent while their auth session lasts.
 
 ## Web
 
-The web service is the piquel-web SvelteKit server on Node (`node build`, port
-8080, as a non-root user). Its image is built without an auth origin: the server
-reads `AUTH_ORIGIN` at startup, refuses to start unless it is an `https://`
-origin, passes it to pages as layout data and narrows their CSP `connect-src` to
-it. `ORIGIN` gives the server its public URL behind ingress. The health check,
-`GET /healthz`, does not call auth, so a server that fails to start blocks the
-deployment without coupling it to auth's health.
+piquel.fr runs no service. Auth serves the account settings at the paths
+piquel.fr used (`/settings`, `/settings/emails`, `/settings/emails/verify`,
+`/settings/sessions` and `/settings/history`), and answers `/` with a redirect to
+`/settings`. The `web` route sends every path to auth, so links sent before the
+move still open the same page, and browsers keep a verification link's fragment
+(`/settings/emails/verify#token=…`). Notice emails link to `/settings/history`
+and never expire: keep the redirect, and those paths on auth, for as long as
+piquel.fr serves nothing at them. A path ending in a slash, which piquel.fr's
+settings also accepted, redirects to the page.
+
+A redirect route sends no headers of its own, so piquel.fr's
+`Strict-Transport-Security` is set at Cloudflare's edge, with the values piquel-web
+sent: `max-age=31536000`, without `includeSubDomains` or `preload`.
 
 ## Telemetry
 

@@ -1,9 +1,5 @@
 set working-directory := '..'
 
-# Serve piquel-web with Vite against a local auth service; AUTH_ORIGIN overrides it.
-dev:
-    @AUTH_ORIGIN="${AUTH_ORIGIN:-http://localhost:3000}" pnpm --filter @piquel/piquel-web dev
-
 check:
     @pnpm check
 
@@ -19,31 +15,22 @@ lint: generate
 
 # Refresh SvelteKit's generated types/config. Cargo generates its own asset table.
 generate:
-    @pnpm --filter @piquel/auth-web --filter @piquel/piquel-web -r exec svelte-kit sync
-
-build: build-auth build-settings
+    @pnpm --filter @piquel/auth-web -r exec svelte-kit sync
 
 # The pages auth embeds: auth-web, and the SDK script its server-rendered pages use.
-build-auth:
+build:
     @pnpm --filter "@piquel/auth-web..." build
 
-build-settings:
-    @pnpm --filter @piquel/piquel-web build
-
-# Starts the production piquel-web server and checks its headers and startup validation.
-test: build-settings
-    @pnpm --filter @piquel/piquel-web test
-
-# Requires running auth/settings servers; see tests/browser/README.md.
+# Requires a running auth service; see tests/browser/README.md.
 [positional-arguments]
 test-browser *ARGS:
     @pnpm test:browser "$@"
 
-# Register the browser checks' public OIDC client for the settings origin ORIGIN, e.g. https://localhost:4443.
-browser-client ORIGIN:
+# tests/browser/oidc.spec.ts serves the client's pages itself and names the same origin.
+# Register the browser checks' public OIDC client, whose origin has no server.
+browser-client:
     @just auth client create browser-e2e --name 'Browser E2E' \
-        --redirect-uri {{ quote(ORIGIN + "/callback") }} \
-        --post-logout-uri {{ quote(ORIGIN + "/settings") }}
+        --redirect-uri https://browser-e2e.test/callback
 
 audit:
     @pnpm audit

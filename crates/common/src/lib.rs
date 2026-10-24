@@ -5,14 +5,14 @@
 //! [`UserId`], the [`protocol`] documents, the [`clients`] registration types and
 //! the vocabulary macros. Servers add:
 //!
-//! - `config`: environment variables, validated URLs and secret references.
+//! - `config`: environment variables, validated origins and secret references.
 //! - `email`: email address normalization.
 //! - `events`: the domain events auth records.
 //! - `sqlx`: decoding identifiers and vocabularies from `PostgreSQL` columns.
 
 /// OAuth client registrations, each field validated by its type.
 pub mod clients;
-/// Environment variables, validated URLs and secret references.
+/// Environment variables, validated origins and secret references.
 #[cfg(feature = "config")]
 pub mod config;
 /// Conservative email normalization; see `docs/security/email-normalization.md`.

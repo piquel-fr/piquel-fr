@@ -102,8 +102,10 @@ specific to the provider:
 ## 6. Show it in the frontends
 
 In `packages/auth-sdk/src/index.ts`, add the wire name to the `Provider` type and
-its display name to `providerName`. The login and settings pages list providers
-from `/login/providers`, so they need no other change.
+its display name to `providerName`, for the sign-in pages, and its name to
+`provider_name` in `crates/ui/src/settings/sign_in.rs`, for the settings; the
+compiler asks for the last. Both list every configured provider, the sign-in pages
+from `/config`, so they need no other change.
 
 ## 7. Test it
 

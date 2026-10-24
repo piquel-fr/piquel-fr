@@ -18,5 +18,5 @@ audit:
 # Build auth-service after the auth pages and SDK script it embeds; pass `--release` for release.
 [positional-arguments]
 build *ARGS:
-    @just web build-auth
+    @just web build
     @cargo build --locked -p auth-service "$@"

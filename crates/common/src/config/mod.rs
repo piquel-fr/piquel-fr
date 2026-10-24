@@ -1,4 +1,4 @@
-//! Environment variables, validated URLs and secret references, read once at startup.
+//! Environment variables, validated origins and secret references, read once at startup.
 
 use std::{env, error::Error as StdError, fmt, fs, path::PathBuf, str::FromStr};
 use thiserror::Error;
@@ -140,11 +140,11 @@ impl Variable {
     }
 }
 
-/// Why a configured URL was rejected. Each message tells the operator what to change.
+/// Why a configured origin was rejected. Each message tells the operator what to change.
 #[derive(Debug, Error)]
-pub enum UrlError {
+pub enum OriginError {
     /// The value is not an absolute URL.
-    #[error("must be an absolute URL, e.g. https://piquel.fr/settings")]
+    #[error("must be an absolute URL, e.g. https://auth.piquel.fr")]
     Malformed(#[source] url::ParseError),
     /// Only HTTPS is accepted; every environment is served over TLS.
     #[error("must use https://")]
@@ -155,43 +155,12 @@ pub enum UrlError {
     /// Credentials in a URL would leak into logs and redirects.
     #[error("must not contain a user name or password")]
     Credentials,
-    /// Queries and fragments are not part of a base URL.
+    /// Queries and fragments are not part of an origin.
     #[error("must not contain a query or fragment")]
     QueryOrFragment,
     /// An origin cannot carry a path.
     #[error("must be an origin without a path, e.g. https://auth.piquel.fr")]
     Path,
-}
-
-/// An absolute HTTPS URL without credentials, query or fragment.
-#[derive(Clone, Debug)]
-pub struct PublicUrl(Url);
-impl PublicUrl {
-    /// Exposes the validated URL.
-    #[must_use]
-    pub const fn as_url(&self) -> &Url {
-        &self.0
-    }
-}
-impl FromStr for PublicUrl {
-    type Err = UrlError;
-    /// Accepts an absolute HTTPS URL, optionally with a path.
-    fn from_str(value: &str) -> Result<Self, Self::Err> {
-        let url = Url::parse(value).map_err(UrlError::Malformed)?;
-        if url.scheme() != "https" {
-            return Err(UrlError::NotHttps);
-        }
-        if url.host_str().is_none() {
-            return Err(UrlError::MissingHost);
-        }
-        if !url.username().is_empty() || url.password().is_some() {
-            return Err(UrlError::Credentials);
-        }
-        if url.query().is_some() || url.fragment().is_some() {
-            return Err(UrlError::QueryOrFragment);
-        }
-        Ok(Self(url))
-    }
 }
 
 /// An HTTPS origin such as `https://auth.piquel.fr`, validated once at startup.
@@ -232,14 +201,23 @@ impl Origin {
     }
 }
 impl FromStr for Origin {
-    type Err = UrlError;
+    type Err = OriginError;
     /// Accepts an HTTPS origin without path, credentials, query or fragment.
     fn from_str(value: &str) -> Result<Self, Self::Err> {
-        let PublicUrl(url) = value.parse()?;
-        if url.path() != "/" {
-            return Err(UrlError::Path);
+        let url = Url::parse(value).map_err(OriginError::Malformed)?;
+        if url.scheme() != "https" {
+            return Err(OriginError::NotHttps);
         }
-        let host = url.host_str().ok_or(UrlError::MissingHost)?.to_owned();
+        let host = url.host_str().ok_or(OriginError::MissingHost)?.to_owned();
+        if !url.username().is_empty() || url.password().is_some() {
+            return Err(OriginError::Credentials);
+        }
+        if url.query().is_some() || url.fragment().is_some() {
+            return Err(OriginError::QueryOrFragment);
+        }
+        if url.path() != "/" {
+            return Err(OriginError::Path);
+        }
         Ok(Self { url, host })
     }
 }

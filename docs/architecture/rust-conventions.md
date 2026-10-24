@@ -10,7 +10,7 @@ Keep implementations simple. Follow neighbouring modules and share repeated logi
   `protocol` the wire types shared with the SDKs: token claims, metadata, JWK sets,
   OAuth/OIDC vocabulary and errors, bearer challenges, and the same-origin rule
   for browser requests. Server-only parts are features: `config` (environment
-  variables, validated URLs, secret references), `email` (address normalization),
+  variables, validated origins, secret references), `email` (address normalization),
   `events` (domain events) and `sqlx` (column decoding).
 - `piquel-crypto` (`crates/crypto`): random secrets, digests, HMAC, constant-time
   comparison, PKCE, RS256 signing, key sets and AES-256-GCM sealing of keys at rest.
@@ -44,7 +44,7 @@ digest key.
 Declare each environment variable as a `Variable` constant beside its configuration
 section. `ConfigurationError` names the variable, explains how to fix it and retains
 safe underlying sources. Parse configuration into validated types such as `Origin`
-and `PublicUrl` at startup; downstream code uses those values without revalidation.
+at startup; downstream code uses those values without revalidation.
 OIDC clients are not configuration: they live in the database (see below).
 
 `AuthConfig` combines `PasskeyConfig`, `FederationConfig` and `OidcConfig`, each with

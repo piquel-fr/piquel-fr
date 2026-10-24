@@ -1,7 +1,6 @@
 //! Federation failures and their single mapping to browser responses.
 
 use super::MAX_RETURN_TO_BYTES;
-use crate::config::FrontendOrigins;
 use crate::security::{ApiError, SessionError};
 use axum::http::header::InvalidHeaderValue;
 use piquel_common::{VocabularyError, config::ConfigurationError};
@@ -19,7 +18,7 @@ pub(crate) enum FederationError {
     /// The requested provider has no configured credentials.
     #[error("sign-in provider is not configured")]
     ProviderNotConfigured,
-    /// `return_to` is neither a safe path on the auth origin nor a frontend URL.
+    /// `return_to` is not a safe path on the auth origin.
     #[error(transparent)]
     InvalidReturnTo(#[from] InvalidReturnTo),
     /// The callback's browser lacks the cookie set when its flow started.
@@ -146,12 +145,9 @@ impl From<FederationError> for ApiError {
 /// Why a `return_to` address is refused. Each message names the rule it breaks.
 #[derive(Debug, Error)]
 pub(crate) enum InvalidReturnTo {
-    /// Anything that is neither a path nor a URL on a frontend origin.
-    #[error("return_to must be a path on this site, starting with /, or a URL on {0}")]
-    External(FrontendOrigins),
-    /// A user name or password in the URL can disguise its real host.
-    #[error("return_to cannot contain a user name or password")]
-    Credentials,
+    /// Anything but a path, such as an absolute URL, even one on auth.
+    #[error("return_to must be a path on auth, starting with /")]
+    NotAPath,
     /// Browsers read a leading `//` as another host.
     #[error("return_to cannot start with //, which browsers read as another host")]
     ProtocolRelative,

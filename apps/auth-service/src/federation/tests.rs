@@ -108,17 +108,12 @@ impl TestApp {
             std::env::temp_dir().join(format!("piquel-federation-test-{}", TokenId::new()));
         std::fs::write(&secret_file, "test-secret").expect("mock provider secret");
         let config = ProviderConfig::test(&secret_file);
-        let settings_url = "https://piquel.fr/settings"
-            .parse::<piquel_common::config::PublicUrl>()
-            .expect("settings");
         let mut app = FederationApplication::new(
             database,
             &FederationConfig {
                 origin: "https://auth.piquel.fr/"
                     .parse::<piquel_common::config::Origin>()
                     .expect("origin"),
-                frontends: FrontendOrigins::new([&settings_url]),
-                settings_url,
                 providers: BTreeMap::from([(Provider::GitHub, config)]),
             },
         )
@@ -362,65 +357,29 @@ impl TestApp {
             .expect("JSON")
     }
 }
-/// Accepts auth paths and frontend URLs only, and rejects duplicated pending-browser cookies.
+/// Accepts auth paths only, and rejects duplicated pending-browser cookies.
 #[test]
 fn return_destinations_and_browser_bindings_are_strict() {
-    let settings: piquel_common::config::PublicUrl = "https://preview.example/settings"
-        .parse()
-        .expect("settings");
-    let frontends = FrontendOrigins::new([&settings]);
     for value in [
         "//evil.test",
         "/\\evil.test",
         "https://evil.test",
+        "https://auth.piquel.fr/settings",
         "/login#x",
         "/\n/evil",
         "settings",
         "javascript:alert(1)",
-        "http://preview.example/settings",
-        "https://preview.example:8443/settings",
-        "https://preview.example.evil.test/settings",
-        "https://evil.test/preview.example/settings",
-        "https://preview.example@evil.test/settings",
-        "https://user:pass@preview.example/settings",
-        "https://user@preview.example/settings",
         "https:\\\\evil.test",
-        "https://evil.test\\@preview.example/",
-        "https://preview.example/settings#tab",
     ] {
-        assert!(ReturnTo::parse(Some(value), &frontends).is_err(), "{value}");
+        assert!(ReturnTo::parse(Some(value)).is_err(), "{value}");
     }
-    for (value, expected) in [
-        (
-            "/oauth/authorize?request=abc",
-            "/oauth/authorize?request=abc",
-        ),
-        (
-            "https://preview.example/settings",
-            "https://preview.example/settings",
-        ),
-        (
-            "https://preview.example/developers?tab=apps",
-            "https://preview.example/developers?tab=apps",
-        ),
-        ("https://PREVIEW.example", "https://preview.example/"),
-    ] {
-        assert_eq!(
-            ReturnTo::parse(Some(value), &frontends).expect(value).0,
-            expected
-        );
-    }
+    let path = "/oauth/authorize?request=abc";
+    assert_eq!(ReturnTo::parse(Some(path)).expect(path).0, path);
     assert_eq!(
-        ReturnTo::parse(None, &frontends).expect("default return").0,
+        ReturnTo::parse(None).expect("default return").0,
         DEFAULT_RETURN_TO
     );
-    assert!(
-        ReturnTo::parse(
-            Some(&format!("/{}", "x".repeat(MAX_RETURN_TO_BYTES))),
-            &frontends
-        )
-        .is_err()
-    );
+    assert!(ReturnTo::parse(Some(&format!("/{}", "x".repeat(MAX_RETURN_TO_BYTES)))).is_err());
     let secret = Secret::generate().expect("browser secret");
     let mut headers = HeaderMap::new();
     headers.insert(
@@ -905,7 +864,7 @@ async fn callback_email_collision_never_links_and_known_subject_never_bootstraps
     tx.commit().await.expect("commit");
     let response = test.callback().await;
     assert_eq!(response.status(), StatusCode::SEE_OTHER);
-    assert_eq!(response.headers()[header::LOCATION], "/");
+    assert_eq!(response.headers()[header::LOCATION], DEFAULT_RETURN_TO);
     let session_cookie = response
         .headers()
         .get_all(header::SET_COOKIE)

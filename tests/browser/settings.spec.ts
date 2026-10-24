@@ -1,10 +1,7 @@
 import { expect, test } from '@playwright/test';
 
-const settingsUrl = process.env.E2E_SETTINGS_URL ?? '';
-
 /** Runs against auth's own settings pages, with Chromium's virtual passkey authenticator. */
 test('settings on auth: passkeys, devices, an email link and signing out', async ({ browser }) => {
-  test.skip(!settingsUrl, 'Set E2E_SETTINGS_URL; registration returns to it.');
   const context = await browser.newContext();
   const page = await context.newPage();
   const cdp = await context.newCDPSession(page);
@@ -27,9 +24,7 @@ test('settings on auth: passkeys, devices, an email link and signing out', async
   await page.getByLabel('Handle', { exact: true }).fill(username);
   await page.getByLabel('Passkey name', { exact: true }).fill('First passkey');
   await page.getByRole('button', { name: 'Create account with a passkey' }).click();
-  await expect(page).toHaveURL(settingsUrl);
-
-  await page.goto('/settings');
+  await expect(page).toHaveURL('/settings');
   await expect(page.getByText(`@${username}`, { exact: true })).toBeVisible();
   await page.getByRole('button', { name: 'Rename First passkey', exact: true }).click();
   await page.getByLabel('Passkey name', { exact: true }).fill('My first passkey');

@@ -7,7 +7,7 @@ pub(crate) mod service {
     pub(crate) const LIVE: &str = "/health/live";
     /// Readiness probe; also checks the database.
     pub(crate) const READY: &str = "/health/ready";
-    /// Public configuration read by the browser frontends.
+    /// Public configuration read by the embedded sign-in pages.
     pub(crate) const CONFIG: &str = "/config";
 }
 
@@ -138,6 +138,9 @@ pub(crate) mod admin {
 /// Pages browsers visit. Each server-rendered page answers `GET` with the page and
 /// `POST` with its form's result, and is listed in [`ALL`](page::ALL).
 pub(crate) mod page {
+    /// Auth's root, which redirects to the account's settings, so that piquel.fr's
+    /// root, which redirects here, still lands on them.
+    pub(crate) const ROOT: &str = "/";
     /// Sign-in, social signup and link confirmation, from the embedded frontend.
     pub(crate) const LOGIN: &str = "/login";
     /// OAuth consent.
@@ -145,7 +148,8 @@ pub(crate) mod page {
     /// RP-initiated logout confirmation.
     pub(crate) const LOGOUT: &str = "/logout";
 
-    /// The account's settings, at the paths piquel.fr served them on.
+    /// The account's settings, at the paths piquel.fr served them on, so its redirect
+    /// keeps old links and sent emails working.
     pub(crate) mod settings {
         /// Sign-in methods: passkeys and social sign-in.
         pub(crate) const HOME: &str = "/settings";
@@ -171,7 +175,5 @@ pub(crate) mod page {
     ];
 }
 
-/// Prefix shared by the settings APIs, which the settings site may call.
+/// Prefix shared by the account JSON APIs.
 pub(crate) const ACCOUNT_PREFIX: &str = "/account/";
-/// Prefix shared by social sign-in, which the settings site may also start.
-pub(crate) const LOGIN_PREFIX: &str = "/login/";

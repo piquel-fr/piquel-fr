@@ -2,10 +2,11 @@
 name: preview
 description: >
   Deploy this worktree to its piqueld preview: a disposable copy of piquel.fr
-  (auth, web settings and PostgreSQL) on private tailnet URLs, built from the
-  worktree's files without committing or pushing. Use whenever a change needs
-  the running app: to try it, debug it against real services, or share it with
-  the user. Also for reading a preview's logs or deleting it.
+  (auth with its settings pages, the admin dashboard and PostgreSQL) on private
+  tailnet URLs, built from the worktree's files without committing or pushing.
+  Use whenever a change needs the running app: to try it, debug it against real
+  services, or share it with the user. Also for reading a preview's logs or
+  deleting it.
 ---
 
 # Previews
@@ -14,10 +15,11 @@ A preview runs the whole application from `infra/piqueld.toml` on the piqueld
 daemon. Each branch (and optional slot) gets its own: separate database,
 generated secrets, and URLs.
 
-| Service | URL |
+| Route | URL |
 | --- | --- |
-| web (settings) | `https://<slug>.dev.piquel.fr` |
-| auth | `https://auth-<slug>.dev.piquel.fr` |
+| auth, with the settings at `/settings` | `https://auth-<slug>.dev.piquel.fr` |
+| admin | `https://admin-<slug>.dev.piquel.fr` |
+| web (redirects to auth, keeping the path) | `https://<slug>.dev.piquel.fr` |
 | www (redirects to web) | `https://www-<slug>.dev.piquel.fr` |
 
 URLs are private: they work from devices on the tailnet, including this machine
@@ -60,7 +62,7 @@ credentials.
 branch=$(git branch --show-current)
 piquelctl preview show piquel-fr "$branch"                    # state, commit, URLs
 piquelctl preview logs piquel-fr "$branch" --service auth --tail 100
-piquelctl preview url piquel-fr "$branch" --route web        # or --route auth
+piquelctl preview url piquel-fr "$branch" --route auth       # or --route admin
 ```
 
 Build and `migrate` job output live in the build history:

@@ -4,7 +4,7 @@ default: validate
 # Rust formatting, linting, checks, audits and the auth-service build.
 mod rust 'just/rust.just'
 
-# Web formatting, linting, checks, builds and tests; `just dev` serves piquel-web.
+# Web formatting, linting, checks, the auth pages build and the browser tests.
 mod web 'just/web.just'
 
 # Scratch PostgreSQL clusters, database tests, the SQLx query cache and migrations.
@@ -20,11 +20,10 @@ mod admin 'just/admin.just'
 mod infra 'just/infra.just'
 
 alias format := fmt
-alias dev := web::dev
 alias preview := infra::preview
 alias preview-delete := infra::preview-delete
 
-validate: fmt-check lint check test web::test doc doc-test audit
+validate: fmt-check lint check test doc doc-test audit
 
 install:
     @pnpm install --frozen-lockfile
@@ -34,8 +33,8 @@ install-tools:
     @cargo install --locked cargo-nextest cargo-deny
     @cargo install --locked sqlx-cli --no-default-features --features rustls,postgres
 
-# Both frontends and the release auth-service executable.
-build: web::build-settings (rust::build "--release")
+# The release auth-service executable, with the auth pages it embeds.
+build: (rust::build "--release")
 
 fmt: rust::fmt web::fmt
 
