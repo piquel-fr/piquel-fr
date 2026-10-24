@@ -321,9 +321,9 @@ and never expire: keep the redirect, and those paths on auth, for as long as
 piquel.fr serves nothing at them. A path ending in a slash, which piquel.fr's
 settings also accepted, redirects to the page.
 
-piquel-web sent piquel.fr's `Strict-Transport-Security` header, and a redirect
-route sends none, so piquel.fr's HSTS must come from in front of the gateway: the
-Cloudflare zone, or piqueld's redirect responses.
+A redirect route sends no headers of its own, so piquel.fr's
+`Strict-Transport-Security` is set at Cloudflare's edge, with the values piquel-web
+sent: `max-age=31536000`, without `includeSubDomains` or `preload`.
 
 ## Telemetry
 
