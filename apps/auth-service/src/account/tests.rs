@@ -6,6 +6,7 @@ use super::*;
 use crate::{
     AdminError, GracePeriod, Operator, Reason,
     admin::tests::{Account, Harness, assert_refused, cli, operator},
+    clients::{ClientPatch, ClientSettings, NewClient},
     config::EmailConfig,
     passkey::PasskeyError,
     security::ApiError,
@@ -713,18 +714,18 @@ impl Confirming {
                 service.revoke_passkey(&subject, state.passkey).await
             }
             Self::CreateClient => {
-                let new = json!({
-                    "kind": "public",
-                    "display_name": "Other",
-                    "redirect_uris": ["https://other.example/callback"],
-                });
-                let new = serde_json::from_value(new).expect("new client");
+                let new = NewClient {
+                    kind: ClientKind::Public,
+                    settings: ClientSettings::test("https://other.example"),
+                };
                 service.create_client(&owner, new).await.map(drop)
             }
             Self::UpdateClientRedirects => {
                 let client = service.owned_client(owner, state.client.as_str()).await?;
-                let patch = json!({"redirect_uris": ["https://attacker.example/callback"]});
-                let patch = serde_json::from_value(patch).expect("patch");
+                let patch = ClientPatch {
+                    redirect_uris: Some(vec!["https://attacker.example/callback".into()]),
+                    ..ClientPatch::default()
+                };
                 service.update_client(&client, patch).await.map(drop)
             }
             Self::RotateClientSecret => {

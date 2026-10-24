@@ -259,6 +259,12 @@ export function safeDestination(value: string | null, config: Configuration): st
  *   `data-fragment` inputs as it posts, then drops the fragment from the address. It
  *   shows, with its button enabled, while the link has every value; otherwise the
  *   page's `data-fragment-missing` notice shows instead.
+ * - a `data-copy` button copies the text of the element its value names, and says
+ *   whether it did, for a moment, in the `role="status"` element just before it. It
+ *   starts hidden, and shows once the browser can write to the clipboard.
+ * - an element marked `data-replace-url` makes its value the page's address: a page
+ *   answering a form with what only it may show, such as a secret, then reloads by
+ *   `GET`, never posting the form again.
  * A form's `data-unavailable` note says why its button is disabled, and hides once
  * it is enabled. Its `data-passkey-error` element says why a ceremony failed.
  */
@@ -338,6 +344,32 @@ function wire(document: Document): void {
   showFragmentForms();
   // Following a link that differs only in its fragment does not reload the page.
   window.addEventListener('hashchange', showFragmentForms);
+  if ('clipboard' in navigator)
+    for (const button of document.querySelectorAll<HTMLButtonElement>('button[data-copy]')) {
+      const status = button.previousElementSibling;
+      let cleared: ReturnType<typeof setTimeout> | undefined;
+      /** Says `message` in the button's status for a moment. */
+      const say = (message: string) => {
+        if (!status) return;
+        status.textContent = message;
+        clearTimeout(cleared);
+        cleared = setTimeout(() => (status.textContent = ''), 2000);
+      };
+      button.hidden = false;
+      button.addEventListener('click', () => {
+        const text = document.getElementById(button.dataset.copy ?? '')?.textContent ?? '';
+        navigator.clipboard.writeText(text).then(
+          () => {
+            say('Copied');
+          },
+          () => {
+            say('Could not copy: select the text instead');
+          }
+        );
+      });
+    }
+  const replaced = document.querySelector<HTMLElement>('[data-replace-url]')?.dataset.replaceUrl;
+  if (replaced) window.history.replaceState(null, '', replaced);
 }
 
 // Without a document, as during SvelteKit's server render, there is nothing to wire.

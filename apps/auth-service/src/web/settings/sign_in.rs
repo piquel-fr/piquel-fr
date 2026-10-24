@@ -1,27 +1,35 @@
 //! `/settings`: passkeys and social sign-in.
 
-use super::{Applied, Reader, SettingsPage};
 use crate::{
     account::{AccountError, Owner, Subject},
     passkey::PasskeyKind,
     routes::page::settings,
     security::BrowserCookie,
-    web::{Failure, WebApplication},
+    web::{
+        Failure, WebApplication,
+        account::{AccountPage, Applied, Reader},
+    },
 };
-use piquel_ui::{Messages, Notice, ProviderRow, SignInChange, SignInState, Tab};
+use piquel_ui::{Messages, Notice, ProviderRow, Section, SignInChange, SignInState, Tab};
 use topcoat::{
     Error,
     context::Cx,
     router::{StatusCode, request::headers, response::Response},
-    view::view,
+    view::{Child, view},
 };
 
 /// The sign-in methods page.
 pub(in crate::web) struct SignInMethods;
 
-impl SettingsPage for SignInMethods {
+impl SignInMethods {
+    /// Its tab.
     const TAB: Tab = Tab::SignIn;
+}
+
+impl AccountPage for SignInMethods {
+    const SECTION: Section = Section::Account;
     const PATH: &'static str = settings::HOME;
+    const TITLE: &'static str = Self::TAB.label();
     type Change = SignInChange;
     type Row = SignInState;
 
@@ -49,6 +57,7 @@ impl SettingsPage for SignInMethods {
     /// link is confirmed.
     async fn apply(
         web: &WebApplication,
+        _: &Cx,
         owner: Owner,
         change: SignInChange,
     ) -> Result<Applied<SignInState>, AccountError> {
@@ -94,8 +103,9 @@ impl SettingsPage for SignInMethods {
         state: SignInState,
         outcome: (StatusCode, Messages<'_>),
     ) -> Result<Response, Failure> {
-        let passkeys = web.account.passkeys(&reader.viewer).await?;
-        let identities = web.account.identities(&reader.viewer).await?;
+        let viewer = reader.viewer();
+        let passkeys = web.account.passkeys(&viewer).await?;
+        let identities = web.account.identities(&viewer).await?;
         // Enabled providers, then any linked one since disabled, so it can still be
         // unlinked.
         let enabled: Vec<_> = web.federation.enabled().collect();
@@ -124,16 +134,16 @@ impl SettingsPage for SignInMethods {
             .authorization_endpoints()
             .map_err(Error::from)?;
         let android = PasskeyKind::offers_google(headers(cx));
-        let page = view! { cx =>
+        let page = Child::new(view! { cx =>
             piquel_ui::sign_in_methods(
                 page: settings::HOME,
                 passkeys: &passkeys,
                 providers: &providers,
                 state: &state,
-                confirmed: reader.confirmed,
+                confirmed: reader.is_recent(),
                 android: android,
             )
-        };
+        });
         web.settings_page(cx, Self::TAB, reader, outcome, &targets, page)
             .await
     }

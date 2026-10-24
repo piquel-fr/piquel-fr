@@ -5,7 +5,7 @@ yet are marked *(planned)*.
 
 | Host | Serves | Used by |
 | --- | --- | --- |
-| `auth.piquel.fr` | OIDC/OAuth endpoints, ceremony pages, account settings and the JSON APIs; security center, developer console *(planned)* | every application and user |
+| `auth.piquel.fr` | OIDC/OAuth endpoints, ceremony pages, account settings, the developer console and the JSON APIs; security center *(planned)* | every application and user |
 | `piquel.fr` | A redirect to auth.piquel.fr that keeps the path; public profiles *(planned)* | old links and bookmarks |
 | `admin.piquel.fr` | Admin dashboard; auth's private admin API behind it | administrators |
 
@@ -15,16 +15,18 @@ The auth executable owns everything that authenticates someone or issues a
 credential: discovery, JWKS, authorization, token, userinfo, logout, and the
 pages a ceremony needs (login, signup, consent, passkey confirmation, device
 verification *(planned)*). It also serves the account settings at `/settings`, on
-the paths piquel.fr used, and redirects its root there. It hosts no developer or
-admin pages yet.
+the paths piquel.fr used, and redirects its root there, and the developer console,
+where accounts register their own OIDC clients, at `/developers`. It hosts no admin
+pages yet.
 
 The account and admin APIs are routes in the same executable. They are small
 next to the pages that use them, and keeping them there keeps one binary, one
 database owner and one policy layer. The account API is on the public listener; the
 admin API has a private listener of its own (see admin.piquel.fr below). Auth keeps its state in PostgreSQL, so it runs
 as several replicas (see "Running several replicas" in `infra/README.md`). Its sign-in pages are static assets embedded at build time
-and are cacheable (see "Caching" in `infra/README.md`). Consent, logout and the
-settings are server-rendered in the executable, with plain forms. Their only script
+and are cacheable (see "Caching" in `infra/README.md`). Consent, logout, the
+settings and the developer console are server-rendered in the executable, with
+plain forms. Their only script
 is the SDK's, which runs the passkey ceremonies their forms need and keeps a form
 from posting twice.
 
@@ -95,7 +97,7 @@ signed out, and confirming with a passkey by the session it confirms.
 | Email addresses | list, choose the primary among verified, remove | add, verify |
 | Sessions | list, sign out one, sign out all | |
 | Security history | read | report an entry |
-| OIDC clients | | all; administrators use `AdminService`'s |
+| OIDC clients (the developer console) | | all; administrators use `AdminService`'s |
 
 When an administrator or operator acts:
 

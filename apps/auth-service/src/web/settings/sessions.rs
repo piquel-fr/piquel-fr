@@ -1,25 +1,33 @@
 //! `/settings/sessions`: the browsers signed in to the account.
 
-use super::{Applied, Reader, SettingsPage};
 use crate::{
     account::{AccountError, Owner, Subject},
     routes::page::settings,
-    web::{Failure, WebApplication},
+    web::{
+        Failure, WebApplication,
+        account::{AccountPage, Applied, Reader},
+    },
 };
 use chrono::Utc;
-use piquel_ui::{DeviceChange, DeviceRow, Messages, Notice, Tab};
+use piquel_ui::{DeviceChange, DeviceRow, Messages, Notice, Section, Tab};
 use topcoat::{
     context::Cx,
     router::{StatusCode, response::Response},
-    view::view,
+    view::{Child, view},
 };
 
 /// The devices page, which opens no rows.
 pub(in crate::web) struct Devices;
 
-impl SettingsPage for Devices {
+impl Devices {
+    /// Its tab.
     const TAB: Tab = Tab::Devices;
+}
+
+impl AccountPage for Devices {
+    const SECTION: Section = Section::Account;
     const PATH: &'static str = settings::SESSIONS;
+    const TITLE: &'static str = Self::TAB.label();
     type Change = DeviceChange;
     type Row = ();
 
@@ -27,6 +35,7 @@ impl SettingsPage for Devices {
 
     async fn apply(
         web: &WebApplication,
+        _: &Cx,
         owner: Owner,
         change: DeviceChange,
     ) -> Result<Applied<()>, AccountError> {
@@ -51,7 +60,7 @@ impl SettingsPage for Devices {
         (): (),
         outcome: (StatusCode, Messages<'_>),
     ) -> Result<Response, Failure> {
-        let sessions = web.account.sessions(&reader.viewer).await?;
+        let sessions = web.account.sessions(&reader.viewer()).await?;
         let rows: Vec<_> = sessions
             .iter()
             .map(|session| DeviceRow {
@@ -64,9 +73,9 @@ impl SettingsPage for Devices {
                 last_seen_at: session.last_seen_at,
             })
             .collect();
-        let page = view! { cx =>
+        let page = Child::new(view! { cx =>
             piquel_ui::devices(page: settings::SESSIONS, rows: &rows, now: Utc::now())
-        };
+        });
         web.settings_page(cx, Self::TAB, reader, outcome, &[], page)
             .await
     }

@@ -1,27 +1,36 @@
 //! `/settings/history`: the account's security history, and reporting an entry.
 
-use super::{Applied, Reader, SettingsPage};
 use crate::{
     account::{AccountError, Owner},
     routes::page::settings,
-    web::{Failure, WebApplication},
+    web::{
+        Failure, WebApplication,
+        account::{AccountPage, Applied, Reader},
+    },
 };
 use piquel_ui::{
-    EmailRow, HistoryChange, HistoryPage, HistoryRow, HistoryState, Holdings, Messages, Tab,
+    EmailRow, HistoryChange, HistoryPage, HistoryRow, HistoryState, Holdings, Messages, Section,
+    Tab,
 };
 use topcoat::{
     context::Cx,
     router::{StatusCode, response::Response},
-    view::view,
+    view::{Child, view},
 };
 
 /// The history page, a page at a time, with the report its query opens, or the
 /// one just made.
 pub(in crate::web) struct History;
 
-impl SettingsPage for History {
+impl History {
+    /// Its tab.
     const TAB: Tab = Tab::History;
+}
+
+impl AccountPage for History {
+    const SECTION: Section = Section::Account;
     const PATH: &'static str = settings::HISTORY;
+    const TITLE: &'static str = Self::TAB.label();
     type Change = HistoryChange;
     type Row = HistoryState;
 
@@ -36,6 +45,7 @@ impl SettingsPage for History {
     /// A report goes on to what is left to undo, on the page it was made on.
     async fn apply(
         web: &WebApplication,
+        _: &Cx,
         owner: Owner,
         HistoryChange::Report { event_id, before }: HistoryChange,
     ) -> Result<Applied<HistoryState>, AccountError> {
@@ -54,18 +64,19 @@ impl SettingsPage for History {
         shown: HistoryState,
         outcome: (StatusCode, Messages<'_>),
     ) -> Result<Response, Failure> {
-        let history = web.account.history(&reader.viewer, shown.before).await?;
-        let passkeys = web.account.passkeys(&reader.viewer).await?;
-        let emails = web.account.emails(&reader.viewer).await?;
+        let viewer = reader.viewer();
+        let history = web.account.history(&viewer, shown.before).await?;
+        let passkeys = web.account.passkeys(&viewer).await?;
+        let emails = web.account.emails(&viewer).await?;
         let linked: Vec<_> = web
             .account
-            .identities(&reader.viewer)
+            .identities(&viewer)
             .await?
             .into_iter()
             .map(|identity| identity.provider)
             .collect();
         let reported = match shown.reported {
-            Some(event_id) => web.account.reported(&reader.viewer, event_id).await?,
+            Some(event_id) => web.account.reported(&viewer, event_id).await?,
             None => None,
         };
         let email_rows: Vec<_> = emails.iter().map(EmailRow::from).collect();
@@ -99,9 +110,10 @@ impl SettingsPage for History {
             shown,
             next: history.next,
             reported,
-            confirmed: reader.confirmed,
+            confirmed: reader.is_recent(),
         };
-        let page = view! { cx => piquel_ui::history(rows: &rows, holds: holds, page: page) };
+        let page =
+            Child::new(view! { cx => piquel_ui::history(rows: &rows, holds: holds, page: page) });
         web.settings_page(cx, Self::TAB, reader, outcome, &[], page)
             .await
     }
