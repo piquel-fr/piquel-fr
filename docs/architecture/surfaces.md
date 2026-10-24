@@ -154,9 +154,11 @@ several recoveries to undo, only what predates all of them is trusted.
 An owner with no passkey left from before a recovery cannot undo it themselves,
 so support can (`user undo-recovery`, `AdminService::undo_recovery`) once it has
 confirmed them: the same rollback, recorded with the reason. Starting another
-recovery while one can be undone is refused unless asked for
-(`--despite-undoable`), and `user recover` first lists each undoable recovery
-with everything it added. No account is recovered while it holds administrator
+recovery while a used one can be undone is refused unless asked for
+(`--despite-undoable`), its link goes to the primary address the oldest undoable
+recovery recorded, and `user recover` first lists each undoable recovery with
+everything it added. Nobody is made an administrator while a recovery can be
+undone, except by the CLI when asked for. No account is recovered while it holds administrator
 rights: whoever used the link could use them before the owner undoes it, so
 revoking them is the prerequisite.
 The pages that use the link and offer the undo are *(planned)*; until then no page uses a link.

@@ -245,9 +245,11 @@ just auth account alice emails remove <email-id> --reason "Asked by email"
   social sign-ins and addresses from before it, or move the primary address away
   from one.
   - It first lists the account's recoveries of the last 30 days, with what each
-    one that can still be undone added since. While one can, it refuses: review
-    it, then either undo it with `user undo-recovery`, or pass
-    `--despite-undoable` when its own owner asks again.
+    one that can still be undone added since. While a used one can, it refuses:
+    review it, then either undo it with `user undo-recovery`, or pass
+    `--despite-undoable` when its own owner asks again; an unused link is just
+    replaced. The new link goes to the primary address the oldest undoable
+    recovery recorded, or is only printed if it recorded none.
   - `user undo-recovery` undoes the newest recovery for an owner with no passkey
     left from before it, once support has confirmed them: whoever used the link
     loses everything they added, and the next link goes back to the owner's
@@ -258,7 +260,9 @@ just auth account alice emails remove <email-id> --reason "Asked by email"
     whoever used the link could use them before the owner undoes it. First
     revoke the rights with `admin revoke`
     (grant another administrator first if it is the last), recover the account,
-    then grant them again once its owner is confirmed.
+    then grant them again once its owner is confirmed: while the recovery can
+    still be undone, `admin grant` refuses unless given `--despite-undoable`,
+    which the evidence policy says when to pass.
 - Each change is recorded as a domain event with the operator: `$USER` and the host
   name. Unlike the admin API, the CLI may act on administrators' accounts, except
   to recover one.

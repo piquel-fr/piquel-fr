@@ -2,6 +2,7 @@
 
 use super::*;
 use crate::keys::SigningKeys;
+use crate::recovery::{RecoveryLinks, WhileUndoable};
 use crate::security::{RequestContext, Session};
 use crate::tests::until_blocked;
 use axum::{
@@ -22,7 +23,7 @@ use piquel_common::{
         step_up::StepUpRequirement,
     },
 };
-use piquel_crypto::{KeySet, Rs256Key};
+use piquel_crypto::{KeySet, Rs256Key, Secret};
 use piquel_repository::{
     Channel, DatabaseConfig, DatabaseError, DatabaseTransaction, DeliveryStatus, EventFilter,
     InsertUser, NewDelivery,
@@ -146,7 +147,7 @@ impl Harness {
     pub(crate) async fn admin(&self) -> Account {
         let account = self.account().await;
         self.service()
-            .grant_administrator(&cli(), account.user_id)
+            .grant_administrator(&cli(), account.user_id, WhileUndoable::Refuse)
             .await
             .expect("grant");
         account
@@ -1141,4 +1142,47 @@ async fn delivery_changes_check_and_record_their_administrator() {
             .unwrap_or_else(|| panic!("{kind} recorded"));
         assert_eq!(recorded.actor, admin.context().actor, "{kind}");
     }
+}
+
+/// Nobody is made an administrator while a recovery of the account can still be
+/// undone: whoever holds or used its link could use the rights. The admin API
+/// refuses outright; the CLI grants only when told to, once support has
+/// confirmed the owner.
+#[tokio::test]
+#[ignore = "requires TEST_DATABASE_URL"]
+async fn no_grant_while_a_recovery_can_be_undone() {
+    let harness = Harness::new().await;
+    let admin = harness.admin().await;
+    let target = harness.account().await.user_id;
+    let links = RecoveryLinks::new(origin(), Secret::generate().expect("key"), None);
+    let reason = Reason::parse("Lost every passkey".into()).expect("reason");
+    harness
+        .service()
+        .recover_account(&cli(), target, reason, &links, WhileUndoable::Proceed)
+        .await
+        .expect("recovery");
+
+    let token = harness.token(admin, Acr::PhishingResistant, Duration::zero());
+    let grant = json!({ "user_id": target });
+    let (status, ..) = harness
+        .call(
+            Method::POST,
+            paths::ADMINISTRATORS,
+            Some(&token),
+            Some(grant),
+        )
+        .await;
+    assert_eq!(status, StatusCode::CONFLICT, "the admin API refuses");
+    let refused = harness
+        .service()
+        .grant_administrator(&cli(), target, WhileUndoable::Refuse)
+        .await;
+    assert!(matches!(refused, Err(AdminError::GrantDuringRecovery)));
+    let granted = harness.database.administrators().contains(target).await;
+    assert!(!granted.expect("rights"), "not granted");
+    harness
+        .service()
+        .grant_administrator(&cli(), target, WhileUndoable::Proceed)
+        .await
+        .expect("the CLI, once the owner is confirmed");
 }

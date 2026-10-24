@@ -15,7 +15,8 @@ use piquel_admin_api::{
     UserDetail, UserPage,
 };
 use piquel_common::{
-    AccountStatus, ClientId, DeliveryId, Handle, Personal, RecoveryId, SessionId, TokenId, UserId,
+    AccountStatus, ClientId, DeliveryId, EmailId, Handle, Personal, RecoveryId, SessionId, TokenId,
+    UserId,
     clients::{ClientField, ClientOwner, ClientRegistration},
     config::Origin,
     email::NormalizedEmail,
@@ -261,10 +262,12 @@ impl AdminService {
     /// account with a primary address.
     ///
     /// Nobody recovers an administrator: whoever used the link could use its
-    /// rights before the owner undoes it. While another recovery can still be
+    /// rights before the owner undoes it. While a used recovery can still be
     /// undone, it starts only `WhileUndoable::Proceed`: support reviews that one
     /// ([`Self::recent_recoveries`]) and undoes it ([`Self::undo_recovery`])
-    /// first.
+    /// first. An unused link is simply replaced. The link goes to the primary
+    /// address `trusted_primary` says, which whoever used an earlier
+    /// recovery cannot have chosen.
     ///
     /// The owner can undo the recovery with a passkey enrolled before it, which
     /// takes back what the account gained since and restores this primary
@@ -286,16 +289,10 @@ impl AdminService {
             return Err(AdminError::RecoveryOfAdministrator);
         }
         let undoable = Undoable::load(&mut tx, user_id).await?;
-        if undoable.newest().is_some() && while_undoable == WhileUndoable::Refuse {
+        if undoable.any_used() && while_undoable == WhileUndoable::Refuse {
             return Err(AdminError::RecoveryUndoable);
         }
-        // The link goes to the primary address, which is always verified.
-        let primary = tx
-            .emails()
-            .list(user_id)
-            .await?
-            .into_iter()
-            .find(|email| email.is_primary);
+        let primary = Self::trusted_primary(&mut tx, user_id, &undoable).await?;
         let shown = matches!(operator, Operator::Cli { .. });
         if primary.is_none() && !shown {
             return Err(AdminError::RecoveryNeedsEmail);
@@ -309,7 +306,7 @@ impl AdminService {
                 id,
                 user_id,
                 secret_digest: token.digest().as_bytes(),
-                primary_email_id: primary.map(|email| email.id),
+                primary_email_id: primary,
                 expires_at,
             })
             .await?;
@@ -326,6 +323,31 @@ impl AdminService {
         let link = shown.then(|| links.url(&token));
         Self::finish(tx, operator, Some(user_id), vec![]).await?;
         Ok(link)
+    }
+
+    /// The primary address a new recovery of `user_id` records, which its link
+    /// goes to and its undo restores: the current one, or, while another can be
+    /// undone, the one the oldest of them recorded, which whoever used them could
+    /// not have chosen. `None` when that address is gone or unverified, or none
+    /// was recorded; the link is then only printed to the operator.
+    async fn trusted_primary(
+        tx: &mut DatabaseTransaction<'_>,
+        user_id: UserId,
+        undoable: &Undoable,
+    ) -> Result<Option<EmailId>, DatabaseError> {
+        let emails = tx.emails().list(user_id).await?;
+        let trusted = match undoable.oldest() {
+            Some(oldest) => oldest.primary_email_id,
+            None => emails
+                .iter()
+                .find(|email| email.is_primary)
+                .map(|email| email.id),
+        };
+        Ok(trusted.filter(|id| {
+            emails
+                .iter()
+                .any(|email| email.id == *id && email.verified_at.is_some())
+        }))
     }
 
     /// The account's recoveries started or used within the last
@@ -806,15 +828,20 @@ impl AdminService {
 
     /// Makes the active account `user_id` an administrator. Administrators cannot
     /// grant themselves rights: one whose rights were revoked while the request
-    /// waited would otherwise restore them.
+    /// waited would otherwise restore them. While a recovery of the account can
+    /// still be undone, whoever holds or used its link could use the rights, so
+    /// it is refused unless `WhileUndoable::Proceed`, which only the CLI passes,
+    /// once support has confirmed the owner.
     ///
     /// # Errors
     /// Fails when the operator may not make changes, or the account is unknown,
-    /// disabled, already an administrator or the caller's own.
-    pub async fn grant_administrator(
+    /// disabled, already an administrator, the caller's own, or has a recovery
+    /// that can still be undone.
+    pub(crate) async fn grant_administrator(
         &self,
         operator: &Operator,
         user_id: UserId,
+        while_undoable: WhileUndoable,
     ) -> Result<(), AdminError> {
         operator.refuse_own_rights(user_id)?;
         let mut tx = self.database.begin().await?;
@@ -826,6 +853,10 @@ impl AdminService {
             .ok_or(AdminError::UserNotFound)?;
         if user.status == AccountStatus::Disabled {
             return Err(AdminError::AccountDisabled);
+        }
+        let undoable = Undoable::load(&mut tx, user_id).await?;
+        if undoable.newest().is_some() && while_undoable == WhileUndoable::Refuse {
+            return Err(AdminError::GrantDuringRecovery);
         }
         if !tx.administrators().grant(user_id).await? {
             return Err(AdminError::AlreadyAdministrator);

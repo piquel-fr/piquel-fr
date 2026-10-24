@@ -35,9 +35,10 @@ for the dashboard *(planned)*; the admin API has no route for it.
 - **R2.** No account is recovered while it holds administrator rights, by
   anyone, including the CLI (`administrators_never_see_the_link`). See
   [Administrators](#administrators).
-- **R3.** While another recovery of the account can still be undone, starting one
-  is refused unless the operator passes `--despite-undoable`
-  (`WhileUndoable::Proceed`) (`support_undoes_a_hijacked_recovery`,
+- **R3.** While a used recovery of the account can still be undone, starting
+  another is refused unless the operator passes `--despite-undoable`
+  (`WhileUndoable::Proceed`). An unused link blocks nothing: nobody got in with
+  it, and the new recovery replaces it (`support_undoes_a_hijacked_recovery`,
   `administrators_never_see_the_link`).
 - **R4.** Starting a recovery ends every session and refresh grant of the
   account, cancels any older unused link, and records `RecoveryStarted` with the
@@ -49,8 +50,8 @@ for the dashboard *(planned)*; the admin API has no route for it.
   replaced or undone, enforced by a partial unique index
   (`crates/database/tests/recoveries.rs: one_open_recovery_per_account`).
 - **R6.** An administrator never receives the link, so they may recover only an
-  account with a primary address. The operator at the terminal is shown the link
-  too, which also reaches an owner without an address
+  account whose recovery has an address to mail (L4). The operator at the
+  terminal is shown the link too, which also reaches an owner without one
   (`administrators_never_see_the_link`).
 - **R7.** Before starting, `user recover` lists the account's recoveries of the
   last 30 days, with the passkey each enrolled and, for each one that can still
@@ -73,9 +74,14 @@ for the dashboard *(planned)*; the admin API has no route for it.
   account without using the link; `POST /recovery/start` and `/finish` are a
   browser-bound registration ceremony on auth's origin, the RP ID
   (`a_link_enrolls_one_passkey_and_signs_in_with_it`).
-- **L4.** The link goes to the account's primary address only, never to its other
-  addresses, and is not sent once it was used or replaced, or the account is
-  disabled (`a_link_enrolls_one_passkey_and_signs_in_with_it`,
+- **L4.** The link goes to one address only, the primary address the recovery
+  records: the current primary, or, while another recovery can still be undone,
+  the one the oldest of them recorded, which whoever used them cannot have
+  chosen. When that address is gone or unverified, or none was recorded, the
+  link is mailed nowhere and only printed to the operator
+  (`a_forced_recovery_mails_only_the_primary_from_before`). It is never sent to
+  the account's other addresses, nor once it was used or replaced, or the
+  account is disabled (`a_link_enrolls_one_passkey_and_signs_in_with_it`,
   `deliveries::email::tests::a_recovery_link_is_sent_while_it_works`; an undone
   or expired link is not sent either, untested).
 - **L5.** A link enrolls one passkey, once. It stops working when it is used,
@@ -167,11 +173,12 @@ ceremony of its own: `POST /account/recovery/undo/start {recovery_id}`, then
   every passkey enrolled since, the recovery's own included; every identity
   linked since; every OIDC consent given or extended since; and every address
   added or verified since (`undo_takes_back_every_way_in_added_since`).
-- **T2.** It makes the primary address the recovery started with primary again,
+- **T2.** It makes the primary address the recovery recorded (L4) primary again,
   or, if that is gone, the oldest address verified before the recovery
   (`undo_takes_back_every_way_in_added_since`,
-  `undo_falls_back_to_the_oldest_address_left`). It leaves an unchanged primary
-  alone (`only_an_older_passkey_undoes_a_recovery`).
+  `undo_falls_back_to_the_oldest_address_left`,
+  `a_forced_recovery_mails_only_the_primary_from_before`). It leaves an
+  unchanged primary alone (`only_an_older_passkey_undoes_a_recovery`).
 - **T3.** It leaves everything from before the recovery untouched, except a
   consent re-approved since and an address added before but verified since,
   which it withdraws whole (`undo_takes_back_every_way_in_added_since`).
@@ -223,8 +230,9 @@ before an undoable recovery.
   (`crates/database/tests/recoveries.rs: the_newest_recovery_is_the_last_stored`).
 - **S3.** The owner undoes the newest first, then the next
   (`a_second_recovery_trusts_only_what_predates_both`).
-- **S4.** Starting another while one can be undone needs `--despite-undoable`
-  (R3), after reviewing the listing (R7).
+- **S4.** Starting another while a used one can be undone needs
+  `--despite-undoable` (R3), after reviewing the listing (R7); its link goes to
+  the primary the oldest undoable recovery recorded (L4).
 
 ## Administrators
 
@@ -238,6 +246,12 @@ before an undoable recovery.
   another administrator first if it is the last), recovers the account, then
   grants them again once the owner is confirmed through the [evidence
   policy](#supports-evidence-policy).
+- **A3.** No account is made an administrator while a recovery of it can still be
+  undone: whoever holds or used its link could use the rights, and an undo
+  would not take them back. The admin API refuses outright; the CLI grants only
+  with `auth-service admin grant --despite-undoable`, which support passes only
+  under the [evidence policy](#supports-evidence-policy)
+  (`admin::tests::no_grant_while_a_recovery_can_be_undone`).
 
 ## Locking and serialization
 
@@ -277,7 +291,7 @@ The operator path, against #85's threats.
 | Social engineering of the operator | The main way to attack this design. Support follows the [evidence policy](#supports-evidence-policy). The reason is recorded and shown to the owner (R4), a second recovery needs a deliberate flag after reviewing the first (R3, R7), and no account is recovered while it holds administrator rights (A1). |
 | Insider or database access | Database access is the root of trust (see [NIST](#nist-sp-800-63b-4)): an operator can do anything. CLI changes record `Actor::Cli` with `$USER` and the host, and the reason where the command takes one; the owner sees that an operator acted, and the reason. Tamper evidence is #31. |
 | Close-proximity attacker | A partner with the mailbox can receive a link that support sent. The owner's older passkey undoes it within 30 days (U1, W2), the guard keeps what undo needs (P1), and the notice reaches every address (C4). |
-| Harassment | There is no self-service recovery to flood: only support starts one. Each start mails one link to one address (L4). Another start needs `--despite-undoable` only while an earlier recovery can still be undone (R3); once its link expired or it settled, support can start another without it. Dedicated recovery rate limits (#86) are not built yet. |
+| Harassment | There is no self-service recovery to flood: only support starts one. Each start mails one link to one address (L4). Another start needs `--despite-undoable` only while a used recovery can still be undone (R3); an unused link is replaced, and once a used one settled, support can start another without it. Dedicated recovery rate limits (#86) are not built yet. |
 | Lockout | The path exists for it. An attacker cannot undo the owner's genuine recovery without a passkey from before every undoable one (U1, S1), and support can undo an attacker's (U5). An owner who loses the recovered passkey within the window has support. |
 
 ## Decisions that replace #85's sketch
@@ -374,6 +388,16 @@ Before `user undo-recovery`, on a claim that a recovery was not the owner's:
    it lists were added since the recovery; a request coming through any of them
    is a request from whoever used the link.
 3. **Write the reason**, as above.
+
+Before `admin grant --despite-undoable`, which re-grants an administrator's
+rights while its recovery can still be undone (A3):
+
+1. **Confirm the owner as for an undo,** through evidence from before the
+   recovery, and check that the recovery's rollback lists nothing the owner does
+   not recognize. If it does, undo the recovery first.
+2. **Prefer waiting** until the recovery settles, when the flag is no longer
+   needed, unless the owner's rights are needed sooner.
+3. **Never grant on a request** that comes through anything the rollback lists.
 
 Never enough on its own:
 
