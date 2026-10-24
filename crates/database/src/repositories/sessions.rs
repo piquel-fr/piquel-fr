@@ -40,7 +40,8 @@ pub struct InsertSession {
     pub ip: IpAddr,
     /// When the session last proved possession of a passkey, if it did.
     pub passkey_confirmed_at: Option<DateTime<Utc>>,
-    /// The passkey that signed it in, if one did.
+    /// The passkey that signed it in, if one did. A later confirmation replaces
+    /// it with the confirming passkey (see [`SessionRepository::confirm_passkey`]).
     pub passkey_id: Option<PasskeyId>,
 }
 
