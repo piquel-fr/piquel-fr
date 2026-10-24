@@ -1076,7 +1076,7 @@ impl AccountService {
         let mut tx = self.database.begin().await?;
         subject.lock_confirmed(&mut tx).await?;
         let enrolled = tx.passkeys().enrolled_at(subject.user(), id).await?;
-        Self::keep_older(&mut tx, subject, enrolled).await?;
+        Self::keep_older(&mut tx, subject.user(), subject.own_session(), enrolled).await?;
         if !tx.passkeys().revoke_if_not_last(id, subject.user()).await? {
             return Err(PasskeyError::LastPasskey.into());
         }

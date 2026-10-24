@@ -144,17 +144,18 @@ impl UserCommand {
                 .or_else(|| at(recovery.cancelled_at).map(|at| format!("replaced {at}")))
                 .or_else(|| at(recovery.completed_at).map(|at| format!("used {at}")))
                 .unwrap_or_else(|| "link not used".to_owned());
+            let (passkey, name, active) = match &recovery.passkey {
+                Some(passkey) => (
+                    passkey.id.to_string(),
+                    passkey.friendly_name.as_deref().unwrap_or("-"),
+                    if passkey.active { "yes" } else { "no" },
+                ),
+                None => ("-".to_owned(), "-", "-"),
+            };
             eprintln!(
-                "{}\t{}\t{state}\t{}\t{}\t{}",
+                "{}\t{}\t{state}\t{passkey}\t{name}\t{active}",
                 recovery.id,
                 recovery.started_at.to_rfc3339(),
-                recovery
-                    .passkey_id
-                    .map_or_else(|| "-".to_owned(), |id| id.to_string()),
-                recovery.passkey_name.as_deref().unwrap_or("-"),
-                recovery
-                    .passkey_active
-                    .map_or("-", |active| if active { "yes" } else { "no" }),
             );
         }
     }

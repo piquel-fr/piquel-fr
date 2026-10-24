@@ -24,10 +24,10 @@ Piquel support started a recovery of the Piquel account @{{ username }}, so its 
 {{ link }}
 
 The link works once, for {{ hours }} hours. If you did not ask for this, contact Piquel support. You can also undo the recovery from your account settings with a passkey you already have.
-{%- when Content::Recovered { address: _, settings } %}
+{%- when Content::Recovered { address: _, settings, days } %}
 A recovery added a new passkey to your Piquel account and signed in with it. If that was you, there is nothing to do.
 
-If it was not, use a passkey you had before the recovery to undo it from your account settings. You have 30 days to do so. Undoing it removes every passkey, social sign-in, app access and email address added or confirmed since the recovery, makes your previous primary address primary again, and signs out your other devices:
+If it was not, use a passkey you had before the recovery to undo it from your account settings. You have {{ days }} days to do so. Undoing it removes every passkey, social sign-in, app access and email address added or confirmed since the recovery, makes your previous primary address primary again, and signs out your other devices:
 
 {{ settings }}
 {%- endmatch %}

@@ -257,7 +257,7 @@ impl AccountService {
         let mut tx = self.database.begin().await?;
         subject.lock_confirmed(&mut tx).await?;
         let linked = tx.federation().linked_at(subject.user(), provider).await?;
-        Self::keep_older(&mut tx, subject, linked).await?;
+        Self::keep_older(&mut tx, subject.user(), subject.own_session(), linked).await?;
         if !tx.federation().unlink(subject.user(), provider).await? {
             return Err(FederationError::IdentityNotLinked.into());
         }

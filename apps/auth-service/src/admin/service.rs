@@ -310,9 +310,9 @@ impl AdminService {
         Ok(link)
     }
 
-    /// The account's recoveries started within the last [`SETTLE_WINDOW`], the
-    /// time one can still be undone, newest first, with the passkey each
-    /// enrolled. Support reviews them before starting another, and can remove a
+    /// The account's recoveries started or used within the last
+    /// [`SETTLE_WINDOW`], so every one that can still be undone, newest first,
+    /// with the passkey each enrolled. Support reviews them before starting another, and can remove a
     /// suspicious passkey first. Recorded, as a view of the account.
     pub(crate) async fn recent_recoveries(
         &self,

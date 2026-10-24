@@ -195,6 +195,7 @@ impl<M: Mailer> EmailSender<M> {
             EmailMessage::Recovered { address } => Content::Recovered {
                 address: address.clone(),
                 settings: settings.to_owned(),
+                days: recovery::SETTLE_WINDOW.num_days(),
             },
         }))
     }
@@ -295,6 +296,8 @@ enum Content {
         address: String,
         /// Account settings, where an older passkey undoes the recovery.
         settings: String,
+        /// How many days the recovery can be undone.
+        days: i64,
     },
 }
 

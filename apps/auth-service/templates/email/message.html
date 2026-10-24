@@ -25,9 +25,9 @@
 <p><a href="{{ link }}" style="display:inline-block;padding:10px 18px;border-radius:8px;background:#1a1a1a;color:#ffffff;text-decoration:none">Add a passkey</a></p>
 <p style="font-size:14px;color:#555555">Or copy this link: {{ link }}</p>
 <p>The link works once, for {{ hours }} hours. If you did not ask for this, contact Piquel support. You can also undo the recovery from your account settings with a passkey you already have.</p>
-{%- when Content::Recovered { address: _, settings } %}
+{%- when Content::Recovered { address: _, settings, days } %}
 <p>A recovery added a new passkey to your Piquel account and signed in with it. If that was you, there is nothing to do.</p>
-<p>If it was not, use a passkey you had before the recovery to <a href="{{ settings }}">undo it from your account settings</a>. You have 30 days to do so. Undoing it removes every passkey, social sign-in, app access and email address added or confirmed since the recovery, makes your previous primary address primary again, and signs out your other devices.</p>
+<p>If it was not, use a passkey you had before the recovery to <a href="{{ settings }}">undo it from your account settings</a>. You have {{ days }} days to do so. Undoing it removes every passkey, social sign-in, app access and email address added or confirmed since the recovery, makes your previous primary address primary again, and signs out your other devices.</p>
 {%- endmatch %}
 <p>Piquel</p>
 </div>

@@ -31,14 +31,14 @@ mod error;
 pub(crate) use error::RecoveryError;
 
 use crate::{
-    account::{AccountError, AccountService, Owner, Subject},
+    account::{AccountError, AccountService, Owner},
     emails::EmailApplication,
     routes,
     security::RequestContext,
 };
 use chrono::{DateTime, Duration, Utc};
 use piquel_common::{
-    AccountStatus, PasskeyId, RecoveryId, UserId,
+    AccountStatus, PasskeyId, RecoveryId, SessionId, UserId,
     config::Origin,
     events::{Actor, DomainEvent, EventContext, RevocationReason},
     protocol::api::Passkey,
@@ -203,9 +203,14 @@ impl Undoable {
         Ok(Self(tx.recoveries().undoable(user, settled_before).await?))
     }
 
+    /// The newest.
+    fn newest(&self) -> Option<&StoredRecovery> {
+        self.0.first()
+    }
+
     /// The newest, if it is recovery `id`, which an undo names.
     fn newest_is(&self, id: RecoveryId) -> Result<&StoredRecovery, RecoveryError> {
-        let newest = self.0.first().ok_or(RecoveryError::NothingToUndo)?;
+        let newest = self.newest().ok_or(RecoveryError::NothingToUndo)?;
         if newest.id == id {
             Ok(newest)
         } else {
@@ -267,7 +272,7 @@ impl AccountService {
     ) -> Result<Option<RecoveryView>, AccountError> {
         let mut tx = self.database.begin().await?;
         let undoable = Undoable::load(&mut tx, owner.user()).await?;
-        let Some(recovery) = undoable.0.first() else {
+        let Some(recovery) = undoable.newest() else {
             return Ok(None);
         };
         let rollback = tx.recoveries().rollback(recovery).await?;
@@ -296,6 +301,12 @@ impl AccountService {
             .recoveries()
             .find(id)
             .await?
+            .ok_or(RecoveryError::NothingToUndo)?;
+        // A disabled account has nothing to undo until it is enabled again.
+        tx.users()
+            .find_by_id(recovery.user_id)
+            .await?
+            .filter(|user| user.status == AccountStatus::Active)
             .ok_or(RecoveryError::NothingToUndo)?;
         let undoable = Undoable::load(&mut tx, recovery.user_id).await?;
         undoable.newest_is(id)?;
@@ -406,23 +417,23 @@ impl AccountService {
         Ok(())
     }
 
-    /// Refuses the owner's removal of a passkey, identity or address that joined
-    /// the account at `added_at`, while a recovery that started after it can be
-    /// undone and the owner's session does not predate that recovery: a passkey
-    /// enrolled before it must have signed the session in or confirmed it.
-    /// Whoever used the link could otherwise remove what undoing needs, or what
-    /// it would leave the owner. Administrators and operators, who act without
-    /// such a session, still can. In the removal's transaction, under the
-    /// account lock; nothing to check when the setting is gone.
+    /// Refuses the owner's removal of a passkey, identity or address of `user`
+    /// that joined the account at `added_at`, while a recovery that started after
+    /// it can be undone and the owner's `session` does not predate that recovery:
+    /// a passkey enrolled before it must have signed the session in or confirmed
+    /// it. Whoever used the link could otherwise remove what undoing needs, or
+    /// what it would leave the owner. Administrators and operators act without
+    /// such a session, `None`, and still can. In the removal's transaction,
+    /// under the account lock; nothing to check when the setting is gone.
     pub(crate) async fn keep_older(
         tx: &mut DatabaseTransaction<'_>,
-        subject: &Subject,
+        user: UserId,
+        session: Option<SessionId>,
         added_at: Option<DateTime<Utc>>,
     ) -> Result<(), AccountError> {
-        let (Some(session), Some(added_at)) = (subject.own_session(), added_at) else {
+        let (Some(session), Some(added_at)) = (session, added_at) else {
             return Ok(());
         };
-        let user = subject.user();
         let undoable = Undoable::load(tx, user).await?;
         let Some(protecting) = undoable.protecting(added_at) else {
             return Ok(());

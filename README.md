@@ -508,8 +508,8 @@ explains how to choose a requirement and handle the challenge.
   Settings keep listing identities of disabled providers so they can be unlinked.
 - The last passkey cannot be removed. Removing a passkey/provider revokes other
   central sessions. An owner who lost every passkey is recovered with a link that
-  enrolls one new passkey; a passkey enrolled before the recovery can undo it,
-  taking back everything added since (see
+  enrolls one new passkey; for 30 days after, a passkey enrolled before the
+  recovery can undo it, taking back everything added since (see
   [surfaces.md](docs/architecture/surfaces.md#recovering-an-account)). Until its page
   ships, nothing can use the link.
 - Sessions last at most 30 days. Access tokens last five minutes. Refresh rotation

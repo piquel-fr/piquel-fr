@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "SELECT\n                    r.id AS \"id: RecoveryId\", r.started_at, r.completed_at, r.cancelled_at,\n                    r.undone_at, r.passkey_id AS \"passkey_id: PasskeyId\",\n                    p.friendly_name AS \"passkey_name?\",\n                    (p.revoked_at IS NULL) AS \"passkey_active?\"\n                FROM account_recoveries r\n                LEFT JOIN passkey_credentials p ON p.id = r.passkey_id\n                WHERE r.user_id = $1 AND r.started_at > $2\n                ORDER BY r.started_at DESC, r.id DESC",
+  "query": "SELECT\n                    r.id AS \"id: RecoveryId\", r.started_at, r.completed_at, r.cancelled_at,\n                    r.undone_at, r.passkey_id AS \"passkey_id: PasskeyId\",\n                    p.friendly_name AS \"passkey_name?\",\n                    (p.id IS NOT NULL AND p.revoked_at IS NULL) AS \"passkey_active!\"\n                FROM account_recoveries r\n                LEFT JOIN passkey_credentials p ON p.id = r.passkey_id\n                WHERE r.user_id = $1 AND COALESCE(r.completed_at, r.started_at) > $2\n                ORDER BY r.started_at DESC, r.id DESC",
   "describe": {
     "columns": [
       {
@@ -40,7 +40,7 @@
       },
       {
         "ordinal": 7,
-        "name": "passkey_active?",
+        "name": "passkey_active!",
         "type_info": "Bool"
       }
     ],
@@ -61,5 +61,5 @@
       null
     ]
   },
-  "hash": "ceb5f337f1cbffec668a0780f8fcde5ffd2eed983248059f8a449564e1eed373"
+  "hash": "db30f8423cf1cb5b2ccdc78fe1cdff7fc3bb6000f6694629576e56dab04d0bee"
 }

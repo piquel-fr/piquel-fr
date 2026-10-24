@@ -271,6 +271,9 @@ impl AccountService {
             if existing.verified_at.is_some() {
                 return Err(EmailError::AlreadyAdded.into());
             }
+            // Adding it again replaces it, which removes the pending one.
+            let joined = tx.emails().joined_at(user, existing.id).await?;
+            Self::keep_older(&mut tx, user, Some(owner.session().id), joined).await?;
             EmailApplication::delete(&mut tx, &context, user, existing.id).await?;
             count -= 1;
         }
@@ -416,7 +419,7 @@ impl AccountService {
         let mut tx = self.database.begin().await?;
         subject.lock_confirmed(&mut tx).await?;
         let joined = tx.emails().joined_at(subject.user(), id).await?;
-        Self::keep_older(&mut tx, subject, joined).await?;
+        Self::keep_older(&mut tx, subject.user(), subject.own_session(), joined).await?;
         let emails = tx.emails().list(subject.user()).await?;
         let email = emails
             .iter()

@@ -121,11 +121,56 @@ pub struct RecentRecovery {
     /// When its owner undid it.
     pub undone_at: Option<DateTime<Utc>>,
     /// The passkey its link enrolled, if it did.
-    pub passkey_id: Option<PasskeyId>,
-    /// That passkey's label.
-    pub passkey_name: Option<String>,
-    /// Whether that passkey is still active.
-    pub passkey_active: Option<bool>,
+    pub passkey: Option<RecoveryPasskey>,
+}
+
+/// The passkey a recovery's link enrolled.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+pub struct RecoveryPasskey {
+    /// The passkey.
+    pub id: PasskeyId,
+    /// Its label, while its row exists.
+    pub friendly_name: Option<String>,
+    /// Whether it is still active.
+    pub active: bool,
+}
+
+/// A [`RecentRecovery`] as one row.
+struct RecentRow {
+    /// See [`RecentRecovery::id`].
+    id: RecoveryId,
+    /// See [`RecentRecovery::started_at`].
+    started_at: DateTime<Utc>,
+    /// See [`RecentRecovery::completed_at`].
+    completed_at: Option<DateTime<Utc>>,
+    /// See [`RecentRecovery::cancelled_at`].
+    cancelled_at: Option<DateTime<Utc>>,
+    /// See [`RecentRecovery::undone_at`].
+    undone_at: Option<DateTime<Utc>>,
+    /// See [`RecoveryPasskey::id`].
+    passkey_id: Option<PasskeyId>,
+    /// See [`RecoveryPasskey::friendly_name`].
+    passkey_name: Option<String>,
+    /// See [`RecoveryPasskey::active`].
+    passkey_active: bool,
+}
+
+impl From<RecentRow> for RecentRecovery {
+    /// Gathers the enrolled passkey's columns, which exist together.
+    fn from(row: RecentRow) -> Self {
+        Self {
+            id: row.id,
+            started_at: row.started_at,
+            completed_at: row.completed_at,
+            cancelled_at: row.cancelled_at,
+            undone_at: row.undone_at,
+            passkey: row.passkey_id.map(|id| RecoveryPasskey {
+                id,
+                friendly_name: row.passkey_name,
+                active: row.passkey_active,
+            }),
+        }
+    }
 }
 
 /// The address undoing a recovery makes primary again.
@@ -298,8 +343,8 @@ impl RecoveryRepository<'_> {
         )
     }
 
-    /// The account's recoveries started after `since`, newest first, with the
-    /// passkey each enrolled.
+    /// The account's recoveries started, or used, after `since`, newest first,
+    /// with the passkey each enrolled.
     ///
     /// # Errors
     ///
@@ -309,24 +354,43 @@ impl RecoveryRepository<'_> {
         user_id: UserId,
         since: DateTime<Utc>,
     ) -> Result<Vec<RecentRecovery>, DatabaseError> {
-        run!(
+        let rows = run!(
             self,
             fetch_all,
             sqlx::query_as!(
-                RecentRecovery,
+                RecentRow,
                 r#"SELECT
                     r.id AS "id: RecoveryId", r.started_at, r.completed_at, r.cancelled_at,
                     r.undone_at, r.passkey_id AS "passkey_id: PasskeyId",
                     p.friendly_name AS "passkey_name?",
-                    (p.revoked_at IS NULL) AS "passkey_active?"
+                    (p.id IS NOT NULL AND p.revoked_at IS NULL) AS "passkey_active!"
                 FROM account_recoveries r
                 LEFT JOIN passkey_credentials p ON p.id = r.passkey_id
-                WHERE r.user_id = $1 AND r.started_at > $2
+                WHERE r.user_id = $1 AND COALESCE(r.completed_at, r.started_at) > $2
                 ORDER BY r.started_at DESC, r.id DESC"#,
                 user_id.as_uuid(),
                 since,
             )
-        )
+        )?;
+        Ok(rows.into_iter().map(Into::into).collect())
+    }
+
+    /// Makes recovery `id`'s unused link expire now: a fixture for expiry.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`DatabaseError`] if the update fails.
+    #[cfg(feature = "test-support")]
+    pub async fn expire(&mut self, id: RecoveryId) -> Result<(), DatabaseError> {
+        run!(
+            self,
+            execute,
+            sqlx::query!(
+                "UPDATE account_recoveries SET expires_at = now() WHERE id = $1",
+                id.as_uuid(),
+            )
+        )?;
+        Ok(())
     }
 
     /// Moves recovery `id`'s use `by` into the past, as if its link had been

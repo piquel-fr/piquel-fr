@@ -127,7 +127,9 @@ only an account with a primary address; the dashboard's way to start one is
 every verified address hears when a recovery enrolls a passkey.
 
 A recovery can be undone until its unused link expires, or for 30 days after the
-link was used (`SETTLE_WINDOW`); then it settles. Undoing is a passkey ceremony of
+link was used (`SETTLE_WINDOW`); then it settles. The window runs while the
+account is disabled too, so support investigating a recovery should settle the
+question within it. Undoing is a passkey ceremony of
 its own (`/account/recovery/undo/start` and `/finish`), by a passkey enrolled
 before every recovery that can still be undone: neither a recovery's passkey nor a
 social sign-in counts, since whoever holds them may not be the owner. It needs no

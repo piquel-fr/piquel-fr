@@ -218,6 +218,16 @@ impl Scenario {
         client.id
     }
 
+    /// Extends the account's consent to `client`, as approving it again does.
+    async fn extend(&self, client: &ClientId) {
+        let scopes = ["openid".to_owned(), "email".to_owned()];
+        self.database()
+            .oidc()
+            .save_consent(self.user(), client, client.as_str(), &scopes)
+            .await
+            .expect("consent");
+    }
+
     /// The clients the account consented to.
     async fn consents(&self) -> Vec<String> {
         let consents = self.database().oidc().list_consents(self.user()).await;
@@ -516,8 +526,10 @@ async fn what_predates_a_recovery_is_protected() {
     scenario.link(Provider::GitHub).await;
     scenario.address("primary", true).await;
     let address = scenario.address("secondary", false).await;
+    let (prior, verified_since) = scenario.unverified("prior").await;
     let token = scenario.recover().await;
     let recovered = scenario.enroll(&token).await;
+    scenario.verify(&verified_since).await;
     let identity = routes::federation::IDENTITY.replace("{provider}", "github");
     let email = routes::emails::ITEM.replace("{id}", &address.to_string());
 
@@ -531,6 +543,10 @@ async fn what_predates_a_recovery_is_protected() {
     assert_eq!(removed, StatusCode::FORBIDDEN);
     assert!(scenario.passkeys().await.contains(&older), "kept");
     assert_eq!(scenario.identities().await, [Provider::GitHub]);
+    // Verified only since, so it is undo's to take back, not protected.
+    let since = routes::emails::ITEM.replace("{id}", &prior.to_string());
+    let removed = scenario.call(Method::DELETE, &since, &recovered).await;
+    assert_eq!(removed, StatusCode::NO_CONTENT);
     assert_eq!(scenario.emails().await.len(), 2);
 
     let signed_in = scenario.signed_in_with(other).await;
@@ -584,6 +600,15 @@ async fn a_second_recovery_trusts_only_what_predates_both() {
         Err(AccountError::Recovery(RecoveryError::OlderPasskeyRequired))
     ));
     drop(tx);
+    let service = AdminService::new(scenario.database().clone());
+    let recent = service
+        .recent_recoveries(&cli(), user)
+        .await
+        .expect("recent");
+    assert_eq!(recent.len(), 2);
+    assert_eq!(recent[0].passkey, None, "the second is unused");
+    let enrolled = recent[1].passkey.as_ref().expect("the first enrolled one");
+    assert_eq!((enrolled.id, enrolled.active), (first_passkey, true));
 
     assert_eq!(scenario.undo(&view["id"]).await.0, StatusCode::NO_CONTENT);
     let (status, signed_in) = scenario.undo(&json!(scenario.newest().await)).await;
@@ -593,6 +618,12 @@ async fn a_second_recovery_trusts_only_what_predates_both() {
         scenario.status(&signed_in.expect("signed in")).await,
         Value::Null
     );
+    let recent = service
+        .recent_recoveries(&cli(), user)
+        .await
+        .expect("recent");
+    let removed = recent[1].passkey.as_ref().expect("the first enrolled one");
+    assert!(!removed.active, "removed by the undo");
 }
 
 /// A used recovery settles after [`SETTLE_WINDOW`]: until then it can be undone
@@ -613,6 +644,9 @@ async fn a_used_recovery_settles_after_its_window() {
         backdated.expect("backdate");
     };
 
+    let view = scenario.status(&recovered).await;
+    let at = |key: &str| -> DateTime<Utc> { serde_json::from_value(view[key].clone()).expect(key) };
+    assert_eq!(at("settles_at") - at("completed_at"), SETTLE_WINDOW);
     backdate(SETTLE_WINDOW - moment).await;
     let view = scenario.status(&recovered).await;
     assert_eq!(view["id"], id.to_string(), "still undoable");
@@ -624,6 +658,31 @@ async fn a_used_recovery_settles_after_its_window() {
     assert_eq!(scenario.status(&recovered).await, Value::Null, "settled");
     assert_eq!(
         scenario.remove(&recovered, older).await,
+        StatusCode::NO_CONTENT
+    );
+}
+
+/// An unused link protects what the account had before it only until it
+/// expires; then there is nothing to undo.
+#[tokio::test]
+#[ignore = "requires TEST_DATABASE_URL"]
+async fn an_expired_link_neither_undoes_nor_protects() {
+    let mut scenario = Scenario::new().await;
+    let older = scenario.keys.key_id;
+    scenario.recover().await;
+    let id = scenario.newest().await;
+    let newer = scenario.keys.switch_passkey("Newer key").await;
+    let signed_in = scenario.signed_in_with(newer).await;
+
+    assert_eq!(
+        scenario.remove(&signed_in, older).await,
+        StatusCode::FORBIDDEN
+    );
+    let expired = scenario.database().recoveries().expire(id).await;
+    expired.expect("expire");
+    assert_eq!(scenario.status(&signed_in).await, Value::Null);
+    assert_eq!(
+        scenario.remove(&signed_in, older).await,
         StatusCode::NO_CONTENT
     );
 }
@@ -641,6 +700,7 @@ async fn undo_takes_back_every_way_in_added_since() {
     let user = scenario.user();
     scenario.link(Provider::GitHub).await;
     let consented = scenario.consent().await;
+    let extended = scenario.consent().await;
     // The recovery's primary address is not the oldest, which only a fallback
     // would choose.
     let secondary = scenario.address("secondary", true).await;
@@ -657,6 +717,7 @@ async fn undo_takes_back_every_way_in_added_since() {
     assert_eq!(response.status(), StatusCode::NO_CONTENT, "confirmed");
     scenario.link(Provider::Google).await;
     let client = scenario.consent().await;
+    scenario.extend(&extended).await;
     let added = scenario.address("added", false).await;
     scenario.make_primary(added, None).await;
     let (pending, _) = scenario.unverified("pending").await;
@@ -677,10 +738,8 @@ async fn undo_takes_back_every_way_in_added_since() {
         ids(&rollback["identities"], "provider"),
         ["google".into()].into()
     );
-    assert_eq!(
-        ids(&rollback["consents"], "client_id"),
-        [client.to_string()].into()
-    );
+    let consents = [client.to_string(), extended.to_string()].into();
+    assert_eq!(ids(&rollback["consents"], "client_id"), consents);
     let emails = [added, pending, prior].map(|id| id.to_string()).into();
     assert_eq!(ids(&rollback["emails"], "id"), emails);
     assert_eq!(rollback["primary"]["id"], primary.to_string());
@@ -703,6 +762,9 @@ async fn undo_takes_back_every_way_in_added_since() {
             provider: Provider::Google,
         },
         DomainEvent::ConsentRevoked { client_id: client },
+        DomainEvent::ConsentRevoked {
+            client_id: extended,
+        },
         DomainEvent::PrimaryEmailChanged {
             email_id: primary,
             previous_email_id: Some(added),
