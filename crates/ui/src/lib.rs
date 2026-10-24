@@ -12,9 +12,8 @@
 //! ```
 //! use topcoat::{context::Cx, view::{ViewExt, view}};
 //!
-//! # tokio_test();
 //! # #[tokio::main(flavor = "current_thread")]
-//! # async fn tokio_test() -> topcoat::Result<()> {
+//! # async fn main() -> topcoat::Result<()> {
 //! let cx = Cx::default();
 //! let html = view! { cx =>
 //!     piquel_ui::document(title: "Sign out", stylesheet: "/assets/style.css", home: "/",
