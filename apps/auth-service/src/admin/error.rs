@@ -95,12 +95,18 @@ pub enum AdminError {
         "the account is an administrator: revoke its rights with `auth-service admin revoke` (grant another administrator first if it is the last), recover it, then grant them again once its owner is confirmed"
     )]
     RecoveryOfAdministrator,
-    /// Another recovery of the account can still be undone, and starting one
+    /// A used recovery of the account can still be undone, and starting another
     /// anyway was not asked for.
     #[error(
-        "the account has a recovery that can still be undone, whose link is unused or whose additions are listed above: review it, then undo it with `auth-service user undo-recovery`, or pass --despite-undoable to start another anyway, which replaces an unused link"
+        "the account has a used recovery that can still be undone, whose additions are listed above: review it, then undo it with `auth-service user undo-recovery`, or pass --despite-undoable to start another anyway"
     )]
     RecoveryUndoable,
+    /// A recovery of the account can still be undone, so its link's holder could
+    /// use administrator rights; only the CLI may grant them anyway.
+    #[error(
+        "the account has a recovery that can still be undone: confirm its owner first, then grant with `auth-service admin grant --despite-undoable`, or undo the recovery"
+    )]
+    GrantDuringRecovery,
     /// The account has no recovery that can still be undone.
     #[error("the account has no recovery that can still be undone")]
     NoRecoveryToUndo,
@@ -186,6 +192,7 @@ impl AdminError {
             Self::RecoveryUndoable => "recovery_undoable",
             Self::NoRecoveryToUndo => "no_recovery_to_undo",
             Self::RecoveryChanged => "recovery_changed",
+            Self::GrantDuringRecovery => "grant_during_recovery",
             Self::AccountDisabled => "account_disabled",
             Self::AlreadyAdministrator => "already_administrator",
             Self::NotAnAdministrator => "not_an_administrator",
@@ -231,6 +238,7 @@ impl AdminError {
             | Self::RecoveryUndoable
             | Self::NoRecoveryToUndo
             | Self::RecoveryChanged
+            | Self::GrantDuringRecovery
             | Self::AccountDisabled
             | Self::AlreadyAdministrator
             | Self::NotAnAdministrator
@@ -279,6 +287,7 @@ impl From<AdminError> for ApiError {
             | AdminError::RecoveryUndoable
             | AdminError::NoRecoveryToUndo
             | AdminError::RecoveryChanged
+            | AdminError::GrantDuringRecovery
             | AdminError::AccountDisabled
             | AdminError::AlreadyAdministrator
             | AdminError::NotAnAdministrator

@@ -5,7 +5,7 @@
 //! [`Admin`] and mutations [`ConfirmedAdmin`], which answer RFC 6750 and RFC 9470
 //! challenges, so the dashboard signs the administrator in again when a mutation
 //! needs a fresh passkey.
-use crate::{AuthConfig, SigningKeys, routes::admin};
+use crate::{AuthConfig, SigningKeys, recovery::WhileUndoable, routes::admin};
 use axum::{
     Json, Router,
     extract::{FromRef, Path, Query, State},
@@ -278,8 +278,10 @@ impl AdminApplication {
         ConfirmedAdmin(operator): ConfirmedAdmin,
         Json(input): Json<GrantAdministrator>,
     ) -> Result<StatusCode, AdminError> {
+        // The admin API never grants while a recovery can be undone; only the
+        // CLI may, once support has confirmed the owner.
         app.service
-            .grant_administrator(&operator, input.user_id)
+            .grant_administrator(&operator, input.user_id, WhileUndoable::Refuse)
             .await?;
         Ok(StatusCode::NO_CONTENT)
     }

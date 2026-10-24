@@ -955,6 +955,55 @@ async fn support_takes_back_every_passkey_added_since() {
     assert_eq!(scenario.passkeys().await, HashSet::new(), "none left");
 }
 
+/// A recovery started while another can still be undone mails its link to the
+/// primary address the earlier one recorded, which whoever used it cannot have
+/// chosen, and its undo restores that address. With none recorded, the link is
+/// only printed to the operator.
+#[tokio::test]
+#[ignore = "requires TEST_DATABASE_URL"]
+async fn a_forced_recovery_mails_only_the_primary_from_before() {
+    let mut scenario = Scenario::new().await;
+    let database = scenario.database().clone();
+    let user = scenario.user();
+    let owners = scenario.address("owner", true).await;
+    let token = scenario.recover().await;
+    scenario.enroll(&token).await;
+    let theirs = scenario.address("theirs", false).await;
+    let subject = Subject::operator(user, cli(), reason());
+    AccountService::new(database.clone())
+        .make_primary_email(&subject, theirs)
+        .await
+        .expect("support was talked into moving it");
+    let told = [
+        sent(&database, user, owners).await,
+        sent(&database, user, theirs).await,
+    ];
+
+    scenario.recover().await;
+    assert_eq!(
+        sent(&database, user, owners).await,
+        told[0] + 1,
+        "the owner's"
+    );
+    assert_eq!(sent(&database, user, theirs).await, told[1], "never theirs");
+    let signed_in = scenario.signed_in_with(scenario.keys.key_id).await;
+    let view = scenario.status(&signed_in).await;
+    assert_eq!(view["rollback"]["primary"]["id"], owners.to_string());
+    assert_eq!(scenario.undo(&view["id"]).await.0, StatusCode::NO_CONTENT);
+    let primary = scenario.emails().await.into_iter().find(|email| email.1);
+    assert_eq!(primary, Some((owners, true)), "restored");
+
+    // An account that had no address when the first recovery started.
+    let scenario = Scenario::new().await;
+    let user = scenario.user();
+    let token = scenario.recover().await;
+    scenario.enroll(&token).await;
+    let address = format!("theirs-{user}@example.com");
+    let theirs = verified_address(&database, user, &address, true).await;
+    scenario.recover().await;
+    assert_eq!(sent(&database, user, theirs).await, 0, "only printed");
+}
+
 /// When the recovery's primary address is gone, undoing it makes the oldest
 /// address verified before the recovery primary again, while it removes the one
 /// that replaced it.
@@ -978,8 +1027,8 @@ async fn undo_falls_back_to_the_oldest_address_left() {
 
 /// Only an operator at the terminal sees a recovery's link, so an administrator
 /// may recover only an account with a primary address, where the link goes.
-/// Nobody recovers a disabled account or an administrator's, nor starts another
-/// recovery while one can be undone unless asked to. Support sees the recent
+/// Nobody recovers a disabled account or an administrator's; a new recovery
+/// replaces an unused link without being asked to. Support sees the recent
 /// recoveries, and reading them checks the administrator.
 #[tokio::test]
 #[ignore = "requires TEST_DATABASE_URL"]
@@ -1000,11 +1049,6 @@ async fn administrators_never_see_the_link() {
         recover(&admin).await,
         Err(AdminError::RecoveryNeedsEmail)
     ));
-    assert!(recover(&cli()).await.expect("terminal").is_some());
-    let refused = service
-        .recover_account(&cli(), user, reason(), &links, WhileUndoable::Refuse)
-        .await;
-    assert!(matches!(refused, Err(AdminError::RecoveryUndoable)));
     let administrator = harness.admin().await.user_id;
     let refused = service
         .recover_account(
@@ -1018,13 +1062,19 @@ async fn administrators_never_see_the_link() {
     assert!(matches!(refused, Err(AdminError::RecoveryOfAdministrator)));
     let address = format!("{user}@example.com");
     let address = verified_address(&harness.database, user, &address, true).await;
-    assert_eq!(recover(&admin).await.expect("administrator"), None);
+    assert!(recover(&cli()).await.expect("terminal").is_some());
     assert_eq!(sent(&harness.database, user, address).await, 1);
+    let replaced = service
+        .recover_account(&cli(), user, reason(), &links, WhileUndoable::Refuse)
+        .await;
+    assert!(replaced.expect("an unused link is replaced").is_some());
+    assert_eq!(recover(&admin).await.expect("administrator"), None);
+    assert_eq!(sent(&harness.database, user, address).await, 3);
     let recent = service
         .recent_recoveries(&admin, user)
         .await
         .expect("recent");
-    assert_eq!(recent.len(), 2);
+    assert_eq!(recent.len(), 3);
     assert!(recent[1].recovery.cancelled_at.is_some(), "replaced");
     for (refused, expected) in harness.refused_readers().await {
         let read = service.recent_recoveries(&refused, user).await;

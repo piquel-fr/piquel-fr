@@ -56,12 +56,13 @@ pub(super) enum UserCommand {
     ///
     /// The recovery page its link opens comes with the server-rendered pages.
     /// First lists the account's recoveries of the last 30 days, with what each
-    /// one that can still be undone added. Refuses while one can, unless
+    /// one that can still be undone added. Refuses while a used one can, unless
     /// `--despite-undoable`: review it, and undo it with `user undo-recovery`
-    /// first. Refuses an administrator's account: revoke its rights first.
-    /// Ends the account's sessions and sends its primary address a link that
-    /// enrolls one passkey, within a day. Prints the link too, for an owner
-    /// without an address. The owner can undo it with an older passkey, which
+    /// first. An unused link is replaced. Refuses an administrator's account:
+    /// revoke its rights first. Ends the account's sessions and sends the primary
+    /// address the recovery records a link that enrolls one passkey, within a
+    /// day: the current one, or, while an earlier recovery can be undone, the one
+    /// that recorded. Prints the link too, for when there is none. The owner can undo it with an older passkey, which
     /// takes back everything added since. Needs `AUTH_PUBLIC_BASE_URL` and the
     /// token digest key, which derives the link.
     Recover {
@@ -147,7 +148,9 @@ impl UserCommand {
                 };
                 // Refused before asking, rather than after the confirmation;
                 // the service refuses too.
-                let undoable = recent.iter().any(|reviewed| reviewed.rollback.is_some());
+                let undoable = recent.iter().any(|reviewed| {
+                    reviewed.rollback.is_some() && reviewed.recovery.completed_at.is_some()
+                });
                 if undoable && while_undoable == WhileUndoable::Refuse {
                     return Err(AdminError::RecoveryUndoable.into());
                 }

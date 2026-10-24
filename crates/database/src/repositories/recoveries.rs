@@ -16,7 +16,8 @@ pub struct InsertRecovery<'a> {
     pub user_id: UserId,
     /// SHA-256 of the link's token.
     pub secret_digest: &'a [u8],
-    /// The account's primary address, which undoing the recovery restores.
+    /// The primary address the recovery records, which its link goes to and
+    /// undoing it restores.
     pub primary_email_id: Option<EmailId>,
     /// When the link stops working.
     pub expires_at: DateTime<Utc>,
@@ -29,7 +30,8 @@ pub struct StoredRecovery {
     pub id: RecoveryId,
     /// The account recovered.
     pub user_id: UserId,
-    /// The account's primary address when it started.
+    /// The primary address it recorded: the account's when it started, or the
+    /// one an earlier undoable recovery recorded.
     pub primary_email_id: Option<EmailId>,
     /// When it started.
     pub started_at: DateTime<Utc>,

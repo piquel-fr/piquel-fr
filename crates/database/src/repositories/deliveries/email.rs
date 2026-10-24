@@ -86,22 +86,23 @@ impl EmailMessage {
         tx: &mut DatabaseTransaction<'_>,
     ) -> Result<Vec<(EmailId, Self)>, DatabaseError> {
         Ok(match event {
-            // A recovery's link goes to one address, the primary one; the notice
-            // that it enrolled a passkey to every verified address, so a
-            // compromised one cannot hide it.
+            // A recovery's link goes to one address, the primary one it recorded,
+            // or nowhere when it recorded none; the notice that it enrolled a
+            // passkey to every verified address, so a compromised one cannot
+            // hide it.
             DomainEvent::RecoveryStarted { recovery_id, .. } => tx
-                .emails()
-                .list(user_id)
+                .recoveries()
+                .find(*recovery_id)
                 .await?
-                .into_iter()
-                .filter(|email| email.is_primary && email.verified_at.is_some())
-                .map(|email| {
+                .and_then(|recovery| recovery.primary_email_id)
+                .map(|email_id| {
                     let message = Self::RecoveryLink {
                         recovery_id: *recovery_id,
-                        email_id: email.id,
+                        email_id,
                     };
-                    (email.id, message)
+                    (email_id, message)
                 })
+                .into_iter()
                 .collect(),
             DomainEvent::RecoveryCompleted { .. } => tx
                 .emails()

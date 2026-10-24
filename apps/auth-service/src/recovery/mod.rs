@@ -248,6 +248,19 @@ impl Undoable {
         self.0.first()
     }
 
+    /// The oldest, whose recorded primary address predates them all.
+    pub(crate) fn oldest(&self) -> Option<&StoredRecovery> {
+        self.0.last()
+    }
+
+    /// Whether one of them was used: an unused link has let nobody in, and a
+    /// new recovery replaces it.
+    pub(crate) fn any_used(&self) -> bool {
+        self.0
+            .iter()
+            .any(|recovery| recovery.completed_at.is_some())
+    }
+
     /// `recent`, each with what undoing it would take back while it can be.
     pub(crate) async fn review(
         &self,

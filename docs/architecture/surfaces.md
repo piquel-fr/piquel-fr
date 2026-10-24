@@ -117,7 +117,7 @@ When an administrator or operator acts:
 An owner who lost every passkey cannot add one: adding a way to sign in needs a
 passkey confirmation. `AdminService::recover_account` helps without giving the
 administrator a way in. It signs the account out everywhere and emails the
-owner's primary verified address a link that enrolls one passkey, once, within a
+primary address it records a link that enrolls one passkey, once, within a
 day, then signs that browser in with it. The link's token alone authorizes it;
 only its digest is stored, and the email's delivery stores neither. Only an
 operator at the terminal sees the link (`user recover`), which also reaches an
@@ -138,7 +138,7 @@ recovery's passkey sign-in counts as a fresh confirmation, so they could add mor
 ways in right away. Undoing therefore takes back everything the account gained
 since the recovery started: it stops a link not used yet, removes every passkey
 enrolled, identity linked, OIDC consent given and address added or verified
-since, makes the primary address the recovery started with primary again (or the
+since, makes the primary address the recovery recorded primary again (or the
 oldest address verified before it), ends every session and signs the undoing
 browser in. Revoking the consents means an app they approved cannot sign the
 owner in again without asking. The owner loses what they added themselves
@@ -154,9 +154,11 @@ several recoveries to undo, only what predates all of them is trusted.
 An owner with no passkey left from before a recovery cannot undo it themselves,
 so support can (`user undo-recovery`, `AdminService::undo_recovery`) once it has
 confirmed them: the same rollback, recorded with the reason. Starting another
-recovery while one can be undone is refused unless asked for
-(`--despite-undoable`), and `user recover` first lists each undoable recovery
-with everything it added. No account is recovered while it holds administrator
+recovery while a used one can be undone is refused unless asked for
+(`--despite-undoable`), its link goes to the primary address the oldest undoable
+recovery recorded, and `user recover` first lists each undoable recovery with
+everything it added. Nobody is made an administrator while a recovery can be
+undone, except by the CLI when asked for. No account is recovered while it holds administrator
 rights: whoever used the link could use them before the owner undoes it, so
 revoking them is the prerequisite.
 The pages that use the link and offer the undo are *(planned)*; until then no page uses a link.
