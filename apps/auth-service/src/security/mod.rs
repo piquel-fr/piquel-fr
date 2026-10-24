@@ -619,8 +619,8 @@ pub(crate) struct OptionalSession(pub Option<StoredSession>);
 /// Browser session whose passkey confirmation is at most `MAX_AGE` seconds old: it
 /// meets [`StepUpRequirement::passkey_within`], checked against the `acr` and
 /// `auth_time` tokens would report, as bearer-protected resources check them. The
-/// age counts from the confirmation itself, so using it never extends it. Handlers
-/// re-check it with [`Self::lock`] inside their transaction.
+/// age counts from the confirmation itself, so using it never extends it. Account
+/// operations check it again under the account lock (`Owner::confirmed`).
 pub(crate) struct Confirmed<const MAX_AGE: u32 = CONFIRMATION_MAX_AGE>(pub StoredSession);
 
 impl<const MAX_AGE: u32> Confirmed<MAX_AGE> {
@@ -638,11 +638,6 @@ impl<const MAX_AGE: u32> Confirmed<MAX_AGE> {
                 Utc::now(),
             )
             .map_err(|_| SessionError::StepUpRequired { max_age: MAX_AGE })
-    }
-
-    /// Re-checks the confirmation inside `tx` under [`Session::lock`].
-    pub(crate) async fn lock(&self, tx: &mut DatabaseTransaction<'_>) -> Result<(), SessionError> {
-        Self::check(&Session::lock(tx, &self.0).await?)
     }
 }
 

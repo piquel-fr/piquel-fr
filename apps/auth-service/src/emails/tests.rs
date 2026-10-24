@@ -329,8 +329,7 @@ async fn addresses_need_confirmation_and_links_verify_once() {
 
 /// An address another active account verified cannot be verified again. Adding it
 /// succeeds, so adding reveals nothing; verifying answers `409` without naming
-/// the owner, and the address stays unverified. A browser signed in to another
-/// account cannot verify an address either.
+/// the owner, and the address stays unverified.
 #[tokio::test]
 #[ignore = "requires TEST_DATABASE_URL"]
 async fn verification_rejects_an_address_another_account_owns() {
@@ -342,21 +341,6 @@ async fn verification_rejects_an_address_another_account_owns() {
     assert_eq!(harness.verify(verified).await.0, StatusCode::OK);
 
     let claimed = harness.added(&other, &address).await;
-    // Signed in to another account than the address's, a browser cannot confirm it.
-    let token = harness
-        .config
-        .verification_key
-        .token(claimed)
-        .expect("token");
-    let (status, _) = harness
-        .call(
-            Some(&owner),
-            Method::POST,
-            routes::emails::VERIFY,
-            Some(json!({ "token": token.encoded() })),
-        )
-        .await;
-    assert_eq!(status, StatusCode::CONFLICT);
     let (status, body) = harness.verify(claimed).await;
     assert_eq!(status, StatusCode::CONFLICT);
     assert_eq!(
@@ -364,6 +348,56 @@ async fn verification_rejects_an_address_another_account_owns() {
         "This address is already used by another Piquel account."
     );
     assert_eq!(harness.list(&other).await[0]["verified"], false);
+}
+
+/// A verification link works signed out, and a browser signed in to the account
+/// confirms it as the owner. A browser signed in to another account is refused,
+/// and the link still works afterwards.
+#[tokio::test]
+#[ignore = "requires TEST_DATABASE_URL"]
+async fn verification_checks_the_signed_in_account() {
+    let harness = Harness::new(true).await;
+    let owner = harness.account(AuthenticationMethod::Passkey).await;
+    let other = harness.account(AuthenticationMethod::Passkey).await;
+    let verify = async |browser, id| {
+        let token = harness.config.verification_key.token(id).expect("token");
+        let body = json!({ "token": token.encoded() });
+        harness
+            .call(browser, Method::POST, routes::emails::VERIFY, Some(body))
+            .await
+    };
+
+    let first = format!("{}-first@example.com", owner.user_id);
+    let first = harness.added(&owner, &first).await;
+    let (status, body) = verify(Some(&other), first).await;
+    assert_eq!(status, StatusCode::CONFLICT);
+    assert_eq!(
+        body["error"],
+        "This link adds the address to a Piquel account other than the one you are signed in \
+         to. Sign out first if you meant to confirm it."
+    );
+    assert_eq!(harness.list(&owner).await[0]["verified"], false);
+    assert_eq!(verify(None, first).await.0, StatusCode::OK, "link kept");
+
+    let second = format!("{}-second@example.com", owner.user_id);
+    let second = harness.added(&owner, &second).await;
+    assert_eq!(verify(Some(&owner), second).await.0, StatusCode::OK);
+    let verified = harness
+        .database
+        .events()
+        .history_for_user(owner.user_id, 1)
+        .await
+        .expect("history")
+        .remove(0);
+    assert_eq!(
+        verified.event.known(),
+        Some(&DomainEvent::EmailVerified { email_id: second })
+    );
+    assert!(
+        matches!(verified.actor, Actor::User { user_id, .. } if user_id == owner.user_id),
+        "{:?}",
+        verified.actor
+    );
 }
 
 /// An expired link verifies nothing. Adding a pending address again replaces it

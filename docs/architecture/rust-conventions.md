@@ -58,9 +58,11 @@ when an existing type can own the operations.
 redirects and endpoint policy. Browser handlers use `Session`, `OptionalSession`
 or `Confirmed` extractors, with `FromRef<Application> for Database`. They resolve
 it with `Session::resolve`, which records its activity, so no handler does. `Confirmed`
-requires a recent passkey confirmation; handlers recheck it with `Confirmed::lock`
-inside their transaction. Handlers that only need the session locked against logout
-use `Session::lock`.
+requires a recent passkey confirmation when the request arrives; account
+operations check it again under the account lock with `Owner::lock_confirmed`, or
+with `Owner::confirmed` before committing when their need for one depends on what
+they changed. Code that only needs the session locked against logout uses
+`Session::lock`.
 Protocol and conditional flows may use `Session` methods directly. Create sessions
 inside the account transaction, and end them with `Session::revoke`, which records
 one event per session; set cookies after commit with `BrowserCookie::set_on`
@@ -89,10 +91,11 @@ their setting's module, such as `src/passkey`. Each takes the account and who ac
 on it:
 
 - an `Owner`, for what only the owner may do, such as adding a passkey or an
-  address. Only the session cookie builds one, so these cannot be called for an
-  administrator. Verifying an address is authorized by its link's token instead,
-  and takes an optional `Owner` only to refuse a browser signed in to another
-  account;
+  address, or managing the account's clients. Only the session cookie builds one,
+  so these cannot be called for an administrator. Verifying an address is
+  authorized by its link's token instead, and takes an optional `Owner`: it refuses
+  a browser signed in to another account, and records the owner as the actor when
+  theirs confirms it;
 - a `Subject`, for changes an administrator may also make: the owner, or an
   `Operator` with the reason it must give;
 - a `Viewer`, for reads, which need no reason. For an operator,
@@ -114,16 +117,19 @@ views, edits or removes, or takes an `Owner`.
 
 `ClientRegistry` (`src/clients/mod.rs`) is the only code that changes OIDC clients: it
 creates, updates, enables, disables, deletes and rotates the secrets of clients,
-recording each change's event. It works in the caller's transaction, so a handler
-can lock its session and check its passkey confirmation in the transaction that
-makes the change. It takes a `ClientRegistration` from `piquel_common::clients`,
-whose field types validate themselves, so invalid input never reaches the
-repository. `AdminService` (for the `client` command) and the account API
-(`src/clients/api`) use it, and the registration API should too. The account API's body types are the
-policy for clients accounts own: they hold no ID or trust, and only standard
-scopes. Its `OwnedClient` extractor answers 404 for any client the caller does not
-own, so handlers never check ownership. Handlers read clients from the database on
-each request and cache nothing, so changes apply at once on every replica.
+recording each change's event. It works in the caller's transaction, so an
+operation can lock its actor's session and check its passkey confirmation in the
+transaction that makes the change. It takes a `ClientRegistration` from
+`piquel_common::clients`, whose field types validate themselves, so invalid input
+never reaches the repository. `AdminService` (for the `client` command) and the
+owner's `AccountService` operations (`src/clients/owned.rs`) use it, and the
+registration API should too. The owner's input types there are the policy for
+clients accounts own: they hold no ID, trust or back-channel logout URI, and only
+standard scopes, and an invalid one names its field (`InvalidSetting`). Every
+owner operation looks the client up as the owner's first, so any other client is
+not found, and nothing checks ownership again. The account API (`src/clients/api`)
+is only JSON over those operations. Clients are read from the database on each
+request and nothing is cached, so changes apply at once on every replica.
 
 Periodic work implements `ExclusiveJob` in `apps/auth-service/src/jobs.rs`, and
 `Jobs::start` schedules it. A job receives only its locked `ExclusiveConnection`,

@@ -2,8 +2,8 @@
 //! the caller's transaction, with the event that records it, so the caller can
 //! check inside the same transaction that its user still may make it.
 //! `AdminService` uses it for the `client` command and the deployment job that
-//! registers the admin dashboard, and the account API for the clients accounts
-//! manage; dynamic registration (#44) will too.
+//! registers the admin dashboard, and `AccountService` for the clients accounts
+//! own ([`owned`]); dynamic registration (#44) will too.
 //!
 //! Nothing is cached: every request reads the registration it needs from the
 //! database, so a change applies to the next request on every replica.
@@ -21,9 +21,12 @@ use thiserror::Error;
 
 use crate::GracePeriod;
 
-/// The account API's routes, over the registry.
+/// The account API's routes, over the owner's operations.
 mod api;
 pub(crate) use api::ClientApplication;
+/// The clients an account owns: their policy and the owner's operations.
+mod owned;
+pub(crate) use owned::{ClientPatch, NewClient, OwnedClient, OwnedClientError, Rotation};
 
 /// Scopes a new client may request when none are given.
 pub const DEFAULT_CLIENT_SCOPES: [Scope; 3] = [Scope::OpenId, Scope::Profile, Scope::Email];

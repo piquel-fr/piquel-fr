@@ -2,6 +2,7 @@
 
 use crate::{
     AdminError,
+    clients::OwnedClientError,
     emails::EmailError,
     federation::FederationError,
     history::HistoryError,
@@ -31,6 +32,9 @@ pub(crate) enum AccountError {
     /// A history entry could not be reported.
     #[error(transparent)]
     History(#[from] HistoryError),
+    /// One of the owner's clients could not be registered or changed.
+    #[error(transparent)]
+    Client(#[from] OwnedClientError),
     /// The owner's session ended, or lacks a recent enough passkey confirmation.
     #[error(transparent)]
     Owner(#[from] SessionError),
@@ -51,6 +55,7 @@ impl From<AccountError> for ApiError {
             AccountError::Email(error) => error.into(),
             AccountError::Session(error) => error.into(),
             AccountError::History(error) => error.into(),
+            AccountError::Client(error) => error.into(),
             AccountError::Owner(error) => error.into(),
             AccountError::Operator(error) => error.into(),
             AccountError::Database(error) => error.into(),

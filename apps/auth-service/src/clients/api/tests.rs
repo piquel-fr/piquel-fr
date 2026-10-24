@@ -4,14 +4,16 @@
 
 use super::*;
 use crate::{
-    ClientRegistryError,
+    ClientRegistryError, GracePeriod,
+    security::Session,
     tests::{
         Browser, Replicas, change, refresh_grant, register, registration, sign_out, until_blocked,
     },
 };
 use axum::http::Method;
 use piquel_common::{
-    AuthenticationMethod, TokenId,
+    AuthenticationMethod, ClientId, TokenId,
+    clients::{ClientKind, ClientRegistration},
     events::{Actor, DomainEvent},
 };
 use piquel_repository::RefreshRotationError;
@@ -58,7 +60,7 @@ impl Harness {
 
 /// An account lists, shows and changes only its own clients. Another account's
 /// client, and a client operators manage, answer 404 to every route, as an
-/// unknown ID does.
+/// unknown or malformed ID does, before the body is read.
 #[tokio::test]
 #[ignore = "requires TEST_DATABASE_URL"]
 async fn accounts_manage_only_their_own_clients() {
@@ -105,6 +107,7 @@ async fn accounts_manage_only_their_own_clients() {
         (&bob, id.as_str()),
         (&alice, operated.id.as_str()),
         (&alice, "c_unknown"),
+        (&alice, "%FF"),
     ] {
         let item = format!("/account/clients/{id}");
         for (method, path, body) in [
@@ -114,14 +117,28 @@ async fn accounts_manage_only_their_own_clients() {
                 item.clone(),
                 Some(json!({"display_name": "Mine"})),
             ),
+            (
+                Method::PATCH,
+                item.clone(),
+                Some(json!({"display_name": 17})),
+            ),
             (Method::DELETE, item.clone(), None),
             (Method::POST, format!("{item}/disable"), None),
             (Method::POST, format!("{item}/secrets"), Some(json!({}))),
+            (
+                Method::POST,
+                format!("{item}/secrets"),
+                Some(json!({"grace": "x"})),
+            ),
         ] {
-            let (status, _) = browser
+            let (status, body) = browser
                 .send(&harness.router, method.clone(), &path, body)
                 .await;
-            assert_eq!(status, StatusCode::NOT_FOUND, "{method} {path}");
+            assert_eq!(
+                (status, body["error"].is_string()),
+                (StatusCode::NOT_FOUND, true),
+                "{method} {path}"
+            );
         }
     }
     let client = harness
@@ -156,16 +173,17 @@ async fn sensitive_changes_need_a_recent_confirmation() {
         "code": "step_up_required",
         "max_age": crate::security::CONFIRMATION_MAX_AGE,
     });
+    let new = json!({
+        "kind": "public",
+        "display_name": "Other",
+        "redirect_uris": ["https://other.example/callback"],
+    });
+    // Asked before the settings are read, even invalid ones.
+    let invalid = json!({"kind": "public", "display_name": "", "redirect_uris": ["not a URI"]});
+    let list = "/account/clients".to_owned();
     for (method, path, body) in [
-        (
-            Method::POST,
-            "/account/clients".to_owned(),
-            Some(json!({
-                "kind": "public",
-                "display_name": "Other",
-                "redirect_uris": ["https://other.example/callback"],
-            })),
-        ),
+        (Method::POST, list.clone(), Some(new)),
+        (Method::POST, list, Some(invalid)),
         (
             Method::PATCH,
             item.clone(),

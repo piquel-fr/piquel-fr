@@ -77,10 +77,11 @@ operations! {
     }
 }
 
-/// Every shared settings operation, on any account: what the owner's routes and
-/// the `account` command run. A change takes the [`Subject`] it acts on, and a read
-/// the [`Viewer`] it shows. Each operation lives with its setting in the passkey,
-/// federation, emails, sessions or history module.
+/// Every account settings operation, on any account. The owner's routes run them
+/// all, and the `account` command the shared ones. An operation only the owner may
+/// run takes the [`Owner`] it acts as, a shared change the [`Subject`] it acts on,
+/// and a read the [`Viewer`] it shows. Each operation lives with its setting in the
+/// passkey, federation, emails, sessions, history or clients module.
 #[derive(Clone)]
 pub(crate) struct AccountService {
     /// Accounts, their settings and events.
