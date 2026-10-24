@@ -615,14 +615,19 @@ fn routes_doing_real_work_have_budgets() {
         (oidc::LOGOUT, Some(RateCategory::Login)),
         (oidc::AUTHORIZE, Some(RateCategory::Login)),
         (oidc::AUTHORIZE_RESUME, Some(RateCategory::Login)),
-        (page::CONSENT, Some(RateCategory::Page)),
-        (page::LOGOUT, Some(RateCategory::Page)),
         (passkey::SESSION, Some(RateCategory::Account)),
         (passkey::LIST, Some(RateCategory::Account)),
         (federation::IDENTITIES, Some(RateCategory::Account)),
         (federation::PENDING, Some(RateCategory::Login)),
     ] {
         assert_eq!(Endpoint::classify(path).rate_category(), budget, "{path}");
+    }
+    for path in page::ALL {
+        assert_eq!(
+            Endpoint::classify(path).rate_category(),
+            Some(RateCategory::Page),
+            "{path}"
+        );
     }
 }
 

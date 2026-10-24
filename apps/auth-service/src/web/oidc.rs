@@ -5,24 +5,17 @@ use super::{Failure, WebApplication};
 use crate::{
     oidc::{AuthorizationDecision, LogoutQuery, OAuthError, TransactionQuery},
     routes,
-    security::{BrowserCookie, RequestContext},
+    security::BrowserCookie,
 };
+use piquel_ui::{Area, Title};
+use std::slice;
 use topcoat::{
     Error,
     context::{Cx, app_context},
-    router::{
-        Body, StatusCode,
-        request::{extensions, headers},
-        response::Response,
-    },
+    router::{Body, StatusCode, request::headers, response::Response},
     view::view,
 };
 use url::{Url, form_urlencoded};
-
-/// The consent page's title.
-pub(super) const CONSENT: &str = "Authorize application";
-/// The logout page's title.
-pub(super) const LOGOUT: &str = "Sign out";
 
 impl WebApplication {
     /// `GET /authorize?transaction=…`: what the application asks to receive, and the
@@ -45,7 +38,14 @@ impl WebApplication {
             )
         };
         Ok(web
-            .render(cx, StatusCode::OK, CONSENT, Some(&redirect), page)
+            .render(
+                cx,
+                StatusCode::OK,
+                Title::Consent.as_str(),
+                Area::SignIn,
+                slice::from_ref(&redirect),
+                page,
+            )
             .await?)
     }
 
@@ -53,7 +53,7 @@ impl WebApplication {
     /// application, with a code or the refusal.
     pub(super) async fn decide(cx: &Cx, body: Body) -> Result<Response, Failure> {
         let web = app_context::<Self>(cx);
-        let context = RequestContext::of(extensions(cx)).map_err(Error::from)?;
+        let context = Self::context(cx)?;
         let decision: AuthorizationDecision = Self::form(cx, body).await?;
         let transaction = decision.transaction().to_owned();
         let redirect = web
@@ -61,7 +61,7 @@ impl WebApplication {
             .decide(headers(cx), decision, Some(context))
             .await
             .map_err(|error| Failure::signing_in(error, &transaction))?;
-        Ok(web.onward(cx, CONSENT, &redirect).await?)
+        Ok(web.onward(cx, Title::Consent.as_str(), &redirect).await?)
     }
 
     /// `GET /logout?…`: asks to confirm an application's logout request, which
@@ -75,7 +75,14 @@ impl WebApplication {
             piquel_ui::logout(action: routes::page::LOGOUT, fields: &fields, keep: routes::page::LOGIN)
         };
         Ok(web
-            .render(cx, StatusCode::OK, LOGOUT, Some(&destination), page)
+            .render(
+                cx,
+                StatusCode::OK,
+                Title::Logout.as_str(),
+                Area::SignIn,
+                slice::from_ref(&destination),
+                page,
+            )
             .await?)
     }
 
@@ -83,10 +90,10 @@ impl WebApplication {
     /// asked, or to sign-in.
     pub(super) async fn end_session(cx: &Cx, body: Body) -> Result<Response, Failure> {
         let web = app_context::<Self>(cx);
-        let context = RequestContext::of(extensions(cx)).map_err(Error::from)?;
+        let context = Self::context(cx)?;
         let request: LogoutQuery = Self::form(cx, body).await?;
         let destination = web.oidc.end_session(context, headers(cx), &request).await?;
-        let mut response = web.onward(cx, LOGOUT, &destination).await?;
+        let mut response = web.onward(cx, Title::Logout.as_str(), &destination).await?;
         BrowserCookie::Session
             .clear_on(&mut response)
             .map_err(Error::from)?;

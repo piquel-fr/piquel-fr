@@ -11,13 +11,13 @@ use axum::{
 };
 use chrono::{DateTime, Utc};
 use piquel_common::{
-    ClientId, EventId, Personal,
+    ClientId, EventId, Personal, UserId,
     events::{
         Actor, DomainEvent, FollowUp, HistoryActor, HistoryEntry, RequestOrigin, RevocationReason,
         UserAgentFamily,
     },
 };
-use piquel_repository::{Database, EventFilter, SessionScope, StoredEvent};
+use piquel_repository::{Database, EventFilter, EventRepository, SessionScope, StoredEvent};
 use serde::{Deserialize, Serialize};
 use std::{collections::BTreeMap, net::IpAddr};
 
@@ -71,23 +71,23 @@ pub(crate) struct HistoryItem {
     /// Why, as the administrator or operator who did it wrote it, while kept.
     pub(crate) reason: Option<String>,
     /// The application involved, if any.
-    client: Option<ClientView>,
+    pub(crate) client: Option<ClientView>,
     /// The request's IP address, while kept.
-    ip: Option<IpAddr>,
+    pub(crate) ip: Option<IpAddr>,
     /// The request's browser and platform, while kept. Entries recorded before
     /// platforms were have `other` for theirs.
-    device: Option<UserAgentFamily>,
+    pub(crate) device: Option<UserAgentFamily>,
     /// Whether retention or a purge deleted the IP address and device.
-    erased: bool,
+    pub(crate) erased: bool,
 }
 
 /// An application named by a history entry.
 #[derive(Serialize)]
-struct ClientView {
+pub(crate) struct ClientView {
     /// Client ID.
-    id: ClientId,
+    pub(crate) id: ClientId,
     /// The name its consent screen shows; `None` if it is not registered.
-    name: Option<String>,
+    pub(crate) name: Option<String>,
 }
 
 /// The answer to a report.
@@ -174,22 +174,7 @@ impl AccountService {
     ) -> Result<Option<FollowUp>, AccountError> {
         let mut tx = self.database.begin().await?;
         owner.lock(&mut tx).await?;
-        let filter = EventFilter {
-            subject: Some(owner.user()),
-            id: Some(event_id),
-            ..EventFilter::default()
-        };
-        let stored = tx
-            .events()
-            .list(&filter, 1)
-            .await?
-            .pop()
-            .ok_or(HistoryError::EntryNotFound)?;
-        let entry = stored
-            .event
-            .known()
-            .and_then(DomainEvent::history_entry)
-            .ok_or(HistoryError::EntryNotFound)?;
+        let (stored, entry) = Self::entry(tx.events(), owner.user(), event_id).await?;
         if !matches!(stored.actor, Actor::User { user_id, .. } if user_id == owner.user()) {
             return Err(HistoryError::NotReportable.into());
         }
@@ -210,6 +195,62 @@ impl AccountService {
         tx.tokens().revoke_all_for_user(owner.user()).await?;
         tx.commit().await?;
         Ok(entry.follow_up())
+    }
+
+    /// What undoes the entry `event_id`, if anything, once the account reported it:
+    /// `None` when it has no report of that entry among its [`PAGE_SIZE`] newest.
+    /// The report's page shows it, and nobody can make it claim a report that was
+    /// never made.
+    pub(crate) async fn reported(
+        &self,
+        viewer: &Viewer,
+        event_id: EventId,
+    ) -> Result<Option<Option<FollowUp>>, AccountError> {
+        viewer.authorize(&self.database).await?;
+        let report = DomainEvent::CompromiseReported { event_id };
+        let filter = EventFilter {
+            subject: Some(viewer.user()),
+            kind: Some(report.kind().to_owned()),
+            ..EventFilter::default()
+        };
+        let reports = self
+            .database
+            .events()
+            .list(&filter, u32::from(PAGE_SIZE))
+            .await?;
+        if !reports
+            .iter()
+            .any(|stored| stored.event.known() == Some(&report))
+        {
+            return Ok(None);
+        }
+        let (_, entry) = Self::entry(self.database.events(), viewer.user(), event_id).await?;
+        Ok(Some(entry.follow_up()))
+    }
+
+    /// The account `user`'s entry `event_id`, as recorded and as its history shows
+    /// it.
+    async fn entry(
+        mut events: EventRepository<'_>,
+        user: UserId,
+        event_id: EventId,
+    ) -> Result<(StoredEvent, HistoryEntry), AccountError> {
+        let filter = EventFilter {
+            subject: Some(user),
+            id: Some(event_id),
+            ..EventFilter::default()
+        };
+        let stored = events
+            .list(&filter, 1)
+            .await?
+            .pop()
+            .ok_or(HistoryError::EntryNotFound)?;
+        let entry = stored
+            .event
+            .known()
+            .and_then(DomainEvent::history_entry)
+            .ok_or(HistoryError::EntryNotFound)?;
+        Ok((stored, entry))
     }
 
     /// Returns a page of the account's entries, newest first, older than

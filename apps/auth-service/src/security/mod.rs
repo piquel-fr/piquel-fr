@@ -96,6 +96,11 @@ impl ApiError {
         self
     }
 
+    /// What the user is told: the status and the message, as a page shows them.
+    pub(crate) fn public(&self) -> (StatusCode, &str) {
+        (self.status, &self.message)
+    }
+
     /// Logs a failure with every preserved cause, once, at the HTTP boundary.
     pub(crate) fn log_error(error: &dyn std::error::Error) {
         tracing::error!(error = %ErrorChain(error), "authentication operation failed");
@@ -195,7 +200,8 @@ impl IntoResponse for ApiError {
 }
 
 piquel_common::str_enum! {
-    /// Host-only cookies binding server-side state to a browser secret.
+    /// Host-only cookies: browser secrets binding server-side state, and the notice
+    /// of a settings change just made.
     pub(crate) enum BrowserCookie {
         /// Central sign-in session.
         Session = "__Host-piquel_session",
@@ -205,21 +211,25 @@ piquel_common::str_enum! {
         Federation = "__Host-piquel_federation",
         /// Verified identity awaiting signup or linking.
         FederationPending = "__Host-piquel_federation_pending",
+        /// What a settings change just did, which the page it goes back to says once.
+        Notice = "__Host-piquel_notice",
     }
 }
 
 impl BrowserCookie {
-    /// Lifetime in seconds. Flow cookies outlive their server-side state slightly.
+    /// Lifetime in seconds. Flow cookies outlive their server-side state slightly; a
+    /// notice is shown on the page its change goes back to, at once.
     const fn max_age(self) -> u32 {
         match self {
             Self::Session => SESSION_LIFETIME_DAYS * 24 * 60 * 60,
             Self::Ceremony | Self::Federation | Self::FederationPending => FLOW_COOKIE_MAX_AGE,
+            Self::Notice => 60,
         }
     }
 
-    /// Reads this cookie's secret. A malformed or duplicated cookie counts as absent,
-    /// so an injected value can never shadow the browser's own.
-    pub(crate) fn read(self, headers: &HeaderMap) -> Option<Secret> {
+    /// Reads this cookie's value. A duplicated cookie counts as absent, so an
+    /// injected value can never shadow the browser's own.
+    pub(crate) fn value(self, headers: &HeaderMap) -> Option<&str> {
         let mut values = headers
             .get_all(header::COOKIE)
             .iter()
@@ -227,19 +237,32 @@ impl BrowserCookie {
             .flat_map(|header| header.split(';'))
             .filter_map(|part| part.trim().strip_prefix(self.as_str())?.strip_prefix('='));
         let value = values.next()?;
-        if values.next().is_some() {
-            return None;
-        }
-        Secret::parse(value).ok()
+        values.next().is_none().then_some(value)
     }
 
-    /// Adds a `Set-Cookie` header storing `secret`, keeping any other cookies being set.
-    pub(crate) fn set_on(
+    /// Reads this cookie's secret, as [`Self::value`] reads it. A malformed one
+    /// counts as absent too.
+    pub(crate) fn read(self, headers: &HeaderMap) -> Option<Secret> {
+        Secret::parse(self.value(headers)?).ok()
+    }
+
+    /// Adds a `Set-Cookie` header storing `secret` to an axum response or a page's,
+    /// keeping any other cookies being set.
+    pub(crate) fn set_on<B>(
         self,
-        response: &mut Response,
+        response: &mut axum::http::Response<B>,
         secret: &Secret,
     ) -> Result<(), InvalidHeaderValue> {
-        self.append(response, &secret.encoded(), self.max_age())
+        self.set_value_on(response, &secret.encoded())
+    }
+
+    /// Adds a `Set-Cookie` header storing `value`, as [`Self::set_on`] does.
+    pub(crate) fn set_value_on<B>(
+        self,
+        response: &mut axum::http::Response<B>,
+        value: &str,
+    ) -> Result<(), InvalidHeaderValue> {
+        self.append(response, value, self.max_age())
     }
 
     /// Adds a `Set-Cookie` header deleting this cookie, to an axum response or a page's.
@@ -770,7 +793,8 @@ enum Endpoint {
 }
 
 impl Endpoint {
-    /// Classifies exact protocol paths and the settings/login route families.
+    /// Classifies exact protocol and page paths, and the account and login route
+    /// families.
     fn classify(path: &str) -> Self {
         match path {
             oidc::TOKEN | oidc::REVOKE | oidc::PAR => Self::OAuthBackChannel,
@@ -780,7 +804,7 @@ impl Endpoint {
             oidc::AUTHORIZE => Self::Authorize,
             oidc::LOGOUT => Self::Logout,
             service::CONFIG | passkey::SESSION | passkey::SESSION_LOGOUT => Self::Account,
-            page::CONSENT | page::LOGOUT => Self::Page,
+            _ if page::ALL.contains(&path) => Self::Page,
             _ if path.starts_with(ACCOUNT_PREFIX) => Self::Account,
             _ if path.starts_with(LOGIN_PREFIX) => Self::Login,
             _ => Self::Other,

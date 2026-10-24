@@ -70,7 +70,7 @@ validated_name! {
 /// both paths create ordinary passkeys verified by the same finish operation.
 #[derive(Clone, Copy, Default, Deserialize)]
 #[serde(rename_all = "snake_case")]
-pub(super) enum PasskeyKind {
+pub(crate) enum PasskeyKind {
     /// Allows security keys and device unlock. Resident credentials are preferred,
     /// so account pickers work where supported while username-only keys remain usable.
     #[default]

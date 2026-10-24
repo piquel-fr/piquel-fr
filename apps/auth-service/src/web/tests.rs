@@ -1,6 +1,7 @@
 //! The pages through the whole service, as a browser uses them: navigations, and the
 //! forms it posts with the headers browsers send.
 
+use super::WebApplication;
 use crate::{
     routes,
     tests::{Browser, MAX_RESPONSE_BYTES, Replicas, location, parameter, register, registration},
@@ -17,7 +18,8 @@ use url::{Position, Url, form_urlencoded};
 const CHALLENGE: &str = "E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM";
 /// What a form on one of auth's pages sends: they have `Referrer-Policy: no-referrer`,
 /// so the browser sends `Origin: null`.
-const OWN_PAGE: &[(&str, &str)] = &[("sec-fetch-site", "same-origin"), ("origin", "null")];
+pub(super) const OWN_PAGE: &[(&str, &str)] =
+    &[("sec-fetch-site", "same-origin"), ("origin", "null")];
 
 /// Two replicas, a signed-in browser, and an untrusted client.
 struct Harness {
@@ -86,14 +88,14 @@ impl Harness {
 }
 
 /// `response`'s Content-Security-Policy.
-fn policy(response: &Response) -> &str {
+pub(super) fn policy(response: &Response) -> &str {
     response.headers()[header::CONTENT_SECURITY_POLICY]
         .to_str()
         .expect("CSP is text")
 }
 
 /// `response`'s body, as text.
-async fn html(response: Response) -> String {
+pub(super) async fn html(response: Response) -> String {
     let body = to_bytes(response.into_body(), MAX_RESPONSE_BYTES)
         .await
         .expect("body");
@@ -253,4 +255,12 @@ async fn logout_page_ends_the_session_from_its_own_form() {
             .await;
         assert_eq!(status, StatusCode::UNAUTHORIZED, "{state:?}");
     }
+}
+
+/// Every page the router registers is one the security layer classifies as a page,
+/// and the other way around.
+#[test]
+fn every_page_is_mounted_and_classified() {
+    let mounted: Vec<_> = WebApplication::pages().map(|(path, ..)| path).into();
+    assert_eq!(mounted, routes::page::ALL);
 }

@@ -142,6 +142,19 @@ export class Passkeys {
   confirm(): Promise<void> {
     return this.assert('/account/passkeys/confirm', {});
   }
+  /**
+   * Runs `action`; if it needs a recent passkey confirmation, confirms the session
+   * with a passkey, then runs it once more.
+   */
+  async withConfirmation<T>(action: () => Promise<T>): Promise<T> {
+    try {
+      return await action();
+    } catch (error) {
+      if (!(error instanceof StepUpRequired)) throw error;
+    }
+    await this.confirm();
+    return action();
+  }
   /** Runs an assertion ceremony against `path`'s start and finish endpoints. */
   private async assert(path: string, body: object): Promise<void> {
     const start = await this.api.request<Ceremony<RequestOptions>>(`${path}/start`, 'POST', body);
@@ -242,16 +255,14 @@ export class StepUp<Key extends string> {
     private readonly actions: Record<Key, (argument: string) => Promise<void>>
   ) {}
   async run(key: Key, argument = ''): Promise<void> {
+    const action = () => this.actions[key](argument);
+    const authOrigin = this.passkeys.api.origin || window.location.origin;
+    if (authOrigin === window.location.origin) return this.passkeys.withConfirmation(action);
     try {
-      await this.actions[key](argument);
+      await action();
       return;
     } catch (error) {
       if (!(error instanceof StepUpRequired)) throw error;
-    }
-    const authOrigin = this.passkeys.api.origin || window.location.origin;
-    if (authOrigin === window.location.origin) {
-      await this.passkeys.confirm();
-      return this.actions[key](argument);
     }
     const account = this.account();
     if (account === undefined) throw new Error('Sign in to continue.');
@@ -308,16 +319,101 @@ export function safeDestination(value: string | null, config: Configuration): st
 }
 
 /**
- * On auth's server-rendered pages, which load this module as their only script: a
- * form marked `data-submit-once` ignores a second submission, such as a double
- * click, while the first is under way. Its buttons stay enabled, so the clicked one
- * still sends its value. Without a document, as during SvelteKit's server render,
- * this does nothing.
+ * Wires auth's server-rendered pages, which load this module as their only script and
+ * mark what needs it:
+ * - a form marked `data-submit-once` ignores a second submission, such as a double
+ *   click, while the first is under way. Its buttons stay enabled, so the clicked one
+ *   still sends its value.
+ * - a form marked `data-passkey-confirm` confirms the session with a passkey, then
+ *   posts it with `form.submit()`, which sends no button's value: its action and
+ *   every other value come from its inputs, never from the button.
+ * - a form marked `data-passkey-enroll` adds a passkey named by its `friendly_name`,
+ *   confirming first if it must, then posts, so its page says so. Its button starts
+ *   disabled until passkeys are known to work here.
+ * - a form marked `data-fragment-form` copies the link's fragment into its
+ *   `data-fragment` inputs as it posts, then drops the fragment from the address. It
+ *   shows, with its button enabled, while the link has every value; otherwise the
+ *   page's `data-fragment-missing` notice shows instead.
+ * A form's `data-unavailable` note says why its button is disabled, and hides once
+ * it is enabled. Its `data-passkey-error` element says why a ceremony failed.
  */
-if (typeof document !== 'undefined')
+function wire(document: Document): void {
+  const passkeys = new Passkeys(new AuthApi());
+  const fragment = () => new URLSearchParams(window.location.hash.slice(1));
+  const inputs = (form: HTMLFormElement) =>
+    form.querySelectorAll<HTMLInputElement>('input[data-fragment]');
+  /** Runs `ceremony` once at a time for `form`, saying why it failed. */
+  const run = (form: HTMLFormElement, ceremony: () => Promise<void>) => {
+    if (form.dataset.busy) return;
+    form.dataset.busy = 'true';
+    ceremony().catch((cause: unknown) => {
+      delete form.dataset.busy;
+      const alert = form.querySelector<HTMLElement>('[data-passkey-error]');
+      if (!alert) return;
+      alert.textContent = errorMessage(cause);
+      alert.hidden = false;
+    });
+  };
   document.addEventListener('submit', (event) => {
     const form = event.target;
-    if (!(form instanceof HTMLFormElement) || !form.hasAttribute('data-submit-once')) return;
-    if (form.dataset.submitted) event.preventDefault();
-    else form.dataset.submitted = 'true';
+    if (!(form instanceof HTMLFormElement)) return;
+    if (form.hasAttribute('data-submit-once')) {
+      if (form.dataset.submitted) event.preventDefault();
+      else form.dataset.submitted = 'true';
+    }
+    if (form.hasAttribute('data-passkey-confirm')) {
+      event.preventDefault();
+      run(form, async () => {
+        await passkeys.confirm();
+        form.submit();
+      });
+    }
+    if (form.hasAttribute('data-passkey-enroll')) {
+      event.preventDefault();
+      const data = new FormData(form);
+      const name =
+        form.querySelector<HTMLInputElement>('input[name="friendly_name"]')?.value.trim() ?? '';
+      const kind =
+        data.get('passkey_kind') === 'google_password_manager'
+          ? 'google_password_manager'
+          : 'standard';
+      run(form, async () => {
+        await passkeys.withConfirmation(() => passkeys.register(name, undefined, kind));
+        form.submit();
+      });
+    }
+    if (form.hasAttribute('data-fragment-form')) {
+      for (const input of inputs(form))
+        input.value = fragment().get(input.dataset.fragment ?? '') ?? '';
+      const { pathname, search } = window.location;
+      window.history.replaceState(null, '', `${pathname}${search}`);
+    }
   });
+  /** Enables `form`'s buttons, or disables them, showing the note on why. */
+  const enable = (form: HTMLFormElement, enabled = true) => {
+    form.querySelector<HTMLElement>('[data-unavailable]')?.toggleAttribute('hidden', enabled);
+    for (const button of form.querySelectorAll('button')) button.disabled = !enabled;
+  };
+  if (passkeysAvailable())
+    for (const form of document.querySelectorAll<HTMLFormElement>('form[data-passkey-enroll]'))
+      enable(form);
+  /** Shows each fragment form while the link has every value, or the notice that it does not. */
+  const showFragmentForms = () => {
+    for (const form of document.querySelectorAll<HTMLFormElement>('form[data-fragment-form]')) {
+      const complete = [...inputs(form)].every((input) =>
+        fragment().get(input.dataset.fragment ?? '')
+      );
+      form.hidden = !complete;
+      enable(form, complete);
+      document
+        .querySelector<HTMLElement>('[data-fragment-missing]')
+        ?.toggleAttribute('hidden', complete);
+    }
+  };
+  showFragmentForms();
+  // Following a link that differs only in its fragment does not reload the page.
+  window.addEventListener('hashchange', showFragmentForms);
+}
+
+// Without a document, as during SvelteKit's server render, there is nothing to wire.
+if (typeof document !== 'undefined') wire(document);

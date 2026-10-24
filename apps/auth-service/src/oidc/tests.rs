@@ -5,7 +5,7 @@ use crate::config::TokenDigestKey;
 use crate::deliveries::{BackchannelLogoutSender, OutboundClient, Sender};
 use crate::security::{BrowserCookie, RequestContext, Session};
 use crate::tests::{AUTH_ORIGIN, Replicas, TlsListener, location, parameter, until_blocked};
-use crate::web::WebApplication;
+use crate::{AuthConfig, federation::FederationApplication, web::WebApplication};
 use axum::{
     body::{Body, to_bytes},
     http::{Method, Request, StatusCode},
@@ -127,8 +127,11 @@ impl Flow {
         let origin = origin
             .parse::<piquel_common::config::Origin>()
             .expect("issuer");
+        let config = AuthConfig::test(&origin);
+        let federation =
+            FederationApplication::new(db.clone(), &config.federation).expect("federation");
         let app = OidcApplication::new(
-            db,
+            db.clone(),
             &OidcConfig {
                 origin: origin.clone(),
                 digest_keys: Arc::new(TokenDigestKeys::new(
@@ -142,7 +145,7 @@ impl Flow {
         )
         .expect("OIDC application");
         Self {
-            router: WebApplication::new(app.clone(), &origin)
+            router: WebApplication::new(db, &config, app.clone(), federation)
                 .routes()
                 .merge(app.clone().routes()),
             app,

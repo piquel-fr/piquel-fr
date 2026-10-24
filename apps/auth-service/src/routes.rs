@@ -135,15 +135,40 @@ pub(crate) mod admin {
     pub(crate) use piquel_admin_api::paths::*;
 }
 
-/// Pages the service redirects browsers to. Each server-rendered page answers `GET`
-/// with the page and `POST` with its form's result.
+/// Pages browsers visit. Each server-rendered page answers `GET` with the page and
+/// `POST` with its form's result, and is listed in [`ALL`](page::ALL).
 pub(crate) mod page {
     /// Sign-in, social signup and link confirmation, from the embedded frontend.
     pub(crate) const LOGIN: &str = "/login";
-    /// OAuth consent, server-rendered.
+    /// OAuth consent.
     pub(crate) const CONSENT: &str = "/authorize";
-    /// RP-initiated logout confirmation, server-rendered.
+    /// RP-initiated logout confirmation.
     pub(crate) const LOGOUT: &str = "/logout";
+
+    /// The account's settings, at the paths piquel.fr served them on.
+    pub(crate) mod settings {
+        /// Sign-in methods: passkeys and social sign-in.
+        pub(crate) const HOME: &str = "/settings";
+        /// Email addresses.
+        pub(crate) const EMAILS: &str = "/settings/emails";
+        /// Confirming an address, from its verification link.
+        pub(crate) const VERIFY: &str = "/settings/emails/verify";
+        /// Signed-in devices.
+        pub(crate) const SESSIONS: &str = "/settings/sessions";
+        /// Security history.
+        pub(crate) const HISTORY: &str = "/settings/history";
+    }
+
+    /// Every server-rendered page, which the security layer classifies as pages.
+    pub(crate) const ALL: [&str; 7] = [
+        CONSENT,
+        LOGOUT,
+        settings::HOME,
+        settings::EMAILS,
+        settings::VERIFY,
+        settings::SESSIONS,
+        settings::HISTORY,
+    ];
 }
 
 /// Prefix shared by the settings APIs, which the settings site may call.

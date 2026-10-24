@@ -9,19 +9,37 @@
 //! stylesheet and the SDK's script, and lets its forms post only to auth and to where
 //! they redirect.
 
+/// A page's entry in [`WebApplication::pages`]: its path, and the handlers showing it
+/// and taking its form, whose failures explain themselves as the page `title`.
+macro_rules! page {
+    ($path:expr, $title:expr, $show:expr, $submit:expr $(,)?) => {
+        (
+            $path,
+            |cx, _| Box::pin(Self::answer(cx, $title, $show(cx))),
+            |cx, body| Box::pin(Self::answer(cx, $title, $submit(cx, body))),
+        )
+    };
+}
+
 /// The consent page and the confirmation of an application's logout request.
 mod oidc;
+/// The account's settings.
+mod settings;
 #[cfg(test)]
 mod tests;
 
 use crate::{
-    MAX_REQUEST_BODY_BYTES,
+    AuthConfig, MAX_REQUEST_BODY_BYTES,
+    account::AccountService,
     assets::EmbeddedAssets,
+    config::EmailConfig,
+    federation::FederationApplication,
     oidc::{OAuthCode, OAuthError, OidcApplication, Reject},
     routes,
-    security::ApiError,
+    security::{ApiError, RequestContext},
 };
-use piquel_common::config::Origin;
+use piquel_repository::Database;
+use piquel_ui::{Area, Title};
 use serde::de::DeserializeOwned;
 use std::{fmt, sync::Arc};
 use topcoat::{
@@ -33,7 +51,7 @@ use topcoat::{
         content::Form,
         error::see_other,
         header, parse_query_params,
-        request::FromRequest,
+        request::{FromRequest, extensions},
         response::{IntoResponse, Response},
         tower::TowerService,
     },
@@ -44,8 +62,14 @@ use url::{Host, Url};
 /// The pages, and what every one of them needs.
 #[derive(Clone)]
 pub(crate) struct WebApplication {
+    /// The account settings the settings pages read and change.
+    account: AccountService,
     /// The OAuth provider whose consent and logout the pages complete.
     oidc: OidcApplication,
+    /// Social sign-in, which the settings link and list.
+    federation: FederationApplication,
+    /// Whether email is sent, which adding an address needs.
+    email: EmailConfig,
     /// Every page's Content-Security-Policy but its `form-action`.
     policy: Arc<str>,
 }
@@ -99,35 +123,59 @@ impl From<Error> for Failure {
 }
 
 impl WebApplication {
-    /// Builds the pages of `oidc`, served on auth's public `origin`.
-    pub(crate) fn new(oidc: OidcApplication, origin: &Origin) -> Self {
-        // A source with a path needs the whole URL: `'self'` names none.
+    /// Builds the pages over `database`, completing the flows of `oidc` and linking
+    /// through `federation`, as `config` sets them up.
+    pub(crate) fn new(
+        database: Database,
+        config: &AuthConfig,
+        oidc: OidcApplication,
+        federation: FederationApplication,
+    ) -> Self {
+        let origin = &config.oidc.origin;
+        // A source with a path needs the whole URL: `'self'` names none. The SDK's
+        // passkey ceremonies fetch auth's own JSON routes.
         let script =
             EmbeddedAssets::SCRIPT.map_or_else(|| "'none'".to_owned(), |path| origin.join(path));
         let policy = format!(
-            "default-src 'none'; style-src {}; script-src {script}; \
+            "default-src 'none'; style-src {}; script-src {script}; connect-src 'self'; \
              frame-ancestors 'none'; base-uri 'none'",
             origin.join(EmbeddedAssets::STYLESHEET),
         );
         Self {
+            account: AccountService::new(database),
             oidc,
+            federation,
+            email: config.email.clone(),
             policy: policy.into(),
         }
     }
 
     /// Each page's path, the handler showing it and the one submitting its form.
-    fn pages() -> [(&'static str, RouteHandlerFn, RouteHandlerFn); 2] {
+    fn pages() -> [(&'static str, RouteHandlerFn, RouteHandlerFn); 7] {
+        use routes::page::{CONSENT, LOGOUT, settings::VERIFY};
         [
-            (
-                routes::page::CONSENT,
-                |cx, _| Box::pin(Self::answer(cx, oidc::CONSENT, Self::consent(cx))),
-                |cx, body| Box::pin(Self::answer(cx, oidc::CONSENT, Self::decide(cx, body))),
+            page!(
+                CONSENT,
+                Title::Consent.as_str(),
+                Self::consent,
+                Self::decide
             ),
-            (
-                routes::page::LOGOUT,
-                |cx, _| Box::pin(Self::answer(cx, oidc::LOGOUT, Self::logout(cx))),
-                |cx, body| Box::pin(Self::answer(cx, oidc::LOGOUT, Self::end_session(cx, body))),
+            page!(
+                LOGOUT,
+                Title::Logout.as_str(),
+                Self::logout,
+                Self::end_session
             ),
+            Self::settings::<settings::SignInMethods>(),
+            Self::settings::<settings::Addresses>(),
+            page!(
+                VERIFY,
+                Title::VerifyEmail.as_str(),
+                Self::verify,
+                Self::confirm_address,
+            ),
+            Self::settings::<settings::Devices>(),
+            Self::settings::<settings::History>(),
         ]
     }
 
@@ -171,6 +219,11 @@ impl WebApplication {
             Err(Failure::Internal(error)) => Err(error),
         };
         answer.inspect_err(|error| ApiError::log_error(&**error))
+    }
+
+    /// The context the security layer attached to the request.
+    fn context(cx: &Cx) -> std::result::Result<RequestContext, Failure> {
+        Ok(RequestContext::of(extensions(cx)).map_err(Error::from)?)
     }
 
     /// The page's query, as `T`. A malformed one is the request's fault.
@@ -221,27 +274,35 @@ impl WebApplication {
             return see_other(target).into_response(cx);
         }
         let page = view! { cx => piquel_ui::onward(href: target.as_str()) };
-        self.render(cx, StatusCode::OK, title, None, page).await
+        self.render(cx, StatusCode::OK, title, Area::SignIn, &[], page)
+            .await
     }
 
-    /// Answers with `page` inside the document titled `title`, under the page policy.
-    /// Its forms may post to auth's own pages, and redirect on to `target`'s origin:
-    /// browsers apply `form-action` to a form's redirects too.
+    /// Answers with `page` inside the document titled `title`, in `area`, under the
+    /// page policy. Its forms may post to auth's own pages, and redirect on to the
+    /// origins of `targets`: browsers apply `form-action` to a form's redirects too.
     async fn render(
         &self,
         cx: &Cx,
         status: StatusCode,
         title: &str,
-        target: Option<&Url>,
+        area: Area,
+        targets: &[Url],
         page: impl View,
     ) -> Result<Response> {
+        // The brand links the account's settings from its own pages.
+        let home = match area {
+            Area::Account => routes::page::settings::HOME,
+            Area::SignIn => "/",
+        };
         let page = Child::new(page);
         let html = view! { cx =>
             piquel_ui::document(
                 title: title,
                 stylesheet: EmbeddedAssets::STYLESHEET,
                 script: EmbeddedAssets::SCRIPT,
-                home: "/",
+                home: home,
+                area: area,
                 (page)
             )
         }
@@ -249,7 +310,7 @@ impl WebApplication {
         .await?
         .render(cx);
         let mut form_action = "'self'".to_owned();
-        if let Some(source) = target.and_then(Self::source) {
+        for source in targets.iter().filter_map(Self::source) {
             form_action.push(' ');
             form_action.push_str(&source);
         }
@@ -285,6 +346,7 @@ impl WebApplication {
         let description = status.is_client_error().then_some(description);
         let page =
             view! { cx => piquel_ui::failure(code: &code, description: description, link: link) };
-        self.render(cx, status, title, None, page).await
+        self.render(cx, status, title, Area::SignIn, &[], page)
+            .await
     }
 }
