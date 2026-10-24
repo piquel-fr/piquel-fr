@@ -28,7 +28,8 @@ pub(super) enum KeysCommand {
         now: bool,
     },
     /// Delete a signing key at once, e.g. a compromised one. When it was the active
-    /// key, a new one signs at once. Verifiers that cached it keep accepting it
+    /// key, the `next` and `retiring` keys go with it, since their private keys
+    /// were stored alongside, and a new one signs at once. Verifiers that cached it keep accepting it
     /// until their cache expires, up to an hour.
     Revoke {
         /// The key's ID.

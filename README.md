@@ -136,7 +136,9 @@ fail at another.
 
 #### Revoking a compromised key
 
-`keys revoke <id>` deletes the key. If it was signing, a new key signs at once.
+`keys revoke <id>` deletes the key. If it was signing, the `next` and `retiring`
+keys go with it, since their private keys were stored alongside, and a new key
+signs at once.
 Revocation takes effect in two places, at different times:
 
 - **At auth:** within a minute, every replica stops accepting the key, for

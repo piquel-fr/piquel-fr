@@ -135,8 +135,8 @@ impl KeyStore {
 
     /// Deletes key `id` at once, for a compromised key: it leaves JWKS, and every
     /// replica stops accepting it within a minute. When it was the active key,
-    /// the `next` key is deleted too, and a new key signs at once; its ID is
-    /// returned.
+    /// every other key whose private key is still stored, `next` and `retiring`,
+    /// is deleted too, and a new key signs at once; its ID is returned.
     ///
     /// # Errors
     /// Returns [`KeyError::Unknown`] for an unknown key, or the database or key
@@ -381,7 +381,7 @@ impl<'t, 'c> Change<'t, 'c> {
         self.record(next, SigningKeyChange::Activated).await
     }
 
-    /// The step rotation takes now, if any, for each key type: a key signs from
+    /// The step rotation takes now, if any: a key signs from
     /// the first start; a successor is published once the active key is
     /// [`ROTATION_PERIOD`] old, and signs once it has been published for
     /// [`PRE_PUBLICATION`]; retiring and retired keys end once their window has.
@@ -450,11 +450,15 @@ impl<'t, 'c> Change<'t, 'c> {
         if key.state != SigningKeyState::Active {
             return Ok(None);
         }
-        // Whatever exposed the signing key may have exposed the `next` one too,
-        // which would otherwise sign within a day; rotation publishes another.
-        if let Some(next) = Self::find(&keys, SigningKeyState::Next) {
-            self.tx.signing_keys().delete(&next.id).await?;
-            self.record(&next.id, SigningKeyChange::Revoked).await?;
+        // Whatever exposed the signing key may have exposed every private key still
+        // stored: `next`, which would sign within a day, and `retiring` ones, which
+        // still verify for up to an hour. Rotation publishes another `next`.
+        for other in keys
+            .iter()
+            .filter(|key| matches!(key.state, SigningKeyState::Next | SigningKeyState::Retiring))
+        {
+            self.tx.signing_keys().delete(&other.id).await?;
+            self.record(&other.id, SigningKeyChange::Revoked).await?;
         }
         Ok(Some(self.generate(SigningKeyState::Active).await?))
     }

@@ -190,8 +190,9 @@ async fn rotation_takes_each_step_once_on_schedule() {
     tx.rollback().await.expect("rollback");
 }
 
-/// At each step of the schedule, of two concurrent ticks, one takes the step and
-/// the other skips it, so every step happens once.
+/// At each step of the schedule, of two concurrent ticks, the one that takes the
+/// lock takes the step, and the other skips the tick instead of waiting, so no
+/// step happens twice.
 #[tokio::test]
 #[ignore = "requires TEST_DATABASE_URL"]
 async fn concurrent_ticks_take_each_step_once() {
@@ -228,9 +229,10 @@ async fn concurrent_ticks_take_each_step_once() {
     first.rollback().await.expect("rollback");
 }
 
-/// Revoking the active key removes it and the `next` key from the key set at
-/// once, for tokens and hints alike, and a new key signs. Revoking a key that
-/// does not sign needs no replacement, and an unknown key changes nothing.
+/// Revoking the active key removes it, the `next` key and the `retiring` key from
+/// the key set at once, for tokens and hints alike, and a new key signs. Revoking
+/// a key that does not sign needs no replacement, and an unknown key changes
+/// nothing.
 #[tokio::test]
 #[ignore = "requires TEST_DATABASE_URL"]
 async fn revoking_a_key_removes_it_and_replaces_the_signer() {
@@ -239,7 +241,14 @@ async fn revoking_a_key_removes_it_and_replaces_the_signer() {
     clear(&mut tx).await;
     let mut change = Change::new(&mut tx, &store.kek, Utc::now(), None);
     change.advance().await.expect("first key");
+    change.rotate(true).await.expect("a second key signs");
     let next = change.rotate(false).await.expect("next key");
+    let retiring = states(&mut tx)
+        .await
+        .into_iter()
+        .find(|(_, state)| *state == SigningKeyState::Retiring)
+        .expect("the first key retires")
+        .0;
     let keys = key_set(&store, &mut tx).await;
     let revoked: KeyId = keys.signer().kid().parse().expect("key ID");
     let (token, revoked_hint) = (access_token(&keys), hint(&keys));
@@ -257,6 +266,10 @@ async fn revoking_a_key_removes_it_and_replaces_the_signer() {
     assert!(
         matches!(change.revoke(&next).await, Err(KeyError::Unknown(_))),
         "the next key was revoked with the active one"
+    );
+    assert!(
+        matches!(change.revoke(&retiring).await, Err(KeyError::Unknown(_))),
+        "the retiring key was revoked with the active one"
     );
     let next = change.rotate(false).await.expect("another next key");
     assert_eq!(change.revoke(&next).await.expect("revoke next key"), None);
