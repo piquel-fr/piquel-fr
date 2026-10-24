@@ -22,6 +22,7 @@ impl AdminOperation {
             Self::ViewUser => &["user", "show", "alice"],
             Self::DisableUser => &["user", "disable", "alice", "--reason", "Spam"],
             Self::EnableUser => &["user", "enable", "alice"],
+            Self::RecoverAccount => &["user", "recover", "alice", "--reason", "Lost phone"],
             Self::RevokeUserSessions => &["session", "revoke-all", "alice"],
             Self::RevokeSession => &["session", "revoke", AN_ID],
             Self::ListInvitations => &["invite", "list"],

@@ -147,6 +147,28 @@ impl PasskeyRepository<'_> {
         )
     }
 
+    /// When the account's unrevoked passkey `id` was enrolled, if it is one.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`DatabaseError`] if the query fails.
+    pub async fn enrolled_at(
+        &mut self,
+        user_id: UserId,
+        id: PasskeyId,
+    ) -> Result<Option<DateTime<Utc>>, DatabaseError> {
+        run!(
+            self,
+            fetch_optional,
+            sqlx::query_scalar!(
+                "SELECT created_at FROM passkey_credentials
+                WHERE user_id = $1 AND id = $2 AND revoked_at IS NULL",
+                user_id.as_uuid(),
+                id.as_uuid(),
+            )
+        )
+    }
+
     /// Lists the unrevoked credentials of the active account named `username`,
     /// oldest first. A missing, inactive or passkey-less account returns none,
     /// in the same single query, so callers cannot tell those cases apart.

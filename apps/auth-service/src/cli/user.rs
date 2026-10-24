@@ -1,7 +1,7 @@
 //! Finding, showing, disabling and reactivating accounts.
 
 use super::{CliError, Confirm, Console, Output};
-use crate::{Reason, UserRef};
+use crate::{AuthConfig, Reason, UserRef};
 use clap::Subcommand;
 use piquel_admin_api::{UserDetail, UserPage};
 use piquel_common::UserId;
@@ -47,6 +47,23 @@ pub(super) enum UserCommand {
         /// The account: its username, ID or verified email.
         user: UserRef,
     },
+    /// Not usable yet: the recovery page its link opens comes with the
+    /// server-rendered pages. Start recovering an account whose owner lost every
+    /// passkey: end its sessions, and send its primary verified address a link
+    /// that enrolls one passkey, within a day. Prints the link too, for an owner
+    /// without an address. The owner can undo it with an older passkey. Needs
+    /// `AUTH_PUBLIC_BASE_URL` and the token digest key, which derives the link.
+    Recover {
+        /// The account: its username, ID or verified email.
+        user: UserRef,
+        /// Why, recorded with the recovery and shown to the owner in their
+        /// history: 1 to 500 characters.
+        #[arg(long)]
+        reason: Reason,
+        /// Confirmation.
+        #[command(flatten)]
+        confirm: Confirm,
+    },
 }
 
 impl UserCommand {
@@ -80,6 +97,26 @@ impl UserCommand {
             Self::Enable { user } => {
                 let id = console.user(&user).await?;
                 service.enable_user(operator, id).await?;
+            }
+            Self::Recover {
+                user,
+                reason,
+                confirm,
+            } => {
+                let id = console.user(&user).await?;
+                let links = AuthConfig::recovery_links_from_environment()?;
+                confirm.ask(&format!(
+                    "Recover {user} ({id}): end its sessions and send it a recovery link"
+                ))?;
+                if let Some(link) = service
+                    .recover_account(operator, id, reason, &links)
+                    .await?
+                {
+                    println!("{link}");
+                }
+                eprintln!(
+                    "The link opens a page that is not available yet; it works once, for a day."
+                );
             }
         }
         Ok(())

@@ -95,8 +95,9 @@ fn typed_ceremonies_preserve_persistence_and_check_the_expected_payload() {
     assert!(EnrollmentCeremony::extract(enrollment).is_some());
 }
 
-/// Isolated account and counter-capable software authenticator for database scenarios.
-struct Fixture {
+/// Isolated account and counter-capable software authenticator for database
+/// scenarios. The recovery scenarios use it too.
+pub(crate) struct Fixture {
     /// Routes and persistence under test.
     app: PasskeyApplication,
     /// Where requests go: the passkey routes, or a replica of the whole service.
@@ -106,15 +107,15 @@ struct Fixture {
     /// HTTPS origin passed to the authenticator.
     origin: Url,
     /// Seeded account owning the software credential.
-    user_id: UserId,
+    pub(crate) user_id: UserId,
     /// Seeded passkey row used for rename and last-key removal checks.
-    key_id: PasskeyId,
+    pub(crate) key_id: PasskeyId,
     /// Unique seeded username for identified authentication.
     username: String,
 }
 impl Fixture {
     /// Seeds an account and passkey in the explicitly configured isolated database.
-    async fn new() -> Self {
+    pub(crate) async fn new() -> Self {
         let url = piquel_common::config::Variable::new("TEST_DATABASE_URL")
             .required()
             .expect("isolated test database");
@@ -193,8 +194,18 @@ impl Fixture {
         self.router = router.clone();
         self
     }
+    /// The scenario database.
+    pub(crate) const fn database(&self) -> &Database {
+        &self.app.database
+    }
     /// Sends a JSON request from the auth origin with the supplied cookies.
-    async fn request(&self, path: &str, method: Method, cookies: &str, body: Value) -> Response {
+    pub(crate) async fn request(
+        &self,
+        path: &str,
+        method: Method,
+        cookies: &str,
+        body: Value,
+    ) -> Response {
         self.router
             .clone()
             .oneshot(
@@ -213,14 +224,14 @@ impl Fixture {
             .expect("response")
     }
     /// Starts a ceremony and returns its challenge JSON and browser-binding cookie.
-    async fn start(&self, path: &str, cookies: &str, body: Value) -> (Value, String) {
+    pub(crate) async fn start(&self, path: &str, cookies: &str, body: Value) -> (Value, String) {
         let response = self.request(path, Method::POST, cookies, body).await;
         assert_eq!(response.status(), StatusCode::OK);
         let cookie = Self::cookie(&response);
         (Self::json(response).await, cookie)
     }
     /// Reads a response's JSON body.
-    async fn json(response: Response) -> Value {
+    pub(crate) async fn json(response: Response) -> Value {
         serde_json::from_slice(
             &to_bytes(response.into_body(), MAX_RESPONSE_BYTES)
                 .await
@@ -229,7 +240,7 @@ impl Fixture {
         .expect("JSON")
     }
     /// Extracts the cookie pair from a response for the next simulated browser request.
-    fn cookie(response: &Response) -> String {
+    pub(crate) fn cookie(response: &Response) -> String {
         response.headers()[header::SET_COOKIE]
             .to_str()
             .expect("cookie")
@@ -247,7 +258,7 @@ impl Fixture {
             .expect("software assertion")
     }
     /// Completes an identified login and returns the new session cookie.
-    async fn login(&mut self) -> String {
+    pub(crate) async fn login(&mut self) -> String {
         self.login_from("").await
     }
     /// Completes an identified login in a browser holding the `session` cookie pair,
@@ -273,7 +284,7 @@ impl Fixture {
         Self::cookie(&response)
     }
     /// Finds the active session a cookie pair names.
-    async fn session(&self, cookie: &str) -> Option<StoredSession> {
+    pub(crate) async fn session(&self, cookie: &str) -> Option<StoredSession> {
         let secret = cookie
             .split_once('=')
             .and_then(|(_, value)| Secret::parse(value).ok())
@@ -286,7 +297,7 @@ impl Fixture {
             .expect("session lookup")
     }
     /// Lists the events recorded about the seeded account, newest first.
-    async fn events(&self) -> Vec<DomainEvent> {
+    pub(crate) async fn events(&self) -> Vec<DomainEvent> {
         self.app
             .database
             .events()
@@ -297,14 +308,18 @@ impl Fixture {
             .map(|stored| stored.event.known().cloned().expect("a known event"))
             .collect()
     }
+    /// Answers a started registration challenge with a fresh software credential.
+    pub(crate) fn credential(&self, started: &Value) -> RegisterPublicKeyCredential {
+        let challenge =
+            serde_json::from_value(started["public_key"].clone()).expect("registration challenge");
+        WebauthnAuthenticator::new(SoftPasskey::new(true))
+            .do_registration(self.origin.clone(), challenge)
+            .expect("software registration")
+    }
     /// Registers a new account with a fresh software credential; returns the finish response.
     async fn register(&self, cookies: &str, body: Value) -> Response {
         let (started, browser) = self.start("/webauthn/register/start", cookies, body).await;
-        let challenge =
-            serde_json::from_value(started["public_key"].clone()).expect("registration challenge");
-        let credential = WebauthnAuthenticator::new(SoftPasskey::new(true))
-            .do_registration(self.origin.clone(), challenge)
-            .expect("software registration");
+        let credential = self.credential(&started);
         self.request(
             "/webauthn/register/finish",
             Method::POST,
@@ -703,11 +718,7 @@ async fn ceremonies_require_browser_binding_and_confirmation_belongs_to_one_sess
         )
         .await
         .expect("stale confirmation");
-    let challenge =
-        serde_json::from_value(started["public_key"].clone()).expect("registration challenge");
-    let credential = WebauthnAuthenticator::new(SoftPasskey::new(true))
-        .do_registration(fixture.origin.clone(), challenge)
-        .expect("software registration");
+    let credential = fixture.credential(&started);
     let response = fixture
         .request(
             "/account/passkeys/enroll/finish",

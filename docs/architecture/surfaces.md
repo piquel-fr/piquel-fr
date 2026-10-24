@@ -112,6 +112,25 @@ When an administrator or operator acts:
 - A change that signs the owner out elsewhere, such as removing a passkey, signs
   out every session, since an administrator has none of the owner's to keep.
 
+### Recovering an account
+
+An owner who lost every passkey cannot add one: adding a way to sign in needs a
+passkey confirmation. `AdminService::recover_account` helps without giving the
+administrator a way in. It signs the account out everywhere and emails the
+owner's primary verified address a link that enrolls one passkey, once, within a
+day, then signs that browser in with it. The link's token alone authorizes it;
+only its digest is stored, and the email's delivery stores neither. Only an
+operator at the terminal sees the link (`user recover`), for an owner without an
+address, so an administrator may recover only an account with one. A new recovery
+replaces an older link, and every verified address hears when a recovery enrolls
+a passkey.
+
+The owner undoes a recovery from a session that a passkey enrolled before it signed
+in or confirmed: neither the recovery's passkey nor a social sign-in counts, since
+whoever holds them may not be the owner. Undoing it stops a link not used yet, or
+removes the passkey it enrolled and ends that passkey's sessions. The pages that
+use the link and offer the undo are *(planned)*; until then nothing can use a link.
+
 ## Contracts
 
 Third-party applications integrate only through open standards: OIDC, OAuth and

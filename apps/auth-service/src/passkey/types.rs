@@ -89,6 +89,23 @@ pub(super) struct EnrollmentStart {
     pub(super) passkey_kind: PasskeyKind,
 }
 
+/// A recovery link's token, from its page's fragment.
+#[derive(Deserialize)]
+pub(super) struct RecoveryToken {
+    /// The token.
+    pub(super) token: String,
+}
+
+/// The start of enrolling a passkey with a recovery link.
+#[derive(Deserialize)]
+pub(super) struct RecoveryStart {
+    /// The link's token.
+    pub(super) token: String,
+    /// Defaults to the compatible standard registration path.
+    #[serde(default)]
+    pub(super) passkey_kind: PasskeyKind,
+}
+
 /// Signup input. Names stay plain strings so invalid ones get our 400 message, not a JSON rejection.
 #[derive(Deserialize)]
 pub(super) struct RegistrationStart {

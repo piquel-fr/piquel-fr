@@ -608,7 +608,7 @@ mod backchannel;
 pub use backchannel::{BackchannelLogout, LogoutRecipient};
 /// Messages to account holders.
 mod email;
-pub use email::{Email, EmailMessage, PendingAddress};
+pub use email::{Email, EmailMessage, PendingAddress, PendingRecovery};
 /// Database tests for fan-out, claims, leases and ordering.
 #[cfg(test)]
 mod tests;

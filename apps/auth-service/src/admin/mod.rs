@@ -112,10 +112,12 @@ impl AdminApplication {
             Op::ListAdministrators => (admin::ADMINISTRATORS, get(Self::list_administrators)),
             Op::GrantAdministrator => (admin::ADMINISTRATORS, post(Self::grant_administrator)),
             Op::RevokeAdministrator => (admin::ADMINISTRATOR, delete(Self::revoke_administrator)),
-            // Client changes, handles and the delivery queue are CLI-only, for now.
+            // Client changes, handles, recovery and the delivery queue are CLI-only,
+            // for now.
             Op::ListInvitations
             | Op::CreateInvitation
             | Op::RevokeInvitation
+            | Op::RecoverAccount
             | Op::CreateClient
             | Op::ApplyClient
             | Op::UpdateClient

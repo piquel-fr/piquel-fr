@@ -940,7 +940,8 @@ impl AdminOperation {
             | Self::RevokeAdministrator
             | Self::RenameHandle
             | Self::RetryDelivery
-            | Self::CancelDelivery => return None,
+            | Self::CancelDelivery
+            | Self::RecoverAccount => return None,
         })
     }
 }

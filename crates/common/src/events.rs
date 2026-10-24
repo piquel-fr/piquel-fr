@@ -7,7 +7,7 @@
 
 use crate::{
     AuthenticationMethod, ClientId, DeliveryId, EmailId, EventId, Handle, PasskeyId, Personal,
-    Provider, SessionId, TokenId, UserId,
+    Provider, RecoveryId, SessionId, TokenId, UserId,
     clients::{ClientField, ClientKind},
     email::NormalizedEmail,
     protocol::jwt::KeyId,
@@ -226,6 +226,30 @@ pub enum DomainEvent {
         /// When its earlier secrets stop working; now, for an immediate revocation.
         previous_expire_at: DateTime<Utc>,
     },
+    /// An administrator or operator started recovering the account: its sessions
+    /// and refresh grants end, and a link that enrolls one new passkey is sent to
+    /// its owner. Its sessions follow as [`Self::SessionRevoked`].
+    RecoveryStarted {
+        /// The recovery.
+        recovery_id: RecoveryId,
+        /// When its link stops working.
+        expires_at: DateTime<Utc>,
+    },
+    /// A recovery's link enrolled a new passkey, which also signed its browser in.
+    RecoveryCompleted {
+        /// The recovery.
+        recovery_id: RecoveryId,
+        /// The passkey it enrolled.
+        passkey_id: PasskeyId,
+    },
+    /// The owner, signed in with a passkey enrolled before a recovery, undid it:
+    /// its link stopped working, or the passkey it enrolled was removed and that
+    /// passkey's sessions ended, which follow as [`Self::PasskeyRemoved`] and
+    /// [`Self::SessionRevoked`].
+    RecoveryUndone {
+        /// The recovery.
+        recovery_id: RecoveryId,
+    },
     /// An operator made a failed delivery, or a cancelled unordered one, due again.
     DeliveryRetried {
         /// The delivery.
@@ -318,6 +342,9 @@ impl DomainEvent {
             | Self::AdministratorGranted {}
             | Self::AdministratorRevoked {}
             | Self::HandleChanged { .. }
+            | Self::RecoveryStarted { .. }
+            | Self::RecoveryCompleted { .. }
+            | Self::RecoveryUndone { .. }
             | Self::DeliveryRetried { .. }
             | Self::DeliveryCancelled { .. }
             | Self::CompromiseReported { .. }
@@ -364,6 +391,9 @@ impl DomainEvent {
             | Self::ClientSuspensionLifted { .. }
             | Self::ClientDeleted { .. }
             | Self::ClientSecretRotated { .. }
+            | Self::RecoveryStarted { .. }
+            | Self::RecoveryCompleted { .. }
+            | Self::RecoveryUndone { .. }
             | Self::DeliveryRetried { .. }
             | Self::DeliveryCancelled { .. }
             | Self::CompromiseReported { .. }
@@ -410,6 +440,9 @@ impl DomainEvent {
             Self::ClientSuspensionLifted { .. } => "client_suspension_lifted",
             Self::ClientDeleted { .. } => "client_deleted",
             Self::ClientSecretRotated { .. } => "client_secret_rotated",
+            Self::RecoveryStarted { .. } => "recovery_started",
+            Self::RecoveryCompleted { .. } => "recovery_completed",
+            Self::RecoveryUndone { .. } => "recovery_undone",
             Self::DeliveryRetried { .. } => "delivery_retried",
             Self::DeliveryCancelled { .. } => "delivery_cancelled",
             Self::CompromiseReported { .. } => "compromise_reported",
@@ -493,6 +526,11 @@ impl DomainEvent {
             Self::AdministratorGranted {} => HistoryEntry::AdministratorGranted,
             Self::AdministratorRevoked {} => HistoryEntry::AdministratorRevoked,
             Self::HandleChanged { .. } => HistoryEntry::HandleChanged,
+            Self::RecoveryStarted { .. } => HistoryEntry::RecoveryStarted,
+            Self::RecoveryCompleted { passkey_id, .. } => HistoryEntry::Recovered {
+                passkey_id: *passkey_id,
+            },
+            Self::RecoveryUndone { .. } => HistoryEntry::RecoveryUndone,
             Self::CompromiseReported { event_id } => HistoryEntry::CompromiseReported {
                 event_id: *event_id,
             },
@@ -635,6 +673,18 @@ pub enum HistoryEntry {
     /// The account's handle changed.
     #[serde(rename = "account.handle_changed")]
     HandleChanged,
+    /// An administrator or operator started recovering the account.
+    #[serde(rename = "account.recovery_started")]
+    RecoveryStarted,
+    /// A recovery link enrolled a new passkey.
+    #[serde(rename = "account.recovered")]
+    Recovered {
+        /// The passkey it enrolled.
+        passkey_id: PasskeyId,
+    },
+    /// The owner undid a recovery.
+    #[serde(rename = "account.recovery_undone")]
+    RecoveryUndone,
     /// The user reported an entry as not theirs.
     #[serde(rename = "compromise.reported")]
     CompromiseReported {
@@ -687,6 +737,9 @@ impl HistoryEntry {
             | Self::AdministratorGranted
             | Self::AdministratorRevoked
             | Self::HandleChanged
+            | Self::RecoveryStarted
+            | Self::Recovered { .. }
+            | Self::RecoveryUndone
             | Self::CompromiseReported { .. }
             | Self::Legacy { .. } => None,
         }

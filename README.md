@@ -53,7 +53,7 @@ piquel-web with Vite against an auth service on `http://localhost:3000`.
 | `AUTH_PUBLIC_LISTENER` | Listener address; defaults to `127.0.0.1:8080` |
 | `AUTH_ADMIN_LISTENER` | Optional address of the private admin API listener, e.g. `0.0.0.0:8081`. No ingress route may reach it. Without it, auth serves no admin API |
 | `AUTH_KEY_ENCRYPTION_KEY` | Required env/file reference to the key that seals [signing keys](#signing-keys) in the database: 32 bytes as unpadded base64url text. A trailing newline is ignored |
-| `AUTH_TOKEN_DIGEST_KEY` | Required env/file reference to the key under which refresh tokens, authorization codes and pending logins are stored as HMAC digests. Its raw bytes are the key, at least 32 of them. Passkey decoys and email verification links derive from it too |
+| `AUTH_TOKEN_DIGEST_KEY` | Required env/file reference to the key under which refresh tokens, authorization codes and pending logins are stored as HMAC digests. Its raw bytes are the key, at least 32 of them. Passkey decoys, email verification links and recovery links derive from it too |
 | `AUTH_TOKEN_DIGEST_KEY_ACCEPTED` | Optional env/file reference to another token digest key, accepted but never used for new digests: the next key, or the old one (see [changing the token digest key](#changing-the-token-digest-key)) |
 | `AUTH_INVITE_REQUIRED` | `true` by default; set `false` to allow public registration |
 | `AUTH_GITHUB_CLIENT_ID`, `AUTH_GITHUB_CLIENT_SECRET` | Both required to enable GitHub; secret is an env/file reference |
@@ -194,7 +194,8 @@ admin API (`AdminService` in `apps/auth-service/src/admin`), and so does every
 setting administrators may change on another account (`AccountService` in
 `apps/auth-service/src/account`). Commands need only
 `AUTH_DATABASE_URL` (`invite create` also needs `AUTH_PUBLIC_BASE_URL`, to build its
-link), so they work while auth is down: they are the break-glass path when the
+link, and `user recover` needs it and `AUTH_TOKEN_DIGEST_KEY`, to derive its link), so
+they work while auth is down: they are the break-glass path when the
 dashboard or auth's frontends are unreachable. In deployed environments,
 run them with `piquelctl app exec piquel-fr auth --env ENV -- auth-service …` (see
 [infra/README.md](infra/README.md)).
@@ -207,6 +208,7 @@ just auth user search ali                 # by ID, or part of a username, name o
 just auth user show alice                 # recorded, since it shows personal data
 just auth user disable alice --reason "Spam"
 just auth user enable alice
+just auth user recover alice --reason "Lost every passkey"   # not usable yet, see below
 just auth session revoke <session-id>     # one session, as `user show` lists it
 just auth session revoke-all alice        # every session of the account
 just auth audit --user alice --kind session_revoked
@@ -219,7 +221,7 @@ just auth account alice emails remove <email-id> --reason "Asked by email"
 - `--output json` prints the admin API's body for `user search` (`UserPage`), `user
   show` (`UserDetail`), `audit` (`EventPage`), `client list`, `invite list` and
   `admin list`, as defined in `crates/admin-api`. It changes only as the API does.
-- `user disable`, `session revoke-all`, `admin revoke`, `client
+- `user disable`, `user recover`, `session revoke-all`, `admin revoke`, `client
   disable|suspend|delete`, and `account … passkeys revoke`, `identities unlink` and
   `sessions revoke-all` describe what they will change and ask for confirmation.
   Without a terminal they refuse unless given `--yes`.
@@ -230,6 +232,12 @@ just auth account alice emails remove <email-id> --reason "Asked by email"
   reads are recorded as views. See
   [surfaces.md](docs/architecture/surfaces.md#changing-an-account-on-its-owners-behalf)
   for what is shared.
+- `user recover` is not usable yet: the page its link opens comes with the
+  server-rendered pages. It is for an owner who lost every passkey. It signs the
+  account out everywhere, and emails its primary verified address a link that
+  enrolls one passkey, once, within a day; it prints the link too, for an owner
+  without an address. Running it again replaces the older link. The owner
+  can undo a recovery from a session of a passkey they had before it.
 - Each change is recorded as a domain event with the operator: `$USER` and the host
   name. Unlike the admin API, the CLI may act on administrators' accounts.
 - Failures print their causes and exit with 1; usage errors exit with 2.
@@ -494,7 +502,10 @@ explains how to choose a requirement and handle the challenge.
   identity so another account can link it; account data and credentials never move.
   Settings keep listing identities of disabled providers so they can be unlinked.
 - The last passkey cannot be removed. Removing a passkey/provider revokes other
-  central sessions. There is no recovery if every passkey is lost.
+  central sessions. An owner who lost every passkey is recovered with a link that
+  enrolls one new passkey; a passkey enrolled before the recovery can undo it (see
+  [surfaces.md](docs/architecture/surfaces.md#recovering-an-account)). Until its page
+  ships, nothing can use the link.
 - Sessions last at most 30 days. Access tokens last five minutes. Refresh rotation
   detects reuse and stops when its central session expires or is revoked. Ending a
   session tells the clients that registered a back-channel logout URI, which end

@@ -160,6 +160,7 @@ impl Administration {
                 UserCommand::Show { .. } => Op::ViewUser,
                 UserCommand::Disable { .. } => Op::DisableUser,
                 UserCommand::Enable { .. } => Op::EnableUser,
+                UserCommand::Recover { .. } => Op::RecoverAccount,
             },
             Self::Session(command) => match command {
                 SessionCommand::Revoke { .. } => Op::RevokeSession,

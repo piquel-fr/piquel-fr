@@ -22,10 +22,11 @@ pub use exclusive::{ExclusiveConnection, LockKey};
 pub use repositories::{
     AdministratorRepository, DeliveryRepository, EmailRepository, EventRepository,
     FederationRepository, MaintenanceRepository, OidcRepository, PasskeyRepository,
-    SecurityRepository, SessionRepository, SigningKeyRepository, TokenRepository, UserRepository,
+    RecoveryRepository, SecurityRepository, SessionRepository, SigningKeyRepository,
+    TokenRepository, UserRepository,
     deliveries::{
         BackchannelLogout, Channel, Delivery, DeliveryOutcome, DeliveryStatus, DeliverySummary,
-        Email, EmailMessage, LogoutRecipient, NewDelivery, PendingAddress,
+        Email, EmailMessage, LogoutRecipient, NewDelivery, PendingAddress, PendingRecovery,
     },
     emails::{InsertUnverifiedEmail, InsertVerifiedEmail, PendingVerification, StoredEmail},
     events::{EventCursor, EventFilter, RecordedEvent, StoredEvent},
@@ -40,6 +41,7 @@ pub use repositories::{
         StoredAuthorizationRequest, StoredClientSecret, StoredOidcClient,
     },
     passkeys::{CeremonyKind, ConsumedCeremony, InsertCeremony, InsertPasskey, StoredPasskey},
+    recoveries::{InsertRecovery, StoredRecovery},
     sessions::{
         InsertSession, LAST_SEEN_INTERVAL, SessionAuthentication, SessionScope, StoredSession,
     },

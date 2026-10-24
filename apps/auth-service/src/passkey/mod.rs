@@ -2,6 +2,7 @@
 use crate::account::{AccountError, AccountService, Owner, Subject, Viewer};
 use crate::config::PasskeyConfig;
 use crate::federation::FederationApplication;
+use crate::recovery::{RecoveryAccount, RecoveryError, RecoveryView};
 use crate::routes;
 use crate::security::{self, ApiError, BrowserCookie, Credential, RequestContext};
 use axum::{
@@ -12,7 +13,7 @@ use axum::{
     routing::{get, post},
 };
 use piquel_common::{
-    AuthenticationMethod, Handle, PasskeyId, UserId,
+    AuthenticationMethod, Handle, PasskeyId, RecoveryId, UserId,
     events::{Actor, DomainEvent, EventContext, RevocationReason},
     protocol::api,
 };
@@ -38,13 +39,13 @@ mod types;
 
 use ceremonies::{
     AuthenticationCeremony, Ceremony, ConfirmationCeremony, DiscoverCeremony, EnrollmentCeremony,
-    LoginCeremony, RegistrationCeremony,
+    LoginCeremony, RecoveryCeremony, RegistrationCeremony,
 };
 pub use error::PasskeyConfigError;
 pub(crate) use error::PasskeyError;
 use types::{
-    AuthenticationFinish, DisplayName, EnrollmentStart, LoginStart, PasskeyKind,
-    RegistrationFinish, RegistrationStart, SessionView, UserView,
+    AuthenticationFinish, DisplayName, EnrollmentStart, LoginStart, PasskeyKind, RecoveryStart,
+    RecoveryToken, RegistrationFinish, RegistrationStart, SessionView, UserView,
 };
 pub(crate) use types::{PasskeyName, Rename};
 
@@ -123,6 +124,11 @@ impl PasskeyApplication {
             )
             .route(routes::passkey::SESSION, get(Self::session_view))
             .route(routes::passkey::SESSION_LOGOUT, post(Self::logout))
+            .route(routes::recovery::CHECK, post(Self::check_recovery))
+            .route(routes::recovery::START, post(Self::start_recovery))
+            .route(routes::recovery::FINISH, post(Self::finish_recovery))
+            .route(routes::recovery::STATUS, get(Self::recovery))
+            .route(routes::recovery::UNDO, post(Self::undo_recovery))
             .with_state(self)
     }
 
@@ -182,6 +188,11 @@ impl PasskeyApplication {
         let mut response = StatusCode::NO_CONTENT.into_response();
         BrowserCookie::Session.set_on(&mut response, &session)?;
         Ok(response)
+    }
+
+    /// The account operations, over this application's database.
+    fn service(&self) -> AccountService {
+        AccountService::new(self.database.clone())
     }
 
     /// Decodes the account's active passkeys for `WebAuthn`.
@@ -753,9 +764,105 @@ impl PasskeyApplication {
             .webauthn
             .finish_passkey_registration(&input.credential, &state)
             .map_err(PasskeyError::from)?;
-        AccountService::new(app.database.clone())
+        app.service()
             .add_passkey(&owner, key, friendly_name)
             .await?;
+        Ok(StatusCode::NO_CONTENT)
+    }
+
+    /// Describes the account a recovery link recovers, without using the link, so
+    /// its page can say whose passkey it adds. Never a `GET`, since mail scanners
+    /// follow links.
+    async fn check_recovery(
+        State(app): State<Self>,
+        Json(input): Json<RecoveryToken>,
+    ) -> Result<Json<RecoveryAccount>, ApiError> {
+        let recovery = app.service().open_recovery(&input.token).await?;
+        Ok(Json(recovery.into_account()))
+    }
+
+    /// Starts enrolling a passkey with a recovery link, excluding the account's
+    /// current credentials. The link's token authorizes it, without a session.
+    async fn start_recovery(
+        State(app): State<Self>,
+        headers: HeaderMap,
+        Json(input): Json<RecoveryStart>,
+    ) -> Result<Response, ApiError> {
+        let recovery = app.service().open_recovery(&input.token).await?;
+        let user_id = recovery.user_id();
+        let exclusions = app
+            .keys(user_id)
+            .await?
+            .iter()
+            .map(|key| key.cred_id().clone())
+            .collect();
+        let account = recovery.account();
+        let (challenge, state) = app.registration(
+            user_id,
+            &account.username,
+            &account.display_name,
+            Some(exclusions),
+            input.passkey_kind,
+            &headers,
+        )?;
+        Ok(app
+            .start(
+                &headers,
+                Ceremony::Recover(RecoveryCeremony {
+                    recovery_id: recovery.id(),
+                    user_id,
+                    state,
+                }),
+                challenge,
+            )
+            .await?)
+    }
+
+    /// Finishes enrolling a passkey with a recovery link: uses the link, and signs
+    /// the browser in with the new passkey.
+    async fn finish_recovery(
+        State(app): State<Self>,
+        context: RequestContext,
+        headers: HeaderMap,
+        Json(input): Json<RegistrationFinish>,
+    ) -> Result<Response, ApiError> {
+        let friendly_name = PasskeyName::parse(input.friendly_name)?;
+        let RecoveryCeremony {
+            recovery_id,
+            user_id,
+            state,
+        } = app
+            .consume::<RecoveryCeremony>(&headers, input.ceremony_id)
+            .await?;
+        let key = app
+            .webauthn
+            .finish_passkey_registration(&input.credential, &state)
+            .map_err(PasskeyError::from)?;
+        let mut tx = app.database.begin().await?;
+        let passkey = AccountService::complete_recovery(
+            &mut tx,
+            recovery_id,
+            user_id,
+            key,
+            friendly_name,
+            context,
+        )
+        .await?;
+        Ok(Self::complete_sign_in(tx, context, &headers, user_id, passkey).await?)
+    }
+
+    /// Describes the owner's newest recovery they could undo, if any.
+    async fn recovery(
+        State(app): State<Self>,
+        owner: Owner,
+    ) -> Result<Json<Option<RecoveryView>>, ApiError> {
+        Ok(Json(app.service().recovery(&owner).await?))
+    }
+
+    /// Undoes the owner's newest recovery, from a session an older passkey signed
+    /// in.
+    async fn undo_recovery(State(app): State<Self>, owner: Owner) -> Result<StatusCode, ApiError> {
+        app.service().undo_recovery(&owner).await?;
         Ok(StatusCode::NO_CONTENT)
     }
 
@@ -808,6 +915,46 @@ impl PasskeyApplication {
 /// Passkey settings any administrator may also change: listing, renaming and
 /// removing. Only the owner adds a passkey, since it is a way to sign in.
 impl AccountService {
+    /// Completes recovery `recovery_id` of `user_id` with `key`, a passkey its
+    /// link's ceremony verified, in the caller's transaction, which signs the
+    /// browser in with it on commit. Stores the passkey and records the completion
+    /// as the browser's, which the link authorized, not a session. Fails if the
+    /// link stopped working since the ceremony started.
+    pub(crate) async fn complete_recovery(
+        tx: &mut DatabaseTransaction<'_>,
+        recovery_id: RecoveryId,
+        user_id: UserId,
+        key: Passkey,
+        friendly_name: PasskeyName,
+        request: RequestContext,
+    ) -> Result<PasskeyId, AccountError> {
+        tx.users()
+            .find_active_by_id_for_update(user_id)
+            .await?
+            .ok_or(RecoveryError::InvalidLink)?;
+        tx.recoveries()
+            .find_open(recovery_id)
+            .await?
+            .filter(|recovery| recovery.user_id == user_id)
+            .ok_or(RecoveryError::InvalidLink)?;
+        let context = request.actor(Actor::Anonymous);
+        let passkey_id =
+            PasskeyApplication::insert_passkey(tx, &context, user_id, key, friendly_name).await?;
+        if !tx.recoveries().complete(recovery_id, passkey_id).await? {
+            return Err(RecoveryError::InvalidLink.into());
+        }
+        tx.record(
+            &context,
+            Some(user_id),
+            DomainEvent::RecoveryCompleted {
+                recovery_id,
+                passkey_id,
+            },
+        )
+        .await?;
+        Ok(passkey_id)
+    }
+
     /// Adds `key`, a passkey the owner's browser registered and the enrollment
     /// ceremony verified, under the owner's session lock. A recent confirmation
     /// authorized the ceremony at its start, and the ceremony belongs to this
@@ -908,4 +1055,4 @@ impl axum::extract::FromRef<PasskeyApplication> for Database {
 }
 
 #[cfg(test)]
-mod tests;
+pub(crate) mod tests;

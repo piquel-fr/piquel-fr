@@ -10,7 +10,7 @@ use axum::{
     response::{IntoResponse, Response},
 };
 use chrono::{Duration, Utc};
-use piquel_common::{Handle, SessionId, TokenId, UserId};
+use piquel_common::{Handle, RecoveryId, SessionId, TokenId, UserId};
 use piquel_crypto::Secret;
 use piquel_repository::{CeremonyKind, InsertCeremony};
 use serde::{Deserialize, Serialize};
@@ -76,6 +76,18 @@ pub(super) struct EnrollmentCeremony {
     pub(super) state: PasskeyRegistration,
 }
 
+/// Registration of a passkey through a recovery's link, for an account no session
+/// of this browser belongs to.
+#[derive(Serialize, Deserialize)]
+pub(super) struct RecoveryCeremony {
+    /// The recovery whose link started it, which must still work at its finish.
+    pub(super) recovery_id: RecoveryId,
+    /// Account receiving the new credential.
+    pub(super) user_id: UserId,
+    /// Server-side registration challenge.
+    pub(super) state: PasskeyRegistration,
+}
+
 /// Persisted ceremony payload; its variant determines kind and account/session binding.
 /// Stored as externally tagged JSON, such as `{"Discover": {...}}`.
 #[derive(Serialize, Deserialize)]
@@ -93,6 +105,8 @@ pub(super) enum Ceremony {
     Confirm(ConfirmationCeremony),
     /// Additional passkey creation.
     Enroll(EnrollmentCeremony),
+    /// Passkey creation through a recovery's link.
+    Recover(RecoveryCeremony),
 }
 
 impl Ceremony {
@@ -102,7 +116,7 @@ impl Ceremony {
             Self::Register(_) => CeremonyKind::Registration,
             Self::Login(_) | Self::Decoy | Self::Discover(_) => CeremonyKind::Authentication,
             Self::Confirm(_) => CeremonyKind::PurposeAuthentication,
-            Self::Enroll(_) => CeremonyKind::Enrollment,
+            Self::Enroll(_) | Self::Recover(_) => CeremonyKind::Enrollment,
         }
     }
 
@@ -113,13 +127,18 @@ impl Ceremony {
             Self::Login(state) => Some(state.user_id),
             Self::Confirm(state) => Some(state.user_id),
             Self::Enroll(state) => Some(state.user_id),
+            Self::Recover(state) => Some(state.user_id),
         }
     }
 
     /// Derives the initiating-session binding for settings operations.
     const fn session_id(&self) -> Option<SessionId> {
         match self {
-            Self::Register(_) | Self::Login(_) | Self::Decoy | Self::Discover(_) => None,
+            Self::Register(_)
+            | Self::Login(_)
+            | Self::Decoy
+            | Self::Discover(_)
+            | Self::Recover(_) => None,
             Self::Confirm(state) => Some(state.session_id),
             Self::Enroll(state) => Some(state.session_id),
         }
@@ -162,6 +181,7 @@ macro_rules! ceremony_state {
 ceremony_state!(RegistrationCeremony, Register, Registration);
 ceremony_state!(ConfirmationCeremony, Confirm, PurposeAuthentication);
 ceremony_state!(EnrollmentCeremony, Enroll, Enrollment);
+ceremony_state!(RecoveryCeremony, Recover, Enrollment);
 
 /// Either supported account sign-in payload, sharing one database purpose.
 pub(super) enum AuthenticationCeremony {
@@ -181,7 +201,10 @@ impl CeremonyState for AuthenticationCeremony {
             Ceremony::Login(state) => Some(Self::Login(state)),
             Ceremony::Decoy => Some(Self::Decoy),
             Ceremony::Discover(state) => Some(Self::Discover(state)),
-            Ceremony::Register(_) | Ceremony::Confirm(_) | Ceremony::Enroll(_) => None,
+            Ceremony::Register(_)
+            | Ceremony::Confirm(_)
+            | Ceremony::Enroll(_)
+            | Ceremony::Recover(_) => None,
         }
     }
 }

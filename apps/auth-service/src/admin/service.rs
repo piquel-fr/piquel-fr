@@ -1,25 +1,29 @@
 //! Every administrative operation, shared by the admin API and the CLI.
 
 use super::{AdminError, HandleIssue, HandleProblem, InviteExpiry, Operator, Reason, UserRef};
-use crate::{Applied, ClientDetails, ClientRegistry, ClientRegistryError, GracePeriod};
+use crate::{
+    Applied, ClientDetails, ClientRegistry, ClientRegistryError, GracePeriod,
+    recovery::{LINK_LIFETIME, RecoveryLinks},
+};
 use chrono::Utc;
 use piquel_admin_api::{
     Administrator, Client, CreatedInvitation, Email, Event, EventPage, EventSearch, Invitation,
     UserDetail, UserPage,
 };
 use piquel_common::{
-    AccountStatus, ClientId, DeliveryId, Handle, Personal, SessionId, TokenId, UserId,
+    AccountStatus, ClientId, DeliveryId, Handle, Personal, RecoveryId, SessionId, TokenId, UserId,
     clients::{ClientField, ClientOwner, ClientRegistration},
     config::Origin,
     email::NormalizedEmail,
-    events::{DomainEvent, RevocationReason},
+    events::{DomainEvent, EventContext, RevocationReason},
 };
 use piquel_crypto::{ClientSecret, Secret};
 use piquel_repository::{
     Database, DatabaseError, DatabaseTransaction, DeliveryStatus, DeliverySummary, EventFilter,
-    SessionScope, StoredOidcClient,
+    InsertRecovery, SessionScope, StoredOidcClient,
 };
 use std::collections::BTreeMap;
+use url::Url;
 
 /// Accounts per search page.
 const USER_PAGE_SIZE: u16 = 50;
@@ -202,7 +206,7 @@ impl AdminService {
             .await?;
         Self::end_sessions(
             &mut tx,
-            operator,
+            &operator.context(),
             user_id,
             RevocationReason::AccountDisabled,
         )
@@ -242,6 +246,64 @@ impl AdminService {
         .await
     }
 
+    /// Starts recovering the active account `user_id`, whose owner lost every
+    /// passkey, for `reason`. Its sessions and refresh grants end, an older
+    /// recovery's unused link stops working, and its primary verified address is
+    /// sent a link that enrolls one passkey, once, within a day. Returns the link
+    /// only to an operator at the terminal, for an owner without an address; an
+    /// administrator never sees it, so a recovery needs a verified address. An
+    /// administrator may not recover another administrator, which the CLI may.
+    ///
+    /// The owner can undo the recovery with a passkey enrolled before it.
+    pub(crate) async fn recover_account(
+        &self,
+        operator: &Operator,
+        user_id: UserId,
+        reason: Reason,
+        links: &RecoveryLinks,
+    ) -> Result<Option<Url>, AdminError> {
+        let mut tx = self.database.begin().await?;
+        let user = operator.lock(&mut tx, user_id).await?;
+        if user.status != AccountStatus::Active {
+            return Err(AdminError::RecoveryOfDisabledAccount);
+        }
+        let reachable = tx
+            .emails()
+            .list(user_id)
+            .await?
+            .iter()
+            .any(|email| email.verified_at.is_some());
+        if !reachable && operator.administrator().is_some() {
+            return Err(AdminError::RecoveryNeedsEmail);
+        }
+        tx.recoveries().cancel_open(user_id).await?;
+        let id = RecoveryId::new();
+        let expires_at = Utc::now() + LINK_LIFETIME;
+        tx.recoveries()
+            .insert(&InsertRecovery {
+                id,
+                user_id,
+                secret_digest: links.token(id)?.digest().as_bytes(),
+                expires_at,
+            })
+            .await?;
+        let context = EventContext {
+            reason: Some(reason.into_inner()),
+            ..operator.context()
+        };
+        let started = DomainEvent::RecoveryStarted {
+            recovery_id: id,
+            expires_at,
+        };
+        tx.record(&context, Some(user_id), started).await?;
+        Self::end_sessions(&mut tx, &context, user_id, RevocationReason::Admin).await?;
+        Self::finish(tx, operator, Some(user_id), vec![]).await?;
+        Ok(match operator {
+            Operator::Cli { .. } => Some(links.link(id)?),
+            Operator::Admin(_) => None,
+        })
+    }
+
     /// Ends every session and refresh grant of an account.
     pub(crate) async fn revoke_user_sessions(
         &self,
@@ -250,19 +312,25 @@ impl AdminService {
     ) -> Result<(), AdminError> {
         let mut tx = self.database.begin().await?;
         operator.lock(&mut tx, user_id).await?;
-        Self::end_sessions(&mut tx, operator, user_id, RevocationReason::Admin).await?;
+        Self::end_sessions(
+            &mut tx,
+            &operator.context(),
+            user_id,
+            RevocationReason::Admin,
+        )
+        .await?;
         Self::finish(tx, operator, Some(user_id), vec![]).await
     }
 
-    /// Revokes the account's sessions, recording each as `operator`'s, then its
+    /// Revokes the account's sessions, recording each in `context`, then its
     /// refresh grants. Callers hold the account lock.
     async fn end_sessions(
         tx: &mut DatabaseTransaction<'_>,
-        operator: &Operator,
+        context: &EventContext,
         user_id: UserId,
         reason: RevocationReason,
     ) -> Result<(), AdminError> {
-        tx.revoke_sessions(&operator.context(), user_id, SessionScope::All, &reason)
+        tx.revoke_sessions(context, user_id, SessionScope::All, &reason)
             .await?;
         tx.tokens().revoke_all_for_user(user_id).await?;
         Ok(())

@@ -27,7 +27,10 @@
   } & (
     | { kind: 'account.created' | 'session.signed_in'; method: Method }
     | { kind: 'session.revoked'; reason: { type: string } }
-    | { kind: 'passkey.added' | 'passkey.renamed' | 'passkey.removed'; passkey_id: string }
+    | {
+        kind: 'passkey.added' | 'passkey.renamed' | 'passkey.removed' | 'account.recovered';
+        passkey_id: string;
+      }
     | { kind: 'identity.linked' | 'identity.unlinked'; provider: Provider }
     | { kind: 'email.added'; email_id: string; address: string | null }
     | { kind: 'email.verified' | 'email.primary_changed' | 'email.removed'; email_id: string }
@@ -42,6 +45,8 @@
           | 'account.enabled'
           | 'account.viewed'
           | 'account.handle_changed'
+          | 'account.recovery_started'
+          | 'account.recovery_undone'
           | 'administrator.granted'
           | 'administrator.revoked';
       }
@@ -262,6 +267,12 @@
         return 'Account details viewed';
       case 'account.handle_changed':
         return 'Handle changed';
+      case 'account.recovery_started':
+        return 'Account recovery started';
+      case 'account.recovered':
+        return `Passkey${passkeyName(entry.passkey_id)} added with a recovery link`;
+      case 'account.recovery_undone':
+        return 'Account recovery undone';
       case 'administrator.granted':
         return 'Administrator rights granted';
       case 'administrator.revoked':

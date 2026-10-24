@@ -80,6 +80,15 @@ pub enum AdminError {
     /// The invitation lifetime is not 1 hour to 365 days.
     #[error("expires_in {0}")]
     InvalidInviteExpiry(#[from] super::InvalidLifetime),
+    /// Only an active account can be recovered.
+    #[error("the account is disabled; enable it before recovering it")]
+    RecoveryOfDisabledAccount,
+    /// An administrator never sees a recovery link, so the account needs a
+    /// verified address to receive it.
+    #[error(
+        "the account has no verified email to send the recovery link to; an operator can recover it with `auth-service user recover`"
+    )]
+    RecoveryNeedsEmail,
     /// Only active accounts can become administrators.
     #[error("the account is disabled; enable it before granting administrator rights")]
     AccountDisabled,
@@ -153,6 +162,8 @@ impl AdminError {
             Self::EmailClaimed(_) => "email_claimed",
             Self::InvalidReason => "invalid_reason",
             Self::InvalidInviteExpiry(_) => "invalid_invite_expiry",
+            Self::RecoveryOfDisabledAccount => "recovery_of_disabled_account",
+            Self::RecoveryNeedsEmail => "recovery_needs_email",
             Self::AccountDisabled => "account_disabled",
             Self::AlreadyAdministrator => "already_administrator",
             Self::NotAnAdministrator => "not_an_administrator",
@@ -192,6 +203,8 @@ impl AdminError {
             | Self::EmailClaimed(_)
             | Self::InvalidReason
             | Self::InvalidInviteExpiry(_)
+            | Self::RecoveryOfDisabledAccount
+            | Self::RecoveryNeedsEmail
             | Self::AccountDisabled
             | Self::AlreadyAdministrator
             | Self::NotAnAdministrator
@@ -234,6 +247,8 @@ impl From<AdminError> for ApiError {
             AdminError::AlreadyDisabled
             | AdminError::AlreadyActive
             | AdminError::EmailClaimed(_)
+            | AdminError::RecoveryOfDisabledAccount
+            | AdminError::RecoveryNeedsEmail
             | AdminError::AccountDisabled
             | AdminError::AlreadyAdministrator
             | AdminError::NotAnAdministrator

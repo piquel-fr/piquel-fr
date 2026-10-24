@@ -1,6 +1,6 @@
 //! Validated startup configuration, grouped by application.
 
-use crate::{emails::VerificationKey, passkey::DecoyKey};
+use crate::{emails::VerificationKey, passkey::DecoyKey, recovery::RecoveryLinks};
 use base64::{Engine, engine::general_purpose::URL_SAFE_NO_PAD};
 use ipnet::IpNet;
 use lettre::{
@@ -35,6 +35,9 @@ const PASSKEY_DECOY_CONTEXT: &[u8] = b"piquel-passkey-decoy-credential-v1";
 /// Separates the email verification key from every other use of the current token
 /// digest key, as [`PASSKEY_DECOY_CONTEXT`] does the decoy key.
 const EMAIL_VERIFICATION_CONTEXT: &[u8] = b"piquel-email-verification-token-v1";
+/// Separates the recovery link key from every other use of the current token
+/// digest key, as [`PASSKEY_DECOY_CONTEXT`] does the decoy key.
+const RECOVERY_LINK_CONTEXT: &[u8] = b"piquel-account-recovery-link-v1";
 /// Fewest bytes a token digest key may have.
 const MIN_TOKEN_DIGEST_KEY_BYTES: usize = 32;
 /// Bytes of a token digest key's digest kept as its fingerprint.
@@ -142,8 +145,8 @@ const SUBMISSION_PORT: u16 = 587;
 /// The longest one SMTP command may take, like an outbound HTTP request.
 const SMTP_TIMEOUT: Duration = Duration::from_secs(10);
 
-/// Email to account holders: where it is sent, as whom, and the key of
-/// verification links.
+/// Email to account holders: where it is sent, as whom, and the keys of its
+/// verification and recovery links.
 #[derive(Clone)]
 pub(crate) struct EmailConfig {
     /// The SMTP relay; `None` when `AUTH_SMTP_URL` is unset, which disables email.
@@ -154,6 +157,8 @@ pub(crate) struct EmailConfig {
     pub settings_url: PublicUrl,
     /// Derives verification tokens from address IDs.
     pub verification_key: VerificationKey,
+    /// Derives recovery links from recovery IDs.
+    pub recovery_links: RecoveryLinks,
 }
 
 impl EmailConfig {
@@ -176,6 +181,10 @@ impl EmailConfig {
             from: EMAIL_FROM.parse_or(DEFAULT_EMAIL_FROM)?,
             settings_url: settings_url.clone(),
             verification_key: VerificationKey::new(digest_keys.current.verification.clone()),
+            recovery_links: RecoveryLinks::new(
+                origin.clone(),
+                digest_keys.current.recovery.clone(),
+            ),
         })
     }
 
@@ -270,6 +279,10 @@ impl EmailConfig {
             from: DEFAULT_EMAIL_FROM.parse().expect("sender"),
             settings_url: settings_url.clone(),
             verification_key: VerificationKey::new(Secret::generate().expect("verification key")),
+            recovery_links: RecoveryLinks::new(
+                "https://auth.piquel.fr".parse().expect("origin"),
+                Secret::generate().expect("recovery key"),
+            ),
         }
     }
 }
@@ -402,11 +415,13 @@ pub(crate) struct TokenDigestKey {
     decoy: Secret,
     /// The email verification key, derived and used like [`Self::decoy`].
     verification: Secret,
+    /// The recovery link key, derived and used like [`Self::decoy`].
+    recovery: Secret,
 }
 
 impl TokenDigestKey {
-    /// Derives the HMAC, decoy and verification keys from configured bytes, as
-    /// the PEM key's always were.
+    /// Derives the HMAC, decoy, verification and recovery link keys from
+    /// configured bytes, as the PEM key's always were.
     pub(crate) fn derive(bytes: &[u8]) -> Result<Self, CryptoError> {
         let key = Secret::derive(bytes, TOKEN_DIGEST_CONTEXT)?;
         let fingerprint = URL_SAFE_NO_PAD
@@ -416,6 +431,7 @@ impl TokenDigestKey {
             fingerprint,
             decoy: Secret::derive(bytes, PASSKEY_DECOY_CONTEXT)?,
             verification: Secret::derive(bytes, EMAIL_VERIFICATION_CONTEXT)?,
+            recovery: Secret::derive(bytes, RECOVERY_LINK_CONTEXT)?,
         })
     }
 
@@ -657,6 +673,18 @@ impl AuthConfig {
             key_encryption_key: Arc::new(Self::key_encryption_key_from_environment()?),
             trusted_proxies: Self::trusted_proxies()?,
         })
+    }
+
+    /// Loads what the `user recover` command needs to print a recovery link: the
+    /// public origin and the current token digest key, which every other setting
+    /// can do without.
+    ///
+    /// # Errors
+    /// Names an invalid or missing origin or key.
+    pub(crate) fn recovery_links_from_environment() -> Result<RecoveryLinks, ConfigurationError> {
+        let origin: Origin = PUBLIC_BASE_URL.parse()?;
+        let digest_keys = TokenDigestKeys::from_environment()?;
+        Ok(RecoveryLinks::new(origin, digest_keys.current.recovery))
     }
 
     /// Reads the key-encryption key, for serving and for the `keys` commands.
