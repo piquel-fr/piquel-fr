@@ -53,6 +53,30 @@ async fn account(database: &Database) -> UserId {
     user_id
 }
 
+/// Starts recovering `user_id`, whose primary address is `email_id`, with a
+/// token from `links`, and returns the recovery and its token.
+async fn recover(
+    database: &Database,
+    user_id: UserId,
+    email_id: EmailId,
+    links: &RecoveryLinks,
+) -> (RecoveryId, Secret) {
+    let id = RecoveryId::new();
+    let token = links.token(id).expect("token");
+    database
+        .recoveries()
+        .insert(&InsertRecovery {
+            id,
+            user_id,
+            secret_digest: token.digest().as_bytes(),
+            primary_email_id: Some(email_id),
+            expires_at: chrono::Utc::now() + LINK_LIFETIME,
+        })
+        .await
+        .expect("recovery");
+    (id, token)
+}
+
 impl<M: Mailer> EmailSender<M> {
     /// Asserts that `message` to `user_id` has a recipient, and a plain-text and
     /// an HTML body.
@@ -165,7 +189,8 @@ async fn retries_resend_the_same_message_to_the_current_address() {
 
 /// A recovery's link goes to its address, naming the account, only while the
 /// link works and the account is active, under the key its recovery started
-/// with, even once a change of token digest key made it the accepted one. The notice that a recovery enrolled a passkey links to settings,
+/// with, even once a change of token digest key made it the accepted one. With
+/// that key gone, the delivery fails. The notice that a recovery enrolled a passkey links to settings,
 /// where an older passkey undoes it.
 #[tokio::test]
 #[ignore = "requires TEST_DATABASE_URL"]
@@ -183,19 +208,7 @@ async fn a_recovery_link_is_sent_while_it_works() {
     let current = Secret::generate().expect("recovery key");
     let before = RecoveryLinks::new(origin.clone(), started.clone(), None);
     config.recovery_links = RecoveryLinks::new(origin.clone(), current.clone(), Some(started));
-    let recovery_id = RecoveryId::new();
-    let token = before.token(recovery_id).expect("token");
-    database
-        .recoveries()
-        .insert(&InsertRecovery {
-            id: recovery_id,
-            user_id,
-            secret_digest: token.digest().as_bytes(),
-            primary_email_id: Some(email_id),
-            expires_at: chrono::Utc::now() + LINK_LIFETIME,
-        })
-        .await
-        .expect("recovery");
+    let (recovery_id, token) = recover(&database, user_id, email_id, &before).await;
     let outbox = Arc::new(Outbox::default());
     let sender = EmailSender::with_mailer(database.clone(), Some(Arc::clone(&outbox)), &config);
     let link = EmailMessage::RecoveryLink {
@@ -233,9 +246,9 @@ async fn a_recovery_link_is_sent_while_it_works() {
     }
     config.recovery_links = RecoveryLinks::new(origin, current, None);
     let unkeyed = EmailSender::with_mailer(database.clone(), Some(Arc::clone(&outbox)), &config);
-    let content = unkeyed.content(user_id, &link).await.expect("content");
+    let content = unkeyed.content(user_id, &link).await;
     assert!(
-        content.is_none(),
+        matches!(content, Err(DeliveryError::Permanent(Failure::Message))),
         "no link under a key no longer configured"
     );
 
@@ -263,4 +276,16 @@ async fn a_recovery_link_is_sent_while_it_works() {
         Ok(())
     );
     assert!(outbox.headers().is_empty(), "no link that stopped working");
+
+    // A recovery started under the current key is sent under it.
+    let (current_id, token) = recover(&database, user_id, email_id, &config.recovery_links).await;
+    let link = EmailMessage::RecoveryLink {
+        recovery_id: current_id,
+        email_id,
+    };
+    let content = unkeyed.content(user_id, &link).await.expect("content");
+    let Some(Content::RecoveryLink { link: url, .. }) = content else {
+        panic!("a recovery's link has a recipient");
+    };
+    assert_eq!(url, config.recovery_links.url(&token).as_str());
 }

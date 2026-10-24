@@ -16,9 +16,9 @@
 //! identities linked and the addresses added or verified since, restores the
 //! primary address, and signs out every other session, each of which was signed
 //! in since. The owner loses what they added themselves meanwhile too; the undo
-//! page lists all of it first. Until then, only a session an older passkey
-//! signed in may remove an older passkey, so the link's holder cannot make the
-//! recovery impossible to undo.
+//! page lists all of it first. While a recovery can be undone, only a session an
+//! older passkey signed in may remove an older passkey, so the link's holder
+//! cannot make the recovery impossible to undo.
 
 /// Recovery failures and their browser response mapping.
 mod error;
@@ -123,7 +123,7 @@ impl RecoveryLinks {
 
     /// Recovery `id`'s link, as [`Self::url`] builds it, under the key whose
     /// token has the stored SHA-256 `digest`. `None` once no configured key
-    /// derives it.
+    /// derives it, which fails its delivery.
     ///
     /// # Errors
     ///

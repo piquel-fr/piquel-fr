@@ -135,9 +135,14 @@ started: it stops a link not used yet, removes every passkey enrolled, identity
 linked and address added or verified since, makes the primary address the
 recovery started with primary again (or the oldest address verified before it),
 and signs out every other session. The owner loses what they added themselves
-meanwhile too, so the undo page lists exactly what goes first. Consents, owned
-clients and profile edits stay: they are not ways in. The pages that use the link
-and offer the undo are *(planned)*; until then nothing can use a link.
+meanwhile too, so the undo page lists exactly what goes first. Owned clients and
+profile edits stay, and so do OIDC consents: signing out ends their refresh
+grants, but an app the link's holder consented to can still get a code without
+asking again if the owner's browser follows its link while signed in. While a
+recovery can be undone, only a session a passkey from before it signed in may
+remove such a passkey (an operator still can), so whoever used the link cannot
+make it impossible to undo. The pages that use the link and offer the undo are
+*(planned)*; until then nothing can use a link.
 
 ## Contracts
 

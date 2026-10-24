@@ -179,9 +179,11 @@ impl<M: Mailer> EmailSender<M> {
                     .recovery_links
                     .link(*recovery_id, &pending.secret_digest)
                     .map_err(|error| Self::underived(&error))?;
+                // Its key was removed before the link was sent: fail the delivery,
+                // which operators see, rather than send a link that matches nothing.
                 let Some(link) = link else {
-                    tracing::warn!(%recovery_id, "no configured key derives the recovery link");
-                    return Ok(None);
+                    tracing::error!(%recovery_id, "no configured key derives the recovery link");
+                    return Err(DeliveryError::Permanent(Failure::Message));
                 };
                 Content::RecoveryLink {
                     address: pending.address,

@@ -147,6 +147,16 @@ impl Scenario {
         response.status()
     }
 
+    /// Removes `passkey` from the browser holding `cookie`.
+    async fn remove(&self, cookie: &str, passkey: PasskeyId) -> StatusCode {
+        let path = routes::passkey::ITEM.replace("{id}", &passkey.to_string());
+        let response = self
+            .keys
+            .request(&path, Method::DELETE, cookie, Value::Null)
+            .await;
+        response.status()
+    }
+
     /// The account's active passkeys.
     async fn passkeys(&self) -> HashSet<PasskeyId> {
         let passkeys = self.database().passkeys().list_active(self.user()).await;
@@ -206,6 +216,39 @@ impl Scenario {
                 .await
                 .expect("remove");
         }
+        tx.commit().await.expect("commit");
+    }
+
+    /// Adds an unverified address named `name`, and returns it and its
+    /// verification token.
+    async fn unverified(&self, name: &str) -> (EmailId, Secret) {
+        let id = EmailId::new();
+        let token = Secret::generate().expect("token");
+        let address = format!("{name}-{}@example.com", self.user());
+        self.database()
+            .emails()
+            .insert_unverified(&InsertUnverifiedEmail {
+                id,
+                user_id: self.user(),
+                normalized_email: &address,
+                secret_digest: token.digest().as_bytes(),
+                expires_at: Utc::now() + Duration::hours(1),
+            })
+            .await
+            .expect("unverified address");
+        (id, token)
+    }
+
+    /// Verifies the address waiting for `token`, as its link does.
+    async fn verify(&self, token: &Secret) {
+        let digest = token.digest();
+        let mut tx = self.database().begin().await.expect("transaction");
+        let pending = tx.emails().find_verification(digest.as_bytes()).await;
+        let pending = pending.expect("lookup").expect("pending");
+        tx.emails()
+            .consume_verification(&pending, digest.as_bytes())
+            .await
+            .expect("verify");
         tx.commit().await.expect("commit");
     }
 
@@ -314,6 +357,7 @@ async fn replaced_undone_or_disabled_links_stop_working() {
 async fn only_an_older_passkey_undoes_a_recovery() {
     let mut scenario = Scenario::new().await;
     let database = scenario.database().clone();
+    scenario.address("primary", true).await;
     let token = scenario.recover().await;
     let recovered = scenario.enroll(&token).await;
     let social =
@@ -334,6 +378,7 @@ async fn only_an_older_passkey_undoes_a_recovery() {
     let passkey = scenario.passkey(&recovered).await;
     let listed = &view["rollback"]["passkeys"];
     assert_eq!(listed[0]["id"], passkey.to_string());
+    assert_eq!(view["rollback"]["primary"], Value::Null, "unchanged");
     let other = json!(RecoveryId::new());
     assert_eq!(scenario.undo(&older, &other).await, StatusCode::CONFLICT);
 
@@ -357,6 +402,8 @@ async fn only_an_older_passkey_undoes_a_recovery() {
             .iter()
             .any(|event| matches!(event, DomainEvent::RecoveryUndone { .. }))
     );
+    let primary = |event: &DomainEvent| matches!(event, DomainEvent::PrimaryEmailChanged { .. });
+    assert!(!events.iter().any(primary), "the primary stays");
     assert_eq!(scenario.status(&older).await, Value::Null);
     assert_eq!(
         scenario.undo(&older, &view["id"]).await,
@@ -365,33 +412,38 @@ async fn only_an_older_passkey_undoes_a_recovery() {
 }
 
 /// Whoever used the link cannot remove the passkeys from before the recovery, so
-/// it always stays possible to undo; an operator still can.
+/// it always stays possible to undo. A session such a passkey signed in still
+/// can, and so can an operator.
 #[tokio::test]
 #[ignore = "requires TEST_DATABASE_URL"]
 async fn the_link_cannot_remove_older_passkeys() {
-    let scenario = Scenario::new().await;
+    let mut scenario = Scenario::new().await;
+    let older = scenario.keys.key_id;
+    let other = scenario.keys.switch_passkey("Other key").await;
     let token = scenario.recover().await;
     let recovered = scenario.enroll(&token).await;
-    let older = scenario.keys.key_id;
 
-    let path = routes::passkey::ITEM.replace("{id}", &older.to_string());
-    let response = scenario
-        .keys
-        .request(&path, Method::DELETE, &recovered, Value::Null)
-        .await;
-    assert_eq!(response.status(), StatusCode::FORBIDDEN);
+    assert_eq!(
+        scenario.remove(&recovered, older).await,
+        StatusCode::FORBIDDEN
+    );
     assert!(scenario.passkeys().await.contains(&older), "kept");
+    let signed_in = scenario.keys.login().await;
+    assert_eq!(
+        scenario.remove(&signed_in, older).await,
+        StatusCode::NO_CONTENT
+    );
     let subject = Subject::operator(scenario.user(), cli(), reason());
     let service = AccountService::new(scenario.database().clone());
     service
-        .revoke_passkey(&subject, older)
+        .revoke_passkey(&subject, other)
         .await
         .expect("an operator removes it");
 }
 
 /// The recovered passkey's sign-in counts as a fresh confirmation, so the link's
 /// holder can add ways in at once. Undoing takes back every passkey, identity and
-/// address added since, restores the primary address, and leaves everything from
+/// address added or verified since, restores the primary address, and leaves everything from
 /// before untouched, recording each change as the owner's. The undo page lists
 /// exactly that.
 #[tokio::test]
@@ -406,6 +458,8 @@ async fn undo_takes_back_every_way_in_added_since() {
     let secondary = scenario.address("secondary", true).await;
     let primary = scenario.address("primary", false).await;
     scenario.make_primary(primary, None).await;
+    // Added before the recovery, but verified only after it.
+    let (prior, verified_since) = scenario.unverified("prior").await;
     let token = scenario.recover().await;
     let recovered = scenario.enroll(&token).await;
 
@@ -416,19 +470,8 @@ async fn undo_takes_back_every_way_in_added_since() {
     scenario.link(Provider::Google).await;
     let added = scenario.address("added", false).await;
     scenario.make_primary(added, None).await;
-    let address = format!("pending-{user}@example.com");
-    let pending = EmailId::new();
-    database
-        .emails()
-        .insert_unverified(&InsertUnverifiedEmail {
-            id: pending,
-            user_id: user,
-            normalized_email: &address,
-            secret_digest: Secret::generate().expect("token").digest().as_bytes(),
-            expires_at: Utc::now() + Duration::hours(1),
-        })
-        .await
-        .expect("unverified address");
+    let (pending, _) = scenario.unverified("pending").await;
+    scenario.verify(&verified_since).await;
     let since: HashSet<_> = &scenario.passkeys().await - &[scenario.keys.key_id].into();
     assert_eq!(since.len(), 2, "the recovered passkey and another");
 
@@ -446,7 +489,7 @@ async fn undo_takes_back_every_way_in_added_since() {
         ids(&rollback["identities"], "provider"),
         ["google".into()].into()
     );
-    let emails = [added.to_string(), pending.to_string()].into();
+    let emails = [added, pending, prior].map(|id| id.to_string()).into();
     assert_eq!(ids(&rollback["emails"], "id"), emails);
     assert_eq!(rollback["primary"]["id"], primary.to_string());
 
@@ -475,6 +518,7 @@ async fn undo_takes_back_every_way_in_added_since() {
         },
         DomainEvent::EmailRemoved { email_id: added },
         DomainEvent::EmailRemoved { email_id: pending },
+        DomainEvent::EmailRemoved { email_id: prior },
     ]);
     for event in undone {
         let recorded = history
