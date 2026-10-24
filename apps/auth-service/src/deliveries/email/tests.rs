@@ -2,10 +2,10 @@
 
 use super::*;
 use crate::{
-    recovery::{LINK_LIFETIME, RecoveryLinks},
+    recovery::{LINK_LIFETIME, RecoveryLinks, SETTLE_WINDOW},
     tests::{Replicas, verified_address},
 };
-use piquel_common::{AccountStatus, EmailId, Handle, RecoveryId, config::Origin};
+use piquel_common::{AccountStatus, EmailId, Handle, PasskeyId, RecoveryId, config::Origin};
 use piquel_crypto::Secret;
 use piquel_repository::{InsertRecovery, InsertUnverifiedEmail, InsertUser};
 use std::sync::{
@@ -239,7 +239,8 @@ async fn a_recovery_link_is_sent_while_it_works() {
     let content = sender.content(user_id, &recovered).await.expect("content");
     assert!(matches!(
         content,
-        Some(Content::Recovered { settings, .. }) if settings == "https://piquel.fr/settings"
+        Some(Content::Recovered { settings, days, .. })
+            if settings == "https://piquel.fr/settings" && days == SETTLE_WINDOW.num_days()
     ));
     for message in [&link, &recovered] {
         sender.assert_renders(user_id, message).await;
@@ -288,4 +289,13 @@ async fn a_recovery_link_is_sent_while_it_works() {
         panic!("a recovery's link has a recipient");
     };
     assert_eq!(url, config.recovery_links.url(&token).as_str());
+
+    // A used link is not sent.
+    let mut recoveries = database.recoveries();
+    let used = recoveries
+        .complete(user_id, current_id, PasskeyId::new())
+        .await;
+    assert!(used.expect("complete"));
+    let content = unkeyed.content(user_id, &link).await.expect("content");
+    assert!(content.is_none(), "no link once used");
 }

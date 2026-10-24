@@ -526,8 +526,7 @@ explains how to choose a requirement and handle the challenge.
   central sessions. An owner who lost every passkey is recovered with a link that
   enrolls one new passkey; for 30 days after, a passkey enrolled before the
   recovery can undo it, taking back everything added since (see
-  [surfaces.md](docs/architecture/surfaces.md#recovering-an-account)). Until its page
-  ships, nothing can use the link.
+  [surfaces.md](docs/architecture/surfaces.md#recovering-an-account)). Until its page ships, no page uses the link.
 - Sessions last at most 30 days. Access tokens last five minutes. Refresh rotation
   detects reuse and stops when its central session expires or is revoked. Ending a
   session tells the clients that registered a back-channel logout URI, which end

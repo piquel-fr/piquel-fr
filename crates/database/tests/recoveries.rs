@@ -100,3 +100,27 @@ async fn the_newest_recovery_is_the_last_stored() {
         .map(|recovery| recovery.id);
     assert_eq!(newest, Some(waiting));
 }
+
+/// An account has at most one recovery whose link was not used, replaced or
+/// undone: a second one cannot be stored while the first is open.
+#[tokio::test]
+#[ignore = "requires a disposable TEST_DATABASE_URL"]
+async fn one_open_recovery_per_account() {
+    let (db, user) = account().await;
+    let (first, second) = (RecoveryId::new(), RecoveryId::new());
+    let digests = [first, second].map(|id| id.as_uuid().as_bytes().repeat(2));
+    db.recoveries()
+        .insert(&recovery(user, first, &digests[0], Duration::hours(1)))
+        .await
+        .expect("first");
+    let second_open = db
+        .recoveries()
+        .insert(&recovery(user, second, &digests[1], Duration::hours(1)))
+        .await;
+    assert!(second_open.is_err(), "the first is still open");
+    db.recoveries().cancel_open(user).await.expect("cancel");
+    db.recoveries()
+        .insert(&recovery(user, second, &digests[1], Duration::hours(1)))
+        .await
+        .expect("once the first is replaced");
+}

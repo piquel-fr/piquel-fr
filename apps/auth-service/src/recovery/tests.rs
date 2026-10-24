@@ -376,7 +376,10 @@ async fn a_link_enrolls_one_passkey_and_signs_in_with_it() {
     let stored = stored.expect("user");
     assert_eq!(account["username"], stored.username);
     assert_eq!(account["display_name"], stored.display_name);
-    assert!(account["expires_at"].is_string());
+    let expires_at: DateTime<Utc> =
+        serde_json::from_value(account["expires_at"].clone()).expect("expiry");
+    let lifetime = expires_at - Utc::now();
+    assert!(lifetime <= LINK_LIFETIME && lifetime > LINK_LIFETIME - Duration::minutes(1));
     let cookie = scenario.enroll(&token).await;
 
     let recovered = scenario.passkey(&cookie).await;
@@ -535,6 +538,7 @@ async fn what_predates_a_recovery_is_protected() {
     let address = scenario.address("secondary", false).await;
     let another = scenario.address("another", false).await;
     let (prior, verified_since) = scenario.unverified("prior").await;
+    let (unverified, _) = scenario.unverified("unverified").await;
     let token = scenario.recover().await;
     let recovered = scenario.enroll(&token).await;
     scenario.verify(&verified_since).await;
@@ -550,6 +554,13 @@ async fn what_predates_a_recovery_is_protected() {
     assert_eq!(unlink, StatusCode::FORBIDDEN);
     let removed = scenario.call(Method::DELETE, &email, &recovered).await;
     assert_eq!(removed, StatusCode::FORBIDDEN);
+    let pending = routes::emails::ITEM.replace("{id}", &unverified.to_string());
+    let removed = scenario.call(Method::DELETE, &pending, &recovered).await;
+    assert_eq!(
+        removed,
+        StatusCode::FORBIDDEN,
+        "unverified, but from before"
+    );
     let moved = scenario.call(Method::POST, &primary, &recovered).await;
     assert_eq!(moved, StatusCode::FORBIDDEN, "the primary stays");
     assert!(scenario.passkeys().await.contains(&older), "kept");
@@ -558,7 +569,7 @@ async fn what_predates_a_recovery_is_protected() {
     let since = routes::emails::ITEM.replace("{id}", &prior.to_string());
     let removed = scenario.call(Method::DELETE, &since, &recovered).await;
     assert_eq!(removed, StatusCode::NO_CONTENT);
-    assert_eq!(scenario.emails().await.len(), 3);
+    assert_eq!(scenario.emails().await.len(), 4);
 
     let signed_in = scenario.signed_in_with(other).await;
     let unlink = scenario.call(Method::DELETE, &identity, &signed_in).await;
