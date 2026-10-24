@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "WITH active_user AS (\n                    SELECT id\n                    FROM users\n                    WHERE id = $2\n                    AND status = 'active'\n                    FOR NO KEY UPDATE\n                )\n                INSERT INTO sessions (\n                    id, user_id, authentication_methods, authenticated_at, expires_at,\n                    last_seen_at, user_agent_family, passkey_confirmed_at, created_ip,\n                    last_seen_ip\n                )\n                SELECT $1, id, $3, $4, $5, $4, $6, $7, $8, $8\n                FROM active_user\n                RETURNING\n                    id AS \"id: SessionId\", user_id AS \"user_id: UserId\",\n                    authentication_methods AS \"authentication_methods: JsonArray<AuthenticationMethod>\",\n                    authenticated_at, expires_at, last_seen_at, revoked_at, passkey_confirmed_at,\n                    user_agent_family AS \"user_agent_family: UserAgentFamily\",\n                    last_seen_ip AS \"last_seen_ip: IpAddr\"",
+  "query": "WITH active_user AS (\n                    SELECT id\n                    FROM users\n                    WHERE id = $2\n                    AND status = 'active'\n                    FOR NO KEY UPDATE\n                )\n                INSERT INTO sessions (\n                    id, user_id, authentication_methods, authenticated_at, expires_at,\n                    last_seen_at, user_agent_family, passkey_confirmed_at, created_ip,\n                    last_seen_ip, passkey_id\n                )\n                SELECT $1, id, $3, $4, $5, $4, $6, $7, $8, $8, $9\n                FROM active_user\n                RETURNING\n                    id AS \"id: SessionId\", user_id AS \"user_id: UserId\",\n                    authentication_methods AS \"authentication_methods: JsonArray<AuthenticationMethod>\",\n                    authenticated_at, expires_at, last_seen_at, revoked_at, passkey_confirmed_at,\n                    user_agent_family AS \"user_agent_family: UserAgentFamily\",\n                    last_seen_ip AS \"last_seen_ip: IpAddr\"",
   "describe": {
     "columns": [
       {
@@ -63,7 +63,8 @@
         "Timestamptz",
         "Text",
         "Timestamptz",
-        "Inet"
+        "Inet",
+        "Uuid"
       ]
     },
     "nullable": [
@@ -79,5 +80,5 @@
       true
     ]
   },
-  "hash": "89a9d77abc442177c28a056c079235e03faf9d13fa07ae19ac6a9863eb596116"
+  "hash": "54251f73da0c7c756c3b4c9841f4075851284c5dbba3c608880e11ebc19fdc44"
 }

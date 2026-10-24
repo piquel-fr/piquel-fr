@@ -154,7 +154,7 @@ impl Browser {
         method: AuthenticationMethod,
     ) -> Self {
         let mut tx = database.begin().await.expect("transaction");
-        let secret = Session::create(&mut tx, RequestContext::TEST, user_id, method)
+        let secret = Session::create(&mut tx, RequestContext::TEST, user_id, method.into())
             .await
             .expect("session");
         let session_id = tx

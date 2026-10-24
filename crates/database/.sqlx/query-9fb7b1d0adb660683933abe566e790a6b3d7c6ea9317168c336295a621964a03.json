@@ -1,0 +1,17 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE sessions\n                SET passkey_confirmed_at = $2,\n                    passkey_id = $4,\n                    authentication_methods = CASE\n                        WHEN authentication_methods @> $3 THEN authentication_methods\n                        ELSE authentication_methods || $3\n                    END\n                WHERE id = $1\n                AND revoked_at IS NULL\n                AND expires_at > now()",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Timestamptz",
+        "Jsonb",
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "9fb7b1d0adb660683933abe566e790a6b3d7c6ea9317168c336295a621964a03"
+}

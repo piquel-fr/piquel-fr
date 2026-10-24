@@ -5,7 +5,7 @@ use crate::{DatabaseError, DatabaseTransaction};
 use chrono::{DateTime, TimeDelta, Utc};
 use piquel_admin_api::Session;
 use piquel_common::{
-    AuthenticationMethod, SessionId, UserId,
+    AuthenticationMethod, PasskeyId, SessionId, UserId,
     events::{DomainEvent, EventContext, RevocationReason, UserAgentFamily},
     protocol::claims::{Acr, Amr},
 };
@@ -40,6 +40,9 @@ pub struct InsertSession {
     pub ip: IpAddr,
     /// When the session last proved possession of a passkey, if it did.
     pub passkey_confirmed_at: Option<DateTime<Utc>>,
+    /// The passkey that signed it in, if one did. A later confirmation replaces
+    /// it with the confirming passkey (see [`SessionRepository::confirm_passkey`]).
+    pub passkey_id: Option<PasskeyId>,
 }
 
 /// A browser session row.
@@ -184,9 +187,9 @@ impl SessionRepository<'_> {
                 INSERT INTO sessions (
                     id, user_id, authentication_methods, authenticated_at, expires_at,
                     last_seen_at, user_agent_family, passkey_confirmed_at, created_ip,
-                    last_seen_ip
+                    last_seen_ip, passkey_id
                 )
-                SELECT $1, id, $3, $4, $5, $4, $6, $7, $8, $8
+                SELECT $1, id, $3, $4, $5, $4, $6, $7, $8, $8, $9
                 FROM active_user
                 RETURNING
                     id AS "id: SessionId", user_id AS "user_id: UserId",
@@ -202,6 +205,7 @@ impl SessionRepository<'_> {
                 input.user_agent_family.to_string(),
                 input.passkey_confirmed_at,
                 input.ip as _,
+                input.passkey_id.map(PasskeyId::as_uuid),
             )
         )
     }
@@ -466,9 +470,9 @@ impl SessionRepository<'_> {
         )
     }
 
-    /// Records that the session proved possession of a passkey `at` this time, adding
-    /// passkeys to its methods. Protected actions accept the confirmation for a fixed
-    /// time after it, so using it never extends it.
+    /// Records that the session proved possession of passkey `passkey_id` `at` this
+    /// time, adding passkeys to its methods. Protected actions accept the
+    /// confirmation for a fixed time after it, so using it never extends it.
     ///
     /// # Errors
     ///
@@ -477,6 +481,7 @@ impl SessionRepository<'_> {
     pub async fn confirm_passkey(
         &mut self,
         id: SessionId,
+        passkey_id: PasskeyId,
         at: DateTime<Utc>,
     ) -> Result<(), DatabaseError> {
         let passkey = Json([AuthenticationMethod::Passkey]);
@@ -486,6 +491,7 @@ impl SessionRepository<'_> {
             sqlx::query!(
                 "UPDATE sessions
                 SET passkey_confirmed_at = $2,
+                    passkey_id = $4,
                     authentication_methods = CASE
                         WHEN authentication_methods @> $3 THEN authentication_methods
                         ELSE authentication_methods || $3
@@ -496,6 +502,7 @@ impl SessionRepository<'_> {
                 id.as_uuid(),
                 at,
                 passkey as _,
+                passkey_id.as_uuid(),
             )
         )?
         .rows_affected();
@@ -503,6 +510,24 @@ impl SessionRepository<'_> {
             return Err(DatabaseError::NotFound);
         }
         Ok(())
+    }
+
+    /// The passkey that last proved possession for session `id`: the one that
+    /// signed it in or confirmed it since, if any did.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`DatabaseError`] if the query fails.
+    pub async fn passkey(&mut self, id: SessionId) -> Result<Option<PasskeyId>, DatabaseError> {
+        Ok(run!(
+            self,
+            fetch_optional,
+            sqlx::query_scalar!(
+                r#"SELECT passkey_id AS "passkey_id: PasskeyId" FROM sessions WHERE id = $1"#,
+                id.as_uuid(),
+            )
+        )?
+        .flatten())
     }
 
     /// Records a social re-authentication of a session `at` this time. Only a session

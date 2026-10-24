@@ -3,7 +3,7 @@ use crate::account::{AccountError, AccountService, Owner, Subject, Viewer};
 use crate::config::PasskeyConfig;
 use crate::federation::FederationApplication;
 use crate::routes;
-use crate::security::{self, ApiError, BrowserCookie, RequestContext};
+use crate::security::{self, ApiError, BrowserCookie, Credential, RequestContext};
 use axum::{
     Json, Router,
     extract::State,
@@ -127,14 +127,14 @@ impl PasskeyApplication {
     }
 
     /// Stores a verified credential with its validated label inside the account
-    /// transaction, and records its addition.
+    /// transaction, records its addition, and returns its ID.
     async fn insert_passkey(
         tx: &mut DatabaseTransaction<'_>,
         context: &EventContext,
         user_id: UserId,
         key: Passkey,
         friendly_name: PasskeyName,
-    ) -> Result<(), PasskeyError> {
+    ) -> Result<PasskeyId, PasskeyError> {
         let passkey_id = PasskeyId::new();
         tx.passkeys()
             .insert(&InsertPasskey {
@@ -158,23 +158,24 @@ impl PasskeyApplication {
             DomainEvent::PasskeyAdded { passkey_id },
         )
         .await?;
-        Ok(())
+        Ok(passkey_id)
     }
 
-    /// Commits the account operation together with the passkey sign-in. A browser
-    /// already signed in as `user_id` keeps its session, now confirmed.
+    /// Commits the account operation together with the sign-in with `passkey`. A
+    /// browser already signed in as `user_id` keeps its session, now confirmed.
     async fn complete_sign_in(
         mut tx: DatabaseTransaction<'_>,
         context: RequestContext,
         headers: &HeaderMap,
         user_id: UserId,
+        passkey: PasskeyId,
     ) -> Result<Response, PasskeyError> {
         let session = security::Session::sign_in(
             &mut tx,
             context,
             headers,
             user_id,
-            AuthenticationMethod::Passkey,
+            Credential::Passkey(passkey),
         )
         .await?;
         tx.commit().await?;
@@ -244,12 +245,13 @@ impl PasskeyApplication {
         }
     }
 
-    /// Checks the latest stored counter under lock before updating the credential.
+    /// Checks the latest stored counter under lock before updating the credential,
+    /// and returns the passkey's ID.
     async fn update_credential(
         tx: &mut DatabaseTransaction<'_>,
         user_id: UserId,
         result: &AuthenticationResult,
-    ) -> Result<(), PasskeyError> {
+    ) -> Result<PasskeyId, PasskeyError> {
         if !result.user_verified() {
             return Err(PasskeyError::UserVerificationRequired);
         }
@@ -288,12 +290,12 @@ impl PasskeyApplication {
         {
             return Err(PasskeyError::CredentialRevoked);
         }
-        Ok(())
+        Ok(stored.id)
     }
 
     /// Takes `WebAuthn`'s verdict on an assertion for `user_id` and, once the latest
     /// credential state also accepts it, opens the transaction that completes the
-    /// authentication. The ceremony was already consumed. A rejection rolls back any
+    /// authentication, and returns it with the asserting passkey's ID. The ceremony was already consumed. A rejection rolls back any
     /// transaction it opened, then is recorded as `actor`'s failed sign-in in a
     /// transaction of its own, so the record outlives the rejection.
     async fn accept_credential(
@@ -302,12 +304,12 @@ impl PasskeyApplication {
         actor: Actor,
         user_id: UserId,
         verified: Result<AuthenticationResult, WebauthnError>,
-    ) -> Result<DatabaseTransaction<'_>, PasskeyError> {
+    ) -> Result<(DatabaseTransaction<'_>, PasskeyId), PasskeyError> {
         let (error, tx) = match verified {
             Ok(result) => {
                 let mut tx = self.database.begin().await?;
                 match Self::update_credential(&mut tx, user_id, &result).await {
-                    Ok(()) => return Ok(tx),
+                    Ok(passkey) => return Ok((tx, passkey)),
                     Err(error) => (error, Some(tx)),
                 }
             }
@@ -485,12 +487,12 @@ impl PasskeyApplication {
             },
         )
         .await?;
-        Self::insert_passkey(&mut tx, &actor, user_id, key, friendly_name).await?;
+        let passkey = Self::insert_passkey(&mut tx, &actor, user_id, key, friendly_name).await?;
         if let Some(pending) = pending {
             FederationApplication::attach_signup(&mut tx, &actor, pending, &headers, user_id)
                 .await?;
         }
-        let mut response = Self::complete_sign_in(tx, context, &headers, user_id).await?;
+        let mut response = Self::complete_sign_in(tx, context, &headers, user_id, passkey).await?;
         // Ordinary registration leaves any unrelated pending social flow untouched.
         if pending.is_some() {
             BrowserCookie::FederationPending
@@ -591,10 +593,10 @@ impl PasskeyApplication {
                 )
             }
         };
-        let tx = app
+        let (tx, passkey) = app
             .accept_credential(context, Actor::Anonymous, user_id, verified)
             .await?;
-        Ok(Self::complete_sign_in(tx, context, &headers, user_id).await?)
+        Ok(Self::complete_sign_in(tx, context, &headers, user_id, passkey).await?)
     }
 
     /// Reads the account a discoverable credential names, and that account's keys.
@@ -664,11 +666,11 @@ impl PasskeyApplication {
             user_id,
             session_id: Some(session_id),
         };
-        let mut tx = app
+        let (mut tx, passkey) = app
             .accept_credential(context, actor, user_id, verified)
             .await?;
         let secret =
-            security::Session::reauthenticate(&mut tx, &session, AuthenticationMethod::Passkey)
+            security::Session::reauthenticate(&mut tx, &session, Credential::Passkey(passkey))
                 .await?;
         tx.record(
             &context.user(&session),

@@ -40,6 +40,7 @@ fn session_for(user: UserId) -> InsertSession {
         },
         ip: IpAddr::from([192, 0, 2, 1]),
         passkey_confirmed_at: None,
+        passkey_id: None,
     }
 }
 /// Inserts a passkey row, which references the account through a foreign key.
