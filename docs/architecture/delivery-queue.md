@@ -105,6 +105,9 @@ A link's token is never stored, not even in the payload: it is an HMAC of the
 address's ID, or the recovery's, under a key derived from the token digest key.
 Settings store a verification token's SHA-256 digest when the address is added,
 and a recovery stores its own when it starts; the sender derives the token again.
+During a change of token digest key, it rebuilds a recovery's link under
+whichever configured key derives the stored digest, so a link sent after the
+change still works.
 Every attempt therefore sends the same content and link, with the `Message-ID`
 `<delivery ID@sender's domain>`. If the connection breaks after the
 relay accepted a message, the delivery is retried and the mail may arrive twice;

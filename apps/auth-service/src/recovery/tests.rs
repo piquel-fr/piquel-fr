@@ -25,6 +25,7 @@ fn links() -> RecoveryLinks {
     RecoveryLinks::new(
         AUTH_ORIGIN.parse().expect("origin"),
         Secret::generate().expect("recovery key"),
+        None,
     )
 }
 

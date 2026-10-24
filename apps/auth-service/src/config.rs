@@ -181,10 +181,7 @@ impl EmailConfig {
             from: EMAIL_FROM.parse_or(DEFAULT_EMAIL_FROM)?,
             settings_url: settings_url.clone(),
             verification_key: VerificationKey::new(digest_keys.current.verification.clone()),
-            recovery_links: RecoveryLinks::new(
-                origin.clone(),
-                digest_keys.current.recovery.clone(),
-            ),
+            recovery_links: digest_keys.recovery_links(origin),
         })
     }
 
@@ -282,6 +279,7 @@ impl EmailConfig {
             recovery_links: RecoveryLinks::new(
                 "https://auth.piquel.fr".parse().expect("origin"),
                 Secret::generate().expect("recovery key"),
+                None,
             ),
         }
     }
@@ -453,6 +451,13 @@ pub struct TokenDigestKeys {
 }
 
 impl TokenDigestKeys {
+    /// Recovery links on `origin`, under the current key's recovery key, and
+    /// rebuilt under the accepted one's for recoveries started before a change.
+    pub(crate) fn recovery_links(&self, origin: &Origin) -> RecoveryLinks {
+        let accepted = self.accepted.as_ref().map(|key| key.recovery.clone());
+        RecoveryLinks::new(origin.clone(), self.current.recovery.clone(), accepted)
+    }
+
     /// Uses `current` for new digests and accepts `accepted` too.
     pub(crate) const fn new(current: TokenDigestKey, accepted: Option<TokenDigestKey>) -> Self {
         Self { current, accepted }
@@ -683,8 +688,7 @@ impl AuthConfig {
     /// Names an invalid or missing origin or key.
     pub(crate) fn recovery_links_from_environment() -> Result<RecoveryLinks, ConfigurationError> {
         let origin: Origin = PUBLIC_BASE_URL.parse()?;
-        let digest_keys = TokenDigestKeys::from_environment()?;
-        Ok(RecoveryLinks::new(origin, digest_keys.current.recovery))
+        Ok(TokenDigestKeys::from_environment()?.recovery_links(&origin))
     }
 
     /// Reads the key-encryption key, for serving and for the `keys` commands.

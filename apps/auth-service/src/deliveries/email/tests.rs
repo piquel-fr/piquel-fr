@@ -2,10 +2,11 @@
 
 use super::*;
 use crate::{
-    recovery::LINK_LIFETIME,
+    recovery::{LINK_LIFETIME, RecoveryLinks},
     tests::{Replicas, verified_address},
 };
-use piquel_common::{AccountStatus, EmailId, Handle, RecoveryId};
+use piquel_common::{AccountStatus, EmailId, Handle, RecoveryId, config::Origin};
+use piquel_crypto::Secret;
 use piquel_repository::{InsertRecovery, InsertUnverifiedEmail, InsertUser};
 use std::sync::{
     Arc, Mutex,
@@ -163,19 +164,27 @@ async fn retries_resend_the_same_message_to_the_current_address() {
 }
 
 /// A recovery's link goes to its address, naming the account, only while the
-/// link works and the account is active. The notice that a recovery enrolled a passkey links to settings,
+/// link works and the account is active, under the key its recovery started
+/// with, even once a change of token digest key made it the accepted one. The notice that a recovery enrolled a passkey links to settings,
 /// where an older passkey undoes it.
 #[tokio::test]
 #[ignore = "requires TEST_DATABASE_URL"]
 async fn a_recovery_link_is_sent_while_it_works() {
     let database = Replicas::database().await;
     let settings = "https://piquel.fr/settings".parse().expect("settings URL");
-    let config = EmailConfig::test(&settings, true);
+    let mut config = EmailConfig::test(&settings, true);
     let user_id = account(&database).await;
     let address = format!("{user_id}@example.com");
     let email_id = verified_address(&database, user_id, &address, true).await;
+    // Started under a key that a change of token digest key made the accepted
+    // one before the link was sent.
+    let origin: Origin = "https://auth.piquel.fr".parse().expect("origin");
+    let started = Secret::generate().expect("recovery key");
+    let current = Secret::generate().expect("recovery key");
+    let before = RecoveryLinks::new(origin.clone(), started.clone(), None);
+    config.recovery_links = RecoveryLinks::new(origin.clone(), current.clone(), Some(started));
     let recovery_id = RecoveryId::new();
-    let token = config.recovery_links.token(recovery_id).expect("token");
+    let token = before.token(recovery_id).expect("token");
     database
         .recoveries()
         .insert(&InsertRecovery {
@@ -209,8 +218,11 @@ async fn a_recovery_link_is_sent_while_it_works() {
     };
     assert_eq!(to, address);
     assert_eq!(username, format!("mail-{}", &user_id.to_string()[24..]));
-    let expected = config.recovery_links.link(recovery_id).expect("link");
-    assert_eq!(url, expected.as_str());
+    assert_eq!(
+        url,
+        before.url(&token).as_str(),
+        "under the key it started with"
+    );
     let content = sender.content(user_id, &recovered).await.expect("content");
     assert!(matches!(
         content,
@@ -219,6 +231,13 @@ async fn a_recovery_link_is_sent_while_it_works() {
     for message in [&link, &recovered] {
         sender.assert_renders(user_id, message).await;
     }
+    config.recovery_links = RecoveryLinks::new(origin, current, None);
+    let unkeyed = EmailSender::with_mailer(database.clone(), Some(Arc::clone(&outbox)), &config);
+    let content = unkeyed.content(user_id, &link).await.expect("content");
+    assert!(
+        content.is_none(),
+        "no link under a key no longer configured"
+    );
 
     // A disabled account's link is not sent, nor a replaced recovery's.
     let disable = async |status| {

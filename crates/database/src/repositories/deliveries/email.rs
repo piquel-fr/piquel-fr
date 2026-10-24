@@ -62,6 +62,8 @@ pub struct PendingRecovery {
     pub address: String,
     /// The account's username, which the message names.
     pub username: String,
+    /// SHA-256 of the link's token, which tells the key that derived it.
+    pub secret_digest: Vec<u8>,
 }
 
 /// An unverified address whose verification link still works, and the account
@@ -199,7 +201,7 @@ impl EmailRepository<'_> {
             fetch_optional,
             sqlx::query_as!(
                 PendingRecovery,
-                "SELECT e.normalized_email AS address, u.username
+                "SELECT e.normalized_email AS address, u.username, r.secret_digest
                 FROM user_emails e
                 JOIN users u ON u.id = e.user_id
                 JOIN account_recoveries r ON r.user_id = e.user_id

@@ -177,8 +177,12 @@ impl<M: Mailer> EmailSender<M> {
                 };
                 let link = self
                     .recovery_links
-                    .link(*recovery_id)
+                    .link(*recovery_id, &pending.secret_digest)
                     .map_err(|error| Self::underived(&error))?;
+                let Some(link) = link else {
+                    tracing::warn!(%recovery_id, "no configured key derives the recovery link");
+                    return Ok(None);
+                };
                 Content::RecoveryLink {
                     address: pending.address,
                     username: pending.username,
