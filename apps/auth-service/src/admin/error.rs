@@ -98,7 +98,7 @@ pub enum AdminError {
     /// Another recovery of the account can still be undone, and starting one
     /// anyway was not asked for.
     #[error(
-        "the account has a recovery that can still be undone: review what it added, listed above, then undo it with `auth-service user undo-recovery`, or pass --despite-undoable to start another anyway"
+        "the account has a recovery that can still be undone, whose link is unused or whose additions are listed above: review it, then undo it with `auth-service user undo-recovery`, or pass --despite-undoable to start another anyway, which replaces an unused link"
     )]
     RecoveryUndoable,
     /// The account has no recovery that can still be undone.

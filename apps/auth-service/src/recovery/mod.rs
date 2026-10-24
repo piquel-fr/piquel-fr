@@ -194,6 +194,18 @@ impl OpenRecovery {
     }
 }
 
+/// Whether undoing a recovery may remove the account's last passkey. The
+/// owner's undo never needs to: the passkey that undoes it predates it. Support's
+/// takes back every passkey added since, even when support removed the older
+/// ones meanwhile, and starts a new recovery after.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum LastPasskey {
+    /// Keep the last one.
+    Keep,
+    /// Remove it too.
+    Remove,
+}
+
 /// What starting a recovery does while another can still be undone. Support
 /// reviews and undoes the other first; starting anyway is a deliberate choice.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -393,7 +405,7 @@ impl AccountService {
             user_id: user,
             session_id: None,
         });
-        Self::revert(tx, &context, recovery).await?;
+        Self::revert(tx, &context, recovery, LastPasskey::Keep).await?;
         tx.revoke_sessions(
             &context,
             user,
@@ -411,10 +423,11 @@ impl AccountService {
         tx: &mut DatabaseTransaction<'_>,
         context: &EventContext,
         recovery: &StoredRecovery,
+        last: LastPasskey,
     ) -> Result<(), DatabaseError> {
         let user = recovery.user_id;
         let rollback = tx.recoveries().rollback(recovery).await?;
-        Self::take_back(tx, context, user, rollback).await?;
+        Self::take_back(tx, context, user, rollback, last).await?;
         tx.recoveries().undo(recovery.id).await?;
         let undone = DomainEvent::RecoveryUndone {
             recovery_id: recovery.id,
@@ -424,16 +437,22 @@ impl AccountService {
 
     /// Applies `rollback` to `user`'s account in `tx`, recording each change in
     /// `context`. The primary address moves back before the added ones go, since
-    /// one of them may be primary. The undoing passkey predates the recovery, so
-    /// a passkey always remains.
+    /// one of them may be primary. Whether the last passkey may go is `last`'s
+    /// to say.
     async fn take_back(
         tx: &mut DatabaseTransaction<'_>,
         context: &EventContext,
         user: UserId,
         rollback: Rollback,
+        last: LastPasskey,
     ) -> Result<(), DatabaseError> {
         for passkey in rollback.passkeys {
-            if tx.passkeys().revoke_if_not_last(passkey.id, user).await? {
+            let mut passkeys = tx.passkeys();
+            let revoked = match last {
+                LastPasskey::Keep => passkeys.revoke_if_not_last(passkey.id, user).await?,
+                LastPasskey::Remove => passkeys.revoke(passkey.id, user).await?,
+            };
+            if revoked {
                 let removed = DomainEvent::PasskeyRemoved {
                     passkey_id: passkey.id,
                 };

@@ -222,7 +222,8 @@ just auth account alice emails remove <email-id> --reason "Asked by email"
 - `--output json` prints the admin API's body for `user search` (`UserPage`), `user
   show` (`UserDetail`), `audit` (`EventPage`), `client list`, `invite list` and
   `admin list`, as defined in `crates/admin-api`. It changes only as the API does.
-- `user disable`, `user recover`, `session revoke-all`, `admin revoke`, `client
+- `user disable`, `user recover`, `user undo-recovery`, `session revoke-all`,
+  `admin revoke`, `client
   disable|suspend|delete`, and `account … passkeys revoke`, `identities unlink` and
   `sessions revoke-all` describe what they will change and ask for confirmation.
   Without a terminal they refuse unless given `--yes`.
@@ -251,6 +252,8 @@ just auth account alice emails remove <email-id> --reason "Asked by email"
     left from before it, once support has confirmed them: whoever used the link
     loses everything they added, and the next link goes back to the owner's
     address.
+  - Before running either, follow the evidence policy in
+    [account recovery](docs/security/account-recovery.md#supports-evidence-policy).
   - It never recovers an administrator, since whoever used the link could use
     the rights before the owner undoes it. Revoke the rights with `admin revoke`
     (grant another administrator first if it is the last), recover the account,

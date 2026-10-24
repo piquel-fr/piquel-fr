@@ -531,7 +531,7 @@ async fn what_predates_a_recovery_is_protected() {
     let older = scenario.keys.key_id;
     let other = scenario.keys.switch_passkey("Other key").await;
     scenario.link(Provider::GitHub).await;
-    scenario.address("primary", true).await;
+    let first = scenario.address("primary", true).await;
     let address = scenario.address("secondary", false).await;
     let another = scenario.address("another", false).await;
     let (prior, verified_since) = scenario.unverified("prior").await;
@@ -571,10 +571,13 @@ async fn what_predates_a_recovery_is_protected() {
         scenario.remove(&signed_in, older).await,
         StatusCode::NO_CONTENT
     );
+    let signed_in = scenario.signed_in_with(other).await;
+    let moved = scenario.call(Method::POST, &primary, &signed_in).await;
+    assert_eq!(moved, StatusCode::NO_CONTENT);
     let subject = Subject::operator(scenario.user(), cli(), reason());
     let service = AccountService::new(scenario.database().clone());
     service
-        .make_primary_email(&subject, another)
+        .make_primary_email(&subject, first)
         .await
         .expect("an operator moves it");
     service
@@ -856,6 +859,10 @@ async fn support_undoes_a_hijacked_recovery() {
     assert_eq!(rollback.identities.len(), 1);
     assert_eq!(rollback.emails.len(), 1);
     let told = sent(&database, user, theirs).await;
+    let stale = service
+        .undo_recovery(&cli(), user, RecoveryId::new(), reason())
+        .await;
+    assert!(matches!(stale, Err(AdminError::RecoveryChanged)));
     service
         .undo_recovery(&cli(), user, recent[0].recovery.id, reason())
         .await
@@ -875,15 +882,27 @@ async fn support_undoes_a_hijacked_recovery() {
     );
     let history = database.events().history_for_user(user, 50).await;
     let history = history.expect("history");
-    let undone = |event: &&StoredEvent| {
-        matches!(
-            event.event.known(),
-            Some(DomainEvent::RecoveryUndone { .. } | DomainEvent::EmailRemoved { .. })
-        )
+    let kind = |event: &StoredEvent| match event.event.known()? {
+        DomainEvent::RecoveryUndone { .. } => Some("undone"),
+        DomainEvent::PasskeyRemoved { .. } => Some("passkey"),
+        DomainEvent::IdentityUnlinked { .. } => Some("identity"),
+        DomainEvent::EmailRemoved { .. } => Some("address"),
+        DomainEvent::SessionRevoked { .. } => Some("session"),
+        _ => None,
     };
-    for event in history.iter().filter(undone) {
-        assert_eq!(event.reason.as_deref(), Some("Lost every passkey"));
+    let mut kinds = HashSet::new();
+    for event in &history {
+        if let Some(kind) = kind(event) {
+            assert_eq!(
+                event.reason.as_deref(),
+                Some("Lost every passkey"),
+                "{kind}"
+            );
+            kinds.insert(kind);
+        }
     }
+    let expected = ["undone", "passkey", "identity", "address", "session"].into();
+    assert_eq!(kinds, expected, "every change records the reason");
     let before = sent(&database, user, owners).await;
     service
         .recover_account(&cli(), user, reason(), &links, WhileUndoable::Refuse)
@@ -894,6 +913,35 @@ async fn support_undoes_a_hijacked_recovery() {
         before + 1,
         "to the owner"
     );
+}
+
+/// Support's undo takes back every passkey added since the recovery, even when
+/// support removed the older ones meanwhile, as whoever used the link may have
+/// asked: they keep none, and support starts a new recovery.
+#[tokio::test]
+#[ignore = "requires TEST_DATABASE_URL"]
+async fn support_takes_back_every_passkey_added_since() {
+    let scenario = Scenario::new().await;
+    let database = scenario.database().clone();
+    let user = scenario.user();
+    let token = scenario.recover().await;
+    let attacker = scenario.enroll(&token).await;
+    let spare = scenario
+        .register("/account/passkeys/enroll/start", &attacker, json!({}))
+        .await;
+    assert_eq!(spare.status(), StatusCode::NO_CONTENT, "a spare passkey");
+    let subject = Subject::operator(user, cli(), reason());
+    AccountService::new(database.clone())
+        .revoke_passkey(&subject, scenario.keys.key_id)
+        .await
+        .expect("support removes the older one");
+
+    let id = scenario.newest().await;
+    AdminService::new(database)
+        .undo_recovery(&cli(), user, id, reason())
+        .await
+        .expect("support undoes it");
+    assert_eq!(scenario.passkeys().await, HashSet::new(), "none left");
 }
 
 /// When the recovery's primary address is gone, undoing it makes the oldest

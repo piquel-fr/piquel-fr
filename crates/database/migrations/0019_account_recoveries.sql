@@ -21,7 +21,7 @@ CREATE TABLE account_recoveries (
     -- When a newer recovery, or disabling the account, replaced it before its
     -- link was used.
     cancelled_at TIMESTAMPTZ,
-    -- When the owner undid it.
+    -- When it was undone, by its owner or by support.
     undone_at TIMESTAMPTZ,
     CHECK ((completed_at IS NULL) = (passkey_id IS NULL)),
     CHECK (cancelled_at IS NULL OR (completed_at IS NULL AND undone_at IS NULL))

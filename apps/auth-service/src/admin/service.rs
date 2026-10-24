@@ -5,8 +5,8 @@ use crate::{
     Applied, ClientDetails, ClientRegistry, ClientRegistryError, GracePeriod,
     account::AccountService,
     recovery::{
-        LINK_LIFETIME, RecoveryError, RecoveryLinks, ReviewedRecovery, SETTLE_WINDOW, Undoable,
-        WhileUndoable,
+        LINK_LIFETIME, LastPasskey, RecoveryError, RecoveryLinks, ReviewedRecovery, SETTLE_WINDOW,
+        Undoable, WhileUndoable,
     },
 };
 use chrono::Utc;
@@ -361,7 +361,8 @@ impl AdminService {
     /// support does once it has confirmed the owner, who may have no passkey left
     /// from before it. Takes back the same rollback the owner's undo would, so
     /// the same notices go out, and ends every session and refresh grant; each
-    /// change records `reason`.
+    /// change records `reason`. Every passkey added since goes, even the last,
+    /// so the account may be left with none: support then starts a new recovery.
     pub(crate) async fn undo_recovery(
         &self,
         operator: &Operator,
@@ -383,7 +384,7 @@ impl AdminService {
             reason: Some(reason.into_inner()),
             ..operator.context()
         };
-        AccountService::revert(&mut tx, &context, recovery).await?;
+        AccountService::revert(&mut tx, &context, recovery, LastPasskey::Remove).await?;
         Self::end_sessions(&mut tx, &context, user_id, RevocationReason::Admin).await?;
         Self::finish(tx, operator, Some(user_id), vec![]).await
     }

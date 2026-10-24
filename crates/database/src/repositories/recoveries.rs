@@ -118,7 +118,7 @@ pub struct RecentRecovery {
     pub completed_at: Option<DateTime<Utc>>,
     /// When a newer recovery or the account's disabling replaced it.
     pub cancelled_at: Option<DateTime<Utc>>,
-    /// When its owner undid it.
+    /// When it was undone, by its owner or by support.
     pub undone_at: Option<DateTime<Utc>>,
     /// The passkey its link enrolled, if it did.
     pub passkey: Option<RecoveryPasskey>,
@@ -419,7 +419,7 @@ impl RecoveryRepository<'_> {
         Ok(())
     }
 
-    /// Records that the owner undid recovery `id`.
+    /// Records that recovery `id` was undone, by its owner or by support.
     ///
     /// # Errors
     ///

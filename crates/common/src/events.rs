@@ -248,8 +248,9 @@ pub enum DomainEvent {
         /// The passkey it enrolled.
         passkey_id: PasskeyId,
     },
-    /// The owner undid a recovery with a passkey enrolled before it: its link
-    /// stopped working, and what the account gained since was taken back,
+    /// A recovery was undone, by its owner with a passkey enrolled before it or
+    /// by support for an owner with none left: its link stopped working, and
+    /// what the account gained since was taken back,
     /// recorded before it as [`Self::PasskeyRemoved`], [`Self::IdentityUnlinked`],
     /// [`Self::ConsentRevoked`], [`Self::PrimaryEmailChanged`] and
     /// [`Self::EmailRemoved`]. Every session ends after it

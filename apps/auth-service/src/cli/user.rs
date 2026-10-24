@@ -138,12 +138,19 @@ impl UserCommand {
             } => {
                 let id = console.user(&user).await?;
                 let links = AuthConfig::recovery_links_from_environment()?;
-                Self::print_recent(&service.recent_recoveries(operator, id).await?);
+                let recent = service.recent_recoveries(operator, id).await?;
+                Self::print_recent(&recent);
                 let while_undoable = if despite_undoable {
                     WhileUndoable::Proceed
                 } else {
                     WhileUndoable::Refuse
                 };
+                // Refused before asking, rather than after the confirmation;
+                // the service refuses too.
+                let undoable = recent.iter().any(|reviewed| reviewed.rollback.is_some());
+                if undoable && while_undoable == WhileUndoable::Refuse {
+                    return Err(AdminError::RecoveryUndoable.into());
+                }
                 confirm.ask(&format!(
                     "Recover {user} ({id}): end its sessions and send it a recovery link"
                 ))?;
