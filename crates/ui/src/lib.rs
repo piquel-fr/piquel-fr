@@ -1,10 +1,10 @@
 //! The components and layouts of auth.piquel.fr's server-rendered pages.
 //!
-//! Components render plain data: `piquel-common` identifiers and vocabularies, and
-//! the view types auth's repository decodes into. They take every URL as a prop,
-//! since only the router serving a request resolves its own paths, and know nothing
-//! of the domain, the database or HTTP. Auth's page handlers resolve who acts, call
-//! the service, and render the result with these.
+//! Components render plain data: `piquel-common` identifiers, vocabularies and
+//! events, and plain rows a page fills from what the service returns. They take
+//! every URL as a prop, since only the router serving a request resolves its own
+//! paths, and know nothing of the domain, the database or HTTP. Auth's page handlers
+//! resolve who acts, call the service, and render the result with these.
 //!
 //! Nothing here uses Topcoat's browser runtime, `suspense`, `live!` or `asset!`: they
 //! need inline scripts or `'unsafe-eval'`, which auth's pages forbid.
@@ -32,6 +32,14 @@
 mod layout;
 /// The pages of OAuth and `OpenID` Connect flows.
 mod oidc;
+/// The account's settings.
+mod settings;
 
-pub use layout::{document, intro};
+pub use layout::{Area, Title, document, intro};
 pub use oidc::{consent, failure, logout, onward};
+pub use settings::{
+    DeviceChange, DeviceRow, EmailChange, EmailRow, EmailsState, HistoryChange, HistoryPage,
+    HistoryRow, HistoryState, Holdings, Messages, Notice, OUT_OF_DATE, ProviderRow, Query,
+    SignInChange, SignInState, Tab, account, addresses, devices, history, settings_frame,
+    sign_in_methods, signed_out, verified, verify,
+};

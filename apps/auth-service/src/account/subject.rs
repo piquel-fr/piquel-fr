@@ -3,11 +3,11 @@
 use super::AccountError;
 use crate::{
     Operator, Reason,
-    security::{ApiError, Confirmed, OptionalSession, RequestContext, Session, SessionError},
+    security::{ApiError, Confirmed, RequestContext, Session, SessionError},
 };
 use axum::{
     extract::{FromRef, FromRequestParts, OptionalFromRequestParts},
-    http::request::Parts,
+    http::{HeaderMap, request::Parts},
 };
 use piquel_common::{
     SessionId, UserId,
@@ -17,9 +17,10 @@ use piquel_repository::{Database, DatabaseTransaction, SessionScope, StoredSessi
 use std::ops::Deref;
 
 /// The signed-in owner of an account, acting through their browser session. Its
-/// fields are private and only the extractors build one, from the session cookie,
-/// so an operation only the owner may run, such as adding a passkey or an
-/// address, takes an `Owner`: no administrator or operator can call it.
+/// fields are private and only the extractors and [`Self::resolve`] build one,
+/// from the session cookie, so an operation only the owner may run, such as adding
+/// a passkey or an address, takes an `Owner`: no administrator or operator can
+/// call it.
 pub(crate) struct Owner {
     /// The owner's browser session, as the request found it.
     session: StoredSession,
@@ -30,7 +31,7 @@ pub(crate) struct Owner {
 /// The account a settings change applies to, and who makes it. Changes any
 /// administrator may also make take it instead of a session, so they serve the
 /// owner and operators alike. Its fields are private: an owner's comes only from
-/// their session cookie, through the extractor, and an operator's from
+/// their [`Owner`], and an operator's from
 /// [`Self::operator`], with their reason and an [`Operator`] only the admin API's
 /// authenticator or the CLI creates. An operator cannot make a change without a
 /// reason: a read takes a [`Viewer`] instead.
@@ -56,7 +57,7 @@ enum ActingAs {
 
 /// The account a settings read shows, and who reads it. A read changes nothing,
 /// so it needs no reason. Its fields are private, like [`Subject`]'s: an owner's
-/// comes only from their session cookie, through the extractor.
+/// comes only from their session cookie, through the extractor or their [`Owner`].
 pub(crate) struct Viewer {
     /// The account.
     user: UserId,
@@ -96,6 +97,26 @@ impl Owner {
             session,
             context: RequestContext::from_request_parts(parts, state).await?,
         })
+    }
+
+    /// The owner of the browser session the request's `headers` carry, if any,
+    /// acting from `context`: how a server-rendered page, which has no extractors,
+    /// finds who acts. It records the session's activity, as the extractors do.
+    pub(crate) async fn resolve(
+        database: &Database,
+        context: RequestContext,
+        headers: &HeaderMap,
+    ) -> Result<Option<Self>, SessionError> {
+        Ok(Session::resolve(database, context, headers)
+            .await?
+            .map(|session| Self { session, context }))
+    }
+
+    /// Whether the owner confirmed their session with a passkey recently enough
+    /// for the changes that need it, as the request's cookie found it. A page asks
+    /// for a confirmation before such a change when it is not.
+    pub(crate) fn is_confirmed(&self) -> bool {
+        <Confirmed>::check(&self.session).is_ok()
     }
 
     /// The owner's account.
@@ -254,6 +275,16 @@ impl From<Owner> for Subject {
     }
 }
 
+impl From<&Owner> for Viewer {
+    /// The owner, reading their own account.
+    fn from(owner: &Owner) -> Self {
+        Self {
+            user: owner.user(),
+            by: Reading::Owner(owner.session.id),
+        }
+    }
+}
+
 impl Viewer {
     /// An administrator or operator reading `user`'s settings.
     pub(crate) const fn operator(user: UserId, operator: Operator) -> Self {
@@ -306,8 +337,9 @@ where
     type Rejection = ApiError;
     /// The owner of the request's browser session.
     async fn from_request_parts(parts: &mut Parts, state: &S) -> Result<Self, Self::Rejection> {
-        let Session(session) = Session::from_request_parts(parts, state).await?;
-        Self::new(parts, state, session).await
+        <Self as OptionalFromRequestParts<S>>::from_request_parts(parts, state)
+            .await?
+            .ok_or_else(|| SessionError::Missing.into())
     }
 }
 
@@ -322,11 +354,8 @@ where
         parts: &mut Parts,
         state: &S,
     ) -> Result<Option<Self>, Self::Rejection> {
-        let OptionalSession(session) = OptionalSession::from_request_parts(parts, state).await?;
-        match session {
-            Some(session) => Ok(Some(Self::new(parts, state, session).await?)),
-            None => Ok(None),
-        }
+        let context = RequestContext::from_request_parts(parts, state).await?;
+        Ok(Self::resolve(&Database::from_ref(state), context, &parts.headers).await?)
     }
 }
 

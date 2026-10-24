@@ -30,6 +30,7 @@ use crate::{
     operations::operations,
     passkey::Rename,
     routes::{emails, federation, history, passkey, sessions},
+    security::SessionError,
     sessions::{Revoked, SessionItem},
 };
 use axum::{
@@ -42,7 +43,7 @@ use piquel_common::{
     EmailId, PasskeyId, SessionId,
     protocol::api::{Identity, Passkey},
 };
-use piquel_repository::Database;
+use piquel_repository::{Database, StoredUser};
 
 operations! {
     /// Every shared settings operation. The owner's router maps each to its
@@ -92,6 +93,18 @@ impl AccountService {
     /// Operates on `database`.
     pub(crate) const fn new(database: Database) -> Self {
         Self { database }
+    }
+
+    /// The account, for its handle and display name. A session whose account is
+    /// gone reads as signed out.
+    pub(crate) async fn profile(&self, viewer: &Viewer) -> Result<StoredUser, AccountError> {
+        viewer.authorize(&self.database).await?;
+        Ok(self
+            .database
+            .users()
+            .find_by_id(viewer.user())
+            .await?
+            .ok_or(SessionError::Missing)?)
     }
 }
 

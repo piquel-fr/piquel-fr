@@ -43,10 +43,24 @@ use ceremonies::{
 pub use error::PasskeyConfigError;
 pub(crate) use error::PasskeyError;
 use types::{
-    AuthenticationFinish, DisplayName, EnrollmentStart, LoginStart, PasskeyKind,
-    RegistrationFinish, RegistrationStart, SessionView, UserView,
+    AuthenticationFinish, DisplayName, EnrollmentStart, LoginStart, RegistrationFinish,
+    RegistrationStart, SessionView, UserView,
 };
-pub(crate) use types::{PasskeyName, Rename};
+pub(crate) use types::{PasskeyKind, PasskeyName, Rename};
+
+impl PasskeyKind {
+    /// Whether the browser behind `headers` may save a passkey with Google Password
+    /// Manager: only on Android. The library forbids this workaround outside Android
+    /// with GMS Core. The User-Agent gate excludes other devices, and the explicit
+    /// choice acknowledges Google services, whose presence a User-Agent cannot prove.
+    /// A compatibility gate, never an authentication claim.
+    pub(crate) fn offers_google(headers: &HeaderMap) -> bool {
+        headers
+            .get(header::USER_AGENT)
+            .and_then(|value| value.to_str().ok())
+            .is_some_and(|value| value.contains(ANDROID_USER_AGENT))
+    }
+}
 
 /// Browser passkey ceremonies, passkey management and session confirmation.
 #[derive(Clone)]
@@ -209,14 +223,7 @@ impl PasskeyApplication {
     ) -> Result<(CreationChallengeResponse, PasskeyRegistration), PasskeyError> {
         match kind {
             PasskeyKind::GooglePasswordManager => {
-                // The library forbids this workaround outside Android with GMS Core.
-                // UA gating excludes other devices; the explicit UI choice acknowledges
-                // Google services because their presence cannot be proven from a UA.
-                if !headers
-                    .get(header::USER_AGENT)
-                    .and_then(|value| value.to_str().ok())
-                    .is_some_and(|value| value.contains(ANDROID_USER_AGENT))
-                {
+                if !PasskeyKind::offers_google(headers) {
                     return Err(PasskeyError::GooglePasswordManagerRequiresAndroid);
                 }
                 Ok(self

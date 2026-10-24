@@ -3,6 +3,11 @@ WebAuthn authenticator. It does not intercept or mock API responses. Use an isol
 database: tests create accounts and credentials. CI runs it against the embedded
 production build, as configured below.
 
+`settings.spec.ts` checks auth's own settings pages: renaming, adding and removing
+passkeys, a passkey ceremony that fails, the passkey confirmation the SDK runs,
+devices, an email link's token and signing out. Until piquel.fr redirects to them, registration still returns to
+`E2E_SETTINGS_URL`.
+
 Run `just preview` to build and deploy this checkout over HTTPS on piqueld.
 Set `E2E_AUTH_URL` and `E2E_SETTINGS_URL` to the printed auth origin and web
 settings URL, then run `just web test-browser`. If signup requires an invitation,
