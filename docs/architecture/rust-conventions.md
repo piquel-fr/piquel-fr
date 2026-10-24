@@ -25,8 +25,11 @@ Keep implementations simple. Follow neighbouring modules and share repeated logi
   server-rendered pages, the strings they show, titles and notices included, and
   the changes and queries their forms and links send. They render plain data,
   `piquel-common` IDs, vocabularies and events, or plain rows such as `EmailRow`
-  that the pages map the service's views into, and take URLs as props; they know
-  nothing of the domain, the database or HTTP. It depends only on `piquel-common`
+  or `ClientRow` that the pages map the service's views into, and take URLs as
+  props; they know nothing of the domain, the database or HTTP. `form` holds what
+  every form shares, including the `Checkbox` and `Lines` types for values a form
+  sends as text; `clients` the client views the console shares with the future
+  dashboard; `settings` and `developers` each section's pages. It depends only on `piquel-common`
   (with `events`), `chrono`, `serde`, `serde_urlencoded` and Topcoat's `view`, so
   it compiles beside the database crate.
 
@@ -87,11 +90,13 @@ isolation headers. Public-client origins for CORS are looked up per request.
 Server-rendered pages live in `src/web` (`WebApplication`). Each page path in
 `routes::page` gets a Topcoat `RouteFn` for `GET`, showing the page, and one for
 `POST`, its form's result; axum mounts the Topcoat router with `route_service` on
-those paths only, never as the fallback, so the security layer classifies them as
-pages, with a request context and the `page` budget. A page handler resolves who
+those paths only, and their twins ending in a slash, which Topcoat redirects, never
+as the fallback, so the security layer classifies them as pages, by the route
+template they match (`/developers/clients/{id}`), with a request context and the
+`page` budget. A page handler resolves who
 acts, calls the service in-process and renders `piquel-ui` components, or returns
 a `Failure`, which `WebApplication::answer` turns into the page explaining it. A
-form's result is a `303`. Pages use no Topcoat browser runtime, `suspense`, `live!`
+form that succeeds answers `303`. Pages use no Topcoat browser runtime, `suspense`, `live!`
 or `asset!`, and register every route explicitly. Their Content-Security-Policy
 loads only the stylesheet and the SDK script embedded under `/assets/`, lets the
 script fetch only auth itself (`connect-src 'self'`), for its passkey ceremonies,
@@ -104,21 +109,28 @@ page's form only from auth's own pages (`BrowserRequest::is_same_origin`): plain
 forms send no CSRF header, and send `Origin: null` under `Referrer-Policy:
 no-referrer`.
 
-Each settings tab (`src/web/settings`) is a `SettingsPage`: its path, the change
-its form posts, its query, how it makes a change and how it renders.
-`WebApplication::show` and `submit` serve them all the same way; the address
-verification page, reached from its emailed link, has its own `verify` and
-`confirm_address`. They find who acts with `AccountService::owner`; a page reads through
-`Viewer::from(&owner)`, and a change takes the owner, as a `Subject` when an
-administrator may make it too. Each page's change and query are types in
+Each page of the signed-in account, a settings tab (`src/web/settings`) or a
+developer console page (`src/web/developers`), is an `AccountPage`
+(`src/web/account.rs`): its section, path, the change its form posts, its query, how
+it makes a change and how it renders. `WebApplication::show` and `submit` serve
+them all the same way; the address verification page, reached from its emailed
+link, has its own `verify` and `confirm_address`. They find who acts with
+`AccountService::owner`, and a page renders for a `Reader`, the owner and how recently
+they confirmed with a passkey; a settings page reads through `Viewer::from(&owner)`,
+and a change takes the owner, as a `Subject` when an administrator may make it too.
+A console page acts on the owner's client its path names: one that is not theirs,
+or does not exist, is a `Failure::Missing`, a `404`. Each page's change and query are types in
 `piquel-ui`, such as `SignInChange` and `SignInState`: forms and links serialize
 them, and the page deserializes the same types, so a field's name is written once.
 A change names itself in a hidden `action` field, as an internally tagged enum, so
 its fields must deserialize from text. A change that succeeds answers `303` to the
 page, which says once what it did, from a short-lived cookie, so no link can claim
-a change; or on to where it leads, such as the provider a link starts at or what a
-report left to undo. One that fails renders the page again, with the change's row
-open, what was typed into it and the service's message. A
+a change; or on to where it leads, such as the provider a link starts at, what a
+report left to undo, or the apps after one is deleted. A change that makes a secret
+renders the page at `200` with it, so it is in no URL, cookie or history entry, and
+pages are never cached. One that fails renders the page again, with the change's
+row open, what was typed into it and the service's message, beside its input when
+it names a setting. A
 query that does not parse opens nothing, and a form that does not decode changes
 nothing, logging why at debug level.
 
@@ -129,7 +141,8 @@ recent confirmation. A `data-passkey-enroll` form runs the passkey enrollment, t
 posts, so its page says so. A `data-fragment-form` copies the link's fragment into its inputs
 as it posts, so a verification token never reaches the server in a URL. Either
 form's button starts disabled, with a `data-unavailable` note saying why, until
-the script finds it can work.
+the script finds it can work. A `data-copy` button copies a value, and a
+`data-replace-url` element makes a page that shows a secret reload by `GET`.
 
 Administrative operations are methods of `AdminService` (`src/admin/service.rs`);
 the admin API's handlers and the CLI's commands (`src/cli`) are thin adapters that
@@ -181,13 +194,12 @@ operation can lock its actor's session and check its passkey confirmation in the
 transaction that makes the change. It takes a `ClientRegistration` from
 `piquel_common::clients`, whose field types validate themselves, so invalid input
 never reaches the repository. `AdminService` (for the `client` command) and the
-owner's `AccountService` operations (`src/clients/owned.rs`) use it, and the
-registration API should too. The owner's input types there are the policy for
+owner's `AccountService` operations (`src/clients/owned.rs`), which the developer
+console calls, use it, and a registration API (RFC 7591) should too. The owner's input types there are the policy for
 clients accounts own: they hold no ID, trust or back-channel logout URI, and only
 standard scopes, and an invalid one names its field (`InvalidSetting`). Every
 owner operation looks the client up as the owner's first, so any other client is
-not found, and nothing checks ownership again. The account API (`src/clients/api`)
-is only JSON over those operations. Clients are read from the database on each
+not found, and nothing checks ownership again. Clients are read from the database on each
 request and nothing is cached, so changes apply at once on every replica.
 
 Periodic work implements `ExclusiveJob` in `apps/auth-service/src/jobs.rs`, and

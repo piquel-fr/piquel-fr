@@ -7,6 +7,12 @@ embedded production build, as configured below.
 passkeys, a passkey ceremony that fails, the passkey confirmation the SDK runs,
 devices, an email link's token and signing out.
 
+`developers.spec.ts` registers a confidential app in the developer console: a
+setting refused beside its input, the secret shown once, in an answer no cache
+keeps and nowhere in the URL, history or storage, and the app then signing a user
+in, redeeming the code with its secret. Its app runs on `https://console-e2e.test`,
+which the test serves as `oidc.spec.ts` does its client.
+
 `oidc.spec.ts` signs in through `browser-e2e`, a public, untrusted client at
 `https://browser-e2e.test` that may request `openid`, `profile` and `email`. No
 server runs it: the test serves its pages through DevTools, so the client's fetches

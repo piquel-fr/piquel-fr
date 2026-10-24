@@ -1,18 +1,20 @@
 //! `/settings/emails`: the account's addresses, and confirming one from its link.
 
-use super::{Applied, Reader, SettingsPage};
 use crate::{
     account::{AccountError, Owner, Subject},
     routes::page::settings,
     security::ApiError,
-    web::{Failure, WebApplication},
+    web::{
+        Failure, WebApplication,
+        account::{AccountPage, Applied, Reader},
+    },
 };
-use piquel_ui::{Area, EmailChange, EmailRow, EmailsState, Messages, Notice, Tab, Title};
+use piquel_ui::{Area, EmailChange, EmailRow, EmailsState, Messages, Notice, Section, Tab, Title};
 use serde::Deserialize;
 use topcoat::{
     context::{Cx, app_context},
     router::{Body, StatusCode, response::Response},
-    view::{View, view},
+    view::{Child, View, view},
 };
 
 /// What the verification page posts.
@@ -25,9 +27,15 @@ struct Verification {
 /// The addresses page.
 pub(in crate::web) struct Addresses;
 
-impl SettingsPage for Addresses {
+impl Addresses {
+    /// Its tab.
     const TAB: Tab = Tab::Emails;
+}
+
+impl AccountPage for Addresses {
+    const SECTION: Section = Section::Account;
     const PATH: &'static str = settings::EMAILS;
+    const TITLE: &'static str = Self::TAB.label();
     type Change = EmailChange;
     type Row = EmailsState;
 
@@ -47,6 +55,7 @@ impl SettingsPage for Addresses {
 
     async fn apply(
         web: &WebApplication,
+        _: &Cx,
         owner: Owner,
         change: EmailChange,
     ) -> Result<Applied<EmailsState>, AccountError> {
@@ -76,19 +85,19 @@ impl SettingsPage for Addresses {
         state: EmailsState,
         outcome: (StatusCode, Messages<'_>),
     ) -> Result<Response, Failure> {
-        let mut emails = web.account.emails(&reader.viewer).await?;
+        let mut emails = web.account.emails(&reader.viewer()).await?;
         emails.sort_by_key(|email| !email.primary);
         let rows: Vec<_> = emails.iter().map(EmailRow::from).collect();
         let sends = web.email.smtp.is_some();
-        let page = view! { cx =>
+        let page = Child::new(view! { cx =>
             piquel_ui::addresses(
                 page: settings::EMAILS,
                 emails: &rows,
                 state: &state,
-                confirmed: reader.confirmed,
+                confirmed: reader.is_recent(),
                 sends: sends,
             )
-        };
+        });
         web.settings_page(cx, Self::TAB, reader, outcome, &[], page)
             .await
     }
@@ -159,7 +168,14 @@ impl WebApplication {
     ) -> Result<Response, Failure> {
         let title = Title::VerifyEmail.as_str();
         Ok(self
-            .render(cx, status, title, Area::Account, &[], page)
+            .render(
+                cx,
+                status,
+                title,
+                Area::Section(Section::Account),
+                &[],
+                page,
+            )
             .await?)
     }
 }

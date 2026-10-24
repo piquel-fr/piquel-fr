@@ -1,9 +1,7 @@
 //! Security history.
 
-use super::{
-    EmailChange, EmailRow, Fields, Query, SignInChange, change_form, device_name, open,
-    sign_in::provider_name, time,
-};
+use super::{EmailChange, EmailRow, SignInChange, device_name, sign_in::provider_name};
+use crate::form::{Fields, Precision, Query, change_form, open, time};
 use chrono::{DateTime, Utc};
 use piquel_common::{
     AuthenticationMethod, EmailId, EventId, PasskeyId, Provider,
@@ -375,7 +373,7 @@ async fn entry<'a>(
             <div>
                 <strong>(description.as_str())</strong>
                 <p class="help">
-                    time(at: row.occurred_at, format: "%H:%M")
+                    time(at: row.occurred_at, precision: Precision::Clock)
                     for part in row.details() {
                         " · " (part)
                     }

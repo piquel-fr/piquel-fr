@@ -3,6 +3,8 @@
 
 use crate::{
     AuthConfig, ClientRegistry, ClientRegistryError, KeyStore, Operator,
+    account::{AccountService, Owner},
+    clients::{ClientSettings, NewClient},
     config::{
         EmailConfig, FederationConfig, OidcConfig, PasskeyConfig, TokenDigestKey, TokenDigestKeys,
     },
@@ -278,6 +280,38 @@ impl Browser {
         Self::dispatch(router, request.body(Body::from(form)).expect("request")).await
     }
 
+    /// The owner this browser's session cookie shows, found from
+    /// [`RequestContext::TEST`] as a server-rendered page finds them.
+    pub(crate) async fn owner(&self, database: &Database) -> Owner {
+        let request = self.request(Method::GET, "/");
+        let headers = request.headers_ref().expect("request headers");
+        AccountService::new(database.clone())
+            .owner(RequestContext::TEST, headers)
+            .await
+            .expect("session lookup")
+            .expect("signed in")
+    }
+
+    /// Registers a client of `kind` calling back to `{origin}/callback`, with
+    /// [`ClientSettings::test`]'s settings, for this browser's account, whose
+    /// session must be confirmed, as the new-app page does, and returns its ID.
+    pub(crate) async fn register_app(
+        &self,
+        database: &Database,
+        kind: ClientKind,
+        origin: &str,
+    ) -> ClientId {
+        let new = NewClient {
+            kind,
+            settings: ClientSettings::test(origin),
+        };
+        let (client, _) = AccountService::new(database.clone())
+            .create_client(&self.owner(database).await, new)
+            .await
+            .expect("app registered");
+        client.id
+    }
+
     /// A request from this browser, with its session cookie.
     fn request(&self, method: Method, path: &str) -> axum::http::request::Builder {
         Request::builder()
@@ -390,6 +424,21 @@ pub(crate) fn registration(kind: ClientKind, origin: &str) -> ClientRegistration
         trusted: false,
         require_pushed_authorization_requests: false,
         backchannel_logout_uri: None,
+    }
+}
+
+impl ClientSettings {
+    /// What an owner chooses for a refresh-capable client calling back to
+    /// `{origin}/callback`, with no post-logout page.
+    pub(crate) fn test(origin: &str) -> Self {
+        Self {
+            display_name: "Notes".into(),
+            redirect_uris: vec![format!("{origin}/callback")],
+            post_logout_uris: Vec::new(),
+            allowed_scopes: vec!["openid".into(), "offline_access".into()],
+            allow_refresh: true,
+            require_pushed_authorization_requests: false,
+        }
     }
 }
 

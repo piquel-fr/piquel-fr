@@ -28,6 +28,14 @@
 //! # }
 //! ```
 
+/// An OIDC client's status, facts, settings form and secrets, which the console
+/// shows and the admin dashboard will.
+mod clients;
+/// The developer console.
+mod developers;
+/// What forms and links send, what a page says of a change, and the parts of
+/// every form.
+mod form;
 /// The document around every page, and the parts pages share.
 mod layout;
 /// The pages of OAuth and `OpenID` Connect flows.
@@ -35,11 +43,20 @@ mod oidc;
 /// The account's settings.
 mod settings;
 
-pub use layout::{Area, Title, document, intro};
+pub use clients::{
+    ClientDraft, ClientRow, ClientStatus, Connection, FieldError, Grace, Revealed, ScopeChoice,
+    SecretRow,
+};
+pub use developers::{
+    AppChange, AppLink, AppSettingsState, AppTab, MISSING, NewAppChange, NewAppState, Registered,
+    SecretsChange, SecretsState, app_header, app_secrets, app_settings, apps, back_to_apps,
+    new_app, overview,
+};
+pub use form::{Alert, Checkbox, Lines, Messages, Notice, OUT_OF_DATE, Query};
+pub use layout::{Area, Section, Title, account, document, intro, signed_out};
 pub use oidc::{consent, failure, logout, onward};
 pub use settings::{
     DeviceChange, DeviceRow, EmailChange, EmailRow, EmailsState, HistoryChange, HistoryPage,
-    HistoryRow, HistoryState, Holdings, Messages, Notice, OUT_OF_DATE, ProviderRow, Query,
-    SignInChange, SignInState, Tab, account, addresses, devices, history, settings_frame,
-    sign_in_methods, signed_out, verified, verify,
+    HistoryRow, HistoryState, Holdings, ProviderRow, SignInChange, SignInState, Tab, addresses,
+    devices, history, settings_tabs, sign_in_methods, verified, verify,
 };

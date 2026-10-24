@@ -1,5 +1,6 @@
 import { createHash, randomBytes } from 'node:crypto';
 import { expect, test } from '@playwright/test';
+import { addPasskeys, authUrl, serveClient, signUp } from './helpers';
 
 // Response shapes this test reads; anything else stays unknown.
 type Tokens = { id_token: string; access_token: string };
@@ -15,44 +16,10 @@ const client = 'https://browser-e2e.test';
 
 /** Runs against the real Rust binary and an isolated PostgreSQL database. */
 test('browser OIDC consent, SSO and step-up for a public client', async ({ page, context }) => {
-  const authUrl = process.env.E2E_AUTH_URL ?? 'http://localhost:3000';
   const username = `browser-${Date.now().toString(36)}`;
-  // A page the test serves has no address, so Chromium counts it as public, and asks
-  // before it fetches auth on a local address, as in CI and on previews.
-  await context.grantPermissions(['local-network-access'], { origin: client });
-  const cdp = await context.newCDPSession(page);
-  await cdp.send('WebAuthn.enable');
-  await cdp.send('WebAuthn.addVirtualAuthenticator', {
-    options: {
-      protocol: 'ctap2',
-      transport: 'internal',
-      hasResidentKey: true,
-      hasUserVerification: true,
-      isUserVerified: true,
-      automaticPresenceSimulation: true,
-      defaultBackupEligibility: true,
-      defaultBackupState: true
-    }
-  });
-  // Serves the client's pages through DevTools, which also sees the redirects that
-  // reach them; Playwright's routes would not, and would answer CORS preflights to
-  // auth themselves.
-  await cdp.send('Fetch.enable', { patterns: [{ urlPattern: `${client}/*` }] });
-  cdp.on('Fetch.requestPaused', ({ requestId }) => {
-    void cdp.send('Fetch.fulfillRequest', {
-      requestId,
-      responseCode: 200,
-      responseHeaders: [{ name: 'Content-Type', value: 'text/html' }],
-      body: Buffer.from('<!doctype html><title>Browser E2E</title>').toString('base64')
-    });
-  });
-
-  const invitation = process.env.E2E_INVITATION;
-  await page.goto(`/register${invitation ? `?invitation=${encodeURIComponent(invitation)}` : ''}`);
-  await page.getByLabel('Handle', { exact: true }).fill(username);
-  await page.getByLabel('Passkey name', { exact: true }).fill('Synced passkey');
-  await page.getByRole('button', { name: 'Create account with a passkey' }).click();
-  await expect(page).toHaveURL('/settings');
+  const { cdp } = await addPasskeys(context, page, true);
+  await serveClient(context, cdp, client);
+  await signUp(page, username, 'Synced passkey');
   const session = (await (
     await page.request.get(new URL('/session', authUrl).href)
   ).json()) as Session;

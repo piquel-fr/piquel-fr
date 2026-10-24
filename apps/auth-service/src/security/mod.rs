@@ -200,7 +200,7 @@ impl IntoResponse for ApiError {
 
 piquel_common::str_enum! {
     /// Host-only cookies: browser secrets binding server-side state, and the notice
-    /// of a settings change just made.
+    /// of an account page's change just made.
     pub(crate) enum BrowserCookie {
         /// Central sign-in session.
         Session = "__Host-piquel_session",
@@ -210,14 +210,14 @@ piquel_common::str_enum! {
         Federation = "__Host-piquel_federation",
         /// Verified identity awaiting signup or linking.
         FederationPending = "__Host-piquel_federation_pending",
-        /// What a settings change just did, which the page it goes back to says once.
+        /// What an account page's change just did, which the page it goes to says once.
         Notice = "__Host-piquel_notice",
     }
 }
 
 impl BrowserCookie {
     /// Lifetime in seconds. Flow cookies outlive their server-side state slightly; a
-    /// notice is shown on the page its change goes back to, at once.
+    /// notice is shown on the page its change goes to, at once.
     const fn max_age(self) -> u32 {
         match self {
             Self::Session => SESSION_LIFETIME_DAYS * 24 * 60 * 60,
@@ -798,7 +798,19 @@ enum Endpoint {
 }
 
 impl Endpoint {
-    /// Classifies exact protocol and page paths, and the account route family.
+    /// Classifies `request` by the template of the route it matched, so that a page
+    /// whose path names an app is a page, or by its path when no route matched.
+    fn of(request: &Request) -> Self {
+        Self::classify(
+            request
+                .extensions()
+                .get::<MatchedPath>()
+                .map_or(request.uri().path(), MatchedPath::as_str),
+        )
+    }
+
+    /// Classifies a route's template, or an unmatched path: exact protocol and page
+    /// routes, and the account route family.
     fn classify(path: &str) -> Self {
         match path {
             oidc::TOKEN | oidc::REVOKE | oidc::PAR => Self::OAuthBackChannel,
@@ -1117,7 +1129,7 @@ impl HttpSecurity {
     ) -> Response {
         // Reuse the original header for CORS so decoration cannot fail during re-parsing.
         let origin = request.headers().get(header::ORIGIN).cloned();
-        let endpoint = Endpoint::classify(request.uri().path());
+        let endpoint = Endpoint::of(&request);
         // Set by the origin check, which runs under the deadline; an error response
         // still carries CORS headers once the origin is known to be allowed.
         let mut allowed = false;

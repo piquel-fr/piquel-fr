@@ -6,8 +6,7 @@
 //! [`Scope`]s, and only an operator sets a back-channel logout URI.
 
 use super::{
-    ClientDetails, ClientRegistry, ClientRegistryError, DEFAULT_CLIENT_SCOPES,
-    MAX_DAILY_REGISTRATIONS, MAX_OWNED_CLIENTS,
+    ClientDetails, ClientRegistry, ClientRegistryError, MAX_DAILY_REGISTRATIONS, MAX_OWNED_CLIENTS,
 };
 use crate::{
     GracePeriod,
@@ -20,52 +19,42 @@ use piquel_common::{
         AllowedScopes, ClientField, ClientKind, ClientOwner, ClientRegistration, PostLogoutUris,
         RedirectUri, RedirectUris, ScopeName,
     },
-    protocol::{api::ErrorCode, oauth::Scope},
+    protocol::oauth::Scope,
 };
 use piquel_crypto::{ClientSecret, Secret};
 use piquel_repository::{DatabaseTransaction, StoredOidcClient};
-use serde::Deserialize;
 use std::error::Error;
 use thiserror::Error;
 
-/// The settings an owner chooses, in the shape the account API's `GET` returns
-/// them.
-#[derive(Deserialize)]
+/// The settings an owner chooses, validated when a client is registered or
+/// changed with them. A back-channel logout URI is not one of them: only the
+/// operator sets it for now.
 pub(crate) struct ClientSettings {
     /// The name consent screens show.
     pub(crate) display_name: String,
     /// Authorization callbacks, matched exactly.
     pub(crate) redirect_uris: Vec<String>,
     /// Pages the browser may return to after logout.
-    #[serde(default)]
     pub(crate) post_logout_uris: Vec<String>,
-    /// Scopes the client may request; `openid`, `profile` and `email` when omitted.
-    #[serde(default = "ClientSettings::default_scopes")]
+    /// Scopes the client may request, each a standard [`Scope`].
     pub(crate) allowed_scopes: Vec<String>,
     /// Whether the client may receive refresh tokens, with `offline_access`.
-    #[serde(default)]
     pub(crate) allow_refresh: bool,
     /// Whether the client must push its authorization requests (RFC 9126).
-    #[serde(default)]
     pub(crate) require_pushed_authorization_requests: bool,
-    /// Where auth posts logout tokens. Only the operator sets it for now, so a
-    /// registration has none and a change keeps the stored one.
-    #[serde(skip)]
-    backchannel_logout_uri: Option<RedirectUri>,
 }
 
 /// A client an owner registers.
-#[derive(Deserialize)]
 pub(crate) struct NewClient {
     /// Public, or confidential with a secret auth generates.
     pub(crate) kind: ClientKind,
     /// Everything else.
-    #[serde(flatten)]
     pub(crate) settings: ClientSettings,
 }
 
-/// A change an owner makes: each given setting replaces the stored one.
-#[derive(Deserialize)]
+/// A change an owner makes: each given setting replaces the stored one. The
+/// default changes nothing.
+#[derive(Default)]
 pub(crate) struct ClientPatch {
     /// A new consent-screen name.
     pub(crate) display_name: Option<String>,
@@ -79,15 +68,6 @@ pub(crate) struct ClientPatch {
     pub(crate) allow_refresh: Option<bool>,
     /// Whether authorization requests must be pushed.
     pub(crate) require_pushed_authorization_requests: Option<bool>,
-}
-
-/// A secret rotation an owner asks for.
-#[derive(Deserialize)]
-pub(crate) struct Rotation {
-    /// How long earlier secrets keep working, e.g. `30m`, `24h` or `7d`; `0`
-    /// revokes them now. A day when omitted, 30 days at most.
-    #[serde(default)]
-    pub(crate) grace: GracePeriod,
 }
 
 /// One of an owner's live clients, with its owner. Only
@@ -128,19 +108,14 @@ pub(crate) struct InvalidSetting {
 }
 
 impl ClientSettings {
-    /// The scopes a client gets when none are given.
-    fn default_scopes() -> Vec<String> {
-        DEFAULT_CLIENT_SCOPES
-            .map(|scope| scope.as_str().to_owned())
-            .into()
-    }
-
     /// Validates every setting, naming the first one that is invalid, and builds
-    /// the registration of an untrusted client `id` of `kind`.
+    /// the registration of an untrusted client `id` of `kind`, posting logout
+    /// tokens to `backchannel_logout_uri`, if anywhere.
     fn registration(
         self,
         id: ClientId,
         kind: ClientKind,
+        backchannel_logout_uri: Option<RedirectUri>,
     ) -> Result<ClientRegistration, InvalidSetting> {
         let scopes = self
             .allowed_scopes
@@ -177,7 +152,7 @@ impl ClientSettings {
             allow_refresh: self.allow_refresh,
             trusted: false,
             require_pushed_authorization_requests: self.require_pushed_authorization_requests,
-            backchannel_logout_uri: self.backchannel_logout_uri,
+            backchannel_logout_uri,
         })
     }
 
@@ -189,10 +164,34 @@ impl ClientSettings {
     }
 }
 
+impl From<ClientSettings> for ClientPatch {
+    /// Replaces every setting an owner chooses with `settings`', as a form showing
+    /// them all saves them.
+    fn from(settings: ClientSettings) -> Self {
+        Self {
+            display_name: Some(settings.display_name),
+            redirect_uris: Some(settings.redirect_uris),
+            post_logout_uris: Some(settings.post_logout_uris),
+            allowed_scopes: Some(settings.allowed_scopes),
+            allow_refresh: Some(settings.allow_refresh),
+            require_pushed_authorization_requests: Some(
+                settings.require_pushed_authorization_requests,
+            ),
+        }
+    }
+}
+
 impl ClientPatch {
-    /// The registration of `current` with the given settings replaced. It is
-    /// validated as a new one is, so a change cannot do what registration may not.
+    /// The registration of `current` with the given settings replaced, keeping its
+    /// back-channel logout URI. It is validated as a new one is, so a change cannot
+    /// do what registration may not.
     fn apply(self, current: &StoredOidcClient) -> Result<ClientRegistration, InvalidSetting> {
+        let backchannel_logout_uri = current
+            .backchannel_logout_uri
+            .as_deref()
+            .map(str::parse)
+            .transpose()
+            .map_err(InvalidSetting::with(ClientField::BackchannelLogoutUri))?;
         ClientSettings {
             display_name: self
                 .display_name
@@ -210,14 +209,8 @@ impl ClientPatch {
             require_pushed_authorization_requests: self
                 .require_pushed_authorization_requests
                 .unwrap_or(current.require_pushed_authorization_requests),
-            backchannel_logout_uri: current
-                .backchannel_logout_uri
-                .as_deref()
-                .map(str::parse)
-                .transpose()
-                .map_err(InvalidSetting::with(ClientField::BackchannelLogoutUri))?,
         }
-        .registration(current.id.clone(), current.kind)
+        .registration(current.id.clone(), current.kind, backchannel_logout_uri)
     }
 }
 
@@ -238,6 +231,12 @@ impl InvalidSetting {
     /// The rejected setting.
     pub(crate) const fn field(&self) -> &ClientField {
         &self.field
+    }
+
+    /// What is wrong with the setting, without the field's name: what a form
+    /// shows next to it.
+    pub(crate) fn reason(&self) -> &(dyn Error + Send + Sync) {
+        &*self.source
     }
 }
 
@@ -290,7 +289,8 @@ impl AccountService {
 
     /// Registers a client the owner manages, with an ID auth generates, once they
     /// confirmed with a passkey, and returns it with a confidential client's
-    /// secret, which nothing shows again. Fails once the account manages
+    /// secret, which nothing shows again. Invalid settings are refused before the
+    /// confirmation is checked. Fails once the account manages
     /// [`MAX_OWNED_CLIENTS`](super::MAX_OWNED_CLIENTS) clients.
     pub(crate) async fn create_client(
         &self,
@@ -302,7 +302,7 @@ impl AccountService {
             .map_err(OwnedClientError::from)?;
         let registration = new
             .settings
-            .registration(ClientId::generated(random.as_bytes()), new.kind)
+            .registration(ClientId::generated(random.as_bytes()), new.kind, None)
             .map_err(OwnedClientError::from)?;
         let mut tx = self.database.begin().await?;
         owner.lock_confirmed(&mut tx).await?;
@@ -414,21 +414,15 @@ impl From<OwnedClientError> for ApiError {
 }
 
 impl From<InvalidSetting> for ApiError {
-    /// Names the field, with RFC 7591's code for redirect URIs or other metadata.
+    /// Names the field before what is wrong with it.
     fn from(error: InvalidSetting) -> Self {
-        let field = error.field().clone();
-        let code = if field.redirects() {
-            ErrorCode::InvalidRedirectUri { field }
-        } else {
-            ErrorCode::InvalidClientMetadata { field }
-        };
-        Self::bad_request(error.to_string()).with_code(code)
+        Self::bad_request(error.to_string())
     }
 }
 
 impl From<ClientRegistryError> for ApiError {
-    /// A deleted client is as unknown as one that never existed. Failures the
-    /// account API cannot cause are internal.
+    /// A deleted client is as unknown as one that never existed. Failures an
+    /// owner cannot cause are internal.
     fn from(error: ClientRegistryError) -> Self {
         match error {
             ClientRegistryError::Unknown(_) | ClientRegistryError::Deleted(_) => {
@@ -439,21 +433,14 @@ impl From<ClientRegistryError> for ApiError {
             }
             ClientRegistryError::QuotaExceeded => Self::conflict(format!(
                 "You can have at most {MAX_OWNED_CLIENTS} clients. Delete one to register another."
-            ))
-            .with_code(ErrorCode::ClientQuotaExceeded {
-                limit: MAX_OWNED_CLIENTS,
-            }),
+            )),
             ClientRegistryError::DailyLimitExceeded => Self::conflict(format!(
                 "You can register at most {MAX_DAILY_REGISTRATIONS} clients a day, deleted ones \
                  included. Try again tomorrow."
-            ))
-            .with_code(ErrorCode::DailyClientLimitExceeded {
-                limit: MAX_DAILY_REGISTRATIONS,
-            }),
+            )),
             ClientRegistryError::Suspended(_) => Self::forbidden(
                 "This client was suspended by an administrator. Contact them to restore it.",
-            )
-            .with_code(ErrorCode::ClientSuspended),
+            ),
             ClientRegistryError::Database(error) => error.into(),
             error @ (ClientRegistryError::Exists { .. }
             | ClientRegistryError::MissingSecret(_)

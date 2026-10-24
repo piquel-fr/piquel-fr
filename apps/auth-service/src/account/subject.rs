@@ -20,7 +20,8 @@ use std::ops::Deref;
 /// fields are private and only the extractors and [`Self::resolve`] build one,
 /// from the session cookie, so an operation only the owner may run, such as adding
 /// a passkey or an address, takes an `Owner`: no administrator or operator can
-/// call it.
+/// call it. A clone is the same owner, as the same request found them.
+#[derive(Clone)]
 pub(crate) struct Owner {
     /// The owner's browser session, as the request found it.
     session: StoredSession,

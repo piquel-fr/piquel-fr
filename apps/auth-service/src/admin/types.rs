@@ -3,6 +3,7 @@
 use super::AdminError;
 use chrono::Duration;
 use piquel_common::{HandleError, UserId};
+use piquel_ui::Grace;
 use serde::Deserialize;
 use std::{fmt, str::FromStr};
 use thiserror::Error;
@@ -105,6 +106,19 @@ impl Default for GracePeriod {
     /// A day.
     fn default() -> Self {
         Self(Minutes(DEFAULT_GRACE_PERIOD))
+    }
+}
+
+impl From<Grace> for GracePeriod {
+    /// The period the rotation form's choice names.
+    fn from(grace: Grace) -> Self {
+        Self(Minutes(match grace {
+            Grace::Now => 0,
+            Grace::Hour => MINUTES_PER_HOUR,
+            Grace::Day => MINUTES_PER_DAY,
+            Grace::Week => 7 * MINUTES_PER_DAY,
+            Grace::Month => 30 * MINUTES_PER_DAY,
+        }))
     }
 }
 
@@ -255,6 +269,21 @@ mod tests {
                 .to_string(),
             "must be a whole number followed by m, h or d, from 0 to 30d, e.g. 24h"
         );
+    }
+
+    /// Each choice of the rotation form is the grace period it is written as.
+    #[test]
+    fn rotation_choices_are_the_periods_they_name() {
+        for grace in Grace::ALL {
+            assert_eq!(
+                Ok(GracePeriod::from(grace)),
+                grace
+                    .as_str()
+                    .parse::<GracePeriod>()
+                    .map_err(|error| error.to_string()),
+                "{grace}"
+            );
+        }
     }
 
     /// Reasons count Unicode characters and reject blank or control input.

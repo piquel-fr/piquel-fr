@@ -1,6 +1,7 @@
 //! Signed-in devices.
 
-use super::{change_form, device_name, time};
+use super::device_name;
+use crate::form::{Precision, change_form, time};
 use chrono::{DateTime, TimeDelta, Utc};
 use piquel_common::{AuthenticationMethod, SessionId, events::UserAgentFamily};
 use serde::{Deserialize, Serialize};
@@ -127,7 +128,7 @@ pub async fn devices<'a>(
                                 <p class="help">(row.details(now))</p>
                                 <p class="help">
                                     "Signed in "
-                                    time(at: row.authenticated_at, format: "%-d %b %Y")
+                                    time(at: row.authenticated_at, precision: Precision::Day)
                                 </p>
                             </div>
                             if !row.current {
