@@ -3,15 +3,12 @@
 use crate::{
     AuthConfig,
     config::ProviderConfig,
-    routes::page::{ROOT, settings},
+    routes::page::settings,
     security::BrowserCookie,
     tests::{AUTH_ORIGIN, Browser, Replicas, parameter, redirect},
-    web::tests::{OWN_PAGE, html, policy},
+    web::tests::{OWN_PAGE, cookie, html, policy, value_after},
 };
-use axum::{
-    http::{StatusCode, header},
-    response::Response,
-};
+use axum::http::StatusCode;
 use piquel_common::{
     AuthenticationMethod, EventId, Provider, TokenId,
     events::{Actor, DomainEvent, EventContext, RequestOrigin},
@@ -19,132 +16,6 @@ use piquel_common::{
 use piquel_crypto::Secret;
 use piquel_repository::InsertExternalIdentity;
 use piquel_ui::{DeviceChange, EmailChange, HistoryChange, HistoryState, Query, SignInChange};
-use serde::Serialize;
-
-/// The settings tabs.
-const PAGES: [&str; 4] = [
-    settings::HOME,
-    settings::EMAILS,
-    settings::SESSIONS,
-    settings::HISTORY,
-];
-
-impl Browser {
-    /// This browser as it follows `response`'s redirect, holding the notice it set.
-    fn following(&self, response: &Response) -> Self {
-        let (notice, _) = cookie(response, BrowserCookie::Notice);
-        Self {
-            user_id: self.user_id,
-            session_id: self.session_id,
-            cookie: format!(
-                "{}; {}={notice}",
-                self.cookie,
-                BrowserCookie::Notice.as_str()
-            ),
-        }
-    }
-
-    /// Posts `change` to the settings page at `path`, as the page's form sends it.
-    async fn post(&self, replicas: &Replicas, path: &str, change: &impl Serialize) -> Response {
-        let encoded = serde_urlencoded::to_string(change).expect("change");
-        let fields: Vec<(String, String)> = serde_urlencoded::from_str(&encoded).expect("fields");
-        let fields: Vec<_> = fields
-            .iter()
-            .map(|(name, value)| (name.as_str(), value.as_str()))
-            .collect();
-        self.submit(&replicas.b, path, &fields, OWN_PAGE).await
-    }
-}
-
-/// The value `response` sets the cookie `name` to, and the cookie's attributes.
-fn cookie(response: &Response, name: BrowserCookie) -> (&str, &str) {
-    response
-        .headers()
-        .get_all(header::SET_COOKIE)
-        .iter()
-        .filter_map(|cookie| cookie.to_str().ok())
-        .find_map(|cookie| cookie.strip_prefix(name.as_str())?.strip_prefix('='))
-        .and_then(|cookie| cookie.split_once(';'))
-        .unwrap_or_else(|| panic!("{name} is set"))
-}
-
-/// The ID `page` writes right after `marker`, such as the one a form sends.
-fn id_after<'a>(page: &'a str, marker: &str) -> &'a str {
-    let start = page
-        .find(marker)
-        .unwrap_or_else(|| panic!("{marker} in {page}"))
-        + marker.len();
-    &page[start..start + 36]
-}
-
-/// Auth's root, and each page's path ending in a slash, lead to the settings. A
-/// browser without a session sees each page offer sign-in, which comes back to the
-/// page as it asked for it, under the pages' policy. Its forms change nothing.
-#[tokio::test]
-#[ignore = "requires TEST_DATABASE_URL"]
-async fn settings_pages_ask_a_signed_out_browser_to_sign_in() {
-    let replicas = Replicas::new().await;
-    let browser = Browser::signed_out();
-    let root = browser.visit(&replicas.a, ROOT).await;
-    assert_eq!(root.status(), StatusCode::TEMPORARY_REDIRECT);
-    assert_eq!(redirect(&root), settings::HOME);
-    for path in PAGES {
-        let slashed = browser
-            .visit(&replicas.a, &format!("{path}/?remove=1"))
-            .await;
-        assert_eq!(slashed.status(), StatusCode::PERMANENT_REDIRECT, "{path}");
-        assert_eq!(redirect(&slashed), format!("{path}?remove=1"));
-        let response = browser
-            .visit(&replicas.a, &format!("{path}?remove=1"))
-            .await;
-        assert_eq!(response.status(), StatusCode::OK, "{path}");
-        assert!(
-            policy(&response).starts_with("default-src 'none'"),
-            "{path}"
-        );
-        let page = html(response).await;
-        assert!(
-            page.contains("<h2>Sign in to see your settings</h2>"),
-            "{page}"
-        );
-        let sign_in = format!(
-            r#"href="/login?return_to={}%3Fremove%3D1""#,
-            path.replace('/', "%2F")
-        );
-        assert!(page.contains(&sign_in), "{page}");
-
-        let posted = browser
-            .post(&replicas, path, &DeviceChange::SignOutOthers)
-            .await;
-        assert_eq!(posted.status(), StatusCode::UNAUTHORIZED, "{path}");
-        let page = html(posted).await;
-        assert!(
-            page.contains("<h2>Sign in to see your settings</h2>"),
-            "{page}"
-        );
-    }
-}
-
-/// A form from an older page, whose change no page knows, changes nothing and says
-/// why, on every page.
-#[tokio::test]
-#[ignore = "requires TEST_DATABASE_URL"]
-async fn settings_pages_refuse_forms_they_do_not_know() {
-    let replicas = Replicas::new().await;
-    let database = Replicas::database().await;
-    let browser = Browser::new_account(&database).await;
-    for path in PAGES {
-        let stale = browser
-            .submit(&replicas.b, path, &[("action", "everything")], OWN_PAGE)
-            .await;
-        assert_eq!(stale.status(), StatusCode::BAD_REQUEST, "{path}");
-        let page = html(stale).await;
-        assert!(
-            page.contains("This page was out of date. Try again."),
-            "{page}"
-        );
-    }
-}
 
 /// The devices page lists every signed-in browser, and signs one or all of the
 /// others out. Only the change itself, never a link, makes the page say so.
@@ -253,7 +124,7 @@ async fn confirmed_changes_ask_for_a_passkey_first() {
     );
     assert!(page.contains("Waiting for confirmation"), "{page}");
 
-    let id = id_after(&page, r#"name="remove" value=""#)
+    let id = value_after(&page, r#"name="remove" value=""#)
         .parse()
         .expect("address ID");
     let refused = social
@@ -471,7 +342,7 @@ async fn history_reports_need_confirmation_and_cannot_be_forged() {
     let page = html(browser.visit(&replicas.a, settings::HISTORY).await).await;
     assert!(!page.contains("Secure your account?"), "{page}");
     let marker = r#"name="report" value=""#;
-    let added: EventId = id_after(&page, marker).parse().expect("newest entry");
+    let added: EventId = value_after(&page, marker).parse().expect("newest entry");
     let link = |state: HistoryState| state.on(settings::HISTORY).expect("link");
 
     let older = link(HistoryState {
@@ -483,7 +354,7 @@ async fn history_reports_need_confirmation_and_cannot_be_forged() {
     assert!(page.contains("Newest activity"), "{page}");
     let kept = format!(r#"<input type="hidden" name="before" value="{added}">"#);
     assert!(page.contains(&kept), "{page}");
-    let signed_in: EventId = id_after(&page, marker).parse().expect("older entry");
+    let signed_in: EventId = value_after(&page, marker).parse().expect("older entry");
     assert!(page.contains("Account created with a passkey"), "{page}");
     assert!(!page.contains(&format!("{marker}{created}")), "{page}");
     let report = HistoryChange::Report {
@@ -557,7 +428,7 @@ async fn verification_links_are_confirmed_by_their_form() {
     };
     owner.post(&replicas, settings::EMAILS, &add).await;
     let page = html(owner.visit(&replicas.a, settings::EMAILS).await).await;
-    let id = id_after(&page, r#"name="remove" value=""#)
+    let id = value_after(&page, r#"name="remove" value=""#)
         .parse()
         .expect("address ID");
     let token = config

@@ -21,7 +21,7 @@
 
 use crate::{
     UserId,
-    protocol::oauth::{Scope, Scopes},
+    protocol::oauth::{ClientAuthMethod, Scope, Scopes},
 };
 use serde::{Deserialize, Serialize};
 use std::{fmt, ops::Deref, str::FromStr};
@@ -124,14 +124,25 @@ crate::str_enum! {
     }
 }
 
+impl ClientKind {
+    /// How a client of this kind authenticates at the token and revocation
+    /// endpoints.
+    #[must_use]
+    pub const fn auth_method(self) -> ClientAuthMethod {
+        match self {
+            Self::Public => ClientAuthMethod::None,
+            Self::Confidential => ClientAuthMethod::ClientSecretBasic,
+        }
+    }
+}
+
 /// Who manages a client, fixed when it is registered.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ClientOwner {
-    /// An operator, with the `client` command. No account manages it, and the
-    /// account API never shows it.
+    /// An operator, with the `client` command. No account manages it, and no
+    /// account's own client list shows it.
     Operator,
-    /// The account that registered it through the account API, which alone may
-    /// change it there.
+    /// The account that registered it, which alone may change it as its owner.
     Account(UserId),
 }
 
@@ -140,7 +151,7 @@ crate::str_enum! {
     pub enum CreatedVia {
         /// By an operator, with the `client` command.
         Cli = "cli",
-        /// By its owner, through the account API.
+        /// By its owner, signed in to auth.
         Account = "account",
     }
 }
@@ -166,10 +177,10 @@ impl ClientOwner {
 }
 
 crate::open_str_enum! {
-    /// A setting of a [`ClientRegistration`], named as the account API's bodies
-    /// name it. Errors name the field they reject, and `ClientUpdated` events the
-    /// fields that changed. Open, since a newer release adds settings (branding,
-    /// #45) to events this release still reads.
+    /// A setting of a [`ClientRegistration`], named as its field is. Errors name
+    /// the field they reject, and `ClientUpdated` events the fields that changed.
+    /// Open, since a newer release adds settings (branding, #45) to events this
+    /// release still reads.
     pub enum ClientField {
         /// [`ClientRegistration::display_name`].
         DisplayName = "display_name",

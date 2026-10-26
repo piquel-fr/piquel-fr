@@ -1,7 +1,10 @@
 //! Email addresses, and confirming one.
 
-use super::{change_form, open, settings_frame};
-use crate::Title;
+use crate::{
+    Section, Title,
+    form::{Query, change_form, open},
+    layout::frame,
+};
 use piquel_common::EmailId;
 use serde::{Deserialize, Serialize};
 use topcoat::{
@@ -44,7 +47,7 @@ pub struct EmailsState {
     pub adding: Option<String>,
 }
 
-impl super::Query for EmailsState {}
+impl Query for EmailsState {}
 
 /// One of the account's addresses.
 #[derive(Clone, Copy, Debug)]
@@ -222,7 +225,8 @@ pub async fn verify<'a>(
     #[default] alert: Option<&'a str>,
 ) -> Result<impl View> {
     Ok(view! {
-        settings_frame(
+        frame(
+            section: Section::Account,
             title: Title::VerifyEmail.as_str(),
             if let Some(alert) = alert {
                 <p class="notice error" role="alert">(alert)</p>
@@ -249,7 +253,8 @@ pub async fn verify<'a>(
 #[component]
 pub async fn verified<'a>(address: &'a str, primary: bool, emails: &'a str) -> Result<impl View> {
     Ok(view! {
-        settings_frame(
+        frame(
+            section: Section::Account,
             title: Title::VerifyEmail.as_str(),
             <div class="card stack">
                 <h2>"Address confirmed"</h2>

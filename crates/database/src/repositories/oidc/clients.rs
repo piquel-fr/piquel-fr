@@ -14,7 +14,6 @@ use piquel_admin_api::Client;
 use piquel_common::{
     ClientId, ClientSecretId, UserId,
     clients::{ClientField, ClientKind, ClientOwner, ClientRegistration, RedirectUri, ScopeName},
-    protocol::oauth::ClientAuthMethod,
 };
 use serde::Serialize;
 use sqlx::types::Json;
@@ -146,10 +145,7 @@ impl From<StoredOidcClient> for Client {
     /// Shows the client without its secrets, only the authentication method its kind implies.
     fn from(client: StoredOidcClient) -> Self {
         Self {
-            token_endpoint_auth_method: match client.kind {
-                ClientKind::Public => ClientAuthMethod::None,
-                ClientKind::Confidential => ClientAuthMethod::ClientSecretBasic,
-            },
+            token_endpoint_auth_method: client.kind.auth_method(),
             id: client.id,
             display_name: client.display_name,
             redirect_uris: client.redirect_uris,

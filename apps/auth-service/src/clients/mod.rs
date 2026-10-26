@@ -21,12 +21,11 @@ use thiserror::Error;
 
 use crate::GracePeriod;
 
-/// The account API's routes, over the owner's operations.
-mod api;
-pub(crate) use api::ClientApplication;
 /// The clients an account owns: their policy and the owner's operations.
 mod owned;
-pub(crate) use owned::{ClientPatch, NewClient, OwnedClient, OwnedClientError, Rotation};
+pub(crate) use owned::{
+    ClientPatch, ClientSettings, NewClient, OwnedClient, OwnedClientError, OwnedClientView,
+};
 
 /// Scopes a new client may request when none are given.
 pub const DEFAULT_CLIENT_SCOPES: [Scope; 3] = [Scope::OpenId, Scope::Profile, Scope::Email];
@@ -104,8 +103,8 @@ pub enum Applied {
     Unchanged,
 }
 
-/// A client's registration and the lifetimes of its secrets, as `client show` and
-/// the account API show them.
+/// A client's registration and the lifetimes of its secrets, as `client show`
+/// shows them.
 #[derive(Serialize)]
 pub struct ClientDetails {
     /// The registration.
@@ -325,8 +324,8 @@ impl<'a, 't> ClientRegistry<'a, 't> {
 
     /// Suspends a client, which disables it until an operator lifts the
     /// suspension, or lifts it, which leaves the client disabled for its owner to
-    /// enable. Only operators call this: the account API has no route to it. A
-    /// client already in that state records nothing.
+    /// enable. Only operators call this: no owner operation does. A client
+    /// already in that state records nothing.
     ///
     /// # Errors
     /// Fails if the client does not exist or was deleted, or the database fails.

@@ -1,13 +1,14 @@
 //! auth.piquel.fr's server-rendered pages. Each handler resolves who acts, calls the
 //! service in-process and renders `piquel-ui` components.
 //!
-//! A page answers `GET` with itself and `POST` with its form's result, at the path
-//! [`routes::page`] declares. Axum mounts the Topcoat router on exactly those paths,
-//! never as the fallback, so the security layer classifies them as pages: it attaches
-//! the request context, spends the pages' own rate budget, and accepts a form only
-//! from auth's own pages. Every page's Content-Security-Policy loads nothing but the
-//! stylesheet and the SDK's script, and lets its forms post only to auth and to where
-//! they redirect.
+//! A page answers `GET` with itself and `POST` with its form's result, at the route
+//! [`routes::page`] declares. Axum mounts the Topcoat router on exactly those routes
+//! and their trailing-slash twins, which Topcoat redirects to the page, never as the
+//! fallback, so the security layer classifies them as pages by their route: it
+//! attaches the request context, spends the pages' own rate budget, and accepts a
+//! form only from auth's own pages. Every page's Content-Security-Policy loads
+//! nothing but the stylesheet and the SDK's script, and lets its forms post only to
+//! auth and to where they redirect.
 
 /// A page's entry in [`WebApplication::pages`]: its path, and the handlers showing it
 /// and taking its form, whose failures explain themselves as the page `title`.
@@ -21,6 +22,11 @@ macro_rules! page {
     };
 }
 
+/// The signed-in account's pages: their frame, and how each shows itself and makes
+/// its changes.
+mod account;
+/// The developer console.
+mod developers;
 /// The consent page and the confirmation of an application's logout request.
 mod oidc;
 /// The account's settings.
@@ -38,6 +44,7 @@ use crate::{
     routes,
     security::{ApiError, RequestContext},
 };
+use piquel_common::config::Origin;
 use piquel_repository::Database;
 use piquel_ui::{Area, Title};
 use serde::de::DeserializeOwned;
@@ -62,7 +69,7 @@ use url::{Host, Url};
 /// The pages, and what every one of them needs.
 #[derive(Clone)]
 pub(crate) struct WebApplication {
-    /// The account settings the settings pages read and change.
+    /// The account the settings pages and the developer console read and change.
     account: AccountService,
     /// The OAuth provider whose consent and logout the pages complete.
     oidc: OidcApplication,
@@ -70,6 +77,8 @@ pub(crate) struct WebApplication {
     federation: FederationApplication,
     /// Whether email is sent, which adding an address needs.
     email: EmailConfig,
+    /// The `OpenID` Connect issuer, which the console tells apps to discover.
+    issuer: Origin,
     /// Every page's Content-Security-Policy but its `form-action`.
     policy: Arc<str>,
 }
@@ -84,6 +93,10 @@ enum Failure {
         /// Where the user may go on from here.
         link: Option<(&'static str, String)>,
     },
+    /// The account has no app by the ID the page's path names: another account's,
+    /// a deleted one or none. The account page rendering says so, at `404`, below
+    /// the account's bar; no other page names an app.
+    Missing,
     /// Rendering or another internal step failed. It is logged, and Topcoat answers
     /// `500`.
     Internal(Error),
@@ -146,12 +159,13 @@ impl WebApplication {
             oidc,
             federation,
             email: config.email.clone(),
+            issuer: origin.clone(),
             policy: policy.into(),
         }
     }
 
-    /// Each page's path, the handler showing it and the one submitting its form.
-    fn pages() -> [(&'static str, RouteHandlerFn, RouteHandlerFn); 7] {
+    /// Each page's route, the handler showing it and the one submitting its form.
+    fn pages() -> [(&'static str, RouteHandlerFn, RouteHandlerFn); 12] {
         use routes::page::{CONSENT, LOGOUT, settings::VERIFY};
         [
             page!(
@@ -166,21 +180,26 @@ impl WebApplication {
                 Self::logout,
                 Self::end_session
             ),
-            Self::settings::<settings::SignInMethods>(),
-            Self::settings::<settings::Addresses>(),
+            Self::entry::<settings::SignInMethods>(),
+            Self::entry::<settings::Addresses>(),
             page!(
                 VERIFY,
                 Title::VerifyEmail.as_str(),
                 Self::verify,
                 Self::confirm_address,
             ),
-            Self::settings::<settings::Devices>(),
-            Self::settings::<settings::History>(),
+            Self::entry::<settings::Devices>(),
+            Self::entry::<settings::History>(),
+            Self::entry::<developers::Apps>(),
+            Self::entry::<developers::NewApp>(),
+            Self::entry::<developers::Overview>(),
+            Self::entry::<developers::AppSettings>(),
+            Self::entry::<developers::AppSecrets>(),
         ]
     }
 
-    /// One Topcoat router serving every page, mounted on each page's path, and the
-    /// redirect of auth's root to the settings.
+    /// One Topcoat router serving every page, mounted on each page's route and its
+    /// trailing-slash twin, and the redirect of auth's root to the settings.
     pub(crate) fn routes(self) -> axum::Router {
         let mut pages = Router::builder()
             .app_context(self)
@@ -201,16 +220,9 @@ impl WebApplication {
                 router
                     .route_service(path, service.clone())
                     // Links ending in a slash, which piquel.fr's settings accepted, go on
-                    // to the page.
-                    .route(
-                        &format!("{path}/"),
-                        axum::routing::get(move |uri: axum::http::Uri| async move {
-                            let query = uri
-                                .query()
-                                .map_or_else(String::new, |query| format!("?{query}"));
-                            axum::response::Redirect::permanent(&format!("{path}{query}"))
-                        }),
-                    )
+                    // to the page: Topcoat answers them with a `308` to its own path,
+                    // the query kept.
+                    .route_service(&format!("{path}/"), service.clone())
             })
             .route(routes::page::ROOT, axum::routing::get(Self::root))
     }
@@ -231,13 +243,16 @@ impl WebApplication {
         title: &str,
         page: impl Future<Output = std::result::Result<Response, Failure>>,
     ) -> Result<Response> {
+        let web = topcoat::context::app_context::<Self>(cx);
         let answer = match page.await {
             Ok(response) => Ok(response),
             Err(Failure::Explained { error, link }) => {
-                let web = topcoat::context::app_context::<Self>(cx);
                 let link = link.as_ref().map(|(label, url)| (*label, url.as_str()));
                 web.failure(cx, title, &error, link).await
             }
+            Err(Failure::Missing) => Err(Error::msg(
+                "a page that is not the account's named a missing app",
+            )),
             Err(Failure::Internal(error)) => Err(error),
         };
         answer.inspect_err(|error| ApiError::log_error(&**error))

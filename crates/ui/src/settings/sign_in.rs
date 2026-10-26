@@ -1,6 +1,6 @@
 //! Passkeys and social sign-in.
 
-use super::{change_form, hidden, open};
+use crate::form::{Query, change_form, hidden, open};
 use piquel_common::{
     PasskeyId, Provider,
     protocol::api::{Identity, Passkey},
@@ -61,7 +61,7 @@ pub struct SignInState {
     pub name: Option<String>,
 }
 
-impl super::Query for SignInState {}
+impl Query for SignInState {}
 
 /// A social sign-in provider, as the sign-in methods list it.
 #[derive(Clone, Copy, Debug)]
