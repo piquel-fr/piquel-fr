@@ -16,6 +16,7 @@ use piquel_common::{
 };
 use piquel_crypto::CryptoError;
 use piquel_repository::DatabaseError;
+use piquel_ui::QueryError;
 use std::{borrow::Cow, error::Error as StdError};
 use thiserror::Error;
 use url::Url;
@@ -107,6 +108,9 @@ pub(crate) enum OAuthError {
     /// A generated cookie could not be represented as an HTTP header.
     #[error("OIDC cookie header is invalid")]
     CookieHeader(#[from] axum::http::header::InvalidHeaderValue),
+    /// The address of the page the browser goes on to could not be written.
+    #[error("a page's address could not be written")]
+    PageAddress(#[from] QueryError),
 }
 
 impl OAuthError {
@@ -184,8 +188,11 @@ impl OAuthError {
                 description,
                 source,
             },
-            error
-            @ (Self::Database(_) | Self::Crypto(_) | Self::Url(_) | Self::CookieHeader(_)) => error,
+            error @ (Self::Database(_)
+            | Self::Crypto(_)
+            | Self::Url(_)
+            | Self::CookieHeader(_)
+            | Self::PageAddress(_)) => error,
         }
     }
 }
@@ -207,7 +214,11 @@ impl OAuthError {
                 }
                 (code.clone(), description.as_ref())
             }
-            Self::Database(_) | Self::Crypto(_) | Self::Url(_) | Self::CookieHeader(_) => {
+            Self::Database(_)
+            | Self::Crypto(_)
+            | Self::Url(_)
+            | Self::CookieHeader(_)
+            | Self::PageAddress(_) => {
                 ApiError::log_error(self);
                 (
                     OAuthCode::ServerError,

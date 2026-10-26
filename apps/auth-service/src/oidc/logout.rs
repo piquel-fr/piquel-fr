@@ -2,10 +2,7 @@
 //! end of the session once confirmed.
 
 use super::{Claim, MAX_STATE_BYTES, OAuthCode, OAuthError, OidcApplication, Reject};
-use crate::{
-    routes,
-    security::{RequestContext, Session},
-};
+use crate::{account::AccountService, routes, security::RequestContext, sessions::SignedOut};
 use axum::{
     Form,
     extract::{State, rejection::FormRejection},
@@ -13,7 +10,7 @@ use axum::{
     response::Redirect,
 };
 use piquel_common::{ClientId, events::RevocationReason};
-use piquel_repository::SessionScope;
+use piquel_ui::LoginQuery;
 use serde::{Deserialize, Deserializer};
 use serde_json::Value;
 use url::Url;
@@ -113,7 +110,7 @@ impl OidcApplication {
                 .reject("client_id does not match the id_token_hint audience"));
         }
         let Some(uri) = q.post_logout_redirect_uri.as_ref() else {
-            let login = Url::parse(&format!("{}{}", self.issuer, routes::page::LOGIN))?;
+            let login = self.page(routes::page::LOGIN, &LoginQuery::default())?;
             return Ok((login, hinted_client));
         };
         let id = q
@@ -167,29 +164,20 @@ impl OidcApplication {
     }
 
     /// Ends the browser's session, once the logout page confirmed `q`, and returns
-    /// where the browser goes next. The page's caller clears the session cookie.
+    /// where the browser goes next, with the sign-out its response applies.
     pub(crate) async fn end_session(
         &self,
         context: RequestContext,
         headers: &HeaderMap,
         q: &LogoutQuery,
-    ) -> Result<Url, OAuthError> {
+    ) -> Result<(Url, SignedOut), OAuthError> {
         let (destination, client) = self.logout_destination(q).await?;
-        if let Some(session) = Session::optional(&self.database, headers).await? {
-            let reason = client.map_or(RevocationReason::Logout, |client_id| {
-                RevocationReason::RelyingPartyLogout { client_id }
-            });
-            let mut tx = self.database.begin().await?;
-            Session::revoke(
-                &mut tx,
-                context,
-                &session,
-                SessionScope::One(session.id),
-                reason,
-            )
+        let reason = client.map_or(RevocationReason::Logout, |client_id| {
+            RevocationReason::RelyingPartyLogout { client_id }
+        });
+        let signed_out = AccountService::new(self.database.clone())
+            .sign_out(context, headers, reason)
             .await?;
-            tx.commit().await?;
-        }
-        Ok(destination)
+        Ok((destination, signed_out))
     }
 }

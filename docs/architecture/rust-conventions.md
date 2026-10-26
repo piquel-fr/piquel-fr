@@ -29,7 +29,10 @@ Keep implementations simple. Follow neighbouring modules and share repeated logi
   props; they know nothing of the domain, the database or HTTP. `form` holds what
   every form shares, including the `Checkbox` and `Lines` types for values a form
   sends as text; `clients` the client views the console shares with the future
-  dashboard; `settings` and `developers` each section's pages. It depends only on `piquel-common`
+  dashboard; `settings` and `developers` each section's pages; `asset` the
+  files pages link, embedded under paths naming their content, and the shared
+  stylesheet, `STYLESHEET`, which the admin dashboard serves with its own. It
+  depends only on `piquel-common`
   (with `events`), `chrono`, `serde`, `serde_urlencoded` and Topcoat's `view`, so
   it compiles beside the database crate.
 
@@ -80,7 +83,8 @@ one event per session; set cookies after commit with `BrowserCookie::set_on`
 and clear them with `clear_on`. Both preserve other Set-Cookie headers. A page
 never sets or clears a flow cookie: the federation operation it calls returns the
 change as a `FlowCookie`, which the page applies to its response. Pages write only
-the notice cookie, with `BrowserCookie::set_notice_on`.
+the notice cookie, with `BrowserCookie::set_notice_on`, and the session cookie only
+through `AccountService::sign_out`, whose `SignedOut` clears it on the response.
 
 `AuthConfig::router` builds applications without writing to the database, so tests
 build two on one database as replicas (`Replicas` in `src/tests.rs`).
@@ -98,12 +102,13 @@ acts, calls the service in-process and renders `piquel-ui` components, or return
 a `Failure`, which `WebApplication::answer` turns into the page explaining it. A
 form that succeeds answers `303`. Pages use no Topcoat browser runtime, `suspense`, `live!`
 or `asset!`, and register every route explicitly. Their Content-Security-Policy
-loads only the stylesheet and the SDK script embedded under `/assets/`, lets the
+loads only the stylesheet and the passkey script embedded under `/assets/`, lets the
 script fetch only auth itself (`connect-src 'self'`), for its passkey ceremonies,
 and lets forms post only to auth and to where they redirect, since browsers apply
 `form-action` to a form's redirects: the consent and logout pages' redirect
-targets, or the enabled providers' authorization origins on the sign-in methods
-page, whose link goes on to the provider. A target no policy can name, such as an IP address, gets
+targets, the enabled providers' authorization origins on the sign-in and sign-in
+methods pages, whose forms go on to the provider, and, when a sign-in continues an
+authorization, the client's redirect origin. A target no policy can name, such as an IP address, gets
 a page linking there instead of the `303`. The security layer accepts a
 page's form only from auth's own pages (`BrowserRequest::is_same_origin`): plain
 forms send no CSRF header, and send `Origin: null` under `Referrer-Policy:
@@ -134,15 +139,38 @@ it names a setting. A
 query that does not parse opens nothing, and a form that does not decode changes
 nothing, logging why at debug level.
 
-The SDK script wires the pages' forms by their attributes. It keeps a form marked
-`data-submit-once` from posting twice, and confirms with a passkey before posting
-one marked `data-passkey-confirm`, which a page marks while the session has no
-recent confirmation. A `data-passkey-enroll` form runs the passkey enrollment, then
-posts, so its page says so. A `data-fragment-form` copies the link's fragment into its inputs
-as it posts, so a verification token never reaches the server in a URL. Either
-form's button starts disabled, with a `data-unavailable` note saying why, until
-the script finds it can work. A `data-copy` button copies a value, and a
-`data-replace-url` element makes a page that shows a secret reload by `GET`.
+The sign-in pages (`src/web/login`), `/login` and `/register`, serve signed-out
+browsers, so they are pages of their own rather than `AccountPage`s. Their query,
+`LoginQuery`, is the one auth's pages and flows serialize for every link to them
+(the admin API's invitation link still writes `/register?invitation=` itself); it
+parses field by field, so a bad value drops only itself, never the `transaction` or
+`return_to` it continues. One `Step` comes from the query, the pending social sign-in and the
+session: signing in, signing up, or linking a provider. The server decides where a
+sign-in continues, an authorization or a path, renders it into each form's action,
+and answers the form with it: an authorization continues in-process and goes on
+through the onward page when no policy can name its client. A provider's sign-in for
+such a client links to the provider rather than redirecting there, since a provider
+the user already allowed sends the browser straight back and on to the client. A
+passkey ceremony runs in the browser through the passkey script, then posts the
+form's change: signing in or up changes nothing and continues, and linking while
+signed out links once the sign-in succeeds.
+
+The passkey script (`apps/auth-service/assets/passkey.js`) wires the pages' forms by
+their attributes. It keeps a form marked `data-submit-once` from posting twice, and
+confirms with a passkey before posting one marked `data-passkey-confirm`, which a
+page marks while the session has no recent confirmation. A `data-passkey-sign-in`
+form signs in with a passkey, with its `username` when typed, and a
+`data-passkey-register` form creates the account and its passkey; both then post. A
+`data-passkey-enroll` form runs the passkey enrollment, then posts, so its page says
+so. A `data-fragment-form` copies the link's fragment into its inputs as it posts,
+so a verification token never reaches the server in a URL. A ceremony form's or a
+fragment form's button starts disabled, with a `data-unavailable` note saying why,
+until the script finds it can work. While a ceremony runs, its form's button is
+disabled and says it waits for the passkey, and the form's last error hides. A
+`data-copy` button copies a value, and a `data-replace-url` element makes a page
+that shows a secret reload by `GET`. The script is plain JavaScript, embedded as
+written: `tsc` checks its JSDoc types, and ESLint lints it as it does the browser
+tests.
 
 Administrative operations are methods of `AdminService` (`src/admin/service.rs`);
 the admin API's handlers and the CLI's commands (`src/cli`) are thin adapters that
@@ -166,7 +194,8 @@ on it:
   so these cannot be called for an administrator. Verifying an address is
   authorized by its link's token instead, and takes an optional `Owner`: it refuses
   a browser signed in to another account, and records the owner as the actor when
-  theirs confirms it;
+  theirs confirms it. Signing a browser out is authorized by its session cookie
+  alone: `AccountService::sign_out` takes the request's headers;
 - a `Subject`, for changes an administrator may also make: the owner, or an
   `Operator` with the reason it must give;
 - a `Viewer`, for reads, which need no reason. For an operator,

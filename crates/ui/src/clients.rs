@@ -385,7 +385,7 @@ pub(crate) async fn client_status<'a>(client: ClientRow<'a>) -> Result<impl View
 
 /// A button copying the text of the element whose ID is `target`, named `label` for
 /// screen readers, after the status saying whether it did. It starts hidden; the
-/// SDK shows it once it can write to the clipboard.
+/// passkey script shows it once it can write to the clipboard.
 #[component]
 pub(crate) async fn copy<'a>(target: &'a str, label: &'a str) -> Result<impl View> {
     Ok(view! {
@@ -557,7 +557,8 @@ async fn scope_choices<'a>(chosen: ScopeChoice, scopes: &'a Described<'a>) -> Re
 /// kind, `kind` chosen. Each input is named by its label alone, and described by
 /// its help. The service's `error` shows beside the input of its setting, which
 /// takes the focus, or above the inputs for a setting with no place for one (see
-/// [`FieldError::placed`]). With `confirm`, the SDK confirms with a passkey first.
+/// [`FieldError::placed`]). With `confirm`, the passkey script confirms with a
+/// passkey first.
 #[component]
 pub(crate) async fn client_form<'a>(
     action: &'a str,
@@ -679,8 +680,8 @@ pub(crate) async fn secrets_list<'a>(
 }
 
 /// A client `secret` Piquel just made, shown once, with a button copying it, on
-/// `page`, whose address the SDK puts back so that reloading it gets the page
-/// without the secret; saving it leads on to `next`.
+/// `page`, whose address the passkey script puts back so that reloading it gets
+/// the page without the secret; saving it leads on to `next`.
 #[component]
 pub(crate) async fn secret_panel<'a>(
     secret: &'a Revealed,

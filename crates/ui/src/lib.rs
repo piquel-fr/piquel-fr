@@ -1,4 +1,5 @@
-//! The components and layouts of auth.piquel.fr's server-rendered pages.
+//! The components, layouts and stylesheet of auth.piquel.fr's server-rendered
+//! pages. The admin dashboard serves the stylesheet too, under its own.
 //!
 //! Components render plain data: `piquel-common` identifiers, vocabularies and
 //! events, and plain rows a page fills from what the service returns. They take
@@ -16,7 +17,8 @@
 //! # async fn main() -> topcoat::Result<()> {
 //! let cx = Cx::default();
 //! let html = view! { cx =>
-//!     piquel_ui::document(title: "Sign out", stylesheet: "/assets/style.css", home: "/settings",
+//!     piquel_ui::document(title: "Sign out", stylesheet: "/assets/style.css",
+//!         script: "/assets/passkey.js", home: "/settings",
 //!         piquel_ui::logout(action: "/logout", fields: &[("client_id", "notes")], keep: "/login")
 //!     )
 //! }
@@ -28,6 +30,8 @@
 //! # }
 //! ```
 
+/// Files pages link, embedded under paths naming their content: the stylesheet.
+mod asset;
 /// An OIDC client's status, facts, settings form and secrets, which the console
 /// shows and the admin dashboard will.
 mod clients;
@@ -38,11 +42,14 @@ mod developers;
 mod form;
 /// The document around every page, and the parts pages share.
 mod layout;
+/// The sign-in pages.
+mod login;
 /// The pages of OAuth and `OpenID` Connect flows.
 mod oidc;
 /// The account's settings.
 mod settings;
 
+pub use asset::{Asset, STYLESHEET};
 pub use clients::{
     ClientDraft, ClientRow, ClientStatus, Connection, FieldError, Grace, Revealed, ScopeChoice,
     SecretRow,
@@ -52,9 +59,12 @@ pub use developers::{
     SecretsChange, SecretsState, app_header, app_secrets, app_settings, apps, back_to_apps,
     new_app, overview,
 };
-pub use form::{Alert, Checkbox, Lines, Messages, Notice, OUT_OF_DATE, Query};
+pub use form::{Alert, Checkbox, Lines, Messages, Notice, OUT_OF_DATE, Query, QueryError};
 pub use layout::{Area, Section, Title, account, document, intro, signed_out};
-pub use oidc::{consent, failure, logout, onward};
+pub use login::{
+    CallbackError, LinkKind, LoginChange, LoginQuery, PendingDestination, SignedIn, Step, sign_in,
+};
+pub use oidc::{Onward, consent, failure, logout, onward};
 pub use settings::{
     DeviceChange, DeviceRow, EmailChange, EmailRow, EmailsState, HistoryChange, HistoryPage,
     HistoryRow, HistoryState, Holdings, ProviderRow, SignInChange, SignInState, Tab, addresses,

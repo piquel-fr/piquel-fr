@@ -2,8 +2,8 @@
 //! produced by resource servers and parsed by clients.
 //!
 //! Parameters are written in one fixed order (`error`, `error_description`, `scope`,
-//! `acr_values`, `max_age`, `resource_metadata`) with every value quoted, so both SDKs
-//! produce byte-identical headers. Parsing follows the RFC 9110 §11 grammar: any
+//! `acr_values`, `max_age`, `resource_metadata`) with every value quoted, so every SDK
+//! produces byte-identical headers. Parsing follows the RFC 9110 §11 grammar: any
 //! parameter order, token or quoted values, and other challenges in the same header,
 //! including ones carrying `token68` credentials.
 //!

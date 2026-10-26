@@ -1,6 +1,6 @@
 //! Shared browser-session, passkey confirmation and HTTP trust boundaries.
 
-use crate::routes::{ACCOUNT_PREFIX, oidc, page, passkey, service};
+use crate::routes::{ACCOUNT_PREFIX, oidc, page, service};
 use axum::{
     Json,
     extract::{ConnectInfo, FromRef, FromRequestParts, MatchedPath, Request, State},
@@ -787,13 +787,13 @@ enum Endpoint {
     /// RP-initiated logout, validated by its own hint, which only sends the browser to
     /// confirm on the logout page.
     Logout,
-    /// Account and session JSON APIs, which browsers may call only from auth's own
-    /// pages.
+    /// The account's JSON APIs, which browsers may call only from auth's own pages.
     Account,
-    /// Auth's server-rendered pages, which anyone may navigate to, and the forms they post.
+    /// Auth's server-rendered pages, sign-in included, which anyone may navigate to,
+    /// and the forms they post.
     Page,
-    /// Passkey ceremonies, social sign-in, the frontend's static pages and the other
-    /// auth-origin routes.
+    /// Passkey ceremonies, the providers' callbacks and the other auth-origin
+    /// routes.
     Other,
 }
 
@@ -819,7 +819,6 @@ impl Endpoint {
             service::LIVE | service::READY => Self::Health,
             oidc::AUTHORIZE => Self::Authorize,
             oidc::LOGOUT => Self::Logout,
-            service::CONFIG | passkey::SESSION | passkey::SESSION_LOGOUT => Self::Account,
             // The root and a page's path ending in a slash redirect to a page.
             page::ROOT => Self::Page,
             _ if page::ALL.contains(&path.strip_suffix('/').unwrap_or(path)) => Self::Page,
@@ -856,17 +855,19 @@ impl Endpoint {
 piquel_common::str_enum! {
     /// Independent request budgets persisted under stable category names, so one kind of
     /// traffic from a client cannot exhaust another: a relying party's `UserInfo` calls
-    /// never block its code exchanges, and settings reads never block a sign-in.
+    /// never block its code exchanges, and browsing auth's pages never blocks a passkey
+    /// ceremony or an authorization.
     enum RateCategory {
         /// OAuth credential exchanges and revocation.
         Token = "token",
         /// Bearer-token claim lookups by relying parties.
         UserInfo = "userinfo",
-        /// Settings and browser-session reads and mutations.
+        /// The account JSON APIs' reads and mutations.
         Account = "account",
-        /// Sign-in, authorization, logout and the other auth-origin routes.
+        /// Passkey ceremonies, providers' callbacks, authorization, logout and the
+        /// other auth-origin routes.
         Login = "login",
-        /// Auth's server-rendered pages and the forms they post.
+        /// Auth's server-rendered pages, sign-in included, and the forms they post.
         Page = "page",
     }
 }
@@ -884,21 +885,11 @@ enum CorsGrant {
 /// Who may store a response, and for how long. Handlers choose a class with [`Cached`];
 /// [`HttpSecurity::decorate`] enforces it on every response.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-#[cfg_attr(
-    not(any(embedded_frontend, test)),
-    expect(
-        dead_code,
-        reason = "only the embedded frontend's pages are Revalidate"
-    )
-)]
 pub(crate) enum CacheClass {
-    /// Never stored: APIs, OAuth, errors and every response without a class.
+    /// Never stored: pages, APIs, OAuth, errors and every response without a class.
     NoStore,
     /// Content-addressed build assets, which any cache may keep for a year.
     Immutable,
-    /// Pages and their unhashed files: browsers keep them and revalidate them on every
-    /// use, so a deploy shows at once; shared caches never store them.
-    Revalidate,
     /// Public, credential-free data, the same for every caller and readable from any
     /// origin. Its route must accept any `Origin` and never read the session.
     Public { max_age: StdDuration },
@@ -906,11 +897,11 @@ pub(crate) enum CacheClass {
 
 impl CacheClass {
     /// The class a response keeps: its handler's, unless it sets a cookie or is
-    /// anything but a success or a revalidation.
+    /// anything but a success.
     fn enforced(response: &Response) -> Self {
         match response.extensions().get::<Self>() {
             Some(&class)
-                if matches!(response.status(), StatusCode::OK | StatusCode::NOT_MODIFIED)
+                if response.status() == StatusCode::OK
                     && !response.headers().contains_key(header::SET_COOKIE) =>
             {
                 class
@@ -924,7 +915,6 @@ impl CacheClass {
         HeaderValue::from_static(match self {
             Self::NoStore => "no-store",
             Self::Immutable => "public, max-age=31536000, immutable",
-            Self::Revalidate => "private, no-cache",
             Self::Public { max_age } => {
                 // Digits and fixed text always form a valid header value.
                 return HeaderValue::try_from(format!("public, max-age={}", max_age.as_secs()))
@@ -1240,7 +1230,7 @@ impl HttpSecurity {
         let grant = match class {
             CacheClass::NoStore => grant,
             CacheClass::Public { .. } => Some(CorsGrant::Public),
-            CacheClass::Immutable | CacheClass::Revalidate => None,
+            CacheClass::Immutable => None,
         };
         let headers = response.headers_mut();
         // Replaces any handler value: only the class decides.

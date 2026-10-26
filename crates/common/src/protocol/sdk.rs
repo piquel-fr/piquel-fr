@@ -1,7 +1,7 @@
-//! Error codes shared by the Rust and TypeScript SDKs, and the shape of the expected
-//! errors in `tests/sdk-vectors`. Each SDK error exposes one
-//! [`SdkError`](crate::protocol::sdk::SdkError), so both SDKs report a given failure with the
-//! same code and reason.
+//! Error codes every SDK shares, and the shape of the expected errors in
+//! `tests/sdk-vectors`. Each SDK error exposes one
+//! [`SdkError`](crate::protocol::sdk::SdkError), so every SDK reports a given failure with
+//! the same code and reason.
 
 use serde::{Deserialize, Serialize};
 

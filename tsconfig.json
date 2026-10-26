@@ -13,5 +13,5 @@
     "verbatimModuleSyntax": true,
     "isolatedModules": true
   },
-  "include": ["*.js", "*.ts", "packages/*/src/**/*.ts", "tests/browser/**/*.ts"]
+  "include": ["*.js", "*.ts", "tests/browser/**/*.ts"]
 }

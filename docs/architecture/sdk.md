@@ -1,16 +1,15 @@
 # SDK design
 
-Applications integrate with auth.piquel.fr through two public SDKs, one for Rust and
-one for TypeScript. Both follow this document, and both pass the shared vectors in
-[`tests/sdk-vectors`](../../tests/sdk-vectors/README.md), so a token or challenge one
-SDK accepts is accepted by the other.
+Applications integrate with auth.piquel.fr through its Rust SDK, `piquel-auth`, or
+any OpenID Connect library. The SDK follows this document and passes the shared
+vectors in [`tests/sdk-vectors`](../../tests/sdk-vectors/README.md); an SDK in another
+language would do the same, so every SDK accepts and rejects the same tokens and
+challenges.
 
 | Path | Package | Published | Role |
 | --- | --- | --- | --- |
 | `crates/common` | `piquel-common` | yes | Shared types; with no features, the IDs and wire types shared by auth and the Rust SDK |
 | `crates/auth-sdk` | `piquel-auth` | yes | Rust SDK; the `axum` feature adds the axum integration |
-| `packages/auth` | `@piquel/auth` | yes | TypeScript SDK; `@piquel/auth/sveltekit` for SvelteKit |
-| `packages/auth-sdk` | `@piquel/auth-sdk` | no | First-party package for auth's own pages: auth-web, and the script of the server-rendered ones |
 | `tests/sdk-vectors` | none | no | Shared test vectors |
 
 ## Wire types
@@ -32,8 +31,8 @@ its contract:
 - `sdk`: the error codes below.
 
 Auth issues tokens and documents by serializing these types, and the Rust SDK
-deserializes them, so the two cannot disagree. The TypeScript SDK mirrors them and
-is held to them by the vectors.
+deserializes them, so the two cannot disagree. An SDK in another language mirrors
+them and is held to them by the vectors.
 
 ## Configuration
 
@@ -50,7 +49,7 @@ older SDKs.
 - A **resource** adds its identifier, which is the `aud` it accepts, and the scopes
   it understands.
 
-The SDKs take an injectable clock, so tests and the vectors can pin time, and an
+The SDK takes an injectable clock, so tests and the vectors can pin time, and an
 injectable HTTP client.
 
 ## Token validation
@@ -60,7 +59,7 @@ Checks run in this order, and the first failure is reported. Each failure is an
 
 1. The token is a compact JWS of three base64url segments, at most 16 KiB, with a
    JSON header (`malformed`).
-2. The header has no `crit`: the SDKs understand no JWS extensions, so a critical one
+2. The header has no `crit`: the SDK understands no JWS extensions, so a critical one
    must be refused (RFC 7515 §4.1.11) (`unsupported_critical_header`).
 3. `typ` is `at+jwt` for access tokens (RFC 9068), `JWT` for ID tokens or
    `logout+jwt` for logout tokens, as auth issues them, compared case-insensitively
@@ -77,7 +76,7 @@ Checks run in this order, and the first failure is reported. Each failure is an
 8. `iss` equals the issuer exactly (`issuer_mismatch`).
 9. `aud` contains the expected value: the resource for access tokens, the client
    for ID and logout tokens. An ID or logout token's `aud` must name no other
-   client, since the SDKs trust no other audience (OIDC Core §3.1.3.7)
+   client, since the SDK trusts no other audience (OIDC Core §3.1.3.7)
    (`wrong_audience`).
 10. Time, with a 30-second leeway, matching auth's own `iat` skew:
    - expired when `now >= exp + 30` (`expired`);
@@ -98,7 +97,7 @@ own categories.
 
 ## Signing keys
 
-The SDKs cache the issuer's key set:
+The SDK caches the issuer's key set:
 
 - On an unknown `kid`, refetch once, then fail with `unknown_key` if the key is
   still missing.
@@ -119,13 +118,13 @@ with any JWKS URL, so auth also uses it for Google.
 ## Scopes
 
 Scopes are space-separated strings on the wire (RFC 6749 §3.3), and each token is
-printable ASCII without spaces, `"` or `\`. Each SDK types them: Rust declares an
-application's scopes once with a macro, so a required scope is a type and a
-misspelled scope does not compile. TypeScript uses string literal types.
+printable ASCII without spaces, `"` or `\`. Each SDK types them: the Rust SDK
+declares an application's scopes once with a macro, so a required scope is a type
+and a misspelled scope does not compile.
 
 ## Errors
 
-Every SDK error has a category and, for most categories, a reason. Both SDKs expose
+Every SDK error has a category and, for most categories, a reason. Every SDK exposes
 the same values, listed in `piquel_common::protocol::sdk`.
 
 | Category | Meaning | Reasons |
@@ -152,7 +151,7 @@ On a resource server, each error maps to one `WWW-Authenticate: Bearer` challeng
 
 The parameters are always written in the order `error`, `error_description`,
 `scope`, `acr_values`, `max_age`, `resource_metadata`, with every value quoted, so
-both SDKs produce identical headers. `error_description` is printable ASCII without
+every SDK produces identical headers. `error_description` is printable ASCII without
 `"` or `\` (RFC 6750 §3), which also keeps it from breaking the header. Parsers
 follow the RFC 9110 §11 grammar: any parameter order, token or quoted values, and
 other challenges in the same header, including `token68` ones. A header that breaks
@@ -181,14 +180,14 @@ Login uses the authorization code flow with S256 PKCE, `state` and `nonce`:
    the login's step-up requirement (`insufficient_user_authentication`), so a
    step-up login that falls short fails instead of being asked for again.
 
-The SDKs never send the `audience` parameter auth accepts today; auth then uses the
+The SDK never sends the `audience` parameter auth accepts today; auth then uses the
 client's default resource. They will send `resource` (RFC 8707) once auth supports
 it.
 
-Browser tokens stay in memory. Server-side apps keep tokens in a server-side session
-and give the browser only a random session key, in a `__Host-` cookie that is
-`Secure`, `HttpOnly` and `SameSite=Lax`. Every sign-in starts a session under a
-fresh key. Refresh tokens never reach the browser.
+Server-side apps keep tokens in a server-side session and give the browser only a
+random session key, in a `__Host-` cookie that is `Secure`, `HttpOnly` and
+`SameSite=Lax`. Every sign-in starts a session under a fresh key. Refresh tokens
+never reach the browser.
 
 Applications choose where sessions live by implementing a small storage backend:
 load, an insert that stores only where no record is, a compare-and-swap replace, and
@@ -268,7 +267,7 @@ in the application's backend, with the same four operations:
 What an operation needs from the user's authentication is a
 `step_up::StepUpRequirement`: an `acr` to meet, a maximum age of `auth_time`, or
 both. Auth checks its own account APIs and authorization requests with the same
-type's `check`, and the SDKs check tokens with it too:
+type's `check`, and the SDK checks tokens with it too:
 
 - `acr` classes are ordered: `phr` meets every class, and
   `urn:piquel:acr:social` meets only itself. A token without `acr`, or with one the
@@ -318,5 +317,5 @@ string, so it still yields the rest of the error body or challenge.
 the parsed value or the expected error code. The generator,
 `crates/common/tests/sdk_vectors.rs`, builds them from fixed test keys and the
 shared claim types and signs them with auth's signer. `just sdk-vectors` rewrites
-them, and `just test`, and so `just validate`, fails when they are stale. Both SDK
-test suites run every case.
+them, and `just test`, and so `just validate`, fails when they are stale. Every
+SDK's test suite runs every case.

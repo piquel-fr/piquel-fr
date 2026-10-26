@@ -256,6 +256,17 @@ str_enum! {
     }
 }
 
+impl Provider {
+    /// Its name, as pages show it.
+    #[must_use]
+    pub const fn name(self) -> &'static str {
+        match self {
+            Self::GitHub => "GitHub",
+            Self::Google => "Google",
+        }
+    }
+}
+
 /// An invalid protocol value received at a trust boundary.
 #[derive(Debug, Clone, Error, PartialEq, Eq)]
 #[error("invalid {kind}")]

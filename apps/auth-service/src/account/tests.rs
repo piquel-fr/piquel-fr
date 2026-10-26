@@ -10,13 +10,16 @@ use crate::{
     config::EmailConfig,
     passkey::PasskeyError,
     security::ApiError,
-    security::CONFIRMATION_MAX_AGE,
-    tests::{AUTH_ORIGIN, Browser, Replicas, change, registration, sign_out, until_blocked},
+    security::{BrowserCookie, CONFIRMATION_MAX_AGE},
+    tests::{
+        AUTH_ORIGIN, Browser, Replicas, change, pending_sign_in, registration, sign_out,
+        until_blocked, unusable_passkey,
+    },
 };
 use axum::{
     Router,
     extract::{FromRef, Path, State},
-    http::Method,
+    http::{HeaderMap, Method},
     routing::{delete, post},
 };
 use chrono::{Duration, Utc};
@@ -29,7 +32,6 @@ use piquel_common::{
 use piquel_crypto::Secret;
 use piquel_repository::{InsertExternalIdentity, InsertPasskey};
 use piquel_repository::{InsertVerifiedEmail, PendingFederation};
-use serde_json::json;
 use std::{fmt::Debug, mem::discriminant};
 
 /// The reason the scenarios give.
@@ -68,10 +70,8 @@ impl Fixture {
             tx.passkeys()
                 .insert(&InsertPasskey {
                     id,
-                    credential_id: TokenId::new().to_string().into_bytes(),
-                    user_id: account.user_id,
-                    credential: json!({}),
                     friendly_name: format!("Key {index}"),
+                    ..unusable_passkey(account.user_id)
                 })
                 .await
                 .expect("passkey");
@@ -576,9 +576,9 @@ struct Confirmation {
     passkey: PasskeyId,
     /// The account's confidential client.
     client: ClientId,
-    /// The cookie secret of a browser holding evidence of another identity to
-    /// link, which the owner's session started.
-    pending: Secret,
+    /// The headers of a browser holding evidence of another identity to link, which
+    /// the owner's session started.
+    pending: HeaderMap,
 }
 
 impl FromRef<Confirmation> for Database {
@@ -627,17 +627,11 @@ impl Confirmation {
         database
             .federation()
             .insert_pending(&PendingFederation {
-                id: TokenId::new(),
-                browser_digest: pending.digest().as_bytes().to_vec(),
                 provider: Provider::Google,
                 issuer: "https://accounts.google.com".into(),
-                subject: TokenId::new().to_string(),
-                email: None,
-                display_name: "Linked".into(),
-                return_to: "/".into(),
                 link_user_id: Some(user),
                 link_session_id: Some(social.session_id),
-                expires_at: Utc::now() + Duration::minutes(5),
+                ..pending_sign_in(&pending)
             })
             .await
             .expect("pending link");
@@ -648,7 +642,9 @@ impl Confirmation {
             address: addresses[1],
             passkey: passkeys[0],
             client: client.id,
-            pending,
+            pending: Browser::signed_out()
+                .with_cookie(BrowserCookie::FederationPending, &pending.encoded())
+                .headers(),
         };
         (state, social)
     }

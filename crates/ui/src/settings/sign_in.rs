@@ -1,6 +1,6 @@
 //! Passkeys and social sign-in.
 
-use crate::form::{Query, change_form, hidden, open};
+use crate::form::{Ceremony, Query, change_form, open, passkey_form, passkey_kind};
 use piquel_common::{
     PasskeyId, Provider,
     protocol::api::{Identity, Passkey},
@@ -39,8 +39,8 @@ pub enum SignInChange {
         /// The provider.
         provider: Provider,
     },
-    /// Shows that the SDK just added a passkey, through the account API: this
-    /// changes nothing.
+    /// Shows that the passkey script just added a passkey, through the account API:
+    /// this changes nothing.
     Enrolled {},
 }
 
@@ -73,14 +73,6 @@ pub struct ProviderRow<'a> {
     /// Whether Piquel offers it now. A linked provider since disabled is still
     /// listed, so it can be unlinked.
     pub enabled: bool,
-}
-
-/// A provider's name.
-pub(super) const fn provider_name(provider: Provider) -> &'static str {
-    match provider {
-        Provider::GitHub => "GitHub",
-        Provider::Google => "Google",
-    }
 }
 
 /// The sign-in methods page: the account's `passkeys`, and the social sign-in
@@ -203,34 +195,25 @@ async fn passkey_row<'a>(
     })
 }
 
-/// Adding a passkey, which the SDK runs: the button stays disabled, and says so,
-/// until it finds the browser can create passkeys. Once added, the SDK posts the
-/// form to `page`, which says so. On Android, it offers Google Password Manager.
+/// Adding a passkey, which the passkey script runs, then posts the form to `page`,
+/// which says so. On Android, it offers Google Password Manager.
 #[component]
 async fn enroll(page: &str, android: bool) -> Result<impl View> {
     Ok(view! {
-        <form class="stack" method="post" action=(page) data-passkey-enroll="">
-            hidden(fields: SignInChange::Enrolled {})
+        passkey_form(
+            action: page,
+            ceremony: Ceremony::Enroll,
+            change: SignInChange::Enrolled {},
+            label: "Add a passkey",
+            class: "secondary full",
             <label>
                 "New passkey name"
                 <input name="friendly_name" maxlength="80" required="" autocomplete="off">
             </label>
             if android {
-                <label>
-                    "Save this passkey with"
-                    <select name="passkey_kind">
-                        <option value="standard">"Passkey or security key"</option>
-                        <option value="google_password_manager">"Google Password Manager on this device"</option>
-                    </select>
-                </label>
-                <p class="help">"Choose Google Password Manager only if it is available on this Android device."</p>
+                passkey_kind()
             }
-            <p class="notice error" role="alert" data-passkey-error="" hidden=""></p>
-            <p class="help" data-unavailable="">
-                "Adding a passkey needs a browser that supports them, with scripts allowed."
-            </p>
-            <button class="secondary full" disabled="">"Add a passkey"</button>
-        </form>
+        )
     })
 }
 
@@ -277,7 +260,7 @@ async fn provider_row<'a>(
     confirmed: bool,
 ) -> Result<impl View> {
     let provider = row.provider;
-    let name = provider_name(provider);
+    let name = provider.name();
     Ok(view! {
         <div class="row between">
             <div>

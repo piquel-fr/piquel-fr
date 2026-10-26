@@ -5,9 +5,8 @@ use super::{Failure, WebApplication};
 use crate::{
     oidc::{AuthorizationDecision, LogoutQuery, OAuthError, TransactionQuery},
     routes,
-    security::BrowserCookie,
 };
-use piquel_ui::{Area, Title};
+use piquel_ui::{Area, LoginQuery, Query, Title};
 use std::slice;
 use topcoat::{
     Error,
@@ -15,7 +14,7 @@ use topcoat::{
     router::{Body, StatusCode, request::headers, response::Response},
     view::view,
 };
-use url::{Url, form_urlencoded};
+use url::Url;
 
 impl WebApplication {
     /// `GET /authorize?transaction=…`: what the application asks to receive, and the
@@ -92,11 +91,10 @@ impl WebApplication {
         let web = app_context::<Self>(cx);
         let context = Self::context(cx)?;
         let request: LogoutQuery = Self::form(cx, body).await?;
-        let destination = web.oidc.end_session(context, headers(cx), &request).await?;
+        let (destination, signed_out) =
+            web.oidc.end_session(context, headers(cx), &request).await?;
         let mut response = web.onward(cx, Title::Logout.as_str(), &destination).await?;
-        BrowserCookie::Session
-            .clear_on(&mut response)
-            .map_err(Error::from)?;
+        signed_out.clear_on(&mut response).map_err(Error::from)?;
         Ok(response)
     }
 }
@@ -105,12 +103,16 @@ impl Failure {
     /// Explains `error` with a link to sign in again, which then continues the
     /// pending authorization `transaction`.
     fn signing_in(error: OAuthError, transaction: &str) -> Self {
-        let query = form_urlencoded::Serializer::new(String::new())
-            .append_pair("transaction", transaction)
-            .finish();
-        Self::Explained {
-            error,
-            link: Some(("Sign in again", format!("{}?{query}", routes::page::LOGIN))),
+        let query = LoginQuery {
+            transaction: Some(transaction.to_owned()),
+            ..LoginQuery::default()
+        };
+        match query.on(routes::page::LOGIN) {
+            Ok(sign_in) => Self::Explained {
+                error,
+                link: Some(("Sign in again", sign_in)),
+            },
+            Err(unwritten) => unwritten.into(),
         }
     }
 }

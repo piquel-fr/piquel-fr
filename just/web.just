@@ -9,17 +9,8 @@ fmt:
 fmt-check:
     @pnpm format:check
 
-# Type-aware linting reads SvelteKit's generated tsconfig files.
-lint: generate
+lint:
     @pnpm lint
-
-# Refresh SvelteKit's generated types/config. Cargo generates its own asset table.
-generate:
-    @pnpm --filter @piquel/auth-web -r exec svelte-kit sync
-
-# The pages auth embeds: auth-web, and the SDK script its server-rendered pages use.
-build:
-    @pnpm --filter "@piquel/auth-web..." build
 
 # Requires a running auth service; see tests/browser/README.md.
 [positional-arguments]

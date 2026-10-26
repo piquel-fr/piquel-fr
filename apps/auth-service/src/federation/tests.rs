@@ -4,9 +4,13 @@ use super::{
     providers::{GoogleClaims, GoogleProtocol, IdentityStrategy, ProviderEndpoints},
     *,
 };
-use crate::account::AccountApplication;
+use crate::{
+    account::{AccountApplication, AccountError, AccountService},
+    tests::{pending_sign_in, unusable_passkey},
+};
 use axum::{
-    body::{Body, to_bytes},
+    Json,
+    body::Body,
     http::{HeaderValue, Method, Request, StatusCode, header},
     routing::post,
 };
@@ -16,8 +20,7 @@ use piquel_common::{Handle, protocol::jwt::TokenType};
 use piquel_crypto::Rs256Key;
 use piquel_crypto::Secret;
 use piquel_repository::{
-    DatabaseConfig, DatabaseTransaction, InsertExternalIdentity, InsertPasskey, InsertUser,
-    InsertVerifiedEmail,
+    DatabaseConfig, DatabaseTransaction, InsertExternalIdentity, InsertUser, InsertVerifiedEmail,
 };
 use std::collections::HashMap;
 use tower::ServiceExt;
@@ -141,38 +144,37 @@ impl TestApp {
     async fn callback(&self) -> Response {
         self.callback_from(None).await
     }
-    /// Runs [`Self::callback`] in a browser that may hold a `session` cookie pair.
-    async fn callback_from(&self, session: Option<&str>) -> Response {
-        let router = self.routes();
-        let response = router
-            .clone()
-            .oneshot(TestApp::request(
-                Method::POST,
-                "/login/github/start",
-                None,
-                &serde_json::json!({}),
-            ))
+    /// Starts a GitHub sign-in returning to `return_to`, as the sign-in page does,
+    /// and returns the provider's `state` and the browser's flow cookie pair.
+    async fn start(&self, return_to: &str) -> (String, String) {
+        let (url, FlowCookie(Flow::Started(browser))) = self
+            .app
+            .start_sign_in(Provider::GitHub, return_to)
             .await
-            .expect("start");
-        let mut cookie = response.headers()[header::SET_COOKIE]
-            .to_str()
-            .expect("cookie")
-            .split(';')
-            .next()
-            .expect("pair")
-            .to_owned();
-        if let Some(session) = session {
-            cookie = format!("{cookie}; {session}");
-        }
-        let body = TestApp::json(response).await;
-        let url = Url::parse(body["redirect_url"].as_str().expect("redirect")).expect("url");
+            .expect("start")
+        else {
+            unreachable!("starting a sign-in sets the flow's cookie")
+        };
         let state = url
             .query_pairs()
             .find(|(name, _)| name == "state")
             .expect("state")
             .1
             .into_owned();
-        router
+        let cookie = format!(
+            "{}={}",
+            BrowserCookie::Federation.as_str(),
+            browser.encoded()
+        );
+        (state, cookie)
+    }
+    /// Runs [`Self::callback`] in a browser that may hold a `session` cookie pair.
+    async fn callback_from(&self, session: Option<&str>) -> Response {
+        let (state, mut cookie) = self.start(DEFAULT_RETURN_TO).await;
+        if let Some(session) = session {
+            cookie = format!("{cookie}; {session}");
+        }
+        self.routes()
             .oneshot(TestApp::request(
                 Method::GET,
                 &format!("/login/github/callback?state={state}&code=mock-code"),
@@ -217,13 +219,7 @@ impl TestApp {
     async fn key(&self, tx: &mut DatabaseTransaction<'_>, user_id: UserId) {
         // Federation only checks key presence; cryptographic ceremony coverage lives in passkey tests.
         tx.passkeys()
-            .insert(&InsertPasskey {
-                id: piquel_common::PasskeyId::new(),
-                credential_id: TokenId::new().to_string().into_bytes(),
-                user_id,
-                credential: serde_json::json!({}),
-                friendly_name: "Existing key".into(),
-            })
+            .insert(&unusable_passkey(user_id))
             .await
             .expect("key");
     }
@@ -235,20 +231,9 @@ impl TestApp {
     ) -> (PendingFederation, HeaderMap) {
         let secret = Secret::generate().expect("browser secret");
         let pending = PendingFederation {
-            id: TokenId::new(),
-            browser_digest: secret.digest().as_bytes().to_vec(),
-            provider: piquel_common::Provider::GitHub,
-            issuer: ProviderEndpoints::new(Provider::GitHub, &reqwest::Client::new())
-                .expect("GitHub facts")
-                .issuer
-                .into(),
-            subject: TokenId::new().to_string(),
             email: email.map(str::to_owned),
-            display_name: "New social account".into(),
-            return_to: "/".into(),
             link_user_id: owner,
-            link_session_id: None,
-            expires_at: Utc::now() + Duration::minutes(5),
+            ..pending_sign_in(&secret)
         };
         self.app
             .database
@@ -256,17 +241,12 @@ impl TestApp {
             .insert_pending(&pending)
             .await
             .expect("pending identity");
-        let mut headers = HeaderMap::new();
-        headers.insert(
-            header::COOKIE,
-            HeaderValue::from_str(&format!(
-                "{}={}",
-                BrowserCookie::FederationPending.as_str(),
-                secret.encoded()
-            ))
-            .expect("cookie"),
+        let cookie = format!(
+            "{}={}",
+            BrowserCookie::FederationPending.as_str(),
+            secret.encoded()
         );
-        (pending, headers)
+        (pending, Self::cookies(&cookie))
     }
     /// Creates a social browser session, optionally confirmed with a passkey now.
     async fn session(&self, user_id: UserId, confirmed: bool) -> (SessionId, String) {
@@ -281,9 +261,7 @@ impl TestApp {
         .expect("session");
         let raw = format!("{}={}", BrowserCookie::Session.as_str(), cookie.encoded());
         tx.commit().await.expect("commit");
-        let mut headers = HeaderMap::new();
-        headers.insert(header::COOKIE, HeaderValue::from_str(&raw).expect("cookie"));
-        let session = security::Session::required(&self.app.database, &headers)
+        let session = security::Session::required(&self.app.database, &Self::cookies(&raw))
             .await
             .expect("active session");
         if confirmed {
@@ -315,16 +293,38 @@ impl TestApp {
             .await
             .expect("known identity");
     }
-    /// Finds the active session a cookie pair names.
-    async fn active(&self, cookie: &str) -> Option<StoredSession> {
+    /// The headers of a browser sending the `cookie` pairs.
+    fn cookies(cookie: &str) -> HeaderMap {
         let mut headers = HeaderMap::new();
         headers.insert(
             header::COOKIE,
             HeaderValue::from_str(cookie).expect("cookie"),
         );
-        security::Session::optional(&self.app.database, &headers)
+        headers
+    }
+    /// Finds the active session a cookie pair names.
+    async fn active(&self, cookie: &str) -> Option<StoredSession> {
+        security::Session::optional(&self.app.database, &Self::cookies(cookie))
             .await
             .expect("session lookup")
+    }
+    /// Links this browser's pending evidence, its `pending` headers, to the account
+    /// of the session `cookie` names, as the sign-in page does.
+    async fn link_pending(
+        &self,
+        cookie: &str,
+        pending: &HeaderMap,
+    ) -> Result<String, AccountError> {
+        let account = AccountService::new(self.app.database.clone());
+        let owner = account
+            .owner(security::RequestContext::TEST, &Self::cookies(cookie))
+            .await
+            .expect("session lookup")
+            .expect("signed in");
+        account
+            .link_identity(&owner, pending)
+            .await
+            .map(|(return_to, _)| return_to)
     }
     /// Borrows Google's replaceable verification facts from the fixture.
     fn google_protocol(&self) -> &GoogleProtocol {
@@ -350,11 +350,6 @@ impl TestApp {
             request = request.header(header::COOKIE, cookie);
         }
         request.body(Body::from(body.to_string())).expect("request")
-    }
-    /// Reads a bounded response body and parses the fixture’s JSON.
-    async fn json(response: Response) -> serde_json::Value {
-        serde_json::from_slice(&to_bytes(response.into_body(), 65536).await.expect("body"))
-            .expect("JSON")
     }
 }
 /// Accepts auth paths only, and rejects duplicated pending-browser cookies.
@@ -400,32 +395,7 @@ fn return_destinations_and_browser_bindings_are_strict() {
 async fn provider_mock_callback_requires_browser_state_and_stays_pending() {
     let test = TestApp::new().await;
     let router = test.routes();
-    let response = router
-        .clone()
-        .oneshot(TestApp::request(
-            Method::POST,
-            "/login/github/start",
-            None,
-            &serde_json::json!({}),
-        ))
-        .await
-        .expect("start");
-    assert_eq!(response.status(), StatusCode::OK);
-    let cookie = response.headers()[header::SET_COOKIE]
-        .to_str()
-        .expect("cookie")
-        .split(';')
-        .next()
-        .expect("pair")
-        .to_owned();
-    let body = TestApp::json(response).await;
-    let url = Url::parse(body["redirect_url"].as_str().expect("redirect")).expect("url");
-    let state = url
-        .query_pairs()
-        .find(|(key, _)| key == "state")
-        .expect("state")
-        .1
-        .into_owned();
+    let (state, cookie) = test.start(DEFAULT_RETURN_TO).await;
     let path = format!("/login/github/callback?code=mock-code&state={state}");
     let response = router
         .clone()
@@ -553,28 +523,6 @@ async fn onboarding_commits_only_with_first_key_and_browser_and_never_claims_exi
     tx.rollback().await.expect("rollback");
 }
 
-/// Linking asks an unconfirmed session to confirm before anything else, so the
-/// browser confirms first: even without this browser's pending evidence, the
-/// answer is `step_up_required`.
-#[tokio::test]
-#[ignore = "requires TEST_DATABASE_URL"]
-async fn linking_asks_for_confirmation_first() {
-    let test = TestApp::new().await;
-    let user = test.user(None, true).await;
-    let (_, cookie) = test.session(user, false).await;
-    let response = test
-        .routes()
-        .oneshot(TestApp::request(
-            Method::POST,
-            "/login/social/link",
-            Some(&cookie),
-            &serde_json::json!({}),
-        ))
-        .await
-        .expect("link");
-    security::tests::assert_step_up_required(response).await;
-}
-
 /// Linking and unlinking require the intended account’s recent passkey confirmation;
 /// unlink frees the subject and preserves email.
 #[expect(
@@ -593,58 +541,48 @@ async fn linking_requires_target_confirmation_and_unlink_releases_subject_withou
     let (_, other_cookie) = test.session(other, true).await;
     let (target_session, target_cookie) = test.session(target, false).await;
     let (other_session, _) = test.session(target, false).await;
-    let pending_cookie = pending_headers[header::COOKIE]
-        .to_str()
-        .expect("pending cookie");
+    let refused = test.link_pending(&other_cookie, &pending_headers).await;
+    assert!(
+        matches!(
+            refused,
+            Err(AccountError::Identity(FederationError::LinkAccountMismatch))
+        ),
+        "another account's confirmation cannot link: {refused:?}"
+    );
+    // Confirmation comes first, before the browser's pending cookie is read.
+    for pending in [&pending_headers, &HeaderMap::new()] {
+        let refused = test.link_pending(&target_cookie, pending).await;
+        assert!(
+            matches!(
+                refused,
+                Err(AccountError::Owner(SessionError::StepUpRequired { .. }))
+            ),
+            "an unconfirmed session cannot link: {refused:?}"
+        );
+    }
     let router = test.routes();
     let response = router
         .clone()
         .oneshot(TestApp::request(
-            Method::POST,
-            "/login/social/link",
-            Some(&format!("{other_cookie}; {pending_cookie}")),
+            Method::DELETE,
+            "/account/social-identities/github",
+            Some(&target_cookie),
             &serde_json::json!({}),
         ))
         .await
-        .expect("link rejection");
-    assert_eq!(
-        response.status(),
-        StatusCode::FORBIDDEN,
-        "another account's confirmation cannot link"
-    );
-    for (method, path) in [
-        (Method::POST, "/login/social/link"),
-        (Method::DELETE, "/account/social-identities/github"),
-    ] {
-        let response = router
-            .clone()
-            .oneshot(TestApp::request(
-                method,
-                path,
-                Some(&format!("{target_cookie}; {pending_cookie}")),
-                &serde_json::json!({}),
-            ))
-            .await
-            .expect("unconfirmed rejection");
-        security::tests::assert_step_up_required(response).await;
-    }
+        .expect("unconfirmed rejection");
+    security::tests::assert_step_up_required(response).await;
     test.app
         .database
         .sessions()
         .confirm_passkey(target_session, PasskeyId::new(), chrono::Utc::now())
         .await
         .expect("confirm");
-    let response = router
-        .clone()
-        .oneshot(TestApp::request(
-            Method::POST,
-            "/login/social/link",
-            Some(&format!("{target_cookie}; {pending_cookie}")),
-            &serde_json::json!({}),
-        ))
+    let return_to = test
+        .link_pending(&target_cookie, &pending_headers)
         .await
         .expect("link");
-    assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(return_to, pending.return_to);
     assert!(
         test.app
             .database
@@ -1024,31 +962,7 @@ async fn failed_provider_preserves_stored_continuation_and_consumes_state() {
         ("code=", "social_failed"),
         ("", "social_failed"),
     ] {
-        let response = router
-            .clone()
-            .oneshot(TestApp::request(
-                Method::POST,
-                "/login/github/start",
-                None,
-                &serde_json::json!({"return_to":destination}),
-            ))
-            .await
-            .expect("start");
-        let cookie = response.headers()[header::SET_COOKIE]
-            .to_str()
-            .expect("cookie")
-            .split(';')
-            .next()
-            .expect("pair")
-            .to_owned();
-        let body = TestApp::json(response).await;
-        let authorization = Url::parse(body["redirect_url"].as_str().expect("URL")).expect("URL");
-        let state = authorization
-            .query_pairs()
-            .find(|(key, _)| key == "state")
-            .expect("state")
-            .1
-            .into_owned();
+        let (state, cookie) = test.start(destination).await;
         let path = format!(
             "/login/github/callback?{callback_query}&state={state}&return_to=https://evil.example"
         );

@@ -15,8 +15,7 @@ lint:
 audit:
     @cargo deny check advisories licenses
 
-# Build auth-service after the auth pages and SDK script it embeds; pass `--release` for release.
+# Build auth-service; pass `--release` for release.
 [positional-arguments]
 build *ARGS:
-    @just web build
     @cargo build --locked -p auth-service "$@"

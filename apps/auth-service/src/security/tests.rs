@@ -1,7 +1,7 @@
 //! Focused persistence and security contract tests.
 
 use super::*;
-use crate::routes::federation;
+use crate::routes::{federation, passkey};
 use crate::tests::Replicas;
 use axum::{Router, body::Body, http::Request as HttpRequest, middleware, routing::any};
 use piquel_common::{
@@ -107,7 +107,6 @@ impl SecurityFixture {
             "/oauth/revoke",
             "/oidc/userinfo",
             "/oidc/logout",
-            "/session",
         ] {
             router = router.route(path, any(|| async { StatusCode::ACCEPTED }));
         }
@@ -526,7 +525,7 @@ async fn reads_exhaust_their_own_budget() {
     assert_eq!(response.headers()[header::RETRY_AFTER], "60");
     assert_eq!(
         fixture
-            .request(Method::GET, "/session", None, false)
+            .request(Method::GET, passkey::LIST, None, false)
             .await
             .status(),
         StatusCode::ACCEPTED
@@ -539,7 +538,7 @@ async fn reads_exhaust_their_own_budget() {
 async fn replicas_share_one_budget() {
     let replicas = Replicas::new().await;
     let status = async |router: &Router| {
-        let request = HttpRequest::get("/session")
+        let request = HttpRequest::get(passkey::LIST)
             .body(Body::empty())
             .expect("request");
         router
@@ -620,10 +619,10 @@ fn routes_doing_real_work_have_budgets() {
         (oidc::LOGOUT, Some(RateCategory::Login)),
         (oidc::AUTHORIZE, Some(RateCategory::Login)),
         (oidc::AUTHORIZE_RESUME, Some(RateCategory::Login)),
-        (passkey::SESSION, Some(RateCategory::Account)),
         (passkey::LIST, Some(RateCategory::Account)),
         (federation::IDENTITIES, Some(RateCategory::Account)),
-        (federation::PENDING, Some(RateCategory::Login)),
+        (passkey::AUTHENTICATE_START, Some(RateCategory::Login)),
+        (federation::CALLBACK, Some(RateCategory::Login)),
     ] {
         assert_eq!(Endpoint::classify(path).rate_category(), budget, "{path}");
     }
@@ -973,12 +972,11 @@ fn client() -> CorsGrant {
     CorsGrant::Client(HeaderValue::from_static("https://external.example"))
 }
 
-/// Each class sends its own `Cache-Control`, on success and on revalidation.
+/// Each class sends its own `Cache-Control`.
 #[test]
 fn cached_responses_carry_their_class() {
     for (class, cache_control) in [
         (CacheClass::Immutable, "public, max-age=31536000, immutable"),
-        (CacheClass::Revalidate, "private, no-cache"),
         (
             CacheClass::Public {
                 max_age: std::time::Duration::from_secs(3600),
@@ -986,18 +984,16 @@ fn cached_responses_carry_their_class() {
             "public, max-age=3600",
         ),
     ] {
-        for status in [StatusCode::OK, StatusCode::NOT_MODIFIED] {
-            let response = decorated(Cached(class, status), None);
-            assert_eq!(
-                response.headers()[header::CACHE_CONTROL],
-                cache_control,
-                "{class:?} {status}"
-            );
-        }
+        let response = decorated(Cached(class, StatusCode::OK), None);
+        assert_eq!(
+            response.headers()[header::CACHE_CONTROL],
+            cache_control,
+            "{class:?}"
+        );
     }
 }
 
-/// Only a classed success or revalidation without cookies may be stored: anything
+/// Only a classed success without cookies may be stored: anything
 /// else is `no-store`, whatever the handler set.
 #[test]
 fn unclassed_errors_and_cookie_responses_are_not_stored() {
@@ -1016,7 +1012,8 @@ fn unclassed_errors_and_cookie_responses_are_not_stored() {
 }
 
 /// Public data is readable from every origin without credentials, so one cached copy
-/// serves them all; a page has no CORS headers, even for an approved origin.
+/// serves them all; an embedded file has no CORS headers, even for an approved
+/// origin.
 #[test]
 fn cached_responses_are_the_same_for_every_origin() {
     let public = CacheClass::Public {
@@ -1029,11 +1026,12 @@ fn cached_responses_are_the_same_for_every_origin() {
         assert!(!headers.contains_key(header::ACCESS_CONTROL_ALLOW_CREDENTIALS));
         assert!(!headers.contains_key(header::VARY));
     }
-    for class in [CacheClass::Revalidate, CacheClass::Immutable] {
-        let response = decorated(Cached(class, StatusCode::OK), Some(client()));
-        let headers = response.headers();
-        assert!(!headers.contains_key(header::ACCESS_CONTROL_ALLOW_ORIGIN));
-        assert!(!headers.contains_key(header::ACCESS_CONTROL_ALLOW_CREDENTIALS));
-        assert!(!headers.contains_key(header::VARY));
-    }
+    let response = decorated(
+        Cached(CacheClass::Immutable, StatusCode::OK),
+        Some(client()),
+    );
+    let headers = response.headers();
+    assert!(!headers.contains_key(header::ACCESS_CONTROL_ALLOW_ORIGIN));
+    assert!(!headers.contains_key(header::ACCESS_CONTROL_ALLOW_CREDENTIALS));
+    assert!(!headers.contains_key(header::VARY));
 }

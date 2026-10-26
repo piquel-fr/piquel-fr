@@ -6,21 +6,23 @@ use crate::{
     account::{AccountService, Owner},
     clients::{ClientSettings, NewClient},
     config::{
-        EmailConfig, FederationConfig, OidcConfig, PasskeyConfig, TokenDigestKey, TokenDigestKeys,
+        EmailConfig, FederationConfig, OidcConfig, PasskeyConfig, ProviderConfig, TokenDigestKey,
+        TokenDigestKeys,
     },
     passkey::DecoyKey,
+    routes,
     security::{BrowserCookie, RequestContext, Session},
 };
 use axum::{
     Extension, Router,
     body::{Body, to_bytes},
     extract::ConnectInfo,
-    http::{Method, Request, StatusCode, header},
+    http::{HeaderMap, Method, Request, StatusCode, header},
     response::Response,
 };
 use chrono::{Duration, Utc};
 use piquel_common::{
-    AuthenticationMethod, ClientId, Handle, SessionId, TokenId, UserId,
+    AuthenticationMethod, ClientId, Handle, PasskeyId, Provider, SessionId, TokenId, UserId,
     clients::{
         AllowedScopes, ClientField, ClientKind, ClientOwner, ClientRegistration, PostLogoutUris,
         RedirectUris, ScopeName,
@@ -32,7 +34,8 @@ use piquel_common::{
 use piquel_crypto::{ClientSecret, KeyEncryptionKey, Secret};
 use piquel_repository::{
     Database, DatabaseConfig, DatabaseError, DatabaseTransaction, InsertAuthorizationCode,
-    InsertRefreshFamily, InsertRefreshToken, InsertUser, SessionAuthentication, SessionScope,
+    InsertPasskey, InsertRefreshFamily, InsertRefreshToken, InsertUser, PendingFederation,
+    SessionAuthentication, SessionScope,
 };
 use serde_json::Value;
 use std::{
@@ -128,6 +131,20 @@ impl Replicas {
         }
     }
 
+    /// Builds both replicas from `config`, with GitHub sign-in enabled.
+    pub(crate) async fn with_github(mut config: AuthConfig) -> Self {
+        let secret = std::env::temp_dir().join(format!("piquel-github-secret-{}", TokenId::new()));
+        std::fs::write(&secret, "secret").expect("provider secret");
+        config
+            .federation
+            .providers
+            .insert(Provider::GitHub, ProviderConfig::test(&secret));
+        // The replicas read the secret as they start.
+        let replicas = Self::of(&config).await;
+        std::fs::remove_file(&secret).expect("provider secret removed");
+        replicas
+    }
+
     /// Connects a new pool to the migrated test database.
     pub(crate) async fn database() -> Database {
         let url = piquel_common::config::Variable::new("TEST_DATABASE_URL")
@@ -146,6 +163,10 @@ impl Replicas {
 
 /// Largest response body [`Browser::call`] and the page tests read.
 pub(crate) const MAX_RESPONSE_BYTES: usize = 256 * 1024;
+/// What a form on one of auth's pages sends: they have `Referrer-Policy: no-referrer`,
+/// so the browser sends `Origin: null`.
+pub(crate) const OWN_PAGE: &[(&str, &str)] =
+    &[("sec-fetch-site", "same-origin"), ("origin", "null")];
 
 /// A browser signed in to a test account, for handler tests.
 pub(crate) struct Browser {
@@ -215,6 +236,20 @@ impl Browser {
         }
     }
 
+    /// This browser, also holding `cookie` with `value`.
+    pub(crate) fn with_cookie(&self, cookie: BrowserCookie, value: &str) -> Self {
+        let pair = format!("{}={value}", cookie.as_str());
+        Self {
+            user_id: self.user_id,
+            session_id: self.session_id,
+            cookie: if self.cookie.is_empty() {
+                pair
+            } else {
+                format!("{}; {pair}", self.cookie)
+            },
+        }
+    }
+
     /// Sends a request to `router` as this browser, with the context
     /// `HttpSecurity` would attach, and returns its status and JSON body.
     pub(crate) async fn call(
@@ -280,13 +315,17 @@ impl Browser {
         Self::dispatch(router, request.body(Body::from(form)).expect("request")).await
     }
 
+    /// The headers this browser sends: its cookies.
+    pub(crate) fn headers(&self) -> HeaderMap {
+        let request = self.request(Method::GET, "/");
+        request.headers_ref().expect("request headers").clone()
+    }
+
     /// The owner this browser's session cookie shows, found from
     /// [`RequestContext::TEST`] as a server-rendered page finds them.
     pub(crate) async fn owner(&self, database: &Database) -> Owner {
-        let request = self.request(Method::GET, "/");
-        let headers = request.headers_ref().expect("request headers");
         AccountService::new(database.clone())
-            .owner(RequestContext::TEST, headers)
+            .owner(RequestContext::TEST, &self.headers())
             .await
             .expect("session lookup")
             .expect("signed in")
@@ -323,6 +362,37 @@ impl Browser {
     /// `router`'s response to `request`.
     async fn dispatch(router: &Router, request: Request<Body>) -> Response {
         router.clone().oneshot(request).await.expect("response")
+    }
+}
+
+/// A passkey of `user_id`'s account whose credential no ceremony can use, for the
+/// tests that need only an account to have one.
+pub(crate) fn unusable_passkey(user_id: UserId) -> InsertPasskey {
+    InsertPasskey {
+        id: PasskeyId::new(),
+        credential_id: TokenId::new().to_string().into_bytes(),
+        user_id,
+        credential: serde_json::json!({}),
+        friendly_name: "Existing key".into(),
+    }
+}
+
+/// GitHub evidence of a new subject, pending for five minutes in the browser whose
+/// cookie holds `browser`: a signup returning to the settings. Callers change the
+/// fields they test.
+pub(crate) fn pending_sign_in(browser: &Secret) -> PendingFederation {
+    PendingFederation {
+        id: TokenId::new(),
+        browser_digest: browser.digest().as_bytes().to_vec(),
+        provider: Provider::GitHub,
+        issuer: "https://github.com".into(),
+        subject: TokenId::new().to_string(),
+        email: None,
+        display_name: "Social account".into(),
+        return_to: routes::page::settings::HOME.into(),
+        link_user_id: None,
+        link_session_id: None,
+        expires_at: Utc::now() + Duration::minutes(5),
     }
 }
 

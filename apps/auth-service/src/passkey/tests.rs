@@ -3,20 +3,19 @@
 use super::*;
 use crate::{
     account::AccountApplication,
-    tests::{AUTH_ORIGIN, Replicas},
+    tests::{AUTH_ORIGIN, Browser, OWN_PAGE, Replicas, pending_sign_in},
 };
 use axum::{
     body::{Body, to_bytes},
     http::{Method, Request},
 };
-use chrono::{Duration, Utc};
 use piquel_common::{
     TokenId,
     events::{RevocationReason, SignInFailure},
     protocol::claims::{Acr, Amr},
 };
 use piquel_crypto::Secret;
-use piquel_repository::{DatabaseConfig, PendingFederation, SessionAuthentication, StoredSession};
+use piquel_repository::{DatabaseConfig, SessionAuthentication, StoredSession};
 use serde_json::json;
 use tower::ServiceExt;
 use url::Url;
@@ -351,19 +350,7 @@ async fn signup_applies_the_handle_rules() {
 async fn registration_attaches_a_pending_social_signup_only_when_it_names_it() {
     let fixture = Fixture::new().await;
     let secret = Secret::generate().expect("browser secret");
-    let pending = PendingFederation {
-        id: TokenId::new(),
-        browser_digest: secret.digest().as_bytes().to_vec(),
-        provider: piquel_common::Provider::GitHub,
-        issuer: "https://github.com".into(),
-        subject: TokenId::new().to_string(),
-        email: None,
-        display_name: "Abandoned signup".into(),
-        return_to: "/".into(),
-        link_user_id: None,
-        link_session_id: None,
-        expires_at: Utc::now() + Duration::minutes(5),
-    };
+    let pending = pending_sign_in(&secret);
     let database = fixture.app.database.clone();
     database
         .federation()
@@ -784,12 +771,8 @@ async fn ceremonies_require_browser_binding_and_confirmation_belongs_to_one_sess
         StatusCode::BAD_REQUEST,
         "last passkey cannot be removed"
     );
-    let response = fixture
-        .request("/session", Method::GET, &signed_in, json!({}))
-        .await;
-    assert_eq!(
-        response.status(),
-        StatusCode::UNAUTHORIZED,
+    assert!(
+        fixture.session(&signed_in).await.is_none(),
         "removing a passkey revokes other sessions"
     );
 }
@@ -959,7 +942,7 @@ async fn passkey_sign_in_confirms_the_browsers_session() {
     );
 }
 
-/// A sign-in started on one replica finishes on the other, and logging out on one
+/// A sign-in started on one replica finishes on the other, and signing out on one
 /// ends the session on both.
 #[tokio::test]
 #[ignore = "requires TEST_DATABASE_URL"]
@@ -984,12 +967,18 @@ async fn sign_in_and_logout_span_replicas() {
     assert_eq!(finished.status(), StatusCode::NO_CONTENT);
     let session = Fixture::cookie(&finished);
     fixture.on(&replicas.a);
-    let read = fixture.request("/session", Method::GET, &session, json!({}));
+    let read = fixture.request(routes::passkey::LIST, Method::GET, &session, json!({}));
     assert_eq!(read.await.status(), StatusCode::OK);
-    let logout = fixture.request("/session/logout", Method::POST, &session, json!({}));
-    assert!(logout.await.status().is_success());
+    let browser = Browser {
+        cookie: session.clone(),
+        ..Browser::signed_out()
+    };
+    let logout = browser
+        .submit(&replicas.a, routes::page::LOGOUT, &[], OWN_PAGE)
+        .await;
+    assert_eq!(logout.status(), StatusCode::SEE_OTHER);
     fixture.on(&replicas.b);
-    let read = fixture.request("/session", Method::GET, &session, json!({}));
+    let read = fixture.request(routes::passkey::LIST, Method::GET, &session, json!({}));
     assert_eq!(read.await.status(), StatusCode::UNAUTHORIZED);
 }
 

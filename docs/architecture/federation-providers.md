@@ -99,13 +99,11 @@ specific to the provider:
     `nonce` (see `GoogleProtocol::extend_authorization`);
   - in `exchange`: call `gitlab_identity`.
 
-## 6. Show it in the frontends
+## 6. Show it on the pages
 
-In `packages/auth-sdk/src/index.ts`, add the wire name to the `Provider` type and
-its display name to `providerName`, for the sign-in pages, and its name to
-`provider_name` in `crates/ui/src/settings/sign_in.rs`, for the settings; the
-compiler asks for the last. Both list every configured provider, the sign-in pages
-from `/config`, so they need no other change.
+Add its display name to `Provider::name` in `crates/common/src/lib.rs`; the
+compiler asks for it. The sign-in and sign-in methods pages list every enabled
+provider by that name, so they need no other change.
 
 ## 7. Test it
 
@@ -124,5 +122,5 @@ https://<auth origin>/login/gitlab/callback
 ```
 
 Set `AUTH_GITLAB_CLIENT_ID` and `AUTH_GITLAB_CLIENT_SECRET`, then restart the
-service. The provider then appears in `/login/providers`. Add the callback URL
+service. The provider then appears on the sign-in page. Add the callback URL
 and scopes to the provider list in `README.md`.

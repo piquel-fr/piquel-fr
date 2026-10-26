@@ -2,11 +2,10 @@
 # as local validation:
 #
 #   checks -> Rust formatting and the Rust dependency audit, which compile nothing
-#   web    -> Prettier, svelte-check and tsc, ESLint, the auth pages build and the
-#             web dependency audit
+#   web    -> Prettier, tsc and ESLint, the passkey script included, and the web
+#             dependency audit
 #   rust   -> Clippy, unit, database and doc tests against PostgreSQL
-#   e2e    -> the browser suite over HTTPS against the real binary, with the
-#             auth pages embedded, and PostgreSQL
+#   e2e    -> the browser suite over HTTPS against the real binary and PostgreSQL
 #   docker -> the deployment images
 #
 # Pull requests run only the jobs their changes can affect (see `changes`).
@@ -43,9 +42,9 @@ env:
 jobs:
   # Decides which jobs a pull request needs from the paths it changes. A file
   # matches a filter only when it matches every pattern. `web` covers every
-  # file Prettier, ESLint, tsc or the frontends can see, so it excludes file
-  # types rather than directories. `app` covers everything the running
-  # service and its images are built from.
+  # file Prettier, ESLint or tsc can see, so it excludes file types rather than
+  # directories. `app` covers everything the running service and its images
+  # are built from.
   changes:
     name: changes
     runs-on: ubuntu-latest
@@ -65,7 +64,7 @@ jobs:
           predicate-quantifier: every
           filters: |
             rust:
-              - '{Cargo.toml,Cargo.lock,rust-toolchain.toml,justfile,just/**,apps/auth-service/**,apps/admin-web/**,packages/auth-sdk/src/style.css,crates/**,tests/sdk-vectors/**,.github/workflows/ci.yml}'
+              - '{Cargo.toml,Cargo.lock,rust-toolchain.toml,justfile,just/**,apps/auth-service/**,apps/admin-web/**,crates/**,tests/sdk-vectors/**,.github/workflows/ci.yml}'
               - '!**/*.md'
             web:
               - '**'
@@ -74,9 +73,9 @@ jobs:
               - '!infra/*.{Dockerfile,conf,sh}'
               - '!.dockerignore'
             deps:
-              - '{Cargo.toml,**/Cargo.toml,Cargo.lock,deny.toml,package.json,**/package.json,pnpm-lock.yaml,pnpm-workspace.yaml,.github/workflows/ci.yml}'
+              - '{Cargo.toml,**/Cargo.toml,Cargo.lock,deny.toml,package.json,**/package.json,pnpm-lock.yaml,.github/workflows/ci.yml}'
             app:
-              - '{Cargo.toml,Cargo.lock,rust-toolchain.toml,justfile,just/**,package.json,pnpm-lock.yaml,pnpm-workspace.yaml,playwright.config.ts,apps/**,crates/**,packages/**,tests/browser/**,infra/**,.dockerignore,.github/workflows/ci.yml}'
+              - '{Cargo.toml,Cargo.lock,rust-toolchain.toml,justfile,just/**,package.json,pnpm-lock.yaml,playwright.config.ts,apps/**,crates/**,tests/browser/**,infra/**,.dockerignore,.github/workflows/ci.yml}'
               - '!**/*.md'
               - '!infra/piqueld.toml'
 
@@ -119,7 +118,6 @@ jobs:
       - run: just web fmt-check
       - run: just web check
       - run: just web lint
-      - run: just web build
       - if: needs.changes.outputs.deps == 'true'
         run: just web audit
 
@@ -183,7 +181,8 @@ jobs:
       - *setup-node
       - *rust-cache
       - run: just install
-      # Embeds the auth pages, as in the deployed image.
+      # The binary embeds the passkey script and the stylesheet, as in the
+      # deployed image.
       - run: just rust build
       # The service accepts only HTTPS origins, as in production. Caddy
       # terminates TLS with its local CA, which the suite is told to accept.

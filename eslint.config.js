@@ -1,36 +1,23 @@
-// Type-aware lint rules for every TypeScript, Svelte and JavaScript file in the
+// Type-aware lint rules for every TypeScript and JavaScript file in the
 // workspace. Formatting is Prettier's job, so conflicting style rules are off.
 import js from '@eslint/js';
 import prettier from 'eslint-config-prettier';
-import svelte from 'eslint-plugin-svelte';
 import { defineConfig } from 'eslint/config';
 import ts from 'typescript-eslint';
 
 export default defineConfig(
   {
-    ignores: [
-      '**/build/',
-      '**/.svelte-kit/',
-      'target/',
-      'test-results/',
-      'playwright-report/',
-      '.claude/',
-      '.dev/'
-    ]
+    ignores: ['target/', 'test-results/', 'playwright-report/', '.claude/', '.dev/']
   },
   js.configs.recommended,
   ts.configs.strictTypeChecked,
   ts.configs.stylisticTypeChecked,
-  svelte.configs.recommended,
   prettier,
-  svelte.configs.prettier,
   {
     languageOptions: {
       parserOptions: {
-        // Each file uses its nearest tsconfig.json. Svelte configs are outside
-        // SvelteKit's generated project, so they use the default project.
-        projectService: { allowDefaultProject: ['apps/*/svelte.config.js'] },
-        extraFileExtensions: ['.svelte'],
+        // Each file uses its nearest tsconfig.json.
+        projectService: true,
         tsconfigRootDir: import.meta.dirname
       }
     },
@@ -39,16 +26,7 @@ export default defineConfig(
       // Node globals, so ESLint's environment-unaware check only adds noise.
       'no-undef': 'off',
       // The codebase consistently declares object shapes as type aliases.
-      '@typescript-eslint/consistent-type-definitions': ['error', 'type'],
-      // auth-web is served from its origin root without `paths.base`, and some
-      // of its links point at pages auth-service serves, such as the settings,
-      // that `resolve()` cannot express. Programmatic navigation is still checked.
-      'svelte/no-navigation-without-resolve': ['error', { ignoreLinks: true }]
+      '@typescript-eslint/consistent-type-definitions': ['error', 'type']
     }
-  },
-  {
-    // Svelte parses components; TypeScript parses their scripts.
-    files: ['**/*.svelte'],
-    languageOptions: { parserOptions: { parser: ts.parser } }
   }
 );

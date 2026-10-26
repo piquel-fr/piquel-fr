@@ -5,9 +5,8 @@ set working-directory := '..'
 run *ARGS:
     @cargo run --locked -p auth-service -- "$@"
 
-# Build the auth pages and SDK script the binary embeds, then serve.
+# Serve with the caller's configuration.
 serve:
-    @just web build
     @just auth run serve
 
 # Create, list or revoke signup invitations, e.g. `just auth invite create --expires-in 7d`.

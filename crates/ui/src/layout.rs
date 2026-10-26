@@ -10,7 +10,7 @@ use topcoat::{
 /// Which part of Piquel a page belongs to, named after the brand.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum Area {
-    /// Signing in, consent and logout.
+    /// Signing in, creating an account, consent and logout.
     #[default]
     SignIn,
     /// A section of the account's pages.
@@ -91,6 +91,12 @@ impl Label for Section {
 /// A page's title in the browser, for pages that are not tabs.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Title {
+    /// Signing in.
+    SignIn,
+    /// Creating an account.
+    SignUp,
+    /// Linking a provider's sign-in to an existing account.
+    Link,
     /// OAuth consent.
     Consent,
     /// Confirming an application's logout request.
@@ -110,6 +116,9 @@ impl Title {
     #[must_use]
     pub const fn as_str(self) -> &'static str {
         match self {
+            Self::SignIn => "Sign in",
+            Self::SignUp => "Create your account",
+            Self::Link => "Link social sign-in",
             Self::Consent => "Authorize application",
             Self::Logout => "Sign out",
             Self::VerifyEmail => "Confirm your email address",
@@ -131,14 +140,14 @@ pub(crate) trait Label: Copy + PartialEq + Send + Sync + 'static {
 }
 
 /// The document around every page: the head, which links `stylesheet` and loads
-/// the SDK's `script`, if any, Piquel's header, whose brand links `home` and names
-/// the page's `area`, and the page as `child`. `title` names the page in the
-/// browser, before "· Piquel".
+/// the passkey `script`, Piquel's header, whose brand links `home` and names the
+/// page's `area`, and the page as `child`. `title` names the page in the browser,
+/// before "· Piquel".
 #[component]
 pub async fn document<'a>(
     title: &'a str,
     stylesheet: &'a str,
-    #[default] script: Option<&'a str>,
+    script: &'a str,
     home: &'a str,
     #[default] area: Area,
     child: Child<'_>,
@@ -152,9 +161,7 @@ pub async fn document<'a>(
                 <meta name="robots" content="noindex">
                 <title>(format!("{title} · Piquel"))</title>
                 <link rel="stylesheet" href=(stylesheet)>
-                if let Some(script) = script {
-                    <script type="module" src=(script)></script>
-                }
+                <script type="module" src=(script)></script>
             </head>
             <body>
                 <div class="shell">

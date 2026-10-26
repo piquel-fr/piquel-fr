@@ -23,12 +23,11 @@ The account and admin APIs are routes in the same executable. They are small
 next to the pages that use them, and keeping them there keeps one binary, one
 database owner and one policy layer. The account API is on the public listener; the
 admin API has a private listener of its own (see admin.piquel.fr below). Auth keeps its state in PostgreSQL, so it runs
-as several replicas (see "Running several replicas" in `infra/README.md`). Its sign-in pages are static assets embedded at build time
-and are cacheable (see "Caching" in `infra/README.md`). Consent, logout, the
-settings and the developer console are server-rendered in the executable, with
-plain forms. Their only script
-is the SDK's, which runs the passkey ceremonies their forms need and keeps a form
-from posting twice.
+as several replicas (see "Running several replicas" in `infra/README.md`). Every page it
+serves, sign-in, consent, logout, the settings and the developer console, is
+server-rendered in the executable, with plain forms, and never cached. Their only
+script is the passkey script, which runs the passkey ceremonies their forms need and
+keeps a form from posting twice.
 
 Passkeys are bound to the `auth.piquel.fr` RP ID, so passkey ceremonies always
 run on auth. A settings change that needs a recent passkey confirmation asks for
@@ -117,7 +116,7 @@ When an administrator or operator acts:
 
 Third-party applications integrate only through open standards: OIDC, OAuth and
 their registration, discovery and token RFCs. The account and admin APIs are
-first-party; they change together with the frontends in this repository.
+first-party; they change together with auth's pages in this repository.
 
 ## Recovering auth
 

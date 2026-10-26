@@ -6,7 +6,6 @@ import { addPasskeys, authUrl, serveClient, signUp } from './helpers';
 type Tokens = { id_token: string; access_token: string };
 type Jwks = { keys: (JsonWebKey & { kid: string })[] };
 type Json = Record<string, unknown>;
-type Session = { user: { id: string } };
 
 /**
  * The `browser-e2e` public client's origin. No server runs it: the test serves its
@@ -20,9 +19,6 @@ test('browser OIDC consent, SSO and step-up for a public client', async ({ page,
   const { cdp } = await addPasskeys(context, page, true);
   await serveClient(context, cdp, client);
   await signUp(page, username, 'Synced passkey');
-  const session = (await (
-    await page.request.get(new URL('/session', authUrl).href)
-  ).json()) as Session;
 
   const redirectUri = `${client}/callback`;
   const atCallback = (url: URL) => url.origin === client && url.pathname === '/callback';
@@ -75,7 +71,7 @@ test('browser OIDC consent, SSO and step-up for a public client', async ({ page,
 
   // The client handles its tokens on its own origin, under auth's real CORS policy.
   const exchange = await page.evaluate(
-    async ({ origin, redirectUri, code, verifier, nonce, user }) => {
+    async ({ origin, redirectUri, code, verifier, nonce }) => {
       const body = new URLSearchParams({
         grant_type: 'authorization_code',
         client_id: 'browser-e2e',
@@ -125,12 +121,12 @@ test('browser OIDC consent, SSO and step-up for a public client', async ({ page,
           claims.iss === origin &&
           claims.aud === 'browser-e2e' &&
           claims.nonce === nonce &&
-          claims.sub === user,
+          typeof claims.sub === 'string',
         sid: claims.sid,
         authTime: claims.auth_time,
         hasRefreshToken: 'refresh_token' in tokens,
         userinfoStatus: userinfoResponse.status,
-        sameUser: userinfo.sub === user,
+        sameUser: userinfo.sub === claims.sub,
         username: userinfo.preferred_username,
         hasEmail:
           'email' in userinfo ||
@@ -140,7 +136,7 @@ test('browser OIDC consent, SSO and step-up for a public client', async ({ page,
         replayStatus: replay.status
       };
     },
-    { origin: authUrl, redirectUri, code, verifier, nonce, user: session.user.id }
+    { origin: authUrl, redirectUri, code, verifier, nonce }
   );
   expect(exchange).toEqual({
     status: 200,

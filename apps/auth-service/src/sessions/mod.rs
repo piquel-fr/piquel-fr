@@ -1,8 +1,14 @@
 //! The account's sessions, one per signed-in browser, and signing them out:
-//! settings any administrator may also change, which [`AccountService`] serves.
+//! settings any administrator may also change, and the browser's own sign-out,
+//! which [`AccountService`] serves.
 use crate::account::{AccountError, AccountService, Subject, Viewer};
+use crate::security::{BrowserCookie, RequestContext, Session, SessionError};
+use axum::http::{HeaderMap, header::InvalidHeaderValue};
 use chrono::{DateTime, Utc};
-use piquel_common::{AuthenticationMethod, SessionId, events::UserAgentFamily};
+use piquel_common::{
+    AuthenticationMethod, SessionId,
+    events::{RevocationReason, UserAgentFamily},
+};
 use piquel_repository::{SessionScope, StoredSession};
 use serde::Serialize;
 use std::net::IpAddr;
@@ -40,6 +46,22 @@ pub(crate) struct Revoked {
     pub(crate) revoked: usize,
 }
 
+/// A browser [`AccountService::sign_out`] signed out, whose response must delete its
+/// session cookie. Only that operation makes one.
+#[must_use = "the browser keeps its session cookie until `clear_on` deletes it"]
+pub(crate) struct SignedOut(BrowserCookie);
+
+impl SignedOut {
+    /// Deletes the session cookie on `response`, an axum response or a page's,
+    /// keeping any other cookies being set.
+    pub(crate) fn clear_on<B>(
+        self,
+        response: &mut axum::http::Response<B>,
+    ) -> Result<(), InvalidHeaderValue> {
+        self.0.clear_on(response)
+    }
+}
+
 impl SessionItem {
     /// Shows `session`, marking it if it is the `current` one.
     fn new(session: StoredSession, current: Option<SessionId>) -> Self {
@@ -75,7 +97,7 @@ impl AccountService {
     }
 
     /// Signs one session of the account out, with its applications' refresh
-    /// grants. The owner's own session signs out through `/session/logout`, which
+    /// grants. The owner's own session signs out with [`Self::sign_out`], which
     /// also clears its cookie.
     pub(crate) async fn revoke_session(
         &self,
@@ -123,6 +145,33 @@ impl AccountService {
             .await?;
         subject.commit(tx).await?;
         Ok(revoked)
+    }
+}
+
+/// The browser's own session, which its cookie alone signs out.
+impl AccountService {
+    /// Signs this browser out: ends the session its `headers` carry, if any, for
+    /// `reason`, with its applications' refresh grants, as [`Session::revoke`] records
+    /// it. A cookie naming no live session signs out too, so a stale one goes.
+    pub(crate) async fn sign_out(
+        &self,
+        context: RequestContext,
+        headers: &HeaderMap,
+        reason: RevocationReason,
+    ) -> Result<SignedOut, SessionError> {
+        if let Some(session) = Session::optional(&self.database, headers).await? {
+            let mut tx = self.database.begin().await?;
+            Session::revoke(
+                &mut tx,
+                context,
+                &session,
+                SessionScope::One(session.id),
+                reason,
+            )
+            .await?;
+            tx.commit().await?;
+        }
+        Ok(SignedOut(BrowserCookie::Session))
     }
 }
 

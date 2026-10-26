@@ -6,6 +6,7 @@ use axum::http::header::InvalidHeaderValue;
 use piquel_common::{VocabularyError, config::ConfigurationError};
 use piquel_crypto::CryptoError;
 use piquel_repository::DatabaseError;
+use piquel_ui::QueryError;
 use thiserror::Error;
 
 /// Federation failures that reach the browser, mapped to HTTP once in `From<FederationError>`.
@@ -66,6 +67,9 @@ pub(crate) enum FederationError {
     /// A built-in provider authorization URL is invalid.
     #[error("provider authorization URL is invalid")]
     Url(#[from] url::ParseError),
+    /// The sign-in page's address could not be written.
+    #[error("the sign-in page's address could not be written")]
+    PageAddress(#[from] QueryError),
     /// A database operation failed.
     #[error(transparent)]
     Database(#[from] DatabaseError),
@@ -137,7 +141,8 @@ impl From<FederationError> for ApiError {
             FederationError::Session(error) => error.into(),
             error @ (FederationError::Crypto(_)
             | FederationError::CookieHeader(_)
-            | FederationError::Url(_)) => Self::internal(error),
+            | FederationError::Url(_)
+            | FederationError::PageAddress(_)) => Self::internal(error),
         }
     }
 }

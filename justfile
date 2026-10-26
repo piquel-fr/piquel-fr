@@ -4,7 +4,7 @@ default: validate
 # Rust formatting, linting, checks, audits and the auth-service build.
 mod rust 'just/rust.just'
 
-# Web formatting, linting, checks, the auth pages build and the browser tests.
+# Web formatting, linting, type checks and the browser tests.
 mod web 'just/web.just'
 
 # Scratch PostgreSQL clusters, database tests, the SQLx query cache and migrations.
@@ -33,7 +33,7 @@ install-tools:
     @cargo install --locked cargo-nextest cargo-deny
     @cargo install --locked sqlx-cli --no-default-features --features rustls,postgres
 
-# The release auth-service executable, with the auth pages it embeds.
+# The release auth-service executable.
 build: (rust::build "--release")
 
 fmt: rust::fmt web::fmt
