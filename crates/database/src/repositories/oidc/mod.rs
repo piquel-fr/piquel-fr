@@ -17,6 +17,22 @@ piquel_common::str_enum! {
     }
 }
 
+/// An app that keeps access to an account, as [`OidcRepository::list_apps`]
+/// finds it: its consents and live refresh grants, merged.
+#[derive(Clone, Debug)]
+pub struct StoredApp {
+    /// The client.
+    pub client_id: ClientId,
+    /// The name its consent screen shows.
+    pub name: String,
+    /// Whether it is first-party, signing in without the consent screen.
+    pub trusted: bool,
+    /// What the account consented to or granted it.
+    pub scopes: Vec<String>,
+    /// Whether it holds a refresh grant, so it can act while the user is away.
+    pub offline: bool,
+}
+
 /// A validated authorization request, stored while the user logs in and
 /// consents. A pushed one waits for the browser to claim it first.
 #[derive(Clone, Debug)]
@@ -410,6 +426,31 @@ impl OidcRepository<'_> {
         Ok(())
     }
 
+    /// The account a code matching `id` and one of `digests` was issued to, read
+    /// without a lock: a code's account never changes, so an exchange locks the
+    /// account before it consumes the code.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`DatabaseError`] if the query fails.
+    pub async fn code_user(
+        &mut self,
+        id: TokenId,
+        digests: &[Vec<u8>],
+    ) -> Result<Option<UserId>, DatabaseError> {
+        run!(
+            self,
+            fetch_optional,
+            sqlx::query_scalar!(
+                r#"SELECT user_id AS "user_id: UserId"
+                FROM authorization_codes
+                WHERE id = $1 AND secret_digest = ANY($2)"#,
+                id.as_uuid(),
+                digests,
+            )
+        )
+    }
+
     /// Consumes an unexpired code once. The client's current policy must still
     /// allow it, and its session and account must still be active.
     ///
@@ -631,22 +672,112 @@ impl OidcRepository<'_> {
         Ok(())
     }
 
-    /// Withdraws every consent of the user, and returns the clients they were
-    /// given to, each once.
+    /// Withdraws the user's consents to `client`, or to every client when `None`,
+    /// and returns the clients they were given to, each once.
     ///
     /// # Errors
     ///
     /// Returns [`DatabaseError`] if the query fails.
-    pub async fn revoke_consents(&mut self, user: UserId) -> Result<Vec<ClientId>, DatabaseError> {
+    pub async fn revoke_consents(
+        &mut self,
+        user: UserId,
+        client: Option<&ClientId>,
+    ) -> Result<Vec<ClientId>, DatabaseError> {
         run!(
             self,
             fetch_all,
             sqlx::query_scalar!(
                 r#"WITH revoked AS (
-                    DELETE FROM oidc_consents WHERE user_id = $1 RETURNING client_id
+                    DELETE FROM oidc_consents
+                    WHERE user_id = $1 AND ($2::TEXT IS NULL OR client_id = $2)
+                    RETURNING client_id
                 )
                 SELECT DISTINCT client_id AS "client_id!: ClientId" FROM revoked
                 ORDER BY 1"#,
+                user.as_uuid(),
+                client.map(ClientId::as_str),
+            )
+        )
+    }
+
+    /// Expires the user's unredeemed codes for `client`, in ID order, under the
+    /// account lock the caller holds. An exchange locks the account before its
+    /// code, so none is mid-exchange here; a code another transaction still holds,
+    /// such as cleanup's, is skipped rather than waited for. Codes this
+    /// transaction already sees expired are included, and all expire at
+    /// `-infinity`: an exchange whose transaction started earlier, and waits for
+    /// the account, reads expiry against its own earlier `now()`.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`DatabaseError`] if the query fails.
+    pub async fn expire_codes(
+        &mut self,
+        user: UserId,
+        client: &ClientId,
+    ) -> Result<(), DatabaseError> {
+        run!(
+            self,
+            execute,
+            sqlx::query!(
+                "WITH free AS (
+                    SELECT id FROM authorization_codes
+                    WHERE user_id = $1
+                    AND client_id = $2
+                    AND consumed_at IS NULL
+                    ORDER BY id
+                    FOR UPDATE SKIP LOCKED
+                )
+                UPDATE authorization_codes c
+                SET expires_at = '-infinity'
+                FROM free
+                WHERE c.id = free.id",
+                user.as_uuid(),
+                client.as_str(),
+            )
+        )?;
+        Ok(())
+    }
+
+    /// Lists the enabled clients the user consented to, or whose refresh grant
+    /// from a live session still works, by name: the apps that keep access to
+    /// the account. A trusted client the user only signed in to holds nothing
+    /// that outlives its access tokens, so it is not listed.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`DatabaseError`] if the query fails or a row is invalid.
+    pub async fn list_apps(&mut self, user: UserId) -> Result<Vec<StoredApp>, DatabaseError> {
+        run!(
+            self,
+            fetch_all,
+            sqlx::query_as!(
+                StoredApp,
+                r#"SELECT
+                    c.id AS "client_id: ClientId", c.display_name AS name, c.trusted,
+                    COALESCE(
+                        jsonb_agg(DISTINCT s.scope) FILTER (WHERE s.scope IS NOT NULL),
+                        '[]'
+                    ) AS "scopes!: JsonArray<String>",
+                    bool_or(g.refresh) AS "offline!"
+                FROM (
+                    SELECT client_id, scopes, FALSE AS refresh
+                    FROM oidc_consents
+                    WHERE user_id = $1
+                    UNION ALL
+                    SELECT f.client_id, f.scopes, TRUE
+                    FROM refresh_token_families f
+                    JOIN sessions session ON session.id = f.session_id
+                    WHERE f.user_id = $1
+                    AND f.revoked_at IS NULL
+                    AND session.revoked_at IS NULL
+                    AND session.expires_at > now()
+                ) g
+                JOIN oidc_clients c ON c.id = g.client_id
+                LEFT JOIN LATERAL jsonb_array_elements_text(g.scopes) AS s(scope) ON TRUE
+                WHERE c.enabled
+                GROUP BY c.id, c.display_name, c.trusted
+                ORDER BY c.display_name, c.id"#,
                 user.as_uuid(),
             )
         )

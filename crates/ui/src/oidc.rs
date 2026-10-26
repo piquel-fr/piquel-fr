@@ -46,9 +46,10 @@ pub async fn consent(
     })
 }
 
-/// What a scope gives the application, in the user's words. A scope Piquel does
-/// not describe, such as an application's own, is shown as it is.
-fn scope_label(scope: &str) -> &str {
+/// What a scope gives the application, in the user’s words, on the consent page
+/// and among the connected apps. A scope Piquel does not describe, such as an
+/// application's own, is shown as it is.
+pub(crate) fn scope_label(scope: &str) -> &str {
     match scope.parse() {
         Ok(Scope::OpenId) => "Your account identifier",
         Ok(Scope::Profile) => "Your username and display name",

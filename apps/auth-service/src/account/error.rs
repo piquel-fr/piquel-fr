@@ -5,6 +5,7 @@ use crate::{
     clients::OwnedClientError,
     emails::EmailError,
     federation::FederationError,
+    grants::GrantError,
     history::HistoryError,
     passkey::PasskeyError,
     recovery::RecoveryError,
@@ -30,6 +31,9 @@ pub(crate) enum AccountError {
     /// A session could not be signed out.
     #[error(transparent)]
     Session(#[from] SessionsError),
+    /// An app's access could not be removed.
+    #[error(transparent)]
+    Grant(#[from] GrantError),
     /// A history entry could not be reported.
     #[error(transparent)]
     History(#[from] HistoryError),
@@ -58,6 +62,7 @@ impl From<AccountError> for ApiError {
             AccountError::Identity(error) => error.into(),
             AccountError::Email(error) => error.into(),
             AccountError::Session(error) => error.into(),
+            AccountError::Grant(error) => error.into(),
             AccountError::History(error) => error.into(),
             AccountError::Client(error) => error.into(),
             AccountError::Recovery(error) => error.into(),

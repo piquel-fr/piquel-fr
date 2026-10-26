@@ -469,13 +469,17 @@ impl TokenRepository<'_> {
         Ok(())
     }
 
-    /// Revokes every active family of the account and returns how many were
-    /// revoked.
+    /// Revokes the account's active families of `client`, or of every client when
+    /// `None`, and returns how many were revoked.
     ///
     /// # Errors
     ///
     /// Returns [`DatabaseError`] if the query fails.
-    pub async fn revoke_all_for_user(&mut self, user_id: UserId) -> Result<u64, DatabaseError> {
+    pub async fn revoke_for_user(
+        &mut self,
+        user_id: UserId,
+        client: Option<&ClientId>,
+    ) -> Result<u64, DatabaseError> {
         // Locked in ID order, as `lock_client_families` explains.
         Ok(run!(
             self,
@@ -483,7 +487,9 @@ impl TokenRepository<'_> {
             sqlx::query!(
                 "WITH locked AS (
                     SELECT id FROM refresh_token_families
-                    WHERE user_id = $1 AND revoked_at IS NULL
+                    WHERE user_id = $1
+                    AND ($2::TEXT IS NULL OR client_id = $2)
+                    AND revoked_at IS NULL
                     ORDER BY id
                     FOR UPDATE
                 )
@@ -492,6 +498,7 @@ impl TokenRepository<'_> {
                 FROM locked
                 WHERE f.id = locked.id AND f.revoked_at IS NULL",
                 user_id.as_uuid(),
+                client.map(ClientId::as_str),
             )
         )?
         .rows_affected())

@@ -458,7 +458,7 @@ impl AdminService {
     ) -> Result<(), AdminError> {
         tx.revoke_sessions(context, user_id, SessionScope::All, &reason)
             .await?;
-        tx.tokens().revoke_all_for_user(user_id).await?;
+        tx.tokens().revoke_for_user(user_id, None).await?;
         Ok(())
     }
 

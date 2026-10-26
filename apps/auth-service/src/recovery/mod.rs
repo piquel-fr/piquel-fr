@@ -463,8 +463,8 @@ impl AccountService {
         context: &EventContext,
         user: UserId,
     ) -> Result<(), DatabaseError> {
-        tx.tokens().revoke_all_for_user(user).await?;
-        for client_id in tx.oidc().revoke_consents(user).await? {
+        tx.tokens().revoke_for_user(user, None).await?;
+        for client_id in tx.oidc().revoke_consents(user, None).await? {
             let revoked = DomainEvent::ConsentRevoked { client_id };
             tx.record(context, Some(user), revoked).await?;
         }

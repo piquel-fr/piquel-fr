@@ -1,6 +1,8 @@
 //! The account's settings: the tabs every settings page shares, and each page's
 //! sections.
 
+/// Connected apps.
+mod connected;
 /// Email addresses, and confirming one.
 mod emails;
 /// Signed-in devices.
@@ -10,6 +12,7 @@ mod sign_in;
 /// Security history.
 mod timeline;
 
+pub use connected::{ConnectedAppChange, ConnectedAppRow, ConnectedAppsState, connected_apps};
 pub use emails::{EmailChange, EmailRow, EmailsState, addresses, verified, verify};
 pub use sessions::{DeviceChange, DeviceRow, devices};
 pub use sign_in::{ProviderRow, SignInChange, SignInState, sign_in_methods};
@@ -31,6 +34,8 @@ pub enum Tab {
     Emails,
     /// Signed-in devices.
     Devices,
+    /// Apps that keep access to the account.
+    Apps,
     /// Security history.
     History,
 }
@@ -43,6 +48,7 @@ impl Tab {
             Self::SignIn => "Sign-in methods",
             Self::Emails => "Email addresses",
             Self::Devices => "Devices",
+            Self::Apps => "Connected apps",
             Self::History => "Security history",
         }
     }

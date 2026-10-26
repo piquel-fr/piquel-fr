@@ -37,7 +37,7 @@ pub use repositories::{
     maintenance::{DigestUsage, DigestedSecret},
     oidc::{
         CodeRedemptionError, ConsumedAuthorizationCode, InsertAuthorizationCode,
-        InsertAuthorizationRequest, OidcRedirectKind, OwnedClientCounts,
+        InsertAuthorizationRequest, OidcRedirectKind, OwnedClientCounts, StoredApp,
         StoredAuthorizationRequest, StoredClientSecret, StoredOidcClient,
     },
     passkeys::{CeremonyKind, ConsumedCeremony, InsertCeremony, InsertPasskey, StoredPasskey},

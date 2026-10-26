@@ -460,7 +460,11 @@ intended for the configured client audience. Only requested claims are released;
 passkey-only accounts have no email claim. Browser clients should keep tokens in
 memory and use SSO again after reload. Refresh permission is off unless explicitly
 enabled and `offline_access` is allowed/requested. Consent is remembered per user,
-client and scope; explicitly trusted clients bypass consent.
+client and scope; explicitly trusted clients bypass consent. Users see the apps
+they consented to, or whose refresh grants still work, under Connected apps in
+settings (`/settings/apps`), and remove an app's access there: its refresh grants
+end, it asks for consent again, and its outstanding codes stop working. Access
+tokens it already holds expire within five minutes.
 
 ### Authentication claims
 

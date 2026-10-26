@@ -416,7 +416,7 @@ async fn a_link_enrolls_one_passkey_that_signs_in_without_confirming() {
     let token = scenario.recover().await;
     assert!(scenario.session(&before).await.is_none(), "signed out");
     let mut tokens = scenario.database().tokens();
-    let grants = tokens.revoke_all_for_user(scenario.user()).await;
+    let grants = tokens.revoke_for_user(scenario.user(), None).await;
     assert_eq!(grants.expect("grants"), 0, "already ended");
     let emails = scenario.database().emails().list(scenario.user()).await;
     let emails: Vec<_> = emails
@@ -657,7 +657,7 @@ async fn undo_takes_back_the_passkey_sessions_grants_and_consents() {
     assert!(scenario.consents().await.is_empty(), "every consent");
     assert!(scenario.session(&cookie).await.is_none(), "signed out");
     let mut tokens = scenario.database().tokens();
-    let grants = tokens.revoke_all_for_user(scenario.user()).await;
+    let grants = tokens.revoke_for_user(scenario.user(), None).await;
     assert_eq!(grants.expect("grants"), 0, "already revoked");
     let events = scenario.events().await;
     assert!(events.contains(&DomainEvent::PasskeyRemoved {

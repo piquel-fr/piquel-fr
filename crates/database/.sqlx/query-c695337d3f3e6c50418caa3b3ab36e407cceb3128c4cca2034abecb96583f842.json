@@ -1,0 +1,23 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "WITH revoked AS (\n                    DELETE FROM oidc_consents\n                    WHERE user_id = $1 AND ($2::TEXT IS NULL OR client_id = $2)\n                    RETURNING client_id\n                )\n                SELECT DISTINCT client_id AS \"client_id!: ClientId\" FROM revoked\n                ORDER BY 1",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "client_id!: ClientId",
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Text"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "c695337d3f3e6c50418caa3b3ab36e407cceb3128c4cca2034abecb96583f842"
+}

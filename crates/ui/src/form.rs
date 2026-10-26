@@ -17,8 +17,9 @@
 //! renders its input instead.
 
 use crate::{
-    AppChange, AppSettingsState, DeviceChange, EmailChange, EmailsState, FieldError, HistoryChange,
-    HistoryState, LoginChange, LoginQuery, NewAppChange, SecretsChange, SignInChange, SignInState,
+    AppChange, AppSettingsState, ConnectedAppChange, ConnectedAppsState, DeviceChange, EmailChange,
+    EmailsState, FieldError, HistoryChange, HistoryState, LoginChange, LoginQuery, NewAppChange,
+    SecretsChange, SignInChange, SignInState,
 };
 use chrono::{DateTime, SecondsFormat, Utc};
 use serde::{Deserialize, Deserializer, Serialize, Serializer, de::IgnoredAny};
@@ -52,6 +53,8 @@ piquel_common::str_enum! {
         DeviceSignedOut = "device_signed_out",
         /// Every other device was signed out.
         OthersSignedOut = "others_signed_out",
+        /// An app's access was removed.
+        AppRemoved = "app_removed",
         /// A public app was registered.
         ClientRegistered = "client_registered",
         /// An app's settings were saved.
@@ -78,6 +81,7 @@ impl Notice {
             Self::EmailRemoved => "The address was removed.",
             Self::DeviceSignedOut => "The device was signed out.",
             Self::OthersSignedOut => "Your other devices were signed out.",
+            Self::AppRemoved => "The app no longer has access to your account.",
             Self::ClientRegistered => "The app was registered.",
             Self::ClientSaved => "Your changes were saved.",
             Self::ClientEnabled => "The app was enabled.",
@@ -183,6 +187,8 @@ fields! {
     Device(DeviceChange),
     /// A change of the history.
     History(HistoryChange),
+    /// A change of the connected apps.
+    Connected(ConnectedAppChange),
     /// A registration of an app.
     NewApp(NewAppChange),
     /// A change of an app's settings.
@@ -195,6 +201,8 @@ fields! {
     EmailRow(EmailsState),
     /// A page or row of the history.
     HistoryRow(HistoryState),
+    /// A row of the connected apps.
+    ConnectedRow(ConnectedAppsState),
     /// A row of an app's settings.
     AppRow(AppSettingsState),
     /// A sign-in page, as its query opens it.

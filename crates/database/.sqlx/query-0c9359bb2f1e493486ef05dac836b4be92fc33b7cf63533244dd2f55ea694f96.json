@@ -1,0 +1,23 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT user_id AS \"user_id: UserId\"\n                FROM authorization_codes\n                WHERE id = $1 AND secret_digest = ANY($2)",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "user_id: UserId",
+        "type_info": "Uuid"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "ByteaArray"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "0c9359bb2f1e493486ef05dac836b4be92fc33b7cf63533244dd2f55ea694f96"
+}

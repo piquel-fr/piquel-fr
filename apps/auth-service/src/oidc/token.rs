@@ -249,8 +249,9 @@ impl OidcApplication {
     }
 
     /// Exchanges a one-use code for the authenticated client after checking its client,
-    /// redirect and PKCE binding, and records the grant. A replayed code has its
-    /// refresh family revoked and committed before the rejection.
+    /// redirect and PKCE binding, and that an untrusted client still has the user's
+    /// consent, then records the grant. A replayed code has its refresh family
+    /// revoked and committed before the rejection.
     async fn exchange_code(
         &self,
         form: TokenForm,
@@ -265,6 +266,15 @@ impl OidcApplication {
         )?;
         let digests = self.accepted_digests(&opaque)?;
         let mut tx = self.database.begin().await?;
+        // Lock the account before the code, as refresh rotation and removing an app
+        // do: a removal then either commits first and expires the code, or waits
+        // for this exchange and revokes the refresh family it creates.
+        if let Some(user) = tx.oidc().code_user(opaque.id, &digests).await? {
+            tx.users()
+                .find_active_by_id_for_update(user)
+                .await?
+                .ok_or_else(|| OAuthCode::InvalidGrant.reject(ACCOUNT_DISABLED))?;
+        }
         let code = match tx.oidc().consume_code(opaque.id, &digests, client_id).await {
             Ok(code) => code,
             Err(error) => return Err(Self::code_rejection(tx, context, client_id, error).await),
@@ -301,6 +311,16 @@ impl OidcApplication {
             .find_client(code.client_id.as_str())
             .await?
             .ok_or_else(|| OAuthCode::InvalidClient.reject("the client is no longer registered"))?;
+        // Reread under the account lock: authorization checks remembered consent
+        // before taking it, so it may issue a code just as the consent is withdrawn.
+        if !client.trusted
+            && !tx
+                .oidc()
+                .consented(user.id, &client.id, &code.audience, &code.scopes)
+                .await?
+        {
+            return Err(OAuthCode::InvalidGrant.reject(CONSENT_WITHDRAWN));
+        }
         let email = tx.oidc().primary_email(user.id).await?;
         let scopes = Scopes::from_stored(&code.scopes);
         let tokens = TokenGrant {
@@ -634,6 +654,8 @@ impl OidcApplication {
 
 /// Rejection of a grant whose account was disabled.
 const ACCOUNT_DISABLED: &str = "the account is disabled";
+/// Rejection of a code whose consent the user withdrew since it was issued.
+const CONSENT_WITHDRAWN: &str = "the user withdrew consent for this application";
 /// Rejection of a grant whose browser session ended.
 const SESSION_ENDED: &str = "the sign-in session behind this grant has ended";
 

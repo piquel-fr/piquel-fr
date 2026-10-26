@@ -93,9 +93,16 @@ Important invariants:
   deletion locks the client's families before the client. A family granted after
   that is skipped if another transaction holds it, since that is a revocation or
   a rotation that will find the client disabled. Every statement that
-  locks several families (a deletion's, a logout's, an account-wide or a
-  code-replay revocation) locks them in ID order, so two never wait for each
-  other's families.
+  locks several families (a deletion's, a logout's, an account-wide, an app
+  removal's or a code-replay revocation) locks them in ID order, so two never
+  wait for each other's families.
+- Removing an app from an account's settings, under the account lock, revokes
+  the app's refresh families of the account, then deletes its consents, as a
+  client's deletion orders them, then expires its outstanding codes. Code
+  exchange locks the account before the code, as rotation does, so it finishes
+  before a removal or finds its code expired, and rereads an untrusted client's
+  consent under that lock, so a code issued from a consent withdrawn meanwhile
+  fails.
 - Grants and revocations of administrator rights take `administrators().lock()`
   first, so the last-administrator check stays true until they commit. An
   administrator's mutation that changes an account locks it first, as a grant
