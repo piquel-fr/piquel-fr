@@ -55,6 +55,21 @@ pub(crate) mod emails {
     pub(crate) const ITEM: &str = "/account/emails/{id}";
 }
 
+/// Account recoveries: their link's page, and undoing one.
+pub(crate) mod recovery {
+    /// Starts enrolling a passkey with a recovery link.
+    pub(crate) const START: &str = "/recovery/start";
+    /// Finishes enrolling it, which uses the link and signs the browser in.
+    pub(crate) const FINISH: &str = "/recovery/finish";
+    /// Describes the account's recovery that can still be undone.
+    pub(crate) const STATUS: &str = "/account/recovery";
+    /// Starts undoing it with any passkey but its own; needs no session.
+    pub(crate) const UNDO_START: &str = "/account/recovery/undo/start";
+    /// Finishes the undo, and signs the browser in with that passkey unless the
+    /// account is disabled.
+    pub(crate) const UNDO_FINISH: &str = "/account/recovery/undo/finish";
+}
+
 /// The account's security history.
 pub(crate) mod history {
     /// Pages through the account's history, newest first.
@@ -176,6 +191,10 @@ pub(crate) mod page {
         developers::APP_SETTINGS,
         developers::APP_SECRETS,
     ];
+    /// Enrolls a passkey with a recovery link, whose token is in the fragment.
+    pub(crate) const RECOVER: &str = "/recover";
+    /// Undoes a recovery, whose ID is in the fragment; the notices link to it.
+    pub(crate) const RECOVER_UNDO: &str = "/recover/undo";
 }
 
 /// Prefix shared by the account JSON APIs.

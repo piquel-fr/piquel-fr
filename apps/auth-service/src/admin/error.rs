@@ -6,7 +6,7 @@ use axum::{
     response::{IntoResponse, Response},
 };
 use piquel_common::{
-    DeliveryId, HandleError,
+    DeliveryId, HandleError, PasskeyId,
     protocol::{
         api::ErrorCode,
         challenge::{BearerChallenge, BearerError},
@@ -80,6 +80,39 @@ pub enum AdminError {
     /// The invitation lifetime is not 1 hour to 365 days.
     #[error("expires_in {0}")]
     InvalidInviteExpiry(#[from] super::InvalidLifetime),
+    /// Only an active account can be recovered.
+    #[error("the account is disabled; enable it before recovering it")]
+    RecoveryOfDisabledAccount,
+    /// An administrator never sees a recovery link, so only a recovery that mails
+    /// it to a primary verified address is theirs to start.
+    #[error(
+        "the recovery link would not be mailed (no primary verified address, or --revoke); only an operator at the terminal can recover this account, with `auth-service user recover`"
+    )]
+    RecoveryNeedsEmail,
+    /// Whoever used an administrator's recovery link could use its rights before
+    /// the owner undoes it, so an administrator is never recovered.
+    #[error(
+        "the account is an administrator: revoke its rights with `auth-service admin revoke` (grant another administrator first if it is the last), recover it, then grant them again once the recovery settles"
+    )]
+    RecoveryOfAdministrator,
+    /// A recovery of the account is in probation: support finds out who used it,
+    /// and undoes it first.
+    #[error(
+        "the account has a recovery in probation: find out who used it, and undo it with `auth-service user undo-recovery` before starting another"
+    )]
+    RecoveryInProbation,
+    /// A passkey `--keep` named is not an active passkey of the account.
+    #[error("passkey {0} is not an active passkey of the account")]
+    UnknownPasskey(PasskeyId),
+    /// A recovery of the account can still be undone: rights granted now would go
+    /// live for whoever used its link once it settles.
+    #[error(
+        "the account has a recovery that can still be undone: grant the rights once it settles, or after undoing it"
+    )]
+    GrantDuringRecovery,
+    /// The account has no recovery that can still be undone.
+    #[error("the account has no recovery that can still be undone")]
+    NoRecoveryToUndo,
     /// Only active accounts can become administrators.
     #[error("the account is disabled; enable it before granting administrator rights")]
     AccountDisabled,
@@ -153,6 +186,13 @@ impl AdminError {
             Self::EmailClaimed(_) => "email_claimed",
             Self::InvalidReason => "invalid_reason",
             Self::InvalidInviteExpiry(_) => "invalid_invite_expiry",
+            Self::RecoveryOfDisabledAccount => "recovery_of_disabled_account",
+            Self::RecoveryNeedsEmail => "recovery_needs_email",
+            Self::RecoveryOfAdministrator => "recovery_of_administrator",
+            Self::RecoveryInProbation => "recovery_in_probation",
+            Self::UnknownPasskey(_) => "unknown_passkey",
+            Self::NoRecoveryToUndo => "no_recovery_to_undo",
+            Self::GrantDuringRecovery => "grant_during_recovery",
             Self::AccountDisabled => "account_disabled",
             Self::AlreadyAdministrator => "already_administrator",
             Self::NotAnAdministrator => "not_an_administrator",
@@ -192,6 +232,13 @@ impl AdminError {
             | Self::EmailClaimed(_)
             | Self::InvalidReason
             | Self::InvalidInviteExpiry(_)
+            | Self::RecoveryOfDisabledAccount
+            | Self::RecoveryNeedsEmail
+            | Self::RecoveryOfAdministrator
+            | Self::RecoveryInProbation
+            | Self::UnknownPasskey(_)
+            | Self::NoRecoveryToUndo
+            | Self::GrantDuringRecovery
             | Self::AccountDisabled
             | Self::AlreadyAdministrator
             | Self::NotAnAdministrator
@@ -234,6 +281,13 @@ impl From<AdminError> for ApiError {
             AdminError::AlreadyDisabled
             | AdminError::AlreadyActive
             | AdminError::EmailClaimed(_)
+            | AdminError::RecoveryOfDisabledAccount
+            | AdminError::RecoveryNeedsEmail
+            | AdminError::RecoveryOfAdministrator
+            | AdminError::RecoveryInProbation
+            | AdminError::UnknownPasskey(_)
+            | AdminError::NoRecoveryToUndo
+            | AdminError::GrantDuringRecovery
             | AdminError::AccountDisabled
             | AdminError::AlreadyAdministrator
             | AdminError::NotAnAdministrator

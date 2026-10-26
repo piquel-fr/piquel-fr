@@ -14,6 +14,7 @@
 //! ```
 
 use crate::{PasskeyId, Provider};
+use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 
 /// The body of an error response: `{"error": message}`, plus a machine-readable
@@ -43,6 +44,27 @@ pub enum ErrorCode {
     HandleReserved,
     /// Another account holds the handle.
     HandleTaken,
+    /// The session was confirmed with a passkey, and this sign-in would lower its
+    /// assurance: frontends sign out first, then sign in again.
+    PasskeyRequired,
+    /// The recovery link is unknown, expired, used or cancelled, or its account
+    /// was disabled.
+    InvalidLink,
+    /// The account has no recovery that can be undone, or not the one named.
+    NothingToUndo,
+    /// Undoing the recovery needs a passkey other than its own: the asserting
+    /// one was the recovery's, or the account has no other, and only support can
+    /// undo it.
+    OlderPasskeyRequired,
+    /// The passkey belongs to a recovery in probation, which signs in but never
+    /// confirms a session until the recovery settles.
+    RecoveryProbation {
+        /// When the probation ends.
+        settles_at: DateTime<Utc>,
+    },
+    /// A recovery of the account can still be undone, so no passkey but the
+    /// recovery's own is removed until it settles or is undone.
+    RecoveryInProgress,
 }
 
 /// An active passkey of an account, without its cryptographic contents.
@@ -53,6 +75,9 @@ pub struct Passkey {
     pub friendly_name: String,
     /// Passkey ID, used to rename or remove it.
     pub id: PasskeyId,
+    /// When it was enrolled. A label can be renamed, so pages tell passkeys apart
+    /// by this and their ID.
+    pub created_at: DateTime<Utc>,
 }
 
 /// A social identity linked to an account.

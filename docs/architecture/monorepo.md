@@ -50,5 +50,5 @@ consume standard OIDC; operators register their clients in the database with
 [surfaces.md](surfaces.md) sets out what auth.piquel.fr, piquel.fr and
 admin.piquel.fr each serve. Build/configuration and testing instructions are in
 the root README; every task runs through `just`. Deployment uses piqueld (`infra/README.md`). The Rust SDK for
-applications follows [sdk.md](sdk.md). Public application registration and account
-recovery are outside this release.
+applications follows [sdk.md](sdk.md). Public application registration is outside
+this release, and account recovery works only once its page ships.

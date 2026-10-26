@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE account_recoveries SET undone_at = clock_timestamp()\n                WHERE id = $1 AND completed_at IS NOT NULL AND undone_at IS NULL",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "215eaf8d042e3a9754e82e7372f5adfcc489306e206aec151de6132fed69df1c"
+}

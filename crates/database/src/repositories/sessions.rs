@@ -530,30 +530,42 @@ impl SessionRepository<'_> {
         .flatten())
     }
 
-    /// Records a social re-authentication of a session `at` this time. Only a session
-    /// without a passkey confirmation qualifies: social sign-in would lower its `acr`.
+    /// Records a re-authentication of a session `at` this time that does not
+    /// confirm it: a social sign-in, or `passkey`, a recovery's passkey during its
+    /// probation, which the session then records as its passkey. Only a session
+    /// without a passkey confirmation qualifies: either would lower its `acr`.
     ///
     /// # Errors
     ///
     /// Returns [`DatabaseError::NotFound`] if the session is revoked, expired or
     /// confirmed by a passkey, or another [`DatabaseError`] if the query fails.
-    pub async fn reauthenticate_social(
+    pub async fn reauthenticate_unconfirmed(
         &mut self,
         id: SessionId,
+        passkey: Option<PasskeyId>,
         at: DateTime<Utc>,
     ) -> Result<(), DatabaseError> {
+        let method = Json([AuthenticationMethod::Passkey]);
         let updated = run!(
             self,
             execute,
             sqlx::query!(
                 "UPDATE sessions
-                SET authenticated_at = $2
+                SET authenticated_at = $2,
+                    passkey_id = COALESCE($3, passkey_id),
+                    authentication_methods = CASE
+                        WHEN $3::uuid IS NULL OR authentication_methods @> $4
+                            THEN authentication_methods
+                        ELSE authentication_methods || $4
+                    END
                 WHERE id = $1
                 AND passkey_confirmed_at IS NULL
                 AND revoked_at IS NULL
                 AND expires_at > $2",
                 id.as_uuid(),
                 at,
+                passkey.map(PasskeyId::as_uuid),
+                method as _,
             )
         )?
         .rows_affected();

@@ -631,6 +631,27 @@ impl OidcRepository<'_> {
         Ok(())
     }
 
+    /// Withdraws every consent of the user, and returns the clients they were
+    /// given to, each once.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`DatabaseError`] if the query fails.
+    pub async fn revoke_consents(&mut self, user: UserId) -> Result<Vec<ClientId>, DatabaseError> {
+        run!(
+            self,
+            fetch_all,
+            sqlx::query_scalar!(
+                r#"WITH revoked AS (
+                    DELETE FROM oidc_consents WHERE user_id = $1 RETURNING client_id
+                )
+                SELECT DISTINCT client_id AS "client_id!: ClientId" FROM revoked
+                ORDER BY 1"#,
+                user.as_uuid(),
+            )
+        )
+    }
+
     /// Returns the user's verified email for the `email` claim, preferring the
     /// primary address.
     ///

@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE account_recoveries\n                SET completed_at = completed_at - $2::bigint * interval '1 millisecond',\n                    settles_at = settles_at - $2::bigint * interval '1 millisecond'\n                WHERE id = $1",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Int8"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "8e551693e0fe8cc0c0958e183c89e78d416d3feb2192bf92c7ba30c589677363"
+}

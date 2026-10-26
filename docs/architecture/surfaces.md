@@ -13,11 +13,11 @@ yet are marked *(planned)*.
 
 The auth executable owns everything that authenticates someone or issues a
 credential: discovery, JWKS, authorization, token, userinfo, logout, and the
-pages a ceremony needs (login, signup, consent, passkey confirmation, device
-verification *(planned)*). It also serves the account settings at `/settings`, on
-the paths piquel.fr used, and redirects its root there, and the developer console,
-where accounts register their own OIDC clients, at `/developers`. It hosts no admin
-pages yet.
+pages a ceremony needs (login, signup, consent, passkey confirmation, account
+recovery *(planned)*, device verification *(planned)*). It also serves the account
+settings at `/settings`, on the paths piquel.fr used, and redirects its root there,
+and the developer console, where accounts register their own OIDC clients, at
+`/developers`. It hosts no admin pages yet.
 
 The account and admin APIs are routes in the same executable. They are small
 next to the pages that use them, and keeping them there keeps one binary, one
@@ -112,6 +112,39 @@ When an administrator or operator acts:
 - A change that signs the owner out elsewhere, such as removing a passkey, signs
   out every session, since an administrator has none of the owner's to keep.
 
+### Recovering an account
+
+An owner who lost every passkey cannot add one: adding a way to sign in needs a
+passkey confirmation. `AdminService::recover_account` helps without giving the
+administrator a way in. It signs the account out everywhere, removes its
+unverified addresses, and emails its current primary verified address a link
+that enrolls one passkey, once, within a day, then signs that browser in with
+it. The link's token alone authorizes it; only its digest is stored, and the
+email's delivery stores neither. Only an operator at the terminal sees the link
+(`user recover`), which also reaches an owner without an address. An
+administrator never sees it, so they may only start a recovery that mails it;
+the dashboard's way to start one is *(planned)*.
+
+For 15 days after the link is used, the recovery is in probation: its passkey
+signs in like a social login and never confirms the session. Every change that
+needs a confirmation refuses it, and so do the admin API and relying parties
+that ask for `phr`, so whoever used the link can use the account but add no way
+into it. Undoing the recovery takes back its passkey, every session and refresh
+grant, and every app consent. The owner undoes it with any other passkey, in a
+ceremony of its own that needs no session and works on a disabled account
+(`/account/recovery/undo/start` and `/finish`). Until it settles, nobody removes
+a passkey but the recovery's own, administrators and operators included, so
+nothing takes that away. Support undoes it for an owner with no other passkey
+(`user undo-recovery`, `AdminService::undo_recovery`).
+
+`user recover --revoke` is for an account that was in someone else's hands: it
+also revokes every passkey the owner doesn't vouch for, unlinks every identity
+and withdraws every consent, and only prints the link. No account is recovered
+while it holds administrator rights, and none is made an administrator while a
+recovery of it can be undone. [Account recovery](../security/account-recovery.md)
+states the policy and support's evidence policy. The pages that use the link and
+offer the undo are *(planned)*; until then no page uses a link.
+
 ## Contracts
 
 Third-party applications integrate only through open standards: OIDC, OAuth and
@@ -123,4 +156,7 @@ first-party; they change together with auth's pages in this repository.
 Nothing auth runs on may require auth to log in: piqueld, server access, the
 tailnet, PostgreSQL, DNS and the tunnel. If auth or its frontends are down, the
 CLI, given database access, can still do every admin operation and repair
-accounts: see [Administration](../../README.md#administration).
+accounts: see [Administration](../../README.md#administration). Recovering an
+account whose owner lost every passkey follows
+[account recovery](../security/account-recovery.md), including support's
+evidence policy.

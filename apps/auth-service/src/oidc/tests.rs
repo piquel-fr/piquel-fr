@@ -3,7 +3,8 @@
 use super::*;
 use crate::config::TokenDigestKey;
 use crate::deliveries::{BackchannelLogoutSender, OutboundClient, Sender};
-use crate::security::{BrowserCookie, RequestContext, Session};
+use crate::recovery::ProbationPasskey;
+use crate::security::{BrowserCookie, Credential, RequestContext, Session};
 use crate::tests::{AUTH_ORIGIN, Replicas, TlsListener, location, parameter, until_blocked};
 use crate::{AuthConfig, federation::FederationApplication, web::WebApplication};
 use axum::{
@@ -12,7 +13,6 @@ use axum::{
     response::Response,
 };
 use chrono::Utc;
-use piquel_common::PasskeyId;
 use piquel_common::{
     AuthenticationMethod, Handle, UserId,
     clients::{AllowedScopes, ClientKind, ClientOwner, ClientRegistration, RedirectUri, ScopeName},
@@ -22,9 +22,11 @@ use piquel_common::{
         step_up::StepUpRequirement,
     },
 };
+use piquel_common::{PasskeyId, RecoveryId};
 use piquel_crypto::{KeySet, Rs256Key};
 use piquel_repository::{
-    BackchannelLogout, DatabaseConfig, InsertUser, InsertVerifiedEmail, SessionScope,
+    BackchannelLogout, DatabaseConfig, InsertPasskey, InsertRecovery, InsertUser,
+    InsertVerifiedEmail, SessionScope,
 };
 use serde_json::{Value, json};
 use std::{
@@ -1265,6 +1267,107 @@ async fn acr_targets_and_grants_keep_their_authentication() {
         assert_eq!(claims["acr"], Acr::Social.as_str(), "{acr_values}");
         assert_eq!(claims["amr"], json!(["fed"]));
     }
+}
+
+/// A browser that signed in for an authorization with a recovered passkey during
+/// its probation cannot reach `phr` by signing in again, so the client hears
+/// `unmet_authentication_requirements` instead of its user looping through
+/// sign-in. A social sign-in, which a passkey could still step up, and a
+/// probation sign-in from before the request go to sign in, as before. Without a
+/// target, a probation sign-in is enough.
+#[tokio::test]
+#[ignore = "requires TEST_DATABASE_URL"]
+async fn a_probation_sign_in_short_of_the_target_answers_the_client() {
+    let mut flow = Flow::new(true, true).await;
+    flow.sign_in_again(AuthenticationMethod::Federation).await;
+    let phr = [("acr_values", "phr")];
+    let response = flow
+        .authorize_with(Method::GET, Scope::OpenId.as_str(), None, &phr)
+        .await;
+    let transaction = parameter(&location(&response), "transaction");
+    let resume = format!(
+        "{}?transaction={transaction}",
+        routes::oidc::AUTHORIZE_RESUME
+    );
+
+    flow.sign_in_again(AuthenticationMethod::Federation).await;
+    let response = flow.request(Method::GET, &resume, &[], None).await;
+    assert_eq!(location(&response).path(), routes::page::LOGIN, "social");
+
+    let database = flow.app.database.clone();
+    let passkey = PasskeyId::new();
+    database
+        .passkeys()
+        .insert(&InsertPasskey {
+            id: passkey,
+            credential_id: passkey.as_uuid().as_bytes().to_vec(),
+            user_id: flow.user_id,
+            credential: json!({}),
+            friendly_name: "Recovered".into(),
+        })
+        .await
+        .expect("passkey");
+    let recovery = RecoveryId::new();
+    database
+        .recoveries()
+        .insert(&InsertRecovery {
+            id: recovery,
+            user_id: flow.user_id,
+            secret_digest: &recovery.as_uuid().as_bytes().repeat(2),
+            expires_at: Utc::now() + chrono::Duration::hours(1),
+        })
+        .await
+        .expect("recovery");
+    let probation = crate::recovery::PROBATION;
+    let mut recoveries = database.recoveries();
+    let completed = recoveries
+        .complete(flow.user_id, recovery, passkey, probation)
+        .await;
+    assert!(completed.expect("complete"));
+    let stored = recoveries
+        .find(recovery)
+        .await
+        .expect("lookup")
+        .expect("recovery");
+    let credential = Credential::Probation(ProbationPasskey::of(&stored).expect("probation"));
+    let user_id = flow.user_id;
+    let probation_sign_in = || async {
+        let mut tx = database.begin().await.expect("transaction");
+        let session = Session::create(&mut tx, RequestContext::TEST, user_id, credential).await;
+        tx.commit().await.expect("commit");
+        let cookie = BrowserCookie::Session.as_str();
+        format!("{cookie}={}", session.expect("session").encoded())
+    };
+    let before_the_request = probation_sign_in().await;
+    let response = flow
+        .authorize_with(Method::GET, Scope::OpenId.as_str(), None, &phr)
+        .await;
+    let transaction = parameter(&location(&response), "transaction");
+    let resume = format!(
+        "{}?transaction={transaction}",
+        routes::oidc::AUTHORIZE_RESUME
+    );
+    flow.cookie = before_the_request;
+    let response = flow.request(Method::GET, &resume, &[], None).await;
+    assert_eq!(location(&response).path(), routes::page::LOGIN, "not fresh");
+
+    flow.cookie = probation_sign_in().await;
+    let response = flow.request(Method::GET, &resume, &[], None).await;
+    assert_eq!(
+        parameter(&flow.client_redirect(&response), "error"),
+        OAuthCode::UnmetAuthenticationRequirements.as_str()
+    );
+    // Signing in again for a request without a target is enough.
+    let response = flow.authorize(Scope::OpenId.as_str(), Some("login")).await;
+    let transaction = parameter(&location(&response), "transaction");
+    let resume = format!(
+        "{}?transaction={transaction}",
+        routes::oidc::AUTHORIZE_RESUME
+    );
+    flow.cookie = probation_sign_in().await;
+    let response = flow.request(Method::GET, &resume, &[], None).await;
+    let code = parameter(&flow.client_redirect(&response), "code");
+    assert!(!code.is_empty(), "no target, no refusal");
 }
 
 /// Checks protocol POST parity and existing OAuth error and challenge formats.

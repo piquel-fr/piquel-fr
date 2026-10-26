@@ -9,6 +9,10 @@ use clap::Subcommand;
 #[derive(Subcommand)]
 pub(super) enum AdminCommand {
     /// Make an active account an administrator.
+    ///
+    /// Refuses while a recovery of the account can still be undone: granted
+    /// during its probation, the rights would go live for whoever used its link
+    /// once it settles.
     Grant {
         /// The account: its username, ID or verified email.
         user: UserRef,

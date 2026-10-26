@@ -239,6 +239,10 @@ crate::open_str_enum! {
         LoginRequired = "login_required",
         /// A `prompt=none` request needs the user's consent.
         ConsentRequired = "consent_required",
+        /// The user signed in again during the authorization, and still cannot
+        /// meet its `acr_values` (`OpenID` Connect Unmet Authentication Requirements
+        /// 1.0), as a recovered passkey cannot during its probation.
+        UnmetAuthenticationRequirements = "unmet_authentication_requirements",
         /// Signed `request` objects are not supported.
         RequestNotSupported = "request_not_supported",
         /// A `request_uri` is not one this server pushed, or is expired, already

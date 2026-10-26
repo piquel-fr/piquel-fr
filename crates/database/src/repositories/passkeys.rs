@@ -48,16 +48,19 @@ pub struct StoredPasskey {
     pub credential: Value,
     /// User-chosen label.
     pub friendly_name: String,
+    /// When the credential was enrolled.
+    pub created_at: DateTime<Utc>,
     /// When the credential was revoked; `None` while it is usable.
     pub revoked_at: Option<DateTime<Utc>>,
 }
 
 impl From<StoredPasskey> for Passkey {
-    /// Shows the label only, never the credential.
+    /// Shows the label and enrollment time only, never the credential.
     fn from(passkey: StoredPasskey) -> Self {
         Self {
             id: passkey.id,
             friendly_name: passkey.friendly_name,
+            created_at: passkey.created_at,
         }
     }
 }
@@ -111,7 +114,7 @@ impl PasskeyRepository<'_> {
                 ) VALUES ($1, $2, $3, $4, $5)
                 RETURNING
                     id AS "id: PasskeyId", credential_id, user_id AS "user_id: UserId", credential,
-                    friendly_name, revoked_at"#,
+                    friendly_name, created_at, revoked_at"#,
                 input.id.as_uuid(),
                 input.credential_id,
                 input.user_id.as_uuid(),
@@ -137,7 +140,7 @@ impl PasskeyRepository<'_> {
                 StoredPasskey,
                 r#"SELECT
                     id AS "id: PasskeyId", credential_id, user_id AS "user_id: UserId", credential,
-                    friendly_name, revoked_at
+                    friendly_name, created_at, revoked_at
                 FROM passkey_credentials
                 WHERE user_id = $1
                 AND revoked_at IS NULL
@@ -165,7 +168,7 @@ impl PasskeyRepository<'_> {
                 StoredPasskey,
                 r#"SELECT
                     p.id AS "id: PasskeyId", p.credential_id, p.user_id AS "user_id: UserId",
-                    p.credential, p.friendly_name, p.revoked_at
+                    p.credential, p.friendly_name, p.created_at, p.revoked_at
                 FROM passkey_credentials p
                 JOIN users u ON u.id = p.user_id
                 WHERE u.username = $1
@@ -194,7 +197,7 @@ impl PasskeyRepository<'_> {
                 StoredPasskey,
                 r#"SELECT
                     id AS "id: PasskeyId", credential_id, user_id AS "user_id: UserId", credential,
-                    friendly_name, revoked_at
+                    friendly_name, created_at, revoked_at
                 FROM passkey_credentials
                 WHERE credential_id = $1
                 AND revoked_at IS NULL

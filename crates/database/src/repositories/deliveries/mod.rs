@@ -306,6 +306,27 @@ impl DeliveryRepository<'_> {
         Ok(id)
     }
 
+    /// The payloads of the deliveries to `destination`, oldest first: a fixture
+    /// for checking what a channel queued.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`DatabaseError`] if the query fails.
+    #[cfg(feature = "test-support")]
+    pub async fn payloads(
+        &mut self,
+        destination: &str,
+    ) -> Result<Vec<serde_json::Value>, DatabaseError> {
+        run!(
+            self,
+            fetch_all,
+            sqlx::query_scalar!(
+                "SELECT payload FROM deliveries WHERE destination = $1 ORDER BY created_at, id",
+                destination,
+            )
+        )
+    }
+
     /// Claims the longest-due delivery of channel `C` for `lease`, or returns
     /// `None` when none is due. Concurrent workers never claim the same delivery
     /// while its lease lasts. An ordered delivery is due only once every earlier
@@ -608,7 +629,7 @@ mod backchannel;
 pub use backchannel::{BackchannelLogout, LogoutRecipient};
 /// Messages to account holders.
 mod email;
-pub use email::{Email, EmailMessage, PendingAddress};
+pub use email::{Email, EmailMessage, PendingAddress, PendingRecovery};
 /// Database tests for fan-out, claims, leases and ordering.
 #[cfg(test)]
 mod tests;

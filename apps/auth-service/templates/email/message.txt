@@ -18,6 +18,34 @@ If you made this change, there is nothing to do. If you did not, sign in and rev
 If you made this change, there is nothing to do. If you did not, sign in and review your account's security history:
 
 {{ history }}
+{%- when Content::RecoveryLink { address: _, username, link, hours, undo } %}
+Piquel support started a recovery of the Piquel account @{{ username }}, so its owner can add a new passkey. The account was signed out everywhere. If it is yours, open this link and follow the steps to add a passkey:
+
+{{ link }}
+
+The link works once, for {{ hours }} hours. If you didn't ask for this, contact Piquel support. If you still have a passkey, you can also cancel the recovery:
+
+{{ undo }}
+{%- when Content::RecoveryRevoked { address: _, undo } %}
+Piquel support revoked passkeys of your Piquel account, signed it out everywhere, and started a recovery so its owner can add a new passkey. Support gives the recovery link only to the person it confirmed as the owner, directly.
+{%- match undo %}
+{%- when Some with (undo) %}
+
+If you didn't ask for this and still have a passkey, cancel the recovery, then contact Piquel support:
+
+{{ undo }}
+{%- when None %}
+
+If you didn't ask for this, contact Piquel support straight away.
+{%- endmatch %}
+{%- when Content::Recovered { address: _, undo, days } %}
+A recovery added a new passkey to your Piquel account and signed in with it. If that was you, there is nothing to do. For {{ days }} days, that passkey can sign in but can't change your account's security settings.
+
+If it wasn't you, use a passkey you had before the recovery to undo it. You have {{ days }} days to do so. Undoing it removes the recovery's passkey, signs out every device and withdraws every app's access; apps ask for it again next time:
+
+{{ undo }}
+
+If you have no passkey from before the recovery, contact Piquel support, who can undo it for you.
 {%- endmatch %}
 
 Piquel

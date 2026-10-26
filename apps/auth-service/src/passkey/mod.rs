@@ -2,6 +2,7 @@
 use crate::account::{AccountError, AccountService, Owner, Subject, Viewer};
 use crate::config::PasskeyConfig;
 use crate::federation::FederationApplication;
+use crate::recovery::{PROBATION, ProbationPasskey, RecoveryError, RecoveryView};
 use crate::routes;
 use crate::security::{self, ApiError, BrowserCookie, Credential, RequestContext};
 use axum::{
@@ -9,10 +10,10 @@ use axum::{
     extract::State,
     http::{HeaderMap, StatusCode, header},
     response::{IntoResponse, Response},
-    routing::post,
+    routing::{get, post},
 };
 use piquel_common::{
-    AuthenticationMethod, Handle, PasskeyId, UserId,
+    AccountStatus, AuthenticationMethod, Handle, PasskeyId, RecoveryId, UserId,
     events::{Actor, DomainEvent, EventContext, RevocationReason},
     protocol::api,
 };
@@ -37,13 +38,13 @@ mod types;
 
 use ceremonies::{
     AuthenticationCeremony, Ceremony, ConfirmationCeremony, DiscoverCeremony, EnrollmentCeremony,
-    LoginCeremony, RegistrationCeremony,
+    LoginCeremony, RecoveryCeremony, RegistrationCeremony, UndoCeremony,
 };
 pub use error::PasskeyConfigError;
 pub(crate) use error::PasskeyError;
 use types::{
-    AuthenticationFinish, DisplayName, EnrollmentStart, LoginStart, PasskeyKind,
-    RegistrationFinish, RegistrationStart,
+    AuthenticationFinish, DisplayName, EnrollmentStart, LoginStart, PasskeyKind, RecoveryStart,
+    RecoveryUndo, RegistrationFinish, RegistrationStart, UndoOutcome,
 };
 pub(crate) use types::{PasskeyName, Rename};
 
@@ -119,6 +120,11 @@ impl PasskeyApplication {
                 routes::passkey::ENROLL_FINISH,
                 post(Self::finish_enrollment),
             )
+            .route(routes::recovery::START, post(Self::start_recovery))
+            .route(routes::recovery::FINISH, post(Self::finish_recovery))
+            .route(routes::recovery::STATUS, get(Self::recovery))
+            .route(routes::recovery::UNDO_START, post(Self::start_undo))
+            .route(routes::recovery::UNDO_FINISH, post(Self::finish_undo))
             .with_state(self)
     }
 
@@ -157,27 +163,36 @@ impl PasskeyApplication {
         Ok(passkey_id)
     }
 
-    /// Commits the account operation together with the sign-in with `passkey`. A
-    /// browser already signed in as `user_id` keeps its session, now confirmed.
+    /// Commits the account operation together with the sign-in with `credential`.
+    /// A browser already signed in as `user_id` keeps its session, now confirmed
+    /// unless the credential is a recovery's passkey during its probation.
     async fn complete_sign_in(
         mut tx: DatabaseTransaction<'_>,
         context: RequestContext,
         headers: &HeaderMap,
         user_id: UserId,
-        passkey: PasskeyId,
+        credential: Credential,
     ) -> Result<Response, PasskeyError> {
-        let session = security::Session::sign_in(
-            &mut tx,
-            context,
-            headers,
-            user_id,
-            Credential::Passkey(passkey),
-        )
-        .await?;
+        let session =
+            security::Session::sign_in(&mut tx, context, headers, user_id, credential).await?;
+        Self::signed_in(tx, &session).await
+    }
+
+    /// Commits `tx`, which signed the browser in with the `session` secret, and
+    /// answers with its cookie.
+    async fn signed_in(
+        tx: DatabaseTransaction<'_>,
+        session: &Secret,
+    ) -> Result<Response, PasskeyError> {
         tx.commit().await?;
         let mut response = StatusCode::NO_CONTENT.into_response();
-        BrowserCookie::Session.set_on(&mut response, &session)?;
+        BrowserCookie::Session.set_on(&mut response, session)?;
         Ok(response)
+    }
+
+    /// The account operations, over this application's database.
+    fn service(&self) -> AccountService {
+        AccountService::new(self.database.clone())
     }
 
     /// Decodes the account's active passkeys for `WebAuthn`.
@@ -247,20 +262,24 @@ impl PasskeyApplication {
         }
     }
 
-    /// Checks the latest stored counter under lock before updating the credential,
-    /// and returns the passkey's ID.
-    async fn update_credential(
+    /// Locks the account, whatever its status, then checks the latest stored
+    /// counter under lock before updating the credential, and returns what `A`
+    /// accepts of it: a [`Credential`], a recovery's passkey during its probation
+    /// included, for an account `A` may sign in to.
+    async fn update_credential<A: Acceptance>(
         tx: &mut DatabaseTransaction<'_>,
         user_id: UserId,
         result: &AuthenticationResult,
-    ) -> Result<PasskeyId, PasskeyError> {
+    ) -> Result<A, PasskeyError> {
         if !result.user_verified() {
             return Err(PasskeyError::UserVerificationRequired);
         }
-        tx.users()
-            .find_active_by_id_for_update(user_id)
+        let status = tx
+            .users()
+            .find_by_id_for_update(user_id)
             .await?
-            .ok_or(PasskeyError::AccountInactive)?;
+            .ok_or(PasskeyError::AccountInactive)?
+            .status;
         let stored = tx
             .passkeys()
             .find_active_by_credential_id_for_update(result.cred_id().as_ref())
@@ -292,26 +311,33 @@ impl PasskeyApplication {
         {
             return Err(PasskeyError::CredentialRevoked);
         }
-        Ok(stored.id)
+        let credential = match tx.recoveries().of_passkey(stored.id).await? {
+            Some(recovery) => ProbationPasskey::of(&recovery)
+                .map_or(Credential::Passkey(stored.id), Credential::Probation),
+            None => Credential::Passkey(stored.id),
+        };
+        A::accept(status, stored.id, credential)
     }
 
     /// Takes `WebAuthn`'s verdict on an assertion for `user_id` and, once the latest
     /// credential state also accepts it, opens the transaction that completes the
-    /// authentication, and returns it with the asserting passkey's ID. The ceremony was already consumed. A rejection rolls back any
-    /// transaction it opened, then is recorded as `actor`'s failed sign-in in a
-    /// transaction of its own, so the record outlives the rejection.
-    async fn accept_credential(
+    /// authentication, and returns it with what `A` accepts: a [`Credential`] to
+    /// sign in or confirm with, or [`Accepted`] for an undo. The ceremony was
+    /// already consumed. A rejection rolls back any transaction it opened, then is
+    /// recorded as `actor`'s failed sign-in in a transaction of its own, so the
+    /// record outlives the rejection.
+    async fn accept_credential<A: Acceptance>(
         &self,
         context: RequestContext,
         actor: Actor,
         user_id: UserId,
         verified: Result<AuthenticationResult, WebauthnError>,
-    ) -> Result<(DatabaseTransaction<'_>, PasskeyId), PasskeyError> {
+    ) -> Result<(DatabaseTransaction<'_>, A), PasskeyError> {
         let (error, tx) = match verified {
             Ok(result) => {
                 let mut tx = self.database.begin().await?;
                 match Self::update_credential(&mut tx, user_id, &result).await {
-                    Ok(passkey) => return Ok((tx, passkey)),
+                    Ok(accepted) => return Ok((tx, accepted)),
                     Err(error) => (error, Some(tx)),
                 }
             }
@@ -494,7 +520,9 @@ impl PasskeyApplication {
             FederationApplication::attach_signup(&mut tx, &actor, pending, &headers, user_id)
                 .await?;
         }
-        let mut response = Self::complete_sign_in(tx, context, &headers, user_id, passkey).await?;
+        let mut response =
+            Self::complete_sign_in(tx, context, &headers, user_id, Credential::Passkey(passkey))
+                .await?;
         // Ordinary registration leaves any unrelated pending social flow untouched.
         if pending.is_some() {
             BrowserCookie::FederationPending
@@ -595,10 +623,10 @@ impl PasskeyApplication {
                 )
             }
         };
-        let (tx, passkey) = app
+        let (tx, credential) = app
             .accept_credential(context, Actor::Anonymous, user_id, verified)
             .await?;
-        Ok(Self::complete_sign_in(tx, context, &headers, user_id, passkey).await?)
+        Ok(Self::complete_sign_in(tx, context, &headers, user_id, credential).await?)
     }
 
     /// Reads the account a discoverable credential names, and that account's keys.
@@ -668,12 +696,18 @@ impl PasskeyApplication {
             user_id,
             session_id: Some(session_id),
         };
-        let (mut tx, passkey) = app
+        let (mut tx, credential) = app
             .accept_credential(context, actor, user_id, verified)
             .await?;
-        let secret =
-            security::Session::reauthenticate(&mut tx, &session, Credential::Passkey(passkey))
-                .await?;
+        let credential = match credential {
+            // A recovery's passkey never confirms a session during its probation.
+            Credential::Probation(probation) => {
+                let settles_at = probation.settles_at();
+                return Err(RecoveryError::Probation { settles_at }.into());
+            }
+            Credential::Passkey(_) | Credential::Federation => credential,
+        };
+        let secret = security::Session::reauthenticate(&mut tx, &session, credential).await?;
         tx.record(
             &context.user(&session),
             Some(user_id),
@@ -755,10 +789,349 @@ impl PasskeyApplication {
             .webauthn
             .finish_passkey_registration(&input.credential, &state)
             .map_err(PasskeyError::from)?;
-        AccountService::new(app.database.clone())
+        app.service()
             .add_passkey(&owner, key, friendly_name)
             .await?;
         Ok(StatusCode::NO_CONTENT)
+    }
+
+    /// Starts enrolling a passkey with a recovery link, excluding the account's
+    /// current credentials. The link's token authorizes it, without a session.
+    async fn start_recovery(
+        State(app): State<Self>,
+        headers: HeaderMap,
+        Json(input): Json<RecoveryStart>,
+    ) -> Result<Response, ApiError> {
+        let recovery = app.service().open_recovery(&input.token).await?;
+        let user_id = recovery.user_id();
+        let exclusions = app
+            .keys(user_id)
+            .await?
+            .iter()
+            .map(|key| key.cred_id().clone())
+            .collect();
+        let account = recovery.account();
+        let (challenge, state) = app.registration(
+            user_id,
+            &account.username,
+            &account.display_name,
+            Some(exclusions),
+            input.passkey_kind,
+            &headers,
+        )?;
+        Ok(app
+            .start(
+                &headers,
+                Ceremony::Recover(RecoveryCeremony {
+                    recovery_id: recovery.id(),
+                    user_id,
+                    state,
+                }),
+                challenge,
+            )
+            .await?)
+    }
+
+    /// Finishes enrolling a passkey with a recovery link: uses the link, and signs
+    /// the browser in with the new passkey.
+    async fn finish_recovery(
+        State(app): State<Self>,
+        context: RequestContext,
+        headers: HeaderMap,
+        Json(input): Json<RegistrationFinish>,
+    ) -> Result<Response, ApiError> {
+        let friendly_name = PasskeyName::parse(input.friendly_name)?;
+        let RecoveryCeremony {
+            recovery_id,
+            user_id,
+            state,
+        } = app
+            .consume::<RecoveryCeremony>(&headers, input.ceremony_id)
+            .await?;
+        let key = app
+            .webauthn
+            .finish_passkey_registration(&input.credential, &state)
+            .map_err(PasskeyError::from)?;
+        let mut tx = app.database.begin().await?;
+        let probation = AccountService::complete_recovery(
+            &mut tx,
+            recovery_id,
+            user_id,
+            key,
+            friendly_name,
+            context,
+        )
+        .await?;
+        // Always a new session: one the browser already had, of this account or
+        // another, is neither renewed nor carried over.
+        let session = security::Session::sign_in_anew(
+            &mut tx,
+            context,
+            &headers,
+            user_id,
+            Credential::Probation(probation),
+        )
+        .await?;
+        Ok(Self::signed_in(tx, &session).await?)
+    }
+
+    /// Describes the account's recovery that can still be undone, if any.
+    async fn recovery(
+        State(app): State<Self>,
+        owner: Owner,
+    ) -> Result<Json<Option<RecoveryView>>, ApiError> {
+        Ok(Json(app.service().recovery(&owner).await?))
+    }
+
+    /// Starts undoing the recovery the undo page names, challenging every passkey
+    /// of the account but the recovery's own. Needs no session: whoever used the
+    /// link cannot stop an undo by signing the owner out, nor by having the
+    /// account disabled.
+    async fn start_undo(
+        State(app): State<Self>,
+        headers: HeaderMap,
+        Json(input): Json<RecoveryUndo>,
+    ) -> Result<Response, ApiError> {
+        let (user_id, passkeys) = app.service().undo_passkeys(input.recovery_id).await?;
+        let (challenge, state) = app
+            .webauthn
+            .start_passkey_authentication(&Self::decode(passkeys)?)
+            .map_err(PasskeyError::from)?;
+        Ok(app
+            .start(
+                &headers,
+                Ceremony::Undo(UndoCeremony {
+                    recovery_id: input.recovery_id,
+                    user_id,
+                    state,
+                }),
+                challenge,
+            )
+            .await?)
+    }
+
+    /// Finishes undoing a recovery with the passkey's assertion, in one
+    /// transaction, and signs the browser in with that passkey. Undoing a recovery
+    /// in probation ends every session before that sign-in; an unused link is only
+    /// cancelled. On a disabled account, it undoes and signs nobody in.
+    async fn finish_undo(
+        State(app): State<Self>,
+        context: RequestContext,
+        headers: HeaderMap,
+        Json(input): Json<AuthenticationFinish>,
+    ) -> Result<Response, ApiError> {
+        let (mut tx, verified) = app.verify_undo(context, &headers, input).await?;
+        AccountService::undo_recovery(&mut tx, context, &verified).await?;
+        let session = match verified.accepted {
+            Accepted::Active(passkey) => Some(
+                security::Session::sign_in(
+                    &mut tx,
+                    context,
+                    &headers,
+                    verified.user_id,
+                    Credential::Passkey(passkey),
+                )
+                .await?,
+            ),
+            Accepted::Disabled(_) => None,
+        };
+        tx.commit().await?;
+        let signed_in = session.is_some();
+        let mut response = Json(UndoOutcome { signed_in }).into_response();
+        if let Some(session) = session {
+            BrowserCookie::Session
+                .set_on(&mut response, &session)
+                .map_err(PasskeyError::CookieHeader)?;
+        }
+        Ok(response)
+    }
+
+    /// Consumes the browser's undo ceremony and verifies its assertion under the
+    /// account lock, whatever the account's status. Returns the transaction that
+    /// holds the lock, and the undo it proves: the only way to build a
+    /// [`VerifiedRecoveryUndo`].
+    async fn verify_undo(
+        &self,
+        context: RequestContext,
+        headers: &HeaderMap,
+        input: AuthenticationFinish,
+    ) -> Result<(DatabaseTransaction<'_>, VerifiedRecoveryUndo), ApiError> {
+        let UndoCeremony {
+            recovery_id,
+            user_id,
+            state,
+        } = self
+            .consume::<UndoCeremony>(headers, input.ceremony_id)
+            .await?;
+        let verified = self
+            .webauthn
+            .finish_passkey_authentication(&input.credential, &state);
+        let (tx, accepted) = self
+            .accept_credential::<Accepted>(context, Actor::Anonymous, user_id, verified)
+            .await?;
+        let undo = VerifiedRecoveryUndo {
+            user_id,
+            recovery_id,
+            accepted,
+        };
+        Ok((tx, undo))
+    }
+}
+
+/// An undo of a recovery that a passkey proved: its undo ceremony was consumed
+/// and the assertion verified under the account lock, binding the account, the
+/// recovery and the passkey. Only [`PasskeyApplication::verify_undo`] builds one,
+/// so [`AccountService::undo_recovery`] is never handed IDs nobody proved.
+pub(crate) struct VerifiedRecoveryUndo {
+    /// The account.
+    user_id: UserId,
+    /// The recovery its ceremony named.
+    recovery_id: RecoveryId,
+    /// The passkey that asserted, and whether the account may be signed in to.
+    accepted: Accepted,
+}
+
+impl VerifiedRecoveryUndo {
+    /// The account.
+    pub(crate) const fn user_id(&self) -> UserId {
+        self.user_id
+    }
+
+    /// The recovery its ceremony named.
+    pub(crate) const fn recovery_id(&self) -> RecoveryId {
+        self.recovery_id
+    }
+
+    /// The passkey that asserted.
+    pub(crate) const fn passkey(&self) -> PasskeyId {
+        self.accepted.passkey()
+    }
+
+    /// An undo of `recovery_id` of `user_id` by `passkey` on an active account, as
+    /// if verified: a fixture for the undo's own checks under the lock.
+    #[cfg(test)]
+    pub(crate) const fn unverified(
+        user_id: UserId,
+        recovery_id: RecoveryId,
+        passkey: PasskeyId,
+    ) -> Self {
+        Self {
+            user_id,
+            recovery_id,
+            accepted: Accepted::Active(passkey),
+        }
+    }
+}
+
+/// What an accepted passkey assertion yields, by who it is accepted from. Sign-in
+/// and confirmation accept only an active account's passkeys, as a
+/// [`Credential`]; the owner's undo of a recovery accepts a disabled account's
+/// too, as [`Accepted`], so disabling the account cannot stop the undo.
+trait Acceptance: Sized {
+    /// What an assertion of `passkey`, which signs in as `credential`, for an
+    /// account with `status` yields.
+    fn accept(
+        status: AccountStatus,
+        passkey: PasskeyId,
+        credential: Credential,
+    ) -> Result<Self, PasskeyError>;
+}
+
+impl Acceptance for Credential {
+    /// The credential, for an active account only.
+    fn accept(
+        status: AccountStatus,
+        _: PasskeyId,
+        credential: Credential,
+    ) -> Result<Self, PasskeyError> {
+        match status {
+            AccountStatus::Active => Ok(credential),
+            AccountStatus::Disabled | AccountStatus::Deleting => Err(PasskeyError::AccountInactive),
+        }
+    }
+}
+
+/// The passkey of an assertion an undo accepts, by whether its account may be
+/// signed in to afterwards.
+#[derive(Clone, Copy)]
+enum Accepted {
+    /// An active account's: the undo signs the browser in with it.
+    Active(PasskeyId),
+    /// A disabled account's: the undo signs nobody in.
+    Disabled(PasskeyId),
+}
+
+impl Accepted {
+    /// The passkey that asserted.
+    const fn passkey(self) -> PasskeyId {
+        match self {
+            Self::Active(passkey) | Self::Disabled(passkey) => passkey,
+        }
+    }
+}
+
+impl Acceptance for Accepted {
+    /// Either, by the account's status; an account being deleted has nothing
+    /// left to undo.
+    fn accept(
+        status: AccountStatus,
+        passkey: PasskeyId,
+        _: Credential,
+    ) -> Result<Self, PasskeyError> {
+        match status {
+            AccountStatus::Active => Ok(Self::Active(passkey)),
+            AccountStatus::Disabled => Ok(Self::Disabled(passkey)),
+            AccountStatus::Deleting => Err(PasskeyError::AccountInactive),
+        }
+    }
+}
+
+/// The passkey a recovery's link enrolls, which its token authorizes.
+impl AccountService {
+    /// Completes recovery `recovery_id` of `user_id` with `key`, a passkey its
+    /// link's ceremony verified, in the caller's transaction, which signs the
+    /// browser in with it on commit. Stores the passkey, starts the recovery's
+    /// probation, and records the completion as the browser's, which the link
+    /// authorized, not a session. Fails, rolling the passkey back, if the link
+    /// stopped working since the ceremony started. Returns the passkey, which
+    /// signs in without confirming during the probation.
+    async fn complete_recovery(
+        tx: &mut DatabaseTransaction<'_>,
+        recovery_id: RecoveryId,
+        user_id: UserId,
+        key: Passkey,
+        friendly_name: PasskeyName,
+        request: RequestContext,
+    ) -> Result<ProbationPasskey, AccountError> {
+        tx.users()
+            .find_active_by_id_for_update(user_id)
+            .await?
+            .ok_or(RecoveryError::InvalidLink)?;
+        let context = request.actor(Actor::Anonymous);
+        let passkey_id =
+            PasskeyApplication::insert_passkey(tx, &context, user_id, key, friendly_name).await?;
+        if !tx
+            .recoveries()
+            .complete(user_id, recovery_id, passkey_id, PROBATION)
+            .await?
+        {
+            return Err(RecoveryError::InvalidLink.into());
+        }
+        let recovery = tx.recoveries().find(recovery_id).await?;
+        let probation = recovery
+            .as_ref()
+            .and_then(ProbationPasskey::of)
+            .ok_or(RecoveryError::InvalidLink)?;
+        tx.record(
+            &context,
+            Some(user_id),
+            DomainEvent::RecoveryCompleted {
+                recovery_id,
+                passkey_id,
+            },
+        )
+        .await?;
+        Ok(probation)
     }
 }
 
@@ -827,7 +1200,9 @@ impl AccountService {
     }
 
     /// Removes a passkey and signs the account out elsewhere. One active passkey
-    /// always remains, even with a social identity linked.
+    /// always remains, even with a social identity linked. While a recovery can
+    /// be undone, only its own passkey is removed, by anyone
+    /// ([`Self::refuse_mid_recovery`]).
     pub(crate) async fn revoke_passkey(
         &self,
         subject: &Subject,
@@ -835,6 +1210,7 @@ impl AccountService {
     ) -> Result<(), AccountError> {
         let mut tx = self.database.begin().await?;
         subject.lock_confirmed(&mut tx).await?;
+        Self::refuse_mid_recovery(&mut tx, subject.user(), id).await?;
         if !tx.passkeys().revoke_if_not_last(id, subject.user()).await? {
             return Err(PasskeyError::LastPasskey.into());
         }
@@ -865,4 +1241,4 @@ impl axum::extract::FromRef<PasskeyApplication> for Database {
 }
 
 #[cfg(test)]
-mod tests;
+pub(crate) mod tests;

@@ -1,25 +1,31 @@
 //! Every administrative operation, shared by the admin API and the CLI.
 
 use super::{AdminError, HandleIssue, HandleProblem, InviteExpiry, Operator, Reason, UserRef};
-use crate::{Applied, ClientDetails, ClientRegistry, ClientRegistryError, GracePeriod};
+use crate::{
+    Applied, ClientDetails, ClientRegistry, ClientRegistryError, GracePeriod,
+    account::AccountService,
+    emails::EmailApplication,
+    recovery::{LINK_LIFETIME, PROBATION, RecoveryLinks, Revoke},
+};
 use chrono::Utc;
 use piquel_admin_api::{
     Administrator, Client, CreatedInvitation, Email, Event, EventPage, EventSearch, Invitation,
     UserDetail, UserPage,
 };
 use piquel_common::{
-    AccountStatus, ClientId, DeliveryId, Handle, Personal, SessionId, TokenId, UserId,
+    AccountStatus, ClientId, DeliveryId, Handle, Personal, RecoveryId, SessionId, TokenId, UserId,
     clients::{ClientField, ClientOwner, ClientRegistration},
     config::Origin,
     email::NormalizedEmail,
-    events::{DomainEvent, RevocationReason},
+    events::{DomainEvent, EventContext, RecoveryRevocation, RevocationReason},
 };
 use piquel_crypto::{ClientSecret, Secret};
 use piquel_repository::{
     Database, DatabaseError, DatabaseTransaction, DeliveryStatus, DeliverySummary, EventFilter,
-    SessionScope, StoredOidcClient,
+    InsertRecovery, RecentRecovery, SessionScope, StoredOidcClient,
 };
 use std::collections::BTreeMap;
+use url::Url;
 
 /// Accounts per search page.
 const USER_PAGE_SIZE: u16 = 50;
@@ -179,7 +185,8 @@ impl AdminService {
     }
 
     /// Disables an account and ends all its sessions and refresh grants in one
-    /// transaction, so its next request and token refresh fail.
+    /// transaction, so its next request and token refresh fail. A recovery link
+    /// not used yet stops working, so re-enabling the account does not revive it.
     pub(crate) async fn disable_user(
         &self,
         operator: &Operator,
@@ -200,9 +207,10 @@ impl AdminService {
         };
         tx.record(&operator.context(), Some(user_id), disabled)
             .await?;
+        tx.recoveries().cancel_open(user_id).await?;
         Self::end_sessions(
             &mut tx,
-            operator,
+            &operator.context(),
             user_id,
             RevocationReason::AccountDisabled,
         )
@@ -242,6 +250,186 @@ impl AdminService {
         .await
     }
 
+    /// Starts recovering the active account `user_id`, whose owner lost every
+    /// passkey, for `reason`, in one transaction. It ends the account's sessions
+    /// and refresh grants, removes its unverified addresses, so no verification
+    /// link sent before can change it, and cancels an unused older link. Its
+    /// current primary verified address is sent a link that enrolls one passkey,
+    /// once, within a day. An operator at the terminal is also given the link,
+    /// which also reaches an owner without an address. An administrator never
+    /// sees it, so they may only start a recovery that mails it.
+    ///
+    /// With `revoke`, for an account that was in someone else's hands, it first
+    /// takes back every way in but the passkeys the owner vouched for: every
+    /// other passkey, the last included, every identity and every consent. Its
+    /// link is then only printed, and every verified address is told at once.
+    ///
+    /// Refused for an administrator, whose rights must be revoked first, and while
+    /// a recovery of the account is in probation, which support undoes first
+    /// ([`Self::undo_recovery`]) once it knows who used it.
+    pub(crate) async fn recover_account(
+        &self,
+        operator: &Operator,
+        user_id: UserId,
+        reason: Reason,
+        links: &RecoveryLinks,
+        revoke: Option<Revoke>,
+    ) -> Result<Option<Url>, AdminError> {
+        let mut tx = self.database.begin().await?;
+        let user = operator.lock(&mut tx, user_id).await?;
+        if user.status != AccountStatus::Active {
+            return Err(AdminError::RecoveryOfDisabledAccount);
+        }
+        if tx.administrators().contains(user_id).await? {
+            return Err(AdminError::RecoveryOfAdministrator);
+        }
+        if AccountService::undoable(&mut tx, user_id)
+            .await?
+            .is_some_and(|undoable| undoable.is_probation())
+        {
+            return Err(AdminError::RecoveryInProbation);
+        }
+        let shown = matches!(operator, Operator::Cli { .. });
+        let emails = tx.emails().list(user_id).await?;
+        let mailed = revoke.is_none()
+            && emails
+                .iter()
+                .any(|email| email.is_primary && email.verified_at.is_some());
+        if !mailed && !shown {
+            return Err(AdminError::RecoveryNeedsEmail);
+        }
+        let context = EventContext {
+            reason: Some(reason.into_inner()),
+            ..operator.context()
+        };
+        // Cancelled before any revocation, which the database refuses while a
+        // recovery's link works.
+        tx.recoveries().cancel_open(user_id).await?;
+        let revoke = match revoke {
+            Some(revoke) => Some(Self::take_back(&mut tx, &context, user_id, revoke).await?),
+            None => None,
+        };
+        for email in emails.iter().filter(|email| email.verified_at.is_none()) {
+            EmailApplication::delete(&mut tx, &context, user_id, email.id).await?;
+        }
+        let id = RecoveryId::new();
+        let token = links.token(id)?;
+        let expires_at = Utc::now() + LINK_LIFETIME;
+        tx.recoveries()
+            .insert(&InsertRecovery {
+                id,
+                user_id,
+                secret_digest: token.digest().as_bytes(),
+                expires_at,
+            })
+            .await?;
+        let started = DomainEvent::RecoveryStarted {
+            recovery_id: id,
+            expires_at,
+            revoke,
+        };
+        tx.record(&context, Some(user_id), started).await?;
+        Self::end_sessions(&mut tx, &context, user_id, RevocationReason::Admin).await?;
+        let link = shown.then(|| links.url(&token));
+        Self::finish(tx, operator, Some(user_id), vec![]).await?;
+        Ok(link)
+    }
+
+    /// Takes back every way into `user_id`'s account but the passkeys `revoke`
+    /// keeps, recording each change in `context`: every other passkey, the last
+    /// included, every identity, and every refresh grant and consent. Fails if a
+    /// kept passkey is not an active one of the account, so a typo cannot leave a
+    /// stolen one active.
+    async fn take_back(
+        tx: &mut DatabaseTransaction<'_>,
+        context: &EventContext,
+        user_id: UserId,
+        revoke: Revoke,
+    ) -> Result<RecoveryRevocation, AdminError> {
+        let passkeys = tx.passkeys().list_active(user_id).await?;
+        if let Some(unknown) = revoke
+            .keep
+            .iter()
+            .find(|kept| !passkeys.iter().any(|passkey| passkey.id == **kept))
+        {
+            return Err(AdminError::UnknownPasskey(*unknown));
+        }
+        let mut revoked = Vec::new();
+        for passkey in passkeys
+            .iter()
+            .filter(|passkey| !revoke.keep.contains(&passkey.id))
+        {
+            if AccountService::take_back_passkey(tx, context, user_id, passkey.id).await? {
+                revoked.push(passkey.id);
+            }
+        }
+        for identity in tx.federation().list_active(user_id).await? {
+            let provider = identity.provider;
+            if tx.federation().unlink(user_id, provider).await? {
+                tx.record(
+                    context,
+                    Some(user_id),
+                    DomainEvent::IdentityUnlinked { provider },
+                )
+                .await?;
+            }
+        }
+        AccountService::withdraw_consents(tx, context, user_id).await?;
+        Ok(RecoveryRevocation {
+            revoked,
+            kept: revoke.keep,
+        })
+    }
+
+    /// The account's recoveries started or used within the last [`PROBATION`],
+    /// newest first, with where each stands and the passkey each enrolled, those
+    /// undone included, so support sees a repeated attempt before starting
+    /// another. Recorded, as a view of the account.
+    pub(crate) async fn recent_recoveries(
+        &self,
+        operator: &Operator,
+        user_id: UserId,
+    ) -> Result<Vec<RecentRecovery>, AdminError> {
+        operator.authorize_read(&self.database).await?;
+        let mut tx = self.database.begin().await?;
+        let since = Utc::now() - PROBATION;
+        let recent = tx.recoveries().recent(user_id, since).await?;
+        tx.record(
+            &operator.context(),
+            Some(user_id),
+            DomainEvent::AccountViewed {},
+        )
+        .await?;
+        tx.commit().await?;
+        Ok(recent)
+    }
+
+    /// Undoes the account's recovery that can still be undone, for `reason`, as
+    /// support does once it has confirmed the owner, who may have no passkey left
+    /// from before it, or whose account is disabled. In probation, it takes back
+    /// the recovery's passkey, even the account's last, every consent, every
+    /// session and every refresh grant, each change recording `reason`; support
+    /// then starts a new recovery if the owner needs one. Its link unused, it
+    /// only cancels the link.
+    pub(crate) async fn undo_recovery(
+        &self,
+        operator: &Operator,
+        user_id: UserId,
+        reason: Reason,
+    ) -> Result<(), AdminError> {
+        let mut tx = self.database.begin().await?;
+        operator.lock(&mut tx, user_id).await?;
+        let recovery = AccountService::undoable(&mut tx, user_id)
+            .await?
+            .ok_or(AdminError::NoRecoveryToUndo)?;
+        let context = EventContext {
+            reason: Some(reason.into_inner()),
+            ..operator.context()
+        };
+        AccountService::revert(&mut tx, &context, &recovery, RevocationReason::Admin).await?;
+        Self::finish(tx, operator, Some(user_id), vec![]).await
+    }
+
     /// Ends every session and refresh grant of an account.
     pub(crate) async fn revoke_user_sessions(
         &self,
@@ -250,19 +438,25 @@ impl AdminService {
     ) -> Result<(), AdminError> {
         let mut tx = self.database.begin().await?;
         operator.lock(&mut tx, user_id).await?;
-        Self::end_sessions(&mut tx, operator, user_id, RevocationReason::Admin).await?;
+        Self::end_sessions(
+            &mut tx,
+            &operator.context(),
+            user_id,
+            RevocationReason::Admin,
+        )
+        .await?;
         Self::finish(tx, operator, Some(user_id), vec![]).await
     }
 
-    /// Revokes the account's sessions, recording each as `operator`'s, then its
+    /// Revokes the account's sessions, recording each in `context`, then its
     /// refresh grants. Callers hold the account lock.
     async fn end_sessions(
         tx: &mut DatabaseTransaction<'_>,
-        operator: &Operator,
+        context: &EventContext,
         user_id: UserId,
         reason: RevocationReason,
     ) -> Result<(), AdminError> {
-        tx.revoke_sessions(&operator.context(), user_id, SessionScope::All, &reason)
+        tx.revoke_sessions(context, user_id, SessionScope::All, &reason)
             .await?;
         tx.tokens().revoke_all_for_user(user_id).await?;
         Ok(())
@@ -653,12 +847,17 @@ impl AdminService {
 
     /// Makes the active account `user_id` an administrator. Administrators cannot
     /// grant themselves rights: one whose rights were revoked while the request
-    /// waited would otherwise restore them.
+    /// waited would otherwise restore them. While a recovery of the account can
+    /// still be undone, it is refused, by the CLI too: granted during a probation,
+    /// the rights would go live for whoever used its link once it settles. The
+    /// migration's `administrators_no_grant_mid_recovery` backs it for every
+    /// writer.
     ///
     /// # Errors
     /// Fails when the operator may not make changes, or the account is unknown,
-    /// disabled, already an administrator or the caller's own.
-    pub async fn grant_administrator(
+    /// disabled, already an administrator, the caller's own, or has a recovery
+    /// that can still be undone.
+    pub(crate) async fn grant_administrator(
         &self,
         operator: &Operator,
         user_id: UserId,
@@ -673,6 +872,9 @@ impl AdminService {
             .ok_or(AdminError::UserNotFound)?;
         if user.status == AccountStatus::Disabled {
             return Err(AdminError::AccountDisabled);
+        }
+        if AccountService::undoable(&mut tx, user_id).await?.is_some() {
+            return Err(AdminError::GrantDuringRecovery);
         }
         if !tx.administrators().grant(user_id).await? {
             return Err(AdminError::AlreadyAdministrator);

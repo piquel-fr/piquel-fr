@@ -52,7 +52,7 @@ work from devices on the tailnet. Run the same command after changing code.
 | `AUTH_PUBLIC_LISTENER` | Listener address; defaults to `127.0.0.1:8080` |
 | `AUTH_ADMIN_LISTENER` | Optional address of the private admin API listener, e.g. `0.0.0.0:8081`. No ingress route may reach it. Without it, auth serves no admin API |
 | `AUTH_KEY_ENCRYPTION_KEY` | Required env/file reference to the key that seals [signing keys](#signing-keys) in the database: 32 bytes as unpadded base64url text. A trailing newline is ignored |
-| `AUTH_TOKEN_DIGEST_KEY` | Required env/file reference to the key under which refresh tokens, authorization codes and pending logins are stored as HMAC digests. Its raw bytes are the key, at least 32 of them. Passkey decoys and email verification links derive from it too |
+| `AUTH_TOKEN_DIGEST_KEY` | Required env/file reference to the key under which refresh tokens, authorization codes and pending logins are stored as HMAC digests. Its raw bytes are the key, at least 32 of them. Passkey decoys, email verification links and recovery links derive from it too |
 | `AUTH_TOKEN_DIGEST_KEY_ACCEPTED` | Optional env/file reference to another token digest key, accepted but never used for new digests: the next key, or the old one (see [changing the token digest key](#changing-the-token-digest-key)) |
 | `AUTH_INVITE_REQUIRED` | `true` by default; set `false` to allow public registration |
 | `AUTH_GITHUB_CLIENT_ID`, `AUTH_GITHUB_CLIENT_SECRET` | Both required to enable GitHub; secret is an env/file reference |
@@ -194,7 +194,8 @@ admin API (`AdminService` in `apps/auth-service/src/admin`), and so does every
 setting administrators may change on another account (`AccountService` in
 `apps/auth-service/src/account`). Commands need only
 `AUTH_DATABASE_URL` (`invite create` also needs `AUTH_PUBLIC_BASE_URL`, to build its
-link), so they work while auth is down: they are the break-glass path when the
+link, and `user recover` needs it and `AUTH_TOKEN_DIGEST_KEY`, to derive its link), so
+they work while auth is down: they are the break-glass path when the
 dashboard or auth's frontends are unreachable. In deployed environments,
 run them with `piquelctl app exec piquel-fr auth --env ENV -- auth-service …` (see
 [infra/README.md](infra/README.md)).
@@ -207,6 +208,9 @@ just auth user search ali                 # by ID, or part of a username, name o
 just auth user show alice                 # recorded, since it shows personal data
 just auth user disable alice --reason "Spam"
 just auth user enable alice
+just auth user recover alice --reason "Lost every passkey"   # not usable yet, see below
+just auth user recover alice --reason "Phone stolen" --revoke --keep <passkey-id>
+just auth user undo-recovery alice --reason "Owner confirmed by phone"
 just auth session revoke <session-id>     # one session, as `user show` lists it
 just auth session revoke-all alice        # every session of the account
 just auth audit --user alice --kind session_revoked
@@ -219,7 +223,8 @@ just auth account alice emails remove <email-id> --reason "Asked by email"
 - `--output json` prints the admin API's body for `user search` (`UserPage`), `user
   show` (`UserDetail`), `audit` (`EventPage`), `client list`, `invite list` and
   `admin list`, as defined in `crates/admin-api`. It changes only as the API does.
-- `user disable`, `session revoke-all`, `admin revoke`, `client
+- `user disable`, `user recover`, `user undo-recovery`, `session revoke-all`,
+  `admin revoke`, `client
   disable|suspend|delete`, and `account … passkeys revoke`, `identities unlink` and
   `sessions revoke-all` describe what they will change and ask for confirmation.
   Without a terminal they refuse unless given `--yes`.
@@ -230,8 +235,36 @@ just auth account alice emails remove <email-id> --reason "Asked by email"
   reads are recorded as views. See
   [surfaces.md](docs/architecture/surfaces.md#changing-an-account-on-its-owners-behalf)
   for what is shared.
+- `user recover` is not usable yet: the page its link opens comes with the
+  server-rendered pages. It is for an owner who lost every passkey. It signs the
+  account out everywhere, removes its unverified addresses, and emails its
+  primary verified address a link that enrolls one passkey, once, within a day;
+  it prints the link too, for an owner without an address. For 15 days after,
+  that passkey signs in but confirms no change, and any other passkey of the
+  account can undo the recovery, which takes back its passkey, every session and
+  every app consent. Until then, nobody removes a passkey but the recovery's
+  own.
+  - It first lists the account's recoveries of the last 15 days. While one is in
+    probation, it refuses: find out who used it, and undo it with `user
+    undo-recovery` first. An unused link is just replaced.
+  - `--revoke [--keep <passkey-id>…]` is for an account that was in someone
+    else's hands: it also revokes every passkey not kept, unlinks every social
+    identity and withdraws every consent, and only prints the link. Remove the
+    addresses the owner doesn't recognize afterwards, before handing the link
+    over.
+  - `user undo-recovery` undoes the account's recovery for an owner with no other
+    passkey, or whose account is disabled, once support has confirmed them.
+  - Before running either, follow the evidence policy in
+    [account recovery](docs/security/account-recovery.md#supports-evidence-policy).
+    Every reason shows in the account's history: write what was asked, never the
+    evidence.
+  - It never recovers an account while it holds administrator rights: revoke them
+    with `admin revoke` first (grant another administrator first if it is the
+    last). `admin grant` refuses while a recovery of the account can still be
+    undone; grant the rights again once it settles.
 - Each change is recorded as a domain event with the operator: `$USER` and the host
-  name. Unlike the admin API, the CLI may act on administrators' accounts.
+  name. Unlike the admin API, the CLI may act on administrators' accounts, except
+  to recover one.
 - Failures print their causes and exit with 1; usage errors exit with 2.
 
 Administrators manage accounts, sessions, invitations and other administrators
@@ -436,8 +469,8 @@ authenticated:
 
 | Claim | Values |
 | --- | --- |
-| `acr` | `phr` once a passkey signed in or confirmed the session: phishing-resistant multi-factor authentication ([OpenID Connect EAP ACR Values](https://openid.net/specs/openid-connect-eap-acr-values-1_0.html)). `urn:piquel:acr:social` for a session signed in with GitHub or Google only: the provider's authentication, whatever it was |
-| `amr` | Every method the session used (RFC 8176): `pop`, `mfa` and `user` for a passkey, which proves possession of a key and requires user verification; `fed` for a provider sign-in. RFC 8176 registers no value for federation, so `fed` is Piquel's own |
+| `acr` | `phr` once a passkey confirmed the session, which a passkey sign-in does: phishing-resistant multi-factor authentication ([OpenID Connect EAP ACR Values](https://openid.net/specs/openid-connect-eap-acr-values-1_0.html)). `urn:piquel:acr:social` for a session signed in with GitHub or Google only, the provider's authentication, whatever it was; and for one signed in with a recovered passkey until its recovery settles |
+| `amr` | Every method the session used (RFC 8176): `pop`, `mfa` and `user` for a passkey, which proves possession of a key and requires user verification; `fed` for a provider sign-in. RFC 8176 registers no value for federation, so `fed` is Piquel's own. It says how, not how strongly: gate on `acr` |
 | `auth_time` | The latest authentication at the session's `acr`: its last passkey confirmation, or else its sign-in |
 
 `phr` satisfies a `urn:piquel:acr:social` requirement, not the reverse. Both values
@@ -445,7 +478,10 @@ are listed in discovery's `acr_values_supported`. An authorization request may s
 `acr_values` in order of preference: the first known value becomes its target, and
 unknown values are ignored. A session below the target signs in again, on a login
 page offering only passkeys for `phr`; with `prompt=none` the request fails with
-`login_required`. With no known value, the tokens report what the session reached.
+`login_required`. If a passkey sign-in for the request still falls short, as a
+recovered passkey does, the request fails with `unmet_authentication_requirements`
+rather than asking again. With no known value, the tokens report what the session
+reached.
 
 Signing in again (`prompt=login`, `max_age`, a target) re-authenticates the
 browser's session rather than starting another, so `sid` stays the same: a passkey
@@ -499,7 +535,11 @@ explains how to choose a requirement and handle the challenge.
   identity so another account can link it; account data and credentials never move.
   Settings keep listing identities of disabled providers so they can be unlinked.
 - The last passkey cannot be removed. Removing a passkey/provider revokes other
-  central sessions. There is no recovery if every passkey is lost.
+  central sessions. An owner who lost every passkey is recovered with a link that
+  enrolls one new passkey; for 15 days after, it confirms no change, and another
+  passkey of the account can undo the recovery (see
+  [surfaces.md](docs/architecture/surfaces.md#recovering-an-account)). Until its
+  page ships, no page uses the link.
 - Sessions last at most 30 days. Access tokens last five minutes. Refresh rotation
   detects reuse and stops when its central session expires or is revoked. Ending a
   session tells the clients that registered a back-channel logout URI, which end

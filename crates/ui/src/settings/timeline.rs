@@ -158,6 +158,7 @@ impl HistoryRow<'_> {
             HistoryEntry::ConsentGranted { scopes } => {
                 format!("Access approved: {}", scopes.join(", "))
             }
+            HistoryEntry::ConsentRevoked => "App access withdrawn".to_owned(),
             HistoryEntry::TokenReused => {
                 "An app’s sign-in was used twice, so its access was revoked".to_owned()
             }
@@ -167,6 +168,11 @@ impl HistoryRow<'_> {
             HistoryEntry::AdministratorGranted => "Administrator rights granted".to_owned(),
             HistoryEntry::AdministratorRevoked => "Administrator rights removed".to_owned(),
             HistoryEntry::HandleChanged => "Handle changed".to_owned(),
+            HistoryEntry::RecoveryStarted => {
+                "Account recovery started by Piquel support".to_owned()
+            }
+            HistoryEntry::Recovered { .. } => "Account recovered: a passkey was added".to_owned(),
+            HistoryEntry::RecoveryUndone => "Account recovery undone".to_owned(),
             HistoryEntry::CompromiseReported { .. } => {
                 "You reported activity that wasn’t you".to_owned()
             }
