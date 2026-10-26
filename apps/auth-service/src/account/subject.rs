@@ -100,9 +100,11 @@ impl Owner {
     }
 
     /// The owner of the browser session the request's `headers` carry, if any,
-    /// acting from `context`: how a server-rendered page, which has no extractors,
-    /// finds who acts. It records the session's activity, as the extractors do.
-    pub(crate) async fn resolve(
+    /// acting from `context`, recording the session's activity: how the optional
+    /// extractor and [`AccountService::owner`] find who acts.
+    ///
+    /// [`AccountService::owner`]: crate::account::AccountService::owner
+    pub(super) async fn resolve(
         database: &Database,
         context: RequestContext,
         headers: &HeaderMap,

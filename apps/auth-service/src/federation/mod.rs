@@ -142,6 +142,25 @@ impl ProviderConfig {
     }
 }
 
+/// The cookie binding a provider sign-in or link just started to the browser, which
+/// the response sending the browser to the provider carries. Only federation makes
+/// one, so a page never names the cookie or holds its secret.
+#[must_use = "the callback refuses a browser without the flow's cookie"]
+pub(crate) struct FlowCookie(Secret);
+
+impl FlowCookie {
+    /// Adds its `Set-Cookie` header to `response`, an axum response or a page's,
+    /// keeping any other cookies being set.
+    pub(crate) fn set_on<B>(
+        self,
+        response: &mut axum::http::Response<B>,
+    ) -> Result<(), FederationError> {
+        BrowserCookie::Federation
+            .set_on(response, &self.0)
+            .map_err(FederationError::CookieHeader)
+    }
+}
+
 /// Social login and explicit linking, backed exclusively by `PostgreSQL`.
 #[derive(Clone)]
 pub struct FederationApplication {
@@ -251,13 +270,13 @@ impl FederationApplication {
 
     /// Starts linking `provider` to the owner's account from a settings page, which
     /// the browser comes back to at `return_to`, a path on auth. Returns where to
-    /// send the browser, and the secret its [`BrowserCookie::Federation`] holds.
+    /// send the browser, and the cookie the response sending it there carries.
     pub(crate) async fn start_link(
         &self,
         owner: &Owner,
         provider: Provider,
         return_to: &str,
-    ) -> Result<(Url, Secret), FederationError> {
+    ) -> Result<(Url, FlowCookie), FederationError> {
         let return_to = ReturnTo::parse(Some(return_to), &self.frontends)?;
         self.authorization(provider, Some(owner.session()), return_to)
             .await
@@ -295,26 +314,26 @@ impl FederationApplication {
             StartMode::Link => Some(session.ok_or(SessionError::Missing)?),
         };
         let return_to = ReturnTo::parse(input.return_to.as_deref(), &self.frontends)?;
-        let (url, browser) = self
+        let (url, cookie) = self
             .authorization(provider, link.as_ref(), return_to)
             .await?;
         let mut response = Json(StartResponse {
             redirect_url: url.as_str(),
         })
         .into_response();
-        BrowserCookie::Federation.set_on(&mut response, &browser)?;
+        cookie.set_on(&mut response)?;
         Ok(response)
     }
 
     /// Persists one-use state for a sign-in, or a link to the account of the `link`
     /// session, returning to `return_to`. Returns the provider's authorization URL
-    /// and the browser secret the state is bound to.
+    /// and the cookie binding the state to the browser.
     async fn authorization(
         &self,
         provider: Provider,
         link: Option<&StoredSession>,
         return_to: ReturnTo,
-    ) -> Result<(Url, Secret), FederationError> {
+    ) -> Result<(Url, FlowCookie), FederationError> {
         let config = self
             .providers
             .get(&provider)
@@ -349,7 +368,7 @@ impl FederationApplication {
             .append_pair("code_challenge", &Pkce::challenge(&verifier)?)
             .append_pair("code_challenge_method", CodeChallengeMethod::S256.as_str());
         endpoints.identity.extend_authorization(&mut url, &nonce);
-        Ok((url, browser))
+        Ok((url, FlowCookie(browser)))
     }
 
     /// Converts provider callbacks into a verified login or pending identity.

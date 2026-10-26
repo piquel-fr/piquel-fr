@@ -229,7 +229,7 @@ impl BrowserCookie {
 
     /// Reads this cookie's value. A duplicated cookie counts as absent, so an
     /// injected value can never shadow the browser's own.
-    pub(crate) fn value(self, headers: &HeaderMap) -> Option<&str> {
+    fn value(self, headers: &HeaderMap) -> Option<&str> {
         let mut values = headers
             .get_all(header::COOKIE)
             .iter()
@@ -253,16 +253,22 @@ impl BrowserCookie {
         response: &mut axum::http::Response<B>,
         secret: &Secret,
     ) -> Result<(), InvalidHeaderValue> {
-        self.set_value_on(response, &secret.encoded())
+        self.append(response, &secret.encoded(), self.max_age())
     }
 
-    /// Adds a `Set-Cookie` header storing `value`, as [`Self::set_on`] does.
-    pub(crate) fn set_value_on<B>(
-        self,
+    /// The notice [`Self::Notice`] carries, of the change just made. An unknown or
+    /// duplicated one counts as absent.
+    pub(crate) fn read_notice(headers: &HeaderMap) -> Option<piquel_ui::Notice> {
+        Self::Notice.value(headers)?.parse().ok()
+    }
+
+    /// Adds a `Set-Cookie` header storing `notice` in [`Self::Notice`], to the
+    /// answer of the change it says was made.
+    pub(crate) fn set_notice_on<B>(
         response: &mut axum::http::Response<B>,
-        value: &str,
+        notice: piquel_ui::Notice,
     ) -> Result<(), InvalidHeaderValue> {
-        self.append(response, value, self.max_age())
+        Self::Notice.append(response, notice.as_str(), Self::Notice.max_age())
     }
 
     /// Adds a `Set-Cookie` header deleting this cookie, to an axum response or a page's.

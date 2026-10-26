@@ -30,13 +30,13 @@ use crate::{
     operations::operations,
     passkey::Rename,
     routes::{emails, federation, history, passkey, sessions},
-    security::SessionError,
+    security::{RequestContext, SessionError},
     sessions::{Revoked, SessionItem},
 };
 use axum::{
     Json, Router,
     extract::{FromRef, Path, Query, State},
-    http::StatusCode,
+    http::{HeaderMap, StatusCode},
     routing::{MethodRouter, delete, get, patch, post},
 };
 use piquel_common::{
@@ -95,16 +95,46 @@ impl AccountService {
         Self { database }
     }
 
-    /// The account, for its handle and display name. A session whose account is
-    /// gone reads as signed out.
-    pub(crate) async fn profile(&self, viewer: &Viewer) -> Result<StoredUser, AccountError> {
+    /// The owner of the browser session the request's `headers` carry, if any,
+    /// acting from `context`: how a server-rendered page, which has no extractors,
+    /// finds who acts. It records the session's activity, as the extractors do.
+    pub(crate) async fn owner(
+        &self,
+        context: RequestContext,
+        headers: &HeaderMap,
+    ) -> Result<Option<Owner>, AccountError> {
+        Ok(Owner::resolve(&self.database, context, headers).await?)
+    }
+
+    /// The account's handle and display name. A session whose account is gone
+    /// reads as signed out.
+    pub(crate) async fn profile(&self, viewer: &Viewer) -> Result<Profile, AccountError> {
         viewer.authorize(&self.database).await?;
         Ok(self
             .database
             .users()
             .find_by_id(viewer.user())
             .await?
+            .map(Profile::from)
             .ok_or(SessionError::Missing)?)
+    }
+}
+
+/// The account as its own pages show it, in their bar.
+pub(crate) struct Profile {
+    /// Its handle, the login name, which may predate the handle rules.
+    pub(crate) handle: String,
+    /// The name shown to the user and to relying parties.
+    pub(crate) display_name: String,
+}
+
+impl From<StoredUser> for Profile {
+    /// Keeps what the account's pages show.
+    fn from(user: StoredUser) -> Self {
+        Self {
+            handle: user.username,
+            display_name: user.display_name,
+        }
     }
 }
 

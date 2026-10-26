@@ -74,7 +74,10 @@ Code that only needs the session locked against logout uses `Session::lock`.
 Protocol and conditional flows may use `Session` methods directly. Create sessions
 inside the account transaction, and end them with `Session::revoke`, which records
 one event per session; set cookies after commit with `BrowserCookie::set_on`
-and clear them with `clear_on`. Both preserve other Set-Cookie headers.
+and clear them with `clear_on`. Both preserve other Set-Cookie headers. A page
+never sets or clears a flow cookie: the federation operation it calls returns the
+change as a `FlowCookie`, which the page applies to its response. Pages write only
+the notice cookie, with `BrowserCookie::set_notice_on`.
 
 `AuthConfig::router` builds applications without writing to the database, so tests
 build two on one database as replicas (`Replicas` in `src/tests.rs`).
@@ -105,7 +108,7 @@ Each settings tab (`src/web/settings`) is a `SettingsPage`: its path, the change
 its form posts, its query, how it makes a change and how it renders.
 `WebApplication::show` and `submit` serve them all the same way; the address
 verification page, reached from its emailed link, has its own `verify` and
-`confirm_address`. They find who acts with `Owner::resolve`; a page reads through
+`confirm_address`. They find who acts with `AccountService::owner`; a page reads through
 `Viewer::from(&owner)`, and a change takes the owner, as a `Subject` when an
 administrator may make it too. Each page's change and query are types in
 `piquel-ui`, such as `SignInChange` and `SignInState`: forms and links serialize
@@ -157,7 +160,7 @@ on it:
   `Viewer::authorize` calls `Operator::authorize_read`, as every admin read does,
   and records the read as a view; an owner's reads are not recorded.
 
-Only the extractors and `Owner::resolve`, which pages call, build an owner's
+Only the extractors and `AccountService::owner`, which pages call, build an owner's
 `Owner`, from the session cookie; their `Subject` and `Viewer` come from it, or
 from the extractors. Only the admin API's authenticator builds an
 `Operator::Admin`. Routes whose operation needs a recent confirmation extract

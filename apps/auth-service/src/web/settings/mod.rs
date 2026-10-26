@@ -28,11 +28,11 @@ use super::{Failure, WebApplication};
 use crate::{
     account::{AccountError, Owner, Viewer},
     emails::EmailView,
+    federation::FlowCookie,
     routes::page::{self, settings},
     security::{ApiError, BrowserCookie, SessionError},
 };
 use piquel_common::ErrorChain;
-use piquel_crypto::Secret;
 use piquel_ui::{Area, EmailRow, Messages, Notice, Query, Tab};
 use serde::de::DeserializeOwned;
 use topcoat::{
@@ -100,33 +100,31 @@ pub(super) enum Applied<R> {
     Done(Notice),
     /// The page shows the query `R`, such as what a report left to undo.
     Opened(R),
-    /// The browser goes on to `to`, such as a provider, bringing back `cookie`,
-    /// with its secret.
+    /// The browser goes on to the provider at `to`, with the cookie binding the
+    /// flow to it.
     Elsewhere {
         /// Where.
         to: Url,
-        /// The cookie, and its secret.
-        cookie: (BrowserCookie, Secret),
+        /// The cookie binding the flow to the browser.
+        cookie: FlowCookie,
     },
 }
 
 impl<R: Query> Applied<R> {
     /// The `303` answering the change, made on the page at `path`.
     fn response(self, cx: &Cx, path: &str) -> topcoat::Result<Response> {
-        let (to, cookie) = match self {
-            Self::Done(notice) => (
-                path.to_owned(),
-                Some((BrowserCookie::Notice, notice.as_str().to_owned())),
-            ),
+        let (to, notice) = match self {
+            Self::Done(notice) => (path.to_owned(), Some(notice)),
             Self::Opened(row) => (row.on(path)?, None),
-            Self::Elsewhere {
-                to,
-                cookie: (cookie, secret),
-            } => (to.into(), Some((cookie, secret.encoded()))),
+            Self::Elsewhere { to, cookie } => {
+                let mut response = see_other(to).into_response(cx)?;
+                cookie.set_on(&mut response)?;
+                return Ok(response);
+            }
         };
         let mut response = see_other(to).into_response(cx)?;
-        if let Some((cookie, value)) = cookie {
-            cookie.set_value_on(&mut response, &value)?;
+        if let Some(notice) = notice {
+            BrowserCookie::set_notice_on(&mut response, notice)?;
         }
         Ok(response)
     }
@@ -184,9 +182,9 @@ impl WebApplication {
         let Some(owner) = web.owner(cx).await? else {
             return web.signed_out(cx, P::TAB, StatusCode::OK).await;
         };
-        let notice = BrowserCookie::Notice.value(headers(cx));
+        let notice = BrowserCookie::read_notice(headers(cx));
         let messages = Messages {
-            notice: notice.and_then(|notice| notice.parse().ok()),
+            notice,
             alert: None,
         };
         let row = parse_query_params(cx).unwrap_or_default();
@@ -250,11 +248,7 @@ impl WebApplication {
 
     /// The owner of the request's browser session, if it has one.
     async fn owner(&self, cx: &Cx) -> Result<Option<Owner>, Failure> {
-        Ok(
-            Owner::resolve(&self.account.database, Self::context(cx)?, headers(cx))
-                .await
-                .map_err(Error::from)?,
-        )
+        Ok(self.account.owner(Self::context(cx)?, headers(cx)).await?)
     }
 
     /// Answers with the settings page `tab`, `page`, in the frame, with the
@@ -281,7 +275,7 @@ impl WebApplication {
             piquel_ui::settings_frame(
                 piquel_ui::account(
                     display_name: &profile.display_name,
-                    handle: &profile.username,
+                    handle: &profile.handle,
                     sign_out: page::LOGOUT,
                     tabs: &TABS,
                     current: tab,

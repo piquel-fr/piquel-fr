@@ -3,9 +3,8 @@
 use super::{Applied, Reader, SettingsPage};
 use crate::{
     account::{AccountError, Owner, Subject},
-    passkey::PasskeyKind,
+    passkey::PasskeyApplication,
     routes::page::settings,
-    security::BrowserCookie,
     web::{Failure, WebApplication},
 };
 use piquel_ui::{Messages, Notice, ProviderRow, SignInChange, SignInState, Tab};
@@ -54,14 +53,11 @@ impl SettingsPage for SignInMethods {
     ) -> Result<Applied<SignInState>, AccountError> {
         let notice = match change {
             SignInChange::Link { provider } => {
-                let (to, secret) = web
+                let (to, cookie) = web
                     .federation
                     .start_link(&owner, provider, settings::HOME)
                     .await?;
-                return Ok(Applied::Elsewhere {
-                    to,
-                    cookie: (BrowserCookie::Federation, secret),
-                });
+                return Ok(Applied::Elsewhere { to, cookie });
             }
             SignInChange::Rename { id, friendly_name } => {
                 let name = friendly_name.trim().to_owned();
@@ -123,7 +119,7 @@ impl SettingsPage for SignInMethods {
             .federation
             .authorization_endpoints()
             .map_err(Error::from)?;
-        let android = PasskeyKind::offers_google(headers(cx));
+        let android = PasskeyApplication::offers_google_password_manager(headers(cx));
         let page = view! { cx =>
             piquel_ui::sign_in_methods(
                 page: settings::HOME,
