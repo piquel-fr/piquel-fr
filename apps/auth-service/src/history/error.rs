@@ -9,9 +9,10 @@ pub(crate) enum HistoryError {
     /// The account's history shows no entry with this ID.
     #[error("history entry not found")]
     EntryNotFound,
-    /// The entry was caused by someone other than the account's user, such as an
-    /// administrator or an application.
-    #[error("history entry was not caused by the account")]
+    /// The entry cannot be reported: someone other than the account's user caused
+    /// it, such as an administrator or an application, or it is one no report
+    /// applies to, such as the account's creation.
+    #[error("history entry cannot be reported")]
     NotReportable,
 }
 
@@ -23,7 +24,7 @@ impl From<HistoryError> for ApiError {
                 Self::not_found("Your security history has no such entry.")
             }
             HistoryError::NotReportable => Self::bad_request(
-                "Only entries from your own sessions can be reported; this one was not.",
+                "Only entries from your own sessions can be reported, and not this one.",
             ),
         }
     }

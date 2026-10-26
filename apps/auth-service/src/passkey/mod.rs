@@ -197,6 +197,19 @@ impl PasskeyApplication {
             })
             .collect()
     }
+
+    /// Whether the browser behind `headers` may save a passkey with Google Password
+    /// Manager: only on Android. The library forbids this workaround outside Android
+    /// with GMS Core. The User-Agent gate excludes other devices, and the explicit
+    /// choice acknowledges Google services, whose presence a User-Agent cannot prove.
+    /// The pages offer the choice by it, and registration enforces it.
+    pub(crate) fn offers_google_password_manager(headers: &HeaderMap) -> bool {
+        headers
+            .get(header::USER_AGENT)
+            .and_then(|value| value.to_str().ok())
+            .is_some_and(|value| value.contains(ANDROID_USER_AGENT))
+    }
+
     /// Starts a registration challenge for the chosen passkey kind.
     fn registration(
         &self,
@@ -209,14 +222,7 @@ impl PasskeyApplication {
     ) -> Result<(CreationChallengeResponse, PasskeyRegistration), PasskeyError> {
         match kind {
             PasskeyKind::GooglePasswordManager => {
-                // The library forbids this workaround outside Android with GMS Core.
-                // UA gating excludes other devices; the explicit UI choice acknowledges
-                // Google services because their presence cannot be proven from a UA.
-                if !headers
-                    .get(header::USER_AGENT)
-                    .and_then(|value| value.to_str().ok())
-                    .is_some_and(|value| value.contains(ANDROID_USER_AGENT))
-                {
+                if !Self::offers_google_password_manager(headers) {
                     return Err(PasskeyError::GooglePasswordManagerRequiresAndroid);
                 }
                 Ok(self

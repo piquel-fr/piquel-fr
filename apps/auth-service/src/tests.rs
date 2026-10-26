@@ -62,13 +62,12 @@ pub(crate) struct Replicas {
     pub b: Router,
 }
 
-impl Replicas {
-    /// Builds both replicas. Every request comes from one client address, unique to
-    /// this fixture, so the replicas share its rate-limit budget and no other test's.
-    pub(crate) async fn new() -> Self {
-        let origin: Origin = AUTH_ORIGIN.parse().expect("auth origin");
+impl AuthConfig {
+    /// The configuration of a test service at `origin`: no providers, email sent, a
+    /// random token digest key, and registration without an invitation.
+    pub(crate) fn test(origin: &Origin) -> Self {
         let settings_url: PublicUrl = "https://piquel.fr/settings".parse().expect("settings URL");
-        let config = AuthConfig {
+        Self {
             public_listener: SocketAddr::from(([127, 0, 0, 1], 0)),
             admin_listener: None,
             passkey: PasskeyConfig {
@@ -84,7 +83,7 @@ impl Replicas {
                 providers: BTreeMap::new(),
             },
             oidc: OidcConfig {
-                origin,
+                origin: origin.clone(),
                 digest_keys: Arc::new(TokenDigestKeys::new(
                     TokenDigestKey::derive(Secret::generate().expect("random").as_bytes())
                         .expect("digest key"),
@@ -93,7 +92,23 @@ impl Replicas {
             },
             key_encryption_key: Arc::new(key_encryption_key()),
             trusted_proxies: vec![],
-        };
+        }
+    }
+}
+
+impl Replicas {
+    /// Builds both replicas of the test service at [`AUTH_ORIGIN`].
+    pub(crate) async fn new() -> Self {
+        Self::of(&AuthConfig::test(
+            &AUTH_ORIGIN.parse().expect("auth origin"),
+        ))
+        .await
+    }
+
+    /// Builds both replicas from `config`. Every request comes from one client
+    /// address, unique to this fixture, so the replicas share its rate-limit budget
+    /// and no other test's.
+    pub(crate) async fn of(config: &AuthConfig) -> Self {
         let peer = SocketAddr::new(
             IpAddr::V6(Ipv6Addr::from(UserId::new().as_uuid().as_u128())),
             4321,
@@ -159,6 +174,15 @@ impl Browser {
             .await
             .expect("user");
         Self::sign_in(database, user_id).await
+    }
+
+    /// A browser with no session.
+    pub(crate) fn signed_out() -> Self {
+        Self {
+            user_id: UserId::new(),
+            session_id: SessionId::new(),
+            cookie: String::new(),
+        }
     }
 
     /// Signs another browser in to `user_id` with a passkey, from
@@ -281,17 +305,19 @@ pub(crate) fn parameter(url: &url::Url, name: &str) -> String {
         .into_owned()
 }
 
+/// Where `response` sends the browser, as its `Location` says it.
+pub(crate) fn redirect(response: &Response) -> &str {
+    response
+        .headers()
+        .get(header::LOCATION)
+        .expect("response has a Location header")
+        .to_str()
+        .expect("Location header is valid text")
+}
+
 /// The absolute URL in `response`'s `Location`.
 pub(crate) fn location(response: &Response) -> url::Url {
-    url::Url::parse(
-        response
-            .headers()
-            .get(header::LOCATION)
-            .expect("response has a Location header")
-            .to_str()
-            .expect("Location header is valid text"),
-    )
-    .expect("Location header contains an absolute URL")
+    url::Url::parse(redirect(response)).expect("Location header contains an absolute URL")
 }
 
 /// The operator client changes made by tests are attributed to, as the `client`

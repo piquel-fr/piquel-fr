@@ -337,20 +337,3 @@
     </footer>
   {/if}
 </section>
-
-<style>
-  select {
-    font: inherit;
-    width: 100%;
-    min-height: 46px;
-    border: 1px solid #a9b8aa;
-    border-radius: 8px;
-    padding: 0.7rem 0.8rem;
-    background: #fff;
-    color: inherit;
-  }
-  select:focus-visible {
-    outline: 3px solid #ab7900;
-    outline-offset: 4px;
-  }
-</style>

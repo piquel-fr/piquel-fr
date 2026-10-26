@@ -259,6 +259,18 @@ impl EmailConfig {
 }
 
 #[cfg(test)]
+impl ProviderConfig {
+    /// Test credentials whose secret is read from the file at `secret`.
+    pub(crate) fn test(secret: &std::path::Path) -> Self {
+        Self {
+            client_id: "test-client".into(),
+            client_secret: SecretReference::parse(&format!("file://{}", secret.display()))
+                .expect("secret reference"),
+        }
+    }
+}
+
+#[cfg(test)]
 impl EmailConfig {
     /// Test settings for `settings_url` with a fresh verification key. `enabled`
     /// sets a relay that tests never reach, so accounts can add addresses.

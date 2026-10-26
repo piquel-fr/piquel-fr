@@ -120,15 +120,16 @@ impl AuthConfig {
     pub fn router(&self, database: Database, keys: &SigningKeys) -> Result<Router, StartupError> {
         EmbeddedAssets::check()?;
         let oidc = OidcApplication::new(database.clone(), &self.oidc, keys.clone())?;
+        let federation = FederationApplication::new(database.clone(), &self.federation)?;
         let application = Router::new()
             .merge(ServiceApplication::new(database.clone(), self).routes())
             .merge(PasskeyApplication::new(database.clone(), &self.passkey)?.routes())
-            .merge(FederationApplication::new(database.clone(), &self.federation)?.routes())
+            .merge(federation.clone().routes())
             .merge(HistoryApplication::new(database.clone()).routes())
             .merge(AccountApplication::new(database.clone()).routes())
             .merge(ClientApplication::new(database.clone()).routes())
             .merge(EmailApplication::new(database.clone(), &self.email).routes())
-            .merge(WebApplication::new(oidc.clone(), &self.oidc.origin).routes())
+            .merge(WebApplication::new(database.clone(), self, oidc.clone(), federation).routes())
             .merge(oidc.routes());
         let policy = security::HttpSecurity::new(self, database);
         let protected = application

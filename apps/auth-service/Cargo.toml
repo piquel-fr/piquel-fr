@@ -44,6 +44,7 @@ rcgen.workspace = true
 tokio-rustls.workspace = true
 piquel-repository = { workspace = true, features = ["test-support"] }
 piquel-telemetry = { workspace = true, features = ["test-util"] }
+serde_urlencoded.workspace = true
 tower.workspace = true
 webauthn-authenticator-rs = { version = "0.5.5", features = ["softpasskey"] }
 

@@ -22,10 +22,13 @@ Keep implementations simple. Follow neighbouring modules and share repeated logi
 - `piquel-telemetry` (`crates/telemetry`): logs, traces and metrics, following
   [telemetry.md](telemetry.md).
 - `piquel-ui` (`crates/ui`): the Topcoat components and layouts of auth's
-  server-rendered pages. They render plain data (`piquel-common` IDs and
-  vocabularies, the repository's view types) and take URLs as props, and know
+  server-rendered pages, the strings they show, titles and notices included, and
+  the changes and queries their forms and links send. They render plain data,
+  `piquel-common` IDs, vocabularies and events, or plain rows such as `EmailRow`
+  that the pages map the service's views into, and take URLs as props; they know
   nothing of the domain, the database or HTTP. It depends only on `piquel-common`
-  and Topcoat's `view`, so it compiles beside the database crate.
+  (with `events`), `chrono`, `serde`, `serde_urlencoded` and Topcoat's `view`, so
+  it compiles beside the database crate.
 
 Application code uses `Secret`, `Digest`, `Pkce`, `Rs256Key`, `KeySet` and
 `KeyEncryptionKey` instead of calling `openssl`, `sha2` or `rand` directly.
@@ -71,7 +74,10 @@ Code that only needs the session locked against logout uses `Session::lock`.
 Protocol and conditional flows may use `Session` methods directly. Create sessions
 inside the account transaction, and end them with `Session::revoke`, which records
 one event per session; set cookies after commit with `BrowserCookie::set_on`
-and clear them with `clear_on`. Both preserve other Set-Cookie headers.
+and clear them with `clear_on`. Both preserve other Set-Cookie headers. A page
+never sets or clears a flow cookie: the federation operation it calls returns the
+change as a `FlowCookie`, which the page applies to its response. Pages write only
+the notice cookie, with `BrowserCookie::set_notice_on`.
 
 `AuthConfig::router` builds applications without writing to the database, so tests
 build two on one database as replicas (`Replicas` in `src/tests.rs`).
@@ -87,14 +93,43 @@ acts, calls the service in-process and renders `piquel-ui` components, or return
 a `Failure`, which `WebApplication::answer` turns into the page explaining it. A
 form's result is a `303`. Pages use no Topcoat browser runtime, `suspense`, `live!`
 or `asset!`, and register every route explicitly. Their Content-Security-Policy
-loads only the stylesheet and the SDK script embedded under `/assets/`, and lets
-forms post only to auth and to the page's redirect target, since browsers apply
-`form-action` to a form's redirects. A target no policy can name, such as an IP
-address, gets a page linking there instead of the `303`. The SDK script keeps a
-form marked `data-submit-once` from posting twice. The security layer accepts a
+loads only the stylesheet and the SDK script embedded under `/assets/`, lets the
+script fetch only auth itself (`connect-src 'self'`), for its passkey ceremonies,
+and lets forms post only to auth and to where they redirect, since browsers apply
+`form-action` to a form's redirects: the consent and logout pages' redirect
+targets, or the enabled providers' authorization origins on the sign-in methods
+page, whose link goes on to the provider. A target no policy can name, such as an IP address, gets
+a page linking there instead of the `303`. The security layer accepts a
 page's form only from auth's own pages (`BrowserRequest::is_same_origin`): plain
 forms send no CSRF header, and send `Origin: null` under `Referrer-Policy:
 no-referrer`.
+
+Each settings tab (`src/web/settings`) is a `SettingsPage`: its path, the change
+its form posts, its query, how it makes a change and how it renders.
+`WebApplication::show` and `submit` serve them all the same way; the address
+verification page, reached from its emailed link, has its own `verify` and
+`confirm_address`. They find who acts with `AccountService::owner`; a page reads through
+`Viewer::from(&owner)`, and a change takes the owner, as a `Subject` when an
+administrator may make it too. Each page's change and query are types in
+`piquel-ui`, such as `SignInChange` and `SignInState`: forms and links serialize
+them, and the page deserializes the same types, so a field's name is written once.
+A change names itself in a hidden `action` field, as an internally tagged enum, so
+its fields must deserialize from text. A change that succeeds answers `303` to the
+page, which says once what it did, from a short-lived cookie, so no link can claim
+a change; or on to where it leads, such as the provider a link starts at or what a
+report left to undo. One that fails renders the page again, with the change's row
+open, what was typed into it and the service's message. A
+query that does not parse opens nothing, and a form that does not decode changes
+nothing, logging why at debug level.
+
+The SDK script wires the pages' forms by their attributes. It keeps a form marked
+`data-submit-once` from posting twice, and confirms with a passkey before posting
+one marked `data-passkey-confirm`, which a page marks while the session has no
+recent confirmation. A `data-passkey-enroll` form runs the passkey enrollment, then
+posts, so its page says so. A `data-fragment-form` copies the link's fragment into its inputs
+as it posts, so a verification token never reaches the server in a URL. Either
+form's button starts disabled, with a `data-unavailable` note saying why, until
+the script finds it can work.
 
 Administrative operations are methods of `AdminService` (`src/admin/service.rs`);
 the admin API's handlers and the CLI's commands (`src/cli`) are thin adapters that
@@ -125,8 +160,9 @@ on it:
   `Viewer::authorize` calls `Operator::authorize_read`, as every admin read does,
   and records the read as a view; an owner's reads are not recorded.
 
-Only the extractors build an owner's `Owner`, `Subject` or `Viewer`, from the
-session cookie, and only the admin API's authenticator builds an
+Only the extractors and `AccountService::owner`, which pages call, build an owner's
+`Owner`, from the session cookie; their `Subject` and `Viewer` come from it, or
+from the extractors. Only the admin API's authenticator builds an
 `Operator::Admin`. Routes whose operation needs a recent confirmation extract
 `ConfirmedOwner` or `ConfirmedSubject` instead, which check it before the path and
 body, so the browser is asked to confirm before any other error. Each operation says what it needs: it locks with `lock`, or

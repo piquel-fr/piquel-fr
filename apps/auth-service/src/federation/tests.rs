@@ -12,7 +12,7 @@ use axum::{
 };
 use piquel_auth::{KeyCache, KeySet};
 use piquel_common::PasskeyId;
-use piquel_common::{Handle, config::SecretReference, protocol::jwt::TokenType};
+use piquel_common::{Handle, protocol::jwt::TokenType};
 use piquel_crypto::Rs256Key;
 use piquel_crypto::Secret;
 use piquel_repository::{
@@ -107,11 +107,7 @@ impl TestApp {
         let secret_file =
             std::env::temp_dir().join(format!("piquel-federation-test-{}", TokenId::new()));
         std::fs::write(&secret_file, "test-secret").expect("mock provider secret");
-        let config = ProviderConfig {
-            client_id: "test-client".into(),
-            client_secret: SecretReference::parse(&format!("file://{}", secret_file.display()))
-                .expect("secret reference"),
-        };
+        let config = ProviderConfig::test(&secret_file);
         let settings_url = "https://piquel.fr/settings"
             .parse::<piquel_common::config::PublicUrl>()
             .expect("settings");
@@ -1029,11 +1025,7 @@ async fn google_signed_tokens_require_well_typed_trusted_issuer_and_audience() {
 #[test]
 fn provider_secrets_fail_early_with_context() {
     let path = std::env::temp_dir().join(format!("piquel-provider-secret-{}", TokenId::new()));
-    let config = || ProviderConfig {
-        client_id: "client".into(),
-        client_secret: SecretReference::parse(&format!("file://{}", path.display()))
-            .expect("reference"),
-    };
+    let config = || ProviderConfig::test(&path);
     let error = config()
         .resolve(Provider::GitHub)
         .err()
