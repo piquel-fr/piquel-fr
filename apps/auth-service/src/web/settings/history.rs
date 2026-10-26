@@ -77,6 +77,7 @@ impl SettingsPage for History {
                 occurred_at: item.occurred_at,
                 entry: &item.entry,
                 actor: item.actor,
+                reportable: item.reportable(),
                 reason: item.reason.as_deref(),
                 client: item
                     .client

@@ -55,8 +55,8 @@ pub(crate) struct HistoryPage {
     pub(crate) next: Option<EventId>,
 }
 
-/// One entry of the account's history. Entries whose actor is `account` can be
-/// reported.
+/// One entry of the account's history, which the account may report as not
+/// theirs when [`HistoryItem::reportable`] says so.
 #[derive(Serialize)]
 pub(crate) struct HistoryItem {
     /// Event ID, to report the entry.
@@ -98,6 +98,12 @@ struct Report {
 }
 
 impl HistoryItem {
+    /// Whether the account may report it as not theirs: what its own sessions did,
+    /// of the kinds [`HistoryEntry::reportable`] allows.
+    pub(crate) const fn reportable(&self) -> bool {
+        matches!(self.actor, HistoryActor::Account) && self.entry.reportable()
+    }
+
     /// The entry `stored` shows its subject, or `None` if it shows none, as for an
     /// event a newer release wrote. `clients` maps client IDs to their names.
     fn new(stored: &StoredEvent, clients: &BTreeMap<ClientId, String>) -> Option<Self> {
@@ -175,7 +181,8 @@ impl AccountService {
         let mut tx = self.database.begin().await?;
         owner.lock(&mut tx).await?;
         let (stored, entry) = Self::entry(tx.events(), owner.user(), event_id).await?;
-        if !matches!(stored.actor, Actor::User { user_id, .. } if user_id == owner.user()) {
+        let caused = matches!(stored.actor, Actor::User { user_id, .. } if user_id == owner.user());
+        if !caused || !entry.reportable() {
             return Err(HistoryError::NotReportable.into());
         }
         let context = owner.context();

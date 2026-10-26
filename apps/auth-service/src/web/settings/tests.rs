@@ -12,7 +12,10 @@ use axum::{
     http::{StatusCode, header},
     response::Response,
 };
-use piquel_common::{AuthenticationMethod, EventId, Provider, TokenId};
+use piquel_common::{
+    AuthenticationMethod, EventId, Provider, TokenId,
+    events::{Actor, DomainEvent, EventContext, RequestOrigin},
+};
 use piquel_crypto::Secret;
 use piquel_repository::InsertExternalIdentity;
 use piquel_ui::{DeviceChange, EmailChange, HistoryChange, HistoryState, Query, SignInChange};
@@ -419,15 +422,38 @@ async fn linking_starts_at_the_provider() {
 }
 
 /// A history page lists entries with a report button each, older ones a page at a
-/// time. Reporting one opens its confirmation first, and a report goes on to what
-/// it left to undo, on the page it was made from. A report the account did not
-/// make shows nothing.
+/// time, but none on the account's creation, which no report applies to. Reporting
+/// one opens its confirmation first, and a report goes on to what it left to undo,
+/// on the page it was made from. A report the account did not make shows nothing.
 #[tokio::test]
 #[ignore = "requires TEST_DATABASE_URL"]
 async fn history_reports_need_confirmation_and_cannot_be_forged() {
     let replicas = Replicas::new().await;
     let database = Replicas::database().await;
     let browser = Browser::new_account(&database).await;
+    let context = EventContext {
+        actor: Actor::User {
+            user_id: browser.user_id,
+            session_id: Some(browser.session_id),
+        },
+        origin: RequestOrigin::default(),
+        reason: None,
+    };
+    let created = DomainEvent::AccountCreated {
+        method: AuthenticationMethod::Passkey,
+        invited: false,
+    };
+    let mut tx = database.begin().await.expect("transaction");
+    tx.record(&context, Some(browser.user_id), created)
+        .await
+        .expect("record");
+    tx.commit().await.expect("commit");
+    let created = database
+        .events()
+        .history_for_user(browser.user_id, 1)
+        .await
+        .expect("history")[0]
+        .id;
     let address = format!("{}@example.com", browser.user_id);
     let add = EmailChange::Add {
         email: address.clone(),
@@ -449,6 +475,19 @@ async fn history_reports_need_confirmation_and_cannot_be_forged() {
     let kept = format!(r#"<input type="hidden" name="before" value="{added}">"#);
     assert!(page.contains(&kept), "{page}");
     let signed_in: EventId = id_after(&page, marker).parse().expect("older entry");
+    assert!(page.contains("Account created with a passkey"), "{page}");
+    assert!(!page.contains(&format!("{marker}{created}")), "{page}");
+    let report = HistoryChange::Report {
+        event_id: created,
+        before: Some(added),
+    };
+    let refused = browser.post(&replicas, settings::HISTORY, &report).await;
+    assert_eq!(refused.status(), StatusCode::BAD_REQUEST);
+    let page = html(refused).await;
+    assert!(
+        page.contains("Only entries from your own sessions can be reported, and not this one."),
+        "{page}"
+    );
 
     let forged = link(HistoryState {
         reported: Some(added),

@@ -57,6 +57,8 @@ pub struct HistoryRow<'a> {
     pub entry: &'a HistoryEntry,
     /// Who did it.
     pub actor: HistoryActor,
+    /// Whether the account may report it as not theirs, as the service decides.
+    pub reportable: bool,
     /// Why, as the administrator or operator who did it wrote it.
     pub reason: Option<&'a str>,
     /// The application involved, by ID and name, if any.
@@ -247,16 +249,6 @@ impl HistoryRow<'_> {
             None => actor.to_owned(),
         })
     }
-
-    /// Whether the account can report it as not theirs: what its own sessions did,
-    /// but reports and the sign-outs other changes caused.
-    fn reportable(&self) -> bool {
-        self.actor == HistoryActor::Account
-            && !matches!(
-                self.entry,
-                HistoryEntry::CompromiseReported { .. } | HistoryEntry::SessionRevoked { .. }
-            )
-    }
 }
 
 impl<'a> HistoryRow<'a> {
@@ -377,7 +369,7 @@ async fn entry<'a>(
 ) -> Result<impl View> {
     let before = page.shown.before;
     let description = row.describe(holds);
-    let reporting = row.reportable() && page.shown.reporting == Some(row.id);
+    let reporting = row.reportable && page.shown.reporting == Some(row.id);
     Ok(view! {
         <div class="row between">
             <div>
@@ -392,7 +384,7 @@ async fn entry<'a>(
                     <p class="help">(by)</p>
                 }
             </div>
-            if row.reportable() && !reporting {
+            if row.reportable && !reporting {
                 open(
                     page: page.page,
                     opens: HistoryState { before, reporting: Some(row.id), reported: None },

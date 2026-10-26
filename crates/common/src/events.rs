@@ -652,6 +652,39 @@ pub enum HistoryEntry {
 }
 
 impl HistoryEntry {
+    /// Whether the account can report this entry, once its own session caused it,
+    /// as not theirs. Not its creation, which made the account; nor a report, or a
+    /// sign-out another change caused.
+    #[must_use]
+    #[deny(clippy::wildcard_enum_match_arm)]
+    pub const fn reportable(&self) -> bool {
+        match self {
+            Self::AccountCreated { .. }
+            | Self::SessionRevoked { .. }
+            | Self::CompromiseReported { .. } => false,
+            Self::SignedIn { .. }
+            | Self::SignedOut
+            | Self::PasskeyAdded { .. }
+            | Self::PasskeyRenamed { .. }
+            | Self::PasskeyRemoved { .. }
+            | Self::IdentityLinked { .. }
+            | Self::IdentityUnlinked { .. }
+            | Self::EmailAdded { .. }
+            | Self::EmailVerified { .. }
+            | Self::PrimaryEmailChanged { .. }
+            | Self::EmailRemoved { .. }
+            | Self::ConsentGranted { .. }
+            | Self::TokenReused
+            | Self::AccountDisabled
+            | Self::AccountEnabled
+            | Self::AccountViewed
+            | Self::AdministratorGranted
+            | Self::AdministratorRevoked
+            | Self::HandleChanged
+            | Self::Legacy { .. } => true,
+        }
+    }
+
     /// What the user should still do after reporting this entry as not theirs:
     /// undo the credential or email address it added. Those actions need a passkey
     /// confirmation, so a stolen cookie that can report an entry still cannot
