@@ -530,11 +530,9 @@ impl OidcApplication {
             ConsentDecision::Approve => {
                 // Lock the account before writing consent: the consent row's foreign key
                 // would otherwise take a key-share lock that deadlocks with a concurrent login.
-                transaction
-                    .users()
-                    .find_active_by_id_for_update(session.user_id)
-                    .await?
-                    .ok_or_else(|| OAuthCode::InvalidToken.reject("this account is disabled"))?;
+                // The session is read again under the lock, so a consent that waited while
+                // its session ended, signed out or revoked, is not saved after it.
+                Session::lock(&mut transaction, &session).await?;
                 if let Some(context) = consent {
                     transaction
                         .oidc()

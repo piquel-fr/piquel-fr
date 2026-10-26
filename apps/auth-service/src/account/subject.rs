@@ -142,9 +142,8 @@ impl Owner {
     /// Requires a recent passkey confirmation of the owner's session both as the
     /// request's cookie found it and as `locked` holds it now. A confirmation
     /// replaces the cookie, so a request sent with the old one never gains a
-    /// confirmation that commits while it waits for the lock. Operations whose
-    /// need for one depends on what they change call it last, before committing.
-    pub(crate) fn confirmed(&self, locked: &StoredSession) -> Result<(), SessionError> {
+    /// confirmation that commits while it waits for the lock.
+    fn confirmed(&self, locked: &StoredSession) -> Result<(), SessionError> {
         <Confirmed>::check(&self.session)?;
         <Confirmed>::check(locked)
     }
