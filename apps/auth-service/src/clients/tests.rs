@@ -580,8 +580,9 @@ async fn owners_find_only_their_own_clients() {
         listed.iter().map(|client| &client.id).collect::<Vec<_>>(),
         [&id]
     );
-    let details = service.client(account.find(alice.clone(), &id).await).await;
-    assert_eq!(details.expect("details").secrets.len(), 1);
+    let app = account.find(alice.clone(), &id).await;
+    let secrets = service.client_secrets(&app).await.expect("secrets");
+    assert_eq!(secrets.len(), 1);
 
     assert_eq!(service.clients(&bob).await.expect("list"), []);
     for (owner, id) in [
@@ -1011,12 +1012,10 @@ async fn owners_cannot_enable_a_suspended_client() {
         .await
         .expect("suspension");
     };
-    let shown = async || {
-        let details = service.client(account.find(owner.clone(), &id).await).await;
-        details.expect("details").client
-    };
+    let shown = async || account.find(owner.clone(), &id).await;
     suspend(true).await;
     let suspended = shown().await;
+    let suspended = suspended.client();
     assert!(suspended.suspended_at.is_some() && !suspended.enabled);
     let enabled = service.set_client_enabled(&client, true).await;
     assert!(
@@ -1042,6 +1041,7 @@ async fn owners_cannot_enable_a_suspended_client() {
 
     suspend(false).await;
     let lifted = shown().await;
+    let lifted = lifted.client();
     assert!(lifted.suspended_at.is_none() && !lifted.enabled);
     service
         .set_client_enabled(&client, true)

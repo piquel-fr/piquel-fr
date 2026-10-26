@@ -21,11 +21,10 @@ use super::{
 use crate::{
     DEFAULT_CLIENT_SCOPES, MAX_OWNED_CLIENTS,
     account::{AccountError, Owner},
-    clients::{ClientDetails, ClientSettings, NewClient, OwnedClient},
+    clients::{ClientSettings, NewClient, OwnedClient, OwnedClientView},
     routes::page::developers::{self, APP, APP_SECRETS, APP_SETTINGS, HOME, NEW},
 };
 use piquel_common::clients::ClientKind;
-use piquel_repository::StoredOidcClient;
 use piquel_ui::{
     AppLink, AppTab, ClientDraft, ClientRow, ClientStatus, Messages, NewAppChange, NewAppState,
     Notice, Registered, Revealed, Section, Title,
@@ -81,7 +80,7 @@ impl AccountPage for Apps {
         let links: Vec<_> = clients
             .iter()
             .map(|client| AppLink {
-                client: client.row(),
+                client: ClientRow::from(client),
                 page: developers::of(APP, &client.id),
             })
             .collect();
@@ -168,27 +167,21 @@ impl AccountPage for NewApp {
     }
 }
 
-/// A stored client as the console shows it.
-trait AsRow {
-    /// The client's row.
-    fn row(&self) -> ClientRow<'_>;
-}
-
-impl AsRow for StoredOidcClient {
-    /// Its settings, status and last use.
-    fn row(&self) -> ClientRow<'_> {
-        ClientRow {
-            id: &self.id,
-            name: &self.display_name,
-            kind: self.kind,
-            status: ClientStatus::of(self.enabled, self.suspended_at),
-            redirect_uris: &self.redirect_uris,
-            post_logout_uris: &self.post_logout_uris,
-            allowed_scopes: &self.allowed_scopes,
-            allow_refresh: self.allow_refresh,
-            require_pushed_authorization_requests: self.require_pushed_authorization_requests,
-            backchannel_logout_uri: self.backchannel_logout_uri.as_deref(),
-            last_used_at: self.last_used_at,
+impl<'a> From<&'a OwnedClientView> for ClientRow<'a> {
+    /// The client as the console shows it: its settings, status and last use.
+    fn from(client: &'a OwnedClientView) -> Self {
+        Self {
+            id: &client.id,
+            name: &client.display_name,
+            kind: client.kind,
+            status: ClientStatus::of(client.enabled, client.suspended_at),
+            redirect_uris: &client.redirect_uris,
+            post_logout_uris: &client.post_logout_uris,
+            allowed_scopes: &client.allowed_scopes,
+            allow_refresh: client.allow_refresh,
+            require_pushed_authorization_requests: client.require_pushed_authorization_requests,
+            backchannel_logout_uri: client.backchannel_logout_uri.as_deref(),
+            last_used_at: client.last_used_at,
         }
     }
 }
@@ -214,11 +207,9 @@ impl WebApplication {
         self.account.owned_client(owner, path_param::<Id>(cx)).await
     }
 
-    /// The app the page's path names, as `reader` owns it, with the lifetimes of
-    /// its secrets.
-    async fn app_details(&self, cx: &Cx, reader: &Reader) -> Result<ClientDetails, AccountError> {
-        let app = self.app(cx, reader.owner().clone()).await?;
-        self.account.client(app).await
+    /// The app the page's path names, as `reader` owns it.
+    async fn read_app(&self, cx: &Cx, reader: &Reader) -> Result<OwnedClient, AccountError> {
+        self.app(cx, reader.owner().clone()).await
     }
 
     /// Answers with the console page titled `title`, `head` then `page`, at the
@@ -249,7 +240,7 @@ impl WebApplication {
         cx: &Cx,
         tab: AppTab,
         reader: &Reader,
-        client: &StoredOidcClient,
+        client: &OwnedClientView,
         outcome: (StatusCode, Messages<'_>),
         page: Child<'_>,
     ) -> Result<Response, Failure> {
@@ -258,8 +249,9 @@ impl WebApplication {
             .filter(|(tab, _)| *tab != AppTab::Secrets || client.kind == ClientKind::Confidential)
             .map(|(tab, route)| (tab, developers::of(route, &client.id)))
             .collect();
+        let row = ClientRow::from(client);
         let head = view! { cx =>
-            piquel_ui::app_header(home: HOME, client: client.row(), tabs: &tabs, current: tab)
+            piquel_ui::app_header(home: HOME, client: row, tabs: &tabs, current: tab)
         };
         let title = tab.title(&client.display_name);
         self.console_page(cx, &title, reader, outcome, Child::new(head), page)

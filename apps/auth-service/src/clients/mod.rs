@@ -23,7 +23,9 @@ use crate::GracePeriod;
 
 /// The clients an account owns: their policy and the owner's operations.
 mod owned;
-pub(crate) use owned::{ClientPatch, ClientSettings, NewClient, OwnedClient, OwnedClientError};
+pub(crate) use owned::{
+    ClientPatch, ClientSettings, NewClient, OwnedClient, OwnedClientError, OwnedClientView,
+};
 
 /// Scopes a new client may request when none are given.
 pub const DEFAULT_CLIENT_SCOPES: [Scope; 3] = [Scope::OpenId, Scope::Profile, Scope::Email];
@@ -102,7 +104,7 @@ pub enum Applied {
 }
 
 /// A client's registration and the lifetimes of its secrets, as `client show`
-/// shows them, and `AccountService::client` to their owner.
+/// shows them.
 #[derive(Serialize)]
 pub struct ClientDetails {
     /// The registration.

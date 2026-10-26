@@ -2,10 +2,9 @@
 //! and secrets. Each page reads the app first, so another account's or an unknown
 //! one is missing before anything else happens.
 
-use super::AsRow;
 use crate::{
     account::{AccountError, Owner},
-    clients::{ClientDetails, ClientPatch, ClientSettings},
+    clients::{ClientPatch, ClientSettings},
     routes::{
         oidc::DISCOVERY,
         page::developers::{self, APP, APP_SECRETS, APP_SETTINGS, HOME},
@@ -18,8 +17,8 @@ use crate::{
 use chrono::Utc;
 use piquel_common::clients::ClientKind;
 use piquel_ui::{
-    AppChange, AppSettingsState, AppTab, Checkbox, Connection, Messages, Notice, Revealed,
-    SecretRow, SecretsChange, SecretsState, Section, Title,
+    AppChange, AppSettingsState, AppTab, Checkbox, ClientRow, Connection, Messages, Notice,
+    Revealed, SecretRow, SecretsChange, SecretsState, Section, Title,
 };
 use topcoat::{
     context::Cx,
@@ -57,7 +56,8 @@ impl AccountPage for Overview {
         (): (),
         outcome: (StatusCode, Messages<'_>),
     ) -> Result<Response, Failure> {
-        let ClientDetails { client, .. } = web.app_details(cx, reader).await?;
+        let app = web.read_app(cx, reader).await?;
+        let client = app.client();
         let secrets = (client.kind == ClientKind::Confidential)
             .then(|| developers::of(APP_SECRETS, &client.id));
         let issuer = web.issuer.serialized();
@@ -66,7 +66,7 @@ impl AccountPage for Overview {
             issuer: &issuer,
             discovery: &discovery,
         };
-        let row = client.row();
+        let row = ClientRow::from(client);
         let page = view! { cx =>
             piquel_ui::overview(client: row, connection: connection, secrets: secrets.as_deref())
         };
@@ -74,7 +74,7 @@ impl AccountPage for Overview {
             cx,
             AppTab::Overview,
             reader,
-            &client,
+            client,
             outcome,
             Child::new(page),
         )
@@ -147,9 +147,10 @@ impl AccountPage for AppSettings {
         state: AppSettingsState,
         outcome: (StatusCode, Messages<'_>),
     ) -> Result<Response, Failure> {
-        let ClientDetails { client, .. } = web.app_details(cx, reader).await?;
+        let app = web.read_app(cx, reader).await?;
+        let client = app.client();
         let page = developers::of(APP_SETTINGS, &client.id);
-        let row = client.row();
+        let row = ClientRow::from(client);
         let view = view! { cx =>
             piquel_ui::app_settings(
                 page: &page,
@@ -163,7 +164,7 @@ impl AccountPage for AppSettings {
             cx,
             AppTab::Settings,
             reader,
-            &client,
+            client,
             outcome,
             Child::new(view),
         )
@@ -212,10 +213,12 @@ impl AccountPage for AppSecrets {
         state: SecretsState,
         outcome: (StatusCode, Messages<'_>),
     ) -> Result<Response, Failure> {
-        let ClientDetails { client, secrets } = web.app_details(cx, reader).await?;
+        let app = web.read_app(cx, reader).await?;
+        let client = app.client();
         if client.kind == ClientKind::Public {
             return Err(Failure::Missing);
         }
+        let secrets = web.account.client_secrets(&app).await?;
         let rows: Vec<_> = secrets
             .iter()
             .map(|secret| SecretRow {
@@ -237,7 +240,7 @@ impl AccountPage for AppSecrets {
             cx,
             AppTab::Secrets,
             reader,
-            &client,
+            client,
             outcome,
             Child::new(view),
         )

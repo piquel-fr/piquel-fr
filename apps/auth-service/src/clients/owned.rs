@@ -5,14 +5,13 @@
 //! clients always show the consent screen, scopes are limited to the standard
 //! [`Scope`]s, and only an operator sets a back-channel logout URI.
 
-use super::{
-    ClientDetails, ClientRegistry, ClientRegistryError, MAX_DAILY_REGISTRATIONS, MAX_OWNED_CLIENTS,
-};
+use super::{ClientRegistry, ClientRegistryError, MAX_DAILY_REGISTRATIONS, MAX_OWNED_CLIENTS};
 use crate::{
     GracePeriod,
     account::{AccountError, AccountService, Owner},
     security::ApiError,
 };
+use chrono::{DateTime, Utc};
 use piquel_common::{
     ClientId,
     clients::{
@@ -22,7 +21,7 @@ use piquel_common::{
     protocol::oauth::Scope,
 };
 use piquel_crypto::{ClientSecret, Secret};
-use piquel_repository::{DatabaseTransaction, StoredOidcClient};
+use piquel_repository::{DatabaseTransaction, StoredClientSecret, StoredOidcClient};
 use std::error::Error;
 use thiserror::Error;
 
@@ -78,7 +77,37 @@ pub(crate) struct OwnedClient {
     /// The owner.
     owner: Owner,
     /// The client, as it was when found.
-    client: StoredOidcClient,
+    client: OwnedClientView,
+}
+
+/// One of an owner's clients as its owner sees it: its settings, status and last
+/// use, never its trust, audiences or owner, which only operators manage.
+#[derive(Debug, PartialEq, Eq)]
+pub(crate) struct OwnedClientView {
+    /// Client identifier.
+    pub(crate) id: ClientId,
+    /// The name consent screens show.
+    pub(crate) display_name: String,
+    /// Public, or confidential with secrets.
+    pub(crate) kind: ClientKind,
+    /// Authorization callbacks, matched exactly.
+    pub(crate) redirect_uris: Vec<String>,
+    /// Pages the browser may return to after logout.
+    pub(crate) post_logout_uris: Vec<String>,
+    /// Scopes the client may request.
+    pub(crate) allowed_scopes: Vec<String>,
+    /// Whether the client may receive refresh tokens.
+    pub(crate) allow_refresh: bool,
+    /// Whether the client must push its authorization requests (RFC 9126).
+    pub(crate) require_pushed_authorization_requests: bool,
+    /// Where logout tokens are posted, which only an operator sets.
+    pub(crate) backchannel_logout_uri: Option<String>,
+    /// Whether it signs users in, as its owner or an operator chose.
+    pub(crate) enabled: bool,
+    /// When an operator suspended it, which keeps it disabled.
+    pub(crate) suspended_at: Option<DateTime<Utc>>,
+    /// When a token was last issued to it, to within an hour.
+    pub(crate) last_used_at: Option<DateTime<Utc>>,
 }
 
 /// Why an owner's request about their clients was refused.
@@ -240,6 +269,33 @@ impl InvalidSetting {
     }
 }
 
+impl OwnedClient {
+    /// The client as its owner sees it, as it was when found.
+    pub(crate) const fn client(&self) -> &OwnedClientView {
+        &self.client
+    }
+}
+
+impl From<StoredOidcClient> for OwnedClientView {
+    /// Keeps what its owner sees.
+    fn from(client: StoredOidcClient) -> Self {
+        Self {
+            id: client.id,
+            display_name: client.display_name,
+            kind: client.kind,
+            redirect_uris: client.redirect_uris,
+            post_logout_uris: client.post_logout_uris,
+            allowed_scopes: client.allowed_scopes,
+            allow_refresh: client.allow_refresh,
+            require_pushed_authorization_requests: client.require_pushed_authorization_requests,
+            backchannel_logout_uri: client.backchannel_logout_uri,
+            enabled: client.enabled,
+            suspended_at: client.suspended_at,
+            last_used_at: client.last_used_at,
+        }
+    }
+}
+
 /// The clients only their owner registers and changes. Administrators manage
 /// every client through `AdminService` instead.
 impl AccountService {
@@ -247,12 +303,13 @@ impl AccountService {
     pub(crate) async fn clients(
         &self,
         owner: &Owner,
-    ) -> Result<Vec<StoredOidcClient>, AccountError> {
-        Ok(self
+    ) -> Result<Vec<OwnedClientView>, AccountError> {
+        let clients = self
             .database
             .oidc()
             .list_owned_clients(owner.user())
-            .await?)
+            .await?;
+        Ok(clients.into_iter().map(OwnedClientView::from).collect())
     }
 
     /// The owner's live client `id`, as it is now. Any other ID, a deleted
@@ -270,21 +327,23 @@ impl AccountService {
             .await?
             .filter(|client| client.owner_id == Some(owner.user()) && client.deleted_at.is_none())
             .ok_or(OwnedClientError::NotFound)?;
-        Ok(OwnedClient { owner, client })
+        Ok(OwnedClient {
+            owner,
+            client: client.into(),
+        })
     }
 
-    /// Shows an owner's client with the lifetimes of its secrets, never their
+    /// The lifetimes of an owner's client's secrets, oldest first, never their
     /// values.
-    pub(crate) async fn client(&self, owned: OwnedClient) -> Result<ClientDetails, AccountError> {
-        let secrets = self
+    pub(crate) async fn client_secrets(
+        &self,
+        owned: &OwnedClient,
+    ) -> Result<Vec<StoredClientSecret>, AccountError> {
+        Ok(self
             .database
             .oidc()
             .client_secrets(&owned.client.id)
-            .await?;
-        Ok(ClientDetails {
-            client: owned.client,
-            secrets,
-        })
+            .await?)
     }
 
     /// Registers a client the owner manages, with an ID auth generates, once they
@@ -296,7 +355,7 @@ impl AccountService {
         &self,
         owner: &Owner,
         new: NewClient,
-    ) -> Result<(StoredOidcClient, Option<ClientSecret>), AccountError> {
+    ) -> Result<(OwnedClientView, Option<ClientSecret>), AccountError> {
         let random = Secret::generate()
             .map_err(ClientRegistryError::from)
             .map_err(OwnedClientError::from)?;
@@ -324,7 +383,7 @@ impl AccountService {
         &self,
         owned: &OwnedClient,
         patch: ClientPatch,
-    ) -> Result<StoredOidcClient, AccountError> {
+    ) -> Result<OwnedClientView, AccountError> {
         let OwnedClient { owner, client } = owned;
         let mut tx = self.database.begin().await?;
         owner.lock_confirmed(&mut tx).await?;
@@ -393,11 +452,12 @@ impl AccountService {
     async fn read_client(
         tx: &mut DatabaseTransaction<'_>,
         id: &ClientId,
-    ) -> Result<StoredOidcClient, AccountError> {
+    ) -> Result<OwnedClientView, AccountError> {
         Ok(tx
             .oidc()
             .find_client(id.as_str())
             .await?
+            .map(OwnedClientView::from)
             .ok_or(OwnedClientError::NotFound)?)
     }
 }
