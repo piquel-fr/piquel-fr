@@ -7,7 +7,7 @@ run *ARGS:
 
 # Build the auth pages and SDK script the binary embeds, then serve.
 serve:
-    @just web build-auth
+    @just web build
     @just auth run serve
 
 # Create, list or revoke signup invitations, e.g. `just auth invite create --expires-in 7d`.

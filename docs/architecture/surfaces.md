@@ -1,13 +1,12 @@
 # Auth, account and admin surfaces
 
-piquel.fr identity is split across three hosts. Each has one job, so the login
-path stays small and scales on its own while the account and admin pages grow.
-This is the target design; parts not built yet are marked *(planned)*.
+piquel.fr identity spans three hosts. This is the target design; parts not built
+yet are marked *(planned)*.
 
 | Host | Serves | Used by |
 | --- | --- | --- |
-| `auth.piquel.fr` | OIDC/OAuth endpoints, ceremony pages and the JSON APIs | every application and user |
-| `piquel.fr` | Account settings; security center, developer console, public profiles *(planned)* | signed-in users |
+| `auth.piquel.fr` | OIDC/OAuth endpoints, ceremony pages, account settings and the JSON APIs; security center, developer console *(planned)* | every application and user |
+| `piquel.fr` | A redirect to auth.piquel.fr that keeps the path; public profiles *(planned)* | old links and bookmarks |
 | `admin.piquel.fr` | Admin dashboard; auth's private admin API behind it | administrators |
 
 ## auth.piquel.fr
@@ -15,9 +14,9 @@ This is the target design; parts not built yet are marked *(planned)*.
 The auth executable owns everything that authenticates someone or issues a
 credential: discovery, JWKS, authorization, token, userinfo, logout, and the
 pages a ceremony needs (login, signup, consent, passkey confirmation, device
-verification *(planned)*). Account settings are moving here from piquel.fr: auth
-serves them at `/settings`, with the same paths, and piquel.fr's copy goes once it
-redirects there. It hosts no developer or admin pages yet.
+verification *(planned)*). It also serves the account settings at `/settings`, on
+the paths piquel.fr used, and redirects its root there. It hosts no developer or
+admin pages yet.
 
 The account and admin APIs are routes in the same executable. They are small
 next to the pages that use them, and keeping them there keeps one binary, one
@@ -29,20 +28,17 @@ settings are server-rendered in the executable, with plain forms. Their only scr
 is the SDK's, which runs the passkey ceremonies their forms need and keeps a form
 from posting twice.
 
+Passkeys are bound to the `auth.piquel.fr` RP ID, so passkey ceremonies always
+run on auth. A settings change that needs a recent passkey confirmation asks for
+it on its page before the form posts. Users never unlock settings explicitly.
+
 ## piquel.fr
 
-A SvelteKit server on Node (adapter-node), deployed separately from auth, so
-public profiles and discovery documents *(planned)* can be rendered per request.
-The server keeps no state and has no database: public pages read auth's public
-API, and account pages call auth's JSON APIs from the browser with the auth session
-cookie. The hosts are same-site, so the host-only cookie is sent without
-third-party cookie exceptions. Each frontend origin is allowed exactly, and
-mutations still require the CSRF header. No access token is held by these pages.
-
-Passkeys are bound to the `auth.piquel.fr` RP ID, so passkey ceremonies always
-run on auth. When an API call needs a recent passkey confirmation, auth answers
-with a step-up error, and the frontend sends the user to auth to confirm and
-back. Users never unlock settings explicitly.
+piquel.fr runs no service: the gateway redirects it to auth.piquel.fr with a
+temporary `307`, keeping the path and query, and browsers keep the fragment. Links
+to `piquel.fr/settings/…` sent before the settings moved still open the same page.
+The security notices among them never expire, so the redirect stays until
+piquel.fr serves pages of its own, such as public profiles *(planned)*.
 
 ## admin.piquel.fr
 
@@ -78,8 +74,8 @@ Administrators change other users' settings with the owner's own operations,
 never by signing in as them. Each setting an administrator may share with the
 owner is an `AccountService` operation: a change takes a `Subject`, the account and
 who acts on it, and a read a `Viewer`, the account and who reads it. The owner's
-`/account` routes run them as the owner of the session cookie, the only way to act
-as an owner. The `auth-service account <user> …`
+settings pages and `/account` routes run them as the owner of the session cookie,
+the only way to act as an owner. The `auth-service account <user> …`
 command runs them as the operator at the terminal, and the dashboard will call
 them in-process as an administrator *(planned)*. Both run the same safety rules:
 for example, one active passkey always remains, whoever removes the others.

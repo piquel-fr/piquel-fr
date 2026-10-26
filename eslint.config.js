@@ -40,15 +40,15 @@ export default defineConfig(
       'no-undef': 'off',
       // The codebase consistently declares object shapes as type aliases.
       '@typescript-eslint/consistent-type-definitions': ['error', 'type'],
-      // Both apps are served from their origin root without `paths.base`, and
-      // most links point at other origins (auth pages, the settings URL) that
-      // `resolve()` cannot express. Programmatic navigation is still checked.
+      // auth-web is served from its origin root without `paths.base`, and some
+      // of its links point at pages auth-service serves, such as the settings,
+      // that `resolve()` cannot express. Programmatic navigation is still checked.
       'svelte/no-navigation-without-resolve': ['error', { ignoreLinks: true }]
     }
   },
   {
-    // Svelte parses components and rune modules (`*.svelte.ts`); TypeScript parses their scripts.
-    files: ['**/*.svelte', '**/*.svelte.ts'],
+    // Svelte parses components; TypeScript parses their scripts.
+    files: ['**/*.svelte'],
     languageOptions: { parserOptions: { parser: ts.parser } }
   }
 );

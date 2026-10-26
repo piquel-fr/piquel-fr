@@ -33,10 +33,10 @@ adds the rest in one line.
   request cancelled while its `COMMIT` is in flight can commit an event that is
   never logged or counted. The stored history is the audit record.
 - **Failures.** A 5xx response marks its span failed and returns the trace ID in
-  `X-Trace-Id`, which CORS exposes to the frontends. `tracing::error!` events
-  with an `error` field, such as `ApiError::log_error`'s, also mark their span.
-  Every failed admin API request is logged as `admin API request failed`, with
-  its `admin.failure` reason.
+  `X-Trace-Id`, which auth's own pages can read, and CORS exposes to public
+  clients' origins. `tracing::error!` events with an `error` field, such as
+  `ApiError::log_error`'s, also mark their span. Every failed admin API request
+  is logged as `admin API request failed`, with its `admin.failure` reason.
 - **One series per process.** Each process gets a new UUID as its
   `service.instance.id`, so replicas and command-line runs never write to the
   same metric series. The admin API's requests carry `piquel.listener = "admin"`,

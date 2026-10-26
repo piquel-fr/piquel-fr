@@ -71,7 +71,7 @@ impl Assets {
     }
 
     /// Generates `EmbeddedAssets::find`: a `match` from each path to the file's bytes
-    /// and headers. A page also answers at its path without `.html`, the index at `""`.
+    /// and headers. A page also answers at its path without `.html`.
     /// The pages' named files are content-addressed, so immutable.
     fn lookup(&self, stylesheet: &str, script: Option<&str>) -> io::Result<String> {
         let names: Vec<&str> = self.entries.iter().map(|(name, _)| name.as_str()).collect();
@@ -83,9 +83,6 @@ impl Assets {
             let mut patterns = vec![name.as_str()];
             if let Some(page) = name.strip_suffix(".html") {
                 patterns.push(page);
-                if page == "/index" {
-                    patterns.push("");
-                }
             }
             // A real file at a page's alias keeps its own path.
             patterns.retain(|pattern| *pattern == name || !names.contains(pattern));

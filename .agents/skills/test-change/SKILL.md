@@ -22,14 +22,16 @@ Fix failures before deploying: a preview build costs minutes.
 ## 2. Deploy a preview
 
 Follow the `preview` skill: `just preview` in the background, then note the
-two URLs it prints. Below, `$web` is `https://<slug>.dev.piquel.fr` and `$auth`
-is `https://auth-<slug>.dev.piquel.fr`.
+URLs it prints. Below, `$auth` is `https://auth-<slug>.dev.piquel.fr`, which
+serves the settings at `/settings`. `$web`, `https://<slug>.dev.piquel.fr`, only
+redirects to it.
 
 ## 3. Smoke-test the deployment
 
 ```sh
 curl -fsS "$auth/health/ready"
-curl -fsSI "$web/settings"       # content-security-policy: ..., connect-src 'self' <$auth>
+curl -fsS -o /dev/null -D - "$auth/settings"   # content-security-policy: default-src 'none'; ...; connect-src 'self'; ...
+curl -sSI "$web/settings?x=1"                  # 307, location: $auth/settings?x=1
 piquelctl preview logs piquel-fr "$(git branch --show-current)" --tail 200
 ```
 
@@ -42,24 +44,25 @@ paths (bad input, expired or replayed links, missing permissions), and the
 flows next to it that it could break. Signing up, signing in and loading
 settings are always worth one pass.
 
-- **Pages and layout:** open `$web` or `$auth` in T3 Code's preview browser
-  (`preview_open`), and take screenshots of what changed.
+- **Pages and layout:** open `$auth`, or `$auth/settings`, in T3 Code's preview
+  browser (`preview_open`), and take screenshots of what changed.
 - **Passkeys:** the preview browser cannot create passkeys. Drive Chromium
   with Playwright and its virtual authenticator instead, as
-  `tests/browser/account.spec.ts` does (`WebAuthn.enable`, then
+  `tests/browser/settings.spec.ts` does (`WebAuthn.enable`, then
   `WebAuthn.addVirtualAuthenticator`). For a one-off check, run a script from
   the repository root so it resolves `@playwright/test`, e.g.
   `node --input-type=module -e "import { chromium } from '@playwright/test'; ..."`.
   Set `CHROMIUM_EXECUTABLE` (or `executablePath`) to a Chromium binary; on
   NixOS, `$(nix build --no-link --print-out-paths nixpkgs#chromium)/bin/chromium`.
 - **APIs:** `curl` the auth API directly. State-changing requests need
-  `origin: $web` (or `$auth`), `content-type: application/json` and
-  `x-piquel-csrf: 1`. Account endpoints also need a session cookie, so those
-  checks are usually simpler from Playwright.
+  `origin: $auth`, `content-type: application/json` and `x-piquel-csrf: 1`; any
+  other origin is refused. A settings form's post needs only `origin: $auth`.
+  Account endpoints and settings also need a session cookie, so those checks are
+  usually simpler from Playwright.
 - **Lasting coverage:** if the change deserves a regression test, add a focused
-  spec to `tests/browser`. The existing suite also needs the `browser-e2e` OIDC
-  client, which previews don't register. Run it locally as
-  `tests/browser/README.md` describes when consent or OIDC changes.
+  spec to `tests/browser`. `oidc.spec.ts` also needs the `browser-e2e` OIDC
+  client, which previews don't register. When consent or OIDC changes, run the
+  suite as `tests/browser/README.md` describes.
 
 After fixing anything, run `just preview` again and repeat the checks the fix
 could affect.
@@ -68,7 +71,7 @@ could affect.
 
 Leave the preview running and tell the user, in chat:
 
-- the web and auth URLs, as links;
+- the auth URL and its `/settings`, as links;
 - that they work from any device on their tailnet, so they can register a real
   passkey from their phone or laptop, and that registration needs no
   invitation;

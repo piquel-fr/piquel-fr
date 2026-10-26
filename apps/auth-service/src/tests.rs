@@ -4,8 +4,7 @@
 use crate::{
     AuthConfig, ClientRegistry, ClientRegistryError, KeyStore, Operator,
     config::{
-        EmailConfig, FederationConfig, FrontendOrigins, OidcConfig, PasskeyConfig, TokenDigestKey,
-        TokenDigestKeys,
+        EmailConfig, FederationConfig, OidcConfig, PasskeyConfig, TokenDigestKey, TokenDigestKeys,
     },
     passkey::DecoyKey,
     security::{BrowserCookie, RequestContext, Session},
@@ -24,7 +23,7 @@ use piquel_common::{
         AllowedScopes, ClientField, ClientKind, ClientOwner, ClientRegistration, PostLogoutUris,
         RedirectUris, ScopeName,
     },
-    config::{Origin, PublicUrl},
+    config::Origin,
     events::{Actor, RevocationReason},
     protocol::oauth::Scope,
 };
@@ -66,7 +65,6 @@ impl AuthConfig {
     /// The configuration of a test service at `origin`: no providers, email sent, a
     /// random token digest key, and registration without an invitation.
     pub(crate) fn test(origin: &Origin) -> Self {
-        let settings_url: PublicUrl = "https://piquel.fr/settings".parse().expect("settings URL");
         Self {
             public_listener: SocketAddr::from(([127, 0, 0, 1], 0)),
             admin_listener: None,
@@ -75,11 +73,9 @@ impl AuthConfig {
                 invite_required: false,
                 decoy_key: DecoyKey::new(Secret::generate().expect("decoy key")),
             },
-            email: EmailConfig::test(&settings_url, true),
+            email: EmailConfig::test(origin, true),
             federation: FederationConfig {
                 origin: origin.clone(),
-                frontends: FrontendOrigins::new([&settings_url]),
-                settings_url,
                 providers: BTreeMap::new(),
             },
             oidc: OidcConfig {

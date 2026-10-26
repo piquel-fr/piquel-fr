@@ -1,9 +1,9 @@
 //! The account API for the OIDC clients an account manages: thin JSON adapters
 //! over the owner's [`AccountService`] operations, which hold the policy and
 //! share [`ClientRegistry`](super::ClientRegistry)'s validation and events with
-//! the `client` command. Like every account route, they accept only the
-//! first-party frontends' exact origins and the session cookie, and mutations need
-//! the CSRF header.
+//! the `client` command. Like every account route, browsers may call them only
+//! from auth's own pages, with the session cookie, and mutations need the CSRF
+//! header.
 
 use super::{ClientDetails, ClientPatch, NewClient, OwnedClient, OwnedClientError, Rotation};
 use crate::{

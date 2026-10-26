@@ -179,7 +179,8 @@ impl WebApplication {
         ]
     }
 
-    /// One Topcoat router serving every page, mounted on each page's path.
+    /// One Topcoat router serving every page, mounted on each page's path, and the
+    /// redirect of auth's root to the settings.
     pub(crate) fn routes(self) -> axum::Router {
         let mut pages = Router::builder()
             .app_context(self)
@@ -197,8 +198,29 @@ impl WebApplication {
         Self::pages()
             .into_iter()
             .fold(axum::Router::new(), |router, (path, ..)| {
-                router.route_service(path, service.clone())
+                router
+                    .route_service(path, service.clone())
+                    // Links ending in a slash, which piquel.fr's settings accepted, go on
+                    // to the page.
+                    .route(
+                        &format!("{path}/"),
+                        axum::routing::get(move |uri: axum::http::Uri| async move {
+                            let query = uri
+                                .query()
+                                .map_or_else(String::new, |query| format!("?{query}"));
+                            axum::response::Redirect::permanent(&format!("{path}{query}"))
+                        }),
+                    )
             })
+            .route(routes::page::ROOT, axum::routing::get(Self::root))
+    }
+
+    /// Sends auth's root on to the account's settings, which show the account or
+    /// offer to sign in. Temporary, so browsers cache nothing should the root change.
+    fn root() -> std::future::Ready<axum::response::Redirect> {
+        std::future::ready(axum::response::Redirect::temporary(
+            routes::page::settings::HOME,
+        ))
     }
 
     /// Runs the handler `page` of the page titled `title`: its failure becomes the
@@ -279,8 +301,9 @@ impl WebApplication {
     }
 
     /// Answers with `page` inside the document titled `title`, in `area`, under the
-    /// page policy. Its forms may post to auth's own pages, and redirect on to the
-    /// origins of `targets`: browsers apply `form-action` to a form's redirects too.
+    /// page policy. The brand links the account's settings. Its forms may post to
+    /// auth's own pages, and redirect on to the origins of `targets`: browsers apply
+    /// `form-action` to a form's redirects too.
     async fn render(
         &self,
         cx: &Cx,
@@ -290,18 +313,13 @@ impl WebApplication {
         targets: &[Url],
         page: impl View,
     ) -> Result<Response> {
-        // The brand links the account's settings from its own pages.
-        let home = match area {
-            Area::Account => routes::page::settings::HOME,
-            Area::SignIn => "/",
-        };
         let page = Child::new(page);
         let html = view! { cx =>
             piquel_ui::document(
                 title: title,
                 stylesheet: EmbeddedAssets::STYLESHEET,
                 script: EmbeddedAssets::SCRIPT,
-                home: home,
+                home: routes::page::settings::HOME,
                 area: area,
                 (page)
             )
