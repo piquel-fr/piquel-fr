@@ -10,16 +10,15 @@
 
 use super::{Failure, WebApplication};
 use crate::{
-    account::Viewer,
-    federation::{FederationError, PendingView, ReturnTo},
-    oidc::{OAuthError, OidcApplication, TransactionQuery},
+    account::{AccountError, Viewer},
+    federation::{FederationError, PendingKind, PendingView, ReturnTo},
+    oidc::{AuthorizationView, OAuthError, OidcApplication, TransactionQuery},
     passkey::PasskeyApplication,
     routes,
-    security::{ApiError, BrowserCookie, Session, SessionError},
+    security::{ApiError, SessionError},
 };
 use axum::extract::Query as UriQuery;
 use piquel_common::{events::RevocationReason, protocol::claims::Acr};
-use piquel_repository::StoredAuthorizationRequest;
 use piquel_ui::{
     Area, CallbackError, LinkKind, LoginChange, LoginQuery, Onward, Query, QueryError, SignedIn,
     Step, Title,
@@ -36,7 +35,6 @@ use topcoat::{
     },
     view::view,
 };
-use url::Url;
 
 #[cfg(test)]
 mod tests;
@@ -53,7 +51,7 @@ pub(super) enum SignInPage {
 
 impl SignInPage {
     /// Its route.
-    pub(super) const fn path(self) -> &'static str {
+    const fn path(self) -> &'static str {
         match self {
             Self::Login => routes::page::LOGIN,
             Self::Register => routes::page::REGISTER,
@@ -119,18 +117,15 @@ impl Continuation {
         }
     }
 
-    /// The pending authorization it continues, if any, as `oidc` stores it, and
-    /// where its application receives the browser.
+    /// The pending authorization it continues, if any, as the sign-in page sees it.
     async fn authorization(
         &self,
         oidc: &OidcApplication,
-    ) -> Result<Option<(StoredAuthorizationRequest, Url)>, OAuthError> {
+    ) -> Result<Option<AuthorizationView>, OAuthError> {
         let Self::Authorization(transaction) = self else {
             return Ok(None);
         };
-        let request = oidc.find_authorization_request(transaction).await?;
-        let client = Url::parse(&request.redirect_uri)?;
-        Ok(Some((request, client)))
+        oidc.authorization(transaction).await.map(Some)
     }
 
     /// `query`, naming this continuation as the sign-in pages do. The settings, where
@@ -147,6 +142,18 @@ impl Continuation {
             transaction,
             return_to,
             ..query
+        }
+    }
+}
+
+impl PendingKind {
+    /// Why the pending evidence must be linked to an existing account, as the link
+    /// step says, or `None` when it creates one.
+    const fn link(self) -> Option<LinkKind> {
+        match self {
+            Self::Signup => None,
+            Self::Link => Some(LinkKind::Email),
+            Self::ExplicitLink => Some(LinkKind::Explicit),
         }
     }
 }
@@ -259,7 +266,7 @@ impl WebApplication {
         visit: Visit,
         change: LoginChange,
     ) -> Result<Response, Refusal> {
-        let mut response = match change {
+        let (mut response, cookie) = match change {
             // The SDK signed the browser in before posting.
             LoginChange::SignedIn {} | LoginChange::Registered {} => {
                 return Ok(self.go_on(cx, page, visit.continuation).await?);
@@ -279,31 +286,27 @@ impl WebApplication {
                 // A provider the user already allowed sends the browser straight back,
                 // and on to the application, which this form's `form-action` may not
                 // name: then the browser follows a link to the provider instead.
-                let mut response = match authorization {
-                    Some((_, client)) if Self::source(&client).is_none() => {
+                let response = match authorization {
+                    Some(authorization) if Self::source(&authorization.redirect_uri).is_none() => {
                         self.link(cx, page.title(), &to, Onward::Provider(provider))
                             .await?
                     }
                     _ => see_other(to.as_str()).into_response(cx)?,
                 };
-                cookie.set_on(&mut response).map_err(Error::from)?;
-                return Ok(response);
+                (response, cookie)
             }
             LoginChange::Link {} => {
                 let owner = self
                     .owner(cx)
                     .await?
                     .ok_or_else(|| ApiError::from(SessionError::Missing))?;
-                let pending = BrowserCookie::FederationPending
-                    .read(headers(cx))
-                    .ok_or_else(|| ApiError::from(FederationError::PendingBrowserMissing))?;
-                let return_to = self
+                let (return_to, cookie) = self
                     .account
-                    .link_identity(&owner, &pending)
+                    .link_identity(&owner, headers(cx))
                     .await
                     .map_err(ApiError::from)?;
                 let continuation = Continuation::new(&visit.query, Some(&return_to));
-                self.go_on(cx, page, continuation).await?
+                (self.go_on(cx, page, continuation).await?, cookie)
             }
             // An explicit link goes back to where it started; an email match offers
             // to sign in before going on.
@@ -312,44 +315,39 @@ impl WebApplication {
                     .pending
                     .unwrap_or(Err(FederationError::PendingBrowserMissing))
                     .map_err(ApiError::from)?;
-                self.federation
+                let cookie = self
+                    .federation
                     .cancel_pending(headers(cx))
                     .await
                     .map_err(ApiError::from)?;
-                match pending.kind.link() {
-                    Some(LinkKind::Explicit) => self.go_on(cx, page, visit.continuation).await?,
-                    Some(LinkKind::Email) | None => {
+                let response = match pending.kind {
+                    PendingKind::ExplicitLink => self.go_on(cx, page, visit.continuation).await?,
+                    PendingKind::Link | PendingKind::Signup => {
                         let sign_in = visit
                             .continuation
                             .on(LoginQuery::default())
                             .on(routes::page::LOGIN)?;
                         see_other(sign_in).into_response(cx)?
                     }
-                }
+                };
+                (response, cookie)
             }
             // Signed out, the page offers to sign in to another account.
             LoginChange::SwitchAccount {} => {
-                Session::sign_out(
-                    &self.account.database,
-                    Self::context(cx)?,
-                    headers(cx),
-                    RevocationReason::Logout,
-                )
-                .await
-                .map_err(ApiError::from)?;
+                let signed_out = self
+                    .account
+                    .sign_out(Self::context(cx)?, headers(cx), RevocationReason::Logout)
+                    .await
+                    .map_err(ApiError::from)?;
                 let here = uri(cx)
                     .path_and_query()
                     .map_or(page.path(), |here| here.as_str());
                 let mut response = see_other(here).into_response(cx)?;
-                BrowserCookie::Session
-                    .clear_on(&mut response)
-                    .map_err(Error::from)?;
+                signed_out.clear_on(&mut response).map_err(Error::from)?;
                 return Ok(response);
             }
         };
-        BrowserCookie::FederationPending
-            .clear_on(&mut response)
-            .map_err(Error::from)?;
+        cookie.set_on(&mut response).map_err(Error::from)?;
         Ok(response)
     }
 
@@ -380,7 +378,12 @@ impl WebApplication {
         let Some(owner) = self.owner(cx).await? else {
             return Ok(None);
         };
-        let profile = self.account.profile(&Viewer::from(&owner)).await?;
+        let profile = match self.account.profile(&Viewer::from(&owner)).await {
+            Ok(profile) => profile,
+            // An account gone since its session was found is signed out.
+            Err(AccountError::Owner(SessionError::Missing)) => return Ok(None),
+            Err(error) => return Err(error.into()),
+        };
         Ok(Some(SignedIn {
             handle: profile.handle,
             confirmed: owner.is_confirmed(),
@@ -408,9 +411,9 @@ impl WebApplication {
             .authorization_endpoints()
             .map_err(Error::from)?;
         let target_acr = match continuation.authorization(&self.oidc).await? {
-            Some((request, client)) => {
-                targets.push(client);
-                request.target_acr
+            Some(authorization) => {
+                targets.push(authorization.redirect_uri);
+                authorization.target_acr
             }
             None => query.acr,
         };

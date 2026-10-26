@@ -17,7 +17,7 @@ use axum::{
     Extension, Router,
     body::{Body, to_bytes},
     extract::ConnectInfo,
-    http::{Method, Request, StatusCode, header},
+    http::{HeaderMap, Method, Request, StatusCode, header},
     response::Response,
 };
 use chrono::{Duration, Utc};
@@ -315,13 +315,17 @@ impl Browser {
         Self::dispatch(router, request.body(Body::from(form)).expect("request")).await
     }
 
+    /// The headers this browser sends: its cookies.
+    pub(crate) fn headers(&self) -> HeaderMap {
+        let request = self.request(Method::GET, "/");
+        request.headers_ref().expect("request headers").clone()
+    }
+
     /// The owner this browser's session cookie shows, found from
     /// [`RequestContext::TEST`] as a server-rendered page finds them.
     pub(crate) async fn owner(&self, database: &Database) -> Owner {
-        let request = self.request(Method::GET, "/");
-        let headers = request.headers_ref().expect("request headers");
         AccountService::new(database.clone())
-            .owner(RequestContext::TEST, headers)
+            .owner(RequestContext::TEST, &self.headers())
             .await
             .expect("session lookup")
             .expect("signed in")

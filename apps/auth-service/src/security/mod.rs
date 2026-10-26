@@ -585,30 +585,6 @@ impl Session {
             .await
     }
 
-    /// Signs the browser out: ends the session its `headers` carry, if any, for
-    /// `reason`, as [`Self::revoke`] records it. Its caller clears the session
-    /// cookie.
-    pub(crate) async fn sign_out(
-        database: &Database,
-        context: RequestContext,
-        headers: &HeaderMap,
-        reason: RevocationReason,
-    ) -> Result<(), SessionError> {
-        let Some(session) = Self::optional(database, headers).await? else {
-            return Ok(());
-        };
-        let mut tx = database.begin().await?;
-        Self::revoke(
-            &mut tx,
-            context,
-            &session,
-            SessionScope::One(session.id),
-            reason,
-        )
-        .await?;
-        Ok(tx.commit().await?)
-    }
-
     /// Records the session's activity from `context`, at most once every
     /// [`LAST_SEEN_INTERVAL`]: a session seen more recently is not written.
     async fn touch(

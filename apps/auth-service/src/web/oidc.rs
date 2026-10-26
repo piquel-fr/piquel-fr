@@ -5,7 +5,6 @@ use super::{Failure, WebApplication};
 use crate::{
     oidc::{AuthorizationDecision, LogoutQuery, OAuthError, TransactionQuery},
     routes,
-    security::BrowserCookie,
 };
 use piquel_ui::{Area, LoginQuery, Query, Title};
 use std::slice;
@@ -92,11 +91,10 @@ impl WebApplication {
         let web = app_context::<Self>(cx);
         let context = Self::context(cx)?;
         let request: LogoutQuery = Self::form(cx, body).await?;
-        let destination = web.oidc.end_session(context, headers(cx), &request).await?;
+        let (destination, signed_out) =
+            web.oidc.end_session(context, headers(cx), &request).await?;
         let mut response = web.onward(cx, Title::Logout.as_str(), &destination).await?;
-        BrowserCookie::Session
-            .clear_on(&mut response)
-            .map_err(Error::from)?;
+        signed_out.clear_on(&mut response).map_err(Error::from)?;
         Ok(response)
     }
 }

@@ -80,7 +80,8 @@ one event per session; set cookies after commit with `BrowserCookie::set_on`
 and clear them with `clear_on`. Both preserve other Set-Cookie headers. A page
 never sets or clears a flow cookie: the federation operation it calls returns the
 change as a `FlowCookie`, which the page applies to its response. Pages write only
-the notice cookie, with `BrowserCookie::set_notice_on`.
+the notice cookie, with `BrowserCookie::set_notice_on`, and the session cookie only
+through `AccountService::sign_out`, whose `SignedOut` clears it on the response.
 
 `AuthConfig::router` builds applications without writing to the database, so tests
 build two on one database as replicas (`Replicas` in `src/tests.rs`).
@@ -187,7 +188,8 @@ on it:
   so these cannot be called for an administrator. Verifying an address is
   authorized by its link's token instead, and takes an optional `Owner`: it refuses
   a browser signed in to another account, and records the owner as the actor when
-  theirs confirms it;
+  theirs confirms it. Signing a browser out is authorized by its session cookie
+  alone: `AccountService::sign_out` takes the request's headers;
 - a `Subject`, for changes an administrator may also make: the owner, or an
   `Operator` with the reason it must give;
 - a `Viewer`, for reads, which need no reason. For an operator,

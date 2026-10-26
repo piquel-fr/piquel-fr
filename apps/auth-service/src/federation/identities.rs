@@ -1,6 +1,6 @@
 //! Pending and linked social identities: signup, linking, listing and unlinking.
 
-use super::{FederationApplication, FederationError, Provider};
+use super::{FederationApplication, FederationError, Flow, FlowCookie, Provider};
 use crate::account::{AccountError, AccountService, Owner, Subject, Viewer};
 use crate::security::BrowserCookie;
 use axum::http::HeaderMap;
@@ -9,9 +9,7 @@ use piquel_common::{
     events::{DomainEvent, EventContext, RevocationReason},
     protocol::api::Identity,
 };
-use piquel_crypto::Secret;
 use piquel_repository::{Database, DatabaseTransaction, InsertExternalIdentity, PendingFederation};
-use piquel_ui::LinkKind;
 
 impl FederationApplication {
     /// Verifies that the signup ID shown by the social page belongs to this browser.
@@ -119,37 +117,43 @@ impl FederationApplication {
         })
     }
 
-    /// Removes this browser's pending evidence, if any. The caller clears its
-    /// [`BrowserCookie::FederationPending`].
-    pub(crate) async fn cancel_pending(&self, headers: &HeaderMap) -> Result<(), FederationError> {
+    /// Removes this browser's pending evidence, if any, and answers the deletion of its
+    /// cookie, which the response carries even when no evidence was left.
+    pub(crate) async fn cancel_pending(
+        &self,
+        headers: &HeaderMap,
+    ) -> Result<FlowCookie, FederationError> {
         if let Some(browser) = BrowserCookie::FederationPending.read(headers) {
             self.database
                 .federation()
                 .cancel_pending(browser.digest().as_bytes())
                 .await?;
         }
-        Ok(())
+        Ok(FlowCookie(Flow::Settled))
     }
 }
 
 /// Linked identities any administrator may also manage: listing and unlinking.
 /// Linking adds a way to sign in, so only the owner can.
 impl AccountService {
-    /// Links the identity in the pending evidence of the browser holding
-    /// `pending`, its cookie's secret, to the owner's account, once they confirmed
-    /// with a passkey, and returns where the browser continues. The evidence must
-    /// name this account, and this session when settings started the link. The
-    /// account must keep a passkey, and a repeated callback may confirm only the
-    /// identity already linked here.
+    /// Links the identity in this browser's pending evidence, which its
+    /// [`BrowserCookie::FederationPending`] in `headers` names, to the owner's account,
+    /// once they confirmed with a passkey, and returns where the browser continues, with
+    /// the deletion of the evidence's cookie. The evidence must name this account, and
+    /// this session when settings started the link. The account must keep a passkey, and
+    /// a repeated callback may confirm only the identity already linked here.
     pub(crate) async fn link_identity(
         &self,
         owner: &Owner,
-        pending: &Secret,
-    ) -> Result<String, AccountError> {
+        headers: &HeaderMap,
+    ) -> Result<(String, FlowCookie), AccountError> {
         let user = owner.user();
         let mut tx = self.database.begin().await?;
         owner.lock_confirmed(&mut tx).await?;
-        let digest = pending.digest();
+        let digest = BrowserCookie::FederationPending
+            .read(headers)
+            .ok_or(FederationError::PendingBrowserMissing)?
+            .digest();
         let evidence = tx
             .federation()
             .pending(digest.as_bytes())
@@ -192,7 +196,7 @@ impl AccountService {
             tx.federation().set_first_email(user, email).await?;
         }
         tx.commit().await?;
-        Ok(evidence.return_to)
+        Ok((evidence.return_to, FlowCookie(Flow::Settled)))
     }
 
     /// Lists the account's active social identities.
@@ -245,18 +249,6 @@ pub(crate) enum PendingKind {
     Link,
     /// Settings-initiated linking requires the initiating passkey session.
     ExplicitLink,
-}
-
-impl PendingKind {
-    /// Why the evidence must be linked to an existing account, or `None` when it
-    /// creates one.
-    pub(crate) const fn link(self) -> Option<LinkKind> {
-        match self {
-            Self::Signup => None,
-            Self::Link => Some(LinkKind::Email),
-            Self::ExplicitLink => Some(LinkKind::Explicit),
-        }
-    }
 }
 
 /// This browser's pending provider evidence, as the sign-in page shows it.

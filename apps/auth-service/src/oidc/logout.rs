@@ -2,10 +2,7 @@
 //! end of the session once confirmed.
 
 use super::{Claim, MAX_STATE_BYTES, OAuthCode, OAuthError, OidcApplication, Reject};
-use crate::{
-    routes,
-    security::{RequestContext, Session},
-};
+use crate::{account::AccountService, routes, security::RequestContext, sessions::SignedOut};
 use axum::{
     Form,
     extract::{State, rejection::FormRejection},
@@ -167,18 +164,20 @@ impl OidcApplication {
     }
 
     /// Ends the browser's session, once the logout page confirmed `q`, and returns
-    /// where the browser goes next. The page's caller clears the session cookie.
+    /// where the browser goes next, with the sign-out its response applies.
     pub(crate) async fn end_session(
         &self,
         context: RequestContext,
         headers: &HeaderMap,
         q: &LogoutQuery,
-    ) -> Result<Url, OAuthError> {
+    ) -> Result<(Url, SignedOut), OAuthError> {
         let (destination, client) = self.logout_destination(q).await?;
         let reason = client.map_or(RevocationReason::Logout, |client_id| {
             RevocationReason::RelyingPartyLogout { client_id }
         });
-        Session::sign_out(&self.database, context, headers, reason).await?;
-        Ok(destination)
+        let signed_out = AccountService::new(self.database.clone())
+            .sign_out(context, headers, reason)
+            .await?;
+        Ok((destination, signed_out))
     }
 }

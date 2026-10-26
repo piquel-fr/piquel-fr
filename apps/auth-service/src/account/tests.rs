@@ -10,7 +10,7 @@ use crate::{
     config::EmailConfig,
     passkey::PasskeyError,
     security::ApiError,
-    security::CONFIRMATION_MAX_AGE,
+    security::{BrowserCookie, CONFIRMATION_MAX_AGE},
     tests::{
         AUTH_ORIGIN, Browser, Replicas, change, pending_sign_in, registration, sign_out,
         until_blocked, unusable_passkey,
@@ -19,7 +19,7 @@ use crate::{
 use axum::{
     Router,
     extract::{FromRef, Path, State},
-    http::Method,
+    http::{HeaderMap, Method},
     routing::{delete, post},
 };
 use chrono::{Duration, Utc};
@@ -576,9 +576,9 @@ struct Confirmation {
     passkey: PasskeyId,
     /// The account's confidential client.
     client: ClientId,
-    /// The cookie secret of a browser holding evidence of another identity to
-    /// link, which the owner's session started.
-    pending: Secret,
+    /// The headers of a browser holding evidence of another identity to link, which
+    /// the owner's session started.
+    pending: HeaderMap,
 }
 
 impl FromRef<Confirmation> for Database {
@@ -642,7 +642,9 @@ impl Confirmation {
             address: addresses[1],
             passkey: passkeys[0],
             client: client.id,
-            pending,
+            pending: Browser::signed_out()
+                .with_cookie(BrowserCookie::FederationPending, &pending.encoded())
+                .headers(),
         };
         (state, social)
     }

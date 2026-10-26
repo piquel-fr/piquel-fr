@@ -147,11 +147,14 @@ impl TestApp {
     /// Starts a GitHub sign-in returning to `return_to`, as the sign-in page does,
     /// and returns the provider's `state` and the browser's flow cookie pair.
     async fn start(&self, return_to: &str) -> (String, String) {
-        let (url, FlowCookie(browser)) = self
+        let (url, FlowCookie(Flow::Started(browser))) = self
             .app
             .start_sign_in(Provider::GitHub, return_to)
             .await
-            .expect("start");
+            .expect("start")
+        else {
+            unreachable!("starting a sign-in sets the flow's cookie")
+        };
         let state = url
             .query_pairs()
             .find(|(name, _)| name == "state")
@@ -318,10 +321,10 @@ impl TestApp {
             .await
             .expect("session lookup")
             .expect("signed in");
-        let secret = BrowserCookie::FederationPending
-            .read(pending)
-            .expect("pending cookie");
-        account.link_identity(&owner, &secret).await
+        account
+            .link_identity(&owner, pending)
+            .await
+            .map(|(return_to, _)| return_to)
     }
     /// Borrows Google's replaceable verification facts from the fixture.
     fn google_protocol(&self) -> &GoogleProtocol {
@@ -546,14 +549,17 @@ async fn linking_requires_target_confirmation_and_unlink_releases_subject_withou
         ),
         "another account's confirmation cannot link: {refused:?}"
     );
-    let refused = test.link_pending(&target_cookie, &pending_headers).await;
-    assert!(
-        matches!(
-            refused,
-            Err(AccountError::Owner(SessionError::StepUpRequired { .. }))
-        ),
-        "an unconfirmed session cannot link: {refused:?}"
-    );
+    // Confirmation comes first, before the browser's pending cookie is read.
+    for pending in [&pending_headers, &HeaderMap::new()] {
+        let refused = test.link_pending(&target_cookie, pending).await;
+        assert!(
+            matches!(
+                refused,
+                Err(AccountError::Owner(SessionError::StepUpRequired { .. }))
+            ),
+            "an unconfirmed session cannot link: {refused:?}"
+        );
+    }
     let router = test.routes();
     let response = router
         .clone()

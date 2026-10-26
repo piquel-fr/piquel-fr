@@ -38,7 +38,7 @@ mod identities;
 pub use error::FederationConfigError;
 pub(crate) use error::FederationError;
 use error::InvalidReturnTo;
-pub(crate) use identities::PendingView;
+pub(crate) use identities::{PendingKind, PendingView};
 /// Provider protocol facts and verified identity exchange.
 mod providers;
 use providers::{ProviderEndpoints, VerifiedIdentity};
@@ -128,22 +128,34 @@ impl ProviderConfig {
     }
 }
 
-/// The cookie binding a provider sign-in or link just started to the browser, which
-/// the response sending the browser to the provider carries. Only federation makes
-/// one, so a page never names the cookie or holds its secret.
-#[must_use = "the callback refuses a browser without the flow's cookie"]
-pub(crate) struct FlowCookie(Secret);
+/// What a federation operation changed in the browser's flow cookies, which the
+/// response answering it carries. Only federation makes one, so a page never names
+/// a flow cookie or holds its secret.
+#[must_use = "the browser's flow cookie changes only once a response carries it"]
+pub(crate) struct FlowCookie(Flow);
+
+/// The change a [`FlowCookie`] makes.
+enum Flow {
+    /// A provider sign-in or link started, bound to the browser by the secret its
+    /// [`BrowserCookie::Federation`] holds until the callback.
+    Started(Secret),
+    /// The browser's pending evidence is gone, linked or cancelled, so its
+    /// [`BrowserCookie::FederationPending`] goes too, even when none was left.
+    Settled,
+}
 
 impl FlowCookie {
-    /// Adds its `Set-Cookie` header to `response`, an axum response or a page's,
-    /// keeping any other cookies being set.
+    /// Adds the `Set-Cookie` header making the change to `response`, an axum
+    /// response or a page's, keeping any other cookies being set.
     pub(crate) fn set_on<B>(
         self,
         response: &mut axum::http::Response<B>,
     ) -> Result<(), FederationError> {
-        BrowserCookie::Federation
-            .set_on(response, &self.0)
-            .map_err(FederationError::CookieHeader)
+        match self.0 {
+            Flow::Started(browser) => BrowserCookie::Federation.set_on(response, &browser)?,
+            Flow::Settled => BrowserCookie::FederationPending.clear_on(response)?,
+        }
+        Ok(())
     }
 }
 
@@ -312,7 +324,7 @@ impl FederationApplication {
             .append_pair("code_challenge", &Pkce::challenge(&verifier)?)
             .append_pair("code_challenge_method", CodeChallengeMethod::S256.as_str());
         endpoints.identity.extend_authorization(&mut url, &nonce);
-        Ok((url, FlowCookie(browser)))
+        Ok((url, FlowCookie(Flow::Started(browser))))
     }
 
     /// Converts provider callbacks into a verified login or pending identity.

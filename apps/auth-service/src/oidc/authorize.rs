@@ -302,6 +302,15 @@ pub(crate) struct TransactionQuery {
 
 impl piquel_ui::Query for TransactionQuery {}
 
+/// A pending authorization, as the sign-in page continuing it sees it.
+pub(crate) struct AuthorizationView {
+    /// The class the sign-in must reach, if the application asked for one.
+    pub(crate) target_acr: Option<Acr>,
+    /// Where the application receives the browser: the registered redirect URI the
+    /// request named.
+    pub(crate) redirect_uri: Url,
+}
+
 /// Consent choice posted by the consent page.
 #[derive(Debug, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
@@ -495,6 +504,20 @@ impl OidcApplication {
         Ok(request)
     }
 
+    /// The pending authorization `transaction`, as the sign-in page continuing it sees
+    /// it: what it may offer and where its forms may lead. The token is all it takes:
+    /// the browser is not signed in yet.
+    pub(crate) async fn authorization(
+        &self,
+        transaction: &str,
+    ) -> Result<AuthorizationView, OAuthError> {
+        let request = self.find_authorization_request(transaction).await?;
+        Ok(AuthorizationView {
+            target_acr: request.target_acr,
+            redirect_uri: Url::parse(&request.redirect_uri)?,
+        })
+    }
+
     /// Consumes the pending authorization and returns the client redirect: an error
     /// for a denial, or a new authorization code. Explicit decisions come from the
     /// consent page, whose request is `consent`, and save and record consent;
@@ -585,9 +608,8 @@ impl OidcApplication {
         Ok(redirect)
     }
 
-    /// Finds a live pending authorization by its opaque token, whoever asks: the
-    /// sign-in page reads what it may offer and where its forms may lead.
-    pub(crate) async fn find_authorization_request(
+    /// Finds a live pending authorization by its opaque token.
+    async fn find_authorization_request(
         &self,
         value: &str,
     ) -> Result<StoredAuthorizationRequest, OAuthError> {

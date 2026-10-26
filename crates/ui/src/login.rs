@@ -109,8 +109,7 @@ impl Query for LoginQuery {}
 impl LoginQuery {
     /// What the links between the sign-in pages keep: where the browser goes on to,
     /// and the class of authentication it must reach.
-    #[must_use]
-    pub fn continued(&self) -> Self {
+    fn continued(&self) -> Self {
         Self {
             transaction: self.transaction.clone(),
             acr: self.acr,
