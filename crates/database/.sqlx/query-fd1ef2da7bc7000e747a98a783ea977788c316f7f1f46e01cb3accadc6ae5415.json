@@ -1,0 +1,32 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT\n                    origin AS \"origin: RelatedOrigin\", client_id AS \"client_id: ClientId\",\n                    approved_at\n                FROM client_webauthn_origins\n                ORDER BY origin",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "origin: RelatedOrigin",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 1,
+        "name": "client_id: ClientId",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 2,
+        "name": "approved_at",
+        "type_info": "Timestamptz"
+      }
+    ],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": [
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "fd1ef2da7bc7000e747a98a783ea977788c316f7f1f46e01cb3accadc6ae5415"
+}

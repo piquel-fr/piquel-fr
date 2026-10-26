@@ -134,7 +134,6 @@ impl Flow {
         let config = AuthConfig::test(&origin);
         let federation =
             FederationApplication::new(db.clone(), &config.federation).expect("federation");
-        let passkeys = PasskeyApplication::new(db.clone(), &config.passkey).expect("passkeys");
         let app = OidcApplication::new(
             db.clone(),
             &OidcConfig {
@@ -149,6 +148,8 @@ impl Flow {
             )),
         )
         .expect("OIDC application");
+        let passkeys =
+            PasskeyApplication::new(db.clone(), &config.passkey, app.clone()).expect("passkeys");
         Self {
             router: WebApplication::new(db, &config, app.clone(), federation, passkeys)
                 .routes()

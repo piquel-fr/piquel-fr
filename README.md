@@ -194,7 +194,8 @@ admin dashboard (`AdminService` in `apps/auth-service/src/admin`), and so does e
 setting administrators may change on another account (`AccountService` in
 `apps/auth-service/src/account`). Commands need only
 `AUTH_DATABASE_URL` (`invite create` also needs `AUTH_PUBLIC_BASE_URL`, to build its
-link, and `user recover` needs it and `AUTH_TOKEN_DIGEST_KEY`, to derive its link), so
+link, `user recover` needs it and `AUTH_TOKEN_DIGEST_KEY`, to derive its link, and
+`client origin add` needs it to tell auth's own domain apart), so
 they work while auth is down: they are the break-glass path when the
 dashboard or auth's frontends are unreachable. In deployed environments,
 run them with `piquelctl app exec piquel-fr auth --env ENV -- auth-service …` (see
@@ -268,9 +269,10 @@ just auth account alice emails remove <email-id> --reason "Asked by email"
   to recover one.
 - Failures print their causes and exit with 1; usage errors exit with 2.
 
-Administrators manage accounts, sessions, invitations and other administrators
-from the admin dashboard, which auth serves on `AUTH_ADMIN_LISTENER` for the
-dashboard's origin, `AUTH_ADMIN_ORIGIN`, and which only a private route reaches.
+Administrators manage accounts, sessions, invitations, other administrators and
+the origins approved for clients' pages to sign users in from the admin dashboard,
+which auth serves on `AUTH_ADMIN_LISTENER` for the dashboard's origin,
+`AUTH_ADMIN_ORIGIN`, and which only a private route reaches.
 Its pages call `AdminService` in-process; there is no admin API.
 
 An administrator signs in by a handoff from auth: the dashboard sends the browser
@@ -522,6 +524,50 @@ end, it asks for consent again, and its outstanding codes stop working. Access
 tokens it already holds expire within five minutes. An administrator removes one
 the same way from the account's Connected apps page on the dashboard, with a
 reason the owner sees in their history.
+
+#### Passkey sign-in on an application's own pages
+
+A trusted client's pages can sign users in with their auth passkeys without
+leaving for auth's pages, through WebAuthn related origins (WebAuthn Level 3
+§5.11). An administrator approves each origin on the dashboard's Clients page,
+which lists them, or with the CLI:
+
+```sh
+just auth client origin add blog https://blog.example
+just auth client origin list         # --output json for scripts
+just auth client origin remove blog https://blog.example
+```
+
+The client must be trusted, since this sign-in skips the consent page, and the
+origin must be the origin of one of its redirect URIs. Browsers honour only a few
+distinct domains in the list, so approved origins may span at most 5 registrable
+domains (`example` counts once for `app.example.co.uk` and `www.example.co.uk`).
+Browsers count origins within auth's own domain too, as `piquel`; a host without a
+registrable domain, such as `localhost`, counts none and is accepted only within
+auth's domain. `/.well-known/webauthn` lists the approved origins, cacheable for
+five minutes and readable from any origin. Auth refuses a removed origin's
+sign-ins at once, and deleting a client removes its origins.
+
+The page pushes an authorization request with PKCE, from its own origin, then posts
+its `request_uri` as `{"request_uri": …}` to `/webauthn/related/start`, with
+`content-type: application/json` and `x-piquel-csrf: 1`. It runs the WebAuthn
+assertion the answer describes, then posts `{"ceremony_id": …, "credential": …}`
+to `/webauthn/related/finish`, which answers `{code, state, iss}` as JSON instead
+of redirecting. The page checks `state` and `iss`, and redeems the code with its
+verifier as usual. These calls send no cookies and get none: the sign-in creates a
+session that only the client's tokens use, recorded with the page's origin in the
+user's security history. A request with `prompt=consent` or `prompt=none`, or an
+`id_token_hint` naming an account without passkeys, is refused at start with
+`interaction_required` and left unclaimed, so the page can send the browser to
+`/oauth/authorize?client_id=…&request_uri=…` with it instead. Finish answers
+`interaction_required` when the sign-in falls short of the request, such as a
+recovered passkey during its probation against `acr_values=phr`, or when the
+account is scheduled for deletion, which only auth's pages restore; the request was
+claimed at start, so the page pushes a fresh one before sending the browser to
+auth with it. The page should also redirect when the browser lacks related origins
+(`PublicKeyCredential.getClientCapabilities()` has no `relatedOrigins`), and push a
+fresh request first when a start or the passkey prompt failed, since auth may have
+claimed the first one.
 
 ### Authentication claims
 

@@ -8,7 +8,7 @@
 pub use crate::protocol::api::{Identity, Passkey};
 use crate::{
     AccountStatus, AuthenticationMethod, ClientId, EventId, Handle, SessionId, TokenId, TraceId,
-    UserId, protocol::oauth::ClientAuthMethod,
+    UserId, clients::RelatedOrigin, protocol::oauth::ClientAuthMethod,
 };
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
@@ -259,6 +259,26 @@ pub struct Event {
     /// or payload version the serving release does not know, written by a newer
     /// one, also carries its `version`.
     pub event: serde_json::Value,
+}
+
+/// An origin approved for a client's pages to sign users in with passkeys, which
+/// `/.well-known/webauthn` lists as a `WebAuthn` related origin.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ApprovedOrigin {
+    /// The origin, as browsers send it.
+    pub origin: RelatedOrigin,
+    /// The client whose pages are on it.
+    pub client_id: ClientId,
+    /// When it was approved.
+    pub approved_at: DateTime<Utc>,
+}
+
+/// The form approving an origin for a client's pages: the origin as typed, which
+/// the dashboard checks, so a malformed one is explained beside the form.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ApproveOrigin {
+    /// The origin, as browsers send it, e.g. `https://notes.example`.
+    pub origin: String,
 }
 
 /// An administrator account.

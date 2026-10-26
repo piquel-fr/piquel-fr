@@ -702,7 +702,10 @@ impl AdminOperation {
                 service.view_user(operator, user).await.map(drop),
             ],
             Self::ListInvitations => vec![service.list_invitations(operator).await.map(drop)],
-            Self::ListClients => vec![service.list_clients(operator).await.map(drop)],
+            Self::ListClients => vec![
+                service.list_clients(operator).await.map(drop),
+                service.list_related_origins(operator).await.map(drop),
+            ],
             Self::ViewClient => vec![
                 service
                     .client_details(operator, &client.parse().expect("client ID"))
@@ -741,6 +744,8 @@ impl AdminOperation {
             | Self::UnsuspendClient
             | Self::DeleteClient
             | Self::RotateClientSecret
+            | Self::ApproveRelatedOrigin
+            | Self::RemoveRelatedOrigin
             | Self::GrantAdministrator
             | Self::RevokeAdministrator
             | Self::RenameHandle

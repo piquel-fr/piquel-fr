@@ -787,3 +787,85 @@ async fn deletions_are_scheduled_and_restored_from_the_dashboard() {
     assert_eq!(redirect(&post(&restore).await), account);
     assert_eq!(status().await, AccountStatus::Active);
 }
+
+/// The clients page lists each client's approved origins. An administrator
+/// approves one of a trusted client's redirect origins, and removes it again;
+/// a malformed origin, or one that is not a redirect origin, is refused beside
+/// the form. An untrusted client's page says why it has none.
+#[tokio::test]
+#[ignore = "requires TEST_DATABASE_URL"]
+async fn related_origins_are_approved_and_removed_from_the_dashboard() {
+    let harness = Harness::new().await;
+    let admin = harness.admin().await;
+    // Within auth's own domain, so it counts only as `piquel`, which every such
+    // origin shares.
+    let origin = format!("https://{}.auth.piquel.fr", UserId::new());
+    let client = piquel_common::clients::ClientRegistration {
+        trusted: true,
+        ..crate::tests::registration(piquel_common::clients::ClientKind::Public, &origin)
+    };
+    crate::tests::register(&harness.database, &client)
+        .await
+        .expect("client");
+    let untrusted = crate::tests::registration(piquel_common::clients::ClientKind::Public, &origin);
+    crate::tests::register(&harness.database, &untrusted)
+        .await
+        .expect("untrusted client");
+    let approve = format!("/clients/{}/origins/approve", client.id);
+    let dashboard = harness.confirmed(&admin, &approve, Utc::now()).await;
+    let page = html(harness.visit(&dashboard, "/clients").await).await;
+    assert!(page.contains(&approve), "{page}");
+    assert!(page.contains("pages sign users in themselves."), "{page}");
+    let post = async |path: &str, fields: &[(&str, &str)]| {
+        let url = format!("{DASHBOARD}{path}");
+        dashboard
+            .submit(&harness.dashboard, &url, fields, OWN_PAGE)
+            .await
+    };
+
+    let refused = html(post(&approve, &[("origin", "notes.example")]).await).await;
+    assert!(refused.contains("role=\"alert\""), "{refused}");
+    let elsewhere = format!("https://elsewhere-{}.auth.piquel.fr", UserId::new());
+    let refused = html(post(&approve, &[("origin", &elsewhere)]).await).await;
+    assert!(
+        refused.contains("is not the origin of any redirect URI"),
+        "{refused}"
+    );
+    assert!(
+        refused.contains(&format!("value=\"{elsewhere}\"")),
+        "the refused origin is kept: {refused}"
+    );
+
+    assert_eq!(
+        redirect(&post(&approve, &[("origin", &origin)]).await),
+        "/clients"
+    );
+    let page = html(harness.visit(&dashboard, "/clients").await).await;
+    assert!(page.contains(&origin), "{page}");
+    let listed = AdminService::new(harness.database.clone(), true)
+        .list_related_origins(&operator())
+        .await
+        .expect("origins");
+    assert!(
+        listed
+            .iter()
+            .any(|approved| approved.origin.as_str() == origin)
+    );
+
+    let remove = format!(
+        "/clients/{}/origins/remove?origin={}",
+        client.id,
+        url::form_urlencoded::byte_serialize(origin.as_bytes()).collect::<String>()
+    );
+    assert!(page.contains(&remove), "{page}");
+    assert_eq!(redirect(&post(&remove, &[]).await), "/clients");
+    let listed = AdminService::new(harness.database.clone(), true)
+        .list_related_origins(&operator())
+        .await
+        .expect("origins");
+    assert!(
+        !listed
+            .iter()
+            .any(|approved| approved.origin.as_str() == origin)
+    );
+}

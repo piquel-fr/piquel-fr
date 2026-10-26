@@ -135,9 +135,13 @@ impl HistoryRow<'_> {
                     "Account created with social sign-in".to_owned()
                 }
             },
-            HistoryEntry::SignedIn { method } => match method {
-                AuthenticationMethod::Passkey => "Signed in with a passkey".to_owned(),
-                AuthenticationMethod::Federation => "Signed in with a social provider".to_owned(),
+            HistoryEntry::SignedIn { method, origin } => match (method, origin) {
+                // An application's own page signed in, with a passkey.
+                (_, Some(origin)) => format!("Signed in with a passkey on {}", origin.host()),
+                (AuthenticationMethod::Passkey, None) => "Signed in with a passkey".to_owned(),
+                (AuthenticationMethod::Federation, None) => {
+                    "Signed in with a social provider".to_owned()
+                }
             },
             HistoryEntry::SignedOut => "Signed out".to_owned(),
             HistoryEntry::SessionRevoked { reason } => Self::revocation(reason).to_owned(),

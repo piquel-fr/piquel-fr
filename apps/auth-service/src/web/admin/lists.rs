@@ -1,11 +1,14 @@
 //! The OIDC clients and domain events.
 
-use super::AdminApplication as App;
+use super::{
+    AdminApplication as App,
+    origins::{self, Client, OriginQuery},
+};
 use piquel_common::{
     EventId, UserId,
     admin::{Event, EventSearch},
 };
-use piquel_ui::{EventRow, Query};
+use piquel_ui::{AdminClientRow, EventRow, Query};
 use topcoat::{
     Result,
     context::Cx,
@@ -24,12 +27,45 @@ struct EventsQuery {
     before: Option<EventId>,
 }
 
-/// `/clients`: every OIDC client and its settings, read-only.
+/// `/clients`: every OIDC client and its settings, read-only but for the origins
+/// approved for its pages to sign users in with passkeys.
 #[route(GET "/clients")]
 pub(super) async fn clients(cx: &Cx) -> Result<Response> {
     let admin = App::admin(cx).await?;
-    let clients = &App::of(cx).service.list_clients(&admin.operator).await?;
-    let page = view! { cx => piquel_ui::client_list(clients: clients) };
+    let service = &App::of(cx).service;
+    let clients = service.list_clients(&admin.operator).await?;
+    let approved = service.list_related_origins(&admin.operator).await?;
+    let rows = clients
+        .iter()
+        .map(|client| {
+            let page = || Client(client.id.clone());
+            let origins = approved
+                .iter()
+                .filter(|approved| approved.client_id == client.id)
+                .map(|approved| {
+                    let query = OriginQuery {
+                        origin: approved.origin.clone(),
+                    };
+                    let remove = query.on(&href!(origins::remove, page()).resolve(cx))?;
+                    Ok((approved.origin.as_str(), remove))
+                })
+                .collect::<Result<_>>()?;
+            let approve = if client.deleted_at.is_some() {
+                Err("Deleted clients sign nobody in.")
+            } else if client.trusted {
+                Ok(href!(origins::approve, page()).resolve(cx))
+            } else {
+                Err("Only trusted clients' pages sign users in themselves.")
+            };
+            Ok(AdminClientRow {
+                client,
+                origins,
+                approve,
+            })
+        })
+        .collect::<Result<Vec<_>>>()?;
+    let rows = &rows;
+    let page = view! { cx => piquel_ui::client_list(rows: rows) };
     App::render(cx, StatusCode::OK, page).await
 }
 

@@ -66,6 +66,16 @@ impl AdminOperation {
             Self::UnsuspendClient => &["client", "unsuspend", "notes"],
             Self::DeleteClient => &["client", "delete", "notes"],
             Self::RotateClientSecret => &["client", "rotate-secret", "notes"],
+            Self::ApproveRelatedOrigin => {
+                &["client", "origin", "add", "notes", "https://notes.example"]
+            }
+            Self::RemoveRelatedOrigin => &[
+                "client",
+                "origin",
+                "remove",
+                "notes",
+                "https://notes.example",
+            ],
             Self::ListEvents => &["audit"],
             Self::ListAdministrators => &["admin", "list"],
             Self::GrantAdministrator => &["admin", "grant", "alice"],

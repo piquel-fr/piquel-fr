@@ -122,7 +122,7 @@ impl AuthConfig {
     pub fn router(&self, database: Database, keys: &SigningKeys) -> Result<Router, StartupError> {
         let oidc = OidcApplication::new(database.clone(), &self.oidc, keys.clone())?;
         let federation = FederationApplication::new(database.clone(), &self.federation)?;
-        let passkeys = PasskeyApplication::new(database.clone(), &self.passkey)?;
+        let passkeys = PasskeyApplication::new(database.clone(), &self.passkey, oidc.clone())?;
         let web = WebApplication::new(
             database.clone(),
             self,

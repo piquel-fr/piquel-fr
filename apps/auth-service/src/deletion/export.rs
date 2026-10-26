@@ -437,6 +437,7 @@ mod tests {
                 occurred_at: at,
                 entry: HistoryEntry::SignedIn {
                     method: AuthenticationMethod::Passkey,
+                    origin: None,
                 },
                 actor: HistoryActor::Account,
                 reason: None,

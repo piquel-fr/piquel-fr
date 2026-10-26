@@ -21,6 +21,19 @@ pub struct AdministratorRow<'a> {
     pub revoke: Result<String, &'a str>,
 }
 
+/// An OIDC client, the origins approved for its pages to sign users in with
+/// passkeys, each with the page removing it, and the page approving another, or
+/// why the client cannot have one.
+#[derive(Clone, Debug)]
+pub struct AdminClientRow<'a> {
+    /// The client.
+    pub client: &'a Client,
+    /// Its approved origins, as browsers send them, and the pages removing them.
+    pub origins: Vec<(&'a str, String)>,
+    /// The page approving an origin, or why it cannot be done.
+    pub approve: Result<String, &'a str>,
+}
+
 /// An invitation, and the page revoking it while it can still be used.
 #[derive(Clone, Debug)]
 pub struct InvitationRow<'a> {
@@ -191,18 +204,20 @@ pub async fn invitation_created<'a>(
     })
 }
 
-/// Every OIDC client and its settings, read-only.
+/// Every OIDC client and its settings, read-only but for the origins whose pages
+/// sign users in with passkeys.
 #[component]
-pub async fn client_list<'a>(clients: &'a [Client]) -> Result<impl View> {
+pub async fn client_list<'a>(rows: &'a [AdminClientRow<'a>]) -> Result<impl View> {
     Ok(view! {
         heading(
             title: "Clients",
             lead: "Applications that sign users in with Piquel.".to_owned(),
         )
-        if clients.is_empty() {
+        if rows.is_empty() {
             <section class="card"><p class="empty">"No client is registered."</p></section>
         }
-        for client in clients {
+        for row in rows {
+            let client = row.client;
             <section class="card">
                 <div class="row between">
                     <h2>(client.display_name.as_str()) " " <code>(client.id.to_string())</code></h2>
@@ -220,6 +235,19 @@ pub async fn client_list<'a>(clients: &'a [Client]) -> Result<impl View> {
                     <dt>"Refresh tokens"</dt><dd>(if client.allow_refresh { "Allowed" } else { "No" })</dd>
                     <dt>"Pushed requests"</dt><dd>(if client.require_pushed_authorization_requests { "Required" } else { "Optional" })</dd>
                     <dt>"Authentication"</dt><dd><code>(client.token_endpoint_auth_method.to_string())</code></dd>
+                    <dt>"Passkey sign-in on"</dt>
+                    <dd class="stack">
+                        for (origin, remove) in &row.origins {
+                            <span class="row">
+                                <code>(*origin)</code>
+                                <a href=(remove.as_str())>"Remove"</a>
+                            </span>
+                        }
+                        match &row.approve {
+                            Ok(href) => <a href=(href.as_str())>"Approve an origin"</a>,
+                            Err(reason) => refused_action(label: "Approve an origin", reason: reason),
+                        }
+                    </dd>
                 </dl>
             </section>
         }

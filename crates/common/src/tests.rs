@@ -101,6 +101,7 @@ fn event_kinds_match_their_serde_tags() {
     let session_id = SessionId::new();
     let passkey_id = PasskeyId::new();
     let client_id: ClientId = "client".parse().expect("client ID");
+    let origin: clients::RelatedOrigin = "https://app.example".parse().expect("origin");
     let imported = serde_json::from_value(json!({
         "action": "passkey.login", "outcome": "success", "metadata": {}
     }))
@@ -113,6 +114,7 @@ fn event_kinds_match_their_serde_tags() {
         DomainEvent::SignedIn {
             session_id,
             method: AuthenticationMethod::Federation,
+            inline: None,
         },
         DomainEvent::SignInFailed {
             method: AuthenticationMethod::Passkey,
@@ -197,9 +199,14 @@ fn event_kinds_match_their_serde_tags() {
             client_id: client_id.clone(),
         },
         DomainEvent::ClientSecretRotated {
-            client_id,
+            client_id: client_id.clone(),
             previous_expire_at: chrono::Utc::now(),
         },
+        DomainEvent::RelatedOriginApproved {
+            client_id: client_id.clone(),
+            origin: origin.clone(),
+        },
+        DomainEvent::RelatedOriginRemoved { client_id, origin },
         DomainEvent::CompromiseReported {
             event_id: EventId::new(),
         },

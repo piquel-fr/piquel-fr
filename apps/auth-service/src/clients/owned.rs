@@ -482,8 +482,9 @@ impl From<InvalidSetting> for ApiError {
 }
 
 impl From<ClientRegistryError> for ApiError {
-    /// A deleted client is as unknown as one that never existed. Failures an
-    /// owner cannot cause are internal.
+    /// A deleted client is as unknown as one that never existed. Refused related
+    /// origins, which only the dashboard's administrators cause, name what to fix.
+    /// Other failures an owner cannot cause are internal.
     fn from(error: ClientRegistryError) -> Self {
         match error {
             ClientRegistryError::Unknown(_) | ClientRegistryError::Deleted(_) => {
@@ -502,6 +503,14 @@ impl From<ClientRegistryError> for ApiError {
             ClientRegistryError::Suspended(_) => Self::forbidden(
                 "This client was suspended by an administrator. Contact them to restore it.",
             ),
+            error @ (ClientRegistryError::Untrusted(_)
+            | ClientRegistryError::NotRedirectOrigin { .. }
+            | ClientRegistryError::PublicSuffix(_)) => Self::bad_request(error.to_string()),
+            error @ (ClientRegistryError::TooManyDomains(_)
+            | ClientRegistryError::OriginApproved { .. }) => Self::conflict(error.to_string()),
+            error @ ClientRegistryError::OriginNotApproved { .. } => {
+                Self::not_found(error.to_string())
+            }
             ClientRegistryError::Database(error) => error.into(),
             error @ (ClientRegistryError::Exists { .. }
             | ClientRegistryError::MissingSecret(_)
