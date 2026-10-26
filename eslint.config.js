@@ -7,7 +7,7 @@ import ts from 'typescript-eslint';
 
 export default defineConfig(
   {
-    ignores: ['**/build/', 'target/', 'test-results/', 'playwright-report/', '.claude/', '.dev/']
+    ignores: ['target/', 'test-results/', 'playwright-report/', '.claude/', '.dev/']
   },
   js.configs.recommended,
   ts.configs.strictTypeChecked,

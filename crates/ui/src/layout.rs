@@ -140,14 +140,14 @@ pub(crate) trait Label: Copy + PartialEq + Send + Sync + 'static {
 }
 
 /// The document around every page: the head, which links `stylesheet` and loads
-/// the SDK's `script`, if any, Piquel's header, whose brand links `home` and names
-/// the page's `area`, and the page as `child`. `title` names the page in the
-/// browser, before "· Piquel".
+/// the passkey `script`, Piquel's header, whose brand links `home` and names the
+/// page's `area`, and the page as `child`. `title` names the page in the browser,
+/// before "· Piquel".
 #[component]
 pub async fn document<'a>(
     title: &'a str,
     stylesheet: &'a str,
-    #[default] script: Option<&'a str>,
+    script: &'a str,
     home: &'a str,
     #[default] area: Area,
     child: Child<'_>,
@@ -161,9 +161,7 @@ pub async fn document<'a>(
                 <meta name="robots" content="noindex">
                 <title>(format!("{title} · Piquel"))</title>
                 <link rel="stylesheet" href=(stylesheet)>
-                if let Some(script) = script {
-                    <script type="module" src=(script)></script>
-                }
+                <script type="module" src=(script)></script>
             </head>
             <body>
                 <div class="shell">

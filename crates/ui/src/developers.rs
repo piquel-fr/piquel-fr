@@ -3,8 +3,8 @@
 //!
 //! A secret shows only in the response to the change that made it, a registration
 //! or a rotation: the change's query holds it in a field no link or form
-//! serializes, and the panel showing it asks the SDK to put back the page's own
-//! address, so reloading gets the page without it.
+//! serializes, and the panel showing it asks the passkey script to put back the
+//! page's own address, so reloading gets the page without it.
 
 use crate::{
     clients::{

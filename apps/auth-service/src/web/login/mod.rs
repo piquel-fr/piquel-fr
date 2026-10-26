@@ -267,7 +267,7 @@ impl WebApplication {
         change: LoginChange,
     ) -> Result<Response, Refusal> {
         let (mut response, cookie) = match change {
-            // The SDK signed the browser in before posting.
+            // The passkey script signed the browser in before posting.
             LoginChange::SignedIn {} | LoginChange::Registered {} => {
                 return Ok(self.go_on(cx, page, visit.continuation).await?);
             }

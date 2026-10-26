@@ -81,9 +81,10 @@ async fn devices_page_signs_other_devices_out() {
     );
 }
 
-/// A change that needs a recent passkey confirmation asks the SDK for one while the
-/// session has none. Posted anyway, it is refused, and its row opens again, with
-/// what was typed, to ask once more. A confirmed session makes it at once.
+/// A change that needs a recent passkey confirmation asks the passkey script for
+/// one while the session has none. Posted anyway, it is refused, and its row opens
+/// again, with what was typed, to ask once more. A confirmed session makes it at
+/// once.
 #[tokio::test]
 #[ignore = "requires TEST_DATABASE_URL"]
 async fn confirmed_changes_ask_for_a_passkey_first() {

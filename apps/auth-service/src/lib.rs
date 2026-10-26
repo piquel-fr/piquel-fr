@@ -4,7 +4,7 @@
 mod account;
 /// The private admin API and the operations it shares with the CLI.
 mod admin;
-/// The stylesheet and SDK script of auth's pages, embedded at build time.
+/// The stylesheet and passkey script of auth's pages, embedded at compile time.
 mod assets;
 /// The command line: serving, migrations and break-glass administration.
 mod cli;
@@ -96,9 +96,6 @@ pub enum StartupError {
     /// The HTTP client that sends deliveries could not initialize.
     #[error("could not initialize the outbound HTTP client")]
     Outbound(#[source] reqwest::Error),
-    /// The executable was compiled before the SDK's script was built.
-    #[error("build the SDK's script with `just web build` before compiling auth-service")]
-    MissingScript,
 }
 
 impl AuthConfig {
@@ -107,10 +104,8 @@ impl AuthConfig {
     /// database, so tests build several to act as replicas.
     ///
     /// # Errors
-    /// Fails when the SDK's script is not embedded or an application cannot
-    /// initialize.
+    /// Fails when an application cannot initialize.
     pub fn router(&self, database: Database, keys: &SigningKeys) -> Result<Router, StartupError> {
-        EmbeddedAssets::check()?;
         let oidc = OidcApplication::new(database.clone(), &self.oidc, keys.clone())?;
         let federation = FederationApplication::new(database.clone(), &self.federation)?;
         let application = Router::new()

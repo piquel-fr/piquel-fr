@@ -2,8 +2,8 @@
 //! sign-in to an existing account.
 //!
 //! Every link and form of these pages keeps their [`LoginQuery`], which says where
-//! the browser goes once signed in. A passkey ceremony runs in the SDK, which then
-//! posts the form, and the page sends the browser on.
+//! the browser goes once signed in. A passkey ceremony runs in the passkey script,
+//! which then posts the form, and the page sends the browser on.
 
 use crate::{
     Title,
@@ -127,16 +127,16 @@ impl LoginQuery {
 }
 
 /// A change a sign-in page posts, named by its `action` field. A ceremony's form
-/// posts once the SDK has run it, with what the ceremony read, which no change
-/// keeps.
+/// posts once the passkey script has run it, with what the ceremony read, which no
+/// change keeps.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(tag = "action", rename_all = "snake_case")]
 pub enum LoginChange {
-    /// Shows that the SDK just signed the browser in with a passkey: this changes
-    /// nothing, and the browser goes on.
+    /// Shows that the passkey script just signed the browser in with a passkey:
+    /// this changes nothing, and the browser goes on.
     SignedIn {},
-    /// Shows that the SDK just created the account, signed in: this changes
-    /// nothing, and the browser goes on.
+    /// Shows that the passkey script just created the account, signed in: this
+    /// changes nothing, and the browser goes on.
     Registered {},
     /// Starts signing in at the provider.
     Social {
@@ -386,10 +386,10 @@ async fn sign_in_forms<'a>(
     })
 }
 
-/// The form of [`Step::SignUp`], posting to `action` once the SDK created the
-/// account. It names the `social` evidence the account gets, if any, and asks for
-/// an invitation, starting with `invitation`, when one is required. On Android, it
-/// offers Google Password Manager.
+/// The form of [`Step::SignUp`], posting to `action` once the passkey script
+/// created the account. It names the `social` evidence the account gets, if any,
+/// and asks for an invitation, starting with `invitation`, when one is required. On
+/// Android, it offers Google Password Manager.
 #[component]
 async fn sign_up_form<'a>(
     action: &'a str,
@@ -511,8 +511,8 @@ async fn passkey_sign_in<'a>(
     })
 }
 
-/// The account's handle, as the SDK sends it: a `new` one, which creating an
-/// account checks against the handle rules, or one to sign in with.
+/// The account's handle, as the passkey script sends it: a `new` one, which
+/// creating an account checks against the handle rules, or one to sign in with.
 #[component]
 async fn handle_input(new: bool) -> Result<impl View> {
     Ok(view! {

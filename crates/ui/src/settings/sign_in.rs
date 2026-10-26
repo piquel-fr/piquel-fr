@@ -39,8 +39,8 @@ pub enum SignInChange {
         /// The provider.
         provider: Provider,
     },
-    /// Shows that the SDK just added a passkey, through the account API: this
-    /// changes nothing.
+    /// Shows that the passkey script just added a passkey, through the account API:
+    /// this changes nothing.
     Enrolled {},
 }
 
@@ -195,8 +195,8 @@ async fn passkey_row<'a>(
     })
 }
 
-/// Adding a passkey, which the SDK runs, then posts the form to `page`, which says
-/// so. On Android, it offers Google Password Manager.
+/// Adding a passkey, which the passkey script runs, then posts the form to `page`,
+/// which says so. On Android, it offers Google Password Manager.
 #[component]
 async fn enroll(page: &str, android: bool) -> Result<impl View> {
     Ok(view! {

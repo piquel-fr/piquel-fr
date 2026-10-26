@@ -4,12 +4,6 @@ settings:
   autoInstallPeers: true
   excludeLinksFromLockfile: false
 
-catalogs:
-  default:
-    typescript:
-      specifier: 6.0.3
-      version: 6.0.3
-
 importers:
 
   .:
@@ -33,17 +27,11 @@ importers:
         specifier: 3.9.10
         version: 3.9.10
       typescript:
-        specifier: 'catalog:'
+        specifier: 6.0.3
         version: 6.0.3
       typescript-eslint:
         specifier: 8.71.1
         version: 8.71.1(eslint@10.12.0)(typescript@6.0.3)
-
-  packages/auth-sdk:
-    devDependencies:
-      typescript:
-        specifier: 'catalog:'
-        version: 6.0.3
 
 packages:
 

@@ -29,7 +29,10 @@ Keep implementations simple. Follow neighbouring modules and share repeated logi
   props; they know nothing of the domain, the database or HTTP. `form` holds what
   every form shares, including the `Checkbox` and `Lines` types for values a form
   sends as text; `clients` the client views the console shares with the future
-  dashboard; `settings` and `developers` each section's pages. It depends only on `piquel-common`
+  dashboard; `settings` and `developers` each section's pages; `asset` the
+  files pages link, embedded under paths naming their content, and the shared
+  stylesheet, `STYLESHEET`, which the admin dashboard serves with its own. It
+  depends only on `piquel-common`
   (with `events`), `chrono`, `serde`, `serde_urlencoded` and Topcoat's `view`, so
   it compiles beside the database crate.
 
@@ -99,7 +102,7 @@ acts, calls the service in-process and renders `piquel-ui` components, or return
 a `Failure`, which `WebApplication::answer` turns into the page explaining it. A
 form that succeeds answers `303`. Pages use no Topcoat browser runtime, `suspense`, `live!`
 or `asset!`, and register every route explicitly. Their Content-Security-Policy
-loads only the stylesheet and the SDK script embedded under `/assets/`, lets the
+loads only the stylesheet and the passkey script embedded under `/assets/`, lets the
 script fetch only auth itself (`connect-src 'self'`), for its passkey ceremonies,
 and lets forms post only to auth and to where they redirect, since browsers apply
 `form-action` to a form's redirects: the consent and logout pages' redirect
@@ -148,23 +151,26 @@ and answers the form with it: an authorization continues in-process and goes on
 through the onward page when no policy can name its client. A provider's sign-in for
 such a client links to the provider rather than redirecting there, since a provider
 the user already allowed sends the browser straight back and on to the client. A
-passkey ceremony runs in the browser through the SDK, then posts the form's change:
-signing in or up changes nothing and continues, and linking while signed out links
-once the sign-in succeeds.
+passkey ceremony runs in the browser through the passkey script, then posts the
+form's change: signing in or up changes nothing and continues, and linking while
+signed out links once the sign-in succeeds.
 
-The SDK script wires the pages' forms by their attributes. It keeps a form marked
-`data-submit-once` from posting twice, and confirms with a passkey before posting
-one marked `data-passkey-confirm`, which a page marks while the session has no
-recent confirmation. A `data-passkey-sign-in` form signs in with a passkey, with its
-`username` when typed, and a `data-passkey-register` form creates the account and
-its passkey; both then post. A `data-passkey-enroll` form runs the passkey
-enrollment, then posts, so its page says so. A `data-fragment-form` copies the
-link's fragment into its inputs as it posts, so a verification token never reaches
-the server in a URL. A ceremony form's or a fragment form's button starts disabled,
-with a `data-unavailable` note saying why, until the script finds it can work. While
-a ceremony runs, its form's button is disabled and says it waits for the passkey,
-and the form's last error hides. A `data-copy` button copies a value, and a
-`data-replace-url` element makes a page that shows a secret reload by `GET`.
+The passkey script (`apps/auth-service/assets/passkey.js`) wires the pages' forms by
+their attributes. It keeps a form marked `data-submit-once` from posting twice, and
+confirms with a passkey before posting one marked `data-passkey-confirm`, which a
+page marks while the session has no recent confirmation. A `data-passkey-sign-in`
+form signs in with a passkey, with its `username` when typed, and a
+`data-passkey-register` form creates the account and its passkey; both then post. A
+`data-passkey-enroll` form runs the passkey enrollment, then posts, so its page says
+so. A `data-fragment-form` copies the link's fragment into its inputs as it posts,
+so a verification token never reaches the server in a URL. A ceremony form's or a
+fragment form's button starts disabled, with a `data-unavailable` note saying why,
+until the script finds it can work. While a ceremony runs, its form's button is
+disabled and says it waits for the passkey, and the form's last error hides. A
+`data-copy` button copies a value, and a `data-replace-url` element makes a page
+that shows a secret reload by `GET`. The script is plain JavaScript, embedded as
+written: `tsc` checks its JSDoc types, and ESLint lints it as it does the browser
+tests.
 
 Administrative operations are methods of `AdminService` (`src/admin/service.rs`);
 the admin API's handlers and the CLI's commands (`src/cli`) are thin adapters that

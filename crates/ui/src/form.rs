@@ -3,11 +3,12 @@
 //!
 //! A change posts one form to its page, naming it in the hidden `action` field.
 //! One that needs a recent passkey confirmation is marked `data-passkey-confirm`
-//! while the session has none, and the SDK confirms before posting it. One that a
-//! passkey ceremony makes, signing in, creating an account or adding a passkey, is
-//! a [`passkey_form`], which the SDK posts once the ceremony is done. Every other
-//! form is marked `data-submit-once`, so a double click posts it once. A row opens
-//! for editing or confirmation by a `GET` form, so it works without a script.
+//! while the session has none, and the passkey script confirms before posting it.
+//! One that a passkey ceremony makes, signing in, creating an account or adding a
+//! passkey, is a [`passkey_form`], which the passkey script posts once the ceremony
+//! is done. Every other form is marked `data-submit-once`, so a double click posts
+//! it once. A row opens for editing or confirmation by a `GET` form, so it works
+//! without a script.
 //!
 //! Each page's changes and query are types, such as [`SignInChange`] and
 //! [`SignInState`]. Forms and links serialize them, and the page that receives them
@@ -340,8 +341,9 @@ pub(crate) async fn hidden(#[into] fields: Fields) -> Result<impl View> {
 
 /// A change posted to the page at `action`: `change` as hidden inputs, the inputs
 /// the user fills in as `child`, and a button labelled `label`, of `class`, beside
-/// a link back to `cancel` when there is one. With `confirm`, the SDK first
-/// confirms the session with a passkey; a ceremony that fails says why in the form.
+/// a link back to `cancel` when there is one. With `confirm`, the passkey script
+/// first confirms the session with a passkey; a ceremony that fails says why in the
+/// form.
 #[component]
 pub(crate) async fn change_form<'a>(
     action: &'a str,
@@ -379,8 +381,8 @@ pub(crate) async fn change_form<'a>(
     })
 }
 
-/// A passkey ceremony the SDK runs before posting a [`passkey_form`], named by the
-/// form's marker.
+/// A passkey ceremony the passkey script runs before posting a [`passkey_form`],
+/// named by the form's marker.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum Ceremony {
     /// Signing in, with the form's `username`, if any, or the browser's account
@@ -396,8 +398,8 @@ pub(crate) enum Ceremony {
 }
 
 impl Ceremony {
-    /// Why the form's button stays disabled, until the SDK finds the browser can run
-    /// the ceremony.
+    /// Why the form's button stays disabled, until the passkey script finds the
+    /// browser can run the ceremony.
     const fn unavailable(self) -> &'static str {
         match self {
             Self::SignIn | Self::Register => {
@@ -410,11 +412,11 @@ impl Ceremony {
     }
 }
 
-/// A change posted to the page at `action` once the SDK ran the passkey
+/// A change posted to the page at `action` once the passkey script ran the passkey
 /// `ceremony`: `change` as hidden inputs, the inputs the ceremony reads as `child`,
 /// and a button labelled `label`, of `class`. The button stays disabled, and says
-/// so, until the SDK finds the browser can run the ceremony; a ceremony that fails
-/// says why in the form.
+/// so, until the passkey script finds the browser can run the ceremony; a ceremony
+/// that fails says why in the form.
 #[component]
 pub(crate) async fn passkey_form<'a>(
     action: &'a str,

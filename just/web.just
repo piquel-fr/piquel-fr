@@ -12,10 +12,6 @@ fmt-check:
 lint:
     @pnpm lint
 
-# The SDK script auth's pages load, which the Rust build embeds.
-build:
-    @pnpm build
-
 # Requires a running auth service; see tests/browser/README.md.
 [positional-arguments]
 test-browser *ARGS:

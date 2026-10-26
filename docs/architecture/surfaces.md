@@ -26,8 +26,8 @@ admin API has a private listener of its own (see admin.piquel.fr below). Auth ke
 as several replicas (see "Running several replicas" in `infra/README.md`). Every page it
 serves, sign-in, consent, logout, the settings and the developer console, is
 server-rendered in the executable, with plain forms, and never cached. Their only
-script is the SDK's, which runs the passkey ceremonies their forms need and keeps a
-form from posting twice.
+script is the passkey script, which runs the passkey ceremonies their forms need and
+keeps a form from posting twice.
 
 Passkeys are bound to the `auth.piquel.fr` RP ID, so passkey ceremonies always
 run on auth. A settings change that needs a recent passkey confirmation asks for

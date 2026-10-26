@@ -11,6 +11,7 @@ piquel-admin-api = { workspace = true, features = ["client"] }
 piquel-auth = { workspace = true, features = ["axum"] }
 piquel-common = { workspace = true, features = ["config"] }
 piquel-telemetry.workspace = true
+piquel-ui.workspace = true
 
 axum.workspace = true
 chrono.workspace = true

@@ -71,7 +71,7 @@
 //!
 //! # Errors
 //!
-//! Every error type has a `code()` returning the [`SdkError`] both SDKs share: a
+//! Every error type has a `code()` returning the [`SdkError`] every SDK shares: a
 //! category, and for most categories the check that failed. A resource server answers
 //! a [`TokenError`] with [`TokenError::challenge`], the RFC 6750 or RFC 9470
 //! `WWW-Authenticate` value.

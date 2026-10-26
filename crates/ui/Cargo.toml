@@ -1,6 +1,6 @@
 [package]
 name = "piquel-ui"
-description = "Components and layouts of auth.piquel.fr's server-rendered pages"
+description = "Components, layouts and stylesheet of auth.piquel.fr's server-rendered pages"
 version.workspace = true
 edition.workspace = true
 license.workspace = true

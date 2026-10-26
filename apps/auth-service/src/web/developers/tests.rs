@@ -101,9 +101,10 @@ fn browser_forms_decode() {
 }
 
 /// A confidential app's secret shows once, in the answer registering it, which
-/// nothing stores and which asks the SDK to put back the form's address; neither
-/// its overview nor the apps show it again. A rotation shows the new one the same
-/// way, and lists when the earlier one stops working: once the grace chosen ends.
+/// nothing stores and which asks the passkey script to put back the form's address;
+/// neither its overview nor the apps show it again. A rotation shows the new one the
+/// same way, and lists when the earlier one stops working: once the grace chosen
+/// ends.
 #[tokio::test]
 #[ignore = "requires TEST_DATABASE_URL"]
 async fn secrets_show_once_in_the_answer_that_makes_them() {

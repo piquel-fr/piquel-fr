@@ -13,18 +13,18 @@ data service. GitHub and Google are optional login providers. The admin dashboar
 
 ## Build
 
-Requires Rust (pinned by `rust-toolchain.toml`), Node 24+, just 1.42+, and pnpm (the workspace pins its version).
-Building needs no database: SQL is checked against the committed query cache in
-`crates/database/.sqlx/`.
+Requires Rust (pinned by `rust-toolchain.toml`) and just 1.42+. Building needs no
+database: SQL is checked against the committed query cache in
+`crates/database/.sqlx/`. It needs no Node either: nothing builds JavaScript.
 
 ```sh
-just install
 just build
 ```
 
-The executable is `target/release/auth-service`. The stylesheet and the SDK script
-are embedded at compile time; rebuild Rust after changing `packages/auth-sdk`. Auth
-needs Node only to build the SDK script.
+The executable is `target/release/auth-service`. It embeds the stylesheet
+(`crates/ui/assets/style.css`) and the passkey script
+(`apps/auth-service/assets/passkey.js`) as they are; rebuild Rust after changing
+them.
 
 ## Development
 
@@ -522,6 +522,8 @@ explains how to choose a requirement and handle the challenge.
 ## Validation
 
 `just` runs `validate` by default.
+`just install` installs the web tools, Prettier, ESLint, tsc and Playwright, which
+need Node 24+ and pnpm (the workspace pins its version).
 `just install-tools` installs `cargo-nextest`, `cargo-deny` and `sqlx-cli`. The
 `db` recipes also need the PostgreSQL 18 server binaries (`initdb`, `pg_ctl`).
 Recipes are grouped into `rust`, `web`, `db`, `auth`, `admin` and `infra` modules under
@@ -533,7 +535,7 @@ Use individual recipes while iterating:
 | --- | --- |
 | Full validation (format, Clippy/ESLint, Rust/TypeScript checks, unit/doc tests, audits) | `just validate` |
 | Format Rust and web / check formatting | `just fmt` / `just fmt-check` |
-| Rust / TypeScript checks (tsc) | `just rust check` / `just web check` |
+| Rust / TypeScript checks (tsc, the passkey script's JSDoc types included) | `just rust check` / `just web check` |
 | Clippy and ESLint, warnings denied | `just lint` (`just rust lint` / `just web lint`) |
 | Unit tests / focused package tests | `just test` / `just test -p auth-service` |
 | Documentation tests | `just doc-test` |
@@ -542,7 +544,7 @@ Use individual recipes while iterating:
 | Run any command against a scratch cluster | `just db scratch -- psql` |
 | Browser tests against running servers | `just web test-browser` |
 | Dependency audits | `just audit` (`just rust audit` runs cargo-deny, `just web audit` pnpm) |
-| SDK script / embedded debug binary / release binary | `just web build` / `just rust build` / `just build` |
+| Debug binary / release binary | `just rust build` / `just build` |
 | Run with caller-provided auth configuration | `just auth serve`, `just db migrate`, `just auth invite create --expires-in 7d`, `just auth admin list` |
 
 CI runs these recipes on every pull request whose changes they can affect,
@@ -552,8 +554,8 @@ Require its `ci` check: it summarizes the others.
 Web code is formatted by Prettier and linted by type-aware ESLint (typescript-eslint
 `strictTypeChecked`), configured once at the repository root.
 Test recipes forward extra arguments to nextest or Playwright, including quoted
-filter expressions. `just auth run` forwards arguments to the auth binary. `just auth serve` builds the SDK script before compiling and serving.
-Cargo embeds the stylesheet, the SDK script and migrations during compilation.
+filter expressions. `just auth run` forwards arguments to the auth binary.
+Cargo embeds the stylesheet, the passkey script and migrations during compilation.
 
 Queries in `crates/database` are checked at compile time against
 `crates/database/.sqlx/`. Changing a query's text without `just db prepare` fails

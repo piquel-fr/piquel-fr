@@ -8,6 +8,7 @@ use crate::{
 use chrono::{DateTime, Utc};
 use piquel_admin_api::{AdminClient, ApiError};
 use piquel_common::ErrorChain;
+use std::sync::LazyLock;
 use topcoat::{
     Error, Result,
     context::Cx,
@@ -34,11 +35,14 @@ mod events;
 /// Signup invitations.
 mod invitations;
 
-/// The shared piquel.fr styles, then the dashboard's own.
-const STYLE: &str = concat!(
-    include_str!("../../../../packages/auth-sdk/src/style.css"),
-    include_str!("../style.css"),
-);
+/// The shared piquel.fr styles, `piquel-ui`'s, then the dashboard's own.
+static STYLE: LazyLock<Vec<u8>> = LazyLock::new(|| {
+    [
+        piquel_ui::STYLESHEET.bytes(),
+        include_bytes!("../style.css"),
+    ]
+    .concat()
+});
 
 /// Every page, calling the admin API through `api`.
 pub fn router(api: AdminClient) -> Router {
@@ -73,8 +77,8 @@ async fn home(cx: &Cx) -> Result<SeeOther> {
 
 /// `/style.css`.
 #[route(GET "/style.css")]
-async fn style() -> Result<Css<&'static str>> {
-    Ok(Css(STYLE))
+async fn style() -> Result<Css<&'static [u8]>> {
+    Ok(Css(STYLE.as_slice()))
 }
 
 /// The document around every page: navigation, the administrator's name and

@@ -1,11 +1,11 @@
 The browser suite uses the real auth binary and PostgreSQL, with Chromium's virtual
 WebAuthn authenticator. It does not intercept or mock auth's responses. Use an
 isolated database: tests create accounts and credentials. CI runs it against the
-embedded production build, as configured below.
+debug binary `just rust build` makes, behind Caddy over HTTPS, as configured below.
 
 `settings.spec.ts` checks auth's own settings pages: renaming, adding and removing
-passkeys, a passkey ceremony that fails, the passkey confirmation the SDK runs,
-devices, an email link's token and signing out.
+passkeys, a passkey ceremony that fails, the passkey confirmation the passkey
+script runs, devices, an email link's token and signing out.
 
 `sign-in.spec.ts` signs in with a handle, after a handle this authenticator holds
 no passkey for is refused in the form. Every spec signs up through `/register`.

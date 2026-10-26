@@ -7,8 +7,8 @@
 //! fallback, so the security layer classifies them as pages by their route: it
 //! attaches the request context, spends the pages' own rate budget, and accepts a
 //! form only from auth's own pages. Every page's Content-Security-Policy loads
-//! nothing but the stylesheet and the SDK's script, and lets its forms post only to
-//! auth and to where they redirect.
+//! nothing but the stylesheet and the passkey script, and lets its forms post only
+//! to auth and to where they redirect.
 
 /// A page's entry in [`WebApplication::pages`]: its path, and the handlers showing it
 /// and taking its form, whose failures explain themselves as the page `title`.
@@ -159,14 +159,13 @@ impl WebApplication {
         federation: FederationApplication,
     ) -> Self {
         let origin = &config.oidc.origin;
-        // A source with a path needs the whole URL: `'self'` names none. The SDK's
-        // passkey ceremonies fetch auth's own JSON routes.
-        let script =
-            EmbeddedAssets::SCRIPT.map_or_else(|| "'none'".to_owned(), |path| origin.join(path));
+        // A source with a path needs the whole URL: `'self'` names none. The passkey
+        // script's ceremonies fetch auth's own JSON routes.
         let policy = format!(
-            "default-src 'none'; style-src {}; script-src {script}; connect-src 'self'; \
+            "default-src 'none'; style-src {}; script-src {}; connect-src 'self'; \
              frame-ancestors 'none'; base-uri 'none'",
-            origin.join(EmbeddedAssets::STYLESHEET),
+            origin.join(&EmbeddedAssets::STYLESHEET.path()),
+            origin.join(&EmbeddedAssets::SCRIPT.path()),
         );
         Self {
             account: AccountService::new(database),
@@ -362,11 +361,15 @@ impl WebApplication {
         page: impl View,
     ) -> Result<Response> {
         let page = Child::new(page);
+        let (stylesheet, script) = (
+            EmbeddedAssets::STYLESHEET.path(),
+            EmbeddedAssets::SCRIPT.path(),
+        );
         let html = view! { cx =>
             piquel_ui::document(
                 title: title,
-                stylesheet: EmbeddedAssets::STYLESHEET,
-                script: EmbeddedAssets::SCRIPT,
+                stylesheet: &stylesheet,
+                script: &script,
                 home: routes::page::settings::HOME,
                 area: area,
                 (page)

@@ -196,8 +196,9 @@ async fn signing_in_offers_passkeys_providers_and_a_handle() {
     );
 }
 
-/// Once the SDK signed the browser in, its form sends it on to the path on auth it
-/// asked for, or to the settings when it asked for none or for another site.
+/// Once the passkey script signed the browser in, its form sends it on to the path
+/// on auth it asked for, or to the settings when it asked for none or for another
+/// site.
 #[tokio::test]
 #[ignore = "requires TEST_DATABASE_URL"]
 async fn signing_in_goes_on_to_the_path_asked_for() {
@@ -404,8 +405,8 @@ async fn social_sign_in_starts_at_the_provider() {
 }
 
 /// Creating an account starts with the invitation its link holds, under its old
-/// name too, and asks for the handle and the passkey's name. Once the SDK created
-/// it, the browser goes on to the settings.
+/// name too, and asks for the handle and the passkey's name. Once the passkey
+/// script created it, the browser goes on to the settings.
 #[tokio::test]
 #[ignore = "requires TEST_DATABASE_URL"]
 async fn signing_up_starts_with_the_invitation() {

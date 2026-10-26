@@ -1,4 +1,5 @@
-//! The components and layouts of auth.piquel.fr's server-rendered pages.
+//! The components, layouts and stylesheet of auth.piquel.fr's server-rendered
+//! pages. The admin dashboard serves the stylesheet too, under its own.
 //!
 //! Components render plain data: `piquel-common` identifiers, vocabularies and
 //! events, and plain rows a page fills from what the service returns. They take
@@ -16,7 +17,8 @@
 //! # async fn main() -> topcoat::Result<()> {
 //! let cx = Cx::default();
 //! let html = view! { cx =>
-//!     piquel_ui::document(title: "Sign out", stylesheet: "/assets/style.css", home: "/settings",
+//!     piquel_ui::document(title: "Sign out", stylesheet: "/assets/style.css",
+//!         script: "/assets/passkey.js", home: "/settings",
 //!         piquel_ui::logout(action: "/logout", fields: &[("client_id", "notes")], keep: "/login")
 //!     )
 //! }
@@ -28,6 +30,8 @@
 //! # }
 //! ```
 
+/// Files pages link, embedded under paths naming their content: the stylesheet.
+mod asset;
 /// An OIDC client's status, facts, settings form and secrets, which the console
 /// shows and the admin dashboard will.
 mod clients;
@@ -45,6 +49,7 @@ mod oidc;
 /// The account's settings.
 mod settings;
 
+pub use asset::{Asset, STYLESHEET};
 pub use clients::{
     ClientDraft, ClientRow, ClientStatus, Connection, FieldError, Grace, Revealed, ScopeChoice,
     SecretRow,

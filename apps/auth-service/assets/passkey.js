@@ -1,59 +1,84 @@
 /**
- * The script of auth's server-rendered pages, which load it as their only script. It
- * runs the WebAuthn passkey ceremonies their forms ask for, and wires their forms by
- * their attributes. It exports nothing: auth embeds it, and the pages' stylesheet, by
- * their paths.
+ * The passkey script: the one script of auth's server-rendered pages. It runs the
+ * WebAuthn passkey ceremonies their forms ask for, and wires their forms by their
+ * attributes. It exports nothing, and nothing compiles it: auth embeds this file as
+ * it is, under a path naming its content, and `tsc` only checks its JSDoc types.
  */
-type PasskeyKind = 'standard' | 'google_password_manager';
+
+/** @typedef {'standard' | 'google_password_manager'} PasskeyKind */
 
 /** The action needs a passkey confirmation of the session first. */
 class StepUpRequired extends Error {}
 
-type EncodedDescriptor = Omit<PublicKeyCredentialDescriptor, 'id'> & { id: string };
-type CreationOptions = Omit<
-  PublicKeyCredentialCreationOptions,
-  'challenge' | 'user' | 'excludeCredentials'
-> & {
-  challenge: string;
-  user: Omit<PublicKeyCredentialUserEntity, 'id'> & { id: string };
-  excludeCredentials?: EncodedDescriptor[];
-};
-type RequestOptions = Omit<PublicKeyCredentialRequestOptions, 'challenge' | 'allowCredentials'> & {
-  challenge: string;
-  allowCredentials?: EncodedDescriptor[];
-};
-type Ceremony<T> = { ceremony_id: string; public_key: { publicKey: T } };
+/** @typedef {Omit<PublicKeyCredentialDescriptor, 'id'> & { id: string }} EncodedDescriptor */
+/**
+ * @typedef {Omit<
+ *   PublicKeyCredentialCreationOptions,
+ *   'challenge' | 'user' | 'excludeCredentials'
+ * > & {
+ *   challenge: string;
+ *   user: Omit<PublicKeyCredentialUserEntity, 'id'> & { id: string };
+ *   excludeCredentials?: EncodedDescriptor[];
+ * }} CreationOptions
+ */
+/**
+ * @typedef {Omit<PublicKeyCredentialRequestOptions, 'challenge' | 'allowCredentials'> & {
+ *   challenge: string;
+ *   allowCredentials?: EncodedDescriptor[];
+ * }} RequestOptions
+ */
+/**
+ * @template T
+ * @typedef {{ ceremony_id: string; public_key: { publicKey: T } }} Ceremony
+ */
 
 /**
  * The passkey ceremonies, which all run on the auth origin against its JSON routes,
  * with its HttpOnly session cookie. Serialized WebAuthn wrappers contain `publicKey`.
  */
 class Passkeys {
-  /** Whether this browser can run a ceremony here. */
-  static available(): boolean {
+  /**
+   * Whether this browser can run a ceremony here.
+   * @returns {boolean}
+   */
+  static available() {
     return window.isSecureContext && 'PublicKeyCredential' in window;
   }
-  /** What a page says when a ceremony failed with `error`. */
-  static message(error: unknown): string {
+  /**
+   * What a page says when a ceremony failed with `error`.
+   * @param {unknown} error
+   * @returns {string}
+   */
+  static message(error) {
     return error instanceof DOMException
       ? 'The passkey request was cancelled or unavailable. Try again or use another device.'
       : error instanceof Error
         ? error.message
         : 'Something went wrong. Please try again.';
   }
-  /** Signs in, which also confirms the new session for actions that need a passkey. */
-  authenticate(username?: string): Promise<void> {
-    return this.assert('/webauthn/authenticate', username ? { username } : {});
+  /**
+   * Signs in, which also confirms the new session for actions that need a passkey.
+   * @param {string} [username]
+   * @returns {Promise<void>}
+   */
+  authenticate(username) {
+    return this.#assert('/webauthn/authenticate', username ? { username } : {});
   }
-  /** Confirms the current session with a passkey, for actions that need a recent one. */
-  confirm(): Promise<void> {
-    return this.assert('/account/passkeys/confirm', {});
+  /**
+   * Confirms the current session with a passkey, for actions that need a recent one.
+   * @returns {Promise<void>}
+   */
+  confirm() {
+    return this.#assert('/account/passkeys/confirm', {});
   }
   /**
    * Runs `action`; if it needs a recent passkey confirmation, confirms the session
    * with a passkey, then runs it once more.
+   * @template T
+   * @param {() => Promise<T>} action
+   * @returns {Promise<T>}
    */
-  async withConfirmation<T>(action: () => Promise<T>): Promise<T> {
+  async withConfirmation(action) {
     try {
       return await action();
     } catch (error) {
@@ -65,68 +90,78 @@ class Passkeys {
   /**
    * Creates an account when `account` is given, else enrolls a key for the signed-in user.
    * `pending_signup` attaches the pending social identity the signup page displayed.
+   * @param {string} friendlyName
+   * @param {{ username: string; invitation?: string; pending_signup?: string }} [account]
+   * @param {PasskeyKind} [kind]
+   * @returns {Promise<void>}
    */
-  async register(
-    friendlyName: string,
-    account?: { username: string; invitation?: string; pending_signup?: string },
-    kind: PasskeyKind = 'standard'
-  ): Promise<void> {
+  async register(friendlyName, account, kind = 'standard') {
     const path = account ? '/webauthn/register' : '/account/passkeys/enroll';
-    const start = await this.post<Ceremony<CreationOptions>>(`${path}/start`, {
-      ...account,
-      passkey_kind: kind
-    });
+    /** @type {Ceremony<CreationOptions>} */
+    const start = await this.#post(`${path}/start`, { ...account, passkey_kind: kind });
     const options = start.public_key.publicKey;
-    const credential = (await navigator.credentials.create({
-      publicKey: {
-        ...options,
-        challenge: Passkeys.decode(options.challenge),
-        user: { ...options.user, id: Passkeys.decode(options.user.id) },
-        excludeCredentials: options.excludeCredentials?.map((value) => Passkeys.descriptor(value))
-      }
-    })) as PublicKeyCredential | null;
+    const credential = /** @type {PublicKeyCredential | null} */ (
+      await navigator.credentials.create({
+        publicKey: {
+          ...options,
+          challenge: Passkeys.#decode(options.challenge),
+          user: { ...options.user, id: Passkeys.#decode(options.user.id) },
+          excludeCredentials: options.excludeCredentials?.map((value) =>
+            Passkeys.#descriptor(value)
+          )
+        }
+      })
+    );
     if (!credential) throw new Error('Passkey creation was cancelled.');
-    const response = credential.response as AuthenticatorAttestationResponse;
-    await this.post(`${path}/finish`, {
+    const response = /** @type {AuthenticatorAttestationResponse} */ (credential.response);
+    await this.#post(`${path}/finish`, {
       ceremony_id: start.ceremony_id,
       friendly_name: friendlyName,
       credential: {
         id: credential.id,
-        rawId: Passkeys.encode(credential.rawId),
+        rawId: Passkeys.#encode(credential.rawId),
         type: credential.type,
         response: {
-          attestationObject: Passkeys.encode(response.attestationObject),
-          clientDataJSON: Passkeys.encode(response.clientDataJSON),
+          attestationObject: Passkeys.#encode(response.attestationObject),
+          clientDataJSON: Passkeys.#encode(response.clientDataJSON),
           transports: response.getTransports()
         },
         clientExtensionResults: credential.getClientExtensionResults()
       }
     });
   }
-  /** Runs an assertion ceremony against `path`'s start and finish endpoints. */
-  private async assert(path: string, body: object): Promise<void> {
-    const start = await this.post<Ceremony<RequestOptions>>(`${path}/start`, body);
+  /**
+   * Runs an assertion ceremony against `path`'s start and finish endpoints.
+   * @param {string} path
+   * @param {object} body
+   * @returns {Promise<void>}
+   */
+  async #assert(path, body) {
+    /** @type {Ceremony<RequestOptions>} */
+    const start = await this.#post(`${path}/start`, body);
     const options = start.public_key.publicKey;
-    const credential = (await navigator.credentials.get({
-      publicKey: {
-        ...options,
-        challenge: Passkeys.decode(options.challenge),
-        allowCredentials: options.allowCredentials?.map((value) => Passkeys.descriptor(value))
-      }
-    })) as PublicKeyCredential | null;
+    const credential = /** @type {PublicKeyCredential | null} */ (
+      await navigator.credentials.get({
+        publicKey: {
+          ...options,
+          challenge: Passkeys.#decode(options.challenge),
+          allowCredentials: options.allowCredentials?.map((value) => Passkeys.#descriptor(value))
+        }
+      })
+    );
     if (!credential) throw new Error('Passkey verification was cancelled.');
-    const response = credential.response as AuthenticatorAssertionResponse;
-    await this.post(`${path}/finish`, {
+    const response = /** @type {AuthenticatorAssertionResponse} */ (credential.response);
+    await this.#post(`${path}/finish`, {
       ceremony_id: start.ceremony_id,
       credential: {
         id: credential.id,
-        rawId: Passkeys.encode(credential.rawId),
+        rawId: Passkeys.#encode(credential.rawId),
         type: credential.type,
         response: {
-          authenticatorData: Passkeys.encode(response.authenticatorData),
-          clientDataJSON: Passkeys.encode(response.clientDataJSON),
-          signature: Passkeys.encode(response.signature),
-          userHandle: response.userHandle ? Passkeys.encode(response.userHandle) : null
+          authenticatorData: Passkeys.#encode(response.authenticatorData),
+          clientDataJSON: Passkeys.#encode(response.clientDataJSON),
+          signature: Passkeys.#encode(response.signature),
+          userHandle: response.userHandle ? Passkeys.#encode(response.userHandle) : null
         },
         clientExtensionResults: credential.getClientExtensionResults()
       }
@@ -136,20 +171,33 @@ class Passkeys {
    * Posts `body` as JSON to the ceremony route `path`. A failure throws an error whose
    * message the page can show as is: the route's own, as `StepUpRequired` when the
    * session must confirm first.
+   * @template [T=void]
+   * @param {string} path
+   * @param {unknown} body
+   * @returns {Promise<T>}
    */
-  private async post<T = void>(path: string, body: unknown): Promise<T> {
+  async #post(path, body) {
     const response = await fetch(path, {
       method: 'POST',
       headers: { 'content-type': 'application/json', 'x-piquel-csrf': '1' },
       body: JSON.stringify(body)
     });
     if (response.ok)
-      return response.status === 204 ? (undefined as T) : (response.json() as Promise<T>);
+      return response.status === 204
+        ? /** @type {T} */ (undefined)
+        : /** @type {Promise<T>} */ (response.json());
     // Auth's browser routes send `{error, code?}`, `error` being a readable message;
     // a proxy in the way may send anything.
-    const problem: unknown = await response.json().catch(() => null);
-    const value = (name: string): unknown =>
-      problem && typeof problem === 'object' ? (problem as Record<string, unknown>)[name] : null;
+    /** @type {unknown} */
+    const problem = await response.json().catch(() => null);
+    /**
+     * @param {string} name
+     * @returns {unknown}
+     */
+    const value = (name) =>
+      problem && typeof problem === 'object'
+        ? /** @type {Record<string, unknown>} */ (problem)[name]
+        : null;
     const error = value('error');
     const message =
       typeof error === 'string'
@@ -159,19 +207,34 @@ class Passkeys {
           : 'This action could not be completed. Please try again.';
     throw value('code') === 'step_up_required' ? new StepUpRequired(message) : new Error(message);
   }
-  private static decode(value: string): ArrayBuffer {
+  /**
+   * The bytes `value` encodes in unpadded base64url.
+   * @param {string} value
+   * @returns {ArrayBuffer}
+   */
+  static #decode(value) {
     return Uint8Array.from(atob(value.replace(/-/g, '+').replace(/_/g, '/')), (c) =>
       c.charCodeAt(0)
     ).buffer;
   }
-  private static encode(value: ArrayBuffer): string {
+  /**
+   * `value` in unpadded base64url.
+   * @param {ArrayBuffer} value
+   * @returns {string}
+   */
+  static #encode(value) {
     return btoa(String.fromCharCode(...new Uint8Array(value)))
       .replace(/\+/g, '-')
       .replace(/\//g, '_')
       .replace(/=+$/, '');
   }
-  private static descriptor(value: EncodedDescriptor): PublicKeyCredentialDescriptor {
-    return { ...value, id: Passkeys.decode(value.id) };
+  /**
+   * The credential descriptor `value` encodes.
+   * @param {EncodedDescriptor} value
+   * @returns {PublicKeyCredentialDescriptor}
+   */
+  static #descriptor(value) {
+    return { ...value, id: Passkeys.#decode(value.id) };
   }
 }
 
@@ -207,27 +270,43 @@ class Passkeys {
  * While a passkey form's ceremony runs, the form is busy: its button is disabled and
  * says so, and its `data-passkey-error` element, which says why the last one failed,
  * hides.
+ * @param {Document} document
+ * @returns {void}
  */
-function wire(document: Document): void {
+function wire(document) {
   const passkeys = new Passkeys();
   const fragment = () => new URLSearchParams(window.location.hash.slice(1));
-  const inputs = (form: HTMLFormElement) =>
-    form.querySelectorAll<HTMLInputElement>('input[data-fragment]');
-  /** The trimmed value `data` holds for `name`, or `undefined` when it holds none. */
-  const field = (data: FormData, name: string) => {
+  /** @param {HTMLFormElement} form */
+  const inputs = (form) =>
+    /** @type {NodeListOf<HTMLInputElement>} */ (form.querySelectorAll('input[data-fragment]'));
+  /**
+   * The trimmed value `data` holds for `name`, or `undefined` when it holds none.
+   * @param {FormData} data
+   * @param {string} name
+   */
+  const field = (data, name) => {
     const value = data.get(name);
     return typeof value === 'string' && value.trim() ? value.trim() : undefined;
   };
-  /** Where `data` asks to save a new passkey. */
-  const kind = (data: FormData): PasskeyKind =>
+  /**
+   * Where `data` asks to save a new passkey.
+   * @param {FormData} data
+   * @returns {PasskeyKind}
+   */
+  const kind = (data) =>
     data.get('passkey_kind') === 'google_password_manager' ? 'google_password_manager' : 'standard';
-  /** Runs `ceremony` once at a time for `form`, busy while it runs, saying why it failed. */
-  const run = (form: HTMLFormElement, ceremony: () => Promise<void>) => {
+  /**
+   * Runs `ceremony` once at a time for `form`, busy while it runs, saying why it failed.
+   * @param {HTMLFormElement} form
+   * @param {() => Promise<void>} ceremony
+   */
+  const run = (form, ceremony) => {
     if (form.dataset.busy) return;
-    const alert = form.querySelector<HTMLElement>('[data-passkey-error]');
+    const alert = /** @type {HTMLElement | null} */ (form.querySelector('[data-passkey-error]'));
     const button = form.querySelector('button');
     const label = button?.textContent ?? '';
-    const busy = (waiting: boolean) => {
+    /** @param {boolean} waiting */
+    const busy = (waiting) => {
       form.setAttribute('aria-busy', String(waiting));
       if (waiting) form.dataset.busy = 'true';
       else delete form.dataset.busy;
@@ -237,7 +316,7 @@ function wire(document: Document): void {
     };
     if (alert) alert.hidden = true;
     busy(true);
-    ceremony().catch((cause: unknown) => {
+    ceremony().catch((/** @type {unknown} */ cause) => {
       busy(false);
       if (!alert) return;
       alert.textContent = Passkeys.message(cause);
@@ -296,38 +375,50 @@ function wire(document: Document): void {
       window.history.replaceState(null, '', `${pathname}${search}`);
     }
   });
-  /** Enables `form`'s buttons, or disables them, showing the note on why. */
-  const enable = (form: HTMLFormElement, enabled = true) => {
-    form.querySelector<HTMLElement>('[data-unavailable]')?.toggleAttribute('hidden', enabled);
+  /**
+   * Enables `form`'s buttons, or disables them, showing the note on why.
+   * @param {HTMLFormElement} form
+   * @param {boolean} [enabled]
+   */
+  const enable = (form, enabled = true) => {
+    form.querySelector('[data-unavailable]')?.toggleAttribute('hidden', enabled);
     for (const button of form.querySelectorAll('button')) button.disabled = !enabled;
   };
   if (Passkeys.available())
-    for (const form of document.querySelectorAll<HTMLFormElement>(
-      'form[data-passkey-sign-in], form[data-passkey-register], form[data-passkey-enroll]'
+    for (const form of /** @type {NodeListOf<HTMLFormElement>} */ (
+      document.querySelectorAll(
+        'form[data-passkey-sign-in], form[data-passkey-register], form[data-passkey-enroll]'
+      )
     ))
       enable(form);
   /** Shows each fragment form while the link has every value, or the notice that it does not. */
   const showFragmentForms = () => {
-    for (const form of document.querySelectorAll<HTMLFormElement>('form[data-fragment-form]')) {
+    for (const form of /** @type {NodeListOf<HTMLFormElement>} */ (
+      document.querySelectorAll('form[data-fragment-form]')
+    )) {
       const complete = [...inputs(form)].every((input) =>
         fragment().get(input.dataset.fragment ?? '')
       );
       form.hidden = !complete;
       enable(form, complete);
-      document
-        .querySelector<HTMLElement>('[data-fragment-missing]')
-        ?.toggleAttribute('hidden', complete);
+      document.querySelector('[data-fragment-missing]')?.toggleAttribute('hidden', complete);
     }
   };
   showFragmentForms();
   // Following a link that differs only in its fragment does not reload the page.
   window.addEventListener('hashchange', showFragmentForms);
   if ('clipboard' in navigator)
-    for (const button of document.querySelectorAll<HTMLButtonElement>('button[data-copy]')) {
+    for (const button of /** @type {NodeListOf<HTMLButtonElement>} */ (
+      document.querySelectorAll('button[data-copy]')
+    )) {
       const status = button.previousElementSibling;
-      let cleared: ReturnType<typeof setTimeout> | undefined;
-      /** Says `message` in the button's status for a moment. */
-      const say = (message: string) => {
+      /** @type {ReturnType<typeof setTimeout> | undefined} */
+      let cleared;
+      /**
+       * Says `message` in the button's status for a moment.
+       * @param {string} message
+       */
+      const say = (message) => {
         if (!status) return;
         status.textContent = message;
         clearTimeout(cleared);
@@ -346,7 +437,8 @@ function wire(document: Document): void {
         );
       });
     }
-  const replaced = document.querySelector<HTMLElement>('[data-replace-url]')?.dataset.replaceUrl;
+  const replaced = /** @type {HTMLElement | null} */ (document.querySelector('[data-replace-url]'))
+    ?.dataset.replaceUrl;
   if (replaced) window.history.replaceState(null, '', replaced);
 }
 
