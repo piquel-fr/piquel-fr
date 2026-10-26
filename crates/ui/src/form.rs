@@ -234,8 +234,7 @@ pub struct Lines(Vec<String>);
 
 impl Lines {
     /// Whether no value was typed.
-    #[must_use]
-    pub const fn is_empty(&self) -> bool {
+    pub(crate) const fn is_empty(&self) -> bool {
         self.0.is_empty()
     }
 

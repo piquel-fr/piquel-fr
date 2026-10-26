@@ -122,7 +122,7 @@ impl Revealed {
     }
 
     /// The secret.
-    pub(crate) fn expose(&self) -> &str {
+    fn expose(&self) -> &str {
         &self.0
     }
 }
@@ -202,8 +202,7 @@ impl ScopeChoice {
     }
 
     /// Whether `scope` is chosen.
-    #[must_use]
-    pub const fn has(mut self, scope: Scope) -> bool {
+    const fn has(mut self, scope: Scope) -> bool {
         self.checkbox(scope).0
     }
 
@@ -401,7 +400,7 @@ pub(crate) async fn copy<'a>(target: &'a str, label: &'a str) -> Result<impl Vie
 
 /// `value` as code, the element `id`, beside a button copying it, named `label`.
 #[component]
-pub(crate) async fn copyable<'a>(id: &'a str, label: &'a str, value: &'a str) -> Result<impl View> {
+async fn copyable<'a>(id: &'a str, label: &'a str, value: &'a str) -> Result<impl View> {
     Ok(view! {
         <div class="row between code-line">
             <code id=(id)>(value)</code>
