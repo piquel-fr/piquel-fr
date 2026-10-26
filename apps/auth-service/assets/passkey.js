@@ -95,11 +95,49 @@ class Passkeys {
    * @param {PasskeyKind} [kind]
    * @returns {Promise<void>}
    */
-  async register(friendlyName, account, kind = 'standard') {
-    const path = account ? '/webauthn/register' : '/account/passkeys/enroll';
+  register(friendlyName, account, kind = 'standard') {
+    return this.#create(
+      account ? '/webauthn/register' : '/account/passkeys/enroll',
+      { ...account, passkey_kind: kind },
+      friendlyName
+    );
+  }
+  /**
+   * Adds a passkey with the recovery link's `token`, which signs the browser in to the
+   * account it recovers.
+   * @param {string} token
+   * @param {string} friendlyName
+   * @param {PasskeyKind} kind
+   * @returns {Promise<void>}
+   */
+  recover(token, friendlyName, kind) {
+    return this.#create('/recovery', { token, passkey_kind: kind }, friendlyName);
+  }
+  /**
+   * Undoes the recovery `recoveryId`, or cancels it when its link was not used, with a
+   * passkey the account had before it. Signed out, it works on a disabled account too.
+   * Resolves to whether it signed the browser in, which it does not on a disabled
+   * account: the session cookie is HttpOnly, so only the answer says.
+   * @param {string} recoveryId
+   * @returns {Promise<boolean>}
+   */
+  async undo(recoveryId) {
+    /** @type {{ signed_in: boolean }} */
+    const outcome = await this.#assert('/account/recovery/undo', { recovery_id: recoveryId });
+    return outcome.signed_in;
+  }
+  /**
+   * Runs a creation ceremony against `path`'s start and finish endpoints, starting it with
+   * `start` and naming the new passkey `friendlyName`.
+   * @param {string} path
+   * @param {object} start
+   * @param {string} friendlyName
+   * @returns {Promise<void>}
+   */
+  async #create(path, start, friendlyName) {
     /** @type {Ceremony<CreationOptions>} */
-    const start = await this.#post(`${path}/start`, { ...account, passkey_kind: kind });
-    const options = start.public_key.publicKey;
+    const ceremony = await this.#post(`${path}/start`, start);
+    const options = ceremony.public_key.publicKey;
     const credential = /** @type {PublicKeyCredential | null} */ (
       await navigator.credentials.create({
         publicKey: {
@@ -115,7 +153,7 @@ class Passkeys {
     if (!credential) throw new Error('Passkey creation was cancelled.');
     const response = /** @type {AuthenticatorAttestationResponse} */ (credential.response);
     await this.#post(`${path}/finish`, {
-      ceremony_id: start.ceremony_id,
+      ceremony_id: ceremony.ceremony_id,
       friendly_name: friendlyName,
       credential: {
         id: credential.id,
@@ -131,10 +169,12 @@ class Passkeys {
     });
   }
   /**
-   * Runs an assertion ceremony against `path`'s start and finish endpoints.
+   * Runs an assertion ceremony against `path`'s start and finish endpoints, and
+   * resolves to the finish's answer.
+   * @template [T=void]
    * @param {string} path
    * @param {object} body
-   * @returns {Promise<void>}
+   * @returns {Promise<T>}
    */
   async #assert(path, body) {
     /** @type {Ceremony<RequestOptions>} */
@@ -151,7 +191,7 @@ class Passkeys {
     );
     if (!credential) throw new Error('Passkey verification was cancelled.');
     const response = /** @type {AuthenticatorAssertionResponse} */ (credential.response);
-    await this.#post(`${path}/finish`, {
+    return this.#post(`${path}/finish`, {
       ceremony_id: start.ceremony_id,
       credential: {
         id: credential.id,
@@ -255,6 +295,12 @@ class Passkeys {
  *   `pending_signup`, then posts, so its page sends the browser on.
  * - a form marked `data-passkey-enroll` adds a passkey named by its `friendly_name`,
  *   confirming first if it must, then posts, so its page says so.
+ * - a form marked `data-passkey-recover` adds a passkey with the recovery link's token,
+ *   its marker's value, named by its `friendly_name` and saved as its `passkey_kind` says,
+ *   then posts, so its page sends the browser on.
+ * - a form marked `data-passkey-undo` undoes the recovery its marker's value names, with
+ *   a passkey from before it, then posts with its `signed_in` input saying whether the
+ *   undo signed the browser in, so its page says so.
  * - a form marked `data-fragment-form` copies the link's fragment into its
  *   `data-fragment` inputs as it posts, then drops the fragment from the address. It
  *   shows, with its button enabled, while the link has every value; otherwise the
@@ -265,8 +311,13 @@ class Passkeys {
  * - an element marked `data-replace-url` makes its value the page's address: a page
  *   answering a form with what only it may show, such as a secret, then reloads by
  *   `GET`, never posting the form again.
- * A sign-in, register or enroll form's button starts disabled until passkeys are known
- * to work here; its `data-unavailable` note says why, and hides once it is enabled.
+ * - an element marked `data-dismiss` starts hidden, and shows unless this browser
+ *   dismissed its value, a key; a `data-dismisses` element inside it dismisses its key
+ *   when clicked, hiding it from then on and giving the focus to the page's heading.
+ *   Where the browser keeps no local storage, it shows on every page, and a dismissal
+ *   hides it on that page only.
+ * A passkey form's button starts disabled until passkeys are known to work here; its
+ * `data-unavailable` note says why, and hides once it is enabled.
  * While a passkey form's ceremony runs, the form is busy: its button is disabled and
  * says so, and its `data-passkey-error` element, which says why the last one failed,
  * hides.
@@ -368,6 +419,27 @@ function wire(document) {
         form.submit();
       });
     }
+    if (form.hasAttribute('data-passkey-recover')) {
+      event.preventDefault();
+      const data = new FormData(form);
+      const token = form.dataset.passkeyRecover ?? '';
+      run(form, async () => {
+        await passkeys.recover(token, field(data, 'friendly_name') ?? '', kind(data));
+        form.submit();
+      });
+    }
+    if (form.hasAttribute('data-passkey-undo')) {
+      event.preventDefault();
+      const recovery = form.dataset.passkeyUndo ?? '';
+      const signedIn = /** @type {HTMLInputElement | null} */ (
+        form.querySelector('input[name="signed_in"]')
+      );
+      run(form, async () => {
+        const outcome = await passkeys.undo(recovery);
+        if (signedIn) signedIn.value = String(outcome);
+        form.submit();
+      });
+    }
     if (form.hasAttribute('data-fragment-form')) {
       for (const input of inputs(form))
         input.value = fragment().get(input.dataset.fragment ?? '') ?? '';
@@ -387,7 +459,7 @@ function wire(document) {
   if (Passkeys.available())
     for (const form of /** @type {NodeListOf<HTMLFormElement>} */ (
       document.querySelectorAll(
-        'form[data-passkey-sign-in], form[data-passkey-register], form[data-passkey-enroll]'
+        'form[data-passkey-sign-in], form[data-passkey-register], form[data-passkey-enroll], form[data-passkey-recover], form[data-passkey-undo]'
       )
     ))
       enable(form);
@@ -437,6 +509,41 @@ function wire(document) {
         );
       });
     }
+  /**
+   * What `use` reads or writes in this browser's local storage, or `undefined` where
+   * the browser keeps none or refuses, as when storage is blocked or full.
+   * @template T
+   * @param {(storage: Storage) => T} use
+   * @returns {T | undefined}
+   */
+  const stored = (use) => {
+    try {
+      return use(window.localStorage);
+    } catch {
+      return undefined;
+    }
+  };
+  for (const element of /** @type {NodeListOf<HTMLElement>} */ (
+    document.querySelectorAll('[data-dismiss]')
+  ))
+    element.hidden = Boolean(stored((storage) => storage.getItem(element.dataset.dismiss ?? '')));
+  for (const button of /** @type {NodeListOf<HTMLElement>} */ (
+    document.querySelectorAll('[data-dismisses]')
+  ))
+    button.addEventListener('click', () => {
+      const key = button.dataset.dismisses ?? '';
+      const dismissed = /** @type {HTMLElement | null} */ (button.closest('[data-dismiss]'));
+      if (dismissed?.dataset.dismiss === key) {
+        // Hiding it takes the focus from the button, so the page's heading gets it.
+        const heading = document.querySelector('h1');
+        heading?.setAttribute('tabindex', '-1');
+        heading?.focus();
+        dismissed.hidden = true;
+      }
+      stored((storage) => {
+        storage.setItem(key, '1');
+      });
+    });
   const replaced = /** @type {HTMLElement | null} */ (document.querySelector('[data-replace-url]'))
     ?.dataset.replaceUrl;
   if (replaced) window.history.replaceState(null, '', replaced);

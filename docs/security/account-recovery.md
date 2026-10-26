@@ -34,8 +34,10 @@ recovery-specific has to remember it.
 The code is `apps/auth-service/src/recovery` (links, the probation passkey,
 undo), `AdminService::recover_account`, `recent_recoveries` and `undo_recovery`
 (`apps/auth-service/src/admin/service.rs`), the passkey routes
-(`apps/auth-service/src/passkey`), migration `0019_account_recoveries`, and the
-CLI's `user recover` and `user undo-recovery`. Tests named below live in
+(`apps/auth-service/src/passkey`), the pages `/recover` and `/recover/undo`
+(`apps/auth-service/src/web/recovery`, with their views in
+`crates/ui/src/recovery.rs`), migration `0019_account_recoveries`, and the CLI's
+`user recover` and `user undo-recovery`. Tests named below live in
 `apps/auth-service/src/recovery/tests.rs` unless another file is given;
 `crates/database/tests/recoveries.rs` is shortened to `db:`.
 
@@ -116,9 +118,16 @@ for the dashboard *(planned)*; the admin API has no route for it.
   recovery's ID under a key derived from the token digest key. Only its SHA-256
   digest is stored, and the email's delivery stores neither, by type:
   `EmailMessage::RecoveryLink` has no token field. The token alone authorizes
-  the link: the `/recover` page reads it in-process
-  (`AccountService::open_recovery`), and `POST /recovery/start` and `/finish`
-  enroll the passkey. No endpoint checks a token without starting the ceremony.
+  the link. Its page never reads the token on `GET`, since mail scanners open
+  links: its form posts the token from the fragment, and the page reads it
+  in-process (`AccountService::open_recovery`), answering with the account, the
+  link's deadline and what the probation restricts before any passkey is made.
+  That page carries the token only in its ceremony form's attribute, so the
+  form's own post never sends it again, and reloads by `GET`. `POST
+  /recovery/start` and `/finish` enroll the passkey; besides the page's own form
+  post, which names the account, no route checks a token without starting the
+  ceremony
+  (`web::recovery::tests::recovery_links_enroll_a_passkey_from_their_form`).
 - **L2.** It is mailed only to the primary verified address the account has when
   the recovery starts,
   and printed to the operator at the terminal, which also reaches an owner
@@ -160,11 +169,25 @@ for the dashboard *(planned)*; the admin API has no route for it.
   carries the undo page too, so an owner who still has a passkey can cancel
   (`a_link_enrolls_one_passkey_that_signs_in_without_confirming`,
   `deliveries::email::tests::a_recovery_link_is_sent_while_it_works`).
-- **C3.** `GET /account/recovery` describes the undoable recovery to any session,
-  so the settings and sign-in pages can ask "Your account was recovered on …
-  Was this you?". An owner with an older passkey learns of it by signing in,
-  even when the notice only reached a hijacked mailbox *(the prompt is planned,
-  with the pages)*.
+- **C3.** `GET /account/recovery` describes the undoable recovery to any
+  session, and auth's pages read, in-process, a projection of it that carries no
+  passkey names; the signed-out undo page reads that projection by the
+  recovery's ID, on a disabled account too
+  (`pages_read_an_undoable_recovery_by_session_or_id`). Every settings and
+  developer console page asks "Your account was recovered on … Was this you?"
+  ("Piquel support started a recovery of your account on …" while its link is
+  unused), and its "No" links to the undo page. "Yes, it was me" hides the
+  question in that browser only, for that session and stage, and until a passkey
+  first confirms the session: a "Yes" while the link is unused still asks once
+  it is used, and one given in the link's own session still asks the owner once
+  their older passkey signs in to it. In probation, a notice no answer hides
+  says that until `settles_at` its passkey confirms nothing, and, with no
+  passkey from before, that only support can undo it; the passkey list says
+  which passkeys can't be removed meanwhile. A passkey sign-in that continues to
+  an app asks the same question before going on. An owner with an older passkey
+  learns of it by signing in, even when the notice only reached a hijacked
+  mailbox (`web::recovery::tests::settings_show_the_recovery`,
+  `web::recovery::tests::a_sign_in_for_an_app_asks_about_a_recovery`).
 
 ## Probation
 
@@ -191,10 +214,12 @@ for the dashboard *(planned)*; the admin API has no route for it.
   confirmation. App consents are the one exception, and undo withdraws all of
   them (U2).
 - **P3.** What a probation session can still do, which undo does not revert
-  because none of it is a way in: rename passkeys (pages name the recovery's
-  passkey by ID and enrollment time, never by name), sign sessions out, report a
-  sign-in as not theirs, verify an address added during the probation, and sign
-  in to apps that don't ask for `phr`, approving their consent.
+  because none of it is a way in: rename passkeys (no page shows the recovery's
+  passkey by its name: the passkey list and the history call it "the recovery's
+  passkey", the list and the undo page give its ID and enrollment time, and the
+  list offers no rename for it), sign sessions out, report a sign-in as not
+  theirs, verify an address added during the probation, and sign in to apps that
+  don't ask for `phr`, approving their consent.
 - **P4.** A relying party that asks for `phr` doesn't loop a probation user
   through sign-in. Once such a passkey signed in during the request, authorize
   answers the client `unmet_authentication_requirements` (OpenID Connect Unmet
@@ -210,8 +235,18 @@ for the dashboard *(planned)*; the admin API has no route for it.
 
 ## Undoing a recovery
 
-The owner undoes a recovery on its undo page *(planned)*, with a passkey ceremony
-of its own: `POST /account/recovery/undo/start {recovery_id}`, then `/finish`.
+The owner undoes a recovery on its undo page, `/recover/undo#recovery=…`, with a
+passkey ceremony of its own: `POST /account/recovery/undo/start {recovery_id}`,
+then `/finish`. The page works signed out: its form posts the recovery's ID from
+the fragment, and the page that answers says what undoing takes back (U2), or,
+for an unused link, that cancelling it also takes back what the link did if it
+is used first (U3). With no passkey from before the recovery, it offers no
+ceremony and says only support can undo it (U5). Without a fragment, a
+signed-in browser is offered its own account's recovery, naming the account.
+Once undone, the page says so whatever the stage was, on the settings only of a
+browser the finish says it signed in (U4), and otherwise on the page itself, as
+on a disabled account (U4a)
+(`web::recovery::tests::the_undo_page_cancels_or_undoes_by_id`).
 
 - **U1.** Any active passkey of the account but the recovery's own may undo it:
   the start challenges every other one, and the finish refuses the recovery's
@@ -329,8 +364,8 @@ cannot shadow `account_recoveries`
   needs a confirmation for every owned-client change and re-reads a consent's
   session under the lock (the prerequisite PR). Never roll back below that
   predecessor while a recovery can be undone.
-- What a rollback loses is availability: the undo page, P4 and the typed errors,
-  until the release is back. This release's CLI still runs `user
+- What a rollback loses is availability: the recovery pages, P4 and the typed
+  errors, until the release is back. This release's CLI still runs `user
   undo-recovery` against the same schema.
 - Start recoveries only once a rollout is over. A replica of the previous release
   can't decode the new recovery emails, and marks them failed; resend them with
@@ -481,6 +516,3 @@ From #85, not built by this path:
   and the security center: prevention first.
 - Dedicated rate limits on recovery endpoints (#86); only the general per-IP
   request budget covers them today.
-- The `/recover` and `/recover/undo` pages, and the "Was this you?" prompt
-  *(planned, from the pages stream)*. The APIs are live, but no page uses a link
-  yet, and `user recover` says so.

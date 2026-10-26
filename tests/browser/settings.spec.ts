@@ -67,8 +67,8 @@ test('settings on auth: passkeys, devices, an email link and signing out', async
   await expect(page.getByText('You’re only signed in on this device.')).toBeVisible();
 
   // A verification link's form posts its token, which never stays in the address, and
-  // a spent one is refused. A link differing only in its fragment loads no new page,
-  // and still fills the form.
+  // a spent one is refused, still leading to the addresses. A link differing only in
+  // its fragment loads no new page, and still fills the form.
   await page.goto('/settings/emails/verify');
   await expect(page.getByRole('heading', { name: 'This link is incomplete' })).toBeVisible();
   await page.goto('/settings/emails/verify#token=spent');
@@ -76,6 +76,9 @@ test('settings on auth: passkeys, devices, an email link and signing out', async
   await page.getByRole('button', { name: 'Confirm this address', exact: true }).click();
   expect((await confirmation).postData()).toContain('token=spent');
   await expect(page.getByRole('alert')).toBeVisible();
+  await expect(
+    page.getByRole('link', { name: 'Manage your addresses', exact: true })
+  ).toBeVisible();
   await page.goBack();
   expect(new URL(page.url()).hash).toBe('');
 

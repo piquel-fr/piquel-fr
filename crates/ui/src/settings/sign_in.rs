@@ -1,6 +1,9 @@
 //! Passkeys and social sign-in.
 
-use crate::form::{Ceremony, Query, change_form, open, passkey_form, passkey_kind};
+use crate::{
+    Recovery, RecoveryPasskey, RecoveryStage,
+    form::{Ceremony, Precision, Query, change_form, new_passkey, open, passkey_form, time},
+};
 use piquel_common::{
     PasskeyId, Provider,
     protocol::api::{Identity, Passkey},
@@ -78,7 +81,9 @@ pub struct ProviderRow<'a> {
 /// The sign-in methods page: the account's `passkeys`, and the social sign-in
 /// `providers`. Its rows open on `page` as `state` says, and its changes post
 /// there; `confirmed` says whether the session needs no passkey confirmation for
-/// them. On Android, adding a passkey offers Google Password Manager.
+/// them. On Android, adding a passkey offers Google Password Manager. While the
+/// account has a `recovery` that can still be undone, only its passkey can be
+/// removed.
 #[component]
 pub async fn sign_in_methods<'a>(
     page: &'a str,
@@ -87,9 +92,17 @@ pub async fn sign_in_methods<'a>(
     state: &'a SignInState,
     confirmed: bool,
     android: bool,
+    recovery: Option<&'a Recovery>,
 ) -> Result<impl View> {
     Ok(view! {
-        passkey_list(page: page, passkeys: passkeys, state: state, confirmed: confirmed, android: android)
+        passkey_list(
+            page: page,
+            passkeys: passkeys,
+            state: state,
+            confirmed: confirmed,
+            android: android,
+            recovery: recovery,
+        )
         social(page: page, providers: providers, state: state, confirmed: confirmed)
     })
 }
@@ -102,8 +115,10 @@ async fn passkey_list<'a>(
     state: &'a SignInState,
     confirmed: bool,
     android: bool,
+    recovery: Option<&'a Recovery>,
 ) -> Result<impl View> {
     let count = passkeys.len();
+    let added = recovery.and_then(Recovery::passkey);
     Ok(view! {
         <section class="card" aria-labelledby="passkeys-heading">
             <div class="row between">
@@ -115,8 +130,16 @@ async fn passkey_list<'a>(
             </p>
             <ul class="list">
                 for passkey in passkeys {
+                    let recovered = added == Some(passkey.id);
                     <li>
-                        passkey_row(page: page, passkey: passkey, removable: count > 1, state: state, confirmed: confirmed)
+                        passkey_row(
+                            page: page,
+                            passkey: passkey,
+                            recovered: recovered,
+                            removable: count > 1 && !recovery.is_some_and(|recovery| recovery.keeps(passkey.id)),
+                            state: state,
+                            confirmed: confirmed,
+                        )
                     </li>
                 }
             </ul>
@@ -125,24 +148,47 @@ async fn passkey_list<'a>(
             }
             enroll(page: page, android: android)
             <p class="help">"Your last passkey cannot be removed."</p>
+            match recovery.map(|recovery| recovery.stage) {
+                Some(RecoveryStage::Open { .. }) => {
+                    <p class="help">"Passkeys can't be removed while the recovery can be cancelled."</p>
+                }
+                Some(RecoveryStage::Probation { settles_at, .. }) => {
+                    <p class="help">
+                        (format!("Only {} can be removed until the recovery settles on ", RecoveryPasskey::NAME))
+                        time(at: settles_at, precision: Precision::Day)
+                        "."
+                    </p>
+                }
+                None => {}
+            }
         </section>
     })
 }
 
-/// One passkey of [`passkey_list`]: its name, or the open rename or removal row,
-/// which takes the focus.
+/// One passkey of [`passkey_list`]: its name and when it was added, or the open
+/// rename or removal row, which takes the focus. The passkey a recovery added,
+/// which whoever used its link may have named, is `recovered`: it goes by
+/// [`RecoveryPasskey`]'s phrase, with a mark, the minute it was added and its ID,
+/// and it is never renamed here.
 #[component]
 async fn passkey_row<'a>(
     page: &'a str,
     passkey: &'a Passkey,
+    recovered: bool,
     removable: bool,
     state: &'a SignInState,
     confirmed: bool,
 ) -> Result<impl View> {
     let id = passkey.id;
-    let name = passkey.friendly_name.as_str();
+    let (name, removal, precision) = if recovered {
+        let removal = format!("Remove {}?", RecoveryPasskey::NAME);
+        (RecoveryPasskey::TITLE, removal, Precision::Minute)
+    } else {
+        let name = passkey.friendly_name.as_str();
+        (name, format!("Remove “{name}”?"), Precision::Day)
+    };
     Ok(view! {
-        if state.renaming == Some(id) {
+        if state.renaming == Some(id) && !recovered {
             change_form(
                 action: page,
                 change: SignInChange::Rename { id, friendly_name: String::new() },
@@ -161,7 +207,7 @@ async fn passkey_row<'a>(
             )
         } else if state.removing == Some(id) {
             <div class="stack">
-                <strong tabindex="-1" autofocus="">(format!("Remove “{name}”?"))</strong>
+                <strong tabindex="-1" autofocus="">(removal)</strong>
                 <p class="help">"You won’t be able to use this passkey to sign in again."</p>
                 change_form(
                     action: page,
@@ -174,14 +220,30 @@ async fn passkey_row<'a>(
             </div>
         } else {
             <div class="row between">
-                <div><strong>(name)</strong></div>
+                <div>
+                    <div class="row">
+                        <strong>(name)</strong>
+                        if recovered {
+                            <span class="badge">"Added by the recovery"</span>
+                        }
+                    </div>
+                    <p class="help">
+                        "Added "
+                        time(at: passkey.created_at, precision: precision)
+                        if recovered {
+                            (format!(" · ID {id}"))
+                        }
+                    </p>
+                </div>
                 <div class="row">
-                    open(
-                        page: page,
-                        opens: SignInState { renaming: Some(id), ..SignInState::default() },
-                        label: "Rename",
-                        aria_label: format!("Rename {name}"),
-                    )
+                    if !recovered {
+                        open(
+                            page: page,
+                            opens: SignInState { renaming: Some(id), ..SignInState::default() },
+                            label: "Rename",
+                            aria_label: format!("Rename {name}"),
+                        )
+                    }
                     open(
                         page: page,
                         opens: SignInState { removing: Some(id), ..SignInState::default() },
@@ -206,13 +268,7 @@ async fn enroll(page: &str, android: bool) -> Result<impl View> {
             change: SignInChange::Enrolled {},
             label: "Add a passkey",
             class: "secondary full",
-            <label>
-                "New passkey name"
-                <input name="friendly_name" maxlength="80" required="" autocomplete="off">
-            </label>
-            if android {
-                passkey_kind()
-            }
+            new_passkey(label: "New passkey name", android: android)
         )
     })
 }

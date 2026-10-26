@@ -49,18 +49,18 @@ pub(super) enum UserCommand {
         /// The account: its username, ID or verified email.
         user: UserRef,
     },
-    /// Recover an account whose owner lost every passkey (not usable yet).
+    /// Recover an account whose owner lost every passkey.
     ///
-    /// The recovery page its link opens comes with the server-rendered pages.
-    /// First lists the account's recoveries of the last 15 days. Refuses while
-    /// one is in probation: find out who used it, and undo it with `user
-    /// undo-recovery` first. An unused link is replaced. Refuses an
-    /// administrator's account: revoke its rights first. Ends the account's
-    /// sessions, removes its unverified addresses, and sends its primary verified
-    /// address a link that enrolls one passkey, within a day; prints the link
-    /// too, for when there is none. For 15 days after, that passkey signs in but
-    /// confirms no change, and any older passkey can undo the recovery. Needs
-    /// `AUTH_PUBLIC_BASE_URL` and the token digest key, which derives the link.
+    /// First lists the account's recoveries that started, ended or were used
+    /// within a probation's length. Refuses while one is in probation: find out
+    /// who used it, and undo it with `user undo-recovery` first. An unused link
+    /// is replaced. Refuses an administrator's account: revoke its rights first.
+    /// Ends the account's sessions, removes its unverified addresses, and sends
+    /// its primary verified address a link that enrolls one passkey, within a
+    /// day; prints the link too, for when there is none. Through the probation
+    /// that follows, that passkey signs in but confirms no change, and any older
+    /// passkey can undo the recovery. Needs `AUTH_PUBLIC_BASE_URL` and the token
+    /// digest key, which derives the link.
     Recover {
         /// The account: its username, ID or verified email.
         user: UserRef,
@@ -169,9 +169,6 @@ impl UserCommand {
                 {
                     println!("{link}");
                 }
-                eprintln!(
-                    "The link opens a page that is not available yet; it works once, for a day."
-                );
             }
             Self::UndoRecovery {
                 user,

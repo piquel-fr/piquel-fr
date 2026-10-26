@@ -4,14 +4,14 @@
 
 use super::*;
 use crate::{
-    AdminError, AdminService, Reason,
+    AdminError, AdminService,
     account::Subject,
     admin::tests::{Harness, cli, operator},
     passkey::{VerifiedRecoveryUndo, tests::Fixture},
     security::{BrowserCookie, Credential, Session},
     tests::{
-        AUTH_ORIGIN, Browser, refresh_grant, register, registration, until_blocked,
-        verified_address,
+        Browser, recovery_links, recovery_reason, recovery_token, refresh_grant, register,
+        registration, until_blocked, verified_address,
     },
 };
 use axum::{
@@ -30,27 +30,6 @@ use piquel_repository::{
 use serde_json::{Value, json};
 use std::collections::HashSet;
 use webauthn_authenticator_rs::{WebauthnAuthenticator, softpasskey::SoftPasskey};
-
-/// Links with a key of their own: the routes find a recovery by its token's
-/// digest, so they need no key.
-fn links() -> RecoveryLinks {
-    RecoveryLinks::new(
-        AUTH_ORIGIN.parse().expect("origin"),
-        Secret::generate().expect("recovery key"),
-        None,
-    )
-}
-
-/// Why the scenarios recover an account.
-fn reason() -> Reason {
-    Reason::parse("Lost every passkey".into()).expect("reason")
-}
-
-/// The token of a recovery `link`.
-fn token(link: &Url) -> String {
-    let fragment = link.fragment().expect("fragment");
-    fragment.strip_prefix("token=").expect("token").to_owned()
-}
 
 /// An error body's `code`.
 async fn code(response: Response) -> Value {
@@ -75,7 +54,7 @@ impl Scenario {
     async fn new() -> Self {
         Self {
             keys: Fixture::new().await,
-            links: links(),
+            links: recovery_links(),
             other: None,
         }
     }
@@ -100,7 +79,7 @@ impl Scenario {
     async fn start(&self, revoke: Option<Revoke>) -> Result<Url, AdminError> {
         let link = self
             .admin()
-            .recover_account(&cli(), self.user(), reason(), &self.links, revoke)
+            .recover_account(&cli(), self.user(), recovery_reason(), &self.links, revoke)
             .await?;
         Ok(link.expect("the terminal sees the link"))
     }
@@ -108,7 +87,7 @@ impl Scenario {
     /// Recovers the account as an operator at the terminal, and returns the
     /// link's token.
     async fn recover(&self) -> String {
-        token(&self.start(None).await.expect("recovery"))
+        recovery_token(&self.start(None).await.expect("recovery"))
     }
 
     /// Whether the link holding `token` still works, as its page reads it.
@@ -697,7 +676,7 @@ async fn an_undo_and_a_client_deletion_never_deadlock() {
         .expect("hold the client's families");
     let undo = tokio::spawn({
         let admin = scenario.admin();
-        async move { admin.undo_recovery(&cli(), user, reason()).await }
+        async move { admin.undo_recovery(&cli(), user, recovery_reason()).await }
     });
     until_blocked(&mut holder, 1).await;
     holder
@@ -710,6 +689,85 @@ async fn an_undo_and_a_client_deletion_never_deadlock() {
         .expect("task")
         .expect("the undo follows the deletion");
     assert!(scenario.consents().await.is_empty(), "every consent");
+}
+
+/// The pages read the account's recovery that can still be undone by its owner's
+/// session, or by its ID alone, a disabled account's too: its stage, the passkey
+/// its link enrolled, by ID and enrollment time only, and whether a passkey from
+/// before it can undo it. Neither finds one that settled, nor an unknown one.
+#[tokio::test]
+#[ignore = "requires TEST_DATABASE_URL"]
+async fn pages_read_an_undoable_recovery_by_session_or_id() {
+    let mut scenario = Scenario::new().await;
+    let service = AccountService::new(scenario.database().clone());
+    let token = scenario.recover().await;
+    let owner = Browser::sign_in(scenario.database(), scenario.user())
+        .await
+        .owner(scenario.database())
+        .await;
+    let read = async |id: RecoveryId| {
+        let by_session = service.recovery_notice(&owner).await.expect("by session");
+        let by_id = service.undoable_recovery(id).await.expect("by ID");
+        assert_eq!(by_session, by_id, "the same either way");
+        by_id
+    };
+    let recovery = scenario.latest().await;
+    let open = RecoveryNotice {
+        id: recovery.id,
+        started_at: recovery.started_at,
+        stage: RecoveryStage::Open {
+            expires_at: recovery.expires_at,
+        },
+        undoable: true,
+    };
+    assert_eq!(read(recovery.id).await, Some(open));
+
+    scenario.enroll(&token).await;
+    let recovery = scenario.latest().await;
+    let passkey = recovery.passkey_id.expect("its passkey");
+    let passkeys = scenario
+        .database()
+        .passkeys()
+        .list_active(scenario.user())
+        .await;
+    let created_at = passkeys
+        .expect("passkeys")
+        .into_iter()
+        .find(|stored| stored.id == passkey)
+        .expect("active")
+        .created_at;
+    let probation = RecoveryNotice {
+        stage: RecoveryStage::Probation {
+            completed_at: recovery.completed_at.expect("completed"),
+            settles_at: recovery.settles_at.expect("in probation"),
+            passkey: Some(EnrolledPasskey {
+                id: passkey,
+                created_at,
+            }),
+        },
+        ..open
+    };
+    assert_eq!(read(recovery.id).await, Some(probation));
+    let disabled = scenario
+        .database()
+        .users()
+        .set_status(scenario.user(), AccountStatus::Disabled)
+        .await;
+    assert!(disabled.expect("disable"));
+    assert_eq!(
+        service.undoable_recovery(recovery.id).await.expect("by ID"),
+        Some(probation),
+        "disabled"
+    );
+
+    let unknown = service.undoable_recovery(RecoveryId::new()).await;
+    assert_eq!(unknown.expect("by ID"), None, "unknown");
+    let mut recoveries = scenario.database().recoveries();
+    recoveries
+        .backdate_completion(recovery.id, PROBATION)
+        .await
+        .expect("settle");
+    assert_eq!(read(recovery.id).await, None, "settled");
 }
 
 /// Only a passkey other than the recovery's own undoes it: the undo challenges
@@ -912,13 +970,13 @@ async fn support_undoes_and_takes_the_last_passkey() {
         .expect("recovery");
     let notice = ("recovery_revoked".to_owned(), Some(false));
     assert_eq!(scenario.messages(address).await, [notice], "nothing kept");
-    scenario.enroll(&token(&link)).await;
+    scenario.enroll(&recovery_token(&link)).await;
     assert_eq!(scenario.passkeys().await.len(), 1, "only the recovery's");
     let recovery = scenario.latest().await.id;
 
     scenario
         .admin()
-        .undo_recovery(&cli(), scenario.user(), reason())
+        .undo_recovery(&cli(), scenario.user(), recovery_reason())
         .await
         .expect("support undoes");
     assert!(scenario.passkeys().await.is_empty(), "the last one too");
@@ -1029,7 +1087,11 @@ async fn nothing_removes_an_older_passkey_mid_recovery() {
     assert_eq!(code(response).await, "recovery_in_progress");
     let harness = Harness::new().await;
     let admin = harness.admin().await;
-    let subject = Subject::operator(scenario.user(), operator(admin, Utc::now()), reason());
+    let subject = Subject::operator(
+        scenario.user(),
+        operator(admin, Utc::now()),
+        recovery_reason(),
+    );
     let service = AccountService::new(scenario.database().clone());
     let refused = service.revoke_passkey(&subject, other).await;
     assert!(
@@ -1078,9 +1140,9 @@ async fn what_a_start_replaces_and_refuses() {
     let administrator = operator(admin, Utc::now());
     let account = harness.account().await.user_id;
     let service = AdminService::new(harness.database.clone());
-    let links = links();
+    let links = recovery_links();
     let unmailed = service
-        .recover_account(&administrator, account, reason(), &links, None)
+        .recover_account(&administrator, account, recovery_reason(), &links, None)
         .await;
     assert!(
         matches!(unmailed, Err(AdminError::RecoveryNeedsEmail)),
@@ -1092,7 +1154,7 @@ async fn what_a_start_replaces_and_refuses() {
         .recover_account(
             &administrator,
             account,
-            reason(),
+            recovery_reason(),
             &links,
             Some(Revoke::default()),
         )
@@ -1102,7 +1164,7 @@ async fn what_a_start_replaces_and_refuses() {
         "printed only"
     );
     let mailed = service
-        .recover_account(&administrator, account, reason(), &links, None)
+        .recover_account(&administrator, account, recovery_reason(), &links, None)
         .await;
     assert_eq!(
         mailed.expect("mailed"),
@@ -1110,21 +1172,21 @@ async fn what_a_start_replaces_and_refuses() {
         "an administrator never sees it"
     );
     let to_admin = service
-        .recover_account(&cli(), admin_id, reason(), &links, None)
+        .recover_account(&cli(), admin_id, recovery_reason(), &links, None)
         .await;
     assert!(matches!(to_admin, Err(AdminError::RecoveryOfAdministrator)));
 
     let link = service
-        .recover_account(&cli(), account, reason(), &links, None)
+        .recover_account(&cli(), account, recovery_reason(), &links, None)
         .await
         .expect("recovery")
         .expect("link");
     service
-        .disable_user(&cli(), account, reason())
+        .disable_user(&cli(), account, recovery_reason())
         .await
         .expect("disable");
     let disabled = service
-        .recover_account(&cli(), account, reason(), &links, None)
+        .recover_account(&cli(), account, recovery_reason(), &links, None)
         .await;
     assert!(matches!(
         disabled,
@@ -1132,7 +1194,7 @@ async fn what_a_start_replaces_and_refuses() {
     ));
     service.enable_user(&cli(), account).await.expect("enable");
     let accounts = AccountService::new(harness.database.clone());
-    let opened = accounts.open_recovery(&token(&link)).await;
+    let opened = accounts.open_recovery(&recovery_token(&link)).await;
     assert!(
         opened.is_err(),
         "disabling cancelled it, so enabling does not revive it"

@@ -1,4 +1,10 @@
-import { expect, type BrowserContext, type CDPSession, type Page } from '@playwright/test';
+import {
+  expect,
+  type Browser,
+  type BrowserContext,
+  type CDPSession,
+  type Page
+} from '@playwright/test';
 
 /** Auth's origin, which the suite's `baseURL` also names. */
 export const authUrl = process.env.E2E_AUTH_URL ?? 'http://localhost:3000';
@@ -40,6 +46,21 @@ export async function signUp(page: Page, handle: string, passkey = 'Passkey'): P
   await page.getByLabel('Passkey name', { exact: true }).fill(passkey);
   await page.getByRole('button', { name: 'Create account with a passkey' }).click();
   await expect(page).toHaveURL('/settings');
+}
+
+/** A page in a browser of its own, with a passkey authenticator. */
+export async function withPasskeys(browser: Browser): Promise<Page> {
+  const context = await browser.newContext();
+  const page = await context.newPage();
+  await addPasskeys(context, page);
+  return page;
+}
+
+/** A browser of its own, with a passkey authenticator, signed up as `username`. */
+export async function signedUp(browser: Browser, username: string): Promise<Page> {
+  const page = await withPasskeys(browser);
+  await signUp(page, username);
+  return page;
 }
 
 /**

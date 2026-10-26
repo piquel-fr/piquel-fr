@@ -103,6 +103,7 @@ impl AccountPage for History {
             passkeys: &passkeys,
             emails: &email_rows,
             linked: &linked,
+            recovery: reader.recovery(),
         };
         let page = HistoryPage {
             page: settings::HISTORY,

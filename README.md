@@ -208,7 +208,7 @@ just auth user search ali                 # by ID, or part of a username, name o
 just auth user show alice                 # recorded, since it shows personal data
 just auth user disable alice --reason "Spam"
 just auth user enable alice
-just auth user recover alice --reason "Lost every passkey"   # not usable yet, see below
+just auth user recover alice --reason "Lost every passkey"
 just auth user recover alice --reason "Phone stolen" --revoke --keep <passkey-id>
 just auth user undo-recovery alice --reason "Owner confirmed by phone"
 just auth session revoke <session-id>     # one session, as `user show` lists it
@@ -235,15 +235,14 @@ just auth account alice emails remove <email-id> --reason "Asked by email"
   reads are recorded as views. See
   [surfaces.md](docs/architecture/surfaces.md#changing-an-account-on-its-owners-behalf)
   for what is shared.
-- `user recover` is not usable yet: the page its link opens comes with the
-  server-rendered pages. It is for an owner who lost every passkey. It signs the
-  account out everywhere, removes its unverified addresses, and emails its
-  primary verified address a link that enrolls one passkey, once, within a day;
-  it prints the link too, for an owner without an address. For 15 days after,
-  that passkey signs in but confirms no change, and any other passkey of the
-  account can undo the recovery, which takes back its passkey, every session and
-  every app consent. Until then, nobody removes a passkey but the recovery's
-  own.
+- `user recover` is for an owner who lost every passkey. It signs the account
+  out everywhere, removes its unverified addresses, and emails its primary
+  verified address a link to auth's `/recover`, which enrolls one passkey, once,
+  within a day; it prints the link too, for an owner without an address. For 15
+  days after, that passkey signs in but confirms no change, and any other passkey
+  of the account can undo the recovery, which takes back its passkey, every
+  session and every app consent. Until then, nobody removes a passkey but the
+  recovery's own.
   - It first lists the account's recoveries of the last 15 days. While one is in
     probation, it refuses: find out who used it, and undo it with `user
     undo-recovery` first. An unused link is just replaced.
@@ -539,11 +538,11 @@ explains how to choose a requirement and handle the challenge.
   identity so another account can link it; account data and credentials never move.
   Settings keep listing identities of disabled providers so they can be unlinked.
 - The last passkey cannot be removed. Removing a passkey/provider revokes other
-  central sessions. An owner who lost every passkey is recovered with a link that
-  enrolls one new passkey; for 15 days after, it confirms no change, and another
-  passkey of the account can undo the recovery (see
-  [surfaces.md](docs/architecture/surfaces.md#recovering-an-account)). Until its
-  page ships, no page uses the link.
+  central sessions. An owner who lost every passkey is recovered with a link to
+  auth's `/recover` that enrolls one new passkey; for 15 days after, it confirms
+  no change, and another passkey of the account can undo the recovery on
+  `/recover/undo` (see
+  [surfaces.md](docs/architecture/surfaces.md#recovering-an-account)).
 - Sessions last at most 30 days. Access tokens last five minutes. Refresh rotation
   detects reuse and stops when its central session expires or is revoked. Ending a
   session tells the clients that registered a back-channel logout URI, which end
