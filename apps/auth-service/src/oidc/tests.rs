@@ -4,7 +4,7 @@ use super::*;
 use crate::config::TokenDigestKey;
 use crate::deliveries::{BackchannelLogoutSender, OutboundClient, Sender};
 use crate::security::{BrowserCookie, RequestContext, Session};
-use crate::tests::{AUTH_ORIGIN, Replicas, TlsListener, location, parameter};
+use crate::tests::{AUTH_ORIGIN, Replicas, TlsListener, location, parameter, until_blocked};
 use crate::web::WebApplication;
 use axum::{
     body::{Body, to_bytes},
@@ -16,14 +16,16 @@ use piquel_common::PasskeyId;
 use piquel_common::{
     AuthenticationMethod, Handle, UserId,
     clients::{AllowedScopes, ClientKind, ClientOwner, ClientRegistration, RedirectUri, ScopeName},
-    events::{DomainEvent, GrantRevocation, RevocationReason},
+    events::{Actor, DomainEvent, GrantRevocation, RevocationReason},
     protocol::{
         claims::{Acr, BACKCHANNEL_LOGOUT_EVENT, IdTokenClaims},
         step_up::StepUpRequirement,
     },
 };
 use piquel_crypto::{KeySet, Rs256Key};
-use piquel_repository::{BackchannelLogout, DatabaseConfig, InsertUser, InsertVerifiedEmail};
+use piquel_repository::{
+    BackchannelLogout, DatabaseConfig, InsertUser, InsertVerifiedEmail, SessionScope,
+};
 use serde_json::{Value, json};
 use std::{
     collections::HashMap,
@@ -1134,6 +1136,51 @@ async fn authorization_hints_bind_initial_resumed_and_consent_requests() {
         )
         .await;
     assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+}
+
+/// A consent that waits for the account lock while every session ends is not
+/// saved: approving reads the session again under the lock.
+#[tokio::test]
+#[ignore = "requires TEST_DATABASE_URL"]
+async fn a_consent_whose_session_ended_while_waiting_is_not_saved() {
+    let flow = Flow::new(true, false).await;
+    let response = flow.authorize("openid", None).await;
+    let transaction = parameter(&location(&response), "transaction");
+    let database = flow.app.database.clone();
+    let mut holder = database.begin().await.expect("transaction");
+    holder
+        .users()
+        .find_active_by_id_for_update(flow.user_id)
+        .await
+        .expect("lock")
+        .expect("user");
+    let approving = flow.clone();
+    let decision = tokio::spawn(async move {
+        let form = [
+            ("transaction", transaction.as_str()),
+            ("decision", APPROVE_CONSENT),
+        ];
+        let response = approving
+            .request(Method::POST, routes::page::CONSENT, &form, None)
+            .await;
+        response.status()
+    });
+    until_blocked(&mut holder, 1).await;
+    let context = RequestContext::TEST.actor(Actor::Anonymous);
+    holder
+        .revoke_sessions(
+            &context,
+            flow.user_id,
+            SessionScope::All,
+            &RevocationReason::Admin,
+        )
+        .await
+        .expect("every session ends");
+    holder.commit().await.expect("commit");
+
+    assert_eq!(decision.await.expect("decision"), StatusCode::UNAUTHORIZED);
+    let consents = database.oidc().list_consents(flow.user_id).await;
+    assert!(consents.expect("consents").is_empty(), "not saved");
 }
 
 /// Tokens report the class and time of the grant's authentication: a refresh keeps

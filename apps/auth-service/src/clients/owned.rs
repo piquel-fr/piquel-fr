@@ -315,11 +315,11 @@ impl AccountService {
         Ok((client, secret))
     }
 
-    /// Changes the given settings of an owner's client, and returns it.
-    /// Changing where auth may send the browser needs a passkey confirmation: with
-    /// a stolen session cookie, someone could otherwise add their own redirect URI
-    /// and collect authorization codes. Only the change shows whether it does, so
-    /// the confirmation is checked after it, before committing.
+    /// Changes the given settings of an owner's client, once they confirmed with
+    /// a passkey, and returns it. Every change needs the confirmation, like every
+    /// other change to a client: with a stolen session cookie, someone could
+    /// otherwise add their own redirect URI and collect authorization codes, or
+    /// widen what a client they control may ask for.
     pub(crate) async fn update_client(
         &self,
         owned: &OwnedClient,
@@ -327,22 +327,21 @@ impl AccountService {
     ) -> Result<StoredOidcClient, AccountError> {
         let OwnedClient { owner, client } = owned;
         let mut tx = self.database.begin().await?;
-        let session = owner.lock(&mut tx).await?;
-        let changed = ClientRegistry::new(&mut tx, owner.context())
+        owner.lock_confirmed(&mut tx).await?;
+        ClientRegistry::new(&mut tx, owner.context())
             .update(&client.id, |current| {
                 patch.apply(current).map_err(OwnedClientError::from)
             })
             .await?;
-        if changed.iter().any(ClientField::redirects) {
-            owner.confirmed(&session)?;
-        }
         let client = Self::read_client(&mut tx, &client.id).await?;
         tx.commit().await?;
         Ok(client)
     }
 
-    /// Enables or disables an owner's client. The session is enough: either
-    /// is undone as easily. A suspended client stays disabled.
+    /// Enables or disables an owner's client, once they confirmed with a passkey.
+    /// Disabling keeps the client's refresh grants, so enabling it again revives
+    /// every user's; a stolen session cookie must not be enough for that. A
+    /// suspended client stays disabled.
     pub(crate) async fn set_client_enabled(
         &self,
         owned: &OwnedClient,
@@ -350,7 +349,7 @@ impl AccountService {
     ) -> Result<(), AccountError> {
         let OwnedClient { owner, client } = owned;
         let mut tx = self.database.begin().await?;
-        owner.lock(&mut tx).await?;
+        owner.lock_confirmed(&mut tx).await?;
         ClientRegistry::new(&mut tx, owner.context())
             .set_enabled(&client.id, enabled)
             .await

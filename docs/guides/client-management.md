@@ -17,9 +17,9 @@ is `403` with `step_up_required` (see
 | `GET /account/clients` | Session | Lists your clients |
 | `POST /account/clients` | Confirmed | Registers a client. Answers `201` with the client and, for a confidential client, `client_secret`, shown only this once |
 | `GET /account/clients/{id}` | Session | Shows a client and its secrets' `created_at` and `expires_at`, never their values |
-| `PATCH /account/clients/{id}` | Session; Confirmed to change `redirect_uris` or `post_logout_uris` | Replaces the settings you send |
-| `POST /account/clients/{id}/disable` | Session | Pauses a client: it can no longer sign users in, exchange codes or refresh tokens |
-| `POST /account/clients/{id}/enable` | Session | Lets a paused client work again. A client an administrator suspended answers `403` with `"code": "client_suspended"` |
+| `PATCH /account/clients/{id}` | Confirmed | Replaces the settings you send |
+| `POST /account/clients/{id}/disable` | Confirmed | Pauses a client: it can no longer sign users in, exchange codes or refresh tokens |
+| `POST /account/clients/{id}/enable` | Confirmed | Lets a paused client work again, refresh tokens included. A client an administrator suspended answers `403` with `"code": "client_suspended"` |
 | `POST /account/clients/{id}/secrets` | Confirmed | Gives a confidential client a new secret, shown only in this answer. Body `{"grace": "24h"}`: earlier secrets keep working that long (a day by default, at most `30d`; `"0"` revokes them now) |
 | `DELETE /account/clients/{id}` | Confirmed | Deletes a client |
 

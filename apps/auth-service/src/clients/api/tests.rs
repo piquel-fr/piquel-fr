@@ -152,9 +152,9 @@ async fn accounts_manage_only_their_own_clients() {
     assert!(client.enabled && client.deleted_at.is_none());
 }
 
-/// Registering, deleting, rotating a secret and changing redirect or post-logout
-/// URIs need a recent passkey confirmation; a refused change leaves the client as
-/// it was. Renaming and pausing need only the session.
+/// Every change to a client needs a recent passkey confirmation: registering,
+/// changing any setting, pausing or resuming it, rotating a secret and deleting
+/// it. A refused change leaves the client as it was.
 #[tokio::test]
 #[ignore = "requires TEST_DATABASE_URL"]
 async fn sensitive_changes_need_a_recent_confirmation() {
@@ -194,6 +194,13 @@ async fn sensitive_changes_need_a_recent_confirmation() {
             item.clone(),
             Some(json!({"post_logout_uris": ["https://attacker.example/"]})),
         ),
+        (
+            Method::PATCH,
+            item.clone(),
+            Some(json!({"display_name": "Renamed"})),
+        ),
+        (Method::POST, format!("{item}/disable"), None),
+        (Method::POST, format!("{item}/enable"), None),
         (Method::POST, format!("{item}/secrets"), Some(json!({}))),
         (Method::DELETE, item.clone(), None),
     ] {
@@ -206,31 +213,20 @@ async fn sensitive_changes_need_a_recent_confirmation() {
             "{method} {path}"
         );
     }
-    let (status, client) = social
-        .send(
-            &harness.router,
-            Method::PATCH,
-            &item,
-            Some(json!({"display_name": "Renamed"})),
-        )
+    let (status, client) = confirmed
+        .send(&harness.router, Method::GET, &item, None)
         .await;
     assert_eq!(status, StatusCode::OK);
-    assert_eq!(client["display_name"], "Renamed");
+    assert_eq!(
+        client["display_name"], "Notes",
+        "the refused changes were rolled back"
+    );
     assert_eq!(
         client["redirect_uris"],
-        json!(["https://notes.example/callback"]),
-        "the refused change was rolled back"
+        json!(["https://notes.example/callback"])
     );
     assert_eq!(client["post_logout_uris"], json!([]));
-    let (status, _) = social
-        .send(
-            &harness.router,
-            Method::POST,
-            &format!("{item}/disable"),
-            None,
-        )
-        .await;
-    assert_eq!(status, StatusCode::NO_CONTENT);
+    assert_eq!(client["enabled"], json!(true));
 
     let (status, rotated) = confirmed
         .send(
@@ -277,6 +273,13 @@ async fn confirmations_never_reach_requests_sent_before_them() {
             item.clone(),
             Some(json!({"redirect_uris": ["https://attacker.example/callback"]})),
         ),
+        (
+            Method::PATCH,
+            item.clone(),
+            Some(json!({"display_name": "Renamed"})),
+        ),
+        (Method::POST, format!("{item}/disable"), None),
+        (Method::POST, format!("{item}/enable"), None),
         (Method::POST, format!("{item}/secrets"), Some(json!({}))),
         (Method::DELETE, item.clone(), None),
     ] {

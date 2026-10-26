@@ -677,7 +677,7 @@ pub(crate) struct OptionalSession(pub Option<StoredSession>);
 /// meets [`StepUpRequirement::passkey_within`], checked against the `acr` and
 /// `auth_time` tokens would report, as bearer-protected resources check them. The
 /// age counts from the confirmation itself, so using it never extends it. Account
-/// operations check it again under the account lock (`Owner::confirmed`).
+/// operations check it again under the account lock (`Owner::lock_confirmed`).
 pub(crate) struct Confirmed<const MAX_AGE: u32 = CONFIRMATION_MAX_AGE>(pub StoredSession);
 
 impl<const MAX_AGE: u32> Confirmed<MAX_AGE> {
