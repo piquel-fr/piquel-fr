@@ -7,11 +7,11 @@ use crate::security::{
     self, ApiError, BrowserCookie, OptionalSession, RequestContext, SessionError,
 };
 use axum::{
-    Json, Router,
+    Router,
     extract::{Path, Query, State},
     http::HeaderMap,
     response::{IntoResponse, Redirect, Response},
-    routing::{get, post},
+    routing::get,
 };
 use chrono::{Duration, Utc};
 use piquel_common::{
@@ -26,7 +26,8 @@ use piquel_repository::{
     Database, DatabaseTransaction, InsertFederationTransaction, PendingFederation,
     StoredExternalIdentity, StoredSession,
 };
-use serde::{Deserialize, Serialize};
+use piquel_ui::{CallbackError, LoginQuery, PendingDestination, Query as _};
+use serde::Deserialize;
 use std::{collections::BTreeMap, sync::Arc, time::Duration as StdDuration};
 use url::Url;
 
@@ -37,6 +38,7 @@ mod identities;
 pub use error::FederationConfigError;
 pub(crate) use error::FederationError;
 use error::InvalidReturnTo;
+pub(crate) use identities::PendingView;
 /// Provider protocol facts and verified identity exchange.
 mod providers;
 use providers::{ProviderEndpoints, VerifiedIdentity};
@@ -57,35 +59,14 @@ const HTTP_USER_AGENT: &str = "piquel-auth";
 /// settings.
 const DEFAULT_RETURN_TO: &str = routes::page::settings::HOME;
 
-piquel_common::str_enum! {
-    /// Failed-callback reasons, sent to the login page as its `error` query parameter.
-    enum CallbackError {
-        /// The provider declined or cancelled authorization.
-        Cancelled = "social_cancelled",
-        /// The returned authorization could not be verified.
-        Failed = "social_failed",
-        /// The browser's session was confirmed with a passkey, which social sign-in
-        /// cannot re-authenticate.
-        PasskeyRequired = "passkey_required",
-    }
-}
-piquel_common::str_enum! {
-    /// What the login page asks of a browser holding pending provider evidence,
-    /// sent as its `social` query parameter.
-    enum PendingDestination {
-        /// A passkey must confirm the matching account.
-        Link = "link",
-        /// A first passkey must create the account.
-        Signup = "signup",
-    }
-}
-
-/// A validated `return_to`: a path on the auth origin.
-struct ReturnTo(String);
+/// A validated `return_to`: a path on the auth origin, the account's settings by
+/// default.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct ReturnTo(String);
 impl ReturnTo {
     /// Accepts a path that cannot leave the auth origin. Absolute URLs are refused,
     /// even auth's own: its pages send paths.
-    fn parse(value: Option<&str>) -> Result<Self, InvalidReturnTo> {
+    pub(crate) fn parse(value: Option<&str>) -> Result<Self, InvalidReturnTo> {
         let value = value.unwrap_or(DEFAULT_RETURN_TO);
         if value.len() > MAX_RETURN_TO_BYTES {
             return Err(InvalidReturnTo::TooLong(value.len()));
@@ -107,6 +88,18 @@ impl ReturnTo {
             return Err(InvalidReturnTo::NotAPath);
         }
         Ok(Self(value.into()))
+    }
+
+    /// The path.
+    pub(crate) fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
+impl Default for ReturnTo {
+    /// The account's settings.
+    fn default() -> Self {
+        Self(DEFAULT_RETURN_TO.to_owned())
     }
 }
 
@@ -205,12 +198,12 @@ impl FederationApplication {
         error: CallbackError,
         return_to: &str,
     ) -> Result<Response, FederationError> {
-        let mut destination = self.origin.as_url().clone();
-        destination.set_path(routes::page::LOGIN);
-        destination
-            .query_pairs_mut()
-            .append_pair("error", error.as_str())
-            .append_pair("return_to", return_to);
+        let query = LoginQuery {
+            error: Some(error),
+            return_to: Some(return_to.to_owned()),
+            ..LoginQuery::default()
+        };
+        let destination = self.origin.as_url().join(&query.on(routes::page::LOGIN)?)?;
         let mut response = Redirect::to(destination.as_str()).into_response();
         BrowserCookie::Federation.clear_on(&mut response)?;
         Ok(response)
@@ -222,24 +215,15 @@ impl FederationApplication {
             .join(&routes::federation::CALLBACK.replace("{provider}", provider.as_str()))
     }
 
-    /// Returns the social sign-in and linking routes. Listing and unlinking
-    /// identities are shared settings, which [`AccountService`] serves.
+    /// Returns the providers' callback. The sign-in pages start, link and cancel
+    /// social sign-ins in-process; listing and unlinking identities are shared
+    /// settings, which [`AccountService`] serves.
     ///
     /// [`AccountService`]: crate::account::AccountService
     pub(crate) fn routes(self) -> Router {
         Router::new()
-            .route(routes::federation::PROVIDERS, get(Self::providers))
-            .route(routes::federation::START, post(Self::start))
             .route(routes::federation::CALLBACK, get(Self::callback))
-            .route(routes::federation::PENDING, get(Self::pending_view))
-            .route(routes::federation::LINK, post(Self::confirm_link))
-            .route(routes::federation::CANCEL, post(Self::cancel))
             .with_state(self)
-    }
-
-    /// Lists enabled providers in shared protocol vocabulary order.
-    fn providers(State(app): State<Self>) -> std::future::Ready<Json<Vec<Provider>>> {
-        std::future::ready(Json(app.enabled().collect()))
     }
 
     /// The enabled providers, in the shared vocabulary's order.
@@ -272,37 +256,17 @@ impl FederationApplication {
             .await
     }
 
-    /// Starts a browser-bound sign-in. Settings pages link through [`Self::start_link`].
-    async fn start(
-        State(app): State<Self>,
-        Path(provider): Path<String>,
-        Json(input): Json<StartInput>,
-    ) -> Result<Response, ApiError> {
-        Ok(app
-            .start_flow(
-                provider
-                    .parse()
-                    .map_err(FederationError::UnsupportedProvider)?,
-                input,
-            )
-            .await?)
-    }
-
-    /// Starts a sign-in returning where `input` asks, and answers with the
-    /// provider's authorization URL as JSON.
-    async fn start_flow(
+    /// Starts signing a browser in at `provider` from a sign-in page, which the
+    /// browser comes back to at `return_to`, a path on auth, unless the provider's
+    /// identity is new. Returns where to send the browser, and the cookie its
+    /// response carries.
+    pub(crate) async fn start_sign_in(
         &self,
         provider: Provider,
-        input: StartInput,
-    ) -> Result<Response, FederationError> {
-        let return_to = ReturnTo::parse(input.return_to.as_deref())?;
-        let (url, cookie) = self.authorization(provider, None, return_to).await?;
-        let mut response = Json(StartResponse {
-            redirect_url: url.as_str(),
-        })
-        .into_response();
-        cookie.set_on(&mut response)?;
-        Ok(response)
+        return_to: &str,
+    ) -> Result<(Url, FlowCookie), FederationError> {
+        let return_to = ReturnTo::parse(Some(return_to))?;
+        self.authorization(provider, None, return_to).await
     }
 
     /// Persists one-use state for a sign-in, or a link to the account of the `link`
@@ -583,26 +547,15 @@ impl FederationApplication {
         } else {
             PendingDestination::Signup
         };
-        let mut response =
-            Redirect::to(&format!("{}?social={destination}", routes::page::LOGIN)).into_response();
+        let query = LoginQuery {
+            social: Some(destination),
+            ..LoginQuery::default()
+        };
+        let mut response = Redirect::to(&query.on(routes::page::LOGIN)?).into_response();
         BrowserCookie::FederationPending.set_on(&mut response, &browser)?;
         BrowserCookie::Federation.clear_on(&mut response)?;
         Ok(response)
     }
-}
-
-/// Browser input for a new sign-in.
-#[derive(Deserialize)]
-struct StartInput {
-    /// Requested continuation, a path on auth; [`DEFAULT_RETURN_TO`] when omitted.
-    return_to: Option<String>,
-}
-
-/// Authorization destination returned to the browser.
-#[derive(Serialize)]
-struct StartResponse<'a> {
-    /// Provider URL containing browser-bound state and PKCE challenge.
-    redirect_url: &'a str,
 }
 
 /// Provider callback parameters; untrusted until bound to consumed state.

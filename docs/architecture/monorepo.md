@@ -6,9 +6,8 @@ is authentication, with its account settings, and the admin dashboard.
 | Location | Responsibility |
 | --- | --- |
 | `apps/auth-service` | Rust auth authority, browser ceremonies, social adapters, OIDC, server-rendered pages, settings and admin APIs, CLI |
-| `apps/auth-web` | Static SvelteKit sign-in pages embedded by the Rust build |
 | `apps/admin-web` | The admin dashboard at admin.piquel.fr: server-rendered Topcoat pages calling auth's private admin API |
-| `packages/auth-sdk` | Browser auth SDK for pages on the auth origin: API client, WebAuthn passkey ceremonies, the sign-in redirect check, shared styles. `build` compiles it to the one script auth's pages may load |
+| `packages/auth-sdk` | The one script auth's server-rendered pages load: the WebAuthn passkey ceremonies and the form hooks that run them, plus the shared stylesheet, which admin-web also embeds. It exports nothing; `build` compiles it |
 | `crates/database` | `piquel-repository`: PostgreSQL connections, migrations and typed persistence operations |
 | `crates/auth-sdk` | `piquel-auth`, the public Rust SDK: token validation, typed scopes, login and the JWKS cache auth also uses for Google; `axum` feature: extractors, bearer layer, login routes over an application's own session backend |
 | `crates/admin-api` | `piquel-admin-api`: the paths and JSON bodies of auth's private admin API, shared with the admin dashboard; `client` feature: the dashboard's typed client |
@@ -31,10 +30,10 @@ or, as `piquel-ui`, to compile slow view code beside the database crate instead 
 after it.
 
 The auth runtime is one executable with one public HTTP listener, plus a private
-listener for the admin API when it is configured. Login assets, the shared styles
-and the SDK script are built before Rust and embedded in the executable. Auth
-renders the account settings itself, at `/settings`; piquel.fr only redirects
-there. The permanent WebAuthn RP ID is the auth hostname, never a wildcard over
+listener for the admin API when it is configured. The shared stylesheet and the
+SDK script are built before Rust and embedded in the executable. Auth renders every
+page itself, sign-in included, and the account settings at `/settings`; piquel.fr
+only redirects there. The permanent WebAuthn RP ID is the auth hostname, never a wildcard over
 piquel.fr subdomains.
 
 The auth binary also runs explicit migrations, generates invitations and grants

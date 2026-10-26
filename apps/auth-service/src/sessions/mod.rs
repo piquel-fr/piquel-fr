@@ -75,7 +75,7 @@ impl AccountService {
     }
 
     /// Signs one session of the account out, with its applications' refresh
-    /// grants. The owner's own session signs out through `/session/logout`, which
+    /// grants. The owner's own session signs out through the logout page, which
     /// also clears its cookie.
     pub(crate) async fn revoke_session(
         &self,

@@ -186,18 +186,15 @@ and anything else, including any error and any response that sets a cookie, is
 | Class | `Cache-Control` | Responses |
 | --- | --- | --- |
 | `NoStore` | `no-store` | APIs, OAuth, server-rendered pages, errors, everything not below |
-| `Immutable` | `public, max-age=31536000, immutable` | content-hashed bundles under `/_app/immutable/`, and the server-rendered pages' styles and script under `/assets/` |
-| `Revalidate` | `private, no-cache` | the sign-in frontend's pages, `/_app/version.json` and its other unhashed files |
+| `Immutable` | `public, max-age=31536000, immutable` | the pages' content-hashed stylesheet and script, under `/assets/` |
 | `Public` | `public, max-age=N` | discovery and JWKS, for an hour |
 
-Every embedded file has an `ETag` computed at build time, so a browser
-revalidates a page with `If-None-Match` and gets a `304` without a body until a
-deploy changes it. Pages stay out of shared caches: an edge-cached old page
-could reference bundles the new binary no longer serves. The Cloudflare Tunnel
-caches the immutable bundles, as it does any static file type the origin lets it
+Every page is server-rendered and `no-store`, so a deploy never leaves a cached page
+pointing at a stylesheet or script the new binary no longer serves. The Cloudflare Tunnel
+caches the immutable files, as it does any static file type the origin lets it
 store. `Public` responses are the same for everyone, with
-`Access-Control-Allow-Origin: *` and no credentials; cached pages and bundles
-carry no CORS headers. Staging and previews are private routes and bypass
+`Access-Control-Allow-Origin: *` and no credentials; the immutable files carry
+no CORS headers. Staging and previews are private routes and bypass
 Cloudflare.
 
 ### Running several replicas

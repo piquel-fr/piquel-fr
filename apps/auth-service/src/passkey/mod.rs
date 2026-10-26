@@ -9,7 +9,7 @@ use axum::{
     extract::State,
     http::{HeaderMap, StatusCode, header},
     response::{IntoResponse, Response},
-    routing::{get, post},
+    routing::post,
 };
 use piquel_common::{
     AuthenticationMethod, Handle, PasskeyId, UserId,
@@ -18,8 +18,7 @@ use piquel_common::{
 };
 use piquel_crypto::Secret;
 use piquel_repository::{
-    Database, DatabaseError, DatabaseTransaction, InsertPasskey, InsertUser, SessionScope,
-    StoredPasskey,
+    Database, DatabaseError, DatabaseTransaction, InsertPasskey, InsertUser, StoredPasskey,
 };
 use serde_json::Value;
 use std::sync::Arc;
@@ -44,7 +43,7 @@ pub use error::PasskeyConfigError;
 pub(crate) use error::PasskeyError;
 use types::{
     AuthenticationFinish, DisplayName, EnrollmentStart, LoginStart, PasskeyKind,
-    RegistrationFinish, RegistrationStart, SessionView, UserView,
+    RegistrationFinish, RegistrationStart,
 };
 pub(crate) use types::{PasskeyName, Rename};
 
@@ -90,9 +89,8 @@ impl PasskeyApplication {
         })
     }
 
-    /// Returns the passkey ceremonies and browser-session endpoints. Listing,
-    /// renaming and removing passkeys are shared settings, which
-    /// [`AccountService`] serves.
+    /// Returns the passkey ceremonies. Listing, renaming and removing passkeys are
+    /// shared settings, which [`AccountService`] serves.
     pub(crate) fn routes(self) -> Router {
         Router::new()
             .route(
@@ -121,8 +119,6 @@ impl PasskeyApplication {
                 routes::passkey::ENROLL_FINISH,
                 post(Self::finish_enrollment),
             )
-            .route(routes::passkey::SESSION, get(Self::session_view))
-            .route(routes::passkey::SESSION_LOGOUT, post(Self::logout))
             .with_state(self)
     }
 
@@ -763,51 +759,6 @@ impl PasskeyApplication {
             .add_passkey(&owner, key, friendly_name)
             .await?;
         Ok(StatusCode::NO_CONTENT)
-    }
-
-    /// Returns the current account identity.
-    async fn session_view(
-        State(app): State<Self>,
-        security::Session(session): security::Session,
-    ) -> Result<Json<SessionView>, ApiError> {
-        let user = app
-            .database
-            .users()
-            .find_by_id(session.user_id)
-            .await?
-            .ok_or(PasskeyError::AccountInactive)?;
-        Ok(Json(SessionView {
-            user: UserView {
-                id: user.id,
-                username: user.username,
-                display_name: user.display_name,
-            },
-        }))
-    }
-
-    /// Revokes the current session if present and clears its browser cookie.
-    async fn logout(
-        State(app): State<Self>,
-        context: RequestContext,
-        security::OptionalSession(session): security::OptionalSession,
-    ) -> Result<Response, ApiError> {
-        if let Some(session) = session {
-            let mut tx = app.database.begin().await?;
-            security::Session::revoke(
-                &mut tx,
-                context,
-                &session,
-                SessionScope::One(session.id),
-                RevocationReason::Logout,
-            )
-            .await?;
-            tx.commit().await?;
-        }
-        let mut response = StatusCode::NO_CONTENT.into_response();
-        BrowserCookie::Session
-            .clear_on(&mut response)
-            .map_err(PasskeyError::CookieHeader)?;
-        Ok(response)
     }
 }
 

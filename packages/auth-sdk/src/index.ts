@@ -1,101 +1,13 @@
 /**
- * Browser-side SDK for the piquel auth service, for pages on the auth origin: auth-web's
- * sign-in pages use it, and auth's server-rendered pages load it as their only script.
- * A typed API client, WebAuthn passkey ceremonies and the sign-in redirect check.
- * Shared presentation styles are exported separately as `@piquel/auth-sdk/style.css`.
+ * The script of auth's server-rendered pages, which load it as their only script. It
+ * runs the WebAuthn passkey ceremonies their forms ask for, and wires their forms by
+ * their attributes. It exports nothing: auth embeds it, and the pages' stylesheet, by
+ * their paths.
  */
-export type Provider = 'github' | 'google';
-export type PasskeyKind = 'standard' | 'google_password_manager';
-export type Session = { user: { id: string; username: string; display_name: string } };
-/** auth's public `/config`: what its sign-in pages offer. */
-export type Configuration = {
-  invite_required: boolean;
-  providers: Provider[];
-  /** The account settings' path, where sign-in goes without another destination. */
-  settings_url: string;
-};
-export const providerName = (provider: Provider) => (provider === 'github' ? 'GitHub' : 'Google');
+type PasskeyKind = 'standard' | 'google_password_manager';
 
-/** A failed auth request, with a message the page can show as is. */
-export class ApiError extends Error {
-  constructor(
-    message: string,
-    readonly status: number
-  ) {
-    super(message);
-    this.name = 'ApiError';
-  }
-}
-
-/** The action needs a passkey confirmation of the session at most `maxAge` seconds old. */
-export class StepUpRequired extends ApiError {
-  constructor(
-    message: string,
-    status: number,
-    readonly maxAge: number
-  ) {
-    super(message, status);
-    this.name = 'StepUpRequired';
-  }
-}
-
-/** Calls auth's JSON API from a page on the auth origin, with its HttpOnly session cookie. */
-export class AuthApi {
-  async request<T = void>(path: string, method = 'GET', body?: unknown): Promise<T> {
-    const response = await fetch(path, {
-      method,
-      headers: method === 'GET' ? {} : { 'content-type': 'application/json', 'x-piquel-csrf': '1' },
-      ...(body === undefined ? {} : { body: JSON.stringify(body) })
-    });
-    if (!response.ok) throw await this.failure(response);
-    return response.status === 204 ? (undefined as T) : (response.json() as Promise<T>);
-  }
-  /** Turns a failed response into an error whose message the page can show as is. */
-  private async failure(response: Response): Promise<ApiError> {
-    const problem: unknown = await response.json().catch(() => null);
-    const text = (name: string): string | null => {
-      if (!problem || typeof problem !== 'object') return null;
-      const value = (problem as Record<string, unknown>)[name];
-      return typeof value === 'string' ? value : null;
-    };
-    // Browser endpoints send `error` as a readable message. OAuth endpoints send a
-    // code in `error` and what to fix in `error_description`.
-    const error = text('error');
-    const description = text('error_description');
-    const maxAge = (problem as Record<string, unknown> | null)?.max_age;
-    if (text('code') === 'step_up_required' && typeof maxAge === 'number')
-      return new StepUpRequired(
-        error ?? 'Confirm with your passkey to continue.',
-        response.status,
-        maxAge
-      );
-    const protocolErrors: Record<string, string> = {
-      invalid_request:
-        'This sign-in request is invalid or expired. Start again from the application.',
-      invalid_token: 'Please sign in again.',
-      access_denied: 'Sign-in was cancelled or access was declined.',
-      login_required: 'Please sign in again.',
-      consent_required: 'Review the application’s requested access to continue.',
-      server_error: 'Sign-in is temporarily unavailable. Please try again.',
-      temporarily_unavailable: 'Sign-in is temporarily unavailable. Please try again.'
-    };
-    const protocolMessage = error === null ? undefined : protocolErrors[error];
-    return new ApiError(
-      response.status === 429
-        ? (error ?? 'Too many attempts. Wait a moment and try again.')
-        : protocolMessage
-          ? description && response.status < 500
-            ? `${protocolMessage} (${description})`
-            : protocolMessage
-          : (description ??
-            error ??
-            (response.status === 401
-              ? 'Please sign in again.'
-              : 'This action could not be completed. Please try again.')),
-      response.status
-    );
-  }
-}
+/** The action needs a passkey confirmation of the session first. */
+class StepUpRequired extends Error {}
 
 type EncodedDescriptor = Omit<PublicKeyCredentialDescriptor, 'id'> & { id: string };
 type CreationOptions = Omit<
@@ -111,26 +23,24 @@ type RequestOptions = Omit<PublicKeyCredentialRequestOptions, 'challenge' | 'all
   allowCredentials?: EncodedDescriptor[];
 };
 type Ceremony<T> = { ceremony_id: string; public_key: { publicKey: T } };
-function decode(value: string): ArrayBuffer {
-  return Uint8Array.from(atob(value.replace(/-/g, '+').replace(/_/g, '/')), (c) => c.charCodeAt(0))
-    .buffer;
-}
-function encode(value: ArrayBuffer): string {
-  return btoa(String.fromCharCode(...new Uint8Array(value)))
-    .replace(/\+/g, '-')
-    .replace(/\//g, '_')
-    .replace(/=+$/, '');
-}
-function descriptor(value: EncodedDescriptor): PublicKeyCredentialDescriptor {
-  return { ...value, id: decode(value.id) };
-}
-export function passkeysAvailable(): boolean {
-  return typeof window !== 'undefined' && window.isSecureContext && 'PublicKeyCredential' in window;
-}
 
-/** All ceremonies run on the auth origin; serialized WebAuthn wrappers contain publicKey. */
-export class Passkeys {
-  constructor(private readonly api: AuthApi) {}
+/**
+ * The passkey ceremonies, which all run on the auth origin against its JSON routes,
+ * with its HttpOnly session cookie. Serialized WebAuthn wrappers contain `publicKey`.
+ */
+class Passkeys {
+  /** Whether this browser can run a ceremony here. */
+  static available(): boolean {
+    return window.isSecureContext && 'PublicKeyCredential' in window;
+  }
+  /** What a page says when a ceremony failed with `error`. */
+  static message(error: unknown): string {
+    return error instanceof DOMException
+      ? 'The passkey request was cancelled or unavailable. Try again or use another device.'
+      : error instanceof Error
+        ? error.message
+        : 'Something went wrong. Please try again.';
+  }
   /** Signs in, which also confirms the new session for actions that need a passkey. */
   authenticate(username?: string): Promise<void> {
     return this.assert('/webauthn/authenticate', username ? { username } : {});
@@ -152,35 +62,6 @@ export class Passkeys {
     await this.confirm();
     return action();
   }
-  /** Runs an assertion ceremony against `path`'s start and finish endpoints. */
-  private async assert(path: string, body: object): Promise<void> {
-    const start = await this.api.request<Ceremony<RequestOptions>>(`${path}/start`, 'POST', body);
-    const options = start.public_key.publicKey;
-    const credential = (await navigator.credentials.get({
-      publicKey: {
-        ...options,
-        challenge: decode(options.challenge),
-        allowCredentials: options.allowCredentials?.map(descriptor)
-      }
-    })) as PublicKeyCredential | null;
-    if (!credential) throw new Error('Passkey verification was cancelled.');
-    const response = credential.response as AuthenticatorAssertionResponse;
-    await this.api.request(`${path}/finish`, 'POST', {
-      ceremony_id: start.ceremony_id,
-      credential: {
-        id: credential.id,
-        rawId: encode(credential.rawId),
-        type: credential.type,
-        response: {
-          authenticatorData: encode(response.authenticatorData),
-          clientDataJSON: encode(response.clientDataJSON),
-          signature: encode(response.signature),
-          userHandle: response.userHandle ? encode(response.userHandle) : null
-        },
-        clientExtensionResults: credential.getClientExtensionResults()
-      }
-    });
-  }
   /**
    * Creates an account when `account` is given, else enrolls a key for the signed-in user.
    * `pending_signup` attaches the pending social identity the signup page displayed.
@@ -191,7 +72,7 @@ export class Passkeys {
     kind: PasskeyKind = 'standard'
   ): Promise<void> {
     const path = account ? '/webauthn/register' : '/account/passkeys/enroll';
-    const start = await this.api.request<Ceremony<CreationOptions>>(`${path}/start`, 'POST', {
+    const start = await this.post<Ceremony<CreationOptions>>(`${path}/start`, {
       ...account,
       passkey_kind: kind
     });
@@ -199,48 +80,99 @@ export class Passkeys {
     const credential = (await navigator.credentials.create({
       publicKey: {
         ...options,
-        challenge: decode(options.challenge),
-        user: { ...options.user, id: decode(options.user.id) },
-        excludeCredentials: options.excludeCredentials?.map(descriptor)
+        challenge: Passkeys.decode(options.challenge),
+        user: { ...options.user, id: Passkeys.decode(options.user.id) },
+        excludeCredentials: options.excludeCredentials?.map((value) => Passkeys.descriptor(value))
       }
     })) as PublicKeyCredential | null;
     if (!credential) throw new Error('Passkey creation was cancelled.');
     const response = credential.response as AuthenticatorAttestationResponse;
-    await this.api.request(`${path}/finish`, 'POST', {
+    await this.post(`${path}/finish`, {
       ceremony_id: start.ceremony_id,
       friendly_name: friendlyName,
       credential: {
         id: credential.id,
-        rawId: encode(credential.rawId),
+        rawId: Passkeys.encode(credential.rawId),
         type: credential.type,
         response: {
-          attestationObject: encode(response.attestationObject),
-          clientDataJSON: encode(response.clientDataJSON),
+          attestationObject: Passkeys.encode(response.attestationObject),
+          clientDataJSON: Passkeys.encode(response.clientDataJSON),
           transports: response.getTransports()
         },
         clientExtensionResults: credential.getClientExtensionResults()
       }
     });
   }
-}
-
-export function errorMessage(error: unknown): string {
-  return error instanceof DOMException
-    ? 'The passkey request was cancelled or unavailable. Try again or use another device.'
-    : error instanceof Error
-      ? error.message
-      : 'Something went wrong. Please try again.';
-}
-
-/**
- * Returns `value` when the auth service accepts it as `return_to`, else the settings
- * path: a path on the auth origin, without a fragment, backslash or control character.
- * Never throws.
- */
-export function safeDestination(value: string | null, config: Configuration): string {
-  if (!value || value.length > 2048 || /[\\#\p{Cc}]/u.test(value)) return config.settings_url;
-  // One leading `/` makes it a path on the auth origin; `//` would leave it.
-  return value.startsWith('/') && !value.startsWith('//') ? value : config.settings_url;
+  /** Runs an assertion ceremony against `path`'s start and finish endpoints. */
+  private async assert(path: string, body: object): Promise<void> {
+    const start = await this.post<Ceremony<RequestOptions>>(`${path}/start`, body);
+    const options = start.public_key.publicKey;
+    const credential = (await navigator.credentials.get({
+      publicKey: {
+        ...options,
+        challenge: Passkeys.decode(options.challenge),
+        allowCredentials: options.allowCredentials?.map((value) => Passkeys.descriptor(value))
+      }
+    })) as PublicKeyCredential | null;
+    if (!credential) throw new Error('Passkey verification was cancelled.');
+    const response = credential.response as AuthenticatorAssertionResponse;
+    await this.post(`${path}/finish`, {
+      ceremony_id: start.ceremony_id,
+      credential: {
+        id: credential.id,
+        rawId: Passkeys.encode(credential.rawId),
+        type: credential.type,
+        response: {
+          authenticatorData: Passkeys.encode(response.authenticatorData),
+          clientDataJSON: Passkeys.encode(response.clientDataJSON),
+          signature: Passkeys.encode(response.signature),
+          userHandle: response.userHandle ? Passkeys.encode(response.userHandle) : null
+        },
+        clientExtensionResults: credential.getClientExtensionResults()
+      }
+    });
+  }
+  /**
+   * Posts `body` as JSON to the ceremony route `path`. A failure throws an error whose
+   * message the page can show as is: the route's own, as `StepUpRequired` when the
+   * session must confirm first.
+   */
+  private async post<T = void>(path: string, body: unknown): Promise<T> {
+    const response = await fetch(path, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', 'x-piquel-csrf': '1' },
+      body: JSON.stringify(body)
+    });
+    if (response.ok)
+      return response.status === 204 ? (undefined as T) : (response.json() as Promise<T>);
+    // Auth's browser routes send `{error, code?}`, `error` being a readable message;
+    // a proxy in the way may send anything.
+    const problem: unknown = await response.json().catch(() => null);
+    const value = (name: string): unknown =>
+      problem && typeof problem === 'object' ? (problem as Record<string, unknown>)[name] : null;
+    const error = value('error');
+    const message =
+      typeof error === 'string'
+        ? error
+        : response.status === 429
+          ? 'Too many attempts. Wait a moment and try again.'
+          : 'This action could not be completed. Please try again.';
+    throw value('code') === 'step_up_required' ? new StepUpRequired(message) : new Error(message);
+  }
+  private static decode(value: string): ArrayBuffer {
+    return Uint8Array.from(atob(value.replace(/-/g, '+').replace(/_/g, '/')), (c) =>
+      c.charCodeAt(0)
+    ).buffer;
+  }
+  private static encode(value: ArrayBuffer): string {
+    return btoa(String.fromCharCode(...new Uint8Array(value)))
+      .replace(/\+/g, '-')
+      .replace(/\//g, '_')
+      .replace(/=+$/, '');
+  }
+  private static descriptor(value: EncodedDescriptor): PublicKeyCredentialDescriptor {
+    return { ...value, id: Passkeys.decode(value.id) };
+  }
 }
 
 /**
@@ -252,9 +184,14 @@ export function safeDestination(value: string | null, config: Configuration): st
  * - a form marked `data-passkey-confirm` confirms the session with a passkey, then
  *   posts it with `form.submit()`, which sends no button's value: its action and
  *   every other value come from its inputs, never from the button.
+ * - a form marked `data-passkey-sign-in` signs in with a passkey, of the account its
+ *   `username` names, or one the browser offers when it names none, then posts, so its
+ *   page sends the browser on.
+ * - a form marked `data-passkey-register` creates an account with its first passkey,
+ *   from its `username`, `friendly_name`, `passkey_kind`, `invitation` and
+ *   `pending_signup`, then posts, so its page sends the browser on.
  * - a form marked `data-passkey-enroll` adds a passkey named by its `friendly_name`,
- *   confirming first if it must, then posts, so its page says so. Its button starts
- *   disabled until passkeys are known to work here.
+ *   confirming first if it must, then posts, so its page says so.
  * - a form marked `data-fragment-form` copies the link's fragment into its
  *   `data-fragment` inputs as it posts, then drops the fragment from the address. It
  *   shows, with its button enabled, while the link has every value; otherwise the
@@ -265,23 +202,45 @@ export function safeDestination(value: string | null, config: Configuration): st
  * - an element marked `data-replace-url` makes its value the page's address: a page
  *   answering a form with what only it may show, such as a secret, then reloads by
  *   `GET`, never posting the form again.
- * A form's `data-unavailable` note says why its button is disabled, and hides once
- * it is enabled. Its `data-passkey-error` element says why a ceremony failed.
+ * A sign-in, register or enroll form's button starts disabled until passkeys are known
+ * to work here; its `data-unavailable` note says why, and hides once it is enabled.
+ * While a passkey form's ceremony runs, the form is busy: its button is disabled and
+ * says so, and its `data-passkey-error` element, which says why the last one failed,
+ * hides.
  */
 function wire(document: Document): void {
-  const passkeys = new Passkeys(new AuthApi());
+  const passkeys = new Passkeys();
   const fragment = () => new URLSearchParams(window.location.hash.slice(1));
   const inputs = (form: HTMLFormElement) =>
     form.querySelectorAll<HTMLInputElement>('input[data-fragment]');
-  /** Runs `ceremony` once at a time for `form`, saying why it failed. */
+  /** The trimmed value `data` holds for `name`, or `undefined` when it holds none. */
+  const field = (data: FormData, name: string) => {
+    const value = data.get(name);
+    return typeof value === 'string' && value.trim() ? value.trim() : undefined;
+  };
+  /** Where `data` asks to save a new passkey. */
+  const kind = (data: FormData): PasskeyKind =>
+    data.get('passkey_kind') === 'google_password_manager' ? 'google_password_manager' : 'standard';
+  /** Runs `ceremony` once at a time for `form`, busy while it runs, saying why it failed. */
   const run = (form: HTMLFormElement, ceremony: () => Promise<void>) => {
     if (form.dataset.busy) return;
-    form.dataset.busy = 'true';
+    const alert = form.querySelector<HTMLElement>('[data-passkey-error]');
+    const button = form.querySelector('button');
+    const label = button?.textContent ?? '';
+    const busy = (waiting: boolean) => {
+      form.setAttribute('aria-busy', String(waiting));
+      if (waiting) form.dataset.busy = 'true';
+      else delete form.dataset.busy;
+      if (!button) return;
+      button.disabled = waiting;
+      button.textContent = waiting ? 'Waiting for your passkey…' : label;
+    };
+    if (alert) alert.hidden = true;
+    busy(true);
     ceremony().catch((cause: unknown) => {
-      delete form.dataset.busy;
-      const alert = form.querySelector<HTMLElement>('[data-passkey-error]');
+      busy(false);
       if (!alert) return;
-      alert.textContent = errorMessage(cause);
+      alert.textContent = Passkeys.message(cause);
       alert.hidden = false;
     });
   };
@@ -299,17 +258,34 @@ function wire(document: Document): void {
         form.submit();
       });
     }
+    if (form.hasAttribute('data-passkey-sign-in')) {
+      event.preventDefault();
+      const username = field(new FormData(form), 'username');
+      run(form, async () => {
+        await passkeys.authenticate(username);
+        form.submit();
+      });
+    }
+    if (form.hasAttribute('data-passkey-register')) {
+      event.preventDefault();
+      const data = new FormData(form);
+      const account = {
+        username: field(data, 'username') ?? '',
+        invitation: field(data, 'invitation'),
+        pending_signup: field(data, 'pending_signup')
+      };
+      run(form, async () => {
+        await passkeys.register(field(data, 'friendly_name') ?? '', account, kind(data));
+        form.submit();
+      });
+    }
     if (form.hasAttribute('data-passkey-enroll')) {
       event.preventDefault();
       const data = new FormData(form);
-      const name =
-        form.querySelector<HTMLInputElement>('input[name="friendly_name"]')?.value.trim() ?? '';
-      const kind =
-        data.get('passkey_kind') === 'google_password_manager'
-          ? 'google_password_manager'
-          : 'standard';
       run(form, async () => {
-        await passkeys.withConfirmation(() => passkeys.register(name, undefined, kind));
+        await passkeys.withConfirmation(() =>
+          passkeys.register(field(data, 'friendly_name') ?? '', undefined, kind(data))
+        );
         form.submit();
       });
     }
@@ -325,8 +301,10 @@ function wire(document: Document): void {
     form.querySelector<HTMLElement>('[data-unavailable]')?.toggleAttribute('hidden', enabled);
     for (const button of form.querySelectorAll('button')) button.disabled = !enabled;
   };
-  if (passkeysAvailable())
-    for (const form of document.querySelectorAll<HTMLFormElement>('form[data-passkey-enroll]'))
+  if (Passkeys.available())
+    for (const form of document.querySelectorAll<HTMLFormElement>(
+      'form[data-passkey-sign-in], form[data-passkey-register], form[data-passkey-enroll]'
+    ))
       enable(form);
   /** Shows each fragment form while the link has every value, or the notice that it does not. */
   const showFragmentForms = () => {
@@ -372,5 +350,4 @@ function wire(document: Document): void {
   if (replaced) window.history.replaceState(null, '', replaced);
 }
 
-// Without a document, as during SvelteKit's server render, there is nothing to wire.
-if (typeof document !== 'undefined') wire(document);
+wire(document);

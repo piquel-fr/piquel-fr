@@ -13,7 +13,7 @@ use axum::{
     response::Redirect,
 };
 use piquel_common::{ClientId, events::RevocationReason};
-use piquel_repository::SessionScope;
+use piquel_ui::LoginQuery;
 use serde::{Deserialize, Deserializer};
 use serde_json::Value;
 use url::Url;
@@ -113,7 +113,7 @@ impl OidcApplication {
                 .reject("client_id does not match the id_token_hint audience"));
         }
         let Some(uri) = q.post_logout_redirect_uri.as_ref() else {
-            let login = Url::parse(&format!("{}{}", self.issuer, routes::page::LOGIN))?;
+            let login = self.page(routes::page::LOGIN, &LoginQuery::default())?;
             return Ok((login, hinted_client));
         };
         let id = q
@@ -175,21 +175,10 @@ impl OidcApplication {
         q: &LogoutQuery,
     ) -> Result<Url, OAuthError> {
         let (destination, client) = self.logout_destination(q).await?;
-        if let Some(session) = Session::optional(&self.database, headers).await? {
-            let reason = client.map_or(RevocationReason::Logout, |client_id| {
-                RevocationReason::RelyingPartyLogout { client_id }
-            });
-            let mut tx = self.database.begin().await?;
-            Session::revoke(
-                &mut tx,
-                context,
-                &session,
-                SessionScope::One(session.id),
-                reason,
-            )
-            .await?;
-            tx.commit().await?;
-        }
+        let reason = client.map_or(RevocationReason::Logout, |client_id| {
+            RevocationReason::RelyingPartyLogout { client_id }
+        });
+        Session::sign_out(&self.database, context, headers, reason).await?;
         Ok(destination)
     }
 }

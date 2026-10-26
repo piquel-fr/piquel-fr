@@ -22,9 +22,9 @@ just install
 just build
 ```
 
-The executable is `target/release/auth-service`. Auth assets are embedded at compile
-time; rebuild Rust after changing `apps/auth-web` or `packages/auth-sdk`. Auth needs
-Node only to build its sign-in pages and the SDK script.
+The executable is `target/release/auth-service`. The stylesheet and the SDK script
+are embedded at compile time; rebuild Rust after changing `packages/auth-sdk`. Auth
+needs Node only to build the SDK script.
 
 ## Development
 
@@ -180,8 +180,9 @@ just auth invite list
 just auth invite revoke <id>
 ```
 
-`create` prints one signup link. The database stores a digest, expiry and redemption
-time. Tokens expire after seven days by default; `h` and `d` are supported. A token
+`create` prints one signup link, to `/register` with the invitation filled in. A
+signup through GitHub or Google asks for the invitation on its own page. The
+database stores a digest, expiry and redemption time. Tokens expire after seven days by default; `h` and `d` are supported. A token
 is redeemed atomically with account creation, so a failed signup does not spend it.
 Disabling invitation enforcement affects signup only; existing users keep access.
 Administrators can also list, create and revoke invitations through the admin API.
@@ -463,9 +464,10 @@ explains how to choose a requirement and handle the challenge.
 ## Security behavior
 
 - Passkeys require user verification and prefer resident credentials. Synced
-  passkeys and security keys are accepted. Android enrollment offers an explicit
-  Google Password Manager option for devices with Google services. Authentication supports the browser
-  account picker and a handle fallback.
+  passkeys and security keys are accepted. On Android, signup and adding a passkey
+  offer an explicit Google Password Manager option for devices with Google services,
+  never chosen automatically; a standard passkey or security key stays the default.
+  Authentication supports the browser account picker and a handle fallback.
 - An account's handle is its public identifier and login name, released as
   `preferred_username`: 3–32 characters of `[a-z0-9-]`, without a leading, trailing
   or double hyphen, so it is a valid DNS label. Signup trims and lowercases it, and
@@ -529,9 +531,9 @@ Use individual recipes while iterating:
 
 | Task | Recipe |
 | --- | --- |
-| Full validation (format, Clippy/ESLint, Rust/Svelte checks, unit/doc tests, audits) | `just validate` |
+| Full validation (format, Clippy/ESLint, Rust/TypeScript checks, unit/doc tests, audits) | `just validate` |
 | Format Rust and web / check formatting | `just fmt` / `just fmt-check` |
-| Rust / frontend checks (svelte-check, tsc) | `just rust check` / `just web check` |
+| Rust / TypeScript checks (tsc) | `just rust check` / `just web check` |
 | Clippy and ESLint, warnings denied | `just lint` (`just rust lint` / `just web lint`) |
 | Unit tests / focused package tests | `just test` / `just test -p auth-service` |
 | Documentation tests | `just doc-test` |
@@ -540,8 +542,7 @@ Use individual recipes while iterating:
 | Run any command against a scratch cluster | `just db scratch -- psql` |
 | Browser tests against running servers | `just web test-browser` |
 | Dependency audits | `just audit` (`just rust audit` runs cargo-deny, `just web audit` pnpm) |
-| SvelteKit generated types/config | `just web generate` |
-| Sign-in pages and SDK script / embedded debug binary / release binary | `just web build` / `just rust build` / `just build` |
+| SDK script / embedded debug binary / release binary | `just web build` / `just rust build` / `just build` |
 | Run with caller-provided auth configuration | `just auth serve`, `just db migrate`, `just auth invite create --expires-in 7d`, `just auth admin list` |
 
 CI runs these recipes on every pull request whose changes they can affect,
@@ -551,8 +552,8 @@ Require its `ci` check: it summarizes the others.
 Web code is formatted by Prettier and linted by type-aware ESLint (typescript-eslint
 `strictTypeChecked`), configured once at the repository root.
 Test recipes forward extra arguments to nextest or Playwright, including quoted
-filter expressions. `just auth run` forwards arguments to the auth binary. `just auth serve` builds auth assets before compiling and serving.
-Cargo generates the embedded asset table and embeds migrations during compilation.
+filter expressions. `just auth run` forwards arguments to the auth binary. `just auth serve` builds the SDK script before compiling and serving.
+Cargo embeds the stylesheet, the SDK script and migrations during compilation.
 
 Queries in `crates/database` are checked at compile time against
 `crates/database/.sqlx/`. Changing a query's text without `just db prepare` fails

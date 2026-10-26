@@ -2,11 +2,11 @@
 # as local validation:
 #
 #   checks -> Rust formatting and the Rust dependency audit, which compile nothing
-#   web    -> Prettier, svelte-check and tsc, ESLint, the auth pages build and the
-#             web dependency audit
+#   web    -> Prettier, tsc, ESLint, the SDK script build and the web dependency
+#             audit
 #   rust   -> Clippy, unit, database and doc tests against PostgreSQL
 #   e2e    -> the browser suite over HTTPS against the real binary, with the
-#             auth pages embedded, and PostgreSQL
+#             SDK script embedded, and PostgreSQL
 #   docker -> the deployment images
 #
 # Pull requests run only the jobs their changes can affect (see `changes`).
@@ -43,7 +43,7 @@ env:
 jobs:
   # Decides which jobs a pull request needs from the paths it changes. A file
   # matches a filter only when it matches every pattern. `web` covers every
-  # file Prettier, ESLint, tsc or the frontends can see, so it excludes file
+  # file Prettier, ESLint, tsc or the SDK build can see, so it excludes file
   # types rather than directories. `app` covers everything the running
   # service and its images are built from.
   changes:
@@ -183,7 +183,7 @@ jobs:
       - *setup-node
       - *rust-cache
       - run: just install
-      # Embeds the auth pages, as in the deployed image.
+      # Embeds the SDK script, as in the deployed image.
       - run: just rust build
       # The service accepts only HTTPS origins, as in production. Caddy
       # terminates TLS with its local CA, which the suite is told to accept.

@@ -7,7 +7,7 @@ use crate::{
     routes,
     security::BrowserCookie,
 };
-use piquel_ui::{Area, Title};
+use piquel_ui::{Area, LoginQuery, Query, Title};
 use std::slice;
 use topcoat::{
     Error,
@@ -15,7 +15,7 @@ use topcoat::{
     router::{Body, StatusCode, request::headers, response::Response},
     view::view,
 };
-use url::{Url, form_urlencoded};
+use url::Url;
 
 impl WebApplication {
     /// `GET /authorize?transaction=…`: what the application asks to receive, and the
@@ -105,12 +105,16 @@ impl Failure {
     /// Explains `error` with a link to sign in again, which then continues the
     /// pending authorization `transaction`.
     fn signing_in(error: OAuthError, transaction: &str) -> Self {
-        let query = form_urlencoded::Serializer::new(String::new())
-            .append_pair("transaction", transaction)
-            .finish();
-        Self::Explained {
-            error,
-            link: Some(("Sign in again", format!("{}?{query}", routes::page::LOGIN))),
+        let query = LoginQuery {
+            transaction: Some(transaction.to_owned()),
+            ..LoginQuery::default()
+        };
+        match query.on(routes::page::LOGIN) {
+            Ok(sign_in) => Self::Explained {
+                error,
+                link: Some(("Sign in again", sign_in)),
+            },
+            Err(unwritten) => unwritten.into(),
         }
     }
 }

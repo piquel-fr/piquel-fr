@@ -2,11 +2,10 @@
 
 use crate::{
     AuthConfig,
-    config::ProviderConfig,
     routes::page::settings,
     security::BrowserCookie,
-    tests::{AUTH_ORIGIN, Browser, Replicas, parameter, redirect},
-    web::tests::{OWN_PAGE, cookie, html, policy, value_after},
+    tests::{AUTH_ORIGIN, Browser, OWN_PAGE, Replicas, parameter, redirect},
+    web::tests::{cookie, html, policy, value_after},
 };
 use axum::http::StatusCode;
 use piquel_common::{
@@ -242,16 +241,8 @@ async fn disabled_providers_can_still_be_unlinked() {
 #[tokio::test]
 #[ignore = "requires TEST_DATABASE_URL"]
 async fn linking_starts_at_the_provider() {
-    let secret = std::env::temp_dir().join(format!("piquel-settings-secret-{}", TokenId::new()));
-    std::fs::write(&secret, "secret").expect("provider secret");
-    let mut config = AuthConfig::test(&AUTH_ORIGIN.parse().expect("auth origin"));
-    config
-        .federation
-        .providers
-        .insert(Provider::GitHub, ProviderConfig::test(&secret));
-    // The replicas read the secret as they start.
-    let replicas = Replicas::of(&config).await;
-    std::fs::remove_file(&secret).expect("provider secret removed");
+    let config = AuthConfig::test(&AUTH_ORIGIN.parse().expect("auth origin"));
+    let replicas = Replicas::with_github(config).await;
     let database = Replicas::database().await;
     let browser = Browser::new_account(&database).await;
     let page = browser.visit(&replicas.a, settings::HOME).await;

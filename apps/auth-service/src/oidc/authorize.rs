@@ -29,6 +29,7 @@ use piquel_repository::{
     InsertAuthorizationCode, InsertAuthorizationRequest, SessionAuthentication,
     StoredAuthorizationRequest, StoredOidcClient, StoredSession,
 };
+use piquel_ui::LoginQuery;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use url::Url;
@@ -293,11 +294,13 @@ impl AuthorizationDecision {
 
 /// A pending authorization, by its opaque token: the one the browser returns with
 /// after signing in, or the consent page shows.
-#[derive(Deserialize)]
+#[derive(Serialize, Deserialize)]
 pub(crate) struct TransactionQuery {
     /// Opaque pending authorization token.
     pub(crate) transaction: String,
 }
+
+impl piquel_ui::Query for TransactionQuery {}
 
 /// Consent choice posted by the consent page.
 #[derive(Debug, Deserialize, PartialEq, Eq)]
@@ -332,9 +335,10 @@ impl OidcApplication {
         })?;
         let client_id = q.client_id.as_deref().unwrap_or_default();
         if let Some(request_uri) = &q.request_uri {
-            return app
+            let next = app
                 .claim_pushed(context, &headers, client_id, request_uri)
-                .await;
+                .await?;
+            return Ok(Redirect::to(next.as_str()));
         }
         let client = app
             .database
@@ -374,15 +378,13 @@ impl OidcApplication {
             .insert_authorization_request(&request)
             .await?;
         let transaction = opaque.encoded();
-        if requires_login {
-            return Ok(app.continuation_page(
-                routes::page::LOGIN,
-                &transaction,
-                request.target_acr,
-            ));
-        }
-        app.continue_authorization(context, &headers, transaction)
-            .await
+        let next = if requires_login {
+            app.sign_in_page(transaction, request.target_acr)?
+        } else {
+            app.continue_authorization(context, &headers, transaction)
+                .await?
+        };
+        Ok(Redirect::to(next.as_str()))
     }
 
     /// Stores a request pushed by an authenticated client (RFC 9126 §2), validated
@@ -430,7 +432,7 @@ impl OidcApplication {
         headers: &HeaderMap,
         client_id: &str,
         request_uri: &str,
-    ) -> Result<Redirect, OAuthError> {
+    ) -> Result<Url, OAuthError> {
         let unknown = || OAuthCode::InvalidRequestUri.reject(UNKNOWN_REQUEST_URI);
         // RFC 9126 §5: a pushed `request_uri` works whatever
         // `request_uri_parameter_supported` says, so the parameter is supported and
@@ -474,8 +476,10 @@ impl OidcApplication {
             OAuthCode::InvalidRequest
                 .reject_with(format!("resume request is malformed: {error}"), error)
         })?;
-        app.continue_authorization(context, &headers, q.transaction)
-            .await
+        let next = app
+            .continue_authorization(context, &headers, q.transaction)
+            .await?;
+        Ok(Redirect::to(next.as_str()))
     }
 
     /// The pending authorization the consent page shows, once the browser's session
@@ -581,8 +585,9 @@ impl OidcApplication {
         Ok(redirect)
     }
 
-    /// Finds a live pending authorization by its opaque token.
-    async fn find_authorization_request(
+    /// Finds a live pending authorization by its opaque token, whoever asks: the
+    /// sign-in page reads what it may offer and where its forms may lead.
+    pub(crate) async fn find_authorization_request(
         &self,
         value: &str,
     ) -> Result<StoredAuthorizationRequest, OAuthError> {
@@ -659,33 +664,32 @@ impl OidcApplication {
             && hinted_user_id.is_none_or(|subject| subject == session.user_id)
     }
 
-    /// Redirects to the login or consent page, passing the pending authorization along.
-    /// A target `acr` is named too, so the login page offers only methods reaching it.
-    fn continuation_page(
+    /// The sign-in page continuing the pending authorization `transaction`. A target
+    /// `acr` is named too, so the page offers only methods reaching it.
+    fn sign_in_page(
         &self,
-        page: &str,
-        transaction: &str,
+        transaction: String,
         target_acr: Option<Acr>,
-    ) -> Redirect {
-        let target = target_acr
-            .map(|acr| format!("&acr={acr}"))
-            .unwrap_or_default();
-        Redirect::to(&format!(
-            "{}{page}?transaction={transaction}{target}",
-            self.issuer
-        ))
+    ) -> Result<Url, OAuthError> {
+        let query = LoginQuery {
+            transaction: Some(transaction),
+            acr: target_acr,
+            ..LoginQuery::default()
+        };
+        self.page(routes::page::LOGIN, &query)
     }
 
-    /// Sends the browser on from a stored authorization: to login if the session falls
-    /// short, straight to the client if consent is already given, otherwise to consent.
-    /// `prompt=none` returns an error to the client instead of showing a page. Looking
-    /// the session up records its activity, so single sign-on keeps it current.
-    async fn continue_authorization(
+    /// Where the browser goes on from a stored authorization: to sign-in if the session
+    /// falls short, straight to the client if consent is already given, otherwise to
+    /// consent. `prompt=none` returns an error to the client instead of showing a page.
+    /// Looking the session up records its activity, so single sign-on keeps it current.
+    /// The sign-in pages call it once the browser signed in.
+    pub(crate) async fn continue_authorization(
         &self,
         context: RequestContext,
         headers: &HeaderMap,
         transaction: String,
-    ) -> Result<Redirect, OAuthError> {
+    ) -> Result<Url, OAuthError> {
         let request = self.find_authorization_request(&transaction).await?;
         let silent = request.prompt_none;
         let redirect = Url::parse(&request.redirect_uri)?;
@@ -699,19 +703,14 @@ impl OidcApplication {
             if silent {
                 return Err(back(OAuthCode::LoginRequired, SILENT_LOGIN_REQUIRED));
             }
-            return Ok(self.continuation_page(
-                routes::page::LOGIN,
-                &transaction,
-                request.target_acr,
-            ));
+            return self.sign_in_page(transaction, request.target_acr);
         };
         if self.can_authorize(&request, &session).await? {
             let input = AuthorizationDecision {
                 transaction,
                 decision: ConsentDecision::Approve,
             };
-            let redirect = self.decide(headers, input, None).await?;
-            return Ok(Redirect::to(redirect.as_str()));
+            return self.decide(headers, input, None).await;
         }
         if silent {
             return Err(back(
@@ -719,7 +718,7 @@ impl OidcApplication {
                 "prompt=none was requested, but the user must consent first",
             ));
         }
-        Ok(self.continuation_page(routes::page::CONSENT, &transaction, None))
+        self.page(routes::page::CONSENT, &TransactionQuery { transaction })
     }
 
     /// Whether the authorization may skip the consent page: the client is trusted or

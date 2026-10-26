@@ -11,7 +11,10 @@ use crate::{
     passkey::PasskeyError,
     security::ApiError,
     security::CONFIRMATION_MAX_AGE,
-    tests::{AUTH_ORIGIN, Browser, Replicas, change, registration, sign_out, until_blocked},
+    tests::{
+        AUTH_ORIGIN, Browser, Replicas, change, pending_sign_in, registration, sign_out,
+        until_blocked, unusable_passkey,
+    },
 };
 use axum::{
     Router,
@@ -29,7 +32,6 @@ use piquel_common::{
 use piquel_crypto::Secret;
 use piquel_repository::{InsertExternalIdentity, InsertPasskey};
 use piquel_repository::{InsertVerifiedEmail, PendingFederation};
-use serde_json::json;
 use std::{fmt::Debug, mem::discriminant};
 
 /// The reason the scenarios give.
@@ -68,10 +70,8 @@ impl Fixture {
             tx.passkeys()
                 .insert(&InsertPasskey {
                     id,
-                    credential_id: TokenId::new().to_string().into_bytes(),
-                    user_id: account.user_id,
-                    credential: json!({}),
                     friendly_name: format!("Key {index}"),
+                    ..unusable_passkey(account.user_id)
                 })
                 .await
                 .expect("passkey");
@@ -627,17 +627,11 @@ impl Confirmation {
         database
             .federation()
             .insert_pending(&PendingFederation {
-                id: TokenId::new(),
-                browser_digest: pending.digest().as_bytes().to_vec(),
                 provider: Provider::Google,
                 issuer: "https://accounts.google.com".into(),
-                subject: TokenId::new().to_string(),
-                email: None,
-                display_name: "Linked".into(),
-                return_to: "/".into(),
                 link_user_id: Some(user),
                 link_session_id: Some(social.session_id),
-                expires_at: Utc::now() + Duration::minutes(5),
+                ..pending_sign_in(&pending)
             })
             .await
             .expect("pending link");

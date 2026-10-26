@@ -7,6 +7,9 @@ embedded production build, as configured below.
 passkeys, a passkey ceremony that fails, the passkey confirmation the SDK runs,
 devices, an email link's token and signing out.
 
+`sign-in.spec.ts` signs in with a handle, after a handle this authenticator holds
+no passkey for is refused in the form. Every spec signs up through `/register`.
+
 `developers.spec.ts` registers a confidential app in the developer console: a
 setting refused beside its input, the secret shown once, in an answer no cache
 keeps and nowhere in the URL, history or storage, and the app then signing a user

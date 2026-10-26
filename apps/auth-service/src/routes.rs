@@ -1,17 +1,15 @@
 //! Every HTTP path the service serves. Routers, discovery metadata and the security
 //! layer's endpoint classification all read these, so they cannot drift apart.
 
-/// Health and public browser configuration.
+/// Health probes.
 pub(crate) mod service {
     /// Liveness probe; answers whenever the process serves HTTP.
     pub(crate) const LIVE: &str = "/health/live";
     /// Readiness probe; also checks the database.
     pub(crate) const READY: &str = "/health/ready";
-    /// Public configuration read by the embedded sign-in pages.
-    pub(crate) const CONFIG: &str = "/config";
 }
 
-/// Passkey ceremonies, passkey management and the browser session.
+/// Passkey ceremonies and passkey management.
 pub(crate) mod passkey {
     /// Starts account registration with a new passkey.
     pub(crate) const REGISTER_START: &str = "/webauthn/register/start";
@@ -33,26 +31,12 @@ pub(crate) mod passkey {
     pub(crate) const LIST: &str = "/account/passkeys";
     /// Renames or removes one passkey.
     pub(crate) const ITEM: &str = "/account/passkeys/{id}";
-    /// Describes the current browser session.
-    pub(crate) const SESSION: &str = "/session";
-    /// Ends the current browser session.
-    pub(crate) const SESSION_LOGOUT: &str = "/session/logout";
 }
 
 /// Social sign-in and linked identities.
 pub(crate) mod federation {
-    /// Lists the configured providers.
-    pub(crate) const PROVIDERS: &str = "/login/providers";
-    /// Redirects to a provider.
-    pub(crate) const START: &str = "/login/{provider}/start";
     /// Receives the provider's redirect back.
     pub(crate) const CALLBACK: &str = "/login/{provider}/callback";
-    /// Describes this browser's pending signup or link.
-    pub(crate) const PENDING: &str = "/login/social/pending";
-    /// Confirms a pending link with a passkey session.
-    pub(crate) const LINK: &str = "/login/social/link";
-    /// Abandons a pending signup or link.
-    pub(crate) const CANCEL: &str = "/login/social/cancel";
     /// Lists the account's linked identities.
     pub(crate) const IDENTITIES: &str = "/account/social-identities";
     /// Unlinks one provider.
@@ -127,8 +111,10 @@ pub(crate) mod page {
     /// Auth's root, which redirects to the account's settings, so that piquel.fr's
     /// root, which redirects here, still lands on them.
     pub(crate) const ROOT: &str = "/";
-    /// Sign-in, social signup and link confirmation, from the embedded frontend.
+    /// Sign-in, social signup and link confirmation.
     pub(crate) const LOGIN: &str = "/login";
+    /// Creating an account, which invitations link.
+    pub(crate) const REGISTER: &str = "/register";
     /// OAuth consent.
     pub(crate) const CONSENT: &str = "/authorize";
     /// RP-initiated logout confirmation.
@@ -174,7 +160,9 @@ pub(crate) mod page {
 
     /// Every server-rendered page's route, which the security layer classifies as
     /// pages.
-    pub(crate) const ALL: [&str; 12] = [
+    pub(crate) const ALL: [&str; 14] = [
+        LOGIN,
+        REGISTER,
         CONSENT,
         LOGOUT,
         settings::HOME,

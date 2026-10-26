@@ -27,6 +27,8 @@ macro_rules! page {
 mod account;
 /// The developer console.
 mod developers;
+/// The sign-in pages: signing in, creating an account and linking a provider.
+mod login;
 /// The consent page and the confirmation of an application's logout request.
 mod oidc;
 /// The account's settings.
@@ -44,9 +46,10 @@ use crate::{
     routes,
     security::{ApiError, RequestContext},
 };
+use login::SignInPage;
 use piquel_common::config::Origin;
 use piquel_repository::Database;
-use piquel_ui::{Area, Title};
+use piquel_ui::{Area, Onward, QueryError, Title};
 use serde::de::DeserializeOwned;
 use std::{fmt, sync::Arc};
 use topcoat::{
@@ -69,12 +72,16 @@ use url::{Host, Url};
 /// The pages, and what every one of them needs.
 #[derive(Clone)]
 pub(crate) struct WebApplication {
-    /// The account the settings pages and the developer console read and change.
+    /// The account the sign-in pages link to, and the settings pages and the
+    /// developer console read and change.
     account: AccountService,
-    /// The OAuth provider whose consent and logout the pages complete.
+    /// The OAuth provider whose authorizations the sign-in pages continue, and whose
+    /// consent and logout the pages complete.
     oidc: OidcApplication,
-    /// Social sign-in, which the settings link and list.
+    /// Social sign-in, which the sign-in pages start and the settings link and list.
     federation: FederationApplication,
+    /// Whether creating an account needs an invitation.
+    invite_required: bool,
     /// Whether email is sent, which adding an address needs.
     email: EmailConfig,
     /// The `OpenID` Connect issuer, which the console tells apps to discover.
@@ -135,6 +142,13 @@ impl From<Error> for Failure {
     }
 }
 
+impl From<QueryError> for Failure {
+    /// An internal failure: a page's link could not be written.
+    fn from(error: QueryError) -> Self {
+        Self::Internal(error.into())
+    }
+}
+
 impl WebApplication {
     /// Builds the pages over `database`, completing the flows of `oidc` and linking
     /// through `federation`, as `config` sets them up.
@@ -158,6 +172,7 @@ impl WebApplication {
             account: AccountService::new(database),
             oidc,
             federation,
+            invite_required: config.passkey.invite_required,
             email: config.email.clone(),
             issuer: origin.clone(),
             policy: policy.into(),
@@ -165,9 +180,21 @@ impl WebApplication {
     }
 
     /// Each page's route, the handler showing it and the one submitting its form.
-    fn pages() -> [(&'static str, RouteHandlerFn, RouteHandlerFn); 12] {
-        use routes::page::{CONSENT, LOGOUT, settings::VERIFY};
+    fn pages() -> [(&'static str, RouteHandlerFn, RouteHandlerFn); 14] {
+        use routes::page::{CONSENT, LOGIN, LOGOUT, REGISTER, settings::VERIFY};
         [
+            page!(
+                LOGIN,
+                SignInPage::Login.title(),
+                |cx| Self::sign_in(cx, SignInPage::Login),
+                |cx, body| Self::sign_in_change(cx, SignInPage::Login, body),
+            ),
+            page!(
+                REGISTER,
+                SignInPage::Register.title(),
+                |cx| Self::sign_in(cx, SignInPage::Register),
+                |cx, body| Self::sign_in_change(cx, SignInPage::Register, body),
+            ),
             page!(
                 CONSENT,
                 Title::Consent.as_str(),
@@ -310,7 +337,13 @@ impl WebApplication {
         if Self::source(target).is_some() {
             return see_other(target).into_response(cx);
         }
-        let page = view! { cx => piquel_ui::onward(href: target.as_str()) };
+        self.link(cx, title, target, Onward::Application).await
+    }
+
+    /// The page titled `title` linking to `target`, which leads `to` there. Following
+    /// a link submits no form, so no `form-action` governs where it redirects.
+    async fn link(&self, cx: &Cx, title: &str, target: &Url, to: Onward) -> Result<Response> {
+        let page = view! { cx => piquel_ui::onward(href: target.as_str(), to: to) };
         self.render(cx, StatusCode::OK, title, Area::SignIn, &[], page)
             .await
     }

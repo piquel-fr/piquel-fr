@@ -2,7 +2,10 @@
 //! cannot go on.
 
 use crate::intro;
-use piquel_common::protocol::oauth::{ErrorCode, Scope};
+use piquel_common::{
+    Provider,
+    protocol::oauth::{ErrorCode, Scope},
+};
 use topcoat::{
     Result,
     view::{View, component, view},
@@ -122,18 +125,34 @@ pub async fn failure<'a>(
     })
 }
 
-/// The end of a flow whose destination a form may not redirect to, such as a native
-/// application's loopback address, which no Content-Security-Policy can name: a link
-/// the user follows there instead.
+/// Where an [`onward`] link leads.
+#[derive(Clone, Copy, Debug)]
+pub enum Onward {
+    /// Back to the application the flow is for.
+    Application,
+    /// To the provider, which signs the user in on the way to the application.
+    Provider(Provider),
+}
+
+/// A step of a flow whose redirects a form may not lead through, because they end
+/// at a destination no Content-Security-Policy can name, such as a native
+/// application's loopback address: a link to `href`, which leads `to` there, that
+/// the user follows instead.
 #[component]
-pub async fn onward(href: &str) -> Result<impl View> {
+pub async fn onward(href: &str, to: Onward) -> Result<impl View> {
+    let (title, lead) = match to {
+        Onward::Application => (
+            "Return to the application".to_owned(),
+            "Continue to finish in the application.",
+        ),
+        Onward::Provider(provider) => (
+            format!("Continue with {}", provider.name()),
+            "Sign in there, then you return to the application.",
+        ),
+    };
     Ok(view! {
         <section class="auth-shell stack">
-            intro(
-                eyebrow: "Your Piquel account",
-                title: "Return to the application",
-                lead: "Continue to finish in the application.",
-            )
+            intro(eyebrow: "Your Piquel account", title: title, lead: lead)
             <a class="button" href=(href)>"Continue"</a>
         </section>
     })

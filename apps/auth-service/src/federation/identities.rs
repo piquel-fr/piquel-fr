@@ -1,14 +1,9 @@
 //! Pending and linked social identities: signup, linking, listing and unlinking.
 
 use super::{FederationApplication, FederationError, Provider};
-use crate::account::{AccountError, AccountService, ConfirmedOwner, Owner, Subject, Viewer};
-use crate::security::{ApiError, BrowserCookie};
-use axum::{
-    Json,
-    extract::State,
-    http::{HeaderMap, StatusCode},
-    response::{IntoResponse, Response},
-};
+use crate::account::{AccountError, AccountService, Owner, Subject, Viewer};
+use crate::security::BrowserCookie;
+use axum::http::HeaderMap;
 use piquel_common::{
     Personal, TokenId, UserId,
     events::{DomainEvent, EventContext, RevocationReason},
@@ -16,7 +11,7 @@ use piquel_common::{
 };
 use piquel_crypto::Secret;
 use piquel_repository::{Database, DatabaseTransaction, InsertExternalIdentity, PendingFederation};
-use serde::Serialize;
+use piquel_ui::LinkKind;
 
 impl FederationApplication {
     /// Verifies that the signup ID shown by the social page belongs to this browser.
@@ -96,16 +91,12 @@ impl FederationApplication {
         }
     }
 
-    /// Shows verified provider evidence so the browser can choose signup or explicit linking.
-    pub(super) async fn pending_view(
-        State(app): State<Self>,
-        headers: HeaderMap,
-    ) -> Result<Json<PendingView>, ApiError> {
-        Ok(Json(app.pending(&headers).await?))
-    }
-
-    /// Reads this browser's pending evidence and classifies its required confirmation.
-    async fn pending(&self, headers: &HeaderMap) -> Result<PendingView, FederationError> {
+    /// Reads this browser's pending evidence and classifies its required
+    /// confirmation, so the sign-in page asks for signup or linking.
+    pub(crate) async fn pending(
+        &self,
+        headers: &HeaderMap,
+    ) -> Result<PendingView, FederationError> {
         let browser = BrowserCookie::FederationPending
             .read(headers)
             .ok_or(FederationError::PendingBrowserMissing)?;
@@ -124,50 +115,20 @@ impl FederationApplication {
             },
             provider: pending.provider,
             email: pending.email,
-            display_name: pending.display_name,
             return_to: pending.return_to,
         })
     }
 
-    /// Links the identity this browser's pending evidence holds to the owner's
-    /// account, then clears the evidence's cookie and says where to continue.
-    pub(super) async fn confirm_link(
-        State(app): State<Self>,
-        owner: ConfirmedOwner,
-        headers: HeaderMap,
-    ) -> Result<Response, ApiError> {
-        let browser = BrowserCookie::FederationPending
-            .read(&headers)
-            .ok_or(FederationError::PendingBrowserMissing)?;
-        let return_to = AccountService::new(app.database.clone())
-            .link_identity(&owner, &browser)
-            .await?;
-        let mut response = Json(LinkResponse { return_to }).into_response();
-        BrowserCookie::FederationPending
-            .clear_on(&mut response)
-            .map_err(FederationError::from)?;
-        Ok(response)
-    }
-
-    /// Discards any pending social flow for this browser.
-    pub(super) async fn cancel(
-        State(app): State<Self>,
-        headers: HeaderMap,
-    ) -> Result<Response, ApiError> {
-        Ok(app.cancel_pending(&headers).await?)
-    }
-
-    /// Removes browser-bound pending evidence and clears its cookie even when absent.
-    async fn cancel_pending(&self, headers: &HeaderMap) -> Result<Response, FederationError> {
+    /// Removes this browser's pending evidence, if any. The caller clears its
+    /// [`BrowserCookie::FederationPending`].
+    pub(crate) async fn cancel_pending(&self, headers: &HeaderMap) -> Result<(), FederationError> {
         if let Some(browser) = BrowserCookie::FederationPending.read(headers) {
             self.database
                 .federation()
                 .cancel_pending(browser.digest().as_bytes())
                 .await?;
         }
-        let mut response = StatusCode::NO_CONTENT.into_response();
-        BrowserCookie::FederationPending.clear_on(&mut response)?;
-        Ok(response)
+        Ok(())
     }
 }
 
@@ -276,9 +237,8 @@ impl AccountService {
 }
 
 /// Confirmation required before pending provider evidence can become an identity.
-#[derive(Serialize)]
-#[serde(rename_all = "snake_case")]
-enum PendingKind {
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum PendingKind {
     /// Social-first signup attached only by registration naming its ID.
     Signup,
     /// Email match; a passkey session of the matching account can confirm it.
@@ -287,26 +247,28 @@ enum PendingKind {
     ExplicitLink,
 }
 
-/// Browser-visible pending provider evidence.
-#[derive(Serialize)]
-pub(super) struct PendingView {
-    /// Evidence ID which social signup must name explicitly.
-    id: TokenId,
-    /// Whether the browser must register or confirm a link.
-    kind: PendingKind,
-    /// Verified identity provider.
-    provider: Provider,
-    /// Optional verified contact address.
-    email: Option<String>,
-    /// Bounded provider profile name for onboarding.
-    display_name: String,
-    /// Validated continuation retained from authorization start.
-    return_to: String,
+impl PendingKind {
+    /// Why the evidence must be linked to an existing account, or `None` when it
+    /// creates one.
+    pub(crate) const fn link(self) -> Option<LinkKind> {
+        match self {
+            Self::Signup => None,
+            Self::Link => Some(LinkKind::Email),
+            Self::ExplicitLink => Some(LinkKind::Explicit),
+        }
+    }
 }
 
-/// Continuation returned after successful explicit linking.
-#[derive(Serialize)]
-struct LinkResponse {
-    /// Stored, validated continuation for the browser.
-    return_to: String,
+/// This browser's pending provider evidence, as the sign-in page shows it.
+pub(crate) struct PendingView {
+    /// Evidence ID which social signup must name explicitly.
+    pub(crate) id: TokenId,
+    /// Whether the browser must register or confirm a link.
+    pub(crate) kind: PendingKind,
+    /// Verified identity provider.
+    pub(crate) provider: Provider,
+    /// Optional verified contact address.
+    pub(crate) email: Option<String>,
+    /// Validated continuation retained from authorization start.
+    pub(crate) return_to: String,
 }

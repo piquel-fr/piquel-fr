@@ -18,7 +18,7 @@ use crate::{
     security::{ApiError, BrowserCookie, SessionError},
 };
 use piquel_common::ErrorChain;
-use piquel_ui::{Alert, Area, FieldError, Messages, Notice, Query, Section};
+use piquel_ui::{Alert, Area, FieldError, LoginQuery, Messages, Notice, Query, Section};
 use serde::{Deserialize, de::DeserializeOwned};
 use topcoat::{
     Error,
@@ -33,7 +33,7 @@ use topcoat::{
     },
     view::{Child, view},
 };
-use url::{Url, form_urlencoded};
+use url::Url;
 
 /// Each section of the account's pages and the page the account's bar links.
 const SECTIONS: [(Section, &str); 2] = [
@@ -421,10 +421,11 @@ impl WebApplication {
         let here = uri(cx)
             .path_and_query()
             .map_or(page::settings::HOME, |path| path.as_str());
-        let query = form_urlencoded::Serializer::new(String::new())
-            .append_pair("return_to", here)
-            .finish();
-        let sign_in = format!("{}?{query}", page::LOGIN);
+        let sign_in = LoginQuery {
+            return_to: Some(here.to_owned()),
+            ..LoginQuery::default()
+        }
+        .on(page::LOGIN)?;
         let page = view! { cx => piquel_ui::signed_out(section: section, sign_in: &sign_in) };
         Ok(self
             .render(cx, status, title, Area::Section(section), &[], page)

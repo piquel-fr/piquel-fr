@@ -38,6 +38,8 @@ mod developers;
 mod form;
 /// The document around every page, and the parts pages share.
 mod layout;
+/// The sign-in pages.
+mod login;
 /// The pages of OAuth and `OpenID` Connect flows.
 mod oidc;
 /// The account's settings.
@@ -52,9 +54,12 @@ pub use developers::{
     SecretsChange, SecretsState, app_header, app_secrets, app_settings, apps, back_to_apps,
     new_app, overview,
 };
-pub use form::{Alert, Checkbox, Lines, Messages, Notice, OUT_OF_DATE, Query};
+pub use form::{Alert, Checkbox, Lines, Messages, Notice, OUT_OF_DATE, Query, QueryError};
 pub use layout::{Area, Section, Title, account, document, intro, signed_out};
-pub use oidc::{consent, failure, logout, onward};
+pub use login::{
+    CallbackError, LinkKind, LoginChange, LoginQuery, PendingDestination, SignedIn, Step, sign_in,
+};
+pub use oidc::{Onward, consent, failure, logout, onward};
 pub use settings::{
     DeviceChange, DeviceRow, EmailChange, EmailRow, EmailsState, HistoryChange, HistoryPage,
     HistoryRow, HistoryState, Holdings, ProviderRow, SignInChange, SignInState, Tab, addresses,

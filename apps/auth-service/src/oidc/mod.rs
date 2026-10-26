@@ -42,6 +42,7 @@ use piquel_common::{
     },
 };
 use piquel_repository::{Database, StoredOidcClient};
+use piquel_ui::Query;
 use serde::Serialize;
 use std::sync::Arc;
 use url::Url;
@@ -564,6 +565,11 @@ impl OidcApplication {
                 .unwrap_or_default()
         };
         Ok((decode(id), decode(secret)))
+    }
+
+    /// Auth's page at `page`, with `query`, where an OAuth flow sends the browser.
+    fn page(&self, page: &str, query: &impl Query) -> Result<Url, OAuthError> {
+        Ok(Url::parse(&format!("{}{}", self.issuer, query.on(page)?))?)
     }
 
     /// Responses to an authorization request with `state`, sent to its verified `uri`.

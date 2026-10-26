@@ -1,6 +1,6 @@
 //! Security history.
 
-use super::{EmailChange, EmailRow, SignInChange, device_name, sign_in::provider_name};
+use super::{EmailChange, EmailRow, SignInChange, device_name};
 use crate::form::{Fields, Precision, Query, change_form, open, time};
 use chrono::{DateTime, Utc};
 use piquel_common::{
@@ -131,10 +131,10 @@ impl HistoryRow<'_> {
             }
             HistoryEntry::PasskeyRemoved { .. } => "Passkey removed".to_owned(),
             HistoryEntry::IdentityLinked { provider } => {
-                format!("{} sign-in linked", provider_name(*provider))
+                format!("{} sign-in linked", provider.name())
             }
             HistoryEntry::IdentityUnlinked { provider } => {
-                format!("{} sign-in unlinked", provider_name(*provider))
+                format!("{} sign-in unlinked", provider.name())
             }
             HistoryEntry::EmailAdded { email_id, address } => {
                 let address = address.as_ref().map_or_else(
@@ -439,7 +439,7 @@ impl<'a> Undo<'a> {
                 holds.linked.contains(&provider).then(|| Self {
                     action: page.sign_in,
                     change: SignInChange::Unlink { provider }.into(),
-                    label: format!("Unlink {} sign-in", provider_name(provider)),
+                    label: format!("Unlink {} sign-in", provider.name()),
                 })
             }
             FollowUp::RemoveEmail { email_id } => {

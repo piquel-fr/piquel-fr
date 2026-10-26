@@ -102,8 +102,9 @@ loads only the stylesheet and the SDK script embedded under `/assets/`, lets the
 script fetch only auth itself (`connect-src 'self'`), for its passkey ceremonies,
 and lets forms post only to auth and to where they redirect, since browsers apply
 `form-action` to a form's redirects: the consent and logout pages' redirect
-targets, or the enabled providers' authorization origins on the sign-in methods
-page, whose link goes on to the provider. A target no policy can name, such as an IP address, gets
+targets, the enabled providers' authorization origins on the sign-in and sign-in
+methods pages, whose forms go on to the provider, and, when a sign-in continues an
+authorization, the client's redirect origin. A target no policy can name, such as an IP address, gets
 a page linking there instead of the `303`. The security layer accepts a
 page's form only from auth's own pages (`BrowserRequest::is_same_origin`): plain
 forms send no CSRF header, and send `Origin: null` under `Referrer-Policy:
@@ -134,14 +135,34 @@ it names a setting. A
 query that does not parse opens nothing, and a form that does not decode changes
 nothing, logging why at debug level.
 
+The sign-in pages (`src/web/login`), `/login` and `/register`, serve signed-out
+browsers, so they are pages of their own rather than `AccountPage`s. Their query,
+`LoginQuery`, is the one auth's pages and flows serialize for every link to them
+(the admin API's invitation link still writes `/register?invitation=` itself); it
+parses field by field, so a bad value drops only itself, never the `transaction` or
+`return_to` it continues. One `Step` comes from the query, the pending social sign-in and the
+session: signing in, signing up, or linking a provider. The server decides where a
+sign-in continues, an authorization or a path, renders it into each form's action,
+and answers the form with it: an authorization continues in-process and goes on
+through the onward page when no policy can name its client. A provider's sign-in for
+such a client links to the provider rather than redirecting there, since a provider
+the user already allowed sends the browser straight back and on to the client. A
+passkey ceremony runs in the browser through the SDK, then posts the form's change:
+signing in or up changes nothing and continues, and linking while signed out links
+once the sign-in succeeds.
+
 The SDK script wires the pages' forms by their attributes. It keeps a form marked
 `data-submit-once` from posting twice, and confirms with a passkey before posting
 one marked `data-passkey-confirm`, which a page marks while the session has no
-recent confirmation. A `data-passkey-enroll` form runs the passkey enrollment, then
-posts, so its page says so. A `data-fragment-form` copies the link's fragment into its inputs
-as it posts, so a verification token never reaches the server in a URL. Either
-form's button starts disabled, with a `data-unavailable` note saying why, until
-the script finds it can work. A `data-copy` button copies a value, and a
+recent confirmation. A `data-passkey-sign-in` form signs in with a passkey, with its
+`username` when typed, and a `data-passkey-register` form creates the account and
+its passkey; both then post. A `data-passkey-enroll` form runs the passkey
+enrollment, then posts, so its page says so. A `data-fragment-form` copies the
+link's fragment into its inputs as it posts, so a verification token never reaches
+the server in a URL. A ceremony form's or a fragment form's button starts disabled,
+with a `data-unavailable` note saying why, until the script finds it can work. While
+a ceremony runs, its form's button is disabled and says it waits for the passkey,
+and the form's last error hides. A `data-copy` button copies a value, and a
 `data-replace-url` element makes a page that shows a secret reload by `GET`.
 
 Administrative operations are methods of `AdminService` (`src/admin/service.rs`);

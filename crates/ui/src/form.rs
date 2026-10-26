@@ -1,9 +1,11 @@
-//! What the account's pages' forms and links send, what a page says once a change
-//! is made or refused, and the parts every form is built of.
+//! What the pages' forms and links send, what a page says once a change is made or
+//! refused, and the parts every form is built of.
 //!
 //! A change posts one form to its page, naming it in the hidden `action` field.
 //! One that needs a recent passkey confirmation is marked `data-passkey-confirm`
-//! while the session has none, and the SDK confirms before posting it; every other
+//! while the session has none, and the SDK confirms before posting it. One that a
+//! passkey ceremony makes, signing in, creating an account or adding a passkey, is
+//! a [`passkey_form`], which the SDK posts once the ceremony is done. Every other
 //! form is marked `data-submit-once`, so a double click posts it once. A row opens
 //! for editing or confirmation by a `GET` form, so it works without a script.
 //!
@@ -15,10 +17,14 @@
 
 use crate::{
     AppChange, AppSettingsState, DeviceChange, EmailChange, EmailsState, FieldError, HistoryChange,
-    HistoryState, NewAppChange, SecretsChange, SignInChange, SignInState,
+    HistoryState, LoginChange, LoginQuery, NewAppChange, SecretsChange, SignInChange, SignInState,
 };
 use chrono::{DateTime, SecondsFormat, Utc};
 use serde::{Deserialize, Deserializer, Serialize, Serializer, de::IgnoredAny};
+
+/// Why a query could not be written as a link: one of its fields is not a name and
+/// a value.
+pub use serde_urlencoded::ser::Error as QueryError;
 use topcoat::{
     Result,
     view::{Child, View, component, view},
@@ -124,16 +130,16 @@ impl<'a> Messages<'a> {
     }
 }
 
-/// A page's query: which history it shows and which of its rows are open. Its
-/// links and `GET` forms serialize it, and the page deserializes it back, so both
-/// name the same parameters.
+/// A page's query, such as which of its rows are open, or where a sign-in goes on
+/// to. Its links and `GET` forms serialize it, and the page deserializes it back, so
+/// both name the same parameters.
 pub trait Query: Serialize {
     /// The link to `page` with this query.
     ///
     /// # Errors
     ///
     /// Fails if the query does not serialize as name-value pairs.
-    fn on(&self, page: &str) -> Result<String> {
+    fn on(&self, page: &str) -> std::result::Result<String, QueryError> {
         let query = serde_urlencoded::to_string(self)?;
         Ok(if query.is_empty() {
             page.to_owned()
@@ -148,7 +154,8 @@ impl Query for () {}
 /// Defines [`Fields`], with a conversion from each type a form or link sends.
 macro_rules! fields {
     ($($(#[$doc:meta])* $variant:ident($type:ty)),* $(,)?) => {
-        /// What a form sends: a page's change, or the query opening one of its rows.
+        /// What a form sends: a page's change, or the query opening a page or one of
+        /// its rows.
         #[derive(Clone, Debug, Serialize)]
         #[serde(untagged)]
         pub(crate) enum Fields {
@@ -165,6 +172,8 @@ macro_rules! fields {
 }
 
 fields! {
+    /// A change made on a sign-in page.
+    Login(LoginChange),
     /// A change of the sign-in methods.
     SignIn(SignInChange),
     /// A change of the addresses.
@@ -187,6 +196,8 @@ fields! {
     HistoryRow(HistoryState),
     /// A row of an app's settings.
     AppRow(AppSettingsState),
+    /// A sign-in page, as its query opens it.
+    LoginPage(LoginQuery),
 }
 
 impl Fields {
@@ -365,6 +376,85 @@ pub(crate) async fn change_form<'a>(
                 }
             </div>
         </form>
+    })
+}
+
+/// A passkey ceremony the SDK runs before posting a [`passkey_form`], named by the
+/// form's marker.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum Ceremony {
+    /// Signing in, with the form's `username`, if any, or the browser's account
+    /// picker: `data-passkey-sign-in`.
+    SignIn,
+    /// Creating an account with its first passkey, from the form's `username`,
+    /// `friendly_name`, `passkey_kind`, `invitation` and `pending_signup`:
+    /// `data-passkey-register`.
+    Register,
+    /// Adding a passkey to the signed-in account, from the form's `friendly_name`
+    /// and `passkey_kind`, confirming first if it must: `data-passkey-enroll`.
+    Enroll,
+}
+
+impl Ceremony {
+    /// Why the form's button stays disabled, until the SDK finds the browser can run
+    /// the ceremony.
+    const fn unavailable(self) -> &'static str {
+        match self {
+            Self::SignIn | Self::Register => {
+                "Passkeys need a supported browser and a secure connection, with scripts allowed. Open this page in Safari, Chrome, or another browser with passkey support."
+            }
+            Self::Enroll => {
+                "Adding a passkey needs a browser that supports them, with scripts allowed."
+            }
+        }
+    }
+}
+
+/// A change posted to the page at `action` once the SDK ran the passkey
+/// `ceremony`: `change` as hidden inputs, the inputs the ceremony reads as `child`,
+/// and a button labelled `label`, of `class`. The button stays disabled, and says
+/// so, until the SDK finds the browser can run the ceremony; a ceremony that fails
+/// says why in the form.
+#[component]
+pub(crate) async fn passkey_form<'a>(
+    action: &'a str,
+    ceremony: Ceremony,
+    #[into] change: Fields,
+    label: &'a str,
+    #[default] class: &'a str,
+    #[default] child: Child<'_>,
+) -> Result<impl View> {
+    Ok(view! {
+        <form
+            class="stack"
+            method="post"
+            action=(action)
+            data-passkey-sign-in=(ceremony == Ceremony::SignIn)
+            data-passkey-register=(ceremony == Ceremony::Register)
+            data-passkey-enroll=(ceremony == Ceremony::Enroll)
+        >
+            hidden(fields: change)
+            (child)
+            <p class="notice error" role="alert" data-passkey-error="" hidden=""></p>
+            <p class="help" data-unavailable="">(ceremony.unavailable())</p>
+            <button class=(class) disabled="">(label)</button>
+        </form>
+    })
+}
+
+/// Where a new passkey is saved, offered on Android, whose browsers may save it
+/// with Google Password Manager, for a [`passkey_form`] creating one.
+#[component]
+pub(crate) async fn passkey_kind() -> Result<impl View> {
+    Ok(view! {
+        <label>
+            "Save this passkey with"
+            <select name="passkey_kind">
+                <option value="standard">"Passkey or security key"</option>
+                <option value="google_password_manager">"Google Password Manager on this device"</option>
+            </select>
+        </label>
+        <p class="help">"Choose Google Password Manager only if it is available on this Android device."</p>
     })
 }
 

@@ -4,7 +4,7 @@
 mod account;
 /// The private admin API and the operations it shares with the CLI.
 mod admin;
-/// Embedded auth frontend pages and static resources.
+/// The stylesheet and SDK script of auth's pages, embedded at build time.
 mod assets;
 /// The command line: serving, migrations and break-glass administration.
 mod cli;
@@ -29,13 +29,13 @@ mod keys;
 mod oidc;
 /// Lists of operations every surface serving them must cover.
 mod operations;
-/// `WebAuthn` ceremonies and account/session management.
+/// `WebAuthn` ceremonies and passkey management.
 mod passkey;
 /// Every HTTP path the service serves.
 mod routes;
 /// Shared browser-session extraction and HTTP trust policy.
 mod security;
-/// Built-in public configuration, liveness and readiness.
+/// Built-in liveness and readiness.
 mod service;
 /// The account's sessions, and signing them out.
 mod sessions;
@@ -67,13 +67,7 @@ use web::WebApplication;
 
 use account::AccountApplication;
 use assets::EmbeddedAssets;
-use axum::{
-    Router,
-    extract::DefaultBodyLimit,
-    http::{HeaderMap, Uri},
-    middleware,
-    routing::get,
-};
+use axum::{Router, extract::DefaultBodyLimit, http::Uri, middleware, routing::get};
 use piquel_repository::Database;
 use piquel_telemetry::HttpTelemetry;
 use thiserror::Error;
@@ -102,11 +96,9 @@ pub enum StartupError {
     /// The HTTP client that sends deliveries could not initialize.
     #[error("could not initialize the outbound HTTP client")]
     Outbound(#[source] reqwest::Error),
-    /// The executable lacks the required browser assets.
-    #[error(
-        "build the auth frontend and SDK with pnpm --filter \"@piquel/auth-web...\" build before compiling auth-service"
-    )]
-    MissingAssets,
+    /// The executable was compiled before the SDK's script was built.
+    #[error("build the SDK's script with `just web build` before compiling auth-service")]
+    MissingScript,
 }
 
 impl AuthConfig {
@@ -115,13 +107,14 @@ impl AuthConfig {
     /// database, so tests build several to act as replicas.
     ///
     /// # Errors
-    /// Fails when the frontend is not embedded or an application cannot initialize.
+    /// Fails when the SDK's script is not embedded or an application cannot
+    /// initialize.
     pub fn router(&self, database: Database, keys: &SigningKeys) -> Result<Router, StartupError> {
         EmbeddedAssets::check()?;
         let oidc = OidcApplication::new(database.clone(), &self.oidc, keys.clone())?;
         let federation = FederationApplication::new(database.clone(), &self.federation)?;
         let application = Router::new()
-            .merge(ServiceApplication::new(database.clone(), self).routes())
+            .merge(ServiceApplication::new(database.clone()).routes())
             .merge(PasskeyApplication::new(database.clone(), &self.passkey)?.routes())
             .merge(federation.clone().routes())
             .merge(HistoryApplication::new(database.clone()).routes())
@@ -131,10 +124,9 @@ impl AuthConfig {
             .merge(oidc.routes());
         let policy = security::HttpSecurity::new(self, database);
         let protected = application
-            // Static pages answer GET and HEAD only, so preconditions need no 412.
-            .fallback(get(|uri: Uri, headers: HeaderMap| async move {
-                EmbeddedAssets::serve(uri.path(), &headers)
-            }))
+            .fallback(get(
+                |uri: Uri| async move { EmbeddedAssets::serve(uri.path()) },
+            ))
             .layer(DefaultBodyLimit::max(MAX_REQUEST_BODY_BYTES))
             .layer(middleware::from_fn_with_state(
                 policy,

@@ -10,7 +10,7 @@ SDK accepts is accepted by the other.
 | `crates/common` | `piquel-common` | yes | Shared types; with no features, the IDs and wire types shared by auth and the Rust SDK |
 | `crates/auth-sdk` | `piquel-auth` | yes | Rust SDK; the `axum` feature adds the axum integration |
 | `packages/auth` | `@piquel/auth` | yes | TypeScript SDK; `@piquel/auth/sveltekit` for SvelteKit |
-| `packages/auth-sdk` | `@piquel/auth-sdk` | no | First-party package for auth's own pages: auth-web, and the script of the server-rendered ones |
+| `packages/auth-sdk` | `@piquel/auth-sdk` | no | The script of auth's own pages: passkey ceremonies and the form hooks that run them. It exports nothing |
 | `tests/sdk-vectors` | none | no | Shared test vectors |
 
 ## Wire types

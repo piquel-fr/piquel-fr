@@ -6,10 +6,6 @@
   "scripts": {
     "build": "tsc -p tsconfig.build.json"
   },
-  "exports": {
-    ".": "./src/index.ts",
-    "./style.css": "./src/style.css"
-  },
   "devDependencies": {
     "typescript": "catalog:"
   }

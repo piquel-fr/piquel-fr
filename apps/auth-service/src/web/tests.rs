@@ -13,13 +13,13 @@ use crate::{
     },
     security::BrowserCookie,
     tests::{
-        Browser, MAX_RESPONSE_BYTES, Replicas, location, parameter, redirect, register,
+        Browser, MAX_RESPONSE_BYTES, OWN_PAGE, Replicas, location, parameter, redirect, register,
         registration,
     },
 };
 use axum::{
     body::to_bytes,
-    http::{Method, StatusCode, header},
+    http::{StatusCode, header},
     response::Response,
 };
 use piquel_common::{
@@ -32,10 +32,6 @@ use url::{Position, Url, form_urlencoded};
 
 /// A PKCE `S256` challenge (RFC 7636 appendix B). No test redeems its code.
 const CHALLENGE: &str = "E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM";
-/// What a form on one of auth's pages sends: they have `Referrer-Policy: no-referrer`,
-/// so the browser sends `Origin: null`.
-pub(super) const OWN_PAGE: &[(&str, &str)] =
-    &[("sec-fetch-site", "same-origin"), ("origin", "null")];
 
 /// Two replicas, a signed-in browser, and an untrusted client.
 struct Harness {
@@ -88,34 +84,34 @@ impl Harness {
 
     /// Starts an authorization as the client, and returns the consent page it lands on.
     async fn consent_page(&self) -> Url {
-        let query = form_urlencoded::Serializer::new(String::new())
-            .append_pair("response_type", "code")
-            .append_pair("client_id", self.client.id.as_str())
-            .append_pair("redirect_uri", self.client.redirect_uris[0].as_str())
-            .append_pair("scope", "openid profile")
-            .append_pair("state", "page-test")
-            .append_pair("code_challenge", CHALLENGE)
-            .append_pair("code_challenge_method", "S256")
-            .finish();
-        let page = location(&self.visit(routes::oidc::AUTHORIZE, &query).await);
+        let authorize = authorize(&self.client, &[]);
+        let page = location(&self.browser.visit(&self.replicas.a, &authorize).await);
         assert_eq!(page.path(), routes::page::CONSENT);
         page
     }
+}
+
+/// The authorization request of `client`, asking for its profile with `extra`
+/// parameters, such as `acr_values`.
+pub(super) fn authorize(client: &ClientRegistration, extra: &[(&str, &str)]) -> String {
+    let query = form_urlencoded::Serializer::new(String::new())
+        .append_pair("response_type", "code")
+        .append_pair("client_id", client.id.as_str())
+        .append_pair("redirect_uri", client.redirect_uris[0].as_str())
+        .append_pair("scope", "openid profile")
+        .append_pair("state", "page-test")
+        .append_pair("code_challenge", CHALLENGE)
+        .append_pair("code_challenge_method", "S256")
+        .extend_pairs(extra.iter().copied())
+        .finish();
+    format!("{}?{query}", routes::oidc::AUTHORIZE)
 }
 
 impl Browser {
     /// This browser as it follows `response`'s redirect, holding the notice it set.
     pub(super) fn following(&self, response: &Response) -> Self {
         let (notice, _) = cookie(response, BrowserCookie::Notice);
-        Self {
-            user_id: self.user_id,
-            session_id: self.session_id,
-            cookie: format!(
-                "{}; {}={notice}",
-                self.cookie,
-                BrowserCookie::Notice.as_str()
-            ),
-        }
+        self.with_cookie(BrowserCookie::Notice, notice)
     }
 
     /// Posts `change` to the page at `path` on replica `b`, as the page's form sends
@@ -306,21 +302,21 @@ async fn logout_page_ends_the_session_from_its_own_form() {
             .append_pair("post_logout_redirect_uri", post_logout)
             .append_pair("state", state)
             .finish();
-        let page = location(&harness.visit(routes::oidc::LOGOUT, &query).await);
-        assert_eq!(page.path(), routes::page::LOGOUT);
-        let response = harness.follow(&page).await;
+        let confirm = location(&harness.visit(routes::oidc::LOGOUT, &query).await);
+        assert_eq!(confirm.path(), routes::page::LOGOUT);
+        let response = harness.follow(&confirm).await;
         assert_eq!(response.status(), StatusCode::OK, "{state:?}");
         let policy = policy(&response).to_owned();
         assert!(
             policy.ends_with("form-action 'self' https://client.example"),
             "{policy}"
         );
-        let html = html(response).await;
-        assert!(html.contains("<h1>Ready to sign out?</h1>"), "{html}");
+        let page = html(response).await;
+        assert!(page.contains("<h1>Ready to sign out?</h1>"), "{page}");
         let field = format!(r#"<input type="hidden" name="state" value="{state}">"#);
-        assert!(html.contains(&field), "{html}");
+        assert!(page.contains(&field), "{page}");
 
-        let fields: Vec<(String, String)> = page.query_pairs().into_owned().collect();
+        let fields: Vec<(String, String)> = confirm.query_pairs().into_owned().collect();
         let fields: Vec<_> = fields
             .iter()
             .map(|(name, value)| (name.as_str(), value.as_str()))
@@ -337,11 +333,17 @@ async fn logout_page_ends_the_session_from_its_own_form() {
             .to_str()
             .expect("Set-Cookie is text");
         assert!(cookie.contains("Max-Age=0"), "{cookie}");
-        let (status, _) = harness
-            .browser
-            .call(&harness.replicas.a, Method::GET, routes::passkey::SESSION)
-            .await;
-        assert_eq!(status, StatusCode::UNAUTHORIZED, "{state:?}");
+        let after = html(
+            harness
+                .browser
+                .visit(&harness.replicas.a, settings::HOME)
+                .await,
+        )
+        .await;
+        assert!(
+            after.contains("<h2>Sign in to see your settings</h2>"),
+            "{state:?}: {after}"
+        );
     }
 }
 
