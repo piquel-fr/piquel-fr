@@ -7,10 +7,10 @@ use crate::{
     routes::page::{LOGIN, REGISTER, settings},
     security::BrowserCookie,
     tests::{
-        AUTH_ORIGIN, Browser, OWN_PAGE, Replicas, location, parameter, pending_sign_in, redirect,
-        register, registration, unusable_passkey,
+        AUTH_ORIGIN, Browser, OWN_PAGE, Replicas, cookie, html, location, parameter,
+        pending_sign_in, policy, redirect, register, registration, unusable_passkey,
     },
-    web::tests::{authorize, cookie, html, policy, value_after},
+    web::tests::{authorize, value_after},
 };
 use axum::http::{StatusCode, header};
 use piquel_common::{

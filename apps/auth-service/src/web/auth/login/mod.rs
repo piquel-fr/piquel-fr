@@ -117,6 +117,18 @@ impl Continuation {
         }
     }
 
+    /// Whether it goes on to auth's handoff to the admin dashboard, which sends the
+    /// browser on to the dashboard.
+    fn hands_off(&self) -> bool {
+        match self {
+            Self::Path(path) => path
+                .as_str()
+                .parse::<Uri>()
+                .is_ok_and(|uri| uri.path() == routes::page::ADMIN),
+            Self::Authorization(_) => false,
+        }
+    }
+
     /// The pending authorization it continues, if any, as the sign-in page sees it.
     async fn authorization(
         &self,
@@ -412,8 +424,9 @@ impl WebApplication {
 
     /// Renders the sign-in page `page` at the step the `visit` finds, at `refused`'s
     /// status and saying why, if anything was. Its forms may redirect to the
-    /// providers, and to the application whose authorization the sign-in
-    /// continues; an authorization that is unknown or expired explains itself.
+    /// providers, to the application whose authorization the sign-in continues,
+    /// and through auth's handoff to the admin dashboard; an authorization that is
+    /// unknown or expired explains itself.
     async fn sign_in_page(
         &self,
         cx: &Cx,
@@ -430,6 +443,9 @@ impl WebApplication {
             .federation
             .authorization_endpoints()
             .map_err(Error::from)?;
+        if let Some(sign_in) = self.dashboard.as_ref().filter(|_| continuation.hands_off()) {
+            targets.push(sign_in.dashboard().as_url().clone());
+        }
         let target_acr = match continuation.authorization(&self.oidc).await? {
             Some(authorization) => {
                 targets.push(authorization.redirect_uri);

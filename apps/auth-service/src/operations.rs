@@ -1,6 +1,6 @@
-//! Lists of operations that every surface serving them must cover: the admin API
-//! and the CLI for administration, the owner's routes and the CLI for account
-//! settings.
+//! Lists of operations that every surface serving them must cover: the admin
+//! dashboard and the CLI for administration, the owner's routes and the CLI for
+//! account settings.
 
 /// Declares an enum of operations, each with its documentation, and its `ALL`
 /// constant listing every variant, so the list cannot miss one. Surfaces match on

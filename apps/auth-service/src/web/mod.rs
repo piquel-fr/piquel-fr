@@ -1,7 +1,9 @@
-//! auth.piquel.fr's server-rendered pages, grouped by area: the sign-in flows
-//! (`auth`), the account settings (`settings`) and the developer console
-//! (`developers`). Each handler resolves who acts, calls the service in-process
-//! and renders `piquel-ui` components.
+//! The server-rendered pages, grouped by area: auth.piquel.fr's sign-in flows
+//! (`auth`), account settings (`settings`) and developer console (`developers`),
+//! and the admin dashboard at admin.piquel.fr ([`admin`]), which has a router and
+//! a security layer of its own. Each handler resolves who acts, calls the
+//! service in-process and renders `piquel-ui` components. The rest of this
+//! module is auth.piquel.fr's router.
 //!
 //! A page answers `GET` with itself and `POST` with its form's result, at the route
 //! [`routes::page`] declares. Axum mounts the Topcoat router on exactly those routes
@@ -27,6 +29,8 @@ macro_rules! page {
 /// The signed-in account's pages: their frame, and how each shows itself and makes
 /// its changes.
 mod account;
+/// The admin dashboard at admin.piquel.fr, served on the admin listener.
+mod admin;
 /// auth.piquel.fr's sign-in flows.
 mod auth;
 /// The developer console.
@@ -39,13 +43,16 @@ mod tests;
 use crate::{
     AuthConfig, MAX_REQUEST_BODY_BYTES,
     account::AccountService,
+    admin::DashboardSignIn,
     assets::EmbeddedAssets,
     config::EmailConfig,
     federation::FederationApplication,
     oidc::{OAuthCode, OAuthError, OidcApplication, Reject},
+    passkey::PasskeyApplication,
     routes,
     security::{ApiError, RequestContext},
 };
+pub(crate) use admin::AdminApplication;
 use auth::SignInPage;
 use piquel_common::config::Origin;
 use piquel_repository::Database;
@@ -80,6 +87,10 @@ pub(crate) struct WebApplication {
     oidc: OidcApplication,
     /// Social sign-in, which the sign-in pages start and the settings link and list.
     federation: FederationApplication,
+    /// Passkeys, whose proof the handoff to the admin dashboard verifies.
+    passkeys: PasskeyApplication,
+    /// Signing administrators in to the admin dashboard, if auth serves one.
+    dashboard: Option<DashboardSignIn>,
     /// Whether creating an account needs an invitation.
     invite_required: bool,
     /// Whether email is sent, which adding an address needs.
@@ -150,13 +161,15 @@ impl From<QueryError> for Failure {
 }
 
 impl WebApplication {
-    /// Builds the pages over `database`, completing the flows of `oidc` and linking
-    /// through `federation`, as `config` sets them up.
+    /// Builds the pages over `database`, completing the flows of `oidc`, linking
+    /// through `federation` and verifying `passkeys`' proofs, as `config` sets
+    /// them up.
     pub(crate) fn new(
         database: Database,
         config: &AuthConfig,
         oidc: OidcApplication,
         federation: FederationApplication,
+        passkeys: PasskeyApplication,
     ) -> Self {
         let origin = &config.oidc.origin;
         // A source with a path needs the whole URL: `'self'` names none. The passkey
@@ -167,10 +180,15 @@ impl WebApplication {
             origin.join(&EmbeddedAssets::STYLESHEET.path()),
             origin.join(&EmbeddedAssets::SCRIPT.path()),
         );
+        let dashboard = config.dashboard.as_ref().map(|dashboard| {
+            DashboardSignIn::new(database.clone(), origin.clone(), dashboard.origin.clone())
+        });
         Self {
             account: AccountService::new(database),
             oidc,
             federation,
+            passkeys,
+            dashboard,
             invite_required: config.passkey.invite_required,
             email: config.email.clone(),
             issuer: origin.clone(),
@@ -179,9 +197,9 @@ impl WebApplication {
     }
 
     /// Each page's route, the handler showing it and the one submitting its form.
-    fn pages() -> [(&'static str, RouteHandlerFn, RouteHandlerFn); 17] {
+    fn pages() -> [(&'static str, RouteHandlerFn, RouteHandlerFn); 18] {
         use routes::page::{
-            CONSENT, LOGIN, LOGOUT, RECOVER, RECOVER_UNDO, REGISTER, settings::VERIFY,
+            ADMIN, CONSENT, LOGIN, LOGOUT, RECOVER, RECOVER_UNDO, REGISTER, settings::VERIFY,
         };
         [
             page!(
@@ -207,6 +225,12 @@ impl WebApplication {
                 Title::Logout.as_str(),
                 Self::logout,
                 Self::end_session
+            ),
+            page!(
+                ADMIN,
+                Title::Dashboard.as_str(),
+                Self::admin,
+                Self::admin_proof
             ),
             Self::entry::<settings::SignInMethods>(),
             Self::entry::<settings::Addresses>(),
@@ -384,7 +408,7 @@ impl WebApplication {
             piquel_ui::document(
                 title: title,
                 stylesheet: &stylesheet,
-                script: &script,
+                script: script.as_str(),
                 home: routes::page::settings::HOME,
                 area: area,
                 (page)

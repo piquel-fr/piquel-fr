@@ -9,6 +9,7 @@ use axum::{
         Extensions, HeaderMap, HeaderValue, Method, StatusCode,
         header::{self, InvalidHeaderValue},
         request::Parts,
+        uri::Authority,
     },
     middleware::Next,
     response::{IntoResponse, Response},
@@ -17,6 +18,7 @@ use chrono::{Duration, Utc};
 use ipnet::IpNet;
 use piquel_common::{
     AuthenticationMethod, ClientId, ErrorChain, HandleError, PasskeyId, SessionId, UserId,
+    config::Origin,
     events::{
         Actor, DomainEvent, EventContext, RequestOrigin, RevocationReason, SignInFailure,
         UserAgentFamily,
@@ -213,6 +215,11 @@ piquel_common::str_enum! {
         FederationPending = "__Host-piquel_federation_pending",
         /// What an account page's change just did, which the page it goes to says once.
         Notice = "__Host-piquel_notice",
+        /// The admin dashboard's session, on the dashboard's own origin.
+        Dashboard = "__Host-piquel_dashboard",
+        /// A sign-in to the admin dashboard awaiting auth's handoff, on the
+        /// dashboard's origin.
+        DashboardState = "__Host-piquel_dashboard_state",
     }
 }
 
@@ -221,8 +228,10 @@ impl BrowserCookie {
     /// notice is shown on the page its change goes to, at once.
     const fn max_age(self) -> u32 {
         match self {
-            Self::Session => SESSION_LIFETIME_DAYS * 24 * 60 * 60,
-            Self::Ceremony | Self::Federation | Self::FederationPending => FLOW_COOKIE_MAX_AGE,
+            Self::Session | Self::Dashboard => SESSION_LIFETIME_DAYS * 24 * 60 * 60,
+            Self::Ceremony | Self::Federation | Self::FederationPending | Self::DashboardState => {
+                FLOW_COOKIE_MAX_AGE
+            }
             Self::Notice => 60,
         }
     }
@@ -862,6 +871,9 @@ enum Endpoint {
     /// Auth's server-rendered pages, sign-in included, which anyone may navigate to,
     /// and the forms they post.
     Page,
+    /// The admin dashboard's pages, the admin listener's only routes, and the forms
+    /// they post.
+    Dashboard,
     /// Passkey ceremonies, the providers' callbacks and the other auth-origin
     /// routes.
     Other,
@@ -901,7 +913,12 @@ impl Endpoint {
     const fn is_protocol(self) -> bool {
         match self {
             Self::OAuthBackChannel | Self::UserInfo | Self::Authorize | Self::Logout => true,
-            Self::Discovery | Self::Health | Self::Account | Self::Page | Self::Other => false,
+            Self::Discovery
+            | Self::Health
+            | Self::Account
+            | Self::Page
+            | Self::Dashboard
+            | Self::Other => false,
         }
     }
 
@@ -917,6 +934,7 @@ impl Endpoint {
             Self::Account => Some(RateCategory::Account),
             Self::Authorize | Self::Logout | Self::Other => Some(RateCategory::Login),
             Self::Page => Some(RateCategory::Page),
+            Self::Dashboard => Some(RateCategory::Dashboard),
             Self::Discovery | Self::Health => None,
         }
     }
@@ -939,6 +957,8 @@ piquel_common::str_enum! {
         Login = "login",
         /// Auth's server-rendered pages, sign-in included, and the forms they post.
         Page = "page",
+        /// The admin dashboard's pages and forms.
+        Dashboard = "dashboard",
     }
 }
 
@@ -1028,6 +1048,9 @@ pub(crate) enum HttpSecurityError {
     /// A form was posted to one of auth's pages from somewhere else.
     #[error("page form posted from another origin")]
     ForeignForm,
+    /// The request names a host this listener does not serve.
+    #[error("request host is not this listener's")]
+    WrongHost,
     /// An approved browser mutation omitted its CSRF proof.
     #[error("browser mutation requires CSRF header")]
     MissingCsrf,
@@ -1067,6 +1090,10 @@ impl From<HttpSecurityError> for ApiError {
             HttpSecurityError::ForeignForm => {
                 Self::forbidden("Submit this form from its page on this site.")
             }
+            HttpSecurityError::WrongHost => Self::new(
+                StatusCode::MISDIRECTED_REQUEST,
+                "This host is not served here.",
+            ),
             HttpSecurityError::MissingCsrf => Self::forbidden(format!(
                 "This request must come from a Piquel page, with the {CSRF_HEADER} header."
             )),
@@ -1096,7 +1123,7 @@ impl From<HttpSecurityError> for ApiError {
     }
 }
 
-/// Shared origin, proxy, timeout and request-limit policy.
+/// Shared origin, proxy, timeout and request-limit policy, one per listener.
 #[derive(Clone)]
 pub(crate) struct HttpSecurity {
     /// Stores the rate-limit counters.
@@ -1105,29 +1132,73 @@ pub(crate) struct HttpSecurity {
     pub trusted_proxies: Arc<Vec<IpNet>>,
     /// Deadline for the whole request, handler included.
     pub request_timeout: StdDuration,
-    /// Origin of auth's own pages, allowed on every endpoint.
+    /// Origin of the listener's own pages, allowed on every endpoint.
     pub origin: url::Origin,
+    /// Which listener it guards.
+    listener: Listener,
+}
+
+/// The listener an [`HttpSecurity`] guards.
+#[derive(Clone)]
+enum Listener {
+    /// Auth's public listener: protocol endpoints, JSON APIs and pages, each
+    /// classified by its route.
+    Public,
+    /// The admin listener, which serves only the dashboard's pages, and only to
+    /// requests naming the dashboard's host, this `Host` header value: a request
+    /// reaching it under another name, by a misrouted ingress or a rebound DNS
+    /// name, is refused before anything runs.
+    Admin(HeaderValue),
 }
 
 impl HttpSecurity {
-    /// Derives the shared HTTP policy from validated startup configuration.
+    /// Derives the public listener's policy from validated startup configuration.
     pub(crate) fn new(config: &crate::AuthConfig, database: Database) -> Self {
         Self {
             database,
             trusted_proxies: Arc::new(config.trusted_proxies.clone()),
             request_timeout: REQUEST_TIMEOUT,
             origin: config.passkey.origin.as_url().origin(),
+            listener: Listener::Public,
         }
     }
 
-    /// Middleware for routers outside [`Self::protect`], such as the admin API:
-    /// runs the request, body reads included, under the same deadline.
-    pub(crate) async fn deadline(request: Request, next: Next) -> Response {
-        tokio::time::timeout(REQUEST_TIMEOUT, next.run(request))
-            .await
-            .unwrap_or_else(|elapsed| {
-                ApiError::from(HttpSecurityError::from(elapsed)).into_response()
-            })
+    /// Derives the admin listener's policy, for the dashboard at `dashboard`, from
+    /// validated startup configuration.
+    pub(crate) fn admin(
+        config: &crate::AuthConfig,
+        database: Database,
+        dashboard: &Origin,
+    ) -> Result<Self, InvalidHeaderValue> {
+        // What browsers send: the host, and the port unless it is the scheme's own.
+        let host = match dashboard.as_url().port() {
+            Some(port) => format!("{}:{port}", dashboard.host()),
+            None => dashboard.host().to_owned(),
+        };
+        Ok(Self {
+            listener: Listener::Admin(HeaderValue::from_str(&host)?),
+            origin: dashboard.as_url().origin(),
+            ..Self::new(config, database)
+        })
+    }
+
+    /// Refuses a request to the admin listener that names another host, by its
+    /// `Host` header or, over HTTP/2, its authority.
+    fn check_host(&self, request: &Request) -> Result<(), HttpSecurityError> {
+        let Listener::Admin(expected) = &self.listener else {
+            return Ok(());
+        };
+        let host = request
+            .headers()
+            .get(header::HOST)
+            .and_then(|host| host.to_str().ok())
+            .or_else(|| request.uri().authority().map(Authority::as_str));
+        match host {
+            Some(host) if host.eq_ignore_ascii_case(expected.to_str().unwrap_or_default()) => {
+                Ok(())
+            }
+            _ => Err(HttpSecurityError::WrongHost),
+        }
     }
 
     /// A trusted edge must overwrite `X-Forwarded-For` with one validated client address.
@@ -1189,11 +1260,15 @@ impl HttpSecurity {
     ) -> Response {
         // Reuse the original header for CORS so decoration cannot fail during re-parsing.
         let origin = request.headers().get(header::ORIGIN).cloned();
-        let endpoint = Endpoint::of(&request);
+        let endpoint = match policy.listener {
+            Listener::Public => Endpoint::of(&request),
+            Listener::Admin(_) => Endpoint::Dashboard,
+        };
         // Set by the origin check, which runs under the deadline; an error response
         // still carries CORS headers once the origin is known to be allowed.
         let mut allowed = false;
         let mut response = tokio::time::timeout(policy.request_timeout, async {
+            policy.check_host(&request)?;
             if let Some(value) = origin.as_ref().and_then(|value| value.to_str().ok()) {
                 allowed = policy.allowed_origin(endpoint, value).await?;
             }
@@ -1265,7 +1340,7 @@ impl HttpSecurity {
         if endpoint.is_protocol() {
             return Ok(());
         }
-        if matches!(endpoint, Endpoint::Page) {
+        if matches!(endpoint, Endpoint::Page | Endpoint::Dashboard) {
             let text = |name: &str| headers.get(name).and_then(|value| value.to_str().ok());
             let request = BrowserRequest {
                 fetch_site: text(FETCH_SITE_HEADER),

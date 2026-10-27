@@ -38,8 +38,11 @@ only redirects there. The permanent WebAuthn RP ID is the auth hostname, never a
 piquel.fr subdomains.
 
 Auth's pages live in `apps/auth-service/src/web`, grouped by area: `auth`, the
-sign-in flows (signing in and up, consent, logout and the recovery pages),
-`settings` and `developers`.
+sign-in flows on auth.piquel.fr (signing in and up, consent, logout, the
+recovery pages and the admin dashboard's handoff), `settings`, `developers`, and
+`admin`, the admin dashboard on admin.piquel.fr, whose views are in
+`crates/ui/src/admin`. `src/admin` is not a page module: it holds
+`AdminService` and the operator rules that the dashboard and the CLI share.
 
 The auth binary also runs explicit migrations, generates invitations and grants
 administrators. PostgreSQL

@@ -169,6 +169,15 @@ class Passkeys {
     });
   }
   /**
+   * Proves a passkey for the ceremony `path` starts, and returns the proof for a form
+   * to post, which its page verifies: it confirms nothing by itself.
+   * @param {string} path
+   * @returns {Promise<object>}
+   */
+  prove(path) {
+    return this.#assertion(path, {});
+  }
+  /**
    * Runs an assertion ceremony against `path`'s start and finish endpoints, and
    * resolves to the finish's answer.
    * @template [T=void]
@@ -177,6 +186,16 @@ class Passkeys {
    * @returns {Promise<T>}
    */
   async #assert(path, body) {
+    return this.#post(`${path}/finish`, await this.#assertion(path, body));
+  }
+  /**
+   * Starts the assertion ceremony at `path`'s start endpoint, and returns what its
+   * finish takes: the ceremony and the browser's signed response.
+   * @param {string} path
+   * @param {object} body
+   * @returns {Promise<object>}
+   */
+  async #assertion(path, body) {
     /** @type {Ceremony<RequestOptions>} */
     const start = await this.#post(`${path}/start`, body);
     const options = start.public_key.publicKey;
@@ -191,7 +210,7 @@ class Passkeys {
     );
     if (!credential) throw new Error('Passkey verification was cancelled.');
     const response = /** @type {AuthenticatorAssertionResponse} */ (credential.response);
-    return this.#post(`${path}/finish`, {
+    return {
       ceremony_id: start.ceremony_id,
       credential: {
         id: credential.id,
@@ -205,7 +224,7 @@ class Passkeys {
         },
         clientExtensionResults: credential.getClientExtensionResults()
       }
-    });
+    };
   }
   /**
    * Posts `body` as JSON to the ceremony route `path`. A failure throws an error whose
@@ -301,6 +320,9 @@ class Passkeys {
  * - a form marked `data-passkey-undo` undoes the recovery its marker's value names, with
  *   a passkey from before it, then posts with its `signed_in` input saying whether the
  *   undo signed the browser in, so its page says so.
+ * - a form marked `data-passkey-assertion` proves a passkey in the ceremony its value
+ *   names, puts the proof in its `assertion` input, then posts, so its page verifies
+ *   it. The session stays as it was: the proof counts only for that form.
  * - a form marked `data-fragment-form` copies the link's fragment into its
  *   `data-fragment` inputs as it posts, then drops the fragment from the address. It
  *   shows, with its button enabled, while the link has every value; otherwise the
@@ -428,6 +450,18 @@ function wire(document) {
         form.submit();
       });
     }
+    if (form.hasAttribute('data-passkey-assertion')) {
+      event.preventDefault();
+      const path = form.dataset.passkeyAssertion ?? '';
+      const proof = /** @type {HTMLInputElement | null} */ (
+        form.querySelector('input[name="assertion"]')
+      );
+      run(form, async () => {
+        if (!proof) throw new Error('This form cannot send a passkey proof.');
+        proof.value = JSON.stringify(await passkeys.prove(path));
+        form.submit();
+      });
+    }
     if (form.hasAttribute('data-passkey-undo')) {
       event.preventDefault();
       const recovery = form.dataset.passkeyUndo ?? '';
@@ -459,7 +493,7 @@ function wire(document) {
   if (Passkeys.available())
     for (const form of /** @type {NodeListOf<HTMLFormElement>} */ (
       document.querySelectorAll(
-        'form[data-passkey-sign-in], form[data-passkey-register], form[data-passkey-enroll], form[data-passkey-recover], form[data-passkey-undo]'
+        'form[data-passkey-sign-in], form[data-passkey-register], form[data-passkey-enroll], form[data-passkey-recover], form[data-passkey-undo], form[data-passkey-assertion]'
       )
     ))
       enable(form);

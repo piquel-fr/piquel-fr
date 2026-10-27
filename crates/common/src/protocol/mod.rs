@@ -39,7 +39,7 @@
 //! # Ok::<(), Box<dyn std::error::Error>>(())
 //! ```
 
-/// Bodies shared by auth's account settings and admin APIs.
+/// Bodies shared by auth's account settings and the admin dashboard.
 pub mod api;
 /// `WWW-Authenticate: Bearer` challenges sent by resource servers.
 pub mod challenge;

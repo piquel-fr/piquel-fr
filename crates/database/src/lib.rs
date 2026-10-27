@@ -20,10 +20,11 @@ pub use connection::{Database, DatabaseConfig, RuntimeRole};
 pub use error::{DatabaseConnectionError, DatabaseError};
 pub use exclusive::{ExclusiveConnection, LockKey};
 pub use repositories::{
-    AdministratorRepository, DeliveryRepository, EmailRepository, EventRepository,
-    FederationRepository, MaintenanceRepository, OidcRepository, PasskeyRepository,
-    RecoveryRepository, SecurityRepository, SessionRepository, SigningKeyRepository,
-    TokenRepository, UserRepository,
+    AdministratorRepository, DashboardRepository, DeliveryRepository, EmailRepository,
+    EventRepository, FederationRepository, MaintenanceRepository, OidcRepository,
+    PasskeyRepository, RecoveryRepository, SecurityRepository, SessionRepository,
+    SigningKeyRepository, TokenRepository, UserRepository,
+    dashboard::{InsertHandoff, RedeemedHandoff, StoredDashboardSession},
     deliveries::{
         BackchannelLogout, Channel, Delivery, DeliveryOutcome, DeliveryStatus, DeliverySummary,
         Email, EmailMessage, LogoutRecipient, NewDelivery, PendingAddress, PendingRecovery,

@@ -1289,3 +1289,61 @@ async fn telemetry_exports_no_secret_of_a_sign_in_and_code_exchange() {
         "the event's log line links to the exchange's trace"
     );
 }
+
+/// A passkey proof of a handoff to the admin dashboard counts for that handoff
+/// only: its ceremony is bound to the browser and session that started it, is
+/// used once, and leaves the session's own confirmation as it was. A ceremony
+/// confirming the session is no proof of a handoff.
+#[tokio::test]
+#[ignore = "requires TEST_DATABASE_URL"]
+async fn an_admin_proof_counts_for_its_handoff_only() {
+    let mut fixture = Fixture::new().await;
+    let cookie = fixture.login().await;
+    let session = fixture.session(&cookie).await.expect("session");
+    let headers = |cookies: &str| {
+        let mut headers = HeaderMap::new();
+        headers.insert(header::COOKIE, cookies.parse().expect("cookies"));
+        headers
+    };
+    let owner = AccountService::new(fixture.database().clone())
+        .owner(RequestContext::TEST, &headers(&cookie))
+        .await
+        .expect("lookup")
+        .expect("signed in");
+    let prove = async |fixture: &mut Fixture, start: &str| {
+        let (started, browser) = fixture.start(start, &cookie, json!({})).await;
+        let credential = fixture.assertion(&started);
+        let assertion = json!({"ceremony_id": started["ceremony_id"], "credential": credential});
+        (assertion.to_string(), format!("{cookie}; {browser}"))
+    };
+
+    let (confirmation, browser) = prove(&mut fixture, routes::passkey::CONFIRM_START).await;
+    let refused = fixture
+        .app
+        .verify_admin_proof(&headers(&browser), &owner, &confirmation)
+        .await;
+    assert!(refused.is_err(), "a confirmation of the session");
+
+    let (assertion, browser) = prove(&mut fixture, routes::passkey::ADMIN_PROOF_START).await;
+    let refused = fixture
+        .app
+        .verify_admin_proof(&headers(&cookie), &owner, &assertion)
+        .await;
+    assert!(refused.is_err(), "another browser");
+    let proof = fixture
+        .app
+        .verify_admin_proof(&headers(&browser), &owner, &assertion)
+        .await
+        .expect("proved");
+    assert_eq!(proof.session_id(), session.id);
+    let after = fixture.session(&cookie).await.expect("session");
+    assert_eq!(
+        after.passkey_confirmed_at, session.passkey_confirmed_at,
+        "the session's own confirmation is as it was"
+    );
+    let replayed = fixture
+        .app
+        .verify_admin_proof(&headers(&browser), &owner, &assertion)
+        .await;
+    assert!(replayed.is_err(), "once only");
+}

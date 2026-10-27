@@ -13,12 +13,11 @@ use crate::{
     },
     security::BrowserCookie,
     tests::{
-        Browser, MAX_RESPONSE_BYTES, OWN_PAGE, Replicas, location, parameter, redirect, register,
+        Browser, OWN_PAGE, Replicas, cookie, html, location, parameter, policy, redirect, register,
         registration,
     },
 };
 use axum::{
-    body::to_bytes,
     http::{StatusCode, header},
     response::Response,
 };
@@ -132,18 +131,6 @@ impl Browser {
     }
 }
 
-/// The value `response` sets the cookie `name` to, and the cookie's attributes.
-pub(super) fn cookie(response: &Response, name: BrowserCookie) -> (&str, &str) {
-    response
-        .headers()
-        .get_all(header::SET_COOKIE)
-        .iter()
-        .filter_map(|cookie| cookie.to_str().ok())
-        .find_map(|cookie| cookie.strip_prefix(name.as_str())?.strip_prefix('='))
-        .and_then(|cookie| cookie.split_once(';'))
-        .unwrap_or_else(|| panic!("{name} is set"))
-}
-
 /// The value `page` writes right after `marker`, up to the next quote or tag, such
 /// as the ID a form sends.
 pub(super) fn value_after<'a>(page: &'a str, marker: &str) -> &'a str {
@@ -169,21 +156,6 @@ fn account_pages(app: &ClientId) -> Vec<(String, Section)> {
     let app = [APP, APP_SETTINGS, APP_SECRETS]
         .map(|route| (developers::of(route, app), Section::Developers));
     settings.into_iter().chain(console).chain(app).collect()
-}
-
-/// `response`'s Content-Security-Policy.
-pub(super) fn policy(response: &Response) -> &str {
-    response.headers()[header::CONTENT_SECURITY_POLICY]
-        .to_str()
-        .expect("CSP is text")
-}
-
-/// `response`'s body, as text.
-pub(super) async fn html(response: Response) -> String {
-    let body = to_bytes(response.into_body(), MAX_RESPONSE_BYTES)
-        .await
-        .expect("body");
-    String::from_utf8(body.to_vec()).expect("UTF-8 page")
 }
 
 /// The consent page shows what the application asks for. Its form decides once, and

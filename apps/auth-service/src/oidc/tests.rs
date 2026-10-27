@@ -6,7 +6,9 @@ use crate::deliveries::{BackchannelLogoutSender, OutboundClient, Sender};
 use crate::recovery::ProbationPasskey;
 use crate::security::{BrowserCookie, Credential, RequestContext, Session};
 use crate::tests::{AUTH_ORIGIN, Replicas, TlsListener, location, parameter, until_blocked};
-use crate::{AuthConfig, federation::FederationApplication, web::WebApplication};
+use crate::{
+    AuthConfig, federation::FederationApplication, passkey::PasskeyApplication, web::WebApplication,
+};
 use axum::{
     body::{Body, to_bytes},
     http::{Method, Request, StatusCode},
@@ -132,6 +134,7 @@ impl Flow {
         let config = AuthConfig::test(&origin);
         let federation =
             FederationApplication::new(db.clone(), &config.federation).expect("federation");
+        let passkeys = PasskeyApplication::new(db.clone(), &config.passkey).expect("passkeys");
         let app = OidcApplication::new(
             db.clone(),
             &OidcConfig {
@@ -147,7 +150,7 @@ impl Flow {
         )
         .expect("OIDC application");
         Self {
-            router: WebApplication::new(db, &config, app.clone(), federation)
+            router: WebApplication::new(db, &config, app.clone(), federation, passkeys)
                 .routes()
                 .merge(app.clone().routes()),
             app,

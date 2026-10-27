@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "DELETE FROM dashboard_handoffs\n            WHERE ctid IN (\n                SELECT ctid\n                FROM dashboard_handoffs\n                WHERE expires_at < now()\n                LIMIT $1\n                FOR UPDATE SKIP LOCKED\n            )",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Int8"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "94405ea4ea79665d1306c3d7c6cab9f0b52b1fb44d9097169324681ff3e600a3"
+}

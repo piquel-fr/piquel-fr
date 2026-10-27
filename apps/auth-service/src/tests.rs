@@ -74,7 +74,7 @@ impl AuthConfig {
     pub(crate) fn test(origin: &Origin) -> Self {
         Self {
             public_listener: SocketAddr::from(([127, 0, 0, 1], 0)),
-            admin_listener: None,
+            dashboard: None,
             passkey: PasskeyConfig {
                 origin: origin.clone(),
                 invite_required: false,
@@ -112,10 +112,7 @@ impl Replicas {
     /// address, unique to this fixture, so the replicas share its rate-limit budget
     /// and no other test's.
     pub(crate) async fn of(config: &AuthConfig) -> Self {
-        let peer = SocketAddr::new(
-            IpAddr::V6(Ipv6Addr::from(UserId::new().as_uuid().as_u128())),
-            4321,
-        );
+        let peer = Self::peer();
         let replica = async || {
             let database = Self::database().await;
             let keys = KeyStore::new(database.clone(), Arc::clone(&config.key_encryption_key))
@@ -145,6 +142,25 @@ impl Replicas {
         let replicas = Self::of(&config).await;
         std::fs::remove_file(&secret).expect("provider secret removed");
         replicas
+    }
+
+    /// The admin listener of `config`'s dashboard, for requests from a client
+    /// address of its own.
+    pub(crate) async fn dashboard(config: &AuthConfig) -> Router {
+        let dashboard = config.dashboard.as_ref().expect("a dashboard");
+        config
+            .admin_router(Self::database().await, dashboard)
+            .expect("dashboard")
+            .layer(Extension(ConnectInfo(Self::peer())))
+    }
+
+    /// A client address unique to the fixture, so its requests spend no other
+    /// test's rate-limit budget.
+    fn peer() -> SocketAddr {
+        SocketAddr::new(
+            IpAddr::V6(Ipv6Addr::from(UserId::new().as_uuid().as_u128())),
+            4321,
+        )
     }
 
     /// Connects a new pool to the migrated test database.
@@ -365,6 +381,33 @@ impl Browser {
     async fn dispatch(router: &Router, request: Request<Body>) -> Response {
         router.clone().oneshot(request).await.expect("response")
     }
+}
+
+/// The value `response` sets the cookie `name` to, and the cookie's attributes.
+pub(crate) fn cookie(response: &Response, name: BrowserCookie) -> (&str, &str) {
+    response
+        .headers()
+        .get_all(header::SET_COOKIE)
+        .iter()
+        .filter_map(|cookie| cookie.to_str().ok())
+        .find_map(|cookie| cookie.strip_prefix(name.as_str())?.strip_prefix('='))
+        .and_then(|cookie| cookie.split_once(';'))
+        .unwrap_or_else(|| panic!("{name} is set"))
+}
+
+/// `response`'s Content-Security-Policy.
+pub(crate) fn policy(response: &Response) -> &str {
+    response.headers()[header::CONTENT_SECURITY_POLICY]
+        .to_str()
+        .expect("CSP is text")
+}
+
+/// `response`'s body, as text.
+pub(crate) async fn html(response: Response) -> String {
+    let body = to_bytes(response.into_body(), MAX_RESPONSE_BYTES)
+        .await
+        .expect("body");
+    String::from_utf8(body.to_vec()).expect("UTF-8 page")
 }
 
 /// A passkey of `user_id`'s account whose credential no ceremony can use, for the

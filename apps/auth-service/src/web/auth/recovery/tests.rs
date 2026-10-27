@@ -10,10 +10,10 @@ use crate::{
     },
     security::{BrowserCookie, RequestContext},
     tests::{
-        Browser, Replicas, location, operator, parameter, recovery_links, recovery_reason,
-        recovery_token, redirect, register, registration, unusable_passkey,
+        Browser, Replicas, cookie, html, location, operator, parameter, recovery_links,
+        recovery_reason, recovery_token, redirect, register, registration, unusable_passkey,
     },
-    web::tests::{authorize, cookie, html},
+    web::tests::authorize,
 };
 use axum::http::StatusCode;
 use chrono::{DateTime, SecondsFormat, Utc};

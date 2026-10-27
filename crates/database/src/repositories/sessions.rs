@@ -95,7 +95,7 @@ impl SessionScope {
 }
 
 impl From<StoredSession> for Session {
-    /// Keeps what the admin API shows.
+    /// Keeps what the admin dashboard shows.
     fn from(session: StoredSession) -> Self {
         Self {
             id: session.id,

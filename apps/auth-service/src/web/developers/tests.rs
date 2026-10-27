@@ -3,8 +3,8 @@
 use crate::{
     routes::page::developers::{self, APP, APP_SECRETS, APP_SETTINGS, HOME, NEW},
     security::BrowserCookie,
-    tests::{Browser, Replicas, redirect},
-    web::tests::{cookie, html, policy, value_after},
+    tests::{Browser, Replicas, cookie, html, policy, redirect},
+    web::tests::value_after,
 };
 use axum::{
     http::{StatusCode, header},

@@ -30,6 +30,8 @@
 //! # }
 //! ```
 
+/// The admin dashboard, and auth's page handing administrators off to it.
+mod admin;
 /// Files pages link, embedded under paths naming their content: the stylesheet.
 mod asset;
 /// An OIDC client's status, facts, settings form and secrets, which the console
@@ -52,6 +54,12 @@ mod recovery;
 /// The account's settings.
 mod settings;
 
+pub use admin::{
+    AdministratorRow, EventRow, HandoffProof, HandoffQuery, InvitationRow, SessionRow,
+    Tab as DashboardTab, UserRow, administrator_list, client_list, dashboard_change,
+    dashboard_failure, dashboard_frame, dashboard_signed_out, event_list, event_rows,
+    handoff_proof, invitation_created, invitation_list, no_access, user_page, user_search,
+};
 pub use asset::{Asset, STYLESHEET};
 pub use clients::{
     ClientDraft, ClientRow, ClientStatus, Connection, FieldError, Grace, Revealed, ScopeChoice,

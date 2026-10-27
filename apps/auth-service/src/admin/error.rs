@@ -1,46 +1,30 @@
-//! Admin failures, from the API or the CLI, and their one conversion to responses.
+//! Admin failures, from the dashboard or the CLI, and their status and message.
 
 use crate::{ClientRegistryError, security::ApiError};
-use axum::{
-    http::{HeaderValue, header},
-    response::{IntoResponse, Response},
-};
 use piquel_common::{
     DeliveryId, HandleError, PasskeyId,
-    protocol::{
-        api::ErrorCode,
-        challenge::{BearerChallenge, BearerError},
-        step_up::StepUpRequirement,
-    },
+    protocol::{api::ErrorCode, step_up::StepUpRequirement},
 };
 use piquel_crypto::CryptoError;
 use piquel_repository::DatabaseError;
 
-/// Failures of an administrative operation, or of authenticating its caller.
+/// Failures of an administrative operation, or of signing its administrator in.
 #[derive(Debug, thiserror::Error)]
 pub enum AdminError {
-    /// The request carried no bearer token.
-    #[error("send an access token as Bearer credentials")]
-    MissingToken,
-    /// `Authorization` was sent twice, or names Bearer without a token.
-    #[error("send one Authorization header with a Bearer token")]
-    MalformedAuthorization,
-    /// The token is not a valid, unexpired access token from this issuer.
-    #[error("the access token is invalid")]
-    InvalidToken(#[source] CryptoError),
-    /// The token is valid, but for another resource, or names no account or session.
-    #[error("the access token is not an administrator's admin API token")]
-    WrongToken,
-    /// The session the token was issued from ended, or its account was disabled.
-    #[error("the access token's session has ended")]
+    /// The administrator's auth session ended, or their account was disabled.
+    #[error("your session has ended; sign in again")]
     SessionEnded,
-    /// The token's account is not an administrator.
+    /// The account is not an administrator.
     #[error("this account is not an administrator")]
     NotAdministrator,
-    /// The token's sign-in does not meet the requirement: a passkey, recent enough
-    /// for mutations.
-    #[error("sign in again with a passkey to continue")]
+    /// The administrator's sign-in does not meet the requirement: a passkey, and
+    /// for a change, the dashboard's own recent confirmation.
+    #[error("confirm with your passkey to continue")]
     StepUpRequired(StepUpRequirement),
+    /// A sign-in to the dashboard was handed off wrongly: its code is unknown,
+    /// used, expired or for another browser, or its request is malformed.
+    #[error("this sign-in to the dashboard did not work; sign in again")]
+    InvalidHandoff,
     /// No account has this ID or username, or no active one this verified email.
     #[error("no account has this ID, username or verified email")]
     UserNotFound,
@@ -61,8 +45,9 @@ pub enum AdminError {
         /// The states the operation applies to.
         states: &'static str,
     },
-    /// The admin API never acts on administrator accounts, so a stolen admin token
-    /// cannot lock other administrators out. Revoke their rights first, or use the CLI.
+    /// The dashboard never acts on administrator accounts, so a stolen dashboard
+    /// session cannot lock other administrators out. Revoke their rights first, or
+    /// use the CLI.
     #[error("administrator accounts can only be changed after revoking their rights")]
     AdministratorTarget,
     /// The account is already disabled.
@@ -122,7 +107,7 @@ pub enum AdminError {
     /// The account is not an administrator, so it has no rights to revoke.
     #[error("the account is not an administrator")]
     NotAnAdministrator,
-    /// Administrators cannot grant or revoke their own rights through the API.
+    /// Administrators cannot grant or revoke their own rights from the dashboard.
     #[error("administrators cannot change their own rights")]
     OwnRights,
     /// The last administrator's rights cannot be revoked.
@@ -149,32 +134,19 @@ pub enum AdminError {
     /// A stored event could not be shown.
     #[error("could not serialize a stored event")]
     Event(#[from] serde_json::Error),
+    /// A link could not be written.
+    #[error("could not write a link")]
+    Link(#[from] piquel_ui::QueryError),
 }
 
 impl AdminError {
-    /// Reports `NotFound` as no delivery `id` in `states`.
-    pub(super) fn delivery(
-        id: DeliveryId,
-        states: &'static str,
-    ) -> impl FnOnce(DatabaseError) -> Self {
-        move |error| match error {
-            DatabaseError::NotFound => Self::DeliveryNotFound { id, states },
-            error => error.into(),
-        }
-    }
-
-    /// Names the failure in its log line. Outside `step_up_required` and
-    /// `session_ended`, a refused caller sent a token the dashboard never would:
-    /// a stolen, forged or non-administrator one.
+    /// Names the failure in its log line.
     const fn reason(&self) -> &'static str {
         match self {
-            Self::MissingToken => "missing_token",
-            Self::MalformedAuthorization => "malformed_authorization",
-            Self::InvalidToken(_) => "invalid_token",
-            Self::WrongToken => "wrong_token",
             Self::SessionEnded => "session_ended",
             Self::NotAdministrator => "not_administrator",
             Self::StepUpRequired(_) => "step_up_required",
+            Self::InvalidHandoff => "invalid_handoff",
             Self::UserNotFound => "user_not_found",
             Self::SessionNotFound => "session_not_found",
             Self::InvitationNotFound => "invitation_not_found",
@@ -191,8 +163,8 @@ impl AdminError {
             Self::RecoveryOfAdministrator => "recovery_of_administrator",
             Self::RecoveryInProbation => "recovery_in_probation",
             Self::UnknownPasskey(_) => "unknown_passkey",
-            Self::NoRecoveryToUndo => "no_recovery_to_undo",
             Self::GrantDuringRecovery => "grant_during_recovery",
+            Self::NoRecoveryToUndo => "no_recovery_to_undo",
             Self::AccountDisabled => "account_disabled",
             Self::AlreadyAdministrator => "already_administrator",
             Self::NotAnAdministrator => "not_an_administrator",
@@ -205,52 +177,29 @@ impl AdminError {
             Self::Client(_) => "client",
             Self::Crypto(_) => "crypto",
             Self::Event(_) => "event",
+            Self::Link(_) => "link",
         }
     }
 
-    /// The `WWW-Authenticate` challenge of a caller failure (RFC 6750, RFC 9470).
-    fn challenge(&self) -> Option<BearerChallenge> {
-        match self {
-            Self::MissingToken => Some(BearerChallenge::default()),
-            Self::MalformedAuthorization => {
-                Some(BearerChallenge::error(BearerError::InvalidRequest))
-            }
-            Self::InvalidToken(_) | Self::WrongToken | Self::SessionEnded => {
-                Some(BearerChallenge::error(BearerError::InvalidToken))
-            }
-            Self::StepUpRequired(requirement) => Some(BearerChallenge::step_up(*requirement)),
-            // The token is fine: the account or the operation is refused.
-            Self::NotAdministrator
-            | Self::UserNotFound
-            | Self::SessionNotFound
-            | Self::InvitationNotFound
-            | Self::ClientNotFound
-            | Self::DeliveryNotFound { .. }
-            | Self::AdministratorTarget
-            | Self::AlreadyDisabled
-            | Self::AlreadyActive
-            | Self::EmailClaimed(_)
-            | Self::InvalidReason
-            | Self::InvalidInviteExpiry(_)
-            | Self::RecoveryOfDisabledAccount
-            | Self::RecoveryNeedsEmail
-            | Self::RecoveryOfAdministrator
-            | Self::RecoveryInProbation
-            | Self::UnknownPasskey(_)
-            | Self::NoRecoveryToUndo
-            | Self::GrantDuringRecovery
-            | Self::AccountDisabled
-            | Self::AlreadyAdministrator
-            | Self::NotAnAdministrator
-            | Self::OwnRights
-            | Self::LastAdministrator
-            | Self::InvalidHandle(_)
-            | Self::SameHandle
-            | Self::HandleTaken(_)
-            | Self::Database(_)
-            | Self::Client(_)
-            | Self::Crypto(_)
-            | Self::Event(_) => None,
+    /// Logs this refusal of an administrator's request in the request's trace, by
+    /// its reason, so every refusal can be counted and followed: one that the
+    /// dashboard's own pages never cause, such as a sign-in or a read by an
+    /// account that is not an administrator, may be a stolen session.
+    pub(crate) fn log_refusal(&self) {
+        tracing::info!(
+            admin.failure = self.reason(),
+            "admin dashboard request refused"
+        );
+    }
+
+    /// Reports `NotFound` as no delivery `id` in `states`.
+    pub(super) fn delivery(
+        id: DeliveryId,
+        states: &'static str,
+    ) -> impl FnOnce(DatabaseError) -> Self {
+        move |error| match error {
+            DatabaseError::NotFound => Self::DeliveryNotFound { id, states },
+            error => error.into(),
         }
     }
 }
@@ -260,15 +209,11 @@ impl From<AdminError> for ApiError {
     fn from(error: AdminError) -> Self {
         let message = error.to_string();
         match error {
-            AdminError::MalformedAuthorization
-            | AdminError::InvalidReason
-            | AdminError::InvalidInviteExpiry(_) => Self::bad_request(message),
+            AdminError::InvalidReason
+            | AdminError::InvalidInviteExpiry(_)
+            | AdminError::InvalidHandoff => Self::bad_request(message),
             AdminError::InvalidHandle(error) => error.into(),
-            AdminError::MissingToken
-            | AdminError::InvalidToken(_)
-            | AdminError::WrongToken
-            | AdminError::SessionEnded
-            | AdminError::StepUpRequired(_) => Self::unauthorized(message),
+            AdminError::SessionEnded | AdminError::StepUpRequired(_) => Self::unauthorized(message),
             AdminError::NotAdministrator
             | AdminError::AdministratorTarget
             | AdminError::OwnRights
@@ -295,26 +240,9 @@ impl From<AdminError> for ApiError {
             AdminError::HandleTaken(_) => Self::conflict(message).with_code(ErrorCode::HandleTaken),
             AdminError::Database(error) => error.into(),
             AdminError::Client(error) => error.into(),
-            error @ (AdminError::Crypto(_) | AdminError::Event(_)) => Self::internal(error),
+            error @ (AdminError::Crypto(_) | AdminError::Event(_) | AdminError::Link(_)) => {
+                Self::internal(error)
+            }
         }
-    }
-}
-
-impl IntoResponse for AdminError {
-    /// Answers `{"error": message}`, with the challenge of a caller failure, and
-    /// logs the failure's reason in the request's trace, so every refusal can be
-    /// counted and followed. The CLI reports its own failures.
-    fn into_response(self) -> Response {
-        tracing::info!(admin.failure = self.reason(), "admin API request failed");
-        let challenge = self
-            .challenge()
-            .and_then(|challenge| HeaderValue::try_from(challenge.to_string()).ok());
-        let mut response = ApiError::from(self).into_response();
-        if let Some(challenge) = challenge {
-            response
-                .headers_mut()
-                .insert(header::WWW_AUTHENTICATE, challenge);
-        }
-        response
     }
 }

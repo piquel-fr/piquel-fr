@@ -7,11 +7,14 @@ license.workspace = true
 repository.workspace = true
 
 [dependencies]
+piquel-admin-api.workspace = true
 piquel-common = { workspace = true, features = ["events"] }
 chrono.workspace = true
 serde.workspace = true
+serde_json.workspace = true
 serde_urlencoded.workspace = true
 topcoat = { workspace = true, features = ["view"] }
+url.workspace = true
 
 [dev-dependencies]
 tokio.workspace = true

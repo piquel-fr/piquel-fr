@@ -94,6 +94,7 @@ impl SecurityFixture {
             request_timeout: std::time::Duration::from_secs(30),
             database,
             origin: site(),
+            listener: Listener::Public,
         };
         let mut router = Router::new();
         for path in [

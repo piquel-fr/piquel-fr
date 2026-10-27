@@ -2131,11 +2131,14 @@ name = "piquel-ui"
 version = "0.1.0"
 dependencies = [
  "chrono",
+ "piquel-admin-api",
  "piquel-common",
  "serde",
+ "serde_json",
  "serde_urlencoded",
  "tokio",
  "topcoat",
+ "url",
 ]
 
 [[package]]

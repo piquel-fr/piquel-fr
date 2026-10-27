@@ -1,0 +1,35 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "DELETE FROM dashboard_handoffs\n                WHERE code_digest = $1 AND state_digest = $2 AND expires_at > now()\n                RETURNING session_id AS \"session_id: SessionId\", return_to, confirmed_at",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "session_id: SessionId",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "return_to",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 2,
+        "name": "confirmed_at",
+        "type_info": "Timestamptz"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Bytea",
+        "Bytea"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      true
+    ]
+  },
+  "hash": "30f2fe6ae8e24cc43d1fd33ae09623135cda8a4f70665dc5be500eee2a259e30"
+}
