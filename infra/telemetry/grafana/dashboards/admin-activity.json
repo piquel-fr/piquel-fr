@@ -1,7 +1,7 @@
 {
   "uid": "admin-activity",
   "title": "Admin activity",
-  "description": "What administrators and operators did, and admin API requests that were refused: to notice a stolen administrator session or a compromised server.",
+  "description": "What administrators and operators did, and dashboard requests that were refused: to notice a stolen administrator session or a compromised server.",
   "tags": [
     "auth",
     "admin",
@@ -138,8 +138,8 @@
     },
     {
       "type": "stat",
-      "title": "Refused tokens",
-      "description": "Admin API requests with a token the admin dashboard would never send: missing, malformed, forged, for another API, or from an account that is not an administrator. Only the dashboard reaches the admin listener, so each one is worth explaining.",
+      "title": "Refused sign-ins",
+      "description": "Dashboard requests and handoffs refused because the account is not an administrator, and handoff codes that did not work. The dashboard's own pages never cause them, so each one is worth explaining.",
       "id": 3,
       "datasource": {
         "type": "loki",
@@ -194,14 +194,14 @@
             "uid": "loki"
           },
           "queryType": "instant",
-          "expr": "sum(count_over_time({service_name=\"auth-service\", deployment_environment_name=~\"$environment\"} | admin_failure != \"\" | admin_failure=~\"missing_token|malformed_authorization|invalid_token|wrong_token|not_administrator\" [$__range]))"
+          "expr": "sum(count_over_time({service_name=\"auth-service\", deployment_environment_name=~\"$environment\"} | admin_failure != \"\" | admin_failure=~\"not_administrator|invalid_handoff\" [$__range]))"
         }
       ]
     },
     {
       "type": "stat",
       "title": "Refused on administrators",
-      "description": "Changes the admin API refused because they targeted an administrator: their account, their own rights, or the last administrator's.",
+      "description": "Changes the dashboard refused because they targeted an administrator: their account, their own rights, or the last administrator's.",
       "id": 4,
       "datasource": {
         "type": "loki",
@@ -569,8 +569,8 @@
     },
     {
       "type": "timeseries",
-      "title": "Admin API failures",
-      "description": "Admin API requests that failed, by reason. step_up_required and session_ended are normal: the dashboard signs the administrator in again.",
+      "title": "Dashboard refusals",
+      "description": "Administrators' requests the dashboard or auth's handoff page refused, by reason. step_up_required and session_ended are normal: the dashboard asks for a confirmation, or a sign-in, again.",
       "id": 11,
       "datasource": {
         "type": "loki",
@@ -623,8 +623,8 @@
     },
     {
       "type": "timeseries",
-      "title": "Admin API requests",
-      "description": "Admin API requests per second, by method and route, reads included. Searches and event listings are not recorded as events, so a burst of reads shows only here.",
+      "title": "Dashboard requests",
+      "description": "Admin dashboard requests per second, by method and route, reads included. Searches and event listings are not recorded as events, so a burst of reads shows only here.",
       "id": 12,
       "datasource": {
         "type": "prometheus",
@@ -675,8 +675,8 @@
     },
     {
       "type": "timeseries",
-      "title": "Admin API responses",
-      "description": "Admin API responses per second, by status.",
+      "title": "Dashboard responses",
+      "description": "Admin dashboard responses per second, by status.",
       "id": 13,
       "datasource": {
         "type": "prometheus",
@@ -684,7 +684,7 @@
       },
       "gridPos": {
         "h": 8,
-        "w": 12,
+        "w": 24,
         "x": 0,
         "y": 22
       },
@@ -717,58 +717,6 @@
         {
           "refId": "A",
           "expr": "sum by (http_response_status_code) (rate(http_server_request_duration_seconds_count{job=\"auth-service\", deployment_environment_name=~\"$environment\", piquel_listener=\"admin\"}[$__rate_interval]))",
-          "legendFormat": "{{http_response_status_code}}",
-          "datasource": {
-            "type": "prometheus",
-            "uid": "prometheus"
-          }
-        }
-      ]
-    },
-    {
-      "type": "timeseries",
-      "title": "Admin dashboard responses",
-      "description": "admin-web responses per second, by status. Its pages have no route templates: the logs below show their paths.",
-      "id": 14,
-      "datasource": {
-        "type": "prometheus",
-        "uid": "prometheus"
-      },
-      "gridPos": {
-        "h": 8,
-        "w": 12,
-        "x": 12,
-        "y": 22
-      },
-      "fieldConfig": {
-        "defaults": {
-          "unit": "reqps",
-          "custom": {
-            "drawStyle": "line",
-            "fillOpacity": 10,
-            "showPoints": "never",
-            "stacking": {
-              "mode": "none"
-            }
-          }
-        },
-        "overrides": []
-      },
-      "options": {
-        "legend": {
-          "displayMode": "list",
-          "placement": "bottom",
-          "showLegend": true
-        },
-        "tooltip": {
-          "mode": "multi",
-          "sort": "desc"
-        }
-      },
-      "targets": [
-        {
-          "refId": "A",
-          "expr": "sum by (http_response_status_code) (rate(http_server_request_duration_seconds_count{job=\"admin-web\", deployment_environment_name=~\"$environment\"}[$__rate_interval]))",
           "legendFormat": "{{http_response_status_code}}",
           "datasource": {
             "type": "prometheus",
@@ -881,9 +829,9 @@
     },
     {
       "type": "logs",
-      "title": "Admin API failures",
+      "title": "Dashboard refusals",
       "id": 18,
-      "description": "Every failed admin API request, with its reason. Expand a line to open its trace, which shows the route.",
+      "description": "Every refused request of an administrator, with its reason. Expand a line to open its trace, which shows the route.",
       "datasource": {
         "type": "loki",
         "uid": "loki"
@@ -908,48 +856,15 @@
             "type": "loki",
             "uid": "loki"
           },
-          "expr": "{service_name=\"auth-service\", deployment_environment_name=~\"$environment\"} | admin_failure != \"\" | line_format \"admin API request failed: {{.admin_failure}}\""
-        }
-      ]
-    },
-    {
-      "type": "logs",
-      "title": "Admin dashboard logs",
-      "id": 19,
-      "description": "admin-web logs, with the path of every page served.",
-      "datasource": {
-        "type": "loki",
-        "uid": "loki"
-      },
-      "gridPos": {
-        "h": 10,
-        "w": 24,
-        "x": 0,
-        "y": 59
-      },
-      "options": {
-        "showTime": true,
-        "wrapLogMessage": true,
-        "sortOrder": "Descending",
-        "enableLogDetails": true,
-        "dedupStrategy": "none"
-      },
-      "targets": [
-        {
-          "refId": "A",
-          "datasource": {
-            "type": "loki",
-            "uid": "loki"
-          },
-          "expr": "{service_name=\"admin-web\", deployment_environment_name=~\"$environment\"} |~ \"$search\""
+          "expr": "{service_name=\"auth-service\", deployment_environment_name=~\"$environment\"} | admin_failure != \"\" | line_format \"admin dashboard request refused: {{.admin_failure}}\""
         }
       ]
     },
     {
       "type": "table",
-      "title": "Admin API traces",
+      "title": "Dashboard traces",
       "id": 20,
-      "description": "Recent admin API request traces; open one by its trace ID.",
+      "description": "Recent admin dashboard request traces; open one by its trace ID.",
       "datasource": {
         "type": "tempo",
         "uid": "tempo"
@@ -958,7 +873,7 @@
         "h": 10,
         "w": 24,
         "x": 0,
-        "y": 69
+        "y": 59
       },
       "targets": [
         {

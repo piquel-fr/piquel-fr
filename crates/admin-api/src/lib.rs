@@ -1,78 +1,18 @@
-//! Paths and JSON bodies of auth's admin API, shared by auth, which serves it, and
-//! the admin dashboard, which calls it.
+//! The views of administration: what the admin dashboard shows and posts, and
+//! what the CLI's `--output json` prints. Auth's service returns them, and its
+//! database crate decodes some straight into them.
 //!
-//! The API listens only on auth's private admin listener (`AUTH_ADMIN_LISTENER`),
-//! which no ingress route reaches. Every request carries an access token that auth
-//! issued to the dashboard, for the [`AUDIENCE`] resource, on behalf of an
-//! administrator who signed in with a passkey. Mutations also need a passkey
-//! confirmation at most [`CONFIRMATION_MAX_AGE`] seconds old; without one the API
-//! answers `401` with an RFC 9470 step-up challenge. Other errors are `{"error": …}`
-//! ([`ErrorBody`]).
-//!
-//! Bodies the account settings API also returns come from `piquel-common`
-//! and are re-exported here. The `client` feature adds [`AdminClient`], a typed
-//! client of every route.
+//! Bodies the account settings also return come from `piquel-common` and are
+//! re-exported here.
 
 use chrono::{DateTime, Utc};
-pub use piquel_common::protocol::{
-    api::{ErrorBody, Identity, Passkey},
-    step_up::CONFIRMATION_MAX_AGE,
-};
+pub use piquel_common::protocol::api::{Identity, Passkey};
 use piquel_common::{
     AccountStatus, AuthenticationMethod, ClientId, EventId, SessionId, TokenId, TraceId, UserId,
     protocol::oauth::ClientAuthMethod,
 };
 use serde::{Deserialize, Serialize};
 use url::Url;
-
-/// The typed client, behind the `client` feature.
-#[cfg(feature = "client")]
-mod client;
-#[cfg(feature = "client")]
-pub use client::{AdminClient, ApiError};
-
-/// The `aud` of the access tokens the admin API accepts. The dashboard is
-/// registered as the OIDC client with this ID, whose tokens carry it.
-pub const AUDIENCE: &str = "piquel-admin";
-
-/// Every route of the admin API, as axum path templates.
-pub mod paths {
-    /// `GET`: searches accounts ([`UserSearch`](super::UserSearch) →
-    /// [`UserPage`](super::UserPage)).
-    pub const USERS: &str = "/users";
-    /// `GET`: describes one account ([`UserDetail`](super::UserDetail)).
-    pub const USER: &str = "/users/{user_id}";
-    /// `POST`: disables an account and ends its sessions
-    /// ([`DisableUser`](super::DisableUser)).
-    pub const USER_DISABLE: &str = "/users/{user_id}/disable";
-    /// `POST`: reactivates a disabled account.
-    pub const USER_ENABLE: &str = "/users/{user_id}/enable";
-    /// `DELETE`: ends every session and refresh grant of an account.
-    pub const USER_SESSIONS: &str = "/users/{user_id}/sessions";
-    /// `DELETE`: ends one session and its refresh grants.
-    pub const SESSION: &str = "/sessions/{session_id}";
-    /// `GET`: lists invitations ([`Invitation`](super::Invitation)). `POST`: creates
-    /// one ([`CreateInvitation`](super::CreateInvitation) →
-    /// [`CreatedInvitation`](super::CreatedInvitation)). Served only while signup
-    /// requires an invitation.
-    pub const INVITATIONS: &str = "/invitations";
-    /// `DELETE`: revokes an unredeemed invitation.
-    pub const INVITATION: &str = "/invitations/{invitation_id}";
-    /// `GET`: lists OIDC clients ([`Client`](super::Client)).
-    pub const CLIENTS: &str = "/clients";
-    /// `GET`: describes one OIDC client ([`Client`](super::Client)).
-    pub const CLIENT: &str = "/clients/{client_id}";
-    /// `GET`: pages through domain events, newest first
-    /// ([`EventSearch`](super::EventSearch) → [`EventPage`](super::EventPage)).
-    pub const EVENTS: &str = "/events";
-    /// `GET`: lists administrators ([`Administrator`](super::Administrator)).
-    /// `POST`: makes an account an administrator
-    /// ([`GrantAdministrator`](super::GrantAdministrator)).
-    pub const ADMINISTRATORS: &str = "/administrators";
-    /// `DELETE`: removes an administrator's rights. Administrators cannot remove
-    /// their own, and the last administrator cannot be removed.
-    pub const ADMINISTRATOR: &str = "/administrators/{user_id}";
-}
 
 /// An account, as search results and its detail page show it.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -89,7 +29,7 @@ pub struct User {
     pub created_at: DateTime<Utc>,
 }
 
-/// The query of [`paths::USERS`].
+/// The account search's query.
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct UserSearch {
     /// An account ID, or part of a username, display name or email, ignoring case.
@@ -115,7 +55,7 @@ pub struct UserPage {
 pub struct UserDetail {
     /// Profile and status.
     pub user: User,
-    /// Whether the account is an administrator. The admin API changes only the
+    /// Whether the account is an administrator. The dashboard changes only the
     /// accounts of non-administrators.
     pub administrator: bool,
     /// Email addresses, primary first.
@@ -169,7 +109,7 @@ pub struct Consent {
     pub scopes: Vec<String>,
 }
 
-/// The body of [`paths::USER_DISABLE`].
+/// The form disabling an account.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct DisableUser {
     /// Why the account is disabled: 1 to 500 characters, without control
@@ -192,7 +132,7 @@ pub struct Invitation {
     pub revoked_at: Option<DateTime<Utc>>,
 }
 
-/// The optional body of `POST` [`paths::INVITATIONS`].
+/// The form creating an invitation.
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct CreateInvitation {
     /// How long the link stays valid: 1 hour to 365 days, a number followed by `m`,
@@ -275,7 +215,7 @@ impl Client {
     }
 }
 
-/// The query of [`paths::EVENTS`]. Every filter is optional.
+/// The event list's query. Every filter is optional.
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct EventSearch {
     /// Only events concerning this account.
@@ -332,7 +272,7 @@ pub struct Administrator {
     pub granted_at: DateTime<Utc>,
 }
 
-/// The body of `POST` [`paths::ADMINISTRATORS`].
+/// The form granting administrator rights.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct GrantAdministrator {
     /// The active account to make an administrator.
