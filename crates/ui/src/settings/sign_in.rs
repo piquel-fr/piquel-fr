@@ -169,7 +169,8 @@ async fn passkey_list<'a>(
 /// rename or removal row, which takes the focus. The passkey a recovery added,
 /// which whoever used its link may have named, is `recovered`: it goes by
 /// [`RecoveryPasskey`]'s phrase, with a mark, the minute it was added and its ID,
-/// and it is never renamed here.
+/// and it is never renamed here. A passkey that can't be removed never opens its
+/// removal row, even from a hand-made link.
 #[component]
 async fn passkey_row<'a>(
     page: &'a str,
@@ -205,7 +206,7 @@ async fn passkey_row<'a>(
                     >
                 </label>
             )
-        } else if state.removing == Some(id) {
+        } else if state.removing == Some(id) && removable {
             <div class="stack">
                 <strong tabindex="-1" autofocus="">(removal)</strong>
                 <p class="help">"You won’t be able to use this passkey to sign in again."</p>

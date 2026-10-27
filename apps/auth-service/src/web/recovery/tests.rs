@@ -384,6 +384,17 @@ async fn settings_show_the_recovery() {
     assert!(page.contains("Remove the recovery's passkey?"), "{page}");
     let page = html(browser.visit(&replicas.a, &renaming).await).await;
     assert!(!page.contains("Save name"), "{page}");
+    let older = database.passkeys().list_active(recovering.user_id).await;
+    let older = older
+        .expect("passkeys")
+        .into_iter()
+        .find(|key| key.id != passkey.id);
+    let older = opened(SignInState {
+        removing: Some(older.expect("a passkey from before").id),
+        ..SignInState::default()
+    });
+    let page = html(browser.visit(&replicas.a, &older).await).await;
+    assert!(!page.contains("Confirm removal"), "{page}");
     let page = html(browser.visit(&replicas.a, settings::HISTORY).await).await;
     assert!(page.contains("The recovery's passkey renamed"), "{page}");
 
