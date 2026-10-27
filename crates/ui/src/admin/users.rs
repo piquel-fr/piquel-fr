@@ -77,12 +77,14 @@ pub async fn user_search<'a>(
 }
 
 /// One account's page: `detail`, with the page changing its status, or why it
-/// cannot, its `sessions`, ending them all at `revoke_sessions`, or why not, and
-/// its `recent` events, linking `all_events`.
+/// cannot, the pages starting and undoing its `recovery`, or why it has none, its
+/// `sessions`, ending them all at `revoke_sessions`, or why not, and its `recent`
+/// events, linking `all_events`.
 #[component]
 pub async fn user_page<'a>(
     detail: &'a UserDetail,
     status: Result<&'a str, &'a str>,
+    recovery: Result<(&'a str, &'a str), &'a str>,
     sessions: &'a [SessionRow<'a>],
     revoke_sessions: Result<&'a str, &'a str>,
     recent: &'a [EventRow<'a>],
@@ -104,22 +106,7 @@ pub async fn user_page<'a>(
                 <dt>"Account ID"</dt><dd><code>(user.id.to_string())</code></dd>
                 <dt>"Created"</dt><dd>moment(at: user.created_at)</dd>
             </dl>
-            <div class="row actions">
-                match status {
-                    Err(reason) => {
-                        refused_action(
-                            label: if user.status == AccountStatus::Active { "Disable" } else { "Enable" },
-                            reason: reason,
-                        )
-                    },
-                    Ok(href) if user.status == AccountStatus::Active => {
-                        <a class="button danger" href=(href)>"Disable"</a>
-                    },
-                    Ok(href) => {
-                        <a class="button secondary" href=(href)>"Enable"</a>
-                    },
-                }
-            </div>
+            account_actions(user: user, status: status, recovery: recovery)
         </section>
         credentials(detail: detail)
         <section class="card">
@@ -183,6 +170,43 @@ pub async fn user_page<'a>(
             </div>
             event_rows(rows: recent)
         </section>
+    })
+}
+
+/// What may be done to `user`: changing its status, or why it cannot, and the
+/// pages starting and undoing its `recovery`, or why it has none.
+#[component]
+async fn account_actions<'a>(
+    user: &'a User,
+    status: Result<&'a str, &'a str>,
+    recovery: Result<(&'a str, &'a str), &'a str>,
+) -> Result<impl View> {
+    Ok(view! {
+        <div class="row actions">
+            match status {
+                Err(reason) => {
+                    refused_action(
+                        label: if user.status == AccountStatus::Active { "Disable" } else { "Enable" },
+                        reason: reason,
+                    )
+                },
+                Ok(href) if user.status == AccountStatus::Active => {
+                    <a class="button danger" href=(href)>"Disable"</a>
+                },
+                Ok(href) => {
+                    <a class="button secondary" href=(href)>"Enable"</a>
+                },
+            }
+            match recovery {
+                Ok((recover, undo)) => {
+                    <a class="button secondary" href=(recover)>"Recover"</a>
+                    <a class="button secondary" href=(undo)>"Undo recovery"</a>
+                },
+                Err(reason) => {
+                    refused_action(label: "Recover", reason: reason)
+                },
+            }
+        </div>
     })
 }
 

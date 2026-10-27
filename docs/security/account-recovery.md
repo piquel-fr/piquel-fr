@@ -2,8 +2,9 @@
 
 Recovery binds a new passkey to an existing account: the same `UserId` and the
 same `sub`. It never moves data or changes identity. Piquel has one recovery
-path today, run by an operator at the terminal. This document states its policy
-as built, as testable invariants, each naming the test that pins it. It is part
+path today, run by support: an operator at the terminal, or an administrator
+from the dashboard. This document states its policy as built, as testable
+invariants, each naming the test that pins it. It is part
 of [#85](https://github.com/piquel-fr/piquel-fr/issues/85), which also designs
 self-service recovery; [What is left](#what-is-left) lists the rest.
 
@@ -37,9 +38,10 @@ undo), `AdminService::recover_account`, `recent_recoveries` and `undo_recovery`
 (`apps/auth-service/src/admin/service.rs`), the passkey routes
 (`apps/auth-service/src/passkey`), the pages `/recover` and `/recover/undo`
 (`apps/auth-service/src/web/auth/recovery`, with their views in
-`crates/ui/src/recovery.rs`), migration `0019_account_recoveries`, and the CLI's
-`user recover` and `user undo-recovery`. Tests named below live in
-`apps/auth-service/src/recovery/tests.rs` unless another file is given;
+`crates/ui/src/recovery.rs`), migration `0019_account_recoveries`, the CLI's
+`user recover` and `user undo-recovery`, and the dashboard's Recover and Undo
+recovery pages (`apps/auth-service/src/web/admin/users.rs`). Tests named below
+live in `apps/auth-service/src/recovery/tests.rs` unless another file is given;
 `crates/database/tests/recoveries.rs` is shortened to `db:`.
 
 ## States
@@ -62,8 +64,9 @@ that condition, which the [database backstops](#database-backstops) share.
 ## Starting a recovery
 
 An operator at the terminal starts one with `auth-service user recover <user>
---reason "…"`. `AdminService::recover_account` also accepts an administrator;
-the admin dashboard has no page for it yet *(planned)*.
+--reason "…"`. An administrator starts one from the dashboard's Recover page,
+which lists the account's recent recoveries first, as the command does; its
+link is only mailed, so `--revoke` stays at the terminal.
 
 - **S1.** Only an active account is recovered
   (`what_a_start_replaces_and_refuses`).
@@ -94,11 +97,14 @@ the admin dashboard has no page for it yet *(planned)*.
   records what was revoked and kept
   (`revoke_takes_back_every_way_in_but_the_kept_passkeys`,
   `support_undoes_and_takes_the_last_passkey`).
-- **S6.** Before starting, `user recover` lists the account's recoveries of the
-  last 15 days with where each stands, those undone included, so support sees a
-  repeated attempt (`AdminService::recent_recoveries`:
-  `support_undoes_and_takes_the_last_passkey`; the printout itself is untested).
-  Reading them records that an operator viewed the account.
+- **S6.** Before starting, `user recover` and the dashboard's Recover page list
+  the account's recoveries of the last 15 days with where each stands, those
+  undone included, so support sees a repeated attempt
+  (`AdminService::recent_recoveries`: `support_undoes_and_takes_the_last_passkey`
+  and `recoveries_are_started_and_undone_from_the_dashboard`; the CLI's printout
+  itself is untested). The dashboard names each recovery's passkey by ID and
+  enrollment time (P3); its row has no name to show, though the rendering is
+  untested. Reading them records that an operator viewed the account.
 
 ## Administrators
 
@@ -134,7 +140,10 @@ the admin dashboard has no page for it yet *(planned)*.
   and printed to the operator at the terminal, which also reaches an owner
   without one. An administrator never sees it, so they may only start a
   recovery that mails it (`a_link_enrolls_one_passkey_that_signs_in_without_confirming`,
-  `what_a_start_replaces_and_refuses`). During a probation, the primary changes
+  `what_a_start_replaces_and_refuses`), which needs email enabled:
+  `AdminService::recover_account` refuses one while it is disabled, before
+  anything changes (`no_recovery_starts_while_email_is_disabled`).
+  During a probation, the primary changes
   only through a confirmed session (an older passkey), an operator, or the
   verification of an address added during it, which only a confirmed session
   can add. None of these is the link holder choosing an address of their own.
@@ -298,10 +307,10 @@ on a disabled account (U4a)
   still cancels an unused link (`what_a_start_replaces_and_refuses`).
 - **U5.** Support undoes for an owner with no passkey left from before it, or
   whose account is disabled: `auth-service user undo-recovery <user> --reason
-  "…"`. It is the same U2 or U3, recorded with the reason, and it removes the
-  recovery's passkey even if it is the last one; support then starts another
-  recovery. Undoing a `--revoke` recovery restores nothing it revoked
-  (`support_undoes_and_takes_the_last_passkey`).
+  "…"`, or the dashboard's Undo recovery page. It is the same U2 or U3, recorded
+  with the reason, and it removes the recovery's passkey even if it is the last
+  one; support then starts another recovery. Undoing a `--revoke` recovery
+  restores nothing it revoked (`support_undoes_and_takes_the_last_passkey`).
 - **U6.** A consent, code exchange or refresh that waited for the account lock
   while an undo ran doesn't survive it: each re-reads its session under the lock
   (`oidc::tests::a_consent_whose_session_ended_while_waiting_is_not_saved`, and
@@ -434,9 +443,9 @@ for the owner (S3), and the administrator rules (A1).
 
 ## Support's evidence policy
 
-**For the user to review.** Support runs `user recover` and `user undo-recovery`
-only on evidence. No single item below is enough on its own, and the items under
-"never enough" must not count at all.
+**For the user to review.** Support recovers and undoes recoveries, at the
+terminal or from the dashboard, only on evidence. No single item below is
+enough on its own, and the items under "never enough" must not count at all.
 
 **Write every reason without the evidence.** Every reason an operator or
 administrator records with a recovery, an undo or a cleanup shows in the
@@ -444,21 +453,23 @@ account's history, which whoever used the link can read. Say what was asked and
 that the evidence policy was followed; keep the evidence itself (channels,
 questions, answers) in support's own record.
 
-Before `user recover`:
+Before recovering, at the terminal or from the dashboard:
 
 1. **Read the account and its history:** `auth-service user show <user>`, then
-   `auth-service account <user> history`, which shows each change and sign-in
-   with its device and IP. Look for signs the account is already compromised:
+   `auth-service account <user> history`, or the account's page on the
+   dashboard and its events, which show each change and sign-in with its
+   device and IP. Look for signs the account is already compromised:
    identities linked, addresses added or a primary change recently, sign-ins
    from new devices. The link goes to the current primary verified address. If
    the primary changed recently, establish the owner through older channels and
    restore the older primary first with `auth-service account <user> emails
    primary <id> --reason "…"`, or use `--revoke`, which only prints the link.
-2. **Read the listing `user recover` prints.** If a recovery is in probation,
-   find out who used it before anything else; `user recover` refuses until it is
-   undone or settles. If it was not the requester, undo it with `user
-   undo-recovery` under the rules below. A recovery undone recently by its owner
-   means someone asked before: treat a new request with suspicion.
+2. **Read the recoveries `user recover` or the Recover page lists.** If one is
+   in probation, find out who used it before anything else; starting another is
+   refused until it is undone or settles. If it was not the requester, undo it,
+   with `user undo-recovery` or the Undo recovery page, under the rules below.
+   A recovery undone recently by its owner means someone asked before: treat a
+   new request with suspicion.
 3. **Confirm the request through a second channel that existed before it**, and
    that is not the address the link will go to: another verified address on the
    account, an organization contact known beforehand, or a reply to a message

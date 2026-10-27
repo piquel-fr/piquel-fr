@@ -4,7 +4,8 @@ use super::{AdminApplication as App, lists};
 use crate::Reason;
 use piquel_admin_api::{DisableUser, EventSearch, UserSearch};
 use piquel_common::{AccountStatus, SessionId, UserId};
-use piquel_ui::{Query, SessionRow, UserRow};
+use piquel_repository::{RecentRecovery, RecoveryState};
+use piquel_ui::{Query, RecoveryKey, RecoveryRow, RecoveryStanding, SessionRow, UserRow};
 use serde::de::IgnoredAny;
 use topcoat::{
     Result,
@@ -89,6 +90,10 @@ pub(super) async fn detail(cx: &Cx) -> Result<Response> {
         AccountStatus::Disabled | AccountStatus::Deleting => href!(enable, Account(id)).resolve(cx),
     };
     let revoke_all = href!(revoke_sessions, Account(id)).resolve(cx);
+    let (recovering, undoing) = (
+        href!(recover, Account(id)).resolve(cx),
+        href!(undo_recovery, Account(id)).resolve(cx),
+    );
     let sessions: Vec<_> = detail
         .sessions
         .iter()
@@ -100,10 +105,18 @@ pub(super) async fn detail(cx: &Cx) -> Result<Response> {
         .collect();
     let events = App::event_rows(cx, &recent.events);
     let all_events = filter.on(&href!(lists::events).resolve(cx))?;
-    let (status, revoke_all) = if changeable {
-        (Ok(status_link.as_str()), Ok(revoke_all.as_str()))
+    let (status, revoke_all, recovery) = if changeable {
+        (
+            Ok(status_link.as_str()),
+            Ok(revoke_all.as_str()),
+            Ok((recovering.as_str(), undoing.as_str())),
+        )
     } else {
-        (Err(ADMINISTRATOR_TARGET), Err(ADMINISTRATOR_TARGET))
+        (
+            Err(ADMINISTRATOR_TARGET),
+            Err(ADMINISTRATOR_TARGET),
+            Err(ADMINISTRATOR_TARGET),
+        )
     };
     // The page names only references: a view moves what it names.
     let (detail, sessions, events, all_events) = (&detail, &sessions, &events, &all_events);
@@ -111,6 +124,7 @@ pub(super) async fn detail(cx: &Cx) -> Result<Response> {
         piquel_ui::user_page(
             detail: detail,
             status: status,
+            recovery: recovery,
             sessions: sessions,
             revoke_sessions: revoke_all,
             recent: events,
@@ -230,7 +244,123 @@ pub(super) async fn revoke_session(cx: &Cx, form: Option<Form<IgnoredAny>>) -> R
     App::render(cx, StatusCode::OK, page).await
 }
 
+/// The form starting or undoing a recovery.
+#[derive(serde::Deserialize)]
+pub(super) struct RecoveryForm {
+    /// Why, recorded with the recovery and shown to the owner in their history.
+    reason: String,
+}
+
+/// `/users/{account}/recover`: the account's recent recoveries, then starts one,
+/// whose link only its primary verified address is mailed, and goes on to the
+/// account's page. An account that was in someone else's hands needs `user
+/// recover --revoke`, at the terminal, and so does every account while email is
+/// disabled.
+#[route([GET, POST] "/users/{account}/recover")]
+pub(super) async fn recover(cx: &Cx, form: Option<Form<RecoveryForm>>) -> Result<Response> {
+    let admin = App::admin(cx).await?;
+    App::confirm(cx, admin)?;
+    let app = App::of(cx);
+    let id = *path_param::<Account>(cx)?;
+    let back = App::account(cx, id);
+    let reason = form.as_ref().map(|Form(input)| input.reason.clone());
+    let refusal = App::submit(cx, form, back.clone(), |input: RecoveryForm| async move {
+        let reason = Reason::parse(input.reason)?;
+        app.service
+            .recover_account(&admin.operator, id, reason, &app.links, None)
+            .await
+            .map(drop)
+    })
+    .await?;
+    let recent = app.service.recent_recoveries(&admin.operator, id).await?;
+    let reason = refusal.as_ref().and(reason);
+    let rows = &App::recovery_rows(&recent);
+    let page = view! { cx =>
+        piquel_ui::dashboard_change(
+            title: "Recover this account",
+            description: "For an owner who lost every passkey. Ends every session, removes the account's unverified addresses, and emails its primary verified address a link that enrolls one passkey, once, within a day. For 15 days after, that passkey signs in but confirms no change, and any older passkey can undo the recovery. Follow the evidence policy first. An account that was in someone else's hands needs auth-service user recover --revoke, at the terminal.",
+            button: "Send the recovery link",
+            back: back.as_str(),
+            refusal: refusal.as_deref(),
+            danger: true,
+            piquel_ui::recovery_list(rows: rows)
+            <label>
+                "Reason, shown to the owner in their history: what was asked, never the evidence"
+                <input name="reason" required="" maxlength="500" value=(reason)>
+            </label>
+        )
+    };
+    App::render(cx, StatusCode::OK, page).await
+}
+
+/// `/users/{account}/undo-recovery`: the account's recent recoveries, then undoes
+/// the one that can still be undone, for an owner support has confirmed, and goes
+/// on to the account's page: in probation, it removes its passkey, withdraws
+/// every consent and ends every session; its link unused, it cancels the link.
+#[route([GET, POST] "/users/{account}/undo-recovery")]
+pub(super) async fn undo_recovery(cx: &Cx, form: Option<Form<RecoveryForm>>) -> Result<Response> {
+    let admin = App::admin(cx).await?;
+    App::confirm(cx, admin)?;
+    let app = App::of(cx);
+    let id = *path_param::<Account>(cx)?;
+    let back = App::account(cx, id);
+    let reason = form.as_ref().map(|Form(input)| input.reason.clone());
+    let refusal = App::submit(cx, form, back.clone(), |input: RecoveryForm| async move {
+        let reason = Reason::parse(input.reason)?;
+        app.service.undo_recovery(&admin.operator, id, reason).await
+    })
+    .await?;
+    let recent = app.service.recent_recoveries(&admin.operator, id).await?;
+    let reason = refusal.as_ref().and(reason);
+    let rows = &App::recovery_rows(&recent);
+    let page = view! { cx =>
+        piquel_ui::dashboard_change(
+            title: "Undo this account's recovery",
+            description: "For an owner support has confirmed, who has no passkey left from before the recovery, or whose account is disabled. In probation, removes the recovery's passkey, even the last, withdraws every consent and ends every session; its link unused, cancels the link.",
+            button: "Undo the recovery",
+            back: back.as_str(),
+            refusal: refusal.as_deref(),
+            danger: true,
+            piquel_ui::recovery_list(rows: rows)
+            <label>
+                "Reason, shown to the owner in their history: what was asked, never the evidence"
+                <input name="reason" required="" maxlength="500" value=(reason)>
+            </label>
+        )
+    };
+    App::render(cx, StatusCode::OK, page).await
+}
+
 impl App {
+    /// `recent` recoveries as the recovery pages list them.
+    fn recovery_rows(recent: &[RecentRecovery]) -> Vec<RecoveryRow> {
+        recent
+            .iter()
+            .map(|recovery| RecoveryRow {
+                started_at: recovery.started_at,
+                standing: match recovery.state {
+                    RecoveryState::Open => RecoveryStanding::Unused,
+                    RecoveryState::Probation { settles_at } => {
+                        RecoveryStanding::Probation { settles_at }
+                    }
+                    RecoveryState::Settled => RecoveryStanding::Settled,
+                    RecoveryState::Ended => match (recovery.undone_at, recovery.cancelled_at) {
+                        (Some(at), _) => RecoveryStanding::Undone(at),
+                        (None, Some(at)) => RecoveryStanding::Cancelled(at),
+                        (None, None) => RecoveryStanding::Expired,
+                    },
+                },
+                passkey: recovery.passkey.as_ref().zip(recovery.completed_at).map(
+                    |(passkey, enrolled_at)| RecoveryKey {
+                        id: passkey.id,
+                        enrolled_at,
+                        active: passkey.active,
+                    },
+                ),
+            })
+            .collect()
+    }
+
     /// The page of the account `id`.
     pub(super) fn account(cx: &Cx, id: UserId) -> String {
         href!(detail, Account(id)).resolve(cx)

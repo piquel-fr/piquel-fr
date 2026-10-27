@@ -52,13 +52,16 @@ const EVENT_PAGE_SIZE: u16 = 100;
 pub struct AdminService {
     /// Accounts, sessions, invitations, clients, events, deliveries and administrators.
     database: Database,
+    /// Whether email is enabled, so a recovery link can be mailed.
+    mails: bool,
 }
 
 impl AdminService {
-    /// Operates on `database`.
+    /// Operates on `database`, mailing recovery links if `mails`, as email is
+    /// enabled.
     #[must_use]
-    pub const fn new(database: Database) -> Self {
-        Self { database }
+    pub const fn new(database: Database, mails: bool) -> Self {
+        Self { database, mails }
     }
 
     /// Ends every mutation: rechecks `operator`, records `events` about `subject`,
@@ -255,7 +258,8 @@ impl AdminService {
     /// current primary verified address is sent a link that enrolls one passkey,
     /// once, within a day. An operator at the terminal is also given the link,
     /// which also reaches an owner without an address. An administrator never
-    /// sees it, so they may only start a recovery that mails it.
+    /// sees it, so they may only start a recovery that mails it, which needs email
+    /// enabled.
     ///
     /// With `revoke`, for an account that was in someone else's hands, it first
     /// takes back every way in but the passkeys the owner vouched for: every
@@ -289,7 +293,8 @@ impl AdminService {
         }
         let shown = matches!(operator, Operator::Cli { .. });
         let emails = tx.emails().list(user_id).await?;
-        let mailed = revoke.is_none()
+        let mailed = self.mails
+            && revoke.is_none()
             && emails
                 .iter()
                 .any(|email| email.is_primary && email.verified_at.is_some());

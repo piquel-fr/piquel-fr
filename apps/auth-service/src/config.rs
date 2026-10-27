@@ -684,6 +684,15 @@ impl AuthConfig {
         Ok(TokenDigestKeys::from_environment()?.recovery_links(&origin))
     }
 
+    /// Reads whether email is enabled (`AUTH_SMTP_URL` is set), for commands that
+    /// send no email themselves.
+    ///
+    /// # Errors
+    /// Names an unreadable variable.
+    pub(crate) fn mails_from_environment() -> Result<bool, ConfigurationError> {
+        Ok(SMTP_URL.optional()?.is_some())
+    }
+
     /// Reads the key-encryption key, for serving and for the `keys` commands.
     ///
     /// # Errors

@@ -106,7 +106,7 @@ impl Harness {
 
     /// The service under test.
     fn service(&self) -> AdminService {
-        AdminService::new(self.database.clone())
+        AdminService::new(self.database.clone(), true)
     }
 
     /// Creates an administrator, granted by the CLI.

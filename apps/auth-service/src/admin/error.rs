@@ -69,9 +69,10 @@ pub enum AdminError {
     #[error("the account is disabled; enable it before recovering it")]
     RecoveryOfDisabledAccount,
     /// An administrator never sees a recovery link, so only a recovery that mails
-    /// it to a primary verified address is theirs to start.
+    /// it to a primary verified address, while email is enabled, is theirs to
+    /// start.
     #[error(
-        "the recovery link would not be mailed (no primary verified address, or --revoke); only an operator at the terminal can recover this account, with `auth-service user recover`"
+        "the recovery link would not be mailed (email is disabled, the account has no primary verified address, or --revoke); only an operator at the terminal can recover this account, with `auth-service user recover`"
     )]
     RecoveryNeedsEmail,
     /// Whoever used an administrator's recovery link could use its rights before
@@ -83,7 +84,7 @@ pub enum AdminError {
     /// A recovery of the account is in probation: support finds out who used it,
     /// and undoes it first.
     #[error(
-        "the account has a recovery in probation: find out who used it, and undo it with `auth-service user undo-recovery` before starting another"
+        "the account has a recovery in probation: find out who used it, and undo it (the dashboard's Undo recovery, or `auth-service user undo-recovery`) before starting another"
     )]
     RecoveryInProbation,
     /// A passkey `--keep` named is not an active passkey of the account.

@@ -32,6 +32,7 @@ use crate::{
     admin::{AdminOperation, DashboardSignIn, SignedInAdmin},
     assets::EmbeddedAssets,
     config::DashboardConfig,
+    recovery::RecoveryLinks,
     routes,
     security::{ApiError, RequestContext},
 };
@@ -78,6 +79,8 @@ pub(crate) struct AdminApplication {
     auth: Origin,
     /// Whether signup needs an invitation, so the dashboard manages them.
     invitations: bool,
+    /// Derives the links recoveries mail.
+    links: RecoveryLinks,
     /// Every answer's Content-Security-Policy.
     policy: HeaderValue,
 }
@@ -126,10 +129,11 @@ impl AdminApplication {
             auth.join(routes::page::ADMIN),
         );
         Ok(Self {
-            service: AdminService::new(database.clone()),
+            service: AdminService::new(database.clone(), config.email.smtp.is_some()),
             sign_in: DashboardSignIn::new(database, auth.clone(), dashboard.origin.clone()),
             auth,
             invitations: config.passkey.invite_required,
+            links: config.email.recovery_links.clone(),
             policy: HeaderValue::try_from(policy)?,
         })
     }
@@ -182,6 +186,8 @@ impl AdminApplication {
             Op::EnableUser => &users::enable,
             Op::RevokeUserSessions => &users::revoke_sessions,
             Op::RevokeSession => &users::revoke_session,
+            Op::RecoverAccount => &users::recover,
+            Op::UndoRecovery => &users::undo_recovery,
             Op::ListInvitations => &invitations::list,
             Op::CreateInvitation => &invitations::create,
             Op::RevokeInvitation => &invitations::revoke,
@@ -190,9 +196,7 @@ impl AdminApplication {
             Op::ListAdministrators => &administrators::list,
             Op::GrantAdministrator => &administrators::grant,
             Op::RevokeAdministrator => &administrators::revoke,
-            Op::RecoverAccount
-            | Op::UndoRecovery
-            | Op::ViewClient
+            Op::ViewClient
             | Op::CreateClient
             | Op::ApplyClient
             | Op::UpdateClient

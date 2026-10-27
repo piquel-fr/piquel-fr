@@ -6,6 +6,7 @@ use crate::{
     AdminService, AuthConfig, DashboardConfig,
     account::AccountService,
     admin::DashboardSignIn,
+    config::EmailConfig,
     passkey::AdminProof,
     routes,
     security::{BrowserCookie, RequestContext},
@@ -19,7 +20,7 @@ use axum::{
     http::{StatusCode, header},
     response::Response,
 };
-use chrono::Utc;
+use chrono::{DateTime, Utc};
 use piquel_common::{AccountStatus, AuthenticationMethod, UserId};
 use piquel_repository::Database;
 use piquel_ui::{Checkbox, HandoffQuery};
@@ -42,7 +43,12 @@ struct Harness {
 impl Harness {
     /// Builds auth and its dashboard over the test database.
     async fn new() -> Self {
-        let mut config = AuthConfig::test(&AUTH_ORIGIN.parse().expect("auth origin"));
+        Self::of(AuthConfig::test(&AUTH_ORIGIN.parse().expect("auth origin"))).await
+    }
+
+    /// Builds auth as `config` sets it up, and its dashboard, over the test
+    /// database.
+    async fn of(mut config: AuthConfig) -> Self {
         config.dashboard = Some(DashboardConfig {
             listener: SocketAddr::from(([127, 0, 0, 1], 0)),
             origin: DASHBOARD.parse().expect("dashboard origin"),
@@ -63,7 +69,7 @@ impl Harness {
 
     /// Makes `user_id` an administrator, from the CLI.
     async fn grant(&self, user_id: UserId) {
-        AdminService::new(self.database.clone())
+        AdminService::new(self.database.clone(), true)
             .grant_administrator(&operator(), user_id)
             .await
             .expect("grant");
@@ -104,6 +110,30 @@ impl Harness {
     async fn sign_in(&self, auth: &Browser, path: &str) -> Browser {
         let (dashboard, handed) = self.hand_off(auth, path).await;
         self.redeem(&dashboard, &location(&handed), path).await
+    }
+
+    /// Signs `auth`'s browser in to the dashboard, which opens its `path`, with a
+    /// passkey proof of the handoff at `proved_at`: the dashboard's browser,
+    /// holding its session.
+    async fn confirmed(&self, auth: &Browser, path: &str, proved_at: DateTime<Utc>) -> Browser {
+        let sign_in = DashboardSignIn::new(
+            self.database.clone(),
+            AUTH_ORIGIN.parse().expect("auth origin"),
+            DASHBOARD.parse().expect("dashboard origin"),
+        );
+        let state = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA";
+        let query = HandoffQuery {
+            state: state.to_owned(),
+            return_to: path.to_owned(),
+            confirm: Checkbox(true),
+        };
+        let proof = AdminProof::unverified(auth.session_id, proved_at);
+        let code_url = sign_in
+            .hand_off(&auth.owner(&self.database).await, &query, Some(proof))
+            .await
+            .expect("handed off");
+        let browser = Browser::signed_out().with_cookie(BrowserCookie::DashboardState, state);
+        self.redeem(&browser, &code_url, path).await
     }
 
     /// Redeems the handoff `code_url` in the dashboard's `browser`, which then goes
@@ -174,7 +204,7 @@ async fn the_dashboard_rests_on_the_auth_session_and_live_rights() {
     let dashboard = harness.sign_in(&revoked, "/users").await;
     // Another administrator, so the rights revoked are not the last.
     harness.admin().await;
-    AdminService::new(harness.database.clone())
+    AdminService::new(harness.database.clone(), true)
         .revoke_administrator(&operator(), revoked.user_id)
         .await
         .expect("revoke");
@@ -259,6 +289,29 @@ async fn a_change_needs_a_confirmation_done_for_the_dashboard() {
     assert_eq!(stored.status, AccountStatus::Disabled);
 }
 
+/// While email is disabled, the Recover page says why the service refuses a
+/// recovery whose link would only be mailed.
+#[tokio::test]
+#[ignore = "requires TEST_DATABASE_URL"]
+async fn recover_says_when_email_is_disabled() {
+    let origin = AUTH_ORIGIN.parse().expect("auth origin");
+    let mut config = AuthConfig::test(&origin);
+    config.email = EmailConfig::test(&origin, false);
+    let harness = Harness::of(config).await;
+    let admin = harness.admin().await;
+    let owner = Browser::new_account(&harness.database).await;
+    let address = format!("{}@example.com", owner.user_id);
+    crate::tests::verified_address(&harness.database, owner.user_id, &address, true).await;
+    let recover = format!("/users/{}/recover", owner.user_id);
+    let dashboard = harness.confirmed(&admin, &recover, Utc::now()).await;
+    let url = format!("{DASHBOARD}{recover}");
+    let reason = [("reason", "Lost every passkey")];
+    let refused = dashboard
+        .submit(&harness.dashboard, &url, &reason, OWN_PAGE)
+        .await;
+    assert!(html(refused).await.contains("email is disabled"));
+}
+
 /// An account's page lists its passkeys by ID and when each was added, never by
 /// name, which whoever used a recovery's link chose.
 #[tokio::test]
@@ -330,26 +383,11 @@ async fn a_form_shown_in_time_may_be_posted_until_the_confirmation_ends() {
     let admin = harness.admin().await;
     let user = Browser::new_account(&harness.database).await;
     let disable = format!("/users/{}/disable", user.user_id);
-    let sign_in = DashboardSignIn::new(
-        harness.database.clone(),
-        AUTH_ORIGIN.parse().expect("auth origin"),
-        DASHBOARD.parse().expect("dashboard origin"),
-    );
-    let state = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA";
-    let query = HandoffQuery {
-        state: state.to_owned(),
-        return_to: disable.clone(),
-        confirm: Checkbox(true),
-    };
     // Ninety seconds left: less than a form needs, more than a post does.
     let ninety_seconds_left = Utc::now() - chrono::Duration::seconds(210);
-    let proof = AdminProof::unverified(admin.session_id, ninety_seconds_left);
-    let code_url = sign_in
-        .hand_off(&admin.owner(&harness.database).await, &query, Some(proof))
-        .await
-        .expect("handed off");
-    let browser = Browser::signed_out().with_cookie(BrowserCookie::DashboardState, state);
-    let confirmed = harness.redeem(&browser, &code_url, &disable).await;
+    let confirmed = harness
+        .confirmed(&admin, &disable, ninety_seconds_left)
+        .await;
     let form = harness.visit(&confirmed, &disable).await;
     assert_eq!(
         location(&form).path(),
@@ -401,4 +439,48 @@ async fn the_admin_listener_keeps_to_its_host_forms_and_session() {
         .await
         .expect("lookup")
         .expect("still signed in to Piquel");
+}
+
+/// Recovering an account mails its primary verified address a link, which the
+/// recovery pages then list, and undoing it cancels the unused link; both go on
+/// to the account's page. An account whose link would not be mailed is left
+/// alone, saying why.
+#[tokio::test]
+#[ignore = "requires TEST_DATABASE_URL"]
+async fn recoveries_are_started_and_undone_from_the_dashboard() {
+    let harness = Harness::new().await;
+    let admin = harness.admin().await;
+    let owner = Browser::new_account(&harness.database).await;
+    let address = format!("{}@example.com", owner.user_id);
+    crate::tests::verified_address(&harness.database, owner.user_id, &address, true).await;
+    let recover = format!("/users/{}/recover", owner.user_id);
+    let dashboard = harness.confirmed(&admin, &recover, Utc::now()).await;
+    let page = html(harness.visit(&dashboard, &recover).await).await;
+    assert!(page.contains("No recovery in the last 15 days."));
+    let reason = [("reason", "Lost every passkey")];
+    let post = async |path: &str| {
+        let url = format!("{DASHBOARD}{path}");
+        dashboard
+            .submit(&harness.dashboard, &url, &reason, OWN_PAGE)
+            .await
+    };
+    let account = format!("/users/{}", owner.user_id);
+    assert_eq!(redirect(&post(&recover).await), account);
+    let page = html(harness.visit(&dashboard, &recover).await).await;
+    assert!(page.contains("Link sent, not used"), "{page}");
+
+    let undo = format!("/users/{}/undo-recovery", owner.user_id);
+    assert_eq!(redirect(&post(&undo).await), account);
+    let page = html(harness.visit(&dashboard, &undo).await).await;
+    assert!(page.contains("Cancelled"), "{page}");
+
+    let unreachable = Browser::new_account(&harness.database).await;
+    let recover = format!("/users/{}/recover", unreachable.user_id);
+    let refused = html(post(&recover).await).await;
+    assert!(refused.contains("would not be mailed"), "{refused}");
+    let recent = AdminService::new(harness.database.clone(), true)
+        .recent_recoveries(&operator(), unreachable.user_id)
+        .await
+        .expect("recoveries");
+    assert!(recent.is_empty(), "nothing started");
 }

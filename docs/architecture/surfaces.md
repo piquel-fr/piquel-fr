@@ -141,7 +141,8 @@ browser in with it. The link's token alone authorizes it; only its digest is
 stored, and the email's delivery stores neither. Only an operator at the
 terminal sees the link (`user recover`), which also reaches an owner without an
 address. An administrator never sees it, so they may only start a recovery that
-mails it; the dashboard's way to start one is *(planned)*.
+mails it, from the dashboard's Recover page; one that also revokes every way in
+(`--revoke`) prints its link, so it stays at the terminal.
 
 For 15 days after the link is used, the recovery is in probation: its passkey
 signs in like a social login and never confirms the session. Every change that
@@ -153,10 +154,11 @@ grant, and every app consent. The owner undoes it with any other passkey on
 that needs no session and works on a disabled account
 (`/account/recovery/undo/start` and `/finish`). Until it settles, nobody removes
 a passkey but the recovery's own, administrators and operators included, so
-nothing takes that away. Support undoes it for an owner with no other passkey
-(`user undo-recovery`, `AdminService::undo_recovery`). While a recovery can be
-undone, every settings and developer console page, and a passkey sign-in that
-continues to an app, asks "Was this you?" and links to the undo page.
+nothing takes that away. Support undoes it for an owner with no other passkey,
+from the dashboard's Undo recovery page or with `user undo-recovery`
+(`AdminService::undo_recovery`). While a recovery can be undone, every settings
+and developer console page, and a passkey sign-in that continues to an app, asks
+"Was this you?" and links to the undo page.
 
 `user recover --revoke` is for an account that was in someone else's hands: it
 also revokes every passkey the owner doesn't vouch for, unlinks every identity
