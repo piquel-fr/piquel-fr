@@ -13,7 +13,7 @@ use crate::{
     security::{BrowserCookie, CONFIRMATION_MAX_AGE},
     tests::{
         AUTH_ORIGIN, Browser, Replicas, change, pending_sign_in, registration, sign_out,
-        until_blocked, unusable_passkey,
+        until_blocked, unusable_passkey, verified_address,
     },
 };
 use axum::{
@@ -30,8 +30,8 @@ use piquel_common::{
     protocol::step_up::StepUpRequirement,
 };
 use piquel_crypto::Secret;
+use piquel_repository::PendingFederation;
 use piquel_repository::{InsertExternalIdentity, InsertPasskey};
-use piquel_repository::{InsertVerifiedEmail, PendingFederation};
 use std::{fmt::Debug, mem::discriminant};
 
 /// The reason the scenarios give.
@@ -597,23 +597,11 @@ impl Confirmation {
         let database = &fixture.harness.database;
         let (account, passkeys) = fixture.target(2).await;
         let user = account.user_id;
-        let mut tx = database.begin().await.expect("transaction");
         let mut addresses = Vec::new();
         for (index, is_primary) in [(1, true), (2, false)] {
-            let email = tx
-                .emails()
-                .insert_verified(&InsertVerifiedEmail {
-                    id: EmailId::new(),
-                    user_id: user,
-                    normalized_email: format!("{user}-{index}@example.com"),
-                    is_primary,
-                    verified_at: Utc::now(),
-                })
-                .await
-                .expect("address");
-            addresses.push(email.id);
+            let address = format!("{user}-{index}@example.com");
+            addresses.push(verified_address(database, user, &address, is_primary).await);
         }
-        tx.commit().await.expect("commit");
         let client = registration(ClientKind::Confidential, "https://notes.example");
         change(database, async |registry| {
             registry

@@ -20,6 +20,23 @@
 {%- when Content::AddressRemoved { address, history } %}
 <p><strong>{{ address }}</strong> was removed from your Piquel account.</p>
 <p>If you made this change, there is nothing to do. If you did not, sign in and <a href="{{ history }}">review your account’s security history</a>.</p>
+{%- when Content::RecoveryLink { address: _, username, link, hours, undo } %}
+<p>Piquel support started a recovery of the Piquel account <strong>@{{ username }}</strong>, so its owner can add a new passkey. The account was signed out everywhere. If it is yours, open this link and follow the steps to add a passkey:</p>
+<p><a href="{{ link }}" style="display:inline-block;padding:10px 18px;border-radius:8px;background:#1a1a1a;color:#ffffff;text-decoration:none">Add a passkey</a></p>
+<p style="font-size:14px;color:#555555">Or copy this link: {{ link }}</p>
+<p>The link works once, for {{ hours }} hours. If you didn’t ask for this, contact Piquel support. If you still have a passkey, you can also <a href="{{ undo }}">cancel the recovery</a>.</p>
+{%- when Content::RecoveryRevoked { address: _, undo } %}
+<p>Piquel support revoked passkeys of your Piquel account, signed it out everywhere, and started a recovery so its owner can add a new passkey. Support gives the recovery link only to the person it confirmed as the owner, directly.</p>
+{%- match undo %}
+{%- when Some with (undo) %}
+<p>If you didn’t ask for this and still have a passkey, <a href="{{ undo }}">cancel the recovery</a>, then contact Piquel support.</p>
+{%- when None %}
+<p>If you didn’t ask for this, contact Piquel support straight away.</p>
+{%- endmatch %}
+{%- when Content::Recovered { address: _, undo, days } %}
+<p>A recovery added a new passkey to your Piquel account and signed in with it. If that was you, there is nothing to do. For {{ days }} days, that passkey can sign in but can’t change your account’s security settings.</p>
+<p>If it wasn’t you, use a passkey you had before the recovery to <a href="{{ undo }}">undo it</a>. You have {{ days }} days to do so. Undoing it removes the recovery’s passkey, signs out every device and withdraws every app’s access; apps ask for it again next time.</p>
+<p>If you have no passkey from before the recovery, contact Piquel support, who can undo it for you.</p>
 {%- endmatch %}
 <p>Piquel</p>
 </div>

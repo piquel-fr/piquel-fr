@@ -100,6 +100,9 @@ pub async fn failure<'a>(
         ErrorCode::InvalidToken | ErrorCode::LoginRequired => "Please sign in again.",
         ErrorCode::AccessDenied => "Sign-in was cancelled or access was declined.",
         ErrorCode::ConsentRequired => "Review the application’s requested access to continue.",
+        ErrorCode::UnmetAuthenticationRequirements => {
+            "This application needs a stronger sign-in than your account can give right now."
+        }
         ErrorCode::ServerError => "Sign-in is temporarily unavailable. Please try again.",
         ErrorCode::InvalidClient
         | ErrorCode::InvalidGrant

@@ -22,7 +22,8 @@ use axum::{
 };
 use chrono::{Duration, Utc};
 use piquel_common::{
-    AuthenticationMethod, ClientId, Handle, PasskeyId, Provider, SessionId, TokenId, UserId,
+    AuthenticationMethod, ClientId, EmailId, Handle, PasskeyId, Provider, SessionId, TokenId,
+    UserId,
     clients::{
         AllowedScopes, ClientField, ClientKind, ClientOwner, ClientRegistration, PostLogoutUris,
         RedirectUris, ScopeName,
@@ -34,8 +35,8 @@ use piquel_common::{
 use piquel_crypto::{ClientSecret, KeyEncryptionKey, Secret};
 use piquel_repository::{
     Database, DatabaseConfig, DatabaseError, DatabaseTransaction, InsertAuthorizationCode,
-    InsertPasskey, InsertRefreshFamily, InsertRefreshToken, InsertUser, PendingFederation,
-    SessionAuthentication, SessionScope,
+    InsertPasskey, InsertRefreshFamily, InsertRefreshToken, InsertUser, InsertVerifiedEmail,
+    PendingFederation, SessionAuthentication, SessionScope,
 };
 use serde_json::Value;
 use std::{
@@ -510,6 +511,28 @@ impl ClientSettings {
             require_pushed_authorization_requests: false,
         }
     }
+}
+
+/// Adds `address` to `user_id` as verified, and primary if `is_primary`, and
+/// returns its ID.
+pub(crate) async fn verified_address(
+    database: &Database,
+    user_id: UserId,
+    address: &str,
+    is_primary: bool,
+) -> EmailId {
+    database
+        .emails()
+        .insert_verified(&InsertVerifiedEmail {
+            id: EmailId::new(),
+            user_id,
+            normalized_email: address.into(),
+            is_primary,
+            verified_at: Utc::now(),
+        })
+        .await
+        .expect("verified address")
+        .id
 }
 
 /// Ends `session_id` of `user_id` in `tx`, as their browser's sign-out does.

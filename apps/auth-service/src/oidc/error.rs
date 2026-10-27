@@ -128,6 +128,7 @@ impl OAuthError {
             | OAuthCode::UnsupportedGrantType
             | OAuthCode::LoginRequired
             | OAuthCode::ConsentRequired
+            | OAuthCode::UnmetAuthenticationRequirements
             | OAuthCode::RequestNotSupported
             | OAuthCode::InvalidRequestUri
             | OAuthCode::AccessDenied
@@ -149,6 +150,7 @@ impl OAuthError {
             | OAuthCode::UnsupportedGrantType
             | OAuthCode::LoginRequired
             | OAuthCode::ConsentRequired
+            | OAuthCode::UnmetAuthenticationRequirements
             | OAuthCode::RequestNotSupported
             | OAuthCode::InvalidRequestUri
             | OAuthCode::AccessDenied
@@ -265,7 +267,9 @@ impl From<SessionError> for OAuthError {
             SessionError::Missing => {
                 OAuthCode::InvalidToken.reject_with("sign in to continue", error)
             }
-            SessionError::StepUpRequired { .. } | SessionError::PasskeyRequired => {
+            SessionError::StepUpRequired { .. }
+            | SessionError::PasskeyRequired
+            | SessionError::SignOutFirst => {
                 OAuthCode::InvalidToken.reject_with("confirm with a passkey to continue", error)
             }
             SessionError::Database(error) => Self::Database(error),

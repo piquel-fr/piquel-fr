@@ -272,6 +272,10 @@ type's `check`, and the SDK checks tokens with it too:
 - `acr` classes are ordered: `phr` meets every class, and
   `urn:piquel:acr:social` meets only itself. A token without `acr`, or with one the
   SDK does not know, meets no `acr` requirement.
+- Gate on `acr`, never on `amr`. `amr` lists the methods a session used, not the
+  assurance it reached: a recovered passkey signs in with `amr` `pop mfa user`
+  but reports `acr` `urn:piquel:acr:social` until its recovery settles (see
+  [account recovery](../security/account-recovery.md)).
 - `max_age` needs `auth_time`, and holds while `now - 30 <= auth_time + max_age`,
   with the same leeway as the other time checks.
 

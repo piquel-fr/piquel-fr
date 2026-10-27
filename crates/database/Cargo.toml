@@ -20,7 +20,8 @@ url.workspace = true
 uuid.workspace = true
 
 [features]
-# Read-only helpers that let other crates' tests observe stored state.
+# Helpers that let other crates' tests observe stored state, and move a
+# recovery's clock.
 test-support = []
 
 [lints]

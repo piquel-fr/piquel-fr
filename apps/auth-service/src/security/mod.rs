@@ -1,5 +1,6 @@
 //! Shared browser-session, passkey confirmation and HTTP trust boundaries.
 
+use crate::recovery::ProbationPasskey;
 use crate::routes::{ACCOUNT_PREFIX, oidc, page, service};
 use axum::{
     Json,
@@ -300,8 +301,12 @@ impl BrowserCookie {
 /// passkey, named so the session records which one, or a provider.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum Credential {
-    /// This passkey's assertion.
+    /// This passkey's assertion, which confirms the session.
     Passkey(PasskeyId),
+    /// The assertion of a recovery's passkey during its probation. It signs in
+    /// like a provider does, without confirming the session, so no step-up
+    /// requirement accepts it until the recovery settles.
+    Probation(ProbationPasskey),
     /// A provider's verified identity.
     Federation,
 }
@@ -310,7 +315,7 @@ impl Credential {
     /// The method sessions and events record.
     pub(crate) const fn method(self) -> AuthenticationMethod {
         match self {
-            Self::Passkey(_) => AuthenticationMethod::Passkey,
+            Self::Passkey(_) | Self::Probation(_) => AuthenticationMethod::Passkey,
             Self::Federation => AuthenticationMethod::Federation,
         }
     }
@@ -319,7 +324,16 @@ impl Credential {
     const fn passkey(self) -> Option<PasskeyId> {
         match self {
             Self::Passkey(passkey) => Some(passkey),
+            Self::Probation(probation) => Some(probation.passkey()),
             Self::Federation => None,
+        }
+    }
+
+    /// The passkey, if one confirms the session.
+    const fn confirming(self) -> Option<PasskeyId> {
+        match self {
+            Self::Passkey(passkey) => Some(passkey),
+            Self::Probation(_) | Self::Federation => None,
         }
     }
 }
@@ -352,6 +366,11 @@ pub(crate) enum SessionError {
     /// which would lower its `acr`.
     #[error("this session was confirmed with a passkey; sign in again with a passkey")]
     PasskeyRequired,
+    /// A recovery's passkey during its probation tried to sign in to a browser
+    /// whose session another passkey confirmed, which would lower its `acr`: the
+    /// browser signs out first.
+    #[error("a recovery's passkey cannot sign in to a session another passkey confirmed")]
+    SignOutFirst,
     /// Session persistence failed.
     #[error(transparent)]
     Database(#[from] DatabaseError),
@@ -371,7 +390,12 @@ impl From<SessionError> for ApiError {
             }
             SessionError::PasskeyRequired => {
                 Self::forbidden("Sign in with your passkey to continue.")
+                    .with_code(ErrorCode::PasskeyRequired)
             }
+            SessionError::SignOutFirst => Self::forbidden(
+                "This passkey was added by a recent recovery, so it can’t sign in to a browser that’s signed in with another passkey. Sign out first.",
+            )
+            .with_code(ErrorCode::PasskeyRequired),
             SessionError::Database(error) => error.into(),
             error @ SessionError::Crypto(_) => Self::internal(error),
         }
@@ -451,19 +475,7 @@ impl Session {
         user_id: UserId,
         credential: Credential,
     ) -> Result<Secret, SessionError> {
-        tx.users()
-            .find_active_by_id_for_update(user_id)
-            .await?
-            .ok_or(SessionError::Missing)?;
-        let current = match BrowserCookie::Session.read(headers) {
-            Some(cookie) => {
-                tx.sessions()
-                    .find_active_by_browser_secret(cookie.digest().as_bytes())
-                    .await?
-            }
-            None => None,
-        };
-        match current {
+        match Self::browser_session(tx, headers, user_id).await? {
             Some(current) if current.user_id == user_id => {
                 let secret = Self::reauthenticate(tx, &current, credential).await?;
                 tx.record(
@@ -477,26 +489,74 @@ impl Session {
                 .await?;
                 Ok(secret)
             }
-            Some(other) => {
-                Self::revoke(
-                    tx,
-                    context,
-                    &other,
-                    SessionScope::One(other.id),
-                    RevocationReason::AccountSwitched,
-                )
-                .await?;
-                Self::create(tx, context, user_id, credential).await
-            }
-            None => Self::create(tx, context, user_id, credential).await,
+            current => Self::replace(tx, context, current, user_id, credential).await,
         }
+    }
+
+    /// Signs `user_id` in on this browser with a new session, as [`Self::sign_in`]
+    /// does, but never re-authenticates the browser's session: whatever session it
+    /// had, of this account or another, is revoked first. A recovery link signs in
+    /// this way, so an existing session can neither make it fail nor carry over.
+    pub(crate) async fn sign_in_anew(
+        tx: &mut DatabaseTransaction<'_>,
+        context: RequestContext,
+        headers: &HeaderMap,
+        user_id: UserId,
+        credential: Credential,
+    ) -> Result<Secret, SessionError> {
+        let current = Self::browser_session(tx, headers, user_id).await?;
+        Self::replace(tx, context, current, user_id, credential).await
+    }
+
+    /// Locks `user_id`'s active account, then reads the session of the browser's
+    /// cookie, if it has a live one.
+    async fn browser_session(
+        tx: &mut DatabaseTransaction<'_>,
+        headers: &HeaderMap,
+        user_id: UserId,
+    ) -> Result<Option<StoredSession>, SessionError> {
+        tx.users()
+            .find_active_by_id_for_update(user_id)
+            .await?
+            .ok_or(SessionError::Missing)?;
+        Ok(match BrowserCookie::Session.read(headers) {
+            Some(cookie) => {
+                tx.sessions()
+                    .find_active_by_browser_secret(cookie.digest().as_bytes())
+                    .await?
+            }
+            None => None,
+        })
+    }
+
+    /// Revokes the browser's `current` session, if any, then creates `user_id`'s
+    /// new one.
+    async fn replace(
+        tx: &mut DatabaseTransaction<'_>,
+        context: RequestContext,
+        current: Option<StoredSession>,
+        user_id: UserId,
+        credential: Credential,
+    ) -> Result<Secret, SessionError> {
+        if let Some(current) = current {
+            Self::revoke(
+                tx,
+                context,
+                &current,
+                SessionScope::One(current.id),
+                RevocationReason::AccountSwitched,
+            )
+            .await?;
+        }
+        Self::create(tx, context, user_id, credential).await
     }
 
     /// Records a new authentication of `session` with `credential` inside the
     /// caller's transaction, keeping its `sid`, and returns the secret for its new
-    /// cookie. A passkey confirms the session, which records it. A social sign-in
-    /// renews it unless a passkey confirmed it, since that would lower its `acr`.
-    /// Callers record the event that says why.
+    /// cookie. A passkey confirms the session, which records it. A social sign-in,
+    /// or a recovery's passkey during its probation, renews it unless a passkey
+    /// confirmed it, since that would lower its `acr`; a probation passkey is
+    /// recorded too. Callers record the event that says why.
     ///
     /// The old cookie stops working, so a copy of it never gains the new
     /// authentication. Callers set the new cookie only after the transaction commits.
@@ -512,11 +572,21 @@ impl Session {
                     .confirm_passkey(session.id, passkey, now)
                     .await?;
             }
+            Credential::Probation(probation) => {
+                if session.passkey_confirmed_at.is_some() {
+                    return Err(SessionError::SignOutFirst);
+                }
+                tx.sessions()
+                    .reauthenticate_unconfirmed(session.id, Some(probation.passkey()), now)
+                    .await?;
+            }
             Credential::Federation => {
                 if session.passkey_confirmed_at.is_some() {
                     return Err(SessionError::PasskeyRequired);
                 }
-                tx.sessions().reauthenticate_social(session.id, now).await?;
+                tx.sessions()
+                    .reauthenticate_unconfirmed(session.id, None, now)
+                    .await?;
             }
         }
         let secret = Secret::generate()?;
@@ -528,8 +598,8 @@ impl Session {
 
     /// Creates a session inside the caller's transaction, records the sign-in, and
     /// returns the secret for its cookie. A passkey sign-in also confirms the session,
-    /// so an action right after it prompts no more, and the session records which
-    /// passkey it was.
+    /// so an action right after it prompts no more, unless it is a recovery's
+    /// passkey during its probation. The session records which passkey it was.
     pub(crate) async fn create(
         tx: &mut DatabaseTransaction<'_>,
         context: RequestContext,
@@ -548,7 +618,7 @@ impl Session {
                 expires_at: now + Duration::days(i64::from(SESSION_LIFETIME_DAYS)),
                 user_agent_family: context.user_agent_family,
                 ip: context.client_ip,
-                passkey_confirmed_at: credential.passkey().map(|_| now),
+                passkey_confirmed_at: credential.confirming().map(|_| now),
                 passkey_id: credential.passkey(),
             })
             .await?;

@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE account_recoveries SET cancelled_at = clock_timestamp()\n                WHERE user_id = $1\n                AND completed_at IS NULL AND cancelled_at IS NULL AND undone_at IS NULL",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "6f6add6e404fb0388453487348b41be36548c1e7f8a46c6d7e10d0739834fd59"
+}

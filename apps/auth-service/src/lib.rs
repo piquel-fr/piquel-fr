@@ -31,6 +31,8 @@ mod oidc;
 mod operations;
 /// `WebAuthn` ceremonies and passkey management.
 mod passkey;
+/// Account recovery for owners who lost every passkey.
+mod recovery;
 /// Every HTTP path the service serves.
 mod routes;
 /// Shared browser-session extraction and HTTP trust policy.

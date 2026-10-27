@@ -61,8 +61,10 @@ impl Acr {
     /// the client's order of preference (OIDC Core §3.1.2.1): the first known value.
     /// Unknown values are skipped, and with none known there is no target.
     ///
-    /// Every active account keeps a passkey, and a passkey meets every class, so any
-    /// account can reach the first known value; no later value needs considering.
+    /// Later values are not considered: a session below the target signs in again.
+    /// Not every account can reach every class: a recovered passkey reports
+    /// `urn:piquel:acr:social` until its recovery settles, and auth then answers
+    /// `unmet_authentication_requirements` rather than fall back to a later value.
     #[must_use]
     pub fn select(acr_values: &str) -> Option<Self> {
         acr_values

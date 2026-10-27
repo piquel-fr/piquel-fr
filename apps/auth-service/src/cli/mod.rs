@@ -87,7 +87,7 @@ enum Command {
 /// terminal: `$USER` and the host name.
 #[derive(Subcommand)]
 enum Administration {
-    /// Search, show, disable and reactivate accounts.
+    /// Search, show, disable, reactivate and recover accounts.
     #[command(subcommand)]
     User(UserCommand),
     /// End an account's sessions.
@@ -160,6 +160,8 @@ impl Administration {
                 UserCommand::Show { .. } => Op::ViewUser,
                 UserCommand::Disable { .. } => Op::DisableUser,
                 UserCommand::Enable { .. } => Op::EnableUser,
+                UserCommand::Recover { .. } => Op::RecoverAccount,
+                UserCommand::UndoRecovery { .. } => Op::UndoRecovery,
             },
             Self::Session(command) => match command {
                 SessionCommand::Revoke { .. } => Op::RevokeSession,

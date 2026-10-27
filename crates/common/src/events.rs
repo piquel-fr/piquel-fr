@@ -7,7 +7,7 @@
 
 use crate::{
     AuthenticationMethod, ClientId, DeliveryId, EmailId, EventId, Handle, PasskeyId, Personal,
-    Provider, SessionId, TokenId, UserId,
+    Provider, RecoveryId, SessionId, TokenId, UserId,
     clients::{ClientField, ClientKind},
     email::NormalizedEmail,
     protocol::jwt::KeyId,
@@ -120,6 +120,12 @@ pub enum DomainEvent {
         /// The approved scopes, drawn from the client's registered allowlist.
         scopes: Vec<String>,
     },
+    /// The account's consent to a client was withdrawn, so the client asks again
+    /// before its next sign-in. Undoing a recovery withdraws every consent.
+    ConsentRevoked {
+        /// The client.
+        client_id: ClientId,
+    },
     /// A client exchanged an authorization code for tokens.
     GrantIssued {
         /// The client the tokens were issued to.
@@ -226,6 +232,38 @@ pub enum DomainEvent {
         /// When its earlier secrets stop working; now, for an immediate revocation.
         previous_expire_at: DateTime<Utc>,
     },
+    /// An operator started recovering the account: its sessions and refresh
+    /// grants end, its unverified addresses go, and a link that enrolls one new
+    /// passkey is sent to its owner, or only printed when `revoke` is set. Its
+    /// sessions follow as [`Self::SessionRevoked`].
+    RecoveryStarted {
+        /// The recovery.
+        recovery_id: RecoveryId,
+        /// When its link stops working.
+        expires_at: DateTime<Utc>,
+        /// Set when the account was in someone else's hands (`--revoke`): every
+        /// passkey but the kept ones was revoked, every identity unlinked and
+        /// every consent withdrawn, each recorded before this event.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        revoke: Option<RecoveryRevocation>,
+    },
+    /// A recovery's link enrolled a new passkey, which also signed its browser in.
+    RecoveryCompleted {
+        /// The recovery.
+        recovery_id: RecoveryId,
+        /// The passkey it enrolled.
+        passkey_id: PasskeyId,
+    },
+    /// A recovery in probation was undone, by its owner with a passkey from
+    /// before it or by support: its passkey, every consent and every refresh grant
+    /// were taken back, recorded before it as [`Self::PasskeyRemoved`] and
+    /// [`Self::ConsentRevoked`]. Every session ends after it
+    /// ([`Self::SessionRevoked`]). An unused link is cancelled instead, which
+    /// records only this event.
+    RecoveryUndone {
+        /// The recovery.
+        recovery_id: RecoveryId,
+    },
     /// An operator made a failed delivery, or a cancelled unordered one, due again.
     DeliveryRetried {
         /// The delivery.
@@ -257,6 +295,16 @@ pub enum DomainEvent {
     Imported(ImportedAudit),
 }
 
+/// What a recovery started with `--revoke` revoked and kept: every passkey the
+/// owner did not vouch for went, and the kept ones can still undo it.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RecoveryRevocation {
+    /// The passkeys revoked.
+    pub revoked: Vec<PasskeyId>,
+    /// The passkeys kept.
+    pub kept: Vec<PasskeyId>,
+}
+
 impl DomainEvent {
     /// The payload version every kind starts at.
     pub const FIRST_VERSION: i16 = 1;
@@ -281,6 +329,7 @@ impl DomainEvent {
     pub fn client_id(&self) -> Option<&ClientId> {
         match self {
             Self::ConsentGranted { client_id, .. }
+            | Self::ConsentRevoked { client_id }
             | Self::GrantIssued { client_id, .. }
             | Self::GrantRevoked { client_id, .. }
             | Self::CodeReplayed { client_id }
@@ -318,6 +367,9 @@ impl DomainEvent {
             | Self::AdministratorGranted {}
             | Self::AdministratorRevoked {}
             | Self::HandleChanged { .. }
+            | Self::RecoveryStarted { .. }
+            | Self::RecoveryCompleted { .. }
+            | Self::RecoveryUndone { .. }
             | Self::DeliveryRetried { .. }
             | Self::DeliveryCancelled { .. }
             | Self::CompromiseReported { .. }
@@ -345,6 +397,7 @@ impl DomainEvent {
             | Self::PrimaryEmailChanged { .. }
             | Self::EmailRemoved { .. }
             | Self::ConsentGranted { .. }
+            | Self::ConsentRevoked { .. }
             | Self::GrantIssued { .. }
             | Self::GrantRevoked { .. }
             | Self::CodeReplayed { .. }
@@ -364,6 +417,9 @@ impl DomainEvent {
             | Self::ClientSuspensionLifted { .. }
             | Self::ClientDeleted { .. }
             | Self::ClientSecretRotated { .. }
+            | Self::RecoveryStarted { .. }
+            | Self::RecoveryCompleted { .. }
+            | Self::RecoveryUndone { .. }
             | Self::DeliveryRetried { .. }
             | Self::DeliveryCancelled { .. }
             | Self::CompromiseReported { .. }
@@ -391,6 +447,7 @@ impl DomainEvent {
             Self::PrimaryEmailChanged { .. } => "primary_email_changed",
             Self::EmailRemoved { .. } => "email_removed",
             Self::ConsentGranted { .. } => "consent_granted",
+            Self::ConsentRevoked { .. } => "consent_revoked",
             Self::GrantIssued { .. } => "grant_issued",
             Self::GrantRevoked { .. } => "grant_revoked",
             Self::CodeReplayed { .. } => "code_replayed",
@@ -410,6 +467,9 @@ impl DomainEvent {
             Self::ClientSuspensionLifted { .. } => "client_suspension_lifted",
             Self::ClientDeleted { .. } => "client_deleted",
             Self::ClientSecretRotated { .. } => "client_secret_rotated",
+            Self::RecoveryStarted { .. } => "recovery_started",
+            Self::RecoveryCompleted { .. } => "recovery_completed",
+            Self::RecoveryUndone { .. } => "recovery_undone",
             Self::DeliveryRetried { .. } => "delivery_retried",
             Self::DeliveryCancelled { .. } => "delivery_cancelled",
             Self::CompromiseReported { .. } => "compromise_reported",
@@ -478,6 +538,7 @@ impl DomainEvent {
             Self::ConsentGranted { scopes, .. } => HistoryEntry::ConsentGranted {
                 scopes: scopes.clone(),
             },
+            Self::ConsentRevoked { .. } => HistoryEntry::ConsentRevoked,
             Self::GrantRevoked { reason, .. } => match reason {
                 GrantRevocation::RefreshReplay => HistoryEntry::TokenReused,
                 // A replayed code shows once, as its `CodeReplayed`.
@@ -493,6 +554,11 @@ impl DomainEvent {
             Self::AdministratorGranted {} => HistoryEntry::AdministratorGranted,
             Self::AdministratorRevoked {} => HistoryEntry::AdministratorRevoked,
             Self::HandleChanged { .. } => HistoryEntry::HandleChanged,
+            Self::RecoveryStarted { .. } => HistoryEntry::RecoveryStarted,
+            Self::RecoveryCompleted { passkey_id, .. } => HistoryEntry::Recovered {
+                passkey_id: *passkey_id,
+            },
+            Self::RecoveryUndone { .. } => HistoryEntry::RecoveryUndone,
             Self::CompromiseReported { event_id } => HistoryEntry::CompromiseReported {
                 event_id: *event_id,
             },
@@ -613,6 +679,9 @@ pub enum HistoryEntry {
         /// The approved scopes.
         scopes: Vec<String>,
     },
+    /// An application's access was withdrawn.
+    #[serde(rename = "consent.revoked")]
+    ConsentRevoked,
     /// A refresh token or authorization code was used twice, so the access it
     /// granted was revoked.
     #[serde(rename = "token.reused")]
@@ -635,6 +704,18 @@ pub enum HistoryEntry {
     /// The account's handle changed.
     #[serde(rename = "account.handle_changed")]
     HandleChanged,
+    /// An operator started recovering the account.
+    #[serde(rename = "account.recovery_started")]
+    RecoveryStarted,
+    /// A recovery link enrolled a new passkey.
+    #[serde(rename = "account.recovered")]
+    Recovered {
+        /// The passkey it enrolled.
+        passkey_id: PasskeyId,
+    },
+    /// A recovery was undone or cancelled.
+    #[serde(rename = "account.recovery_undone")]
+    RecoveryUndone,
     /// The user reported an entry as not theirs.
     #[serde(rename = "compromise.reported")]
     CompromiseReported {
@@ -654,14 +735,21 @@ pub enum HistoryEntry {
 impl HistoryEntry {
     /// Whether the account can report this entry, once its own session caused it,
     /// as not theirs. Not its creation, which made the account; nor a report, or a
-    /// sign-out another change caused.
+    /// sign-out another change caused. Nor a recovery: the answer to a recovery the
+    /// owner didn't ask for is undoing it, which takes back more than a report and
+    /// needs no session. Nor what only takes access away: a withdrawn consent, or an
+    /// undone recovery.
     #[must_use]
     #[deny(clippy::wildcard_enum_match_arm)]
     pub const fn reportable(&self) -> bool {
         match self {
             Self::AccountCreated { .. }
             | Self::SessionRevoked { .. }
-            | Self::CompromiseReported { .. } => false,
+            | Self::CompromiseReported { .. }
+            | Self::ConsentRevoked
+            | Self::RecoveryStarted
+            | Self::Recovered { .. }
+            | Self::RecoveryUndone => false,
             Self::SignedIn { .. }
             | Self::SignedOut
             | Self::PasskeyAdded { .. }
@@ -713,6 +801,7 @@ impl HistoryEntry {
             | Self::PrimaryEmailChanged { .. }
             | Self::EmailRemoved { .. }
             | Self::ConsentGranted { .. }
+            | Self::ConsentRevoked
             | Self::TokenReused
             | Self::AccountDisabled
             | Self::AccountEnabled
@@ -720,6 +809,9 @@ impl HistoryEntry {
             | Self::AdministratorGranted
             | Self::AdministratorRevoked
             | Self::HandleChanged
+            | Self::RecoveryStarted
+            | Self::Recovered { .. }
+            | Self::RecoveryUndone
             | Self::CompromiseReported { .. }
             | Self::Legacy { .. } => None,
         }
@@ -804,7 +896,8 @@ crate::str_enum! {
 pub enum RevocationReason {
     /// The user signed out.
     Logout,
-    /// The browser signed in to another account, which ends its previous session.
+    /// The browser signed in to another account, or with a recovery link, which
+    /// ends its previous session.
     AccountSwitched,
     /// The user signed out at a client's request (RP-initiated logout).
     RelyingPartyLogout {

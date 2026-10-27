@@ -94,13 +94,21 @@ the message names, when it sends, so a link to an address removed, replaced or
 verified meanwhile is not sent, and the delivery succeeds without a send. The
 notices that an address stopped being primary, or was removed, copy the address
 instead, read in the event's transaction, so removing the address right after
-cannot cancel them. They are the channel's only personal data, deleted with the
+cannot cancel them. A recovery's link stores the recovery's ID and the primary
+address's, and is not sent once the link was used, cancelled or expired, or the
+account was disabled. The notices that a recovery enrolled a passkey, or that
+support revoked passkeys and started one, go to every verified address, copying
+it. The copied addresses are the channel's only personal data, deleted with the
 delivery. The `destination` column names the account and the address's ID, for
 operators.
 
-A verification link's token is never stored, not even in the payload: it is an
-HMAC of the address's ID under a key derived from the signing key. Settings store
-its SHA-256 digest when the address is added, and the sender derives it again.
+A link's token is never stored, not even in the payload: it is an HMAC of the
+address's ID, or the recovery's, under a key derived from the token digest key.
+Settings store a verification token's SHA-256 digest when the address is added,
+and a recovery stores its own when it starts; the sender derives the token again.
+During a change of token digest key, it rebuilds a recovery's link under
+whichever configured key derives the stored digest, so a link sent after the
+change still works; if no configured key does, the delivery fails.
 Every attempt therefore sends the same content and link, with the `Message-ID`
 `<delivery ID@sender's domain>`. If the connection breaks after the
 relay accepted a message, the delivery is retried and the mail may arrive twice;

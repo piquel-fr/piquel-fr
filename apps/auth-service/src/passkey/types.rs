@@ -1,7 +1,7 @@
 //! Validated names and the browser API's request and response bodies.
 
 use super::PasskeyError;
-use piquel_common::TokenId;
+use piquel_common::{RecoveryId, TokenId};
 use serde::{Deserialize, Serialize};
 use webauthn_rs::prelude::{PublicKeyCredential, RegisterPublicKeyCredential};
 
@@ -84,6 +84,31 @@ pub(super) enum PasskeyKind {
 /// Optional authenticator selection when adding another passkey.
 #[derive(Default, Deserialize)]
 pub(super) struct EnrollmentStart {
+    /// Defaults to the compatible standard registration path.
+    #[serde(default)]
+    pub(super) passkey_kind: PasskeyKind,
+}
+
+/// The recovery an undo page names, from its fragment or the account's recovery.
+#[derive(Deserialize)]
+pub(super) struct RecoveryUndo {
+    /// The recovery.
+    pub(super) recovery_id: RecoveryId,
+}
+
+/// How an undo ended: the session cookie is `HttpOnly`, so the page reads here
+/// whether the browser was signed in, which it is not on a disabled account.
+#[derive(Serialize)]
+pub(super) struct UndoOutcome {
+    /// Whether the undoing browser was signed in.
+    pub(super) signed_in: bool,
+}
+
+/// The start of enrolling a passkey with a recovery link.
+#[derive(Deserialize)]
+pub(super) struct RecoveryStart {
+    /// The link's token.
+    pub(super) token: String,
     /// Defaults to the compatible standard registration path.
     #[serde(default)]
     pub(super) passkey_kind: PasskeyKind,

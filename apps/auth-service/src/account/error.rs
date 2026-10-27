@@ -7,6 +7,7 @@ use crate::{
     federation::FederationError,
     history::HistoryError,
     passkey::PasskeyError,
+    recovery::RecoveryError,
     security::{ApiError, SessionError},
     sessions::SessionsError,
 };
@@ -35,6 +36,9 @@ pub(crate) enum AccountError {
     /// One of the owner's clients could not be registered or changed.
     #[error(transparent)]
     Client(#[from] OwnedClientError),
+    /// A recovery link was refused, or a recovery could not be undone.
+    #[error(transparent)]
+    Recovery(#[from] RecoveryError),
     /// The owner's session ended, or lacks a recent enough passkey confirmation.
     #[error(transparent)]
     Owner(#[from] SessionError),
@@ -56,6 +60,7 @@ impl From<AccountError> for ApiError {
             AccountError::Session(error) => error.into(),
             AccountError::History(error) => error.into(),
             AccountError::Client(error) => error.into(),
+            AccountError::Recovery(error) => error.into(),
             AccountError::Owner(error) => error.into(),
             AccountError::Operator(error) => error.into(),
             AccountError::Database(error) => error.into(),

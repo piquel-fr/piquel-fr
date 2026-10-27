@@ -1,0 +1,17 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE account_recoveries\n                SET completed_at = clock_timestamp(), passkey_id = $3,\n                    settles_at = clock_timestamp() + $4::bigint * interval '1 second'\n                WHERE user_id = $1 AND id = $2\n                AND completed_at IS NULL AND cancelled_at IS NULL\n                AND expires_at > clock_timestamp()",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid",
+        "Uuid",
+        "Int8"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "77fe73e9e3c9afad076b830bfefddfdaa495c038c702e097f9fa1e7212f876d0"
+}

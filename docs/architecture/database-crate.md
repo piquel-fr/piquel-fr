@@ -192,12 +192,13 @@ The role cannot change the schema, disable triggers, change
 `session_replication_role` or run programs on the server. It still takes the
 advisory locks `try_exclusive` uses, and may create temporary tables.
 
-Trigger functions run as the role that fires them, except a trigger that writes to
-a table its own migration creates: the runtime role is granted that table only
-after the migrations, while the previous release already fires the trigger. That
-function runs as its owner (`SECURITY DEFINER`), like the one migration `0013`
-uses to record redeemed codes in `oidc_session_clients`, and only its owner may
-execute it. The runtime role may create temporary tables and types, so it could
+Trigger functions run as the role that fires them, except a trigger that reads or
+writes a table its own migration creates: the runtime role is granted that table
+only after the migrations, while the previous release already fires the trigger.
+That function runs as its owner (`SECURITY DEFINER`), like the one migration
+`0013` uses to record redeemed codes in `oidc_session_clients`, or those
+migration `0019` uses to hold account recoveries' rules for every release, and
+only its owner may execute it. The runtime role may create temporary tables and types, so it could
 otherwise attach the function to a table of its own and have it run that type's
 cast as the owner. A test fails for any such function others may execute.
 

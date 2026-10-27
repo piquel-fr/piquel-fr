@@ -137,6 +137,9 @@ fn event_kinds_match_their_serde_tags() {
             client_id: client_id.clone(),
             scopes: vec![],
         },
+        DomainEvent::ConsentRevoked {
+            client_id: client_id.clone(),
+        },
         DomainEvent::GrantIssued {
             client_id: client_id.clone(),
             family_id: None,
@@ -196,6 +199,18 @@ fn event_kinds_match_their_serde_tags() {
         },
         DomainEvent::CompromiseReported {
             event_id: EventId::new(),
+        },
+        DomainEvent::RecoveryStarted {
+            recovery_id: RecoveryId::new(),
+            expires_at: chrono::Utc::now(),
+            revoke: None,
+        },
+        DomainEvent::RecoveryCompleted {
+            recovery_id: RecoveryId::new(),
+            passkey_id,
+        },
+        DomainEvent::RecoveryUndone {
+            recovery_id: RecoveryId::new(),
         },
         DomainEvent::Imported(imported),
     ];

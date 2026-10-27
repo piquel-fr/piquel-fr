@@ -387,8 +387,8 @@ async fn runtime_role_has_only_row_privileges() {
         .expect("drop the role");
 }
 
-/// Every function pins its `search_path`, so temporary tables cannot shadow the
-/// tables it reads.
+/// Every function pins its `search_path` with `pg_temp` last, so temporary tables
+/// cannot shadow the tables it reads: left out, `pg_temp` is searched first.
 #[tokio::test]
 #[ignore = "requires a disposable TEST_DATABASE_URL"]
 async fn functions_pin_their_search_path() {
@@ -397,7 +397,8 @@ async fn functions_pin_their_search_path() {
         "SELECT proname::text FROM pg_proc
         WHERE pronamespace = 'public'::regnamespace
         AND NOT EXISTS (
-            SELECT FROM unnest(proconfig) setting WHERE setting LIKE 'search_path=%'
+            SELECT FROM unnest(proconfig) setting
+            WHERE setting LIKE 'search_path=%' AND setting LIKE '%, pg_temp'
         )",
     )
     .fetch_all(&pool)

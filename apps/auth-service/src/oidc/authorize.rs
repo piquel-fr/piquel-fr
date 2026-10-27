@@ -21,7 +21,7 @@ use axum::{
 };
 use chrono::{DateTime, Duration, Utc};
 use piquel_common::{
-    UserId,
+    AuthenticationMethod, UserId,
     events::DomainEvent,
     protocol::{claims::Acr, step_up::StepUpRequirement},
 };
@@ -686,6 +686,35 @@ impl OidcApplication {
             && hinted_user_id.is_none_or(|subject| subject == session.user_id)
     }
 
+    /// Whether a passkey signed `session` in, or in again, after the request
+    /// started without confirming it, for the hinted account, and the session
+    /// still falls short of the request's target `acr`. Only a recovered passkey
+    /// during its probation signs in without confirming. The session's methods
+    /// are its whole life's: one that such a passkey once signed in, then a
+    /// provider signed in again, is answered so too.
+    fn falls_short_after_signing_in(
+        request: &StoredAuthorizationRequest,
+        session: &StoredSession,
+    ) -> bool {
+        let authentication = SessionAuthentication::from(session);
+        let unconfirmed_passkey = session.passkey_confirmed_at.is_none()
+            && session
+                .authentication_methods
+                .contains(&AuthenticationMethod::Passkey);
+        let target = StepUpRequirement {
+            acr: request.target_acr,
+            max_age: None,
+        };
+        unconfirmed_passkey
+            && authentication.auth_time >= request.started_at
+            && request
+                .hinted_user_id
+                .is_none_or(|subject| subject == session.user_id)
+            && target
+                .check(Some(&authentication.acr), None, Utc::now())
+                .is_err()
+    }
+
     /// The sign-in page continuing the pending authorization `transaction`. A target
     /// `acr` is named too, so the page offers only methods reaching it.
     fn sign_in_page(
@@ -718,8 +747,20 @@ impl OidcApplication {
         let client_redirect = self.client_redirect(&redirect, &request.client_state);
         let back =
             |code: OAuthCode, description| code.reject(description).redirected(&client_redirect);
-        let session = Session::resolve(&self.database, context, headers)
-            .await?
+        let session = Session::resolve(&self.database, context, headers).await?;
+        // A passkey just signed in for this request without confirming the
+        // session, as a recovered passkey does during its probation: signing in
+        // again would not help, so the client hears it instead of looping.
+        if session
+            .as_ref()
+            .is_some_and(|session| Self::falls_short_after_signing_in(&request, session))
+        {
+            return Err(back(
+                OAuthCode::UnmetAuthenticationRequirements,
+                "this account cannot meet the requested acr_values for now",
+            ));
+        }
+        let session = session
             .filter(|session| Self::require_authorization_session(&request, session).is_ok());
         let Some(session) = session else {
             if silent {
