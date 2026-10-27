@@ -399,10 +399,10 @@ pub(crate) async fn hidden(#[into] fields: Fields) -> Result<impl View> {
 }
 
 /// A change posted to the page at `action`: `change` as hidden inputs, the inputs
-/// the user fills in as `child`, and a button labelled `label`, of `class`, beside
-/// a link back to `cancel` when there is one. With `confirm`, the passkey script
-/// first confirms the session with a passkey; a ceremony that fails says why in the
-/// form.
+/// the user fills in as `child`, the reason an administrator gives when `reason`
+/// asks for one, and a button labelled `label`, of `class`, beside a link back to
+/// `cancel` when there is one. With `confirm`, the passkey script first confirms
+/// the session with a passkey; a ceremony that fails says why in the form.
 #[component]
 pub(crate) async fn change_form<'a>(
     action: &'a str,
@@ -413,6 +413,7 @@ pub(crate) async fn change_form<'a>(
     #[default]
     aria_label: Option<String>,
     #[default] confirm: bool,
+    #[default] reason: bool,
     #[into]
     #[default]
     cancel: Option<String>,
@@ -427,6 +428,12 @@ pub(crate) async fn change_form<'a>(
         >
             hidden(fields: change)
             (child)
+            if reason {
+                <label>
+                    "Reason, shown to the owner in their history"
+                    <input name="reason" required="" maxlength="500">
+                </label>
+            }
             if confirm {
                 <p class="notice error" role="alert" data-passkey-error="" hidden=""></p>
             }

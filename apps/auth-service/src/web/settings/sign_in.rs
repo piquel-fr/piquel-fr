@@ -9,7 +9,7 @@ use crate::{
         account::{AccountPage, Applied, Reader},
     },
 };
-use piquel_ui::{Messages, Notice, ProviderRow, Section, SignInChange, SignInState, Tab};
+use piquel_ui::{Audience, Messages, Notice, ProviderRow, Section, SignInChange, SignInState, Tab};
 use topcoat::{
     Error,
     context::Cx,
@@ -136,7 +136,7 @@ impl AccountPage for SignInMethods {
                 passkeys: &passkeys,
                 providers: &providers,
                 state: &state,
-                confirmed: reader.is_recent(),
+                audience: Audience::Owner { confirmed: reader.is_recent() },
                 android: android,
                 recovery: reader.recovery(),
             )

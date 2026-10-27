@@ -9,7 +9,9 @@ use crate::{
         account::{AccountPage, Applied, Reader},
     },
 };
-use piquel_ui::{Area, EmailChange, EmailRow, EmailsState, Messages, Notice, Section, Tab, Title};
+use piquel_ui::{
+    Area, Audience, EmailChange, EmailRow, EmailsState, Messages, Notice, Section, Tab, Title,
+};
 use serde::Deserialize;
 use topcoat::{
     context::{Cx, app_context},
@@ -94,7 +96,7 @@ impl AccountPage for Addresses {
                 page: settings::EMAILS,
                 emails: &rows,
                 state: &state,
-                confirmed: reader.is_recent(),
+                audience: Audience::Owner { confirmed: reader.is_recent() },
                 sends: sends,
             )
         });

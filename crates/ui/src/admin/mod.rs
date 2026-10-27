@@ -19,12 +19,14 @@ pub use lists::{
     event_rows, invitation_created, invitation_list,
 };
 pub use recoveries::{RecoveryKey, RecoveryRow, RecoveryStanding, recovery_list};
-pub use users::{SessionRow, UserRow, user_page, user_search};
+pub use users::{AccountPages, SessionRow, UserRow, user_page, user_search};
 
 use crate::{
     Area, Checkbox, Query, document,
     form::{Precision, time},
     layout::Label,
+    settings::Tab as SettingsTab,
+    settings_tabs,
 };
 use chrono::{DateTime, Utc};
 use piquel_admin_api::{EventSearch, UserSearch};
@@ -192,6 +194,29 @@ pub async fn dashboard_change<'a>(
                 </div>
             </form>
         </section>
+    })
+}
+
+/// An account's settings tab, as an administrator changes them: a link `back` to
+/// the account, the `tabs`, `current` among them, why the change just posted was
+/// refused, if it was, and the tab's section as `child`.
+#[component]
+pub async fn account_settings<'a>(
+    back: &'a str,
+    tabs: &'a [(SettingsTab, &'a str)],
+    current: SettingsTab,
+    #[into]
+    #[default]
+    refusal: Option<&'a str>,
+    child: Child<'_>,
+) -> Result<impl View> {
+    Ok(view! {
+        <a href=(back)>"Back to the account"</a>
+        settings_tabs(tabs: tabs, current: current)
+        if let Some(refusal) = refusal {
+            <p class="notice error" role="alert">(refusal)</p>
+        }
+        (child)
     })
 }
 

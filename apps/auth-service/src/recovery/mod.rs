@@ -30,7 +30,7 @@ mod error;
 pub(crate) use error::RecoveryError;
 
 use crate::{
-    account::{AccountError, AccountService, Owner},
+    account::{AccountError, AccountService, Owner, Viewer},
     passkey::VerifiedRecoveryUndo,
     routes,
     security::RequestContext,
@@ -461,13 +461,14 @@ impl AccountService {
     }
 
     /// The account's recovery that can still be undone, if any, as the account's
-    /// pages show it.
+    /// pages show it, the owner's and the dashboard's.
     pub(crate) async fn recovery_notice(
         &self,
-        owner: &Owner,
+        viewer: &Viewer,
     ) -> Result<Option<RecoveryNotice>, AccountError> {
+        viewer.authorize(&self.database).await?;
         let mut tx = self.database.begin().await?;
-        let undoable = Self::undoable(&mut tx, owner.user()).await?;
+        let undoable = Self::undoable(&mut tx, viewer.user()).await?;
         let notice = Self::notice(&mut tx, undoable).await?;
         tx.commit().await?;
         Ok(notice)

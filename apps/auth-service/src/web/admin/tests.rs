@@ -443,7 +443,8 @@ async fn the_admin_listener_keeps_to_its_host_forms_and_session() {
 
 /// Recovering an account mails its primary verified address a link, which the
 /// recovery pages then list, and undoing it cancels the unused link; both go on
-/// to the account's page. An account whose link would not be mailed is left
+/// to the account's page. Until then, the account's sign-in methods say no
+/// passkey can be removed. An account whose link would not be mailed is left
 /// alone, saying why.
 #[tokio::test]
 #[ignore = "requires TEST_DATABASE_URL"]
@@ -468,6 +469,12 @@ async fn recoveries_are_started_and_undone_from_the_dashboard() {
     assert_eq!(redirect(&post(&recover).await), account);
     let page = html(harness.visit(&dashboard, &recover).await).await;
     assert!(page.contains("Link sent, not used"), "{page}");
+    let sign_in = format!("/users/{}/sign-in", owner.user_id);
+    let page = html(harness.visit(&dashboard, &sign_in).await).await;
+    assert!(
+        page.contains("removed while the recovery can be cancelled"),
+        "{page}"
+    );
 
     let undo = format!("/users/{}/undo-recovery", owner.user_id);
     assert_eq!(redirect(&post(&undo).await), account);
@@ -483,4 +490,106 @@ async fn recoveries_are_started_and_undone_from_the_dashboard() {
         .await
         .expect("recoveries");
     assert!(recent.is_empty(), "nothing started");
+}
+
+/// An administrator changes an account's settings with the owner's own
+/// operations, each with a reason: renaming and removing a passkey, and making
+/// another address primary. The pages offer nothing that adds a way in, and a
+/// change without a reason, or only the owner's, is refused. They also rename
+/// the account's handle.
+#[tokio::test]
+#[ignore = "requires TEST_DATABASE_URL"]
+async fn administrators_change_an_accounts_settings_with_a_reason() {
+    let harness = Harness::new().await;
+    let admin = harness.admin().await;
+    let owner = Browser::new_account(&harness.database).await;
+    let user = owner.user_id;
+    let mut passkeys = Vec::new();
+    for _ in 0..2 {
+        let stored = harness
+            .database
+            .passkeys()
+            .insert(&crate::tests::unusable_passkey(user))
+            .await
+            .expect("passkey");
+        passkeys.push(stored.id.to_string());
+    }
+    let first = format!("first-{user}@example.com");
+    crate::tests::verified_address(&harness.database, user, &first, true).await;
+    let second = format!("second-{user}@example.com");
+    let other = crate::tests::verified_address(&harness.database, user, &second, false).await;
+    let sign_in = format!("/users/{user}/sign-in");
+    let dashboard = harness.confirmed(&admin, &sign_in, Utc::now()).await;
+    let post = async |path: &str, fields: &[(&str, &str)]| {
+        let url = format!("{DASHBOARD}{path}");
+        dashboard
+            .submit(&harness.dashboard, &url, fields, OWN_PAGE)
+            .await
+    };
+
+    let page = html(harness.visit(&dashboard, &sign_in).await).await;
+    assert!(page.contains("Existing key"), "{page}");
+    assert!(!page.contains("data-passkey-enroll"), "no passkey is added");
+    let opened = format!("{sign_in}?rename={}", passkeys[0]);
+    let page = html(harness.visit(&dashboard, &opened).await).await;
+    assert!(
+        page.contains(r#"name="reason""#),
+        "a change asks why: {page}"
+    );
+
+    let rename = [
+        ("action", "rename"),
+        ("id", passkeys[0].as_str()),
+        ("friendly_name", "Renamed by support"),
+    ];
+    let refused = post(&sign_in, &[rename.as_slice(), &[("reason", "")]].concat()).await;
+    assert_eq!(refused.status(), StatusCode::BAD_REQUEST, "no reason");
+    let reason = ("reason", "Asked by email");
+    let done = post(&sign_in, &[rename.as_slice(), &[reason]].concat()).await;
+    assert_eq!(redirect(&done), sign_in);
+    let remove = [("action", "remove"), ("id", passkeys[1].as_str()), reason];
+    assert_eq!(redirect(&post(&sign_in, &remove).await), sign_in);
+    let active = harness
+        .database
+        .passkeys()
+        .list_active(user)
+        .await
+        .expect("passkeys");
+    let names: Vec<_> = active
+        .iter()
+        .map(|key| key.friendly_name.as_str())
+        .collect();
+    assert_eq!(names, ["Renamed by support"]);
+    let link = [("action", "link"), ("provider", "github"), reason];
+    let refused = html(post(&sign_in, &link).await).await;
+    assert!(
+        refused.contains("Only the account&#39;s owner")
+            || refused.contains("Only the account's owner")
+    );
+
+    let emails = format!("/users/{user}/emails");
+    let page = html(harness.visit(&dashboard, &emails).await).await;
+    assert!(!page.contains("Add an address"), "no address is added");
+    let other = other.to_string();
+    let primary = [("action", "primary"), ("id", other.as_str()), reason];
+    assert_eq!(redirect(&post(&emails, &primary).await), emails);
+    let stored = harness.database.emails().list(user).await.expect("emails");
+    let primary = stored
+        .iter()
+        .find(|email| email.is_primary)
+        .expect("primary");
+    assert_eq!(primary.id.to_string(), other);
+
+    let handle = format!("/users/{user}/handle");
+    let renamed = format!("renamed-{}", &user.to_string()[24..]);
+    let done = post(&handle, &[("handle", renamed.as_str())]).await;
+    assert_eq!(redirect(&done), format!("/users/{user}"));
+    let stored = harness
+        .database
+        .users()
+        .find_by_id(user)
+        .await
+        .expect("lookup")
+        .expect("user");
+    assert_eq!(stored.username, renamed);
 }

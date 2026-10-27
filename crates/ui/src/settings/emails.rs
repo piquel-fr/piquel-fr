@@ -1,5 +1,6 @@
 //! Email addresses, and confirming one.
 
+use super::Audience;
 use crate::{
     Section, Title,
     form::{Query, change_form, fragment_form, open},
@@ -63,15 +64,15 @@ pub struct EmailRow<'a> {
 }
 
 /// The email addresses page: the account's `emails`, primary first. Its rows open
-/// on `page` as `state` says, and its changes post there; `confirmed` says whether
-/// the session needs no passkey confirmation for them. Addresses can be added, or
-/// sent a new link, only when Piquel `sends` email.
+/// on `page` as `state` says, and its changes post there, for `audience`. Only the
+/// owner adds addresses, or sends one a new link, and only when Piquel `sends`
+/// email.
 #[component]
 pub async fn addresses<'a>(
     page: &'a str,
     emails: &'a [EmailRow<'a>],
     state: &'a EmailsState,
-    confirmed: bool,
+    audience: Audience,
     sends: bool,
 ) -> Result<impl View> {
     // The primary address can be removed only while no other verified one could
@@ -94,7 +95,7 @@ pub async fn addresses<'a>(
                             email: *email,
                             replaceable: replaceable,
                             state: state,
-                            confirmed: confirmed,
+                            audience: audience,
                             sends: sends,
                         )
                     </li>
@@ -103,13 +104,13 @@ pub async fn addresses<'a>(
             if emails.is_empty() {
                 <p class="empty">"Add an address so Piquel can tell you about changes to your account."</p>
             }
-            if sends {
+            if audience.owns() && sends {
                 change_form(
                     action: page,
                     change: EmailChange::Add { email: String::new() },
                     label: "Send a confirmation link",
                     class: "secondary full",
-                    confirm: !confirmed,
+                    confirm: audience.confirms(),
                     <label>
                         "Add an address"
                         <input
@@ -122,7 +123,7 @@ pub async fn addresses<'a>(
                         >
                     </label>
                 )
-            } else {
+            } else if audience.owns() {
                 <p class="help">"Piquel cannot send email right now, so addresses cannot be added."</p>
             }
         </section>
@@ -139,7 +140,7 @@ async fn address_row<'a>(
     email: EmailRow<'a>,
     replaceable: bool,
     state: &'a EmailsState,
-    confirmed: bool,
+    audience: Audience,
     sends: bool,
 ) -> Result<impl View> {
     let id = email.id;
@@ -169,17 +170,18 @@ async fn address_row<'a>(
                         label: "Make primary",
                         class: "text-button",
                         aria_label: format!("Make primary {address}"),
-                        confirm: !confirmed,
+                        confirm: audience.confirms(),
+                        reason: audience.asks_reason(),
                     )
                 }
-                if sends && !email.verified {
+                if sends && !email.verified && audience.owns() {
                     change_form(
                         action: page,
                         change: EmailChange::Add { email: address.to_owned() },
                         label: "Resend link",
                         class: "text-button",
                         aria_label: format!("Resend link to {address}"),
-                        confirm: !confirmed,
+                        confirm: audience.confirms(),
                     )
                 }
                 open(
@@ -204,7 +206,8 @@ async fn address_row<'a>(
                     change: EmailChange::Remove { id },
                     label: "Confirm removal",
                     class: "danger",
-                    confirm: !confirmed,
+                    confirm: audience.confirms(),
+                    reason: audience.asks_reason(),
                     cancel: page.to_owned(),
                 )
             </div>

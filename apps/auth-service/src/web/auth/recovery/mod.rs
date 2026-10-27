@@ -70,7 +70,7 @@ impl WebApplication {
     ) -> Result<Option<Recovery>, Failure> {
         Ok(self
             .account
-            .recovery_notice(owner)
+            .recovery_notice(&owner.into())
             .await?
             .map(Recovery::from))
     }

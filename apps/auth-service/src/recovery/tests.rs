@@ -706,7 +706,10 @@ async fn pages_read_an_undoable_recovery_by_session_or_id() {
         .owner(scenario.database())
         .await;
     let read = async |id: RecoveryId| {
-        let by_session = service.recovery_notice(&owner).await.expect("by session");
+        let by_session = service
+            .recovery_notice(&(&owner).into())
+            .await
+            .expect("by session");
         let by_id = service.undoable_recovery(id).await.expect("by ID");
         assert_eq!(by_session, by_id, "the same either way");
         by_id

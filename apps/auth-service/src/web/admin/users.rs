@@ -1,11 +1,13 @@
 //! Account search, one account's page, and the changes made to an account.
 
-use super::{AdminApplication as App, lists};
+use super::{AdminApplication as App, lists, settings};
 use crate::Reason;
 use piquel_admin_api::{DisableUser, EventSearch, UserSearch};
 use piquel_common::{AccountStatus, SessionId, UserId};
 use piquel_repository::{RecentRecovery, RecoveryState};
-use piquel_ui::{Query, RecoveryKey, RecoveryRow, RecoveryStanding, SessionRow, UserRow};
+use piquel_ui::{
+    AccountPages, Query, RecoveryKey, RecoveryRow, RecoveryStanding, SessionRow, UserRow,
+};
 use serde::de::IgnoredAny;
 use topcoat::{
     Result,
@@ -85,15 +87,42 @@ pub(super) async fn detail(cx: &Cx) -> Result<Response> {
     let mut recent = service.events(&admin.operator, filter.clone()).await?;
     recent.events.truncate(RECENT_EVENTS);
     let changeable = !detail.administrator;
-    let status_link = match detail.user.status {
-        AccountStatus::Active => href!(disable, Account(id)).resolve(cx),
-        AccountStatus::Disabled | AccountStatus::Deleting => href!(enable, Account(id)).resolve(cx),
-    };
-    let revoke_all = href!(revoke_sessions, Account(id)).resolve(cx);
-    let (recovering, undoing) = (
+    let links = [
+        match detail.user.status {
+            AccountStatus::Active => href!(disable, Account(id)).resolve(cx),
+            AccountStatus::Disabled | AccountStatus::Deleting => {
+                href!(enable, Account(id)).resolve(cx)
+            }
+        },
+        href!(revoke_sessions, Account(id)).resolve(cx),
         href!(recover, Account(id)).resolve(cx),
         href!(undo_recovery, Account(id)).resolve(cx),
-    );
+        href!(settings::sign_in, Account(id)).resolve(cx),
+        href!(settings::emails, Account(id)).resolve(cx),
+        href!(settings::handle, Account(id)).resolve(cx),
+    ];
+    let [
+        status,
+        revoking,
+        recovering,
+        undoing,
+        signing_in,
+        addresses,
+        renaming,
+    ] = links.each_ref().map(String::as_str);
+    let pages = if changeable {
+        Ok(AccountPages {
+            status,
+            revoke_sessions: revoking,
+            recover: recovering,
+            undo_recovery: undoing,
+            sign_in: signing_in,
+            emails: addresses,
+            handle: renaming,
+        })
+    } else {
+        Err(ADMINISTRATOR_TARGET)
+    };
     let sessions: Vec<_> = detail
         .sessions
         .iter()
@@ -105,28 +134,13 @@ pub(super) async fn detail(cx: &Cx) -> Result<Response> {
         .collect();
     let events = App::event_rows(cx, &recent.events);
     let all_events = filter.on(&href!(lists::events).resolve(cx))?;
-    let (status, revoke_all, recovery) = if changeable {
-        (
-            Ok(status_link.as_str()),
-            Ok(revoke_all.as_str()),
-            Ok((recovering.as_str(), undoing.as_str())),
-        )
-    } else {
-        (
-            Err(ADMINISTRATOR_TARGET),
-            Err(ADMINISTRATOR_TARGET),
-            Err(ADMINISTRATOR_TARGET),
-        )
-    };
     // The page names only references: a view moves what it names.
     let (detail, sessions, events, all_events) = (&detail, &sessions, &events, &all_events);
     let page = view! { cx =>
         piquel_ui::user_page(
             detail: detail,
-            status: status,
-            recovery: recovery,
+            pages: pages,
             sessions: sessions,
-            revoke_sessions: revoke_all,
             recent: events,
             all_events: all_events.as_str(),
         )

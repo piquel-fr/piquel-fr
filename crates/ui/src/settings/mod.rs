@@ -25,6 +25,39 @@ use topcoat::{
     view::{View, component, view},
 };
 
+/// Whom a settings section serves, which decides what it offers.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Audience {
+    /// The account's owner: every change, those needing a recent passkey
+    /// confirmation asking for one first unless the session is `confirmed`, and
+    /// adding passkeys, providers and addresses.
+    Owner {
+        /// Whether the session needs no passkey confirmation now.
+        confirmed: bool,
+    },
+    /// An administrator, on the owner's behalf: only the changes they share with
+    /// the owner, each with the reason they give, and nothing that adds a way in
+    /// or an address. The dashboard confirmed their passkey before showing it.
+    Administrator,
+}
+
+impl Audience {
+    /// Whether a change needing a recent passkey confirmation asks for one first.
+    pub(crate) const fn confirms(self) -> bool {
+        matches!(self, Self::Owner { confirmed: false })
+    }
+
+    /// Whether every change asks why.
+    pub(crate) const fn asks_reason(self) -> bool {
+        matches!(self, Self::Administrator)
+    }
+
+    /// Whether it may add a way in, or an address.
+    pub(crate) const fn owns(self) -> bool {
+        matches!(self, Self::Owner { .. })
+    }
+}
+
 /// The settings pages, in the order the tabs list them.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Tab {
