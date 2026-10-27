@@ -25,7 +25,7 @@ adds the rest in one line.
 - **Events in telemetry.** Every event recorded with `DatabaseTransaction::record`
   stores the current trace ID in `domain_events.trace_id`, and once its
   transaction commits it is logged as `event recorded` (with its ID, kind, kind
-  of actor, subject and, when one acted through the admin API, administrator) and
+  of actor, subject and, when one acted from the admin dashboard, administrator) and
   counted in `piquel.auth.events{kind}`. The audit
   history and telemetry therefore point at each other: the admin dashboard shows
   each event's trace ID, and the trace shows each event its request recorded. A
@@ -35,12 +35,13 @@ adds the rest in one line.
 - **Failures.** A 5xx response marks its span failed and returns the trace ID in
   `X-Trace-Id`, which auth's own pages can read, and CORS exposes to public
   clients' origins. `tracing::error!` events with an `error` field, such as
-  `ApiError::log_error`'s, also mark their span. Every failed admin API request
-  is logged as `admin API request failed`, with its `admin.failure` reason.
+  `ApiError::log_error`'s, also mark their span. Every request of an
+  administrator the dashboard or auth's handoff page refuses is logged as `admin
+  dashboard request refused`, with its `admin.failure` reason.
 - **One series per process.** Each process gets a new UUID as its
   `service.instance.id`, so replicas and command-line runs never write to the
-  same metric series. The admin API's requests carry `piquel.listener = "admin"`,
-  which tells them apart from the public listener's.
+  same metric series. The admin dashboard's requests carry `piquel.listener =
+  "admin"`, which tells them apart from the public listener's.
 
 ## Adding telemetry
 
@@ -100,7 +101,7 @@ Only the standard variables, read by `Telemetry::init`:
 | --- | --- |
 | `OTEL_EXPORTER_OTLP_ENDPOINT` | OTLP/HTTP base URL, e.g. `http://collector.telemetry:4318`; unset or empty exports nothing |
 | `OTEL_SDK_DISABLED` | `true` keeps telemetry on stderr only |
-| `OTEL_SERVICE_NAME` | Overrides `auth-service` or `admin-web` |
+| `OTEL_SERVICE_NAME` | Overrides `auth-service` |
 | `OTEL_RESOURCE_ATTRIBUTES` | e.g. `deployment.environment.name=staging`, which dashboards filter on |
 | `OTEL_TRACES_SAMPLER`, `OTEL_TRACES_SAMPLER_ARG` | Sampling; every trace is kept by default |
 | `OTEL_EXPORTER_OTLP_TIMEOUT` | Bound on each export request, in milliseconds; 10000 by default. The per-signal variants are not supported |

@@ -22,7 +22,8 @@ as a fully confirmed owner and then trying to take back everything they did,
 **a recovery's passkey signs in like a social login until the recovery
 settles**: it never gives a passkey confirmation. Every way into an account
 already needs one: adding or removing a passkey, linking an identity, changing
-addresses or the primary, managing owned clients, and the admin API. So do
+addresses or the primary, managing owned clients, and signing in to the admin
+dashboard. So do
 relying parties that ask for `phr`. Whoever used the link can therefore use the
 account, but can add no way into it. Undoing the recovery has a short, fixed list
 to take back: its passkey, every session and refresh grant, and every app
@@ -61,8 +62,8 @@ that condition, which the [database backstops](#database-backstops) share.
 ## Starting a recovery
 
 An operator at the terminal starts one with `auth-service user recover <user>
---reason "…"`. `AdminService::recover_account` also accepts an administrator,
-for the dashboard *(planned)*; the admin API has no route for it.
+--reason "…"`. `AdminService::recover_account` also accepts an administrator;
+the admin dashboard has no page for it yet *(planned)*.
 
 - **S1.** Only an active account is recovered
   (`what_a_start_replaces_and_refuses`).
@@ -104,7 +105,7 @@ for the dashboard *(planned)*; the admin API has no route for it.
 - **A1.** An account with a recovery that can still be undone is never an
   administrator. Starting refuses an administrator: support revokes the rights
   first (`admin revoke`; to recover the last administrator, grant another one
-  first). Granting rights, by the admin API or the CLI, is refused while a
+  first). Granting rights, from the dashboard or the CLI, is refused while a
   recovery can be undone, with no override. Granted during a probation, they
   would go live for whoever used the link once it settles
   (`what_a_start_replaces_and_refuses`,
@@ -203,7 +204,7 @@ for the dashboard *(planned)*; the admin API has no route for it.
   - the confirmation ceremony answers `403 recovery_probation {settles_at}`.
 
   No step-up gate accepts it: no confirmed account change (`step_up_required`),
-  no admin API call, no relying party that asks for `phr`. After `settles_at`,
+  no sign-in to the admin dashboard, no relying party that asks for `phr`. After `settles_at`,
   the same passkey confirms as usual
   (`a_link_enrolls_one_passkey_that_signs_in_without_confirming`,
   `a_probation_passkey_signs_in_anew_and_never_confirms`). The database backs
@@ -217,9 +218,11 @@ for the dashboard *(planned)*; the admin API has no route for it.
   because none of it is a way in: rename passkeys (no page shows the recovery's
   passkey by its name: the passkey list and the history call it "the recovery's
   passkey", the list and the undo page give its ID and enrollment time, and the
-  list offers no rename for it), sign sessions out, report a sign-in as not
-  theirs, verify an address added during the probation, and sign in to apps that
-  don't ask for `phr`, approving their consent.
+  list offers no rename for it; the admin dashboard's account page lists every
+  passkey by ID and enrollment time only:
+  `web::admin::tests::an_accounts_page_names_no_passkey`), sign sessions out,
+  report a sign-in as not theirs, verify an address added during the probation,
+  and sign in to apps that don't ask for `phr`, approving their consent.
 - **P4.** A relying party that asks for `phr` doesn't loop a probation user
   through sign-in. Once such a passkey signed in during the request, authorize
   answers the client `unmet_authentication_requirements` (OpenID Connect Unmet
@@ -397,7 +400,7 @@ The operator path, against #85's threats.
   recovered passkey reporting an AAL1-grade `acr`, and a restriction checked in
   `Confirmed`. This path does it where the passkey is accepted: the recovered
   passkey never confirms, so it reports `acr` Social and every confirmation gate
-  refuses it, the admin API and relying parties included. It needs no new `acr`
+  refuses it, the admin dashboard and relying parties included. It needs no new `acr`
   value, which older releases and SDKs would not know.
 - **A fixed undo.** The sketch rolled back the recovered passkey, sessions,
   refresh families and consents. That is the whole list here too, because the

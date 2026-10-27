@@ -141,8 +141,8 @@ nothing, logging why at debug level.
 
 The sign-in pages (`src/web/auth/login`), `/login` and `/register`, serve signed-out
 browsers, so they are pages of their own rather than `AccountPage`s. Their query,
-`LoginQuery`, is the one auth's pages and flows serialize for every link to them
-(the admin API's invitation link still writes `/register?invitation=` itself); it
+`LoginQuery`, is the one auth's pages, flows and invitation links serialize for
+every link to them; it
 parses field by field, so a bad value drops only itself, never the `transaction` or
 `return_to` it continues. One `Step` comes from the query, the pending social sign-in and the
 session: signing in, signing up, or linking a provider. The server decides where a
@@ -184,7 +184,8 @@ a value, and a `data-replace-url` element makes a page that shows a secret reloa
 types, and ESLint lints it as it does the browser tests.
 
 Administrative operations are methods of `AdminService` (`src/admin/service.rs`);
-the admin API's handlers and the CLI's commands (`src/cli`) are thin adapters that
+the admin dashboard's pages (`src/web/admin`) and the CLI's commands (`src/cli`)
+are thin adapters that
 say which `Operator` acts. Every method takes that `Operator` and checks it itself,
 so a caller in the same process needs no check of its own: a read first calls
 `Operator::authorize_read` (rights, session and a passkey sign-in), and a change
@@ -215,8 +216,8 @@ on it:
 
 Only the extractors and `AccountService::owner`, which pages call, build an owner's
 `Owner`, from the session cookie; their `Subject` and `Viewer` come from it, or
-from the extractors. Only the admin API's authenticator builds an
-`Operator::Admin`. Routes whose operation needs a recent confirmation extract
+from the extractors. Only `DashboardSignIn`, from the dashboard's session cookie,
+builds an `Operator::Admin`. Routes whose operation needs a recent confirmation extract
 `ConfirmedOwner` or `ConfirmedSubject` instead, which check it before the path and
 body, so the browser is asked to confirm before any other error. Each operation says what it needs: it locks with `lock`, or
 `lock_confirmed` when the owner must have confirmed with a passkey recently

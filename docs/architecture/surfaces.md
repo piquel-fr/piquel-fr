@@ -7,7 +7,7 @@ yet are marked *(planned)*.
 | --- | --- | --- |
 | `auth.piquel.fr` | OIDC/OAuth endpoints, ceremony pages, account settings, the developer console and the JSON APIs; security center *(planned)* | every application and user |
 | `piquel.fr` | A redirect to auth.piquel.fr that keeps the path; public profiles *(planned)* | old links and bookmarks |
-| `admin.piquel.fr` | Admin dashboard; auth's private admin API behind it | administrators |
+| `admin.piquel.fr` | The admin dashboard, which auth serves on a listener of its own | administrators |
 
 ## auth.piquel.fr
 
@@ -17,12 +17,12 @@ pages a ceremony needs (login, signup, consent, passkey confirmation, account
 recovery at `/recover` and `/recover/undo`, device verification *(planned)*). It
 also serves the account settings at `/settings`, on the paths piquel.fr used, and
 redirects its root there, and the developer console, where accounts register
-their own OIDC clients, at `/developers`. It hosts no admin pages yet.
+their own OIDC clients, at `/developers`. The admin dashboard is the same
+executable too, on another listener and host (see admin.piquel.fr below).
 
-The account and admin APIs are routes in the same executable. They are small
-next to the pages that use them, and keeping them there keeps one binary, one
-database owner and one policy layer. The account API is on the public listener; the
-admin API has a private listener of its own (see admin.piquel.fr below). Auth keeps its state in PostgreSQL, so it runs
+The account API is routes in the same executable. It is small next to the pages
+that use it, and keeping it there keeps one binary, one database owner and one
+policy layer per listener. Auth keeps its state in PostgreSQL, so it runs
 as several replicas (see "Running several replicas" in `infra/README.md`). Every page it
 serves, sign-in, consent, logout, account recovery, the settings and the
 developer console, is server-rendered in the executable, with plain forms, and
@@ -43,31 +43,49 @@ piquel.fr serves pages of its own, such as public profiles *(planned)*.
 
 ## admin.piquel.fr
 
-The admin dashboard (`apps/admin-web`) is a server-rendered Rust app on Topcoat,
-reachable only on the tailnet. It signs administrators in as the confidential OIDC
-client `piquel-admin`, with the Rust SDK's login routes, and keeps their tokens in
-its server's memory; the browser holds only the dashboard's session cookie. Its
-server calls the admin API with the administrator's access token, through the typed
-client in `piquel-admin-api`, so both sides share one definition of the API. Pages
-that change something confirm a recent passkey before showing their form, so the
-administrator steps up before submitting rather than after.
+Auth serves the admin dashboard itself, on its admin listener
+(`AUTH_ADMIN_LISTENER`), for the dashboard's own origin (`AUTH_ADMIN_ORIGIN`). Only
+a private route reaches that listener, so the dashboard is reachable only on the
+tailnet. Its pages are server-rendered in `apps/auth-service/src/web/admin`, render
+`piquel-ui`'s dashboard components, and call `AdminService` in-process, as the CLI
+does: there is no admin API. The network path is a second wall, not the
+authorization.
 
-Auth serves the admin API on a second, private listener that no ingress route
-reaches, so neither the internet nor the tailnet can call it; only the
-application's own services can. The network path is a second wall, not the
-authorization. Auth checks every call:
+The admin listener has a security layer of its own. It answers only requests that
+name the dashboard's host, takes a form only from the dashboard's own pages (the
+same-origin rule auth's pages follow), spends a request budget of its own, and
+limits bodies to 64 KiB. Every page loads no script and only the stylesheet, and
+its forms post only to the dashboard, whose answer may go on to auth's handoff
+page.
 
-- The token is for `piquel-admin`, and comes from a passkey sign-in.
-- Its account is an administrator, and its session is still active. Both are read
-  on each call, so revoking either takes effect at once.
-- A mutation needs a passkey confirmation from the last five minutes. Otherwise
-  auth answers with an RFC 9470 challenge, and the dashboard sends the
-  administrator through auth's login and back.
+The dashboard is no OIDC client. An administrator signs in by a handoff from auth:
+
+1. A browser without a dashboard session, or whose change needs a confirmation, is
+   sent to auth's handoff page, `/admin`, with a state the dashboard keeps in a
+   cookie of its own origin.
+2. The handoff page needs a session signed in with a passkey, of an account that
+   still holds administrator rights: anyone else is told they have no access, and
+   a social sign-in signs in with a passkey first. It sends the browser back with a
+   code that works once, for 60 seconds, bound to that session and to the state.
+3. The dashboard redeems the code in the browser holding the state, and starts a
+   session of its own, storing only its cookie's digest, with the auth session and
+   its own passkey confirmation.
+
+The dashboard's session rests on the auth session: signing out of auth, revoking
+that session or replacing it ends it, and every request checks the
+administrator's rights again. Signing out of the dashboard ends only its session.
+
+A change needs the dashboard's own passkey confirmation from the last five
+minutes, which a confirmation for auth's pages never gives. A page that changes
+something sends the browser to the handoff page to confirm before showing its form:
+there, a passkey proves the handoff in a ceremony started for it, and the
+dashboard keeps that time as its confirmation. The auth session's own
+confirmation stays as it was.
 
 Administrators manage the administrator list too, but never their own rights or
-the last administrator's, and the API never changes an administrator's account.
-Every admin operation is also an `auth-service` CLI command; granting the first
-administrator is one.
+the last administrator's, and the dashboard never changes an administrator's
+account. Every admin operation is also an `auth-service` CLI command; granting the
+first administrator is one.
 
 ### Changing an account on its owner's behalf
 
@@ -78,7 +96,7 @@ who acts on it, and a read a `Viewer`, the account and who reads it. The owner's
 settings pages and `/account` routes run them as the owner of the session cookie,
 the only way to act as an owner. The `auth-service account <user> …`
 command runs them as the operator at the terminal, and the dashboard will call
-them in-process as an administrator *(planned)*. Both run the same safety rules:
+them in-process as an administrator *(planned)*. All run the same safety rules:
 for example, one active passkey always remains, whoever removes the others.
 
 The rule for what is shared: administrators may view, edit and remove, but never
@@ -127,7 +145,7 @@ mails it; the dashboard's way to start one is *(planned)*.
 
 For 15 days after the link is used, the recovery is in probation: its passkey
 signs in like a social login and never confirms the session. Every change that
-needs a confirmation refuses it, and so do the admin API and relying parties
+needs a confirmation refuses it, and so do the dashboard and relying parties
 that ask for `phr`, so whoever used the link can use the account but add no way
 into it. Undoing the recovery takes back its passkey, every session and refresh
 grant, and every app consent. The owner undoes it with any other passkey on
@@ -150,8 +168,8 @@ states the policy and support's evidence policy.
 ## Contracts
 
 Third-party applications integrate only through open standards: OIDC, OAuth and
-their registration, discovery and token RFCs. The account and admin APIs are
-first-party; they change together with auth's pages in this repository.
+their registration, discovery and token RFCs. The account API is first-party; it
+changes together with auth's pages in this repository.
 
 ## Recovering auth
 
