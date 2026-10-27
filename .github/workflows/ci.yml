@@ -5,7 +5,8 @@
 #   web    -> Prettier, tsc and ESLint, the passkey script included, and the web
 #             dependency audit
 #   rust   -> Clippy, unit, database and doc tests against PostgreSQL
-#   e2e    -> the browser suite over HTTPS against the real binary and PostgreSQL
+#   e2e    -> the browser suite over HTTPS against the real binary and PostgreSQL,
+#             with the admin dashboard on its own listener and host
 #   docker -> the deployment image
 #
 # Pull requests run only the jobs their changes can affect (see `changes`).
@@ -174,6 +175,12 @@ jobs:
       AUTH_PUBLIC_BASE_URL: https://localhost:3443
       AUTH_PUBLIC_LISTENER: 127.0.0.1:3000
       AUTH_INVITE_REQUIRED: 'false'
+      # The dashboard on its own host, as admin.piquel.fr is: browsers resolve
+      # `*.localhost` to the loopback address.
+      AUTH_ADMIN_LISTENER: 127.0.0.1:3001
+      AUTH_ADMIN_ORIGIN: https://admin.localhost:3443
+      E2E_ADMIN_URL: https://admin.localhost:3443
+      E2E_GRANT_ADMIN: target/debug/auth-service admin grant
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       - *install-just
@@ -201,6 +208,9 @@ jobs:
           }
           localhost:3443 {
             reverse_proxy 127.0.0.1:3000
+          }
+          admin.localhost:3443 {
+            reverse_proxy 127.0.0.1:3001
           }
           EOF
           docker run --detach --name caddy --network host --volume "$RUNNER_TEMP/Caddyfile:/etc/caddy/Caddyfile:ro" caddy:2-alpine
