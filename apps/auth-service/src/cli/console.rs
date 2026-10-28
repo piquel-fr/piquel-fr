@@ -3,7 +3,7 @@
 //! administrator or client.
 
 use super::CliError;
-use crate::{AdminService, Operator, UserRef, account::AccountService};
+use crate::{AdminService, AuthConfig, Operator, UserRef, account::AccountService};
 use clap::{Args, ValueEnum};
 use piquel_common::UserId;
 use piquel_repository::Database;
@@ -25,7 +25,7 @@ impl Console {
     /// Runs operations on `database` as the operator at this terminal.
     pub(super) fn new(database: Database) -> Result<Self, CliError> {
         Ok(Self {
-            service: AdminService::new(database.clone()),
+            service: AdminService::new(database.clone(), AuthConfig::mails_from_environment()?),
             account: AccountService::new(database),
             operator: Operator::terminal()?,
         })

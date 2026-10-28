@@ -71,7 +71,7 @@ impl Scenario {
 
     /// The support operations.
     fn admin(&self) -> AdminService {
-        AdminService::new(self.database().clone())
+        AdminService::new(self.database().clone(), true)
     }
 
     /// Starts recovering the account as an operator at the terminal, with
@@ -1139,7 +1139,7 @@ async fn what_a_start_replaces_and_refuses() {
     let admin_id = admin.user_id;
     let administrator = operator(admin, Utc::now());
     let account = harness.account().await.user_id;
-    let service = AdminService::new(harness.database.clone());
+    let service = AdminService::new(harness.database.clone(), true);
     let links = recovery_links();
     let unmailed = service
         .recover_account(&administrator, account, recovery_reason(), &links, None)
@@ -1199,4 +1199,42 @@ async fn what_a_start_replaces_and_refuses() {
         opened.is_err(),
         "disabling cancelled it, so enabling does not revive it"
     );
+}
+
+/// While email is disabled, a recovery whose link would only be mailed is
+/// refused before anything changes: the account keeps its session, and nothing
+/// starts. The terminal, which prints its link, still recovers it.
+#[tokio::test]
+#[ignore = "requires TEST_DATABASE_URL"]
+async fn no_recovery_starts_while_email_is_disabled() {
+    let harness = Harness::new().await;
+    let administrator = operator(harness.admin().await, Utc::now());
+    let owner = harness.account().await;
+    let account = owner.user_id;
+    let address = format!("{account}@example.com");
+    verified_address(&harness.database, account, &address, true).await;
+    let service = AdminService::new(harness.database.clone(), false);
+    let links = recovery_links();
+    let refused = service
+        .recover_account(&administrator, account, recovery_reason(), &links, None)
+        .await;
+    assert!(matches!(refused, Err(AdminError::RecoveryNeedsEmail)));
+    let session = harness
+        .database
+        .sessions()
+        .find_by_id(owner.session_id)
+        .await
+        .expect("lookup")
+        .expect("session");
+    assert!(session.revoked_at.is_none(), "still signed in");
+    let recent = service
+        .recent_recoveries(&cli(), account)
+        .await
+        .expect("recoveries");
+    assert!(recent.is_empty(), "nothing started");
+    let printed = service
+        .recover_account(&cli(), account, recovery_reason(), &links, None)
+        .await
+        .expect("recovery");
+    assert!(printed.is_some(), "the terminal prints its link");
 }

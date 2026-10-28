@@ -179,7 +179,7 @@ async fn user_disable_runs_the_admin_operation() {
         panic!("an administrative command");
     };
     let console = Console {
-        service: AdminService::new(database.clone()),
+        service: AdminService::new(database.clone(), true),
         account: AccountService::new(database.clone()),
         operator: operator(),
     };
@@ -237,7 +237,7 @@ async fn account_commands_run_the_shared_operation() {
         panic!("an administrative command");
     };
     let console = Console {
-        service: AdminService::new(database.clone()),
+        service: AdminService::new(database.clone(), true),
         account: AccountService::new(database.clone()),
         operator: operator(),
     };

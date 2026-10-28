@@ -58,7 +58,7 @@ impl Recovering {
         } else {
             None
         };
-        let link = AdminService::new(database.clone())
+        let link = AdminService::new(database.clone(), true)
             .recover_account(
                 &operator(),
                 user_id,
