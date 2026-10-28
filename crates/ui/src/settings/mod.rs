@@ -27,7 +27,7 @@ use topcoat::{
 
 /// Whom a settings section serves, which decides what it offers.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum Audience {
+pub enum Audience<'a> {
     /// The account's owner: every change, those needing a recent passkey
     /// confirmation asking for one first unless the session is `confirmed`, and
     /// adding passkeys, providers and addresses.
@@ -38,18 +38,26 @@ pub enum Audience {
     /// An administrator, on the owner's behalf: only the changes they share with
     /// the owner, each with the reason they give, and nothing that adds a way in
     /// or an address. The dashboard confirmed their passkey before showing it.
-    Administrator,
+    Administrator {
+        /// The reason they typed for a change that was refused, which the open
+        /// row's form shows again; empty otherwise.
+        reason: &'a str,
+    },
 }
 
-impl Audience {
+impl<'a> Audience<'a> {
     /// Whether a change needing a recent passkey confirmation asks for one first.
     pub(crate) const fn confirms(self) -> bool {
         matches!(self, Self::Owner { confirmed: false })
     }
 
-    /// Whether every change asks why.
-    pub(crate) const fn asks_reason(self) -> bool {
-        matches!(self, Self::Administrator)
+    /// The reason every change asks for, as last typed, if every change asks
+    /// why.
+    pub(crate) const fn asks_reason(self) -> Option<&'a str> {
+        match self {
+            Self::Administrator { reason } => Some(reason),
+            Self::Owner { .. } => None,
+        }
     }
 
     /// Whether it may add a way in, or an address.

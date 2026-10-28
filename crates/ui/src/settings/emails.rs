@@ -46,6 +46,10 @@ pub struct EmailsState {
     /// The address an addition that failed asked for, to ask for it again.
     #[serde(skip)]
     pub adding: Option<String>,
+    /// The address a refused change of the primary asked for, whose form alone
+    /// keeps the reason typed.
+    #[serde(skip)]
+    pub making_primary: Option<EmailId>,
 }
 
 impl Query for EmailsState {}
@@ -72,7 +76,7 @@ pub async fn addresses<'a>(
     page: &'a str,
     emails: &'a [EmailRow<'a>],
     state: &'a EmailsState,
-    audience: Audience,
+    audience: Audience<'a>,
     sends: bool,
 ) -> Result<impl View> {
     // The primary address can be removed only while no other verified one could
@@ -140,7 +144,7 @@ async fn address_row<'a>(
     email: EmailRow<'a>,
     replaceable: bool,
     state: &'a EmailsState,
-    audience: Audience,
+    audience: Audience<'a>,
     sends: bool,
 ) -> Result<impl View> {
     let id = email.id;
@@ -171,7 +175,13 @@ async fn address_row<'a>(
                         class: "text-button",
                         aria_label: format!("Make primary {address}"),
                         confirm: audience.confirms(),
-                        reason: audience.asks_reason(),
+                        // On every verified row: only the refused one keeps its
+                        // reason, so another change's never carries over.
+                        reason: if state.making_primary == Some(id) {
+                            audience.asks_reason()
+                        } else {
+                            audience.asks_reason().map(|_| "")
+                        },
                     )
                 }
                 if sends && !email.verified && audience.owns() {
@@ -186,7 +196,7 @@ async fn address_row<'a>(
                 }
                 open(
                     page: page,
-                    opens: EmailsState { removing: Some(id), adding: None },
+                    opens: EmailsState { removing: Some(id), ..EmailsState::default() },
                     label: "Remove",
                     aria_label: format!("Remove {address}"),
                     disabled: blocked,

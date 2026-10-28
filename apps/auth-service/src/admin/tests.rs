@@ -252,6 +252,25 @@ async fn disabling_ends_sessions_and_is_recorded() {
     );
 }
 
+/// A handle rename records its reason with the change, as personal data the
+/// owner sees in their history.
+#[tokio::test]
+#[ignore = "requires TEST_DATABASE_URL"]
+async fn handle_renames_record_their_reason() {
+    let harness = Harness::new().await;
+    let suffix = &TokenId::new().to_string()[24..];
+    let account = harness.named(&format!("before-{suffix}")).await;
+    let after = Handle::parse(&format!("after-{suffix}")).expect("handle");
+    harness
+        .service()
+        .rename_handle(&cli(), account, after, reason("Impersonation"), false)
+        .await
+        .expect("rename");
+    let latest = harness.database.events().history_for_user(account, 1).await;
+    let latest = latest.expect("history");
+    assert_eq!(latest[0].reason.as_deref(), Some("Impersonation"));
+}
+
 /// Operators rename without the cooldown, but not to a taken, retired, look-alike,
 /// reserved or unchanged handle. A released handle stays its former owner's until
 /// an operator releases it; `handle check` lists reserved handles operators assign.
@@ -268,7 +287,7 @@ async fn operators_rename_and_release_handles() {
         let service = service.clone();
         async move {
             service
-                .rename_handle(&cli(), user, handle, allow_reserved)
+                .rename_handle(&cli(), user, handle, reason("Renamed"), allow_reserved)
                 .await
         }
     };

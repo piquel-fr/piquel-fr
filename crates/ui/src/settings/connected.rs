@@ -54,7 +54,7 @@ pub async fn connected_apps<'a>(
     page: &'a str,
     rows: &'a [ConnectedAppRow<'a>],
     state: &'a ConnectedAppsState,
-    audience: Audience,
+    audience: Audience<'a>,
 ) -> Result<impl View> {
     Ok(view! {
         <p class="help">
@@ -97,7 +97,7 @@ async fn app_row<'a>(
     page: &'a str,
     row: ConnectedAppRow<'a>,
     removing: bool,
-    audience: Audience,
+    audience: Audience<'a>,
 ) -> Result<impl View> {
     let name = row.name;
     let away = match (row.offline, audience.owns()) {

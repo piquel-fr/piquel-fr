@@ -115,7 +115,7 @@ pub async fn sign_in_methods<'a>(
     passkeys: &'a [Passkey],
     providers: &'a [ProviderRow<'a>],
     state: &'a SignInState,
-    audience: Audience,
+    audience: Audience<'a>,
     android: bool,
     recovery: Option<&'a Recovery>,
     #[default] handle: Option<HandleRow<'a>>,
@@ -144,7 +144,7 @@ async fn handle_card<'a>(
     page: &'a str,
     row: HandleRow<'a>,
     state: &'a SignInState,
-    audience: Audience,
+    audience: Audience<'a>,
 ) -> Result<impl View> {
     let current = row.handle;
     Ok(view! {
@@ -198,7 +198,7 @@ async fn passkey_list<'a>(
     page: &'a str,
     passkeys: &'a [Passkey],
     state: &'a SignInState,
-    audience: Audience,
+    audience: Audience<'a>,
     android: bool,
     recovery: Option<&'a Recovery>,
 ) -> Result<impl View> {
@@ -271,7 +271,7 @@ async fn passkey_row<'a>(
     recovered: bool,
     removable: bool,
     state: &'a SignInState,
-    audience: Audience,
+    audience: Audience<'a>,
 ) -> Result<impl View> {
     let id = passkey.id;
     let (name, removal, precision) = if recovered {
@@ -375,7 +375,7 @@ async fn social<'a>(
     page: &'a str,
     providers: &'a [ProviderRow<'a>],
     state: &'a SignInState,
-    audience: Audience,
+    audience: Audience<'a>,
 ) -> Result<impl View> {
     Ok(view! {
         <section class="card" aria-labelledby="social-heading">
@@ -411,7 +411,7 @@ async fn provider_row<'a>(
     page: &'a str,
     row: ProviderRow<'a>,
     unlinking: bool,
-    audience: Audience,
+    audience: Audience<'a>,
 ) -> Result<impl View> {
     let provider = row.provider;
     let name = provider.name();

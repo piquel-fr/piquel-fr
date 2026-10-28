@@ -83,6 +83,9 @@ pub(super) async fn create(cx: &Cx, form: Option<Form<CreateInvitation>>) -> Res
         Some(Err(refused)) => (None, Some(refused)),
         None => (None, None),
     };
+    let typed = refused
+        .as_ref()
+        .and_then(|refused| refused.form.expires_in.clone());
     let (created, refused) = (&created, refused.as_deref());
     let page = view! { cx =>
         match created {
@@ -102,7 +105,7 @@ pub(super) async fn create(cx: &Cx, form: Option<Form<CreateInvitation>>) -> Res
                     refusal: refused,
                     <label>
                         "Valid for"
-                        <input name="expires_in" placeholder="7d" pattern="[0-9]+[hd]">
+                        <input name="expires_in" placeholder="7d" pattern="[0-9]+[hd]" value=(typed)>
                         <small>"Hours or days, e.g. 24h or 7d; seven days when empty."</small>
                     </label>
                 )

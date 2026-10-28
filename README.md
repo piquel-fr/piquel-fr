@@ -289,9 +289,9 @@ or CLI operator.
 ### Handles
 
 ```sh
-just auth handle check                      # accounts whose handle is reserved
-just auth handle rename old-name new-name   # --allow-reserved to assign a reserved name
-just auth handle release old-name           # let anyone claim a released handle again
+just auth handle check                                  # accounts whose handle is reserved
+just auth handle rename old-name new-name --reason "…"  # --allow-reserved to assign a reserved name
+just auth handle release old-name                       # let anyone claim a released handle again
 ```
 
 Operators rename without the 30-day cooldown of settings renames, but not to a
@@ -300,7 +300,9 @@ handle another account holds or held, or one that looks like it (see
 version, so relying parties refresh `preferred_username`. `release` deletes a
 handle no account holds anymore, the only way one returns to the pool, for cases
 like a trademark dispute; to free a current handle, rename its account first.
-Every change is recorded as a domain event with its operator.
+Every change is recorded as a domain event with its operator; a rename also with
+its reason, which the owner sees in their history. Administrators rename from the
+dashboard the same way, with a reason.
 
 Upgrading from a release that stored usernames: run its `handle check`, and rename
 every account it lists with its `handle rename`, before deploying. The migration
