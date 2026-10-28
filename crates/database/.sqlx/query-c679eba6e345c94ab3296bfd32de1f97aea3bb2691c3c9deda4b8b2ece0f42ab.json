@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "WITH free AS (\n                    SELECT id FROM authorization_codes\n                    WHERE user_id = $1\n                    AND client_id = $2\n                    AND consumed_at IS NULL\n                    ORDER BY id\n                    FOR UPDATE SKIP LOCKED\n                )\n                UPDATE authorization_codes c\n                SET expires_at = '-infinity'\n                FROM free\n                WHERE c.id = free.id",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "c679eba6e345c94ab3296bfd32de1f97aea3bb2691c3c9deda4b8b2ece0f42ab"
+}

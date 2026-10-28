@@ -1,0 +1,46 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT\n                    c.id AS \"client_id: ClientId\", c.display_name AS name, c.trusted,\n                    COALESCE(\n                        jsonb_agg(DISTINCT s.scope) FILTER (WHERE s.scope IS NOT NULL),\n                        '[]'\n                    ) AS \"scopes!: JsonArray<String>\",\n                    bool_or(g.refresh) AS \"offline!\"\n                FROM (\n                    SELECT client_id, scopes, FALSE AS refresh\n                    FROM oidc_consents\n                    WHERE user_id = $1\n                    UNION ALL\n                    SELECT f.client_id, f.scopes, TRUE\n                    FROM refresh_token_families f\n                    JOIN sessions session ON session.id = f.session_id\n                    WHERE f.user_id = $1\n                    AND f.revoked_at IS NULL\n                    AND session.revoked_at IS NULL\n                    AND session.expires_at > now()\n                ) g\n                JOIN oidc_clients c ON c.id = g.client_id\n                LEFT JOIN LATERAL jsonb_array_elements_text(g.scopes) AS s(scope) ON TRUE\n                WHERE c.enabled\n                GROUP BY c.id, c.display_name, c.trusted\n                ORDER BY c.display_name, c.id",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "client_id: ClientId",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 1,
+        "name": "name",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 2,
+        "name": "trusted",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 3,
+        "name": "scopes!: JsonArray<String>",
+        "type_info": "Jsonb"
+      },
+      {
+        "ordinal": 4,
+        "name": "offline!",
+        "type_info": "Bool"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      null,
+      null
+    ]
+  },
+  "hash": "b8f42093fc42292526b768564056bae8f1cc39087685aa8e4ff8f7eb493bdcd6"
+}

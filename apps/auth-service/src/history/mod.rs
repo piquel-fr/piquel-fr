@@ -199,7 +199,7 @@ impl AccountService {
             &RevocationReason::CompromiseReported,
         )
         .await?;
-        tx.tokens().revoke_all_for_user(owner.user()).await?;
+        tx.tokens().revoke_for_user(owner.user(), None).await?;
         tx.commit().await?;
         Ok(entry.follow_up())
     }

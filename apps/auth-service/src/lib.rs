@@ -19,6 +19,8 @@ mod deliveries;
 mod emails;
 /// External identity provider applications and linking.
 mod federation;
+/// The apps that keep access to an account, and removing it.
+mod grants;
 /// The signed-in user's security history and its reports.
 mod history;
 /// Periodic background work, coordinated across replicas.

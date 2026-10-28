@@ -66,7 +66,8 @@ pub use login::{
 };
 pub use oidc::{Onward, consent, failure, logout, onward};
 pub use settings::{
-    DeviceChange, DeviceRow, EmailChange, EmailRow, EmailsState, HistoryChange, HistoryPage,
-    HistoryRow, HistoryState, Holdings, ProviderRow, SignInChange, SignInState, Tab, addresses,
-    devices, history, settings_tabs, sign_in_methods, verified, verify,
+    ConnectedAppChange, ConnectedAppRow, ConnectedAppsState, DeviceChange, DeviceRow, EmailChange,
+    EmailRow, EmailsState, HistoryChange, HistoryPage, HistoryRow, HistoryState, Holdings,
+    ProviderRow, SignInChange, SignInState, Tab, addresses, connected_apps, devices, history,
+    settings_tabs, sign_in_methods, verified, verify,
 };

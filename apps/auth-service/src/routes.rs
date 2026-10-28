@@ -146,6 +146,8 @@ pub(crate) mod page {
         pub(crate) const VERIFY: &str = "/settings/emails/verify";
         /// Signed-in devices.
         pub(crate) const SESSIONS: &str = "/settings/sessions";
+        /// Apps that keep access to the account.
+        pub(crate) const APPS: &str = "/settings/apps";
         /// Security history.
         pub(crate) const HISTORY: &str = "/settings/history";
     }
@@ -175,7 +177,7 @@ pub(crate) mod page {
 
     /// Every server-rendered page's route, which the security layer classifies as
     /// pages.
-    pub(crate) const ALL: [&str; 14] = [
+    pub(crate) const ALL: [&str; 15] = [
         LOGIN,
         REGISTER,
         CONSENT,
@@ -184,6 +186,7 @@ pub(crate) mod page {
         settings::EMAILS,
         settings::VERIFY,
         settings::SESSIONS,
+        settings::APPS,
         settings::HISTORY,
         developers::HOME,
         developers::NEW,

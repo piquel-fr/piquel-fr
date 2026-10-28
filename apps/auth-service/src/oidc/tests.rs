@@ -398,6 +398,24 @@ impl Flow {
             .expect("verify ID token");
         (tokens, claims)
     }
+    /// The scenario's account, as the owner of its browser session.
+    async fn owner(&self) -> crate::account::Owner {
+        let mut headers = axum::http::HeaderMap::new();
+        headers.insert(header::COOKIE, self.cookie.parse().expect("cookie"));
+        crate::account::AccountService::new(self.app.database.clone())
+            .owner(RequestContext::TEST, &headers)
+            .await
+            .expect("session lookup")
+            .expect("signed in")
+    }
+    /// Asserts that a token response rejected its grant as `invalid_grant`.
+    async fn assert_invalid_grant(response: Response) {
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+        assert_eq!(
+            Self::json(response).await["error"],
+            OAuthCode::InvalidGrant.as_str()
+        );
+    }
     /// Rotates a scenario refresh token using its registered client credentials.
     async fn refresh(&self, token: &str) -> Response {
         self.request(
@@ -829,6 +847,99 @@ async fn logout_posts_a_logout_token_to_the_clients_of_the_session() {
             "events": {BACKCHANNEL_LOGOUT_EVENT: {}},
         })
     );
+}
+
+/// Removing an app from the account's settings ends its refresh grant and its
+/// outstanding code, and forgets the consent, so it asks again. It is recorded
+/// once, and listed no more.
+#[tokio::test]
+#[ignore = "requires TEST_DATABASE_URL"]
+async fn removing_an_app_ends_its_access() {
+    let flow = Flow::new(false, false).await;
+    let code = flow.code(REFRESH_SCOPES).await;
+    let tokens = Flow::json(flow.exchange(&code, Flow::verifier(), None).await).await;
+    let refresh = tokens["refresh_token"].as_str().expect("refresh token");
+    let outstanding = flow.code(REFRESH_SCOPES).await;
+    let service = crate::account::AccountService::new(flow.app.database.clone());
+    let owner = flow.owner().await;
+    let viewer = crate::account::Viewer::from(&owner);
+    let apps = service.apps(&viewer).await.expect("apps");
+    assert_eq!(apps.len(), 1);
+    assert_eq!(apps[0].client_id, flow.client.id);
+    assert_eq!(apps[0].scopes, [Scope::OpenId.as_str()]);
+    assert!(apps[0].offline && !apps[0].first_party);
+
+    service
+        .remove_app(&owner, &flow.client.id)
+        .await
+        .expect("remove");
+    assert!(service.apps(&viewer).await.expect("apps").is_empty());
+    assert_eq!(
+        flow.events().await[0],
+        DomainEvent::ConsentRevoked {
+            client_id: flow.client.id.clone()
+        }
+    );
+    Flow::assert_invalid_grant(flow.refresh(refresh).await).await;
+    Flow::assert_invalid_grant(flow.exchange(&outstanding, Flow::verifier(), None).await).await;
+    let response = flow
+        .authorize(REFRESH_SCOPES, Some(Prompt::None.as_str()))
+        .await;
+    assert_eq!(
+        parameter(&flow.client_redirect(&response), "error"),
+        OAuthCode::ConsentRequired.as_str()
+    );
+}
+
+/// A code issued before the user withdrew consent is not exchanged after it,
+/// even when it is not expired, as one an authorization issued just as a removal
+/// withdrew the consent is not.
+#[tokio::test]
+#[ignore = "requires TEST_DATABASE_URL"]
+async fn withdrawn_consent_stops_an_issued_code() {
+    let flow = Flow::new(false, false).await;
+    let code = flow.code(Scope::OpenId.as_str()).await;
+    flow.app
+        .database
+        .oidc()
+        .revoke_consents(flow.user_id, Some(&flow.client.id))
+        .await
+        .expect("withdraw");
+    Flow::assert_invalid_grant(flow.exchange(&code, Flow::verifier(), None).await).await;
+}
+
+/// An exchange that starts while an app's removal holds the account waits for it,
+/// before taking its code, so even a first-party app, which needs no consent,
+/// finds its code expired rather than creating a refresh grant after the removal.
+#[tokio::test]
+#[ignore = "requires TEST_DATABASE_URL"]
+async fn an_exchange_waits_for_a_removal_and_finds_its_code_expired() {
+    let flow = Flow::new(false, true).await;
+    let code = flow.code(REFRESH_SCOPES).await;
+    let database = flow.app.database.clone();
+    let mut removal = database.begin().await.expect("transaction");
+    removal
+        .users()
+        .find_active_by_id_for_update(flow.user_id)
+        .await
+        .expect("lock")
+        .expect("user");
+    let exchanging = flow.clone();
+    let exchange = tokio::spawn(async move {
+        let response = exchanging.exchange(&code, Flow::verifier(), None).await;
+        (response.status(), Flow::json(response).await)
+    });
+    until_blocked(&mut removal, 1).await;
+    removal
+        .oidc()
+        .expire_codes(flow.user_id, &flow.client.id)
+        .await
+        .expect("expire");
+    removal.commit().await.expect("commit");
+
+    let (status, body) = exchange.await.expect("exchange");
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+    assert_eq!(body["error"], OAuthCode::InvalidGrant.as_str());
 }
 
 /// Replaying a redeemed code revokes the refresh family it produced, while the same

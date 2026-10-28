@@ -4,6 +4,8 @@
 //! section, keeping its [`Tab`] to mark it among the tabs. Confirming an address,
 //! from its emailed link, is a page of its own.
 
+/// Connected apps.
+mod connected;
 /// Email addresses, and confirming one.
 mod emails;
 /// Security history.
@@ -15,6 +17,7 @@ mod sign_in;
 #[cfg(test)]
 mod tests;
 
+pub(super) use connected::ConnectedApps;
 pub(super) use emails::Addresses;
 pub(super) use history::History;
 pub(super) use sessions::Devices;
@@ -34,10 +37,11 @@ use topcoat::{
 use url::Url;
 
 /// Each tab and the page it links.
-const TABS: [(Tab, &str); 4] = [
+const TABS: [(Tab, &str); 5] = [
     (Tab::SignIn, settings::HOME),
     (Tab::Emails, settings::EMAILS),
     (Tab::Devices, settings::SESSIONS),
+    (Tab::Apps, settings::APPS),
     (Tab::History, settings::HISTORY),
 ];
 

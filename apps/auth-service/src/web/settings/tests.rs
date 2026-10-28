@@ -14,7 +14,10 @@ use piquel_common::{
 };
 use piquel_crypto::Secret;
 use piquel_repository::InsertExternalIdentity;
-use piquel_ui::{DeviceChange, EmailChange, HistoryChange, HistoryState, Query, SignInChange};
+use piquel_ui::{
+    ConnectedAppChange, ConnectedAppsState, DeviceChange, EmailChange, HistoryChange, HistoryState,
+    Query, SignInChange,
+};
 
 /// The devices page lists every signed-in browser, and signs one or all of the
 /// others out. Only the change itself, never a link, makes the page say so.
@@ -79,6 +82,52 @@ async fn devices_page_signs_other_devices_out() {
         page.contains("Your other devices were signed out."),
         "{page}"
     );
+}
+
+/// The connected apps page lists an app the account consented to, with what it
+/// can see, and removes its access once confirmed. Removing it again says it has
+/// none.
+#[tokio::test]
+#[ignore = "requires TEST_DATABASE_URL"]
+async fn connected_apps_are_listed_and_removed() {
+    let replicas = Replicas::new().await;
+    let database = Replicas::database().await;
+    let browser = Browser::new_account(&database).await;
+    let client = crate::tests::registration(
+        piquel_common::clients::ClientKind::Public,
+        "https://client.example",
+    );
+    crate::tests::register(&database, &client)
+        .await
+        .expect("register");
+    let scopes = ["openid".to_owned(), "email".to_owned()];
+    database
+        .oidc()
+        .save_consent(browser.user_id, &client.id, client.id.as_str(), &scopes)
+        .await
+        .expect("consent");
+    let page = html(browser.visit(&replicas.a, settings::APPS).await).await;
+    assert!(page.contains("Your verified email address"), "{page}");
+    assert!(page.contains("1 connected"), "{page}");
+
+    let removing = ConnectedAppsState {
+        removing: Some(client.id.clone()),
+    };
+    let link = removing.on(settings::APPS).expect("link");
+    let page = html(browser.visit(&replicas.a, &link).await).await;
+    assert!(page.contains("will need your approval again"), "{page}");
+    let remove = ConnectedAppChange::Remove {
+        client_id: client.id.clone(),
+    };
+    let removed = browser.post(&replicas, settings::APPS, &remove).await;
+    assert_eq!(redirect(&removed), settings::APPS);
+    assert_eq!(cookie(&removed, BrowserCookie::Notice).0, "app_removed");
+    let page = html(browser.visit(&replicas.a, settings::APPS).await).await;
+    assert!(page.contains("No apps have access"), "{page}");
+
+    let again = browser.post(&replicas, settings::APPS, &remove).await;
+    assert_eq!(again.status(), StatusCode::NOT_FOUND);
+    assert!(html(again).await.contains("may already be removed"));
 }
 
 /// A change that needs a recent passkey confirmation asks the passkey script for

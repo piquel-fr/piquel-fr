@@ -486,3 +486,43 @@ async fn logout_revokes_a_family_committed_while_it_waited() {
     .expect("family");
     assert!(revoked, "the family committed during the wait is revoked");
 }
+
+/// Removing an app expires even a code its own transaction already sees expired:
+/// an exchange whose transaction began before the code expired reads expiry
+/// against its earlier `now()`, so it would still redeem the code.
+#[tokio::test]
+#[ignore = "requires a disposable TEST_DATABASE_URL"]
+async fn removal_expires_codes_an_earlier_exchange_still_sees_live() {
+    let pool = Database::test_pool().await;
+    let client = client(&pool).await;
+    let grant = Grant::new(&pool, &client).await;
+    sqlx::query(
+        "UPDATE authorization_codes SET expires_at = now() + interval '1 second' WHERE id = $1",
+    )
+    .bind(grant.code.as_uuid())
+    .execute(&pool)
+    .await
+    .expect("expire soon");
+    // `now()` is fixed when a transaction begins.
+    let mut exchange = DatabaseTransaction::new(pool.begin().await.expect("exchange"));
+    tokio::time::sleep(Wait::from_millis(1200)).await;
+    let mut removal = DatabaseTransaction::new(pool.begin().await.expect("removal"));
+    removal
+        .oidc()
+        .expire_codes(grant.user, &client)
+        .await
+        .expect("expire");
+    removal.commit().await.expect("commit");
+    let redeemed = exchange
+        .oidc()
+        .consume_code(
+            grant.code,
+            std::slice::from_ref(&grant.code_digest),
+            &client,
+        )
+        .await;
+    assert!(
+        matches!(redeemed, Err(CodeRedemptionError::Invalid)),
+        "{redeemed:?}"
+    );
+}
