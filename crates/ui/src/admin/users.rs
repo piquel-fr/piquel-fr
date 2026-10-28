@@ -60,7 +60,7 @@ pub async fn user_search<'a>(
                     <tbody>
                         for row in rows {
                             <tr>
-                                <td><a href=(row.href.as_str())>(row.user.username.as_str())</a></td>
+                                <td><a href=(row.href.as_str())>(row.user.handle.as_str())</a></td>
                                 <td>(row.user.display_name.as_str())</td>
                                 <td>account_status(status: row.user.status)</td>
                                 <td>moment(at: row.user.created_at)</td>
@@ -109,7 +109,7 @@ pub async fn user_page<'a>(
     let user = &detail.user;
     Ok(view! {
         <div class="row between">
-            heading(title: user.display_name.as_str(), lead: format!("@{}", user.username))
+            heading(title: user.display_name.as_str(), lead: format!("@{}", user.handle))
             <div class="row">
                 account_status(status: user.status)
                 if detail.administrator {

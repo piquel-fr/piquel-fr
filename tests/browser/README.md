@@ -50,7 +50,7 @@ only, and disables an account, whose settings page then loses its session; signi
 out of the dashboard keeps the Piquel session, and signed out of both, a passkey
 sign-in on auth goes on to the dashboard. Set `E2E_ADMIN_URL` to the
 dashboard's origin and `E2E_GRANT_ADMIN` to a command that grants administrator
-rights to the username appended to it, e.g. `just auth admin grant` with the
+rights to the handle appended to it, e.g. `just auth admin grant` with the
 deployment's configuration. Without them, the test is skipped.
 
 `recovery.spec.ts` recovers an account as support does, against a deployment
@@ -61,7 +61,7 @@ page loads. The owner's browser, which the start signed out, signs in with the
 passkey from before the recovery, follows the question to the undo page and
 undoes the recovery, which signs the second browser out. Set `E2E_RECOVER` to a
 command that runs `auth-service user recover` on the deployment, to which the
-test appends the username, a reason and `--yes`, e.g. `just auth user recover`
+test appends the handle, a reason and `--yes`, e.g. `just auth user recover`
 with the deployment's configuration, or `piquelctl preview exec piquel-fr
 <branch> auth -- auth-service user recover` for a preview. Without it, the test
 is skipped.

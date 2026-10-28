@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "SELECT d.session_id AS \"session_id: SessionId\",\n                    s.user_id AS \"user_id: UserId\", u.username AS handle, d.confirmed_at\n                FROM dashboard_sessions d\n                JOIN sessions s ON s.id = d.session_id\n                JOIN users u ON u.id = s.user_id\n                WHERE d.secret_digest = $1\n                AND s.revoked_at IS NULL AND s.expires_at > now()",
+  "query": "SELECT d.session_id AS \"session_id: SessionId\",\n                    s.user_id AS \"user_id: UserId\", h.handle AS \"handle: Handle\", d.confirmed_at\n                FROM dashboard_sessions d\n                JOIN sessions s ON s.id = d.session_id\n                JOIN handles h ON h.user_id = s.user_id AND h.released_at IS NULL\n                WHERE d.secret_digest = $1\n                AND s.revoked_at IS NULL AND s.expires_at > now()",
   "describe": {
     "columns": [
       {
@@ -15,7 +15,7 @@
       },
       {
         "ordinal": 2,
-        "name": "handle",
+        "name": "handle: Handle",
         "type_info": "Text"
       },
       {
@@ -36,5 +36,5 @@
       true
     ]
   },
-  "hash": "1bb56af8eb5c35e01f672e1c2a61f2f5bf1cc07dde981b5aea2851a621396c86"
+  "hash": "617ecf31cc0d0921ce6bf4ec681ff325ce4e839a3d56da2095bf50c178a2b2db"
 }

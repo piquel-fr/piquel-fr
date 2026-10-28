@@ -155,12 +155,15 @@ async fn retries_resend_the_same_message_to_the_current_address() {
     for message in [&verify, &notice, &removed] {
         sender.assert_renders(user_id, message).await;
     }
-    let Some(Content::VerifyAddress { link, username, .. }) =
+    let Some(Content::VerifyAddress { link, handle, .. }) =
         sender.content(user_id, &verify).await.expect("content")
     else {
         panic!("a verification message has a link");
     };
-    assert_eq!(username, format!("mail-{}", &user_id.to_string()[24..]));
+    assert_eq!(
+        handle.as_str(),
+        format!("mail-{}", &user_id.to_string()[24..])
+    );
     assert_eq!(
         link,
         format!(
@@ -214,7 +217,7 @@ async fn a_recovery_link_is_sent_while_it_works() {
     let content = sender.content(user_id, &link).await.expect("content");
     let Some(Content::RecoveryLink {
         address: to,
-        username,
+        handle,
         link: url,
         ..
     }) = content
@@ -222,7 +225,10 @@ async fn a_recovery_link_is_sent_while_it_works() {
         panic!("a recovery's link has a recipient");
     };
     assert_eq!(to, address);
-    assert_eq!(username, format!("mail-{}", &user_id.to_string()[24..]));
+    assert_eq!(
+        handle.as_str(),
+        format!("mail-{}", &user_id.to_string()[24..])
+    );
     assert_eq!(
         url,
         before.url(&token).as_str(),

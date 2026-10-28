@@ -57,9 +57,6 @@ pub(super) enum CliError {
     /// The confirmation could not be read.
     #[error("could not read the confirmation")]
     Prompt(#[source] std::io::Error),
-    /// `handle check` found accounts to fix.
-    #[error("{0} accounts break the handle rules")]
-    HandleProblems(usize),
     /// A client change was refused.
     #[error(transparent)]
     Client(#[from] ClientRegistryError),

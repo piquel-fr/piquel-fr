@@ -164,7 +164,7 @@ The passkey script (`apps/auth-service/assets/passkey.js`) wires the pages' form
 their attributes. It keeps a form marked `data-submit-once` from posting twice, and
 confirms with a passkey before posting one marked `data-passkey-confirm`, which a
 page marks while the session has no recent confirmation. A `data-passkey-sign-in`
-form signs in with a passkey, with its `username` when typed, and a
+form signs in with a passkey, with its `handle` when typed, and a
 `data-passkey-register` form creates the account and its passkey; both then post. A
 `data-passkey-enroll` form runs the passkey enrollment, then posts, so its page says
 so. A `data-passkey-recover` form enrolls a passkey with the recovery link's token

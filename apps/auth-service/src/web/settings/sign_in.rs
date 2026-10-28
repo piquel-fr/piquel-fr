@@ -1,4 +1,4 @@
-//! `/settings`: passkeys and social sign-in.
+//! `/settings`: the handle, passkeys and social sign-in.
 
 use crate::{
     account::{AccountError, Owner, Subject},
@@ -9,7 +9,10 @@ use crate::{
         account::{AccountPage, Applied, Reader},
     },
 };
-use piquel_ui::{Audience, Messages, Notice, ProviderRow, Section, SignInChange, SignInState, Tab};
+use piquel_ui::{
+    Audience, Checkbox, HandleRow, Messages, Notice, ProviderRow, Section, SignInChange,
+    SignInState, Tab,
+};
 use topcoat::{
     Error,
     context::Cx,
@@ -35,6 +38,11 @@ impl AccountPage for SignInMethods {
     fn reopened(change: &SignInChange) -> SignInState {
         let closed = SignInState::default();
         match change {
+            SignInChange::Handle { handle } => SignInState {
+                changing_handle: Checkbox(true),
+                handle: Some(handle.clone()),
+                ..closed
+            },
             SignInChange::Rename { id, friendly_name } => SignInState {
                 renaming: Some(*id),
                 name: Some(friendly_name.clone()),
@@ -61,6 +69,10 @@ impl AccountPage for SignInMethods {
         change: SignInChange,
     ) -> Result<Applied<SignInState>, AccountError> {
         let notice = match change {
+            SignInChange::Handle { handle } => {
+                web.account.rename_handle(&owner, &handle).await?;
+                Notice::HandleChanged
+            }
             SignInChange::Link { provider } => {
                 let (to, cookie) = web
                     .federation
@@ -100,6 +112,7 @@ impl AccountPage for SignInMethods {
         outcome: (StatusCode, Messages<'_>),
     ) -> Result<Response, Failure> {
         let viewer = reader.viewer();
+        let profile = web.account.profile(&viewer).await?;
         let passkeys = web.account.passkeys(&viewer).await?;
         let identities = web.account.identities(&viewer).await?;
         // Enabled providers, then any linked one since disabled, so it can still be
@@ -133,6 +146,10 @@ impl AccountPage for SignInMethods {
         let page = Child::new(view! { cx =>
             piquel_ui::sign_in_methods(
                 page: settings::HOME,
+                handle: Some(HandleRow {
+                    handle: profile.handle.as_str(),
+                    changeable_at: profile.handle_changeable_at,
+                }),
                 passkeys: &passkeys,
                 providers: &providers,
                 state: &state,

@@ -8,9 +8,8 @@ use std::time::Duration;
 /// Inserts an active account to be the subject of recorded events.
 async fn insert_user(pool: &PgPool) -> UserId {
     let user = UserId::new();
-    sqlx::query("INSERT INTO users(id,username,display_name) VALUES($1,$2,'Event test')")
+    sqlx::query("INSERT INTO users(id,display_name) VALUES($1,'Event test')")
         .bind(user.as_uuid())
-        .bind(format!("event_{user}"))
         .execute(pool)
         .await
         .expect("user");

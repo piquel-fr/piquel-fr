@@ -4,7 +4,7 @@
 use super::{DashboardRepository, RepositoryExecutor};
 use crate::DatabaseError;
 use chrono::{DateTime, Utc};
-use piquel_common::{SessionId, UserId};
+use piquel_common::{Handle, SessionId, UserId};
 
 /// A handoff code, which redeems once, before `expires_at`, in the browser
 /// holding the state its digest names.
@@ -42,7 +42,7 @@ pub struct StoredDashboardSession {
     /// The account signed in.
     pub user_id: UserId,
     /// The account's handle, which the dashboard shows.
-    pub handle: String,
+    pub handle: Handle,
     /// When a passkey last confirmed it, in a ceremony started for the dashboard.
     pub confirmed_at: Option<DateTime<Utc>>,
 }
@@ -143,10 +143,10 @@ impl DashboardRepository<'_> {
             sqlx::query_as!(
                 StoredDashboardSession,
                 r#"SELECT d.session_id AS "session_id: SessionId",
-                    s.user_id AS "user_id: UserId", u.username AS handle, d.confirmed_at
+                    s.user_id AS "user_id: UserId", h.handle AS "handle: Handle", d.confirmed_at
                 FROM dashboard_sessions d
                 JOIN sessions s ON s.id = d.session_id
-                JOIN users u ON u.id = s.user_id
+                JOIN handles h ON h.user_id = s.user_id AND h.released_at IS NULL
                 WHERE d.secret_digest = $1
                 AND s.revoked_at IS NULL AND s.expires_at > now()"#,
                 secret_digest,

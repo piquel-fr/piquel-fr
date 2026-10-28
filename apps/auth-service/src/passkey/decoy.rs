@@ -1,7 +1,7 @@
-//! Stable decoy credentials, so username sign-in does not reveal which accounts exist.
+//! Stable decoy credentials, so handle sign-in does not reveal which accounts exist.
 //!
-//! A username without an active account or passkey still receives a challenge listing
-//! credentials. They are derived from the username with a server key, so they stay the
+//! A handle without an active account or passkey still receives a challenge listing
+//! credentials. They are derived from the handle with a server key, so they stay the
 //! same across requests, restarts and replicas, as a real account's credentials do.
 //! Nobody holds their private keys, and their ceremony fails at finish regardless.
 
@@ -18,7 +18,7 @@ const DECOY_COUNTS: [u8; 4] = [1, 1, 1, 2];
 /// the real mix. No decoy lists transports: webauthn-rs keeps them only from packed or
 /// TPM attestation, and browsers replace both with `none`, which passkey registration requests.
 const DECOY_ID_LENGTHS: [usize; 3] = [16, 20, 32];
-/// Input under a username's key that selects its decoy count and ID lengths. Credential
+/// Input under a handle's key that selects its decoy count and ID lengths. Credential
 /// IDs use one-byte inputs instead, so ID bytes are independent of the chosen shape.
 const DECOY_SHAPE_INPUT: &[u8] = b"shape";
 
@@ -37,7 +37,7 @@ const _: () = {
     }
 };
 
-/// HMAC key deriving the decoy credentials of usernames without an active account or
+/// HMAC key deriving the decoy credentials of handles without an active account or
 /// passkey. It must be derived from persistent key material, so decoys stay stable.
 #[derive(Clone)]
 pub(crate) struct DecoyKey(Secret);
@@ -48,13 +48,13 @@ impl DecoyKey {
         Self(key)
     }
 
-    /// Returns the stable `allowCredentials` for `username`.
+    /// Returns the stable `allowCredentials` for `handle`.
     ///
     /// # Errors
     ///
     /// Returns [`CryptoError`] if the HMAC provider fails.
-    pub(crate) fn credentials(&self, username: &str) -> Result<Vec<AllowCredentials>, CryptoError> {
-        let key = Secret::derive(self.0.as_bytes(), username.as_bytes())?;
+    pub(crate) fn credentials(&self, handle: &str) -> Result<Vec<AllowCredentials>, CryptoError> {
+        let key = Secret::derive(self.0.as_bytes(), handle.as_bytes())?;
         let shape = Digest::hmac(key.as_bytes(), DECOY_SHAPE_INPUT)?;
         let [count, lengths @ ..] = shape.as_bytes();
         (0..DECOY_COUNTS[usize::from(*count) % DECOY_COUNTS.len()])
@@ -81,22 +81,22 @@ mod tests {
     use std::collections::HashSet;
     use webauthn_rs_proto::AllowCredentials;
 
-    /// Across many usernames, decoys use every configured count and ID length and
-    /// nothing else, and a username always gets the same decoys.
+    /// Across many handles, decoys use every configured count and ID length and
+    /// nothing else, and a handle always gets the same decoys.
     #[test]
     fn decoys_use_exactly_the_configured_shapes() {
         let key = DecoyKey::new(Secret::generate().expect("key"));
         let (mut counts, mut lengths) = (HashSet::new(), HashSet::new());
         for index in 0..256 {
-            let username = format!("user_{index}");
+            let handle = format!("user-{index}");
             let ids = |decoys: &[AllowCredentials]| {
                 decoys
                     .iter()
                     .map(|decoy| decoy.id.clone())
                     .collect::<Vec<_>>()
             };
-            let decoys = key.credentials(&username).expect("decoys");
-            let repeated = key.credentials(&username).expect("decoys");
+            let decoys = key.credentials(&handle).expect("decoys");
+            let repeated = key.credentials(&handle).expect("decoys");
             assert_eq!(ids(&decoys), ids(&repeated));
             counts.insert(u8::try_from(decoys.len()).expect("count"));
             for decoy in decoys {

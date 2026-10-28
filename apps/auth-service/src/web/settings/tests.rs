@@ -15,8 +15,8 @@ use piquel_common::{
 use piquel_crypto::Secret;
 use piquel_repository::InsertExternalIdentity;
 use piquel_ui::{
-    ConnectedAppChange, ConnectedAppsState, DeviceChange, EmailChange, HistoryChange, HistoryState,
-    Query, SignInChange,
+    Checkbox, ConnectedAppChange, ConnectedAppsState, DeviceChange, EmailChange, HistoryChange,
+    HistoryState, Query, SignInChange, SignInState,
 };
 
 /// The devices page lists every signed-in browser, and signs one or all of the
@@ -241,6 +241,68 @@ async fn addresses_change_their_primary_and_are_removed() {
     );
     assert!(
         page.contains("Primary: receives security notices"),
+        "{page}"
+    );
+}
+
+/// The handle can change once its cooldown is over. A refusal says why, with the
+/// handle typed still in the form, and a change says so.
+#[tokio::test]
+#[ignore = "requires TEST_DATABASE_URL"]
+async fn the_handle_changes_once_its_cooldown_is_over() {
+    let replicas = Replicas::new().await;
+    let database = Replicas::database().await;
+    let browser = Browser::new_account(&database).await;
+    let taken = Browser::new_account(&database).await;
+    let handle = async |browser: &Browser| {
+        database
+            .users()
+            .find_by_id(browser.user_id)
+            .await
+            .expect("lookup")
+            .expect("user")
+            .handle
+    };
+    let (current, taken) = (handle(&browser).await, handle(&taken).await);
+    let page = html(browser.visit(&replicas.a, settings::HOME).await).await;
+    assert!(
+        page.contains(&format!("<strong>@{current}</strong>")),
+        "{page}"
+    );
+    assert!(page.contains("You can change it again on"), "{page}");
+
+    database
+        .users()
+        .age_handle_change(browser.user_id, 31)
+        .await
+        .expect("age");
+    let opened = SignInState {
+        changing_handle: Checkbox(true),
+        ..SignInState::default()
+    };
+    let path = opened.on(settings::HOME).expect("query");
+    let page = html(browser.visit(&replicas.a, &path).await).await;
+    assert!(page.contains(&format!(r#"value="{current}""#)), "{page}");
+    let change = |handle: &str| SignInChange::Handle {
+        handle: handle.to_owned(),
+    };
+    let refused = browser
+        .post(&replicas, settings::HOME, &change(taken.as_str()))
+        .await;
+    assert_eq!(refused.status(), StatusCode::CONFLICT);
+    let page = html(refused).await;
+    assert!(page.contains("This handle is taken."), "{page}");
+    assert!(page.contains(&format!(r#"value="{taken}""#)), "{page}");
+
+    let renamed = format!("renamed-{}", &browser.user_id.to_string()[24..]);
+    let changed = browser
+        .post(&replicas, settings::HOME, &change(&renamed))
+        .await;
+    assert_eq!(redirect(&changed), settings::HOME);
+    assert_eq!(cookie(&changed, BrowserCookie::Notice).0, "handle_changed");
+    let page = html(browser.visit(&replicas.a, settings::HOME).await).await;
+    assert!(
+        page.contains(&format!("<strong>@{renamed}</strong>")),
         "{page}"
     );
 }

@@ -12,7 +12,7 @@ mod emails;
 mod history;
 /// Signed-in devices.
 mod sessions;
-/// Passkeys and social sign-in.
+/// The handle, passkeys and social sign-in.
 mod sign_in;
 #[cfg(test)]
 mod tests;

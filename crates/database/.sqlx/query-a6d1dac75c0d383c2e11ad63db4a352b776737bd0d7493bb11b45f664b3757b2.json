@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "SELECT\n                    id AS \"id: UserId\", username, display_name,\n                    profile_version AS \"profile_version: Unsigned\",\n                    status AS \"status: AccountStatus\", created_at, updated_at\n                FROM users\n                WHERE id = $1",
+  "query": "SELECT\n                    u.id AS \"id: UserId\", h.handle AS \"handle: Handle\", u.handle_changed_at,\n                    u.display_name, u.profile_version AS \"profile_version: Unsigned\",\n                    u.status AS \"status: AccountStatus\", u.created_at, u.updated_at\n                FROM users u\n                JOIN handles h ON h.user_id = u.id AND h.released_at IS NULL\n                WHERE h.handle = $1",
   "describe": {
     "columns": [
       {
@@ -10,38 +10,43 @@
       },
       {
         "ordinal": 1,
-        "name": "username",
+        "name": "handle: Handle",
         "type_info": "Text"
       },
       {
         "ordinal": 2,
+        "name": "handle_changed_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 3,
         "name": "display_name",
         "type_info": "Text"
       },
       {
-        "ordinal": 3,
+        "ordinal": 4,
         "name": "profile_version: Unsigned",
         "type_info": "Int8"
       },
       {
-        "ordinal": 4,
+        "ordinal": 5,
         "name": "status: AccountStatus",
         "type_info": "Text"
       },
       {
-        "ordinal": 5,
+        "ordinal": 6,
         "name": "created_at",
         "type_info": "Timestamptz"
       },
       {
-        "ordinal": 6,
+        "ordinal": 7,
         "name": "updated_at",
         "type_info": "Timestamptz"
       }
     ],
     "parameters": {
       "Left": [
-        "Uuid"
+        "Text"
       ]
     },
     "nullable": [
@@ -51,8 +56,9 @@
       false,
       false,
       false,
+      false,
       false
     ]
   },
-  "hash": "be8512324849366772927c0e5cf26d482591631cd8190949850cd92cbb0f427e"
+  "hash": "a6d1dac75c0d383c2e11ad63db4a352b776737bd0d7493bb11b45f664b3757b2"
 }

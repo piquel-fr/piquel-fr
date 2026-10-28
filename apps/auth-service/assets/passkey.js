@@ -58,11 +58,11 @@ class Passkeys {
   }
   /**
    * Signs in, which also confirms the new session for actions that need a passkey.
-   * @param {string} [username]
+   * @param {string} [handle]
    * @returns {Promise<void>}
    */
-  authenticate(username) {
-    return this.#assert('/webauthn/authenticate', username ? { username } : {});
+  authenticate(handle) {
+    return this.#assert('/webauthn/authenticate', handle ? { handle } : {});
   }
   /**
    * Confirms the current session with a passkey, for actions that need a recent one.
@@ -91,7 +91,7 @@ class Passkeys {
    * Creates an account when `account` is given, else enrolls a key for the signed-in user.
    * `pending_signup` attaches the pending social identity the signup page displayed.
    * @param {string} friendlyName
-   * @param {{ username: string; invitation?: string; pending_signup?: string }} [account]
+   * @param {{ handle: string; invitation?: string; pending_signup?: string }} [account]
    * @param {PasskeyKind} [kind]
    * @returns {Promise<void>}
    */
@@ -288,6 +288,38 @@ class Passkeys {
       .replace(/=+$/, '');
   }
   /**
+   * Tells the browser's password manager the current handle and display name of the
+   * account whose ID is `id`, so its passkeys show them after a change (the WebAuthn
+   * Signal API). Does nothing where unsupported.
+   * @param {{ id: string; name: string; displayName: string }} account
+   * @returns {void}
+   */
+  static signal({ id, name, displayName }) {
+    /**
+     * @typedef {(details: {
+     *   rpId: string;
+     *   userId: string;
+     *   name: string;
+     *   displayName: string;
+     * }) => Promise<void>} SignalCurrentUserDetails
+     */
+    const credentials = /** @type {{ signalCurrentUserDetails?: SignalCurrentUserDetails }} */ (
+      /** @type {unknown} */ (PublicKeyCredential)
+    );
+    // Passkeys carry the account ID's 16 bytes as their user handle.
+    const bytes = Uint8Array.from(id.replace(/-/g, '').match(/../g) ?? [], (byte) =>
+      parseInt(byte, 16)
+    );
+    credentials
+      .signalCurrentUserDetails?.({
+        rpId: window.location.hostname,
+        userId: Passkeys.#encode(bytes.buffer),
+        name,
+        displayName
+      })
+      .catch(() => undefined);
+  }
+  /**
    * The credential descriptor `value` encodes.
    * @param {EncodedDescriptor} value
    * @returns {PublicKeyCredentialDescriptor}
@@ -307,10 +339,10 @@ class Passkeys {
  *   posts it with `form.submit()`, which sends no button's value: its action and
  *   every other value come from its inputs, never from the button.
  * - a form marked `data-passkey-sign-in` signs in with a passkey, of the account its
- *   `username` names, or one the browser offers when it names none, then posts, so its
+ *   `handle` names, or one the browser offers when it names none, then posts, so its
  *   page sends the browser on.
  * - a form marked `data-passkey-register` creates an account with its first passkey,
- *   from its `username`, `friendly_name`, `passkey_kind`, `invitation` and
+ *   from its `handle`, `friendly_name`, `passkey_kind`, `invitation` and
  *   `pending_signup`, then posts, so its page sends the browser on.
  * - a form marked `data-passkey-enroll` adds a passkey named by its `friendly_name`,
  *   confirming first if it must, then posts, so its page says so.
@@ -330,6 +362,9 @@ class Passkeys {
  * - a `data-copy` button copies the text of the element its value names, and says
  *   whether it did, for a moment, in the `role="status"` element just before it. It
  *   starts hidden, and shows once the browser can write to the clipboard.
+ * - an element marked `data-passkey-user`, the signed-in account's ID, tells the
+ *   password manager the account's current `data-passkey-name` and
+ *   `data-passkey-display-name`, so its passkeys show them after a change.
  * - an element marked `data-replace-url` makes its value the page's address: a page
  *   answering a form with what only it may show, such as a secret, then reloads by
  *   `GET`, never posting the form again.
@@ -412,9 +447,9 @@ function wire(document) {
     }
     if (form.hasAttribute('data-passkey-sign-in')) {
       event.preventDefault();
-      const username = field(new FormData(form), 'username');
+      const handle = field(new FormData(form), 'handle');
       run(form, async () => {
-        await passkeys.authenticate(username);
+        await passkeys.authenticate(handle);
         form.submit();
       });
     }
@@ -422,7 +457,7 @@ function wire(document) {
       event.preventDefault();
       const data = new FormData(form);
       const account = {
-        username: field(data, 'username') ?? '',
+        handle: field(data, 'handle') ?? '',
         invitation: field(data, 'invitation'),
         pending_signup: field(data, 'pending_signup')
       };
@@ -490,6 +525,14 @@ function wire(document) {
     form.querySelector('[data-unavailable]')?.toggleAttribute('hidden', enabled);
     for (const button of form.querySelectorAll('button')) button.disabled = !enabled;
   };
+  const account = /** @type {HTMLElement | null} */ (document.querySelector('[data-passkey-user]'))
+    ?.dataset;
+  if (Passkeys.available() && account?.passkeyUser)
+    Passkeys.signal({
+      id: account.passkeyUser,
+      name: account.passkeyName ?? '',
+      displayName: account.passkeyDisplayName ?? ''
+    });
   if (Passkeys.available())
     for (const form of /** @type {NodeListOf<HTMLFormElement>} */ (
       document.querySelectorAll(

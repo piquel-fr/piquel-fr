@@ -7,7 +7,7 @@ mod connected;
 mod emails;
 /// Signed-in devices.
 mod sessions;
-/// Passkeys and social sign-in.
+/// The handle, passkeys and social sign-in.
 mod sign_in;
 /// Security history.
 mod timeline;
@@ -15,7 +15,7 @@ mod timeline;
 pub use connected::{ConnectedAppChange, ConnectedAppRow, ConnectedAppsState, connected_apps};
 pub use emails::{EmailChange, EmailRow, EmailsState, addresses, verified, verify};
 pub use sessions::{DeviceChange, DeviceRow, devices};
-pub use sign_in::{ProviderRow, SignInChange, SignInState, sign_in_methods};
+pub use sign_in::{HandleRow, ProviderRow, SignInChange, SignInState, sign_in_methods};
 pub use timeline::{HistoryChange, HistoryPage, HistoryRow, HistoryState, Holdings, history};
 
 use crate::layout::{Label, navigation};
@@ -61,7 +61,7 @@ impl Audience {
 /// The settings pages, in the order the tabs list them.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Tab {
-    /// Passkeys and social sign-in.
+    /// The handle, passkeys and social sign-in.
     SignIn,
     /// Email addresses.
     Emails,

@@ -23,6 +23,8 @@ mod emails;
 mod federation;
 /// The apps that keep access to an account, and removing it.
 mod grants;
+/// Handle availability and renames.
+mod handles;
 /// The signed-in user's security history and its reports.
 mod history;
 /// Periodic background work, coordinated across replicas.
@@ -52,8 +54,7 @@ mod tests;
 mod web;
 
 pub use admin::{
-    AdminError, AdminService, GracePeriod, HandleIssue, HandleProblem, InviteExpiry, Operator,
-    Reason, UserRef,
+    AdminError, AdminService, GracePeriod, HandleProblem, InviteExpiry, Operator, Reason, UserRef,
 };
 pub use cli::Cli;
 pub use clients::{
@@ -63,6 +64,7 @@ pub use clients::{
 pub use config::{AuthConfig, DashboardConfig, PUBLIC_BASE_URL, TokenDigestKeys};
 use emails::EmailApplication;
 use federation::FederationApplication;
+pub use handles::HandlesError;
 use history::HistoryApplication;
 pub use jobs::Jobs;
 pub use keys::{KeyError, KeyStore, SigningKeys};

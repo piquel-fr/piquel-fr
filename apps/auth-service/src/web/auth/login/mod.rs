@@ -417,7 +417,7 @@ impl WebApplication {
             Err(error) => return Err(error.into()),
         };
         Ok(Some(SignedIn {
-            handle: profile.handle,
+            handle: profile.handle.into(),
             confirmed: owner.is_confirmed(),
         }))
     }

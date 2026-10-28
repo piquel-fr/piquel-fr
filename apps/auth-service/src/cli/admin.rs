@@ -14,12 +14,12 @@ pub(super) enum AdminCommand {
     /// during its probation, the rights would go live for whoever used its link
     /// once it settles.
     Grant {
-        /// The account: its username, ID or verified email.
+        /// The account: its handle, ID or verified email.
         user: UserRef,
     },
     /// Remove an account's administrator rights. The last administrator keeps theirs.
     Revoke {
-        /// The account: its username, ID or verified email.
+        /// The account: its handle, ID or verified email.
         user: UserRef,
         /// Confirmation.
         #[command(flatten)]
@@ -53,11 +53,11 @@ impl AdminCommand {
                 output.print(
                     &service.list_administrators(operator).await?,
                     |administrators| {
-                        println!("USERNAME\tID\tGRANTED");
+                        println!("HANDLE\tID\tGRANTED");
                         for administrator in administrators {
                             println!(
                                 "{}\t{}\t{}",
-                                administrator.username,
+                                administrator.handle,
                                 administrator.user_id,
                                 administrator.granted_at.to_rfc3339()
                             );

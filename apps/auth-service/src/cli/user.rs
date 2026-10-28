@@ -11,7 +11,7 @@ use piquel_repository::{RecentRecovery, RecoveryState};
 /// Accounts, in any status.
 #[derive(Subcommand)]
 pub(super) enum UserCommand {
-    /// Search accounts by ID, or by part of a username, display name or email,
+    /// Search accounts by ID, or by part of a handle, display name or email,
     /// ignoring case. Lists 50 at a time, by ID.
     Search {
         /// What to look for. Lists every account when empty.
@@ -27,7 +27,7 @@ pub(super) enum UserCommand {
     /// Show an account's profile, status, emails, passkeys, linked identities,
     /// sessions and consents. Recorded, since it shows personal data.
     Show {
-        /// The account: its username, ID or verified email.
+        /// The account: its handle, ID or verified email.
         user: UserRef,
         /// Output format.
         #[command(flatten)]
@@ -35,7 +35,7 @@ pub(super) enum UserCommand {
     },
     /// Disable an account and end its sessions and refresh tokens.
     Disable {
-        /// The account: its username, ID or verified email.
+        /// The account: its handle, ID or verified email.
         user: UserRef,
         /// Why, kept with the event as personal data: 1 to 500 characters.
         #[arg(long)]
@@ -46,7 +46,7 @@ pub(super) enum UserCommand {
     },
     /// Let a disabled account sign in again.
     Enable {
-        /// The account: its username, ID or verified email.
+        /// The account: its handle, ID or verified email.
         user: UserRef,
     },
     /// Recover an account whose owner lost every passkey.
@@ -62,7 +62,7 @@ pub(super) enum UserCommand {
     /// passkey can undo the recovery. Needs `AUTH_PUBLIC_BASE_URL` and the token
     /// digest key, which derives the link.
     Recover {
-        /// The account: its username, ID or verified email.
+        /// The account: its handle, ID or verified email.
         user: UserRef,
         /// Why, recorded with the recovery and shown to the owner, and to whoever
         /// uses the link, in the history: what was asked, never the evidence. 1
@@ -91,7 +91,7 @@ pub(super) enum UserCommand {
     /// every consent, and ends every session and refresh grant; its link unused,
     /// cancels the link.
     UndoRecovery {
-        /// The account: its username, ID or verified email.
+        /// The account: its handle, ID or verified email.
         user: UserRef,
         /// Why, recorded with each change and shown to the owner in their
         /// history: 1 to 500 characters.
@@ -236,12 +236,12 @@ impl UserCommand {
 
     /// Prints one account per line, and how to continue if there may be more.
     fn print_page(page: &UserPage) {
-        println!("ID\tUSERNAME\tSTATUS\tCREATED\tNAME");
+        println!("ID\tHANDLE\tSTATUS\tCREATED\tNAME");
         for user in &page.users {
             println!(
                 "{}\t{}\t{}\t{}\t{}",
                 user.id,
-                user.username,
+                user.handle,
                 user.status,
                 user.created_at.to_rfc3339(),
                 user.display_name
@@ -255,7 +255,7 @@ impl UserCommand {
     /// Prints an account's facts, then one section per kind of record.
     fn print_detail(detail: &UserDetail) {
         let user = &detail.user;
-        println!("{} ({})", user.username, user.id);
+        println!("{} ({})", user.handle, user.id);
         println!("Name:\t{}", user.display_name);
         println!("Status:\t{}", user.status);
         println!("Created:\t{}", user.created_at.to_rfc3339());

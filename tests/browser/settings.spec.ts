@@ -10,7 +10,9 @@ test('settings on auth: passkeys, devices, an email link and signing out', async
   cdp.on('WebAuthn.credentialAsserted', () => (assertions += 1));
   const username = `settings-${Date.now().toString(36)}`;
   await signUp(page, username, 'First passkey');
-  await expect(page.getByText(`@${username}`, { exact: true })).toBeVisible();
+  await expect(
+    page.getByRole('region', { name: 'Handle' }).getByText(`@${username}`, { exact: true })
+  ).toBeVisible();
   await page.getByRole('button', { name: 'Rename First passkey', exact: true }).click();
   await page.getByLabel('Passkey name', { exact: true }).fill('My first passkey');
   await page.getByRole('button', { name: 'Save name', exact: true }).click();

@@ -1,10 +1,14 @@
-//! Passkeys and social sign-in.
+//! The handle, passkeys and social sign-in.
 
 use super::Audience;
 use crate::{
     Recovery, RecoveryPasskey, RecoveryStage,
-    form::{Ceremony, Precision, Query, change_form, new_passkey, open, passkey_form, time},
+    form::{
+        Ceremony, Checkbox, Precision, Query, change_form, handle_input, new_passkey, open,
+        passkey_form, time,
+    },
 };
+use chrono::{DateTime, Utc};
 use piquel_common::{
     PasskeyId, Provider,
     protocol::api::{Identity, Passkey},
@@ -20,6 +24,12 @@ use topcoat::{
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(tag = "action", rename_all = "snake_case")]
 pub enum SignInChange {
+    /// Changes the account's handle, once confirmed with a passkey.
+    Handle {
+        /// The new handle, which the user types.
+        #[serde(skip_serializing_if = "String::is_empty")]
+        handle: String,
+    },
     /// Renames a passkey.
     Rename {
         /// The passkey.
@@ -51,6 +61,12 @@ pub enum SignInChange {
 /// Which row of the sign-in methods is open, as the page's query names it.
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
 pub struct SignInState {
+    /// The handle is being changed.
+    #[serde(default, rename = "handle", skip_serializing_if = "Checkbox::is_off")]
+    pub changing_handle: Checkbox,
+    /// The handle a change that failed asked for, to ask for it again.
+    #[serde(skip)]
+    pub handle: Option<String>,
     /// The passkey being renamed.
     #[serde(rename = "rename")]
     pub renaming: Option<PasskeyId>,
@@ -79,11 +95,20 @@ pub struct ProviderRow<'a> {
     pub enabled: bool,
 }
 
-/// The sign-in methods page: the account's `passkeys`, and the social sign-in
-/// `providers`. Its rows open on `page` as `state` says, and its changes post
-/// there, for `audience`. On Android, adding a passkey offers Google Password
-/// Manager. While the account has a `recovery` that can still be undone, only
-/// its passkey can be removed.
+/// The account's handle, as its owner's sign-in methods show it.
+#[derive(Clone, Copy, Debug)]
+pub struct HandleRow<'a> {
+    /// The handle.
+    pub handle: &'a str,
+    /// When it may change again, if not yet.
+    pub changeable_at: Option<DateTime<Utc>>,
+}
+
+/// The sign-in methods page: the account's `handle`, if its owner may change it
+/// here, its `passkeys`, and the social sign-in `providers`. Its rows open on
+/// `page` as `state` says, and its changes post there, for `audience`. On Android,
+/// adding a passkey offers Google Password Manager. While the account has a
+/// `recovery` that can still be undone, only its passkey can be removed.
 #[component]
 pub async fn sign_in_methods<'a>(
     page: &'a str,
@@ -93,8 +118,12 @@ pub async fn sign_in_methods<'a>(
     audience: Audience,
     android: bool,
     recovery: Option<&'a Recovery>,
+    #[default] handle: Option<HandleRow<'a>>,
 ) -> Result<impl View> {
     Ok(view! {
+        if let Some(handle) = handle {
+            handle_card(page: page, row: handle, state: state, audience: audience)
+        }
         passkey_list(
             page: page,
             passkeys: passkeys,
@@ -104,6 +133,62 @@ pub async fn sign_in_methods<'a>(
             recovery: recovery,
         )
         social(page: page, providers: providers, state: state, audience: audience)
+    })
+}
+
+/// The handle section of [`sign_in_methods`]: the handle, and changing it when
+/// `state` opens it, which takes the focus. While the last change is recent, it says
+/// when the handle may change again instead.
+#[component]
+async fn handle_card<'a>(
+    page: &'a str,
+    row: HandleRow<'a>,
+    state: &'a SignInState,
+    audience: Audience,
+) -> Result<impl View> {
+    let current = row.handle;
+    Ok(view! {
+        <section class="card" aria-labelledby="handle-heading">
+            <h2 id="handle-heading">"Handle"</h2>
+            <p class="help">
+                "Your public name on Piquel and the name you sign in with. Apps you use see it as your username."
+            </p>
+            if state.changing_handle.0 && row.changeable_at.is_none() {
+                change_form(
+                    action: page,
+                    change: SignInChange::Handle { handle: String::new() },
+                    label: "Change handle",
+                    confirm: audience.confirms(),
+                    cancel: page.to_owned(),
+                    handle_input(new: true, value: state.handle.as_deref().or(Some(current)), focus: true)
+                    <div class="notice stack">
+                        <p>
+                            <strong>(format!("@{current} stops working right away."))</strong>
+                            " Links to it, and apps and services that look you up by it, stop finding you."
+                        </p>
+                        <p>"It stays reserved for you: nobody else can take it unless Piquel support releases it, and you can take it back later. You can change your handle once every 30 days."</p>
+                    </div>
+                )
+            } else {
+                <div class="row between">
+                    <div>
+                        <strong>(format!("@{current}"))</strong>
+                        if let Some(at) = row.changeable_at {
+                            <p class="help">
+                                "You can change it again on " time(at: at, precision: Precision::Day) "."
+                            </p>
+                        }
+                    </div>
+                    open(
+                        page: page,
+                        opens: SignInState { changing_handle: Checkbox(true), ..SignInState::default() },
+                        label: "Change",
+                        aria_label: "Change handle".to_owned(),
+                        disabled: row.changeable_at.is_some(),
+                    )
+                </div>
+            }
+        </section>
     })
 }
 

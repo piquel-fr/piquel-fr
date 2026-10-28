@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE handles SET released_at = now()\n                WHERE user_id = $1 AND released_at IS NULL",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "3722f2c0640089f62bbbec0ed48b2de1fa4db94591104646784dc3884eb1e079"
+}

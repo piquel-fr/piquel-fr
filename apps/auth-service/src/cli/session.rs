@@ -15,7 +15,7 @@ pub(super) enum SessionCommand {
     },
     /// End every session of an account and its applications' refresh tokens.
     RevokeAll {
-        /// The account: its username, ID or verified email.
+        /// The account: its handle, ID or verified email.
         user: UserRef,
         /// Confirmation.
         #[command(flatten)]

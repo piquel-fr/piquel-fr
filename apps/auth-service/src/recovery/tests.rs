@@ -135,7 +135,7 @@ impl Scenario {
     /// Signs in with the signing authenticator from the browser holding
     /// `session`. Returns the finish response.
     async fn login(&mut self, session: &str) -> Response {
-        let body = json!({ "username": self.keys.username });
+        let body = json!({ "handle": self.keys.username });
         let (started, browser) = self
             .keys
             .start("/webauthn/authenticate/start", "", body)
@@ -414,7 +414,8 @@ async fn a_link_enrolls_one_passkey_that_signs_in_without_confirming() {
     let opened = service.open_recovery(&token).await.expect("open");
     let account = opened.account();
     assert_eq!(
-        account.username, scenario.keys.username,
+        account.handle.as_str(),
+        scenario.keys.username,
         "names the account"
     );
 
@@ -896,7 +897,7 @@ async fn the_owner_undoes_a_disabled_accounts_recovery() {
     scenario.enroll(&token).await;
     let recovery = scenario.latest().await.id;
     // A sign-in started before the account is disabled.
-    let body = json!({ "username": scenario.keys.username });
+    let body = json!({ "handle": scenario.keys.username });
     let login = scenario
         .keys
         .start("/webauthn/authenticate/start", "", body)

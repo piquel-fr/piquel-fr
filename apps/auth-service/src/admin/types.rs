@@ -2,32 +2,22 @@
 
 use super::AdminError;
 use chrono::Duration;
-use piquel_common::{HandleError, UserId};
+use piquel_common::{Handle, HandleError, UserId};
 use piquel_ui::Grace;
 use serde::Deserialize;
 use std::{fmt, str::FromStr};
 use thiserror::Error;
 
-/// An account whose login name the handle rules refuse, as `handle check` lists it.
+/// An account whose current handle the handle rules refuse, as `handle check`
+/// lists it.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct HandleProblem {
     /// The account.
     pub user_id: UserId,
-    /// Its current login name.
-    pub username: String,
-    /// What is wrong with it.
-    pub issue: HandleIssue,
-}
-
-/// Why a login name is not an acceptable handle.
-#[derive(Clone, Debug, PartialEq, Eq, Error)]
-pub enum HandleIssue {
-    /// It breaks the syntax, or is reserved.
-    #[error(transparent)]
-    Refused(#[from] HandleError),
-    /// It shares its skeleton with these other accounts' names.
-    #[error("looks like {}", .0.join(", "))]
-    LooksLike(Vec<String>),
+    /// Its current handle.
+    pub handle: Handle,
+    /// Why the rules refuse it.
+    pub error: HandleError,
 }
 
 /// Maximum Unicode characters in an administrator's reason.
@@ -199,28 +189,28 @@ impl FromStr for Reason {
 }
 
 /// An account as an operator names it: its ID, a verified email of an active
-/// account (anything with an `@`), or its username.
+/// account (anything with an `@`), or its current handle.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum UserRef {
     /// The account's ID.
     Id(UserId),
     /// A verified address an active account owns.
     Email(String),
-    /// The account's login name, in any status.
-    Username(String),
+    /// The account's current handle, in any status.
+    Handle(String),
 }
 
 impl FromStr for UserRef {
     type Err = std::convert::Infallible;
     /// Reads a UUID as an ID, a value with an `@` as an email, and anything else as
-    /// a username.
+    /// a handle.
     fn from_str(value: &str) -> Result<Self, Self::Err> {
         Ok(if let Ok(id) = value.parse() {
             Self::Id(id)
         } else if value.contains('@') {
             Self::Email(value.to_owned())
         } else {
-            Self::Username(value.to_owned())
+            Self::Handle(value.to_owned())
         })
     }
 }
@@ -230,7 +220,7 @@ impl fmt::Display for UserRef {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::Id(id) => id.fmt(formatter),
-            Self::Email(value) | Self::Username(value) => formatter.write_str(value),
+            Self::Email(value) | Self::Handle(value) => formatter.write_str(value),
         }
     }
 }

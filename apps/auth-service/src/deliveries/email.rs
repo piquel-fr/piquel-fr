@@ -23,7 +23,7 @@ use lettre::{
     Address, AsyncSmtpTransport, AsyncTransport, Message, Tokio1Executor,
     message::{Mailbox, MultiPart},
 };
-use piquel_common::{DeliveryId, ErrorChain, UserId, config::Origin};
+use piquel_common::{DeliveryId, ErrorChain, Handle, UserId, config::Origin};
 use piquel_crypto::CryptoError;
 use piquel_repository::{Database, DatabaseError, Delivery, Email, EmailMessage};
 use std::time::Duration;
@@ -149,7 +149,7 @@ impl<M: Mailer> EmailSender<M> {
                     .map_err(|error| Self::underived(&error))?;
                 Content::VerifyAddress {
                     address: pending.address,
-                    username: pending.username,
+                    handle: pending.handle,
                     link: format!(
                         "{}#token={}",
                         self.origin.join(settings::VERIFY),
@@ -191,7 +191,7 @@ impl<M: Mailer> EmailSender<M> {
                 };
                 Content::RecoveryLink {
                     address: pending.address,
-                    username: pending.username,
+                    handle: pending.handle,
                     link: link.into(),
                     hours: recovery::LINK_LIFETIME.num_hours(),
                     undo: self.recovery_links.undo_url(*recovery_id).into(),
@@ -274,7 +274,7 @@ enum Content {
         address: String,
         /// The account it would join, named so its reader can tell whether they
         /// added it themselves.
-        username: String,
+        handle: Handle,
         /// The settings page that verifies it, with the token in its fragment, so
         /// it never reaches a server log.
         link: String,
@@ -300,7 +300,7 @@ enum Content {
         /// The primary address.
         address: String,
         /// The account it recovers.
-        username: String,
+        handle: Handle,
         /// The recovery page, with the token in its fragment.
         link: String,
         /// How many hours the link works.

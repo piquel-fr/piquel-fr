@@ -2,6 +2,7 @@
 //! section of the account's pages, the account's bar and the navigations.
 
 use crate::{Alert, Messages};
+use piquel_common::UserId;
 use topcoat::{
     Result,
     view::{Child, View, component, view},
@@ -259,14 +260,16 @@ pub(crate) async fn frame<'a>(
     })
 }
 
-/// A signed-in page of `section`, in its frame: the bar of the account, named
-/// `display_name` and `handle`, linking each section's page in `sections` and
-/// signing out by posting to `sign_out`; then what the account's `recovery` that
-/// can still be undone asks, if any, such as a [`crate::recovery_banner`]; the
-/// page's `head`, such as its tabs, its `messages`, and the page as `child`.
+/// A signed-in page of `section`, in its frame: the bar of the account `user`, named
+/// `display_name` and `handle`, which the passkey script tells the password manager,
+/// linking each section's page in `sections` and signing out by posting to
+/// `sign_out`; then what the account's `recovery` that can still be undone asks, if
+/// any, such as a [`crate::recovery_banner`]; the page's `head`, such as its tabs,
+/// its `messages`, and the page as `child`.
 #[component]
 pub async fn account<'a>(
     section: Section,
+    user: UserId,
     display_name: &'a str,
     handle: &'a str,
     sections: &'a [(Section, &'a str)],
@@ -284,7 +287,11 @@ pub async fn account<'a>(
         frame(
             section: section,
             <div class="row between">
-                <div>
+                <div
+                    data-passkey-user=(user.to_string())
+                    data-passkey-name=(handle)
+                    data-passkey-display-name=(display_name)
+                >
                     <strong>(display_name)</strong>
                     <p class="help">(format!("@{handle}"))</p>
                 </div>

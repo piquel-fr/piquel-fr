@@ -120,8 +120,10 @@ pub(super) struct RegistrationStart {
     /// Requested authenticator selection.
     #[serde(default)]
     pub(super) passkey_kind: PasskeyKind,
-    /// Account handle, validated before starting `WebAuthn`.
-    pub(super) username: String,
+    /// Account handle, validated before starting `WebAuthn`. Pages of the release
+    /// before handles send it as `username`.
+    #[serde(alias = "username")]
+    pub(super) handle: String,
     /// Account display name; an empty value defaults to the handle.
     #[serde(default)]
     pub(super) display_name: String,
@@ -150,11 +152,13 @@ impl RegistrationFinish {
     }
 }
 
-/// Username-based login, or account-picker login when absent or empty.
+/// Handle-based login, or account-picker login when absent or empty.
 #[derive(Deserialize)]
 pub(super) struct LoginStart {
-    /// Existing username; login deliberately does not apply signup validation.
-    pub(super) username: Option<String>,
+    /// An account's handle, trimmed and lowercased like signup's. Pages of the
+    /// release before handles send it as `username`.
+    #[serde(alias = "username")]
+    pub(super) handle: Option<String>,
 }
 
 /// Browser assertion response for login and session confirmation.

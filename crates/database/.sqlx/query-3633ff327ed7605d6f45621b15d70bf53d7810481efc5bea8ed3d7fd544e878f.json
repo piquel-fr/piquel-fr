@@ -1,0 +1,36 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT e.normalized_email AS address, h.handle AS \"handle: Handle\", r.secret_digest\n                FROM user_emails e\n                JOIN users u ON u.id = e.user_id\n                JOIN handles h ON h.user_id = e.user_id AND h.released_at IS NULL\n                JOIN account_recoveries r ON r.user_id = e.user_id\n                WHERE e.user_id = $1 AND e.id = $3 AND e.verified_at IS NOT NULL\n                AND r.id = $2 AND r.completed_at IS NULL AND r.cancelled_at IS NULL\n                AND r.undone_at IS NULL AND r.expires_at > clock_timestamp()\n                AND u.status = 'active'",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "address",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 1,
+        "name": "handle: Handle",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 2,
+        "name": "secret_digest",
+        "type_info": "Bytea"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid",
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "3633ff327ed7605d6f45621b15d70bf53d7810481efc5bea8ed3d7fd544e878f"
+}

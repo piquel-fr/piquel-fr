@@ -19,7 +19,7 @@ use piquel_common::{
 /// a reason, recorded with it and shown to the owner in their security history.
 #[derive(Args)]
 pub(super) struct AccountCommand {
-    /// The account: its username, ID or verified email.
+    /// The account: its handle, ID or verified email.
     user: UserRef,
     /// The setting to read or change.
     #[command(subcommand)]

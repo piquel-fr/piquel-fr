@@ -26,8 +26,10 @@ const CEREMONY_LIFETIME: Duration = Duration::minutes(5);
 pub(super) struct RegistrationCeremony {
     /// New account identifier included in the authenticator's user handle.
     pub(super) user_id: UserId,
-    /// Validated, unreserved account handle.
-    pub(super) username: Handle,
+    /// Validated, unreserved account handle, free when the ceremony started. The
+    /// release before handles stored it as `username`.
+    #[serde(alias = "username")]
+    pub(super) handle: Handle,
     /// Validated account display name.
     pub(super) display_name: DisplayName,
     /// Digest redeemed atomically with account creation when admission is gated.
@@ -122,9 +124,9 @@ pub(super) struct RecoveryCeremony {
 pub(super) enum Ceremony {
     /// Initial account and first passkey creation.
     Register(RegistrationCeremony),
-    /// Username-based authentication.
+    /// Handle-based authentication.
     Login(LoginCeremony),
-    /// Username-based authentication for a username without an active account or
+    /// Handle-based authentication for a handle without an active account or
     /// passkey. It holds no `WebAuthn` state, so its finish can never succeed.
     Decoy,
     /// Discoverable account-picker authentication.
@@ -225,9 +227,9 @@ ceremony_state!(AdminProofCeremony, AdminProof, PurposeAuthentication);
 
 /// Either supported account sign-in payload, sharing one database purpose.
 pub(super) enum AuthenticationCeremony {
-    /// Account identified by username before the challenge.
+    /// Account identified by handle before the challenge.
     Login(LoginCeremony),
-    /// Username without an active account or passkey; always rejected.
+    /// Handle without an active account or passkey; always rejected.
     Decoy,
     /// Account identified by the authenticator's response.
     Discover(DiscoverCeremony),

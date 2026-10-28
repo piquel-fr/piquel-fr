@@ -412,8 +412,9 @@ impl WebApplication {
         let page = view! { cx =>
             piquel_ui::account(
                 section: section,
+                user: reader.owner().user(),
                 display_name: &profile.display_name,
-                handle: &profile.handle,
+                handle: profile.handle.as_str(),
                 sections: &SECTIONS,
                 sign_out: page::LOGOUT,
                 recovery: view! {
