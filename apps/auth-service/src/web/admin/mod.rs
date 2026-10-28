@@ -204,7 +204,8 @@ impl AdminApplication {
             // The settings administrators share with owners, the account
             // service's operations.
             .route(settings::sign_in)
-            .route(settings::emails);
+            .route(settings::emails)
+            .route(settings::apps);
         let pages = AdminOperation::ALL
             .iter()
             .filter_map(|operation| Self::page(*operation))

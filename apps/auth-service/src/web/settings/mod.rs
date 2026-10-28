@@ -27,8 +27,8 @@ use super::{
     Failure, WebApplication,
     account::{Framed, Reader},
 };
-use crate::{emails::EmailView, routes::page::settings};
-use piquel_ui::{EmailRow, Messages, Section, Tab};
+use crate::{emails::EmailView, grants::ConnectedApp, routes::page::settings};
+use piquel_ui::{ConnectedAppRow, EmailRow, Messages, Section, Tab};
 use topcoat::{
     context::Cx,
     router::{StatusCode, response::Response},
@@ -53,6 +53,19 @@ impl<'a> From<&'a EmailView> for EmailRow<'a> {
             address: &email.address,
             verified: email.verified,
             primary: email.primary,
+        }
+    }
+}
+
+impl<'a> From<&'a ConnectedApp> for ConnectedAppRow<'a> {
+    /// The app as a page shows it.
+    fn from(app: &'a ConnectedApp) -> Self {
+        Self {
+            client_id: &app.client_id,
+            name: &app.name,
+            first_party: app.first_party,
+            scopes: &app.scopes,
+            offline: app.offline,
         }
     }
 }

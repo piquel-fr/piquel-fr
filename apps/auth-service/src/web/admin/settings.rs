@@ -17,8 +17,8 @@ use crate::{
 };
 use piquel_common::{Handle, UserId};
 use piquel_ui::{
-    Audience, EmailChange, EmailRow, EmailsState, ProviderRow, Recovery, SignInChange, SignInState,
-    Tab,
+    Audience, ConnectedAppChange, ConnectedAppRow, ConnectedAppsState, EmailChange, EmailRow,
+    EmailsState, ProviderRow, Recovery, SignInChange, SignInState, Tab,
 };
 use serde::{Deserialize, de::DeserializeOwned};
 use topcoat::{
@@ -144,6 +144,37 @@ pub(super) async fn emails(cx: &Cx, body: Body) -> Result<Response> {
     App::settings_page(cx, user, Tab::Emails, refused.as_deref(), section).await
 }
 
+/// `/users/{account}/apps`: the apps that keep access to the account, to remove
+/// one's access.
+#[route([GET, POST] "/users/{account}/apps")]
+pub(super) async fn apps(cx: &Cx, body: Body) -> Result<Response> {
+    let (admin, user) = App::settings(cx).await?;
+    let form = App::posted::<Administered<ConnectedAppChange>>(cx, body).await?;
+    let refused = App::submit(cx, form, App::here(cx), |posted| async move {
+        let subject = App::subject(user, admin, posted.reason)?;
+        let ConnectedAppChange::Remove { client_id } = posted.change;
+        let account = &App::of(cx).account;
+        account
+            .remove_app(&subject, &client_id)
+            .await
+            .map_err(Refusal::from)
+    })
+    .await?;
+    let apps = App::of(cx).account.apps(&App::viewer(user, admin)).await?;
+    let rows: Vec<_> = apps.iter().map(ConnectedAppRow::from).collect();
+    let state: ConnectedAppsState = App::opened(cx);
+    let (page, rows, state) = (&App::here(cx), &rows, &state);
+    let section = view! { cx =>
+        piquel_ui::connected_apps(
+            page: page.as_str(),
+            rows: rows,
+            state: state,
+            audience: Audience::Administrator,
+        )
+    };
+    App::settings_page(cx, user, Tab::Apps, refused.as_deref(), section).await
+}
+
 /// `/users/{account}/handle`: gives the account a new handle, such as one that
 /// impersonates another account, without the settings' cooldown. A reserved
 /// handle is refused here: only the terminal may assign one.
@@ -237,6 +268,7 @@ impl App {
         let links = [
             (Tab::SignIn, href!(sign_in, Account(user)).resolve(cx)),
             (Tab::Emails, href!(emails, Account(user)).resolve(cx)),
+            (Tab::Apps, href!(apps, Account(user)).resolve(cx)),
         ];
         let tabs: &Vec<_> = &links
             .iter()

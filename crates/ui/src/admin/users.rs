@@ -92,6 +92,8 @@ pub struct AccountPages<'a> {
     pub sign_in: &'a str,
     /// Its email addresses.
     pub emails: &'a str,
+    /// The apps that keep access to it.
+    pub apps: &'a str,
     /// Giving it a new handle.
     pub handle: &'a str,
 }
@@ -208,6 +210,7 @@ async fn account_actions<'a>(
                     <a class="button secondary" href=(pages.undo_recovery)>"Undo recovery"</a>
                     <a class="button secondary" href=(pages.sign_in)>"Sign-in methods"</a>
                     <a class="button secondary" href=(pages.emails)>"Email addresses"</a>
+                    <a class="button secondary" href=(pages.apps)>"Connected apps"</a>
                     <a class="button secondary" href=(pages.handle)>"Rename handle"</a>
                 },
                 Err(reason) => {

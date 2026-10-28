@@ -1,7 +1,7 @@
 //! `/settings/apps`: the apps that keep access to the account.
 
 use crate::{
-    account::{AccountError, Owner},
+    account::{AccountError, Owner, Subject},
     routes::page::settings,
     web::{
         Failure, WebApplication,
@@ -9,7 +9,8 @@ use crate::{
     },
 };
 use piquel_ui::{
-    ConnectedAppChange, ConnectedAppRow, ConnectedAppsState, Messages, Notice, Section, Tab,
+    Audience, ConnectedAppChange, ConnectedAppRow, ConnectedAppsState, Messages, Notice, Section,
+    Tab,
 };
 use topcoat::{
     context::Cx,
@@ -48,7 +49,9 @@ impl AccountPage for ConnectedApps {
     ) -> Result<Applied<ConnectedAppsState>, AccountError> {
         match change {
             ConnectedAppChange::Remove { client_id } => {
-                web.account.remove_app(&owner, &client_id).await?;
+                web.account
+                    .remove_app(&Subject::from(owner), &client_id)
+                    .await?;
             }
         }
         Ok(Applied::Done(Notice::AppRemoved))
@@ -62,18 +65,14 @@ impl AccountPage for ConnectedApps {
         outcome: (StatusCode, Messages<'_>),
     ) -> Result<Response, Failure> {
         let apps = web.account.apps(&reader.viewer()).await?;
-        let rows: Vec<_> = apps
-            .iter()
-            .map(|app| ConnectedAppRow {
-                client_id: &app.client_id,
-                name: &app.name,
-                first_party: app.first_party,
-                scopes: &app.scopes,
-                offline: app.offline,
-            })
-            .collect();
+        let rows: Vec<_> = apps.iter().map(ConnectedAppRow::from).collect();
         let page = Child::new(view! { cx =>
-            piquel_ui::connected_apps(page: settings::APPS, rows: &rows, state: &state)
+            piquel_ui::connected_apps(
+                page: settings::APPS,
+                rows: &rows,
+                state: &state,
+                audience: Audience::Owner { confirmed: reader.is_recent() },
+            )
         });
         web.settings_page(cx, Self::TAB, reader, outcome, &[], page)
             .await

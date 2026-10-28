@@ -99,6 +99,7 @@ pub(super) async fn detail(cx: &Cx) -> Result<Response> {
         href!(undo_recovery, Account(id)).resolve(cx),
         href!(settings::sign_in, Account(id)).resolve(cx),
         href!(settings::emails, Account(id)).resolve(cx),
+        href!(settings::apps, Account(id)).resolve(cx),
         href!(settings::handle, Account(id)).resolve(cx),
     ];
     let [
@@ -108,6 +109,7 @@ pub(super) async fn detail(cx: &Cx) -> Result<Response> {
         undoing,
         signing_in,
         addresses,
+        connected,
         renaming,
     ] = links.each_ref().map(String::as_str);
     let pages = if changeable {
@@ -118,6 +120,7 @@ pub(super) async fn detail(cx: &Cx) -> Result<Response> {
             undo_recovery: undoing,
             sign_in: signing_in,
             emails: addresses,
+            apps: connected,
             handle: renaming,
         })
     } else {
