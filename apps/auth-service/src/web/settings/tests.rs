@@ -168,7 +168,7 @@ async fn confirmed_changes_ask_for_a_passkey_first() {
     assert_eq!(cookie(&added, BrowserCookie::Notice).0, "email_added");
     let page = html(confirmed.visit(&replicas.a, settings::EMAILS).await).await;
     assert!(
-        page.contains(&format!("<strong>{address}</strong>")),
+        page.contains(&format!("<span>{address}</span>")),
         "{page}"
     );
     assert!(page.contains("Waiting for confirmation"), "{page}");
@@ -236,7 +236,7 @@ async fn addresses_change_their_primary_and_are_removed() {
     let page = html(browser.visit(&replicas.a, settings::EMAILS).await).await;
     assert!(!page.contains(&first), "{page}");
     assert!(
-        page.contains(&format!("<strong>{second}</strong>")),
+        page.contains(&format!("<span>{second}</span>")),
         "{page}"
     );
     assert!(
