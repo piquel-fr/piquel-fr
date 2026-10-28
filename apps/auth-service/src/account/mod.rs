@@ -3,7 +3,7 @@
 //! do; a [`Subject`], for changes any administrator may also make; or a
 //! [`Viewer`], for reads. The owner's routes run them with the owner of their
 //! session cookie, and the `account` command with the operator at the terminal.
-//! The admin dashboard will call them in-process, as an administrator.
+//! The admin dashboard calls them in-process, as an administrator.
 //!
 //! The rule for sharing: administrators may view, edit and remove, but never add
 //! a way to sign in or to receive the account's email, which would let them take

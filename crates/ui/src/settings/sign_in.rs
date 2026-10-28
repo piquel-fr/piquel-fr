@@ -1,5 +1,6 @@
 //! Passkeys and social sign-in.
 
+use super::Audience;
 use crate::{
     Recovery, RecoveryPasskey, RecoveryStage,
     form::{Ceremony, Precision, Query, change_form, new_passkey, open, passkey_form, time},
@@ -80,17 +81,16 @@ pub struct ProviderRow<'a> {
 
 /// The sign-in methods page: the account's `passkeys`, and the social sign-in
 /// `providers`. Its rows open on `page` as `state` says, and its changes post
-/// there; `confirmed` says whether the session needs no passkey confirmation for
-/// them. On Android, adding a passkey offers Google Password Manager. While the
-/// account has a `recovery` that can still be undone, only its passkey can be
-/// removed.
+/// there, for `audience`. On Android, adding a passkey offers Google Password
+/// Manager. While the account has a `recovery` that can still be undone, only
+/// its passkey can be removed.
 #[component]
 pub async fn sign_in_methods<'a>(
     page: &'a str,
     passkeys: &'a [Passkey],
     providers: &'a [ProviderRow<'a>],
     state: &'a SignInState,
-    confirmed: bool,
+    audience: Audience,
     android: bool,
     recovery: Option<&'a Recovery>,
 ) -> Result<impl View> {
@@ -99,11 +99,11 @@ pub async fn sign_in_methods<'a>(
             page: page,
             passkeys: passkeys,
             state: state,
-            confirmed: confirmed,
+            audience: audience,
             android: android,
             recovery: recovery,
         )
-        social(page: page, providers: providers, state: state, confirmed: confirmed)
+        social(page: page, providers: providers, state: state, audience: audience)
     })
 }
 
@@ -113,7 +113,7 @@ async fn passkey_list<'a>(
     page: &'a str,
     passkeys: &'a [Passkey],
     state: &'a SignInState,
-    confirmed: bool,
+    audience: Audience,
     android: bool,
     recovery: Option<&'a Recovery>,
 ) -> Result<impl View> {
@@ -138,15 +138,19 @@ async fn passkey_list<'a>(
                             recovered: recovered,
                             removable: count > 1 && !recovery.is_some_and(|recovery| recovery.keeps(passkey.id)),
                             state: state,
-                            confirmed: confirmed,
+                            audience: audience,
                         )
                     </li>
                 }
             </ul>
             if passkeys.is_empty() {
-                <p class="empty">"Add your first passkey to protect your account."</p>
+                <p class="empty">
+                    (if audience.owns() { "Add your first passkey to protect your account." } else { "No passkey." })
+                </p>
             }
-            enroll(page: page, android: android)
+            if audience.owns() {
+                enroll(page: page, android: android)
+            }
             <p class="help">"Your last passkey cannot be removed."</p>
             match recovery.map(|recovery| recovery.stage) {
                 Some(RecoveryStage::Open { .. }) => {
@@ -182,7 +186,7 @@ async fn passkey_row<'a>(
     recovered: bool,
     removable: bool,
     state: &'a SignInState,
-    confirmed: bool,
+    audience: Audience,
 ) -> Result<impl View> {
     let id = passkey.id;
     let (name, removal, precision) = if recovered {
@@ -198,6 +202,7 @@ async fn passkey_row<'a>(
                 action: page,
                 change: SignInChange::Rename { id, friendly_name: String::new() },
                 label: "Save name",
+                reason: audience.asks_reason(),
                 cancel: page.to_owned(),
                 <label>
                     "Passkey name"
@@ -219,7 +224,8 @@ async fn passkey_row<'a>(
                     change: SignInChange::Remove { id },
                     label: "Confirm removal",
                     class: "danger",
-                    confirm: !confirmed,
+                    confirm: audience.confirms(),
+                    reason: audience.asks_reason(),
                     cancel: page.to_owned(),
                 )
             </div>
@@ -284,7 +290,7 @@ async fn social<'a>(
     page: &'a str,
     providers: &'a [ProviderRow<'a>],
     state: &'a SignInState,
-    confirmed: bool,
+    audience: Audience,
 ) -> Result<impl View> {
     Ok(view! {
         <section class="card" aria-labelledby="social-heading">
@@ -299,13 +305,15 @@ async fn social<'a>(
                             page: page,
                             row: *row,
                             unlinking: state.unlinking == Some(row.provider),
-                            confirmed: confirmed,
+                            audience: audience,
                         )
                     </li>
                 }
             </ul>
             if providers.is_empty() {
-                <p class="empty">"Social sign-in is not available yet."</p>
+                <p class="empty">
+                    (if audience.owns() { "Social sign-in is not available yet." } else { "No linked provider." })
+                </p>
             }
         </section>
     })
@@ -318,7 +326,7 @@ async fn provider_row<'a>(
     page: &'a str,
     row: ProviderRow<'a>,
     unlinking: bool,
-    confirmed: bool,
+    audience: Audience,
 ) -> Result<impl View> {
     let provider = row.provider;
     let name = provider.name();
@@ -344,7 +352,7 @@ async fn provider_row<'a>(
                     aria_label: format!("Unlink {name}"),
                     secondary: true,
                 )
-            } else if row.enabled {
+            } else if row.enabled && audience.owns() {
                 change_form(
                     action: page,
                     change: SignInChange::Link { provider },
@@ -361,7 +369,8 @@ async fn provider_row<'a>(
                     change: SignInChange::Unlink { provider },
                     label: "Confirm unlink",
                     class: "danger",
-                    confirm: !confirmed,
+                    confirm: audience.confirms(),
+                    reason: audience.asks_reason(),
                     cancel: page.to_owned(),
                 )
             </div>

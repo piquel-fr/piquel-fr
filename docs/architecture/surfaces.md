@@ -48,7 +48,8 @@ Auth serves the admin dashboard itself, on its admin listener
 a private route reaches that listener, so the dashboard is reachable only on the
 tailnet. Its pages are server-rendered in `apps/auth-service/src/web/admin`, render
 `piquel-ui`'s dashboard components, and call `AdminService` in-process, as the CLI
-does: there is no admin API. The network path is a second wall, not the
+does, and `AccountService` for an account's settings (see below): there is no
+admin API. The network path is a second wall, not the
 authorization.
 
 The admin listener has a security layer of its own. It answers only requests that
@@ -95,8 +96,10 @@ owner is an `AccountService` operation: a change takes a `Subject`, the account 
 who acts on it, and a read a `Viewer`, the account and who reads it. The owner's
 settings pages and `/account` routes run them as the owner of the session cookie,
 the only way to act as an owner. The `auth-service account <user> …`
-command runs them as the operator at the terminal, and the dashboard will call
-them in-process as an administrator *(planned)*. All run the same safety rules:
+command runs them as the operator at the terminal, and the dashboard's sign-in
+methods and email addresses pages call them in-process as an administrator,
+rendering the owner's own settings sections without what adds a way in, and
+asking for a reason with each change. All run the same safety rules:
 for example, one active passkey always remains, whoever removes the others.
 
 The rule for what is shared: administrators may view, edit and remove, but never

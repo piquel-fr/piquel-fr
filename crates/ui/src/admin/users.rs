@@ -76,17 +76,33 @@ pub async fn user_search<'a>(
     })
 }
 
-/// One account's page: `detail`, with the page changing its status, or why it
-/// cannot, the pages starting and undoing its `recovery`, or why it has none, its
-/// `sessions`, ending them all at `revoke_sessions`, or why not, and its `recent`
-/// events, linking `all_events`.
+/// The pages changing an account, which the dashboard has only for an account
+/// that does not administer Piquel.
+#[derive(Clone, Copy, Debug)]
+pub struct AccountPages<'a> {
+    /// Disabling or enabling it, by its status.
+    pub status: &'a str,
+    /// Ending every session.
+    pub revoke_sessions: &'a str,
+    /// Starting a recovery.
+    pub recover: &'a str,
+    /// Undoing its recovery.
+    pub undo_recovery: &'a str,
+    /// Its passkeys and social sign-in.
+    pub sign_in: &'a str,
+    /// Its email addresses.
+    pub emails: &'a str,
+    /// Giving it a new handle.
+    pub handle: &'a str,
+}
+
+/// One account's page: `detail`, with the `pages` changing it, or why there are
+/// none, its `sessions`, and its `recent` events, linking `all_events`.
 #[component]
 pub async fn user_page<'a>(
     detail: &'a UserDetail,
-    status: Result<&'a str, &'a str>,
-    recovery: Result<(&'a str, &'a str), &'a str>,
+    pages: Result<AccountPages<'a>, &'a str>,
     sessions: &'a [SessionRow<'a>],
-    revoke_sessions: Result<&'a str, &'a str>,
     recent: &'a [EventRow<'a>],
     all_events: &'a str,
 ) -> Result<impl View> {
@@ -106,16 +122,16 @@ pub async fn user_page<'a>(
                 <dt>"Account ID"</dt><dd><code>(user.id.to_string())</code></dd>
                 <dt>"Created"</dt><dd>moment(at: user.created_at)</dd>
             </dl>
-            account_actions(user: user, status: status, recovery: recovery)
+            account_actions(user: user, pages: pages)
         </section>
         credentials(detail: detail)
         <section class="card">
             <div class="row between">
                 <h2>"Sessions"</h2>
                 if !sessions.is_empty() {
-                    match revoke_sessions {
-                        Ok(href) => {
-                            <a class="button danger small" href=(href)>"Revoke all"</a>
+                    match pages {
+                        Ok(pages) => {
+                            <a class="button danger small" href=(pages.revoke_sessions)>"Revoke all"</a>
                         },
                         Err(reason) => {
                             refused_action(label: "Revoke all", reason: reason)
@@ -173,37 +189,29 @@ pub async fn user_page<'a>(
     })
 }
 
-/// What may be done to `user`: changing its status, or why it cannot, and the
-/// pages starting and undoing its `recovery`, or why it has none.
+/// What may be done to `user`, by its `pages`, or why nothing may.
 #[component]
 async fn account_actions<'a>(
     user: &'a User,
-    status: Result<&'a str, &'a str>,
-    recovery: Result<(&'a str, &'a str), &'a str>,
+    pages: Result<AccountPages<'a>, &'a str>,
 ) -> Result<impl View> {
     Ok(view! {
         <div class="row actions">
-            match status {
-                Err(reason) => {
-                    refused_action(
-                        label: if user.status == AccountStatus::Active { "Disable" } else { "Enable" },
-                        reason: reason,
-                    )
-                },
-                Ok(href) if user.status == AccountStatus::Active => {
-                    <a class="button danger" href=(href)>"Disable"</a>
-                },
-                Ok(href) => {
-                    <a class="button secondary" href=(href)>"Enable"</a>
-                },
-            }
-            match recovery {
-                Ok((recover, undo)) => {
-                    <a class="button secondary" href=(recover)>"Recover"</a>
-                    <a class="button secondary" href=(undo)>"Undo recovery"</a>
+            match pages {
+                Ok(pages) => {
+                    if user.status == AccountStatus::Active {
+                        <a class="button danger" href=(pages.status)>"Disable"</a>
+                    } else {
+                        <a class="button secondary" href=(pages.status)>"Enable"</a>
+                    }
+                    <a class="button secondary" href=(pages.recover)>"Recover"</a>
+                    <a class="button secondary" href=(pages.undo_recovery)>"Undo recovery"</a>
+                    <a class="button secondary" href=(pages.sign_in)>"Sign-in methods"</a>
+                    <a class="button secondary" href=(pages.emails)>"Email addresses"</a>
+                    <a class="button secondary" href=(pages.handle)>"Rename handle"</a>
                 },
                 Err(reason) => {
-                    refused_action(label: "Recover", reason: reason)
+                    refused_action(label: "Change", reason: reason)
                 },
             }
         </div>

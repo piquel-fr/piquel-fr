@@ -55,11 +55,11 @@ mod recovery;
 mod settings;
 
 pub use admin::{
-    AdministratorRow, EventRow, HandoffProof, HandoffQuery, InvitationRow, RecoveryKey,
-    RecoveryRow, RecoveryStanding, SessionRow, Tab as DashboardTab, UserRow, administrator_list,
-    client_list, dashboard_change, dashboard_failure, dashboard_frame, dashboard_signed_out,
-    event_list, event_rows, handoff_proof, invitation_created, invitation_list, no_access,
-    recovery_list, user_page, user_search,
+    AccountPages, AdministratorRow, EventRow, HandoffProof, HandoffQuery, InvitationRow,
+    RecoveryKey, RecoveryRow, RecoveryStanding, SessionRow, Tab as DashboardTab, UserRow,
+    account_settings, administrator_list, client_list, dashboard_change, dashboard_failure,
+    dashboard_frame, dashboard_signed_out, event_list, event_rows, handoff_proof,
+    invitation_created, invitation_list, no_access, recovery_list, user_page, user_search,
 };
 pub use asset::{Asset, STYLESHEET};
 pub use clients::{
@@ -82,8 +82,8 @@ pub use recovery::{
     recover, recovery_banner, recovery_prompt, undo_recovery,
 };
 pub use settings::{
-    ConnectedAppChange, ConnectedAppRow, ConnectedAppsState, DeviceChange, DeviceRow, EmailChange,
-    EmailRow, EmailsState, HistoryChange, HistoryPage, HistoryRow, HistoryState, Holdings,
-    ProviderRow, SignInChange, SignInState, Tab, addresses, connected_apps, devices, history,
-    settings_tabs, sign_in_methods, verified, verify,
+    Audience, ConnectedAppChange, ConnectedAppRow, ConnectedAppsState, DeviceChange, DeviceRow,
+    EmailChange, EmailRow, EmailsState, HistoryChange, HistoryPage, HistoryRow, HistoryState,
+    Holdings, ProviderRow, SignInChange, SignInState, Tab, addresses, connected_apps, devices,
+    history, settings_tabs, sign_in_methods, verified, verify,
 };

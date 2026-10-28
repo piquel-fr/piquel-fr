@@ -1,7 +1,8 @@
 //! The admin dashboard at admin.piquel.fr, which auth serves on its admin
-//! listener: pages over [`AdminService`], in-process, for the administrator
+//! listener: pages over [`AdminService`], and over [`AccountService`] for the
+//! settings administrators share with owners, in-process, for the administrator
 //! [`DashboardSignIn`] finds from the dashboard's own session cookie. Each page
-//! renders `piquel-ui`'s dashboard components.
+//! renders `piquel-ui`'s dashboard components, or the owner's settings sections.
 //!
 //! The pages declare their own paths, under [`routes::dashboard::PREFIXES`], and
 //! the admin listener mounts them there, never as the fallback, so the listener's
@@ -22,6 +23,8 @@ mod administrators;
 mod invitations;
 /// The OIDC clients and domain events.
 mod lists;
+/// An account's settings, which administrators change on its owner's behalf.
+mod settings;
 #[cfg(test)]
 mod tests;
 /// Account search, one account, and the changes made to it.
@@ -29,6 +32,7 @@ mod users;
 
 use crate::{
     AdminError, AdminService, AuthConfig, MAX_REQUEST_BODY_BYTES,
+    account::{AccountError, AccountService},
     admin::{AdminOperation, DashboardSignIn, SignedInAdmin},
     assets::EmbeddedAssets,
     config::DashboardConfig,
@@ -72,6 +76,8 @@ const FORM_TIME: Duration = Duration::minutes(2);
 pub(crate) struct AdminApplication {
     /// Every administrative operation.
     service: AdminService,
+    /// The settings administrators share with owners.
+    account: AccountService,
     /// Who is signed in, and signing in through auth.
     sign_in: DashboardSignIn,
     /// Auth's origin: invitations link its registration page, and the dashboard
@@ -104,6 +110,48 @@ impl Answer {
     }
 }
 
+/// What the dashboard does about a change the service refused.
+enum Refusal {
+    /// The change needs a newer confirmation: the browser confirms on auth's
+    /// handoff page, and comes back to the form's page.
+    Confirm,
+    /// The administrator's session ended: the browser signs in again, and comes
+    /// back to the form's page.
+    SignIn,
+    /// The page explains it instead, and logs it: the account administers
+    /// nothing.
+    Page(AdminError),
+    /// The form says why.
+    Form(ApiError),
+}
+
+impl From<AdminError> for Refusal {
+    /// What the dashboard does about `error`, which it logs.
+    fn from(error: AdminError) -> Self {
+        match error {
+            // The page logs it.
+            error @ AdminError::NotAdministrator => return Self::Page(error),
+            ref error => error.log_refusal(),
+        }
+        match error {
+            AdminError::StepUpRequired(_) => Self::Confirm,
+            AdminError::SessionEnded => Self::SignIn,
+            error => Self::Form(error.into()),
+        }
+    }
+}
+
+impl From<AccountError> for Refusal {
+    /// What the dashboard does about a settings change refused for its
+    /// administrator, or for the account's own rules.
+    fn from(error: AccountError) -> Self {
+        match error {
+            AccountError::Operator(error) => error.into(),
+            error => Self::Form(error.into()),
+        }
+    }
+}
+
 /// The query auth's handoff sends the browser back with.
 #[derive(Deserialize)]
 struct SignInQuery {
@@ -130,6 +178,7 @@ impl AdminApplication {
         );
         Ok(Self {
             service: AdminService::new(database.clone(), config.email.smtp.is_some()),
+            account: AccountService::new(database.clone()),
             sign_in: DashboardSignIn::new(database, auth.clone(), dashboard.origin.clone()),
             auth,
             invitations: config.passkey.invite_required,
@@ -151,7 +200,11 @@ impl AdminApplication {
             .layer(answers)
             .route(root)
             .route(sign_in)
-            .route(sign_out);
+            .route(sign_out)
+            // The settings administrators share with owners, the account
+            // service's operations.
+            .route(settings::sign_in)
+            .route(settings::emails);
         let pages = AdminOperation::ALL
             .iter()
             .filter_map(|operation| Self::page(*operation))
@@ -186,6 +239,7 @@ impl AdminApplication {
             Op::EnableUser => &users::enable,
             Op::RevokeUserSessions => &users::revoke_sessions,
             Op::RevokeSession => &users::revoke_session,
+            Op::RenameHandle => &settings::handle,
             Op::RecoverAccount => &users::recover,
             Op::UndoRecovery => &users::undo_recovery,
             Op::ListInvitations => &invitations::list,
@@ -207,7 +261,6 @@ impl AdminApplication {
             | Op::DeleteClient
             | Op::RotateClientSecret
             | Op::CheckHandles
-            | Op::RenameHandle
             | Op::ListDeliveries
             | Op::RetryDelivery
             | Op::CancelDelivery => return None,
@@ -279,50 +332,47 @@ impl AdminApplication {
     /// anything. A refusal comes back as the message the form shows. When the
     /// change needs a newer confirmation, or the session ended meanwhile, the
     /// browser goes through auth's handoff page and back to the form's page.
-    async fn change<I, T, F, Fut>(
+    async fn change<I, T, E, F, Fut>(
         cx: &Cx,
         form: Option<Form<I>>,
         call: F,
     ) -> Result<Option<Result<T, String>>>
     where
+        E: Into<Refusal>,
         F: FnOnce(I) -> Fut,
-        Fut: Future<Output = Result<T, AdminError>>,
+        Fut: Future<Output = Result<T, E>>,
     {
         let Some(Form(input)) = form.filter(|_| method(cx) == Method::POST) else {
             return Ok(None);
         };
         let refused = match call(input).await {
             Ok(value) => return Ok(Some(Ok(value))),
-            // The page explains it, and logs it.
-            Err(error @ AdminError::NotAdministrator) => return Err(error.into()),
-            Err(refused) => refused,
+            Err(refused) => refused.into(),
         };
-        refused.log_refusal();
         match refused {
-            AdminError::StepUpRequired(_) => Err(Self::of(cx).hand_off(cx, true)),
-            AdminError::SessionEnded => Err(Self::of(cx).hand_off(cx, false)),
-            error => {
-                let refusal = ApiError::from(error);
-                match refusal.public() {
-                    (status, _) if status.is_server_error() => {
-                        Err(Error::msg("an admin change failed"))
-                    }
-                    (_, message) => Ok(Some(Err(message.to_owned()))),
+            Refusal::Confirm => Err(Self::of(cx).hand_off(cx, true)),
+            Refusal::SignIn => Err(Self::of(cx).hand_off(cx, false)),
+            Refusal::Page(error) => Err(error.into()),
+            Refusal::Form(refusal) => match refusal.public() {
+                (status, _) if status.is_server_error() => {
+                    Err(Error::msg("an admin change failed"))
                 }
-            }
+                (_, message) => Ok(Some(Err(message.to_owned()))),
+            },
         }
     }
 
     /// Like [`Self::change`], then goes to `done` once the change is made.
-    async fn submit<I, F, Fut>(
+    async fn submit<I, E, F, Fut>(
         cx: &Cx,
         form: Option<Form<I>>,
         done: String,
         call: F,
     ) -> Result<Option<String>>
     where
+        E: Into<Refusal>,
         F: FnOnce(I) -> Fut,
-        Fut: Future<Output = Result<(), AdminError>>,
+        Fut: Future<Output = Result<(), E>>,
     {
         match Self::change(cx, form, call).await? {
             Some(Ok(())) => Err(see_other(done).into()),
@@ -411,26 +461,37 @@ impl AdminApplication {
 
     /// What a page that failed with `error` answers: the [`Answer`] it carries,
     /// that an account which does not administer Piquel has no access, or why the
-    /// service refused. Other failures fail the page.
+    /// admin or account service refused. Other failures fail the page.
     async fn failed(cx: &Cx, error: Error) -> Result<Response> {
         if let Some(response) = error.downcast_ref::<Answer>().and_then(Answer::take) {
             return Ok(response);
         }
-        if let Some(refused) = error.downcast_ref::<AdminError>() {
+        // The administrator's own refusal, from either service.
+        let administrator = error.downcast_ref::<AdminError>().or_else(|| {
+            match error.downcast_ref::<AccountError>() {
+                Some(AccountError::Operator(refused)) => Some(refused),
+                _ => None,
+            }
+        });
+        if let Some(refused) = administrator {
             refused.log_refusal();
-        }
-        if let Some(AdminError::NotAdministrator) = error.downcast_ref::<AdminError>() {
-            let home = &Self::of(cx).auth.join(routes::page::settings::HOME);
-            let page = view! { cx => piquel_ui::no_access(home: home.as_str()) };
-            return Self::render(cx, StatusCode::FORBIDDEN, page).await;
+            if let AdminError::NotAdministrator = refused {
+                let home = &Self::of(cx).auth.join(routes::page::settings::HOME);
+                let page = view! { cx => piquel_ui::no_access(home: home.as_str()) };
+                return Self::render(cx, StatusCode::FORBIDDEN, page).await;
+            }
         }
         // A refusal shared with another handle, such as the memoized sign-in's,
         // fails the page.
-        let refused = ApiError::from(
-            error
-                .downcast::<AdminError>()
-                .map_err(topcoat::core::DowncastError::into_error)?,
-        );
+        let refused = match error.downcast::<AdminError>() {
+            Ok(refused) => ApiError::from(refused),
+            Err(failed) => ApiError::from(
+                failed
+                    .into_error()
+                    .downcast::<AccountError>()
+                    .map_err(topcoat::core::DowncastError::into_error)?,
+            ),
+        };
         let (status, detail) = refused.public();
         let page = view! { cx =>
             piquel_ui::dashboard_failure(title: "That did not work", detail: detail)
