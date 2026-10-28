@@ -179,7 +179,10 @@ impl SecurityFixture {
                 .get(header::ACCESS_CONTROL_ALLOW_ORIGIN)
                 .is_none()
         );
-        assert_eq!(response.headers()[header::CACHE_CONTROL], "no-store");
+        assert_eq!(
+            response.headers()[header::CACHE_CONTROL],
+            "no-store, no-transform"
+        );
         assert_eq!(
             response.headers()[header::X_CONTENT_TYPE_OPTIONS],
             "nosniff"
@@ -977,12 +980,15 @@ fn client() -> CorsGrant {
 #[test]
 fn cached_responses_carry_their_class() {
     for (class, cache_control) in [
-        (CacheClass::Immutable, "public, max-age=31536000, immutable"),
+        (
+            CacheClass::Immutable,
+            "public, max-age=31536000, immutable, no-transform",
+        ),
         (
             CacheClass::Public {
                 max_age: std::time::Duration::from_secs(3600),
             },
-            "public, max-age=3600",
+            "public, max-age=3600, no-transform",
         ),
     ] {
         let response = decorated(Cached(class, StatusCode::OK), None);
@@ -1008,7 +1014,10 @@ fn unclassed_errors_and_cookie_responses_are_not_stored() {
         decorated(Cached(class, StatusCode::TOO_MANY_REQUESTS), None),
         decorated([(header::CACHE_CONTROL, "public, max-age=60")], None),
     ] {
-        assert_eq!(response.headers()[header::CACHE_CONTROL], "no-store");
+        assert_eq!(
+            response.headers()[header::CACHE_CONTROL],
+            "no-store, no-transform"
+        );
     }
 }
 

@@ -1000,15 +1000,20 @@ impl CacheClass {
         }
     }
 
-    /// The `Cache-Control` value of this class.
+    /// The `Cache-Control` value of this class. Every value forbids transforming the
+    /// body: Cloudflare's edge would otherwise rewrite pages, hiding email addresses
+    /// behind a decoding script the Content-Security-Policy blocks.
     fn cache_control(self) -> HeaderValue {
         HeaderValue::from_static(match self {
-            Self::NoStore => "no-store",
-            Self::Immutable => "public, max-age=31536000, immutable",
+            Self::NoStore => "no-store, no-transform",
+            Self::Immutable => "public, max-age=31536000, immutable, no-transform",
             Self::Public { max_age } => {
                 // Digits and fixed text always form a valid header value.
-                return HeaderValue::try_from(format!("public, max-age={}", max_age.as_secs()))
-                    .unwrap_or(HeaderValue::from_static("no-store"));
+                return HeaderValue::try_from(format!(
+                    "public, max-age={}, no-transform",
+                    max_age.as_secs()
+                ))
+                .unwrap_or(HeaderValue::from_static("no-store, no-transform"));
             }
         })
     }

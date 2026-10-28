@@ -53,7 +53,7 @@ test('the developer console registers an app, shows its secret once, and the app
   await page.getByRole('button', { name: 'Register app', exact: true }).click();
   const answer = await registered;
   expect(answer.status()).toBe(200);
-  expect(answer.headers()['cache-control']).toBe('no-store');
+  expect(answer.headers()['cache-control']).toBe('no-store, no-transform');
   await expect(page.getByRole('heading', { name: 'Your client secret' })).toBeVisible();
   const secret = (await page.locator('#client-secret').textContent()) ?? '';
   expect(secret).toMatch(/^pqcs_/);

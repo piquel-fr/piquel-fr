@@ -445,6 +445,32 @@ tbody tr:last-child td {
     margin-top: 2rem;
   }
 }
+/* An email address, blurred until its visually hidden checkbox is checked. */
+.private-address {
+  display: inline;
+  position: relative;
+  font: inherit;
+  cursor: pointer;
+}
+.private-address input {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  min-height: 0;
+  padding: 0;
+  opacity: 0;
+}
+.private-address span {
+  filter: blur(5px);
+  transition: filter 0.15s;
+}
+.private-address input:checked + span {
+  filter: none;
+}
+.private-address:has(input:focus-visible) span {
+  outline: 3px solid #ab7900;
+  outline-offset: 4px;
+}
 /* Author display rules would otherwise show what a page or its script hides. */
 [hidden] {
   display: none !important;

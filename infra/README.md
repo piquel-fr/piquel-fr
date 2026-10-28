@@ -181,13 +181,15 @@ the gateway ranges in `PIQUELD_INGRESS_PROXIES` to trust ingress's overwritten
 Auth decides every response's `Cache-Control` itself; the edge needs no rule.
 Handlers mark a response cacheable with `Cached` (`apps/auth-service/src/security`),
 and anything else, including any error and any response that sets a cookie, is
-`no-store`:
+`no-store`. Every value also carries `no-transform`, so Cloudflare never rewrites
+a body: its Email Address Obfuscation would replace addresses with a link to a
+decoding script the pages' Content-Security-Policy blocks.
 
 | Class | `Cache-Control` | Responses |
 | --- | --- | --- |
-| `NoStore` | `no-store` | APIs, OAuth, server-rendered pages, errors, everything not below |
-| `Immutable` | `public, max-age=31536000, immutable` | the pages' content-hashed stylesheet and script, under `/assets/` |
-| `Public` | `public, max-age=N` | discovery and JWKS, for an hour |
+| `NoStore` | `no-store, no-transform` | APIs, OAuth, server-rendered pages, errors, everything not below |
+| `Immutable` | `public, max-age=31536000, immutable, no-transform` | the pages' content-hashed stylesheet and script, under `/assets/` |
+| `Public` | `public, max-age=N, no-transform` | discovery and JWKS, for an hour |
 
 Every page is server-rendered and `no-store`, so a deploy never leaves a cached page
 pointing at a stylesheet or script the new binary no longer serves. The Cloudflare Tunnel

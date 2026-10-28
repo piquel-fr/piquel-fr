@@ -60,7 +60,10 @@ async fn assert_missing(response: Response) {
 /// redirect, no cookie, and no copy in any cache.
 fn assert_unstored(response: &Response) {
     assert_eq!(response.status(), StatusCode::OK);
-    assert_eq!(response.headers()[header::CACHE_CONTROL], "no-store");
+    assert_eq!(
+        response.headers()[header::CACHE_CONTROL],
+        "no-store, no-transform"
+    );
     assert!(response.headers().get(header::LOCATION).is_none());
     assert!(response.headers().get(header::SET_COOKIE).is_none());
 }
