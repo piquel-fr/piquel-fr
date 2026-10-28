@@ -7,6 +7,8 @@ license.workspace = true
 repository.workspace = true
 
 [features]
+# The views of administration, for auth and its dashboard.
+admin = ["dep:serde_json"]
 # Environment variables, validated origins and secret references, for servers.
 config = []
 # Email address normalization, for servers that store or compare addresses.

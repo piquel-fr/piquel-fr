@@ -5,11 +5,15 @@
 //! [`UserId`], the [`protocol`] documents, the [`clients`] registration types and
 //! the vocabulary macros. Servers add:
 //!
+//! - `admin`: the views of administration.
 //! - `config`: environment variables, validated origins and secret references.
 //! - `email`: email address normalization.
 //! - `events`: the domain events auth records.
 //! - `sqlx`: decoding identifiers and vocabularies from `PostgreSQL` columns.
 
+/// The views of administration: what the admin dashboard shows and the CLI prints.
+#[cfg(feature = "admin")]
+pub mod admin;
 /// OAuth client registrations, each field validated by its type.
 pub mod clients;
 /// Environment variables, validated origins and secret references.

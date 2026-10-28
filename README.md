@@ -222,7 +222,7 @@ just auth account alice emails remove <email-id> --reason "Asked by email"
 - Accounts are named by handle, ID or a verified email of an active account.
 - `--output json` prints the views the dashboard shows for `user search`
   (`UserPage`), `user show` (`UserDetail`), `audit` (`EventPage`), `client list`,
-  `invite list` and `admin list`, as defined in `crates/admin-api`.
+  `invite list` and `admin list`, as defined in `piquel_common::admin`.
 - `user disable`, `user recover`, `user undo-recovery`, `session revoke-all`,
   `admin revoke`, `client
   disable|suspend|delete`, and `account … passkeys revoke`, `identities unlink` and

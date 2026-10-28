@@ -3,8 +3,11 @@
 use super::{CliError, Console, Output};
 use crate::UserRef;
 use clap::Args;
-use piquel_admin_api::{EventPage, EventSearch};
-use piquel_common::{EventId, events::Actor};
+use piquel_common::{
+    EventId,
+    admin::{EventPage, EventSearch},
+    events::Actor,
+};
 
 /// Page through recorded events, newest first, 100 at a time.
 #[derive(Args)]

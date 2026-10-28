@@ -2,8 +2,7 @@
 
 use super::{AdministratorRepository, RepositoryExecutor};
 use crate::DatabaseError;
-use piquel_admin_api::Administrator;
-use piquel_common::{Handle, UserId};
+use piquel_common::{Handle, UserId, admin::Administrator};
 
 impl AdministratorRepository<'_> {
     /// Serializes changes to the administrator list until the transaction ends:

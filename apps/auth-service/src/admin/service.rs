@@ -10,12 +10,12 @@ use crate::{
     routes,
 };
 use chrono::Utc;
-use piquel_admin_api::{
-    Administrator, Client, CreatedInvitation, Email, Event, EventPage, EventSearch, Invitation,
-    UserDetail, UserPage,
-};
 use piquel_common::{
     AccountStatus, ClientId, DeliveryId, Handle, Personal, RecoveryId, SessionId, TokenId, UserId,
+    admin::{
+        Administrator, Client, CreatedInvitation, Email, Event, EventPage, EventSearch, Invitation,
+        UserDetail, UserPage,
+    },
     clients::{ClientField, ClientOwner, ClientRegistration},
     config::Origin,
     email::NormalizedEmail,

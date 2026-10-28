@@ -7,8 +7,7 @@ license.workspace = true
 repository.workspace = true
 
 [dependencies]
-piquel-admin-api.workspace = true
-piquel-common = { workspace = true, features = ["events"] }
+piquel-common = { workspace = true, features = ["admin", "events"] }
 chrono.workspace = true
 serde.workspace = true
 serde_json.workspace = true

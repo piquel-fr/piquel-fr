@@ -1,8 +1,7 @@
 //! Who administers Piquel: the list, granting rights and revoking them.
 
 use super::AdminApplication as App;
-use piquel_admin_api::GrantAdministrator;
-use piquel_common::UserId;
+use piquel_common::{UserId, admin::GrantAdministrator};
 use piquel_ui::AdministratorRow;
 use serde::de::IgnoredAny;
 use topcoat::{

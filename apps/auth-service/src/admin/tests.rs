@@ -7,10 +7,10 @@ use crate::recovery::RecoveryLinks;
 use crate::security::{CONFIRMATION_MAX_AGE, RequestContext, Session};
 use crate::tests::until_blocked;
 use chrono::{Duration, Utc};
-use piquel_admin_api::EventSearch;
 use piquel_common::{
     AccountStatus, AuthenticationMethod, DeliveryId, Handle, HandleError, Personal, SessionId,
     TokenId, UserId,
+    admin::EventSearch,
     config::Origin,
     events::{DomainEvent, RevocationReason},
     protocol::{claims::Acr, step_up::StepUpRequirement},

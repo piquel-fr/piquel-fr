@@ -46,11 +46,11 @@ piquel.fr serves pages of its own, such as public profiles *(planned)*.
 Auth serves the admin dashboard itself, on its admin listener
 (`AUTH_ADMIN_LISTENER`), for the dashboard's own origin (`AUTH_ADMIN_ORIGIN`). Only
 a private route reaches that listener, so the dashboard is reachable only on the
-tailnet. Its pages are server-rendered in `apps/auth-service/src/web/admin`, render
-`piquel-ui`'s dashboard components, and call `AdminService` in-process, as the CLI
-does, and `AccountService` for an account's settings (see below): there is no
-admin API. The network path is a second wall, not the
-authorization.
+tailnet. Its pages are server-rendered in `apps/auth-service/src/web/admin`,
+render the views of `piquel_common::admin` with `piquel-ui`'s dashboard
+components, and call `AdminService` in-process, as the CLI does, and
+`AccountService` for an account's settings (see below): there is no admin API.
+The network path is a second wall, not the authorization.
 
 The admin listener has a security layer of its own. It answers only requests that
 name the dashboard's host, takes a form only from the dashboard's own pages (the

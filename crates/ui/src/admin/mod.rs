@@ -1,7 +1,7 @@
 //! The admin dashboard at admin.piquel.fr: the frame of its pages, each page's
 //! view, and auth's page handing an administrator off to it.
 //!
-//! The pages render the view types of `piquel-admin-api`, as the service returns
+//! The pages render the views of `piquel_common::admin`, as the service returns
 //! them, with the links their handler resolves. Each change has its own page: a
 //! `GET` shows its form, and only that form's `POST` makes the change, so a link,
 //! even with a query, never changes anything. The dashboard loads no script: a
@@ -29,8 +29,10 @@ use crate::{
     settings_tabs,
 };
 use chrono::{DateTime, Utc};
-use piquel_admin_api::{EventSearch, UserSearch};
-use piquel_common::AccountStatus;
+use piquel_common::{
+    AccountStatus,
+    admin::{EventSearch, UserSearch},
+};
 use serde::{Deserialize, Serialize};
 use topcoat::{
     Result,
