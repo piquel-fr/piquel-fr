@@ -1,5 +1,7 @@
-//! auth.piquel.fr's server-rendered pages. Each handler resolves who acts, calls the
-//! service in-process and renders `piquel-ui` components.
+//! auth.piquel.fr's server-rendered pages, grouped by area: the sign-in flows
+//! (`auth`), the account settings (`settings`) and the developer console
+//! (`developers`). Each handler resolves who acts, calls the service in-process
+//! and renders `piquel-ui` components.
 //!
 //! A page answers `GET` with itself and `POST` with its form's result, at the route
 //! [`routes::page`] declares. Axum mounts the Topcoat router on exactly those routes
@@ -25,15 +27,10 @@ macro_rules! page {
 /// The signed-in account's pages: their frame, and how each shows itself and makes
 /// its changes.
 mod account;
+/// auth.piquel.fr's sign-in flows.
+mod auth;
 /// The developer console.
 mod developers;
-/// The sign-in pages: signing in, creating an account and linking a provider.
-mod login;
-/// The consent page and the confirmation of an application's logout request.
-mod oidc;
-/// The recovery pages: adding a passkey with a recovery link, and undoing a
-/// recovery.
-mod recovery;
 /// The account's settings.
 mod settings;
 #[cfg(test)]
@@ -49,7 +46,7 @@ use crate::{
     routes,
     security::{ApiError, RequestContext},
 };
-use login::SignInPage;
+use auth::SignInPage;
 use piquel_common::config::Origin;
 use piquel_repository::Database;
 use piquel_ui::{Area, Onward, QueryError, Title};

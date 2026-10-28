@@ -35,7 +35,7 @@ The code is `apps/auth-service/src/recovery` (links, the probation passkey,
 undo), `AdminService::recover_account`, `recent_recoveries` and `undo_recovery`
 (`apps/auth-service/src/admin/service.rs`), the passkey routes
 (`apps/auth-service/src/passkey`), the pages `/recover` and `/recover/undo`
-(`apps/auth-service/src/web/recovery`, with their views in
+(`apps/auth-service/src/web/auth/recovery`, with their views in
 `crates/ui/src/recovery.rs`), migration `0019_account_recoveries`, and the CLI's
 `user recover` and `user undo-recovery`. Tests named below live in
 `apps/auth-service/src/recovery/tests.rs` unless another file is given;
@@ -127,7 +127,7 @@ for the dashboard *(planned)*; the admin API has no route for it.
   /recovery/start` and `/finish` enroll the passkey; besides the page's own form
   post, which names the account, no route checks a token without starting the
   ceremony
-  (`web::recovery::tests::recovery_links_enroll_a_passkey_from_their_form`).
+  (`web::auth::recovery::tests::recovery_links_enroll_a_passkey_from_their_form`).
 - **L2.** It is mailed only to the primary verified address the account has when
   the recovery starts,
   and printed to the operator at the terminal, which also reaches an owner
@@ -186,8 +186,8 @@ for the dashboard *(planned)*; the admin API has no route for it.
   which passkeys can't be removed meanwhile. A passkey sign-in that continues to
   an app asks the same question before going on. An owner with an older passkey
   learns of it by signing in, even when the notice only reached a hijacked
-  mailbox (`web::recovery::tests::settings_show_the_recovery`,
-  `web::recovery::tests::a_sign_in_for_an_app_asks_about_a_recovery`).
+  mailbox (`web::auth::recovery::tests::settings_show_the_recovery`,
+  `web::auth::recovery::tests::a_sign_in_for_an_app_asks_about_a_recovery`).
 
 ## Probation
 
@@ -246,7 +246,7 @@ signed-in browser is offered its own account's recovery, naming the account.
 Once undone, the page says so whatever the stage was, on the settings only of a
 browser the finish says it signed in (U4), and otherwise on the page itself, as
 on a disabled account (U4a)
-(`web::recovery::tests::the_undo_page_cancels_or_undoes_by_id`).
+(`web::auth::recovery::tests::the_undo_page_cancels_or_undoes_by_id`).
 
 - **U1.** Any active passkey of the account but the recovery's own may undo it:
   the start challenges every other one, and the finish refuses the recovery's

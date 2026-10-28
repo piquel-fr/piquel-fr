@@ -139,7 +139,7 @@ it names a setting. A
 query that does not parse opens nothing, and a form that does not decode changes
 nothing, logging why at debug level.
 
-The sign-in pages (`src/web/login`), `/login` and `/register`, serve signed-out
+The sign-in pages (`src/web/auth/login`), `/login` and `/register`, serve signed-out
 browsers, so they are pages of their own rather than `AccountPage`s. Their query,
 `LoginQuery`, is the one auth's pages and flows serialize for every link to them
 (the admin API's invitation link still writes `/register?invitation=` itself); it
@@ -156,7 +156,7 @@ form's change: signing in or up changes nothing and continues, and linking while
 signed out links once the sign-in succeeds. While the account has a recovery that
 can be undone, a passkey sign-in that continues an authorization first asks whether
 it was the owner's, and goes on by a plain link that resumes the authorization. The
-recovery pages (`src/web/recovery`), `/recover` and `/recover/undo`, which a
+recovery pages (`src/web/auth/recovery`), `/recover` and `/recover/undo`, which a
 recovery's emails link to, serve signed-out browsers too, so they are pages of their
 own as well.
 

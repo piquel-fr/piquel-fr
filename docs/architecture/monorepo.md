@@ -37,6 +37,10 @@ page itself, sign-in included, and the account settings at `/settings`; piquel.f
 only redirects there. The permanent WebAuthn RP ID is the auth hostname, never a wildcard over
 piquel.fr subdomains.
 
+Auth's pages live in `apps/auth-service/src/web`, grouped by area: `auth`, the
+sign-in flows (signing in and up, consent, logout and the recovery pages),
+`settings` and `developers`.
+
 The auth binary also runs explicit migrations, generates invitations and grants
 administrators. PostgreSQL
 stores sessions, WebAuthn challenges, OAuth state, pending social identities,

@@ -1,14 +1,14 @@
 //! The sign-in pages, `/login` and `/register`: signing in, creating an account,
 //! and linking a provider's sign-in to an existing account.
 //!
-//! Neither is an [`AccountPage`](super::account::AccountPage): they serve browsers
+//! Neither is an [`AccountPage`](crate::web::account::AccountPage): they serve browsers
 //! that are not signed in. Their `GET` finds the [`Step`] the browser is at, from
 //! the query, the provider's sign-in pending in the browser and its session. Their
 //! `POST` makes the change its form names, then sends the browser where the
 //! [`Continuation`] says, which the server alone decides. A change the service
 //! refuses renders the page again, saying why.
 
-use super::{Failure, WebApplication};
+use crate::web::{Failure, WebApplication};
 use crate::{
     account::{AccountError, Owner, Viewer},
     federation::{FederationError, PendingKind, PendingView, ReturnTo},
@@ -42,7 +42,7 @@ mod tests;
 /// Which sign-in page the browser opened, which says what it asks of a browser no
 /// provider's sign-in waits in.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(super) enum SignInPage {
+pub(in crate::web) enum SignInPage {
     /// `/login`: signing in.
     Login,
     /// `/register`: creating an account.
@@ -59,7 +59,7 @@ impl SignInPage {
     }
 
     /// Its title in the browser, when it cannot render or sends the browser on.
-    pub(super) const fn title(self) -> &'static str {
+    pub(in crate::web) const fn title(self) -> &'static str {
         match self {
             Self::Login => Title::SignIn.as_str(),
             Self::Register => Title::SignUp.as_str(),
@@ -229,7 +229,7 @@ impl From<QueryError> for Refusal {
 
 impl WebApplication {
     /// `GET` of the sign-in page `page`: the step the browser is at.
-    pub(super) async fn sign_in(cx: &Cx, page: SignInPage) -> Result<Response, Failure> {
+    pub(in crate::web) async fn sign_in(cx: &Cx, page: SignInPage) -> Result<Response, Failure> {
         let web = app_context::<Self>(cx);
         web.sign_in_page(cx, page, Visit::new(web, cx).await, None)
             .await
@@ -238,7 +238,7 @@ impl WebApplication {
     /// `POST` of the sign-in page `page`: makes the change its form names, then
     /// sends the browser on, or renders the page again with why it was refused. A
     /// form from an older page that does not decode changes nothing.
-    pub(super) async fn sign_in_change(
+    pub(in crate::web) async fn sign_in_change(
         cx: &Cx,
         page: SignInPage,
         body: Body,
@@ -394,7 +394,10 @@ impl WebApplication {
 
     /// The account the browser is signed in to as `owner`, or none when it is gone
     /// since its session was found.
-    pub(super) async fn signed_in(&self, owner: &Owner) -> Result<Option<SignedIn>, Failure> {
+    pub(in crate::web) async fn signed_in(
+        &self,
+        owner: &Owner,
+    ) -> Result<Option<SignedIn>, Failure> {
         let profile = match self.account.profile(&Viewer::from(owner)).await {
             Ok(profile) => profile,
             // An account gone since its session was found is signed out.
