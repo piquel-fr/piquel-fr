@@ -48,8 +48,8 @@ impl Console {
 pub(super) enum OutputFormat {
     /// Tab-separated lines for people.
     Table,
-    /// The admin API's JSON body, for scripts. Its shape is that API's, and
-    /// changes only as the API does.
+    /// The view the admin dashboard shows, as JSON, for scripts: its shape is
+    /// `piquel-admin-api`'s.
     Json,
 }
 

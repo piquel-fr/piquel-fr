@@ -1,46 +1,33 @@
-//! Database-backed admin API scenarios: who may call it, and what each operation changes.
+//! Database-backed administration scenarios: who may run each operation, and
+//! what it changes.
 
 use super::*;
-use crate::keys::SigningKeys;
 use crate::recovery::RecoveryLinks;
-use crate::security::{RequestContext, Session};
+use crate::security::{CONFIRMATION_MAX_AGE, RequestContext, Session};
 use crate::tests::until_blocked;
-use axum::{
-    body::{Body, to_bytes},
-    http::{HeaderMap, Method, Request, header},
-};
-use caller::AdminSession;
 use chrono::{Duration, Utc};
-use piquel_admin_api::{AUDIENCE, paths};
+use piquel_admin_api::EventSearch;
 use piquel_common::{
-    AccountStatus, AuthenticationMethod, DeliveryId, Handle, HandleError, Personal,
+    AccountStatus, AuthenticationMethod, DeliveryId, Handle, HandleError, Personal, SessionId,
+    TokenId, UserId,
     config::Origin,
     events::{DomainEvent, RevocationReason},
-    protocol::{
-        claims::{AccessTokenClaims, Acr, Audience, AuthenticationClaims, ProfileClaims},
-        jwt::TokenType,
-        oauth::Scopes,
-        step_up::StepUpRequirement,
-    },
+    protocol::{claims::Acr, step_up::StepUpRequirement},
 };
-use piquel_crypto::{KeySet, Rs256Key, Secret};
+use piquel_crypto::Secret;
 use piquel_repository::{
-    Channel, DatabaseConfig, DatabaseError, DatabaseTransaction, DeliveryStatus, EventFilter,
-    InsertUser, NewDelivery,
+    Channel, Database, DatabaseConfig, DatabaseError, DatabaseTransaction, DeliveryStatus,
+    EventFilter, InsertUser, NewDelivery,
 };
-use serde_json::{Value, json};
+use serde_json::json;
 use std::mem::discriminant;
-use tower::ServiceExt;
-
-/// Issuer of the scenario tokens.
-const ISSUER: &str = "https://auth.piquel.fr";
 
 /// A scenario account and its signed-in session.
 #[derive(Clone, Copy)]
 pub(crate) struct Account {
     /// The account.
     pub(crate) user_id: UserId,
-    /// Its passkey session.
+    /// Its session.
     pub(crate) session_id: SessionId,
 }
 
@@ -53,19 +40,15 @@ impl Account {
     }
 }
 
-/// The admin API on the test database, with the key its tokens are signed with.
-/// The shared account settings' tests use it too.
+/// The test database the scenarios run on. The shared account settings' and the
+/// recoveries' tests use it too.
 pub(crate) struct Harness {
-    /// Routes under test.
-    router: Router,
     /// The scenario database.
     pub(crate) database: Database,
-    /// Signs scenario access tokens.
-    keys: SigningKeys,
 }
 
 impl Harness {
-    /// Builds the admin API over a migrated test database.
+    /// Connects to the migrated test database.
     pub(crate) async fn new() -> Self {
         let url = piquel_common::config::Variable::new("TEST_DATABASE_URL")
             .required()
@@ -76,24 +59,7 @@ impl Harness {
         .await
         .expect("database");
         database.run_migrations().await.expect("migrations");
-        let keys = SigningKeys::new(KeySet::single(
-            Rs256Key::generate("admin-tests").expect("signing key"),
-        ));
-        let application = AdminApplication {
-            service: AdminService::new(database.clone()),
-            tokens: AdminTokens {
-                keys: keys.clone(),
-                issuer: ISSUER.into(),
-                database: database.clone(),
-            },
-            origin: origin(),
-            invitations: true,
-        };
-        Self {
-            router: application.routes(),
-            database,
-            keys,
-        }
+        Self { database }
     }
 
     /// Creates an account with the handle `handle`, without a session.
@@ -113,17 +79,17 @@ impl Harness {
 
     /// Creates an account signed in with a passkey.
     pub(crate) async fn account(&self) -> Account {
+        self.signed_in(AuthenticationMethod::Passkey).await
+    }
+
+    /// Creates an account signed in by `method`.
+    pub(crate) async fn signed_in(&self, method: AuthenticationMethod) -> Account {
         let suffix = TokenId::new().to_string();
         let user_id = self.named(&format!("admin-{}", &suffix[24..])).await;
         let mut tx = self.database.begin().await.expect("transaction");
-        let secret = Session::create(
-            &mut tx,
-            RequestContext::TEST,
-            user_id,
-            AuthenticationMethod::Passkey.into(),
-        )
-        .await
-        .expect("session");
+        let secret = Session::create(&mut tx, RequestContext::TEST, user_id, method.into())
+            .await
+            .expect("session");
         let session_id = tx
             .sessions()
             .find_active_by_browser_secret(secret.digest().as_bytes())
@@ -138,7 +104,7 @@ impl Harness {
         }
     }
 
-    /// The service behind the routes, to call without an extractor.
+    /// The service under test.
     fn service(&self) -> AdminService {
         AdminService::new(self.database.clone())
     }
@@ -146,82 +112,16 @@ impl Harness {
     /// Creates an administrator, granted by the CLI.
     pub(crate) async fn admin(&self) -> Account {
         let account = self.account().await;
+        self.grant(account).await
+    }
+
+    /// Makes `account` an administrator, from the CLI.
+    pub(crate) async fn grant(&self, account: Account) -> Account {
         self.service()
             .grant_administrator(&cli(), account.user_id)
             .await
             .expect("grant");
         account
-    }
-
-    /// An admin API token for `account`, signed in at `acr` `age` ago.
-    fn token(&self, account: Account, acr: Acr, age: Duration) -> String {
-        self.signed(account, AUDIENCE, acr, age)
-    }
-
-    /// A token for `account` and `audience`, signed in at `acr` `age` ago.
-    fn signed(&self, account: Account, audience: &str, acr: Acr, age: Duration) -> String {
-        let now = Utc::now();
-        self.keys
-            .current()
-            .sign(
-                TokenType::Access,
-                &AccessTokenClaims {
-                    iss: ISSUER.into(),
-                    sub: account.user_id.to_string(),
-                    aud: Audience::One(audience.into()),
-                    client_id: AUDIENCE.parse().expect("client ID"),
-                    jti: TokenId::new(),
-                    scope: Scopes::default(),
-                    iat: now,
-                    exp: now + Duration::minutes(5),
-                    nbf: None,
-                    authentication: AuthenticationClaims {
-                        sid: Some(account.session_id),
-                        auth_time: Some(now - age),
-                        amr: vec![],
-                        acr: Some(acr),
-                    },
-                    act: None,
-                    cnf: None,
-                    profile: ProfileClaims::default(),
-                    extra: (),
-                },
-            )
-            .expect("sign")
-    }
-
-    /// Sends a request with `token` as its bearer, and `body` as JSON.
-    async fn call(
-        &self,
-        method: Method,
-        path: &str,
-        token: Option<&str>,
-        body: Option<Value>,
-    ) -> (StatusCode, HeaderMap, Value) {
-        let mut request = Request::builder().method(method).uri(path);
-        if let Some(token) = token {
-            request = request.header(header::AUTHORIZATION, format!("Bearer {token}"));
-        }
-        if body.is_some() {
-            request = request.header(header::CONTENT_TYPE, "application/json");
-        }
-        let request = request
-            .body(body.map_or_else(Body::empty, |body| Body::from(body.to_string())))
-            .expect("request");
-        let response = self
-            .router
-            .clone()
-            .oneshot(request)
-            .await
-            .expect("response");
-        let (parts, body) = response.into_parts();
-        let bytes = to_bytes(body, 1 << 20).await.expect("body");
-        let json = if bytes.is_empty() {
-            Value::Null
-        } else {
-            serde_json::from_slice(&bytes).expect("JSON body")
-        };
-        (parts.status, parts.headers, json)
     }
 
     /// The kinds of the events concerning `user_id`, newest first.
@@ -247,127 +147,44 @@ pub(crate) fn cli() -> Operator {
 
 /// Auth's origin, which invitations link to.
 fn origin() -> Origin {
-    ISSUER.parse().expect("origin")
+    "https://auth.piquel.fr".parse().expect("origin")
 }
 
-/// The path of an account's route.
-fn user_path(template: &str, user_id: UserId) -> String {
-    template.replace("{user_id}", &user_id.to_string())
+/// `admin` signed in to the dashboard, as its session cookie finds them, with a
+/// passkey confirmation of the dashboard at `confirmed_at`.
+pub(crate) fn operator(admin: Account, confirmed_at: chrono::DateTime<Utc>) -> Operator {
+    Operator::Admin(AdminSession {
+        user_id: admin.user_id,
+        session_id: admin.session_id,
+        confirmed_at: Some(confirmed_at),
+        context: RequestContext::TEST,
+    })
 }
 
-/// Every caller failure answers with its own status and challenge, before any
-/// operation runs: reads need an administrator's passkey sign-in, mutations a
-/// recent one.
-#[tokio::test]
-#[ignore = "requires TEST_DATABASE_URL"]
-async fn callers_must_be_administrators_with_a_passkey() {
-    let harness = Harness::new().await;
-    let admin = harness.admin().await;
-    let user = harness.account().await;
-    let fresh = harness.token(admin, Acr::PhishingResistant, Duration::seconds(10));
-    let old = harness.token(admin, Acr::PhishingResistant, Duration::minutes(10));
-    let social = harness.token(admin, Acr::Social, Duration::seconds(10));
-    let not_admin = harness.token(user, Acr::PhishingResistant, Duration::seconds(10));
-    let wrong_audience =
-        harness.signed(admin, "notes-api", Acr::PhishingResistant, Duration::zero());
-    let ended = harness.admin().await;
-    let ended_token = harness.token(ended, Acr::PhishingResistant, Duration::zero());
-    let mut tx = harness.database.begin().await.expect("transaction");
-    ended.sign_out(&mut tx).await;
-    tx.commit().await.expect("commit");
-    let read = paths::USERS;
-    let mutation = user_path(paths::USER_ENABLE, user.user_id);
-    for (path, method, token, status, challenge) in [
-        (read, Method::GET, None, 401, Some("Bearer")),
-        (
-            read,
-            Method::GET,
-            Some("not-a-jwt"),
-            401,
-            Some(r#"Bearer error="invalid_token""#),
-        ),
-        (
-            read,
-            Method::GET,
-            Some(wrong_audience.as_str()),
-            401,
-            Some(r#"Bearer error="invalid_token""#),
-        ),
-        (
-            read,
-            Method::GET,
-            Some(ended_token.as_str()),
-            401,
-            Some(r#"Bearer error="invalid_token""#),
-        ),
-        (read, Method::GET, Some(not_admin.as_str()), 403, None),
-        (
-            read,
-            Method::GET,
-            Some(social.as_str()),
-            401,
-            Some(r#"Bearer error="insufficient_user_authentication", acr_values="phr""#),
-        ),
-        (read, Method::GET, Some(old.as_str()), 200, None),
-        (
-            mutation.as_str(),
-            Method::POST,
-            Some(old.as_str()),
-            401,
-            Some(
-                r#"Bearer error="insufficient_user_authentication", acr_values="phr", max_age="300""#,
-            ),
-        ),
-        // The account is active, so a caller who passes every check gets a conflict.
-        (
-            mutation.as_str(),
-            Method::POST,
-            Some(fresh.as_str()),
-            409,
-            None,
-        ),
-    ] {
-        let (actual, headers, _) = harness.call(method.clone(), path, token, None).await;
-        assert_eq!(actual.as_u16(), status, "{method} {path} with {token:?}");
-        assert_eq!(
-            headers
-                .get(header::WWW_AUTHENTICATE)
-                .map(|value| value.to_str().expect("header")),
-            challenge,
-            "{method} {path} with {token:?}"
-        );
-    }
+/// A reason any change accepts.
+fn reason(text: &str) -> Reason {
+    Reason::parse(text.into()).expect("reason")
 }
 
 /// Disabling an account ends its sessions at once and records why; enabling it
-/// restores it, and both show in the events.
+/// restores it, and both show in the events, attributed to the administrator.
 #[tokio::test]
 #[ignore = "requires TEST_DATABASE_URL"]
 async fn disabling_ends_sessions_and_is_recorded() {
     let capture = piquel_telemetry::Telemetry::capture(crate::TELEMETRY_FILTER);
     let harness = Harness::new().await;
+    let service = harness.service();
     let admin = harness.admin().await;
     let user = harness.account().await;
-    let token = harness.token(admin, Acr::PhishingResistant, Duration::zero());
-    let disable = user_path(paths::USER_DISABLE, user.user_id);
-    let (status, ..) = harness
-        .call(
-            Method::POST,
-            &disable,
-            Some(&token),
-            Some(json!({"reason": ""})),
-        )
-        .await;
-    assert_eq!(status, StatusCode::BAD_REQUEST);
-    let (status, ..) = harness
-        .call(
-            Method::POST,
-            &disable,
-            Some(&token),
-            Some(json!({"reason": "Spam"})),
-        )
-        .await;
-    assert_eq!(status, StatusCode::NO_CONTENT);
+    let administrator = operator(admin, Utc::now());
+    assert!(matches!(
+        Reason::parse(String::new()),
+        Err(AdminError::InvalidReason)
+    ));
+    service
+        .disable_user(&administrator, user.user_id, reason("Spam"))
+        .await
+        .expect("disable");
     let stored = harness
         .database
         .users()
@@ -376,7 +193,7 @@ async fn disabling_ends_sessions_and_is_recorded() {
         .expect("lookup")
         .expect("user");
     assert_eq!(stored.status, AccountStatus::Disabled);
-    let administrator = admin.user_id.to_string();
+    let id = admin.user_id.to_string();
     assert!(
         capture.logs().iter().any(|log| {
             let has = |key: &str, value: &str| {
@@ -384,7 +201,7 @@ async fn disabling_ends_sessions_and_is_recorded() {
                     name.as_str() == key && format!("{logged:?}").contains(value)
                 })
             };
-            has("event.kind", "account_disabled") && has("event.administrator", &administrator)
+            has("event.kind", "account_disabled") && has("event.administrator", &id)
         }),
         "the disablement's log line names its administrator"
     );
@@ -399,15 +216,10 @@ async fn disabling_ends_sessions_and_is_recorded() {
             .revoked_at
             .is_some()
     );
-    let (status, ..) = harness
-        .call(
-            Method::POST,
-            &user_path(paths::USER_ENABLE, user.user_id),
-            Some(&token),
-            None,
-        )
-        .await;
-    assert_eq!(status, StatusCode::NO_CONTENT);
+    service
+        .enable_user(&administrator, user.user_id)
+        .await
+        .expect("enable");
     assert_eq!(
         harness.events(user.user_id).await[..3],
         [
@@ -421,25 +233,20 @@ async fn disabling_ends_sessions_and_is_recorded() {
             },
         ]
     );
-    let (status, _, page) = harness
-        .call(
-            Method::GET,
-            &format!(
-                "{}?user={}&kind=account_disabled",
-                paths::EVENTS,
-                user.user_id
-            ),
-            Some(&token),
-            None,
+    let page = service
+        .events(
+            &administrator,
+            EventSearch {
+                user: Some(user.user_id),
+                kind: Some("account_disabled".into()),
+                before: None,
+            },
         )
-        .await;
-    assert_eq!(status, StatusCode::OK);
+        .await
+        .expect("events");
+    assert_eq!(page.events[0].actor["user_id"], id);
     assert_eq!(
-        page["events"][0]["actor"]["user_id"],
-        admin.user_id.to_string()
-    );
-    assert_eq!(
-        page["events"][0]["event"]["data"]["reason"],
+        page.events[0].event["data"]["reason"],
         json!({"$personal": "Spam"})
     );
 }
@@ -540,89 +347,66 @@ async fn events_a_newer_release_wrote_are_listed() {
         .insert_written_elsewhere(user.user_id, "from_a_newer_release", 1, &data)
         .await
         .expect("event");
-    let token = harness.token(admin, Acr::PhishingResistant, Duration::zero());
-    let (status, _, page) = harness
-        .call(
-            Method::GET,
-            &format!("{}?user={}", paths::EVENTS, user.user_id),
-            Some(&token),
-            None,
-        )
-        .await;
-    assert_eq!(status, StatusCode::OK);
+    let filter = EventSearch {
+        user: Some(user.user_id),
+        ..EventSearch::default()
+    };
+    let page = harness
+        .service()
+        .events(&operator(admin, Utc::now()), filter)
+        .await
+        .expect("events");
     assert_eq!(
-        page["events"][0]["event"],
+        page.events[0].event,
         json!({"kind": "from_a_newer_release", "version": 1, "data": data})
     );
 }
 
-/// Administrator accounts are out of the API's reach until their rights are
-/// revoked, and nobody grants or revokes their own rights. A revocation applies to the next
-/// request of the revoked administrator's token.
+/// Administrator accounts are out of the dashboard's reach until their rights
+/// are revoked, and nobody grants or revokes their own rights there. A
+/// revocation applies to the revoked administrator's next request.
 #[tokio::test]
 #[ignore = "requires TEST_DATABASE_URL"]
 async fn administrators_are_protected_until_revoked() {
     let harness = Harness::new().await;
+    let service = harness.service();
     let admin = harness.admin().await;
     let other = harness.account().await;
-    let token = harness.token(admin, Acr::PhishingResistant, Duration::zero());
-    let other_token = harness.token(other, Acr::PhishingResistant, Duration::zero());
-    let (status, ..) = harness
-        .call(
-            Method::POST,
-            paths::ADMINISTRATORS,
-            Some(&token),
-            Some(json!({"user_id": other.user_id})),
-        )
+    let (by_admin, by_other) = (operator(admin, Utc::now()), operator(other, Utc::now()));
+    service
+        .grant_administrator(&by_admin, other.user_id)
+        .await
+        .expect("grant");
+    service
+        .search_users(&by_other, "", None)
+        .await
+        .expect("the new administrator reads");
+    let refused = service
+        .disable_user(&by_admin, other.user_id, reason("Compromised"))
         .await;
-    assert_eq!(status, StatusCode::NO_CONTENT);
-    let (status, ..) = harness
-        .call(Method::GET, paths::USERS, Some(&other_token), None)
-        .await;
-    assert_eq!(status, StatusCode::OK);
-    let disable = user_path(paths::USER_DISABLE, other.user_id);
-    let reason = json!({"reason": "Compromised"});
-    let (status, ..) = harness
-        .call(Method::POST, &disable, Some(&token), Some(reason.clone()))
-        .await;
-    assert_eq!(status, StatusCode::FORBIDDEN);
-    let (status, ..) = harness
-        .call(
-            Method::DELETE,
-            &user_path(paths::ADMINISTRATOR, admin.user_id),
-            Some(&token),
-            None,
-        )
-        .await;
-    assert_eq!(status, StatusCode::FORBIDDEN);
+    assert!(
+        matches!(refused, Err(AdminError::AdministratorTarget)),
+        "{refused:?}"
+    );
+    let refused = service.revoke_administrator(&by_admin, admin.user_id).await;
+    assert!(matches!(refused, Err(AdminError::OwnRights)), "{refused:?}");
     // Refused before any lock, so a grant queued behind the caller's own
     // revocation cannot restore their rights.
-    let (status, ..) = harness
-        .call(
-            Method::POST,
-            paths::ADMINISTRATORS,
-            Some(&token),
-            Some(json!({"user_id": admin.user_id})),
-        )
-        .await;
-    assert_eq!(status, StatusCode::FORBIDDEN);
-    let (status, ..) = harness
-        .call(
-            Method::DELETE,
-            &user_path(paths::ADMINISTRATOR, other.user_id),
-            Some(&token),
-            None,
-        )
-        .await;
-    assert_eq!(status, StatusCode::NO_CONTENT);
-    let (status, ..) = harness
-        .call(Method::GET, paths::USERS, Some(&other_token), None)
-        .await;
-    assert_eq!(status, StatusCode::FORBIDDEN);
-    let (status, ..) = harness
-        .call(Method::POST, &disable, Some(&token), Some(reason))
-        .await;
-    assert_eq!(status, StatusCode::NO_CONTENT);
+    let refused = service.grant_administrator(&by_admin, admin.user_id).await;
+    assert!(matches!(refused, Err(AdminError::OwnRights)), "{refused:?}");
+    service
+        .revoke_administrator(&by_admin, other.user_id)
+        .await
+        .expect("revoke");
+    let refused = service.search_users(&by_other, "", None).await;
+    assert!(
+        matches!(refused, Err(AdminError::NotAdministrator)),
+        "{refused:?}"
+    );
+    service
+        .disable_user(&by_admin, other.user_id, reason("Compromised"))
+        .await
+        .expect("disable");
     assert_eq!(
         harness.events(other.user_id).await[2..4],
         [
@@ -632,79 +416,53 @@ async fn administrators_are_protected_until_revoked() {
     );
 }
 
-/// An invitation link works until an administrator revokes it.
+/// An invitation link works until an administrator revokes it, which also ends
+/// its expiry, for the previous release; revoking it again finds nothing.
 #[tokio::test]
 #[ignore = "requires TEST_DATABASE_URL"]
 async fn revoked_invitations_cannot_be_redeemed() {
     let harness = Harness::new().await;
-    let admin = harness.admin().await;
-    let token = harness.token(admin, Acr::PhishingResistant, Duration::zero());
-    let (status, _, created) = harness
-        .call(
-            Method::POST,
-            paths::INVITATIONS,
-            Some(&token),
-            Some(json!({"expires_in": "24h"})),
-        )
-        .await;
-    assert_eq!(status, StatusCode::CREATED);
-    let url: url::Url = created["url"].as_str().expect("url").parse().expect("URL");
-    let (_, encoded) = url
+    let service = harness.service();
+    let admin = operator(harness.admin().await, Utc::now());
+    let created = service
+        .create_invitation(&admin, &origin(), "24h".parse().expect("expiry"))
+        .await
+        .expect("invitation");
+    assert_eq!(created.url.path(), crate::routes::page::REGISTER);
+    let (_, encoded) = created
+        .url
         .query_pairs()
         .find(|(name, _)| name == "invitation")
         .expect("invitation secret");
-    let secret = piquel_crypto::Secret::parse(&encoded).expect("secret");
-    let digest = secret.digest();
+    let digest = Secret::parse(&encoded).expect("secret").digest();
+    let active = || harness.database.security();
     assert!(
-        harness
-            .database
-            .security()
+        active()
             .invitation_active(digest.as_bytes())
             .await
             .expect("lookup")
     );
-    let invitation = paths::INVITATION.replace(
-        "{invitation_id}",
-        created["id"].as_str().expect("invitation ID"),
-    );
-    let (status, ..) = harness
-        .call(Method::DELETE, &invitation, Some(&token), None)
-        .await;
-    assert_eq!(status, StatusCode::NO_CONTENT);
+    service
+        .revoke_invitation(&admin, created.id)
+        .await
+        .expect("revoke");
     assert!(
-        !harness
-            .database
-            .security()
+        !active()
             .invitation_active(digest.as_bytes())
             .await
             .expect("lookup")
     );
-    // The previous release checks only the expiry, so revocation sets it too.
-    let (_, _, listed) = harness
-        .call(Method::GET, paths::INVITATIONS, Some(&token), None)
-        .await;
+    let listed = service.list_invitations(&admin).await.expect("list");
     let revoked = listed
-        .as_array()
-        .expect("invitations")
         .iter()
-        .find(|listed| listed["id"] == created["id"])
+        .find(|listed| listed.id == created.id)
         .expect("revoked invitation");
-    assert!(revoked["expires_at"].as_str() <= revoked["revoked_at"].as_str());
-    let (status, ..) = harness
-        .call(Method::DELETE, &invitation, Some(&token), None)
-        .await;
-    assert_eq!(status, StatusCode::NOT_FOUND);
-}
-
-/// An administrator's operator, as a token signed in with a passkey at `auth_time`
-/// makes it.
-pub(crate) fn operator(admin: Account, auth_time: chrono::DateTime<Utc>) -> Operator {
-    Operator::Admin(AdminSession {
-        user_id: admin.user_id,
-        session_id: admin.session_id,
-        acr: Some(Acr::PhishingResistant),
-        auth_time: Some(auth_time),
-    })
+    assert!(Some(revoked.expires_at) <= revoked.revoked_at);
+    let again = service.revoke_invitation(&admin, created.id).await;
+    assert!(
+        matches!(again, Err(AdminError::InvitationNotFound)),
+        "{again:?}"
+    );
 }
 
 /// A mutation checks its caller's confirmation after its last write: one admitted
@@ -720,7 +478,7 @@ async fn mutations_recheck_the_confirmation_after_waiting() {
     let mut logout = harness.database.begin().await.expect("transaction");
     user.sign_out(&mut logout).await;
     let service = harness.service();
-    let reason = Reason::parse("Spam".into()).expect("reason");
+    let reason = reason("Spam");
     let operator = operator(admin, auth_time);
     let (result, ()) = tokio::join!(
         service.disable_user(&operator, user.user_id, reason),
@@ -761,7 +519,7 @@ async fn waiting_mutations_hold_no_caller_locks() {
         .await
         .expect("target lock");
     let service = harness.service();
-    let reason = Reason::parse("Spam".into()).expect("reason");
+    let reason = reason("Spam");
     let operator = operator(admin, Utc::now());
     let (result, ()) = tokio::join!(
         service.disable_user(&operator, user.user_id, reason),
@@ -792,7 +550,7 @@ async fn mutations_never_wait_for_the_callers_session() {
         .find_active_by_id_for_update(admin.session_id)
         .await
         .expect("caller session lock");
-    let reason = Reason::parse("Spam".into()).expect("reason");
+    let reason = reason("Spam");
     let disabled = tokio::time::timeout(
         std::time::Duration::from_secs(5),
         harness
@@ -853,29 +611,25 @@ async fn invitation_revocation_waits_for_signup() {
 #[ignore = "requires TEST_DATABASE_URL"]
 async fn administrators_acting_on_each_other_are_refused() {
     let harness = Harness::new().await;
+    let service = harness.service();
     let (a, b) = (harness.admin().await, harness.admin().await);
-    let harness = &harness;
     for _ in 0..10 {
         let disable = |by: Account, target: Account| {
-            let token = harness.token(by, Acr::PhishingResistant, Duration::zero());
-            let path = user_path(paths::USER_DISABLE, target.user_id);
+            let service = service.clone();
             async move {
-                harness
-                    .call(
-                        Method::POST,
-                        &path,
-                        Some(&token),
-                        Some(json!({"reason": "Rogue"})),
-                    )
+                let by = operator(by, Utc::now());
+                service
+                    .disable_user(&by, target.user_id, reason("Rogue"))
                     .await
-                    .0
             }
         };
         let (first, second) = tokio::join!(disable(a, b), disable(b, a));
-        assert_eq!(
-            (first, second),
-            (StatusCode::FORBIDDEN, StatusCode::FORBIDDEN)
-        );
+        for refused in [first, second] {
+            assert!(
+                matches!(refused, Err(AdminError::AdministratorTarget)),
+                "{refused:?}"
+            );
+        }
     }
 }
 
@@ -902,7 +656,6 @@ impl AdminOperation {
             Self::ListInvitations => vec![service.list_invitations(operator).await.map(drop)],
             Self::ListClients => vec![service.list_clients(operator).await.map(drop)],
             Self::ViewClient => vec![
-                service.client(operator, client).await.map(drop),
                 service
                     .client_details(operator, &client.parse().expect("client ID"))
                     .await
@@ -950,10 +703,13 @@ impl AdminOperation {
 
 impl Harness {
     /// Three administrators who may no longer read, with the refusal each gets:
-    /// one whose rights were revoked, one whose session ended, and one signed in
-    /// without a passkey.
+    /// one whose rights were revoked, one whose session ended, and one whose
+    /// session signed in without a passkey.
     pub(crate) async fn refused_readers(&self) -> [(Operator, AdminError); 3] {
-        let (revoked, ended, social) = (self.admin().await, self.admin().await, self.admin().await);
+        let (revoked, ended) = (self.admin().await, self.admin().await);
+        let social = self
+            .grant(self.signed_in(AuthenticationMethod::Federation).await)
+            .await;
         self.service()
             .revoke_administrator(&cli(), revoked.user_id)
             .await
@@ -961,13 +717,7 @@ impl Harness {
         let mut tx = self.database.begin().await.expect("transaction");
         ended.sign_out(&mut tx).await;
         tx.commit().await.expect("commit");
-        let social = Operator::Admin(AdminSession {
-            user_id: social.user_id,
-            session_id: social.session_id,
-            acr: Some(Acr::Social),
-            auth_time: Some(Utc::now()),
-        });
-        // Any passkey sign-in, however old, as the admin API's reads require.
+        // Any passkey sign-in, however old, as every read requires.
         let passkey = StepUpRequirement {
             acr: Some(Acr::PhishingResistant),
             max_age: None,
@@ -975,7 +725,10 @@ impl Harness {
         [
             (operator(revoked, Utc::now()), AdminError::NotAdministrator),
             (operator(ended, Utc::now()), AdminError::SessionEnded),
-            (social, AdminError::StepUpRequired(passkey)),
+            (
+                operator(social, Utc::now()),
+                AdminError::StepUpRequired(passkey),
+            ),
         ]
     }
 }
@@ -995,9 +748,9 @@ pub(crate) fn assert_refused(refused: &AdminError, expected: &AdminError, case: 
     }
 }
 
-/// Every read checks its operator itself, as the dashboard will call the service
+/// Every read checks its operator itself, as the dashboard calls the service
 /// in-process: an administrator whose rights were revoked, whose session ended,
-/// or who signed in without a passkey reads nothing.
+/// or whose session signed in without a passkey reads nothing.
 #[tokio::test]
 #[ignore = "requires TEST_DATABASE_URL"]
 async fn every_read_checks_its_administrator() {
@@ -1052,7 +805,7 @@ async fn delivery_changes_check_and_record_their_administrator() {
         .await
         .expect("revoke");
     let stale = Utc::now() - Duration::minutes(10);
-    let step_up = StepUpRequirement::passkey_within(piquel_admin_api::CONFIRMATION_MAX_AGE);
+    let step_up = StepUpRequirement::passkey_within(CONFIRMATION_MAX_AGE);
     let queue = async || {
         let delivery = NewDelivery::<Unsent> {
             destination: "https://receiver.example".into(),
@@ -1155,24 +908,20 @@ async fn no_grant_while_a_recovery_can_be_undone() {
     let admin = harness.admin().await;
     let target = harness.account().await.user_id;
     let links = RecoveryLinks::new(origin(), Secret::generate().expect("key"), None);
-    let reason = || Reason::parse("Lost every passkey".into()).expect("reason");
+    let reason = || reason("Lost every passkey");
     let service = harness.service();
     service
         .recover_account(&cli(), target, reason(), &links, None)
         .await
         .expect("recovery");
 
-    let token = harness.token(admin, Acr::PhishingResistant, Duration::zero());
-    let grant = json!({ "user_id": target });
-    let (status, ..) = harness
-        .call(
-            Method::POST,
-            paths::ADMINISTRATORS,
-            Some(&token),
-            Some(grant),
-        )
+    let refused = service
+        .grant_administrator(&operator(admin, Utc::now()), target)
         .await;
-    assert_eq!(status, StatusCode::CONFLICT, "the admin API refuses");
+    assert!(
+        matches!(refused, Err(AdminError::GrantDuringRecovery)),
+        "the dashboard refuses"
+    );
     let refused = service.grant_administrator(&cli(), target).await;
     assert!(
         matches!(refused, Err(AdminError::GrantDuringRecovery)),

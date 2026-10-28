@@ -111,6 +111,8 @@ repositories! {
     administrators: AdministratorRepository;
     /// Account recoveries and their links.
     recoveries: RecoveryRepository;
+    /// Sign-ins to the admin dashboard: handoff codes and dashboard sessions.
+    dashboard: DashboardRepository;
     /// Signing keys and their lifecycle.
     signing_keys: SigningKeyRepository;
 }
@@ -236,6 +238,8 @@ impl From<Unsigned> for u64 {
 
 /// Administrator rights and the lock that serializes their changes.
 pub(crate) mod administrators;
+/// Handoff codes and dashboard sessions.
+pub(crate) mod dashboard;
 /// The outbound delivery queue.
 pub(crate) mod deliveries;
 /// Verified email ownership and primary-address persistence.

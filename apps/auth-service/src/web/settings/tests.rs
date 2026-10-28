@@ -4,8 +4,8 @@ use crate::{
     AuthConfig,
     routes::page::settings,
     security::BrowserCookie,
-    tests::{AUTH_ORIGIN, Browser, OWN_PAGE, Replicas, parameter, redirect},
-    web::tests::{cookie, html, policy, value_after},
+    tests::{AUTH_ORIGIN, Browser, OWN_PAGE, Replicas, cookie, html, parameter, policy, redirect},
+    web::tests::value_after,
 };
 use axum::http::StatusCode;
 use piquel_common::{

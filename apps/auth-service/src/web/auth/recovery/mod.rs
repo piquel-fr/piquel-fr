@@ -1,14 +1,14 @@
 //! The recovery pages, `/recover` and `/recover/undo`: adding a passkey with a
 //! recovery link, and undoing or cancelling a recovery, signed in or not.
 //!
-//! Neither is an [`AccountPage`](super::account::AccountPage): whoever opens a
+//! Neither is an [`AccountPage`](crate::web::account::AccountPage): whoever opens a
 //! recovery's links may have no session. Each link carries what it names in its
 //! fragment, which never reaches a server, so a page's `GET` only offers the form
 //! posting it, and changes nothing: mail scanners open links. The passkey script
 //! runs the passkey ceremony against the recovery's JSON routes, then posts that it
 //! is done, and the page sends the browser on.
 
-use super::{Failure, WebApplication};
+use crate::web::{Failure, WebApplication};
 use crate::{
     account::Owner,
     passkey::PasskeyApplication,
@@ -64,7 +64,10 @@ impl From<RecoveryNotice> for Recovery {
 impl WebApplication {
     /// The recovery of `owner`'s account that can still be undone, if any, which
     /// the account's pages and its sign-ins ask about.
-    pub(super) async fn recovery(&self, owner: &Owner) -> Result<Option<Recovery>, Failure> {
+    pub(in crate::web) async fn recovery(
+        &self,
+        owner: &Owner,
+    ) -> Result<Option<Recovery>, Failure> {
         Ok(self
             .account
             .recovery_notice(owner)
@@ -73,7 +76,7 @@ impl WebApplication {
     }
 
     /// `GET /recover`: the recovery link's form, which posts its token.
-    pub(super) async fn recover(cx: &Cx) -> Result<Response, Failure> {
+    pub(in crate::web) async fn recover(cx: &Cx) -> Result<Response, Failure> {
         let web = app_context::<Self>(cx);
         web.recover_page(cx, StatusCode::OK, RecoverStep::Open, None)
             .await
@@ -84,7 +87,7 @@ impl WebApplication {
     /// passkey script added the passkey, which signed the browser in, it goes on to
     /// the settings. A form from an older page that does not decode changes
     /// nothing.
-    pub(super) async fn recover_change(cx: &Cx, body: Body) -> Result<Response, Failure> {
+    pub(in crate::web) async fn recover_change(cx: &Cx, body: Body) -> Result<Response, Failure> {
         let web = app_context::<Self>(cx);
         let refused = match Self::change(cx, body).await {
             Some(RecoverChange::Open { token }) => match web.account.open_recovery(&token).await {
@@ -118,7 +121,7 @@ impl WebApplication {
     /// `GET /recover/undo`: the undo link's form, which posts the recovery's ID. A
     /// browser signed in to an account with a recovery that can still be undone is
     /// offered that one instead, should the link name none.
-    pub(super) async fn undo_recovery(cx: &Cx) -> Result<Response, Failure> {
+    pub(in crate::web) async fn undo_recovery(cx: &Cx) -> Result<Response, Failure> {
         let web = app_context::<Self>(cx);
         let mut signed_in = None;
         if let Some(owner) = web.owner(cx).await?
@@ -141,7 +144,10 @@ impl WebApplication {
     /// disabled account. It needs no session and works on a disabled account, as
     /// the undo does. A form from an older page that does not decode changes
     /// nothing.
-    pub(super) async fn undo_recovery_change(cx: &Cx, body: Body) -> Result<Response, Failure> {
+    pub(in crate::web) async fn undo_recovery_change(
+        cx: &Cx,
+        body: Body,
+    ) -> Result<Response, Failure> {
         let web = app_context::<Self>(cx);
         let Some(change) = Self::change(cx, body).await else {
             let step = UndoStep::Open { signed_in: None };

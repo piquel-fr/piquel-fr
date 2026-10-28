@@ -51,8 +51,12 @@ const DEFAULT_PUBLIC_LISTENER: &str = "127.0.0.1:8080";
 pub const PUBLIC_BASE_URL: Variable = Variable::new("AUTH_PUBLIC_BASE_URL");
 /// HTTP listener behind the HTTPS ingress.
 const PUBLIC_LISTENER: Variable = Variable::new("AUTH_PUBLIC_LISTENER");
-/// Optional private listener serving only the admin API.
+/// Optional listener serving only the admin dashboard, which only a private route
+/// may reach.
 const ADMIN_LISTENER: Variable = Variable::new("AUTH_ADMIN_LISTENER");
+/// The admin dashboard's origin, e.g. `https://admin.piquel.fr`, set with
+/// [`ADMIN_LISTENER`].
+const ADMIN_ORIGIN: Variable = Variable::new("AUTH_ADMIN_ORIGIN");
 /// `PostgreSQL` transport and database.
 const DATABASE_URL: Variable = Variable::new("AUTH_DATABASE_URL");
 /// Optional separately mounted database password.
@@ -550,13 +554,42 @@ impl DatabaseVariables {
     }
 }
 
+/// The admin dashboard, which auth serves on a listener of its own, for its own
+/// origin.
+#[derive(Clone)]
+pub struct DashboardConfig {
+    /// Address bound by the admin listener, which only a private route may reach.
+    pub listener: SocketAddr,
+    /// The dashboard's origin, which auth's handoff page sends administrators to.
+    pub origin: Origin,
+}
+
+impl DashboardConfig {
+    /// Reads the admin listener and the dashboard's origin, which are set together,
+    /// or neither, when auth serves no dashboard.
+    fn from_environment() -> Result<Option<Self>, ConfigurationError> {
+        match (ADMIN_LISTENER.optional()?, ADMIN_ORIGIN.optional()?) {
+            (None, None) => Ok(None),
+            (Some(_), Some(_)) => Ok(Some(Self {
+                listener: ADMIN_LISTENER.parse()?,
+                origin: ADMIN_ORIGIN.parse()?,
+            })),
+            (Some(_), None) => Err(ADMIN_ORIGIN.invalid(
+                "must be set with AUTH_ADMIN_LISTENER: the dashboard's origin, e.g. https://admin.piquel.fr",
+            )),
+            (None, Some(_)) => Err(ADMIN_LISTENER.invalid(
+                "must be set with AUTH_ADMIN_ORIGIN: the address the dashboard listens on",
+            )),
+        }
+    }
+}
+
 /// Validated service configuration combining one section per application.
 pub struct AuthConfig {
     /// Address bound by the HTTP listener behind piqueld.
     pub public_listener: SocketAddr,
-    /// Address bound by the admin API's listener, which no ingress route may reach.
-    /// Without one, auth serves no admin API.
-    pub admin_listener: Option<SocketAddr>,
+    /// The admin dashboard, if auth serves it.
+    pub dashboard: Option<DashboardConfig>,
     /// Passkey policy and origin.
     pub(crate) passkey: PasskeyConfig,
     /// External identity provider policy.
@@ -627,7 +660,7 @@ impl AuthConfig {
         let digest_keys = Arc::new(TokenDigestKeys::from_environment()?);
         Ok(Self {
             public_listener: PUBLIC_LISTENER.parse_or(DEFAULT_PUBLIC_LISTENER)?,
-            admin_listener: ADMIN_LISTENER.parse_optional()?,
+            dashboard: DashboardConfig::from_environment()?,
             passkey: PasskeyConfig::from_environment(&origin, &digest_keys)?,
             federation: FederationConfig::from_environment(&origin)?,
             email: EmailConfig::from_environment(&origin, &digest_keys)?,

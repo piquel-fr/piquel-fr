@@ -45,7 +45,7 @@ pub(crate) struct Committed {
     pub(crate) id: EventId,
     /// The kind of actor that caused it.
     pub(crate) actor: HistoryActor,
-    /// The administrator that caused it, if one did through the admin API: the
+    /// The administrator that caused it, if one did from the admin dashboard: the
     /// only actor whose account is not the subject, so their actions can be
     /// followed in telemetry. Operators are never named.
     pub(crate) administrator: Option<UserId>,

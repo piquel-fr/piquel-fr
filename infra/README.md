@@ -1,7 +1,7 @@
 # Piqueld deployments
 
 `infra/piqueld.toml` deploys piquel.fr as one repository-backed piqueld
-application, `piquel-fr`: auth, which also serves the account settings, the
+application, `piquel-fr`: auth, which also serves the account settings and the
 admin dashboard, and PostgreSQL. Its environments and previews share the
 manifest; variables give each its own hostnames. A second application,
 `telemetry` (`infra/telemetry.toml`), stores and shows their traces, metrics and
@@ -105,7 +105,7 @@ an explicit data migration.
 ## Auth
 
 piqueld generates `database-password`, `database-runtime-password`,
-`key-encryption-key`, `token-digest-key`, `signing-key` and `admin-client-secret`
+`key-encryption-key`, `token-digest-key` and `signing-key`
 for each environment and preview on the first deployment that uses them, and
 never changes them; `piquelctl env secret piquel-fr --env ENV regenerate NAME`
 rotates one. A new `database-password` does not change the one an existing
@@ -169,8 +169,8 @@ deploy:
 piquelctl app exec piquel-fr auth --env production -- auth-service client list
 ```
 
-No external identity providers are configured by default. The only client an
-environment needs, the dashboard's, is registered by a deploy job (see
+No external identity providers are configured by default, and an environment
+needs no client: the dashboard signs administrators in itself (see
 [Admin](#admin)). Auth uses
 the gateway ranges in `PIQUELD_INGRESS_PROXIES` to trust ingress's overwritten
 `X-Forwarded-For` address and throttle each client separately.
@@ -283,19 +283,14 @@ was wrong goes out once auth runs with the fixed secret.
 
 ## Admin
 
-The admin service is the dashboard in `apps/admin-web`, on port 8080 as a non-root
-user, behind a private route in every environment. It calls the admin API at
-`http://auth:8081`, auth's private listener, which only services of the same
-environment reach; it has no database credentials. Its health check,
-`GET /healthz`, does not call auth: the dashboard discovers auth in the
-background, since auth's route may not serve yet when it starts.
-
-Its OIDC client, `piquel-admin`, needs no setup. After `migrate`, the
-`admin-client` job runs `auth-service client apply` on every deploy: it registers
-the client with the environment's admin host and the `admin-client-secret` that
-piqueld generated, or updates what differs. After `piquelctl env secret piquel-fr
---env ENV regenerate admin-client-secret`, the next deploy registers the new
-secret; the previous one keeps working for an hour, while the dashboard rolls out.
+Auth serves the admin dashboard on its admin listener, port 8081, for the
+environment's admin host (`AUTH_ADMIN_ORIGIN`). Only the private `admin` route
+reaches that port, in every environment; auth's health check stays on 8080. The
+dashboard signs administrators in by a handoff from auth's own passkey session,
+so it needs no OIDC client or secret. The `piquel-admin` client that the dashboard
+used to be is deleted by migration `0020`, and the `admin-client-secret` piqueld
+generated is no longer used: delete it with `piquelctl env secret piquel-fr --env
+ENV delete admin-client-secret` once the release is out.
 
 Only administrators can use it. Grant the first one with the CLI:
 
@@ -303,8 +298,8 @@ Only administrators can use it. Grant the first one with the CLI:
 piquelctl app exec piquel-fr auth --env production -- auth-service admin grant USERNAME
 ```
 
-Administrators sign in to the dashboard again after it restarts; their sign-ins
-live in its memory. That is silent while their auth session lasts.
+An administrator's dashboard session lasts while their auth session does, and
+survives restarts and replicas: it is stored, as a digest, in PostgreSQL.
 
 ## Web
 
@@ -344,10 +339,11 @@ trace its logs, and two dashboards in the `piquel.fr` folder:
   database pool, cleanup, logs and traces.
 - **Admin activity**: what administrators and operators did, to notice a stolen
   administrator session or a compromised server. Its first row counts, over the
-  chosen range, administrator rights changed, admin API requests with a token the
-  dashboard would never send, changes refused because they targeted an
-  administrator, command-line changes, disabled accounts and viewed accounts.
-  Below are their timelines, admin API traffic, actions by administrator, and
+  chosen range, administrator rights changed, dashboard requests refused for a
+  sign-in or rights the dashboard's own pages never lack, changes refused because
+  they targeted an administrator, command-line changes, disabled accounts and
+  viewed accounts. Below are their timelines, the dashboard's traffic, actions by
+  administrator, and
   the matching log lines and traces. Its counts come from the event and failure
   log lines, so they are exact.
 
@@ -367,8 +363,8 @@ Grafana stores that password on its first start, so regenerating the secret
 changes nothing; change it in Grafana instead.
 
 piquel-fr imports the collector (`[[spec.imports]]` in `infra/piqueld.toml`),
-so its staging and production reach it as `collector.telemetry`. Their auth and
-admin services set:
+so its staging and production reach it as `collector.telemetry`. Their auth
+service sets:
 
 | Variable | Value |
 | --- | --- |

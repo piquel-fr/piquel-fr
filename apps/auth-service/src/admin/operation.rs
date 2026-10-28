@@ -1,13 +1,14 @@
-//! The list of administrative operations, which the admin API and the CLI must
+//! The list of administrative operations, which the dashboard and the CLI must
 //! both cover.
 
 use crate::operations::operations;
 
 operations! {
     /// Every operation [`AdminService`](super::AdminService) performs, which each
-    /// new operation must join. The admin API's router maps each to its route, or
-    /// to none when only the CLI may run it. Every CLI command names the operation
-    /// it runs, and a CLI test checks that each operation has a command naming it.
+    /// new operation must join. The dashboard maps each to the page running it,
+    /// or to none when only the CLI may run it. Every CLI command names the
+    /// operation it runs, and a CLI test checks that each operation has a command
+    /// naming it: the terminal can do whatever the dashboard does.
     pub(crate) enum AdminOperation {
         /// Search accounts.
         SearchUsers,

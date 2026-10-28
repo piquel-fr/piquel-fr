@@ -3,28 +3,6 @@
 version = 4
 
 [[package]]
-name = "admin-web"
-version = "0.1.0"
-dependencies = [
- "axum",
- "chrono",
- "piquel-admin-api",
- "piquel-auth",
- "piquel-common",
- "piquel-telemetry",
- "piquel-ui",
- "reqwest",
- "serde",
- "serde_json",
- "thiserror 2.0.18",
- "tokio",
- "topcoat",
- "tower",
- "tracing",
- "url",
-]
-
-[[package]]
 name = "aead"
 version = "0.5.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2021,11 +1999,8 @@ version = "0.1.0"
 dependencies = [
  "chrono",
  "piquel-common",
- "reqwest",
  "serde",
  "serde_json",
- "thiserror 2.0.18",
- "tokio",
  "url",
 ]
 
@@ -2131,11 +2106,14 @@ name = "piquel-ui"
 version = "0.1.0"
 dependencies = [
  "chrono",
+ "piquel-admin-api",
  "piquel-common",
  "serde",
+ "serde_json",
  "serde_urlencoded",
  "tokio",
  "topcoat",
+ "url",
 ]
 
 [[package]]

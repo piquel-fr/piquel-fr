@@ -1,0 +1,19 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO dashboard_handoffs\n                    (code_digest, session_id, state_digest, return_to, confirmed_at, expires_at)\n                VALUES ($1, $2, $3, $4, $5, $6)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Bytea",
+        "Uuid",
+        "Bytea",
+        "Text",
+        "Timestamptz",
+        "Timestamptz"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "33df8dc36ae42907cff05523b8df3765f8726df4dd4f642a20f4e8abdb11b8d3"
+}

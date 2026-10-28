@@ -1,8 +1,10 @@
-//! One authentication authority: browser flows, settings API, OIDC and the admin API.
+//! One authentication authority: browser flows, settings API, OIDC, and the admin
+//! dashboard on a listener of its own.
 /// Settings any administrator may also change, as operations both the owner's
 /// routes and the CLI run.
 mod account;
-/// The private admin API and the operations it shares with the CLI.
+/// The operations the admin dashboard and the CLI share, and signing
+/// administrators in to the dashboard.
 mod admin;
 /// The stylesheet and passkey script of auth's pages, embedded at compile time.
 mod assets;
@@ -58,7 +60,7 @@ pub use clients::{
     Applied, ClientDetails, ClientRegistry, ClientRegistryError, DEFAULT_CLIENT_SCOPES,
     MAX_DAILY_REGISTRATIONS, MAX_OWNED_CLIENTS,
 };
-pub use config::{AuthConfig, PUBLIC_BASE_URL, TokenDigestKeys};
+pub use config::{AuthConfig, DashboardConfig, PUBLIC_BASE_URL, TokenDigestKeys};
 use emails::EmailApplication;
 use federation::FederationApplication;
 use history::HistoryApplication;
@@ -67,7 +69,7 @@ pub use keys::{KeyError, KeyStore, SigningKeys};
 use oidc::OidcApplication;
 use passkey::PasskeyApplication;
 use service::ServiceApplication;
-use web::WebApplication;
+use web::{AdminApplication, WebApplication};
 
 use account::AccountApplication;
 use assets::EmbeddedAssets;
@@ -100,6 +102,9 @@ pub enum StartupError {
     /// The HTTP client that sends deliveries could not initialize.
     #[error("could not initialize the outbound HTTP client")]
     Outbound(#[source] reqwest::Error),
+    /// The admin dashboard's origin or policy cannot be sent in a header.
+    #[error("could not initialize the admin dashboard")]
+    Dashboard(#[from] axum::http::header::InvalidHeaderValue),
 }
 
 impl AuthConfig {
@@ -112,14 +117,22 @@ impl AuthConfig {
     pub fn router(&self, database: Database, keys: &SigningKeys) -> Result<Router, StartupError> {
         let oidc = OidcApplication::new(database.clone(), &self.oidc, keys.clone())?;
         let federation = FederationApplication::new(database.clone(), &self.federation)?;
+        let passkeys = PasskeyApplication::new(database.clone(), &self.passkey)?;
+        let web = WebApplication::new(
+            database.clone(),
+            self,
+            oidc.clone(),
+            federation.clone(),
+            passkeys.clone(),
+        );
         let application = Router::new()
             .merge(ServiceApplication::new(database.clone()).routes())
-            .merge(PasskeyApplication::new(database.clone(), &self.passkey)?.routes())
+            .merge(passkeys.routes())
             .merge(federation.clone().routes())
             .merge(HistoryApplication::new(database.clone()).routes())
             .merge(AccountApplication::new(database.clone()).routes())
             .merge(EmailApplication::new(database.clone(), &self.email).routes())
-            .merge(WebApplication::new(database.clone(), self, oidc.clone(), federation).routes())
+            .merge(web.routes())
             .merge(oidc.routes());
         let policy = security::HttpSecurity::new(self, database);
         let protected = application
@@ -137,17 +150,27 @@ impl AuthConfig {
             .wrap(protected))
     }
 
-    /// Builds the admin API, for the private admin listener only. It has no browser
-    /// origin, CSRF or rate policy: no browser reaches it, and every request
-    /// carries an administrator's access token. It shares the public listener's
-    /// body limit and deadline, so no request can hold up shutdown. Its telemetry
-    /// is labelled `piquel.listener = "admin"`.
-    pub fn admin_router(&self, database: Database, keys: &SigningKeys) -> Router {
-        HttpTelemetry::default().listener("admin").wrap(
-            admin::AdminApplication::new(database, self, keys.clone())
-                .routes()
-                .layer(DefaultBodyLimit::max(MAX_REQUEST_BODY_BYTES))
-                .layer(middleware::from_fn(security::HttpSecurity::deadline)),
-        )
+    /// Builds the admin dashboard `dashboard` sets up, for the admin listener
+    /// only, under that listener's own security layer: the dashboard's host and
+    /// origin only, the same-origin rule for its forms, its own request budget,
+    /// and the public listener's body limit and deadline. Its telemetry is
+    /// labelled `piquel.listener = "admin"`.
+    ///
+    /// # Errors
+    /// Fails when the dashboard's origin or policy cannot be sent in a header.
+    pub fn admin_router(
+        &self,
+        database: Database,
+        dashboard: &DashboardConfig,
+    ) -> Result<Router, StartupError> {
+        let policy = security::HttpSecurity::admin(self, database.clone(), &dashboard.origin)?;
+        let pages = AdminApplication::new(database, self, dashboard)?
+            .routes()
+            .layer(DefaultBodyLimit::max(MAX_REQUEST_BODY_BYTES))
+            .layer(middleware::from_fn_with_state(
+                policy,
+                security::HttpSecurity::protect,
+            ));
+        Ok(HttpTelemetry::default().listener("admin").wrap(pages))
     }
 }

@@ -1,7 +1,6 @@
 [workspace]
 resolver = "3"
 members = [
-    "apps/admin-web",
     "apps/auth-service",
     "crates/admin-api",
     "crates/auth-sdk",

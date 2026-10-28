@@ -15,6 +15,8 @@ pub enum Area {
     SignIn,
     /// A section of the account's pages.
     Section(Section),
+    /// The admin dashboard.
+    Admin,
 }
 
 impl Area {
@@ -24,6 +26,7 @@ impl Area {
             Self::SignIn => " / sign in",
             Self::Section(Section::Account) => " / account",
             Self::Section(Section::Developers) => " / developers",
+            Self::Admin => " / admin",
         }
     }
 }
@@ -113,6 +116,8 @@ pub enum Title {
     Recover,
     /// Undoing or cancelling a recovery.
     UndoRecovery,
+    /// Going on to the admin dashboard.
+    Dashboard,
 }
 
 impl Title {
@@ -131,6 +136,7 @@ impl Title {
             Self::App => "App",
             Self::Recover => "Recover your account",
             Self::UndoRecovery => "Undo a recovery",
+            Self::Dashboard => "Admin dashboard",
         }
     }
 }
@@ -146,14 +152,16 @@ pub(crate) trait Label: Copy + PartialEq + Send + Sync + 'static {
 }
 
 /// The document around every page: the head, which links `stylesheet` and loads
-/// the passkey `script`, Piquel's header, whose brand links `home` and names the
-/// page's `area`, and the page as `child`. `title` names the page in the browser,
-/// before "· Piquel".
+/// the passkey `script`, if the page has one, Piquel's header, whose brand links
+/// `home` and names the page's `area`, and the page as `child`. `title` names the
+/// page in the browser, before "· Piquel".
 #[component]
 pub async fn document<'a>(
     title: &'a str,
     stylesheet: &'a str,
-    script: &'a str,
+    #[into]
+    #[default]
+    script: Option<&'a str>,
     home: &'a str,
     #[default] area: Area,
     child: Child<'_>,
@@ -167,7 +175,9 @@ pub async fn document<'a>(
                 <meta name="robots" content="noindex">
                 <title>(format!("{title} · Piquel"))</title>
                 <link rel="stylesheet" href=(stylesheet)>
-                <script type="module" src=(script)></script>
+                if let Some(script) = script {
+                    <script type="module" src=(script)></script>
+                }
             </head>
             <body>
                 <div class="shell">

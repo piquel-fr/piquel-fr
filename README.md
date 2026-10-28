@@ -6,8 +6,8 @@ the developer console.
 
 The authentication service is **one Rust executable** containing its login,
 onboarding, consent, passkey, settings and developer console pages. PostgreSQL is its only external
-data service. GitHub and Google are optional login providers. The admin dashboard
-(`apps/admin-web`, at `admin.piquel.fr`) calls its private admin API, and
+data service. GitHub and Google are optional login providers. The same executable
+serves the admin dashboard at `admin.piquel.fr`, on a listener of its own, and
 `piquel.fr` redirects to auth, keeping the path. See
 [infra/README.md](infra/README.md) for repository-driven piqueld deployments.
 
@@ -50,7 +50,7 @@ work from devices on the tailnet. Run the same command after changing code.
 | `AUTH_PUBLIC_BASE_URL` | Exact auth origin, normally `https://auth.piquel.fr` |
 | `AUTH_TRUSTED_PROXIES` | Optional comma-separated proxy peer IPs or CIDRs; these peers must overwrite `X-Forwarded-For` with one client IP. Defaults to piqueld's `PIQUELD_INGRESS_PROXIES` |
 | `AUTH_PUBLIC_LISTENER` | Listener address; defaults to `127.0.0.1:8080` |
-| `AUTH_ADMIN_LISTENER` | Optional address of the private admin API listener, e.g. `0.0.0.0:8081`. No ingress route may reach it. Without it, auth serves no admin API |
+| `AUTH_ADMIN_LISTENER`, `AUTH_ADMIN_ORIGIN` | Optional address of the admin dashboard's listener, e.g. `0.0.0.0:8081`, and the dashboard's origin, e.g. `https://admin.piquel.fr`, set together. Only a private route may reach the listener. Without them, auth serves no dashboard |
 | `AUTH_KEY_ENCRYPTION_KEY` | Required env/file reference to the key that seals [signing keys](#signing-keys) in the database: 32 bytes as unpadded base64url text. A trailing newline is ignored |
 | `AUTH_TOKEN_DIGEST_KEY` | Required env/file reference to the key under which refresh tokens, authorization codes and pending logins are stored as HMAC digests. Its raw bytes are the key, at least 32 of them. Passkey decoys, email verification links and recovery links derive from it too |
 | `AUTH_TOKEN_DIGEST_KEY_ACCEPTED` | Optional env/file reference to another token digest key, accepted but never used for new digests: the next key, or the old one (see [changing the token digest key](#changing-the-token-digest-key)) |
@@ -141,7 +141,7 @@ signs at once.
 Revocation takes effect in two places, at different times:
 
 - **At auth:** within a minute, every replica stops accepting the key, for
-  access tokens at `UserInfo` and the admin API, and for `id_token_hint`s. The
+  access tokens at `UserInfo`, and for `id_token_hint`s. The
   tokens it legitimately signed stop working at auth too, so their users sign
   in again through SSO.
 - **Downstream:** verifiers that cached JWKS keep accepting the key until their
@@ -185,12 +185,12 @@ signup through GitHub or Google asks for the invitation on its own page. The
 database stores a digest, expiry and redemption time. Tokens expire after seven days by default; `h` and `d` are supported. A token
 is redeemed atomically with account creation, so a failed signup does not spend it.
 Disabling invitation enforcement affects signup only; existing users keep access.
-Administrators can also list, create and revoke invitations through the admin API.
+Administrators can also list, create and revoke invitations from the admin dashboard.
 
 ### Administration
 
 Every administrative operation has a command, which runs the same code as the
-admin API (`AdminService` in `apps/auth-service/src/admin`), and so does every
+admin dashboard (`AdminService` in `apps/auth-service/src/admin`), and so does every
 setting administrators may change on another account (`AccountService` in
 `apps/auth-service/src/account`). Commands need only
 `AUTH_DATABASE_URL` (`invite create` also needs `AUTH_PUBLIC_BASE_URL`, to build its
@@ -220,9 +220,9 @@ just auth account alice emails remove <email-id> --reason "Asked by email"
 ```
 
 - Accounts are named by username, ID or a verified email of an active account.
-- `--output json` prints the admin API's body for `user search` (`UserPage`), `user
-  show` (`UserDetail`), `audit` (`EventPage`), `client list`, `invite list` and
-  `admin list`, as defined in `crates/admin-api`. It changes only as the API does.
+- `--output json` prints the views the dashboard shows for `user search`
+  (`UserPage`), `user show` (`UserDetail`), `audit` (`EventPage`), `client list`,
+  `invite list` and `admin list`, as defined in `crates/admin-api`.
 - `user disable`, `user recover`, `user undo-recovery`, `session revoke-all`,
   `admin revoke`, `client
   disable|suspend|delete`, and `account … passkeys revoke`, `identities unlink` and
@@ -262,27 +262,26 @@ just auth account alice emails remove <email-id> --reason "Asked by email"
     last). `admin grant` refuses while a recovery of the account can still be
     undone; grant the rights again once it settles.
 - Each change is recorded as a domain event with the operator: `$USER` and the host
-  name. Unlike the admin API, the CLI may act on administrators' accounts, except
+  name. Unlike the dashboard, the CLI may act on administrators' accounts, except
   to recover one.
 - Failures print their causes and exit with 1; usage errors exit with 2.
 
 Administrators manage accounts, sessions, invitations and other administrators
-through the admin API, from the admin dashboard
-([apps/admin-web](apps/admin-web/README.md)). Auth serves the API only on
-`AUTH_ADMIN_LISTENER`, which no ingress route reaches: the dashboard calls it from
-its server, over the application's private network. Its routes, bodies and typed
-client are in `crates/admin-api`.
+from the admin dashboard, which auth serves on `AUTH_ADMIN_LISTENER` for the
+dashboard's origin, `AUTH_ADMIN_ORIGIN`, and which only a private route reaches.
+Its pages call `AdminService` in-process; there is no admin API.
 
-Every request carries an access token that auth issued to the dashboard,
-registered as the confidential OIDC client `piquel-admin` (the tokens' audience;
-deployments register it with `client apply`, see [OIDC clients](#oidc-clients)),
-for an administrator who signed in with a passkey. Auth checks on every request
-that the account is still an administrator and the token's session still active, so
-revoking either takes effect at once. Mutations also need a passkey confirmation
-from the last five minutes. Otherwise the API answers `401` with an RFC 9470
-step-up challenge, and the dashboard signs the administrator in again.
+An administrator signs in by a handoff from auth: the dashboard sends the browser
+to auth's `/admin` page, which needs a session signed in with a passkey, of an
+account that still holds administrator rights, and sends it back with a
+single-use code bound to that session and to the dashboard's state cookie. The
+dashboard's session lasts while that auth session does, and every request checks
+the administrator's rights again, so revoking either takes effect at once.
+Changes also need the dashboard's own passkey confirmation from the last five
+minutes, which the administrator gives on auth's `/admin` page, for the dashboard
+only. See [surfaces.md](docs/architecture/surfaces.md#adminpiquelfr).
 
-The API never changes an administrator's account: revoke their rights first.
+The dashboard never changes an administrator's account: revoke their rights first.
 Administrators cannot grant or revoke their own rights, and nobody can revoke the last
 administrator's. Every change is recorded as a domain event with its administrator
 or CLI operator.

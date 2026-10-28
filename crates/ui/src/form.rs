@@ -164,6 +164,20 @@ pub trait Query: Serialize {
             format!("{page}?{query}")
         })
     }
+
+    /// The URL of `page` on the origin of `base`, with this query: a link to
+    /// another origin's page.
+    ///
+    /// # Errors
+    ///
+    /// Fails if the query does not serialize as name-value pairs.
+    fn url(&self, base: &url::Url, page: &str) -> std::result::Result<url::Url, QueryError> {
+        let query = serde_urlencoded::to_string(self)?;
+        let mut url = base.clone();
+        url.set_path(page);
+        url.set_query((!query.is_empty()).then_some(query.as_str()));
+        Ok(url)
+    }
 }
 
 impl Query for () {}

@@ -1,24 +1,18 @@
-//! Who runs an administrative operation, and how the admin API authenticates them.
+//! Who runs an administrative operation: an administrator signed in to the admin
+//! dashboard, or an operator at the terminal.
 
 use super::AdminError;
-use crate::keys::SigningKeys;
-use axum::{
-    extract::{FromRef, FromRequestParts},
-    http::{HeaderMap, header, request::Parts},
-};
-use chrono::{DateTime, Utc};
-use piquel_admin_api::{AUDIENCE, CONFIRMATION_MAX_AGE};
+use crate::security::{CONFIRMATION_MAX_AGE, RequestContext};
+use chrono::{DateTime, Duration, Utc};
 use piquel_common::{
     SessionId, UserId,
     config::{ConfigurationError, Variable},
     events::{Actor, EventContext, RequestOrigin},
-    protocol::{
-        claims::{AccessTokenClaims, Acr},
-        jwt::TokenType,
-        step_up::StepUpRequirement,
-    },
+    protocol::{claims::Acr, step_up::StepUpRequirement},
 };
-use piquel_repository::{Database, DatabaseTransaction, StoredSession, StoredUser};
+use piquel_repository::{
+    Database, DatabaseTransaction, SessionAuthentication, StoredSession, StoredUser,
+};
 
 /// The operating system user running a command, recorded on the events it causes.
 const OS_USER: Variable = Variable::new("USER");
@@ -29,7 +23,7 @@ const HOST_NAME_FILE: &str = "/proc/sys/kernel/hostname";
 /// Recorded when the operator's user or host name cannot be read.
 const UNKNOWN_OPERATOR: &str = "unknown";
 
-/// Any passkey sign-in, however old: what every admin API request needs.
+/// Any passkey sign-in, however old: what every read needs.
 const PASSKEY: StepUpRequirement = StepUpRequirement {
     acr: Some(Acr::PhishingResistant),
     max_age: None,
@@ -37,11 +31,11 @@ const PASSKEY: StepUpRequirement = StepUpRequirement {
 /// A passkey confirmation recent enough for a mutation.
 const RECENT_PASSKEY: StepUpRequirement = StepUpRequirement::passkey_within(CONFIRMATION_MAX_AGE);
 
-/// Who runs an administrative operation: an administrator through the admin API,
-/// or an operator at the command line.
-#[derive(Clone, Debug, PartialEq, Eq)]
+/// Who runs an administrative operation: an administrator through the admin
+/// dashboard, or an operator at the command line.
+#[derive(Clone, Debug)]
 pub enum Operator {
-    /// An administrator, authenticated by an access token the dashboard holds.
+    /// An administrator, signed in to the dashboard.
     Admin(AdminSession),
     /// An operator running `auth-service`.
     Cli {
@@ -52,19 +46,21 @@ pub enum Operator {
     },
 }
 
-/// An administrator signed in to the admin API. Its fields are private to the
-/// admin module, so only [`AdminTokens`] creates one, from a token it verified: no
-/// other code can act as an administrator.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+/// An administrator signed in to the admin dashboard. Its fields are private to
+/// the admin module, so only [`DashboardSignIn`](super::DashboardSignIn) creates
+/// one, from the dashboard's session cookie: no other code can act as an
+/// administrator.
+#[derive(Clone, Copy, Debug)]
 pub struct AdminSession {
     /// The administrator's account.
     pub(super) user_id: UserId,
-    /// The session the token was issued from.
+    /// The auth session the dashboard's session rests on.
     pub(super) session_id: SessionId,
-    /// How that session had authenticated, as the token reports it.
-    pub(super) acr: Option<Acr>,
-    /// When it had, as the token reports it.
-    pub(super) auth_time: Option<DateTime<Utc>>,
+    /// When a passkey last confirmed the dashboard's session, for it: a
+    /// confirmation of the auth session never counts.
+    pub(super) confirmed_at: Option<DateTime<Utc>>,
+    /// Where the administrator's request came from.
+    pub(super) context: RequestContext,
 }
 
 impl Operator {
@@ -84,21 +80,36 @@ impl Operator {
         })
     }
 
-    /// Attributes events to this operator. Neither carries a client origin: the
-    /// admin API's caller is the dashboard's server, not the administrator's browser.
+    /// Attributes events to this operator: an administrator from their browser's
+    /// request, an operator from the terminal, which has no client origin.
     #[must_use]
     pub fn context(&self) -> EventContext {
-        let actor = match self.clone() {
-            Self::Admin(session) => Actor::Admin {
+        match self.clone() {
+            Self::Admin(session) => session.context.actor(Actor::Admin {
                 user_id: session.user_id,
                 session_id: session.session_id,
+            }),
+            Self::Cli { os_user, host } => EventContext {
+                actor: Actor::Cli { os_user, host },
+                origin: RequestOrigin::default(),
+                reason: None,
             },
-            Self::Cli { os_user, host } => Actor::Cli { os_user, host },
-        };
-        EventContext {
-            actor,
-            origin: RequestOrigin::default(),
-            reason: None,
+        }
+    }
+
+    /// Whether the operator's passkey confirmation will still meet a mutation's
+    /// requirement `ahead` from now, so that a form shown now can still be
+    /// submitted. The terminal needs none.
+    pub(crate) fn is_confirmed(&self, ahead: Duration) -> bool {
+        match self {
+            Self::Admin(session) => RECENT_PASSKEY
+                .check(
+                    Some(&Acr::PhishingResistant),
+                    session.confirmed_at,
+                    Utc::now() + ahead,
+                )
+                .is_ok(),
+            Self::Cli { .. } => true,
         }
     }
 
@@ -190,131 +201,26 @@ impl Operator {
 }
 
 impl AdminSession {
-    /// Requires `stored`, this session as read now, to be active and this
+    /// Requires `stored`, the auth session as read now, to be active and this
     /// administrator's, the account to still be an administrator (`held`), and the
-    /// session's sign-in to meet `requirement`. Every check of an administrator
-    /// comes down to this one.
+    /// session to meet `requirement`: signed in with a passkey, and for a mutation,
+    /// the dashboard's own confirmation recent enough. Every check of an
+    /// administrator comes down to this one.
     fn check(
         &self,
         stored: Option<StoredSession>,
         held: bool,
         requirement: StepUpRequirement,
     ) -> Result<(), AdminError> {
-        stored
+        let stored = stored
             .filter(|session| session.user_id == self.user_id && session.expires_at > Utc::now())
             .ok_or(AdminError::SessionEnded)?;
         if !held {
             return Err(AdminError::NotAdministrator);
         }
+        let signed_in = SessionAuthentication::from(&stored).acr;
         requirement
-            .check(self.acr.as_ref(), self.auth_time, Utc::now())
+            .check(Some(&signed_in), self.confirmed_at, Utc::now())
             .map_err(AdminError::StepUpRequired)
     }
 }
-
-/// Verifies admin API access tokens with auth's own signing keys.
-#[derive(Clone)]
-pub(crate) struct AdminTokens {
-    /// Keys that signed the tokens.
-    pub(super) keys: SigningKeys,
-    /// The issuer the tokens must name.
-    pub(super) issuer: String,
-    /// Holds the sessions and administrator rights checked on each request.
-    pub(super) database: Database,
-}
-
-impl AdminTokens {
-    /// Authenticates the request's administrator: a valid access token for the
-    /// admin API, from an active session of an administrator, whose sign-in meets
-    /// `requirement`. The rights and session are read now, not from the token, so
-    /// revoking either takes effect on the next request.
-    async fn authenticate(
-        &self,
-        headers: &HeaderMap,
-        requirement: StepUpRequirement,
-    ) -> Result<Operator, AdminError> {
-        let claims: AccessTokenClaims = self
-            .keys
-            .current()
-            .verify(Self::bearer(headers)?, TokenType::Access, &self.issuer)
-            .map_err(AdminError::InvalidToken)?;
-        let user_id: UserId = claims.sub.parse().map_err(|_| AdminError::WrongToken)?;
-        let session_id = claims
-            .authentication
-            .sid
-            .filter(|_| claims.aud.contains(AUDIENCE))
-            .ok_or(AdminError::WrongToken)?;
-        let session = AdminSession {
-            user_id,
-            session_id,
-            acr: claims.authentication.acr,
-            auth_time: claims.authentication.auth_time,
-        };
-        session.check(
-            self.database
-                .sessions()
-                .find_active_by_id(session_id)
-                .await?,
-            self.database.administrators().contains(user_id).await?,
-            requirement,
-        )?;
-        Ok(Operator::Admin(session))
-    }
-
-    /// The token of the request's one `Authorization: Bearer` header. Another scheme
-    /// counts as no token.
-    fn bearer(headers: &HeaderMap) -> Result<&str, AdminError> {
-        let mut values = headers.get_all(header::AUTHORIZATION).iter();
-        let (Some(value), None) = (values.next(), values.next()) else {
-            return Err(if headers.contains_key(header::AUTHORIZATION) {
-                AdminError::MalformedAuthorization
-            } else {
-                AdminError::MissingToken
-            });
-        };
-        let value = value
-            .to_str()
-            .map_err(|_| AdminError::MalformedAuthorization)?;
-        let (scheme, token) = value.split_once(' ').unwrap_or((value, ""));
-        if !scheme.eq_ignore_ascii_case("Bearer") {
-            return Err(AdminError::MissingToken);
-        }
-        match token.trim() {
-            "" => Err(AdminError::MalformedAuthorization),
-            token => Ok(token),
-        }
-    }
-}
-
-/// An administrator signed in with a passkey. Every read takes it.
-pub(crate) struct Admin(pub Operator);
-/// An administrator with a passkey confirmation at most [`CONFIRMATION_MAX_AGE`]
-/// seconds old. Every mutation takes it, and rechecks the caller with
-/// [`Operator::authorize`] inside its transaction.
-pub(crate) struct ConfirmedAdmin(pub Operator);
-
-/// Implements extraction for an administrator whose sign-in meets `$requirement`.
-macro_rules! admin_extractor {
-    ($name:ident, $requirement:expr) => {
-        impl<S> FromRequestParts<S> for $name
-        where
-            AdminTokens: FromRef<S>,
-            S: Send + Sync,
-        {
-            type Rejection = AdminError;
-            /// Authenticates the bearer token against the application's state.
-            async fn from_request_parts(
-                parts: &mut Parts,
-                state: &S,
-            ) -> Result<Self, Self::Rejection> {
-                Ok(Self(
-                    AdminTokens::from_ref(state)
-                        .authenticate(&parts.headers, $requirement)
-                        .await?,
-                ))
-            }
-        }
-    };
-}
-admin_extractor!(Admin, PASSKEY);
-admin_extractor!(ConfirmedAdmin, RECENT_PASSKEY);

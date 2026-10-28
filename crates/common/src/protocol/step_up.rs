@@ -8,7 +8,7 @@ use chrono::{DateTime, TimeDelta, Utc};
 use serde::{Deserialize, Serialize};
 
 /// Longest time, in seconds, since the passkey confirmation auth's protected
-/// actions accept: sensitive account changes and admin API mutations. The
+/// actions accept: sensitive account changes and admin dashboard changes. The
 /// confirmation happens just before the action, so it can be short.
 pub const CONFIRMATION_MAX_AGE: u32 = 300;
 

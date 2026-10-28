@@ -65,7 +65,7 @@ pub struct PendingVerification {
 }
 
 impl From<StoredEmail> for Email {
-    /// The address as the admin API shows it.
+    /// The address as the admin dashboard shows it.
     fn from(email: StoredEmail) -> Self {
         Self {
             address: email.normalized_email,

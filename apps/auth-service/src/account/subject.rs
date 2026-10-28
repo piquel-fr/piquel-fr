@@ -33,8 +33,8 @@ pub(crate) struct Owner {
 /// administrator may also make take it instead of a session, so they serve the
 /// owner and operators alike. Its fields are private: an owner's comes only from
 /// their [`Owner`], and an operator's from
-/// [`Self::operator`], with their reason and an [`Operator`] only the admin API's
-/// authenticator or the CLI creates. An operator cannot make a change without a
+/// [`Self::operator`], with their reason and an [`Operator`] only the dashboard's
+/// sign-in or the CLI creates. An operator cannot make a change without a
 /// reason: a read takes a [`Viewer`] instead.
 pub(crate) struct Subject {
     /// The account.

@@ -1,26 +1,17 @@
 [package]
 name = "piquel-admin-api"
-description = "Paths and bodies of auth's private admin API, shared with the admin dashboard"
+description = "The views of administration: what the admin dashboard shows and the CLI prints"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
 repository.workspace = true
 
-[features]
-# `AdminClient`, the typed client the dashboard calls the API with.
-client = ["dep:reqwest", "dep:thiserror"]
-
 [dependencies]
 piquel-common.workspace = true
 chrono.workspace = true
-reqwest = { workspace = true, optional = true }
 serde.workspace = true
 serde_json.workspace = true
-thiserror = { workspace = true, optional = true }
 url.workspace = true
-
-[dev-dependencies]
-tokio.workspace = true
 
 [lints]
 workspace = true

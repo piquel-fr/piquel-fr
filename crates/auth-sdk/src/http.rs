@@ -45,7 +45,8 @@ pub enum NetworkError {
 
 impl NetworkError {
     /// Whether the request never reached the server: the client could not be built,
-    /// or the connection could not be opened.
+    /// or the connection could not be opened. Only the axum login routes ask.
+    #[cfg(feature = "axum")]
     pub(crate) fn unsent(&self) -> bool {
         match self {
             Self::Client(_) => true,

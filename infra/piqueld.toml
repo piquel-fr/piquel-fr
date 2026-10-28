@@ -27,8 +27,8 @@ branch = "main"
 invite_required = "true"
 # See "Running several replicas" in infra/README.md before raising it.
 auth_replicas = 1
-# Where auth and the admin dashboard send telemetry: the `telemetry`
-# application's collector, imported below. Empty sends none.
+# Where auth, with the admin dashboard it serves, sends telemetry: the
+# `telemetry` application's collector, imported below. Empty sends none.
 otlp_endpoint = "http://collector.telemetry:4318"
 
 [spec.environments.production]
@@ -87,12 +87,13 @@ service = "auth"
 port = 8080
 visibility = "public"
 
-# The admin dashboard is reachable only from the tailnet, in every environment.
+# The admin dashboard, which auth serves on its admin listener, is reachable only
+# from the tailnet, in every environment.
 [[spec.routes]]
 name = "admin"
 hostname = "${{ vars.admin_host }}"
-service = "admin"
-port = 8080
+service = "auth"
+port = 8081
 visibility = "private"
 
 # Routes cannot be limited to one environment, so staging and previews redirect
@@ -141,12 +142,6 @@ generate = { type = "random", bytes = 32, encoding = "base64url" }
 name = "signing-key"
 generate = { type = "rsa", bits = 3072 }
 
-# The `piquel-admin` OIDC client's secret. The dashboard authenticates with it,
-# and the `admin-client` job registers it with auth.
-[[spec.secrets]]
-name = "admin-client-secret"
-generate = { type = "random", bytes = 32, encoding = "base64url" }
-
 # Applies migrations as the superuser, then creates or resets `piquel_auth`.
 [[spec.jobs]]
 name = "migrate"
@@ -171,21 +166,6 @@ service = "auth"
 command = ["auth-service", "keys", "import", "file:///run/secrets/signing-key"]
 run = "before-rollout"
 
-# Registers the admin dashboard as the trusted OIDC client `piquel-admin`, or
-# brings its registration and secret in line, on every deploy after migrations.
-[[spec.jobs]]
-name = "admin-client"
-service = "auth"
-command = [
-  "auth-service", "client", "apply", "piquel-admin",
-  "--name", "Piquel admin", "--confidential", "--refresh", "--trusted",
-  "--redirect-uri", "https://${{ vars.admin_host }}/auth/callback",
-  "--post-logout-uri", "https://${{ vars.admin_host }}/",
-  "--scope", "openid", "--scope", "profile", "--scope", "offline_access",
-  "--secret", "file:///run/secrets/admin-client-secret",
-]
-run = "before-rollout"
-
 [[spec.services]]
 name = "auth"
 depends_on = ["postgres"]
@@ -207,10 +187,10 @@ AUTH_KEY_ENCRYPTION_KEY = "file:///run/secrets/key-encryption-key"
 AUTH_TOKEN_DIGEST_KEY = "file:///run/secrets/signing-key"
 AUTH_TOKEN_DIGEST_KEY_ACCEPTED = "file:///run/secrets/token-digest-key"
 AUTH_PUBLIC_LISTENER = "0.0.0.0:8080"
-# The admin API. No route exposes this port, so only services on the
-# application's private network reach it, and each call needs an
-# administrator's access token.
+# The admin dashboard, which only the private `admin` route reaches, for its own
+# origin.
 AUTH_ADMIN_LISTENER = "0.0.0.0:8081"
+AUTH_ADMIN_ORIGIN = "https://${{ vars.admin_host }}"
 AUTH_PUBLIC_BASE_URL = "https://${{ vars.auth_host }}"
 AUTH_INVITE_REQUIRED = "${{ vars.invite_required }}"
 AUTH_SMTP_URL = "smtps://resend@smtp.resend.com:465"
@@ -235,10 +215,6 @@ target = "/run/secrets/token-digest-key"
 name = "signing-key"
 target = "/run/secrets/signing-key"
 
-[[spec.services.secrets]]
-name = "admin-client-secret"
-target = "/run/secrets/admin-client-secret"
-
 # Set by hand with `piquelctl app secret`, not generated: see "Email" in
 # infra/README.md.
 [[spec.services.secrets]]
@@ -249,39 +225,6 @@ target = "/run/secrets/smtp-password"
 type = "http"
 port = 8080
 path = "/health/ready"
-
-[[spec.services]]
-name = "admin"
-depends_on = ["auth"]
-
-[spec.services.source]
-type = "git"
-repository = "self"
-
-[spec.services.source.build]
-type = "docker"
-dockerfile = "infra/admin.Dockerfile"
-
-# The dashboard calls the admin API on auth's private listener; it has no
-# database credentials.
-[spec.services.environment]
-ADMIN_AUTH_ORIGIN = "https://${{ vars.auth_host }}"
-ADMIN_API_URL = "http://auth:8081"
-ADMIN_ORIGIN = "https://${{ vars.admin_host }}"
-ADMIN_CLIENT_SECRET = "file:///run/secrets/admin-client-secret"
-ADMIN_LISTENER = "0.0.0.0:8080"
-OTEL_EXPORTER_OTLP_ENDPOINT = "${{ vars.otlp_endpoint }}"
-OTEL_RESOURCE_ATTRIBUTES = "deployment.environment.name=${{ env.name }}"
-
-[[spec.services.secrets]]
-name = "admin-client-secret"
-target = "/run/secrets/admin-client-secret"
-
-# Does not call auth, so the dashboard starts while auth's route comes up.
-[spec.services.healthcheck]
-type = "http"
-port = 8080
-path = "/healthz"
 
 [[spec.services]]
 name = "postgres"

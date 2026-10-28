@@ -50,9 +50,9 @@ Only `Database::provision` runs unchecked SQL: DDL takes no bind parameters, so 
 checked query renders its script (`src/connection/runtime_role.sql`) with
 `format`, which quotes the values, and `raw_sql` runs it.
 
-Queries only the admin API reads decode straight into its bodies from
-`piquel-admin-api`. Records that auth also uses elsewhere convert into those bodies
-with `From`, leaving out what the API never shows, so no record repeats an API body.
+Queries only administration reads decode straight into its views from
+`piquel-admin-api`. Records that auth also uses elsewhere convert into those views
+with `From`, leaving out what administrators never see, so no record repeats a view.
 
 The cache in `.sqlx/` is committed, and `.cargo/config.toml` sets
 `SQLX_OFFLINE=true`, so builds, including image builds, never connect to a

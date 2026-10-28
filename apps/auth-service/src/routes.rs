@@ -31,6 +31,12 @@ pub(crate) mod passkey {
     pub(crate) const LIST: &str = "/account/passkeys";
     /// Renames or removes one passkey.
     pub(crate) const ITEM: &str = "/account/passkeys/{id}";
+    /// The passkey proof the admin dashboard's handoff page posts, which counts
+    /// for that handoff only: the passkey script starts it at
+    /// [`ADMIN_PROOF_START`].
+    pub(crate) const ADMIN_PROOF: &str = "/admin/proof";
+    /// Starts the passkey proof of a handoff to the admin dashboard.
+    pub(crate) const ADMIN_PROOF_START: &str = "/admin/proof/start";
 }
 
 /// Social sign-in and linked identities.
@@ -114,10 +120,24 @@ pub(crate) mod oidc {
     pub(crate) const LOGOUT: &str = "/oidc/logout";
 }
 
-/// The admin API, served only on the private admin listener. The paths are shared
-/// with the dashboard through `piquel-admin-api`.
-pub(crate) mod admin {
-    pub(crate) use piquel_admin_api::paths::*;
+/// The admin dashboard, on its own origin, which the admin listener serves. Its
+/// pages declare their own paths, under these prefixes.
+pub(crate) mod dashboard {
+    /// Redeems auth's handoff code, signing the browser in to the dashboard.
+    pub(crate) const SIGN_IN: &str = "/sign-in";
+    /// Every path the dashboard serves is one of these, or under one: the admin
+    /// listener mounts the pages on them, and nowhere else.
+    pub(crate) const PREFIXES: [&str; 9] = [
+        "/",
+        SIGN_IN,
+        "/sign-out",
+        "/assets",
+        "/users",
+        "/administrators",
+        "/invitations",
+        "/clients",
+        "/events",
+    ];
 }
 
 /// Pages browsers visit. Each server-rendered page answers `GET` with the page and
@@ -138,6 +158,8 @@ pub(crate) mod page {
     pub(crate) const RECOVER: &str = "/recover";
     /// Undoes a recovery, whose ID is in the fragment; the notices link to it.
     pub(crate) const RECOVER_UNDO: &str = "/recover/undo";
+    /// Hands an administrator's passkey session off to the admin dashboard.
+    pub(crate) const ADMIN: &str = "/admin";
 
     /// The account's settings, at the paths piquel.fr served them on, so its redirect
     /// keeps old links and sent emails working.
@@ -181,11 +203,12 @@ pub(crate) mod page {
 
     /// Every server-rendered page's route, which the security layer classifies as
     /// pages.
-    pub(crate) const ALL: [&str; 17] = [
+    pub(crate) const ALL: [&str; 18] = [
         LOGIN,
         REGISTER,
         CONSENT,
         LOGOUT,
+        ADMIN,
         settings::HOME,
         settings::EMAILS,
         settings::VERIFY,

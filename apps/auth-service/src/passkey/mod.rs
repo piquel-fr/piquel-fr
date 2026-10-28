@@ -13,7 +13,7 @@ use axum::{
     routing::{get, post},
 };
 use piquel_common::{
-    AccountStatus, AuthenticationMethod, Handle, PasskeyId, RecoveryId, UserId,
+    AccountStatus, AuthenticationMethod, Handle, PasskeyId, RecoveryId, SessionId, UserId,
     events::{Actor, DomainEvent, EventContext, RevocationReason},
     protocol::api,
 };
@@ -37,8 +37,8 @@ mod error;
 mod types;
 
 use ceremonies::{
-    AuthenticationCeremony, Ceremony, ConfirmationCeremony, DiscoverCeremony, EnrollmentCeremony,
-    LoginCeremony, RecoveryCeremony, RegistrationCeremony, UndoCeremony,
+    AdminProofCeremony, AuthenticationCeremony, Ceremony, ConfirmationCeremony, DiscoverCeremony,
+    EnrollmentCeremony, LoginCeremony, RecoveryCeremony, RegistrationCeremony, UndoCeremony,
 };
 pub use error::PasskeyConfigError;
 pub(crate) use error::PasskeyError;
@@ -125,6 +125,10 @@ impl PasskeyApplication {
             .route(routes::recovery::STATUS, get(Self::recovery))
             .route(routes::recovery::UNDO_START, post(Self::start_undo))
             .route(routes::recovery::UNDO_FINISH, post(Self::finish_undo))
+            .route(
+                routes::passkey::ADMIN_PROOF_START,
+                post(Self::start_admin_proof),
+            )
             .with_state(self)
     }
 
@@ -722,6 +726,75 @@ impl PasskeyApplication {
         Ok(response)
     }
 
+    /// Starts the passkey proof of a handoff to the admin dashboard, tied to the
+    /// current signed-in session. Its page posts the assertion with the handoff,
+    /// which [`Self::verify_admin_proof`] checks.
+    async fn start_admin_proof(
+        State(app): State<Self>,
+        security::Session(session): security::Session,
+        headers: HeaderMap,
+    ) -> Result<Response, ApiError> {
+        let (challenge, state) = app
+            .webauthn
+            .start_passkey_authentication(&app.keys(session.user_id).await?)
+            .map_err(PasskeyError::from)?;
+        Ok(app
+            .start(
+                &headers,
+                Ceremony::AdminProof(AdminProofCeremony {
+                    user_id: session.user_id,
+                    session_id: session.id,
+                    state,
+                }),
+                challenge,
+            )
+            .await?)
+    }
+
+    /// Verifies the passkey `assertion` a handoff to the admin dashboard posted, as
+    /// JSON, for `owner`: the browser's admin proof ceremony, which `owner`'s
+    /// session started, is consumed, and its assertion accepted. The session stays
+    /// as it was. A recovery's passkey during its probation proves nothing.
+    pub(crate) async fn verify_admin_proof(
+        &self,
+        headers: &HeaderMap,
+        owner: &Owner,
+        assertion: &str,
+    ) -> Result<AdminProof, ApiError> {
+        let input: AuthenticationFinish = serde_json::from_str(assertion)
+            .map_err(|_| ApiError::bad_request("The passkey proof is malformed. Try again."))?;
+        let AdminProofCeremony {
+            user_id,
+            session_id,
+            state,
+        } = self
+            .consume::<AdminProofCeremony>(headers, input.ceremony_id)
+            .await?;
+        let session = owner.session();
+        if session.user_id != user_id || session.id != session_id {
+            return Err(PasskeyError::SessionChanged.into());
+        }
+        let verified = self
+            .webauthn
+            .finish_passkey_authentication(&input.credential, &state);
+        let actor = Actor::User {
+            user_id,
+            session_id: Some(session_id),
+        };
+        let (tx, credential) = self
+            .accept_credential::<Credential>(owner.request(), actor, user_id, verified)
+            .await?;
+        if let Credential::Probation(probation) = credential {
+            let settles_at = probation.settles_at();
+            return Err(RecoveryError::Probation { settles_at }.into());
+        }
+        tx.commit().await.map_err(PasskeyError::from)?;
+        Ok(AdminProof {
+            session_id,
+            at: chrono::Utc::now(),
+        })
+    }
+
     /// Starts another passkey registration, excluding the account's current credentials.
     async fn start_enrollment(
         State(app): State<Self>,
@@ -975,6 +1048,39 @@ impl PasskeyApplication {
             accepted,
         };
         Ok((tx, undo))
+    }
+}
+
+/// A passkey proof of a handoff to the admin dashboard: its ceremony, which the
+/// session handing off started, was consumed and its assertion accepted. Only
+/// [`PasskeyApplication::verify_admin_proof`] builds one, so a dashboard session
+/// counts as confirmed only after a passkey proved it, for it.
+pub(crate) struct AdminProof {
+    /// The session that started the ceremony.
+    session_id: SessionId,
+    /// When the passkey proved it.
+    at: chrono::DateTime<chrono::Utc>,
+}
+
+impl AdminProof {
+    /// The session that started the ceremony.
+    pub(crate) const fn session_id(&self) -> SessionId {
+        self.session_id
+    }
+
+    /// When the passkey proved it.
+    pub(crate) const fn at(&self) -> chrono::DateTime<chrono::Utc> {
+        self.at
+    }
+
+    /// A proof of `session_id` at `at`, as if verified: a fixture for the
+    /// handoff's own checks.
+    #[cfg(test)]
+    pub(crate) const fn unverified(
+        session_id: SessionId,
+        at: chrono::DateTime<chrono::Utc>,
+    ) -> Self {
+        Self { session_id, at }
     }
 }
 

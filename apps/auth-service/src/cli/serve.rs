@@ -1,4 +1,4 @@
-//! Serving the public listener and, when configured, the private admin listener.
+//! Serving the public listener and, when configured, the admin dashboard's listener.
 
 use super::{CliError, Command};
 use crate::{AuthConfig, Jobs, KeyStore};
@@ -9,29 +9,35 @@ use tokio::{net::TcpListener, sync::watch};
 
 impl Command {
     /// Builds the configured service, loads its signing keys, starts background
-    /// jobs and serves the public listener, and the admin listener when one is configured,
+    /// jobs and serves the public listener, and the admin dashboard's listener when
+    /// one is configured,
     /// until a shutdown signal. Once in-flight requests drain, running jobs get a
     /// grace period to finish.
     pub(super) async fn serve(database: Database) -> Result<(), CliError> {
         let config = AuthConfig::from_environment()?;
         let public = TcpListener::bind(config.public_listener).await?;
-        let admin = match config.admin_listener {
-            Some(address) => Some(TcpListener::bind(address).await?),
+        let admin = match &config.dashboard {
+            Some(dashboard) => Some((TcpListener::bind(dashboard.listener).await?, dashboard)),
             None => None,
         };
         let store = KeyStore::new(database.clone(), Arc::clone(&config.key_encryption_key));
         let keys = store.start().await?;
         let router = config.router(database.clone(), &keys)?;
-        let admin_router = config.admin_router(database.clone(), &keys);
+        let admin = match admin {
+            Some((listener, dashboard)) => {
+                Some((listener, config.admin_router(database.clone(), dashboard)?))
+            }
+            None => None,
+        };
         database.observe_connections();
         let jobs = Jobs::start(&database, &config, &store, &keys)?;
         tracing::info!(address=%config.public_listener,"authentication service listening");
         let (stop, _) = watch::channel(false);
         let admin = async {
-            let Some(listener) = admin else {
+            let Some((listener, admin_router)) = admin else {
                 return Ok(());
             };
-            tracing::info!(address=%listener.local_addr()?, "admin API listening");
+            tracing::info!(address=%listener.local_addr()?, "admin dashboard listening");
             Self::listen(listener, admin_router, &stop).await
         };
         let signal = async {

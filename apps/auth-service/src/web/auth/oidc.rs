@@ -1,7 +1,7 @@
 //! The consent page and the confirmation of an application's logout request. Both
 //! complete an OAuth flow in-process, then send the browser on.
 
-use super::{Failure, WebApplication};
+use crate::web::{Failure, WebApplication};
 use crate::{
     oidc::{AuthorizationDecision, LogoutQuery, OAuthError, TransactionQuery},
     routes,
@@ -19,7 +19,7 @@ use url::Url;
 impl WebApplication {
     /// `GET /authorize?transaction=…`: what the application asks to receive, and the
     /// buttons deciding on it.
-    pub(super) async fn consent(cx: &Cx) -> Result<Response, Failure> {
+    pub(in crate::web) async fn consent(cx: &Cx) -> Result<Response, Failure> {
         let web = app_context::<Self>(cx);
         let TransactionQuery { transaction } = Self::query(cx)?;
         let request = web
@@ -50,7 +50,7 @@ impl WebApplication {
 
     /// `POST /authorize`: records the decision and sends the browser to the
     /// application, with a code or the refusal.
-    pub(super) async fn decide(cx: &Cx, body: Body) -> Result<Response, Failure> {
+    pub(in crate::web) async fn decide(cx: &Cx, body: Body) -> Result<Response, Failure> {
         let web = app_context::<Self>(cx);
         let context = Self::context(cx)?;
         let decision: AuthorizationDecision = Self::form(cx, body).await?;
@@ -65,7 +65,7 @@ impl WebApplication {
 
     /// `GET /logout?…`: asks to confirm an application's logout request, which
     /// `GET /oidc/logout` sends here once it is valid.
-    pub(super) async fn logout(cx: &Cx) -> Result<Response, Failure> {
+    pub(in crate::web) async fn logout(cx: &Cx) -> Result<Response, Failure> {
         let web = app_context::<Self>(cx);
         let request: LogoutQuery = Self::query(cx)?;
         let (destination, _) = web.oidc.logout_destination(&request).await?;
@@ -87,7 +87,7 @@ impl WebApplication {
 
     /// `POST /logout`: ends the session and sends the browser where the application
     /// asked, or to sign-in.
-    pub(super) async fn end_session(cx: &Cx, body: Body) -> Result<Response, Failure> {
+    pub(in crate::web) async fn end_session(cx: &Cx, body: Body) -> Result<Response, Failure> {
         let web = app_context::<Self>(cx);
         let context = Self::context(cx)?;
         let request: LogoutQuery = Self::form(cx, body).await?;

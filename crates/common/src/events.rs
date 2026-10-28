@@ -848,7 +848,7 @@ crate::str_enum! {
     pub enum HistoryActor {
         /// The account's own user.
         Account = "account",
-        /// An administrator, through the admin API.
+        /// An administrator, through the admin dashboard.
         Admin = "admin",
         /// An operator, through the service's command line.
         Operator = "operator",
@@ -955,7 +955,7 @@ pub enum Actor {
         /// The session acting, once there is one.
         session_id: Option<SessionId>,
     },
-    /// An administrator, through the admin API.
+    /// An administrator, through the admin dashboard.
     Admin {
         /// The administrator's account.
         user_id: UserId,

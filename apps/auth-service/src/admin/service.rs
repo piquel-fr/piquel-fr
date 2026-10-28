@@ -1,4 +1,4 @@
-//! Every administrative operation, shared by the admin API and the CLI.
+//! Every administrative operation, shared by the admin dashboard and the CLI.
 
 use super::{AdminError, HandleIssue, HandleProblem, InviteExpiry, Operator, Reason, UserRef};
 use crate::{
@@ -6,6 +6,7 @@ use crate::{
     account::AccountService,
     emails::EmailApplication,
     recovery::{LINK_LIFETIME, PROBATION, RecoveryLinks, Revoke},
+    routes,
 };
 use chrono::Utc;
 use piquel_admin_api::{
@@ -24,6 +25,7 @@ use piquel_repository::{
     Database, DatabaseError, DatabaseTransaction, DeliveryStatus, DeliverySummary, EventFilter,
     InsertRecovery, RecentRecovery, SessionScope, StoredOidcClient,
 };
+use piquel_ui::{LoginQuery, Query};
 use std::collections::BTreeMap;
 use url::Url;
 
@@ -31,12 +33,8 @@ use url::Url;
 const USER_PAGE_SIZE: u16 = 50;
 /// Events per page.
 const EVENT_PAGE_SIZE: u16 = 100;
-/// Registration page used by generated signup links.
-const REGISTRATION_PATH: &str = "/register";
-/// Invitation proof sent to the registration page.
-const INVITATION_PARAMETER: &str = "invitation";
 
-/// Owns each administrative operation. HTTP handlers and CLI commands are thin
+/// Owns each administrative operation. Dashboard pages and CLI commands are thin
 /// adapters that say which [`Operator`] acts. Every mutation, and viewing an
 /// account's details, records a domain event attributed to it in the same
 /// transaction.
@@ -47,8 +45,8 @@ const INVITATION_PARAMETER: &str = "invitation";
 /// passkey (`Operator::authorize_read`). Mutations recheck that an administrator
 /// still holds their rights, session and recent confirmation after their last
 /// write, just before committing. Those on accounts refuse
-/// administrator accounts unless the CLI acts, so a stolen admin token cannot lock
-/// other administrators out; revoking their rights comes first, and is itself
+/// administrator accounts unless the CLI acts, so a stolen dashboard session
+/// cannot lock other administrators out; revoking their rights comes first, and is itself
 /// guarded.
 #[derive(Clone)]
 pub struct AdminService {
@@ -179,7 +177,7 @@ impl AdminService {
         Ok(detail)
     }
 
-    /// Shows each stored record without what the API never returns.
+    /// Shows each stored record without what the dashboard and CLI never show.
     fn views<S: Into<T>, T>(records: Vec<S>) -> Vec<T> {
         records.into_iter().map(Into::into).collect()
     }
@@ -521,9 +519,11 @@ impl AdminService {
             .await?;
         let created = DomainEvent::InvitationCreated { expires_at };
         Self::finish(tx, operator, None, vec![created]).await?;
-        let mut url = origin.url(REGISTRATION_PATH);
-        url.query_pairs_mut()
-            .append_pair(INVITATION_PARAMETER, &secret.encoded());
+        let url = LoginQuery {
+            invitation: Some(secret.encoded()),
+            ..LoginQuery::default()
+        }
+        .url(origin.as_url(), routes::page::REGISTER)?;
         Ok(CreatedInvitation {
             id,
             url,
@@ -552,17 +552,6 @@ impl AdminService {
     ) -> Result<Vec<Client>, AdminError> {
         operator.authorize_read(&self.database).await?;
         Ok(Self::views(self.database.oidc().list_clients().await?))
-    }
-
-    /// Describes one OIDC client.
-    pub(crate) async fn client(&self, operator: &Operator, id: &str) -> Result<Client, AdminError> {
-        operator.authorize_read(&self.database).await?;
-        self.database
-            .oidc()
-            .find_client(id)
-            .await?
-            .map(Into::into)
-            .ok_or(AdminError::ClientNotFound)
     }
 
     /// Describes one OIDC client as stored, with the lifetimes of its secrets.
