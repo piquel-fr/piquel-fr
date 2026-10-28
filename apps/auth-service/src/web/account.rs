@@ -407,9 +407,8 @@ impl WebApplication {
             }
             Err(error) => return Err(error.into()),
         };
-        let session = reader.owner().session();
-        // A recovery's passkey never confirms a session; a passkey from before does.
-        let confirmed = session.passkey_confirmed_at.is_some();
+        let session = reader.owner().session_id();
+        let confirmed = reader.owner().was_passkey_confirmed();
         let page = view! { cx =>
             piquel_ui::account(
                 section: section,
@@ -421,7 +420,7 @@ impl WebApplication {
                     if let Some(recovery) = reader.recovery() {
                         piquel_ui::recovery_banner(
                             recovery: recovery,
-                            session: session.id,
+                            session: session,
                             confirmed: confirmed,
                             undo: page::RECOVER_UNDO,
                         )

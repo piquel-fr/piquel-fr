@@ -162,7 +162,7 @@ impl AccountService {
         if evidence.link_user_id != Some(user)
             || evidence
                 .link_session_id
-                .is_some_and(|id| id != owner.session().id)
+                .is_some_and(|id| id != owner.session_id())
         {
             return Err(FederationError::LinkAccountMismatch.into());
         }

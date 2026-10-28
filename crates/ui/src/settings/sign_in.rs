@@ -154,7 +154,11 @@ async fn passkey_list<'a>(
                 }
                 Some(RecoveryStage::Probation { settles_at, .. }) => {
                     <p class="help">
-                        (format!("Only {} can be removed until the recovery settles on ", RecoveryPasskey::NAME))
+                        (if added.is_some() && count > 1 {
+                            format!("Only {} can be removed until the recovery settles on ", RecoveryPasskey::NAME)
+                        } else {
+                            "Passkeys can't be removed until the recovery settles on ".to_owned()
+                        })
                         time(at: settles_at, precision: Precision::Day)
                         "."
                     </p>
