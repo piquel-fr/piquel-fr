@@ -119,7 +119,7 @@ async fn app_row<'a>(page: &'a str, row: ConnectedAppRow<'a>, removing: bool) ->
             if removing {
                 <div class="notice stack">
                     <strong tabindex="-1" autofocus="">(format!("Remove {name}’s access?"))</strong>
-                    <p>(again) " It may stay signed in for up to 5 minutes."</p>
+                    <p>(again) " Access it already has can last up to 5 minutes."</p>
                     change_form(
                         action: page,
                         change: ConnectedAppChange::Remove { client_id: row.client_id.clone() },

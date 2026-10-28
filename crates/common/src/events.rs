@@ -120,8 +120,10 @@ pub enum DomainEvent {
         /// The approved scopes, drawn from the client's registered allowlist.
         scopes: Vec<String>,
     },
-    /// The account's consent to a client was withdrawn, so the client asks again
-    /// before its next sign-in. Undoing a recovery withdraws every consent.
+    /// A client's access to the account was withdrawn: its consent, refresh grants
+    /// and unused codes. An untrusted client asks for consent again at its next
+    /// sign-in; a trusted one is let back in. Undoing a recovery withdraws every
+    /// client's access.
     ConsentRevoked {
         /// The client.
         client_id: ClientId,

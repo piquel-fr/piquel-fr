@@ -298,8 +298,8 @@ impl OidcApplication {
             .find_active_by_id_for_update(code.user_id)
             .await?
             .ok_or_else(|| OAuthCode::InvalidGrant.reject(ACCOUNT_DISABLED))?;
-        // Revalidate under lock: logout may have revoked the session since the code
-        // was consumed, while this exchange waited for the account lock.
+        // Revalidate under the session's lock: logout takes no account lock, so it may
+        // have revoked the session since the code was issued.
         let session = tx
             .sessions()
             .find_active_by_id_for_update(code.session_id)
