@@ -18,7 +18,7 @@ use crate::{
     security::{ApiError, BrowserCookie, SessionError},
 };
 use piquel_common::ErrorChain;
-use piquel_ui::{Alert, Area, FieldError, LoginQuery, Messages, Notice, Query, Section};
+use piquel_ui::{Alert, Area, FieldError, LoginQuery, Messages, Notice, Query, Recovery, Section};
 use serde::{Deserialize, de::DeserializeOwned};
 use topcoat::{
     Error,
@@ -123,35 +123,31 @@ pub(super) enum Applied<R> {
 }
 
 impl<R: Query> Applied<R> {
-    /// Answers the change made on the page `P` for `reader`: a `303` to where it
-    /// leads, or the page with what it revealed.
+    /// Answers the change `owner` made on the page `P`: a `303` to where it leads,
+    /// or the page with what it revealed.
     async fn answer<P: AccountPage<Row = R>>(
         self,
         web: &WebApplication,
         cx: &Cx,
-        reader: &Reader,
+        owner: Owner,
     ) -> Result<Response, Failure> {
         // The page's own path, not its route's template.
         let here = uri(cx).path();
-        let (to, notice) = match self {
+        match self {
             Self::Revealed(row) => {
                 let outcome = (StatusCode::OK, Messages::default());
-                return web.rendered::<P>(cx, reader, row, outcome).await;
+                let reader = Reader::new(web, owner).await?;
+                web.rendered::<P>(cx, &reader, row, outcome).await
             }
+            Self::Done(notice) => WebApplication::notify(cx, here, notice),
+            Self::Moved { to, notice } => WebApplication::notify(cx, &to, notice),
+            Self::Opened(row) => Ok(see_other(row.on(here)?).into_response(cx)?),
             Self::Elsewhere { to, cookie } => {
                 let mut response = see_other(to).into_response(cx)?;
                 cookie.set_on(&mut response).map_err(Error::from)?;
-                return Ok(response);
+                Ok(response)
             }
-            Self::Done(notice) => (here.to_owned(), Some(notice)),
-            Self::Moved { to, notice } => (to, Some(notice)),
-            Self::Opened(row) => (row.on(here)?, None),
-        };
-        let mut response = see_other(to).into_response(cx)?;
-        if let Some(notice) = notice {
-            BrowserCookie::set_notice_on(&mut response, notice).map_err(Error::from)?;
         }
-        Ok(response)
     }
 }
 
@@ -164,30 +160,33 @@ enum Confirmation {
     Stale,
 }
 
-/// The account a page shows, and whether its session can make the changes that
-/// need a recent passkey confirmation.
+/// The account a page shows, whether its session can make the changes that need
+/// a recent passkey confirmation, and the account's recovery that can still be
+/// undone, which every page asks about.
 pub(super) struct Reader {
     /// Who reads.
     owner: Owner,
     /// Whether their session was confirmed recently enough.
     confirmation: Confirmation,
+    /// The account's recovery that can still be undone, if any.
+    recovery: Option<Recovery>,
 }
 
-impl From<Owner> for Reader {
-    /// The owner, as their session is now.
-    fn from(owner: Owner) -> Self {
-        Self {
+impl Reader {
+    /// `owner`, as their session is now, with their account's recovery, as
+    /// `web` reads it once for the whole page: only a page that renders reads it.
+    async fn new(web: &WebApplication, owner: Owner) -> Result<Self, Failure> {
+        Ok(Self {
             confirmation: if owner.is_confirmed() {
                 Confirmation::Recent
             } else {
                 Confirmation::Stale
             },
+            recovery: web.recovery(&owner).await?,
             owner,
-        }
+        })
     }
-}
 
-impl Reader {
     /// The owner, for the reads only they may make, such as their apps'.
     pub(super) const fn owner(&self) -> &Owner {
         &self.owner
@@ -202,6 +201,12 @@ impl Reader {
     /// always needs one asks for one otherwise.
     pub(super) fn is_recent(&self) -> bool {
         self.confirmation == Confirmation::Recent
+    }
+
+    /// The account's recovery that can still be undone, if any: no passkey but
+    /// its own can be removed meanwhile.
+    pub(super) const fn recovery(&self) -> Option<&Recovery> {
+        self.recovery.as_ref()
     }
 }
 
@@ -252,9 +257,8 @@ impl WebApplication {
         };
         let row = parse_query_params(cx).unwrap_or_default();
         let outcome = (StatusCode::OK, messages);
-        let mut response = web
-            .rendered::<P>(cx, &Reader::from(owner), row, outcome)
-            .await?;
+        let reader = Reader::new(web, owner).await?;
+        let mut response = web.rendered::<P>(cx, &reader, row, outcome).await?;
         if notice.is_some() {
             BrowserCookie::Notice
                 .clear_on(&mut response)
@@ -273,28 +277,26 @@ impl WebApplication {
                 .signed_out(cx, P::SECTION, P::TITLE, StatusCode::UNAUTHORIZED)
                 .await;
         };
-        let mut reader = Reader::from(owner);
         let Some(change) = Self::change::<P::Change>(cx, body).await else {
             let outcome = (
                 StatusCode::BAD_REQUEST,
                 Messages::alert(Alert::Page(piquel_ui::OUT_OF_DATE)),
             );
+            let reader = Reader::new(web, owner).await?;
             return web
                 .rendered::<P>(cx, &reader, P::Row::default(), outcome)
                 .await;
         };
         let row = P::reopened(&change);
-        let error = match P::apply(web, cx, reader.owner.clone(), change).await {
-            Ok(applied) => return applied.answer::<P>(web, cx, &reader).await,
+        let error = match P::apply(web, cx, owner.clone(), change).await {
+            Ok(applied) => return applied.answer::<P>(web, cx, owner).await,
             Err(error) => error,
         };
-        if matches!(
+        // A confirmation asked for is asked for again, by the page's forms.
+        let stale = matches!(
             error,
             AccountError::Owner(SessionError::StepUpRequired { .. })
-        ) {
-            // A confirmation asked for is asked for again, by the page's forms.
-            reader.confirmation = Confirmation::Stale;
-        }
+        );
         let (status, message, field) = match error {
             // A setting refused is said beside its input.
             AccountError::Client(OwnedClientError::InvalidSetting(invalid)) => (
@@ -309,6 +311,11 @@ impl WebApplication {
                 (status, message.to_owned(), None)
             }
         };
+        // Read once the failure is logged, so a read that fails too hides nothing.
+        let mut reader = Reader::new(web, owner).await?;
+        if stale {
+            reader.confirmation = Confirmation::Stale;
+        }
         let alert = match &field {
             Some(field) => Alert::Field(FieldError {
                 field,
@@ -365,8 +372,17 @@ impl WebApplication {
         Ok(self.account.owner(Self::context(cx)?, headers(cx)).await?)
     }
 
+    /// Sends the browser to the page `to`, which says `notice` once. A cookie
+    /// carries it, so a link can never claim a change that was not made.
+    pub(super) fn notify(cx: &Cx, to: &str, notice: Notice) -> Result<Response, Failure> {
+        let mut response = see_other(to).into_response(cx)?;
+        BrowserCookie::set_notice_on(&mut response, notice).map_err(Error::from)?;
+        Ok(response)
+    }
+
     /// Answers with the account page `framed`, at the status and with the messages
-    /// of `outcome`, in its section's frame, below the account's bar. Its forms may
+    /// of `outcome`, in its section's frame, below the account's bar and what the
+    /// account's recovery that can still be undone asks, if any. Its forms may
     /// redirect to `targets`.
     pub(super) async fn account_page(
         &self,
@@ -391,6 +407,8 @@ impl WebApplication {
             }
             Err(error) => return Err(error.into()),
         };
+        let session = reader.owner().session_id();
+        let confirmed = reader.owner().was_passkey_confirmed();
         let page = view! { cx =>
             piquel_ui::account(
                 section: section,
@@ -398,6 +416,16 @@ impl WebApplication {
                 handle: &profile.handle,
                 sections: &SECTIONS,
                 sign_out: page::LOGOUT,
+                recovery: view! {
+                    if let Some(recovery) = reader.recovery() {
+                        piquel_ui::recovery_banner(
+                            recovery: recovery,
+                            session: session,
+                            confirmed: confirmed,
+                            undo: page::RECOVER_UNDO,
+                        )
+                    }
+                },
                 head: head,
                 messages: messages,
                 (page)

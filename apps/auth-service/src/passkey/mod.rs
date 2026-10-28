@@ -782,7 +782,7 @@ impl PasskeyApplication {
         } = app
             .consume::<EnrollmentCeremony>(&headers, input.ceremony_id)
             .await?;
-        if user_id != owner.user() || session_id != owner.session().id {
+        if user_id != owner.user() || session_id != owner.session_id() {
             return Err(PasskeyError::SessionChanged.into());
         }
         let key = app

@@ -2,7 +2,7 @@
 
 use crate::{
     Section, Title,
-    form::{Query, change_form, open},
+    form::{Query, change_form, fragment_form, open},
     layout::frame,
 };
 use piquel_common::EmailId;
@@ -228,22 +228,22 @@ pub async fn verify<'a>(
         frame(
             section: Section::Account,
             title: Title::VerifyEmail.as_str(),
-            if let Some(alert) = alert {
-                <p class="notice error" role="alert">(alert)</p>
-            }
-            <form class="card stack" method="post" action=(action) data-submit-once="" data-fragment-form="">
-                <input type="hidden" name="token" data-fragment="token">
+            fragment_form(
+                action: action,
+                change: (),
+                fragments: &["token"],
+                label: "Confirm this address",
+                unavailable: "Confirming an address needs scripts allowed.",
+                alert: alert,
+                missing: view! {
+                    <h2>"This link is incomplete"</h2>
+                    <p>"Open the link from the email again, or add the address again to get a new one."</p>
+                    <a class="button secondary" href=(emails)>"Manage your addresses"</a>
+                },
                 <p>
                     "Confirm only if you added this address to your own Piquel account: the email names the account it joins."
                 </p>
-                <p class="help" data-unavailable="">"Confirming an address needs scripts allowed."</p>
-                <button disabled="">"Confirm this address"</button>
-            </form>
-            <div class="card stack" data-fragment-missing="" hidden="">
-                <h2>"This link is incomplete"</h2>
-                <p>"Open the link from the email again, or add the address again to get a new one."</p>
-                <a class="button secondary" href=(emails)>"Manage your addresses"</a>
-            </div>
+            )
         )
     })
 }

@@ -138,6 +138,7 @@ impl AccountPage for SignInMethods {
                 state: &state,
                 confirmed: reader.is_recent(),
                 android: android,
+                recovery: reader.recovery(),
             )
         });
         web.settings_page(cx, Self::TAB, reader, outcome, &targets, page)

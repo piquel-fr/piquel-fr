@@ -7,7 +7,7 @@
 
 use crate::{
     Title,
-    form::{Ceremony, Checkbox, Fields, Query, change_form, open, passkey_form, passkey_kind},
+    form::{Ceremony, Checkbox, Fields, Query, change_form, new_passkey, open, passkey_form},
     intro,
 };
 use piquel_common::{
@@ -15,8 +15,7 @@ use piquel_common::{
     handle::{MAX_LENGTH, MIN_LENGTH},
     protocol::claims::Acr,
 };
-use serde::{Deserialize, Deserializer, Serialize};
-use std::str::FromStr;
+use serde::{Deserialize, Serialize};
 use topcoat::{
     Result,
     view::{View, component, view},
@@ -74,7 +73,7 @@ pub struct LoginQuery {
     /// passkeys.
     #[serde(
         default,
-        deserialize_with = "LoginQuery::lenient",
+        deserialize_with = "Fields::lenient",
         skip_serializing_if = "Option::is_none"
     )]
     pub acr: Option<Acr>,
@@ -88,14 +87,14 @@ pub struct LoginQuery {
     /// Why the provider's sign-in that brought the browser here failed.
     #[serde(
         default,
-        deserialize_with = "LoginQuery::lenient",
+        deserialize_with = "Fields::lenient",
         skip_serializing_if = "Option::is_none"
     )]
     pub error: Option<CallbackError>,
     /// A provider's sign-in waits in this browser, for a signup or a link.
     #[serde(
         default,
-        deserialize_with = "LoginQuery::lenient",
+        deserialize_with = "Fields::lenient",
         skip_serializing_if = "Option::is_none"
     )]
     pub social: Option<PendingDestination>,
@@ -116,13 +115,6 @@ impl LoginQuery {
             return_to: self.return_to.clone(),
             ..Self::default()
         }
-    }
-
-    /// Reads a field as `T`, or as absent when it does not parse.
-    fn lenient<'de, D: Deserializer<'de>, T: FromStr>(
-        deserializer: D,
-    ) -> std::result::Result<Option<T>, D::Error> {
-        Ok(Option::<String>::deserialize(deserializer)?.and_then(|value| value.parse().ok()))
     }
 }
 
@@ -147,7 +139,7 @@ pub enum LoginChange {
     Link {},
     /// Abandons the provider's pending sign-in.
     CancelLink {},
-    /// Signs this browser out, so another account can take the link.
+    /// Signs this browser out, so another account can sign in or take the link.
     SwitchAccount {},
 }
 
@@ -160,7 +152,7 @@ pub enum LinkKind {
     Explicit,
 }
 
-/// The account a browser is signed in to, as the link step shows it.
+/// The account a browser is signed in to, as the sign-in and link steps show it.
 #[derive(Clone, Debug)]
 pub struct SignedIn {
     /// Its handle.
@@ -181,6 +173,10 @@ pub enum Step<'a> {
         handle_open: bool,
         /// The enabled providers.
         providers: &'a [Provider],
+        /// The account the browser is signed in to, if any, which it can sign out
+        /// of first: a sign-in that would lower its session's confirmation is
+        /// refused.
+        signed_in: Option<&'a SignedIn>,
     },
     /// Creating an account with its first passkey.
     SignUp {
@@ -212,7 +208,7 @@ pub enum Step<'a> {
     },
 }
 
-impl Step<'_> {
+impl<'a> Step<'a> {
     /// The page's title in the browser.
     #[must_use]
     pub const fn title(&self) -> Title {
@@ -220,6 +216,14 @@ impl Step<'_> {
             Self::SignIn { .. } => Title::SignIn,
             Self::SignUp { .. } => Title::SignUp,
             Self::Link { .. } => Title::Link,
+        }
+    }
+
+    /// The account the browser is signed in to, if the step shows it.
+    const fn signed_in(&self) -> Option<&'a SignedIn> {
+        match self {
+            Self::SignIn { signed_in, .. } | Self::Link { signed_in, .. } => *signed_in,
+            Self::SignUp { .. } => None,
         }
     }
 
@@ -301,28 +305,27 @@ pub async fn sign_in<'a>(
                         (format!("Finish creating your account to add {} sign-in.", provider.name()))
                     </p>
                 }
-                Step::Link { email, signed_in, .. } => {
-                    if let Some(email) = email {
-                        <p class="notice">(email)</p>
-                    }
-                    if let Some(account) = signed_in {
-                        <p class="help">(format!("Signed in as @{}.", account.handle))</p>
-                    }
+                Step::Link { email: Some(email), .. } => {
+                    <p class="notice">(email)</p>
                 }
                 _ => {}
+            }
+            if let Some(account) = step.signed_in() {
+                <p class="help">(format!("Signed in as @{}.", account.handle))</p>
             }
             if let Some(alert) = alert {
                 <p class="notice error" role="alert">(alert)</p>
             }
             <div class="stack">
                 match step {
-                    Step::SignIn { passkey_only, handle_open, providers } => sign_in_forms(
+                    Step::SignIn { passkey_only, handle_open, providers, signed_in } => sign_in_forms(
                         action: &action,
                         page: page,
                         query: query,
                         passkey_only: passkey_only,
                         handle_open: handle_open,
                         providers: providers,
+                        signed_in: signed_in.is_some(),
                     ),
                     Step::SignUp { social, invitation, invite_required, android } => sign_up_form(
                         action: &action,
@@ -352,8 +355,9 @@ pub async fn sign_in<'a>(
 }
 
 /// The forms of [`Step::SignIn`], posting to `action`: signing in with a passkey,
-/// opening `page` with `query` to ask for a handle, and, unless the application
-/// asks for a passkey, signing in at one of the `providers`.
+/// opening `page` with `query` to ask for a handle, unless the application asks
+/// for a passkey, signing in at one of the `providers`, and, when the browser is
+/// `signed_in`, signing it out first.
 #[component]
 async fn sign_in_forms<'a>(
     action: &'a str,
@@ -362,6 +366,7 @@ async fn sign_in_forms<'a>(
     passkey_only: bool,
     handle_open: bool,
     providers: &'a [Provider],
+    signed_in: bool,
 ) -> Result<impl View> {
     Ok(view! {
         passkey_sign_in(
@@ -382,6 +387,9 @@ async fn sign_in_forms<'a>(
                     class: "secondary full",
                 )
             }
+        }
+        if signed_in {
+            switch_account(action: action, label: "Sign out")
         }
     })
 }
@@ -406,13 +414,7 @@ async fn sign_up_form<'a>(
             label: "Create account with a passkey",
             class: "full",
             handle_input(new: true)
-            <label>
-                "Passkey name"
-                <input name="friendly_name" value="My passkey" maxlength="80" required="" autocomplete="off">
-            </label>
-            if android {
-                passkey_kind()
-            }
+            new_passkey(label: "Passkey name", value: "My passkey", android: android)
             if invite_required {
                 <label>
                     "Invitation"
@@ -461,18 +463,27 @@ async fn link_forms<'a>(
         }
         // An explicit link belongs to this session: signing out would strand it.
         if signed_in.is_some() && kind == LinkKind::Email {
-            change_form(
-                action: action,
-                change: LoginChange::SwitchAccount {},
-                label: "Use a different account",
-                class: "secondary",
-            )
+            switch_account(action: action, label: "Use a different account")
         }
         change_form(
             action: action,
             change: LoginChange::CancelLink {},
             label: "Cancel linking",
             class: "text-button",
+        )
+    })
+}
+
+/// Signing the browser out by posting to `action`, so another account can sign in
+/// or take the link, with a button labelled `label`.
+#[component]
+async fn switch_account<'a>(action: &'a str, label: &'a str) -> Result<impl View> {
+    Ok(view! {
+        change_form(
+            action: action,
+            change: LoginChange::SwitchAccount {},
+            label: label,
+            class: "secondary",
         )
     })
 }

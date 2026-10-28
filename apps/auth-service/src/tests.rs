@@ -2,7 +2,7 @@
 //! and the fixtures shared by the applications' tests.
 
 use crate::{
-    AuthConfig, ClientRegistry, ClientRegistryError, KeyStore, Operator,
+    AuthConfig, ClientRegistry, ClientRegistryError, KeyStore, Operator, Reason,
     account::{AccountService, Owner},
     clients::{ClientSettings, NewClient},
     config::{
@@ -10,6 +10,7 @@ use crate::{
         TokenDigestKeys,
     },
     passkey::DecoyKey,
+    recovery::RecoveryLinks,
     routes,
     security::{BrowserCookie, RequestContext, Session},
 };
@@ -428,6 +429,27 @@ pub(crate) fn operator() -> Operator {
         os_user: "test".into(),
         host: "test".into(),
     }
+}
+
+/// Recovery links with a key of their own: the routes find a recovery by its
+/// token's digest, so they need no key.
+pub(crate) fn recovery_links() -> RecoveryLinks {
+    RecoveryLinks::new(
+        AUTH_ORIGIN.parse().expect("origin"),
+        Secret::generate().expect("recovery key"),
+        None,
+    )
+}
+
+/// Why the scenarios recover an account.
+pub(crate) fn recovery_reason() -> Reason {
+    Reason::parse("Lost every passkey".into()).expect("reason")
+}
+
+/// The token of a recovery `link`.
+pub(crate) fn recovery_token(link: &url::Url) -> String {
+    let fragment = link.fragment().expect("fragment");
+    fragment.strip_prefix("token=").expect("token").to_owned()
 }
 
 /// Makes `change` with a registry over a transaction of its own, as [`operator`],

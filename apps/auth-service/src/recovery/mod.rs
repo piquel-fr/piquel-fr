@@ -93,6 +93,8 @@ pub(crate) struct RecoveryAccount {
     pub(crate) username: String,
     /// Its display name.
     pub(crate) display_name: String,
+    /// When the link stops working.
+    pub(crate) expires_at: DateTime<Utc>,
 }
 
 /// A recovery's passkey during its probation, as a sign-in credential: it signs
@@ -102,6 +104,8 @@ pub(crate) struct RecoveryAccount {
 pub(crate) struct ProbationPasskey {
     /// The passkey.
     passkey: PasskeyId,
+    /// When the recovery's link enrolled it, which started the probation.
+    completed_at: DateTime<Utc>,
     /// When the probation ends.
     settles_at: DateTime<Utc>,
 }
@@ -109,11 +113,14 @@ pub(crate) struct ProbationPasskey {
 impl ProbationPasskey {
     /// `recovery`'s passkey, if the recovery is in probation.
     pub(crate) fn of(recovery: &StoredRecovery) -> Option<Self> {
-        match (recovery.state(), recovery.passkey_id) {
-            (RecoveryState::Probation { settles_at }, Some(passkey)) => Some(Self {
-                passkey,
-                settles_at,
-            }),
+        match (recovery.state(), recovery.passkey_id, recovery.completed_at) {
+            (RecoveryState::Probation { settles_at }, Some(passkey), Some(completed_at)) => {
+                Some(Self {
+                    passkey,
+                    completed_at,
+                    settles_at,
+                })
+            }
             _ => None,
         }
     }
@@ -173,9 +180,82 @@ impl UndoableRecovery {
     fn passkey(&self) -> Option<PasskeyId> {
         self.probation.map(ProbationPasskey::passkey)
     }
+
+    /// How its pages show it, with the account's active passkeys
+    /// [`AccountService::split`] gives: its `own`, if still active, and the
+    /// `others`, which may undo it.
+    fn notice(&self, own: Option<&StoredPasskey>, others: &[StoredPasskey]) -> RecoveryNotice {
+        let recovery = &self.recovery;
+        let stage = match self.probation {
+            None => RecoveryStage::Open {
+                expires_at: recovery.expires_at,
+            },
+            Some(probation) => RecoveryStage::Probation {
+                completed_at: probation.completed_at,
+                settles_at: probation.settles_at,
+                passkey: own.map(|passkey| EnrolledPasskey {
+                    id: passkey.id,
+                    created_at: passkey.created_at,
+                }),
+            },
+        };
+        RecoveryNotice {
+            id: recovery.id,
+            started_at: recovery.started_at,
+            stage,
+            undoable: !others.is_empty(),
+        }
+    }
 }
 
-/// Where an undoable recovery stands, as its page shows it.
+/// An account's recovery that can still be undone, as the recovery pages and
+/// the account's pages show it. It names no passkey, so a page may show it from
+/// the recovery's ID alone, signed out: whoever used the link can rename the
+/// recovery's passkey.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct RecoveryNotice {
+    /// The recovery, which undoing it names.
+    pub(crate) id: RecoveryId,
+    /// When it started.
+    pub(crate) started_at: DateTime<Utc>,
+    /// Where it stands.
+    pub(crate) stage: RecoveryStage,
+    /// Whether a passkey from before it may undo it; otherwise only support can.
+    pub(crate) undoable: bool,
+}
+
+/// Where a recovery that can still be undone stands, with what its pages show
+/// at that stage.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum RecoveryStage {
+    /// Its link works: undoing it cancels the link.
+    Open {
+        /// When the link stops working.
+        expires_at: DateTime<Utc>,
+    },
+    /// Its link was used, and it has not settled: its passkey confirms nothing,
+    /// and undoing it takes back that passkey, every session and every consent.
+    Probation {
+        /// When its link enrolled the passkey.
+        completed_at: DateTime<Utc>,
+        /// When the probation ends.
+        settles_at: DateTime<Utc>,
+        /// The passkey its link enrolled, while active.
+        passkey: Option<EnrolledPasskey>,
+    },
+}
+
+/// The passkey a recovery's link enrolled, as pages name it: by ID and
+/// enrollment time, never by name.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct EnrolledPasskey {
+    /// The passkey.
+    pub(crate) id: PasskeyId,
+    /// When the link enrolled it.
+    pub(crate) created_at: DateTime<Utc>,
+}
+
+/// Where an undoable recovery stands, as `GET /account/recovery` names it.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
 enum UndoableState {
@@ -207,6 +287,42 @@ pub(crate) struct RecoveryView {
     /// The passkeys that may undo it: every active one but its own. None, and
     /// only support can.
     undo_with: Vec<Passkey>,
+}
+
+impl RecoveryView {
+    /// `notice`, naming the recovery's passkey `own`, if still active, and the
+    /// passkeys that may undo it, `undo_with`.
+    fn new(
+        notice: RecoveryNotice,
+        own: Option<StoredPasskey>,
+        undo_with: Vec<StoredPasskey>,
+    ) -> Self {
+        let (state, expires_at, completed_at, settles_at) = match notice.stage {
+            RecoveryStage::Open { expires_at } => {
+                (UndoableState::Open, Some(expires_at), None, None)
+            }
+            RecoveryStage::Probation {
+                completed_at,
+                settles_at,
+                ..
+            } => (
+                UndoableState::Probation,
+                None,
+                Some(completed_at),
+                Some(settles_at),
+            ),
+        };
+        Self {
+            id: notice.id,
+            state,
+            started_at: notice.started_at,
+            expires_at,
+            completed_at,
+            settles_at,
+            passkey: own.map(Passkey::from),
+            undo_with: undo_with.into_iter().map(Passkey::from).collect(),
+        }
+    }
 }
 
 impl RecoveryLinks {
@@ -313,6 +429,7 @@ impl AccountService {
             account: RecoveryAccount {
                 username: user.username,
                 display_name: user.display_name,
+                expires_at: recovery.expires_at,
             },
         })
     }
@@ -332,27 +449,54 @@ impl AccountService {
         Ok(view)
     }
 
-    /// How `undoable`'s page shows it, with the passkeys that may undo it.
+    /// `undoable` as `GET /account/recovery` answers it, with the passkeys that may
+    /// undo it.
     async fn view(
         tx: &mut DatabaseTransaction<'_>,
         undoable: &UndoableRecovery,
     ) -> Result<RecoveryView, DatabaseError> {
         let (own, undo_with) = Self::split(tx, undoable).await?;
-        let recovery = &undoable.recovery;
-        let (state, expires_at, settles_at) = match undoable.probation {
-            None => (UndoableState::Open, Some(recovery.expires_at), None),
-            Some(probation) => (UndoableState::Probation, None, Some(probation.settles_at())),
+        let notice = undoable.notice(own.as_ref(), &undo_with);
+        Ok(RecoveryView::new(notice, own, undo_with))
+    }
+
+    /// The account's recovery that can still be undone, if any, as the account's
+    /// pages show it.
+    pub(crate) async fn recovery_notice(
+        &self,
+        owner: &Owner,
+    ) -> Result<Option<RecoveryNotice>, AccountError> {
+        let mut tx = self.database.begin().await?;
+        let undoable = Self::undoable(&mut tx, owner.user()).await?;
+        let notice = Self::notice(&mut tx, undoable).await?;
+        tx.commit().await?;
+        Ok(notice)
+    }
+
+    /// Recovery `id`, if it is its account's one that can still be undone, as
+    /// its undo page shows it. Needs no session, so the emails about it can link
+    /// to that page, and works on a disabled account, as its undo does.
+    pub(crate) async fn undoable_recovery(
+        &self,
+        id: RecoveryId,
+    ) -> Result<Option<RecoveryNotice>, AccountError> {
+        let mut tx = self.database.begin().await?;
+        let undoable = Self::undoable_by_id(&mut tx, id).await?;
+        let notice = Self::notice(&mut tx, undoable).await?;
+        tx.commit().await?;
+        Ok(notice)
+    }
+
+    /// How the pages show `undoable`, if any.
+    async fn notice(
+        tx: &mut DatabaseTransaction<'_>,
+        undoable: Option<UndoableRecovery>,
+    ) -> Result<Option<RecoveryNotice>, DatabaseError> {
+        let Some(undoable) = undoable else {
+            return Ok(None);
         };
-        Ok(RecoveryView {
-            id: recovery.id,
-            state,
-            started_at: recovery.started_at,
-            expires_at,
-            completed_at: recovery.completed_at,
-            settles_at,
-            passkey: own.map(Passkey::from),
-            undo_with: undo_with.into_iter().map(Passkey::from).collect(),
-        })
+        let (own, others) = Self::split(tx, &undoable).await?;
+        Ok(Some(undoable.notice(own.as_ref(), &others)))
     }
 
     /// The account recovery `id` belongs to, and the passkeys that may undo it,
@@ -365,19 +509,15 @@ impl AccountService {
         id: RecoveryId,
     ) -> Result<(UserId, Vec<StoredPasskey>), AccountError> {
         let mut tx = self.database.begin().await?;
-        let user = tx
-            .recoveries()
-            .find(id)
+        let undoable = Self::undoable_by_id(&mut tx, id)
             .await?
-            .ok_or(RecoveryError::NothingToUndo)?
-            .user_id;
-        let undoable = Self::undoable_named(&mut tx, user, id).await?;
+            .ok_or(RecoveryError::NothingToUndo)?;
         let (_, passkeys) = Self::split(&mut tx, &undoable).await?;
         tx.commit().await?;
         if passkeys.is_empty() {
             return Err(RecoveryError::OlderPasskeyRequired.into());
         }
-        Ok((user, passkeys))
+        Ok((undoable.recovery.user_id, passkeys))
     }
 
     /// Undoes the recovery `verified` names, its account's undoable one, in the
@@ -391,7 +531,9 @@ impl AccountService {
         verified: &VerifiedRecoveryUndo,
     ) -> Result<(), AccountError> {
         let user = verified.user_id();
-        let undoable = Self::undoable_named(tx, user, verified.recovery_id()).await?;
+        let undoable = Self::undoable_named(tx, user, verified.recovery_id())
+            .await?
+            .ok_or(RecoveryError::NothingToUndo)?;
         if undoable.passkey() == Some(verified.passkey()) {
             return Err(RecoveryError::OlderPasskeyRequired.into());
         }
@@ -504,11 +646,21 @@ impl AccountService {
         tx: &mut DatabaseTransaction<'_>,
         user: UserId,
         id: RecoveryId,
-    ) -> Result<UndoableRecovery, AccountError> {
-        Ok(Self::undoable(tx, user)
-            .await?
-            .filter(|undoable| undoable.recovery.id == id)
-            .ok_or(RecoveryError::NothingToUndo)?)
+    ) -> Result<Option<UndoableRecovery>, DatabaseError> {
+        let undoable = Self::undoable(tx, user).await?;
+        Ok(undoable.filter(|undoable| undoable.recovery.id == id))
+    }
+
+    /// Recovery `id`, if it is its account's one that can still be undone,
+    /// whatever the account's status.
+    async fn undoable_by_id(
+        tx: &mut DatabaseTransaction<'_>,
+        id: RecoveryId,
+    ) -> Result<Option<UndoableRecovery>, DatabaseError> {
+        match tx.recoveries().find(id).await? {
+            Some(recovery) => Self::undoable_named(tx, recovery.user_id, id).await,
+            None => Ok(None),
+        }
     }
 
     /// The account's active passkeys, split into `undoable`'s own, if still

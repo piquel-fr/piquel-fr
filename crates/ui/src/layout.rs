@@ -109,6 +109,10 @@ pub enum Title {
     NewApp,
     /// One of the account's apps, when its name is unknown.
     App,
+    /// Adding a passkey with a recovery link.
+    Recover,
+    /// Undoing or cancelling a recovery.
+    UndoRecovery,
 }
 
 impl Title {
@@ -125,6 +129,8 @@ impl Title {
             Self::Developers => "Developers",
             Self::NewApp => "New app",
             Self::App => "App",
+            Self::Recover => "Recover your account",
+            Self::UndoRecovery => "Undo a recovery",
         }
     }
 }
@@ -245,8 +251,9 @@ pub(crate) async fn frame<'a>(
 
 /// A signed-in page of `section`, in its frame: the bar of the account, named
 /// `display_name` and `handle`, linking each section's page in `sections` and
-/// signing out by posting to `sign_out`; then the page's `head`, such as its tabs,
-/// its `messages`, and the page as `child`.
+/// signing out by posting to `sign_out`; then what the account's `recovery` that
+/// can still be undone asks, if any, such as a [`crate::recovery_banner`]; the
+/// page's `head`, such as its tabs, its `messages`, and the page as `child`.
 #[component]
 pub async fn account<'a>(
     section: Section,
@@ -254,6 +261,9 @@ pub async fn account<'a>(
     handle: &'a str,
     sections: &'a [(Section, &'a str)],
     sign_out: &'a str,
+    #[into]
+    #[default]
+    recovery: Child<'_>,
     #[into]
     #[default]
     head: Child<'_>,
@@ -275,6 +285,7 @@ pub async fn account<'a>(
                     </form>
                 </div>
             </div>
+            (recovery)
             (head)
             // A refused setting is said beside its input instead.
             if let Some(Alert::Page(alert)) = messages.alert {

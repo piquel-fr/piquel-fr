@@ -127,6 +127,18 @@ impl Owner {
         self.session.user_id
     }
 
+    /// The owner's browser session's ID, which a page keys what it remembers per
+    /// session by.
+    pub(crate) const fn session_id(&self) -> SessionId {
+        self.session.id
+    }
+
+    /// Whether a passkey ever confirmed the owner's session. A recovery's passkey
+    /// never does; a passkey from before it does.
+    pub(crate) const fn was_passkey_confirmed(&self) -> bool {
+        self.session.passkey_confirmed_at.is_some()
+    }
+
     /// The owner's browser session, as the request found it.
     pub(crate) const fn session(&self) -> &StoredSession {
         &self.session

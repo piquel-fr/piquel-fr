@@ -46,6 +46,9 @@ mod layout;
 mod login;
 /// The pages of OAuth and `OpenID` Connect flows.
 mod oidc;
+/// Account recovery: the pages its links open, and what the account's pages ask
+/// of it.
+mod recovery;
 /// The account's settings.
 mod settings;
 
@@ -65,6 +68,10 @@ pub use login::{
     CallbackError, LinkKind, LoginChange, LoginQuery, PendingDestination, SignedIn, Step, sign_in,
 };
 pub use oidc::{Onward, consent, failure, logout, onward};
+pub use recovery::{
+    RecoverChange, RecoverStep, Recovery, RecoveryPasskey, RecoveryStage, UndoChange, UndoStep,
+    recover, recovery_banner, recovery_prompt, undo_recovery,
+};
 pub use settings::{
     ConnectedAppChange, ConnectedAppRow, ConnectedAppsState, DeviceChange, DeviceRow, EmailChange,
     EmailRow, EmailsState, HistoryChange, HistoryPage, HistoryRow, HistoryState, Holdings,

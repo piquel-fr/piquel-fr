@@ -14,20 +14,20 @@ yet are marked *(planned)*.
 The auth executable owns everything that authenticates someone or issues a
 credential: discovery, JWKS, authorization, token, userinfo, logout, and the
 pages a ceremony needs (login, signup, consent, passkey confirmation, account
-recovery *(planned)*, device verification *(planned)*). It also serves the account
-settings at `/settings`, on the paths piquel.fr used, and redirects its root there,
-and the developer console, where accounts register their own OIDC clients, at
-`/developers`. It hosts no admin pages yet.
+recovery at `/recover` and `/recover/undo`, device verification *(planned)*). It
+also serves the account settings at `/settings`, on the paths piquel.fr used, and
+redirects its root there, and the developer console, where accounts register
+their own OIDC clients, at `/developers`. It hosts no admin pages yet.
 
 The account and admin APIs are routes in the same executable. They are small
 next to the pages that use them, and keeping them there keeps one binary, one
 database owner and one policy layer. The account API is on the public listener; the
 admin API has a private listener of its own (see admin.piquel.fr below). Auth keeps its state in PostgreSQL, so it runs
 as several replicas (see "Running several replicas" in `infra/README.md`). Every page it
-serves, sign-in, consent, logout, the settings and the developer console, is
-server-rendered in the executable, with plain forms, and never cached. Their only
-script is the passkey script, which runs the passkey ceremonies their forms need and
-keeps a form from posting twice.
+serves, sign-in, consent, logout, account recovery, the settings and the
+developer console, is server-rendered in the executable, with plain forms, and
+never cached. Their only script is the passkey script, which runs the passkey
+ceremonies their forms need and keeps a form from posting twice.
 
 Passkeys are bound to the `auth.piquel.fr` RP ID, so passkey ceremonies always
 run on auth. A settings change that needs a recent passkey confirmation asks for
@@ -118,32 +118,34 @@ An owner who lost every passkey cannot add one: adding a way to sign in needs a
 passkey confirmation. `AdminService::recover_account` helps without giving the
 administrator a way in. It signs the account out everywhere, removes its
 unverified addresses, and emails its current primary verified address a link
-that enrolls one passkey, once, within a day, then signs that browser in with
-it. The link's token alone authorizes it; only its digest is stored, and the
-email's delivery stores neither. Only an operator at the terminal sees the link
-(`user recover`), which also reaches an owner without an address. An
-administrator never sees it, so they may only start a recovery that mails it;
-the dashboard's way to start one is *(planned)*.
+to `/recover`, which enrolls one passkey, once, within a day, then signs that
+browser in with it. The link's token alone authorizes it; only its digest is
+stored, and the email's delivery stores neither. Only an operator at the
+terminal sees the link (`user recover`), which also reaches an owner without an
+address. An administrator never sees it, so they may only start a recovery that
+mails it; the dashboard's way to start one is *(planned)*.
 
 For 15 days after the link is used, the recovery is in probation: its passkey
 signs in like a social login and never confirms the session. Every change that
 needs a confirmation refuses it, and so do the admin API and relying parties
 that ask for `phr`, so whoever used the link can use the account but add no way
 into it. Undoing the recovery takes back its passkey, every session and refresh
-grant, and every app consent. The owner undoes it with any other passkey, in a
-ceremony of its own that needs no session and works on a disabled account
+grant, and every app consent. The owner undoes it with any other passkey on
+`/recover/undo`, which the recovery's emails link to, in a ceremony of its own
+that needs no session and works on a disabled account
 (`/account/recovery/undo/start` and `/finish`). Until it settles, nobody removes
 a passkey but the recovery's own, administrators and operators included, so
 nothing takes that away. Support undoes it for an owner with no other passkey
-(`user undo-recovery`, `AdminService::undo_recovery`).
+(`user undo-recovery`, `AdminService::undo_recovery`). While a recovery can be
+undone, every settings and developer console page, and a passkey sign-in that
+continues to an app, asks "Was this you?" and links to the undo page.
 
 `user recover --revoke` is for an account that was in someone else's hands: it
 also revokes every passkey the owner doesn't vouch for, unlinks every identity
 and withdraws every consent, and only prints the link. No account is recovered
 while it holds administrator rights, and none is made an administrator while a
 recovery of it can be undone. [Account recovery](../security/account-recovery.md)
-states the policy and support's evidence policy. The pages that use the link and
-offer the undo are *(planned)*; until then no page uses a link.
+states the policy and support's evidence policy.
 
 ## Contracts
 

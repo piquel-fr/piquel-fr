@@ -1,7 +1,10 @@
 //! Security history.
 
 use super::{EmailChange, EmailRow, SignInChange, device_name};
-use crate::form::{Fields, Precision, Query, change_form, open, time};
+use crate::{
+    Recovery, RecoveryPasskey,
+    form::{Fields, Precision, Query, change_form, open, time},
+};
 use chrono::{DateTime, Utc};
 use piquel_common::{
     AuthenticationMethod, EmailId, EventId, PasskeyId, Provider,
@@ -79,6 +82,10 @@ pub struct Holdings<'a> {
     pub emails: &'a [EmailRow<'a>],
     /// The providers linked to the account.
     pub linked: &'a [Provider],
+    /// The account's recovery that can still be undone, if any. Its passkey is
+    /// never named, since whoever used its link may have named it, and no other
+    /// passkey can be removed meanwhile.
+    pub recovery: Option<&'a Recovery>,
 }
 
 impl Holdings<'_> {
@@ -92,11 +99,22 @@ impl Holdings<'_> {
         self.emails.iter().find(|email| email.id == id)
     }
 
-    /// ` “name”` of the passkey `id`, if the account still has it.
+    /// Whether the passkey `id` is the one the account's recovery added.
+    fn recovered(&self, id: PasskeyId) -> bool {
+        self.recovery.and_then(Recovery::passkey) == Some(id)
+    }
+
+    /// The passkey `id`, starting an entry: `Passkey “name”` if the account still
+    /// has it, [`RecoveryPasskey::TITLE`] for the one its recovery added, and
+    /// `Passkey` otherwise.
     fn passkey(&self, id: PasskeyId) -> String {
-        self.find_passkey(id)
-            .map(|passkey| format!(" “{}”", passkey.friendly_name))
-            .unwrap_or_default()
+        if self.recovered(id) {
+            return RecoveryPasskey::TITLE.to_owned();
+        }
+        self.find_passkey(id).map_or_else(
+            || "Passkey".to_owned(),
+            |passkey| format!("Passkey “{}”", passkey.friendly_name),
+        )
     }
 
     /// ` address` of the address `id`, if the account still has it.
@@ -124,10 +142,10 @@ impl HistoryRow<'_> {
             HistoryEntry::SignedOut => "Signed out".to_owned(),
             HistoryEntry::SessionRevoked { reason } => Self::revocation(reason).to_owned(),
             HistoryEntry::PasskeyAdded { passkey_id } => {
-                format!("Passkey{} added", holdings.passkey(*passkey_id))
+                format!("{} added", holdings.passkey(*passkey_id))
             }
             HistoryEntry::PasskeyRenamed { passkey_id } => {
-                format!("Passkey{} renamed", holdings.passkey(*passkey_id))
+                format!("{} renamed", holdings.passkey(*passkey_id))
             }
             HistoryEntry::PasskeyRemoved { .. } => "Passkey removed".to_owned(),
             HistoryEntry::IdentityLinked { provider } => {
@@ -434,11 +452,22 @@ impl<'a> Undo<'a> {
     fn of(follow_up: FollowUp, holds: &Holdings<'_>, page: &HistoryPage<'a>) -> Option<Self> {
         match follow_up {
             FollowUp::RemovePasskey { passkey_id } => {
+                if holds
+                    .recovery
+                    .is_some_and(|recovery| recovery.keeps(passkey_id))
+                {
+                    return None;
+                }
                 let passkey = holds.find_passkey(passkey_id)?;
+                let label = if holds.recovered(passkey_id) {
+                    format!("Remove {}", RecoveryPasskey::NAME)
+                } else {
+                    format!("Remove passkey “{}”", passkey.friendly_name)
+                };
                 Some(Self {
                     action: page.sign_in,
                     change: SignInChange::Remove { id: passkey_id }.into(),
-                    label: format!("Remove passkey “{}”", passkey.friendly_name),
+                    label,
                 })
             }
             FollowUp::UnlinkIdentity { provider } => {

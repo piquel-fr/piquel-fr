@@ -198,13 +198,19 @@ async fn signing_in_offers_passkeys_providers_and_a_handle() {
 
 /// Once the passkey script signed the browser in, its form sends it on to the path
 /// on auth it asked for, or to the settings when it asked for none or for another
-/// site.
+/// site. A browser already signed in is told to which account, and may sign out
+/// first.
 #[tokio::test]
 #[ignore = "requires TEST_DATABASE_URL"]
 async fn signing_in_goes_on_to_the_path_asked_for() {
     let replicas = Replicas::new().await;
     let database = Replicas::database().await;
     let browser = Browser::new_account(&database).await;
+    let account = database.users().find_by_id(browser.user_id).await;
+    let handle = account.expect("account").expect("active").username;
+    let page = html(browser.visit(&replicas.a, LOGIN).await).await;
+    assert!(page.contains(&format!("Signed in as @{handle}.")), "{page}");
+    assert!(page.contains(">Sign out</button>"), "{page}");
     for (return_to, to) in [
         (Some(settings::SESSIONS), settings::SESSIONS),
         (Some("https://evil.example"), settings::HOME),

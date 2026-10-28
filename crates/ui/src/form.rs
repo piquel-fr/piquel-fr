@@ -4,11 +4,12 @@
 //! A change posts one form to its page, naming it in the hidden `action` field.
 //! One that needs a recent passkey confirmation is marked `data-passkey-confirm`
 //! while the session has none, and the passkey script confirms before posting it.
-//! One that a passkey ceremony makes, signing in, creating an account or adding a
-//! passkey, is a [`passkey_form`], which the passkey script posts once the ceremony
-//! is done. Every other form is marked `data-submit-once`, so a double click posts
-//! it once. A row opens for editing or confirmation by a `GET` form, so it works
-//! without a script.
+//! One that a passkey ceremony makes, signing in, creating an account, adding a
+//! passkey or undoing a recovery, is a [`passkey_form`], which the passkey script
+//! posts once the ceremony is done. One that a link's fragment fills in is a
+//! [`fragment_form`]. Every other form is marked `data-submit-once`, so a double
+//! click posts it once. A row opens for editing or confirmation by a `GET` form, so
+//! it works without a script.
 //!
 //! Each page's changes and query are types, such as [`SignInChange`] and
 //! [`SignInState`]. Forms and links serialize them, and the page that receives them
@@ -19,10 +20,12 @@
 use crate::{
     AppChange, AppSettingsState, ConnectedAppChange, ConnectedAppsState, DeviceChange, EmailChange,
     EmailsState, FieldError, HistoryChange, HistoryState, LoginChange, LoginQuery, NewAppChange,
-    SecretsChange, SignInChange, SignInState,
+    RecoverChange, SecretsChange, SignInChange, SignInState, UndoChange,
 };
 use chrono::{DateTime, SecondsFormat, Utc};
+use piquel_common::RecoveryId;
 use serde::{Deserialize, Deserializer, Serialize, Serializer, de::IgnoredAny};
+use std::str::FromStr;
 
 /// Why a query could not be written as a link: one of its fields is not a name and
 /// a value.
@@ -65,6 +68,11 @@ piquel_common::str_enum! {
         ClientDisabled = "client_disabled",
         /// An app was deleted.
         ClientDeleted = "client_deleted",
+        /// A recovery link added a passkey, which signed the browser in.
+        Recovered = "recovered",
+        /// A recovery was undone: its link cancelled, and what the link did, if it
+        /// was used, taken back.
+        RecoveryUndone = "recovery_undone",
     }
 }
 
@@ -87,6 +95,10 @@ impl Notice {
             Self::ClientEnabled => "The app was enabled.",
             Self::ClientDisabled => "The app was disabled.",
             Self::ClientDeleted => "The app was deleted.",
+            Self::Recovered => "Your account is recovered. Your new passkey signs you in.",
+            Self::RecoveryUndone => {
+                "The recovery is undone. Its link no longer works, and if it was used, its passkey is removed, every device is signed out, and apps ask for access again."
+            }
         }
     }
 }
@@ -159,8 +171,8 @@ impl Query for () {}
 /// Defines [`Fields`], with a conversion from each type a form or link sends.
 macro_rules! fields {
     ($($(#[$doc:meta])* $variant:ident($type:ty)),* $(,)?) => {
-        /// What a form sends: a page's change, or the query opening a page or one of
-        /// its rows.
+        /// What a form sends: a page's change, the query opening a page or one of
+        /// its rows, or nothing but its inputs.
         #[derive(Clone, Debug, Serialize)]
         #[serde(untagged)]
         pub(crate) enum Fields {
@@ -207,6 +219,12 @@ fields! {
     AppRow(AppSettingsState),
     /// A sign-in page, as its query opens it.
     LoginPage(LoginQuery),
+    /// A change made on a recovery link's page.
+    Recover(RecoverChange),
+    /// A change made on a recovery's undo page.
+    Undo(UndoChange),
+    /// Nothing: the form sends only its inputs.
+    Inputs(()),
 }
 
 impl Fields {
@@ -214,6 +232,21 @@ impl Fields {
     fn pairs(&self) -> Result<Vec<(String, String)>> {
         let encoded = serde_urlencoded::to_string(self)?;
         Ok(serde_urlencoded::from_str(&encoded)?)
+    }
+
+    /// Reads a field as `T`, or as absent when it does not parse: the
+    /// `deserialize_with` of a field a link or form may get wrong.
+    pub(crate) fn lenient<'de, D: Deserializer<'de>, T: FromStr>(
+        deserializer: D,
+    ) -> std::result::Result<Option<T>, D::Error> {
+        Ok(Option::<String>::deserialize(deserializer)?.and_then(|value| value.parse().ok()))
+    }
+
+    /// [`Self::lenient`], reading a field that does not parse as `T`'s default.
+    pub(crate) fn lenient_or_default<'de, D: Deserializer<'de>, T: FromStr + Default>(
+        deserializer: D,
+    ) -> std::result::Result<T, D::Error> {
+        Ok(Self::lenient(deserializer)?.unwrap_or_default())
     }
 }
 
@@ -323,6 +356,12 @@ impl Precision {
             Self::Clock => "%H:%M",
         }
     }
+
+    /// The moment `at`, in UTC, this precisely, as text where a [`time`] cannot
+    /// go, such as a title.
+    pub(crate) fn write(self, at: DateTime<Utc>) -> String {
+        format!("{} UTC", at.format(self.format()))
+    }
 }
 
 /// A moment, in UTC, at `precision`. Its `datetime` is to the second, as HTML
@@ -330,9 +369,7 @@ impl Precision {
 #[component]
 pub(crate) async fn time(at: DateTime<Utc>, precision: Precision) -> Result<impl View> {
     Ok(view! {
-        <time datetime=(at.to_rfc3339_opts(SecondsFormat::Secs, true))>
-            (format!("{} UTC", at.format(precision.format())))
-        </time>
+        <time datetime=(at.to_rfc3339_opts(SecondsFormat::Secs, true))>(precision.write(at))</time>
     })
 }
 
@@ -392,7 +429,7 @@ pub(crate) async fn change_form<'a>(
 /// A passkey ceremony the passkey script runs before posting a [`passkey_form`],
 /// named by the form's marker.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) enum Ceremony {
+pub(crate) enum Ceremony<'a> {
     /// Signing in, with the form's `username`, if any, or the browser's account
     /// picker: `data-passkey-sign-in`.
     SignIn,
@@ -403,9 +440,23 @@ pub(crate) enum Ceremony {
     /// Adding a passkey to the signed-in account, from the form's `friendly_name`
     /// and `passkey_kind`, confirming first if it must: `data-passkey-enroll`.
     Enroll,
+    /// Adding a passkey with a recovery link, which signs the browser in, from the
+    /// form's `friendly_name` and `passkey_kind`: `data-passkey-recover`, whose
+    /// value is the link's `token`. The token rides in the marker rather than in an
+    /// input, so the form's post never sends it again.
+    Recover {
+        /// The recovery link's token.
+        token: &'a str,
+    },
+    /// Undoing the `recovery` with a passkey the account had before it:
+    /// `data-passkey-undo`, whose value is the recovery's ID.
+    Undo {
+        /// The recovery.
+        recovery: RecoveryId,
+    },
 }
 
-impl Ceremony {
+impl Ceremony<'_> {
     /// Why the form's button stays disabled, until the passkey script finds the
     /// browser can run the ceremony.
     const fn unavailable(self) -> &'static str {
@@ -415,6 +466,12 @@ impl Ceremony {
             }
             Self::Enroll => {
                 "Adding a passkey needs a browser that supports them, with scripts allowed."
+            }
+            Self::Recover { .. } => {
+                "Recovering needs a browser that supports passkeys, with scripts allowed."
+            }
+            Self::Undo { .. } => {
+                "Undoing needs a browser that supports passkeys, with scripts allowed."
             }
         }
     }
@@ -428,12 +485,17 @@ impl Ceremony {
 #[component]
 pub(crate) async fn passkey_form<'a>(
     action: &'a str,
-    ceremony: Ceremony,
+    ceremony: Ceremony<'a>,
     #[into] change: Fields,
     label: &'a str,
     #[default] class: &'a str,
     #[default] child: Child<'_>,
 ) -> Result<impl View> {
+    let (recover, undo) = match ceremony {
+        Ceremony::Recover { token } => (Some(token), None),
+        Ceremony::Undo { recovery } => (None, Some(recovery.to_string())),
+        Ceremony::SignIn | Ceremony::Register | Ceremony::Enroll => (None, None),
+    };
     Ok(view! {
         <form
             class="stack"
@@ -442,6 +504,8 @@ pub(crate) async fn passkey_form<'a>(
             data-passkey-sign-in=(ceremony == Ceremony::SignIn)
             data-passkey-register=(ceremony == Ceremony::Register)
             data-passkey-enroll=(ceremony == Ceremony::Enroll)
+            data-passkey-recover=(recover)
+            data-passkey-undo=(undo.as_deref())
         >
             hidden(fields: change)
             (child)
@@ -452,19 +516,72 @@ pub(crate) async fn passkey_form<'a>(
     })
 }
 
-/// Where a new passkey is saved, offered on Android, whose browsers may save it
-/// with Google Password Manager, for a [`passkey_form`] creating one.
+/// The inputs of a [`passkey_form`] creating a passkey: its name, labelled
+/// `label` and starting as `value`, if any, and, on `android`, whose browsers may
+/// save it with Google Password Manager, where it is saved.
 #[component]
-pub(crate) async fn passkey_kind() -> Result<impl View> {
+pub(crate) async fn new_passkey<'a>(
+    label: &'a str,
+    #[into]
+    #[default]
+    value: Option<&'a str>,
+    android: bool,
+) -> Result<impl View> {
     Ok(view! {
         <label>
-            "Save this passkey with"
-            <select name="passkey_kind">
-                <option value="standard">"Passkey or security key"</option>
-                <option value="google_password_manager">"Google Password Manager on this device"</option>
-            </select>
+            (label)
+            <input name="friendly_name" value=(value) maxlength="80" required="" autocomplete="off">
         </label>
-        <p class="help">"Choose Google Password Manager only if it is available on this Android device."</p>
+        if android {
+            <label>
+                "Save this passkey with"
+                <select name="passkey_kind">
+                    <option value="standard">"Passkey or security key"</option>
+                    <option value="google_password_manager">"Google Password Manager on this device"</option>
+                </select>
+            </label>
+            <p class="help">"Choose Google Password Manager only if it is available on this Android device."</p>
+        }
+    })
+}
+
+/// A change posted to the page at `action` with values a link carries in its
+/// fragment, which never reaches a server: `change` as hidden inputs, then an input
+/// for each of `fragments`, named as the fragment names it, which the passkey
+/// script fills in from the fragment as it posts the form, dropping the fragment
+/// from the address. The form holds `child`, and a button labelled `label`, which
+/// stays disabled without scripts, as the note `unavailable` says. It shows, with
+/// its button enabled, while the link has every value; otherwise `missing` shows
+/// instead, as after a post that failed, whose `alert` says why: the fragment is
+/// gone by then. With `alert_replaces_missing`, the alert says why alone.
+#[component]
+pub(crate) async fn fragment_form<'a>(
+    action: &'a str,
+    #[into] change: Fields,
+    fragments: &'a [&'a str],
+    label: &'a str,
+    unavailable: &'a str,
+    #[default] alert: Option<&'a str>,
+    #[default] alert_replaces_missing: bool,
+    #[into] missing: Child<'_>,
+    #[default] child: Child<'_>,
+) -> Result<impl View> {
+    Ok(view! {
+        if let Some(alert) = alert {
+            <p class="notice error" role="alert">(alert)</p>
+        }
+        <form class="card stack" method="post" action=(action) data-submit-once="" data-fragment-form="">
+            hidden(fields: change)
+            for name in fragments {
+                <input type="hidden" name=(*name) data-fragment=(*name)>
+            }
+            (child)
+            <p class="help" data-unavailable="">(unavailable)</p>
+            <button disabled="">(label)</button>
+        </form>
+        if !(alert_replaces_missing && alert.is_some()) {
+            <div class="card stack" data-fragment-missing="" hidden="">(missing)</div>
+        }
     })
 }
 

@@ -120,8 +120,8 @@ impl AccountService {
     }
 }
 
-/// The account as its own pages show it: in their bar, and on the sign-in page's
-/// link step.
+/// The account as auth's pages show it to the browser signed in to it: in the
+/// account's bar, and on the sign-in and undo pages.
 pub(crate) struct Profile {
     /// Its handle, the login name, which may predate the handle rules.
     pub(crate) handle: String,

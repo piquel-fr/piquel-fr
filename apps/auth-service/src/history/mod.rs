@@ -195,7 +195,7 @@ impl AccountService {
         tx.revoke_sessions(
             &context,
             owner.user(),
-            SessionScope::AllExcept(owner.session().id),
+            SessionScope::AllExcept(owner.session_id()),
             &RevocationReason::CompromiseReported,
         )
         .await?;

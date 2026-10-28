@@ -31,6 +31,9 @@ mod developers;
 mod login;
 /// The consent page and the confirmation of an application's logout request.
 mod oidc;
+/// The recovery pages: adding a passkey with a recovery link, and undoing a
+/// recovery.
+mod recovery;
 /// The account's settings.
 mod settings;
 #[cfg(test)]
@@ -179,8 +182,10 @@ impl WebApplication {
     }
 
     /// Each page's route, the handler showing it and the one submitting its form.
-    fn pages() -> [(&'static str, RouteHandlerFn, RouteHandlerFn); 15] {
-        use routes::page::{CONSENT, LOGIN, LOGOUT, REGISTER, settings::VERIFY};
+    fn pages() -> [(&'static str, RouteHandlerFn, RouteHandlerFn); 17] {
+        use routes::page::{
+            CONSENT, LOGIN, LOGOUT, RECOVER, RECOVER_UNDO, REGISTER, settings::VERIFY,
+        };
         [
             page!(
                 LOGIN,
@@ -222,6 +227,18 @@ impl WebApplication {
             Self::entry::<developers::Overview>(),
             Self::entry::<developers::AppSettings>(),
             Self::entry::<developers::AppSecrets>(),
+            page!(
+                RECOVER,
+                Title::Recover.as_str(),
+                Self::recover,
+                Self::recover_change,
+            ),
+            page!(
+                RECOVER_UNDO,
+                Title::UndoRecovery.as_str(),
+                Self::undo_recovery,
+                Self::undo_recovery_change,
+            ),
         ]
     }
 

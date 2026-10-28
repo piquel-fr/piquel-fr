@@ -10,7 +10,7 @@
 
 use super::{Failure, WebApplication};
 use crate::{
-    account::{AccountError, Viewer},
+    account::{AccountError, Owner, Viewer},
     federation::{FederationError, PendingKind, PendingView, ReturnTo},
     oidc::{AuthorizationView, OAuthError, OidcApplication, TransactionQuery},
     passkey::PasskeyApplication,
@@ -354,18 +354,37 @@ impl WebApplication {
     /// Sends the browser on to `continuation` from `page`, once it signed in: to
     /// the path, or on through the authorization, which the page continues
     /// in-process, so that its `form-action` governs the redirect to the
-    /// application, or links there when it cannot.
+    /// application, or links there when it cannot. Before an application, an
+    /// account with a recovery that can still be undone asks whether it was its
+    /// owner's, going on through the path resuming the authorization; a path on
+    /// auth asks on the account's pages.
     async fn go_on(
         &self,
         cx: &Cx,
         page: SignInPage,
         continuation: Continuation,
     ) -> Result<Response, Failure> {
-        match continuation {
+        match &continuation {
             Continuation::Authorization(transaction) => {
+                if let Some(owner) = self.owner(cx).await?
+                    && let Some(recovery) = self.recovery(&owner).await?
+                {
+                    let resume = continuation.return_to()?;
+                    let prompt = view! { cx =>
+                        piquel_ui::recovery_prompt(
+                            recovery: &recovery,
+                            continue_href: &resume,
+                            undo: routes::page::RECOVER_UNDO,
+                        )
+                    };
+                    let title = Title::SignIn.as_str();
+                    return Ok(self
+                        .render(cx, StatusCode::OK, title, Area::SignIn, &[], prompt)
+                        .await?);
+                }
                 let next = self
                     .oidc
-                    .continue_authorization(Self::context(cx)?, headers(cx), transaction)
+                    .continue_authorization(Self::context(cx)?, headers(cx), transaction.clone())
                     .await?;
                 Ok(self.onward(cx, page.title(), &next).await?)
             }
@@ -373,12 +392,10 @@ impl WebApplication {
         }
     }
 
-    /// The account the browser is signed in to, if it is.
-    async fn signed_in(&self, cx: &Cx) -> Result<Option<SignedIn>, Failure> {
-        let Some(owner) = self.owner(cx).await? else {
-            return Ok(None);
-        };
-        let profile = match self.account.profile(&Viewer::from(&owner)).await {
+    /// The account the browser is signed in to as `owner`, or none when it is gone
+    /// since its session was found.
+    pub(super) async fn signed_in(&self, owner: &Owner) -> Result<Option<SignedIn>, Failure> {
+        let profile = match self.account.profile(&Viewer::from(owner)).await {
             Ok(profile) => profile,
             // An account gone since its session was found is signed out.
             Err(AccountError::Owner(SessionError::Missing)) => return Ok(None),
@@ -423,8 +440,8 @@ impl WebApplication {
             None => (None, None),
         };
         let link = pending.as_ref().and_then(|pending| pending.kind.link());
-        let signed_in = match link {
-            Some(_) => self.signed_in(cx).await?,
+        let signed_in = match self.owner(cx).await? {
+            Some(owner) => self.signed_in(&owner).await?,
             None => None,
         };
         let providers: Vec<_> = self.federation.enabled().collect();
@@ -442,6 +459,7 @@ impl WebApplication {
                 passkey_only: target_acr == Some(Acr::PhishingResistant),
                 handle_open: query.handle.0,
                 providers: &providers,
+                signed_in: signed_in.as_ref(),
             },
             (Some(_), None, _) | (None, _, SignInPage::Register) => Step::SignUp {
                 social: pending

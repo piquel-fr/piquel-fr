@@ -1,20 +1,11 @@
-import { type Browser, expect, type Page, test } from '@playwright/test';
+import { expect, test } from '@playwright/test';
 import { execFileSync } from 'node:child_process';
-import { addPasskeys, signUp } from './helpers';
+import { signedUp } from './helpers';
 
 const adminUrl = process.env.E2E_ADMIN_URL ?? '';
 // A command that makes the account named by its last argument an administrator,
 // e.g. `just auth admin grant` or `piquelctl app exec … -- auth-service admin grant`.
 const grantAdmin = process.env.E2E_GRANT_ADMIN;
-
-/** A browser of its own, with a passkey authenticator, signed up as `username`. */
-async function signedUp(browser: Browser, username: string): Promise<Page> {
-  const context = await browser.newContext();
-  const page = await context.newPage();
-  await addPasskeys(context, page);
-  await signUp(page, username);
-  return page;
-}
 
 /** Runs against a deployment with the dashboard, such as a preview. */
 test('an administrator disables a user from the dashboard, and the user is signed out', async ({

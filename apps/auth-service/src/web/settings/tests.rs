@@ -455,7 +455,8 @@ async fn history_reports_need_confirmation_and_cannot_be_forged() {
 }
 
 /// The verification page never verifies on its own: its form does, signed out.
-/// Neither another account nor a token that does not match can.
+/// Neither another account nor a token that does not match can, and a refused
+/// confirmation still leads to the addresses.
 #[tokio::test]
 #[ignore = "requires TEST_DATABASE_URL"]
 async fn verification_links_are_confirmed_by_their_form() {
@@ -493,7 +494,9 @@ async fn verification_links_are_confirmed_by_their_form() {
         )
         .await;
     assert_eq!(refused.status(), StatusCode::BAD_REQUEST);
-    assert!(html(refused).await.contains(r#"role="alert""#));
+    let page = html(refused).await;
+    assert!(page.contains(r#"role="alert""#), "{page}");
+    assert!(page.contains("Manage your addresses"), "{page}");
 
     let other = Browser::new_account(&database).await;
     let refused = other

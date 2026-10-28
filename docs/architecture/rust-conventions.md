@@ -153,7 +153,12 @@ such a client links to the provider rather than redirecting there, since a provi
 the user already allowed sends the browser straight back and on to the client. A
 passkey ceremony runs in the browser through the passkey script, then posts the
 form's change: signing in or up changes nothing and continues, and linking while
-signed out links once the sign-in succeeds.
+signed out links once the sign-in succeeds. While the account has a recovery that
+can be undone, a passkey sign-in that continues an authorization first asks whether
+it was the owner's, and goes on by a plain link that resumes the authorization. The
+recovery pages (`src/web/recovery`), `/recover` and `/recover/undo`, which a
+recovery's emails link to, serve signed-out browsers too, so they are pages of their
+own as well.
 
 The passkey script (`apps/auth-service/assets/passkey.js`) wires the pages' forms by
 their attributes. It keeps a form marked `data-submit-once` from posting twice, and
@@ -162,15 +167,21 @@ page marks while the session has no recent confirmation. A `data-passkey-sign-in
 form signs in with a passkey, with its `username` when typed, and a
 `data-passkey-register` form creates the account and its passkey; both then post. A
 `data-passkey-enroll` form runs the passkey enrollment, then posts, so its page says
-so. A `data-fragment-form` copies the link's fragment into its inputs as it posts,
-so a verification token never reaches the server in a URL. A ceremony form's or a
+so. A `data-passkey-recover` form enrolls a passkey with the recovery link's token
+its attribute carries, so the form's post never sends the token again, and a
+`data-passkey-undo` form undoes the recovery its attribute names with an older
+passkey; both then post, the undo saying whether it signed the browser in. A
+`data-fragment-form` copies the link's fragment into its inputs as it posts, so an
+emailed link's token never reaches the server in a URL. A ceremony form's or a
 fragment form's button starts disabled, with a `data-unavailable` note saying why,
 until the script finds it can work. While a ceremony runs, its form's button is
 disabled and says it waits for the passkey, and the form's last error hides. A
-`data-copy` button copies a value, and a `data-replace-url` element makes a page
-that shows a secret reload by `GET`. The script is plain JavaScript, embedded as
-written: `tsc` checks its JSDoc types, and ESLint lints it as it does the browser
-tests.
+`data-dismiss` element, rendered hidden, shows unless the browser's local storage
+holds its key, which a `data-dismisses` button with that key stores as it hides the
+element; without local storage, it shows on every page. A `data-copy` button copies
+a value, and a `data-replace-url` element makes a page that shows a secret reload by
+`GET`. The script is plain JavaScript, embedded as written: `tsc` checks its JSDoc
+types, and ESLint lints it as it does the browser tests.
 
 Administrative operations are methods of `AdminService` (`src/admin/service.rs`);
 the admin API's handlers and the CLI's commands (`src/cli`) are thin adapters that

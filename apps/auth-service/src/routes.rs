@@ -134,6 +134,10 @@ pub(crate) mod page {
     pub(crate) const CONSENT: &str = "/authorize";
     /// RP-initiated logout confirmation.
     pub(crate) const LOGOUT: &str = "/logout";
+    /// Enrolls a passkey with a recovery link, whose token is in the fragment.
+    pub(crate) const RECOVER: &str = "/recover";
+    /// Undoes a recovery, whose ID is in the fragment; the notices link to it.
+    pub(crate) const RECOVER_UNDO: &str = "/recover/undo";
 
     /// The account's settings, at the paths piquel.fr served them on, so its redirect
     /// keeps old links and sent emails working.
@@ -177,7 +181,7 @@ pub(crate) mod page {
 
     /// Every server-rendered page's route, which the security layer classifies as
     /// pages.
-    pub(crate) const ALL: [&str; 15] = [
+    pub(crate) const ALL: [&str; 17] = [
         LOGIN,
         REGISTER,
         CONSENT,
@@ -193,11 +197,9 @@ pub(crate) mod page {
         developers::APP,
         developers::APP_SETTINGS,
         developers::APP_SECRETS,
+        RECOVER,
+        RECOVER_UNDO,
     ];
-    /// Enrolls a passkey with a recovery link, whose token is in the fragment.
-    pub(crate) const RECOVER: &str = "/recover";
-    /// Undoes a recovery, whose ID is in the fragment; the notices link to it.
-    pub(crate) const RECOVER_UNDO: &str = "/recover/undo";
 }
 
 /// Prefix shared by the account JSON APIs.
