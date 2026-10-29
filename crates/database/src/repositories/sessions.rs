@@ -3,9 +3,9 @@
 use super::{JsonArray, RepositoryExecutor, SessionRepository};
 use crate::{DatabaseError, DatabaseTransaction};
 use chrono::{DateTime, TimeDelta, Utc};
-use piquel_admin_api::Session;
 use piquel_common::{
     AuthenticationMethod, PasskeyId, SessionId, UserId,
+    admin::Session,
     events::{DomainEvent, EventContext, RevocationReason, UserAgentFamily},
     protocol::claims::{Acr, Amr},
 };

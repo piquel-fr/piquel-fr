@@ -2,8 +2,10 @@
 
 use super::{AdminApplication as App, lists, settings};
 use crate::Reason;
-use piquel_admin_api::{DisableUser, EventSearch, UserSearch};
-use piquel_common::{AccountStatus, SessionId, UserId};
+use piquel_common::{
+    AccountStatus, SessionId, UserId,
+    admin::{DisableUser, EventSearch, UserSearch},
+};
 use piquel_repository::{RecentRecovery, RecoveryState};
 use piquel_ui::{
     AccountPages, Query, RecoveryKey, RecoveryRow, RecoveryStanding, SessionRow, UserRow,

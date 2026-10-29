@@ -1,8 +1,10 @@
 //! Account search and one account's page.
 
 use super::{EventRow, account_status, event_rows, heading, moment, refused_action};
-use piquel_admin_api::{Session, User, UserDetail};
-use piquel_common::{AccountStatus, AuthenticationMethod};
+use piquel_common::{
+    AccountStatus, AuthenticationMethod,
+    admin::{Session, User, UserDetail},
+};
 use topcoat::{
     Result,
     view::{View, component, view},

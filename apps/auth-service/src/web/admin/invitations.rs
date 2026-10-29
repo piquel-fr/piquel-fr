@@ -3,8 +3,7 @@
 use super::AdminApplication as App;
 use crate::{AdminError, InviteExpiry};
 use chrono::Utc;
-use piquel_admin_api::CreateInvitation;
-use piquel_common::TokenId;
+use piquel_common::{TokenId, admin::CreateInvitation};
 use piquel_ui::InvitationRow;
 use serde::de::IgnoredAny;
 use topcoat::{

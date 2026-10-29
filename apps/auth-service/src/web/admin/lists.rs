@@ -1,8 +1,10 @@
 //! The OIDC clients and domain events.
 
 use super::AdminApplication as App;
-use piquel_admin_api::{Event, EventSearch};
-use piquel_common::{EventId, UserId};
+use piquel_common::{
+    EventId, UserId,
+    admin::{Event, EventSearch},
+};
 use piquel_ui::{EventRow, Query};
 use topcoat::{
     Result,

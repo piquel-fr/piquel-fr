@@ -4,8 +4,10 @@ use super::{CliError, Confirm, Console, Output};
 use crate::{AdminError, AuthConfig, Reason, UserRef, recovery::Revoke};
 use chrono::{DateTime, Utc};
 use clap::Subcommand;
-use piquel_admin_api::{UserDetail, UserPage};
-use piquel_common::{PasskeyId, UserId};
+use piquel_common::{
+    PasskeyId, UserId,
+    admin::{UserDetail, UserPage},
+};
 use piquel_repository::{RecentRecovery, RecoveryState};
 
 /// Accounts, in any status.

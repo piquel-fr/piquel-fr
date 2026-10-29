@@ -2,15 +2,15 @@
 //! what the CLI's `--output json` prints. Auth's service returns them, and its
 //! database crate decodes some straight into them.
 //!
-//! Bodies the account settings also return come from `piquel-common` and are
-//! re-exported here.
+//! Bodies the account settings also return come from [`crate::protocol::api`]
+//! and are re-exported here.
 
-use chrono::{DateTime, Utc};
-pub use piquel_common::protocol::api::{Identity, Passkey};
-use piquel_common::{
+pub use crate::protocol::api::{Identity, Passkey};
+use crate::{
     AccountStatus, AuthenticationMethod, ClientId, EventId, Handle, SessionId, TokenId, TraceId,
     UserId, protocol::oauth::ClientAuthMethod,
 };
+use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use url::Url;
 

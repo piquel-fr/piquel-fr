@@ -51,7 +51,7 @@ checked query renders its script (`src/connection/runtime_role.sql`) with
 `format`, which quotes the values, and `raw_sql` runs it.
 
 Queries only administration reads decode straight into its views from
-`piquel-admin-api`. Records that auth also uses elsewhere convert into those views
+`piquel_common::admin`. Records that auth also uses elsewhere convert into those views
 with `From`, leaving out what administrators never see, so no record repeats a view.
 
 The cache in `.sqlx/` is committed, and `.cargo/config.toml` sets

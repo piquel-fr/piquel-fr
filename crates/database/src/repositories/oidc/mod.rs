@@ -3,8 +3,7 @@
 use super::{JsonArray, OidcRepository, RepositoryExecutor};
 use crate::{DatabaseError, SessionAuthentication};
 use chrono::{DateTime, Utc};
-use piquel_admin_api::Consent;
-use piquel_common::{ClientId, SessionId, TokenId, UserId, protocol::claims::Acr};
+use piquel_common::{ClientId, SessionId, TokenId, UserId, admin::Consent, protocol::claims::Acr};
 use sqlx::types::Json;
 
 piquel_common::str_enum! {

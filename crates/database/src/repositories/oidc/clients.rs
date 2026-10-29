@@ -10,9 +10,9 @@ use crate::{
     repositories::{JsonArray, OidcRepository, RepositoryExecutor, Unsigned},
 };
 use chrono::{DateTime, Duration, Utc};
-use piquel_admin_api::Client;
 use piquel_common::{
     ClientId, ClientSecretId, UserId,
+    admin::Client,
     clients::{ClientField, ClientKind, ClientOwner, ClientRegistration, RedirectUri, ScopeName},
 };
 use serde::Serialize;

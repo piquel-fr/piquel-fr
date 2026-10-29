@@ -2,7 +2,7 @@
 
 use super::{heading, moment, refused_action};
 use chrono::{DateTime, Utc};
-use piquel_admin_api::{Administrator, Client, Event, Invitation};
+use piquel_common::admin::{Administrator, Client, Event, Invitation};
 use serde_json::Value;
 use topcoat::{
     Result,

@@ -8,8 +8,7 @@ is authentication, with its account settings, and the admin dashboard.
 | `apps/auth-service` | Rust auth authority, browser ceremonies, social adapters, OIDC, server-rendered pages, the settings API, the admin dashboard at admin.piquel.fr, CLI; `assets/passkey.js`, the one script its pages load: the WebAuthn passkey ceremonies and the form hooks that run them |
 | `crates/database` | `piquel-repository`: PostgreSQL connections, migrations and typed persistence operations |
 | `crates/auth-sdk` | `piquel-auth`, the public Rust SDK: token validation, typed scopes, login and the JWKS cache auth also uses for Google; `axum` feature: extractors, bearer layer, login routes over an application's own session backend |
-| `crates/admin-api` | `piquel-admin-api`: the views of administration, which the admin dashboard shows, the CLI prints as JSON and the database crate decodes into |
-| `crates/common` | `piquel-common`, the one home for shared types: IDs, string enums, `Personal<T>`, and the wire types shared by auth and the SDKs (token claims, discovery metadata, JWK sets, OAuth/OIDC vocabulary and errors, bearer challenges, SDK error codes, and the bodies auth's settings API and the admin views share); `config` feature: environment variables, validated origins, secret references; `events` feature: domain events |
+| `crates/common` | `piquel-common`, the one home for shared types: IDs, string enums, `Personal<T>`, and the wire types shared by auth and the SDKs (token claims, discovery metadata, JWK sets, OAuth/OIDC vocabulary and errors, bearer challenges, SDK error codes, and the bodies auth's settings API and the admin views share); `admin` feature: the views of administration, which the admin dashboard shows, the CLI prints as JSON and the database crate decodes into; `config` feature: environment variables, validated origins, secret references; `events` feature: domain events |
 | `crates/crypto` | Random secrets, SHA-256, HMAC, PKCE and RS256 signing |
 | `crates/ui` | `piquel-ui`: the Topcoat components and layouts of auth's server-rendered pages, rendering plain data and taking URLs as props, the admin dashboard's included, and the shared stylesheet, `assets/style.css` |
 | `crates/telemetry` | `piquel-telemetry`: stderr logs, and OpenTelemetry traces, metrics and logs over OTLP; request spans and access logs for axum routers, client spans, and typed metric instruments; see [telemetry.md](telemetry.md) |
@@ -22,9 +21,10 @@ builds JavaScript.
 
 Only `crates/database` runs SQL. `piquel-common` has an optional `sqlx` feature,
 enabled only by the database crate, that lets its IDs and vocabularies decode from
-columns. Its other server-only parts sit behind the `config` and `events` features,
-so the Rust SDK compiles only IDs and wire types. Auth-service owns authentication policy;
-frontends never receive database credentials or provider secrets. Shared types
+columns. Its other server-only parts sit behind the `admin`, `config`, `email` and
+`events` features, so the Rust SDK compiles only IDs and wire types. Auth-service
+owns authentication policy; frontends never receive database credentials or
+provider secrets. Shared types
 go in `piquel-common`; add new crates only for independently auditable primitives,
 or, as `piquel-ui`, to compile slow view code beside the database crate instead of
 after it.

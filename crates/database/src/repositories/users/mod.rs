@@ -3,8 +3,7 @@
 use super::{RepositoryExecutor, Unsigned, UserRepository};
 use crate::DatabaseError;
 use chrono::{DateTime, Utc};
-use piquel_admin_api::User;
-use piquel_common::{AccountStatus, Handle, UserId};
+use piquel_common::{AccountStatus, Handle, UserId, admin::User};
 
 /// A user account row, with its current handle.
 #[derive(Clone, Debug, PartialEq, Eq)]
