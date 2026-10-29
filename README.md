@@ -468,7 +468,9 @@ client and scope; explicitly trusted clients bypass consent. Users see the apps
 they consented to, or whose refresh grants still work, under Connected apps in
 settings (`/settings/apps`), and remove an app's access there: its refresh grants
 end, it asks for consent again, and its outstanding codes stop working. Access
-tokens it already holds expire within five minutes.
+tokens it already holds expire within five minutes. An administrator removes one
+the same way from the account's Connected apps page on the dashboard, with a
+reason the owner sees in their history.
 
 ### Authentication claims
 

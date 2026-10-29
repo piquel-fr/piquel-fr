@@ -1,7 +1,7 @@
 //! The apps that keep access to the account, and removing that access: what
 //! [`AccountService`] serves the settings' connected apps. Their scenarios run with
 //! the OIDC flow tests, which issue the grants they remove.
-use crate::account::{AccountError, AccountService, Owner, Viewer};
+use crate::account::{AccountError, AccountService, Subject, Viewer};
 use piquel_common::{ClientId, events::DomainEvent, protocol::oauth::Scope};
 use piquel_repository::StoredApp;
 
@@ -57,25 +57,27 @@ impl AccountService {
             .collect())
     }
 
-    /// Removes `client`'s access to the owner's account in one transaction,
+    /// Removes `client`'s access to `subject`'s account in one transaction,
     /// under the account lock: revokes its refresh grants, withdraws the
     /// consent, so it asks again before its next sign-in, and expires its
-    /// outstanding codes. Recorded as one `ConsentRevoked`. Access tokens it
-    /// already holds expire within minutes.
+    /// outstanding codes. Recorded as one `ConsentRevoked`, with the reason of
+    /// an administrator or operator who removes it. Access tokens it already
+    /// holds expire within minutes.
     ///
-    /// Only the owner may: it needs no passkey confirmation, since it only takes
-    /// access away. The owner's sessions stay signed in, since other apps share
-    /// them. A code exchange locks the account first too, so it either finishes
-    /// before this, and its refresh grant is revoked here, or finds its code
-    /// expired.
+    /// The owner needs no passkey confirmation, since it only takes access
+    /// away; an administrator's own recent passkey is checked as for every
+    /// admin change. The owner's sessions stay signed in, since other apps
+    /// share them. A code exchange locks the account first too, so it either
+    /// finishes before this, and its refresh grant is revoked here, or finds its
+    /// code expired.
     pub(crate) async fn remove_app(
         &self,
-        owner: &Owner,
+        subject: &Subject,
         client: &ClientId,
     ) -> Result<(), AccountError> {
         let mut tx = self.database.begin().await?;
-        owner.lock(&mut tx).await?;
-        let user = owner.user();
+        subject.lock(&mut tx).await?;
+        let user = subject.user();
         // Refresh grants before the consent, in the order a client's deletion
         // locks them, so neither waits for what the other holds.
         let revoked = tx.tokens().revoke_for_user(user, Some(client)).await?;
@@ -87,8 +89,7 @@ impl AccountService {
         let removed = DomainEvent::ConsentRevoked {
             client_id: client.clone(),
         };
-        tx.record(&owner.context(), Some(user), removed).await?;
-        tx.commit().await?;
-        Ok(())
+        tx.record(&subject.context(), Some(user), removed).await?;
+        subject.commit(tx).await
     }
 }

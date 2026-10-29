@@ -1,5 +1,6 @@
 //! Connected apps: the apps that keep access to the account.
 
+use super::Audience;
 use crate::form::{Query, change_form, open};
 use crate::oidc::scope_label;
 use piquel_common::ClientId;
@@ -47,16 +48,21 @@ pub struct ConnectedAppRow<'a> {
 }
 
 /// The connected apps page: the apps in `rows`, each removable once confirmed,
-/// as `state` opens it. Its changes post to `page`.
+/// as `state` opens it, for `audience`. Its changes post to `page`.
 #[component]
 pub async fn connected_apps<'a>(
     page: &'a str,
     rows: &'a [ConnectedAppRow<'a>],
     state: &'a ConnectedAppsState,
+    audience: Audience,
 ) -> Result<impl View> {
     Ok(view! {
         <p class="help">
-            "The apps you sign in to with Piquel that keep access to your account, and what they can see. Remove any you no longer use."
+            (if audience.owns() {
+                "The apps you sign in to with Piquel that keep access to your account, and what they can see. Remove any you no longer use."
+            } else {
+                "The apps that keep access to this account, and what they can see."
+            })
         </p>
         <section class="card" aria-labelledby="apps-heading">
             <div class="row between">
@@ -66,12 +72,19 @@ pub async fn connected_apps<'a>(
             <ul class="list">
                 for row in rows {
                     <li>
-                        app_row(page: page, row: *row, removing: state.removing.as_ref() == Some(row.client_id))
+                        app_row(
+                            page: page,
+                            row: *row,
+                            removing: state.removing.as_ref() == Some(row.client_id),
+                            audience: audience,
+                        )
                     </li>
                 }
             </ul>
             if rows.is_empty() {
-                <p class="empty">"No apps have access to your account."</p>
+                <p class="empty">
+                    (if audience.owns() { "No apps have access to your account." } else { "No app has access to this account." })
+                </p>
             }
         </section>
     })
@@ -80,17 +93,25 @@ pub async fn connected_apps<'a>(
 /// One app of [`connected_apps`]: what it can see, and removing it. The open
 /// removal row takes the focus.
 #[component]
-async fn app_row<'a>(page: &'a str, row: ConnectedAppRow<'a>, removing: bool) -> Result<impl View> {
+async fn app_row<'a>(
+    page: &'a str,
+    row: ConnectedAppRow<'a>,
+    removing: bool,
+    audience: Audience,
+) -> Result<impl View> {
     let name = row.name;
-    let away = if row.offline {
-        "It can use your account while you’re away."
-    } else {
-        "It can use your account only while you’re signed in to it."
+    let away = match (row.offline, audience.owns()) {
+        (true, true) => "It can use your account while you’re away.",
+        (false, true) => "It can use your account only while you’re signed in to it.",
+        (true, false) => "It can use the account while its owner is away.",
+        (false, false) => "It can use the account only while its owner is signed in to it.",
     };
     let again = if row.first_party {
         format!("Piquel makes {name}, so signing in to it again gives it access without asking.")
-    } else {
+    } else if audience.owns() {
         format!("{name} will need your approval again to use your account.")
+    } else {
+        format!("{name} will need the owner’s approval again to use the account.")
     };
     Ok(view! {
         <div class="stack">
@@ -125,6 +146,7 @@ async fn app_row<'a>(page: &'a str, row: ConnectedAppRow<'a>, removing: bool) ->
                         change: ConnectedAppChange::Remove { client_id: row.client_id.clone() },
                         label: "Remove access",
                         class: "danger",
+                        reason: audience.asks_reason(),
                         cancel: page.to_owned(),
                     )
                 </div>

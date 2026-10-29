@@ -97,10 +97,11 @@ who acts on it, and a read a `Viewer`, the account and who reads it. The owner's
 settings pages and `/account` routes run them as the owner of the session cookie,
 the only way to act as an owner. The `auth-service account <user> …`
 command runs them as the operator at the terminal, and the dashboard's sign-in
-methods and email addresses pages call them in-process as an administrator,
-rendering the owner's own settings sections without what adds a way in, and
-asking for a reason with each change. All run the same safety rules:
-for example, one active passkey always remains, whoever removes the others.
+methods, email addresses and connected apps pages call them in-process as an
+administrator, rendering the owner's own settings sections without what adds a
+way in, and asking for a reason with each change. All run the same safety
+rules: for example, one active passkey always remains, whoever removes the
+others.
 
 The rule for what is shared: administrators may view, edit and remove, but never
 add a way to sign in or to receive the account's email, since that would let them
@@ -116,6 +117,7 @@ signed out, and confirming with a passkey by the session it confirms.
 | Social identities | list, unlink | link |
 | Email addresses | list, choose the primary among verified, remove | add, verify |
 | Sessions | list, sign out one, sign out all | |
+| Connected apps (settings pages and dashboard only) | list, remove an app's access | |
 | Security history | read | report an entry |
 | OIDC clients (the developer console) | | all; administrators use `AdminService`'s |
 

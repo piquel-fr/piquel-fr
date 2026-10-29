@@ -312,6 +312,55 @@ async fn recover_says_when_email_is_disabled() {
     assert!(html(refused).await.contains("email is disabled"));
 }
 
+/// An administrator removes the access of an app the account consented to, with
+/// a reason, from its Connected apps page.
+#[tokio::test]
+#[ignore = "requires TEST_DATABASE_URL"]
+async fn administrators_remove_an_accounts_app() {
+    let harness = Harness::new().await;
+    let admin = harness.admin().await;
+    let owner = Browser::new_account(&harness.database).await;
+    let client = crate::tests::registration(
+        piquel_common::clients::ClientKind::Public,
+        "https://client.example",
+    );
+    crate::tests::register(&harness.database, &client)
+        .await
+        .expect("register");
+    let scopes = ["openid".to_owned()];
+    harness
+        .database
+        .oidc()
+        .save_consent(owner.user_id, &client.id, client.id.as_str(), &scopes)
+        .await
+        .expect("consent");
+    let apps = format!("/users/{}/apps", owner.user_id);
+    let dashboard = harness.confirmed(&admin, &apps, Utc::now()).await;
+    let opened = format!("{apps}?remove={}", client.id);
+    let page = html(harness.visit(&dashboard, &opened).await).await;
+    assert!(page.contains("the owner’s approval again"), "{page}");
+    assert!(
+        page.contains(r#"name="reason""#),
+        "a removal asks why: {page}"
+    );
+
+    let url = format!("{DASHBOARD}{apps}");
+    let remove = [
+        ("action", "remove"),
+        ("client_id", client.id.as_str()),
+        ("reason", "Reported as an impersonating app"),
+    ];
+    let done = dashboard
+        .submit(&harness.dashboard, &url, &remove, OWN_PAGE)
+        .await;
+    assert_eq!(redirect(&done), apps);
+    let page = html(harness.visit(&dashboard, &apps).await).await;
+    assert!(
+        page.contains("No app has access to this account."),
+        "{page}"
+    );
+}
+
 /// An account's page lists its passkeys by ID and when each was added, never by
 /// name, which whoever used a recovery's link chose.
 #[tokio::test]

@@ -48,9 +48,10 @@ use piquel_common::{
 use piquel_repository::{Database, StoredUser};
 
 operations! {
-    /// Every shared settings operation. The owner's router maps each to its
-    /// route, and the `account` command has a command for each, which a CLI test
-    /// checks.
+    /// Every shared settings operation of the settings API. The owner's router
+    /// maps each to its route, and the `account` command has a command for each,
+    /// which a CLI test checks. Connected apps are not among them yet: only the
+    /// settings pages and the dashboard list and remove them.
     pub(crate) enum AccountOperation {
         /// List the account's passkeys.
         ListPasskeys,
@@ -84,7 +85,7 @@ operations! {
 /// all, and the `account` command the shared ones. An operation only the owner may
 /// run takes the [`Owner`] it acts as, a shared change the [`Subject`] it acts on,
 /// and a read the [`Viewer`] it shows. Each operation lives with its setting in the
-/// passkey, federation, emails, sessions, history or clients module.
+/// passkey, federation, emails, sessions, history, grants or clients module.
 #[derive(Clone)]
 pub(crate) struct AccountService {
     /// Accounts, their settings and events.
