@@ -12,6 +12,7 @@ use crate::{
     Reason,
     account::{Subject, Viewer},
     admin::SignedInAdmin,
+    handles::HandlesError,
     security::ApiError,
 };
 use piquel_common::{Handle, UserId};
@@ -69,7 +70,11 @@ pub(super) async fn sign_in(cx: &Cx, body: Body) -> Result<Response> {
             SignInChange::Unlink { provider } => {
                 Ok(account.unlink_identity(&subject, provider).await?)
             }
-            SignInChange::Link { .. } | SignInChange::Enrolled {} => Err(App::owners()),
+            // The owner renames, with the cooldown; an administrator, on the handle
+            // page.
+            SignInChange::Handle { .. } | SignInChange::Link { .. } | SignInChange::Enrolled {} => {
+                Err(App::owners())
+            }
         }
     })
     .await?;
@@ -140,15 +145,15 @@ pub(super) async fn emails(cx: &Cx, body: Body) -> Result<Response> {
 }
 
 /// `/users/{account}/handle`: gives the account a new handle, such as one that
-/// impersonates another account. A reserved handle is refused here: only the
-/// terminal may assign one.
+/// impersonates another account, without the settings' cooldown. A reserved
+/// handle is refused here: only the terminal may assign one.
 #[route([GET, POST] "/users/{account}/handle")]
 pub(super) async fn handle(cx: &Cx, form: Option<Form<NewHandle>>) -> Result<Response> {
     let (admin, user) = App::settings(cx).await?;
     let back = App::account(cx, user);
     let typed = form.as_ref().map(|Form(input)| input.handle.clone());
     let refused = App::submit(cx, form, back.clone(), |input: NewHandle| async move {
-        let handle = Handle::parse(input.handle.trim()).map_err(crate::AdminError::from)?;
+        let handle = Handle::parse(input.handle.trim()).map_err(HandlesError::from)?;
         App::of(cx)
             .service
             .rename_handle(&admin.operator, user, handle, false)
@@ -159,7 +164,7 @@ pub(super) async fn handle(cx: &Cx, form: Option<Form<NewHandle>>) -> Result<Res
     let page = view! { cx =>
         piquel_ui::dashboard_change(
             title: "Rename this account's handle",
-            description: "The account signs in and is shown under the new handle at once. Its old handle is free for anyone to take.",
+            description: "The account signs in and is shown under the new handle at once. Its old handle stays reserved for it: no other account can take it unless it is released from the terminal, and the account can take it back.",
             button: "Rename",
             back: back.as_str(),
             refusal: refused.as_deref(),

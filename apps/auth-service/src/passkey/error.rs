@@ -1,8 +1,9 @@
 //! Passkey failures and their single conversion boundary to browser responses.
 
 use super::ApiError;
+use crate::handles::HandlesError;
 use crate::security::SessionError;
-use piquel_common::{HandleError, InvalidValue, events::SignInFailure, protocol::api::ErrorCode};
+use piquel_common::{InvalidValue, events::SignInFailure};
 use piquel_crypto::CryptoError;
 use piquel_repository::DatabaseError;
 use std::borrow::Cow;
@@ -11,12 +12,10 @@ use webauthn_rs::prelude::WebauthnError;
 /// Failures while validating, persisting or completing a passkey operation.
 #[derive(Debug, thiserror::Error)]
 pub(crate) enum PasskeyError {
-    /// The signup handle breaks the handle rules or is reserved.
-    #[error("invalid handle")]
-    InvalidHandle(#[from] HandleError),
-    /// Another account holds the handle, perhaps since this signup started.
-    #[error("handle is taken")]
-    HandleTaken(#[source] DatabaseError),
+    /// The signup handle is invalid, reserved or not free, perhaps since this
+    /// signup started.
+    #[error("handle refused")]
+    Handle(#[from] HandlesError),
     /// The authenticator's credential is already registered to an account.
     #[error("passkey credential is already registered")]
     PasskeyAlreadyRegistered(#[source] DatabaseError),
@@ -56,7 +55,7 @@ pub(crate) enum PasskeyError {
     /// A discoverable credential returned an invalid account handle.
     #[error("invalid discoverable account handle")]
     InvalidUserHandle(#[source] InvalidValue),
-    /// A decoy ceremony finished: the username has no active account or passkey.
+    /// A decoy ceremony finished: the handle has no active account or passkey.
     #[error("account unavailable for passkey authentication")]
     AccountUnavailable,
     /// The account, or the credential it signed with, was disabled or removed.
@@ -113,11 +112,7 @@ impl From<PasskeyError> for ApiError {
     /// Maps each failure to its browser status and message; internal details stay in the logs.
     fn from(error: PasskeyError) -> Self {
         match error {
-            PasskeyError::InvalidHandle(error) => error.into(),
-            PasskeyError::HandleTaken(_) => Self::conflict(
-                "This handle is taken. Choose another one and create your passkey again.",
-            )
-            .with_code(ErrorCode::HandleTaken),
+            PasskeyError::Handle(error) => error.into(),
             PasskeyError::PasskeyAlreadyRegistered(_) => {
                 Self::conflict("This passkey is already registered to an account.")
             }
@@ -197,8 +192,7 @@ impl PasskeyError {
             | Self::InvalidUserHandle(_)
             | Self::UserVerificationRequired
             | Self::CredentialRevoked => Some(SignInFailure::InvalidCredential),
-            Self::InvalidHandle(_)
-            | Self::HandleTaken(_)
+            Self::Handle(_)
             | Self::PasskeyAlreadyRegistered(_)
             | Self::InvalidDisplayName
             | Self::InvalidPasskeyName

@@ -75,7 +75,7 @@ impl Recovering {
         Self {
             database: database.clone(),
             user_id,
-            handle: account.expect("lookup").expect("account").username,
+            handle: account.expect("lookup").expect("account").handle.into(),
             id: latest.id,
             expires_at: latest.expires_at,
             token: recovery_token(&link),

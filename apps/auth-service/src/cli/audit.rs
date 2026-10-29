@@ -9,7 +9,7 @@ use piquel_common::{EventId, events::Actor};
 /// Page through recorded events, newest first, 100 at a time.
 #[derive(Args)]
 pub(super) struct AuditCommand {
-    /// Only events concerning this account: its username, ID or verified email.
+    /// Only events concerning this account: its handle, ID or verified email.
     #[arg(long)]
     user: Option<UserRef>,
     /// Only events of this kind, e.g. `session_revoked`.

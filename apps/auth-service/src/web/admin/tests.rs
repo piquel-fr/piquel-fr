@@ -496,7 +496,7 @@ async fn recoveries_are_started_and_undone_from_the_dashboard() {
 /// operations, each with a reason: renaming and removing a passkey, and making
 /// another address primary. The pages offer nothing that adds a way in, and a
 /// change without a reason, or only the owner's, is refused. They also rename
-/// the account's handle.
+/// the account's handle, under the owner's handle rules but without the cooldown.
 #[tokio::test]
 #[ignore = "requires TEST_DATABASE_URL"]
 async fn administrators_change_an_accounts_settings_with_a_reason() {
@@ -581,6 +581,11 @@ async fn administrators_change_an_accounts_settings_with_a_reason() {
     assert_eq!(primary.id.to_string(), other);
 
     let handle = format!("/users/{user}/handle");
+    let page = html(harness.visit(&dashboard, &handle).await).await;
+    assert!(
+        page.contains("Its old handle stays reserved for it"),
+        "{page}"
+    );
     let renamed = format!("renamed-{}", &user.to_string()[24..]);
     let done = post(&handle, &[("handle", renamed.as_str())]).await;
     assert_eq!(redirect(&done), format!("/users/{user}"));
@@ -591,5 +596,8 @@ async fn administrators_change_an_accounts_settings_with_a_reason() {
         .await
         .expect("lookup")
         .expect("user");
-    assert_eq!(stored.username, renamed);
+    assert_eq!(stored.handle.as_str(), renamed);
+    // The handle rules refuse a rename, saying why, as they do the owner's.
+    let refused = html(post(&handle, &[("handle", renamed.as_str())]).await).await;
+    assert!(refused.contains("This is already the account"), "{refused}");
 }

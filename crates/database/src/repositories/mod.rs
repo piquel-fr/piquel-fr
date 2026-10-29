@@ -87,6 +87,8 @@ macro_rules! repositories {
 repositories! {
     /// User accounts.
     users: UserRepository;
+    /// Current, released and retired handles.
+    handles: HandleRepository;
     /// Verified email addresses and their cross-account ownership.
     emails: EmailRepository;
     /// Browser sessions, their cookie digests and passkey confirmations.
@@ -248,6 +250,8 @@ pub(crate) mod emails;
 pub(crate) mod events;
 /// Provider transactions, pending signups and external identity links.
 pub(crate) mod federation;
+/// Every handle, current or released, and the rename that moves between them.
+pub(crate) mod handles;
 /// Expired-state cleanup.
 pub(crate) mod maintenance;
 /// Client registrations, authorization requests, codes and consent.

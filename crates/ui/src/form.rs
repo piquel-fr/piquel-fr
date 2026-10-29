@@ -23,7 +23,10 @@ use crate::{
     RecoverChange, SecretsChange, SignInChange, SignInState, UndoChange,
 };
 use chrono::{DateTime, SecondsFormat, Utc};
-use piquel_common::RecoveryId;
+use piquel_common::{
+    RecoveryId,
+    handle::{MAX_LENGTH, MIN_LENGTH},
+};
 use serde::{Deserialize, Deserializer, Serialize, Serializer, de::IgnoredAny};
 use std::str::FromStr;
 
@@ -38,6 +41,8 @@ use topcoat::{
 piquel_common::str_enum! {
     /// What the last change did, which the page it goes to says once.
     pub enum Notice {
+        /// The handle changed.
+        HandleChanged = "handle_changed",
         /// A passkey was added.
         PasskeyAdded = "passkey_added",
         /// A passkey was renamed.
@@ -80,6 +85,7 @@ impl Notice {
     /// What the page says.
     pub(crate) const fn message(self) -> &'static str {
         match self {
+            Self::HandleChanged => "Your handle changed.",
             Self::PasskeyAdded => "The passkey was added.",
             Self::PasskeyRenamed => "The passkey was renamed.",
             Self::PasskeyRemoved => "The passkey was removed.",
@@ -451,10 +457,10 @@ pub(crate) async fn change_form<'a>(
 /// named by the form's marker.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum Ceremony<'a> {
-    /// Signing in, with the form's `username`, if any, or the browser's account
+    /// Signing in, with the form's `handle`, if any, or the browser's account
     /// picker: `data-passkey-sign-in`.
     SignIn,
-    /// Creating an account with its first passkey, from the form's `username`,
+    /// Creating an account with its first passkey, from the form's `handle`,
     /// `friendly_name`, `passkey_kind`, `invitation` and `pending_signup`:
     /// `data-passkey-register`.
     Register,
@@ -602,6 +608,41 @@ pub(crate) async fn fragment_form<'a>(
         </form>
         if !(alert_replaces_missing && alert.is_some()) {
             <div class="card stack" data-fragment-missing="" hidden="">(missing)</div>
+        }
+    })
+}
+
+/// An account's handle, as the passkey script and the handle's settings send it:
+/// a `new` one, which creating an account or changing the handle checks against the
+/// handle rules, or one to sign in with. It shows `value`, if any, and takes the
+/// focus with `focus`.
+#[component]
+pub(crate) async fn handle_input<'a>(
+    new: bool,
+    #[default] value: Option<&'a str>,
+    #[default] focus: bool,
+) -> Result<impl View> {
+    Ok(view! {
+        <label>
+            "Handle"
+            <input
+                name="handle"
+                value=(value)
+                autocomplete=(if new { "username" } else { "username webauthn" })
+                autocapitalize="none"
+                spellcheck="false"
+                pattern=(new.then_some("[a-z0-9]+(-[a-z0-9]+)*"))
+                minlength=(MIN_LENGTH.to_string())
+                maxlength=(MAX_LENGTH.to_string())
+                required=""
+                autofocus=(focus)
+                aria-describedby=(new.then_some("handle-rules"))
+            >
+        </label>
+        if new {
+            <small id="handle-rules">
+                (format!("{MIN_LENGTH}–{MAX_LENGTH} lowercase letters, numbers, or single hyphens between them."))
+            </small>
         }
     })
 }

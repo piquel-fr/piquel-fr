@@ -94,7 +94,7 @@ impl WebApplication {
                 Ok(opened) => {
                     let account = opened.account();
                     let step = RecoverStep::Enroll {
-                        username: &account.username,
+                        handle: account.handle.as_str(),
                         display_name: &account.display_name,
                         expires_at: account.expires_at,
                         token: &token,

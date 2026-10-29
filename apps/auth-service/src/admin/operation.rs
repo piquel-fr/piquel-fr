@@ -62,10 +62,12 @@ operations! {
         GrantAdministrator,
         /// Remove an account's administrator rights.
         RevokeAdministrator,
-        /// List accounts whose handle breaks the rules.
+        /// List accounts whose current handle is reserved.
         CheckHandles,
         /// Give an account a new handle.
         RenameHandle,
+        /// Free a released handle for anyone to claim.
+        ReleaseHandle,
         /// List outbound deliveries.
         ListDeliveries,
         /// Retry a failed or cancelled delivery.

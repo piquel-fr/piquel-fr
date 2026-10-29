@@ -1,10 +1,7 @@
 //! Admin failures, from the dashboard or the CLI, and their status and message.
 
-use crate::{ClientRegistryError, security::ApiError};
-use piquel_common::{
-    DeliveryId, HandleError, PasskeyId,
-    protocol::{api::ErrorCode, step_up::StepUpRequirement},
-};
+use crate::{ClientRegistryError, handles::HandlesError, security::ApiError};
+use piquel_common::{DeliveryId, PasskeyId, protocol::step_up::StepUpRequirement};
 use piquel_crypto::CryptoError;
 use piquel_repository::DatabaseError;
 
@@ -25,8 +22,8 @@ pub enum AdminError {
     /// used, expired or for another browser, or its request is malformed.
     #[error("this sign-in to the dashboard did not work; sign in again")]
     InvalidHandoff,
-    /// No account has this ID or username, or no active one this verified email.
-    #[error("no account has this ID, username or verified email")]
+    /// No account has this ID or handle, or no active one this verified email.
+    #[error("no account has this ID, handle or verified email")]
     UserNotFound,
     /// No active session has this ID.
     #[error("no active session has this ID")]
@@ -114,15 +111,13 @@ pub enum AdminError {
     /// The last administrator's rights cannot be revoked.
     #[error("the last administrator's rights cannot be revoked")]
     LastAdministrator,
-    /// The new handle breaks the handle rules, or is reserved.
+    /// The handle cannot be the account's: invalid, reserved or not free.
     #[error(transparent)]
-    InvalidHandle(#[from] HandleError),
-    /// The account already has this handle.
-    #[error("the account already has this handle")]
-    SameHandle,
-    /// Another account has this handle.
-    #[error("another account has this handle")]
-    HandleTaken(#[source] DatabaseError),
+    Handle(#[from] HandlesError),
+    /// No released handle, or purged account's, is this one; an account's current
+    /// handle is never released.
+    #[error("no released handle is this one")]
+    HandleNotReleased,
     /// Persistence failed.
     #[error(transparent)]
     Database(#[from] DatabaseError),
@@ -171,9 +166,8 @@ impl AdminError {
             Self::NotAnAdministrator => "not_an_administrator",
             Self::OwnRights => "own_rights",
             Self::LastAdministrator => "last_administrator",
-            Self::InvalidHandle(_) => "invalid_handle",
-            Self::SameHandle => "same_handle",
-            Self::HandleTaken(_) => "handle_taken",
+            Self::Handle(_) => "handle",
+            Self::HandleNotReleased => "handle_not_released",
             Self::Database(_) => "database",
             Self::Client(_) => "client",
             Self::Crypto(_) => "crypto",
@@ -213,7 +207,7 @@ impl From<AdminError> for ApiError {
             AdminError::InvalidReason
             | AdminError::InvalidInviteExpiry(_)
             | AdminError::InvalidHandoff => Self::bad_request(message),
-            AdminError::InvalidHandle(error) => error.into(),
+            AdminError::Handle(error) => error.into(),
             AdminError::SessionEnded | AdminError::StepUpRequired(_) => Self::unauthorized(message),
             AdminError::NotAdministrator
             | AdminError::AdministratorTarget
@@ -223,7 +217,8 @@ impl From<AdminError> for ApiError {
             | AdminError::SessionNotFound
             | AdminError::InvitationNotFound
             | AdminError::ClientNotFound
-            | AdminError::DeliveryNotFound { .. } => Self::not_found(message),
+            | AdminError::DeliveryNotFound { .. }
+            | AdminError::HandleNotReleased => Self::not_found(message),
             AdminError::AlreadyDisabled
             | AdminError::AlreadyActive
             | AdminError::EmailClaimed(_)
@@ -236,9 +231,7 @@ impl From<AdminError> for ApiError {
             | AdminError::GrantDuringRecovery
             | AdminError::AccountDisabled
             | AdminError::AlreadyAdministrator
-            | AdminError::NotAnAdministrator
-            | AdminError::SameHandle => Self::conflict(message),
-            AdminError::HandleTaken(_) => Self::conflict(message).with_code(ErrorCode::HandleTaken),
+            | AdminError::NotAnAdministrator => Self::conflict(message),
             AdminError::Database(error) => error.into(),
             AdminError::Client(error) => error.into(),
             error @ (AdminError::Crypto(_) | AdminError::Event(_) | AdminError::Link(_)) => {

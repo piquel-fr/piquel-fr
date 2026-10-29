@@ -26,6 +26,7 @@ pub(crate) use subject::{ConfirmedOwner, ConfirmedSubject, Owner, Subject, Viewe
 use crate::{
     emails::EmailView,
     federation::FederationError,
+    handles,
     history::{HistoryPage, HistoryQuery},
     operations::operations,
     passkey::Rename,
@@ -39,8 +40,9 @@ use axum::{
     http::{HeaderMap, StatusCode},
     routing::{MethodRouter, delete, get, patch, post},
 };
+use chrono::{DateTime, Utc};
 use piquel_common::{
-    EmailId, PasskeyId, SessionId,
+    EmailId, Handle, PasskeyId, SessionId,
     protocol::api::{Identity, Passkey},
 };
 use piquel_repository::{Database, StoredUser};
@@ -121,10 +123,12 @@ impl AccountService {
 }
 
 /// The account as auth's pages show it to the browser signed in to it: in the
-/// account's bar, and on the sign-in and undo pages.
+/// account's bar, on the sign-in and undo pages, and in its handle's settings.
 pub(crate) struct Profile {
-    /// Its handle, the login name, which may predate the handle rules.
-    pub(crate) handle: String,
+    /// Its handle, the login name.
+    pub(crate) handle: Handle,
+    /// When the owner may change the handle again, if not yet.
+    pub(crate) handle_changeable_at: Option<DateTime<Utc>>,
     /// The name shown to the user and to relying parties.
     pub(crate) display_name: String,
 }
@@ -132,8 +136,10 @@ pub(crate) struct Profile {
 impl From<StoredUser> for Profile {
     /// Keeps what the account's pages show.
     fn from(user: StoredUser) -> Self {
+        let changeable_at = user.handle_changed_at + handles::COOLDOWN;
         Self {
-            handle: user.username,
+            handle: user.handle,
+            handle_changeable_at: (changeable_at > Utc::now()).then_some(changeable_at),
             display_name: user.display_name,
         }
     }

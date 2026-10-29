@@ -192,7 +192,7 @@ pub enum RecoverStep<'a> {
     /// Adding a passkey to the account the link recovers.
     Enroll {
         /// The account's handle.
-        username: &'a str,
+        handle: &'a str,
         /// The account's display name.
         display_name: &'a str,
         /// When the link stops working.
@@ -221,10 +221,10 @@ pub async fn recover<'a>(
     let title = match step {
         RecoverStep::Open => Title::Recover.as_str().to_owned(),
         RecoverStep::Enroll {
-            username,
+            handle,
             display_name,
             ..
-        } => format!("Add a passkey to @{username} ({display_name})"),
+        } => format!("Add a passkey to @{handle} ({display_name})"),
     };
     Ok(view! {
         <section class="auth-shell stack">

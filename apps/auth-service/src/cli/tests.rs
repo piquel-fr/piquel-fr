@@ -62,6 +62,7 @@ impl AdminOperation {
             Self::RevokeAdministrator => &["admin", "revoke", "alice"],
             Self::CheckHandles => &["handle", "check"],
             Self::RenameHandle => &["handle", "rename", "alice", "alicia"],
+            Self::ReleaseHandle => &["handle", "release", "alice"],
             Self::ListDeliveries => &["deliveries", "list"],
             Self::RetryDelivery => &["deliveries", "retry", AN_ID],
             Self::CancelDelivery => &["deliveries", "cancel", AN_ID],

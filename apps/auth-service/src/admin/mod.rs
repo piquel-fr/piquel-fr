@@ -24,9 +24,7 @@ use operator::AdminSession;
 pub use operator::Operator;
 pub use service::AdminService;
 pub(crate) use sign_in::{DashboardSignIn, SignedInAdmin};
-pub use types::{
-    GracePeriod, HandleIssue, HandleProblem, InvalidLifetime, InviteExpiry, Reason, UserRef,
-};
+pub use types::{GracePeriod, HandleProblem, InvalidLifetime, InviteExpiry, Reason, UserRef};
 
 /// Administrative scenarios over the service, and the harness the shared
 /// settings' tests also use.

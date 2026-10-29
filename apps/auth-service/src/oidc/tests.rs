@@ -1302,6 +1302,46 @@ async fn a_consent_whose_session_ended_while_waiting_is_not_saved() {
     assert!(consents.expect("consents").is_empty(), "not saved");
 }
 
+/// A rename bumps the profile version, and the next token carries the new
+/// `preferred_username`.
+#[tokio::test]
+#[ignore = "requires TEST_DATABASE_URL"]
+async fn renames_reach_the_next_token() {
+    let flow = Flow::new(true, true).await;
+    let code = flow.code(PROFILE_REFRESH_SCOPES).await;
+    let (tokens, claims) = flow
+        .id_token(
+            flow.exchange(&code, Flow::verifier(), flow.basic.as_deref())
+                .await,
+        )
+        .await;
+    let database = &flow.app.database;
+    let user = database
+        .users()
+        .find_by_id(flow.user_id)
+        .await
+        .expect("lookup")
+        .expect("user");
+    assert_eq!(claims["preferred_username"], user.handle.as_str());
+    let renamed =
+        Handle::parse(&format!("renamed-{}", &flow.user_id.to_string()[24..])).expect("handle");
+    let mut tx = database.begin().await.expect("transaction");
+    assert!(
+        tx.rename_handle(flow.user_id, &renamed)
+            .await
+            .expect("rename")
+    );
+    tx.commit().await.expect("commit");
+    let (_, refreshed) = flow
+        .id_token(
+            flow.refresh(tokens["refresh_token"].as_str().expect("refresh token"))
+                .await,
+        )
+        .await;
+    assert_eq!(refreshed["preferred_username"], renamed.as_str());
+    assert_eq!(refreshed["profile_version"], user.profile_version + 1);
+}
+
 /// Tokens report the class and time of the grant's authentication: a refresh keeps
 /// them after the session re-authenticates, and `acr_values` makes a weaker session
 /// sign in again while unknown values are ignored.
@@ -1746,6 +1786,8 @@ const EMAIL_REFRESH_SCOPES: &str = "openid email offline_access";
 const REFRESH_SCOPES: &str = "openid offline_access";
 /// Public-profile scope fixture.
 const PROFILE_SCOPES: &str = "openid profile";
+/// Profile claims with a refresh token.
+const PROFILE_REFRESH_SCOPES: &str = "openid profile offline_access";
 /// Verified-email scope fixture.
 const EMAIL_SCOPES: &str = "openid email";
 /// Unregistered extension scope fixture used to check rejection.

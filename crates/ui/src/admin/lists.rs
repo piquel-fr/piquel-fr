@@ -104,7 +104,7 @@ pub async fn administrator_list<'a>(
                 <tbody>
                     for row in rows {
                         <tr>
-                            <td><a href=(row.account.as_str())>(row.administrator.username.as_str())</a></td>
+                            <td><a href=(row.account.as_str())>(row.administrator.handle.as_str())</a></td>
                             <td>moment(at: row.administrator.granted_at)</td>
                             <td>
                                 match &row.revoke {

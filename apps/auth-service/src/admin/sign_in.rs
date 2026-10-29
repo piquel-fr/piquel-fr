@@ -29,7 +29,7 @@ use crate::{
 };
 use axum::http::{HeaderMap, header::InvalidHeaderValue};
 use chrono::{Duration, Utc};
-use piquel_common::{UserId, config::Origin};
+use piquel_common::{Handle, UserId, config::Origin};
 use piquel_crypto::Secret;
 use piquel_repository::{Database, InsertHandoff};
 use piquel_ui::{Checkbox, HandoffQuery, Query};
@@ -56,7 +56,7 @@ pub(crate) struct SignedInAdmin {
     /// Their account.
     pub(crate) user_id: UserId,
     /// Their handle, which the dashboard shows.
-    pub(crate) handle: String,
+    pub(crate) handle: Handle,
 }
 
 /// How a step of signing in to the dashboard changes the browser's cookies on the

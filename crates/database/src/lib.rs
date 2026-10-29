@@ -21,7 +21,7 @@ pub use error::{DatabaseConnectionError, DatabaseError};
 pub use exclusive::{ExclusiveConnection, LockKey};
 pub use repositories::{
     AdministratorRepository, DashboardRepository, DeliveryRepository, EmailRepository,
-    EventRepository, FederationRepository, MaintenanceRepository, OidcRepository,
+    EventRepository, FederationRepository, HandleRepository, MaintenanceRepository, OidcRepository,
     PasskeyRepository, RecoveryRepository, SecurityRepository, SessionRepository,
     SigningKeyRepository, TokenRepository, UserRepository,
     dashboard::{InsertHandoff, RedeemedHandoff, StoredDashboardSession},
@@ -35,6 +35,7 @@ pub use repositories::{
         ConsumedFederationTransaction, InsertExternalIdentity, InsertFederationTransaction,
         PendingFederation, StoredExternalIdentity,
     },
+    handles::StoredHandle,
     maintenance::{DigestUsage, DigestedSecret},
     oidc::{
         CodeRedemptionError, ConsumedAuthorizationCode, InsertAuthorizationCode,
@@ -51,6 +52,6 @@ pub use repositories::{
         InsertRefreshFamily, InsertRefreshToken, RefreshRotationError, RevokedFamily,
         RotatedRefreshToken,
     },
-    users::{AccountName, InsertUser, StoredUser},
+    users::{InsertUser, StoredUser},
 };
 pub use transaction::DatabaseTransaction;

@@ -1,10 +1,11 @@
 //! Every administrative operation, shared by the admin dashboard and the CLI.
 
-use super::{AdminError, HandleIssue, HandleProblem, InviteExpiry, Operator, Reason, UserRef};
+use super::{AdminError, HandleProblem, InviteExpiry, Operator, Reason, UserRef};
 use crate::{
     Applied, ClientDetails, ClientRegistry, ClientRegistryError, GracePeriod,
     account::AccountService,
     emails::EmailApplication,
+    handles::{Handles, HandlesError},
     recovery::{LINK_LIFETIME, PROBATION, RecoveryLinks, Revoke},
     routes,
 };
@@ -26,7 +27,6 @@ use piquel_repository::{
     InsertRecovery, RecentRecovery, SessionScope, StoredOidcClient,
 };
 use piquel_ui::{LoginQuery, Query};
-use std::collections::BTreeMap;
 use url::Url;
 
 /// Accounts per search page.
@@ -96,12 +96,16 @@ impl AdminService {
                 .find_by_id(*id)
                 .await?
                 .map(|user| user.id),
-            UserRef::Username(username) => self
-                .database
-                .users()
-                .find_by_username(username)
-                .await?
-                .map(|user| user.id),
+            // A name that is not a handle was never stored.
+            UserRef::Handle(handle) => match Handle::parse(handle) {
+                Ok(handle) => self
+                    .database
+                    .users()
+                    .find_by_handle(&handle)
+                    .await?
+                    .map(|user| user.id),
+                Err(_) => None,
+            },
             // An address that cannot be normalized was never stored.
             UserRef::Email(address) => match NormalizedEmail::parse(address) {
                 Ok(address) => self
@@ -724,9 +728,8 @@ impl AdminService {
         Ok(EventPage { events, next })
     }
 
-    /// Lists the accounts whose login name the handle rules refuse, by name: it
-    /// breaks the syntax, is reserved, or shares its skeleton with another account's.
-    /// Reserved names an operator assigned on purpose are listed too.
+    /// Lists the accounts whose current handle is reserved, by handle: ones an
+    /// operator assigned on purpose, or that a later release reserved.
     ///
     /// # Errors
     /// Fails when the operator may not read, or the query fails.
@@ -735,66 +738,30 @@ impl AdminService {
         operator: &Operator,
     ) -> Result<Vec<HandleProblem>, AdminError> {
         operator.authorize_read(&self.database).await?;
-        let names: Vec<_> = self
+        Ok(self
             .database
-            .users()
-            .list_names()
+            .handles()
+            .list_current()
             .await?
             .into_iter()
-            .map(|name| {
-                let handle = name.username.parse::<Handle>();
-                (name, handle)
-            })
-            .collect();
-        let mut skeletons = BTreeMap::<String, Vec<&str>>::new();
-        for (name, handle) in &names {
-            if let Ok(handle) = handle {
-                skeletons
-                    .entry(handle.skeleton())
-                    .or_default()
-                    .push(&name.username);
-            }
-        }
-        Ok(names
-            .iter()
-            .filter_map(|(name, handle)| {
-                let issue = match handle.clone().and_then(|handle| {
-                    handle.ensure_unreserved()?;
-                    Ok(handle)
-                }) {
-                    Err(error) => HandleIssue::Refused(error),
-                    Ok(handle) => {
-                        let others: Vec<String> = skeletons[&handle.skeleton()]
-                            .iter()
-                            .filter(|other| **other != name.username)
-                            .map(|other| (*other).to_owned())
-                            .collect();
-                        if others.is_empty() {
-                            return None;
-                        }
-                        HandleIssue::LooksLike(others)
-                    }
-                };
+            .filter_map(|current| {
+                let error = current.handle.ensure_unreserved().err()?;
                 Some(HandleProblem {
-                    user_id: name.id,
-                    username: name.username.clone(),
-                    issue,
+                    user_id: current.user_id?,
+                    handle: current.handle,
+                    error,
                 })
             })
             .collect())
     }
 
-    /// Gives the account `user_id` the handle `handle`, unless another account has
-    /// it. Reserved names are refused unless `allow_reserved`. The account's profile
-    /// version is bumped, so relying parties refresh `preferred_username`.
-    ///
-    /// Look-alikes are not checked here: only the next release's `handles` table can
-    /// enforce them atomically, and with an index. [`Self::check_handles`] lists
-    /// them, and that release's migration refuses to run while any remain.
+    /// Gives the account `user_id` the handle `handle`, as a settings rename does
+    /// but without its cooldown. Reserved names are refused unless `allow_reserved`.
     ///
     /// # Errors
-    /// Fails when the operator may not make changes, the account is unknown or
-    /// already has the handle, or the handle is reserved or taken.
+    /// Fails when the operator may not make changes, the account is unknown, or
+    /// the handle is reserved, taken, retired, a look-alike or already the
+    /// account's.
     pub async fn rename_handle(
         &self,
         operator: &Operator,
@@ -803,28 +770,37 @@ impl AdminService {
         allow_reserved: bool,
     ) -> Result<(), AdminError> {
         if !allow_reserved {
-            handle.ensure_unreserved()?;
+            handle.ensure_unreserved().map_err(HandlesError::from)?;
         }
         let mut tx = self.database.begin().await?;
         let user = operator.lock(&mut tx, user_id).await?;
-        if user.username == handle.as_str() {
-            return Err(AdminError::SameHandle);
-        }
-        tx.users()
-            .rename(user_id, &handle)
-            .await
-            .map_err(|error| match error {
-                DatabaseError::Conflict(_) => AdminError::HandleTaken(error),
-                DatabaseError::NotFound
-                | DatabaseError::Timeout(_)
-                | DatabaseError::InvalidStoredData { .. }
-                | DatabaseError::Operation(_) => error.into(),
-            })?;
-        let changed = DomainEvent::HandleChanged {
-            old: Personal::Value(user.username),
-            new: Personal::Value(handle),
-        };
+        let (tx, changed) = Handles::new(&self.database)
+            .rename(tx, &user, handle)
+            .await?;
         Self::finish(tx, operator, Some(user_id), vec![changed]).await
+    }
+
+    /// Deletes the released handle `handle`, or a purged account's last one, so
+    /// anyone may claim it again: the only way a handle returns to the pool, for
+    /// cases such as a trademark dispute.
+    ///
+    /// # Errors
+    /// Fails when no released handle, or purged account's, is `handle`.
+    pub async fn release_handle(
+        &self,
+        operator: &Operator,
+        handle: Handle,
+    ) -> Result<(), AdminError> {
+        let mut tx = self.database.begin().await?;
+        let released = tx
+            .handles()
+            .delete_released(&handle)
+            .await?
+            .ok_or(AdminError::HandleNotReleased)?;
+        let event = DomainEvent::HandleReleased {
+            handle: Personal::Value(handle),
+        };
+        Self::finish(tx, operator, released.user_id, vec![event]).await
     }
 
     /// Lists every administrator, oldest grant first.

@@ -1,25 +1,34 @@
-//! Checking accounts against the handle rules, and changing their handles.
+//! Checking accounts' handles against the handle rules, and changing them.
 
 use super::{CliError, Console};
-use crate::{AdminError, UserRef};
+use crate::UserRef;
 use clap::Subcommand;
 use piquel_common::Handle;
 
 /// Handle checks and changes. The CLI may act on any account.
 #[derive(Subcommand)]
 pub(super) enum HandleCommand {
-    /// List accounts whose handle breaks the syntax, is reserved, or looks like
-    /// another account's. Fails while any remain.
+    /// List accounts whose handle is reserved.
     Check,
-    /// Give an account a new handle, and record the change.
+    /// Give an account a new handle, without the settings cooldown, and record the
+    /// change.
     Rename {
         /// The account: its current handle, ID or verified email.
         user: UserRef,
         /// Its new handle.
-        new: String,
+        #[arg(value_parser = Handle::parse)]
+        new: Handle,
         /// Allow a reserved name, or one that looks like it.
         #[arg(long)]
         allow_reserved: bool,
+    },
+    /// Delete a released handle, or a purged account's last one, so anyone may
+    /// claim it again, e.g. after a trademark dispute. An account's current handle is
+    /// never released: rename the account first.
+    Release {
+        /// The released handle.
+        #[arg(value_parser = Handle::parse)]
+        handle: Handle,
     },
 }
 
@@ -31,15 +40,8 @@ impl HandleCommand {
         } = console;
         match self {
             Self::Check => {
-                let problems = service.check_handles(operator).await?;
-                for problem in &problems {
-                    println!(
-                        "{}\t{}\t{}",
-                        problem.username, problem.user_id, problem.issue
-                    );
-                }
-                if !problems.is_empty() {
-                    return Err(CliError::HandleProblems(problems.len()));
+                for problem in service.check_handles(operator).await? {
+                    println!("{}\t{}\t{}", problem.handle, problem.user_id, problem.error);
                 }
             }
             Self::Rename {
@@ -48,11 +50,11 @@ impl HandleCommand {
                 allow_reserved,
             } => {
                 let user = console.user(&user).await?;
-                let new = Handle::parse(&new).map_err(AdminError::from)?;
                 service
                     .rename_handle(operator, user, new, allow_reserved)
                     .await?;
             }
+            Self::Release { handle } => service.release_handle(operator, handle).await?,
         }
         Ok(())
     }

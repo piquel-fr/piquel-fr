@@ -4,6 +4,7 @@ use crate::Database;
 use crate::repositories::{
     SessionRepository, UserRepository,
     sessions::{InsertSession, LAST_SEEN_INTERVAL, SessionScope},
+    users::InsertUser,
 };
 use chrono::Utc;
 use piquel_common::{
@@ -15,14 +16,11 @@ use std::{net::IpAddr, time::Duration};
 
 /// Inserts an active account for one lock scenario.
 async fn insert_user(pool: &PgPool) -> UserId {
-    let user = UserId::new();
-    sqlx::query("INSERT INTO users(id,username,display_name) VALUES($1,$2,'Lock test')")
-        .bind(user.as_uuid())
-        .bind(format!("lock_{user}"))
-        .execute(pool)
+    UserRepository::from_pool(pool)
+        .insert(&InsertUser::named("lock"))
         .await
-        .expect("user");
-    user
+        .expect("user")
+        .id
 }
 
 /// A session valid from now until tomorrow.

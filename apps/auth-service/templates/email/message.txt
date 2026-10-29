@@ -1,7 +1,7 @@
 Hello,
 {% match content %}
-{%- when Content::VerifyAddress { address, username, link, hours } %}
-Someone, hopefully you, added {{ address }} to the Piquel account @{{ username }}. If that is your account, open this link and select "Confirm this address":
+{%- when Content::VerifyAddress { address, handle, link, hours } %}
+Someone, hopefully you, added {{ address }} to the Piquel account @{{ handle }}. If that is your account, open this link and select "Confirm this address":
 
 {{ link }}
 
@@ -18,8 +18,8 @@ If you made this change, there is nothing to do. If you did not, sign in and rev
 If you made this change, there is nothing to do. If you did not, sign in and review your account's security history:
 
 {{ history }}
-{%- when Content::RecoveryLink { address: _, username, link, hours, undo } %}
-Piquel support started a recovery of the Piquel account @{{ username }}, so its owner can add a new passkey. The account was signed out everywhere. If it is yours, open this link and follow the steps to add a passkey:
+{%- when Content::RecoveryLink { address: _, handle, link, hours, undo } %}
+Piquel support started a recovery of the Piquel account @{{ handle }}, so its owner can add a new passkey. The account was signed out everywhere. If it is yours, open this link and follow the steps to add a passkey:
 
 {{ link }}
 

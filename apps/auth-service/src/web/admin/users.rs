@@ -36,7 +36,7 @@ struct SearchQuery {
     cursor: Option<UserId>,
 }
 
-/// `/users`: searches accounts by username, display name, email or ID.
+/// `/users`: searches accounts by handle, display name, email or ID.
 #[route(GET "/users")]
 pub(super) async fn search(cx: &Cx) -> Result<Response> {
     let admin = App::admin(cx).await?;

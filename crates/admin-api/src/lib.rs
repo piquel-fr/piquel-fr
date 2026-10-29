@@ -8,8 +8,8 @@
 use chrono::{DateTime, Utc};
 pub use piquel_common::protocol::api::{Identity, Passkey};
 use piquel_common::{
-    AccountStatus, AuthenticationMethod, ClientId, EventId, SessionId, TokenId, TraceId, UserId,
-    protocol::oauth::ClientAuthMethod,
+    AccountStatus, AuthenticationMethod, ClientId, EventId, Handle, SessionId, TokenId, TraceId,
+    UserId, protocol::oauth::ClientAuthMethod,
 };
 use serde::{Deserialize, Serialize};
 use url::Url;
@@ -19,8 +19,8 @@ use url::Url;
 pub struct User {
     /// Account ID.
     pub id: UserId,
-    /// Login name.
-    pub username: String,
+    /// Public identifier and login name.
+    pub handle: Handle,
     /// Name shown to the user and to applications.
     pub display_name: String,
     /// Whether the account can sign in.
@@ -32,7 +32,7 @@ pub struct User {
 /// The account search's query.
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct UserSearch {
-    /// An account ID, or part of a username, display name or email, ignoring case.
+    /// An account ID, or part of a handle, display name or email, ignoring case.
     /// Empty matches every account.
     #[serde(default)]
     pub q: String,
@@ -266,8 +266,8 @@ pub struct Event {
 pub struct Administrator {
     /// The administrator's account.
     pub user_id: UserId,
-    /// The account's login name.
-    pub username: String,
+    /// The account's handle.
+    pub handle: Handle,
     /// When the rights were granted.
     pub granted_at: DateTime<Utc>,
 }

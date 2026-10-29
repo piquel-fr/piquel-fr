@@ -26,5 +26,7 @@ test('signing in with a handle, after one with no passkey here is refused', asyn
   await field.fill(handle);
   await signIn.click();
   await expect(page).toHaveURL('/settings');
-  await expect(page.getByText(`@${handle}`, { exact: true })).toBeVisible();
+  await expect(
+    page.getByRole('region', { name: 'Handle' }).getByText(`@${handle}`, { exact: true })
+  ).toBeVisible();
 });

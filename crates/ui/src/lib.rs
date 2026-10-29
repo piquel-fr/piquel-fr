@@ -83,7 +83,7 @@ pub use recovery::{
 };
 pub use settings::{
     Audience, ConnectedAppChange, ConnectedAppRow, ConnectedAppsState, DeviceChange, DeviceRow,
-    EmailChange, EmailRow, EmailsState, HistoryChange, HistoryPage, HistoryRow, HistoryState,
-    Holdings, ProviderRow, SignInChange, SignInState, Tab, addresses, connected_apps, devices,
-    history, settings_tabs, sign_in_methods, verified, verify,
+    EmailChange, EmailRow, EmailsState, HandleRow, HistoryChange, HistoryPage, HistoryRow,
+    HistoryState, Holdings, ProviderRow, SignInChange, SignInState, Tab, addresses, connected_apps,
+    devices, history, settings_tabs, sign_in_methods, verified, verify,
 };

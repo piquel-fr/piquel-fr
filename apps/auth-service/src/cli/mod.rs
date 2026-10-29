@@ -194,6 +194,7 @@ impl Administration {
             Self::Handle(command) => match command {
                 HandleCommand::Check => Op::CheckHandles,
                 HandleCommand::Rename { .. } => Op::RenameHandle,
+                HandleCommand::Release { .. } => Op::ReleaseHandle,
             },
             Self::Deliveries(command) => match command {
                 DeliveriesCommand::List { .. } => Op::ListDeliveries,

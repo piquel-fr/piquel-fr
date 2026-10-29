@@ -261,6 +261,7 @@ impl AdminApplication {
             | Op::DeleteClient
             | Op::RotateClientSecret
             | Op::CheckHandles
+            | Op::ReleaseHandle
             | Op::ListDeliveries
             | Op::RetryDelivery
             | Op::CancelDelivery => return None,

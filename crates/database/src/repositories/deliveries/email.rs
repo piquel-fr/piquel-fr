@@ -13,7 +13,7 @@ use crate::{
     DatabaseError, DatabaseTransaction,
     repositories::{EmailRepository, RepositoryExecutor},
 };
-use piquel_common::{EmailId, RecoveryId, UserId, events::DomainEvent};
+use piquel_common::{EmailId, Handle, RecoveryId, UserId, events::DomainEvent};
 use serde::{Deserialize, Serialize};
 
 /// Email to account holders, sent over SMTP by auth-service.
@@ -73,8 +73,8 @@ pub enum EmailMessage {
 pub struct PendingRecovery {
     /// The verified address the link goes to.
     pub address: String,
-    /// The account's username, which the message names.
-    pub username: String,
+    /// The account's handle, which the message names.
+    pub handle: Handle,
     /// SHA-256 of the link's token, which tells the key that derived it.
     pub secret_digest: Vec<u8>,
 }
@@ -85,9 +85,9 @@ pub struct PendingRecovery {
 pub struct PendingAddress {
     /// The address.
     pub address: String,
-    /// The account's username, which the message names so its reader knows whose
+    /// The account's handle, which the message names so its reader knows whose
     /// account they would confirm the address for.
-    pub username: String,
+    pub handle: Handle,
 }
 
 impl EmailMessage {
@@ -229,7 +229,7 @@ impl Channel for Email {
 
 impl EmailRepository<'_> {
     /// `user_id`'s verified address `email_id`, if recovery `recovery_id` of the
-    /// active account still has a working link, with the account's username.
+    /// active account still has a working link, with the account's handle.
     ///
     /// # Errors
     ///
@@ -245,14 +245,15 @@ impl EmailRepository<'_> {
             fetch_optional,
             sqlx::query_as!(
                 PendingRecovery,
-                "SELECT e.normalized_email AS address, u.username, r.secret_digest
+                r#"SELECT e.normalized_email AS address, h.handle AS "handle: Handle", r.secret_digest
                 FROM user_emails e
                 JOIN users u ON u.id = e.user_id
+                JOIN handles h ON h.user_id = e.user_id AND h.released_at IS NULL
                 JOIN account_recoveries r ON r.user_id = e.user_id
                 WHERE e.user_id = $1 AND e.id = $3 AND e.verified_at IS NOT NULL
                 AND r.id = $2 AND r.completed_at IS NULL AND r.cancelled_at IS NULL
                 AND r.undone_at IS NULL AND r.expires_at > clock_timestamp()
-                AND u.status = 'active'",
+                AND u.status = 'active'"#,
                 user_id.as_uuid(),
                 recovery_id.as_uuid(),
                 email_id.as_uuid(),
@@ -261,7 +262,7 @@ impl EmailRepository<'_> {
     }
 
     /// `user_id`'s address `id`, if it is still unverified with a working
-    /// verification link, with the account's username.
+    /// verification link, with the account's handle.
     ///
     /// # Errors
     ///
@@ -276,12 +277,12 @@ impl EmailRepository<'_> {
             fetch_optional,
             sqlx::query_as!(
                 PendingAddress,
-                "SELECT e.normalized_email AS address, u.username
+                r#"SELECT e.normalized_email AS address, h.handle AS "handle: Handle"
                 FROM user_emails e
-                JOIN users u ON u.id = e.user_id
+                JOIN handles h ON h.user_id = e.user_id AND h.released_at IS NULL
                 JOIN email_verification_secrets s ON s.email_id = e.id
                 WHERE e.user_id = $1 AND e.id = $2 AND e.verified_at IS NULL
-                AND s.expires_at > now()",
+                AND s.expires_at > now()"#,
                 user_id.as_uuid(),
                 id.as_uuid(),
             )

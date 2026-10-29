@@ -73,9 +73,9 @@ restarts, and give every replica the same ones. The key-encryption key cannot be
 changed yet: the stored signing keys would no longer open. Replacing the token
 digest key at once ends every refresh token and every login in progress, so
 change it in two deploys (see below). Changing it also changes the decoy
-passkey IDs that username sign-in returns for unknown usernames, while real
+passkey IDs that handle sign-in returns for unknown handles, while real
 accounts keep theirs, so comparing responses from before and after a
-replacement reveals which usernames exist. Verification links already sent keep
+replacement reveals which handles exist. Verification links already sent keep
 working, but a verification email still queued at the change carries a link
 that does not.
 
@@ -204,7 +204,7 @@ run them with `piquelctl app exec piquel-fr auth --env ENV -- auth-service …` 
 just auth admin grant alice               # the first administrator is granted here
 just auth admin list
 just auth admin revoke bob                # the last administrator's rights stay
-just auth user search ali                 # by ID, or part of a username, name or email
+just auth user search ali                 # by ID, or part of a handle, name or email
 just auth user show alice                 # recorded, since it shows personal data
 just auth user disable alice --reason "Spam"
 just auth user enable alice
@@ -219,7 +219,7 @@ just auth account alice passkeys revoke <passkey-id> --reason "Phone stolen"
 just auth account alice emails remove <email-id> --reason "Asked by email"
 ```
 
-- Accounts are named by username, ID or a verified email of an active account.
+- Accounts are named by handle, ID or a verified email of an active account.
 - `--output json` prints the views the dashboard shows for `user search`
   (`UserPage`), `user show` (`UserDetail`), `audit` (`EventPage`), `client list`,
   `invite list` and `admin list`, as defined in `crates/admin-api`.
@@ -289,16 +289,22 @@ or CLI operator.
 ### Handles
 
 ```sh
-just auth handle check                      # accounts whose handle breaks the rules
-just auth handle rename old_name new-name   # --allow-reserved to assign a reserved name
+just auth handle check                      # accounts whose handle is reserved
+just auth handle rename old-name new-name   # --allow-reserved to assign a reserved name
+just auth handle release old-name           # let anyone claim a released handle again
 ```
 
-`check` lists every account whose handle breaks the syntax, is reserved or looks like
-another account's (see [Security behavior](#security-behavior)), and fails while any
-remain. `rename` refuses a handle another account has, but not a look-alike: run
-`check` again after renaming. A rename bumps the account's profile version, so
-relying parties refresh `preferred_username`, and is recorded as a domain event with
-its CLI operator.
+Operators rename without the 30-day cooldown of settings renames, but not to a
+handle another account holds or held, or one that looks like it (see
+[Security behavior](#security-behavior)). A rename bumps the account's profile
+version, so relying parties refresh `preferred_username`. `release` deletes a
+handle no account holds anymore, the only way one returns to the pool, for cases
+like a trademark dispute; to free a current handle, rename its account first.
+Every change is recorded as a domain event with its operator.
+
+Upgrading from a release that stored usernames: run its `handle check`, and rename
+every account it lists with its `handle rename`, before deploying. The migration
+that moves usernames into handles refuses to run, naming them, while any remain.
 
 ### Email
 
@@ -512,14 +518,17 @@ explains how to choose a requirement and handle the challenge.
   refuses reserved names (infrastructure labels such as `auth` and `www`, RFC 2142
   mailboxes, piquel.fr routes and the brand) and names that look like one: hyphens
   are dropped, and `0`, `1` or `i`, `5`, `rn` and `vv` read as `o`, `l`, `s`, `m` and
-  `w`. Look-alikes of other accounts' handles are refused from the next release,
-  which enforces them in the database; until then `handle check` lists them.
-  Usernames from before these rules still sign in until an operator renames them.
+  `w`. Every handle and look-alike stays unique, current or not: a handle is not
+  reassigned to another account unless an operator releases it, though its former
+  owner may take it back.
+  The sign-in methods settings change the handle, which needs a passkey
+  confirmation like other sensitive changes and is refused within 30 days of the
+  last change, saying when it may change again.
 - Social-first signup remains pending until its first passkey is committed. Only
   a registration that names the pending identity shown on the signup page attaches
   it; plain registration ignores it. A social login can never replace an
   established account's passkeys.
-- Sensitive changes (adding or removing a passkey, linking or unlinking a provider,
+- Sensitive changes (changing the handle, adding or removing a passkey, linking or unlinking a provider,
   adding, removing or changing the primary email address, and registering an OIDC
   client, rotating its secret, deleting it or changing its redirect or post-logout
   URIs) need a passkey confirmation of the current browser session from the last five

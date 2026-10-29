@@ -169,7 +169,7 @@ async fn signing_in_offers_passkeys_providers_and_a_handle() {
     );
     assert!(page.contains(">GitHub</button>"), "{page}");
     assert!(page.contains(">Use a handle instead</button>"), "{page}");
-    assert!(!page.contains(r#"name="username""#), "{page}");
+    assert!(!page.contains(r#"name="handle" autocomplete"#), "{page}");
     let register = attribute(&link(REGISTER, &query));
     assert!(
         page.contains(&format!(
@@ -184,7 +184,7 @@ async fn signing_in_offers_passkeys_providers_and_a_handle() {
     };
     let page = html(browser.visit(&replicas.a, &link(LOGIN, &handle)).await).await;
     assert!(
-        page.contains(r#"name="username" autocomplete="username webauthn""#),
+        page.contains(r#"name="handle" autocomplete="username webauthn""#),
         "{page}"
     );
     assert!(page.contains(">Handle<"), "{page}");
@@ -207,7 +207,7 @@ async fn signing_in_goes_on_to_the_path_asked_for() {
     let database = Replicas::database().await;
     let browser = Browser::new_account(&database).await;
     let account = database.users().find_by_id(browser.user_id).await;
-    let handle = account.expect("account").expect("active").username;
+    let handle = account.expect("account").expect("active").handle;
     let page = html(browser.visit(&replicas.a, LOGIN).await).await;
     assert!(page.contains(&format!("Signed in as @{handle}.")), "{page}");
     assert!(page.contains(">Sign out</button>"), "{page}");
@@ -437,7 +437,7 @@ async fn signing_up_starts_with_the_invitation() {
         "{page}"
     );
     assert!(
-        page.contains(r#"name="username" autocomplete="username""#),
+        page.contains(r#"name="handle" autocomplete="username""#),
         "{page}"
     );
     assert!(
@@ -564,7 +564,7 @@ async fn linking_confirms_the_account_with_a_passkey() {
         .await
         .expect("account")
         .expect("active")
-        .username;
+        .handle;
     let signed_in_as = format!("Signed in as @{handle}.");
 
     let signed_out = holding(&Browser::signed_out());

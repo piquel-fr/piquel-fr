@@ -7,14 +7,13 @@
 
 use crate::{
     Title,
-    form::{Ceremony, Checkbox, Fields, Query, change_form, new_passkey, open, passkey_form},
+    form::{
+        Ceremony, Checkbox, Fields, Query, change_form, handle_input, new_passkey, open,
+        passkey_form,
+    },
     intro,
 };
-use piquel_common::{
-    Provider, TokenId,
-    handle::{MAX_LENGTH, MIN_LENGTH},
-    protocol::claims::Acr,
-};
+use piquel_common::{Provider, TokenId, protocol::claims::Acr};
 use serde::{Deserialize, Serialize};
 use topcoat::{
     Result,
@@ -509,7 +508,7 @@ async fn passkey_sign_in<'a>(
             label: label,
             class: "full",
             if handle_open {
-                handle_input(new: false)
+                handle_input(new: false, focus: true)
             }
         )
         if !handle_open {
@@ -518,34 +517,6 @@ async fn passkey_sign_in<'a>(
                 opens: LoginQuery { handle: Checkbox(true), ..query.clone() },
                 label: "Use a handle instead",
             )
-        }
-    })
-}
-
-/// The account's handle, as the passkey script sends it: a `new` one, which
-/// creating an account checks against the handle rules, or one to sign in with.
-#[component]
-async fn handle_input(new: bool) -> Result<impl View> {
-    Ok(view! {
-        <label>
-            "Handle"
-            <input
-                name="username"
-                autocomplete=(if new { "username" } else { "username webauthn" })
-                autocapitalize="none"
-                spellcheck="false"
-                pattern=(new.then_some("[a-z0-9]+(-[a-z0-9]+)*"))
-                minlength=(MIN_LENGTH.to_string())
-                maxlength=(MAX_LENGTH.to_string())
-                required=""
-                autofocus=(!new)
-                aria-describedby=(new.then_some("handle-rules"))
-            >
-        </label>
-        if new {
-            <small id="handle-rules">
-                (format!("{MIN_LENGTH}–{MAX_LENGTH} lowercase letters, numbers, or single hyphens between them."))
-            </small>
         }
     })
 }

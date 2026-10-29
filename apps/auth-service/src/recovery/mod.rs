@@ -37,7 +37,7 @@ use crate::{
 };
 use chrono::{DateTime, Duration, Utc};
 use piquel_common::{
-    AccountStatus, PasskeyId, RecoveryId, UserId,
+    AccountStatus, Handle, PasskeyId, RecoveryId, UserId,
     config::Origin,
     events::{Actor, DomainEvent, EventContext, RevocationReason},
     protocol::api::Passkey,
@@ -89,8 +89,8 @@ pub(crate) struct OpenRecovery {
 
 /// The account a recovery link recovers, as its page shows it.
 pub(crate) struct RecoveryAccount {
-    /// The account's login name.
-    pub(crate) username: String,
+    /// The account's handle, its login name.
+    pub(crate) handle: Handle,
     /// Its display name.
     pub(crate) display_name: String,
     /// When the link stops working.
@@ -427,7 +427,7 @@ impl AccountService {
             id: recovery.id,
             user_id: recovery.user_id,
             account: RecoveryAccount {
-                username: user.username,
+                handle: user.handle,
                 display_name: user.display_name,
                 expires_at: recovery.expires_at,
             },

@@ -6,6 +6,7 @@ use crate::{
     emails::EmailError,
     federation::FederationError,
     grants::GrantError,
+    handles::HandlesError,
     history::HistoryError,
     passkey::PasskeyError,
     recovery::RecoveryError,
@@ -34,6 +35,9 @@ pub(crate) enum AccountError {
     /// An app's access could not be removed.
     #[error(transparent)]
     Grant(#[from] GrantError),
+    /// The handle could not be changed.
+    #[error(transparent)]
+    Handle(#[from] HandlesError),
     /// A history entry could not be reported.
     #[error(transparent)]
     History(#[from] HistoryError),
@@ -63,6 +67,7 @@ impl From<AccountError> for ApiError {
             AccountError::Email(error) => error.into(),
             AccountError::Session(error) => error.into(),
             AccountError::Grant(error) => error.into(),
+            AccountError::Handle(error) => error.into(),
             AccountError::History(error) => error.into(),
             AccountError::Client(error) => error.into(),
             AccountError::Recovery(error) => error.into(),
