@@ -74,6 +74,7 @@ const SCHEME: &str = "Bearer";
 
 /// One `Bearer` challenge. Without `error` it means no token was sent (RFC 6750 §3.1).
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(test, derive(ts_rs::TS), ts(optional_fields))]
 pub struct BearerChallenge {
     /// What went wrong; `None` when the request carried no token.
     #[serde(default, skip_serializing_if = "Option::is_none")]

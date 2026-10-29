@@ -1,3 +1,7 @@
+# The root package holds the repository's web tooling; packages/ holds the
+# TypeScript SDK.
+packages:
+  - packages/*
 auditConfig:
   ignoreGhsas:
     # minimatch DoS, fixed only in minimatch 11, while eslint and

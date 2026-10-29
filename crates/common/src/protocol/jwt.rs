@@ -167,6 +167,7 @@ crate::__str_enum_sqlx!(KeyId);
 /// # Ok::<(), serde_json::Error>(())
 /// ```
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(test, derive(ts_rs::TS), ts(optional_fields, concrete(K = Jwk)))]
 pub struct JwkSet<K = Jwk> {
     /// Published keys.
     pub keys: Vec<K>,
@@ -175,6 +176,7 @@ pub struct JwkSet<K = Jwk> {
 /// One public RSA signing key. Fields are in sorted order, so auth's JWKS keeps the
 /// byte layout it had when it was built with `json!`.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(test, derive(ts_rs::TS), ts(optional_fields))]
 pub struct Jwk {
     /// Algorithm the key signs with. Auth always sends it; other issuers may not.
     #[serde(default, skip_serializing_if = "Option::is_none")]

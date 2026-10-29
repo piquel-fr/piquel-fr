@@ -57,6 +57,9 @@ pub mod same_origin;
 pub mod sdk;
 /// What a protected operation needs from the user's authentication (RFC 9470).
 pub mod step_up;
+/// The TypeScript SDK's declarations of these types.
+#[cfg(test)]
+mod typescript;
 
 use serde::{Deserialize, Deserializer};
 use std::str::FromStr;
