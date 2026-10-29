@@ -204,7 +204,7 @@ impl AccountDeletionRepository<'_> {
         }
         delete!(
             // Users and administrators act as `{"type": …, "user_id": …}`. Events
-            // recorded after this keep none, as migration 0024's trigger ensures.
+            // recorded after this keep none, as migration 0022's trigger ensures.
             "DELETE FROM event_personal_data p
             USING domain_events e
             WHERE p.event_id = e.id
