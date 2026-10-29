@@ -240,11 +240,13 @@ impl<'a, 't> Deletions<'a, 't> {
 /// Exporting, deleting and restoring, which only the owner may do.
 /// Administrators schedule, restore and purge through `AdminService`.
 impl AccountService {
-    /// Every record of the owner's account, read from one snapshot, and recorded.
-    /// It holds IP and email addresses, so it needs a recent passkey confirmation,
-    /// checked in the snapshot under the account lock.
+    /// Every record of the owner's account, read under the account lock, and
+    /// recorded. Every change to an account takes that lock first, so the parts
+    /// agree with each other without a snapshot, which a concurrent touch of the
+    /// session would fail with a serialization error. It holds IP and email
+    /// addresses, so it needs a recent passkey confirmation, checked under the lock.
     pub(crate) async fn export(&self, owner: &Owner) -> Result<AccountExport, AccountError> {
-        let mut tx = self.database.begin_snapshot().await?;
+        let mut tx = self.database.begin().await?;
         owner.lock_confirmed(&mut tx).await?;
         let export = AccountExport::read(&mut tx, owner.user(), owner.session().id).await?;
         tx.record(

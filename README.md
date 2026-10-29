@@ -349,7 +349,7 @@ probation sign-in.
   addresses, an administrator's dashboard sign-ins, consents, refresh grants, the
   apps the account registered, its recoveries (dates, state and the passkey each
   enrolled, never a link) and the security history. It is read
-  from one snapshot, holds no secret or digest, nothing may cache it, and it is
+  under the account lock, holds no secret or digest, nothing may cache it, and it is
   recorded in the history.
 - **Deleting** asks for the account's handle. The account becomes `deleting`, every
   session and refresh grant ends, their apps receive back-channel logout tokens, and

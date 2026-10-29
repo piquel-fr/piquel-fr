@@ -1,5 +1,5 @@
 //! The account's data, as its owner downloads it (GDPR Art. 20): one versioned
-//! JSON document, read from one snapshot. It holds no secret, digest or key
+//! JSON document, read under the account lock. It holds no secret, digest or key
 //! material: passkeys show their label, dates and backup state only.
 
 use crate::{
@@ -239,8 +239,8 @@ impl From<StoredExternalIdentity> for Identity {
 }
 
 impl AccountExport {
-    /// Reads the account `user_id` for its session `current` in `tx`, which should
-    /// be a snapshot, so every part is consistent with the others.
+    /// Reads the account `user_id` for its session `current` in `tx`, which holds
+    /// the account lock, so every part is consistent with the others.
     pub(super) async fn read(
         tx: &mut DatabaseTransaction<'_>,
         user_id: UserId,
