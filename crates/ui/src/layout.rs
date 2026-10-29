@@ -217,6 +217,19 @@ pub async fn intro<'a>(
     })
 }
 
+/// An email `address`, blurred until clicked so a shared screen does not show it;
+/// clicking again blurs it. A checkbox, visually hidden, holds whether it shows:
+/// the admin dashboard allows no script.
+#[component]
+pub(crate) async fn private_address<'a>(address: &'a str) -> Result<impl View> {
+    Ok(view! {
+        <label class="private-address">
+            <input type="checkbox" aria-label="Show address">
+            <span>(address)</span>
+        </label>
+    })
+}
+
 /// The navigation named `label`, of `class`, linking each of `links` to its URL,
 /// `current` among them, whose link is marked [`Label::CURRENT`].
 #[component]

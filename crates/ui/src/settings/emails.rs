@@ -4,7 +4,7 @@ use super::Audience;
 use crate::{
     Section, Title,
     form::{Query, change_form, fragment_form, open},
-    layout::frame,
+    layout::{frame, private_address},
 };
 use piquel_common::EmailId;
 use serde::{Deserialize, Serialize};
@@ -153,7 +153,7 @@ async fn address_row<'a>(
     Ok(view! {
         <div class="row between">
             <div>
-                <strong>(address)</strong>
+                <strong>private_address(address: address)</strong>
                 <p class="help">
                     (if blocked {
                         "Primary: receives security notices. Make another address primary to remove it."

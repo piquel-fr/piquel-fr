@@ -1,6 +1,7 @@
 //! Account search and one account's page.
 
 use super::{EventRow, account_status, event_rows, heading, moment, refused_action};
+use crate::layout::private_address;
 use piquel_common::{
     AccountStatus, AuthenticationMethod,
     admin::{Session, User, UserDetail},
@@ -237,7 +238,7 @@ async fn credentials<'a>(detail: &'a UserDetail) -> Result<impl View> {
                 <ul class="list">
                     for email in &detail.emails {
                         <li class="row between">
-                            <span>(email.address.as_str())</span>
+                            private_address(address: email.address.as_str())
                             <span class="row">
                                 if email.primary { <span class="badge">"Primary"</span> }
                                 match email.verified_at {
@@ -272,7 +273,9 @@ async fn credentials<'a>(detail: &'a UserDetail) -> Result<impl View> {
                     for identity in &detail.identities {
                         <li class="row between">
                             <span>(identity.provider.to_string())</span>
-                            <small>(identity.linked_email.clone().unwrap_or_default())</small>
+                            if let Some(email) = &identity.linked_email {
+                                <small>private_address(address: email.as_str())</small>
+                            }
                         </li>
                     }
                 </ul>
