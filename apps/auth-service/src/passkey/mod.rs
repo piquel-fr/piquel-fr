@@ -1240,8 +1240,8 @@ impl Accepted {
 }
 
 impl Acceptance for Accepted {
-    /// Either, by the account's status. An account being deleted is restored
-    /// first, then its recovery undone.
+    /// Either, by the account's status. An account being deleted is refused: it is
+    /// restored, from the sign-in page or by support, before its recovery is undone.
     fn accept(
         status: AccountStatus,
         passkey: PasskeyId,
