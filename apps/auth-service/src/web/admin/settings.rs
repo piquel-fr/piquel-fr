@@ -7,18 +7,22 @@
 //! the reason with each change, which the owner sees in their history. Nothing
 //! here adds a way in or an address: those are the owner's alone.
 
-use super::{AdminApplication as App, Refusal, users::Account};
+use super::{AdminApplication as App, Refusal, Refused, users::Account};
 use crate::{
     Reason,
     account::{Subject, Viewer},
     admin::SignedInAdmin,
     handles::HandlesError,
     security::ApiError,
+    web::{
+        account::AccountPage,
+        settings::{Addresses, ConnectedApps, SignInMethods},
+    },
 };
 use piquel_common::{Handle, UserId};
 use piquel_ui::{
-    Audience, ConnectedAppChange, ConnectedAppRow, ConnectedAppsState, EmailChange, EmailRow,
-    EmailsState, ProviderRow, Recovery, SignInChange, SignInState, Tab,
+    Audience, ConnectedAppChange, ConnectedAppRow, EmailChange, EmailRow, ProviderRow, Recovery,
+    SignInChange, Tab,
 };
 use serde::{Deserialize, de::DeserializeOwned};
 use topcoat::{
@@ -36,7 +40,7 @@ use topcoat::{
 };
 
 /// A settings change an administrator posts: the owner's change, and why.
-#[derive(Deserialize)]
+#[derive(Clone, Deserialize)]
 struct Administered<C> {
     /// The change, as the owner's form names it.
     #[serde(flatten)]
@@ -46,10 +50,12 @@ struct Administered<C> {
 }
 
 /// The form giving an account a new handle.
-#[derive(Deserialize)]
+#[derive(Clone, Deserialize)]
 struct NewHandle {
     /// The handle.
     handle: String,
+    /// Why, recorded with the change and shown to the owner in their history.
+    reason: String,
 }
 
 /// `/users/{account}/sign-in`: the account's passkeys and linked identities, to
@@ -92,7 +98,7 @@ pub(super) async fn sign_in(cx: &Cx, body: Body) -> Result<Response> {
             enabled: true,
         })
         .collect();
-    let state: SignInState = App::opened(cx);
+    let (state, reason) = App::reopened::<SignInMethods>(cx, refused.as_ref());
     let (page, passkeys, providers, state, recovery) =
         (&App::here(cx), &passkeys, &providers, &state, &recovery);
     let section = view! { cx =>
@@ -101,7 +107,7 @@ pub(super) async fn sign_in(cx: &Cx, body: Body) -> Result<Response> {
             passkeys: passkeys,
             providers: providers,
             state: state,
-            audience: Audience::Administrator,
+            audience: Audience::Administrator { reason },
             android: false,
             recovery: recovery.as_ref(),
         )
@@ -130,14 +136,14 @@ pub(super) async fn emails(cx: &Cx, body: Body) -> Result<Response> {
         .emails(&App::viewer(user, admin))
         .await?;
     let rows: Vec<_> = emails.iter().map(EmailRow::from).collect();
-    let state: EmailsState = App::opened(cx);
+    let (state, reason) = App::reopened::<Addresses>(cx, refused.as_ref());
     let (page, rows, state) = (&App::here(cx), &rows, &state);
     let section = view! { cx =>
         piquel_ui::addresses(
             page: page.as_str(),
             emails: rows,
             state: state,
-            audience: Audience::Administrator,
+            audience: Audience::Administrator { reason },
             sends: false,
         )
     };
@@ -162,14 +168,14 @@ pub(super) async fn apps(cx: &Cx, body: Body) -> Result<Response> {
     .await?;
     let apps = App::of(cx).account.apps(&App::viewer(user, admin)).await?;
     let rows: Vec<_> = apps.iter().map(ConnectedAppRow::from).collect();
-    let state: ConnectedAppsState = App::opened(cx);
+    let (state, reason) = App::reopened::<ConnectedApps>(cx, refused.as_ref());
     let (page, rows, state) = (&App::here(cx), &rows, &state);
     let section = view! { cx =>
         piquel_ui::connected_apps(
             page: page.as_str(),
             rows: rows,
             state: state,
-            audience: Audience::Administrator,
+            audience: Audience::Administrator { reason },
         )
     };
     App::settings_page(cx, user, Tab::Apps, refused.as_deref(), section).await
@@ -182,26 +188,33 @@ pub(super) async fn apps(cx: &Cx, body: Body) -> Result<Response> {
 pub(super) async fn handle(cx: &Cx, form: Option<Form<NewHandle>>) -> Result<Response> {
     let (admin, user) = App::settings(cx).await?;
     let back = App::account(cx, user);
-    let typed = form.as_ref().map(|Form(input)| input.handle.clone());
     let refused = App::submit(cx, form, back.clone(), |input: NewHandle| async move {
         let handle = Handle::parse(input.handle.trim()).map_err(HandlesError::from)?;
+        let reason = Reason::parse(input.reason)?;
         App::of(cx)
             .service
-            .rename_handle(&admin.operator, user, handle, false)
+            .rename_handle(&admin.operator, user, handle, reason, false)
             .await
     })
     .await?;
-    let typed = refused.as_ref().and(typed);
+    let (typed, reason) = refused.as_ref().map_or(("", ""), |refused| {
+        (refused.form.handle.as_str(), refused.form.reason.as_str())
+    });
+    let refused = refused.as_deref();
     let page = view! { cx =>
         piquel_ui::dashboard_change(
             title: "Rename this account's handle",
             description: "The account signs in and is shown under the new handle at once. Its old handle stays reserved for it: no other account can take it unless it is released from the terminal, and the account can take it back.",
             button: "Rename",
             back: back.as_str(),
-            refusal: refused.as_deref(),
+            refusal: refused,
             <label>
                 "New handle"
                 <input name="handle" required="" maxlength="32" autocomplete="off" value=(typed)>
+            </label>
+            <label>
+                "Reason, shown to the owner in their history"
+                <input name="reason" required="" maxlength="500" value=(reason)>
             </label>
         )
     };
@@ -233,9 +246,20 @@ impl App {
         topcoat::router::request::uri(cx).path().to_owned()
     }
 
-    /// The row the page's query opens; one that does not parse opens none.
-    fn opened<T: DeserializeOwned + Default>(cx: &Cx) -> T {
-        parse_query_params(cx).unwrap_or_default()
+    /// The row `P`'s section opens, and the reason its form shows: after a
+    /// refusal, the refused change's own row, as posted, so nothing typed is lost;
+    /// otherwise the row the page's query opens, if it parses, and no reason yet.
+    fn reopened<'a, P: AccountPage>(
+        cx: &Cx,
+        refused: Option<&'a Refused<Administered<P::Change>>>,
+    ) -> (P::Row, &'a str) {
+        match refused {
+            Some(refused) => (
+                P::reopened(&refused.form.change),
+                refused.form.reason.as_str(),
+            ),
+            None => (parse_query_params(cx).unwrap_or_default(), ""),
+        }
     }
 
     /// `admin` reading `user`'s settings.

@@ -1,7 +1,7 @@
 //! Checking accounts' handles against the handle rules, and changing them.
 
 use super::{CliError, Console};
-use crate::UserRef;
+use crate::{Reason, UserRef};
 use clap::Subcommand;
 use piquel_common::Handle;
 
@@ -18,6 +18,9 @@ pub(super) enum HandleCommand {
         /// Its new handle.
         #[arg(value_parser = Handle::parse)]
         new: Handle,
+        /// Why, kept with the event as personal data: 1 to 500 characters.
+        #[arg(long)]
+        reason: Reason,
         /// Allow a reserved name, or one that looks like it.
         #[arg(long)]
         allow_reserved: bool,
@@ -47,11 +50,12 @@ impl HandleCommand {
             Self::Rename {
                 user,
                 new,
+                reason,
                 allow_reserved,
             } => {
                 let user = console.user(&user).await?;
                 service
-                    .rename_handle(operator, user, new, allow_reserved)
+                    .rename_handle(operator, user, new, reason, allow_reserved)
                     .await?;
             }
             Self::Release { handle } => service.release_handle(operator, handle).await?,

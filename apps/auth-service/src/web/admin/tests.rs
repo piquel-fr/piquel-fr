@@ -361,6 +361,93 @@ async fn administrators_remove_an_accounts_app() {
     );
 }
 
+/// A change the service refuses shows the form again with what was typed: a
+/// settings section reopens the refused row with its input and reason, which no
+/// other form takes, and a change page keeps its fields.
+#[tokio::test]
+#[ignore = "requires TEST_DATABASE_URL"]
+async fn a_refused_change_keeps_what_was_typed() {
+    let harness = Harness::new().await;
+    let admin = harness.admin().await;
+    let owner = Browser::new_account(&harness.database).await;
+    let user = owner.user_id;
+    let passkey = harness
+        .database
+        .passkeys()
+        .insert(&crate::tests::unusable_passkey(user))
+        .await
+        .expect("passkey")
+        .id
+        .to_string();
+    let sign_in = format!("/users/{user}/sign-in");
+    let dashboard = harness.confirmed(&admin, &sign_in, Utc::now()).await;
+    let post = async |path: &str, fields: &[(&str, &str)]| {
+        let url = format!("{DASHBOARD}{path}");
+        dashboard
+            .submit(&harness.dashboard, &url, fields, OWN_PAGE)
+            .await
+    };
+
+    let too_long = "x".repeat(81);
+    let rename = [
+        ("action", "rename"),
+        ("id", passkey.as_str()),
+        ("friendly_name", too_long.as_str()),
+        ("reason", "Asked by email"),
+    ];
+    let refused = post(&sign_in, &rename).await;
+    assert_eq!(refused.status(), StatusCode::BAD_REQUEST);
+    let page = html(refused).await;
+    assert!(page.contains(&format!(r#"value="{too_long}""#)), "{page}");
+    assert!(page.contains(r#"value="Asked by email""#), "{page}");
+
+    let first = format!("first-{user}@example.com");
+    let primary = crate::tests::verified_address(&harness.database, user, &first, true).await;
+    let second = format!("second-{user}@example.com");
+    let second_id = crate::tests::verified_address(&harness.database, user, &second, false).await;
+    let emails = format!("/users/{user}/emails");
+    let primary = primary.to_string();
+    let remove = [
+        ("action", "remove"),
+        ("id", primary.as_str()),
+        ("reason", "Asked by phone"),
+    ];
+    let page = html(post(&emails, &remove).await).await;
+    assert_eq!(
+        page.matches(r#"value="Asked by phone""#).count(),
+        1,
+        "only the refused row keeps the reason: {page}"
+    );
+    let other = second_id.to_string();
+    let long = "x".repeat(501);
+    let primary = [
+        ("action", "primary"),
+        ("id", other.as_str()),
+        ("reason", long.as_str()),
+    ];
+    let page = html(post(&emails, &primary).await).await;
+    assert_eq!(
+        page.matches(&format!(r#"value="{long}""#)).count(),
+        1,
+        "the refused Make primary keeps its own reason: {page}"
+    );
+
+    let handle = format!("/users/{user}/handle");
+    let current = harness
+        .database
+        .users()
+        .find_by_id(user)
+        .await
+        .expect("lookup")
+        .expect("user")
+        .handle
+        .to_string();
+    let same = [("handle", current.as_str()), ("reason", "Impersonation")];
+    let page = html(post(&handle, &same).await).await;
+    assert!(page.contains(&format!(r#"value="{current}""#)), "{page}");
+    assert!(page.contains(r#"value="Impersonation""#), "{page}");
+}
+
 /// An account's page lists its passkeys by ID and when each was added, never by
 /// name, which whoever used a recovery's link chose.
 #[tokio::test]
@@ -636,7 +723,7 @@ async fn administrators_change_an_accounts_settings_with_a_reason() {
         "{page}"
     );
     let renamed = format!("renamed-{}", &user.to_string()[24..]);
-    let done = post(&handle, &[("handle", renamed.as_str())]).await;
+    let done = post(&handle, &[("handle", renamed.as_str()), reason]).await;
     assert_eq!(redirect(&done), format!("/users/{user}"));
     let stored = harness
         .database
@@ -647,6 +734,6 @@ async fn administrators_change_an_accounts_settings_with_a_reason() {
         .expect("user");
     assert_eq!(stored.handle.as_str(), renamed);
     // The handle rules refuse a rename, saying why, as they do the owner's.
-    let refused = html(post(&handle, &[("handle", renamed.as_str())]).await).await;
+    let refused = html(post(&handle, &[("handle", renamed.as_str()), reason]).await).await;
     assert!(refused.contains("This is already the account"), "{refused}");
 }

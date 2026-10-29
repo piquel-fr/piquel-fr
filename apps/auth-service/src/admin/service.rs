@@ -755,8 +755,10 @@ impl AdminService {
             .collect())
     }
 
-    /// Gives the account `user_id` the handle `handle`, as a settings rename does
-    /// but without its cooldown. Reserved names are refused unless `allow_reserved`.
+    /// Gives the account `user_id` the handle `handle`, for `reason`, as a settings
+    /// rename does but without its cooldown. Reserved names are refused unless
+    /// `allow_reserved`. The reason is recorded with the change, as personal data
+    /// the owner sees in their history.
     ///
     /// # Errors
     /// Fails when the operator may not make changes, the account is unknown, or
@@ -767,6 +769,7 @@ impl AdminService {
         operator: &Operator,
         user_id: UserId,
         handle: Handle,
+        reason: Reason,
         allow_reserved: bool,
     ) -> Result<(), AdminError> {
         if !allow_reserved {
@@ -774,10 +777,15 @@ impl AdminService {
         }
         let mut tx = self.database.begin().await?;
         let user = operator.lock(&mut tx, user_id).await?;
-        let (tx, changed) = Handles::new(&self.database)
+        let (mut tx, changed) = Handles::new(&self.database)
             .rename(tx, &user, handle)
             .await?;
-        Self::finish(tx, operator, Some(user_id), vec![changed]).await
+        let context = EventContext {
+            reason: Some(reason.into_inner()),
+            ..operator.context()
+        };
+        tx.record(&context, Some(user_id), changed).await?;
+        Self::finish(tx, operator, Some(user_id), vec![]).await
     }
 
     /// Deletes the released handle `handle`, or a purged account's last one, so

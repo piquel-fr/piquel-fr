@@ -15,6 +15,7 @@ use piquel_common::{
 };
 use piquel_repository::{Database, DatabaseTransaction, SessionScope, StoredSession};
 use std::ops::Deref;
+use tokio::sync::OnceCell;
 
 /// The signed-in owner of an account, acting through their browser session. Its
 /// fields are private and only the extractors and [`Self::resolve`] build one,
@@ -82,8 +83,10 @@ pub(crate) struct ConfirmedSubject(Subject);
 enum Reading {
     /// The account's own user, signed in with this session.
     Owner(SessionId),
-    /// An administrator or operator.
-    Operator(Operator),
+    /// An administrator or operator, and their view of the account once
+    /// recorded: once per [`Viewer`], so a page reading several settings records
+    /// one view.
+    Operator(Operator, OnceCell<()>),
 }
 
 impl Owner {
@@ -304,7 +307,7 @@ impl Viewer {
     pub(crate) const fn operator(user: UserId, operator: Operator) -> Self {
         Self {
             user,
-            by: Reading::Operator(operator),
+            by: Reading::Operator(operator, OnceCell::const_new()),
         }
     }
 
@@ -317,27 +320,34 @@ impl Viewer {
     pub(crate) const fn own_session(&self) -> Option<SessionId> {
         match &self.by {
             Reading::Owner(session) => Some(*session),
-            Reading::Operator(_) => None,
+            Reading::Operator(..) => None,
         }
     }
 
     /// Authorizes a read before it reads. An administrator must still hold their
     /// rights and session, signed in with a passkey, as every admin read requires
-    /// ([`Operator::authorize_read`]), and an administrator's or operator's read
-    /// is recorded as a view, as `user show` is, since settings hold personal
-    /// data. The extractor already checked an owner's session, and an owner's
-    /// reads of their own are not recorded.
+    /// ([`Operator::authorize_read`]), and an administrator's or operator's
+    /// first read through this viewer is recorded as a view, as `user show` is,
+    /// since settings hold personal data. The extractor already checked an
+    /// owner's session, and an owner's reads of their own are not recorded.
     pub(crate) async fn authorize(&self, database: &Database) -> Result<(), AccountError> {
-        if let Reading::Operator(operator) = &self.by {
+        if let Reading::Operator(operator, viewed) = &self.by {
             operator.authorize_read(database).await?;
-            let mut tx = database.begin().await?;
-            tx.record(
-                &operator.context(),
-                Some(self.user),
-                DomainEvent::AccountViewed {},
-            )
-            .await?;
-            tx.commit().await?;
+            // Reads at once wait for the first to record; a failed record leaves
+            // the next read to try again.
+            viewed
+                .get_or_try_init(|| async {
+                    let mut tx = database.begin().await?;
+                    tx.record(
+                        &operator.context(),
+                        Some(self.user),
+                        DomainEvent::AccountViewed {},
+                    )
+                    .await?;
+                    tx.commit().await?;
+                    Ok::<_, AccountError>(())
+                })
+                .await?;
         }
         Ok(())
     }

@@ -54,6 +54,9 @@ pub(super) async fn grant(cx: &Cx, form: Option<Form<GrantAdministrator>>) -> Re
         service.grant_administrator(&admin.operator, input.user_id)
     })
     .await?;
+    let typed = refusal
+        .as_ref()
+        .map(|refused| refused.form.user_id.to_string());
     let page = view! { cx =>
         piquel_ui::dashboard_change(
             title: "Grant administrator rights",
@@ -63,7 +66,7 @@ pub(super) async fn grant(cx: &Cx, form: Option<Form<GrantAdministrator>>) -> Re
             refusal: refusal.as_deref(),
             <label>
                 "Account ID"
-                <input name="user_id" required="" autocomplete="off" placeholder="From the account's page">
+                <input name="user_id" required="" autocomplete="off" placeholder="From the account's page" value=(typed)>
             </label>
         )
     };

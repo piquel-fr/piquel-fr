@@ -162,22 +162,21 @@ pub(super) async fn disable(cx: &Cx, form: Option<Form<DisableUser>>) -> Result<
     let service = &App::of(cx).service;
     let id = *path_param::<Account>(cx)?;
     let back = App::account(cx, id);
-    // Kept to fill in again after a refusal, never from a link's query string.
-    let reason = form.as_ref().map(|Form(input)| input.reason.clone());
     let refusal = App::submit(cx, form, back.clone(), |input: DisableUser| async move {
         service
             .disable_user(&admin.operator, id, Reason::parse(input.reason)?)
             .await
     })
     .await?;
-    let reason = refusal.as_ref().and(reason);
+    let reason = refusal.as_ref().map(|refused| refused.form.reason.as_str());
+    let refusal = refusal.as_deref();
     let page = view! { cx =>
         piquel_ui::dashboard_change(
             title: "Disable this account",
             description: "The account can no longer sign in, and every session and refresh grant ends now.",
             button: "Disable",
             back: back.as_str(),
-            refusal: refusal.as_deref(),
+            refusal: refusal,
             danger: true,
             <label>
                 "Reason"
@@ -264,7 +263,7 @@ pub(super) async fn revoke_session(cx: &Cx, form: Option<Form<IgnoredAny>>) -> R
 }
 
 /// The form starting or undoing a recovery.
-#[derive(serde::Deserialize)]
+#[derive(Clone, serde::Deserialize)]
 pub(super) struct RecoveryForm {
     /// Why, recorded with the recovery and shown to the owner in their history.
     reason: String,
@@ -282,7 +281,6 @@ pub(super) async fn recover(cx: &Cx, form: Option<Form<RecoveryForm>>) -> Result
     let app = App::of(cx);
     let id = *path_param::<Account>(cx)?;
     let back = App::account(cx, id);
-    let reason = form.as_ref().map(|Form(input)| input.reason.clone());
     let refusal = App::submit(cx, form, back.clone(), |input: RecoveryForm| async move {
         let reason = Reason::parse(input.reason)?;
         app.service
@@ -292,7 +290,8 @@ pub(super) async fn recover(cx: &Cx, form: Option<Form<RecoveryForm>>) -> Result
     })
     .await?;
     let recent = app.service.recent_recoveries(&admin.operator, id).await?;
-    let reason = refusal.as_ref().and(reason);
+    let reason = refusal.as_ref().map(|refused| refused.form.reason.as_str());
+    let refusal = refusal.as_deref();
     let rows = &App::recovery_rows(&recent);
     let page = view! { cx =>
         piquel_ui::dashboard_change(
@@ -300,7 +299,7 @@ pub(super) async fn recover(cx: &Cx, form: Option<Form<RecoveryForm>>) -> Result
             description: "For an owner who lost every passkey. Ends every session, removes the account's unverified addresses, and emails its primary verified address a link that enrolls one passkey, once, within a day. For 15 days after, that passkey signs in but confirms no change, and any older passkey can undo the recovery. Follow the evidence policy first. An account that was in someone else's hands needs auth-service user recover --revoke, at the terminal.",
             button: "Send the recovery link",
             back: back.as_str(),
-            refusal: refusal.as_deref(),
+            refusal: refusal,
             danger: true,
             piquel_ui::recovery_list(rows: rows)
             <label>
@@ -323,14 +322,14 @@ pub(super) async fn undo_recovery(cx: &Cx, form: Option<Form<RecoveryForm>>) -> 
     let app = App::of(cx);
     let id = *path_param::<Account>(cx)?;
     let back = App::account(cx, id);
-    let reason = form.as_ref().map(|Form(input)| input.reason.clone());
     let refusal = App::submit(cx, form, back.clone(), |input: RecoveryForm| async move {
         let reason = Reason::parse(input.reason)?;
         app.service.undo_recovery(&admin.operator, id, reason).await
     })
     .await?;
     let recent = app.service.recent_recoveries(&admin.operator, id).await?;
-    let reason = refusal.as_ref().and(reason);
+    let reason = refusal.as_ref().map(|refused| refused.form.reason.as_str());
+    let refusal = refusal.as_deref();
     let rows = &App::recovery_rows(&recent);
     let page = view! { cx =>
         piquel_ui::dashboard_change(
@@ -338,7 +337,7 @@ pub(super) async fn undo_recovery(cx: &Cx, form: Option<Form<RecoveryForm>>) -> 
             description: "For an owner support has confirmed, who has no passkey left from before the recovery, or whose account is disabled. In probation, removes the recovery's passkey, even the last, withdraws every consent and ends every session; its link unused, cancels the link.",
             button: "Undo the recovery",
             back: back.as_str(),
-            refusal: refusal.as_deref(),
+            refusal: refusal,
             danger: true,
             piquel_ui::recovery_list(rows: rows)
             <label>

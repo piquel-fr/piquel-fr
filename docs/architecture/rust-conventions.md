@@ -212,7 +212,8 @@ on it:
   `Operator` with the reason it must give;
 - a `Viewer`, for reads, which need no reason. For an operator,
   `Viewer::authorize` calls `Operator::authorize_read`, as every admin read does,
-  and records the read as a view; an owner's reads are not recorded.
+  and records the first read through that viewer as a view, so a page reading
+  several settings records one; an owner's reads are not recorded.
 
 Only the extractors and `AccountService::owner`, which pages call, build an owner's
 `Owner`, from the session cookie; their `Subject` and `Viewer` come from it, or

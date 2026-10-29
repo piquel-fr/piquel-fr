@@ -44,14 +44,17 @@ impl AccountPage for Addresses {
     fn reopened(change: &EmailChange) -> EmailsState {
         match change {
             EmailChange::Add { email } => EmailsState {
-                removing: None,
                 adding: Some(email.clone()),
+                ..EmailsState::default()
             },
             EmailChange::Remove { id } => EmailsState {
                 removing: Some(*id),
-                adding: None,
+                ..EmailsState::default()
             },
-            EmailChange::Primary { .. } => EmailsState::default(),
+            EmailChange::Primary { id } => EmailsState {
+                making_primary: Some(*id),
+                ..EmailsState::default()
+            },
         }
     }
 

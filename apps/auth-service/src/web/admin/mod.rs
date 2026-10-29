@@ -331,15 +331,17 @@ impl AdminApplication {
 
     /// Makes the change a posted `form` asks for, with `call`. Returns nothing for
     /// a `GET`, which only shows the form: a link, even with a query, never changes
-    /// anything. A refusal comes back as the message the form shows. When the
-    /// change needs a newer confirmation, or the session ended meanwhile, the
-    /// browser goes through auth's handoff page and back to the form's page.
+    /// anything. A refusal comes back with the message the form shows and the form
+    /// as posted, so the page keeps what was typed. When the change needs a newer
+    /// confirmation, or the session ended meanwhile, the browser goes through
+    /// auth's handoff page and back to the form's page.
     async fn change<I, T, E, F, Fut>(
         cx: &Cx,
         form: Option<Form<I>>,
         call: F,
-    ) -> Result<Option<Result<T, String>>>
+    ) -> Result<Option<Result<T, Refused<I>>>>
     where
+        I: Clone,
         E: Into<Refusal>,
         F: FnOnce(I) -> Fut,
         Fut: Future<Output = Result<T, E>>,
@@ -347,7 +349,7 @@ impl AdminApplication {
         let Some(Form(input)) = form.filter(|_| method(cx) == Method::POST) else {
             return Ok(None);
         };
-        let refused = match call(input).await {
+        let refused = match call(input.clone()).await {
             Ok(value) => return Ok(Some(Ok(value))),
             Err(refused) => refused.into(),
         };
@@ -359,7 +361,10 @@ impl AdminApplication {
                 (status, _) if status.is_server_error() => {
                     Err(Error::msg("an admin change failed"))
                 }
-                (_, message) => Ok(Some(Err(message.to_owned()))),
+                (_, message) => Ok(Some(Err(Refused {
+                    message: message.to_owned(),
+                    form: input,
+                }))),
             },
         }
     }
@@ -370,8 +375,9 @@ impl AdminApplication {
         form: Option<Form<I>>,
         done: String,
         call: F,
-    ) -> Result<Option<String>>
+    ) -> Result<Option<Refused<I>>>
     where
+        I: Clone,
         E: Into<Refusal>,
         F: FnOnce(I) -> Fut,
         Fut: Future<Output = Result<(), E>>,
@@ -381,6 +387,23 @@ impl AdminApplication {
             Some(Err(refused)) => Ok(Some(refused)),
             None => Ok(None),
         }
+    }
+}
+
+/// A change the service refused: why, and the form as it was posted, which the
+/// page shows again so nothing typed is lost. It reads as its message.
+struct Refused<I> {
+    /// Why, as the form says it.
+    message: String,
+    /// The form, as posted.
+    form: I,
+}
+
+impl<I> std::ops::Deref for Refused<I> {
+    type Target = str;
+
+    fn deref(&self) -> &str {
+        &self.message
     }
 }
 
