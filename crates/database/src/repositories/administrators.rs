@@ -94,6 +94,28 @@ impl AdministratorRepository<'_> {
         .is_some())
     }
 
+    /// Reports whether an active account other than `user_id` is an administrator,
+    /// so removing `user_id` would still leave someone to administer.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`DatabaseError`] if the query fails.
+    pub async fn others_active(&mut self, user_id: UserId) -> Result<bool, DatabaseError> {
+        run!(
+            self,
+            fetch_one,
+            sqlx::query_scalar!(
+                r#"SELECT EXISTS (
+                    SELECT FROM administrators a
+                    JOIN users u ON u.id = a.user_id
+                    WHERE a.user_id <> $1
+                    AND u.status = 'active'
+                ) AS "others!""#,
+                user_id.as_uuid(),
+            )
+        )
+    }
+
     /// Lists every administrator, oldest grant first.
     ///
     /// # Errors

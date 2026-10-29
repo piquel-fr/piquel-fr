@@ -162,6 +162,13 @@ impl Administration {
                 UserCommand::Enable { .. } => Op::EnableUser,
                 UserCommand::Recover { .. } => Op::RecoverAccount,
                 UserCommand::UndoRecovery { .. } => Op::UndoRecovery,
+                UserCommand::Delete {
+                    immediately: false, ..
+                } => Op::ScheduleDeletion,
+                UserCommand::Delete {
+                    immediately: true, ..
+                } => Op::PurgeUser,
+                UserCommand::Restore { .. } => Op::RestoreUser,
             },
             Self::Session(command) => match command {
                 SessionCommand::Revoke { .. } => Op::RevokeSession,

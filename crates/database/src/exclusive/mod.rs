@@ -17,6 +17,8 @@ pub enum LockKey {
     /// Changes to signing keys, taken per transaction by
     /// [`SigningKeyRepository::lock`](crate::SigningKeyRepository::lock).
     SigningKeys = 3,
+    /// The purge of accounts whose deletion grace period ended.
+    AccountPurge = 4,
     /// Job runner tests in other crates; no release takes it.
     #[cfg(feature = "test-support")]
     Test = -1,

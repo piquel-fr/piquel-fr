@@ -3,6 +3,8 @@
 
 /// Connected apps.
 mod connected;
+/// Downloading the account's data, and deleting the account.
+mod data;
 /// Email addresses, and confirming one.
 mod emails;
 /// Signed-in devices.
@@ -13,6 +15,7 @@ mod sign_in;
 mod timeline;
 
 pub use connected::{ConnectedAppChange, ConnectedAppRow, ConnectedAppsState, connected_apps};
+pub use data::{DataChange, DataState, account_data, account_deleted};
 pub use emails::{EmailChange, EmailRow, EmailsState, addresses, verified, verify};
 pub use sessions::{DeviceChange, DeviceRow, devices};
 pub use sign_in::{HandleRow, ProviderRow, SignInChange, SignInState, sign_in_methods};
@@ -79,6 +82,8 @@ pub enum Tab {
     Apps,
     /// Security history.
     History,
+    /// Downloading the account's data, and deleting the account.
+    Data,
 }
 
 impl Tab {
@@ -91,6 +96,7 @@ impl Tab {
             Self::Devices => "Devices",
             Self::Apps => "Connected apps",
             Self::History => "Security history",
+            Self::Data => "Your data",
         }
     }
 }

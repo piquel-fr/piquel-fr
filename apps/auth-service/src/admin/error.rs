@@ -1,6 +1,8 @@
 //! Admin failures, from the dashboard or the CLI, and their status and message.
 
-use crate::{ClientRegistryError, handles::HandlesError, security::ApiError};
+use crate::{
+    ClientRegistryError, deletion::DeletionError, handles::HandlesError, security::ApiError,
+};
 use piquel_common::{DeliveryId, PasskeyId, protocol::step_up::StepUpRequirement};
 use piquel_crypto::CryptoError;
 use piquel_repository::DatabaseError;
@@ -97,8 +99,13 @@ pub enum AdminError {
     #[error("the account has no recovery that can still be undone")]
     NoRecoveryToUndo,
     /// Only active accounts can become administrators.
-    #[error("the account is disabled; enable it before granting administrator rights")]
+    #[error(
+        "the account is disabled or being deleted; only active accounts can become administrators"
+    )]
     AccountDisabled,
+    /// The account is scheduled for deletion, which only restoring it ends.
+    #[error("the account is scheduled for deletion; restore it first")]
+    DeletionScheduled,
     /// The account is already an administrator.
     #[error("the account is already an administrator")]
     AlreadyAdministrator,
@@ -124,6 +131,9 @@ pub enum AdminError {
     /// A client change was refused or failed.
     #[error(transparent)]
     Client(#[from] ClientRegistryError),
+    /// Deleting, restoring or purging the account was refused or failed.
+    #[error(transparent)]
+    Deletion(#[from] DeletionError),
     /// Secret generation failed.
     #[error(transparent)]
     Crypto(#[from] CryptoError),
@@ -162,6 +172,7 @@ impl AdminError {
             Self::GrantDuringRecovery => "grant_during_recovery",
             Self::NoRecoveryToUndo => "no_recovery_to_undo",
             Self::AccountDisabled => "account_disabled",
+            Self::DeletionScheduled => "deletion_scheduled",
             Self::AlreadyAdministrator => "already_administrator",
             Self::NotAnAdministrator => "not_an_administrator",
             Self::OwnRights => "own_rights",
@@ -170,6 +181,7 @@ impl AdminError {
             Self::HandleNotReleased => "handle_not_released",
             Self::Database(_) => "database",
             Self::Client(_) => "client",
+            Self::Deletion(_) => "deletion",
             Self::Crypto(_) => "crypto",
             Self::Event(_) => "event",
             Self::Link(_) => "link",
@@ -230,10 +242,12 @@ impl From<AdminError> for ApiError {
             | AdminError::NoRecoveryToUndo
             | AdminError::GrantDuringRecovery
             | AdminError::AccountDisabled
+            | AdminError::DeletionScheduled
             | AdminError::AlreadyAdministrator
             | AdminError::NotAnAdministrator => Self::conflict(message),
             AdminError::Database(error) => error.into(),
             AdminError::Client(error) => error.into(),
+            AdminError::Deletion(error) => error.into(),
             error @ (AdminError::Crypto(_) | AdminError::Event(_) | AdminError::Link(_)) => {
                 Self::internal(error)
             }

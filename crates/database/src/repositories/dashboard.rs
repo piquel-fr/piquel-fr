@@ -47,7 +47,43 @@ pub struct StoredDashboardSession {
     pub confirmed_at: Option<DateTime<Utc>>,
 }
 
+/// One of an account's sign-ins to the dashboard.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct DashboardSignIn {
+    /// The auth session it rests on.
+    pub session_id: SessionId,
+    /// When it started.
+    pub created_at: DateTime<Utc>,
+    /// When a passkey last confirmed it, if one did.
+    pub confirmed_at: Option<DateTime<Utc>>,
+}
+
 impl DashboardRepository<'_> {
+    /// Lists `user_id`'s dashboard sessions, newest first, while their auth
+    /// sessions are kept.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`DatabaseError`] if the query fails or a row is invalid.
+    pub async fn of_user(
+        &mut self,
+        user_id: UserId,
+    ) -> Result<Vec<DashboardSignIn>, DatabaseError> {
+        run!(
+            self,
+            fetch_all,
+            sqlx::query_as!(
+                DashboardSignIn,
+                r#"SELECT d.session_id AS "session_id: SessionId", d.created_at, d.confirmed_at
+                FROM dashboard_sessions d
+                JOIN sessions s ON s.id = d.session_id
+                WHERE s.user_id = $1
+                ORDER BY d.created_at DESC"#,
+                user_id.as_uuid(),
+            )
+        )
+    }
+
     /// Stores a handoff code.
     ///
     /// # Errors

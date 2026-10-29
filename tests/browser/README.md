@@ -10,6 +10,10 @@ script runs, devices, an email link's token and signing out.
 `sign-in.spec.ts` signs in with a handle, after a handle this authenticator holds
 no passkey for is refused in the form. Every spec signs up through `/register`.
 
+`deletion.spec.ts` downloads the account's data from `/settings/data`, deletes the
+account by typing its handle, and restores it: signing in with its passkey offers to
+restore it instead of a session, and restoring signs in.
+
 `developers.spec.ts` registers a confidential app in the developer console: a
 setting refused beside its input, the secret shown once, in an answer no cache
 keeps and nowhere in the URL, history or storage, and the app then signing a user

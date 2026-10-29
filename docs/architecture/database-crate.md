@@ -23,8 +23,8 @@ values before any SQL runs.
 
 Each repository has its own module under `src/repositories/` (`users`, `handles`, `emails`,
 `sessions`, `events`, `deliveries`, `passkeys`, `oidc`, `tokens`, `federation`,
-`security`, `maintenance`, `administrators`), holding its methods and the records they
-take and return.
+`security`, `maintenance`, `administrators`, `deletions`), holding its methods and the
+records they take and return.
 `repositories/mod.rs` holds only shared plumbing: the executor, the
 `repositories!` macro that declares every handle and its accessors on `Database`,
 `DatabaseTransaction` and `ExclusiveConnection`, the `run!` query macro and the
@@ -110,6 +110,15 @@ Important invariants:
   committing: it share-locks the caller's rights, so a revocation waits for it,
   and reads their session and confirmation without locking either, so it joins
   no lock cycle.
+- An account scheduled for deletion has status `deleting` and an
+  `account_deletions` row; it keeps its verified emails until it is purged, so
+  restoring it never collides. Scheduling and purging take
+  `administrators().lock()` before the account lock, as grants do, so the last
+  active administrator's account cannot be deleted. Callers end its sessions and
+  delete the clients it manages first. `deletions().purge` then deletes the rows
+  that reference the account without cascading, the personal data of the events it
+  is the subject or actor of, and the account itself, in the same transaction. Its
+  handles stay in `handles` without an owner, so nobody claims them again.
 - Active provider subjects and active provider-per-account links are unique.
   Unlink marks the identity revoked and releases both constraints.
 - Verified email ownership is unique across active accounts. Email is optional;
@@ -171,6 +180,8 @@ job its own `LockKey` value and never reuse one. `LockKey::SigningKeys` is inste
 taken per transaction, by `signing_keys().lock()` or `try_lock()`: it serializes
 every change to `signing_keys`, so rotation runs on one replica at a time and never
 races a `keys` command.
+The account purge job (`LockKey::AccountPurge`) also runs every five minutes,
+purging up to 100 accounts past their grace period, each in its own transaction.
 Tests that use `TEST_DATABASE_URL` are explicitly
 marked ignored by the ordinary unit test runner; other crates' tests read stored state
 through helpers behind the `test-support` feature. `just db test` runs them in a
@@ -290,8 +301,8 @@ always reads it.
   the repository moves each `Personal` value there and leaves `"$erased"` in the
   payload; on read it merges them back. Once the row is gone, they and the request
   origin read as `Personal::Erased`. Deleting it never breaks the event.
-- The cleanup pass deletes personal data after 90 days. Account purge (#84) deletes
-  it earlier for every event whose subject or actor is the purged account.
+- The cleanup pass deletes personal data after 90 days. Account purge deletes it
+  earlier for every event whose subject or actor is the purged account.
 - `subject_user_id` has no foreign key: history outlives the account. Subject and
   actor UUIDs are pseudonymous, not anonymous: applications hold the same `sub`.
 

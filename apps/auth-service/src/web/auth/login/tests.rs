@@ -3,6 +3,8 @@
 use super::Continuation;
 use crate::{
     AuthConfig,
+    account::AccountService,
+    deletion::Deletions,
     federation::ReturnTo,
     routes::page::{LOGIN, REGISTER, settings},
     security::BrowserCookie,
@@ -823,4 +825,101 @@ async fn failures_are_said_above_the_page() {
             .await
             .contains("This page was out of date. Try again.")
     );
+}
+
+/// A browser holding the offer a passkey sign-in left for an account scheduled for
+/// deletion sees the sign-in page ask to restore it, signed in to another account
+/// or not, also when the passkey script posts its sign-in. Keeping it scheduled
+/// forgets the offer; an offer used, or none, restores nothing.
+#[tokio::test]
+#[ignore = "requires TEST_DATABASE_URL"]
+async fn sign_in_asks_to_restore_an_account_scheduled_for_deletion() {
+    let replicas = Replicas::new().await;
+    let database = Replicas::database().await;
+    let browser = Browser::new_account(&database).await;
+    let passkey = unusable_passkey(browser.user_id);
+    database.passkeys().insert(&passkey).await.expect("passkey");
+    let handle = database
+        .users()
+        .find_by_id(browser.user_id)
+        .await
+        .expect("lookup")
+        .expect("account")
+        .handle
+        .to_string();
+    let _signed_out = AccountService::new(database.clone())
+        .delete_account(&browser.owner(&database).await, &handle)
+        .await
+        .expect("delete");
+    let mut tx = database.begin().await.expect("transaction");
+    tx.users()
+        .find_by_id_for_update(browser.user_id)
+        .await
+        .expect("lock");
+    let mut offered = axum::http::Response::new(());
+    Deletions::offer_restore(tx, browser.user_id, passkey.id)
+        .await
+        .expect("offer")
+        .set_on(&mut offered)
+        .expect("cookie");
+    let offer = offered.headers()[header::SET_COOKIE]
+        .to_str()
+        .expect("cookie")
+        .split(';')
+        .next()
+        .expect("pair")
+        .to_owned();
+    let holder = Browser {
+        cookie: offer,
+        ..Browser::signed_out()
+    };
+
+    let page = html(holder.visit(&replicas.a, LOGIN).await).await;
+    assert!(page.contains("Restore your account?"), "{page}");
+    // A browser signed in to another account is asked too: its passkey just named
+    // this one.
+    let other = Browser::new_account(&database).await;
+    let signed_in = Browser {
+        cookie: format!("{}; {}", other.cookie, holder.cookie),
+        ..Browser::signed_out()
+    };
+    let page = html(signed_in.visit(&replicas.a, LOGIN).await).await;
+    assert!(page.contains("Restore your account?"), "{page}");
+    assert!(
+        page.contains(&format!("@{handle} is scheduled for deletion.")),
+        "{page}"
+    );
+    let signed_in = holder
+        .post(&replicas, LOGIN, &LoginChange::SignedIn {})
+        .await;
+    assert_eq!(redirect(&signed_in), LOGIN, "the page asks to restore");
+
+    let kept = holder
+        .post(&replicas, LOGIN, &LoginChange::KeepScheduled {})
+        .await;
+    assert_eq!(redirect(&kept), LOGIN);
+    let (cleared, attributes) = cookie(&kept, BrowserCookie::Restore);
+    assert_eq!(cleared, "");
+    assert!(attributes.ends_with("Max-Age=0"), "{attributes}");
+
+    let return_to = link(
+        LOGIN,
+        &LoginQuery {
+            return_to: Some(settings::SESSIONS.to_owned()),
+            ..LoginQuery::default()
+        },
+    );
+    let restored = holder
+        .post(&replicas, &return_to, &LoginChange::Restore {})
+        .await;
+    assert_eq!(redirect(&restored), settings::SESSIONS);
+    assert_ne!(cookie(&restored, BrowserCookie::Session).0, "");
+    let page = html(holder.visit(&replicas.a, LOGIN).await).await;
+    assert!(!page.contains("Restore your account?"), "{page}");
+    let again = holder
+        .post(&replicas, LOGIN, &LoginChange::Restore {})
+        .await;
+    assert_eq!(again.status(), StatusCode::BAD_REQUEST);
+    let page = html(again).await;
+    assert!(page.contains("This restore offer has expired."), "{page}");
 }

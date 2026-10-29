@@ -98,6 +98,8 @@ pub struct RecentRecovery {
     pub id: RecoveryId,
     /// When it started.
     pub started_at: DateTime<Utc>,
+    /// When its link stops, or stopped, working unused.
+    pub expires_at: DateTime<Utc>,
     /// When its link enrolled a passkey, if it did.
     pub completed_at: Option<DateTime<Utc>>,
     /// When it was cancelled before its link was used.
@@ -143,6 +145,7 @@ impl From<RecentRow> for RecentRecovery {
             state: recovery.state(),
             id: recovery.id,
             started_at: recovery.started_at,
+            expires_at: recovery.expires_at,
             completed_at: recovery.completed_at,
             cancelled_at: recovery.cancelled_at,
             undone_at: recovery.undone_at,

@@ -1,4 +1,5 @@
-//! Finding, showing, disabling, reactivating and recovering accounts.
+//! Finding, showing, disabling, reactivating, recovering, deleting and restoring
+//! accounts.
 
 use super::{CliError, Confirm, Console, Output};
 use crate::{AdminError, AuthConfig, Reason, UserRef, recovery::Revoke};
@@ -86,6 +87,23 @@ pub(super) enum UserCommand {
         #[command(flatten)]
         confirm: Confirm,
     },
+    /// Schedule an active account's deletion: it can no longer sign in, its
+    /// sessions end, and it is purged after 30 days unless restored first. Never
+    /// the last active administrator's.
+    Delete {
+        /// The account: its handle, ID or verified email.
+        user: UserRef,
+        /// Why, kept with the event as personal data: 1 to 500 characters.
+        #[arg(long)]
+        reason: Reason,
+        /// Purge the account now, in any status, without a grace period. This
+        /// cannot be undone.
+        #[arg(long)]
+        immediately: bool,
+        /// Confirmation.
+        #[command(flatten)]
+        confirm: Confirm,
+    },
     /// Undo an account's recovery for its owner, once they are confirmed.
     ///
     /// For an owner with no passkey left from before it, or whose account is
@@ -102,6 +120,14 @@ pub(super) enum UserCommand {
         /// Confirmation.
         #[command(flatten)]
         confirm: Confirm,
+    },
+    /// Restore an account scheduled for deletion, so it can sign in again.
+    Restore {
+        /// The account: its handle, ID or verified email.
+        user: UserRef,
+        /// Why, kept with the event as personal data: 1 to 500 characters.
+        #[arg(long)]
+        reason: Reason,
     },
 }
 
@@ -143,35 +169,7 @@ impl UserCommand {
                 revoke,
                 keep,
                 confirm,
-            } => {
-                let id = console.user(&user).await?;
-                let links = AuthConfig::recovery_links_from_environment()?;
-                let recent = service.recent_recoveries(operator, id).await?;
-                Self::print_recent(&recent);
-                // Refused before asking, rather than after the confirmation;
-                // the service refuses too.
-                let probation = recent
-                    .iter()
-                    .any(|recovery| matches!(recovery.state, RecoveryState::Probation { .. }));
-                if probation {
-                    return Err(AdminError::RecoveryInProbation.into());
-                }
-                let revoke = revoke.then_some(Revoke { keep });
-                let action = match &revoke {
-                    Some(revoke) => format!(
-                        "revoke every passkey but {} kept, unlink every identity, withdraw every consent, end its sessions and print a recovery link",
-                        revoke.keep.len()
-                    ),
-                    None => "end its sessions and send it a recovery link".to_owned(),
-                };
-                confirm.ask(&format!("Recover {user} ({id}): {action}"))?;
-                if let Some(link) = service
-                    .recover_account(operator, id, reason, &links, revoke)
-                    .await?
-                {
-                    println!("{link}");
-                }
-            }
+            } => Self::recover(console, &user, reason, revoke, keep, &confirm).await?,
             Self::UndoRecovery {
                 user,
                 reason,
@@ -195,6 +193,85 @@ impl UserCommand {
                 ))?;
                 service.undo_recovery(operator, id, reason).await?;
             }
+            Self::Delete {
+                user,
+                reason,
+                immediately,
+                confirm,
+            } => Self::delete(console, &user, reason, immediately, &confirm).await?,
+            Self::Restore { user, reason } => {
+                let id = console.user(&user).await?;
+                service.restore_user(operator, id, reason).await?;
+            }
+        }
+        Ok(())
+    }
+
+    /// Starts recovering `user`'s account for `reason`, once confirmed, after
+    /// listing its recent recoveries; `revoke` with `keep` takes back every other
+    /// way in first.
+    async fn recover(
+        console: &Console,
+        user: &UserRef,
+        reason: Reason,
+        revoke: bool,
+        keep: Vec<PasskeyId>,
+        confirm: &Confirm,
+    ) -> Result<(), CliError> {
+        let Console {
+            service, operator, ..
+        } = console;
+        let id = console.user(user).await?;
+        let links = AuthConfig::recovery_links_from_environment()?;
+        let recent = service.recent_recoveries(operator, id).await?;
+        Self::print_recent(&recent);
+        // Refused before asking, rather than after the confirmation;
+        // the service refuses too.
+        let probation = recent
+            .iter()
+            .any(|recovery| matches!(recovery.state, RecoveryState::Probation { .. }));
+        if probation {
+            return Err(AdminError::RecoveryInProbation.into());
+        }
+        let revoke = revoke.then_some(Revoke { keep });
+        let action = match &revoke {
+            Some(revoke) => format!(
+                "revoke every passkey but {} kept, unlink every identity, withdraw every consent, end its sessions and print a recovery link",
+                revoke.keep.len()
+            ),
+            None => "end its sessions and send it a recovery link".to_owned(),
+        };
+        confirm.ask(&format!("Recover {user} ({id}): {action}"))?;
+        if let Some(link) = service
+            .recover_account(operator, id, reason, &links, revoke)
+            .await?
+        {
+            println!("{link}");
+        }
+        Ok(())
+    }
+
+    /// Schedules the deletion of `user`'s account, or purges it at once when
+    /// `immediately`, for `reason`, once confirmed.
+    async fn delete(
+        console: &Console,
+        user: &UserRef,
+        reason: Reason,
+        immediately: bool,
+        confirm: &Confirm,
+    ) -> Result<(), CliError> {
+        let Console {
+            service, operator, ..
+        } = console;
+        let id = console.user(user).await?;
+        if immediately {
+            confirm.ask(&format!(
+                "Purge {user} ({id}) and everything that identifies its person now; this cannot be undone"
+            ))?;
+            service.purge_user(operator, id, reason).await?;
+        } else {
+            confirm.ask(&format!("Schedule the deletion of {user} ({id})"))?;
+            service.schedule_deletion(operator, id, reason).await?;
         }
         Ok(())
     }

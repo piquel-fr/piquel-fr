@@ -1,0 +1,37 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE account_deletions\n                SET restore_token_digest = $2, restore_passkey_id = $3,\n                    restore_token_expires_at = $4\n                WHERE user_id = $1\n                RETURNING user_id AS \"user_id: UserId\", requested_at, purge_after",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "user_id: UserId",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "requested_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 2,
+        "name": "purge_after",
+        "type_info": "Timestamptz"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Bytea",
+        "Uuid",
+        "Timestamptz"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "fcf1753e8962f2e15b641847bd662197addac91807f406374c8f91b9bac947d0"
+}

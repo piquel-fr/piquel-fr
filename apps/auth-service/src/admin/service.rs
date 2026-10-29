@@ -4,10 +4,12 @@ use super::{AdminError, HandleProblem, InviteExpiry, Operator, Reason, UserRef};
 use crate::{
     Applied, ClientDetails, ClientRegistry, ClientRegistryError, GracePeriod,
     account::AccountService,
+    deletion::Deletions,
     emails::EmailApplication,
     handles::{Handles, HandlesError},
     recovery::{LINK_LIFETIME, PROBATION, RecoveryLinks, Revoke},
     routes,
+    security::Session,
 };
 use chrono::Utc;
 use piquel_common::{
@@ -24,7 +26,7 @@ use piquel_common::{
 use piquel_crypto::{ClientSecret, Secret};
 use piquel_repository::{
     Database, DatabaseError, DatabaseTransaction, DeliveryStatus, DeliverySummary, EventFilter,
-    InsertRecovery, RecentRecovery, SessionScope, StoredOidcClient,
+    InsertRecovery, RecentRecovery, SessionScope, StoredOidcClient, StoredUser,
 };
 use piquel_ui::{LoginQuery, Query};
 use url::Url;
@@ -199,21 +201,24 @@ impl AdminService {
         reason: Reason,
     ) -> Result<(), AdminError> {
         let mut tx = self.database.begin().await?;
-        operator.lock(&mut tx, user_id).await?;
-        if !tx
-            .users()
-            .set_status(user_id, AccountStatus::Disabled)
-            .await?
-        {
-            return Err(AdminError::AlreadyDisabled);
+        // Deleting an account checks that another administrator stays active under
+        // this lock, so disabling one must wait for it.
+        tx.administrators().lock().await?;
+        match operator.lock(&mut tx, user_id).await?.status {
+            AccountStatus::Active => {}
+            AccountStatus::Disabled => return Err(AdminError::AlreadyDisabled),
+            AccountStatus::Deleting => return Err(AdminError::DeletionScheduled),
         }
+        tx.users()
+            .set_status(user_id, AccountStatus::Disabled)
+            .await?;
         let disabled = DomainEvent::AccountDisabled {
             reason: Personal::Value(reason.into_inner()),
         };
         tx.record(&operator.context(), Some(user_id), disabled)
             .await?;
         tx.recoveries().cancel_open(user_id).await?;
-        Self::end_sessions(
+        Session::end_all(
             &mut tx,
             &operator.context(),
             user_id,
@@ -231,9 +236,12 @@ impl AdminService {
         user_id: UserId,
     ) -> Result<(), AdminError> {
         let mut tx = self.database.begin().await?;
-        operator.lock(&mut tx, user_id).await?;
-        let changed = tx
-            .users()
+        match operator.lock(&mut tx, user_id).await?.status {
+            AccountStatus::Disabled => {}
+            AccountStatus::Active => return Err(AdminError::AlreadyActive),
+            AccountStatus::Deleting => return Err(AdminError::DeletionScheduled),
+        }
+        tx.users()
             .set_status(user_id, AccountStatus::Active)
             .await
             .map_err(|error| match error {
@@ -243,9 +251,6 @@ impl AdminService {
                 | DatabaseError::InvalidStoredData { .. }
                 | DatabaseError::Operation(_) => error.into(),
             })?;
-        if !changed {
-            return Err(AdminError::AlreadyActive);
-        }
         Self::finish(
             tx,
             operator,
@@ -305,10 +310,7 @@ impl AdminService {
         if !mailed && !shown {
             return Err(AdminError::RecoveryNeedsEmail);
         }
-        let context = EventContext {
-            reason: Some(reason.into_inner()),
-            ..operator.context()
-        };
+        let context = Self::context(operator, reason);
         // Cancelled before any revocation, which the database refuses while a
         // recovery's link works.
         tx.recoveries().cancel_open(user_id).await?;
@@ -336,7 +338,7 @@ impl AdminService {
             revoke,
         };
         tx.record(&context, Some(user_id), started).await?;
-        Self::end_sessions(&mut tx, &context, user_id, RevocationReason::Admin).await?;
+        Session::end_all(&mut tx, &context, user_id, RevocationReason::Admin).await?;
         let link = shown.then(|| links.url(&token));
         Self::finish(tx, operator, Some(user_id), vec![]).await?;
         Ok(link)
@@ -429,12 +431,82 @@ impl AdminService {
         let recovery = AccountService::undoable(&mut tx, user_id)
             .await?
             .ok_or(AdminError::NoRecoveryToUndo)?;
-        let context = EventContext {
-            reason: Some(reason.into_inner()),
-            ..operator.context()
-        };
+        let context = Self::context(operator, reason);
         AccountService::revert(&mut tx, &context, &recovery, RevocationReason::Admin).await?;
         Self::finish(tx, operator, Some(user_id), vec![]).await
+    }
+
+    /// Schedules the deletion of an active account, for `reason`: it can no longer
+    /// sign in, its sessions and refresh grants end, and it is purged once its
+    /// grace period ends, unless it is restored first. Nobody can delete the last
+    /// active administrator's account.
+    pub(crate) async fn schedule_deletion(
+        &self,
+        operator: &Operator,
+        user_id: UserId,
+        reason: Reason,
+    ) -> Result<(), AdminError> {
+        let (mut tx, user) = self.lock_deletable(operator, user_id).await?;
+        Deletions::new(&mut tx, Self::context(operator, reason))
+            .schedule(&user)
+            .await?;
+        Self::finish(tx, operator, Some(user_id), vec![]).await
+    }
+
+    /// Purges an account now, in any status, without a grace period, for
+    /// `reason`. It cannot be undone, so only the CLI offers it.
+    pub(crate) async fn purge_user(
+        &self,
+        operator: &Operator,
+        user_id: UserId,
+        reason: Reason,
+    ) -> Result<(), AdminError> {
+        let (mut tx, user) = self.lock_deletable(operator, user_id).await?;
+        Deletions::new(&mut tx, Self::context(operator, reason))
+            .purge(&user)
+            .await?;
+        Self::finish(tx, operator, Some(user_id), vec![]).await
+    }
+
+    /// Restores an account scheduled for deletion, for `reason`. It can sign in
+    /// again.
+    pub(crate) async fn restore_user(
+        &self,
+        operator: &Operator,
+        user_id: UserId,
+        reason: Reason,
+    ) -> Result<(), AdminError> {
+        let mut tx = self.database.begin().await?;
+        let user = operator.lock(&mut tx, user_id).await?;
+        Deletions::new(&mut tx, Self::context(operator, reason))
+            .restore(&user)
+            .await?;
+        Self::finish(tx, operator, Some(user_id), vec![]).await
+    }
+
+    /// Opens the transaction of a deletion and locks its account as
+    /// [`Deletions::lock`] does, refusing an administrator's unless the CLI acts.
+    async fn lock_deletable(
+        &self,
+        operator: &Operator,
+        user_id: UserId,
+    ) -> Result<(DatabaseTransaction<'_>, StoredUser), AdminError> {
+        let mut tx = self.database.begin().await?;
+        let user = Deletions::lock(&mut tx, user_id).await?;
+        // The administrator list is locked, so the answer holds until commit.
+        if operator.administrator().is_some() && tx.administrators().contains(user_id).await? {
+            return Err(AdminError::AdministratorTarget);
+        }
+        Ok((tx, user))
+    }
+
+    /// Attributes a change to `operator`, with their `reason`, which the owner
+    /// sees in their history.
+    fn context(operator: &Operator, reason: Reason) -> EventContext {
+        EventContext {
+            reason: Some(reason.into_inner()),
+            ..operator.context()
+        }
     }
 
     /// Ends every session and refresh grant of an account.
@@ -445,7 +517,7 @@ impl AdminService {
     ) -> Result<(), AdminError> {
         let mut tx = self.database.begin().await?;
         operator.lock(&mut tx, user_id).await?;
-        Self::end_sessions(
+        Session::end_all(
             &mut tx,
             &operator.context(),
             user_id,
@@ -453,20 +525,6 @@ impl AdminService {
         )
         .await?;
         Self::finish(tx, operator, Some(user_id), vec![]).await
-    }
-
-    /// Revokes the account's sessions, recording each in `context`, then its
-    /// refresh grants. Callers hold the account lock.
-    async fn end_sessions(
-        tx: &mut DatabaseTransaction<'_>,
-        context: &EventContext,
-        user_id: UserId,
-        reason: RevocationReason,
-    ) -> Result<(), AdminError> {
-        tx.revoke_sessions(context, user_id, SessionScope::All, &reason)
-            .await?;
-        tx.tokens().revoke_for_user(user_id, None).await?;
-        Ok(())
     }
 
     /// Ends one active session and the refresh grants issued from it.
@@ -848,7 +906,7 @@ impl AdminService {
             .find_by_id_for_update(user_id)
             .await?
             .ok_or(AdminError::UserNotFound)?;
-        if user.status == AccountStatus::Disabled {
+        if user.status != AccountStatus::Active {
             return Err(AdminError::AccountDisabled);
         }
         if AccountService::undoable(&mut tx, user_id).await?.is_some() {

@@ -191,6 +191,12 @@ impl HistoryRow<'_> {
             }
             HistoryEntry::Recovered { .. } => "Account recovered: a passkey was added".to_owned(),
             HistoryEntry::RecoveryUndone => "Account recovery undone".to_owned(),
+            HistoryEntry::AccountExported => "Account data downloaded".to_owned(),
+            HistoryEntry::DeletionScheduled { purge_after } => format!(
+                "Account deletion scheduled for {}",
+                purge_after.format("%-d %b %Y")
+            ),
+            HistoryEntry::AccountRestored => "Account restored".to_owned(),
             HistoryEntry::CompromiseReported { .. } => {
                 "You reported activity that wasn’t you".to_owned()
             }

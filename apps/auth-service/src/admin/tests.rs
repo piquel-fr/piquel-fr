@@ -725,6 +725,9 @@ impl AdminOperation {
             ],
             Self::DisableUser
             | Self::EnableUser
+            | Self::ScheduleDeletion
+            | Self::RestoreUser
+            | Self::PurgeUser
             | Self::RevokeUserSessions
             | Self::RevokeSession
             | Self::CreateInvitation

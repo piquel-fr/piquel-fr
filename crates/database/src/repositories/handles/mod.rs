@@ -46,6 +46,28 @@ impl HandleRepository<'_> {
         )
     }
 
+    /// Lists the handles `user_id` holds or held, the current one first, then the
+    /// others, most recently claimed first.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`DatabaseError`] if the query fails or a row is invalid.
+    pub async fn of_user(&mut self, user_id: UserId) -> Result<Vec<StoredHandle>, DatabaseError> {
+        run!(
+            self,
+            fetch_all,
+            sqlx::query_as!(
+                StoredHandle,
+                r#"SELECT handle AS "handle: Handle", user_id AS "user_id: UserId", claimed_at,
+                    released_at
+                FROM handles
+                WHERE user_id = $1
+                ORDER BY released_at IS NOT NULL, claimed_at DESC"#,
+                user_id.as_uuid(),
+            )
+        )
+    }
+
     /// Lists every account's current handle, by handle.
     ///
     /// # Errors

@@ -83,8 +83,10 @@ pub async fn user_search<'a>(
 /// that does not administer Piquel.
 #[derive(Clone, Copy, Debug)]
 pub struct AccountPages<'a> {
-    /// Disabling or enabling it, by its status.
+    /// Disabling, enabling or restoring it, by its status.
     pub status: &'a str,
+    /// Scheduling its deletion, while it is active.
+    pub delete: &'a str,
     /// Ending every session.
     pub revoke_sessions: &'a str,
     /// Starting a recovery.
@@ -204,10 +206,17 @@ async fn account_actions<'a>(
         <div class="row actions">
             match pages {
                 Ok(pages) => {
-                    if user.status == AccountStatus::Active {
-                        <a class="button danger" href=(pages.status)>"Disable"</a>
-                    } else {
-                        <a class="button secondary" href=(pages.status)>"Enable"</a>
+                    match user.status {
+                        AccountStatus::Active => {
+                            <a class="button danger" href=(pages.status)>"Disable"</a>
+                            <a class="button danger" href=(pages.delete)>"Delete"</a>
+                        },
+                        AccountStatus::Disabled => {
+                            <a class="button secondary" href=(pages.status)>"Enable"</a>
+                        },
+                        AccountStatus::Deleting => {
+                            <a class="button secondary" href=(pages.status)>"Restore"</a>
+                        },
                     }
                     <a class="button secondary" href=(pages.recover)>"Recover"</a>
                     <a class="button secondary" href=(pages.undo_recovery)>"Undo recovery"</a>

@@ -6,6 +6,8 @@
 
 /// Connected apps.
 mod connected;
+/// Downloading the account's data, and deleting the account.
+mod data;
 /// Email addresses, and confirming one.
 mod emails;
 /// Security history.
@@ -18,6 +20,7 @@ mod sign_in;
 mod tests;
 
 pub(super) use connected::ConnectedApps;
+pub(super) use data::AccountData;
 pub(super) use emails::Addresses;
 pub(super) use history::History;
 pub(super) use sessions::Devices;
@@ -37,12 +40,13 @@ use topcoat::{
 use url::Url;
 
 /// Each tab and the page it links.
-const TABS: [(Tab, &str); 5] = [
+const TABS: [(Tab, &str); 6] = [
     (Tab::SignIn, settings::HOME),
     (Tab::Emails, settings::EMAILS),
     (Tab::Devices, settings::SESSIONS),
     (Tab::Apps, settings::APPS),
     (Tab::History, settings::HISTORY),
+    (Tab::Data, settings::DATA),
 ];
 
 impl<'a> From<&'a EmailView> for EmailRow<'a> {

@@ -22,6 +22,7 @@ use piquel_common::{
 };
 use piquel_crypto::{ClientSecret, Secret};
 use piquel_repository::{DatabaseTransaction, StoredClientSecret, StoredOidcClient};
+use serde::Serialize;
 use std::error::Error;
 use thiserror::Error;
 
@@ -82,7 +83,7 @@ pub(crate) struct OwnedClient {
 
 /// One of an owner's clients as its owner sees it: its settings, status and last
 /// use, never its trust, audiences or owner, which only operators manage.
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Debug, PartialEq, Eq, Serialize)]
 pub(crate) struct OwnedClientView {
     /// Client identifier.
     pub(crate) id: ClientId,

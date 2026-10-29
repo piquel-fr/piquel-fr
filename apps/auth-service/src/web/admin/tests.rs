@@ -737,3 +737,53 @@ async fn administrators_change_an_accounts_settings_with_a_reason() {
     let refused = html(post(&handle, &[("handle", renamed.as_str()), reason]).await).await;
     assert!(refused.contains("This is already the account"), "{refused}");
 }
+
+/// An administrator schedules an account's deletion and restores it from the
+/// dashboard, each with a reason; the account's page then offers Restore, not
+/// Enable, and only the terminal purges at once.
+#[tokio::test]
+#[ignore = "requires TEST_DATABASE_URL"]
+async fn deletions_are_scheduled_and_restored_from_the_dashboard() {
+    let harness = Harness::new().await;
+    let admin = harness.admin().await;
+    let owner = Browser::new_account(&harness.database).await;
+    let account = format!("/users/{}", owner.user_id);
+    let delete = format!("{account}/delete");
+    let dashboard = harness.confirmed(&admin, &delete, Utc::now()).await;
+    let page = html(harness.visit(&dashboard, &account).await).await;
+    assert!(page.contains(&format!(r#"href="{delete}""#)), "{page}");
+    let page = html(harness.visit(&dashboard, &delete).await).await;
+    assert!(
+        page.contains("--immediately"),
+        "the terminal purges: {page}"
+    );
+    let reason = [("reason", "Asked by email")];
+    let post = async |path: &str| {
+        let url = format!("{DASHBOARD}{path}");
+        dashboard
+            .submit(&harness.dashboard, &url, &reason, OWN_PAGE)
+            .await
+    };
+    assert_eq!(redirect(&post(&delete).await), account);
+    let status = async || {
+        harness
+            .database
+            .users()
+            .find_by_id(owner.user_id)
+            .await
+            .expect("lookup")
+            .expect("account")
+            .status
+    };
+    assert_eq!(status().await, AccountStatus::Deleting);
+
+    let restore = format!("{account}/restore");
+    let page = html(harness.visit(&dashboard, &account).await).await;
+    assert!(
+        page.contains(&format!(r#"href="{restore}">Restore"#)),
+        "{page}"
+    );
+    assert!(!page.contains("/enable"), "{page}");
+    assert_eq!(redirect(&post(&restore).await), account);
+    assert_eq!(status().await, AccountStatus::Active);
+}

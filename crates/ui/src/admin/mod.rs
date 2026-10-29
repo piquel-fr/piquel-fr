@@ -237,7 +237,7 @@ pub(crate) async fn refused_action<'a>(label: &'a str, reason: &'a str) -> Resul
 #[component]
 pub(crate) async fn account_status(status: AccountStatus) -> Result<impl View> {
     Ok(view! {
-        <span class=(class!("badge", "disabled" if status == AccountStatus::Disabled))>
+        <span class=(class!("badge", "disabled" if status != AccountStatus::Active))>
             (status.to_string())
         </span>
     })
