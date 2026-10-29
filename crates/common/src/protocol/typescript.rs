@@ -184,23 +184,34 @@ impl Declarations {
     }
 
     /// The file, once every referenced type is declared in it. Drops the docs' Rust
-    /// examples and ts-rs's trailing spaces.
+    /// examples, the colon that introduced a final one and rustdoc's link brackets,
+    /// and ts-rs's trailing spaces.
     fn finish(self) -> String {
         let missing: Vec<_> = self.referenced.difference(&self.declared).collect();
         assert!(missing.is_empty(), "declare {missing:?} too");
         let mut example = false;
-        let mut lines: Vec<&str> = Vec::new();
+        let mut lines: Vec<String> = Vec::new();
         for line in self.text.lines().map(str::trim_end) {
             let fence = line.trim_start().strip_prefix('*').map(str::trim) == Some("```");
             example ^= fence;
             if example || fence {
                 continue;
             }
-            // An example that ended a doc leaves an empty line before its end.
-            if line == " */" && lines.last() == Some(&" *") {
-                lines.pop();
+            if line == " */" {
+                // An example that ended a doc leaves an empty line before its end.
+                if lines.last().is_some_and(|last| last == " *") {
+                    lines.pop();
+                }
+                if let Some(last) = lines.last_mut().filter(|last| last.ends_with(':')) {
+                    last.pop();
+                    last.push('.');
+                }
             }
-            lines.push(line);
+            if line.starts_with(" *") {
+                lines.push(line.replace("[`", "`").replace("`]", "`"));
+            } else {
+                lines.push(line.to_owned());
+            }
         }
         lines.join("\n") + "\n"
     }
