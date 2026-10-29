@@ -1,0 +1,35 @@
+{
+  "name": "@piquel/auth",
+  "version": "0.1.0",
+  "description": "TypeScript SDK for auth.piquel.fr",
+  "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/piquel-fr/piquel-fr.git",
+    "directory": "packages/auth"
+  },
+  "private": true,
+  "type": "module",
+  "sideEffects": false,
+  "engines": {
+    "node": ">=22"
+  },
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsc",
+    "lint": "tsc && publint --strict && attw --pack --profile esm-only"
+  },
+  "devDependencies": {
+    "@arethetypeswrong/cli": "0.18.5",
+    "publint": "0.3.25",
+    "typescript": "6.0.3"
+  }
+}

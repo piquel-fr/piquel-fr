@@ -86,6 +86,11 @@ askama = { version = "0.16", default-features = false, features = ["derive", "st
 # constant-time and avoids the RustCrypto `rsa` crate's RUSTSEC-2023-0071.
 jsonwebtoken = { version = "11.1", default-features = false, features = ["aws_lc_rs"] }
 secrecy = "0.10"
+# Test-only: TypeScript declarations of the protocol types, which piquel-common's
+# tests write to packages/auth/src/protocol.ts for the TypeScript SDK. The only serde
+# attribute it cannot read is `deserialize_with = "known"`, which drops unknown
+# vocabulary values without changing the type, so its warnings are off.
+ts-rs = { version = "12.0", features = ["url-impl", "no-serde-warnings"] }
 trybuild = "1.0"
 # Test-only: a self-signed certificate and TLS listener so tests reach auth over HTTPS.
 rcgen = "0.14"

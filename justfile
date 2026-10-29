@@ -59,4 +59,9 @@ doc-test:
 sdk-vectors:
     @UPDATE_SDK_VECTORS=1 cargo nextest run --locked -p piquel-common --test sdk_vectors
 
+# Regenerate the TypeScript SDK's wire types, packages/auth/src/protocol.ts, from
+# piquel_common::protocol; `just test` fails while the committed file is stale.
+sdk-types:
+    @UPDATE_SDK_TYPES=1 cargo nextest run --locked -p piquel-common --lib protocol::typescript
+
 audit: rust::audit web::audit

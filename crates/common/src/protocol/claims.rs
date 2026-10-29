@@ -85,6 +85,7 @@ impl Acr {
 /// # Ok::<(), serde_json::Error>(())
 /// ```
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(test, derive(ts_rs::TS), ts(optional_fields))]
 #[serde(untagged)]
 pub enum Audience {
     /// A single recipient.
@@ -113,6 +114,7 @@ impl Audience {
 /// `act` (RFC 8693 §4.1): who is acting for the subject. Nested for delegation chains,
 /// the outermost actor being the most recent.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(test, derive(ts_rs::TS), ts(optional_fields))]
 pub struct Actor {
     /// The acting party.
     pub sub: String,
@@ -123,6 +125,7 @@ pub struct Actor {
 
 /// `cnf` (RFC 7800): the key a sender-constrained token is bound to.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(test, derive(ts_rs::TS), ts(optional_fields))]
 pub struct Confirmation {
     /// SHA-256 JWK thumbprint of the `DPoP` key (RFC 9449 §6.1).
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -132,6 +135,7 @@ pub struct Confirmation {
 /// How and when the browser session behind a token authenticated. Shared by access
 /// and ID tokens, and what step-up checks read.
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(test, derive(ts_rs::TS), ts(optional_fields))]
 pub struct AuthenticationClaims {
     /// Browser session that authorized the grant.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -142,6 +146,7 @@ pub struct AuthenticationClaims {
         skip_serializing_if = "Option::is_none",
         with = "chrono::serde::ts_seconds_option"
     )]
+    #[cfg_attr(test, ts(type = "number"))]
     pub auth_time: Option<DateTime<Utc>>,
     /// How the session signed in. Values this version does not know are dropped.
     #[serde(
@@ -162,6 +167,7 @@ pub struct AuthenticationClaims {
 
 /// Profile and email claims, present only when the matching scope was granted.
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(test, derive(ts_rs::TS), ts(optional_fields))]
 pub struct ProfileClaims {
     /// Username, with the profile scope.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -183,6 +189,7 @@ pub struct ProfileClaims {
 /// Claims of an access token (RFC 9068), signed with `typ: at+jwt`. `X` holds
 /// application claims; auth issues none, so it uses `()`.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(test, derive(ts_rs::TS), ts(optional_fields, concrete(X = ())))]
 pub struct AccessTokenClaims<X = ()> {
     /// Issuer, exactly as in discovery.
     pub iss: String,
@@ -198,9 +205,11 @@ pub struct AccessTokenClaims<X = ()> {
     pub scope: Scopes,
     /// Issue time.
     #[serde(with = "chrono::serde::ts_seconds")]
+    #[cfg_attr(test, ts(type = "number"))]
     pub iat: DateTime<Utc>,
     /// Expiry time.
     #[serde(with = "chrono::serde::ts_seconds")]
+    #[cfg_attr(test, ts(type = "number"))]
     pub exp: DateTime<Utc>,
     /// Time before which the token must not be accepted.
     #[serde(
@@ -208,6 +217,7 @@ pub struct AccessTokenClaims<X = ()> {
         skip_serializing_if = "Option::is_none",
         with = "chrono::serde::ts_seconds_option"
     )]
+    #[cfg_attr(test, ts(type = "number"))]
     pub nbf: Option<DateTime<Utc>>,
     /// How the user authenticated.
     #[serde(flatten)]
@@ -223,11 +233,13 @@ pub struct AccessTokenClaims<X = ()> {
     pub profile: ProfileClaims,
     /// Application claims.
     #[serde(flatten)]
+    #[cfg_attr(test, ts(skip))]
     pub extra: X,
 }
 
 /// Claims of an ID token (OIDC Core §2), signed with `typ: JWT`.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(test, derive(ts_rs::TS), ts(optional_fields))]
 pub struct IdTokenClaims {
     /// Issuer, exactly as in discovery.
     pub iss: String,
@@ -240,9 +252,11 @@ pub struct IdTokenClaims {
     pub azp: Option<ClientId>,
     /// Issue time.
     #[serde(with = "chrono::serde::ts_seconds")]
+    #[cfg_attr(test, ts(type = "number"))]
     pub iat: DateTime<Utc>,
     /// Expiry time.
     #[serde(with = "chrono::serde::ts_seconds")]
+    #[cfg_attr(test, ts(type = "number"))]
     pub exp: DateTime<Utc>,
     /// Time before which the token must not be accepted.
     #[serde(
@@ -250,6 +264,7 @@ pub struct IdTokenClaims {
         skip_serializing_if = "Option::is_none",
         with = "chrono::serde::ts_seconds_option"
     )]
+    #[cfg_attr(test, ts(type = "number"))]
     pub nbf: Option<DateTime<Utc>>,
     /// The client's nonce from the authorization request.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -335,6 +350,7 @@ impl<'de> Deserialize<'de> for Absent {
 /// # Ok::<(), serde_json::Error>(())
 /// ```
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(test, derive(ts_rs::TS), ts(optional_fields))]
 pub struct LogoutTokenClaims {
     /// Issuer, exactly as in discovery.
     pub iss: String,
@@ -342,9 +358,11 @@ pub struct LogoutTokenClaims {
     pub aud: Audience,
     /// When this attempt to deliver the token was made.
     #[serde(with = "chrono::serde::ts_seconds")]
+    #[cfg_attr(test, ts(type = "number"))]
     pub iat: DateTime<Utc>,
     /// Expiry time.
     #[serde(with = "chrono::serde::ts_seconds")]
+    #[cfg_attr(test, ts(type = "number"))]
     pub exp: DateTime<Utc>,
     /// The delivery's ID, the same on every attempt, so receivers can drop repeats.
     pub jti: DeliveryId,
@@ -358,11 +376,13 @@ pub struct LogoutTokenClaims {
     pub events: LogoutEvents,
     /// Never present.
     #[serde(default, skip_serializing)]
+    #[cfg_attr(test, ts(as = "Option<Absent>", optional))]
     pub nonce: Absent,
 }
 
 /// The `UserInfo` response (OIDC Core §5.3.2).
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(test, derive(ts_rs::TS), ts(optional_fields))]
 pub struct UserInfo {
     /// The user's account ID.
     pub sub: String,

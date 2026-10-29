@@ -1,0 +1,4 @@
+# The root package holds the repository's web tooling; packages/ holds the
+# TypeScript SDK.
+packages:
+  - packages/*

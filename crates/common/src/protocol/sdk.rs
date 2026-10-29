@@ -95,6 +95,7 @@ crate::str_enum! {
 /// # Ok::<(), serde_json::Error>(())
 /// ```
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(test, derive(ts_rs::TS), ts(optional_fields))]
 pub struct SdkError {
     /// What kind of operation failed.
     pub code: ErrorCategory,
