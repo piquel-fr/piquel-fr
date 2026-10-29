@@ -61,7 +61,7 @@ auth_time?: number,
 /**
  * How the session signed in. Values this version does not know are dropped.
  */
-amr: Array<Amr>,
+amr?: Array<Amr>,
 /**
  * Authentication context class the session reached. A class this version does
  * not know reads as none, so it meets no requirement.
@@ -135,7 +135,7 @@ auth_time?: number,
 /**
  * How the session signed in. Values this version does not know are dropped.
  */
-amr: Array<Amr>,
+amr?: Array<Amr>,
 /**
  * Authentication context class the session reached. A class this version does
  * not know reads as none, so it meets no requirement.
@@ -253,7 +253,7 @@ auth_time?: number,
 /**
  * How the session signed in. Values this version does not know are dropped.
  */
-amr: Array<Amr>,
+amr?: Array<Amr>,
 /**
  * Authentication context class the session reached. A class this version does
  * not know reads as none, so it meets no requirement.
@@ -327,7 +327,7 @@ export type Acr = "phr" | "urn:piquel:acr:social";
 export type ServerMetadata = {
 /**
  * Issuer, matching the `iss` claim. A string because it is an origin without the
- * trailing slash a [`Url`] would add.
+ * trailing slash a `Url` would add.
  */
 issuer: string,
 /**
@@ -424,7 +424,7 @@ request_parameter_supported: boolean,
 /**
  * Whether client-hosted request objects (`request_uri`, RFC 9101) are
  * accepted. Pushed `request_uri` values are advertised by
- * [`Self::pushed_authorization_request_endpoint`] instead.
+ * `Self::pushed_authorization_request_endpoint` instead.
  */
 request_uri_parameter_supported: boolean,
 /**
@@ -450,7 +450,7 @@ backchannel_logout_session_supported: boolean, };
  */
 export type StepUpRequirement = {
 /**
- * The class the authentication must meet ([`Acr::satisfies`]).
+ * The class the authentication must meet (`Acr::satisfies`).
  */
 acr_values?: Acr,
 /**
@@ -561,7 +561,7 @@ scope?: string,
  */
 resource_metadata?: string,
 /**
- * The class the authentication must meet ([`Acr::satisfies`]).
+ * The class the authentication must meet (`Acr::satisfies`).
  */
 acr_values?: Acr,
 /**
@@ -573,7 +573,7 @@ export type BearerError = "invalid_request" | "invalid_token" | "insufficient_sc
 
 /**
  * The shared code of an SDK error: a category, and for most categories the check
- * that failed. It serializes as the vectors' expected errors do:
+ * that failed. It serializes as the vectors' expected errors do.
  */
 export type SdkError = {
 /**

@@ -154,6 +154,7 @@ pub struct AuthenticationClaims {
         skip_serializing_if = "Vec::is_empty",
         deserialize_with = "known"
     )]
+    #[cfg_attr(test, ts(as = "Option<Vec<Amr>>", optional))]
     pub amr: Vec<Amr>,
     /// Authentication context class the session reached. A class this version does
     /// not know reads as none, so it meets no requirement.
