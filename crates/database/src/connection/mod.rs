@@ -230,6 +230,21 @@ impl Database {
             .map_err(Into::into)
     }
 
+    /// Opens a read-only `REPEATABLE READ` transaction: every query reads one
+    /// snapshot, so reads spread over several queries agree with each other. It
+    /// writes and locks nothing, so it never fails with a serialization error.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`DatabaseError`] if no connection is available or `BEGIN` fails.
+    pub async fn begin_snapshot(&self) -> Result<DatabaseTransaction<'_>, DatabaseError> {
+        self.pool
+            .begin_with("BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY")
+            .await
+            .map(DatabaseTransaction::new)
+            .map_err(Into::into)
+    }
+
     /// Runs schema migrations when explicitly requested through the auth binary.
     ///
     /// # Errors
