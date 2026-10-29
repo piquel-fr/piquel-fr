@@ -19,6 +19,8 @@ pub enum LockKey {
     SigningKeys = 3,
     /// The purge of accounts whose deletion grace period ended.
     AccountPurge = 4,
+    /// Approving related origins, which counts the domains of every approved one.
+    RelatedOrigins = 5,
     /// Job runner tests in other crates; no release takes it.
     #[cfg(feature = "test-support")]
     Test = -1,

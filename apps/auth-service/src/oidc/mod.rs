@@ -4,6 +4,8 @@
 mod authorize;
 /// Protocol errors and their HTTP responses.
 mod error;
+/// Pushed requests completed by a passkey sign-in on an application's own page.
+mod inline;
 /// RP-initiated logout and confirmation.
 mod logout;
 /// Code exchanges, refresh rotation and identity claims.
@@ -16,6 +18,7 @@ use crate::security::{CacheClass, Cached};
 pub(crate) use authorize::{AuthorizationDecision, AuthorizationView, TransactionQuery};
 pub use error::OidcConfigError;
 pub(crate) use error::{OAuthCode, OAuthError, Reject};
+pub(crate) use inline::{InlineClaim, InlineResponse};
 pub(crate) use logout::LogoutQuery;
 use piquel_crypto::{ClientSecret, CryptoError, Digest, Secret};
 

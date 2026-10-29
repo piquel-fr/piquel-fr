@@ -23,6 +23,8 @@ mod administrators;
 mod invitations;
 /// The OIDC clients and domain events.
 mod lists;
+/// The origins approved for clients' pages to sign users in with passkeys.
+mod origins;
 /// An account's settings, which administrators change on its owner's behalf.
 mod settings;
 #[cfg(test)]
@@ -253,6 +255,8 @@ impl AdminApplication {
             Op::ListAdministrators => &administrators::list,
             Op::GrantAdministrator => &administrators::grant,
             Op::RevokeAdministrator => &administrators::revoke,
+            Op::ApproveRelatedOrigin => &origins::approve,
+            Op::RemoveRelatedOrigin => &origins::remove,
             // Purging at once cannot be undone, so only the terminal offers it.
             Op::PurgeUser
             | Op::ViewClient

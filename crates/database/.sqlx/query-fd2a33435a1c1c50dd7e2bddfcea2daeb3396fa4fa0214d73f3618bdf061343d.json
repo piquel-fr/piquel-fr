@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "DELETE FROM client_webauthn_origins WHERE origin = $1 AND client_id = $2",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "fd2a33435a1c1c50dd7e2bddfcea2daeb3396fa4fa0214d73f3618bdf061343d"
+}

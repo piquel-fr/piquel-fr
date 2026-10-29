@@ -28,10 +28,22 @@ consent, posted once on a double click, the `iss` on each authorization response
 a PKCE exchange, an ID-token signature verified with JWKS and WebCrypto, userinfo,
 code replay rejection, a `prompt=none` request using remembered consent, and a
 step-up re-authentication. Passkey-only accounts must not acquire email claims.
-`just web browser-client` registers the client with the auth database configured in
-the environment, as CI does. Previews do not register it by default: run
+`related-origins.spec.ts` signs in on a client application's own page with a
+passkey, through `browser-e2e-inline`, a trusted client approved as a related
+origin. Its page, served like `browser-e2e`'s, gets the code as JSON, with no auth
+cookie, and redeems it with its PKCE verifier; replaying the ceremony fails. With
+auth on `localhost`, as in CI, the page is at `https://localhost:4443`, on auth's
+own host, where browsers need no list. Elsewhere it is at
+`https://related-e2e.test`, another site, so the browser reads auth's
+`/.well-known/webauthn` first.
+
+`just web browser-client` registers both clients with the auth database configured
+in the environment, as CI does. Previews do not register them by default: run
 `auth-service client create browser-e2e --name 'Browser E2E' --redirect-uri
-https://browser-e2e.test/callback` there.
+https://browser-e2e.test/callback`, `auth-service client create browser-e2e-inline
+--name 'Browser E2E inline' --trusted --redirect-uri
+https://related-e2e.test/callback` and `auth-service client origin add
+browser-e2e-inline https://related-e2e.test` there.
 
 Run `just preview` to build and deploy this checkout over HTTPS on piqueld. Set
 `E2E_AUTH_URL` to the printed auth origin, then run `just web test-browser`. If

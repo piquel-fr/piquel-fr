@@ -358,6 +358,128 @@ impl fmt::Display for RedirectUri {
     }
 }
 
+/// An origin whose pages may sign users in with their auth passkeys, as a `WebAuthn`
+/// related origin (`WebAuthn` Level 3 §5.11): HTTPS on a domain name, written exactly
+/// as browsers send it in an `Origin` header.
+///
+/// ```
+/// use piquel_common::clients::RelatedOrigin;
+///
+/// let origin: RelatedOrigin = "https://notes.example".parse()?;
+/// assert_eq!(origin.host(), "notes.example");
+/// // A trailing slash, a path or plain HTTP is not an origin browsers send.
+/// assert!("https://notes.example/".parse::<RelatedOrigin>().is_err());
+/// assert!("http://notes.example".parse::<RelatedOrigin>().is_err());
+/// # Ok::<(), Box<dyn std::error::Error>>(())
+/// ```
+#[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(try_from = "String", into = "String")]
+pub struct RelatedOrigin(Box<Url>);
+
+/// Why a related origin was rejected.
+#[derive(Clone, Debug, PartialEq, Eq, Error)]
+pub enum InvalidRelatedOrigin {
+    /// The value is not an absolute URL.
+    #[error("origin {origin:?} is not an absolute URL")]
+    NotAbsolute {
+        /// The rejected value.
+        origin: String,
+        /// The URL parser's diagnostic.
+        #[source]
+        source: url::ParseError,
+    },
+    /// The URL uses another scheme, or its host is an IP address.
+    #[error("origin {origin} must use https on a domain name, e.g. https://notes.example")]
+    Insecure {
+        /// The rejected value.
+        origin: String,
+    },
+    /// The URL holds a user name or password. The value is omitted: it may hold a secret.
+    #[error("origins must not contain a user name or password")]
+    Credentials,
+    /// The value is not written as browsers send the origin: it has a path, a
+    /// query, a default port or upper case letters.
+    #[error("origin {origin} must be written as {canonical}, as browsers send it")]
+    NotCanonical {
+        /// The rejected value.
+        origin: String,
+        /// The origin as browsers send it.
+        canonical: String,
+    },
+}
+
+impl RelatedOrigin {
+    /// The origin as browsers send it, e.g. `https://notes.example`.
+    #[must_use]
+    pub fn as_str(&self) -> &str {
+        // The URL's path is `/` and it has no query or fragment, so dropping the
+        // slash leaves the origin's serialization.
+        self.0.as_str().trim_end_matches('/')
+    }
+
+    /// The origin's domain name, e.g. `notes.example`.
+    #[must_use]
+    pub fn host(&self) -> &str {
+        self.0.host_str().unwrap_or_default()
+    }
+
+    /// The origin as a URL, e.g. `https://notes.example/`.
+    #[must_use]
+    pub fn url(&self) -> &Url {
+        &self.0
+    }
+}
+
+impl FromStr for RelatedOrigin {
+    type Err = InvalidRelatedOrigin;
+    /// Applies the rules in [`RelatedOrigin`]'s description.
+    fn from_str(value: &str) -> Result<Self, Self::Err> {
+        let origin = || value.to_owned();
+        let url = Url::parse(value).map_err(|source| InvalidRelatedOrigin::NotAbsolute {
+            origin: origin(),
+            source,
+        })?;
+        if url.scheme() != "https" || !matches!(url.host(), Some(Host::Domain(_))) {
+            return Err(InvalidRelatedOrigin::Insecure { origin: origin() });
+        }
+        if !url.username().is_empty() || url.password().is_some() {
+            return Err(InvalidRelatedOrigin::Credentials);
+        }
+        let canonical = url.origin().ascii_serialization();
+        if canonical != value {
+            return Err(InvalidRelatedOrigin::NotCanonical {
+                origin: origin(),
+                canonical,
+            });
+        }
+        Ok(Self(Box::new(url)))
+    }
+}
+
+impl TryFrom<String> for RelatedOrigin {
+    type Error = InvalidRelatedOrigin;
+    /// Validates owned text, as serde reads it.
+    fn try_from(value: String) -> Result<Self, Self::Error> {
+        value.parse()
+    }
+}
+
+impl From<RelatedOrigin> for String {
+    /// The origin as browsers send it.
+    fn from(value: RelatedOrigin) -> Self {
+        value.as_str().to_owned()
+    }
+}
+
+crate::__str_enum_sqlx!(RelatedOrigin);
+
+impl fmt::Display for RelatedOrigin {
+    /// Writes the origin as browsers send it.
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.write_str(self.as_str())
+    }
+}
+
 /// A scope a client may request: an RFC 6749 §3.3 scope token of at most 64
 /// characters, such as `openid` or an application's own `notes:read`.
 #[derive(Clone, Debug, PartialEq, Eq)]

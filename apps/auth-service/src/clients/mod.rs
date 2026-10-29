@@ -1,6 +1,7 @@
-//! The one place that changes OIDC client registrations. Each change happens in
-//! the caller's transaction, with the event that records it, so the caller can
-//! check inside the same transaction that its user still may make it.
+//! The one place that changes OIDC client registrations and their approved
+//! related origins. Each change happens in the caller's transaction, with the event
+//! that records it, so the caller can check inside the same transaction that its
+//! user still may make it.
 //! `AdminService` uses it for the `client` command and the deployment job that
 //! registers the admin dashboard, and `AccountService` for the clients accounts
 //! own ([`owned`]); dynamic registration (#44) will too.
@@ -10,14 +11,16 @@
 
 use piquel_common::{
     ClientId, UserId,
-    clients::{ClientField, ClientKind, ClientOwner, ClientRegistration},
+    clients::{ClientField, ClientKind, ClientOwner, ClientRegistration, RelatedOrigin},
     events::{DomainEvent, EventContext},
     protocol::oauth::Scope,
 };
 use piquel_crypto::{ClientSecret, CryptoError};
 use piquel_repository::{DatabaseError, DatabaseTransaction, StoredClientSecret, StoredOidcClient};
 use serde::Serialize;
+use std::collections::BTreeSet;
 use thiserror::Error;
+use url::Url;
 
 use crate::GracePeriod;
 
@@ -36,9 +39,14 @@ pub const MAX_OWNED_CLIENTS: u32 = 10;
 pub const MAX_DAILY_REGISTRATIONS: u32 = 20;
 /// The window [`MAX_DAILY_REGISTRATIONS`] counts in.
 const REGISTRATION_WINDOW: chrono::Duration = chrono::Duration::days(1);
+/// The most distinct domains related origins may span. Browsers must honour at
+/// least 5 (`WebAuthn` Level 3 §5.11.1) and ignore origins past their limit, so
+/// staying within 5 keeps every approved origin working in every browser.
+pub(crate) const MAX_RELATED_ORIGIN_DOMAINS: usize = 5;
 
 /// Creates, updates, applies, enables, disables, rotates the secrets of and
-/// deletes clients in one transaction, attributing each change to one actor.
+/// deletes clients, and approves their related origins, in one transaction,
+/// attributing each change to one actor.
 pub struct ClientRegistry<'a, 't> {
     /// Where the changes and their events are written; the caller commits it.
     tx: &'a mut DatabaseTransaction<'t>,
@@ -84,6 +92,44 @@ pub enum ClientRegistryError {
     /// The account registered [`MAX_DAILY_REGISTRATIONS`] clients in the last day.
     #[error("an account may register at most {MAX_DAILY_REGISTRATIONS} clients a day")]
     DailyLimitExceeded,
+    /// Only trusted clients skip consent, which inline sign-in needs.
+    #[error("client {0} is not trusted, so its pages cannot sign users in themselves")]
+    Untrusted(ClientId),
+    /// A client's pages are on the origins of its redirect URIs.
+    #[error("{origin} is not the origin of any redirect URI of client {client}")]
+    NotRedirectOrigin {
+        /// The origin to approve.
+        origin: RelatedOrigin,
+        /// The client.
+        client: ClientId,
+    },
+    /// Browsers ignore an origin whose host has no registrable domain.
+    #[error("{0} is on a public suffix, so browsers would ignore it")]
+    PublicSuffix(RelatedOrigin),
+    /// Browsers would ignore some approved origins.
+    #[error(
+        "approved origins would span {} domains ({}); browsers honour {MAX_RELATED_ORIGIN_DOMAINS}",
+        .0.len(),
+        .0.join(", ")
+    )]
+    TooManyDomains(Vec<String>),
+    /// The origin is already approved, for this client or another.
+    #[error("{origin} is already approved")]
+    OriginApproved {
+        /// The origin.
+        origin: RelatedOrigin,
+        /// The uniqueness violation.
+        #[source]
+        source: DatabaseError,
+    },
+    /// The origin is not approved for this client.
+    #[error("{origin} is not approved for client {client}")]
+    OriginNotApproved {
+        /// The origin.
+        origin: RelatedOrigin,
+        /// The client.
+        client: ClientId,
+    },
     /// A secret could not be generated.
     #[error("could not generate a client secret")]
     Crypto(#[from] CryptoError),
@@ -431,6 +477,100 @@ impl<'a, 't> ClientRegistry<'a, 't> {
             .await?;
         }
         Ok(added || capped)
+    }
+
+    /// Approves `origin` for client `id`'s pages to sign users in with passkeys
+    /// for `rp_id`, auth's `WebAuthn` RP ID. The client must be trusted and have a
+    /// redirect URI on the origin, and approved origins must stay within the
+    /// domains every browser honours.
+    ///
+    /// # Errors
+    /// Fails if the client does not exist or breaks a rule above, the origin is
+    /// already approved or the database fails.
+    pub async fn approve_origin(
+        &mut self,
+        id: &ClientId,
+        origin: &RelatedOrigin,
+        rp_id: &str,
+    ) -> Result<(), ClientRegistryError> {
+        let client = self.locked(id).await?;
+        if !client.trusted {
+            return Err(ClientRegistryError::Untrusted(client.id));
+        }
+        let on_origin = |uri: &String| {
+            Url::parse(uri).is_ok_and(|uri| uri.origin().ascii_serialization() == origin.as_str())
+        };
+        if !client.redirect_uris.iter().any(on_origin) {
+            return Err(ClientRegistryError::NotRedirectOrigin {
+                origin: origin.clone(),
+                client: client.id,
+            });
+        }
+        self.tx.oidc().lock_related_origins().await?;
+        let mut domains = BTreeSet::new();
+        for approved in self.tx.oidc().related_origins().await? {
+            domains.extend(Self::domain(&approved.origin, rp_id)?);
+        }
+        domains.extend(Self::domain(origin, rp_id)?);
+        if domains.len() > MAX_RELATED_ORIGIN_DOMAINS {
+            return Err(ClientRegistryError::TooManyDomains(
+                domains.into_iter().collect(),
+            ));
+        }
+        self.tx
+            .oidc()
+            .approve_related_origin(id, origin)
+            .await
+            .map_err(|error| match error {
+                DatabaseError::Conflict(_) => ClientRegistryError::OriginApproved {
+                    origin: origin.clone(),
+                    source: error,
+                },
+                error => error.into(),
+            })?;
+        self.record(DomainEvent::RelatedOriginApproved {
+            client_id: id.clone(),
+            origin: origin.clone(),
+        })
+        .await
+    }
+
+    /// Removes `origin` from client `id`'s approved origins. Ceremonies its pages
+    /// already started can no longer finish.
+    ///
+    /// # Errors
+    /// Fails if the origin is not approved for the client or the database fails.
+    pub async fn remove_origin(
+        &mut self,
+        id: &ClientId,
+        origin: &RelatedOrigin,
+    ) -> Result<(), ClientRegistryError> {
+        if !self.tx.oidc().remove_related_origin(id, origin).await? {
+            return Err(ClientRegistryError::OriginNotApproved {
+                origin: origin.clone(),
+                client: id.clone(),
+            });
+        }
+        self.record(DomainEvent::RelatedOriginRemoved {
+            client_id: id.clone(),
+            origin: origin.clone(),
+        })
+        .await
+    }
+
+    /// The domain label browsers count for `origin` against their related-origins
+    /// limit (`WebAuthn` Level 3 §5.11.1): its registrable domain's first label, e.g.
+    /// `example` for `https://app.example.co.uk`. Browsers count every listed origin,
+    /// those within `rp_id` included. They skip one without a registrable domain,
+    /// such as `localhost`, so that works only within `rp_id`, which browsers allow
+    /// without the list, and counts nothing.
+    fn domain(origin: &RelatedOrigin, rp_id: &str) -> Result<Option<String>, ClientRegistryError> {
+        let host = origin.host();
+        match psl::domain_str(host).and_then(|domain| domain.split('.').next()) {
+            Some(label) => Ok(Some(label.to_owned())),
+            None if host == rp_id || host.ends_with(&format!(".{rp_id}")) => Ok(None),
+            None => Err(ClientRegistryError::PublicSuffix(origin.clone())),
+        }
     }
 
     /// Locks client `id` for the rest of the transaction, then reads it. A deleted

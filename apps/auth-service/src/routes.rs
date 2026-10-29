@@ -19,6 +19,12 @@ pub(crate) mod passkey {
     pub(crate) const AUTHENTICATE_START: &str = "/webauthn/authenticate/start";
     /// Finishes passkey sign-in.
     pub(crate) const AUTHENTICATE_FINISH: &str = "/webauthn/authenticate/finish";
+    /// Lists the origins whose pages may use auth's passkeys (`WebAuthn` related origins).
+    pub(crate) const RELATED_ORIGINS: &str = "/.well-known/webauthn";
+    /// Starts a passkey sign-in on an approved origin's page.
+    pub(crate) const RELATED_START: &str = "/webauthn/related/start";
+    /// Finishes a passkey sign-in on an approved origin's page.
+    pub(crate) const RELATED_FINISH: &str = "/webauthn/related/finish";
     /// Starts the passkey check that confirms the current session.
     pub(crate) const CONFIRM_START: &str = "/account/passkeys/confirm/start";
     /// Finishes the passkey check that confirms the current session.

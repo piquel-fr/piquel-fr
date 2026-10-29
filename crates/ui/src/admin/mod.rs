@@ -15,8 +15,8 @@ mod recoveries;
 mod users;
 
 pub use lists::{
-    AdministratorRow, EventRow, InvitationRow, administrator_list, client_list, event_list,
-    event_rows, invitation_created, invitation_list,
+    AdminClientRow, AdministratorRow, EventRow, InvitationRow, administrator_list, client_list,
+    event_list, event_rows, invitation_created, invitation_list,
 };
 pub use recoveries::{RecoveryKey, RecoveryRow, RecoveryStanding, recovery_list};
 pub use users::{AccountPages, SessionRow, UserRow, user_page, user_search};

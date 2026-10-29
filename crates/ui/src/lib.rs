@@ -55,11 +55,12 @@ mod recovery;
 mod settings;
 
 pub use admin::{
-    AccountPages, AdministratorRow, EventRow, HandoffProof, HandoffQuery, InvitationRow,
-    RecoveryKey, RecoveryRow, RecoveryStanding, SessionRow, Tab as DashboardTab, UserRow,
-    account_settings, administrator_list, client_list, dashboard_change, dashboard_failure,
-    dashboard_frame, dashboard_signed_out, event_list, event_rows, handoff_proof,
-    invitation_created, invitation_list, no_access, recovery_list, user_page, user_search,
+    AccountPages, AdminClientRow, AdministratorRow, EventRow, HandoffProof, HandoffQuery,
+    InvitationRow, RecoveryKey, RecoveryRow, RecoveryStanding, SessionRow, Tab as DashboardTab,
+    UserRow, account_settings, administrator_list, client_list, dashboard_change,
+    dashboard_failure, dashboard_frame, dashboard_signed_out, event_list, event_rows,
+    handoff_proof, invitation_created, invitation_list, no_access, recovery_list, user_page,
+    user_search,
 };
 pub use asset::{Asset, STYLESHEET};
 pub use clients::{

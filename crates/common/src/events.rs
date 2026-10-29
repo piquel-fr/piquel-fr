@@ -8,7 +8,7 @@
 use crate::{
     AuthenticationMethod, ClientId, DeliveryId, EmailId, EventId, Handle, PasskeyId, Personal,
     Provider, RecoveryId, SessionId, TokenId, UserId,
-    clients::{ClientField, ClientKind},
+    clients::{ClientField, ClientKind, RelatedOrigin},
     email::NormalizedEmail,
     protocol::jwt::KeyId,
 };
@@ -38,6 +38,10 @@ pub enum DomainEvent {
         session_id: SessionId,
         /// How the browser authenticated.
         method: AuthenticationMethod,
+        /// Set when an application's own page signed the user in, rather than
+        /// auth's pages. The session then has no browser cookie.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        inline: Option<InlineSignIn>,
     },
     /// A passkey or provider authentication was rejected, whether signing in or
     /// confirming a session. Only the rejected attempt is recorded; nothing changed.
@@ -283,6 +287,21 @@ pub enum DomainEvent {
         /// The delivery.
         delivery_id: DeliveryId,
     },
+    /// An origin of a client's was approved for inline passkey sign-in, so
+    /// `/.well-known/webauthn` lists it.
+    RelatedOriginApproved {
+        /// The client whose pages are on the origin.
+        client_id: ClientId,
+        /// The approved origin.
+        origin: RelatedOrigin,
+    },
+    /// An approved origin was removed: its pages can no longer sign users in.
+    RelatedOriginRemoved {
+        /// The client whose pages were on the origin.
+        client_id: ClientId,
+        /// The removed origin.
+        origin: RelatedOrigin,
+    },
     /// The user reported an event of their history as not theirs. Their other
     /// sessions follow as [`Self::SessionRevoked`], and every refresh family of the
     /// account is revoked with them.
@@ -362,6 +381,12 @@ impl DomainEvent {
             | Self::ClientSuspensionLifted { client_id }
             | Self::ClientDeleted { client_id }
             | Self::ClientSecretRotated { client_id, .. }
+            | Self::RelatedOriginApproved { client_id, .. }
+            | Self::RelatedOriginRemoved { client_id, .. }
+            | Self::SignedIn {
+                inline: Some(InlineSignIn { client_id, .. }),
+                ..
+            }
             | Self::SessionRevoked {
                 reason: RevocationReason::RelyingPartyLogout { client_id },
                 ..
@@ -449,6 +474,8 @@ impl DomainEvent {
             | Self::RecoveryUndone { .. }
             | Self::DeliveryRetried { .. }
             | Self::DeliveryCancelled { .. }
+            | Self::RelatedOriginApproved { .. }
+            | Self::RelatedOriginRemoved { .. }
             | Self::CompromiseReported { .. }
             | Self::SigningKeyChanged { .. }
             | Self::AccountExported {}
@@ -504,6 +531,8 @@ impl DomainEvent {
             Self::RecoveryUndone { .. } => "recovery_undone",
             Self::DeliveryRetried { .. } => "delivery_retried",
             Self::DeliveryCancelled { .. } => "delivery_cancelled",
+            Self::RelatedOriginApproved { .. } => "related_origin_approved",
+            Self::RelatedOriginRemoved { .. } => "related_origin_removed",
             Self::CompromiseReported { .. } => "compromise_reported",
             Self::SigningKeyChanged { .. } => "signing_key_changed",
             Self::AccountExported {} => "account_exported",
@@ -527,7 +556,10 @@ impl DomainEvent {
     pub fn history_entry(&self) -> Option<HistoryEntry> {
         Some(match self {
             Self::AccountCreated { method, .. } => HistoryEntry::AccountCreated { method: *method },
-            Self::SignedIn { method, .. } => HistoryEntry::SignedIn { method: *method },
+            Self::SignedIn { method, inline, .. } => HistoryEntry::SignedIn {
+                method: *method,
+                origin: inline.as_ref().map(|inline| inline.origin.clone()),
+            },
             Self::SessionRevoked { reason, .. } => match reason {
                 // Switching accounts signs this one out of the browser.
                 RevocationReason::Logout
@@ -627,6 +659,8 @@ impl DomainEvent {
             | Self::ClientSuspensionLifted { .. }
             | Self::ClientDeleted { .. }
             | Self::ClientSecretRotated { .. }
+            | Self::RelatedOriginApproved { .. }
+            | Self::RelatedOriginRemoved { .. }
             // The delivery queue is operations' business; the audit keeps it.
             | Self::DeliveryRetried { .. }
             | Self::DeliveryCancelled { .. }
@@ -655,6 +689,9 @@ pub enum HistoryEntry {
     SignedIn {
         /// How it authenticated.
         method: AuthenticationMethod,
+        /// The application page's origin, when it signed the user in itself.
+        #[serde(skip_serializing_if = "Option::is_none")]
+        origin: Option<RelatedOrigin>,
     },
     /// A browser signed out, at the user's or an application's request, or by
     /// signing in to another account.
@@ -941,6 +978,16 @@ impl From<&Actor> for HistoryActor {
             Actor::Unrecorded => Self::Unrecorded,
         }
     }
+}
+
+/// An application's page that signed a user in with a passkey, from an approved
+/// related origin, without sending them to auth's pages.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct InlineSignIn {
+    /// The client whose pushed authorization request the sign-in completed.
+    pub client_id: ClientId,
+    /// The page's origin.
+    pub origin: RelatedOrigin,
 }
 
 crate::str_enum! {

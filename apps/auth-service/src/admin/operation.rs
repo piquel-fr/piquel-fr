@@ -38,7 +38,8 @@ operations! {
         CreateInvitation,
         /// Revoke an unredeemed invitation.
         RevokeInvitation,
-        /// List OIDC clients.
+        /// List OIDC clients, and the origins approved for their pages to sign
+        /// users in.
         ListClients,
         /// Show one OIDC client.
         ViewClient,
@@ -60,6 +61,10 @@ operations! {
         DeleteClient,
         /// Give a confidential client a new secret.
         RotateClientSecret,
+        /// Approve an origin for a client's pages to sign users in.
+        ApproveRelatedOrigin,
+        /// Remove an approved origin.
+        RemoveRelatedOrigin,
         /// Page through domain events.
         ListEvents,
         /// List administrators.

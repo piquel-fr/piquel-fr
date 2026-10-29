@@ -65,6 +65,12 @@ pub enum ErrorCode {
     /// A recovery of the account can still be undone, so no passkey but the
     /// recovery's own is removed until it settles or is undone.
     RecoveryInProgress,
+    /// An application page cannot sign the user in itself, because the browser or
+    /// the authorization request needs auth's own pages. It sends the user through
+    /// the redirect flow instead: with the same request when the sign-in's start
+    /// refused it, which leaves it unclaimed, or with a fresh one when its finish
+    /// did, since its start claimed it.
+    InteractionRequired,
 }
 
 /// An active passkey of an account, without its cryptographic contents.

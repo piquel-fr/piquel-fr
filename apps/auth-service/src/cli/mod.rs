@@ -39,7 +39,7 @@ use account::AccountCommand;
 use admin::AdminCommand;
 use audit::AuditCommand;
 use clap::{Parser, Subcommand};
-use client::ClientCommand;
+use client::{ClientCommand, OriginCommand};
 use console::{Confirm, Console, Output};
 use deliveries::DeliveriesCommand;
 use error::CliError;
@@ -182,7 +182,9 @@ impl Administration {
             Self::Client(command) => match **command {
                 ClientCommand::Create(_) => Op::CreateClient,
                 ClientCommand::Apply(_) => Op::ApplyClient,
-                ClientCommand::List { .. } => Op::ListClients,
+                ClientCommand::List { .. } | ClientCommand::Origin(OriginCommand::List { .. }) => {
+                    Op::ListClients
+                }
                 ClientCommand::Show { .. } => Op::ViewClient,
                 ClientCommand::Update(_) => Op::UpdateClient,
                 ClientCommand::Disable { .. } => Op::DisableClient,
@@ -191,6 +193,8 @@ impl Administration {
                 ClientCommand::Suspend { .. } => Op::SuspendClient,
                 ClientCommand::Unsuspend { .. } => Op::UnsuspendClient,
                 ClientCommand::RotateSecret { .. } => Op::RotateClientSecret,
+                ClientCommand::Origin(OriginCommand::Add { .. }) => Op::ApproveRelatedOrigin,
+                ClientCommand::Origin(OriginCommand::Remove { .. }) => Op::RemoveRelatedOrigin,
             },
             Self::Audit(_) => Op::ListEvents,
             Self::Admin(command) => match command {

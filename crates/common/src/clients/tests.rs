@@ -90,6 +90,51 @@ fn redirect_uris_follow_the_transport_and_exact_match_rules() {
     );
 }
 
+/// Related origins are HTTPS domain origins, written as browsers send them.
+#[test]
+fn related_origins_are_bare_https_domain_origins() {
+    for valid in ["https://notes.example", "https://notes.example:8443"] {
+        let origin: RelatedOrigin = valid.parse().expect(valid);
+        assert_eq!(origin.as_str(), valid);
+        assert_eq!(origin.host(), "notes.example");
+    }
+    for (value, expected) in [
+        (
+            "http://notes.example",
+            InvalidRelatedOrigin::Insecure {
+                origin: "http://notes.example".into(),
+            },
+        ),
+        (
+            "https://127.0.0.1",
+            InvalidRelatedOrigin::Insecure {
+                origin: "https://127.0.0.1".into(),
+            },
+        ),
+        (
+            "https://user@notes.example",
+            InvalidRelatedOrigin::Credentials,
+        ),
+        (
+            "https://notes.example/app",
+            InvalidRelatedOrigin::NotCanonical {
+                origin: "https://notes.example/app".into(),
+                canonical: "https://notes.example".into(),
+            },
+        ),
+        (
+            "https://Notes.example:443",
+            InvalidRelatedOrigin::NotCanonical {
+                origin: "https://Notes.example:443".into(),
+                canonical: "https://notes.example".into(),
+            },
+        ),
+    ] {
+        assert_eq!(value.parse::<RelatedOrigin>(), Err(expected), "{value}");
+    }
+    assert!(serde_json::from_str::<RelatedOrigin>("\"https://notes.example/\"").is_err());
+}
+
 /// Display names are nonblank and count characters, not bytes; scopes are tokens.
 #[test]
 fn names_and_scopes_are_bounded() {
