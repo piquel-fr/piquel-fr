@@ -210,6 +210,22 @@ impl AuditRepository<'_> {
         .map(Into::into)
     }
 
+    /// Whether this connection's role may delete events, as pruning must: the
+    /// schema owner may, and auth's runtime role may not.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`DatabaseError`] if the query fails.
+    pub async fn may_prune(&mut self) -> Result<bool, DatabaseError> {
+        run!(
+            self,
+            fetch_one,
+            sqlx::query_scalar!(
+                r#"SELECT has_table_privilege('domain_events', 'DELETE') AS "allowed!""#
+            )
+        )
+    }
+
     /// The chain head: the newest sealed event, or the anchor if every sealed event
     /// was pruned, or `None` before the first event is sealed.
     ///

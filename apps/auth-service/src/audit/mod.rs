@@ -73,6 +73,12 @@ pub enum AuditError {
         /// The current anchor's position.
         anchor: u64,
     },
+    /// The connection's role may not delete events: pruning needs the schema owner.
+    #[error(
+        "pruning needs the database schema owner, but this connection's role may not delete \
+         events; set AUTH_DATABASE_OWNER_URL and AUTH_DATABASE_OWNER_PASSWORD"
+    )]
+    NotOwner,
     /// No checkpoint was signed at the position to prune through.
     #[error("no checkpoint was signed at position {0}; prune through a checkpoint's position")]
     NoCheckpoint(u64),

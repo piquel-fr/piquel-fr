@@ -149,7 +149,9 @@ auth-service audit verify --key preview-key.pub
 CLI is the authoritative check: a compromised server could answer anything.
 
 The admin dashboard's Audit tab shows the same verification, through the same
-`AdminService` operation. It checks against the environment's committed key, or,
+`AdminService` operation. It verifies the whole history on every load, within the
+dashboard's 30-second request deadline, so on a very long unpruned history use the
+CLI. It checks against the environment's committed key, or,
 on a preview, which commits none, against the server's own key, and says so.
 
 To detect truncation, also compare the published checkpoints with copies kept
@@ -172,7 +174,11 @@ so the pruned history stays signed, and the prune itself is recorded as an
 
 Auth's own role may not delete events, so pruning connects as the schema owner:
 set `AUTH_DATABASE_OWNER_URL` and `AUTH_DATABASE_OWNER_PASSWORD`, as for
-`migrate`. The dashboard therefore never prunes. Its Audit tab lists the
+`migrate`. Without them, `audit prune` refuses before verifying anything. In a
+deployed environment, only the `migrate` job gets the owner's credentials, by
+design, and piqueld runs jobs only before a rollout, so pruning there is not
+supported yet: it needs a one-off job with those credentials. Until then, history
+is kept. The dashboard therefore never prunes. Its Audit tab lists the
 checkpoints after the anchor, says by the same rules whether the chain may be
 pruned through each, and shows the command that would.
 

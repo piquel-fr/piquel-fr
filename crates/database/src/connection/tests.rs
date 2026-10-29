@@ -339,6 +339,14 @@ async fn runtime_role_has_only_row_privileges() {
     .await
     .expect("append an event");
     append.rollback().await.expect("rollback");
+    assert!(
+        owner.audit().may_prune().await.expect("owner"),
+        "the owner prunes"
+    );
+    assert!(
+        !runtime.audit().may_prune().await.expect("runtime"),
+        "auth never prunes"
+    );
     // Sealing locks unsealed events and sets their chain columns, nothing else.
     let mut seal = runtime.begin().await.expect("begin");
     seal.audit()

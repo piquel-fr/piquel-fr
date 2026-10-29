@@ -53,7 +53,9 @@ impl AuditKeys {
 }
 
 impl AuditChain {
-    /// Rows read per query, and checkpoints per [`AuditPage`].
+    /// Rows read per query.
+    const BATCH: u32 = 1_000;
+    /// Checkpoints per [`AuditPage`].
     const PAGE: u32 = 100;
 
     /// Verifies the chain from its anchor: every sealed event's hash is
@@ -222,7 +224,7 @@ impl AuditChain {
     ) -> Result<(ChainLink, Option<ChainBreak>), AuditError> {
         let mut head = start;
         loop {
-            let page = tx.audit().chain(head.position, Self::PAGE).await?;
+            let page = tx.audit().chain(head.position, Self::BATCH).await?;
             if page.is_empty() {
                 return Ok((head, None));
             }
@@ -256,7 +258,7 @@ impl AuditChain {
         let mut checked = BTreeMap::new();
         let mut after = 0;
         loop {
-            let page = tx.audit().checkpoints(after, Self::PAGE).await?;
+            let page = tx.audit().checkpoints(after, Self::BATCH).await?;
             let Some(last) = page.last() else {
                 return Ok(checked);
             };
@@ -285,7 +287,9 @@ impl AuditChain {
     /// not delete events.
     ///
     /// # Errors
-    /// Returns [`AuditError::NoCheckpoint`] unless a checkpoint was signed at
+    /// Returns [`AuditError::NotOwner`] when the connection's role may not delete
+    /// events, before verifying anything, [`AuditError::NoCheckpoint`] unless a
+    /// checkpoint was signed at
     /// `through`, [`AuditError::AlreadyPruned`] if the anchor is at or after it,
     /// [`AuditError::Broken`] if the chain breaks at or before it, or another
     /// [`AuditError`] if the database fails.
@@ -294,6 +298,9 @@ impl AuditChain {
         keys: &AuditKeys,
         through: u64,
     ) -> Result<(), AuditError> {
+        if !self.database.audit().may_prune().await? {
+            return Err(AuditError::NotOwner);
+        }
         let mut checkpoint = self
             .database
             .audit()

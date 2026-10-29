@@ -197,7 +197,11 @@ the runtime role or resets its attributes and password, and grants it:
 
 - `CONNECT` on the database and `USAGE` on the schema;
 - `SELECT, INSERT, UPDATE, DELETE` on every table, except:
-  - `domain_events`: `SELECT, INSERT`, so history cannot be rewritten;
+  - `domain_events`: `SELECT, INSERT`, and `UPDATE` on `chain_position` and
+    `chain_hash` only, so history cannot be rewritten (see
+    [Audit chain](#audit-chain));
+  - `audit_checkpoints`: `SELECT, INSERT`;
+  - `audit_anchor`: `SELECT`;
   - `event_personal_data`: `SELECT, INSERT, DELETE`, so it can be erased but not
     rewritten. Queries on it therefore cannot use `FOR UPDATE`, which needs
     `UPDATE`;
