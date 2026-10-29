@@ -3,9 +3,17 @@
 
 use crate::{
     AuthConfig, KeyStore, SigningKeys, StartupError,
+    deletion::{DeletionError, Deletions},
     deliveries::{BackchannelLogoutSender, EmailSender, OutboundClient},
 };
-use piquel_repository::{Database, DatabaseError, ExclusiveConnection, LockKey};
+use chrono::Utc;
+use piquel_common::{
+    AccountStatus, UserId,
+    events::{Actor, EventContext, JobName, RequestOrigin},
+};
+use piquel_repository::{
+    Database, DatabaseError, DatabaseTransaction, ExclusiveConnection, LockKey,
+};
 use piquel_telemetry::{Counter, Histogram};
 use std::{sync::Arc, time::Duration};
 use tokio::{
@@ -49,6 +57,11 @@ impl Shutdown {
         // An error means the runner is gone, which is a shutdown too.
         let _ = self.0.clone().wait_for(|&requested| requested).await;
     }
+
+    /// Whether shutdown has been requested, without waiting.
+    fn is_requested(&self) -> bool {
+        *self.0.borrow()
+    }
 }
 
 /// Every background job of the service, running until [`Self::shutdown`].
@@ -74,6 +87,7 @@ impl Jobs {
     ) -> Result<Self, StartupError> {
         let mut jobs = Self::new();
         jobs.exclusive(Cleanup, database.clone());
+        jobs.exclusive(AccountPurge, database.clone());
         let (store, reloaded) = (store.clone(), keys.clone());
         jobs.spawn(|shutdown| store.run(reloaded, shutdown));
         let logout = BackchannelLogoutSender::new(
@@ -289,6 +303,69 @@ impl ExclusiveJob for Cleanup {
             changed = Self::batch(connection).await?;
         }
         CLEANUP_DURATION.record(started.elapsed().as_secs_f64(), &());
+        Ok(())
+    }
+}
+
+/// Purges the accounts whose deletion grace period ended, each in a transaction of
+/// its own, attributed to [`JobName::AccountPurge`]. One run purges at most
+/// [`Self::BATCH_SIZE`] accounts; the next run continues.
+pub(crate) struct AccountPurge;
+
+impl AccountPurge {
+    /// Accounts one run purges at most.
+    const BATCH_SIZE: u32 = 100;
+
+    /// Purges `user_id` in `tx` if it is still scheduled for deletion and due,
+    /// rechecked under the account lock, since it may have been restored meanwhile.
+    pub(crate) async fn purge(
+        mut tx: DatabaseTransaction<'_>,
+        user_id: UserId,
+    ) -> Result<(), DeletionError> {
+        let user = Deletions::lock(&mut tx, user_id).await?;
+        let due = tx
+            .deletions()
+            .find(user_id)
+            .await?
+            .is_some_and(|deletion| deletion.purge_after <= Utc::now());
+        if user.status != AccountStatus::Deleting || !due {
+            return Ok(());
+        }
+        let context = EventContext {
+            actor: Actor::System {
+                job: JobName::AccountPurge,
+            },
+            origin: RequestOrigin::default(),
+            reason: None,
+        };
+        Deletions::new(&mut tx, context).purge(&user).await?;
+        Ok(tx.commit().await?)
+    }
+}
+
+impl ExclusiveJob for AccountPurge {
+    const NAME: &'static str = "account-purge";
+    const LOCK: LockKey = LockKey::AccountPurge;
+    const EVERY: Duration = Duration::from_mins(5);
+    type Error = DeletionError;
+
+    /// Stops after the current account once shutdown is requested. A failing
+    /// account is logged and skipped, so it cannot hold back the others; the next
+    /// run retries it.
+    async fn run(
+        &self,
+        connection: &mut ExclusiveConnection,
+        shutdown: &Shutdown,
+    ) -> Result<(), DeletionError> {
+        for user_id in connection.deletions().due(Self::BATCH_SIZE).await? {
+            if shutdown.is_requested() {
+                break;
+            }
+            let tx = connection.begin().await?;
+            if let Err(error) = Self::purge(tx, user_id).await {
+                tracing::error!(?error, %user_id, "could not purge account");
+            }
+        }
         Ok(())
     }
 }

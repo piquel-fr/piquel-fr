@@ -92,10 +92,10 @@ pub(super) async fn detail(cx: &Cx) -> Result<Response> {
     let links = [
         match detail.user.status {
             AccountStatus::Active => href!(disable, Account(id)).resolve(cx),
-            AccountStatus::Disabled | AccountStatus::Deleting => {
-                href!(enable, Account(id)).resolve(cx)
-            }
+            AccountStatus::Disabled => href!(enable, Account(id)).resolve(cx),
+            AccountStatus::Deleting => href!(restore, Account(id)).resolve(cx),
         },
+        href!(delete, Account(id)).resolve(cx),
         href!(revoke_sessions, Account(id)).resolve(cx),
         href!(recover, Account(id)).resolve(cx),
         href!(undo_recovery, Account(id)).resolve(cx),
@@ -106,6 +106,7 @@ pub(super) async fn detail(cx: &Cx) -> Result<Response> {
     ];
     let [
         status,
+        deleting,
         revoking,
         recovering,
         undoing,
@@ -117,6 +118,7 @@ pub(super) async fn detail(cx: &Cx) -> Result<Response> {
     let pages = if changeable {
         Ok(AccountPages {
             status,
+            delete: deleting,
             revoke_sessions: revoking,
             recover: recovering,
             undo_recovery: undoing,
@@ -211,6 +213,74 @@ pub(super) async fn enable(cx: &Cx, form: Option<Form<IgnoredAny>>) -> Result<Re
     App::render(cx, StatusCode::OK, page).await
 }
 
+/// `/users/{account}/delete`: schedules the active account's deletion, with a
+/// reason the owner sees. Purging it at once is left to the terminal: it cannot
+/// be undone.
+#[route([GET, POST] "/users/{account}/delete")]
+pub(super) async fn delete(cx: &Cx, form: Option<Form<ReasonForm>>) -> Result<Response> {
+    let admin = App::admin(cx).await?;
+    App::confirm(cx, admin)?;
+    let service = &App::of(cx).service;
+    let id = *path_param::<Account>(cx)?;
+    let back = App::account(cx, id);
+    let refusal = App::submit(cx, form, back.clone(), |input: ReasonForm| async move {
+        service
+            .schedule_deletion(&admin.operator, id, Reason::parse(input.reason)?)
+            .await
+    })
+    .await?;
+    let reason = refusal.as_ref().map(|refused| refused.form.reason.as_str());
+    let refusal = refusal.as_deref();
+    let page = view! { cx =>
+        piquel_ui::dashboard_change(
+            title: "Delete this account",
+            description: "The account can no longer sign in, and every session and refresh grant ends now. It is purged with its apps and personal data after 30 days, unless it is restored first; its owner can restore it by signing in with a passkey. To purge at once, use auth-service user delete --immediately, at the terminal.",
+            button: "Schedule the deletion",
+            back: back.as_str(),
+            refusal: refusal,
+            danger: true,
+            <label>
+                "Reason, shown to the owner in their history"
+                <input name="reason" required="" maxlength="500" value=(reason)>
+            </label>
+        )
+    };
+    App::render(cx, StatusCode::OK, page).await
+}
+
+/// `/users/{account}/restore`: restores an account scheduled for deletion, with a
+/// reason the owner sees.
+#[route([GET, POST] "/users/{account}/restore")]
+pub(super) async fn restore(cx: &Cx, form: Option<Form<ReasonForm>>) -> Result<Response> {
+    let admin = App::admin(cx).await?;
+    App::confirm(cx, admin)?;
+    let service = &App::of(cx).service;
+    let id = *path_param::<Account>(cx)?;
+    let back = App::account(cx, id);
+    let refusal = App::submit(cx, form, back.clone(), |input: ReasonForm| async move {
+        service
+            .restore_user(&admin.operator, id, Reason::parse(input.reason)?)
+            .await
+    })
+    .await?;
+    let reason = refusal.as_ref().map(|refused| refused.form.reason.as_str());
+    let refusal = refusal.as_deref();
+    let page = view! { cx =>
+        piquel_ui::dashboard_change(
+            title: "Restore this account",
+            description: "The account is no longer scheduled for deletion and can sign in again with its passkeys.",
+            button: "Restore",
+            back: back.as_str(),
+            refusal: refusal,
+            <label>
+                "Reason, shown to the owner in their history"
+                <input name="reason" required="" maxlength="500" value=(reason)>
+            </label>
+        )
+    };
+    App::render(cx, StatusCode::OK, page).await
+}
+
 /// `/users/{account}/sessions/revoke`: ends every session of the account.
 #[route([GET, POST] "/users/{account}/sessions/revoke")]
 pub(super) async fn revoke_sessions(cx: &Cx, form: Option<Form<IgnoredAny>>) -> Result<Response> {
@@ -262,10 +332,11 @@ pub(super) async fn revoke_session(cx: &Cx, form: Option<Form<IgnoredAny>>) -> R
     App::render(cx, StatusCode::OK, page).await
 }
 
-/// The form starting or undoing a recovery.
+/// The form of a change whose reason the owner sees in their history: starting
+/// or undoing a recovery, scheduling a deletion or restoring the account.
 #[derive(Clone, serde::Deserialize)]
-pub(super) struct RecoveryForm {
-    /// Why, recorded with the recovery and shown to the owner in their history.
+pub(super) struct ReasonForm {
+    /// Why, recorded with the change and shown to the owner in their history.
     reason: String,
 }
 
@@ -275,13 +346,13 @@ pub(super) struct RecoveryForm {
 /// recover --revoke`, at the terminal, and so does every account while email is
 /// disabled.
 #[route([GET, POST] "/users/{account}/recover")]
-pub(super) async fn recover(cx: &Cx, form: Option<Form<RecoveryForm>>) -> Result<Response> {
+pub(super) async fn recover(cx: &Cx, form: Option<Form<ReasonForm>>) -> Result<Response> {
     let admin = App::admin(cx).await?;
     App::confirm(cx, admin)?;
     let app = App::of(cx);
     let id = *path_param::<Account>(cx)?;
     let back = App::account(cx, id);
-    let refusal = App::submit(cx, form, back.clone(), |input: RecoveryForm| async move {
+    let refusal = App::submit(cx, form, back.clone(), |input: ReasonForm| async move {
         let reason = Reason::parse(input.reason)?;
         app.service
             .recover_account(&admin.operator, id, reason, &app.links, None)
@@ -316,13 +387,13 @@ pub(super) async fn recover(cx: &Cx, form: Option<Form<RecoveryForm>>) -> Result
 /// on to the account's page: in probation, it removes its passkey, withdraws
 /// every consent and ends every session; its link unused, it cancels the link.
 #[route([GET, POST] "/users/{account}/undo-recovery")]
-pub(super) async fn undo_recovery(cx: &Cx, form: Option<Form<RecoveryForm>>) -> Result<Response> {
+pub(super) async fn undo_recovery(cx: &Cx, form: Option<Form<ReasonForm>>) -> Result<Response> {
     let admin = App::admin(cx).await?;
     App::confirm(cx, admin)?;
     let app = App::of(cx);
     let id = *path_param::<Account>(cx)?;
     let back = App::account(cx, id);
-    let refusal = App::submit(cx, form, back.clone(), |input: RecoveryForm| async move {
+    let refusal = App::submit(cx, form, back.clone(), |input: ReasonForm| async move {
         let reason = Reason::parse(input.reason)?;
         app.service.undo_recovery(&admin.operator, id, reason).await
     })

@@ -119,6 +119,10 @@ pub enum Title {
     UndoRecovery,
     /// Going on to the admin dashboard.
     Dashboard,
+    /// The account, just scheduled for deletion.
+    AccountDeleted,
+    /// Restoring an account scheduled for deletion.
+    Restore,
 }
 
 impl Title {
@@ -138,6 +142,8 @@ impl Title {
             Self::Recover => "Recover your account",
             Self::UndoRecovery => "Undo a recovery",
             Self::Dashboard => "Admin dashboard",
+            Self::AccountDeleted => "Your account is scheduled for deletion",
+            Self::Restore => "Restore your account",
         }
     }
 }

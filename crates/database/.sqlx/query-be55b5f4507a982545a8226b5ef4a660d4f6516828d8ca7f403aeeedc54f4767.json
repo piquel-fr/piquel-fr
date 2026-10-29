@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "SELECT\n                    p.id AS \"id: PasskeyId\", p.credential_id, p.user_id AS \"user_id: UserId\",\n                    p.credential, p.friendly_name, p.created_at, p.revoked_at\n                FROM passkey_credentials p\n                JOIN users u ON u.id = p.user_id\n                JOIN handles h ON h.user_id = u.id AND h.released_at IS NULL\n                WHERE h.handle = $1\n                AND u.status = 'active'\n                AND p.revoked_at IS NULL\n                ORDER BY p.created_at",
+  "query": "INSERT INTO passkey_credentials (\n                    id, credential_id, user_id, credential, friendly_name\n                ) VALUES ($1, $2, $3, $4, $5)\n                RETURNING\n                    id AS \"id: PasskeyId\", credential_id, user_id AS \"user_id: UserId\", credential,\n                    friendly_name, created_at, last_used_at, revoked_at",
   "describe": {
     "columns": [
       {
@@ -35,12 +35,21 @@
       },
       {
         "ordinal": 6,
+        "name": "last_used_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 7,
         "name": "revoked_at",
         "type_info": "Timestamptz"
       }
     ],
     "parameters": {
       "Left": [
+        "Uuid",
+        "Bytea",
+        "Uuid",
+        "Jsonb",
         "Text"
       ]
     },
@@ -51,8 +60,9 @@
       false,
       false,
       false,
+      true,
       true
     ]
   },
-  "hash": "cd805541414eead4b510c8c3e3748fc7de5c788027bbad169053dac0bf0da52b"
+  "hash": "be55b5f4507a982545a8226b5ef4a660d4f6516828d8ca7f403aeeedc54f4767"
 }

@@ -149,6 +149,7 @@ fn account_pages(app: &ClientId) -> Vec<(String, Section)> {
         settings::EMAILS,
         settings::SESSIONS,
         settings::HISTORY,
+        settings::DATA,
     ]
     .map(|path| (path.to_owned(), Section::Account));
     let console =

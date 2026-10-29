@@ -15,6 +15,8 @@ mod cli;
 mod clients;
 /// Validated service and application configuration.
 mod config;
+/// Deleting, restoring and exporting an account, and purging it.
+mod deletion;
 /// Sending the outbound delivery queue.
 mod deliveries;
 /// The account's email addresses and their verification.
@@ -62,6 +64,7 @@ pub use clients::{
     MAX_DAILY_REGISTRATIONS, MAX_OWNED_CLIENTS,
 };
 pub use config::{AuthConfig, DashboardConfig, PUBLIC_BASE_URL, TokenDigestKeys};
+pub use deletion::DeletionError;
 use emails::EmailApplication;
 use federation::FederationApplication;
 pub use handles::HandlesError;

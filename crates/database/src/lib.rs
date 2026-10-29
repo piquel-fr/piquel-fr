@@ -20,11 +20,12 @@ pub use connection::{Database, DatabaseConfig, RuntimeRole};
 pub use error::{DatabaseConnectionError, DatabaseError};
 pub use exclusive::{ExclusiveConnection, LockKey};
 pub use repositories::{
-    AdministratorRepository, DashboardRepository, DeliveryRepository, EmailRepository,
-    EventRepository, FederationRepository, HandleRepository, MaintenanceRepository, OidcRepository,
-    PasskeyRepository, RecoveryRepository, SecurityRepository, SessionRepository,
-    SigningKeyRepository, TokenRepository, UserRepository,
-    dashboard::{InsertHandoff, RedeemedHandoff, StoredDashboardSession},
+    AccountDeletionRepository, AdministratorRepository, DashboardRepository, DeliveryRepository,
+    EmailRepository, EventRepository, FederationRepository, HandleRepository,
+    MaintenanceRepository, OidcRepository, PasskeyRepository, RecoveryRepository,
+    SecurityRepository, SessionRepository, SigningKeyRepository, TokenRepository, UserRepository,
+    dashboard::{DashboardSignIn, InsertHandoff, RedeemedHandoff, StoredDashboardSession},
+    deletions::{AccountDeletion, RestoreToken},
     deliveries::{
         BackchannelLogout, Channel, Delivery, DeliveryOutcome, DeliveryStatus, DeliverySummary,
         Email, EmailMessage, LogoutRecipient, NewDelivery, PendingAddress, PendingRecovery,
@@ -50,7 +51,7 @@ pub use repositories::{
     signing_keys::{InsertSigningKey, SigningKeyState, SigningKeyType, StoredSigningKey},
     tokens::{
         InsertRefreshFamily, InsertRefreshToken, RefreshRotationError, RevokedFamily,
-        RotatedRefreshToken,
+        RotatedRefreshToken, StoredGrant,
     },
     users::{InsertUser, StoredUser},
 };

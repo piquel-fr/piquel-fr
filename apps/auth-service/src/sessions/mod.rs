@@ -64,7 +64,7 @@ impl SignedOut {
 
 impl SessionItem {
     /// Shows `session`, marking it if it is the `current` one.
-    fn new(session: StoredSession, current: Option<SessionId>) -> Self {
+    pub(crate) fn new(session: StoredSession, current: Option<SessionId>) -> Self {
         Self {
             current: Some(session.id) == current,
             id: session.id,

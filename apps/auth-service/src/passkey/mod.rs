@@ -1,6 +1,7 @@
 //! Browser-bound `WebAuthn` ceremonies, passkey management and session confirmation.
 use crate::account::{AccountError, AccountService, Owner, Subject, Viewer};
 use crate::config::PasskeyConfig;
+use crate::deletion::Deletions;
 use crate::federation::FederationApplication;
 use crate::handles::{Handles, HandlesError};
 use crate::recovery::{PROBATION, ProbationPasskey, RecoveryError, RecoveryView};
@@ -192,6 +193,9 @@ impl PasskeyApplication {
         tx.commit().await?;
         let mut response = StatusCode::NO_CONTENT.into_response();
         BrowserCookie::Session.set_on(&mut response, session)?;
+        // An offer an earlier sign-in left to restore another account no longer
+        // stands: this one signed in.
+        BrowserCookie::Restore.clear_on(&mut response)?;
         Ok(response)
     }
 
@@ -316,18 +320,27 @@ impl PasskeyApplication {
         {
             return Err(PasskeyError::CredentialRevoked);
         }
-        let credential = match tx.recoveries().of_passkey(stored.id).await? {
-            Some(recovery) => ProbationPasskey::of(&recovery)
-                .map_or(Credential::Passkey(stored.id), Credential::Probation),
-            None => Credential::Passkey(stored.id),
-        };
+        let credential = Self::credential(tx, stored.id).await?;
         A::accept(status, stored.id, credential)
+    }
+
+    /// What an assertion of `passkey` signs in as: a recovery's passkey during its
+    /// probation confirms nothing, any other passkey confirms the session.
+    pub(crate) async fn credential(
+        tx: &mut DatabaseTransaction<'_>,
+        passkey: PasskeyId,
+    ) -> Result<Credential, DatabaseError> {
+        Ok(match tx.recoveries().of_passkey(passkey).await? {
+            Some(recovery) => ProbationPasskey::of(&recovery)
+                .map_or(Credential::Passkey(passkey), Credential::Probation),
+            None => Credential::Passkey(passkey),
+        })
     }
 
     /// Takes `WebAuthn`'s verdict on an assertion for `user_id` and, once the latest
     /// credential state also accepts it, opens the transaction that completes the
-    /// authentication, and returns it with what `A` accepts: a [`Credential`] to
-    /// sign in or confirm with, or [`Accepted`] for an undo. The ceremony was
+    /// authentication, and returns it with what `A` accepts: a [`SignIn`], a
+    /// [`Credential`] to confirm with, or [`Accepted`] for an undo. The ceremony was
     /// already consumed. A rejection rolls back any transaction it opened, then is
     /// recorded as `actor`'s failed sign-in in a transaction of its own, so the
     /// record outlives the rejection.
@@ -641,10 +654,22 @@ impl PasskeyApplication {
                 )
             }
         };
-        let (tx, credential) = app
+        let (tx, signed_in) = app
             .accept_credential(context, Actor::Anonymous, user_id, verified)
             .await?;
-        Ok(Self::complete_sign_in(tx, context, &headers, user_id, credential).await?)
+        match signed_in {
+            SignIn::Session(credential) => {
+                Ok(Self::complete_sign_in(tx, context, &headers, user_id, credential).await?)
+            }
+            SignIn::Restore(passkey) => {
+                let mut response = StatusCode::NO_CONTENT.into_response();
+                Deletions::offer_restore(tx, user_id, passkey)
+                    .await?
+                    .set_on(&mut response)
+                    .map_err(PasskeyError::from)?;
+                Ok(response)
+            }
+        }
     }
 
     /// Reads the account a discoverable credential names, and that account's keys.
@@ -1171,6 +1196,30 @@ impl Acceptance for Credential {
     }
 }
 
+/// What a passkey sign-in yields, by its account's status.
+enum SignIn {
+    /// An active account's session, signed in as this credential.
+    Session(Credential),
+    /// For an account scheduled for deletion, no session but an offer to restore
+    /// it, which signs in with this passkey once restored.
+    Restore(PasskeyId),
+}
+
+impl Acceptance for SignIn {
+    /// A session for an active account, an offer for one being deleted.
+    fn accept(
+        status: AccountStatus,
+        passkey: PasskeyId,
+        credential: Credential,
+    ) -> Result<Self, PasskeyError> {
+        match status {
+            AccountStatus::Active => Ok(Self::Session(credential)),
+            AccountStatus::Deleting => Ok(Self::Restore(passkey)),
+            AccountStatus::Disabled => Err(PasskeyError::AccountInactive),
+        }
+    }
+}
+
 /// The passkey of an assertion an undo accepts, by whether its account may be
 /// signed in to afterwards.
 #[derive(Clone, Copy)]
@@ -1191,8 +1240,8 @@ impl Accepted {
 }
 
 impl Acceptance for Accepted {
-    /// Either, by the account's status; an account being deleted has nothing
-    /// left to undo.
+    /// Either, by the account's status. An account being deleted is restored
+    /// first, then its recovery undone.
     fn accept(
         status: AccountStatus,
         passkey: PasskeyId,

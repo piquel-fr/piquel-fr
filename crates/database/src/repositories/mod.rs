@@ -117,6 +117,8 @@ repositories! {
     dashboard: DashboardRepository;
     /// Signing keys and their lifecycle.
     signing_keys: SigningKeyRepository;
+    /// Accounts scheduled for deletion, and their purge.
+    deletions: AccountDeletionRepository;
 }
 
 /// Runs a checked query on the repository's pool or transaction connection, in a
@@ -242,6 +244,8 @@ impl From<Unsigned> for u64 {
 pub(crate) mod administrators;
 /// Handoff codes and dashboard sessions.
 pub(crate) mod dashboard;
+/// Accounts scheduled for deletion, restore tokens and the purge.
+pub(crate) mod deletions;
 /// The outbound delivery queue.
 pub(crate) mod deliveries;
 /// Verified email ownership and primary-address persistence.

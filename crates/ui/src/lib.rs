@@ -82,8 +82,9 @@ pub use recovery::{
     recover, recovery_banner, recovery_prompt, undo_recovery,
 };
 pub use settings::{
-    Audience, ConnectedAppChange, ConnectedAppRow, ConnectedAppsState, DeviceChange, DeviceRow,
-    EmailChange, EmailRow, EmailsState, HandleRow, HistoryChange, HistoryPage, HistoryRow,
-    HistoryState, Holdings, ProviderRow, SignInChange, SignInState, Tab, addresses, connected_apps,
-    devices, history, settings_tabs, sign_in_methods, verified, verify,
+    Audience, ConnectedAppChange, ConnectedAppRow, ConnectedAppsState, DataChange, DataState,
+    DeviceChange, DeviceRow, EmailChange, EmailRow, EmailsState, HandleRow, HistoryChange,
+    HistoryPage, HistoryRow, HistoryState, Holdings, ProviderRow, SignInChange, SignInState, Tab,
+    account_data, account_deleted, addresses, connected_apps, devices, history, settings_tabs,
+    sign_in_methods, verified, verify,
 };

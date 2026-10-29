@@ -213,6 +213,8 @@ piquel_common::str_enum! {
         Federation = "__Host-piquel_federation",
         /// Verified identity awaiting signup or linking.
         FederationPending = "__Host-piquel_federation_pending",
+        /// Offer to restore an account scheduled for deletion, from a passkey sign-in.
+        Restore = "__Host-piquel_restore",
         /// What an account page's change just did, which the page it goes to says once.
         Notice = "__Host-piquel_notice",
         /// The admin dashboard's session, on the dashboard's own origin.
@@ -229,9 +231,11 @@ impl BrowserCookie {
     const fn max_age(self) -> u32 {
         match self {
             Self::Session | Self::Dashboard => SESSION_LIFETIME_DAYS * 24 * 60 * 60,
-            Self::Ceremony | Self::Federation | Self::FederationPending | Self::DashboardState => {
-                FLOW_COOKIE_MAX_AGE
-            }
+            Self::Ceremony
+            | Self::Federation
+            | Self::FederationPending
+            | Self::DashboardState
+            | Self::Restore => FLOW_COOKIE_MAX_AGE,
             Self::Notice => 60,
         }
     }
@@ -467,6 +471,21 @@ impl Session {
             .await?
             .filter(|session| session.expires_at > Utc::now())
             .ok_or(SessionError::Missing)
+    }
+
+    /// Ends every session of the account, recording each revocation as `context`
+    /// says, which tells their clients, then revokes every refresh grant, those of
+    /// sessions that already expired included. Callers hold the account lock.
+    pub(crate) async fn end_all(
+        tx: &mut DatabaseTransaction<'_>,
+        context: &EventContext,
+        user_id: UserId,
+        reason: RevocationReason,
+    ) -> Result<(), DatabaseError> {
+        tx.revoke_sessions(context, user_id, SessionScope::All, &reason)
+            .await?;
+        tx.tokens().revoke_for_user(user_id, None).await?;
+        Ok(())
     }
 
     /// Signs `user_id` in on this browser inside the caller's transaction, records the

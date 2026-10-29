@@ -176,6 +176,8 @@ pub(crate) mod page {
         pub(crate) const APPS: &str = "/settings/apps";
         /// Security history.
         pub(crate) const HISTORY: &str = "/settings/history";
+        /// Downloading the account's data, and deleting the account.
+        pub(crate) const DATA: &str = "/settings/data";
     }
 
     /// The developer console: the account's apps, and each app's pages, whose
@@ -203,7 +205,7 @@ pub(crate) mod page {
 
     /// Every server-rendered page's route, which the security layer classifies as
     /// pages.
-    pub(crate) const ALL: [&str; 18] = [
+    pub(crate) const ALL: [&str; 19] = [
         LOGIN,
         REGISTER,
         CONSENT,
@@ -215,6 +217,7 @@ pub(crate) mod page {
         settings::SESSIONS,
         settings::APPS,
         settings::HISTORY,
+        settings::DATA,
         developers::HOME,
         developers::NEW,
         developers::APP,

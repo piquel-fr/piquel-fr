@@ -4,10 +4,13 @@ use crate::{
     AuthConfig,
     routes::page::settings,
     security::BrowserCookie,
-    tests::{AUTH_ORIGIN, Browser, OWN_PAGE, Replicas, cookie, html, parameter, policy, redirect},
+    tests::{
+        AUTH_ORIGIN, Browser, MAX_RESPONSE_BYTES, OWN_PAGE, Replicas, cookie, html, parameter,
+        policy, redirect,
+    },
     web::tests::value_after,
 };
-use axum::http::StatusCode;
+use axum::http::{StatusCode, header};
 use piquel_common::{
     AuthenticationMethod, EventId, Provider, TokenId,
     events::{Actor, DomainEvent, EventContext, RequestOrigin},
@@ -15,8 +18,8 @@ use piquel_common::{
 use piquel_crypto::Secret;
 use piquel_repository::InsertExternalIdentity;
 use piquel_ui::{
-    Checkbox, ConnectedAppChange, ConnectedAppsState, DeviceChange, EmailChange, HistoryChange,
-    HistoryState, Query, SignInChange, SignInState,
+    Checkbox, ConnectedAppChange, ConnectedAppsState, DataChange, DeviceChange, EmailChange,
+    HistoryChange, HistoryState, Query, SignInChange, SignInState,
 };
 
 /// The devices page lists every signed-in browser, and signs one or all of the
@@ -581,4 +584,85 @@ async fn verification_links_are_confirmed_by_their_form() {
     assert_eq!(verified.status(), StatusCode::OK);
     let page = html(verified).await;
     assert!(page.contains(&format!("{address} is verified")), "{page}");
+}
+
+/// The data page downloads the account's records once the session confirmed with a
+/// passkey, and deletes the account once its handle is typed: every browser is
+/// signed out, and the answer says when the account is purged.
+#[tokio::test]
+#[ignore = "requires TEST_DATABASE_URL"]
+async fn data_page_downloads_the_data_and_deletes_the_account() {
+    let replicas = Replicas::new().await;
+    let database = Replicas::database().await;
+    let browser = Browser::new_account(&database).await;
+    let handle = database
+        .users()
+        .find_by_id(browser.user_id)
+        .await
+        .expect("lookup")
+        .expect("account")
+        .handle
+        .to_string();
+    let social =
+        Browser::sign_in_with(&database, browser.user_id, AuthenticationMethod::Federation).await;
+    let page = html(social.visit(&replicas.a, settings::DATA).await).await;
+    assert!(page.contains("data-passkey-confirm"), "{page}");
+    let refused = social
+        .post(&replicas, settings::DATA, &DataChange::Export)
+        .await;
+    assert_eq!(refused.status(), StatusCode::FORBIDDEN);
+
+    let download = browser
+        .post(&replicas, settings::DATA, &DataChange::Export)
+        .await;
+    assert_eq!(download.status(), StatusCode::OK);
+    let headers = download.headers();
+    assert_eq!(headers[header::CACHE_CONTROL], "no-store, no-transform");
+    let disposition = headers[header::CONTENT_DISPOSITION]
+        .to_str()
+        .expect("disposition");
+    assert!(
+        disposition.starts_with(&format!("attachment; filename=\"piquel-account-{handle}-")),
+        "{disposition}"
+    );
+    let body = axum::body::to_bytes(download.into_body(), MAX_RESPONSE_BYTES)
+        .await
+        .expect("body");
+    let export: serde_json::Value = serde_json::from_slice(&body).expect("JSON");
+    assert_eq!(export["format"], "piquel.account-export");
+
+    let opened = format!("{}?delete=true", settings::DATA);
+    let page = html(browser.visit(&replicas.a, &opened).await).await;
+    assert!(
+        page.contains(&format!("Type your handle, {handle}, to confirm")),
+        "{page}"
+    );
+    let mismatch = DataChange::Delete {
+        handle: "someone-else".into(),
+    };
+    let refused = browser.post(&replicas, settings::DATA, &mismatch).await;
+    assert_eq!(refused.status(), StatusCode::BAD_REQUEST);
+    let page = html(refused).await;
+    assert!(page.contains("Type your handle exactly as shown"), "{page}");
+    assert!(
+        page.contains("Type your handle, "),
+        "the row stays open: {page}"
+    );
+
+    let delete = DataChange::Delete {
+        handle: handle.clone(),
+    };
+    let deleted = browser.post(&replicas, settings::DATA, &delete).await;
+    assert_eq!(deleted.status(), StatusCode::OK);
+    let (cleared, attributes) = cookie(&deleted, BrowserCookie::Session);
+    assert_eq!(cleared, "");
+    assert!(attributes.ends_with("Max-Age=0"), "{attributes}");
+    let page = html(deleted).await;
+    assert!(
+        page.contains("Your account is scheduled for deletion"),
+        "{page}"
+    );
+    assert!(page.contains("Restore my account"), "{page}");
+    let page = html(social.visit(&replicas.a, settings::DATA).await).await;
+    assert!(!page.contains("Download your data"), "signed out: {page}");
 }

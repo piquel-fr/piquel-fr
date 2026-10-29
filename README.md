@@ -211,6 +211,8 @@ just auth user enable alice
 just auth user recover alice --reason "Lost every passkey"
 just auth user recover alice --reason "Phone stolen" --revoke --keep <passkey-id>
 just auth user undo-recovery alice --reason "Owner confirmed by phone"
+just auth user delete alice --reason "Asked by email"   # see Data export and account deletion
+just auth user restore alice --reason "Changed their mind"
 just auth session revoke <session-id>     # one session, as `user show` lists it
 just auth session revoke-all alice        # every session of the account
 just auth audit --user alice --kind session_revoked
@@ -223,7 +225,7 @@ just auth account alice emails remove <email-id> --reason "Asked by email"
 - `--output json` prints the views the dashboard shows for `user search`
   (`UserPage`), `user show` (`UserDetail`), `audit` (`EventPage`), `client list`,
   `invite list` and `admin list`, as defined in `piquel_common::admin`.
-- `user disable`, `user recover`, `user undo-recovery`, `session revoke-all`,
+- `user disable|delete`, `user recover`, `user undo-recovery`, `session revoke-all`,
   `admin revoke`, `client
   disable|suspend|delete`, and `account … passkeys revoke`, `identities unlink` and
   `sessions revoke-all` describe what they will change and ask for confirmation.
@@ -332,6 +334,53 @@ sign-in. For development, `just auth mailpit` runs a local Mailpit: set
 `AUTH_SMTP_URL=smtp://localhost:1025` and read the mail at
 `http://localhost:8025`. Sending domains need SPF, DKIM and DMARC; see
 [infra/README.md](infra/README.md#email).
+
+### Data export and account deletion
+
+Owners download their data and delete their account on
+`auth.piquel.fr/settings/data`. Both need a passkey confirmation from the last five
+minutes, checked under the account lock, so no administrator can do either for
+them, and neither can a session that never confirms, such as a recovery's
+probation sign-in.
+
+- **Download** sends one versioned JSON file (`"format": "piquel.account-export"`):
+  profile, the handles it holds or held, email addresses, passkeys (label, dates
+  and backup state, no key material), linked identities, devices with their IP
+  addresses, an administrator's dashboard sign-ins, consents, refresh grants, the
+  apps the account registered, its recoveries (dates, state and the passkey each
+  enrolled, never a link) and the security history. It is read
+  from one snapshot, holds no secret or digest, nothing may cache it, and it is
+  recorded in the history.
+- **Deleting** asks for the account's handle. The account becomes `deleting`, every
+  session and refresh grant ends, their apps receive back-channel logout tokens, and
+  it can no longer sign in or authorize. For 30 days, signing in with one of its
+  passkeys asks to restore it instead of signing in: the offer, valid for five
+  minutes and used once, lives in its own cookie, and restoring signs in with that
+  passkey, as its sign-in would have: a recovery's passkey in probation confirms
+  nothing.
+- **Purge:** every five minutes, one replica purges the accounts past their grace
+  period. It deletes the apps the account registered, leaving tombstones without
+  an owner, then the account with its emails, passkeys, identities, sessions,
+  grants, consents and email deliveries, and the personal data (IP, device,
+  provider subjects, operators' reasons) of every event it is the subject or actor
+  of. The events stay, with pseudonymous IDs only. Its handles stay in the handles
+  table without an owner, so no account claims them until an operator releases
+  them (`handle release`).
+
+Administrators schedule and restore deletions from the account's page on the
+admin dashboard, with a reason the owner sees in their history. Operators do the
+same with the CLI, which alone also purges at once, in any status, since that
+cannot be undone:
+
+```sh
+just auth user delete alice --reason "Asked by email"         # 30 days of grace
+just auth user restore alice --reason "Changed their mind"
+just auth user delete mallory --immediately --reason "Spam"   # cannot be undone
+```
+
+Nobody can delete the last active administrator's account. Auth does not email the
+account about its deletion yet, and the signals that tell applications to erase
+their records come with #66 and #97.
 
 ### Outbound deliveries
 

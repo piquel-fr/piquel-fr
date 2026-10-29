@@ -13,6 +13,7 @@ use super::{Failure, WebApplication};
 use crate::{
     account::{AccountError, Owner, Viewer},
     clients::OwnedClientError,
+    deletion::{AccountDeleted, AccountExport},
     federation::FlowCookie,
     routes::page,
     security::{ApiError, BrowserCookie, SessionError},
@@ -112,6 +113,11 @@ pub(super) enum Applied<R> {
     /// answer may show, such as a new client secret: with no redirect, it is in no
     /// URL, history entry or cookie.
     Revealed(R),
+    /// The browser saves the account's records, as a file.
+    Download(Box<AccountExport>),
+    /// The account was scheduled for deletion, which signed the browser out: the
+    /// answer says when it is purged, and deletes the session cookie.
+    Deleted(AccountDeleted),
     /// The browser goes on to the provider at `to`, with the cookie binding the
     /// flow to it.
     Elsewhere {
@@ -142,6 +148,8 @@ impl<R: Query> Applied<R> {
             Self::Done(notice) => WebApplication::notify(cx, here, notice),
             Self::Moved { to, notice } => WebApplication::notify(cx, &to, notice),
             Self::Opened(row) => Ok(see_other(row.on(here)?).into_response(cx)?),
+            Self::Download(export) => WebApplication::download(cx, &export),
+            Self::Deleted(deleted) => web.deleted(cx, &deleted).await,
             Self::Elsewhere { to, cookie } => {
                 let mut response = see_other(to).into_response(cx)?;
                 cookie.set_on(&mut response).map_err(Error::from)?;

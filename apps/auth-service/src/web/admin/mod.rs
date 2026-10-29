@@ -238,6 +238,8 @@ impl AdminApplication {
             Op::ViewUser => &users::detail,
             Op::DisableUser => &users::disable,
             Op::EnableUser => &users::enable,
+            Op::ScheduleDeletion => &users::delete,
+            Op::RestoreUser => &users::restore,
             Op::RevokeUserSessions => &users::revoke_sessions,
             Op::RevokeSession => &users::revoke_session,
             Op::RenameHandle => &settings::handle,
@@ -251,7 +253,9 @@ impl AdminApplication {
             Op::ListAdministrators => &administrators::list,
             Op::GrantAdministrator => &administrators::grant,
             Op::RevokeAdministrator => &administrators::revoke,
-            Op::ViewClient
+            // Purging at once cannot be undone, so only the terminal offers it.
+            Op::PurgeUser
+            | Op::ViewClient
             | Op::CreateClient
             | Op::ApplyClient
             | Op::UpdateClient

@@ -11,6 +11,7 @@
 use crate::web::{Failure, WebApplication};
 use crate::{
     account::{AccountError, Owner, Viewer},
+    deletion::{RestoreOffer, RestoreSettled},
     federation::{FederationError, PendingKind, PendingView, ReturnTo},
     oidc::{AuthorizationView, OAuthError, OidcApplication, TransactionQuery},
     passkey::PasskeyApplication,
@@ -279,9 +280,34 @@ impl WebApplication {
         change: LoginChange,
     ) -> Result<Response, Refusal> {
         let (mut response, cookie) = match change {
-            // The passkey script signed the browser in before posting.
+            // The passkey script signed the browser in before posting, unless its
+            // passkey's account is scheduled for deletion: then it left an offer to
+            // restore it instead, which the page shows.
             LoginChange::SignedIn {} | LoginChange::Registered {} => {
+                if self.restore_offer(cx).await?.is_some() {
+                    return Ok(see_other(Self::here(cx, page)).into_response(cx)?);
+                }
                 return Ok(self.go_on(cx, page, visit.continuation).await?);
+            }
+            // Restored, the browser is signed in by this response's cookie, so it
+            // goes on by a redirect, which the next request carries it on.
+            LoginChange::Restore {} => {
+                let restored = self
+                    .account
+                    .restore(Self::context(cx)?, headers(cx))
+                    .await
+                    .map_err(ApiError::from)?;
+                let mut response =
+                    see_other(visit.continuation.return_to()?.as_str()).into_response(cx)?;
+                restored.set_on(&mut response).map_err(Error::from)?;
+                return Ok(response);
+            }
+            LoginChange::KeepScheduled {} => {
+                let mut response = see_other(Self::here(cx, page)).into_response(cx)?;
+                RestoreSettled::declined()
+                    .set_on(&mut response)
+                    .map_err(Error::from)?;
+                return Ok(response);
             }
             LoginChange::Social { provider } => {
                 let authorization = visit
@@ -351,10 +377,7 @@ impl WebApplication {
                     .sign_out(Self::context(cx)?, headers(cx), RevocationReason::Logout)
                     .await
                     .map_err(ApiError::from)?;
-                let here = uri(cx)
-                    .path_and_query()
-                    .map_or(page.path(), |here| here.as_str());
-                let mut response = see_other(here).into_response(cx)?;
+                let mut response = see_other(Self::here(cx, page)).into_response(cx)?;
                 signed_out.clear_on(&mut response).map_err(Error::from)?;
                 return Ok(response);
             }
@@ -402,6 +425,20 @@ impl WebApplication {
             }
             Continuation::Path(path) => Ok(see_other(path.as_str()).into_response(cx)?),
         }
+    }
+
+    /// The sign-in page `cx` requests, as requested: what a change that keeps the
+    /// browser on it goes back to.
+    fn here(cx: &Cx, page: SignInPage) -> &str {
+        uri(cx)
+            .path_and_query()
+            .map_or(page.path(), |here| here.as_str())
+    }
+
+    /// The offer to restore an account scheduled for deletion that the browser's
+    /// last passkey sign-in left, if any. A passkey sign-in that succeeds drops it.
+    async fn restore_offer(&self, cx: &Cx) -> Result<Option<RestoreOffer>, Failure> {
+        Ok(self.account.restore_offer(headers(cx)).await?)
     }
 
     /// The account the browser is signed in to as `owner`, or none when it is gone
@@ -466,7 +503,12 @@ impl WebApplication {
         let providers: Vec<_> = self.federation.enabled().collect();
         let invitation = query.invitation.as_deref();
         let android = PasskeyApplication::offers_google_password_manager(headers(cx));
+        let offer = self.restore_offer(cx).await?;
         let step = match (&pending, link, page) {
+            _ if let Some(offer) = &offer => Step::Restore {
+                handle: &offer.handle,
+                purge_after: offer.purge_after,
+            },
             (Some(pending), Some(kind), _) => Step::Link {
                 kind,
                 provider: pending.provider,

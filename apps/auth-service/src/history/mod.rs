@@ -17,7 +17,10 @@ use piquel_common::{
         UserAgentFamily,
     },
 };
-use piquel_repository::{Database, EventFilter, EventRepository, SessionScope, StoredEvent};
+use piquel_repository::{
+    Database, DatabaseError, DatabaseTransaction, EventFilter, EventRepository, OidcRepository,
+    SessionScope, StoredEvent,
+};
 use serde::{Deserialize, Serialize};
 use std::{collections::BTreeMap, net::IpAddr};
 
@@ -27,6 +30,8 @@ pub(crate) use error::HistoryError;
 
 /// Entries per page.
 const PAGE_SIZE: u16 = 50;
+/// Events a data export reads per query.
+const EXPORT_BATCH: u16 = 500;
 /// Batches of [`PAGE_SIZE`] events one page reads at most, visible or not, so a
 /// long run of hidden events cannot hold a request.
 const MAX_BATCHES: usize = 10;
@@ -131,6 +136,43 @@ impl HistoryItem {
             device: origin.user_agent_family,
             erased,
         })
+    }
+
+    /// The names of the registered clients, by ID, for [`Self::new`].
+    async fn client_names(
+        mut oidc: OidcRepository<'_>,
+    ) -> Result<BTreeMap<ClientId, String>, DatabaseError> {
+        Ok(oidc
+            .list_clients()
+            .await?
+            .into_iter()
+            .map(|client| (client.id, client.display_name))
+            .collect())
+    }
+
+    /// Every entry of the account's history, newest first, read in `tx`, for its
+    /// data export.
+    pub(crate) async fn all(
+        tx: &mut DatabaseTransaction<'_>,
+        user_id: UserId,
+    ) -> Result<Vec<Self>, DatabaseError> {
+        let clients = Self::client_names(tx.oidc()).await?;
+        let mut filter = EventFilter {
+            subject: Some(user_id),
+            ..EventFilter::default()
+        };
+        let mut items = Vec::new();
+        loop {
+            let batch = tx.events().list(&filter, u32::from(EXPORT_BATCH)).await?;
+            let exhausted = batch.len() < usize::from(EXPORT_BATCH);
+            for stored in batch {
+                filter.before = Some(stored.id);
+                items.extend(Self::new(&stored, &clients));
+            }
+            if exhausted {
+                return Ok(items);
+            }
+        }
     }
 }
 
@@ -270,14 +312,7 @@ impl AccountService {
         before: Option<EventId>,
     ) -> Result<HistoryPage, AccountError> {
         viewer.authorize(&self.database).await?;
-        let clients: BTreeMap<_, _> = self
-            .database
-            .oidc()
-            .list_clients()
-            .await?
-            .into_iter()
-            .map(|client| (client.id, client.display_name))
-            .collect();
+        let clients = HistoryItem::client_names(self.database.oidc()).await?;
         let mut filter = EventFilter {
             subject: Some(viewer.user()),
             before,

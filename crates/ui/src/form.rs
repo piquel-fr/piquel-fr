@@ -18,9 +18,9 @@
 //! renders its input instead.
 
 use crate::{
-    AppChange, AppSettingsState, ConnectedAppChange, ConnectedAppsState, DeviceChange, EmailChange,
-    EmailsState, FieldError, HistoryChange, HistoryState, LoginChange, LoginQuery, NewAppChange,
-    RecoverChange, SecretsChange, SignInChange, SignInState, UndoChange,
+    AppChange, AppSettingsState, ConnectedAppChange, ConnectedAppsState, DataChange, DataState,
+    DeviceChange, EmailChange, EmailsState, FieldError, HistoryChange, HistoryState, LoginChange,
+    LoginQuery, NewAppChange, RecoverChange, SecretsChange, SignInChange, SignInState, UndoChange,
 };
 use chrono::{DateTime, SecondsFormat, Utc};
 use piquel_common::{
@@ -217,6 +217,8 @@ fields! {
     Email(EmailChange),
     /// A change of the devices.
     Device(DeviceChange),
+    /// A change of the account's data.
+    Data(DataChange),
     /// A change of the history.
     History(HistoryChange),
     /// A change of the connected apps.
@@ -231,6 +233,8 @@ fields! {
     SignInRow(SignInState),
     /// A row of the addresses.
     EmailRow(EmailsState),
+    /// A row of the account's data.
+    DataRow(DataState),
     /// A page or row of the history.
     HistoryRow(HistoryState),
     /// A row of the connected apps.

@@ -3,6 +3,7 @@
 use crate::{
     AdminError,
     clients::OwnedClientError,
+    deletion::DeletionError,
     emails::EmailError,
     federation::FederationError,
     grants::GrantError,
@@ -47,6 +48,9 @@ pub(crate) enum AccountError {
     /// A recovery link was refused, or a recovery could not be undone.
     #[error(transparent)]
     Recovery(#[from] RecoveryError),
+    /// The account could not be exported, deleted or restored.
+    #[error(transparent)]
+    Deletion(#[from] DeletionError),
     /// The owner's session ended, or lacks a recent enough passkey confirmation.
     #[error(transparent)]
     Owner(#[from] SessionError),
@@ -71,6 +75,7 @@ impl From<AccountError> for ApiError {
             AccountError::History(error) => error.into(),
             AccountError::Client(error) => error.into(),
             AccountError::Recovery(error) => error.into(),
+            AccountError::Deletion(error) => error.into(),
             AccountError::Owner(error) => error.into(),
             AccountError::Operator(error) => error.into(),
             AccountError::Database(error) => error.into(),

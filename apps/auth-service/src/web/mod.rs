@@ -197,7 +197,7 @@ impl WebApplication {
     }
 
     /// Each page's route, the handler showing it and the one submitting its form.
-    fn pages() -> [(&'static str, RouteHandlerFn, RouteHandlerFn); 18] {
+    fn pages() -> [(&'static str, RouteHandlerFn, RouteHandlerFn); 19] {
         use routes::page::{
             ADMIN, CONSENT, LOGIN, LOGOUT, RECOVER, RECOVER_UNDO, REGISTER, settings::VERIFY,
         };
@@ -243,6 +243,7 @@ impl WebApplication {
             Self::entry::<settings::Devices>(),
             Self::entry::<settings::ConnectedApps>(),
             Self::entry::<settings::History>(),
+            Self::entry::<settings::AccountData>(),
             Self::entry::<developers::Apps>(),
             Self::entry::<developers::NewApp>(),
             Self::entry::<developers::Overview>(),

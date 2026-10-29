@@ -8,11 +8,12 @@
 use crate::{
     Title,
     form::{
-        Ceremony, Checkbox, Fields, Query, change_form, handle_input, new_passkey, open,
-        passkey_form,
+        Ceremony, Checkbox, Fields, Precision, Query, change_form, handle_input, new_passkey, open,
+        passkey_form, time,
     },
     intro,
 };
+use chrono::{DateTime, Utc};
 use piquel_common::{Provider, TokenId, protocol::claims::Acr};
 use serde::{Deserialize, Serialize};
 use topcoat::{
@@ -140,6 +141,11 @@ pub enum LoginChange {
     CancelLink {},
     /// Signs this browser out, so another account can sign in or take the link.
     SwitchAccount {},
+    /// Restores the account a passkey sign-in found scheduled for deletion, and
+    /// signs in to it.
+    Restore {},
+    /// Leaves that account scheduled for deletion, and forgets the offer.
+    KeepScheduled {},
 }
 
 /// Why a provider's pending sign-in must be linked rather than create an account.
@@ -205,6 +211,14 @@ pub enum Step<'a> {
         /// "Use a handle instead" is open: signing in asks for the handle.
         handle_open: bool,
     },
+    /// Restoring the account a passkey just signed in to, which is scheduled for
+    /// deletion, instead of signing in.
+    Restore {
+        /// The account's handle.
+        handle: &'a str,
+        /// When it is deleted for good, unless it is restored first.
+        purge_after: DateTime<Utc>,
+    },
 }
 
 impl<'a> Step<'a> {
@@ -215,6 +229,7 @@ impl<'a> Step<'a> {
             Self::SignIn { .. } => Title::SignIn,
             Self::SignUp { .. } => Title::SignUp,
             Self::Link { .. } => Title::Link,
+            Self::Restore { .. } => Title::Restore,
         }
     }
 
@@ -222,7 +237,7 @@ impl<'a> Step<'a> {
     const fn signed_in(&self) -> Option<&'a SignedIn> {
         match self {
             Self::SignIn { signed_in, .. } | Self::Link { signed_in, .. } => *signed_in,
-            Self::SignUp { .. } => None,
+            Self::SignUp { .. } | Self::Restore { .. } => None,
         }
     }
 
@@ -257,6 +272,11 @@ impl<'a> Step<'a> {
                         provider.name()
                     ),
                 },
+            ),
+            Self::Restore { handle, .. } => (
+                "Your Piquel account",
+                "Restore your account?",
+                format!("@{handle} is scheduled for deletion."),
             ),
         }
     }
@@ -293,7 +313,7 @@ pub async fn sign_in<'a>(
             "Sign in",
             query.continued().on(login)?,
         )),
-        Step::Link { .. } => None,
+        Step::Link { .. } | Step::Restore { .. } => None,
     };
     Ok(view! {
         <section class="auth-shell">
@@ -306,6 +326,13 @@ pub async fn sign_in<'a>(
                 }
                 Step::Link { email: Some(email), .. } => {
                     <p class="notice">(email)</p>
+                }
+                Step::Restore { purge_after, .. } => {
+                    <p class="notice">
+                        "It will be deleted for good on "
+                        time(at: purge_after, precision: Precision::Day)
+                        ". Restore it to keep it and sign in, or leave it to be deleted."
+                    </p>
                 }
                 _ => {}
             }
@@ -341,6 +368,7 @@ pub async fn sign_in<'a>(
                         signed_in: signed_in,
                         handle_open: handle_open,
                     ),
+                    Step::Restore { .. } => restore_forms(action: &action),
                 }
             </div>
             <footer>
@@ -423,6 +451,26 @@ async fn sign_up_form<'a>(
             if let Some((_, id)) = social {
                 <input type="hidden" name="pending_signup" value=(id.to_string())>
             }
+        )
+    })
+}
+
+/// The forms of [`Step::Restore`], posting to `action`: restoring the account and
+/// signing in, or leaving it scheduled for deletion.
+#[component]
+async fn restore_forms<'a>(action: &'a str) -> Result<impl View> {
+    Ok(view! {
+        change_form(
+            action: action,
+            change: LoginChange::Restore {},
+            label: "Restore my account",
+            class: "full",
+        )
+        change_form(
+            action: action,
+            change: LoginChange::KeepScheduled {},
+            label: "Keep it scheduled",
+            class: "secondary full",
         )
     })
 }
