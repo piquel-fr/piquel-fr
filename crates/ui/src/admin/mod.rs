@@ -7,6 +7,8 @@
 //! even with a query, never changes anything. The dashboard loads no script: a
 //! passkey confirmation happens on auth's handoff page.
 
+/// The audit chain's state and its checkpoints.
+mod audit;
 /// The lists: administrators, invitations, clients and events.
 mod lists;
 /// An account's recent recoveries.
@@ -14,6 +16,7 @@ mod recoveries;
 /// Account search and one account.
 mod users;
 
+pub use audit::audit_page;
 pub use lists::{
     AdminClientRow, AdministratorRow, EventRow, InvitationRow, administrator_list, client_list,
     event_list, event_rows, invitation_created, invitation_list,
@@ -84,6 +87,8 @@ pub enum Tab {
     Clients,
     /// Domain events.
     Events,
+    /// The tamper-evident audit chain.
+    Audit,
 }
 
 impl Label for Tab {
@@ -97,6 +102,7 @@ impl Label for Tab {
             Self::Invitations => "Invitations",
             Self::Clients => "Clients",
             Self::Events => "Events",
+            Self::Audit => "Audit",
         }
     }
 }

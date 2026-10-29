@@ -21,6 +21,8 @@ pub enum LockKey {
     AccountPurge = 4,
     /// Approving related origins, which counts the domains of every approved one.
     RelatedOrigins = 5,
+    /// Sealing the audit chain and signing its checkpoints.
+    AuditChain = 6,
     /// Job runner tests in other crates; no release takes it.
     #[cfg(feature = "test-support")]
     Test = -1,

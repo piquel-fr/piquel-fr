@@ -1,8 +1,8 @@
-//! Signing keys and token digest keys. None needs the HTTP service, and every
-//! replica picks up a signing key change within a minute.
+//! Signing keys, token digest keys and the audit key. None needs the HTTP
+//! service, and every replica picks up a signing key change within a minute.
 
 use super::CliError;
-use crate::{AuthConfig, KeyStore, Operator, TokenDigestKeys};
+use crate::{AuditConfig, AuthConfig, KeyStore, Operator, PUBLIC_BASE_URL, TokenDigestKeys};
 use chrono::{DateTime, Utc};
 use clap::Subcommand;
 use piquel_common::{config::SecretReference, protocol::jwt::KeyId};
@@ -48,6 +48,9 @@ pub(super) enum KeysCommand {
         #[arg(long, default_value = DEFAULT_IMPORTED_KEY_ID)]
         id: KeyId,
     },
+    /// Print the verifier key of the audit key `AUTH_AUDIT_KEY_PROVIDER` names,
+    /// for `AUTH_PUBLIC_BASE_URL`'s host, to commit to docs/security/audit-key.pub.
+    Audit,
 }
 
 impl KeysCommand {
@@ -101,6 +104,10 @@ impl KeysCommand {
                         usage.stored,
                     );
                 }
+            }
+            Self::Audit => {
+                let config = AuditConfig::from_environment(&PUBLIC_BASE_URL.parse()?)?;
+                println!("{}", config.verifier());
             }
             Self::Import { pem, id } => {
                 let pem = pem.resolve().map_err(CliError::PemUnreadable)?;

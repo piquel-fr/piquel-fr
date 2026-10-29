@@ -30,6 +30,12 @@ pub(super) enum CliError {
     /// A change to an account's settings was refused or failed.
     #[error(transparent)]
     Account(#[from] AccountError),
+    /// The audit chain is broken, or the keys to check it against are invalid.
+    #[error(transparent)]
+    Audit(#[from] crate::AuditError),
+    /// The file given with `--key` could not be read.
+    #[error("could not read the verifier keys given with --key")]
+    AuditKeyFile(#[source] std::io::Error),
     /// A signing key change was refused or failed.
     #[error(transparent)]
     Keys(#[from] KeyError),

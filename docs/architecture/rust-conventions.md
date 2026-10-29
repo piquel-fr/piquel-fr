@@ -13,7 +13,8 @@ Keep implementations simple. Follow neighbouring modules and share repeated logi
   variables, validated origins, secret references), `email` (address normalization),
   `events` (domain events) and `sqlx` (column decoding).
 - `piquel-crypto` (`crates/crypto`): random secrets, digests, HMAC, constant-time
-  comparison, PKCE, RS256 signing, key sets and AES-256-GCM sealing of keys at rest.
+  comparison, PKCE, RS256 signing, key sets, AES-256-GCM sealing of keys at rest
+  and Ed25519 signed notes.
 - `piquel-auth` (`crates/auth-sdk`): the public Rust SDK, following
   [sdk.md](sdk.md). It depends only on `piquel-common`, without features, among
   the workspace crates, since it is published.
@@ -36,9 +37,9 @@ Keep implementations simple. Follow neighbouring modules and share repeated logi
   (with `events`), `chrono`, `serde`, `serde_urlencoded` and Topcoat's `view`, so
   it compiles beside the database crate.
 
-Application code uses `Secret`, `Digest`, `Pkce`, `Rs256Key`, `KeySet` and
-`KeyEncryptionKey` instead of calling `openssl`, `sha2` or `rand` directly.
-Environment reads go through `Variable`.
+Application code uses `Secret`, `Digest`, `Pkce`, `Rs256Key`, `KeySet`,
+`KeyEncryptionKey` and `NoteKey` instead of calling `openssl`, `sha2` or `rand`
+directly. Environment reads go through `Variable`.
 Keep cryptographic implementations in the crypto crate so they can be audited together.
 
 ## Configuration

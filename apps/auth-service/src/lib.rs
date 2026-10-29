@@ -8,6 +8,8 @@ mod account;
 mod admin;
 /// The stylesheet and passkey script of auth's pages, embedded at compile time.
 mod assets;
+/// The tamper-evident audit chain: sealing, checkpoints, verification and pruning.
+mod audit;
 /// The command line: serving, migrations and break-glass administration.
 mod cli;
 /// Creating, changing, rotating the secrets of and deleting OIDC clients, and the
@@ -58,12 +60,14 @@ mod web;
 pub use admin::{
     AdminError, AdminService, GracePeriod, HandleProblem, InviteExpiry, Operator, Reason, UserRef,
 };
+use audit::AuditApplication;
+pub use audit::{AuditError, AuditKeys};
 pub use cli::Cli;
 pub use clients::{
     Applied, ClientDetails, ClientRegistry, ClientRegistryError, DEFAULT_CLIENT_SCOPES,
     MAX_DAILY_REGISTRATIONS, MAX_OWNED_CLIENTS,
 };
-pub use config::{AuthConfig, DashboardConfig, PUBLIC_BASE_URL, TokenDigestKeys};
+pub use config::{AuditConfig, AuthConfig, DashboardConfig, PUBLIC_BASE_URL, TokenDigestKeys};
 pub use deletion::DeletionError;
 use emails::EmailApplication;
 use federation::FederationApplication;
@@ -135,6 +139,7 @@ impl AuthConfig {
             .merge(passkeys.routes())
             .merge(federation.clone().routes())
             .merge(HistoryApplication::new(database.clone()).routes())
+            .merge(AuditApplication::new(database.clone()).routes())
             .merge(AccountApplication::new(database.clone()).routes())
             .merge(EmailApplication::new(database.clone(), &self.email).routes())
             .merge(web.routes())

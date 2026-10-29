@@ -8,6 +8,8 @@ COPY .cargo .cargo
 # dashboard too.
 COPY crates crates
 COPY apps/auth-service apps/auth-service
+# The committed audit verifier keys, compiled into `audit verify` and `audit prune`.
+COPY docs/security/audit-key.pub docs/security/audit-key.pub
 RUN cargo build --locked --release -p auth-service
 
 FROM debian:bookworm-slim

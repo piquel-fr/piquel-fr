@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO audit_anchor (position) VALUES ($1)\n            ON CONFLICT (singleton) DO UPDATE SET position = EXCLUDED.position",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Int8"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "fb98b67050df8be84ddc6a7d2ea098446c693f228406f7c2bd22d70c6cf9850b"
+}

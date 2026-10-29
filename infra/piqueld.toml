@@ -25,6 +25,9 @@ branch = "main"
 # infra/README.md.
 [spec.variables]
 invite_required = "true"
+# Previews sign audit checkpoints with a generated key. Staging and production
+# use stored keys whose verifier keys are committed in docs/security/audit-key.pub.
+audit_key = "audit-key"
 # See "Running several replicas" in infra/README.md before raising it.
 auth_replicas = 1
 # Where auth, with the admin dashboard it serves, sends telemetry: the
@@ -41,6 +44,7 @@ www_host = "www.piquel.fr"
 admin_host = "admin.piquel.fr"
 smtp_secret = "resend-production"
 email_from = "Piquel <security@piquel.fr>"
+audit_key = "audit-key-production"
 
 [spec.environments.staging]
 sync = true
@@ -53,6 +57,7 @@ www_host = "www.staging.piquel.fr"
 admin_host = "admin.staging.piquel.fr"
 smtp_secret = "resend-dev"
 email_from = "Piquel <security@dev.piquel.fr>"
+audit_key = "audit-key-staging"
 
 # Flat hostnames, so the `*.dev.piquel.fr` certificate covers every preview.
 # Preview databases start empty, so anyone on the tailnet may register.
@@ -142,6 +147,13 @@ generate = { type = "random", bytes = 32, encoding = "base64url" }
 name = "signing-key"
 generate = { type = "rsa", bits = 3072 }
 
+# The Ed25519 seed that signs a preview's audit checkpoints, apart from the OIDC
+# signing key so the two rotate independently. Staging and production mount
+# stored seeds instead. See docs/security/audit-history.md.
+[[spec.secrets]]
+name = "audit-key"
+generate = { type = "random", bytes = 32, encoding = "hex" }
+
 # Applies migrations as the superuser, then creates or resets `piquel_auth`.
 [[spec.jobs]]
 name = "migrate"
@@ -186,6 +198,7 @@ AUTH_DATABASE_PASSWORD = "file:///run/secrets/database-runtime-password"
 AUTH_KEY_ENCRYPTION_KEY = "file:///run/secrets/key-encryption-key"
 AUTH_TOKEN_DIGEST_KEY = "file:///run/secrets/signing-key"
 AUTH_TOKEN_DIGEST_KEY_ACCEPTED = "file:///run/secrets/token-digest-key"
+AUTH_AUDIT_KEY_PROVIDER = "file:///run/secrets/audit-key"
 AUTH_PUBLIC_LISTENER = "0.0.0.0:8080"
 # The admin dashboard, which only the private `admin` route reaches, for its own
 # origin.
@@ -214,6 +227,10 @@ target = "/run/secrets/token-digest-key"
 [[spec.services.secrets]]
 name = "signing-key"
 target = "/run/secrets/signing-key"
+
+[[spec.services.secrets]]
+name = "${{ vars.audit_key }}"
+target = "/run/secrets/audit-key"
 
 # Set by hand with `piquelctl app secret`, not generated: see "Email" in
 # infra/README.md.

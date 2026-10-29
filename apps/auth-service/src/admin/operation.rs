@@ -85,5 +85,9 @@ operations! {
         RetryDelivery,
         /// Cancel a pending or failed delivery.
         CancelDelivery,
+        /// Recompute the audit chain and check its checkpoints.
+        VerifyAuditChain,
+        /// Delete the audit history through a checkpoint.
+        PruneAuditChain,
     }
 }

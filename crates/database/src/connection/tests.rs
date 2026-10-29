@@ -339,6 +339,17 @@ async fn runtime_role_has_only_row_privileges() {
     .await
     .expect("append an event");
     append.rollback().await.expect("rollback");
+    // Sealing locks unsealed events and sets their chain columns, nothing else.
+    let mut seal = runtime.begin().await.expect("begin");
+    seal.audit()
+        .unsealed(1)
+        .await
+        .expect("lock unsealed events");
+    seal.rollback().await.expect("rollback");
+    sqlx::query("UPDATE domain_events SET chain_hash = chain_hash WHERE false")
+        .execute(&runtime.pool)
+        .await
+        .expect("seal");
     runtime
         .maintenance()
         .purge_expired_auth_state(1000)
@@ -348,6 +359,10 @@ async fn runtime_role_has_only_row_privileges() {
         "UPDATE domain_events SET kind = kind",
         "DELETE FROM domain_events",
         "UPDATE event_personal_data SET details = details",
+        "UPDATE audit_checkpoints SET note = note",
+        "DELETE FROM audit_checkpoints",
+        "UPDATE audit_anchor SET position = position",
+        "INSERT INTO audit_anchor (position) VALUES (1)",
         "DELETE FROM event_consumers",
         "SELECT FROM _sqlx_migrations",
         "CREATE TABLE shadow (id INT)",

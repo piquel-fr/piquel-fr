@@ -24,7 +24,13 @@ GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO %1$I;
 -- Only migrations read it.
 REVOKE ALL ON _sqlx_migrations FROM %1$I;
 -- History is append-only, and its personal data is erased but never rewritten.
+-- Sealing sets an event's chain position and hash, which a trigger allows only
+-- while they are unset. Checkpoints are only added, and only the schema owner
+-- prunes, so moves the anchor.
 REVOKE UPDATE, DELETE ON domain_events FROM %1$I;
+GRANT UPDATE (chain_position, chain_hash) ON domain_events TO %1$I;
+REVOKE UPDATE, DELETE ON audit_checkpoints FROM %1$I;
+REVOKE INSERT, UPDATE, DELETE ON audit_anchor FROM %1$I;
 REVOKE UPDATE ON event_personal_data FROM %1$I;
 REVOKE DELETE ON event_consumers FROM %1$I;
 $script$, $1::text, $2::text, current_database(), $3::bigint) AS "script!"

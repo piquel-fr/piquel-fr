@@ -213,15 +213,18 @@ removes the restart gap after a crash; it adds no capacity.
 - **Configuration.** Replicas must run with the same `AUTH_*` settings. The
   manifest gives every replica the same `key-encryption-key`, which opens the
   signing keys in the database, and the same token digest keys, from which
-  refresh-token digests and passkey decoys derive.
+  refresh-token digests and passkey decoys derive. Audit checkpoints are signed
+  with a separate key (`AUTH_AUDIT_KEY_PROVIDER`): the stored
+  `audit-key-production` and `audit-key-staging` secrets, or a preview's
+  generated `audit-key`.
 - **Per-replica state.** Only signing keys are cached per replica: Google's,
   and auth's own key set, which every replica reloads each minute. OIDC
   clients, and the public-client origins CORS allows, are read from the
   database on each request, so a client change reaches every replica at once.
 - **Background work.** Jobs run through one runner
   (`apps/auth-service/src/jobs.rs`). An exclusive job, such as expired-state
-  cleanup or the purge of deleted accounts, each every five minutes, holds a
-  PostgreSQL advisory lock while it runs, so
+  cleanup or the purge of deleted accounts, each every five minutes, or audit
+  sealing every five seconds, holds a PostgreSQL advisory lock while it runs, so
   one replica at a time runs it and the others skip that run. A run that fails
   or panics is logged and retried at the next interval. On shutdown, once
   in-flight requests drain, running jobs get 10 seconds to finish (cleanup stops

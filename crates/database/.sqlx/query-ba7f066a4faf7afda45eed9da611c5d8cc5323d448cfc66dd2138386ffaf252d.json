@@ -1,0 +1,16 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE domain_events e\n                SET chain_position = s.position, chain_hash = s.hash\n                FROM UNNEST($1::uuid[], $2::bigint[], $3::bytea[]) AS s(id, position, hash)\n                WHERE e.id = s.id AND e.chain_position IS NULL",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "UuidArray",
+        "Int8Array",
+        "ByteaArray"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "ba7f066a4faf7afda45eed9da611c5d8cc5323d448cfc66dd2138386ffaf252d"
+}

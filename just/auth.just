@@ -24,7 +24,8 @@ user *ARGS:
 session *ARGS:
     @just auth run session "$@"
 
-# Page through the audit history, e.g. `just auth audit --user alice`.
+# Page through, verify or prune the audit history, e.g. `just auth audit verify`
+# or `just auth audit list --user alice`.
 [positional-arguments]
 audit *ARGS:
     @just auth run audit "$@"

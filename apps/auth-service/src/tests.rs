@@ -6,8 +6,8 @@ use crate::{
     account::{AccountService, Owner},
     clients::{ClientSettings, NewClient},
     config::{
-        EmailConfig, FederationConfig, OidcConfig, PasskeyConfig, ProviderConfig, TokenDigestKey,
-        TokenDigestKeys,
+        AuditConfig, EmailConfig, FederationConfig, OidcConfig, PasskeyConfig, ProviderConfig,
+        TokenDigestKey, TokenDigestKeys,
     },
     passkey::DecoyKey,
     recovery::RecoveryLinks,
@@ -33,7 +33,7 @@ use piquel_common::{
     events::{Actor, RevocationReason},
     protocol::oauth::Scope,
 };
-use piquel_crypto::{ClientSecret, KeyEncryptionKey, Secret};
+use piquel_crypto::{ClientSecret, KeyEncryptionKey, NoteKey, Secret};
 use piquel_repository::{
     Database, DatabaseConfig, DatabaseError, DatabaseTransaction, InsertAuthorizationCode,
     InsertPasskey, InsertRefreshFamily, InsertRefreshToken, InsertUser, InsertVerifiedEmail,
@@ -69,6 +69,18 @@ pub(crate) struct Replicas {
 }
 
 impl AuthConfig {
+    /// One replica of this service on `database`, with its own signing key store,
+    /// receiving every request from `peer`.
+    pub(crate) async fn test_router(&self, database: Database, peer: SocketAddr) -> Router {
+        let keys = KeyStore::new(database.clone(), Arc::clone(&self.key_encryption_key))
+            .start()
+            .await
+            .expect("signing keys");
+        self.router(database, &keys)
+            .expect("replica")
+            .layer(Extension(ConnectInfo(peer)))
+    }
+
     /// The configuration of a test service at `origin`: no providers, email sent, a
     /// random token digest key, and registration without an invitation.
     pub(crate) fn test(origin: &Origin) -> Self {
@@ -94,6 +106,9 @@ impl AuthConfig {
                 )),
             },
             key_encryption_key: Arc::new(key_encryption_key()),
+            audit: AuditConfig {
+                key: Arc::new(NoteKey::generate("auth.piquel.fr/audit").expect("audit key")),
+            },
             trusted_proxies: vec![],
         }
     }
@@ -113,20 +128,9 @@ impl Replicas {
     /// and no other test's.
     pub(crate) async fn of(config: &AuthConfig) -> Self {
         let peer = Self::peer();
-        let replica = async || {
-            let database = Self::database().await;
-            let keys = KeyStore::new(database.clone(), Arc::clone(&config.key_encryption_key))
-                .start()
-                .await
-                .expect("signing keys");
-            config
-                .router(database, &keys)
-                .expect("replica")
-                .layer(Extension(ConnectInfo(peer)))
-        };
         Self {
-            a: replica().await,
-            b: replica().await,
+            a: config.test_router(Self::database().await, peer).await,
+            b: config.test_router(Self::database().await, peer).await,
         }
     }
 

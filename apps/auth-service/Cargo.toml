@@ -26,6 +26,7 @@ reqwest.workspace = true
 tower-http.workspace = true
 serde.workspace = true
 serde_json.workspace = true
+serde_json_canonicalizer.workspace = true
 thiserror.workspace = true
 tokio.workspace = true
 topcoat = { workspace = true, features = ["router", "view", "tower"] }
