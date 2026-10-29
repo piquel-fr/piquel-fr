@@ -57,8 +57,8 @@ use user::UserCommand;
 /// Piquel authentication service. Runs `serve` when no command is given.
 #[derive(Parser)]
 #[command(
-    after_help = "Every command uses AUTH_DATABASE_URL, except migrate when AUTH_DATABASE_OWNER_URL is \
-                  set. See README.md for configuration and administration."
+    after_help = "Every command uses AUTH_DATABASE_URL, except migrate and audit prune when \
+                  AUTH_DATABASE_OWNER_URL is set. See README.md for configuration and administration."
 )]
 pub struct Cli {
     /// Defaults to serving when no administrative command is supplied.
@@ -74,8 +74,9 @@ enum Command {
     /// Apply database migrations. Connected as the schema owner, also create or
     /// reset the role other commands connect as.
     Migrate,
-    /// Inspect, rotate, revoke and import signing keys, and check token digest
-    /// keys. Every replica picks up a change within a minute.
+    /// Inspect, rotate, revoke and import signing keys, check token digest keys,
+    /// and print the audit key's verifier key. Every replica picks up a signing
+    /// key change within a minute.
     #[command(subcommand)]
     Keys(KeysCommand),
     /// Administrative commands.
@@ -99,7 +100,8 @@ enum Administration {
     /// Register, inspect and change OIDC clients. Changes apply to the next request.
     #[command(subcommand)]
     Client(Box<ClientCommand>),
-    /// Page through the audit history, newest first.
+    /// Page through, verify and prune the audit history.
+    #[command(subcommand)]
     Audit(AuditCommand),
     /// Grant, revoke or list administrators.
     #[command(subcommand)]
@@ -127,9 +129,13 @@ impl Command {
     /// Executes this command and returns the original startup or operation failure.
     async fn run(self) -> Result<(), CliError> {
         // `migrate` connects as the schema owner when one is configured, then
-        // provisions the role every other command connects as.
+        // provisions the role every other command connects as. Pruning connects
+        // as the owner too, since that role may not delete events.
         let (config, runtime_role) = match self {
             Self::Migrate => AuthConfig::migration_from_environment()?,
+            Self::Administration(Administration::Audit(AuditCommand::Prune { .. })) => {
+                (AuthConfig::owner_database_from_environment()?, None)
+            }
             _ => (AuthConfig::database_from_environment()?, None),
         };
         let database = Database::connect(config).await?;
@@ -196,7 +202,11 @@ impl Administration {
                 ClientCommand::Origin(OriginCommand::Add { .. }) => Op::ApproveRelatedOrigin,
                 ClientCommand::Origin(OriginCommand::Remove { .. }) => Op::RemoveRelatedOrigin,
             },
-            Self::Audit(_) => Op::ListEvents,
+            Self::Audit(command) => match command {
+                AuditCommand::List(_) => Op::ListEvents,
+                AuditCommand::Verify { .. } => Op::VerifyAuditChain,
+                AuditCommand::Prune { .. } => Op::PruneAuditChain,
+            },
             Self::Admin(command) => match command {
                 AdminCommand::Grant { .. } => Op::GrantAdministrator,
                 AdminCommand::Revoke { .. } => Op::RevokeAdministrator,

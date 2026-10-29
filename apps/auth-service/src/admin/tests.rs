@@ -2,6 +2,7 @@
 //! what it changes.
 
 use super::*;
+use crate::AuditKeys;
 use crate::handles::HandlesError;
 use crate::recovery::RecoveryLinks;
 use crate::security::{CONFIRMATION_MAX_AGE, RequestContext, Session};
@@ -681,6 +682,11 @@ async fn administrators_acting_on_each_other_are_refused() {
     }
 }
 
+/// Production's committed audit keys.
+fn committed_keys() -> AuditKeys {
+    AuditKeys::committed(&"https://auth.piquel.fr".parse().expect("origin")).expect("keys")
+}
+
 impl AdminOperation {
     /// Runs the service methods behind this operation as `operator`, if it reads,
     /// with arguments that need not exist, since a read checks its operator before
@@ -723,6 +729,23 @@ impl AdminOperation {
             Self::ListDeliveries => vec![
                 service
                     .list_deliveries(operator, None, None, 1)
+                    .await
+                    .map(drop),
+            ],
+            Self::VerifyAuditChain => vec![
+                service
+                    .verify_audit_chain(operator, &committed_keys())
+                    .await
+                    .map(drop),
+                service
+                    .audit_page(operator, &committed_keys(), None)
+                    .await
+                    .map(drop),
+            ],
+            // Pruning checks its operator before anything else too.
+            Self::PruneAuditChain => vec![
+                service
+                    .prune_audit_chain(operator, &committed_keys(), 1)
                     .await
                     .map(drop),
             ],

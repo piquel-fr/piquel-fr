@@ -3,6 +3,7 @@
 
 use crate::{
     AuthConfig, KeyStore, SigningKeys, StartupError,
+    audit::Sealer,
     deletion::{DeletionError, Deletions},
     deliveries::{BackchannelLogoutSender, EmailSender, OutboundClient},
 };
@@ -28,7 +29,7 @@ const SHUTDOWN_GRACE: Duration = Duration::from_secs(10);
 
 /// A periodic task that runs on at most one replica at a time. It receives only the
 /// locked connection, never the pool, so all its work happens while it holds the lock.
-trait ExclusiveJob: Send + Sync + 'static {
+pub(crate) trait ExclusiveJob: Send + Sync + 'static {
     /// Names the job in logs.
     const NAME: &'static str;
     /// Keeps other replicas from running the job at the same time.
@@ -58,8 +59,9 @@ impl Shutdown {
         let _ = self.0.clone().wait_for(|&requested| requested).await;
     }
 
-    /// Whether shutdown has been requested, without waiting.
-    fn is_requested(&self) -> bool {
+    /// Whether shutdown has been requested, without waiting, for work that
+    /// checks between steps.
+    pub(crate) fn is_requested(&self) -> bool {
         *self.0.borrow()
     }
 }
@@ -74,8 +76,8 @@ pub struct Jobs {
 
 impl Jobs {
     /// Starts every job on `database`: signing key rotation in `store` and the
-    /// reloads of this replica's `keys`, and the delivery workers of every
-    /// channel, configured by `config`.
+    /// reloads of this replica's `keys`, audit chain sealing with `config`'s audit
+    /// key, and the delivery workers of every channel, configured by `config`.
     ///
     /// # Errors
     /// Fails if the outbound HTTP client cannot initialize.
@@ -88,6 +90,7 @@ impl Jobs {
         let mut jobs = Self::new();
         jobs.exclusive(Cleanup, database.clone());
         jobs.exclusive(AccountPurge, database.clone());
+        jobs.exclusive(Sealer::new(config.audit.key.clone()), database.clone());
         let (store, reloaded) = (store.clone(), keys.clone());
         jobs.spawn(|shutdown| store.run(reloaded, shutdown));
         let logout = BackchannelLogoutSender::new(

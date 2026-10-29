@@ -282,6 +282,7 @@ async fn purge_leaves_nothing_that_references_or_identifies_the_account() {
     assert!(purge(&pool, user).await);
 
     // Every column with a foreign key to users(id), and how many rows hold the account.
+    // Only this schema's: audit tests migrate schemas of their own beside it.
     let references: Vec<(String, String, i64)> = sqlx::query_as(
         "SELECT
             source.table_name::text, source.column_name::text,
@@ -297,7 +298,8 @@ async fn purge_leaves_nothing_that_references_or_identifies_the_account() {
             ON target.constraint_name = r.unique_constraint_name
             AND target.constraint_schema = r.unique_constraint_schema
             AND target.ordinal_position = source.position_in_unique_constraint
-        WHERE target.table_name = 'users' AND target.column_name = 'id'",
+        WHERE target.table_schema = current_schema()
+            AND target.table_name = 'users' AND target.column_name = 'id'",
     )
     .bind(user.to_string())
     .fetch_all(&pool)

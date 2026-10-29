@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "DELETE FROM event_personal_data\n                    WHERE event_id = (SELECT id FROM domain_events WHERE chain_position = $1)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Int8"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "882448c12f862b5a58431ab681a6833d3082bec22dda7cf841eb4704ddba325c"
+}

@@ -19,6 +19,8 @@
 
 /// The administrators.
 mod administrators;
+/// The audit chain's state, and the checkpoints it may be pruned through.
+mod audit;
 /// Signup invitations.
 mod invitations;
 /// The OIDC clients and domain events.
@@ -45,6 +47,7 @@ use crate::{
 use axum::http::header::InvalidHeaderValue;
 use chrono::Duration;
 use piquel_common::config::Origin;
+use piquel_crypto::NoteVerifier;
 use piquel_repository::Database;
 use piquel_ui::DashboardTab;
 use serde::Deserialize;
@@ -89,6 +92,9 @@ pub(crate) struct AdminApplication {
     invitations: bool,
     /// Derives the links recoveries mail.
     links: RecoveryLinks,
+    /// The server's own audit key, which the audit page verifies with when none
+    /// is committed for this environment.
+    audit_key: NoteVerifier,
     /// Every answer's Content-Security-Policy.
     policy: HeaderValue,
 }
@@ -185,6 +191,7 @@ impl AdminApplication {
             auth,
             invitations: config.passkey.invite_required,
             links: config.email.recovery_links.clone(),
+            audit_key: config.audit.verifier().clone(),
             policy: HeaderValue::try_from(policy)?,
         })
     }
@@ -252,6 +259,7 @@ impl AdminApplication {
             Op::RevokeInvitation => &invitations::revoke,
             Op::ListClients => &lists::clients,
             Op::ListEvents => &lists::events,
+            Op::VerifyAuditChain => &audit::verify,
             Op::ListAdministrators => &administrators::list,
             Op::GrantAdministrator => &administrators::grant,
             Op::RevokeAdministrator => &administrators::revoke,
@@ -273,7 +281,10 @@ impl AdminApplication {
             | Op::ReleaseHandle
             | Op::ListDeliveries
             | Op::RetryDelivery
-            | Op::CancelDelivery => return None,
+            | Op::CancelDelivery
+            // Pruning needs the schema owner, which auth never holds: the audit page
+            // shows the command instead.
+            | Op::PruneAuditChain => return None,
         })
     }
 
@@ -449,6 +460,7 @@ impl AdminApplication {
             ),
             (DashboardTab::Clients, href!(lists::clients).resolve(cx)),
             (DashboardTab::Events, href!(lists::events).resolve(cx)),
+            (DashboardTab::Audit, href!(audit::verify).resolve(cx)),
         ];
         let path = uri(cx).path();
         let current = tabs

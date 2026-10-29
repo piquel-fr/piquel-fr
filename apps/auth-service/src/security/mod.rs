@@ -1,7 +1,7 @@
 //! Shared browser-session, passkey confirmation and HTTP trust boundaries.
 
 use crate::recovery::ProbationPasskey;
-use crate::routes::{ACCOUNT_PREFIX, oidc, page, passkey, service};
+use crate::routes::{ACCOUNT_PREFIX, audit, oidc, page, passkey, service};
 use axum::{
     Json,
     extract::{ConnectInfo, FromRef, FromRequestParts, MatchedPath, Request, State},
@@ -912,6 +912,8 @@ enum Endpoint {
     UserInfo,
     /// Public metadata, signing keys and related origins, readable from any origin.
     Discovery,
+    /// Public audit checkpoints, read from the database and readable from any origin.
+    Checkpoints,
     /// Liveness and readiness probes polled by the orchestrator.
     Health,
     /// Authorization requests, including cross-site form navigation.
@@ -956,6 +958,7 @@ impl Endpoint {
                 Self::Discovery
             }
             passkey::RELATED_START | passkey::RELATED_FINISH => Self::RelatedLogin,
+            audit::LATEST_CHECKPOINT | audit::CHECKPOINTS => Self::Checkpoints,
             service::LIVE | service::READY => Self::Health,
             oidc::AUTHORIZE => Self::Authorize,
             oidc::LOGOUT => Self::Logout,
@@ -972,6 +975,7 @@ impl Endpoint {
         match self {
             Self::OAuthBackChannel | Self::UserInfo | Self::Authorize | Self::Logout => true,
             Self::Discovery
+            | Self::Checkpoints
             | Self::Health
             | Self::Account
             | Self::Page
@@ -997,6 +1001,7 @@ impl Endpoint {
             }
             Self::Page => Some(RateCategory::Page),
             Self::Dashboard => Some(RateCategory::Dashboard),
+            Self::Checkpoints => Some(RateCategory::Audit),
             Self::Discovery | Self::Health => None,
         }
     }
@@ -1021,6 +1026,8 @@ piquel_common::str_enum! {
         Page = "page",
         /// The admin dashboard's pages and forms.
         Dashboard = "dashboard",
+        /// Reads of the public audit checkpoints.
+        Audit = "audit",
     }
 }
 
@@ -1302,7 +1309,8 @@ impl HttpSecurity {
     }
 
     /// Determines whether an exact browser origin may access this endpoint family:
-    /// any origin reads discovery, and auth's own pages reach every endpoint. The
+    /// any origin reads discovery and the audit checkpoints, and auth's own pages
+    /// reach every endpoint. The
     /// back-channel and `UserInfo` endpoints also serve the redirect origins of
     /// enabled public clients, and related sign-in the approved origins of trusted
     /// clients. Those are looked up per request, so registration changes apply at
@@ -1312,7 +1320,9 @@ impl HttpSecurity {
         endpoint: Endpoint,
         origin: &str,
     ) -> Result<bool, HttpSecurityError> {
-        if matches!(endpoint, Endpoint::Discovery) || origin == self.origin.ascii_serialization() {
+        if matches!(endpoint, Endpoint::Discovery | Endpoint::Checkpoints)
+            || origin == self.origin.ascii_serialization()
+        {
             return Ok(true);
         }
         Ok(match endpoint {
@@ -1326,6 +1336,7 @@ impl HttpSecurity {
                 .await?
                 .is_some(),
             Endpoint::Discovery
+            | Endpoint::Checkpoints
             | Endpoint::Health
             | Endpoint::Authorize
             | Endpoint::Logout
@@ -1365,7 +1376,7 @@ impl HttpSecurity {
         .flatten()
         .unwrap_or_else(|error| ApiError::from(error).into_response());
         let grant = match endpoint {
-            Endpoint::Discovery => Some(CorsGrant::Public),
+            Endpoint::Discovery | Endpoint::Checkpoints => Some(CorsGrant::Public),
             Endpoint::RelatedLogin => origin.filter(|_| allowed).map(CorsGrant::Related),
             _ => origin.filter(|_| allowed).map(CorsGrant::Client),
         };

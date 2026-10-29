@@ -469,6 +469,20 @@ async fn an_accounts_page_names_no_passkey() {
     assert!(!page.contains(&passkey.friendly_name), "{page}");
 }
 
+/// The audit page shows the chain as `audit verify` reports it, and says that
+/// pruning is the database owner's, from the command line.
+#[tokio::test]
+#[ignore = "requires TEST_DATABASE_URL"]
+async fn the_audit_page_shows_the_chain_and_leaves_pruning_to_the_owner() {
+    let harness = Harness::new().await;
+    let admin = harness.admin().await;
+    let dashboard = harness.sign_in(&admin, "/audit").await;
+    let page = html(harness.visit(&dashboard, "/audit").await).await;
+    assert!(page.contains("Audit history"), "{page}");
+    assert!(page.contains("Events checked"), "{page}");
+    assert!(page.contains("needs the database owner"), "{page}");
+}
+
 /// Only an administrator signed in with a passkey is handed off: anyone else is
 /// told they have no access, and a social sign-in signs in with a passkey first,
 /// coming back to the handoff, which the sign-in page's forms may then follow to

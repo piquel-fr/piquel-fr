@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE domain_events SET chain_hash = $2 WHERE chain_position = $1",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Int8",
+        "Bytea"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "432e9a05afd3423427182e10739c7cb9edaaab6bd3d0976343a75d5eb9585975"
+}

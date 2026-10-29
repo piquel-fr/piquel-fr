@@ -2,8 +2,9 @@
 
 use super::{AdminError, HandleProblem, InviteExpiry, Operator, Reason, UserRef};
 use crate::{
-    Applied, ClientDetails, ClientRegistry, ClientRegistryError, GracePeriod,
+    Applied, AuditKeys, ClientDetails, ClientRegistry, ClientRegistryError, GracePeriod,
     account::AccountService,
+    audit::{AuditChain, AuditPage, AuditVerification},
     deletion::Deletions,
     emails::EmailApplication,
     handles::{Handles, HandlesError},
@@ -981,6 +982,54 @@ impl AdminService {
         tx.administrators().revoke(user_id).await?;
         let revoked = DomainEvent::AdministratorRevoked {};
         Self::finish(tx, operator, Some(user_id), vec![revoked]).await
+    }
+
+    /// Recomputes the audit chain and checks every checkpoint against `keys`. A
+    /// broken chain is a result, naming where it breaks.
+    pub(crate) async fn verify_audit_chain(
+        &self,
+        operator: &Operator,
+        keys: &AuditKeys,
+    ) -> Result<AuditVerification, AdminError> {
+        operator.authorize_read(&self.database).await?;
+        Ok(AuditChain::new(self.database.clone()).verify(keys).await?)
+    }
+
+    /// [`Self::verify_audit_chain`], with up to 100 checkpoints after `after`, or
+    /// after the anchor, and whether the chain may be pruned through each, by the
+    /// rules [`Self::prune_audit_chain`] applies.
+    pub(crate) async fn audit_page(
+        &self,
+        operator: &Operator,
+        keys: &AuditKeys,
+        after: Option<u64>,
+    ) -> Result<AuditPage, AdminError> {
+        operator.authorize_read(&self.database).await?;
+        Ok(AuditChain::new(self.database.clone())
+            .page(keys, after)
+            .await?)
+    }
+
+    /// Deletes every event through the checkpoint at `through`, which becomes the
+    /// anchor the remaining chain extends, once the chain verifies against `keys`
+    /// through it, and returns how many events it deleted. Checkpoints are kept, so
+    /// the pruned history stays signed. Auth's own role may not delete events, so
+    /// this needs a connection as the schema owner.
+    pub(crate) async fn prune_audit_chain(
+        &self,
+        operator: &Operator,
+        keys: &AuditKeys,
+        through: u64,
+    ) -> Result<u64, AdminError> {
+        operator.authorize_read(&self.database).await?;
+        AuditChain::new(self.database.clone())
+            .check_prunable(keys, through)
+            .await?;
+        let mut tx = self.database.begin().await?;
+        let deleted = tx.prune_audit_chain(through).await?;
+        let pruned = DomainEvent::AuditHistoryPruned { through, deleted };
+        Self::finish(tx, operator, None, vec![pruned]).await?;
+        Ok(deleted)
     }
 
     /// Lists outbound deliveries, newest first, with `status` and on `channel` when

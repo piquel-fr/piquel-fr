@@ -199,8 +199,10 @@ jobs:
         run: |
           just auth generate-secret "$RUNNER_TEMP/key-encryption-key"
           just auth generate-secret "$RUNNER_TEMP/token-digest-key"
+          openssl rand -hex 32 > "$RUNNER_TEMP/audit-key"
           export AUTH_KEY_ENCRYPTION_KEY="file://$RUNNER_TEMP/key-encryption-key"
           export AUTH_TOKEN_DIGEST_KEY="file://$RUNNER_TEMP/token-digest-key"
+          export AUTH_AUDIT_KEY_PROVIDER="file://$RUNNER_TEMP/audit-key"
           cat > "$RUNNER_TEMP/Caddyfile" <<'EOF'
           {
             auto_https disable_redirects

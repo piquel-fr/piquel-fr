@@ -143,6 +143,9 @@ pub enum AdminError {
     /// A link could not be written.
     #[error("could not write a link")]
     Link(#[from] piquel_ui::QueryError),
+    /// The audit chain could not be verified or pruned.
+    #[error(transparent)]
+    Audit(#[from] crate::AuditError),
 }
 
 impl AdminError {
@@ -185,6 +188,7 @@ impl AdminError {
             Self::Crypto(_) => "crypto",
             Self::Event(_) => "event",
             Self::Link(_) => "link",
+            Self::Audit(_) => "audit",
         }
     }
 
@@ -248,9 +252,10 @@ impl From<AdminError> for ApiError {
             AdminError::Database(error) => error.into(),
             AdminError::Client(error) => error.into(),
             AdminError::Deletion(error) => error.into(),
-            error @ (AdminError::Crypto(_) | AdminError::Event(_) | AdminError::Link(_)) => {
-                Self::internal(error)
-            }
+            error @ (AdminError::Crypto(_)
+            | AdminError::Event(_)
+            | AdminError::Link(_)
+            | AdminError::Audit(_)) => Self::internal(error),
         }
     }
 }

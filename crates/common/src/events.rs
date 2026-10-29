@@ -330,6 +330,15 @@ pub enum DomainEvent {
     /// The account was deleted with everything auth knew about the person: the
     /// personal data of every event it was the subject or actor of went with it.
     AccountPurged {},
+    /// The audit history was pruned: every event through the checkpoint at
+    /// `through` was deleted, and that checkpoint became the chain's anchor. It
+    /// concerns no account.
+    AuditHistoryPruned {
+        /// The position of the checkpoint pruned through.
+        through: u64,
+        /// How many events were deleted.
+        deleted: u64,
+    },
     /// A row of the security audit log that preceded typed events. Only
     /// migrations write these; its fields are private, so one is only ever read back.
     Imported(ImportedAudit),
@@ -425,6 +434,7 @@ impl DomainEvent {
             | Self::AccountDeletionScheduled { .. }
             | Self::AccountRestored {}
             | Self::AccountPurged {}
+            | Self::AuditHistoryPruned { .. }
             | Self::Imported(_) => None,
         }
     }
@@ -482,6 +492,7 @@ impl DomainEvent {
             | Self::AccountDeletionScheduled { .. }
             | Self::AccountRestored {}
             | Self::AccountPurged {}
+            | Self::AuditHistoryPruned { .. }
             | Self::Imported(_) => None,
         }
     }
@@ -539,6 +550,7 @@ impl DomainEvent {
             Self::AccountDeletionScheduled { .. } => "account_deletion_scheduled",
             Self::AccountRestored {} => "account_restored",
             Self::AccountPurged {} => "account_purged",
+            Self::AuditHistoryPruned { .. } => "audit_history_pruned",
             Self::Imported(_) => "imported",
         }
     }
@@ -665,6 +677,7 @@ impl DomainEvent {
             | Self::DeliveryRetried { .. }
             | Self::DeliveryCancelled { .. }
             | Self::SigningKeyChanged { .. }
+            | Self::AuditHistoryPruned { .. }
             // Nobody can read the history of an account that no longer exists.
             | Self::AccountPurged {} => return None,
         })

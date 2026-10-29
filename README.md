@@ -54,6 +54,7 @@ work from devices on the tailnet. Run the same command after changing code.
 | `AUTH_KEY_ENCRYPTION_KEY` | Required env/file reference to the key that seals [signing keys](#signing-keys) in the database: 32 bytes as unpadded base64url text. A trailing newline is ignored |
 | `AUTH_TOKEN_DIGEST_KEY` | Required env/file reference to the key under which refresh tokens, authorization codes and pending logins are stored as HMAC digests. Its raw bytes are the key, at least 32 of them. Passkey decoys, email verification links and recovery links derive from it too |
 | `AUTH_TOKEN_DIGEST_KEY_ACCEPTED` | Optional env/file reference to another token digest key, accepted but never used for new digests: the next key, or the old one (see [changing the token digest key](#changing-the-token-digest-key)) |
+| `AUTH_AUDIT_KEY_PROVIDER` | Required env/file reference to the key that signs audit checkpoints: a 32-byte Ed25519 seed as 64 hex characters. See `docs/security/audit-history.md` |
 | `AUTH_INVITE_REQUIRED` | `true` by default; set `false` to allow public registration |
 | `AUTH_GITHUB_CLIENT_ID`, `AUTH_GITHUB_CLIENT_SECRET` | Both required to enable GitHub; secret is an env/file reference |
 | `AUTH_GOOGLE_CLIENT_ID`, `AUTH_GOOGLE_CLIENT_SECRET` | Both required to enable Google; secret is an env/file reference |
@@ -68,7 +69,8 @@ directory in the `host` query parameter, e.g.
 `postgres://USER:PASSWORD@localhost/piquel?host=/run/postgresql&sslmode=disable`.
 
 Generate either key with `just auth generate-secret /absolute/path` (uses the
-OpenSSL CLI; piqueld generates its own, see `infra/README.md`). Keep both across
+OpenSSL CLI; piqueld generates its own, see `infra/README.md`), and an audit key
+with `openssl rand -hex 32 > /absolute/path/audit-key`. Keep them across
 restarts, and give every replica the same ones. The key-encryption key cannot be
 changed yet: the stored signing keys would no longer open. Replacing the token
 digest key at once ends every refresh token and every login in progress, so
@@ -192,14 +194,16 @@ Administrators can also list, create and revoke invitations from the admin dashb
 Every administrative operation has a command, which runs the same code as the
 admin dashboard (`AdminService` in `apps/auth-service/src/admin`), and so does every
 setting administrators may change on another account (`AccountService` in
-`apps/auth-service/src/account`). Commands need only
-`AUTH_DATABASE_URL` (`invite create` also needs `AUTH_PUBLIC_BASE_URL`, to build its
-link, `user recover` needs it and `AUTH_TOKEN_DIGEST_KEY`, to derive its link, and
-`client origin add` needs it to tell auth's own domain apart), so
-they work while auth is down: they are the break-glass path when the
-dashboard or auth's frontends are unreachable. In deployed environments,
-run them with `piquelctl app exec piquel-fr auth --env ENV -- auth-service …` (see
-[infra/README.md](infra/README.md)).
+`apps/auth-service/src/account`). Commands need only `AUTH_DATABASE_URL`, so they
+work while auth is down: they are the break-glass path when the dashboard or
+auth's frontends are unreachable. `invite create` also needs
+`AUTH_PUBLIC_BASE_URL`, to build its link; `user recover` needs it and
+`AUTH_TOKEN_DIGEST_KEY`, to derive its link; `client origin add` needs it to tell
+auth's own domain apart; and `audit verify` and `audit prune` need it to pick the
+environment's audit key. `audit prune` connects as the schema owner (see
+[audit-history.md](docs/security/audit-history.md#pruning)). In deployed
+environments, run them with `piquelctl app exec piquel-fr auth --env ENV --
+auth-service …` (see [infra/README.md](infra/README.md)).
 
 ```sh
 just auth admin grant alice               # the first administrator is granted here
@@ -216,7 +220,8 @@ just auth user delete alice --reason "Asked by email"   # see Data export and ac
 just auth user restore alice --reason "Changed their mind"
 just auth session revoke <session-id>     # one session, as `user show` lists it
 just auth session revoke-all alice        # every session of the account
-just auth audit --user alice --kind session_revoked
+just auth audit list --user alice --kind session_revoked
+just auth audit verify                    # recompute the tamper-evident chain
 just auth account alice passkeys list     # the account's settings, as its owner sees them
 just auth account alice passkeys revoke <passkey-id> --reason "Phone stolen"
 just auth account alice emails remove <email-id> --reason "Asked by email"
@@ -224,11 +229,16 @@ just auth account alice emails remove <email-id> --reason "Asked by email"
 
 - Accounts are named by handle, ID or a verified email of an active account.
 - `--output json` prints the views the dashboard shows for `user search`
-  (`UserPage`), `user show` (`UserDetail`), `audit` (`EventPage`), `client list`,
-  `invite list` and `admin list`, as defined in `piquel_common::admin`.
+  (`UserPage`), `user show` (`UserDetail`), `audit list` (`EventPage`), `client
+  list`, `invite list` and `admin list`, as defined in `piquel_common::admin`.
+  `audit verify --output json` prints the verification.
+- `audit verify` and `audit prune` are described in
+  [audit-history.md](docs/security/audit-history.md). `audit prune` connects as
+  the schema owner when `AUTH_DATABASE_OWNER_URL` is set, since auth's own role
+  may not delete events.
 - `user disable|delete`, `user recover`, `user undo-recovery`, `session revoke-all`,
-  `admin revoke`, `client
-  disable|suspend|delete`, and `account … passkeys revoke`, `identities unlink` and
+  `admin revoke`, `client disable|suspend|delete`, `audit prune`, and `account …
+  passkeys revoke`, `identities unlink` and
   `sessions revoke-all` describe what they will change and ask for confirmation.
   Without a terminal they refuse unless given `--yes`.
 - `account <user>` reads and changes the settings administrators share with the

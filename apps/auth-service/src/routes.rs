@@ -100,6 +100,14 @@ pub(crate) mod sessions {
     pub(crate) const REVOKE_OTHERS: &str = "/account/sessions/revoke-others";
 }
 
+/// The audit chain's signed checkpoints, public so anyone can keep copies.
+pub(crate) mod audit {
+    /// The newest checkpoint, as a signed note.
+    pub(crate) const LATEST_CHECKPOINT: &str = "/audit/checkpoints/latest";
+    /// Checkpoints after a position, oldest first.
+    pub(crate) const CHECKPOINTS: &str = "/audit/checkpoints";
+}
+
 /// OAuth 2.0 and `OpenID` Connect endpoints.
 pub(crate) mod oidc {
     use piquel_common::protocol::metadata;
@@ -133,7 +141,7 @@ pub(crate) mod dashboard {
     pub(crate) const SIGN_IN: &str = "/sign-in";
     /// Every path the dashboard serves is one of these, or under one: the admin
     /// listener mounts the pages on them, and nowhere else.
-    pub(crate) const PREFIXES: [&str; 9] = [
+    pub(crate) const PREFIXES: [&str; 10] = [
         "/",
         SIGN_IN,
         "/sign-out",
@@ -143,6 +151,7 @@ pub(crate) mod dashboard {
         "/invitations",
         "/clients",
         "/events",
+        "/audit",
     ];
 }
 

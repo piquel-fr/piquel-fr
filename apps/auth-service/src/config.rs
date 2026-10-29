@@ -12,7 +12,7 @@ use piquel_common::{
     Provider,
     config::{ConfigurationError, Origin, SecretBytes, SecretReference, Variable},
 };
-use piquel_crypto::{CryptoError, Digest, KeyEncryptionKey, Secret};
+use piquel_crypto::{CryptoError, Digest, KeyEncryptionKey, NoteKey, NoteVerifier, Secret};
 use piquel_repository::{DatabaseConfig, RuntimeRole};
 use std::{
     collections::BTreeMap,
@@ -77,6 +77,8 @@ const OWNER_DATABASE: DatabaseVariables = DatabaseVariables {
 };
 /// Reference to the key that seals signing keys in the database.
 const KEY_ENCRYPTION_KEY: Variable = Variable::new("AUTH_KEY_ENCRYPTION_KEY");
+/// Required reference to the key that signs audit checkpoints.
+const AUDIT_KEY_PROVIDER: Variable = Variable::new("AUTH_AUDIT_KEY_PROVIDER");
 /// Reference to the key under which opaque token secrets are digested.
 const TOKEN_DIGEST_KEY: Variable = Variable::new("AUTH_TOKEN_DIGEST_KEY");
 /// Optional reference to another token digest key, accepted but never used for
@@ -508,6 +510,49 @@ pub(crate) struct OidcConfig {
     pub digest_keys: Arc<TokenDigestKeys>,
 }
 
+/// The key that signs audit checkpoints: an Ed25519 key of its own, so it rotates
+/// independently of the OIDC signing keys. See `docs/security/audit-history.md`.
+#[derive(Clone)]
+pub struct AuditConfig {
+    /// Signs checkpoints as `<auth host>/audit`.
+    pub(crate) key: Arc<NoteKey>,
+}
+
+impl AuditConfig {
+    /// Reads the key from `AUTH_AUDIT_KEY_PROVIDER` and names it after `origin`.
+    ///
+    /// # Errors
+    /// Names the variable when it is missing, does not resolve, or does not hold a
+    /// 32-byte seed in hex.
+    pub fn from_environment(origin: &Origin) -> Result<Self, ConfigurationError> {
+        let reference: SecretReference = AUDIT_KEY_PROVIDER.parse()?;
+        let secret = reference.resolve().map_err(|source| {
+            AUDIT_KEY_PROVIDER.error("must resolve to a 32-byte Ed25519 seed in hex", source)
+        })?;
+        Self::parse(origin, &secret)
+    }
+
+    /// Decodes the seed: 64 hex characters, with one trailing newline allowed, as
+    /// `openssl rand -hex 32` or a piqueld `{ type = "random", bytes = 32, encoding =
+    /// "hex" }` secret writes it.
+    pub(crate) fn parse(origin: &Origin, secret: &SecretBytes) -> Result<Self, ConfigurationError> {
+        let reason = "must contain a 32-byte Ed25519 seed as 64 hexadecimal characters";
+        let hex = secret
+            .utf8()
+            .map_err(|source| AUDIT_KEY_PROVIDER.error(reason, source))?;
+        let key = NoteKey::from_hex_seed(&crate::AuditKeys::name(origin), hex)
+            .map_err(|source| AUDIT_KEY_PROVIDER.error(reason, source))?;
+        Ok(Self { key: Arc::new(key) })
+    }
+
+    /// The name and public key that verify checkpoints, to commit to
+    /// `docs/security/audit-key.pub`.
+    #[must_use]
+    pub fn verifier(&self) -> &NoteVerifier {
+        self.key.verifier()
+    }
+}
+
 /// A database connection's URL variable and its optional password variable.
 #[derive(Clone, Copy)]
 struct DatabaseVariables {
@@ -600,6 +645,8 @@ pub struct AuthConfig {
     pub(crate) email: EmailConfig,
     /// Seals and opens the signing keys in the database.
     pub key_encryption_key: Arc<KeyEncryptionKey>,
+    /// The audit checkpoint key.
+    pub(crate) audit: AuditConfig,
     /// Trusted reverse-proxy peers.
     pub(crate) trusted_proxies: Vec<IpNet>,
 }
@@ -611,6 +658,19 @@ impl AuthConfig {
     /// Names invalid transport settings or unresolved password references.
     pub fn database_from_environment() -> Result<DatabaseConfig, ConfigurationError> {
         Ok(RUNTIME_DATABASE.read(&DATABASE_URL.required()?)?.0)
+    }
+
+    /// Loads what `audit prune` connects with: the schema owner when
+    /// `AUTH_DATABASE_OWNER_URL` is set, since the runtime role may not delete
+    /// events, and the runtime connection otherwise.
+    ///
+    /// # Errors
+    /// Names invalid transport settings or unresolved password references.
+    pub fn owner_database_from_environment() -> Result<DatabaseConfig, ConfigurationError> {
+        Ok(match DATABASE_OWNER_URL.optional()? {
+            Some(url) => OWNER_DATABASE.read(&url)?.0,
+            None => RUNTIME_DATABASE.read(&DATABASE_URL.required()?)?.0,
+        })
     }
 
     /// Loads what `migrate` connects with: the schema owner when
@@ -664,6 +724,7 @@ impl AuthConfig {
             passkey: PasskeyConfig::from_environment(&origin, &digest_keys)?,
             federation: FederationConfig::from_environment(&origin)?,
             email: EmailConfig::from_environment(&origin, &digest_keys)?,
+            audit: AuditConfig::from_environment(&origin)?,
             oidc: OidcConfig {
                 origin,
                 digest_keys,
@@ -739,5 +800,39 @@ impl AuthConfig {
                 }
             })
             .collect()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    //! Audit key validation.
+    use super::*;
+
+    /// The audit key is a 32-byte seed in hex, with one trailing newline allowed.
+    /// Anything else stops startup with an error naming the variable.
+    #[test]
+    fn audit_keys_must_be_32_hex_encoded_bytes() {
+        let origin: Origin = "https://auth.piquel.fr".parse().expect("origin");
+        let path = std::env::temp_dir().join(format!("audit-key-{}", piquel_common::UserId::new()));
+        let parse = |value: &str| {
+            std::fs::write(&path, value).expect("secret file");
+            let secret = SecretReference::parse(&format!("file://{}", path.display()))
+                .and_then(|reference| reference.resolve())
+                .expect("secret");
+            AuditConfig::parse(&origin, &secret)
+        };
+        let config = parse(&format!("{}\n", "ab".repeat(32))).expect("generated secret");
+        assert_eq!(config.verifier().name(), "auth.piquel.fr/audit");
+        for malformed in [
+            "ab".repeat(31),
+            "ab".repeat(33),
+            "zz".repeat(32),
+            "-----BEGIN".into(),
+        ] {
+            let error = parse(&malformed).err().expect("malformed key").to_string();
+            assert!(error.contains("AUTH_AUDIT_KEY_PROVIDER"), "{error}");
+            assert!(error.contains("64 hexadecimal characters"), "{error}");
+        }
+        std::fs::remove_file(path).expect("cleanup");
     }
 }

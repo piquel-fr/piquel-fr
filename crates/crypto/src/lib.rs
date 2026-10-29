@@ -1,8 +1,11 @@
 //! Auditable cryptographic primitives for authentication; no browser or database policy.
+/// Ed25519 signed notes, for audit checkpoints.
+mod note;
 /// AES-256-GCM sealing of private keys at rest.
 mod sealing;
 /// RSA signing and verification of compact JWTs, by key set.
 mod signing;
+pub use note::{NoteKey, NoteVerifier, NoteVerifiers};
 pub use sealing::KeyEncryptionKey;
 pub use signing::{KeySet, PublicKey, Rs256Key};
 
@@ -70,6 +73,27 @@ pub enum CryptoError {
     /// The PKCE verifier does not match its challenge.
     #[error("PKCE S256 challenge does not match the verifier")]
     PkceMismatch,
+    /// A note key's name is empty or contains whitespace or `+`.
+    #[error("note key name must be nonempty, without whitespace or +")]
+    NoteKeyName,
+    /// An Ed25519 seed is not 32 hex-encoded bytes.
+    #[error("Ed25519 seed must be 64 hexadecimal characters (32 bytes)")]
+    NoteKeySeed,
+    /// A verifier key is malformed, not Ed25519, or has the wrong key ID.
+    #[error("note verifier key must be <name>+<hex key ID>+<base64 Ed25519 key>")]
+    NoteVerifierKey,
+    /// Note text does not end with a newline, or holds another control character.
+    #[error("note text must end with a newline and contain no other control characters")]
+    NoteText,
+    /// A note has no signature block, or a malformed signature line.
+    #[error("signed note is malformed")]
+    NoteFormat,
+    /// A signature by a known key does not verify.
+    #[error("note signature is invalid")]
+    NoteSignature,
+    /// No known key signed the note.
+    #[error("note has no signature by a known key")]
+    NoteUnverified,
 }
 
 /// A random 256-bit secret with redacted diagnostics.

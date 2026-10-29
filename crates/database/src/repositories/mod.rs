@@ -95,6 +95,8 @@ repositories! {
     sessions: SessionRepository;
     /// Typed domain events, their personal data and consumer cursors.
     events: EventRepository;
+    /// The audit chain over sealed events, its checkpoints and anchor.
+    audit: AuditRepository;
     /// Outbound deliveries, their leases and ordering.
     deliveries: DeliveryRepository;
     /// Passkey credentials and `WebAuthn` ceremony state.
@@ -217,6 +219,7 @@ impl<T> From<JsonArray<T>> for Vec<T> {
 
 /// A `BIGINT` column that must not be negative, decoded into a `u64` field, e.g.
 /// `profile_version AS "profile_version: Unsigned"`.
+#[derive(Debug)]
 struct Unsigned(u64);
 
 impl Type<Postgres> for Unsigned {
@@ -233,6 +236,18 @@ impl Decode<'_, Postgres> for Unsigned {
     }
 }
 
+impl Unsigned {
+    /// Converts a value for a `BIGINT` bind.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`DatabaseError::Operation`](crate::DatabaseError::Operation) for a
+    /// value above `i64::MAX`, which no stored value reaches.
+    fn bind(value: u64) -> Result<i64, crate::DatabaseError> {
+        i64::try_from(value).map_err(|error| crate::DatabaseError::Operation(Box::new(error)))
+    }
+}
+
 impl From<Unsigned> for u64 {
     /// Unwraps the decoded value.
     fn from(Unsigned(value): Unsigned) -> Self {
@@ -240,8 +255,37 @@ impl From<Unsigned> for u64 {
     }
 }
 
+/// A `BYTEA` column holding exactly 32 bytes, such as a SHA-256 hash, decoded
+/// into a `[u8; 32]` field, e.g. `head AS "head: Bytes32"`.
+#[derive(Debug)]
+struct Bytes32([u8; 32]);
+
+impl Type<Postgres> for Bytes32 {
+    /// Stored as `BYTEA`.
+    fn type_info() -> PgTypeInfo {
+        Vec::<u8>::type_info()
+    }
+}
+
+impl Decode<'_, Postgres> for Bytes32 {
+    /// Rejects any other length.
+    fn decode(value: PgValueRef<'_>) -> Result<Self, BoxDynError> {
+        let bytes = <&[u8]>::decode(value)?;
+        Ok(Self(bytes.try_into()?))
+    }
+}
+
+impl From<Bytes32> for [u8; 32] {
+    /// Unwraps the decoded bytes.
+    fn from(Bytes32(value): Bytes32) -> Self {
+        value
+    }
+}
+
 /// Administrator rights and the lock that serializes their changes.
 pub(crate) mod administrators;
+/// The audit chain, its checkpoints and its anchor.
+pub(crate) mod audit;
 /// Handoff codes and dashboard sessions.
 pub(crate) mod dashboard;
 /// Accounts scheduled for deletion, restore tokens and the purge.
