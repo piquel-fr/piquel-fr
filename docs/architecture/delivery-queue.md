@@ -86,21 +86,21 @@ statuses, refused destinations and redirects fail at once.
 
 ## Email
 
-The `email` channel (`deliveries/email.rs` in both crates) sends account holders
-transactional messages over SMTP. A delivery stores the account's ID as its
-recipient and a typed `EmailMessage` as its payload. A verification link stores
-only the address's ID: the sender reads the address, and the account's handle
-the message names, when it sends, so a link to an address removed, replaced or
-verified meanwhile is not sent, and the delivery succeeds without a send. The
-notices that an address stopped being primary, or was removed, copy the address
-instead, read in the event's transaction, so removing the address right after
-cannot cancel them. A recovery's link stores the recovery's ID and the primary
-address's, and is not sent once the link was used, cancelled or expired, or the
-account was disabled. The notices that a recovery enrolled a passkey, or that
-support revoked passkeys and started one, go to every verified address, copying
-it. The copied addresses are the channel's only personal data, deleted with the
-delivery. The `destination` column names the account and the address's ID, for
-operators.
+The `email` channel (`deliveries/email/` in auth-service, `deliveries/email.rs` in
+the database crate) sends account holders transactional messages over SMTP. A
+delivery stores the account's ID as its recipient and a typed `EmailMessage` as
+its payload. A verification link stores only the address's ID: the sender reads
+the address, and the account's handle the message names, when it sends, so a link
+to an address removed, replaced or verified meanwhile is not sent, and the
+delivery succeeds without a send. The notices that an address stopped being
+primary, or was removed, copy the address instead, read in the event's
+transaction, so removing the address right after cannot cancel them. A recovery's
+link stores the recovery's ID and the primary address's, and is not sent once the
+link was used, cancelled or expired, or the account was disabled. The notices that
+a recovery enrolled a passkey, or that support revoked passkeys and started one,
+go to every verified address, copying it. The copied addresses are the channel's
+only personal data, deleted with the delivery. The `destination` column names the
+account and the address's ID, for operators.
 
 A link's token is never stored, not even in the payload: it is an HMAC of the
 address's ID, or the recovery's, under a key derived from the token digest key.
