@@ -107,7 +107,7 @@ impl<M: Mailer> EmailSender<M> {
     /// nothing while email is disabled, or once a link is no longer needed, so the
     /// delivery succeeds rather than retrying: a verification link's address was
     /// verified, replaced or removed, or a recovery's link was used, replaced or
-    /// undone, or expired.
+    /// undone, or expired, or the account is no longer active.
     async fn deliver(
         &self,
         id: DeliveryId,
