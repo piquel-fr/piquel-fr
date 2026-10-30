@@ -609,6 +609,29 @@ async fn refused_pushes_keep_the_oauth_error() {
     ));
 }
 
+/// A push succeeds only as RFC 9126 §2.2 answers it: `201 Created` with a request URI.
+#[tokio::test]
+async fn pushes_need_a_created_request_uri() {
+    for (status, request_uri) in [
+        (StatusCode::OK, "urn:ietf:params:oauth:request_uri:abc"),
+        (StatusCode::CREATED, ""),
+    ] {
+        let body = serde_json::json!({ "request_uri": request_uri, "expires_in": 60 });
+        let endpoint = PushEndpoint::start(status, body).await;
+        let unexpected = login_client("notes-web", Some(endpoint.url))
+            .authorize(&AuthorizeRequest::default())
+            .await
+            .expect_err("unexpected answer");
+        assert!(
+            matches!(
+                unexpected,
+                LoginError::Push(OAuthError::UnexpectedResponse { .. })
+            ),
+            "{status} {request_uri:?}: {unexpected:?}"
+        );
+    }
+}
+
 /// A pending login completes only with the client and issuer that started it, before
 /// anything is sent anywhere.
 #[tokio::test]
