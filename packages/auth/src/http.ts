@@ -83,7 +83,7 @@ export class Http {
   async send(url: string, init: RequestInit): Promise<Reply> {
     const fetcher = this.#fetch;
     const failed = (cause: unknown) =>
-      new AuthError({ code: 'network' }, `request to ${url} failed`, { cause });
+      new AuthError({ code: 'network', url }, `request to ${url} failed`, { cause });
     let response: Response;
     try {
       response = await fetcher(url, {

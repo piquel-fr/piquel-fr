@@ -507,7 +507,7 @@ export class Login {
         return this.#save(key, id, until, current.login);
       }
       // The request never reached auth, so nothing was rotated either.
-      if (Login.#unsent(error)) return this.#save(key, id, until, current.login);
+      if (this.#unsent(error)) return this.#save(key, id, until, current.login);
       // No usable answer: auth may have rotated the token.
       await this.#end(key);
       if (error instanceof AuthError) return null;
@@ -570,9 +570,15 @@ export class Login {
     }
   }
 
-  /** Whether `error` says the request never reached auth: its connection could not be opened. */
-  static #unsent(error: unknown): boolean {
-    for (let cause = error; typeof cause === 'object' && cause !== null;) {
+  /**
+   * Whether `error` says the refresh request itself never reached auth: its connection
+   * to the token endpoint could not be opened. A failure after auth answered, such as
+   * fetching the keys to check the new ID token, may follow a rotation, so it is not.
+   */
+  #unsent(error: unknown): boolean {
+    const tokenEndpoint = this.client.issuer.metadata.token_endpoint;
+    if (!(error instanceof AuthError) || error.url !== tokenEndpoint) return false;
+    for (let cause: unknown = error.cause; typeof cause === 'object' && cause !== null;) {
       const { code, name } = cause as { code?: unknown; name?: unknown };
       if (CONNECT_ERRORS.has(String(code)) || CONNECT_ERRORS.has(String(name))) return true;
       cause = (cause as { cause?: unknown }).cause;

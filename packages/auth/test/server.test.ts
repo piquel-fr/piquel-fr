@@ -40,6 +40,8 @@ class Auth {
   token: () => Response | Promise<Response> = () => new Response(null, { status: 500 });
   readonly fetch: FakeFetch;
   readonly #keys: CryptoKeyPair;
+  /** The key ID new tokens name. */
+  kid = 'test';
   #issued = 0;
   login!: Login;
 
@@ -80,7 +82,7 @@ class Auth {
   /** A compact JWS of `claims`, with header `typ`. */
   async sign(typ: string, claims: object): Promise<string> {
     const part = (value: object) => Buffer.from(JSON.stringify(value)).toString('base64url');
-    const input = `${part({ alg: 'RS256', typ, kid: 'test' })}.${part(claims)}`;
+    const input = `${part({ alg: 'RS256', typ, kid: this.kid })}.${part(claims)}`;
     const signature = await crypto.subtle.sign(
       'RSASSA-PKCS1-v1_5',
       this.#keys.privateKey,
@@ -345,6 +347,14 @@ test('a logout during a refresh leaves the session deleted', async () => {
   assert.equal(await browser.session(), null);
 });
 
+/** A request whose connection could not be opened, as Node's fetch fails. */
+const unreachable = () =>
+  Promise.reject(
+    new TypeError('fetch failed', {
+      cause: Object.assign(new Error('connect'), { code: 'ECONNREFUSED' })
+    })
+  );
+
 test('a refresh ends the session only when its token may be spent', async () => {
   const outcome = async (answer: () => Response | Promise<Response>) => {
     const auth = await Auth.start();
@@ -357,16 +367,22 @@ test('a refresh ends the session only when its token may be spent', async () => 
     return (await browser.session())?.accessToken ?? 'ended';
   };
   const refused = (error: string) => () => Response.json({ error }, { status: 400 });
-  const unreachable = () =>
-    Promise.reject(
-      new TypeError('fetch failed', {
-        cause: Object.assign(new Error('connect'), { code: 'ECONNREFUSED' })
-      })
-    );
   assert.equal(await outcome(refused('invalid_grant')), 'ended');
   assert.equal(await outcome(() => new Response('<h1>Bad gateway</h1>', { status: 502 })), 'ended');
   assert.equal(await outcome(refused('temporarily_unavailable')), 'at-2');
   assert.equal(await outcome(unreachable), 'at-2');
+});
+
+test('a refresh auth answered ends the session when its ID token cannot be checked', async () => {
+  const auth = await Auth.start();
+  const browser = new Browser(auth);
+  await browser.signIn();
+  auth.clock.seconds += 600;
+  // Auth rotates the refresh token, but the keys its new ID token names cannot be fetched.
+  auth.kid = 'rotated';
+  auth.fetch.routes[JWKS_URI] = unreachable;
+  auth.token = async () => Response.json(await auth.tokens({}));
+  assert.equal(await browser.session(), null);
 });
 
 test('back-channel logout ends the sessions of a sid or of a user, once', async () => {
