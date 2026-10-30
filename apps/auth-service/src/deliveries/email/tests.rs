@@ -2,7 +2,10 @@
 
 use super::*;
 use crate::{
+    account::AccountService,
+    config::{LinkKeys, TokenDigestKey, TokenDigestKeys},
     recovery::{LINK_LIFETIME, PROBATION, RecoveryLinks},
+    security::RequestContext,
     tests::{AUTH_ORIGIN, Replicas, verified_address},
 };
 use piquel_common::{AccountStatus, EmailId, Handle, PasskeyId, RecoveryId, config::Origin};
@@ -120,7 +123,7 @@ async fn retries_resend_the_same_message_to_the_current_address() {
     let config = EmailConfig::test(&AUTH_ORIGIN.parse().expect("auth origin"), true);
     let user_id = account(&database).await;
     let email_id = EmailId::new();
-    let token = config.verification_key.token(email_id).expect("token");
+    let token = config.verification_keys.token(email_id).expect("token");
     database
         .emails()
         .insert_unverified(&InsertUnverifiedEmail {
@@ -187,6 +190,65 @@ async fn retries_resend_the_same_message_to_the_current_address() {
     assert_eq!(outbox.headers().len(), 3, "nothing is sent while disabled");
 }
 
+/// A verification link added before a change of token digest key, and still
+/// queued when the change made its key the accepted one, is sent under that key,
+/// and verifies its address. A disabled account's link is not sent.
+#[tokio::test]
+#[ignore = "requires TEST_DATABASE_URL"]
+async fn a_verification_link_survives_a_change_of_key() {
+    let database = Replicas::database().await;
+    let mut config = EmailConfig::test(&AUTH_ORIGIN.parse().expect("auth origin"), true);
+    let user_id = account(&database).await;
+    let (old, new) = (
+        Secret::generate().expect("key"),
+        Secret::generate().expect("key"),
+    );
+    let keys = |current: &Secret, accepted: &Secret| {
+        let derive = |key: &Secret| TokenDigestKey::derive(key.as_bytes()).expect("digest key");
+        TokenDigestKeys::new(derive(current), Some(derive(accepted))).verification_keys()
+    };
+    // Added after the first deploy of the change, which accepts the new key.
+    config.verification_keys = keys(&old, &new);
+    let email_id = EmailId::new();
+    let address = format!("{user_id}@example.com");
+    let added = config.verification_keys.token(email_id).expect("token");
+    database
+        .emails()
+        .insert_unverified(&InsertUnverifiedEmail {
+            id: email_id,
+            user_id,
+            normalized_email: &address,
+            secret_digest: added.digest().as_bytes(),
+            expires_at: chrono::Utc::now() + VERIFICATION_LIFETIME,
+        })
+        .await
+        .expect("address");
+    // Sent after the second, which makes the new key current.
+    config.verification_keys = keys(&new, &old);
+    let sender = EmailSender::with_mailer(database.clone(), None::<Arc<Outbox>>, &config);
+    let verify = EmailMessage::VerifyAddress { email_id };
+
+    let set_status = async |status| {
+        let changed = database.users().set_status(user_id, status).await;
+        assert!(changed.expect("status"));
+    };
+    set_status(AccountStatus::Disabled).await;
+    let content = sender.content(user_id, &verify).await.expect("content");
+    assert!(content.is_none(), "no link to a disabled account");
+    set_status(AccountStatus::Active).await;
+
+    let content = sender.content(user_id, &verify).await.expect("content");
+    let Some(Content::VerifyAddress { link, .. }) = content else {
+        panic!("a verification message has a link");
+    };
+    let (_, token) = link.split_once("#token=").expect("token");
+    let verified = AccountService::new(database)
+        .verify_email(token, None, RequestContext::TEST)
+        .await
+        .expect("the link verifies");
+    assert_eq!(verified.address, address);
+}
+
 /// A recovery's link goes to its address, naming the account, only while the
 /// link works and the account is active, under the key its recovery started
 /// with, even once a change of token digest key made it the accepted one. With
@@ -204,8 +266,9 @@ async fn a_recovery_link_is_sent_while_it_works() {
     let origin: Origin = "https://auth.piquel.fr".parse().expect("origin");
     let started = Secret::generate().expect("recovery key");
     let current = Secret::generate().expect("recovery key");
-    let before = RecoveryLinks::new(origin.clone(), started.clone(), None);
-    config.recovery_links = RecoveryLinks::new(origin.clone(), current.clone(), Some(started));
+    let before = RecoveryLinks::new(origin.clone(), LinkKeys::new(started.clone(), None));
+    let keys = LinkKeys::new(current.clone(), Some(started));
+    config.recovery_links = RecoveryLinks::new(origin.clone(), keys);
     let (recovery_id, token) = recover(&database, user_id, &before).await;
     let outbox = Arc::new(Outbox::default());
     let sender = EmailSender::with_mailer(database.clone(), Some(Arc::clone(&outbox)), &config);
@@ -236,7 +299,7 @@ async fn a_recovery_link_is_sent_while_it_works() {
     );
     sender.assert_renders(user_id, &link).await;
 
-    config.recovery_links = RecoveryLinks::new(origin, current, None);
+    config.recovery_links = RecoveryLinks::new(origin, LinkKeys::new(current, None));
     let unkeyed = EmailSender::with_mailer(database.clone(), Some(Arc::clone(&outbox)), &config);
     let content = unkeyed.content(user_id, &link).await;
     assert!(
