@@ -7,11 +7,11 @@
 //! remove, but only the owner adds an address.
 //!
 //! The token is never stored, not even in the delivery that sends it: it is
-//! derived from the address's ID with [`VerificationKey`], once here to store its
+//! derived from the address's ID with [`VerificationKeys`], once here to store its
 //! digest, and again by the email sender. See `docs/architecture/delivery-queue.md`.
 use crate::{
     account::{AccountError, AccountService, ConfirmedOwner, Owner, Subject, Viewer},
-    config::EmailConfig,
+    config::{EmailConfig, LinkKeys},
     routes,
     security::{ApiError, RequestContext},
 };
@@ -27,7 +27,7 @@ use piquel_repository::{
     Database, DatabaseError, DatabaseTransaction, InsertUnverifiedEmail, StoredEmail,
 };
 use serde::{Deserialize, Serialize};
-use std::{net::IpAddr, sync::Arc, time::Duration as StdDuration};
+use std::{net::IpAddr, time::Duration as StdDuration};
 
 /// Email failures and their browser response mapping.
 mod error;
@@ -48,25 +48,41 @@ const VERIFICATIONS_PER_IP: i32 = 10;
 /// accounts and clients.
 const VERIFICATIONS_PER_ADDRESS: i32 = 3;
 
-/// HMAC key deriving each address's verification token from its ID. It is derived
-/// from persistent key material, so every replica and the email sender derive the
-/// same token, and a restart does not break links already sent.
+/// HMAC keys deriving each address's verification token from its ID. They are
+/// derived from the token digest keys, so every replica and the email sender
+/// derive the same token, a restart does not break links already sent, and a
+/// change of token digest key does not break those still queued.
 #[derive(Clone)]
-pub(crate) struct VerificationKey(Arc<Secret>);
+pub(crate) struct VerificationKeys(LinkKeys);
 
-impl VerificationKey {
-    /// Wraps a key reserved for verification tokens.
-    pub(crate) fn new(key: Secret) -> Self {
-        Self(Arc::new(key))
+impl VerificationKeys {
+    /// Wraps keys reserved for verification tokens.
+    pub(crate) const fn new(keys: LinkKeys) -> Self {
+        Self(keys)
     }
 
-    /// The token of address `id`'s verification link.
+    /// The token of new address `id`'s verification link, under the current key.
     ///
     /// # Errors
     ///
     /// Returns [`CryptoError`] if the HMAC provider fails.
     pub(crate) fn token(&self, id: EmailId) -> Result<Secret, CryptoError> {
-        Secret::derive(self.0.as_bytes(), id.as_uuid().as_bytes())
+        self.0.token(id.as_uuid().as_bytes())
+    }
+
+    /// The token of address `id`'s verification link whose SHA-256 is the stored
+    /// `digest`, under the key that derives it. `None` once no configured key
+    /// does.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`CryptoError`] if the HMAC provider fails.
+    pub(crate) fn rebuild(
+        &self,
+        id: EmailId,
+        digest: &[u8],
+    ) -> Result<Option<Secret>, CryptoError> {
+        self.0.rebuild(id.as_uuid().as_bytes(), digest)
     }
 }
 
@@ -280,7 +296,7 @@ impl AccountService {
         EmailApplication::limit(&mut tx, user, owner.request().client_ip, &address).await?;
         let id = EmailId::new();
         let digest = config
-            .verification_key
+            .verification_keys
             .token(id)
             .map_err(EmailError::Crypto)?
             .digest();

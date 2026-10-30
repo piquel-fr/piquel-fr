@@ -145,7 +145,7 @@ impl Harness {
 
     /// Presents the token of `id`'s verification link, signed out.
     async fn verify(&self, id: EmailId) -> (StatusCode, Value) {
-        let token = self.config.verification_key.token(id).expect("token");
+        let token = self.config.verification_keys.token(id).expect("token");
         self.verify_token(&token.encoded()).await
     }
 
@@ -362,7 +362,7 @@ async fn verification_checks_the_signed_in_account() {
     let owner = harness.account(AuthenticationMethod::Passkey).await;
     let other = harness.account(AuthenticationMethod::Passkey).await;
     let verify = async |browser, id| {
-        let token = harness.config.verification_key.token(id).expect("token");
+        let token = harness.config.verification_keys.token(id).expect("token");
         let body = json!({ "token": token.encoded() });
         harness
             .call(browser, Method::POST, routes::emails::VERIFY, Some(body))
@@ -413,7 +413,7 @@ async fn expired_links_replacements_and_limits() {
     let expired = EmailId::new();
     let token = harness
         .config
-        .verification_key
+        .verification_keys
         .token(expired)
         .expect("token");
     harness

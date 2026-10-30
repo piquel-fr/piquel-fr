@@ -3,8 +3,9 @@
 //! A link's delivery names the account and the address's ID, and a recovery link's
 //! the recovery's too: the sender reads the address when it sends, so an address
 //! verified or removed, or a recovery used or undone, in the meantime receives
-//! nothing, and derives the link's token again from the ID, so it is stored
-//! nowhere. Notices carry the address they go to.
+//! nothing, and derives the link's token again from the ID, under the key that
+//! made its stored digest, so it is stored nowhere and survives a change of token
+//! digest key. Notices carry the address they go to.
 //!
 //! Every attempt sends the same content, with the delivery's ID as `Message-ID`.
 //! SMTP is at least once like the queue: if the connection breaks after the relay
@@ -14,7 +15,7 @@
 use super::{DeliveryError, Failure, Sender};
 use crate::{
     config::EmailConfig,
-    emails::{VERIFICATION_LIFETIME, VerificationKey},
+    emails::{VERIFICATION_LIFETIME, VerificationKeys},
     recovery::{self, RecoveryLinks},
     routes::page::settings,
 };
@@ -77,7 +78,7 @@ pub(crate) struct EmailSender<M> {
     /// Auth's origin, whose settings pages every link opens.
     origin: Origin,
     /// Derives verification tokens.
-    verification_key: VerificationKey,
+    verification_keys: VerificationKeys,
     /// Builds recovery links.
     recovery_links: RecoveryLinks,
 }
@@ -90,14 +91,14 @@ impl EmailSender<AsyncSmtpTransport<Tokio1Executor>> {
 }
 
 impl<M: Mailer> EmailSender<M> {
-    /// Sends through `mailer`, with `config`'s sender, links and key.
+    /// Sends through `mailer`, with `config`'s sender, links and keys.
     pub(crate) fn with_mailer(database: Database, mailer: Option<M>, config: &EmailConfig) -> Self {
         Self {
             database,
             mailer,
             from: config.from.clone(),
             origin: config.origin.clone(),
-            verification_key: config.verification_key.clone(),
+            verification_keys: config.verification_keys.clone(),
             recovery_links: config.recovery_links.clone(),
         }
     }
@@ -143,10 +144,10 @@ impl<M: Mailer> EmailSender<M> {
                 let Some(pending) = pending else {
                     return Ok(None);
                 };
-                let token = self
-                    .verification_key
-                    .token(*email_id)
-                    .map_err(|error| Self::underived(&error))?;
+                let token = Self::rebuilt(
+                    self.verification_keys
+                        .rebuild(*email_id, &pending.secret_digest),
+                )?;
                 Content::VerifyAddress {
                     address: pending.address,
                     handle: pending.handle,
@@ -179,16 +180,10 @@ impl<M: Mailer> EmailSender<M> {
                 let Some(pending) = pending else {
                     return Ok(None);
                 };
-                let link = self
-                    .recovery_links
-                    .link(*recovery_id, &pending.secret_digest)
-                    .map_err(|error| Self::underived(&error))?;
-                // Its key was removed before the link was sent: fail the delivery,
-                // which operators see, rather than send a link that matches nothing.
-                let Some(link) = link else {
-                    tracing::error!(%recovery_id, "no configured key derives the recovery link");
-                    return Err(DeliveryError::Permanent(Failure::Message));
-                };
+                let link = Self::rebuilt(
+                    self.recovery_links
+                        .link(*recovery_id, &pending.secret_digest),
+                )?;
                 Content::RecoveryLink {
                     address: pending.address,
                     handle: pending.handle,
@@ -225,10 +220,19 @@ impl<M: Mailer> EmailSender<M> {
         }
     }
 
-    /// A failed derivation of a link's token, which fails the delivery.
-    fn underived(error: &CryptoError) -> DeliveryError {
-        tracing::error!(error = %ErrorChain(error), "could not derive a link's token");
-        DeliveryError::Permanent(Failure::Message)
+    /// A link, or its token, `rebuilt` under the key that made its stored digest.
+    /// A failed derivation fails the delivery, and so does a key removed before
+    /// the link was sent, which operators see, rather than send a link that
+    /// matches nothing.
+    fn rebuilt<T>(rebuilt: Result<Option<T>, CryptoError>) -> Result<T, DeliveryError> {
+        match rebuilt {
+            Ok(Some(rebuilt)) => return Ok(rebuilt),
+            Ok(None) => tracing::error!("no configured key derives the link's token"),
+            Err(error) => {
+                tracing::error!(error = %ErrorChain(&error), "could not derive a link's token");
+            }
+        }
+        Err(DeliveryError::Permanent(Failure::Message))
     }
 
     /// Builds the message. Every attempt of a delivery builds the same one, with

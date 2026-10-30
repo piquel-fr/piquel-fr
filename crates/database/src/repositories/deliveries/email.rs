@@ -88,6 +88,8 @@ pub struct PendingAddress {
     /// The account's handle, which the message names so its reader knows whose
     /// account they would confirm the address for.
     pub handle: Handle,
+    /// SHA-256 of the link's token, which tells the key that derived it.
+    pub secret_digest: Vec<u8>,
 }
 
 impl EmailMessage {
@@ -262,7 +264,7 @@ impl EmailRepository<'_> {
     }
 
     /// `user_id`'s address `id`, if it is still unverified with a working
-    /// verification link, with the account's handle.
+    /// verification link and the account is active, with the account's handle.
     ///
     /// # Errors
     ///
@@ -277,12 +279,13 @@ impl EmailRepository<'_> {
             fetch_optional,
             sqlx::query_as!(
                 PendingAddress,
-                r#"SELECT e.normalized_email AS address, h.handle AS "handle: Handle"
+                r#"SELECT e.normalized_email AS address, h.handle AS "handle: Handle", s.secret_digest
                 FROM user_emails e
+                JOIN users u ON u.id = e.user_id
                 JOIN handles h ON h.user_id = e.user_id AND h.released_at IS NULL
                 JOIN email_verification_secrets s ON s.email_id = e.id
                 WHERE e.user_id = $1 AND e.id = $2 AND e.verified_at IS NULL
-                AND s.expires_at > now()"#,
+                AND s.expires_at > now() AND u.status = 'active'"#,
                 user_id.as_uuid(),
                 id.as_uuid(),
             )

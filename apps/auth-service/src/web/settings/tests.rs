@@ -209,7 +209,7 @@ async fn addresses_change_their_primary_and_are_removed() {
             .expect("added")
             .id;
         // The first address confirmed becomes the primary one.
-        let token = config.email.verification_key.token(id).expect("token");
+        let token = config.email.verification_keys.token(id).expect("token");
         let verified = Browser::signed_out()
             .submit(
                 &replicas.b,
@@ -534,7 +534,7 @@ async fn verification_links_are_confirmed_by_their_form() {
         .expect("address ID");
     let token = config
         .email
-        .verification_key
+        .verification_keys
         .token(id)
         .expect("token")
         .encoded();
