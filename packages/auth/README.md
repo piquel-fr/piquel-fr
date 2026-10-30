@@ -162,11 +162,9 @@ const auth = browserClient(issuer, {
 });
 
 // On every page load: finish a callback, or restore the session with prompt=none.
-const session = (await auth.handleCallback()) ?? (await auth.restore({ scopes: ['profile'] }));
-if (!session) {
-  // On the user's click: a passkey on this page, or auth's pages with auth.login().
-  await auth.signInWithPasskey({ scopes: ['profile'] });
-}
+let session = (await auth.handleCallback()) ?? (await auth.restore({ scopes: ['profile'] }));
+// On the user's click: a passkey on this page, or auth's pages with auth.login().
+session ??= await auth.signInWithPasskey({ scopes: ['profile'] });
 const notes = await session.fetch('https://notes.example/notes');
 ```
 

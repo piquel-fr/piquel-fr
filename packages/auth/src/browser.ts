@@ -11,8 +11,10 @@
  *
  * const issuer = await Issuer.discover('https://auth.piquel.fr');
  * const auth = browserClient(issuer, { clientId: 'notes-web', redirectUri: `${location.origin}/callback` });
- * const session = (await auth.handleCallback()) ?? (await auth.restore());
- * if (!session) await auth.signInWithPasskey({ scopes: ['profile'] }); // or auth.login()
+ * const session =
+ *   (await auth.handleCallback()) ??
+ *   (await auth.restore()) ??
+ *   (await auth.signInWithPasskey({ scopes: ['profile'] })); // or auth.login()
  * await session.fetch('https://notes.example/notes');
  * ```
  */
@@ -183,8 +185,12 @@ export class BrowserClient {
   #redirect(url: string, pending: PendingLogin, request: SignInRequest): Promise<never> {
     const purpose: Purpose =
       request.prompt === 'none' ? 'restore' : request.stepUp === undefined ? 'sign-in' : 'step-up';
-    const returnTo = request.returnTo ?? this.platform.location.href;
-    const stored: StoredLogin = { pending, returnTo, purpose };
+    const here = new URL(this.platform.location.href);
+    const returnTo = new URL(request.returnTo ?? here.href, here);
+    if (returnTo.origin !== here.origin) {
+      throw new TypeError(`returnTo must be on this page's origin, not ${returnTo.origin}`);
+    }
+    const stored: StoredLogin = { pending, returnTo: returnTo.href, purpose };
     this.platform.storage.setItem(this.#key, JSON.stringify(stored));
     return this.away(url);
   }
@@ -289,9 +295,9 @@ export class Session {
     const requirement: StepUpRequirement = {};
     if (challenge.acr_values !== undefined) requirement.acr_values = challenge.acr_values;
     if (challenge.max_age !== undefined) requirement.max_age = challenge.max_age;
+    // Every refusal within the window is the retry, concurrent ones included.
     const retry =
       this.#steppedUpAt !== undefined && this.#clock() - this.#steppedUpAt < STEP_UP_RETRY_WINDOW;
-    this.#steppedUpAt = undefined;
     if (retry) {
       throw new AuthError(
         { code: 'insufficient_user_authentication', requirement },
