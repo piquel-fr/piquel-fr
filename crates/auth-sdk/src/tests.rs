@@ -565,12 +565,16 @@ async fn authorize_pushes_when_advertised() {
     )
     .await;
     let client = login_client("notes-web", Some(endpoint.url.clone()));
-    let (url, pending) = client
-        .authorize(&AuthorizeRequest::default())
-        .await
-        .expect("authorize");
+    let request = AuthorizeRequest {
+        step_up: StepUpRequirement::passkey_within(300),
+        ..AuthorizeRequest::default()
+    };
+    let (url, pending) = client.authorize(&request).await.expect("authorize");
     assert_eq!(endpoint.field("client_id").as_deref(), Some("notes-web"));
     assert_eq!(endpoint.field("state").as_deref(), Some(pending.state()));
+    // The step-up requirement travels in the pushed request, not the URL.
+    assert_eq!(endpoint.field("acr_values").as_deref(), Some("phr"));
+    assert_eq!(endpoint.field("max_age").as_deref(), Some("300"));
     assert_eq!(url.path(), metadata().authorization_endpoint.path());
     let query: Vec<(String, String)> = url.query_pairs().into_owned().collect();
     assert_eq!(
