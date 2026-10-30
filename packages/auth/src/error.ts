@@ -58,7 +58,8 @@ export type AuthErrorDetail =
       >;
     }
   | { code: Extract<ErrorCategory, 'oauth'>; response: ErrorResponse }
-  | { code: Extract<ErrorCategory, 'network'> }
+  /** `url` is the request that could not be sent or read, when one did. */
+  | { code: Extract<ErrorCategory, 'network'>; url?: string }
   /** `scope` is every scope the request needs, space-separated, when known. */
   | { code: 'missing_token'; scope?: string }
   | { code: 'invalid_request' };
@@ -87,6 +88,8 @@ export class AuthError extends Error {
   readonly reason: ErrorReason | undefined;
   /** The error auth answered with, for `oauth` errors. */
   readonly response: ErrorResponse | undefined;
+  /** The request that failed, for `network` errors about one. */
+  readonly url: string | undefined;
   readonly #detail: AuthErrorDetail;
   /** The resource's protected resource metadata URL (RFC 9728), for its challenge. */
   #resourceMetadata: string | undefined;
@@ -98,6 +101,7 @@ export class AuthError extends Error {
     this.code = detail.code;
     this.reason = 'reason' in detail ? detail.reason : undefined;
     this.response = detail.code === 'oauth' ? detail.response : undefined;
+    this.url = detail.code === 'network' ? detail.url : undefined;
   }
 
   /** @internal A token that failed the check `reason` names. */
