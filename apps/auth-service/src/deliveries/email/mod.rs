@@ -27,7 +27,7 @@ use lettre::{
 use piquel_common::{DeliveryId, ErrorChain, Handle, UserId, config::Origin};
 use piquel_crypto::CryptoError;
 use piquel_repository::{Database, DatabaseError, Delivery, Email, EmailMessage};
-use std::time::Duration;
+use std::{fmt::Display, time::Duration};
 
 /// Sends a built message, classifying failures for the retry policy. The SMTP
 /// relay in production; tests use a fake.
@@ -147,6 +147,8 @@ impl<M: Mailer> EmailSender<M> {
                 let token = Self::rebuilt(
                     self.verification_keys
                         .rebuild(*email_id, &pending.secret_digest),
+                    "verification",
+                    email_id,
                 )?;
                 Content::VerifyAddress {
                     address: pending.address,
@@ -183,6 +185,8 @@ impl<M: Mailer> EmailSender<M> {
                 let link = Self::rebuilt(
                     self.recovery_links
                         .link(*recovery_id, &pending.secret_digest),
+                    "recovery",
+                    recovery_id,
                 )?;
                 Content::RecoveryLink {
                     address: pending.address,
@@ -220,16 +224,21 @@ impl<M: Mailer> EmailSender<M> {
         }
     }
 
-    /// A link, or its token, `rebuilt` under the key that made its stored digest.
-    /// A failed derivation fails the delivery, and so does a key removed before
-    /// the link was sent, which operators see, rather than send a link that
-    /// matches nothing.
-    fn rebuilt<T>(rebuilt: Result<Option<T>, CryptoError>) -> Result<T, DeliveryError> {
+    /// A `link` of what `id` names, or its token, `rebuilt` under the key that
+    /// made its stored digest. A failed derivation fails the delivery, and so does
+    /// a key removed before the link was sent, which operators see, rather than
+    /// send a link that matches nothing.
+    fn rebuilt<T>(
+        rebuilt: Result<Option<T>, CryptoError>,
+        link: &'static str,
+        id: &dyn Display,
+    ) -> Result<T, DeliveryError> {
         match rebuilt {
             Ok(Some(rebuilt)) => return Ok(rebuilt),
-            Ok(None) => tracing::error!("no configured key derives the link's token"),
+            Ok(None) => tracing::error!(link, %id, "no configured key derives the link's token"),
             Err(error) => {
-                tracing::error!(error = %ErrorChain(&error), "could not derive a link's token");
+                let error = ErrorChain(&error);
+                tracing::error!(%error, link, %id, "could not derive a link's token");
             }
         }
         Err(DeliveryError::Permanent(Failure::Message))
