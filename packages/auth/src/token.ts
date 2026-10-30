@@ -117,6 +117,12 @@ export type Subject = { kind: 'user'; id: string } | { kind: 'client'; id: strin
 declare const proven: unique symbol;
 
 /**
+ * `S` when it names one scope, `never` when it is a union: a value typed
+ * `'notes:read' | 'notes:write'` is checked as one of them, so it proves neither.
+ */
+type Single<S, All = S> = S extends unknown ? ([All] extends [S] ? S : never) : never;
+
+/**
  * A validated access token. `Declared` are the scopes its resource declared, and
  * `Proven` those it is proven to hold, so a function can ask for
  * `AccessToken<Notes, 'notes:write'>` and only receive tokens checked for it.
@@ -155,7 +161,7 @@ export class AccessToken<
   }
 
   /** Whether the token holds `scope`; narrows its type when it does. */
-  has<S extends Declared>(scope: S): this is AccessToken<Declared, Proven | S> {
+  has<S extends Declared>(scope: S & Single<S>): this is AccessToken<Declared, Proven | S> {
     return this.scopes.has(scope);
   }
 
@@ -163,10 +169,12 @@ export class AccessToken<
    * Requires every scope in `scopes`, returning the token with their proof, or throws
    * `insufficient_scope`, whose challenge names every scope required.
    */
-  require<S extends Declared>(...scopes: [S, ...S[]]): AccessToken<Declared, Proven | S> {
+  require<const T extends readonly [Declared, ...Declared[]]>(
+    ...scopes: T & { [K in keyof T]: Single<T[K]> }
+  ): AccessToken<Declared, Proven | T[number]> {
     // The proof exists only in types, and the scopes were just checked.
     if (scopes.every((scope) => this.scopes.has(scope))) {
-      return this as unknown as AccessToken<Declared, Proven | S>;
+      return this as unknown as AccessToken<Declared, Proven | T[number]>;
     }
     throw new AuthError(
       { code: 'insufficient_scope', scope: Scopes.of(scopes).toString() },
