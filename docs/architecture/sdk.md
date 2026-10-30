@@ -12,7 +12,7 @@ behavior and names.
 | --- | --- | --- | --- |
 | `crates/common` | `piquel-common` | yes | Shared types; with no features, the IDs and wire types shared by auth and the Rust SDK |
 | `crates/auth-sdk` | `piquel-auth` | yes | Rust SDK; the `axum` feature adds the axum integration |
-| `packages/auth` | `@piquel/auth` | not yet | TypeScript SDK, ESM only, with no runtime dependencies: `fetch` and WebCrypto, so it runs in browsers, Node, Deno, Bun and Workers |
+| `packages/auth` | `@piquel/auth` | not yet | TypeScript SDK, ESM only, with no runtime dependencies: `fetch` and WebCrypto, so it runs in browsers, Node, Deno, Bun and Workers; `@piquel/auth/server` is its server-side login over standard `Request` and `Response` |
 | `tests/sdk-vectors` | none | no | Shared test vectors |
 
 ## Wire types
@@ -198,9 +198,9 @@ client's default resource. They will send `resource` (RFC 8707) once auth suppor
 it.
 
 Server-side apps keep tokens in a server-side session and give the browser only a
-random session key, in a `__Host-` cookie that is `Secure`, `HttpOnly` and
-`SameSite=Lax`. Every sign-in starts a session under a fresh key. Refresh tokens
-never reach the browser.
+random session key, as the Rust SDK's axum login routes and `@piquel/auth/server`
+do, in a `__Host-` cookie that is `Secure`, `HttpOnly` and `SameSite=Lax`. Every
+sign-in starts a session under a fresh key. Refresh tokens never reach the browser.
 
 Applications choose where sessions live by implementing a small storage backend:
 load, an insert that stores only where no record is, a compare-and-swap replace, and

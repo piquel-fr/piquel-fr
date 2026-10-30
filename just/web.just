@@ -32,7 +32,9 @@ test-browser *ARGS:
 
 # tests/browser/oidc.spec.ts, related-origins.spec.ts and sdk.spec.ts serve the
 # clients' pages themselves and name the same origins. Register the browser checks'
-# public OIDC clients, whose origins have no server, with auth on localhost, as in CI.
+# public OIDC clients, whose origins have no server, with auth on localhost, as in CI,
+# and the confidential client of server.spec.ts's example app, with the secret in
+# E2E_SERVER_CLIENT_SECRET.
 browser-client:
     @just auth client create browser-e2e --name 'Browser E2E' \
         --redirect-uri https://browser-e2e.test/callback
@@ -41,6 +43,9 @@ browser-client:
     @just auth client create browser-e2e-inline --name 'Browser E2E inline' --trusted \
         --redirect-uri https://localhost:4443/callback
     @just auth client origin add browser-e2e-inline https://localhost:4443
+    @just auth client apply browser-e2e-server --name 'Browser E2E server' --trusted --confidential \
+        --redirect-uri http://127.0.0.1:4100/auth/callback --post-logout-uri http://127.0.0.1:4100/ \
+        --secret env://E2E_SERVER_CLIENT_SECRET
 
 audit:
     @pnpm audit

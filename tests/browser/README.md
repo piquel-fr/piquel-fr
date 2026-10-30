@@ -43,15 +43,29 @@ at `https://sdk-e2e.test`, served like `browser-e2e`'s. The SDK pushes the reque
 so the browser sees only its `request_uri`, then completes the callback and
 validates the ID token; a step-up sign-in must meet its `acr_values` and `max_age`.
 
-`just web browser-client` registers the three clients with the auth database
-configured in the environment, as CI does. Previews do not register them by default: run
+`server.spec.ts` starts the example app of `@piquel/auth/server`,
+`packages/auth/examples/server.ts`, at `http://127.0.0.1:4100`, a loopback address
+auth accepts plain HTTP redirect URIs on and browsers count as secure, so its
+`__Host-` session cookie works. It signs in through `browser-e2e-server`, a trusted
+confidential client, reloads, opens a page whose step-up requirement a fresh passkey
+sign-in meets, and signs out: the session cookie is gone, and auth's RP-initiated
+logout ends auth's session and returns to the app. The test needs the client's secret
+in `E2E_SERVER_CLIENT_SECRET`, and is skipped without it. Back-channel logout needs a
+public address auth can post to, so unit tests cover it instead.
+
+`just web browser-client` registers the four clients with the auth database
+configured in the environment, as CI does, the last with the secret in
+`E2E_SERVER_CLIENT_SECRET`: 32 random bytes in unpadded base64url. Previews do not register them by default: run
 `auth-service client create browser-e2e --name 'Browser E2E' --redirect-uri
 https://browser-e2e.test/callback`, `auth-service client create browser-e2e-sdk
 --name 'Browser E2E SDK' --trusted --require-par --redirect-uri
 https://sdk-e2e.test/callback`, `auth-service client create browser-e2e-inline
 --name 'Browser E2E inline' --trusted --redirect-uri
-https://related-e2e.test/callback` and `auth-service client origin add
-browser-e2e-inline https://related-e2e.test` there.
+https://related-e2e.test/callback`, `auth-service client origin add
+browser-e2e-inline https://related-e2e.test` and `auth-service client create
+browser-e2e-server --name 'Browser E2E server' --trusted --confidential
+--redirect-uri http://127.0.0.1:4100/auth/callback --post-logout-uri
+http://127.0.0.1:4100/`, which prints the secret, there.
 
 Run `just preview` to build and deploy this checkout over HTTPS on piqueld. Set
 `E2E_AUTH_URL` to the printed auth origin, then run `just web test-browser`. If

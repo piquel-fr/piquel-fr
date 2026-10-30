@@ -190,6 +190,9 @@ jobs:
       AUTH_ADMIN_ORIGIN: https://admin.localhost:3443
       E2E_ADMIN_URL: https://admin.localhost:3443
       E2E_GRANT_ADMIN: target/debug/auth-service admin grant
+      # The secret `just web browser-client` registers for the example app of
+      # @piquel/auth/server, which server.spec.ts starts. It guards nothing.
+      E2E_SERVER_CLIENT_SECRET: YnJvd3Nlci1lMmUtc2VydmVyIHNlY3JldCBmb3IgY2k
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       - *install-just
