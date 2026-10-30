@@ -922,6 +922,33 @@ async fn ceremonies_require_browser_binding_and_confirmation_belongs_to_one_sess
     );
 }
 
+/// Handles are public, so handle sign-in refuses a handle without an active
+/// account, and text that is no handle, before starting any ceremony.
+#[tokio::test]
+#[ignore = "requires TEST_DATABASE_URL"]
+async fn handle_sign_in_refuses_a_handle_without_an_account_at_once() {
+    let fixture = Fixture::new().await;
+    for handle in [
+        format!("none-{}", &TokenId::new().to_string()[24..]),
+        "@not a handle".to_owned(),
+    ] {
+        let response = fixture
+            .request(
+                routes::passkey::AUTHENTICATE_START,
+                Method::POST,
+                "",
+                json!({ "handle": handle }),
+            )
+            .await;
+        assert_eq!(response.status(), StatusCode::NOT_FOUND, "{handle}");
+        assert!(response.headers().get(header::SET_COOKIE).is_none());
+        assert_eq!(
+            Fixture::json(response).await["error"],
+            "No active account has this handle."
+        );
+    }
+}
+
 /// Signing in with a passkey in a browser holding a social session of the same
 /// account confirms that session, keeping its ID but replacing its cookie. A
 /// session records the passkey that signed it in, or confirmed it since; a social

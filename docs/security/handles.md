@@ -34,8 +34,8 @@ This was decided in [#255](https://github.com/piquel-fr/piquel-fr/issues/255).
 
 | Who | Learns |
 | --- | --- |
-| Anyone, through handle sign-in | Whether the handle has an account that can sign in: one that is active, or scheduled for deletion, with a passkey. If so, that account's credential IDs too, which `WebAuthn` lists for the browser: how many passkeys it has and, from their lengths, often which provider holds them. |
-| Anyone admitted to signup, and every account holder through a rename | Whether the handle, or a look-alike, is held or was held, and which look-alike. With handle sign-in, whether an account that holds it can no longer sign in. |
+| Anyone, through handle sign-in | Whether the handle belongs to an account that can sign in with a passkey by handle: one that is active, or scheduled for deletion, and has an unrevoked passkey. If so, that account's credential IDs too, which `WebAuthn` lists for the browser: how many passkeys it has and, from their lengths, often which provider holds them. |
+| Anyone admitted to signup, and every account holder through a rename | Whether the handle, or a look-alike, is held or was held, and which look-alike. |
 | Relying parties the user signs in to | The handle, as `preferred_username`. |
 | Anyone, once a profile is published (#101) | The profile. An unpublished profile answers 404 like an unknown handle, so it reveals nothing beyond what sign-in does. |
 
@@ -63,6 +63,12 @@ is accepted.
 
 ## Limits
 
+- **Anyone can add failed sign-ins to an account's history.** Handle sign-in
+  binds its ceremony to the account, so a failed assertion, even from a passkey
+  that was never registered, is recorded against it as `SignInFailed`. The
+  owner's history hides these, but support reads them in the account's events.
+  Per-IP rate limits slow a single source, but nothing bounds the failures across
+  sources. The failures change nothing: they are noise, not progress.
 - **Credential IDs link a handle across renames.** Anyone who recorded an
   account's credential IDs before a rename can find its new handle by trying
   candidates. [#297](https://github.com/piquel-fr/piquel-fr/issues/297) decides
