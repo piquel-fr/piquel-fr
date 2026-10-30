@@ -361,11 +361,13 @@ describe('restore', () => {
     ]);
   });
 
-  test('comes back with a session when auth has one', async () => {
+  test('comes back with a session when auth has one, and can restore it again', async () => {
     const { auth, page, client } = await setUp();
     await leaving(client.restore(), page);
     page.callback(auth.authorization(page.redirectedWith ?? ''));
     assert.equal((await client.handleCallback())?.claims.preferred_username, 'ada');
+    // Its access token expiring later on this page load, a restore signs in again.
+    await leaving(client.restore(), page);
   });
 });
 
