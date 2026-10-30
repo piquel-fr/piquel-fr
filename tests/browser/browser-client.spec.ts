@@ -110,15 +110,18 @@ async function setUp(
   return { ...passkeys, handle };
 }
 
-/** Nothing the page stores holds `tokens`, and the client's origin has no cookie. */
-async function expectNoStoredTokens(page: Page, context: BrowserContext, tokens: string[]) {
+/**
+ * Nothing the page stores holds `tokens`, and it set no cookie. The SDK runs in the
+ * page, so it could only write cookies `document.cookie` shows; the browser's own
+ * cookie jar would also show auth's, which share the client's host in CI.
+ */
+async function expectNoStoredTokens(page: Page, tokens: string[]) {
   const stored = await page.evaluate(() => ({
     local: Object.entries(localStorage),
     session: Object.entries(sessionStorage),
     cookie: document.cookie
   }));
   expect(stored).toEqual({ local: [], session: [], cookie: '' });
-  expect(await context.cookies(client)).toEqual([]);
   const everything = JSON.stringify(stored);
   for (const token of tokens) expect(everything).not.toContain(token);
 }
@@ -136,7 +139,7 @@ test('the browser client signs in with a redirect, and restores with prompt=none
   expect(signedIn?.username).toBe(handle);
   // Back where the login left from, without the code.
   expect(page.url()).toBe(`${client}/notes`);
-  await expectNoStoredTokens(page, context, signedIn?.tokens ?? []);
+  await expectNoStoredTokens(page, signedIn?.tokens ?? []);
 
   // Tokens live in memory only: after a reload, auth's session signs in again silently.
   await page.reload();
@@ -146,7 +149,7 @@ test('the browser client signs in with a redirect, and restores with prompt=none
   expect(restored?.username).toBe(handle);
   expect(page.url()).toBe(`${client}/notes`);
   expect(requests.prompts).toEqual([null, 'none']);
-  await expectNoStoredTokens(page, context, restored?.tokens ?? []);
+  await expectNoStoredTokens(page, restored?.tokens ?? []);
 });
 
 test('the browser client signs in with a passkey without leaving the page', async ({
@@ -164,7 +167,7 @@ test('the browser client signs in with a passkey without leaving the page', asyn
   const signedIn = await inPage(page, 'passkey', { scopes: ['profile'] });
   expect(signedIn?.username).toBe(handle);
   expect(navigations).toEqual([]);
-  await expectNoStoredTokens(page, context, signedIn?.tokens ?? []);
+  await expectNoStoredTokens(page, signedIn?.tokens ?? []);
   expect(
     (await context.cookies(authUrl)).filter((cookie) => cookie.name === '__Host-piquel_session')
   ).toEqual([]);
