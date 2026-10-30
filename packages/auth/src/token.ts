@@ -1,6 +1,6 @@
 /** Validated tokens, and the checks they pass. */
 import * as wire from './claims.ts';
-import { AuthError, type TokenReason } from './error.ts';
+import { AuthError } from './error.ts';
 import { Jws, type KeyCache } from './keys.ts';
 import * as json from './json.ts';
 import type {
@@ -19,11 +19,6 @@ import { type Clock, LEEWAY } from './time.ts';
 
 /** Longest a logout token may be valid, in seconds: auth signs each delivery attempt for two minutes. */
 const MAX_LOGOUT_LIFETIME = 10 * 60;
-
-/** A token failed the check `reason` names. */
-function invalidToken(reason: TokenReason, message: string, cause?: unknown): AuthError {
-  return new AuthError({ code: 'invalid_token', reason }, message, { cause });
-}
 
 /** The registered claims every token type checks the same way. */
 type RegisteredClaims = { iss: string; aud: Audience; exp: number; iat: number; nbf?: number };
@@ -120,7 +115,7 @@ declare const proven: unique symbol;
  * `S` when it names one scope, `never` when it is a union: a value typed
  * `'notes:read' | 'notes:write'` is checked as one of them, so it proves neither.
  */
-type Single<S, All = S> = S extends unknown ? ([All] extends [S] ? S : never) : never;
+export type Single<S, All = S> = S extends unknown ? ([All] extends [S] ? S : never) : never;
 
 /** Reads an application's own claims from a token's claims object; throws when they are invalid. */
 export type ClaimsReader<Extra> = (claims: Readonly<Record<string, unknown>>) => Extra;
@@ -167,7 +162,11 @@ export class AccessToken<
     try {
       wire.uuid(claims.sub, 'sub');
     } catch (error) {
-      throw invalidToken('invalid_claims', 'the token subject is not an account ID', error);
+      throw AuthError.invalidToken(
+        'invalid_claims',
+        'the token subject is not an account ID',
+        error
+      );
     }
     return new AccessToken(claims, extra, context, { kind: 'user', id: claims.sub });
   }
@@ -200,10 +199,14 @@ export class IdToken extends AuthenticatedToken<IdTokenClaims> {
   /** The token as issued. */
   readonly token: string;
 
-  /** @internal */
-  constructor(claims: IdTokenClaims, token: string, context: Context) {
+  private constructor(claims: IdTokenClaims, token: string, context: Context) {
     super(claims, context);
     this.token = token;
+  }
+
+  /** @internal Wraps validated claims and the compact token they came from. */
+  static from(claims: IdTokenClaims, token: string, context: Context): IdToken {
+    return new IdToken(claims, token, context);
   }
 }
 
@@ -217,19 +220,30 @@ export class LogoutToken {
   /** What the token ends: its `sid` when it names one, else every session of its `sub`. */
   readonly target: LogoutTarget;
 
+  private constructor(claims: LogoutTokenClaims, target: LogoutTarget) {
+    this.claims = claims;
+    this.target = target;
+  }
+
   /**
    * @internal Applies the checks particular to logout tokens: a lifetime of at most
    * 10 minutes, and `sub` or `sid`. Decoding already required the logout event and no
    * `nonce`.
    */
-  constructor(claims: LogoutTokenClaims) {
+  static from(claims: LogoutTokenClaims): LogoutToken {
     if (claims.exp - claims.iat > MAX_LOGOUT_LIFETIME) {
-      throw invalidToken('lifetime_too_long', 'the logout token is valid for over 10 minutes');
+      throw AuthError.invalidToken(
+        'lifetime_too_long',
+        'the logout token is valid for over 10 minutes'
+      );
     }
-    if (claims.sid !== undefined) this.target = { kind: 'session', sid: claims.sid };
-    else if (claims.sub !== undefined) this.target = { kind: 'subject', sub: claims.sub };
-    else throw invalidToken('invalid_claims', 'the logout token names neither sub nor sid');
-    this.claims = claims;
+    if (claims.sid !== undefined) {
+      return new LogoutToken(claims, { kind: 'session', sid: claims.sid });
+    }
+    if (claims.sub !== undefined) {
+      return new LogoutToken(claims, { kind: 'subject', sub: claims.sub });
+    }
+    throw AuthError.invalidToken('invalid_claims', 'the logout token names neither sub nor sid');
   }
 }
 
@@ -271,17 +285,20 @@ export class TokenValidator {
   ): Promise<IdToken> {
     const [decoded] = await this.#decode(token, ID, client);
     if (nonce !== undefined && decoded.nonce !== nonce) {
-      throw invalidToken('nonce_mismatch', 'the ID token nonce does not match this login');
+      throw AuthError.invalidToken(
+        'nonce_mismatch',
+        'the ID token nonce does not match this login'
+      );
     }
     if (decoded.azp !== undefined && decoded.azp !== client) {
-      throw invalidToken(
+      throw AuthError.invalidToken(
         'wrong_authorized_party',
         `the ID token authorized party is ${decoded.azp}, expected ${client}`
       );
     }
-    const id = new IdToken(decoded, token, { clock: this.#clock });
+    const id = IdToken.from(decoded, token, { clock: this.#clock });
     if (maxAge !== undefined && !id.meets({ max_age: maxAge })) {
-      throw invalidToken(
+      throw AuthError.invalidToken(
         'authentication_too_old',
         `the authentication is older than ${String(maxAge)} seconds`
       );
@@ -292,7 +309,7 @@ export class TokenValidator {
   /** A back-channel logout token for `client`. */
   async logoutToken(token: string, client: string): Promise<LogoutToken> {
     const [decoded] = await this.#decode(token, LOGOUT, client);
-    return new LogoutToken(decoded);
+    return LogoutToken.from(decoded);
   }
 
   /**
@@ -318,10 +335,10 @@ export class TokenValidator {
       // The claims decoded, so `raw` is an object.
       extra = read === undefined ? (undefined as X) : read(raw as Record<string, unknown>);
     } catch (error) {
-      throw invalidToken('invalid_claims', 'the token claims are invalid', error);
+      throw AuthError.invalidToken('invalid_claims', 'the token claims are invalid', error);
     }
     if (decoded.iss !== this.#issuer) {
-      throw invalidToken(
+      throw AuthError.invalidToken(
         'issuer_mismatch',
         `the token issuer is ${decoded.iss}, expected ${this.#issuer}`
       );
@@ -329,15 +346,16 @@ export class TokenValidator {
     const audiences = typeof decoded.aud === 'string' ? [decoded.aud] : decoded.aud;
     const others = kind.exclusiveAudience && audiences.some((value) => value !== audience);
     if (others || !audiences.includes(audience)) {
-      throw invalidToken('wrong_audience', `the token audience is not ${audience}`);
+      throw AuthError.invalidToken('wrong_audience', `the token audience is not ${audience}`);
     }
     const now = this.#clock();
-    if (now >= decoded.exp * 1000 + LEEWAY) throw invalidToken('expired', 'the token expired');
+    if (now >= decoded.exp * 1000 + LEEWAY)
+      throw AuthError.invalidToken('expired', 'the token expired');
     if (decoded.nbf !== undefined && decoded.nbf * 1000 > now + LEEWAY) {
-      throw invalidToken('not_yet_valid', 'the token is not valid yet');
+      throw AuthError.invalidToken('not_yet_valid', 'the token is not valid yet');
     }
     if (decoded.iat * 1000 > now + LEEWAY) {
-      throw invalidToken('issued_in_future', 'the token is issued in the future');
+      throw AuthError.invalidToken('issued_in_future', 'the token is issued in the future');
     }
     return [decoded, extra];
   }

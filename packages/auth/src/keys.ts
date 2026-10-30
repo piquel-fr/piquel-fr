@@ -1,7 +1,7 @@
 /** Compact JWS parsing and the signing key cache. */
 import * as base64 from './base64.ts';
 import { asciiLowercase } from './challenge.ts';
-import { AuthError, type TokenReason } from './error.ts';
+import { AuthError } from './error.ts';
 import { type Fetch, Http, type Reply } from './http.ts';
 import * as json from './json.ts';
 import type { Algorithm, Jwk, TokenType } from './protocol.ts';
@@ -18,11 +18,6 @@ const DEFAULT_LIFETIME = 60 * 60_000;
 const MAX_LIFETIME = 24 * 60 * 60_000;
 /** `typ` media types may carry this prefix (RFC 7515 §4.1.9). */
 const MEDIA_TYPE_PREFIX = 'application/';
-
-/** A token failed the check `reason` names. */
-function invalidToken(reason: TokenReason, message: string): AuthError {
-  return new AuthError({ code: 'invalid_token', reason }, message);
-}
 
 /** The protected header of a compact JWS. */
 export type JwsHeader = {
@@ -80,7 +75,7 @@ export class Jws {
    */
   static parse(token: string): Jws {
     if (new TextEncoder().encode(token).length > MAX_TOKEN_BYTES) {
-      throw invalidToken('malformed', 'the token exceeds 16 KiB');
+      throw AuthError.invalidToken('malformed', 'the token exceeds 16 KiB');
     }
     const segments = token.split('.');
     const [header, payload, signature] = segments;
@@ -90,11 +85,12 @@ export class Jws {
       signature === undefined ||
       segments.length !== 3
     ) {
-      throw invalidToken('malformed', 'the token is not three segments');
+      throw AuthError.invalidToken('malformed', 'the token is not three segments');
     }
     const decode = (segment: string) => {
       const bytes = base64.decode(segment);
-      if (bytes === undefined) throw invalidToken('malformed', 'a segment is not base64url');
+      if (bytes === undefined)
+        throw AuthError.invalidToken('malformed', 'a segment is not base64url');
       return bytes;
     };
     const headerBytes = decode(header);
@@ -111,7 +107,7 @@ export class Jws {
       );
     }
     if (json.isObject(raw) && Object.hasOwn(raw, 'crit')) {
-      throw invalidToken(
+      throw AuthError.invalidToken(
         'unsupported_critical_header',
         'the token requires header extensions this SDK does not understand'
       );
@@ -127,7 +123,7 @@ export class Jws {
     const typ = asciiLowercase(this.header.typ ?? '');
     const bare = typ.startsWith(MEDIA_TYPE_PREFIX) ? typ.slice(MEDIA_TYPE_PREFIX.length) : typ;
     if (this.header.typ === undefined || bare !== asciiLowercase(expected)) {
-      throw invalidToken(
+      throw AuthError.invalidToken(
         'wrong_type',
         `the token type is ${JSON.stringify(this.header.typ ?? null)}, expected ${expected}`
       );
@@ -141,7 +137,7 @@ export class Jws {
   requireAlgorithm(allowed: readonly Algorithm[]): Algorithm {
     const algorithm = allowed.find((name) => name === this.header.alg);
     if (algorithm === undefined) {
-      throw invalidToken(
+      throw AuthError.invalidToken(
         'unsupported_algorithm',
         `the token algorithm ${JSON.stringify(this.header.alg)} is not accepted`
       );
@@ -182,15 +178,23 @@ class SigningKey {
     this.#jwk = key;
   }
 
-  /** The key, imported for RS256 verification on first use. */
+  /**
+   * The key, imported for RS256 verification on first use. A modulus outside 2048 to
+   * 8192 bits is refused, as the Rust SDK's verifier refuses it, so no SDK accepts a
+   * token signed with a weak key.
+   */
   imported(): Promise<CryptoKey> {
-    this.#imported ??= crypto.subtle.importKey(
-      'jwk',
-      { kty: this.#jwk.kty, n: this.#jwk.n, e: this.#jwk.e },
-      { name: 'RSASSA-PKCS1-v1_5', hash: 'SHA-256' },
-      false,
-      ['verify']
-    );
+    this.#imported ??= (async () => {
+      const bits = (base64.decode(this.#jwk.n)?.length ?? 0) * 8;
+      if (bits < 2048 || bits > 8192) throw new RangeError(`an RSA key of ${String(bits)} bits`);
+      return crypto.subtle.importKey(
+        'jwk',
+        { kty: this.#jwk.kty, n: this.#jwk.n, e: this.#jwk.e },
+        { name: 'RSASSA-PKCS1-v1_5', hash: 'SHA-256' },
+        false,
+        ['verify']
+      );
+    })();
     return this.#imported;
   }
 }
@@ -313,10 +317,13 @@ export class KeyCache {
    */
   async verify(jws: Jws, algorithm: Algorithm): Promise<void> {
     const kid = jws.header.kid;
-    if (kid === undefined) throw invalidToken('unknown_key', 'the token names no key');
+    if (kid === undefined) throw AuthError.invalidToken('unknown_key', 'the token names no key');
     const key = await this.#key(kid);
     if (!key.algorithms.includes(algorithm)) {
-      throw invalidToken('unknown_key', `key ${JSON.stringify(kid)} is not for ${algorithm}`);
+      throw AuthError.invalidToken(
+        'unknown_key',
+        `key ${JSON.stringify(kid)} is not for ${algorithm}`
+      );
     }
     let verified: boolean;
     try {
@@ -324,7 +331,7 @@ export class KeyCache {
     } catch {
       verified = false;
     }
-    if (!verified) throw invalidToken('bad_signature', 'the token signature is invalid');
+    if (!verified) throw AuthError.invalidToken('bad_signature', 'the token signature is invalid');
   }
 
   /** The key named `kid`, if the cached keys hold it and are fresh. */
@@ -362,7 +369,10 @@ export class KeyCache {
     if (this.#failed) {
       throw new AuthError({ code: 'network' }, 'signing keys could not be fetched recently');
     }
-    throw invalidToken('unknown_key', `no signing key matches key ID ${JSON.stringify(kid)}`);
+    throw AuthError.invalidToken(
+      'unknown_key',
+      `no signing key matches key ID ${JSON.stringify(kid)}`
+    );
   }
 
   /** Fetches the key set, keeping the old one if the fetch fails. */

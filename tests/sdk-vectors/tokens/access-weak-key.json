@@ -1,0 +1,28 @@
+{
+  "description": "a token signed with a 1024-bit RSA key is rejected",
+  "now": 1767225600,
+  "input": {
+    "audience": "https://notes.example.com",
+    "issuer": "https://auth.example.com",
+    "jwks": {
+      "keys": [
+        {
+          "alg": "RS256",
+          "e": "AQAB",
+          "kid": "key-weak",
+          "kty": "RSA",
+          "n": "vif7rlXGNRP659r3qzSkhKuklfEcv2Wblz9UyHGx6HCjCuS0RmCLBvaJbW2ok47RCp1DddBovwMfCVmxSzfctbm7I9-juCc5LbOeyS3BZSkTZ10FQerfQFF179XlMOM3Bi7rC7REoWNU_jOvkMzTkZXXMxP-T8phpuEaYxTtJE0",
+          "use": "sig"
+        }
+      ]
+    },
+    "kind": "access",
+    "token": "eyJhbGciOiJSUzI1NiIsImtpZCI6ImtleS13ZWFrIiwidHlwIjoiYXQrand0In0.eyJpc3MiOiJodHRwczovL2F1dGguZXhhbXBsZS5jb20iLCJzdWIiOiIwMTkzNmYzZS04YzAwLTcwMDAtODAwMC0wMDAwMDAwMDAwMDEiLCJhdWQiOiJodHRwczovL25vdGVzLmV4YW1wbGUuY29tIiwiY2xpZW50X2lkIjoibm90ZXMtd2ViIiwianRpIjoiMDE5MzZmM2UtOGMwMC03MDAwLTgwMDAtMDAwMDAwMDAwMDAzIiwic2NvcGUiOiJub3RlczpyZWFkIG9wZW5pZCBwcm9maWxlIiwiaWF0IjoxNzY3MjI1NTQwLCJleHAiOjE3NjcyMjU4NDAsInNpZCI6IjAxOTM2ZjNlLThjMDAtNzAwMC04MDAwLTAwMDAwMDAwMDAwMiIsImF1dGhfdGltZSI6MTc2NzIyMjAwMCwiYW1yIjpbInBvcCIsIm1mYSIsInVzZXIiXSwiYWNyIjoicGhyIiwicHJlZmVycmVkX3VzZXJuYW1lIjoiYWRhIiwibmFtZSI6IkFkYSBMb3ZlbGFjZSIsInByb2ZpbGVfdmVyc2lvbiI6MX0.issGDgTpxnsckcfk4XRRHxOrgt8qj1zCuSmecQAS78oRbcVk9cIfewh2VkWc6CHqiZ02YQ08kTnx3uoiT8m4KhRUk_-c4sH1A4yTZGmyv8ZrSx6zimAdcGu-Zl6R005mYTGerAqe9_iJI5B1MEIARYjLbqkJiqdnYKBKZsC0h_Y"
+  },
+  "expected": {
+    "error": {
+      "code": "invalid_token",
+      "reason": "bad_signature"
+    }
+  }
+}

@@ -20,8 +20,9 @@ const api = issuer.resource({ identifier: 'notes-api', scopes: notes });
 
 export async function handle(request: Request): Promise<Response> {
   try {
-    const token = await api.authenticate(request);
-    token.require('notes:write'); // 'notes:delete' would not compile
+    // Requires notes:write, which a request without a token is told; 'notes:delete'
+    // would not compile.
+    const token = await api.authenticate(request, 'notes:write');
     token.requireAuthentication({ acr_values: 'phr', max_age: 300 });
     return Response.json({ user: token.subject.id });
   } catch (error) {
@@ -35,6 +36,8 @@ export async function handle(request: Request): Promise<Response> {
   PKCE and `https` endpoints.
 - `authenticate` reads `Authorization: Bearer` only, and `validate` takes a token.
   Both run every check of the SDK design in order, with a 30-second leeway on times.
+  `authenticate` also requires the scopes it is given, and names them in the
+  challenge to a request without a token.
 - `require` narrows the token's type to the scopes it proves, so a function can ask
   for `AccessToken<Notes, 'notes:write'>`. `has` checks without throwing.
 - `requireAuthentication` checks a `StepUpRequirement`: `phr` meets every class, and
