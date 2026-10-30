@@ -219,7 +219,6 @@ serves the routes under `/auth` and sets `event.locals.user`:
 import { Issuer } from '@piquel/auth';
 import { Login, MemoryBackend } from '@piquel/auth/server';
 import { AUTH_CLIENT_ID, AUTH_CLIENT_SECRET, ORIGIN } from '$app/env/private';
-import type { RequestEvent } from '@sveltejs/kit';
 import type { Handle } from '@sveltejs/kit/hooks';
 
 const issuer = await Issuer.discover('https://auth.piquel.fr');
@@ -233,26 +232,30 @@ const login = new Login(
   { backend: new MemoryBackend(), scopes: ['profile'] }
 );
 
+/** This app's origin, which its own form posts carry. */
+const origin = new URL(ORIGIN).origin;
+
 /** A form post from another site, which SvelteKit refuses unless vite.config.js trusts it. */
-function crossSiteForm({ request, url }: RequestEvent): boolean {
+function crossSiteForm(request: Request): boolean {
   const type = request.headers.get('content-type')?.split(';')[0]?.trim().toLowerCase() ?? '';
   const form = ['', 'application/x-www-form-urlencoded', 'multipart/form-data', 'text/plain'];
   return (
     ['POST', 'PUT', 'PATCH', 'DELETE'].includes(request.method) &&
     form.includes(type) &&
-    request.headers.get('origin') !== url.origin
+    request.headers.get('origin') !== origin
   );
 }
 
 export const handle: Handle = async ({ event, resolve }) => {
   // Back-channel logout is signed; every other cross-site form post is refused.
-  if (event.url.pathname !== '/auth/backchannel-logout' && crossSiteForm(event)) {
+  if (event.url.pathname !== '/auth/backchannel-logout' && crossSiteForm(event.request)) {
     return new Response('Cross-site form submissions are forbidden.', { status: 403 });
   }
   const routed = await login.handle(event.request); // /auth/login, /callback, /logout, …
   if (routed) return routed;
   // `event.url` names the page even when the request is for its `__data.json`.
-  const page = new Request(event.url, { headers: event.request.headers });
+  const { method, headers } = event.request;
+  const page = new Request(event.url, { method, headers });
   event.locals.user = await login.session(page);
   return resolve(event);
 };
@@ -265,7 +268,8 @@ export const handle: Handle = async ({ event, resolve }) => {
   which SvelteKit's form check refuses. So
   [`vite.config.js`](examples/sveltekit/server/vite.config.js) trusts every origin
   (`csrf.trustedOrigins: ['*']`), and the hook refuses every other cross-site form
-  post itself. `/auth/logout` checks its origin on its own.
+  post itself, comparing `Origin` with `ORIGIN` as SvelteKit's check would with
+  `paths.origin`. `/auth/logout` checks its origin on its own.
 - [`src/env.ts`](examples/sveltekit/server/src/env.ts) declares the settings the hook
   reads from `$app/env/private`, so the app does not start without them.
 - [`src/app.d.ts`](examples/sveltekit/server/src/app.d.ts) types `locals.user` as
@@ -281,8 +285,8 @@ export const handle: Handle = async ({ event, resolve }) => {
 with `@piquel/auth/browser`, from a root
 [`+layout.ts`](examples/sveltekit/static/src/routes/+layout.ts) with `ssr = false`.
 Auth sends the callback to `/`, the redirect URI to register; the layout finishes
-it, then redirects to the page the login left from, so SvelteKit's router renders
-that page rather than the callback. It keeps the session in memory for the page
+it, then redirects to the page the login left from, with or without a session, so
+SvelteKit's router renders that page rather than the callback. It keeps the session in memory for the page
 load, and restores it with `prompt=none` once otherwise.
 
 ## Other JWKS issuers

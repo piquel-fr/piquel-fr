@@ -18,11 +18,17 @@ export const load: Load = async ({ url }) => {
     redirectUri: `${url.origin}/`
   });
   if (!session) {
-    const signedIn = await auth.handleCallback();
-    if (signedIn) {
+    const before = location.href;
+    const signedIn = await auth.handleCallback().catch((error: unknown) => {
+      // The sign-in failed, such as the user cancelling at auth: stay signed out.
+      console.error(error);
+      return null;
+    });
+    // A callback, with or without a session, put the page the login left from back
+    // in the address bar: render that page rather than the callback.
+    if (location.href !== before) {
       session = signedIn;
-      // The address bar is back at the page the login left from: render that page.
-      redirect(303, location.pathname + location.search);
+      redirect(303, location.href);
     }
     session = await auth.restore({ scopes: ['profile'] });
   }
