@@ -18,7 +18,7 @@
  * await session.fetch('https://notes.example/notes');
  * ```
  */
-import { parseChallenge } from './challenge.ts';
+import { parseChallenge, stepUpRequirement } from './challenge.ts';
 import { type AuthorizeRequest, type Client, type ClientConfig, pendingLogin } from './client.ts';
 import type { PendingLogin, Tokens } from './client.ts';
 import { AuthError } from './error.ts';
@@ -26,8 +26,9 @@ import type { Issuer } from './issuer.ts';
 import * as json from './json.ts';
 import { type PasskeyAuthorization, PasskeyCeremony, PasskeyError } from './passkey.ts';
 import { type Platform, platform } from './platform.ts';
-import type { IdTokenClaims, StepUpRequirement } from './protocol.ts';
+import type { IdTokenClaims } from './protocol.ts';
 import type { Scopes } from './scope.ts';
+import { REFRESH_MARGIN, STEP_UP_RETRY } from './time.ts';
 import type { IdToken } from './token.ts';
 
 export {
@@ -37,13 +38,6 @@ export {
   type PasskeyStep
 } from './passkey.ts';
 
-/** How long before its expiry an access token is refreshed, in milliseconds. */
-const EXPIRY_MARGIN = 30_000;
-/**
- * How long after a step-up's return a refused step-up is an error rather than a new
- * step-up, in milliseconds: the retry of the action that asked for it.
- */
-const STEP_UP_RETRY_WINDOW = 60_000;
 /** What a `prompt=none` login answers when auth has no session it can use silently. */
 const NO_SILENT_SESSION = [
   'login_required',
@@ -92,12 +86,16 @@ export class BrowserClient {
   /** Whether a restore came back without a session on this page load. */
   #restored = false;
 
-  /** @internal Use {@link browserClient}. */
-  constructor(issuer: Issuer, config: BrowserClientConfig) {
+  private constructor(issuer: Issuer, config: BrowserClientConfig) {
     const { platform: injected, ...registration } = config;
     this.client = issuer.client(registration);
     this.platform = injected ?? platform();
     this.#key = `@piquel/auth:login:${registration.clientId}`;
+  }
+
+  /** @internal Use {@link browserClient}. */
+  static from(issuer: Issuer, config: BrowserClientConfig): BrowserClient {
+    return new BrowserClient(issuer, config);
   }
 
   /**
@@ -114,20 +112,23 @@ export class BrowserClient {
       return null;
     }
     const stored = this.#take();
-    this.platform.history.replaceState(null, '', stored?.returnTo ?? callback.pathname);
+    // The router's own state, if any, stays: only the address changes.
+    const { history } = this.platform;
+    history.replaceState(history.state, '', stored?.returnTo ?? callback.pathname);
     if (stored === undefined) {
       throw new AuthError(
         { code: 'callback', reason: 'state_mismatch' },
         'no login of this page is waiting for this authorization response'
       );
     }
+    // A restore is tried once per page load, whatever its outcome.
+    if (stored.purpose === 'restore') this.#restored = true;
     try {
       return await this.#session(stored.pending, here.searchParams, stored.purpose === 'step-up');
     } catch (error) {
       const silent =
         error instanceof AuthError && NO_SILENT_SESSION.includes(error.response?.error ?? '');
       if (stored.purpose !== 'restore' || !silent) throw error;
-      this.#restored = true;
       return null;
     }
   }
@@ -145,8 +146,9 @@ export class BrowserClient {
 
   /** Sends the browser to auth's sign-in pages, coming back to {@link handleCallback}. */
   async login(request: SignInRequest = {}): Promise<never> {
+    const returnTo = this.#returnTo(request);
     const { url, pending } = await this.client.authorize(request);
-    return this.#redirect(url, pending, request);
+    return this.#redirect(url, pending, request, returnTo);
   }
 
   /**
@@ -160,16 +162,17 @@ export class BrowserClient {
    * throw.
    */
   async signInWithPasskey(request: SignInRequest = {}): Promise<Session> {
+    const returnTo = this.#returnTo(request);
     const { url, pending } = await this.client.authorize(request);
     // Without pushed requests, there is no `request_uri` to sign in with on the page.
     const requestUri = new URL(url).searchParams.get('request_uri');
-    if (requestUri === null) return this.#redirect(url, pending, request);
+    if (requestUri === null) return this.#redirect(url, pending, request, returnTo);
     let authorization: PasskeyAuthorization;
     try {
       authorization = await new PasskeyCeremony(this.client.issuer, this.platform).run(requestUri);
     } catch (error) {
       if (!(error instanceof PasskeyError)) throw error;
-      if (error.unclaimed) return this.#redirect(url, pending, request);
+      if (error.unclaimed) return this.#redirect(url, pending, request, returnTo);
       return this.login(request);
     }
     return this.#session(pending, new URLSearchParams(authorization), false);
@@ -181,16 +184,29 @@ export class BrowserClient {
     return new Promise<never>(() => undefined);
   }
 
-  /** Keeps `request`'s pending login until its callback, and leaves for `url`. */
-  #redirect(url: string, pending: PendingLogin, request: SignInRequest): Promise<never> {
-    const purpose: Purpose =
-      request.prompt === 'none' ? 'restore' : request.stepUp === undefined ? 'sign-in' : 'step-up';
+  /**
+   * Where `request`'s login comes back to: its `returnTo`, which must be on this
+   * page's origin, or this page. Checked before anything is sent.
+   */
+  #returnTo(request: SignInRequest): string {
     const here = new URL(this.platform.location.href);
     const returnTo = new URL(request.returnTo ?? here.href, here);
     if (returnTo.origin !== here.origin) {
       throw new TypeError(`returnTo must be on this page's origin, not ${returnTo.origin}`);
     }
-    const stored: StoredLogin = { pending, returnTo: returnTo.href, purpose };
+    return returnTo.href;
+  }
+
+  /** Keeps `request`'s pending login until its callback, and leaves for `url`. */
+  #redirect(
+    url: string,
+    pending: PendingLogin,
+    request: SignInRequest,
+    returnTo: string
+  ): Promise<never> {
+    const purpose: Purpose =
+      request.prompt === 'none' ? 'restore' : request.stepUp === undefined ? 'sign-in' : 'step-up';
+    const stored: StoredLogin = { pending, returnTo, purpose };
     this.platform.storage.setItem(this.#key, JSON.stringify(stored));
     return this.away(url);
   }
@@ -215,7 +231,7 @@ export class BrowserClient {
     steppedUp: boolean
   ): Promise<Session> {
     const tokens = await this.client.complete(pending, response);
-    return new Session(this, tokens as SessionTokens, steppedUp);
+    return Session.from(this, tokens as SessionTokens, steppedUp);
   }
 }
 
@@ -235,11 +251,15 @@ export class Session {
   /** When this session returned from a step-up, until a refused step-up uses it. */
   #steppedUpAt: number | undefined;
 
-  /** @internal */
-  constructor(owner: BrowserClient, tokens: SessionTokens, steppedUp: boolean) {
+  private constructor(owner: BrowserClient, tokens: SessionTokens, steppedUp: boolean) {
     this.#owner = owner;
     this.#tokens = tokens;
     this.#steppedUpAt = steppedUp ? this.#clock() : undefined;
+  }
+
+  /** @internal `steppedUp` marks a session returning from a step-up login. */
+  static from(owner: BrowserClient, tokens: SessionTokens, steppedUp: boolean): Session {
+    return new Session(owner, tokens, steppedUp);
   }
 
   /** The validated ID token. */
@@ -259,12 +279,13 @@ export class Session {
 
   /**
    * A current access token, refreshed when it is about to expire. Without a refresh
-   * token, an expired one throws `invalid_token` (`expired`): {@link BrowserClient.restore}
-   * signs in again.
+   * token, it is used until it expires, then throws `invalid_token` (`expired`):
+   * {@link BrowserClient.restore} signs in again.
    */
   async accessToken(): Promise<string> {
-    if (this.#clock() < this.#tokens.expiresAt - EXPIRY_MARGIN) return this.#tokens.accessToken;
     const refreshToken = this.#tokens.refreshToken;
+    const margin = refreshToken === undefined ? 0 : REFRESH_MARGIN;
+    if (this.#clock() < this.#tokens.expiresAt - margin) return this.#tokens.accessToken;
     if (refreshToken === undefined) {
       throw new AuthError({ code: 'invalid_token', reason: 'expired' }, 'the access token expired');
     }
@@ -292,12 +313,10 @@ export class Session {
     const header = response.status === 401 ? response.headers.get('www-authenticate') : null;
     const challenge = header === null ? undefined : parseChallenge(header);
     if (challenge?.error !== 'insufficient_user_authentication') return response;
-    const requirement: StepUpRequirement = {};
-    if (challenge.acr_values !== undefined) requirement.acr_values = challenge.acr_values;
-    if (challenge.max_age !== undefined) requirement.max_age = challenge.max_age;
+    const requirement = stepUpRequirement(challenge);
     // Every refusal within the window is the retry, concurrent ones included.
     const retry =
-      this.#steppedUpAt !== undefined && this.#clock() - this.#steppedUpAt < STEP_UP_RETRY_WINDOW;
+      this.#steppedUpAt !== undefined && this.#clock() - this.#steppedUpAt < STEP_UP_RETRY;
     if (retry) {
       throw new AuthError(
         { code: 'insufficient_user_authentication', requirement },
@@ -327,7 +346,7 @@ export class Session {
   async #refresh(refreshToken: string): Promise<void> {
     const tokens = await this.#owner.client.refresh(refreshToken);
     const idToken = tokens.idToken ?? this.#tokens.idToken;
-    if (idToken.claims.sub !== this.#tokens.idToken.claims.sub) {
+    if (!this.#tokens.idToken.sameUser(idToken)) {
       throw new AuthError(
         { code: 'invalid_token', reason: 'invalid_claims' },
         'the refreshed ID token names another user'
@@ -342,5 +361,5 @@ export class Session {
  * issuer with `Issuer.discover` from `@piquel/auth` first.
  */
 export function browserClient(issuer: Issuer, config: BrowserClientConfig): BrowserClient {
-  return new BrowserClient(issuer, config);
+  return BrowserClient.from(issuer, config);
 }

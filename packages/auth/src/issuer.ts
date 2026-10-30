@@ -100,9 +100,19 @@ export class Issuer {
         `issuer ${JSON.stringify(issuer)} must be an https URL without query or fragment`
       );
     }
-    const url = `${issuer.replace(/\/+$/, '')}${OPENID_CONFIGURATION_PATH}`;
+    const url = Issuer.#under(issuer, OPENID_CONFIGURATION_PATH);
     const reply = (await new Http(options.fetch).get(url)).ok();
     return new Issuer(Issuer.#check(issuer, reply), options);
+  }
+
+  /** @internal `path` under the issuer identifier, where auth serves its own routes. */
+  url(path: string): string {
+    return Issuer.#under(this.issuer, path);
+  }
+
+  /** `path` under `issuer`, whatever slash it ends with. */
+  static #under(issuer: string, path: string): string {
+    return `${issuer.replace(/\/+$/, '')}${path}`;
   }
 
   /** Parses a metadata document and checks it belongs to `issuer`. */

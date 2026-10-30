@@ -12,7 +12,7 @@ behavior and names.
 | --- | --- | --- | --- |
 | `crates/common` | `piquel-common` | yes | Shared types; with no features, the IDs and wire types shared by auth and the Rust SDK |
 | `crates/auth-sdk` | `piquel-auth` | yes | Rust SDK; the `axum` feature adds the axum integration |
-| `packages/auth` | `@piquel/auth` | not yet | TypeScript SDK, ESM only, with no runtime dependencies: `fetch` and WebCrypto, so it runs in browsers, Node, Deno, Bun and Workers; `@piquel/auth/server` is its server-side login over standard `Request` and `Response` |
+| `packages/auth` | `@piquel/auth` | not yet | TypeScript SDK, ESM only, with no runtime dependencies: `fetch` and WebCrypto, so it runs in browsers, Node, Deno, Bun and Workers; `@piquel/auth/server` is its server-side login over standard `Request` and `Response`, and `@piquel/auth/browser` its public client for apps without a server, passkey sign-in on the app's page included |
 | `tests/sdk-vectors` | none | no | Shared test vectors |
 
 ## Wire types
