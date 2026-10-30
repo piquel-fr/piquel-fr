@@ -202,6 +202,11 @@ random session key, as the Rust SDK's axum login routes and `@piquel/auth/server
 do, in a `__Host-` cookie that is `Secure`, `HttpOnly` and `SameSite=Lax`. Every
 sign-in starts a session under a fresh key. Refresh tokens never reach the browser.
 
+Browser apps with no server are public clients and keep tokens in the page's memory
+only. Only the pending login crosses a redirect, in `sessionStorage`, and its
+callback deletes it. After a reload they authorize again with `prompt=none`, at most
+once per page load, so a user signed out at auth does not loop.
+
 Applications choose where sessions live by implementing a small storage backend:
 load, an insert that stores only where no record is, a compare-and-swap replace, and
 a remove that reports whether the record existed. The SDK keeps everything else: the
@@ -307,7 +312,7 @@ A client retries at most once per user action. It signs the user in again with t
 challenge's values and returns to the same page. If the resource still refuses on
 that return, the client reports the error instead of redirecting again. A server-side
 client recognizes the return by a short-lived marker, so a much later return counts
-as a new action. The login check above also means a step-up sign-in never completes
+as a new action; a browser client by the session the return created, for a minute. The login check above also means a step-up sign-in never completes
 below its requirement.
 
 ## Forward compatibility

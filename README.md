@@ -577,7 +577,8 @@ claimed at start, so the page pushes a fresh one before sending the browser to
 auth with it. The page should also redirect when the browser lacks related origins
 (`PublicKeyCredential.getClientCapabilities()` has no `relatedOrigins`), and push a
 fresh request first when a start or the passkey prompt failed, since auth may have
-claimed the first one.
+claimed the first one. The TypeScript SDK's browser client runs this flow with every fallback
+(`signInWithPasskey` in [`@piquel/auth/browser`](packages/auth/README.md#browser-apps)).
 
 ### Authentication claims
 

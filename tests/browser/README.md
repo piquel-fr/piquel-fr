@@ -53,6 +53,14 @@ logout ends auth's session and returns to the app. The test needs the client's s
 in `E2E_SERVER_CLIENT_SECRET`, and is skipped without it. Back-channel logout needs a
 public address auth can post to, so unit tests cover it instead.
 
+`browser-client.spec.ts` runs the TypeScript SDK's browser client, built, in the
+page of `browser-e2e-inline`, which imports it from `/sdk/`: a redirect sign-in that
+a reload restores with `prompt=none`, leaving no token in `localStorage`,
+`sessionStorage` or cookies; a passkey sign-in that never leaves the page; and the
+passkey sign-in's fallbacks to auth's pages, `prompt=consent` with the request auth
+left unclaimed, a failed passkey prompt with a fresh one, and a browser without
+related origins. `just web test-browser` builds the package first.
+
 `just web browser-client` registers the four clients with the auth database
 configured in the environment, as CI does, the last with the secret in
 `E2E_SERVER_CLIENT_SECRET`: 32 random bytes in unpadded base64url. Previews do not register them by default: run

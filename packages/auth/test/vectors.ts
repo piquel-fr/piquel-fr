@@ -46,12 +46,12 @@ export const TOKEN_URL = `${ISSUER}/oauth/token`;
 /** The callback of the vectors' client, `notes-web`. */
 export const REDIRECT_URI = 'https://client.example.com/callback';
 
-/** A fake `fetch` answering each URL with its route's response, counting requests. */
+/** A fake `fetch` answering each URL with its route's response to the request, counting requests. */
 export class FakeFetch {
   readonly requests: { url: string; init: RequestInit }[] = [];
-  readonly routes: Record<string, () => Response | Promise<Response>>;
+  readonly routes: Record<string, (init: RequestInit) => Response | Promise<Response>>;
 
-  constructor(routes: Record<string, () => Response | Promise<Response>>) {
+  constructor(routes: Record<string, (init: RequestInit) => Response | Promise<Response>>) {
     this.routes = routes;
   }
 
@@ -92,7 +92,7 @@ export class FakeFetch {
   readonly fetch: Fetch = (url, init) => {
     this.requests.push({ url, init });
     const route = this.routes[url];
-    return Promise.resolve(route ? route() : new Response(null, { status: 404 }));
+    return Promise.resolve(route ? route(init) : new Response(null, { status: 404 }));
   };
 }
 
