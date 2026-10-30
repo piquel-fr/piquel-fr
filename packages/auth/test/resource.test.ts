@@ -51,10 +51,9 @@ test('a bearer token is read from Authorization, and nothing else', async () => 
   assert.deepEqual(token.subject, { kind: 'user', id: '01936f3e-8c00-7000-8000-000000000001' });
   const missing = `Bearer resource_metadata="${METADATA}"`;
   assert.deepEqual(await answer(() => resource.authenticate(request())), [401, missing]);
-  assert.deepEqual(await answer(() => resource.authenticate(request('Basic YTpi'))), [
-    401,
-    missing
-  ]);
+  for (const other of ['Basic YTpi', 'Digest username="a", realm="b"']) {
+    assert.deepEqual(await answer(() => resource.authenticate(request(other))), [401, missing]);
+  }
   // A required scope is named even without a token, so the client knows what to ask for.
   assert.deepEqual(await answer(() => resource.authenticate(request(), 'notes:write')), [
     401,

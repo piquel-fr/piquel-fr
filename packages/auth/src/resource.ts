@@ -77,17 +77,20 @@ export class Resource<S extends string = never, X = undefined> {
    * requires `scopes`, narrowing the token's type to them. Throws `missing_token`
    * when there is none (another scheme counts as none), whose challenge names
    * `scopes`, and `invalid_request` when the header is malformed: `Bearer` without a
-   * token, or several `Authorization` headers, which `Headers` joins with commas, as
-   * no token holds one. Otherwise see {@link validate} and {@link AccessToken.require}.
+   * token, or several `Authorization` headers one of which is Bearer, as the Rust
+   * SDK reads them (`Headers` joins them with `, `). Otherwise see {@link validate} and {@link AccessToken.require}.
    */
   async authenticate<const T extends readonly S[] = readonly []>(
     request: { headers: Headers },
     ...scopes: T & { [K in keyof T]: Single<T[K]> }
   ): Promise<AccessToken<S, T[number], X>> {
     const header = request.headers.get('authorization') ?? '';
+    // One header of another scheme may hold commas itself, such as Digest's.
+    const values = header.split(', ');
+    const joined = values.length > 1 && values.some((value) => /^bearer(?: |$)/i.test(value));
     const space = header.indexOf(' ');
     const scheme = space === -1 ? header : header.slice(0, space);
-    if (header.includes(',') || (asciiLowercase(scheme) === 'bearer' && space === -1)) {
+    if (joined || (asciiLowercase(scheme) === 'bearer' && space === -1)) {
       throw new AuthError(
         { code: 'invalid_request' },
         'the Authorization header is malformed'
