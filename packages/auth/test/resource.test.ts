@@ -1,15 +1,18 @@
 /** Resource servers: reading the Authorization header, scopes, step-up and the answers. */
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { AuthError, Issuer, defineScopes } from '../src/index.ts';
+import { AuthError, type ClaimsReader, Issuer, defineScopes } from '../src/index.ts';
 import { FakeFetch, ISSUER, vector } from './vectors.ts';
 
 const VALID = vector('tokens', 'access-valid');
 const METADATA = 'https://notes.example.com/.well-known/oauth-protected-resource';
 const notes = defineScopes('notes:read', 'notes:write');
 
-/** The vectors' notes API at the vectors' time, its key endpoint up or down. */
-async function api(keys: 'up' | 'down' = 'up') {
+/**
+ * The vectors' notes API at the vectors' time, its key endpoint up or down, reading
+ * application claims with `claims`.
+ */
+async function api<X = undefined>(keys: 'up' | 'down' = 'up', claims?: ClaimsReader<X>) {
   const fetch = FakeFetch.issuer(keys === 'up' ? VALID.input.jwks : undefined);
   const issuer = await Issuer.discover(ISSUER, {
     fetch: fetch.fetch,
@@ -18,7 +21,8 @@ async function api(keys: 'up' | 'down' = 'up') {
   return issuer.resource({
     identifier: String(VALID.input.audience),
     scopes: notes,
-    metadata: METADATA
+    metadata: METADATA,
+    ...(claims && { claims })
   });
 }
 
@@ -91,4 +95,18 @@ test('scopes and step-up requirements answer with their challenges', async () =>
 test('keys that cannot be fetched are the server failing, without a challenge', async () => {
   const resource = await api('down');
   assert.deepEqual(await answer(() => resource.validate(String(VALID.input.token))), [503, null]);
+});
+
+test('application claims are read with the claims check, and fail it when invalid', async () => {
+  const read = await api('up', (claims) => ({ client: String(claims.client_id) }));
+  const token = await read.validate(String(VALID.input.token));
+  assert.deepEqual(token.extra, { client: 'notes-web' });
+  const strict = await api('up', (claims) => {
+    if (typeof claims.tenant !== 'string') throw new TypeError('tenant is required');
+    return claims.tenant;
+  });
+  await assert.rejects(strict.validate(String(VALID.input.token)), {
+    code: 'invalid_token',
+    reason: 'invalid_claims'
+  });
 });

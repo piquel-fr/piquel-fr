@@ -23,4 +23,4 @@ export { Jws, KeyCache, type JwsHeader, type KeyCacheOptions } from './keys.ts';
 export { Resource, type ResourceConfig } from './resource.ts';
 export { Scopes, defineScopes } from './scope.ts';
 export type { Clock } from './time.ts';
-export { AccessToken, type Subject } from './token.ts';
+export { AccessToken, type ClaimsReader, type Subject } from './token.ts';

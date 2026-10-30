@@ -2,10 +2,10 @@
 import { asciiLowercase } from './challenge.ts';
 import { AuthError } from './error.ts';
 import { Scopes } from './scope.ts';
-import type { AccessToken, TokenValidator } from './token.ts';
+import type { AccessToken, ClaimsReader, TokenValidator } from './token.ts';
 
 /** What a resource server is. */
-export type ResourceConfig<S extends string> = {
+export type ResourceConfig<S extends string, X = undefined> = {
   /**
    * The resource identifier, the `aud` its access tokens carry, such as `notes-api`.
    * It is compared exactly.
@@ -18,11 +18,17 @@ export type ResourceConfig<S extends string> = {
    * every challenge as `resource_metadata`.
    */
   metadata?: string;
+  /**
+   * Reads the application's own claims, which auth does not define, from each
+   * token's claims object into {@link AccessToken.extra}. It runs with the claims
+   * check: throwing fails the token with `invalid_claims`.
+   */
+  claims?: ClaimsReader<X>;
 };
 
 /**
  * Validates access tokens for one resource. `S` are its declared scopes, the only
- * ones {@link AccessToken.require} accepts.
+ * ones {@link AccessToken.require} accepts, and `X` its application claims.
  *
  * ```ts
  * const api = issuer.resource({ identifier: 'notes-api', scopes: defineScopes('notes:read') });
@@ -34,7 +40,7 @@ export type ResourceConfig<S extends string> = {
  * }
  * ```
  */
-export class Resource<S extends string = never> {
+export class Resource<S extends string = never, X = undefined> {
   /** The identifier its tokens' `aud` must contain. */
   readonly identifier: string;
   /** The declared scopes. */
@@ -42,9 +48,10 @@ export class Resource<S extends string = never> {
   /** Where its protected resource metadata is served, if configured. */
   readonly metadata: string | undefined;
   readonly #tokens: TokenValidator;
+  readonly #claims: ClaimsReader<X>;
 
   /** @internal Use {@link Issuer.resource}. */
-  constructor(tokens: TokenValidator, config: ResourceConfig<S>) {
+  constructor(tokens: TokenValidator, config: ResourceConfig<S, X>) {
     if (!/^[\x21-\x7e]+$/.test(config.identifier)) {
       throw new TypeError('a resource identifier must be printable ASCII without spaces');
     }
@@ -55,6 +62,7 @@ export class Resource<S extends string = never> {
     this.scopes = config.scopes ?? Scopes.of([]);
     this.metadata = config.metadata === undefined ? undefined : new URL(config.metadata).href;
     this.#tokens = tokens;
+    this.#claims = config.claims ?? (() => undefined as X);
   }
 
   /**
@@ -64,7 +72,7 @@ export class Resource<S extends string = never> {
    * token holding whitespace or commas, as several `Authorization` headers joined by
    * `Headers` do. Otherwise see {@link validate}.
    */
-  async authenticate(request: { headers: Headers }): Promise<AccessToken<S>> {
+  async authenticate(request: { headers: Headers }): Promise<AccessToken<S, never, X>> {
     const header = request.headers.get('authorization') ?? '';
     const space = header.indexOf(' ');
     if (asciiLowercase(space === -1 ? header : header.slice(0, space)) !== 'bearer') {
@@ -88,9 +96,14 @@ export class Resource<S extends string = never> {
    * times with a 30-second leeway. Throws `invalid_token` with the failed check as
    * `reason`, or `keys` and `network` errors when signing keys cannot be fetched.
    */
-  async validate(token: string): Promise<AccessToken<S>> {
+  async validate(token: string): Promise<AccessToken<S, never, X>> {
     try {
-      return await this.#tokens.accessToken<S>(token, this.identifier, this.metadata);
+      return await this.#tokens.accessToken<S, X>(
+        token,
+        this.identifier,
+        this.metadata,
+        this.#claims
+      );
     } catch (error) {
       throw error instanceof AuthError ? error.forResource(this.metadata) : error;
     }
