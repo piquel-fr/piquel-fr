@@ -91,6 +91,61 @@ tokens.idToken?.claims.sub;
 A confidential client authenticates with HTTP Basic, and a public one sends its
 `client_id`.
 
+## Server-side login
+
+`@piquel/auth/server` is the recommended way to sign users in: tokens stay on the
+server, and the browser holds only a random session key. It takes a standard
+`Request` and returns a `Response`, so it runs as is in Node, Deno, Bun, Workers,
+Hono or SvelteKit. [`examples/server.ts`](examples/server.ts) is a whole app on
+Node's `http` server.
+
+```ts
+import { Login, MemoryBackend } from '@piquel/auth/server';
+
+const login = new Login(
+  issuer.client({ clientId, clientSecret, redirectUri: 'https://notes.example/auth/callback' }),
+  { backend: new MemoryBackend(), scopes: ['profile', 'offline_access'] }
+);
+
+export async function fetch(request: Request): Promise<Response> {
+  const routed = await login.handle(request); // the routes under /auth; null otherwise
+  if (routed) return routed;
+  const user = await login.session(request); // null, or the signed-in user
+  if (!user) return login.signIn(request); // through login, and back to this page
+  const stepUp = user.require({ acr_values: 'phr', max_age: 300 });
+  if (stepUp) return stepUp; // a recent passkey sign-in, or through login again
+  return new Response(`Hello ${user.name}`); // user.accessToken calls APIs
+}
+```
+
+- **Routes**, under `mount` (`/auth` by default): `GET /login?return_to=/page`,
+  `GET /callback`, `POST /logout` and `POST /backchannel-logout`. Register
+  `<app>/auth/callback` as the redirect URI and `<app>/auth/backchannel-logout` as
+  the back-channel logout URI. `return_to` must be a same-origin path, and logout
+  accepts only posts from the app's own pages (`Sec-Fetch-Site`, else `Origin`). Every
+  answer has `Cache-Control: no-store`, and a backend failure answers 500, reported
+  with `console.error`.
+- **Sessions** live under a `__Host-piquel-session` cookie (`Secure`, `HttpOnly`,
+  `SameSite=Lax`), under a fresh key on every sign-in, for `sessionLifetime` (12 hours
+  by default). `session()` refreshes an access token about to expire, once for every
+  concurrent request and replica, through a lease in the session record; a refresh
+  whose outcome is unknown, or that auth refuses with `invalid_grant`, ends the
+  session.
+- **Back-channel logout** ends every session started under the token's `sid`, or
+  every session of its `sub`, on every replica sharing the backend. A replayed token
+  changes nothing.
+- **Step-up**: `user.require(requirement)` and `user.stepUp(challenge)`, for an API's
+  `insufficient_user_authentication` challenge read with `parseChallenge`, redirect
+  through login with `acr_values` and `max_age`, back to the same page. That return
+  is the retry: asked again, they answer 403 instead of another redirect.
+
+`MemoryBackend` loses every session on restart and is not shared between replicas.
+Apps implement `SessionBackend` instead: `load`, `insert` (only where no record is),
+`replace` (only at the expected version) and `remove`, over opaque records whose
+keys are SHA-256 digests, so one table with a single statement per operation is
+enough (the type's documentation shows PostgreSQL). Test it with
+`checkBackend(backend)`, which throws on the first broken rule.
+
 ## Other JWKS issuers
 
 `KeyCache` verifies JWS signatures against any JWKS URL, refetching once on an unknown

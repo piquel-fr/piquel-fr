@@ -8,6 +8,7 @@
  *   compile.
  * - **Applications** sign users in with {@link Issuer.client}: the authorization
  *   code flow with PKCE, pushed authorization requests, and the RFC 9207 issuer check.
+ *   `@piquel/auth/server` builds the routes and sessions of a server-side app on it.
  * - {@link KeyCache} verifies JWS signatures against any JWKS URL, refetching on key
  *   rotation without letting unknown key IDs flood the issuer.
  * - Every failure is an {@link AuthError}, whose `toResponse()` answers with the
