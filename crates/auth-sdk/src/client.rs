@@ -91,7 +91,8 @@ impl OAuthError {
     }
 }
 
-/// An authorization response failed, or its code could not be exchanged.
+/// A login could not start, its authorization response failed, or its code could not
+/// be exchanged.
 ///
 /// ```
 /// use piquel_auth::{
@@ -110,6 +111,13 @@ impl OAuthError {
 /// ```
 #[derive(Debug, Error)]
 pub enum LoginError {
+    /// The operating system could not supply random bytes for `state`, `nonce` and
+    /// the PKCE verifier.
+    #[error("operating system randomness is unavailable")]
+    Randomness(#[source] rand::Error),
+    /// The pushed authorization request failed (RFC 9126 §2.3).
+    #[error(transparent)]
+    Push(OAuthError),
     /// `state` is not the pending login's: the response belongs to another attempt.
     #[error("authorization response state does not match this login")]
     StateMismatch,
@@ -150,7 +158,10 @@ impl LoginError {
     pub const fn code(&self) -> SdkError {
         let reason = match self {
             Self::Denied { .. } => return SdkError::category(ErrorCategory::OAuth),
-            Self::Exchange(error) => return error.code(),
+            Self::Push(error) | Self::Exchange(error) => return error.code(),
+            // No shared category names a local failure; like an HTTP client that
+            // cannot be built, it keeps the SDK from reaching auth.
+            Self::Randomness(_) => return SdkError::category(ErrorCategory::Network),
             Self::StateMismatch | Self::ForeignLogin => ErrorReason::StateMismatch,
             Self::IssuerMismatch { .. } => ErrorReason::IssuerMismatch,
             Self::MissingIssuer => ErrorReason::MissingIssuer,
@@ -466,6 +477,14 @@ struct TokenResponse {
     refresh_token: Option<String>,
 }
 
+/// The pushed authorization endpoint's success response (RFC 9126 §2.2). Its
+/// `expires_in` is not needed: the browser is redirected at once.
+#[derive(Deserialize)]
+struct PushedAuthorization {
+    /// What the browser brings to the authorization endpoint, with `client_id`.
+    request_uri: String,
+}
+
 /// What the client shares across clones.
 struct ClientInner {
     /// The issuer it signs in with.
@@ -490,10 +509,12 @@ struct ClientInner {
 ///
 /// // 1. Send the browser to `url`, and keep the pending login server-side under its
 /// //    state, never in the browser: it holds the PKCE verifier.
-/// let (url, pending) = client.authorize(&AuthorizeRequest {
-///     scopes: "profile offline_access".parse()?,
-///     ..AuthorizeRequest::default()
-/// })?;
+/// let (url, pending) = client
+///     .authorize(&AuthorizeRequest {
+///         scopes: "profile offline_access".parse()?,
+///         ..AuthorizeRequest::default()
+///     })
+///     .await?;
 /// let saved = (pending.state().to_owned(), serde_json::to_string(&pending)?);
 ///
 /// // 2. On the callback, take the pending login back, once, and complete it.
@@ -536,18 +557,27 @@ impl Client {
         &self.0.config
     }
 
-    /// Builds the authorization URL to redirect the browser to, and the pending login
-    /// to store server-side until the callback.
+    /// Starts a login: the authorization URL to redirect the browser to, and the
+    /// pending login to store server-side until the callback.
+    ///
+    /// When discovery advertises a pushed authorization endpoint, the request is
+    /// pushed there (RFC 9126), authenticated as at the token endpoint, and the URL
+    /// carries only `client_id` and the returned `request_uri`. A client auth
+    /// requires to push can then sign in, and the request never crosses the browser.
+    /// Otherwise the URL carries the request itself.
     ///
     /// # Errors
-    /// Fails only if the operating system cannot supply random bytes.
-    pub fn authorize(
+    /// [`LoginError::Push`] if the push fails, with the OAuth error auth answered;
+    /// [`LoginError::Randomness`] if the operating system cannot supply random bytes.
+    pub async fn authorize(
         &self,
         request: &AuthorizeRequest,
-    ) -> Result<(Url, PendingLogin), rand::Error> {
-        let random = || -> Result<String, rand::Error> {
+    ) -> Result<(Url, PendingLogin), LoginError> {
+        let random = || -> Result<String, LoginError> {
             let mut bytes = [0; RANDOM_BYTES];
-            OsRng.try_fill_bytes(&mut bytes)?;
+            OsRng
+                .try_fill_bytes(&mut bytes)
+                .map_err(LoginError::Randomness)?;
             Ok(URL_SAFE_NO_PAD.encode(bytes))
         };
         let pending = PendingLogin {
@@ -566,24 +596,46 @@ impl Client {
             .map(str::to_owned)
             .collect();
         let challenge = URL_SAFE_NO_PAD.encode(Sha256::digest(pending.verifier.as_bytes()));
-        let mut url = self.issuer().metadata().authorization_endpoint.clone();
-        {
-            // `audience` is never sent: auth then picks the client's default resource.
-            let mut query = url.query_pairs_mut();
-            query
-                .append_pair("response_type", ResponseType::Code.as_str())
-                .append_pair("client_id", self.config().client_id.as_str())
-                .append_pair("redirect_uri", pending.redirect_uri.as_str())
-                .append_pair("scope", &scopes.to_string())
-                .append_pair("state", &pending.state)
-                .append_pair("nonce", &pending.nonce)
-                .append_pair("code_challenge", &challenge)
-                .append_pair("code_challenge_method", CodeChallengeMethod::S256.as_str());
-            if let Some(prompt) = request.prompt {
-                query.append_pair("prompt", prompt.as_str());
+        // `audience` is never sent: auth then picks the client's default resource.
+        // `client_id` is added where the request goes, as `post` adds it.
+        let mut parameters = vec![
+            ("response_type", ResponseType::Code.as_str().to_owned()),
+            ("redirect_uri", pending.redirect_uri.to_string()),
+            ("scope", scopes.to_string()),
+            ("state", pending.state.clone()),
+            ("nonce", pending.nonce.clone()),
+            ("code_challenge", challenge),
+            (
+                "code_challenge_method",
+                CodeChallengeMethod::S256.as_str().to_owned(),
+            ),
+        ];
+        parameters.extend(
+            request
+                .prompt
+                .map(|prompt| ("prompt", prompt.as_str().to_owned())),
+        );
+        parameters.extend(request.step_up.authorize_params());
+        let parameters: Vec<_> = parameters
+            .iter()
+            .map(|(name, value)| (*name, value.as_str()))
+            .collect();
+        let metadata = self.issuer().metadata();
+        let client_id = ("client_id", self.config().client_id.as_str());
+        let mut url = metadata.authorization_endpoint.clone();
+        match &metadata.pushed_authorization_request_endpoint {
+            Some(endpoint) => {
+                let push = async {
+                    let reply = self.post(endpoint, &parameters).await?;
+                    Self::read::<PushedAuthorization>("pushed authorization", &reply)
+                };
+                let pushed = push.await.map_err(LoginError::Push)?;
+                url.query_pairs_mut()
+                    .extend_pairs([client_id, ("request_uri", pushed.request_uri.as_str())]);
             }
-            for (name, value) in request.step_up.authorize_params() {
-                query.append_pair(name, &value);
+            None => {
+                url.query_pairs_mut()
+                    .extend_pairs([client_id].into_iter().chain(parameters));
             }
         }
         Ok((url, pending))
@@ -780,10 +832,11 @@ impl Client {
         }
     }
 
-    /// Parses a success body, or the OAuth error of a failed request.
+    /// Parses a success body, under any `2xx` since the pushed authorization endpoint
+    /// answers `201 Created`, or the OAuth error of a failed request.
     fn read<T: DeserializeOwned>(endpoint: &'static str, reply: &Reply) -> Result<T, OAuthError> {
         let status = reply.status.as_u16();
-        if reply.status == StatusCode::OK {
+        if reply.status.is_success() {
             // An empty body, as the revocation endpoint sends, parses as JSON null.
             let body: &[u8] = if reply.body.is_empty() {
                 b"null"

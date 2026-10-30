@@ -1959,6 +1959,7 @@ async fn sdk_login_client_runs_against_the_provider() {
             scopes: "profile email offline_access".parse().expect("scopes"),
             ..AuthorizeRequest::default()
         })
+        .await
         .expect("authorization URL");
 
     let mixed_up = CallbackParams {
@@ -2348,6 +2349,24 @@ async fn sdk_login_routes_run_against_the_provider() {
     assert_eq!(after.status(), StatusCode::SEE_OTHER);
 }
 
+/// A client required to push its authorization requests signs in through the SDK's
+/// login routes, which push them, so the browser carries only the `request_uri`.
+#[tokio::test]
+#[ignore = "requires TEST_DATABASE_URL"]
+async fn sdk_login_routes_push_for_clients_that_must() {
+    let mut app = LoginApp::start().await;
+    app.flow.client.require_pushed_authorization_requests = true;
+    crate::tests::replace(&app.flow.app.database, &app.flow.client)
+        .await
+        .expect("require pushed requests");
+    let (pending, authorize) = app.start_login("/auth/login", None).await;
+    let names: Vec<_> = authorize.query_pairs().map(|(name, _)| name).collect();
+    assert_eq!(names, ["client_id", "request_uri"]);
+    let browser = app.authorize(&authorize).await;
+    let callback = app.finish_login(browser, pending, None).await;
+    assert_eq!(LoginApp::location(&callback), "/");
+}
+
 /// A passkey confirmation within five minutes.
 struct RecentPasskey;
 
@@ -2375,10 +2394,9 @@ async fn sdk_step_up_runs_against_the_provider() {
         login,
         "/auth/login?return_to=%2Fsettings&acr_values=phr&max_age=300&step_up=true"
     );
+    // The pushed request carries `acr_values` and `max_age`: the social session is
+    // too weak for them, so the provider asks for a passkey.
     let (pending, authorize) = app.start_login(&login, Some(&first)).await;
-    assert_eq!(parameter(&authorize, "acr_values"), "phr");
-    assert_eq!(parameter(&authorize, "max_age"), "300");
-    // The social session is too weak, so the provider asks for a passkey.
     let prompt = app.authorize(&authorize).await;
     assert_eq!(location(&prompt).path(), routes::page::LOGIN);
 
@@ -2403,7 +2421,20 @@ async fn sdk_step_up_runs_against_the_provider() {
         .confirm_passkey(session, PasskeyId::new(), Utc::now())
         .await
         .expect("passkey confirmation");
-    let browser = app.authorize(&authorize).await;
+    // The pushed request was claimed, so the browser resumes its transaction.
+    let transaction = parameter(&location(&prompt), "transaction");
+    let browser = app
+        .flow
+        .request(
+            Method::GET,
+            &format!(
+                "{}?transaction={transaction}",
+                routes::oidc::AUTHORIZE_RESUME
+            ),
+            &[],
+            None,
+        )
+        .await;
     let callback = app.finish_login(browser, pending, Some(&first)).await;
     assert_eq!(LoginApp::location(&callback), "/settings");
     let second = LoginApp::cookie(&callback, "__Host-piquel-session");
