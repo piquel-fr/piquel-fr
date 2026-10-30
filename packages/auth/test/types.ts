@@ -7,6 +7,11 @@ type Notes = (typeof notes.all)[number];
 // @ts-expect-error a scope name holding a space does not compile
 defineScopes('notes read');
 
+/** Needs a string. */
+declare function text(value: string): void;
+/** Needs nothing at all. */
+declare function absent(value: undefined): void;
+
 /** Needs a token proven to hold notes:write. */
 declare function write(token: AccessToken<Notes, 'notes:write'>): void;
 
@@ -30,4 +35,17 @@ export async function checks(issuer: Issuer, compact: string, either: Notes) {
   token.require('notes:read', either);
   // @ts-expect-error a union-typed scope proves nothing
   if (token.has(either)) write(token);
+
+  // Application claims take their type from the resource's reader, through narrowing.
+  const tenants = issuer.resource({
+    identifier: 'notes-api',
+    scopes: notes,
+    claims: (claims) => ({ tenant: String(claims.tenant) })
+  });
+  const scoped = (await tenants.validate(compact)).require('notes:write');
+  text(scoped.extra.tenant);
+  // A token with application claims still proves its scopes to any function.
+  write(scoped);
+  // Without a reader, a resource reads no application claims.
+  absent(token.extra);
 }

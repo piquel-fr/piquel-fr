@@ -155,7 +155,9 @@ export class Issuer {
   }
 
   /** Validates access tokens for the resource `config` describes. */
-  resource<const S extends string = never>(config: ResourceConfig<S>): Resource<S> {
+  resource<const S extends string = never, X = undefined>(
+    config: ResourceConfig<S, X>
+  ): Resource<S, X> {
     return new Resource(this.tokens, config);
   }
 }

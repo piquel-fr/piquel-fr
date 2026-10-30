@@ -122,14 +122,19 @@ declare const proven: unique symbol;
  */
 type Single<S, All = S> = S extends unknown ? ([All] extends [S] ? S : never) : never;
 
+/** Reads an application's own claims from a token's claims object; throws when they are invalid. */
+export type ClaimsReader<Extra> = (claims: Readonly<Record<string, unknown>>) => Extra;
+
 /**
  * A validated access token. `Declared` are the scopes its resource declared, and
  * `Proven` those it is proven to hold, so a function can ask for
  * `AccessToken<Notes, 'notes:write'>` and only receive tokens checked for it.
+ * `Extra` are the application claims its resource reads, in {@link extra}.
  */
 export class AccessToken<
   Declared extends string = string,
-  Proven extends Declared = never
+  Proven extends Declared = never,
+  Extra = unknown
 > extends AuthenticatedToken<AccessTokenClaims> {
   /** Phantom member carrying `Proven`: a token proving more scopes is still accepted. */
   declare readonly [proven]: (scope: Proven) => void;
@@ -137,9 +142,12 @@ export class AccessToken<
   readonly subject: Subject;
   /** The granted scopes. */
   readonly scopes: Scopes;
+  /** The application claims the resource's `claims` reader returned; `undefined` without one. */
+  readonly extra: Extra;
 
-  private constructor(claims: AccessTokenClaims, context: Context, subject: Subject) {
+  private constructor(claims: AccessTokenClaims, extra: Extra, context: Context, subject: Subject) {
     super(claims, context);
+    this.extra = extra;
     this.subject = subject;
     this.scopes = Scopes.parse(claims.scope) ?? Scopes.of([]);
   }
@@ -148,20 +156,24 @@ export class AccessToken<
    * @internal Wraps validated claims. A `sub` equal to `client_id` with no session is
    * the client itself; any other `sub` must be an account ID.
    */
-  static from<D extends string>(claims: AccessTokenClaims, context: Context): AccessToken<D> {
+  static from<D extends string, X>(
+    claims: AccessTokenClaims,
+    extra: X,
+    context: Context
+  ): AccessToken<D, never, X> {
     if (claims.sid === undefined && claims.sub === claims.client_id) {
-      return new AccessToken(claims, context, { kind: 'client', id: claims.sub });
+      return new AccessToken(claims, extra, context, { kind: 'client', id: claims.sub });
     }
     try {
       wire.uuid(claims.sub, 'sub');
     } catch (error) {
       throw invalidToken('invalid_claims', 'the token subject is not an account ID', error);
     }
-    return new AccessToken(claims, context, { kind: 'user', id: claims.sub });
+    return new AccessToken(claims, extra, context, { kind: 'user', id: claims.sub });
   }
 
   /** Whether the token holds `scope`; narrows its type when it does. */
-  has<S extends Declared>(scope: S & Single<S>): this is AccessToken<Declared, Proven | S> {
+  has<S extends Declared>(scope: S & Single<S>): this is AccessToken<Declared, Proven | S, Extra> {
     return this.scopes.has(scope);
   }
 
@@ -171,10 +183,10 @@ export class AccessToken<
    */
   require<const T extends readonly [Declared, ...Declared[]]>(
     ...scopes: T & { [K in keyof T]: Single<T[K]> }
-  ): AccessToken<Declared, Proven | T[number]> {
+  ): AccessToken<Declared, Proven | T[number], Extra> {
     // The proof exists only in types, and the scopes were just checked.
     if (scopes.every((scope) => this.scopes.has(scope))) {
-      return this as unknown as AccessToken<Declared, Proven | T[number]>;
+      return this as unknown as AccessToken<Declared, Proven | T[number], Extra>;
     }
     throw new AuthError(
       { code: 'insufficient_scope', scope: Scopes.of(scopes).toString() },
@@ -236,14 +248,15 @@ export class TokenValidator {
     this.#clock = clock;
   }
 
-  /** An access token for the resource `audience`. */
-  async accessToken<D extends string>(
+  /** An access token for the resource `audience`, with the application claims `read` returns. */
+  async accessToken<D extends string, X>(
     token: string,
     audience: string,
-    resourceMetadata: string | undefined
-  ): Promise<AccessToken<D>> {
-    const decoded = await this.#decode(token, ACCESS, audience);
-    return AccessToken.from(decoded, { clock: this.#clock, resourceMetadata });
+    resourceMetadata: string | undefined,
+    read: ClaimsReader<X>
+  ): Promise<AccessToken<D, never, X>> {
+    const [decoded, extra] = await this.#decode(token, ACCESS, audience, read);
+    return AccessToken.from(decoded, extra, { clock: this.#clock, resourceMetadata });
   }
 
   /**
@@ -256,7 +269,7 @@ export class TokenValidator {
     nonce: string | undefined,
     maxAge: number | undefined
   ): Promise<IdToken> {
-    const decoded = await this.#decode(token, ID, client);
+    const [decoded] = await this.#decode(token, ID, client);
     if (nonce !== undefined && decoded.nonce !== nonce) {
       throw invalidToken('nonce_mismatch', 'the ID token nonce does not match this login');
     }
@@ -278,27 +291,32 @@ export class TokenValidator {
 
   /** A back-channel logout token for `client`. */
   async logoutToken(token: string, client: string): Promise<LogoutToken> {
-    return new LogoutToken(await this.#decode(token, LOGOUT, client));
+    const [decoded] = await this.#decode(token, LOGOUT, client);
+    return new LogoutToken(decoded);
   }
 
   /**
    * The checks every token type shares, in order: framing, `crit`, `typ`, algorithm,
-   * key, signature, claims, issuer, audience, then times with the leeway.
+   * key, signature, claims, issuer, audience, then times with the leeway. `read`
+   * reads application claims as part of the claims check, as the Rust SDK
+   * deserializes them with the rest.
    */
-  async #decode<C extends RegisteredClaims>(
+  async #decode<C extends RegisteredClaims, X = undefined>(
     token: string,
     kind: Kind<C>,
-    audience: string
-  ): Promise<C> {
+    audience: string,
+    read?: ClaimsReader<X>
+  ): Promise<[C, X]> {
     const jws = Jws.parse(token);
     jws.requireType(kind.typ);
     await this.#keys.verify(jws, jws.requireAlgorithm(this.#algorithms));
     let decoded: C;
+    let extra: X;
     try {
-      decoded = kind.claims(
-        json.parse(new TextDecoder('utf-8', { fatal: true }).decode(jws.payload)),
-        'claims'
-      );
+      const raw = json.parse(new TextDecoder('utf-8', { fatal: true }).decode(jws.payload));
+      decoded = kind.claims(raw, 'claims');
+      // The claims decoded, so `raw` is an object.
+      extra = read === undefined ? (undefined as X) : read(raw as Record<string, unknown>);
     } catch (error) {
       throw invalidToken('invalid_claims', 'the token claims are invalid', error);
     }
@@ -321,6 +339,6 @@ export class TokenValidator {
     if (decoded.iat * 1000 > now + LEEWAY) {
       throw invalidToken('issued_in_future', 'the token is issued in the future');
     }
-    return decoded;
+    return [decoded, extra];
   }
 }

@@ -41,6 +41,10 @@ export async function handle(request: Request): Promise<Response> {
   `max_age` needs `auth_time`.
 - `token.subject` is `{ kind: 'user', id }`, or `{ kind: 'client', id }` for a client
   acting for itself; `token.claims` holds every validated claim.
+- A resource's `claims` option reads the application's own claims, which auth does
+  not define, into `token.extra`, typed by what it returns:
+  `claims: (claims) => ({ tenant: String(claims.tenant) })`. It runs with the claims
+  check, so throwing fails the token with `invalid_claims`.
 
 Every failure is an `AuthError` with a `code` (the category) and a `reason` (the check
 that failed). `toResponse()` answers with the status and the canonical
