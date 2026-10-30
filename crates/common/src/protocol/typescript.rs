@@ -75,14 +75,15 @@ macro_rules! open {
     )+};
 }
 
-/// Writes validated strings as `string`, inline.
-macro_rules! strings {
-    ($($name:ty),+ $(,)?) => {$(
+/// Writes types as a built-in TypeScript type, inline: validated strings as
+/// `string`, and a claim that must be absent as `never`.
+macro_rules! builtin {
+    ($builtin:literal => $($name:ty),+ $(,)?) => {$(
         impl TS for $name {
             type WithoutGenerics = Self;
             type OptionInnerType = Self;
             fn name(_: &Config) -> String {
-                "string".to_owned()
+                $builtin.to_owned()
             }
             fn inline(cfg: &Config) -> String {
                 Self::name(cfg)
@@ -111,7 +112,8 @@ closed!(
     ErrorReason,
 );
 open!(ErrorCode, BearerError);
-strings!(
+builtin!(
+    "string" =>
     ClientId,
     SessionId,
     TokenId,
@@ -124,17 +126,7 @@ declared!(
     LogoutEvents,
     format!("{{ {BACKCHANNEL_LOGOUT_EVENT:?}: Record<string, unknown> }}")
 );
-
-impl TS for Absent {
-    type WithoutGenerics = Self;
-    type OptionInnerType = Self;
-    fn name(_: &Config) -> String {
-        "never".to_owned()
-    }
-    fn inline(cfg: &Config) -> String {
-        Self::name(cfg)
-    }
-}
+builtin!("never" => Absent);
 
 /// `"a" | "b"`, from spellings that need no escaping.
 fn union<'a>(values: impl Iterator<Item = &'a str>) -> String {
@@ -192,7 +184,10 @@ impl Declarations {
         let mut example = false;
         let mut lines: Vec<String> = Vec::new();
         for line in self.text.lines().map(str::trim_end) {
-            let fence = line.trim_start().strip_prefix('*').map(str::trim) == Some("```");
+            let fence = line
+                .trim_start()
+                .strip_prefix('*')
+                .is_some_and(|doc| doc.trim().starts_with("```"));
             example ^= fence;
             if example || fence {
                 continue;
