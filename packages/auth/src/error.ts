@@ -59,7 +59,8 @@ export type AuthErrorDetail =
     }
   | { code: Extract<ErrorCategory, 'oauth'>; response: ErrorResponse }
   | { code: Extract<ErrorCategory, 'network'> }
-  | { code: 'missing_token' }
+  /** `scope` is every scope the request needs, space-separated, when known. */
+  | { code: 'missing_token'; scope?: string }
   | { code: 'invalid_request' };
 
 /** An error category, or a resource server's request error. */
@@ -99,6 +100,11 @@ export class AuthError extends Error {
     this.response = detail.code === 'oauth' ? detail.response : undefined;
   }
 
+  /** @internal A token that failed the check `reason` names. */
+  static invalidToken(reason: TokenReason, message: string, cause?: unknown): AuthError {
+    return new AuthError({ code: 'invalid_token', reason }, message, { cause });
+  }
+
   /** @internal Names the resource that failed, so its challenge carries `resource_metadata`. */
   forResource(metadata: string | undefined): this {
     this.#resourceMetadata ??= metadata;
@@ -116,7 +122,7 @@ export class AuthError extends Error {
     if (this.#resourceMetadata !== undefined) metadata.resource_metadata = this.#resourceMetadata;
     switch (detail.code) {
       case 'missing_token':
-        return metadata;
+        return detail.scope === undefined ? metadata : { scope: detail.scope, ...metadata };
       case 'invalid_request':
       case 'invalid_token':
         return { error: detail.code, ...metadata };

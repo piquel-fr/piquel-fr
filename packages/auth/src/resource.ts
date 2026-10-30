@@ -2,7 +2,7 @@
 import { asciiLowercase } from './challenge.ts';
 import { AuthError } from './error.ts';
 import { Scopes } from './scope.ts';
-import type { AccessToken, ClaimsReader, TokenValidator } from './token.ts';
+import type { AccessToken, ClaimsReader, Single, TokenValidator } from './token.ts';
 
 /** What a resource server is. */
 export type ResourceConfig<S extends string, X = undefined> = {
@@ -50,8 +50,7 @@ export class Resource<S extends string = never, X = undefined> {
   readonly #tokens: TokenValidator;
   readonly #claims: ClaimsReader<X>;
 
-  /** @internal Use {@link Issuer.resource}. */
-  constructor(tokens: TokenValidator, config: ResourceConfig<S, X>) {
+  private constructor(tokens: TokenValidator, config: ResourceConfig<S, X>) {
     if (!/^[\x21-\x7e]+$/.test(config.identifier)) {
       throw new TypeError('a resource identifier must be printable ASCII without spaces');
     }
@@ -65,29 +64,54 @@ export class Resource<S extends string = never, X = undefined> {
     this.#claims = config.claims ?? (() => undefined as X);
   }
 
+  /** @internal Use {@link Issuer.resource}. */
+  static from<S extends string, X>(
+    tokens: TokenValidator,
+    config: ResourceConfig<S, X>
+  ): Resource<S, X> {
+    return new Resource(tokens, config);
+  }
+
   /**
-   * Validates the request's bearer token, read from `Authorization: Bearer` only.
-   * Throws `missing_token` when there is none (another scheme counts as none), and
-   * `invalid_request` when the header is malformed: `Bearer` without a token, or a
-   * token holding whitespace or commas, as several `Authorization` headers joined by
-   * `Headers` do. Otherwise see {@link validate}.
+   * Validates the request's bearer token, read from `Authorization: Bearer` only, and
+   * requires `scopes`, narrowing the token's type to them. Throws `missing_token`
+   * when there is none (another scheme counts as none), whose challenge names
+   * `scopes`, and `invalid_request` when the header is malformed: `Bearer` without a
+   * token, or several `Authorization` headers, which `Headers` joins with commas, as
+   * no token holds one. Otherwise see {@link validate} and {@link AccessToken.require}.
    */
-  async authenticate(request: { headers: Headers }): Promise<AccessToken<S, never, X>> {
+  async authenticate<const T extends readonly S[] = readonly []>(
+    request: { headers: Headers },
+    ...scopes: T & { [K in keyof T]: Single<T[K]> }
+  ): Promise<AccessToken<S, T[number], X>> {
     const header = request.headers.get('authorization') ?? '';
     const space = header.indexOf(' ');
-    if (asciiLowercase(space === -1 ? header : header.slice(0, space)) !== 'bearer') {
-      throw new AuthError({ code: 'missing_token' }, 'the request has no bearer token').forResource(
-        this.metadata
-      );
-    }
-    const token = space === -1 ? '' : header.slice(space + 1).trim();
-    if (token === '' || /[\s,]/.test(token)) {
+    const scheme = space === -1 ? header : header.slice(0, space);
+    if (header.includes(',') || (asciiLowercase(scheme) === 'bearer' && space === -1)) {
       throw new AuthError(
         { code: 'invalid_request' },
         'the Authorization header is malformed'
       ).forResource(this.metadata);
     }
-    return this.validate(token);
+    if (asciiLowercase(scheme) !== 'bearer') {
+      const scope = scopes.length === 0 ? undefined : Scopes.of(scopes).toString();
+      throw new AuthError(
+        scope === undefined ? { code: 'missing_token' } : { code: 'missing_token', scope },
+        'the request has no bearer token'
+      ).forResource(this.metadata);
+    }
+    const token = header.slice(space + 1).trim();
+    if (token === '') {
+      throw new AuthError(
+        { code: 'invalid_request' },
+        'the Authorization header is malformed'
+      ).forResource(this.metadata);
+    }
+    const validated = await this.validate(token);
+    // `require` throws unless the token holds every scope; the proof exists only in types.
+    const require = validated.require.bind(validated) as (...required: readonly S[]) => unknown;
+    if (scopes.length > 0) require(...scopes);
+    return validated as unknown as AccessToken<S, T[number], X>;
   }
 
   /**

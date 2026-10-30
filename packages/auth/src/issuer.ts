@@ -158,6 +158,6 @@ export class Issuer {
   resource<const S extends string = never, X = undefined>(
     config: ResourceConfig<S, X>
   ): Resource<S, X> {
-    return new Resource(this.tokens, config);
+    return Resource.from(this.tokens, config);
   }
 }

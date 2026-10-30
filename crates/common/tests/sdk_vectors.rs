@@ -51,6 +51,8 @@ const CODE: &str = "pac_v1_01936f3e-8c00-7000-8000-000000000004.c2VjcmV0";
 const OLD_KID: &str = "key-2025";
 /// Key signing after the rotation.
 const NEW_KID: &str = "key-2026";
+/// A 1024-bit key, too weak for any SDK to accept.
+const WEAK_KID: &str = "key-weak";
 
 /// One case file: inputs, the clock, and the expected result.
 #[derive(Serialize)]
@@ -98,6 +100,8 @@ struct Vectors {
     new: Rs256Key,
     /// The old key's PEM, to sign tokens whose header auth's signer would never write.
     old_pem: String,
+    /// The weak key's PEM, which auth's signer refuses.
+    weak_pem: String,
 }
 
 impl Vectors {
@@ -118,6 +122,7 @@ impl Vectors {
             old: key(OLD_KID),
             new: key(NEW_KID),
             old_pem: pem(OLD_KID),
+            weak_pem: pem(WEAK_KID),
         }
     }
 
@@ -509,6 +514,26 @@ impl Vectors {
             ),
             Expected::error(ErrorCategory::InvalidToken, ErrorReason::BadSignature),
         );
+        // The Rust SDK's verifier refuses RSA keys under 2048 bits, so every SDK must.
+        let weak = PKey::private_key_from_pem(self.weak_pem.as_bytes()).expect("weak test key");
+        let weak = weak.rsa().expect("RSA test key");
+        let weak_jwks = json!({ "keys": [{
+            "alg": Algorithm::Rs256.as_str(), "e": URL_SAFE_NO_PAD.encode(weak.e().to_vec()),
+            "kid": WEAK_KID, "kty": "RSA", "n": URL_SAFE_NO_PAD.encode(weak.n().to_vec()),
+            "use": "sig",
+        }]});
+        let weak_header = json!({
+            "alg": Algorithm::Rs256.as_str(), "kid": WEAK_KID, "typ": TokenType::Access.as_str(),
+        });
+        self.token(
+            "access-weak-key",
+            "a token signed with a 1024-bit RSA key is rejected",
+            access_case(
+                Self::sign_with(&self.weak_pem, &weak_header, &access),
+                &weak_jwks,
+            ),
+            Expected::error(ErrorCategory::InvalidToken, ErrorReason::BadSignature),
+        );
         let mut incomplete = serde_json::to_value(&access).expect("serialize claims");
         incomplete
             .as_object_mut()
@@ -818,12 +843,17 @@ impl Vectors {
     /// Signs `claims` under a hand-written `header` with the old key, for headers
     /// auth's signer never writes.
     fn sign_header(&self, header: &Value, claims: &impl Serialize) -> String {
+        Self::sign_with(&self.old_pem, header, claims)
+    }
+
+    /// Signs `claims` under `header` with the key in `pem`.
+    fn sign_with(pem: &str, header: &Value, claims: &impl Serialize) -> String {
         let input = format!(
             "{}.{}",
             URL_SAFE_NO_PAD.encode(serde_json::to_vec(header).expect("header")),
             URL_SAFE_NO_PAD.encode(serde_json::to_vec(claims).expect("claims"))
         );
-        let key = PKey::private_key_from_pem(self.old_pem.as_bytes()).expect("test key");
+        let key = PKey::private_key_from_pem(pem.as_bytes()).expect("test key");
         let mut signer = Signer::new(MessageDigest::sha256(), &key).expect("signer");
         signer.update(input.as_bytes()).expect("signing input");
         format!(

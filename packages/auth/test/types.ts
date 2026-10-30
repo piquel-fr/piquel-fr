@@ -15,8 +15,15 @@ declare function absent(value: undefined): void;
 /** Needs a token proven to hold notes:write. */
 declare function write(token: AccessToken<Notes, 'notes:write'>): void;
 
-export async function checks(issuer: Issuer, compact: string, either: Notes) {
-  const token = await issuer.resource({ identifier: 'notes-api', scopes: notes }).validate(compact);
+export async function checks(issuer: Issuer, compact: string, either: Notes, request: Request) {
+  const resource = issuer.resource({ identifier: 'notes-api', scopes: notes });
+  const token = await resource.validate(compact);
+  // `authenticate` requires and proves the scopes it is given.
+  write(await resource.authenticate(request, 'notes:write'));
+  // @ts-expect-error a request authenticated without a scope proves none
+  write(await resource.authenticate(request));
+  // @ts-expect-error a union-typed scope proves nothing
+  write(await resource.authenticate(request, either));
   token.require('notes:read');
   // @ts-expect-error a scope the resource did not declare does not compile
   token.require('notes:delete');

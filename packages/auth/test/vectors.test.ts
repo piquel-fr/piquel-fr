@@ -45,11 +45,12 @@ describe('token vectors', () => {
           case 'access':
             return (await issuer.resource({ identifier: audience }).validate(token)).claims;
           case 'id': {
-            const maxAge = vector.input.max_age;
+            const { nonce, max_age: maxAge } = vector.input;
             const id = await issuer.tokens.idToken(
               token,
               audience,
-              String(vector.input.nonce),
+              // `null` when the login sent none.
+              typeof nonce === 'string' ? nonce : undefined,
               typeof maxAge === 'number' ? maxAge : undefined
             );
             return id.claims;

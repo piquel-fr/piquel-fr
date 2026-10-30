@@ -55,13 +55,29 @@ test('a bearer token is read from Authorization, and nothing else', async () => 
     401,
     missing
   ]);
+  // A required scope is named even without a token, so the client knows what to ask for.
+  assert.deepEqual(await answer(() => resource.authenticate(request(), 'notes:write')), [
+    401,
+    `Bearer scope="notes:write", resource_metadata="${METADATA}"`
+  ]);
   const invalid = `Bearer error="invalid_request", resource_metadata="${METADATA}"`;
-  for (const malformed of [['Bearer'], ['Bearer  '], ['Bearer a', 'Bearer b']]) {
+  // Several headers are malformed whatever their schemes, as the Rust SDK reads them.
+  for (const malformed of [
+    ['Bearer'],
+    ['Bearer  '],
+    ['Bearer a', 'Bearer b'],
+    ['Basic YTpi', 'Bearer a']
+  ]) {
     assert.deepEqual(await answer(() => resource.authenticate(request(...malformed))), [
       400,
       invalid
     ]);
   }
+  // A token holding a space is read, and fails validation.
+  assert.deepEqual(await answer(() => resource.authenticate(request('Bearer a b'))), [
+    401,
+    `Bearer error="invalid_token", resource_metadata="${METADATA}"`
+  ]);
   assert.deepEqual(await answer(() => resource.validate('not.a.token')), [
     401,
     `Bearer error="invalid_token", resource_metadata="${METADATA}"`
