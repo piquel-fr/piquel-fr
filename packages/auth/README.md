@@ -205,6 +205,62 @@ A passkey sign-in on the page leaves no session cookie at auth, so after a reloa
 refresh tokens (#214), kept in IndexedDB under a non-extractable key, will let a
 session survive reloads without a redirect.
 
+## SvelteKit
+
+There is no SvelteKit integration to install: `Login.handle` and `Login.session` take
+SvelteKit's `event.request` as is. [`examples/sveltekit`](examples/sveltekit) holds
+the files below, type-checked with this package so they stay current.
+
+**Server-rendered apps** (adapter-node, adapter-cloudflare, …) sign in as
+confidential clients, and tokens never reach the browser. `src/hooks.server.ts`
+serves the routes under `/auth` and sets `event.locals.user`:
+
+```ts
+import { Issuer } from '@piquel/auth';
+import { Login, MemoryBackend } from '@piquel/auth/server';
+import type { Handle } from '@sveltejs/kit';
+import { env } from '$env/dynamic/private';
+
+/** A required environment variable, read at startup. */
+function setting(name: string): string {
+  const value = env[name];
+  if (!value) throw new Error(`${name} is not set`);
+  return value;
+}
+
+const issuer = await Issuer.discover('https://auth.piquel.fr');
+const login = new Login(
+  issuer.client({
+    clientId: setting('AUTH_CLIENT_ID'),
+    clientSecret: setting('AUTH_CLIENT_SECRET'),
+    redirectUri: `${setting('ORIGIN')}/auth/callback`
+  }),
+  // MemoryBackend is for development: implement SessionBackend to keep sessions.
+  { backend: new MemoryBackend(), scopes: ['profile'] }
+);
+
+export const handle: Handle = async ({ event, resolve }) => {
+  const routed = await login.handle(event.request); // /auth/login, /callback, /logout, …
+  if (routed) return routed;
+  event.locals.user = await login.session(event.request);
+  return resolve(event);
+};
+```
+
+- [`src/app.d.ts`](examples/sveltekit/server/src/app.d.ts) types `locals.user` as
+  `SignedIn | null`.
+- [`src/routes/(app)/+layout.server.ts`](<examples/sveltekit/server/src/routes/(app)/+layout.server.ts>)
+  sends signed-out visitors to `/auth/login?return_to=…`, back to the same page.
+- [`src/routes/(app)/notes/+page.server.ts`](<examples/sveltekit/server/src/routes/(app)/notes/+page.server.ts>)
+  calls an API with `user.accessToken`, and answers its
+  `insufficient_user_authentication` challenge with `user.stepUp`, which signs the
+  user in again once, back to the same page.
+
+**Static apps** (adapter-static) sign in as public clients with
+`@piquel/auth/browser`, from a root
+[`+layout.ts`](examples/sveltekit/static/src/routes/+layout.ts) with `ssr = false`
+that finishes a callback or restores the session on every page load.
+
 ## Other JWKS issuers
 
 `KeyCache` verifies JWS signatures against any JWKS URL, refetching once on an unknown
