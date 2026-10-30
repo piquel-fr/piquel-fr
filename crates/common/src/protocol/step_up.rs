@@ -35,6 +35,7 @@ pub const CONFIRMATION_MAX_AGE: u32 = 300;
 /// assert_eq!(params, [("acr_values", "phr".into()), ("max_age", "300".into())]);
 /// ```
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(test, derive(ts_rs::TS), ts(optional_fields))]
 pub struct StepUpRequirement {
     /// The class the authentication must meet ([`Acr::satisfies`]).
     #[serde(

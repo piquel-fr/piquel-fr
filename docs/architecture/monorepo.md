@@ -12,12 +12,14 @@ is authentication, with its account settings, and the admin dashboard.
 | `crates/crypto` | Random secrets, SHA-256, HMAC, PKCE and RS256 signing |
 | `crates/ui` | `piquel-ui`: the Topcoat components and layouts of auth's server-rendered pages, rendering plain data and taking URLs as props, the admin dashboard's included, and the shared stylesheet, `assets/style.css` |
 | `crates/telemetry` | `piquel-telemetry`: stderr logs, and OpenTelemetry traces, metrics and logs over OTLP; request spans and access logs for axum routers, client spans, and typed metric instruments; see [telemetry.md](telemetry.md) |
+| `packages/auth` | `@piquel/auth`, the TypeScript SDK (#58), not yet published; `src/protocol.ts` is generated from `piquel_common::protocol` |
 | `tests/sdk-vectors` | Generated cases every SDK must pass; see [sdk.md](sdk.md) |
 
 Prettier and type-aware ESLint cover all web code from the root configuration, as
 rustfmt and Clippy cover Rust; `just fmt`, `just lint` and `just check` run both.
-`tsc` checks the passkey script's JSDoc types as strictly as TypeScript's; nothing
-builds JavaScript.
+`tsc` checks the passkey script's JSDoc types as strictly as TypeScript's. The
+TypeScript SDK is the one package that builds JavaScript, with `tsc`, and is the
+pnpm workspace's only member besides the root; auth's executable builds none.
 
 Only `crates/database` runs SQL. `piquel-common` has an optional `sqlx` feature,
 enabled only by the database crate, that lets its IDs and vocabularies decode from

@@ -1,7 +1,7 @@
 # SDK design
 
-Applications integrate with auth.piquel.fr through its Rust SDK, `piquel-auth`, or
-any OpenID Connect library. The SDK follows this document and passes the shared
+Applications integrate with auth.piquel.fr through its Rust SDK, `piquel-auth`, its
+TypeScript SDK, `@piquel/auth` (in development, #58), or any OpenID Connect library. The SDK follows this document and passes the shared
 vectors in [`tests/sdk-vectors`](../../tests/sdk-vectors/README.md); an SDK in another
 language would do the same, so every SDK accepts and rejects the same tokens and
 challenges.
@@ -10,6 +10,7 @@ challenges.
 | --- | --- | --- | --- |
 | `crates/common` | `piquel-common` | yes | Shared types; with no features, the IDs and wire types shared by auth and the Rust SDK |
 | `crates/auth-sdk` | `piquel-auth` | yes | Rust SDK; the `axum` feature adds the axum integration |
+| `packages/auth` | `@piquel/auth` | not yet | TypeScript SDK, ESM only, with no runtime dependencies |
 | `tests/sdk-vectors` | none | no | Shared test vectors |
 
 ## Wire types
@@ -32,7 +33,10 @@ its contract:
 
 Auth issues tokens and documents by serializing these types, and the Rust SDK
 deserializes them, so the two cannot disagree. An SDK in another language mirrors
-them and is held to them by the vectors.
+them and is held to them by the vectors. The TypeScript SDK's mirror is generated:
+`piquel-common`'s tests write `packages/auth/src/protocol.ts` from these types with
+ts-rs, vocabularies as unions of their spellings, and `just test` fails while it is
+stale (`just sdk-types` rewrites it).
 
 ## Configuration
 
