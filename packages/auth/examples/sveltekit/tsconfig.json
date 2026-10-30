@@ -1,0 +1,22 @@
+{
+  // Checks the recipe the package README shows against the built package and
+  // SvelteKit's own types, set up as `svelte-kit sync` sets up an app. Vite and
+  // Svelte, which those types mention, are not installed.
+  "compilerOptions": {
+    "strict": true,
+    "exactOptionalPropertyTypes": true,
+    "noUncheckedIndexedAccess": true,
+    "noEmit": true,
+    "skipLibCheck": true,
+    "allowJs": true,
+    "checkJs": true,
+    "target": "es2023",
+    "module": "esnext",
+    "moduleResolution": "bundler",
+    "lib": ["es2023", "DOM", "DOM.Iterable"],
+    "types": [],
+    "verbatimModuleSyntax": true,
+    "isolatedModules": true
+  },
+  "include": ["server", "static"]
+}

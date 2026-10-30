@@ -19,7 +19,8 @@ Prettier and type-aware ESLint cover all web code from the root configuration, a
 rustfmt and Clippy cover Rust; `just fmt`, `just lint` and `just check` run both.
 `tsc` checks the passkey script's JSDoc types as strictly as TypeScript's. The
 TypeScript SDK is the one package that builds JavaScript, with `tsc`, and is the
-pnpm workspace's only member besides the root; auth's executable builds none.
+pnpm workspace's member besides the root, with its SvelteKit recipe, which only
+type-checks; auth's executable builds none.
 
 Only `crates/database` runs SQL. `piquel-common` has an optional `sqlx` feature,
 enabled only by the database crate, that lets its IDs and vocabularies decode from

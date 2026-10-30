@@ -1,7 +1,11 @@
 # The root package holds the repository's web tooling; packages/ holds the
-# TypeScript SDK.
+# TypeScript SDK, and the SvelteKit recipe its README type-checks.
 packages:
   - packages/*
+  - packages/auth/examples/sveltekit
+# Peers are not installed for packages that do not list them: the recipe needs
+# SvelteKit's types only, not vite and svelte, its build toolchain.
+autoInstallPeers: false
 # workerd's install script only fetches its binary when the platform package is
 # missing, which pnpm installs anyway.
 allowBuilds:

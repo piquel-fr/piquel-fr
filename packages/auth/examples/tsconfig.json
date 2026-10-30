@@ -1,12 +1,6 @@
 {
   "extends": "../test/tsconfig.json",
-  "compilerOptions": {
-    // The SvelteKit recipe imports the package by name, as apps do.
-    "paths": {
-      "@piquel/auth": ["../src/index.ts"],
-      "@piquel/auth/server": ["../src/server.ts"],
-      "@piquel/auth/browser": ["../src/browser.ts"]
-    }
-  },
-  "include": ["."]
+  "include": ["."],
+  // The SvelteKit recipe is its own package, with SvelteKit's types.
+  "exclude": ["sveltekit"]
 }

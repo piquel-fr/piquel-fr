@@ -55,7 +55,7 @@ jobs:
       pull-requests: read
     outputs:
       rust: ${{ github.event_name != 'pull_request' || steps.filter.outputs.rust == 'true' }}
-      web: ${{ github.event_name != 'pull_request' || steps.filter.outputs.web == 'true' }}
+      web: ${{ github.event_name != 'pull_request' || steps.filter.outputs.web == 'true' || steps.filter.outputs.recipe == 'true' }}
       deps: ${{ github.event_name != 'pull_request' || steps.filter.outputs.deps == 'true' }}
       app: ${{ github.event_name != 'pull_request' || steps.filter.outputs.app == 'true' }}
     steps:
@@ -74,6 +74,9 @@ jobs:
               - '!Cargo.lock'
               - '!infra/*.{Dockerfile,conf,sh}'
               - '!.dockerignore'
+            # The SDK's README holds the SvelteKit recipe, which `just web test` checks.
+            recipe:
+              - 'packages/auth/README.md'
             deps:
               - '{Cargo.toml,**/Cargo.toml,Cargo.lock,deny.toml,package.json,**/package.json,pnpm-lock.yaml,pnpm-workspace.yaml,.github/workflows/ci.yml}'
             app:

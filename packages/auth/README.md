@@ -207,9 +207,9 @@ session survive reloads without a redirect.
 
 ## SvelteKit
 
-There is no SvelteKit integration to install: `Login.handle` and `Login.session` take
-SvelteKit's `event.request` as is. [`examples/sveltekit`](examples/sveltekit) holds
-the files below, type-checked with this package so they stay current.
+There is no SvelteKit integration to install: `Login.handle` and `Login.session`
+take SvelteKit's requests. [`examples/sveltekit`](examples/sveltekit) holds the files
+below, type-checked against SvelteKit 3 and this package so they stay current.
 
 **Server-rendered apps** (adapter-node, adapter-cloudflare, …) sign in as
 confidential clients, and tokens never reach the browser. `src/hooks.server.ts`
@@ -218,48 +218,72 @@ serves the routes under `/auth` and sets `event.locals.user`:
 ```ts
 import { Issuer } from '@piquel/auth';
 import { Login, MemoryBackend } from '@piquel/auth/server';
-import type { Handle } from '@sveltejs/kit';
-import { env } from '$env/dynamic/private';
-
-/** A required environment variable, read at startup. */
-function setting(name: string): string {
-  const value = env[name];
-  if (!value) throw new Error(`${name} is not set`);
-  return value;
-}
+import { AUTH_CLIENT_ID, AUTH_CLIENT_SECRET, ORIGIN } from '$app/env/private';
+import type { RequestEvent } from '@sveltejs/kit';
+import type { Handle } from '@sveltejs/kit/hooks';
 
 const issuer = await Issuer.discover('https://auth.piquel.fr');
 const login = new Login(
   issuer.client({
-    clientId: setting('AUTH_CLIENT_ID'),
-    clientSecret: setting('AUTH_CLIENT_SECRET'),
-    redirectUri: `${setting('ORIGIN')}/auth/callback`
+    clientId: AUTH_CLIENT_ID,
+    clientSecret: AUTH_CLIENT_SECRET,
+    redirectUri: `${ORIGIN}/auth/callback`
   }),
   // MemoryBackend is for development: implement SessionBackend to keep sessions.
   { backend: new MemoryBackend(), scopes: ['profile'] }
 );
 
+/** A form post from another site, which SvelteKit refuses unless vite.config.js trusts it. */
+function crossSiteForm({ request, url }: RequestEvent): boolean {
+  const type = request.headers.get('content-type')?.split(';')[0]?.trim().toLowerCase() ?? '';
+  const form = ['', 'application/x-www-form-urlencoded', 'multipart/form-data', 'text/plain'];
+  return (
+    ['POST', 'PUT', 'PATCH', 'DELETE'].includes(request.method) &&
+    form.includes(type) &&
+    request.headers.get('origin') !== url.origin
+  );
+}
+
 export const handle: Handle = async ({ event, resolve }) => {
+  // Back-channel logout is signed; every other cross-site form post is refused.
+  if (event.url.pathname !== '/auth/backchannel-logout' && crossSiteForm(event)) {
+    return new Response('Cross-site form submissions are forbidden.', { status: 403 });
+  }
   const routed = await login.handle(event.request); // /auth/login, /callback, /logout, …
   if (routed) return routed;
-  event.locals.user = await login.session(event.request);
+  // `event.url` names the page even when the request is for its `__data.json`.
+  const page = new Request(event.url, { headers: event.request.headers });
+  event.locals.user = await login.session(page);
   return resolve(event);
 };
 ```
 
+- `login.session` reads `event.url`, not `event.request`: on a client-side
+  navigation the request is for the page's `__data.json`, and a step-up must come
+  back to the page itself.
+- Auth posts back-channel logout from its servers, without an `Origin` header,
+  which SvelteKit's form check refuses. So
+  [`vite.config.js`](examples/sveltekit/server/vite.config.js) trusts every origin
+  (`csrf.trustedOrigins: ['*']`), and the hook refuses every other cross-site form
+  post itself. `/auth/logout` checks its origin on its own.
+- [`src/env.ts`](examples/sveltekit/server/src/env.ts) declares the settings the hook
+  reads from `$app/env/private`, so the app does not start without them.
 - [`src/app.d.ts`](examples/sveltekit/server/src/app.d.ts) types `locals.user` as
   `SignedIn | null`.
 - [`src/routes/(app)/+layout.server.ts`](<examples/sveltekit/server/src/routes/(app)/+layout.server.ts>)
   sends signed-out visitors to `/auth/login?return_to=…`, back to the same page.
 - [`src/routes/(app)/notes/+page.server.ts`](<examples/sveltekit/server/src/routes/(app)/notes/+page.server.ts>)
-  calls an API with `user.accessToken`, and answers its
+  calls an API with `await user.accessToken()`, and answers its
   `insufficient_user_authentication` challenge with `user.stepUp`, which signs the
   user in again once, back to the same page.
 
-**Static apps** (adapter-static) sign in as public clients with
-`@piquel/auth/browser`, from a root
-[`+layout.ts`](examples/sveltekit/static/src/routes/+layout.ts) with `ssr = false`
-that finishes a callback or restores the session on every page load.
+**Static apps** (adapter-static, with a `fallback` page) sign in as public clients
+with `@piquel/auth/browser`, from a root
+[`+layout.ts`](examples/sveltekit/static/src/routes/+layout.ts) with `ssr = false`.
+Auth sends the callback to `/`, the redirect URI to register; the layout finishes
+it, then redirects to the page the login left from, so SvelteKit's router renders
+that page rather than the callback. It keeps the session in memory for the page
+load, and restores it with `prompt=none` once otherwise.
 
 ## Other JWKS issuers
 
