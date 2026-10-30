@@ -858,16 +858,12 @@ impl Client {
     ) -> Result<T, OAuthError> {
         let status = reply.status.as_u16();
         if reply.status == success {
-            // An empty body, as the revocation endpoint sends, parses as JSON null.
-            let body: &[u8] = if reply.body.is_empty() {
-                b"null"
-            } else {
-                &reply.body
-            };
-            return serde_json::from_slice(body).map_err(|source| OAuthError::UnexpectedResponse {
-                endpoint,
-                status,
-                source: Some(source),
+            return serde_json::from_slice(&reply.body).map_err(|source| {
+                OAuthError::UnexpectedResponse {
+                    endpoint,
+                    status,
+                    source: Some(source),
+                }
             });
         }
         match serde_json::from_slice(&reply.body) {
