@@ -7,13 +7,11 @@
  */
 import * as base64 from './base64.ts';
 import { idTokenClaims, scope } from './claims.ts';
-import type { PendingLogin, Tokens } from './client.ts';
+import { type PendingLogin, type Tokens, pendingLogin } from './client.ts';
 import * as json from './json.ts';
-import type { StepUpRequirement } from './protocol.ts';
 import { Scopes } from './scope.ts';
 import { type Clock, LEEWAY } from './time.ts';
 import { IdToken, type LogoutToken } from './token.ts';
-import { ACR } from './vocabulary.ts';
 
 /** Random bytes in a session key: 256 bits. */
 const KEY_BYTES = 32;
@@ -209,21 +207,8 @@ const lease = json.object({ id: json.string, until: count });
 const sessionData = json.object({ login: storedLogin, lease: json.optional(lease) });
 type SessionData = ReturnType<typeof sessionData>;
 
-const stepUpRequirement: json.Decoder<StepUpRequirement> = json.object({
-  acr_values: json.optional(json.oneOf(ACR)),
-  max_age: json.optional(json.integer(0, 0xffff_ffff))
-});
-
 const pendingAuthorization: json.Decoder<PendingAuthorization> = json.object({
-  login: json.object({
-    issuer: json.string,
-    clientId: json.string,
-    redirectUri: json.string,
-    state: json.string,
-    nonce: json.string,
-    verifier: json.string,
-    stepUp: stepUpRequirement
-  }),
+  login: pendingLogin,
   returnTo: json.string,
   stepUp: json.boolean
 });

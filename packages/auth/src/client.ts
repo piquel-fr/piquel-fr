@@ -12,6 +12,7 @@ import * as json from './json.ts';
 import type { ErrorResponse, Prompt, StepUpRequirement, UserInfo } from './protocol.ts';
 import { Scopes } from './scope.ts';
 import type { IdToken, LogoutToken } from './token.ts';
+import { ACR } from './vocabulary.ts';
 
 /** Random bytes in `state`, `nonce` and the PKCE verifier: 256 bits, a 43-character verifier. */
 const RANDOM_BYTES = 32;
@@ -60,6 +61,20 @@ export type PendingLogin = {
   /** The authentication asked for, which the ID token must meet. */
   stepUp: StepUpRequirement;
 };
+
+/** @internal Reads back a {@link PendingLogin} stored as JSON. */
+export const pendingLogin: json.Decoder<PendingLogin> = json.object({
+  issuer: json.string,
+  clientId: json.string,
+  redirectUri: json.string,
+  state: json.string,
+  nonce: json.string,
+  verifier: json.string,
+  stepUp: json.object({
+    acr_values: json.optional(json.oneOf(ACR)),
+    max_age: json.optional(json.integer(0, 0xffff_ffff))
+  })
+});
 
 /** Tokens from a code exchange or refresh. */
 export type Tokens = {
