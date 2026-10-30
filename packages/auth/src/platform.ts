@@ -6,7 +6,7 @@
 /** @internal The page's location, history, storage, passkeys and `fetch`. */
 export type Platform = {
   location: Pick<Location, 'href' | 'assign'>;
-  history: Pick<History, 'replaceState'>;
+  history: Pick<History, 'replaceState' | 'state'>;
   /** Where a login waits for its callback: `sessionStorage`. */
   storage: Pick<Storage, 'getItem' | 'setItem' | 'removeItem'>;
   credentials: Pick<CredentialsContainer, 'get'>;
@@ -25,7 +25,8 @@ export function platform(): Platform {
     credentials: globalThis.navigator.credentials,
     capabilities: async () =>
       typeof PublicKeyCredential !== 'undefined' && 'getClientCapabilities' in PublicKeyCredential
-        ? PublicKeyCredential.getClientCapabilities()
+        ? // A browser that cannot tell has no related origins to offer.
+          PublicKeyCredential.getClientCapabilities().catch(() => ({}))
         : {},
     fetch: (request) => fetch(request)
   };

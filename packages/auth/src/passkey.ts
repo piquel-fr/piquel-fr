@@ -41,15 +41,23 @@ export class PasskeyError extends Error {
    */
   readonly interactionRequired: boolean;
 
-  /** @internal */
-  constructor(
+  private constructor(
     step: PasskeyStep,
     message: string,
-    options: { cause?: unknown; interactionRequired?: boolean } = {}
+    options: { cause?: unknown; interactionRequired?: boolean }
   ) {
     super(message, { cause: options.cause });
     this.step = step;
     this.interactionRequired = options.interactionRequired ?? false;
+  }
+
+  /** @internal A failure at `step`. */
+  static at(
+    step: PasskeyStep,
+    message: string,
+    options: { cause?: unknown; interactionRequired?: boolean } = {}
+  ): PasskeyError {
+    return new PasskeyError(step, message, options);
   }
 
   /**
@@ -123,17 +131,17 @@ export class PasskeyCeremony {
   async run(requestUri: string): Promise<PasskeyAuthorization> {
     const capabilities = await this.#platform.capabilities();
     if (capabilities.relatedOrigins !== true) {
-      throw new PasskeyError('unsupported', 'this browser cannot use passkeys on related origins');
+      throw PasskeyError.at('unsupported', 'this browser cannot use passkeys on related origins');
     }
     const start = await this.#post('start', { request_uri: requestUri }, started);
     let credential: Credential | null;
     try {
       credential = await this.#platform.credentials.get({ publicKey: start.public_key.publicKey });
     } catch (error) {
-      throw new PasskeyError('prompt', 'the passkey prompt failed', { cause: error });
+      throw PasskeyError.at('prompt', 'the passkey prompt failed', { cause: error });
     }
     if (credential?.type !== 'public-key') {
-      throw new PasskeyError('prompt', 'the passkey prompt returned no passkey');
+      throw PasskeyError.at('prompt', 'the passkey prompt returned no passkey');
     }
     return this.#post(
       'finish',
@@ -150,9 +158,9 @@ export class PasskeyCeremony {
    * `decoder`. Every failure is a {@link PasskeyError} of `step`.
    */
   async #post<T>(step: 'start' | 'finish', body: unknown, decoder: json.Decoder<T>): Promise<T> {
-    const url = `${this.#issuer.issuer.replace(/\/+$/, '')}/webauthn/related/${step}`;
+    const url = this.#issuer.url(`/webauthn/related/${step}`);
     const failed = (message: string, options: { cause?: unknown; interactionRequired?: boolean }) =>
-      new PasskeyError(step, `the passkey ${step} failed: ${message}`, options);
+      PasskeyError.at(step, `the passkey ${step} failed: ${message}`, options);
     let reply: Reply;
     try {
       reply = await this.#issuer.http.send(url, {

@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { describe, test } from 'node:test';
 import { Issuer } from '../src/index.ts';
 import { type BrowserClient, browserClient } from '../src/browser.ts';
-import type { Platform } from '../src/platform.ts';
+import { type Platform, platform } from '../src/platform.ts';
 import {
   DISCOVERY_URL,
   DOCUMENT,
@@ -49,6 +49,8 @@ class FakeAuth {
   readonly clock = new ManualClock(NOW);
   /** Every pushed request's form, by `request_uri`. */
   readonly pushed = new Map<string, Record<string, string>>();
+  /** Whether token responses carry a refresh token. */
+  refresh = true;
   readonly fetch: FakeFetch;
   readonly #codes = new Map<string, Record<string, string>>();
   readonly #key: CryptoKeyPair;
@@ -144,7 +146,7 @@ class FakeAuth {
       expires_in: 300,
       scope: request.scope ?? 'openid offline_access',
       id_token: `${input}.${base64url(new Uint8Array(signature))}`,
-      refresh_token: `prt_${String(now)}`
+      ...(this.refresh ? { refresh_token: `prt_${String(now)}` } : {})
     });
   }
 }
@@ -182,13 +184,18 @@ class FakePage {
     return new Promise((resolve) => this.#waiting.push(resolve));
   }
 
+  /** The page's history entry, whose state the app's router may own. */
+  readonly history = {
+    state: null as unknown,
+    replaceState: (data: unknown, _unused: string, url?: string | URL | null) => {
+      this.history.state = data;
+      this.location.href = new URL(String(url), this.location.href).href;
+    }
+  };
+
   readonly platform: Platform = {
     location: this.location,
-    history: {
-      replaceState: (_data, _unused, url) => {
-        this.location.href = new URL(String(url), this.location.href).href;
-      }
-    },
+    history: this.history,
     storage: {
       getItem: (key) => this.storage.get(key) ?? null,
       setItem: (key, value) => {
@@ -287,12 +294,15 @@ describe('a redirect sign-in', () => {
     ]);
 
     page.callback(auth.authorization(requestUri));
+    page.history.state = { router: 3 };
     const session = await client.handleCallback();
     assert.ok(session);
     assert.equal(session.claims.sub, USER);
     assert.equal(page.storage.size, 0);
-    // Back where the login left from, without the code in the address bar.
+    // Back where the login left from, without the code in the address bar, and with
+    // the router's state.
     assert.equal(page.location.href, PAGE);
+    assert.deepEqual(page.history.state, { router: 3 });
     // No token was ever written to storage.
     const tokens = [await session.accessToken(), session.idToken.token, `prt_${String(NOW)}`];
     assert.ok(page.written.every((value) => tokens.every((token) => !value.includes(token))));
@@ -334,6 +344,21 @@ describe('restore', () => {
     const navigations = page.navigations.length;
     assert.equal(await client.restore(), null);
     assert.equal(page.navigations.length, navigations);
+  });
+
+  test('tries once per page load, even when the restore failed', async () => {
+    const { auth, page, client } = await setUp();
+    await leaving(client.restore(), page);
+    page.callback(auth.authorization(page.redirectedWith ?? ''));
+    auth.fetch.routes[TOKEN_URL] = () => new Response(null, { status: 500 });
+    await assert.rejects(client.handleCallback(), { code: 'network' });
+    const navigations = page.navigations.length;
+    await Promise.race([
+      client.restore().then((restored) => {
+        assert.equal(restored, null);
+      }),
+      page.left(navigations).then(() => assert.fail('the page load restored twice'))
+    ]);
   });
 
   test('comes back with a session when auth has one', async () => {
@@ -496,12 +521,40 @@ describe('a session', () => {
     ]);
   });
 
-  test('refuses to come back to another origin', async () => {
-    const { page, client } = await setUp();
+  test('refuses to come back to another origin, before asking anything', async () => {
+    const { auth, page, client } = await setUp();
+    const returnTo = 'https://elsewhere.example/';
     await Promise.race([
-      assert.rejects(client.login({ returnTo: 'https://elsewhere.example/' }), TypeError),
+      assert.rejects(client.login({ returnTo }), TypeError),
       page.left(0).then(() => assert.fail('the login left for another origin'))
     ]);
+    await assert.rejects(client.signInWithPasskey({ returnTo }), TypeError);
+    assert.equal(auth.pushed.size, 0);
+    assert.equal(page.prompts.length, 0);
+  });
+
+  test('without a refresh token, uses its access token until it expires', async () => {
+    const { auth, client } = await setUp();
+    auth.refresh = false;
+    const session = await client.signInWithPasskey({ scopes: ['profile'] });
+    auth.clock.seconds += 290;
+    assert.equal(await session.accessToken(), `at_${String(NOW)}`);
+    auth.clock.seconds += 10;
+    await assert.rejects(session.accessToken(), { code: 'invalid_token', reason: 'expired' });
+  });
+
+  test('a browser that cannot tell its capabilities has no related origins', async () => {
+    const saved = Object.getOwnPropertyDescriptor(globalThis, 'PublicKeyCredential');
+    Object.defineProperty(globalThis, 'PublicKeyCredential', {
+      configurable: true,
+      value: { getClientCapabilities: () => Promise.reject(new Error('unavailable')) }
+    });
+    try {
+      assert.deepEqual(await platform().capabilities(), {});
+    } finally {
+      if (saved === undefined) Reflect.deleteProperty(globalThis, 'PublicKeyCredential');
+      else Object.defineProperty(globalThis, 'PublicKeyCredential', saved);
+    }
   });
 
   test('refreshes an expiring access token once for concurrent requests', async () => {
