@@ -6,6 +6,7 @@
 import { readAcrValues, readMaxAge } from './challenge.ts';
 import type { Client } from './client.ts';
 import { AuthError } from './error.ts';
+import { Http } from './http.ts';
 import type { IdTokenClaims, StepUpRequirement } from './protocol.ts';
 import { Scopes } from './scope.ts';
 import {
@@ -15,6 +16,7 @@ import {
   Sessions,
   type StoredLogin
 } from './sessions.ts';
+import { REFRESH_MARGIN, STEP_UP_RETRY } from './time.ts';
 import type { IdToken } from './token.ts';
 
 /**
@@ -26,16 +28,14 @@ const SESSION_COOKIE = '__Host-piquel-session';
 const LOGIN_COOKIE = '__Host-piquel-login';
 /** Cookie holding the marker of a step-up login's return, so that page's request is known to be the retry. */
 const STEP_UP_COOKIE = '__Host-piquel-step-up';
-/** How long the browser has to follow the redirect back after a step-up login. */
-const STEP_UP_RETURN = 60_000;
 /** How long a login may take at auth. */
 const PENDING_LIFETIME = 10 * 60_000;
 /** Default session lifetime. */
 const DEFAULT_SESSION_LIFETIME = 12 * 60 * 60_000;
-/** Access tokens this close to expiry are refreshed first. */
-const REFRESH_MARGIN = 30_000;
 /** Longest a refresh may take, auth's response and its ID token check included. */
 const REFRESH_DEADLINE = 20_000;
+/** Longest back-channel logout request read: a logout token is at most 16 KiB. */
+const MAX_LOGOUT_REQUEST = 64 * 1024;
 /** Time kept back from a lease for saving its result, so the save lands before the lease expires. */
 const SAVE_MARGIN = 10_000;
 /** How long a refresh lease lasts if its holder never gives it back. */
@@ -217,7 +217,7 @@ export class Login {
       request.method === 'GET' &&
       marker !== undefined &&
       (await this.#sessions.takeStepUp(marker, Login.#page(request)));
-    return new SignedIn(this, current.login, request, retry);
+    return SignedIn.from(this, current.login, request, retry);
   }
 
   /**
@@ -252,10 +252,11 @@ export class Login {
    */
   static #returnTo(path: string | null): string | undefined {
     if (path === null) return undefined;
+    // Printable ASCII only, as a `Location` header must hold it.
     const local =
-      new TextEncoder().encode(path).length <= MAX_RETURN_TO_BYTES &&
-      /^\/(?![/\\])/.test(path) &&
-      !/[\\#\p{Cc}]/u.test(path);
+      path.length <= MAX_RETURN_TO_BYTES &&
+      /^\/(?![/\\])[\x21-\x7e]*$/.test(path) &&
+      !/[\\#]/.test(path);
     return local ? path : undefined;
   }
 
@@ -364,8 +365,8 @@ export class Login {
     // belonged to the session this one replaces.
     if (pending.stepUp) {
       const marker = SessionKey.generate();
-      await this.#sessions.markStepUp(marker, returnTo, this.#now() + STEP_UP_RETURN);
-      cookies.push(Login.#setCookie(STEP_UP_COOKIE, marker.value, STEP_UP_RETURN));
+      await this.#sessions.markStepUp(marker, returnTo, this.#now() + STEP_UP_RETRY);
+      cookies.push(Login.#setCookie(STEP_UP_COOKIE, marker.value, STEP_UP_RETRY));
     } else {
       cookies.push(Login.#setCookie(STEP_UP_COOKIE, '', 0));
     }
@@ -415,7 +416,10 @@ export class Login {
     const invalid = () => Response.json({ error: 'invalid_request' }, { status: 400 });
     const type = request.headers.get('content-type') ?? '';
     if (!/^application\/x-www-form-urlencoded\s*(;|$)/i.test(type)) return invalid();
-    const [token, ...others] = new URLSearchParams(await request.text()).getAll('logout_token');
+    const body = await Http.readBody(request.body, MAX_LOGOUT_REQUEST);
+    if (body === undefined) return invalid();
+    const form = new URLSearchParams(new TextDecoder().decode(body));
+    const [token, ...others] = form.getAll('logout_token');
     if (token === undefined || others.length > 0) return invalid();
     let logout;
     try {
@@ -515,9 +519,8 @@ export class Login {
     }
     if (refreshed === TIMED_OUT) return this.#end(key);
     // A new ID token must name the same user (OIDC Core §12.2).
-    const old = current.login.idToken.claims;
     const idToken = refreshed.idToken ?? current.login.idToken;
-    if (idToken.claims.sub !== old.sub || idToken.claims.iss !== old.iss) return this.#end(key);
+    if (!current.login.idToken.sameUser(idToken)) return this.#end(key);
     const login: StoredLogin = { ...current.login, ...refreshed, idToken };
     return this.#save(key, id, until, login);
   }
@@ -602,25 +605,38 @@ export class Login {
 export class SignedIn {
   /** The validated ID token of the sign-in, or of the latest refresh that sent one. */
   readonly idToken: IdToken;
-  /** The access token, to send as a bearer credential. */
-  readonly accessToken: string;
+
   /** When the access token expires, in milliseconds since the epoch. */
   readonly expiresAt: number;
   /** Scopes granted to the access token. */
   readonly scopes: Scopes;
+  readonly #accessToken: string;
   readonly #login: Login;
   readonly #request: Request;
   readonly #retry: boolean;
 
-  /** @internal `retry` marks a request returning from a step-up login. */
-  constructor(login: Login, stored: StoredLogin, request: Request, retry: boolean) {
+  private constructor(login: Login, stored: StoredLogin, request: Request, retry: boolean) {
     this.idToken = stored.idToken;
-    this.accessToken = stored.accessToken;
+    this.#accessToken = stored.accessToken;
     this.expiresAt = stored.expiresAt;
     this.scopes = stored.scopes;
     this.#login = login;
     this.#request = request;
     this.#retry = retry;
+  }
+
+  /** @internal `retry` marks a request returning from a step-up login. */
+  static from(login: Login, stored: StoredLogin, request: Request, retry: boolean): SignedIn {
+    return new SignedIn(login, stored, request, retry);
+  }
+
+  /**
+   * The access token, to send as a bearer credential. {@link Login.session} already
+   * refreshed it if it was about to expire; it is a method, as on the browser's
+   * session, which refreshes when asked.
+   */
+  accessToken(): Promise<string> {
+    return Promise.resolve(this.#accessToken);
   }
 
   /** The user's claims, from the ID token. */

@@ -114,7 +114,7 @@ export async function fetch(request: Request): Promise<Response> {
   if (!user) return login.signIn(request); // through login, and back to this page
   const stepUp = user.require({ acr_values: 'phr', max_age: 300 });
   if (stepUp) return stepUp; // a recent passkey sign-in, or through login again
-  return new Response(`Hello ${user.name}`); // user.accessToken calls APIs
+  return new Response(`Hello ${user.name}`); // await user.accessToken() calls APIs
 }
 ```
 

@@ -384,7 +384,7 @@ export class Sessions {
     const { issuer, idToken, claims, accessToken, expiresAt, scopes, refreshToken } = data.login;
     const login: StoredLogin = {
       issuer,
-      idToken: new IdToken(claims, idToken, { clock: this.#clock }),
+      idToken: IdToken.from(claims, idToken, { clock: this.#clock }),
       accessToken,
       expiresAt,
       scopes: Scopes.parse(scopes) ?? Scopes.of([])

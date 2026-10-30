@@ -251,6 +251,8 @@ test('return_to accepts only same-origin paths', async () => {
     '/a\\b',
     '/a#b',
     '/a\nb',
+    // A `Location` header holds ASCII only, so the callback could not send it back.
+    '/✓',
     'notes',
     `/${'a'.repeat(2048)}`
   ]) {
@@ -316,7 +318,7 @@ test('concurrent requests with an expired access token refresh it once', async (
   const users = await Promise.all(Array.from({ length: 5 }, () => browser.session()));
   assert.equal(auth.fetch.count(TOKEN_URL), 2); // The code exchange, then one refresh.
   assert.deepEqual(
-    users.map((user) => user?.accessToken),
+    await Promise.all(users.map(async (user) => user?.accessToken())),
     Array.from({ length: 5 }, () => 'at-2')
   );
   assert.equal(auth.fetch.sent(TOKEN_URL)?.form.refresh_token, 'rt-1');
@@ -364,7 +366,7 @@ test('a refresh ends the session only when its token may be spent', async () => 
     auth.token = answer;
     await browser.session();
     auth.token = async () => Response.json(await auth.tokens());
-    return (await browser.session())?.accessToken ?? 'ended';
+    return (await (await browser.session())?.accessToken()) ?? 'ended';
   };
   const refused = (error: string) => () => Response.json({ error }, { status: 400 });
   assert.equal(await outcome(refused('invalid_grant')), 'ended');
@@ -417,6 +419,16 @@ test('back-channel logout ends the sessions of a sid or of a user, once', async 
   // An ID token is no logout token.
   const idToken = (await other.session())?.idToken.token ?? '';
   assert.equal((await auth.backchannelLogout(idToken)).status, 400);
+  // A body far longer than any logout token is refused, even around a valid one.
+  const padded = new Request(`${APP}/auth/backchannel-logout`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/x-www-form-urlencoded' },
+    body: new URLSearchParams({
+      logout_token: await auth.logoutToken({ sub: USER }, uuid(102)),
+      padding: 'a'.repeat(64 * 1024)
+    })
+  });
+  assert.equal((await auth.login.handle(padded))?.status, 400);
 });
 
 test('a step-up returns to the page, retries once, then answers 403', async () => {
