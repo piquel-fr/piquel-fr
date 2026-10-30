@@ -165,8 +165,14 @@ Login uses the authorization code flow with S256 PKCE, `state` and `nonce`:
 
 1. `authorize` returns the authorization URL and a pending login holding the PKCE
    verifier, `state`, `nonce`, the expected issuer, the redirect URI and any step-up
-   requirement it asks for with `acr_values` and `max_age`. The pending login is stored server-side and consumed by the callback,
-   so a callback completes at most once.
+   requirement it asks for with `acr_values` and `max_age`. Whenever discovery
+   advertises `pushed_authorization_request_endpoint`, the SDK pushes the request
+   there (RFC 9126), authenticated as at the token endpoint, and the URL carries
+   only `client_id` and the returned `request_uri`; otherwise the URL carries the
+   request. So a client auth requires to push still signs in. A push auth refuses
+   is an `oauth` error, and one that cannot reach auth a `network` error. The
+   pending login is stored server-side and consumed by the callback, so a callback
+   completes at most once.
 2. The callback is checked before the code goes anywhere:
    1. `state` equals the pending login's (`state_mismatch`).
    2. RFC 9207 §2.4: when the response carries `iss`, it must equal the issuer

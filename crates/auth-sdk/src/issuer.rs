@@ -260,7 +260,15 @@ impl Issuer {
             ("end_session_endpoint", &metadata.end_session_endpoint),
             ("jwks_uri", &metadata.jwks_uri),
         ];
-        if let Some((name, _)) = endpoints.iter().find(|(_, url)| url.scheme() != "https") {
+        let pushed = metadata
+            .pushed_authorization_request_endpoint
+            .as_ref()
+            .map(|url| ("pushed_authorization_request_endpoint", url));
+        if let Some((name, _)) = endpoints
+            .into_iter()
+            .chain(pushed)
+            .find(|(_, url)| url.scheme() != "https")
+        {
             return Err(DiscoveryError::InsecureEndpoint(name));
         }
         Ok(metadata)

@@ -7,8 +7,8 @@ use super::{
     session::{BackendError, Lease, LeaseId, PendingAuthorization, Session, SessionKey, Sessions},
 };
 use crate::{
-    Acr, AuthenticationPolicy, AuthorizeRequest, CallbackParams, Client, IdToken, Scopes,
-    StepUpRequirement, TokenError, UserId,
+    Acr, AuthenticationPolicy, AuthorizeRequest, CallbackParams, Client, IdToken, LoginError,
+    Scopes, StepUpRequirement, TokenError, UserId,
 };
 use axum::{
     Extension, Form, Json, Router,
@@ -149,7 +149,8 @@ struct Login {
 /// Server-side login for apps: the routes, and the layer the session extractors need.
 ///
 /// - `GET /login?return_to=…` stores a pending login under a fresh random key and
-///   redirects to auth.
+///   redirects to auth, pushing the request first when auth advertises it
+///   ([`Client::authorize`]). It answers 502 if the push fails.
 /// - `GET /callback` completes it, then starts a session under another fresh key,
 ///   ending any session the browser already had.
 /// - `POST /logout` deletes the session and redirects to RP-initiated logout.
@@ -377,11 +378,25 @@ impl Login {
             step_up,
             ..AuthorizeRequest::default()
         };
-        let (Ok((url, pending)), Ok(key)) =
-            (login.client.authorize(&request), SessionKey::generate())
-        else {
+        let randomness_unavailable = || {
             tracing::error!("operating system randomness is unavailable");
-            return StatusCode::INTERNAL_SERVER_ERROR.into_response();
+            StatusCode::INTERNAL_SERVER_ERROR.into_response()
+        };
+        let Ok(key) = SessionKey::generate() else {
+            return randomness_unavailable();
+        };
+        let (url, pending) = match login.client.authorize(&request).await {
+            Ok(started) => started,
+            Err(LoginError::Randomness(_)) => return randomness_unavailable(),
+            // Auth refused or could not take the pushed request.
+            Err(error) => {
+                tracing::warn!(error = %ErrorChain(&error), "sign-in could not start");
+                return (
+                    StatusCode::BAD_GATEWAY,
+                    format!("Sign-in could not start: {error}."),
+                )
+                    .into_response();
+            }
         };
         let pending = PendingAuthorization {
             login: pending,
