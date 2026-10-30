@@ -159,7 +159,7 @@ export class Issuer {
 
   /** Signs users in as the client `config` describes. */
   client(config: ClientConfig): Client {
-    return new Client(this, config);
+    return Client.from(this, config);
   }
 
   /** Validates access tokens for the resource `config` describes. */

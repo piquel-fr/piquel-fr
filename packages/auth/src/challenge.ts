@@ -2,7 +2,7 @@
  * `WWW-Authenticate: Bearer` challenges (RFC 6750 §3, RFC 9470 §3, RFC 9728 §5.1),
  * written by resource servers and read back by clients, exactly as the Rust SDK does.
  */
-import type { BearerChallenge } from './protocol.ts';
+import type { BearerChallenge, StepUpRequirement } from './protocol.ts';
 import { includes } from './json.ts';
 import { Scopes } from './scope.ts';
 import { ACR } from './vocabulary.ts';
@@ -62,6 +62,17 @@ export function formatChallenge(challenge: BearerChallenge): FormattedChallenge 
         : 401;
   const header = written.length === 0 ? 'Bearer' : `Bearer ${written.join(', ')}`;
   return { status, header };
+}
+
+/**
+ * The step-up requirement `source` names, such as a parsed challenge's
+ * `acr_values` and `max_age`, without its other fields.
+ */
+export function stepUpRequirement(source: StepUpRequirement): StepUpRequirement {
+  const requirement: StepUpRequirement = {};
+  if (source.acr_values !== undefined) requirement.acr_values = source.acr_values;
+  if (source.max_age !== undefined) requirement.max_age = source.max_age;
+  return requirement;
 }
 
 /**

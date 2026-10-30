@@ -91,6 +91,9 @@ test('a confidential client authenticates with HTTP Basic, a public one sends it
     { ...PUBLIC, clientSecret: 'a secret/+' }
   );
   await outcome(() => confidential.client.refresh('prt_v1_old'));
+  // The secret stays out of the client's printable state.
+  assert.ok(!JSON.stringify(confidential.client).includes('a secret'));
+  assert.ok(!('clientSecret' in confidential.client.config));
   const basic = sent(confidential.fetch, TOKEN_URL);
   // RFC 6749 §2.3.1 form-encodes both before base64.
   assert.equal(basic.headers.get('authorization'), `Basic ${btoa('notes-web:a+secret%2F%2B')}`);
