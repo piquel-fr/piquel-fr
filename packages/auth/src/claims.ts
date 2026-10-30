@@ -26,14 +26,15 @@ export const uuid = json.matching(
 );
 
 /** A registered client's ID: 1 to 64 ASCII letters, digits, `.`, `_` or `-`. */
-export const clientId = json.matching(/^[A-Za-z0-9._-]{1,64}$/, 'a client ID');
+export const CLIENT_ID = /^[A-Za-z0-9._-]{1,64}$/;
+const clientId = json.matching(CLIENT_ID, 'a client ID');
 
 /** `aud`: one string or an array (RFC 7519 §4.1.3). */
 const audience: json.Decoder<Audience> = (value, path) =>
   typeof value === 'string' ? value : json.array(json.string)(value, path);
 
 /** Granted scopes, in their sorted wire form. */
-const scope = json.refine('a scope list', (value) => Scopes.parse(value)?.toString());
+export const scope = json.refine('a scope list', (value) => Scopes.parse(value)?.toString());
 
 /** `act` (RFC 8693 §4.1), nested for delegation chains. */
 const actor: json.Decoder<Actor> = (value, path) =>

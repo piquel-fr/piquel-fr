@@ -57,6 +57,40 @@ that failed). `toResponse()` answers with the status and the canonical
 `Issuer.discover` takes `fetch` and `clock` options, to send requests through another
 client or pin time in tests.
 
+## Signing users in
+
+`issuer.client()` runs the authorization code flow with PKCE, `state`, `nonce` and
+the RFC 9207 issuer check:
+
+```ts
+const client = issuer.client({
+  clientId: 'notes-web',
+  clientSecret: process.env.NOTES_CLIENT_SECRET, // none for a public client
+  redirectUri: 'https://notes.example/auth/callback'
+});
+
+// 1. Send the browser to `url`. Keep `pending` server-side under its `state`:
+//    it holds the PKCE verifier.
+const { url, pending } = await client.authorize({ scopes: ['profile', 'offline_access'] });
+
+// 2. On the callback, take the pending login back, once, and complete it.
+const tokens = await client.complete(pending, new URL(request.url).searchParams);
+tokens.idToken?.claims.sub;
+```
+
+- `authorize` pushes the request (RFC 9126) whenever the issuer advertises it, so
+  the browser carries only a `request_uri`, as clients registered with
+  `--require-par` need. A `stepUp` requirement, such as one `parseChallenge` read
+  back, is sent as `acr_values` and `max_age`, and `complete` fails unless the ID
+  token meets it.
+- `complete` checks `state`, `iss`, `error` and `code` before the code goes
+  anywhere, then validates the ID token against the pending login.
+- `refresh`, `revoke`, `userinfo` and `logoutUrl` cover the rest of a session, and
+  `logoutToken` validates a back-channel logout token auth posted.
+
+A confidential client authenticates with HTTP Basic, and a public one sends its
+`client_id`.
+
 ## Other JWKS issuers
 
 `KeyCache` verifies JWS signatures against any JWKS URL, refetching once on an unknown

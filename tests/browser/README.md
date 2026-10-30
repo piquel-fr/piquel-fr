@@ -37,10 +37,18 @@ own host, where browsers need no list. Elsewhere it is at
 `https://related-e2e.test`, another site, so the browser reads auth's
 `/.well-known/webauthn` first.
 
-`just web browser-client` registers both clients with the auth database configured
-in the environment, as CI does. Previews do not register them by default: run
+`sdk.spec.ts` signs in with the TypeScript SDK's login client, driven from Node,
+through `browser-e2e-sdk`, a trusted public client registered with `--require-par`
+at `https://sdk-e2e.test`, served like `browser-e2e`'s. The SDK pushes the request,
+so the browser sees only its `request_uri`, then completes the callback and
+validates the ID token; a step-up sign-in must meet its `acr_values` and `max_age`.
+
+`just web browser-client` registers the three clients with the auth database
+configured in the environment, as CI does. Previews do not register them by default: run
 `auth-service client create browser-e2e --name 'Browser E2E' --redirect-uri
-https://browser-e2e.test/callback`, `auth-service client create browser-e2e-inline
+https://browser-e2e.test/callback`, `auth-service client create browser-e2e-sdk
+--name 'Browser E2E SDK' --trusted --require-par --redirect-uri
+https://sdk-e2e.test/callback`, `auth-service client create browser-e2e-inline
 --name 'Browser E2E inline' --trusted --redirect-uri
 https://related-e2e.test/callback` and `auth-service client origin add
 browser-e2e-inline https://related-e2e.test` there.
