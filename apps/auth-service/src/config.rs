@@ -1,6 +1,6 @@
 //! Validated startup configuration, grouped by application.
 
-use crate::{emails::VerificationKey, passkey::DecoyKey, recovery::RecoveryLinks};
+use crate::{emails::VerificationKey, recovery::RecoveryLinks};
 use base64::{Engine, engine::general_purpose::URL_SAFE_NO_PAD};
 use ipnet::IpNet;
 use lettre::{
@@ -26,15 +26,11 @@ const MAX_PROVIDER_CLIENT_ID_LENGTH: usize = 512;
 /// Separates opaque token digests from every other use of a token digest key. The
 /// PEM signing key was used the same way, so it still works as a token digest key.
 const TOKEN_DIGEST_CONTEXT: &[u8] = b"piquel-refresh-token-digest-v1";
-/// Separates the passkey decoy key from every other use of the current token
-/// digest key. The PEM signing key was used the same way, so decoys stay the same
-/// while it is the current key.
-const PASSKEY_DECOY_CONTEXT: &[u8] = b"piquel-passkey-decoy-credential-v1";
 /// Separates the email verification key from every other use of the current token
-/// digest key, as [`PASSKEY_DECOY_CONTEXT`] does the decoy key.
+/// digest key.
 const EMAIL_VERIFICATION_CONTEXT: &[u8] = b"piquel-email-verification-token-v1";
 /// Separates the recovery link key from every other use of the current token
-/// digest key, as [`PASSKEY_DECOY_CONTEXT`] does the decoy key.
+/// digest key, as [`EMAIL_VERIFICATION_CONTEXT`] does the verification key.
 const RECOVERY_LINK_CONTEXT: &[u8] = b"piquel-account-recovery-link-v1";
 /// Fewest bytes a token digest key may have.
 const MIN_TOKEN_DIGEST_KEY_BYTES: usize = 32;
@@ -107,16 +103,10 @@ pub(crate) struct PasskeyConfig {
     pub origin: Origin,
     /// Registration admission policy.
     pub invite_required: bool,
-    /// Domain-separated key for the stable decoy credentials of unknown handles.
-    pub decoy_key: DecoyKey,
 }
 impl PasskeyConfig {
-    /// Reads the passkey policy, validates that the origin has a domain RP ID and
-    /// derives the decoy key from the token digest key.
-    pub(crate) fn from_environment(
-        origin: &Origin,
-        digest_keys: &TokenDigestKeys,
-    ) -> Result<Self, ConfigurationError> {
+    /// Reads the passkey policy and validates that the origin has a domain RP ID.
+    pub(crate) fn from_environment(origin: &Origin) -> Result<Self, ConfigurationError> {
         if !matches!(origin.as_url().host(), Some(url::Host::Domain(_))) {
             return Err(PUBLIC_BASE_URL
                 .invalid("must use a domain name for WebAuthn, e.g. https://auth.piquel.fr"));
@@ -124,7 +114,6 @@ impl PasskeyConfig {
         Ok(Self {
             origin: origin.clone(),
             invite_required: INVITE_REQUIRED.flag(true)?,
-            decoy_key: DecoyKey::new(digest_keys.current.decoy.clone()),
         })
     }
 }
@@ -375,17 +364,15 @@ pub(crate) struct TokenDigestKey {
     key: Secret,
     /// Identifies the key in stored records, without revealing it.
     fingerprint: String,
-    /// The passkey decoy key, derived from the same bytes, used only while this
-    /// key is current.
-    decoy: Secret,
-    /// The email verification key, derived and used like [`Self::decoy`].
+    /// The email verification key, derived from the same bytes, used only while
+    /// this key is current.
     verification: Secret,
-    /// The recovery link key, derived and used like [`Self::decoy`].
+    /// The recovery link key, derived and used like [`Self::verification`].
     recovery: Secret,
 }
 
 impl TokenDigestKey {
-    /// Derives the HMAC, decoy, verification and recovery link keys from
+    /// Derives the HMAC, verification and recovery link keys from
     /// configured bytes, as the PEM key's always were.
     pub(crate) fn derive(bytes: &[u8]) -> Result<Self, CryptoError> {
         let key = Secret::derive(bytes, TOKEN_DIGEST_CONTEXT)?;
@@ -394,7 +381,6 @@ impl TokenDigestKey {
         Ok(Self {
             key,
             fingerprint,
-            decoy: Secret::derive(bytes, PASSKEY_DECOY_CONTEXT)?,
             verification: Secret::derive(bytes, EMAIL_VERIFICATION_CONTEXT)?,
             recovery: Secret::derive(bytes, RECOVERY_LINK_CONTEXT)?,
         })
@@ -721,7 +707,7 @@ impl AuthConfig {
         Ok(Self {
             public_listener: PUBLIC_LISTENER.parse_or(DEFAULT_PUBLIC_LISTENER)?,
             dashboard: DashboardConfig::from_environment()?,
-            passkey: PasskeyConfig::from_environment(&origin, &digest_keys)?,
+            passkey: PasskeyConfig::from_environment(&origin)?,
             federation: FederationConfig::from_environment(&origin)?,
             email: EmailConfig::from_environment(&origin, &digest_keys)?,
             audit: AuditConfig::from_environment(&origin)?,

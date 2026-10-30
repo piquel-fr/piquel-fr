@@ -129,9 +129,6 @@ pub(super) enum Ceremony {
     Register(RegistrationCeremony),
     /// Handle-based authentication.
     Login(LoginCeremony),
-    /// Handle-based authentication for a handle without an active account or
-    /// passkey. It holds no `WebAuthn` state, so its finish can never succeed.
-    Decoy,
     /// Discoverable account-picker authentication.
     Discover(DiscoverCeremony),
     /// Settings authorization for the initiating session.
@@ -151,7 +148,7 @@ impl Ceremony {
     pub(super) const fn kind(&self) -> CeremonyKind {
         match self {
             Self::Register(_) => CeremonyKind::Registration,
-            Self::Login(_) | Self::Decoy | Self::Discover(_) => CeremonyKind::Authentication,
+            Self::Login(_) | Self::Discover(_) => CeremonyKind::Authentication,
             Self::Confirm(_) | Self::Undo(_) | Self::AdminProof(_) => {
                 CeremonyKind::PurposeAuthentication
             }
@@ -162,7 +159,7 @@ impl Ceremony {
     /// Derives the existing-account binding; signup has no account row yet.
     const fn user_id(&self) -> Option<UserId> {
         match self {
-            Self::Register(_) | Self::Decoy | Self::Discover(_) => None,
+            Self::Register(_) | Self::Discover(_) => None,
             Self::Login(state) => Some(state.user_id),
             Self::Confirm(state) => Some(state.user_id),
             Self::Enroll(state) => Some(state.user_id),
@@ -177,7 +174,6 @@ impl Ceremony {
         match self {
             Self::Register(_)
             | Self::Login(_)
-            | Self::Decoy
             | Self::Discover(_)
             | Self::Recover(_)
             | Self::Undo(_) => None,
@@ -233,8 +229,6 @@ ceremony_state!(AdminProofCeremony, AdminProof, PurposeAuthentication);
 pub(super) enum AuthenticationCeremony {
     /// Account identified by handle before the challenge.
     Login(LoginCeremony),
-    /// Handle without an active account or passkey; always rejected.
-    Decoy,
     /// Account identified by the authenticator's response.
     Discover(DiscoverCeremony),
 }
@@ -250,7 +244,7 @@ pub(super) struct RelatedCeremony {
     pub(super) client_id: ClientId,
     /// The client's pushed request, claimed when the ceremony started.
     pub(super) claim: InlineClaim,
-    /// The hinted account's sign-in, or else an account picker; never a decoy.
+    /// The hinted account's sign-in, or else an account picker.
     pub(super) sign_in: AuthenticationCeremony,
 }
 
@@ -260,7 +254,6 @@ impl CeremonyState for AuthenticationCeremony {
     fn extract(ceremony: Ceremony) -> Option<Self> {
         match ceremony {
             Ceremony::Login(state) => Some(Self::Login(state)),
-            Ceremony::Decoy => Some(Self::Decoy),
             Ceremony::Discover(state) => Some(Self::Discover(state)),
             Ceremony::Register(_)
             | Ceremony::Confirm(_)
@@ -321,7 +314,7 @@ impl PasskeyApplication {
                 id,
                 user_id: match &ceremony.sign_in {
                     AuthenticationCeremony::Login(state) => Some(state.user_id),
-                    AuthenticationCeremony::Decoy | AuthenticationCeremony::Discover(_) => None,
+                    AuthenticationCeremony::Discover(_) => None,
                 },
                 session_id: None,
                 kind: CeremonyKind::RelatedAuthentication,

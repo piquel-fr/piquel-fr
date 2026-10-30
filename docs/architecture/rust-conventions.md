@@ -267,7 +267,8 @@ OAuth rejections that carry a cause log it at debug level; clients trigger them.
 Rejections tell the client what to fix: name the parameter or rule and its limit.
 Every OAuth rejection goes through `OAuthCode::reject` or `reject_with`, which
 sends an RFC 6749 `error_description`. Stay vague only where detail would reveal
-a secret or whether an account exists. Internal failures keep a generic message.
+a secret or whether an account exists; a handle may say so, since handles are
+public ([handles](../security/handles.md)). Internal failures keep a generic message.
 Keep separate variants when they identify different failures; merge indistinguishable ones.
 
 ## Vocabulary and persistence

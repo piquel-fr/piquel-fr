@@ -52,7 +52,7 @@ work from devices on the tailnet. Run the same command after changing code.
 | `AUTH_PUBLIC_LISTENER` | Listener address; defaults to `127.0.0.1:8080` |
 | `AUTH_ADMIN_LISTENER`, `AUTH_ADMIN_ORIGIN` | Optional address of the admin dashboard's listener, e.g. `0.0.0.0:8081`, and the dashboard's origin, e.g. `https://admin.piquel.fr`, set together. Only a private route may reach the listener. Without them, auth serves no dashboard |
 | `AUTH_KEY_ENCRYPTION_KEY` | Required env/file reference to the key that seals [signing keys](#signing-keys) in the database: 32 bytes as unpadded base64url text. A trailing newline is ignored |
-| `AUTH_TOKEN_DIGEST_KEY` | Required env/file reference to the key under which refresh tokens, authorization codes and pending logins are stored as HMAC digests. Its raw bytes are the key, at least 32 of them. Passkey decoys, email verification links and recovery links derive from it too |
+| `AUTH_TOKEN_DIGEST_KEY` | Required env/file reference to the key under which refresh tokens, authorization codes and pending logins are stored as HMAC digests. Its raw bytes are the key, at least 32 of them. Email verification links and recovery links derive from it too |
 | `AUTH_TOKEN_DIGEST_KEY_ACCEPTED` | Optional env/file reference to another token digest key, accepted but never used for new digests: the next key, or the old one (see [changing the token digest key](#changing-the-token-digest-key)) |
 | `AUTH_AUDIT_KEY_PROVIDER` | Required env/file reference to the key that signs audit checkpoints: a 32-byte Ed25519 seed as 64 hex characters. See `docs/security/audit-history.md` |
 | `AUTH_INVITE_REQUIRED` | `true` by default; set `false` to allow public registration |
@@ -74,10 +74,7 @@ with `openssl rand -hex 32 > /absolute/path/audit-key`. Keep them across
 restarts, and give every replica the same ones. The key-encryption key cannot be
 changed yet: the stored signing keys would no longer open. Replacing the token
 digest key at once ends every refresh token and every login in progress, so
-change it in two deploys (see below). Changing it also changes the decoy
-passkey IDs that handle sign-in returns for unknown handles, while real
-accounts keep theirs, so comparing responses from before and after a
-replacement reveals which handles exist. Verification links already sent keep
+change it in two deploys (see below). Verification links already sent keep
 working, but a verification email still queued at the change carries a link
 that does not.
 
@@ -629,7 +626,9 @@ explains how to choose a requirement and handle the challenge.
   are dropped, and `0`, `1` or `i`, `5`, `rn` and `vv` read as `o`, `l`, `s`, `m` and
   `w`. Every handle and look-alike stays unique, current or not: a handle is not
   reassigned to another account unless an operator releases it, though its former
-  owner may take it back.
+  owner may take it back. Handles are not secret: handle sign-in says when no
+  active account has one, and signup names the look-alike that blocks one (see
+  [handles.md](docs/security/handles.md)).
   The sign-in methods settings change the handle, which needs a passkey
   confirmation like other sensitive changes and is refused within 30 days of the
   last change, saying when it may change again.

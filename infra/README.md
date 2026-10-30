@@ -131,8 +131,8 @@ piquelctl app exec piquel-fr auth --env production -- auth-service keys list
 ### Moving signing keys to the database
 
 Auth used to sign with the `signing-key` PEM secret alone, and derived the
-digests of refresh tokens, codes and pending logins, passkey decoys and email
-verification links from it. The move to the database (#48) keeps everything issued before it valid,
+digests of refresh tokens, codes and pending logins, and email verification
+links, from it. The move to the database (#48) keeps everything issued before it valid,
 through rolling deploys and rollbacks:
 
 1. The first release reading keys from the database runs the
@@ -143,9 +143,8 @@ through rolling deploys and rollbacks:
    `token-digest-key` is already accepted (`AUTH_TOKEN_DIGEST_KEY_ACCEPTED`).
 2. In a later deploy, swap the two: `AUTH_TOKEN_DIGEST_KEY` points at
    `token-digest-key`, and `AUTH_TOKEN_DIGEST_KEY_ACCEPTED` at `signing-key`.
-   Passkey decoys change once then, and so does the email verification key:
-   links already sent keep working, but one still queued then does not, and its
-   owner sends another. From this deploy on, a rollback lands on a
+   The email verification key changes once then: links already sent keep
+   working, but one still queued then does not, and its owner sends another. From this deploy on, a rollback lands on a
    release that reads signing keys from the database.
 3. Only then rotate once by hand to see rotation work: `auth-service keys
    rotate`, then a day later `keys list` shows the new key active and `primary`
@@ -213,7 +212,7 @@ removes the restart gap after a crash; it adds no capacity.
 - **Configuration.** Replicas must run with the same `AUTH_*` settings. The
   manifest gives every replica the same `key-encryption-key`, which opens the
   signing keys in the database, and the same token digest keys, from which
-  refresh-token digests and passkey decoys derive. Audit checkpoints are signed
+  refresh-token digests and email and recovery links derive. Audit checkpoints are signed
   with a separate key (`AUTH_AUDIT_KEY_PROVIDER`): the stored
   `audit-key-production` and `audit-key-staging` secrets, or a preview's
   generated `audit-key`.
