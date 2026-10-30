@@ -95,7 +95,7 @@ const tokenResponse = json.object({
   refresh_token: json.optional(json.string)
 });
 
-const pushedAuthorization = json.object({ request_uri: json.string });
+const pushedAuthorization = json.object({ request_uri: json.matching(/^\S+$/, 'a request URI') });
 
 /** Unpadded base64url of `length` random bytes. */
 function random(length = RANDOM_BYTES): string {
@@ -232,6 +232,8 @@ export class Client {
     const reply = await this.#post(this.issuer.metadata.revocation_endpoint, {
       token: refreshToken
     });
+    // A success's body carries nothing and is ignored (RFC 7009 §2.2).
+    if (reply.status === 200) return;
     Client.#read('revocation', reply, (value) => value);
   }
 

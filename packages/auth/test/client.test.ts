@@ -17,6 +17,7 @@ import {
 
 const PAR_URL = `${ISSUER}/oauth/par`;
 const REQUEST_URI = 'urn:ietf:params:oauth:request_uri:pushed';
+const REVOCATION_URL = (DOCUMENT as { revocation_endpoint: string }).revocation_endpoint;
 const ID = vector('tokens', 'id-valid');
 const PUBLIC: ClientConfig = { clientId: 'notes-web', redirectUri: REDIRECT_URI };
 
@@ -112,6 +113,17 @@ test('a refused request keeps its OAuth error; any other answer is a network err
   assert.deepEqual(await outcome(() => broken.client.refresh('prt_v1_old')), {
     error: { code: 'network' }
   });
+  const unpushed = await client({
+    [PAR_URL]: () => Response.json({ request_uri: '', expires_in: 60 }, { status: 201 })
+  });
+  await assert.rejects(unpushed.client.authorize(), { code: 'network' });
+});
+
+test('a revocation succeeds on HTTP 200, whatever its body', async () => {
+  const { client: revoking } = await client({
+    [REVOCATION_URL]: () => new Response('revoked', { status: 200 })
+  });
+  await revoking.revoke('prt_v1_old');
 });
 
 test('a login completes with an ID token validated against the pending login', async () => {
