@@ -3,7 +3,7 @@
  * then refresh, revocation, `UserInfo` and logout.
  */
 import * as base64 from './base64.ts';
-import { asciiLowercase } from './challenge.ts';
+import { asciiLowercase, stepUpRequirement } from './challenge.ts';
 import { CLIENT_ID, scope, userInfo } from './claims.ts';
 import { AuthError } from './error.ts';
 import type { Reply } from './http.ts';
@@ -121,15 +121,24 @@ function formEncoded(value: string): string {
 export class Client {
   /** The issuer it signs in with. */
   readonly issuer: Issuer;
-  /** Its registration. */
-  readonly config: ClientConfig;
+  /** Its registration, without the secret, which stays out of logs. */
+  readonly config: Readonly<Omit<ClientConfig, 'clientSecret'>>;
+  readonly #secret: string | undefined;
+
+  private constructor(issuer: Issuer, config: ClientConfig) {
+    const { clientSecret, ...registration } = config;
+    if (!CLIENT_ID.test(registration.clientId)) throw new TypeError('clientId must be a client ID');
+    if (!URL.canParse(registration.redirectUri)) {
+      throw new TypeError('redirectUri must be a URL');
+    }
+    this.issuer = issuer;
+    this.config = { ...registration, redirectUri: new URL(registration.redirectUri).href };
+    this.#secret = clientSecret;
+  }
 
   /** @internal Use {@link Issuer.client}. */
-  constructor(issuer: Issuer, config: ClientConfig) {
-    if (!CLIENT_ID.test(config.clientId)) throw new TypeError('clientId must be a client ID');
-    if (!URL.canParse(config.redirectUri)) throw new TypeError('redirectUri must be a URL');
-    this.issuer = issuer;
-    this.config = { ...config, redirectUri: new URL(config.redirectUri).href };
+  static from(issuer: Issuer, config: ClientConfig): Client {
+    return new Client(issuer, config);
   }
 
   /**
@@ -149,12 +158,9 @@ export class Client {
       state: random(),
       nonce: random(),
       verifier: random(),
-      stepUp: {}
+      // Only the requirement, should a whole parsed challenge be passed.
+      stepUp: stepUpRequirement(request.stepUp ?? {})
     };
-    // Only the requirement, should a whole parsed challenge be passed.
-    const { acr_values, max_age } = request.stepUp ?? {};
-    if (acr_values !== undefined) pending.stepUp.acr_values = acr_values;
-    if (max_age !== undefined) pending.stepUp.max_age = max_age;
     const digest = await crypto.subtle.digest(
       'SHA-256',
       new TextEncoder().encode(pending.verifier)
@@ -190,8 +196,8 @@ export class Client {
    * the code goes anywhere, in order: `state` (`state_mismatch`); RFC 9207 `iss`,
    * which must be the issuer's (`issuer_mismatch`), and present when the issuer
    * advertises it (`missing_issuer`), error responses included; an `error` becomes an
-   * `oauth` error; then `code` (`missing_code`). A parameter sent twice fails its
-   * check (RFC 6749 §3.1). The code is then exchanged, and the ID token validated
+   * `oauth` error; then `code` (`missing_code`). A `state`, `iss` or `code` sent
+   * twice fails its check (RFC 6749 §3.1); an error response only ever fails. The code is then exchanged, and the ID token validated
    * against the pending login's `nonce` and `max_age`. It must meet the login's
    * step-up requirement (`insufficient_user_authentication`), so a step-up login
    * that falls short fails instead of being asked for again.
@@ -310,10 +316,11 @@ export class Client {
    * `client_id` in the form for a public one.
    */
   #post(url: string, form: Record<string, string>): Promise<Reply> {
-    const { clientId, clientSecret } = this.config;
-    if (clientSecret === undefined)
+    const { clientId } = this.config;
+    if (this.#secret === undefined) {
       return this.issuer.http.post(url, { ...form, client_id: clientId });
-    const credentials = btoa(`${formEncoded(clientId)}:${formEncoded(clientSecret)}`);
+    }
+    const credentials = btoa(`${formEncoded(clientId)}:${formEncoded(this.#secret)}`);
     return this.issuer.http.post(url, form, { authorization: `Basic ${credentials}` });
   }
 

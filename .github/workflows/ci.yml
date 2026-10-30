@@ -77,7 +77,7 @@ jobs:
             deps:
               - '{Cargo.toml,**/Cargo.toml,Cargo.lock,deny.toml,package.json,**/package.json,pnpm-lock.yaml,pnpm-workspace.yaml,.github/workflows/ci.yml}'
             app:
-              - '{Cargo.toml,Cargo.lock,rust-toolchain.toml,justfile,just/**,package.json,pnpm-lock.yaml,playwright.config.ts,apps/**,crates/**,tests/browser/**,infra/**,.dockerignore,.github/workflows/ci.yml}'
+              - '{Cargo.toml,Cargo.lock,rust-toolchain.toml,justfile,just/**,package.json,pnpm-lock.yaml,playwright.config.ts,apps/**,crates/**,packages/auth/**,tests/browser/**,infra/**,.dockerignore,.github/workflows/ci.yml}'
               - '!**/*.md'
               - '!infra/piqueld.toml'
 
