@@ -91,8 +91,8 @@ the database crate) sends account holders transactional messages over SMTP. A
 delivery stores the account's ID as its recipient and a typed `EmailMessage` as
 its payload. A verification link stores only the address's ID: the sender reads
 the address, and the account's handle the message names, when it sends, so a link
-to an address removed, replaced or verified meanwhile is not sent, and the
-delivery succeeds without a send. The notices that an address stopped being
+to an address removed, replaced or verified meanwhile, or of an account no longer
+active, is not sent, and the delivery succeeds without a send. The notices that an address stopped being
 primary, or was removed, copy the address instead, read in the event's
 transaction, so removing the address right after cannot cancel them. A recovery's
 link stores the recovery's ID and the primary address's, and is not sent once the
