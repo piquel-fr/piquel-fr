@@ -247,12 +247,11 @@ export class Login {
 
   /**
    * `path` if it is a same-origin relative path, so login cannot be turned into an
-   * open redirect: it starts with one `/` (not `//` or `/\`), has no `\`, `#` or
-   * control characters, and has at most 2048 bytes.
+   * open redirect: it starts with one `/` (not `//` or `/\`), is printable ASCII
+   * without `\` or `#`, as a `Location` header holds it, and has at most 2048 bytes.
    */
   static #returnTo(path: string | null): string | undefined {
     if (path === null) return undefined;
-    // Printable ASCII only, as a `Location` header must hold it.
     const local =
       path.length <= MAX_RETURN_TO_BYTES &&
       /^\/(?![/\\])[\x21-\x7e]*$/.test(path) &&

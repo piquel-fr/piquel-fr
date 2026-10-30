@@ -209,7 +209,7 @@ export class IdToken extends AuthenticatedToken<IdTokenClaims> {
     return new IdToken(claims, token, context);
   }
 
-  /** Whether `other` names the same user at the same issuer, as a refresh's ID token must (OIDC Core §12.2). */
+  /** @internal Whether `other` names the same user at the same issuer, as a refresh's ID token must (OIDC Core §12.2). */
   sameUser(other: IdToken): boolean {
     return other.claims.sub === this.claims.sub && other.claims.iss === this.claims.iss;
   }
