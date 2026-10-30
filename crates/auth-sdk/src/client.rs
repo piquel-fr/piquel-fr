@@ -627,7 +627,19 @@ impl Client {
             Some(endpoint) => {
                 let push = async {
                     let reply = self.post(endpoint, &parameters).await?;
-                    Self::read::<PushedAuthorization>("pushed authorization", &reply)
+                    let pushed: PushedAuthorization =
+                        Self::read("pushed authorization", &reply, StatusCode::CREATED)?;
+                    // A request URI is one token (RFC 9126 §2.2): an empty one names nothing.
+                    if pushed.request_uri.is_empty()
+                        || pushed.request_uri.contains(char::is_whitespace)
+                    {
+                        return Err(OAuthError::UnexpectedResponse {
+                            endpoint: "pushed authorization",
+                            status: reply.status.as_u16(),
+                            source: None,
+                        });
+                    }
+                    Ok(pushed)
                 };
                 let pushed = push.await.map_err(LoginError::Push)?;
                 url.query_pairs_mut()
@@ -726,7 +738,11 @@ impl Client {
     pub async fn revoke(&self, refresh: &RefreshToken) -> Result<(), OAuthError> {
         let url = &self.issuer().metadata().revocation_endpoint;
         let reply = self.post(url, &[("token", refresh.expose())]).await?;
-        Self::read::<serde::de::IgnoredAny>("revocation", &reply).map(|_| ())
+        // A success's body carries nothing and is ignored (RFC 7009 §2.2).
+        if reply.status == StatusCode::OK {
+            return Ok(());
+        }
+        Self::read::<serde::de::IgnoredAny>("revocation", &reply, StatusCode::OK).map(|_| ())
     }
 
     /// Reads the user's claims with an access token.
@@ -747,7 +763,7 @@ impl Client {
             .http()
             .get(url, Authorization::Bearer(access.expose()))
             .await?;
-        Self::read("userinfo", &reply)
+        Self::read("userinfo", &reply, StatusCode::OK)
     }
 
     /// The RP-initiated logout URL: auth ends the browser session, then sends the
@@ -811,7 +827,7 @@ impl Client {
     /// Posts a grant to the token endpoint.
     async fn token_request(&self, form: &[(&str, &str)]) -> Result<TokenResponse, OAuthError> {
         let url = &self.issuer().metadata().token_endpoint;
-        Self::read("token", &self.post(url, form).await?)
+        Self::read("token", &self.post(url, form).await?, StatusCode::OK)
     }
 
     /// Posts a form, authenticating as this client: HTTP Basic for confidential
@@ -832,11 +848,16 @@ impl Client {
         }
     }
 
-    /// Parses a success body, under any `2xx` since the pushed authorization endpoint
-    /// answers `201 Created`, or the OAuth error of a failed request.
-    fn read<T: DeserializeOwned>(endpoint: &'static str, reply: &Reply) -> Result<T, OAuthError> {
+    /// Parses the body of a `success` answer, which is `201 Created` for the pushed
+    /// authorization endpoint and `200 OK` for the others, or the OAuth error of a
+    /// failed request.
+    fn read<T: DeserializeOwned>(
+        endpoint: &'static str,
+        reply: &Reply,
+        success: StatusCode,
+    ) -> Result<T, OAuthError> {
         let status = reply.status.as_u16();
-        if reply.status.is_success() {
+        if reply.status == success {
             // An empty body, as the revocation endpoint sends, parses as JSON null.
             let body: &[u8] = if reply.body.is_empty() {
                 b"null"
