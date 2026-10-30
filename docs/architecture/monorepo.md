@@ -12,7 +12,7 @@ is authentication, with its account settings, and the admin dashboard.
 | `crates/crypto` | Random secrets, SHA-256, HMAC, PKCE and RS256 signing |
 | `crates/ui` | `piquel-ui`: the Topcoat components and layouts of auth's server-rendered pages, rendering plain data and taking URLs as props, the admin dashboard's included, and the shared stylesheet, `assets/style.css` |
 | `crates/telemetry` | `piquel-telemetry`: stderr logs, and OpenTelemetry traces, metrics and logs over OTLP; request spans and access logs for axum routers, client spans, and typed metric instruments; see [telemetry.md](telemetry.md) |
-| `packages/auth` | `@piquel/auth`, the TypeScript SDK, not yet published: discovery, token validation, typed scopes, challenges and the JWKS cache, with no runtime dependencies; `src/protocol.ts` is generated from `piquel_common::protocol` |
+| `packages/auth` | `@piquel/auth`, the TypeScript SDK, not yet published: discovery, token validation, typed scopes, challenges, the JWKS cache and the login client, with no runtime dependencies; `src/protocol.ts` is generated from `piquel_common::protocol` |
 | `tests/sdk-vectors` | Generated cases every SDK must pass; see [sdk.md](sdk.md) |
 
 Prettier and type-aware ESLint cover all web code from the root configuration, as

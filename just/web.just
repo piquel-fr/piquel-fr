@@ -12,7 +12,7 @@ fmt-check:
 lint:
     @pnpm lint
 
-# The TypeScript SDK's unit tests, every shared vector but the callbacks included.
+# The TypeScript SDK's unit tests, every shared vector included.
 test:
     @pnpm test
 
@@ -30,12 +30,14 @@ smoke:
 test-browser *ARGS:
     @pnpm test:browser "$@"
 
-# tests/browser/oidc.spec.ts and related-origins.spec.ts serve the clients' pages
-# themselves and name the same origins. Register the browser checks' public OIDC
-# clients, whose origins have no server, with auth on localhost, as in CI.
+# tests/browser/oidc.spec.ts, related-origins.spec.ts and sdk.spec.ts serve the
+# clients' pages themselves and name the same origins. Register the browser checks'
+# public OIDC clients, whose origins have no server, with auth on localhost, as in CI.
 browser-client:
     @just auth client create browser-e2e --name 'Browser E2E' \
         --redirect-uri https://browser-e2e.test/callback
+    @just auth client create browser-e2e-sdk --name 'Browser E2E SDK' --trusted --require-par \
+        --redirect-uri https://sdk-e2e.test/callback
     @just auth client create browser-e2e-inline --name 'Browser E2E inline' --trusted \
         --redirect-uri https://localhost:4443/callback
     @just auth client origin add browser-e2e-inline https://localhost:4443

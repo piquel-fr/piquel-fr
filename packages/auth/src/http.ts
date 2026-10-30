@@ -32,6 +32,11 @@ export class Reply {
     this.maxAge = maxAge === undefined ? undefined : Number(maxAge);
   }
 
+  /** Whether the body is empty. */
+  get empty(): boolean {
+    return this.#body.length === 0;
+  }
+
   /** Requires `200 OK`, as document endpoints answer. */
   ok(): this {
     if (this.status === 200) return this;
@@ -61,6 +66,19 @@ export class Http {
   /** Sends a `GET`. */
   get(url: string, headers: Record<string, string> = {}): Promise<Reply> {
     return this.send(url, { method: 'GET', headers });
+  }
+
+  /** Sends a form `POST`. */
+  post(
+    url: string,
+    form: Record<string, string>,
+    headers: Record<string, string> = {}
+  ): Promise<Reply> {
+    return this.send(url, {
+      method: 'POST',
+      headers: { ...headers, 'content-type': 'application/x-www-form-urlencoded' },
+      body: new URLSearchParams(form).toString()
+    });
   }
 
   /**

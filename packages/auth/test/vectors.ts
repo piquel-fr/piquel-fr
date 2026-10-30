@@ -42,6 +42,9 @@ export const ISSUER = 'https://auth.example.com';
 export const DOCUMENT = vector('discovery', 'valid').input.document;
 export const DISCOVERY_URL = `${ISSUER}/.well-known/openid-configuration`;
 export const JWKS_URI = `${ISSUER}/.well-known/jwks.json`;
+export const TOKEN_URL = `${ISSUER}/oauth/token`;
+/** The callback of the vectors' client, `notes-web`. */
+export const REDIRECT_URI = 'https://client.example.com/callback';
 
 /** A fake `fetch` answering each URL with its route's response, counting requests. */
 export class FakeFetch {
@@ -68,6 +71,17 @@ export class FakeFetch {
         ? { [DISCOVERY_URL]: DOCUMENT }
         : { [DISCOVERY_URL]: DOCUMENT, [JWKS_URI]: jwks }
     );
+  }
+
+  /** The form and headers of the last request to `url`, if any. */
+  sent(url: string): { form: Record<string, string>; headers: Headers } | undefined {
+    const request = this.requests.findLast((candidate) => candidate.url === url);
+    if (request === undefined) return undefined;
+    const body = typeof request.init.body === 'string' ? request.init.body : '';
+    return {
+      form: Object.fromEntries(new URLSearchParams(body)),
+      headers: new Headers(request.init.headers)
+    };
   }
 
   /** Requests sent to `url`. */

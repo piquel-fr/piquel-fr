@@ -33,6 +33,14 @@ export class Scopes<S extends string = string> {
     return scopes.every((scope) => Scopes.isToken(scope)) ? new Scopes(scopes) : undefined;
   }
 
+  /** @internal Scopes from an application, throwing a `TypeError` for an invalid one. */
+  static checked<S extends string>(scopes: readonly S[]): Scopes<S> {
+    const invalid = scopes.find((scope) => !Scopes.isToken(scope));
+    if (invalid !== undefined)
+      throw new TypeError(`${JSON.stringify(invalid)} is not a valid scope`);
+    return new Scopes(scopes);
+  }
+
   /** @internal Scopes already known to be valid tokens. */
   static of<S extends string>(scopes: Iterable<S>): Scopes<S> {
     return new Scopes(scopes);
@@ -65,7 +73,5 @@ export class Scopes<S extends string = string> {
  * `"` or `\` does not compile either.
  */
 export function defineScopes<const S extends string>(...scopes: ScopeName<S>[]): Scopes<S> {
-  const invalid = scopes.find((scope) => !Scopes.isToken(scope));
-  if (invalid !== undefined) throw new TypeError(`${JSON.stringify(invalid)} is not a valid scope`);
-  return Scopes.of(scopes);
+  return Scopes.checked(scopes);
 }
