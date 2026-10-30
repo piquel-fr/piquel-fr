@@ -121,11 +121,11 @@ export class BrowserClient {
         'no login of this page is waiting for this authorization response'
       );
     }
-    // A restore is tried once per page load, whatever its outcome.
-    if (stored.purpose === 'restore') this.#restored = true;
     try {
       return await this.#session(stored.pending, here.searchParams, stored.purpose === 'step-up');
     } catch (error) {
+      // A restore that came back without a session is not tried again on this page load.
+      if (stored.purpose === 'restore') this.#restored = true;
       const silent =
         error instanceof AuthError && NO_SILENT_SESSION.includes(error.response?.error ?? '');
       if (stored.purpose !== 'restore' || !silent) throw error;
