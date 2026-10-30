@@ -185,15 +185,17 @@ class SigningKey {
    */
   imported(): Promise<CryptoKey> {
     this.#imported ??= (async () => {
-      const bits = (base64.decode(this.#jwk.n)?.length ?? 0) * 8;
-      if (bits < 2048 || bits > 8192) throw new RangeError(`an RSA key of ${String(bits)} bits`);
-      return crypto.subtle.importKey(
+      const key = await crypto.subtle.importKey(
         'jwk',
         { kty: this.#jwk.kty, n: this.#jwk.n, e: this.#jwk.e },
         { name: 'RSASSA-PKCS1-v1_5', hash: 'SHA-256' },
         false,
         ['verify']
       );
+      // The modulus's real size: leading zero bytes in `n` add none.
+      const bits = (key.algorithm as RsaHashedKeyAlgorithm).modulusLength;
+      if (bits < 2048 || bits > 8192) throw new RangeError(`an RSA key of ${String(bits)} bits`);
+      return key;
     })();
     return this.#imported;
   }
@@ -325,13 +327,17 @@ export class KeyCache {
         `key ${JSON.stringify(kid)} is not for ${algorithm}`
       );
     }
-    let verified: boolean;
+    let verified = false;
+    let cause: unknown;
     try {
       verified = await jws.verifiedBy(await key.imported());
-    } catch {
-      verified = false;
+    } catch (error) {
+      // The key could not verify RS256, such as a key too weak for it.
+      cause = error;
     }
-    if (!verified) throw AuthError.invalidToken('bad_signature', 'the token signature is invalid');
+    if (!verified) {
+      throw AuthError.invalidToken('bad_signature', 'the token signature is invalid', cause);
+    }
   }
 
   /** The key named `kid`, if the cached keys hold it and are fresh. */

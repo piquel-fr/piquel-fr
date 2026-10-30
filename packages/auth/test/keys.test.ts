@@ -112,3 +112,16 @@ test('a set with a duplicate kid is rejected and the previous set stays in use',
   });
   assert.equal(server.served, 3);
 });
+
+test('a weak RSA key verifies nothing, however its modulus is written', async () => {
+  const weak = vector('tokens', 'access-weak-key').input;
+  const [key] = (weak.jwks as { keys: { n: string }[] }).keys;
+  assert.ok(key);
+  // Leading zero bytes make the 1024-bit modulus look 2048 bits long.
+  const padded = new Uint8Array([...new Uint8Array(128), ...(base64.decode(key.n) ?? [])]);
+  const server = new KeyServer([{ keys: [{ ...key, n: base64.encode(padded) }] }]);
+  const keys = new KeyCache(JWKS_URI, { fetch: server.fetch });
+  assert.deepEqual(await verify(keys, String(weak.token)), {
+    error: { code: 'invalid_token', reason: 'bad_signature' }
+  });
+});

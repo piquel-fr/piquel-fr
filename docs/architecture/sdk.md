@@ -116,6 +116,8 @@ The SDK caches the issuer's key set:
 - Keys of an unknown `kty`, and keys whose `use` is not `sig`, are skipped (RFC 7517
   §5). A set where two keys share a `kid` is rejected as a whole, and the previous
   set stays in use.
+- An RSA key whose modulus is under 2048 or over 8192 bits verifies nothing: its
+  tokens fail with `bad_signature`.
 
 This handles signing key rotation: auth publishes the new key before it signs with
 it, so tokens from both keys verify during the overlap. Both SDKs' key caches work
