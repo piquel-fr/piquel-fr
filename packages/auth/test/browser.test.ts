@@ -485,10 +485,23 @@ describe('a session', () => {
     assert.ok(stepped);
     assert.equal(page.location.href, PAGE);
     const navigations = page.navigations.length;
-    await assert.rejects(stepped.fetch(RESOURCE), {
-      code: 'insufficient_user_authentication'
-    });
-    assert.equal(page.navigations.length, navigations);
+    // Concurrent refusals on the return are all the one retry: none leaves again.
+    const refused = { code: 'insufficient_user_authentication' };
+    await Promise.race([
+      Promise.all([
+        assert.rejects(stepped.fetch(RESOURCE), refused),
+        assert.rejects(stepped.fetch(RESOURCE), refused)
+      ]),
+      page.left(navigations).then(() => assert.fail('a refusal left the page again'))
+    ]);
+  });
+
+  test('refuses to come back to another origin', async () => {
+    const { page, client } = await setUp();
+    await Promise.race([
+      assert.rejects(client.login({ returnTo: 'https://elsewhere.example/' }), TypeError),
+      page.left(0).then(() => assert.fail('the login left for another origin'))
+    ]);
   });
 
   test('refreshes an expiring access token once for concurrent requests', async () => {
