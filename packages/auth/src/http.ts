@@ -32,11 +32,6 @@ export class Reply {
     this.maxAge = maxAge === undefined ? undefined : Number(maxAge);
   }
 
-  /** Whether the body is empty. */
-  get empty(): boolean {
-    return this.#body.length === 0;
-  }
-
   /** Requires `200 OK`, as document endpoints answer. */
   ok(): this {
     if (this.status === 200) return this;

@@ -367,8 +367,7 @@ export class Client {
       );
     let body: unknown;
     try {
-      // An empty body, as the revocation endpoint sends, reads as `null`.
-      body = reply.empty ? null : reply.json();
+      body = reply.json();
     } catch (error) {
       throw unexpected(error);
     }
