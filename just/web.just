@@ -12,6 +12,19 @@ fmt-check:
 lint:
     @pnpm lint
 
+# The TypeScript SDK's unit tests, every shared vector but the callbacks included.
+test:
+    @pnpm test
+
+# The built TypeScript SDK validating a vector token in Node, Deno, Bun and workerd,
+# the Cloudflare Workers runtime. Needs `deno` and `bun`, as CI installs them.
+smoke:
+    @pnpm --filter @piquel/auth build
+    @node packages/auth/test/smoke/smoke.js
+    @deno run --allow-read=tests/sdk-vectors packages/auth/test/smoke/smoke.js
+    @bun packages/auth/test/smoke/smoke.js
+    @pnpm --filter @piquel/auth exec node test/smoke/workerd.js
+
 # Requires a running auth service; see tests/browser/README.md.
 [positional-arguments]
 test-browser *ARGS:
