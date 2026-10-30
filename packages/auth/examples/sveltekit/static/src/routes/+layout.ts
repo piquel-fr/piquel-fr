@@ -1,18 +1,30 @@
 import { Issuer } from '@piquel/auth';
-import { type BrowserClient, browserClient } from '@piquel/auth/browser';
-import type { Load } from '@sveltejs/kit';
+import { type BrowserClient, type Session, browserClient } from '@piquel/auth/browser';
+import { type Load, redirect } from '@sveltejs/kit';
 
-// adapter-static: the app runs in the browser only, as a public client.
+// adapter-static with a fallback page: the app runs in the browser only, as a public client.
 export const ssr = false;
 
 let auth: BrowserClient | undefined;
+let session: Session | null = null;
 
-/** Finishes a callback, or restores the session with prompt=none, on every page load. */
+/**
+ * Signs the user in once per page load: finishes the callback auth sends to `/`,
+ * then shows the page the login left from, or restores the session with prompt=none.
+ */
 export const load: Load = async ({ url }) => {
   auth ??= browserClient(await Issuer.discover('https://auth.piquel.fr'), {
     clientId: 'notes-web',
-    redirectUri: `${url.origin}/callback`
+    redirectUri: `${url.origin}/`
   });
-  const session = (await auth.handleCallback()) ?? (await auth.restore({ scopes: ['profile'] }));
+  if (!session) {
+    const signedIn = await auth.handleCallback();
+    if (signedIn) {
+      session = signedIn;
+      // The address bar is back at the page the login left from: render that page.
+      redirect(303, location.pathname + location.search);
+    }
+    session = await auth.restore({ scopes: ['profile'] });
+  }
   return { auth, session };
 };

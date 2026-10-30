@@ -6,7 +6,7 @@ export const load: ServerLoad = async ({ locals, fetch }) => {
   const user = locals.user;
   if (!user) redirect(303, '/auth/login');
   const response = await fetch('https://notes.example/notes', {
-    headers: { authorization: `Bearer ${user.accessToken}` }
+    headers: { authorization: `Bearer ${await user.accessToken()}` }
   });
   const challenge = parseChallenge(response.headers.get('www-authenticate') ?? '');
   if (challenge?.error === 'insufficient_user_authentication') {

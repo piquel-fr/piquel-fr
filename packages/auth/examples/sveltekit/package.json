@@ -1,0 +1,9 @@
+{
+  "name": "@piquel/auth-sveltekit-recipe",
+  "private": true,
+  "type": "module",
+  "devDependencies": {
+    "@piquel/auth": "workspace:*",
+    "@sveltejs/kit": "3.1.0"
+  }
+}
