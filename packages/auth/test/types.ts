@@ -10,7 +10,7 @@ defineScopes('notes read');
 /** Needs a token proven to hold notes:write. */
 declare function write(token: AccessToken<Notes, 'notes:write'>): void;
 
-export async function checks(issuer: Issuer, compact: string) {
+export async function checks(issuer: Issuer, compact: string, either: Notes) {
   const token = await issuer.resource({ identifier: 'notes-api', scopes: notes }).validate(compact);
   token.require('notes:read');
   // @ts-expect-error a scope the resource did not declare does not compile
@@ -23,4 +23,11 @@ export async function checks(issuer: Issuer, compact: string) {
   // @ts-expect-error a token proving another scope is refused
   write(token.require('notes:read'));
   if (token.has('notes:write')) write(token);
+  // `either` is typed as a union: checked as one of its members, it proves none.
+  // @ts-expect-error a union-typed scope proves nothing
+  write(token.require(either));
+  // @ts-expect-error a union-typed scope proves nothing
+  token.require('notes:read', either);
+  // @ts-expect-error a union-typed scope proves nothing
+  if (token.has(either)) write(token);
 }
