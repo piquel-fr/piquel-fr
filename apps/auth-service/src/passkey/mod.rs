@@ -467,7 +467,7 @@ impl PasskeyApplication {
             }
             None => None,
         };
-        // Only once admitted, so whether a handle is held is no answer to anyone.
+        // Only once admitted, so an uninvited signup hears about its invitation first.
         Handles::new(&app.database)
             .claimable(&handle, None)
             .await
