@@ -50,8 +50,9 @@
 //!
 //! [`Client`] runs the authorization code flow with PKCE:
 //!
-//! 1. [`Client::authorize`] gives the URL to redirect to and a [`PendingLogin`] to
-//!    keep server-side.
+//! 1. [`Client::authorize`] gives the URL to redirect to, pushing the request first
+//!    when auth advertises pushed authorization requests (RFC 9126), and a
+//!    [`PendingLogin`] to keep server-side.
 //! 2. [`Client::complete`] checks the callback, `state` then the RFC 9207 `iss`,
 //!    before the code goes anywhere. It then validates the ID token against the
 //!    pending login.
