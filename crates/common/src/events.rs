@@ -1010,8 +1010,9 @@ crate::str_enum! {
         InvalidCredential = "invalid_credential",
         /// A passkey's signature counter did not increase, so it may have been copied.
         CounterRegression = "counter_regression",
-        /// No active account holds the handle. Only older events have it: handle
-        /// sign-in now refuses such a handle before any attempt.
+        /// No active account with a passkey held the handle, or the text was no
+        /// handle. Only older events have it: handle sign-in now refuses these
+        /// before any attempt.
         UnknownAccount = "unknown_account",
         /// The account is disabled, or cannot sign in this way any more.
         AccountUnavailable = "account_unavailable",
