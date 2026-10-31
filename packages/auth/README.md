@@ -291,7 +291,8 @@ it, then redirects to the page the login left from, with or without a session, s
 SvelteKit's router renders that page rather than the callback. It keeps the session
 in memory for the page load, and restores it with `prompt=none` otherwise. A `load`
 calling an API with `session.fetch` passes
-`{ returnTo: untrack(() => url.href) }`, since it runs before the address changes,
+`{ returnTo: untrack(() => url.href) }`, with the `untrack` of the load's event
+(`load({ url, untrack })`, not Svelte's), since it runs before the address changes,
 and untracked, so it does not run again on every change of the URL. Its links must
 not preload data: `data-sveltekit-preload-data="false"` on them overrides the
 `hover` a new app's `app.html` sets, since even `tap` preloads on a press, and a
