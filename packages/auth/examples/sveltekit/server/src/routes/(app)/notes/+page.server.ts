@@ -10,10 +10,17 @@ export const load: ServerLoad = async ({ locals, fetch }) => {
   });
   const challenge = parseChallenge(response.headers.get('www-authenticate') ?? '');
   if (challenge?.error === 'insufficient_user_authentication') {
-    // Signs in again as the API asks, back to this page; once only.
-    const location = user.stepUp(challenge).headers.get('location');
+    // Signs in again as the API asks, back to this page; once only. A form post
+    // cannot leave for auth: `stepUp` answers it 401, and the page's GET steps up.
+    const answer = user.stepUp(challenge);
+    const location = answer.headers.get('location');
     if (location) redirect(303, location);
-    error(403, 'Signing in again did not give access to this page.');
+    error(
+      answer.status,
+      answer.status === 401
+        ? 'This page needs a stronger sign-in: open it again.'
+        : 'Signing in again did not give access to this page.'
+    );
   }
   return { notes: (await response.json()) as unknown };
 };
