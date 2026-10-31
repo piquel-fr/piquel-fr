@@ -279,15 +279,19 @@ export const handle: Handle = async ({ event, resolve }) => {
 - [`src/routes/(app)/notes/+page.server.ts`](<examples/sveltekit/server/src/routes/(app)/notes/+page.server.ts>)
   calls an API with `await user.accessToken()`, and answers its
   `insufficient_user_authentication` challenge with `user.stepUp`, which signs the
-  user in again once, back to the same page.
+  user in again once, back to the same page. A form post cannot leave for auth, so
+  `stepUp` answers it 401, and the page's own load steps up when it opens again.
 
 **Static apps** (adapter-static, with a `fallback` page) sign in as public clients
 with `@piquel/auth/browser`, from a root
 [`+layout.ts`](examples/sveltekit/static/src/routes/+layout.ts) with `ssr = false`.
 Auth sends the callback to `/`, the redirect URI to register; the layout finishes
 it, then redirects to the page the login left from, with or without a session, so
-SvelteKit's router renders that page rather than the callback. It keeps the session in memory for the page
-load, and restores it with `prompt=none` once otherwise.
+SvelteKit's router renders that page rather than the callback. It keeps the session
+in memory for the page load, and restores it with `prompt=none` otherwise. A `load`
+calling an API with `session.fetch` passes `{ returnTo: url.href }`, since it runs
+before the address changes, and its links should not be preloaded
+(`data-sveltekit-preload-data="tap"`): a preload that steps up leaves for auth.
 
 ## Other JWKS issuers
 
