@@ -1,3 +1,4 @@
+import { readFileSync } from 'node:fs';
 import {
   expect,
   type Browser,
@@ -69,21 +70,29 @@ export async function signedUp(browser: Browser, username: string): Promise<Page
  * not, and would answer CORS preflights to auth themselves. Its fetches to auth are
  * then genuinely cross-origin. Chromium counts a page with no address as public, and
  * asks before it fetches auth on a local address, as in CI and on previews, so
- * `origin` is granted local network access.
+ * `origin` is granted local network access. `modules` maps paths to JavaScript
+ * files served from disk, such as the built SDK.
  */
 export async function serveClient(
   context: BrowserContext,
   cdp: CDPSession,
-  origin: string
+  origin: string,
+  modules: Partial<Record<string, string>> = {}
 ): Promise<void> {
   await context.grantPermissions(['local-network-access'], { origin });
   await cdp.send('Fetch.enable', { patterns: [{ urlPattern: `${origin}/*` }] });
-  cdp.on('Fetch.requestPaused', ({ requestId }) => {
+  cdp.on('Fetch.requestPaused', ({ requestId, request }) => {
+    const module = modules[new URL(request.url).pathname];
     void cdp.send('Fetch.fulfillRequest', {
       requestId,
       responseCode: 200,
-      responseHeaders: [{ name: 'Content-Type', value: 'text/html' }],
-      body: Buffer.from('<!doctype html><title>Client</title>').toString('base64')
+      responseHeaders: [
+        { name: 'Content-Type', value: module === undefined ? 'text/html' : 'text/javascript' }
+      ],
+      body: (module === undefined
+        ? Buffer.from('<!doctype html><title>Client</title>')
+        : readFileSync(module)
+      ).toString('base64')
     });
   });
 }

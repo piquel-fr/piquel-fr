@@ -146,6 +146,65 @@ keys are SHA-256 digests, so one table with a single statement per operation is
 enough (the type's documentation shows PostgreSQL). Test it with
 `checkBackend(backend)`, which throws on the first broken rule.
 
+## Browser apps
+
+`@piquel/auth/browser` signs users in to a page with no server, as a public client.
+Tokens live in the page's memory only:
+
+```ts
+import { Issuer } from '@piquel/auth';
+import { browserClient } from '@piquel/auth/browser';
+
+const issuer = await Issuer.discover('https://auth.piquel.fr');
+const auth = browserClient(issuer, {
+  clientId: 'notes-web',
+  redirectUri: `${location.origin}/callback`
+});
+
+// On every page load: finish a callback, or restore the session with prompt=none.
+let session = (await auth.handleCallback()) ?? (await auth.restore({ scopes: ['profile'] }));
+// On the user's click: a passkey on this page, or auth's pages with auth.login().
+session ??= await auth.signInWithPasskey({ scopes: ['profile'] });
+const notes = await session.fetch('https://notes.example/notes');
+```
+
+- `login` and `restore` send the browser to auth. Only the pending login (PKCE
+  verifier, `state`, `nonce`, issuer) crosses the redirect, in `sessionStorage`,
+  and `handleCallback` deletes it before completing, then puts the page the login
+  left from back in the address bar. No token is ever written to `localStorage`,
+  `sessionStorage` or a cookie.
+- `restore` asks with `prompt=none`. When auth has no session it can use silently,
+  `handleCallback` returns `null`, and `restore` does not try again on that page
+  load, nor after a callback that found no login waiting, so a signed-out user does
+  not loop. A restore after a step-up that failed keeps that step-up's retry spent,
+  so a page whose request asked for it does not ask again within a minute of that
+  restore's return.
+- `signInWithPasskey` signs in on the page itself, through WebAuthn related
+  origins, for a trusted client whose origin auth approved (see auth's README,
+  "Passkey sign-in on an application's own pages"). When it needs auth's pages, it
+  sends the browser there with the pushed request: the same one when auth left it
+  unclaimed (the browser lacks related origins, or start answered
+  `interaction_required`), and a fresh one after any other failure, since auth may
+  have claimed it. `authorizeWithPasskey(issuer, requestUri)` runs the ceremony
+  alone, a `request_uri` in and `{ code, state, iss }` out, throwing a
+  `PasskeyError` that says whether the request is still unclaimed.
+- `session.fetch` sends the access token, refreshed shortly before it expires when
+  the login was granted `offline_access`; without a refresh token, an expired one
+  throws `invalid_token` (`expired`), and `restore` signs in again. A resource
+  answering `insufficient_user_authentication` sends the browser to auth with the
+  challenge's `acr_values` and `max_age`, back to the same page; if the resource
+  still refuses within a minute of that return, `fetch` throws instead of leaving
+  again. A router's `load` runs before the address changes, so it passes the page it
+  loads: `session.fetch(resource, init, { returnTo })`. A cross-origin resource must
+  expose `WWW-Authenticate` (`Access-Control-Expose-Headers`).
+- `session.claims` holds the user's ID token claims, and `session.logout()` revokes
+  the refresh token and runs RP-initiated logout.
+
+A passkey sign-in on the page leaves no session cookie at auth, so after a reload
+`restore` cannot find it, and the user confirms their passkey again. DPoP-bound
+refresh tokens (#214), kept in IndexedDB under a non-extractable key, will let a
+session survive reloads without a redirect.
+
 ## Other JWKS issuers
 
 `KeyCache` verifies JWS signatures against any JWKS URL, refetching once on an unknown

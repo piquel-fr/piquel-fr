@@ -46,7 +46,7 @@ jobs:
   # matches a filter only when it matches every pattern. `web` covers every
   # file Prettier, ESLint or tsc can see, so it excludes file types rather than
   # directories. `app` covers everything the running service and its images
-  # are built from.
+  # are built from, and the TypeScript SDK the browser suite also runs.
   changes:
     name: changes
     runs-on: ubuntu-latest
