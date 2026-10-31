@@ -465,7 +465,6 @@ async fn signup_applies_the_handle_rules() {
         &PasskeyConfig {
             origin: AUTH_ORIGIN.parse().expect("origin"),
             invite_required: true,
-            decoy_key: DecoyKey::new(Secret::generate().expect("decoy key")),
         },
         fixture.app.oidc.clone(),
     )
@@ -923,99 +922,31 @@ async fn ceremonies_require_browser_binding_and_confirmation_belongs_to_one_sess
     );
 }
 
-/// Checks that a username without an account gets a stable challenge shaped like a
-/// real account's, and that finishing it fails exactly like an unregistered passkey.
+/// Handles are public, so handle sign-in refuses a handle without an active
+/// account, and text that is no handle, before starting any ceremony.
 #[tokio::test]
 #[ignore = "requires TEST_DATABASE_URL"]
-async fn unknown_usernames_get_stable_decoys_that_fail_like_unregistered_passkeys() {
+async fn handle_sign_in_refuses_a_handle_without_an_account_at_once() {
     let fixture = Fixture::new().await;
-    let unknown = format!("none_{}", &TokenId::new().to_string()[24..]);
-    let start = |username: &str| {
-        fixture.start(
-            "/webauthn/authenticate/start",
-            "",
-            json!({"handle":username}),
-        )
-    };
-    let (known, known_browser) = start(&fixture.username).await;
-    let (decoy, decoy_browser) = start(&unknown).await;
-    // Apart from the fresh challenge and the credential list, the options are identical.
-    let options = |started: &Value| {
-        let mut options = started["public_key"].clone();
-        options["publicKey"]["challenge"].take();
-        options["publicKey"]["allowCredentials"].take();
-        options
-    };
-    assert_eq!(options(&known), options(&decoy));
-    let credentials = |started: &Value| {
-        started["public_key"]["publicKey"]["allowCredentials"]
-            .as_array()
-            .expect("allowCredentials")
-            .clone()
-    };
-    let real = &credentials(&known)[0];
-    let fields = |value: &Value| -> Vec<String> {
-        value
-            .as_object()
-            .expect("descriptor")
-            .keys()
-            .cloned()
-            .collect()
-    };
-    for credential in credentials(&decoy) {
-        assert_eq!(fields(&credential), fields(real));
-        assert_eq!(credential["type"], real["type"]);
-    }
-    assert_eq!(credentials(&decoy), credentials(&start(&unknown).await.0));
-    assert_ne!(
-        credentials(&decoy),
-        credentials(&start(&format!("{unknown}x")).await.0)
-    );
-
-    // A passkey the server never registered, standing in for any guess at the account.
-    let (challenge, _) = fixture
-        .app
-        .webauthn
-        .start_passkey_registration(UserId::new().as_uuid(), "stranger", "Stranger", None)
-        .expect("registration");
-    let mut stranger = WebauthnAuthenticator::new(SoftPasskey::new(true));
-    let id = stranger
-        .do_registration(fixture.origin.clone(), challenge)
-        .expect("software registration")
-        .raw_id;
-    let mut failures = Vec::new();
-    for (started, browser) in [(known, known_browser), (decoy, decoy_browser)] {
-        let mut challenge: RequestChallengeResponse =
-            serde_json::from_value(started["public_key"].clone()).expect("challenge");
-        challenge.public_key.allow_credentials = vec![webauthn_rs_proto::AllowCredentials {
-            type_: "public-key".into(),
-            id: id.clone(),
-            transports: None,
-        }];
-        let assertion = stranger
-            .do_authentication(fixture.origin.clone(), challenge)
-            .expect("software assertion");
+    for handle in [
+        format!("none-{}", &TokenId::new().to_string()[24..]),
+        "@not a handle".to_owned(),
+    ] {
         let response = fixture
             .request(
-                "/webauthn/authenticate/finish",
+                routes::passkey::AUTHENTICATE_START,
                 Method::POST,
-                &browser,
-                json!({"ceremony_id":started["ceremony_id"],"credential":assertion}),
+                "",
+                json!({ "handle": handle }),
             )
             .await;
+        assert_eq!(response.status(), StatusCode::NOT_FOUND, "{handle}");
         assert!(response.headers().get(header::SET_COOKIE).is_none());
-        failures.push((response.status(), Fixture::json(response).await));
+        assert_eq!(
+            Fixture::json(response).await["error"],
+            "No active account has this handle."
+        );
     }
-    assert_eq!(failures[0].0, StatusCode::BAD_REQUEST);
-    assert_eq!(failures[0], failures[1]);
-    assert_eq!(
-        fixture.events().await,
-        [DomainEvent::SignInFailed {
-            method: AuthenticationMethod::Passkey,
-            reason: SignInFailure::InvalidCredential,
-        }],
-        "the decoy's failure concerns no account"
-    );
 }
 
 /// Signing in with a passkey in a browser holding a social session of the same

@@ -157,7 +157,7 @@ impl PasskeyRepository<'_> {
     /// Lists the unrevoked credentials of the account whose handle is `handle`,
     /// oldest first, if it is active or scheduled for deletion: a passkey can
     /// restore the latter. A missing, disabled or passkey-less account returns
-    /// none, in the same single query, so callers cannot tell those cases apart.
+    /// none, so handle sign-in refuses all three alike.
     ///
     /// # Errors
     ///

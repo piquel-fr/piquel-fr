@@ -9,7 +9,6 @@ use crate::{
         AuditConfig, EmailConfig, FederationConfig, OidcConfig, PasskeyConfig, ProviderConfig,
         TokenDigestKey, TokenDigestKeys,
     },
-    passkey::DecoyKey,
     recovery::RecoveryLinks,
     routes,
     security::{BrowserCookie, RequestContext, Session},
@@ -90,7 +89,6 @@ impl AuthConfig {
             passkey: PasskeyConfig {
                 origin: origin.clone(),
                 invite_required: false,
-                decoy_key: DecoyKey::new(Secret::generate().expect("decoy key")),
             },
             email: EmailConfig::test(origin, true),
             federation: FederationConfig {
