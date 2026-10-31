@@ -175,7 +175,9 @@ const notes = await session.fetch('https://notes.example/notes');
   `sessionStorage` or a cookie.
 - `restore` asks with `prompt=none`. When auth has no session it can use silently,
   `handleCallback` returns `null`, and `restore` does not try again on that page
-  load, so a signed-out user does not loop.
+  load, nor after a callback that found no login waiting, so a signed-out user does
+  not loop. A restore after a step-up that failed keeps that step-up's retry spent,
+  so a page whose request asked for it does not ask again.
 - `signInWithPasskey` signs in on the page itself, through WebAuthn related
   origins, for a trusted client whose origin auth approved (see auth's README,
   "Passkey sign-in on an application's own pages"). When it needs auth's pages, it
@@ -192,7 +194,7 @@ const notes = await session.fetch('https://notes.example/notes');
   challenge's `acr_values` and `max_age`, back to the same page; if the resource
   still refuses within a minute of that return, `fetch` throws instead of leaving
   again. A router's `load` runs before the address changes, so it passes the page it
-  loads: `session.fetch(url, init, { returnTo })`. A cross-origin resource must
+  loads: `session.fetch(resource, init, { returnTo })`. A cross-origin resource must
   expose `WWW-Authenticate` (`Access-Control-Expose-Headers`).
 - `session.claims` holds the user's ID token claims, and `session.logout()` revokes
   the refresh token and runs RP-initiated logout.

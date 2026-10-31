@@ -205,8 +205,9 @@ sign-in starts a session under a fresh key. Refresh tokens never reach the brows
 Browser apps with no server are public clients and keep tokens in the page's memory
 only. Only the pending login crosses a redirect, in `sessionStorage`, and its
 callback deletes it. After a reload they authorize again with `prompt=none`; once
-that comes back without a session, the page load does not try again, so a user
-signed out at auth does not loop.
+that comes back without a session, or a callback finds no login waiting, the page
+load does not try again, so a user signed out at auth does not loop. A restore
+after a failed step-up keeps the step-up's one retry spent.
 
 Applications choose where sessions live by implementing a small storage backend:
 load, an insert that stores only where no record is, a compare-and-swap replace, and
