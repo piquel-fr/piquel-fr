@@ -279,8 +279,9 @@ export const handle: Handle = async ({ event, resolve }) => {
 - [`src/routes/(app)/notes/+page.server.ts`](<examples/sveltekit/server/src/routes/(app)/notes/+page.server.ts>)
   calls an API with `await user.accessToken()`, and answers its
   `insufficient_user_authentication` challenge with `user.stepUp`, which signs the
-  user in again once, back to the same page. A form post cannot leave for auth, so
-  `stepUp` answers it 401, and the page's own load steps up when it opens again.
+  user in again once, back to the same page. A post to the page's form actions
+  cannot leave for auth, so `stepUp` answers it 401, and the page's own load steps up
+  when it opens again.
 
 **Static apps** (adapter-static, with a `fallback` page) sign in as public clients
 with `@piquel/auth/browser`, from a root
@@ -289,9 +290,14 @@ Auth sends the callback to `/`, the redirect URI to register; the layout finishe
 it, then redirects to the page the login left from, with or without a session, so
 SvelteKit's router renders that page rather than the callback. It keeps the session
 in memory for the page load, and restores it with `prompt=none` otherwise. A `load`
-calling an API with `session.fetch` passes `{ returnTo: url.href }`, since it runs
-before the address changes, and its links should not be preloaded
-(`data-sveltekit-preload-data="tap"`): a preload that steps up leaves for auth.
+calling an API with `session.fetch` passes
+`{ returnTo: untrack(() => url.href) }`, since it runs before the address changes,
+and untracked, so it does not run again on every change of the URL. Its links must
+not preload data: `data-sveltekit-preload-data="false"` on them overrides the
+`hover` a new app's `app.html` sets, since even `tap` preloads on a press, and a
+preload that steps up leaves for auth. Without `offline_access` there is no refresh
+token: when `session.fetch` throws `invalid_token` (`expired`), the `load` signs in
+again with `auth.restore({ scopes, returnTo })`.
 
 ## Other JWKS issuers
 
