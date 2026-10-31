@@ -290,7 +290,8 @@ describe('a redirect sign-in', () => {
     assert.deepEqual(Object.keys(JSON.parse(stored) as object).sort(), [
       'pending',
       'purpose',
-      'returnTo'
+      'returnTo',
+      'steppedUp'
     ]);
 
     page.callback(auth.authorization(requestUri));
@@ -503,6 +504,25 @@ describe('a session', () => {
     const { page, session } = await signedIn();
     assert.equal(await (await session.fetch(RESOURCE)).text(), 'notes');
     assert.equal(page.requests[0]?.headers.get('authorization'), `Bearer at_${String(NOW)}`);
+  });
+
+  test('a restore after a failed step-up does not step up again', async () => {
+    const { auth, page, client, session } = await signedIn();
+    page.resource = () => challenge.clone();
+    await leaving(session.fetch(RESOURCE), page);
+    const { state } = auth.authorization(page.redirectedWith ?? '');
+    page.callback({ error: 'access_denied', state: state ?? '', iss: ISSUER });
+    await assert.rejects(client.handleCallback(), { code: 'oauth' });
+    // The page restores the session the step-up's navigation dropped.
+    await leaving(client.restore(), page);
+    page.callback(auth.authorization(page.redirectedWith ?? ''));
+    const restored = await client.handleCallback();
+    assert.ok(restored);
+    const navigations = page.navigations.length;
+    await Promise.race([
+      assert.rejects(restored.fetch(RESOURCE), { code: 'insufficient_user_authentication' }),
+      page.left(navigations).then(() => assert.fail('the refused request stepped up again'))
+    ]);
   });
 
   test('steps up when a resource asks, and the retry after the return fails at most once', async () => {

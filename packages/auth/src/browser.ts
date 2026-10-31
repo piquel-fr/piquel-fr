@@ -61,20 +61,30 @@ export type SignInRequest = AuthorizeRequest & {
 /** Why a login left the page, which decides how its callback ends. */
 type Purpose = 'sign-in' | 'restore' | 'step-up';
 
-/** A login waiting for its callback in `sessionStorage`. */
-type StoredLogin = { pending: PendingLogin; returnTo: string; purpose: Purpose };
+/**
+ * A login waiting for its callback in `sessionStorage`. `steppedUp` marks a login
+ * whose session has spent its step-up retry: a step-up's own, or a restore after a
+ * step-up that failed, so a refused request does not step up again.
+ */
+type StoredLogin = {
+  pending: PendingLogin;
+  returnTo: string;
+  purpose: Purpose;
+  steppedUp: boolean;
+};
 
 const storedLogin: json.Decoder<StoredLogin> = json.object({
   pending: pendingLogin,
   returnTo: json.string,
-  purpose: json.oneOf(['sign-in', 'restore', 'step-up'])
+  purpose: json.oneOf(['sign-in', 'restore', 'step-up']),
+  steppedUp: json.boolean
 });
 
 /**
  * Signs users in to a page with no server, from {@link browserClient}. Call
  * {@link handleCallback} first on every page load, then {@link restore}: once a
- * restore came back without a session, the page load does not try again, so a page
- * whose user is signed out at auth does not loop.
+ * restore came back without a session, or a callback found no login waiting, the page
+ * load does not try again, so a page whose user is signed out at auth does not loop.
  */
 export class BrowserClient {
   /** The login client it signs in with. */
@@ -83,8 +93,10 @@ export class BrowserClient {
   readonly platform: Platform;
   /** Where its login waits for the callback. */
   readonly #key: string;
-  /** Whether a restore came back without a session on this page load. */
+  /** Whether this page load stops restoring: a restore came back without a session, or a callback found no login waiting. */
   #restored = false;
+  /** Whether a step-up failed on this page load, so the next restore has spent its retry. */
+  #stepUpFailed = false;
 
   private constructor(issuer: Issuer, config: BrowserClientConfig) {
     const { platform: injected, ...registration } = config;
@@ -124,10 +136,12 @@ export class BrowserClient {
       );
     }
     try {
-      return await this.#session(stored.pending, here.searchParams, stored.purpose === 'step-up');
+      return await this.#session(stored.pending, here.searchParams, stored.steppedUp);
     } catch (error) {
       // A restore that came back without a session is not tried again on this page load.
       if (stored.purpose === 'restore') this.#restored = true;
+      // Nor is a failed step-up asked for again by the session a restore brings back.
+      if (stored.purpose === 'step-up') this.#stepUpFailed = true;
       const silent =
         error instanceof AuthError && NO_SILENT_SESSION.includes(error.response?.error ?? '');
       if (stored.purpose !== 'restore' || !silent) throw error;
@@ -139,7 +153,8 @@ export class BrowserClient {
    * Restores the user's session after a reload: the browser goes to auth with
    * `prompt=none`, and comes back to {@link handleCallback} with a session, or without
    * one when the user is signed out at auth. Returns `null` without leaving once a
-   * restore came back to this page load without a session.
+   * restore came back to this page load without a session, or a callback found no
+   * login waiting.
    */
   async restore(request: Pick<SignInRequest, 'scopes' | 'returnTo'> = {}): Promise<null> {
     if (this.#restored) return null;
@@ -208,7 +223,8 @@ export class BrowserClient {
   ): Promise<never> {
     const purpose: Purpose =
       request.prompt === 'none' ? 'restore' : request.stepUp === undefined ? 'sign-in' : 'step-up';
-    const stored: StoredLogin = { pending, returnTo, purpose };
+    const steppedUp = purpose === 'step-up' || (purpose === 'restore' && this.#stepUpFailed);
+    const stored: StoredLogin = { pending, returnTo, purpose, steppedUp };
     this.platform.storage.setItem(this.#key, JSON.stringify(stored));
     return this.away(url);
   }
