@@ -77,8 +77,9 @@ export class Resource<S extends string = never, X = undefined> {
    * requires `scopes`, narrowing the token's type to them. Throws `missing_token`
    * when there is none (another scheme counts as none), whose challenge names
    * `scopes`, and `invalid_request` when the header is malformed: `Bearer` without a
-   * token, or several `Authorization` headers one of which is Bearer, as the Rust
-   * SDK reads them (`Headers` joins them with `, `). Otherwise see {@link validate} and {@link AccessToken.require}.
+   * token, or several `Authorization` headers one of which is Bearer. The Rust SDK
+   * refuses any repeated header; here `Headers` has joined them with `, `, which a
+   * single header of another scheme may hold too, so only a joined Bearer shows. Otherwise see {@link validate} and {@link AccessToken.require}.
    */
   async authenticate<const T extends readonly S[] = readonly []>(
     request: { headers: Headers },
