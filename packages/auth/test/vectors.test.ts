@@ -1,9 +1,18 @@
-/** Every case in tests/sdk-vectors except callbacks, with the case's clock and a fake fetch. */
+/** Every case in tests/sdk-vectors, with the case's clock and a fake fetch. */
 import assert from 'node:assert/strict';
 import { describe, test } from 'node:test';
 import { Issuer, formatChallenge, parseChallenge, type BearerChallenge } from '../src/index.ts';
 import { KeySet } from '../src/keys.ts';
-import { FakeFetch, ISSUER, cases, outcome } from './vectors.ts';
+import {
+  DISCOVERY_URL,
+  DOCUMENT,
+  FakeFetch,
+  ISSUER,
+  REDIRECT_URI,
+  TOKEN_URL,
+  cases,
+  outcome
+} from './vectors.ts';
 
 describe('discovery vectors', () => {
   for (const vector of cases('discovery')) {
@@ -55,8 +64,10 @@ describe('token vectors', () => {
             );
             return id.claims;
           }
-          case 'logout':
-            return (await issuer.tokens.logoutToken(token, audience)).claims;
+          case 'logout': {
+            const client = issuer.client({ clientId: audience, redirectUri: REDIRECT_URI });
+            return (await client.logoutToken(token)).claims;
+          }
           default:
             throw new Error(`unknown token kind in ${vector.name}`);
         }
@@ -80,6 +91,43 @@ describe('challenge vectors', () => {
       const formatted = formatChallenge(challenge as BearerChallenge);
       assert.deepEqual(formatted, expected);
       assert.deepEqual(parseChallenge(formatted.header), challenge);
+    });
+  }
+});
+
+describe('callback vectors', () => {
+  for (const vector of cases('callbacks')) {
+    test(vector.name, async () => {
+      // The token endpoint refuses every code; the test checks which code reached it.
+      const fetch = new FakeFetch({
+        [DISCOVERY_URL]: () =>
+          Response.json({
+            ...(DOCUMENT as object),
+            authorization_response_iss_parameter_supported:
+              vector.input.authorization_response_iss_parameter_supported
+          }),
+        [TOKEN_URL]: () => Response.json({ error: 'invalid_grant' }, { status: 400 })
+      });
+      const issuer = await Issuer.discover(String(vector.input.issuer), { fetch: fetch.fetch });
+      const client = issuer.client({ clientId: 'notes-web', redirectUri: REDIRECT_URI });
+      const pending = {
+        issuer: issuer.issuer,
+        clientId: 'notes-web',
+        redirectUri: REDIRECT_URI,
+        state: String(vector.input.state),
+        nonce: 'unused',
+        verifier: 'unused',
+        stepUp: {}
+      };
+      const parameters = new URLSearchParams(vector.input.parameters as Record<string, string>);
+      const result = await outcome(() => client.complete(pending, parameters));
+      const sent = fetch.sent(TOKEN_URL);
+      if (sent === undefined) {
+        assert.deepEqual(result, vector.expected);
+      } else {
+        assert.deepEqual({ ok: { code: sent.form.code } }, vector.expected);
+        assert.deepEqual(result, { error: { code: 'oauth' } });
+      }
     });
   }
 });

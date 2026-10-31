@@ -1,4 +1,5 @@
 /** Discovery, and the issuer handle every resource and client shares. */
+import { Client, type ClientConfig } from './client.ts';
 import { AuthError } from './error.ts';
 import { type Fetch, Http, type Reply } from './http.ts';
 import * as json from './json.ts';
@@ -152,6 +153,11 @@ export class Issuer {
   /** The issuer identifier, exactly as tokens carry it in `iss`. */
   get issuer(): string {
     return this.metadata.issuer;
+  }
+
+  /** Signs users in as the client `config` describes. */
+  client(config: ClientConfig): Client {
+    return Client.from(this, config);
   }
 
   /** Validates access tokens for the resource `config` describes. */
