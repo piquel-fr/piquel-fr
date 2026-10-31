@@ -1,16 +1,18 @@
 # SDK design
 
 Applications integrate with auth.piquel.fr through its Rust SDK, `piquel-auth`, its
-TypeScript SDK, `@piquel/auth` (in development, #58), or any OpenID Connect library. The SDK follows this document and passes the shared
-vectors in [`tests/sdk-vectors`](../../tests/sdk-vectors/README.md); an SDK in another
-language would do the same, so every SDK accepts and rejects the same tokens and
-challenges.
+TypeScript SDK, `@piquel/auth`, or any OpenID Connect library. Both SDKs follow this
+document and pass the shared vectors in
+[`tests/sdk-vectors`](../../tests/sdk-vectors/README.md); an SDK in another language
+would do the same, so every SDK accepts and rejects the same tokens and challenges.
+The Rust SDK is the reference implementation, and the TypeScript SDK mirrors its
+behavior and names.
 
 | Path | Package | Published | Role |
 | --- | --- | --- | --- |
 | `crates/common` | `piquel-common` | yes | Shared types; with no features, the IDs and wire types shared by auth and the Rust SDK |
 | `crates/auth-sdk` | `piquel-auth` | yes | Rust SDK; the `axum` feature adds the axum integration |
-| `packages/auth` | `@piquel/auth` | not yet | TypeScript SDK, ESM only, with no runtime dependencies |
+| `packages/auth` | `@piquel/auth` | not yet | TypeScript SDK, ESM only, with no runtime dependencies: `fetch` and WebCrypto, so it runs in browsers, Node, Deno, Bun and Workers |
 | `tests/sdk-vectors` | none | no | Shared test vectors |
 
 ## Wire types
@@ -54,7 +56,7 @@ older SDKs.
   it understands.
 
 The SDK takes an injectable clock, so tests and the vectors can pin time, and an
-injectable HTTP client.
+injectable HTTP client: a `reqwest` client in Rust, a `fetch` in TypeScript.
 
 ## Token validation
 
@@ -114,17 +116,20 @@ The SDK caches the issuer's key set:
 - Keys of an unknown `kty`, and keys whose `use` is not `sig`, are skipped (RFC 7517
   §5). A set where two keys share a `kid` is rejected as a whole, and the previous
   set stays in use.
+- An RSA key whose modulus is under 2048 or over 8192 bits verifies nothing: its
+  tokens fail with `bad_signature`.
 
 This handles signing key rotation: auth publishes the new key before it signs with
-it, so tokens from both keys verify during the overlap. The Rust key cache works
-with any JWKS URL, so auth also uses it for Google.
+it, so tokens from both keys verify during the overlap. Both SDKs' key caches work
+with any JWKS URL, so auth also uses the Rust one for Google.
 
 ## Scopes
 
 Scopes are space-separated strings on the wire (RFC 6749 §3.3), and each token is
-printable ASCII without spaces, `"` or `\`. Each SDK types them: the Rust SDK
-declares an application's scopes once with a macro, so a required scope is a type
-and a misspelled scope does not compile.
+printable ASCII without spaces, `"` or `\`. Each SDK types them, so a misspelled
+scope does not compile: the Rust SDK declares an application's scopes once with a
+macro, so a required scope is a type, and the TypeScript SDK with `defineScopes`,
+whose names become a union that `AccessToken.require` accepts.
 
 ## Errors
 
@@ -152,6 +157,10 @@ On a resource server, each error maps to one `WWW-Authenticate: Bearer` challeng
 | `insufficient_scope` | 403 | `error="insufficient_scope"` with every required scope |
 | `insufficient_user_authentication` | 401 | `error="insufficient_user_authentication"` with `acr_values` and `max_age` |
 | A malformed `Authorization` header | 400 | `error="invalid_request"` |
+
+The Rust SDK's axum extractors report the request rows themselves. The TypeScript
+SDK's `AuthError` reports them with two codes outside the shared categories,
+`missing_token` and `invalid_request`, and every row with `toResponse()`.
 
 The parameters are always written in the order `error`, `error_description`,
 `scope`, `acr_values`, `max_age`, `resource_metadata`, with every value quoted, so

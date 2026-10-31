@@ -4,7 +4,7 @@ default: validate
 # Rust formatting, linting, checks, audits and the auth-service build.
 mod rust 'just/rust.just'
 
-# Web formatting, linting, type checks and the browser tests.
+# Web formatting, linting, type checks, the TypeScript SDK's tests and the browser tests.
 mod web 'just/web.just'
 
 # Scratch PostgreSQL clusters, database tests, the SQLx query cache and migrations.
@@ -21,7 +21,7 @@ alias format := fmt
 alias preview := infra::preview
 alias preview-delete := infra::preview-delete
 
-validate: fmt-check lint check test doc doc-test audit
+validate: fmt-check lint check test web::test doc doc-test audit
 
 install:
     @pnpm install --frozen-lockfile

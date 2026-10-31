@@ -693,12 +693,13 @@ Use individual recipes while iterating:
 
 | Task | Recipe |
 | --- | --- |
-| Full validation (format, Clippy/ESLint, Rust/TypeScript checks, unit/doc tests, audits) | `just validate` |
+| Full validation (format, Clippy/ESLint, Rust/TypeScript checks, Rust and SDK unit tests, doc tests, audits) | `just validate` |
 | Format Rust and web / check formatting | `just fmt` / `just fmt-check` |
 | Rust / TypeScript checks (tsc, the passkey script's JSDoc types included) | `just rust check` / `just web check` |
 | Clippy and ESLint, warnings denied; `publint` and `attw` on the built TypeScript SDK | `just lint` (`just rust lint` / `just web lint`) |
 | Regenerate the SDK vectors / the TypeScript SDK's wire types | `just sdk-vectors` / `just sdk-types` |
 | Unit tests / focused package tests | `just test` / `just test -p auth-service` |
+| TypeScript SDK tests, the shared vectors included / the built SDK in Node, Deno, Bun and workerd | `just web test` / `just web smoke` |
 | Documentation tests | `just doc-test` |
 | Database integration tests and query cache check, in a scratch cluster | `just db test` |
 | Regenerate the query cache after changing SQL or migrations | `just db prepare` |

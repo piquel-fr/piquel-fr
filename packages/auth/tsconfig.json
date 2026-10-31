@@ -8,10 +8,16 @@
     "lib": ["es2023", "DOM"],
     "types": [],
     "declaration": true,
+    "stripInternal": true,
     "rootDir": "src",
     "outDir": "dist",
     "verbatimModuleSyntax": true,
-    "isolatedModules": true
+    "isolatedModules": true,
+    // Node runs the sources and tests directly by stripping types, so imports name
+    // the .ts files, and tsc rewrites them to .js in what it emits.
+    "allowImportingTsExtensions": true,
+    "rewriteRelativeImportExtensions": true,
+    "erasableSyntaxOnly": true
   },
   "include": ["src"]
 }

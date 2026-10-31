@@ -2,3 +2,7 @@
 # TypeScript SDK.
 packages:
   - packages/*
+# workerd's install script only fetches its binary when the platform package is
+# missing, which pnpm installs anyway.
+allowBuilds:
+  workerd: false
