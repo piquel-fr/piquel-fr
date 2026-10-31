@@ -316,6 +316,13 @@ describe('a redirect sign-in', () => {
     page.callback({ code: 'pac_v1_stolen', state: 'state', iss: ISSUER });
     await assert.rejects(client.handleCallback(), { code: 'callback', reason: 'state_mismatch' });
     assert.equal(page.location.href, REDIRECT_URI);
+    // A page that loses its logins would lose a restore's too: it does not try one.
+    await Promise.race([
+      client.restore().then((restored) => {
+        assert.equal(restored, null);
+      }),
+      page.left(0).then(() => assert.fail('the page restored without its storage'))
+    ]);
   });
 
   test('a refused sign-in throws its OAuth error', async () => {
@@ -346,7 +353,7 @@ describe('restore', () => {
     assert.equal(page.navigations.length, navigations);
   });
 
-  test('tries once per page load, even when the restore failed', async () => {
+  test('does not try again on a page load whose restore failed', async () => {
     const { auth, page, client } = await setUp();
     await leaving(client.restore(), page);
     page.callback(auth.authorization(page.redirectedWith ?? ''));
@@ -511,6 +518,11 @@ describe('a session', () => {
     const stepped = await client.handleCallback();
     assert.ok(stepped);
     assert.equal(page.location.href, PAGE);
+    // A router's `load` names the page it loads, the address not having changed yet.
+    const next = new URL('/notes/2', PAGE).href;
+    await leaving(session.fetch(RESOURCE, undefined, { returnTo: next }), page);
+    const [stored] = [...page.storage.values()];
+    assert.equal((JSON.parse(stored ?? '{}') as { returnTo?: string }).returnTo, next);
     const navigations = page.navigations.length;
     // Concurrent refusals on the return are all the one retry: none leaves again.
     const refused = { code: 'insufficient_user_authentication' };
