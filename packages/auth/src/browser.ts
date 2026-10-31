@@ -266,7 +266,10 @@ export class Session {
   #tokens: SessionTokens;
   /** The refresh under way, which concurrent requests share. */
   #refreshing: Promise<void> | undefined;
-  /** When this session returned from a step-up, until a refused step-up uses it. */
+  /**
+   * When this session started with its step-up retry spent: a step-up's return, or a
+   * restore after a step-up that failed. Refusals within `STEP_UP_RETRY` of it throw.
+   */
   #steppedUpAt: number | undefined;
 
   private constructor(owner: BrowserClient, tokens: SessionTokens, steppedUp: boolean) {
@@ -275,7 +278,7 @@ export class Session {
     this.#steppedUpAt = steppedUp ? this.#clock() : undefined;
   }
 
-  /** @internal `steppedUp` marks a session returning from a step-up login. */
+  /** @internal `steppedUp` marks a session whose step-up retry is spent, as `StoredLogin.steppedUp` says. */
   static from(owner: BrowserClient, tokens: SessionTokens, steppedUp: boolean): Session {
     return new Session(owner, tokens, steppedUp);
   }

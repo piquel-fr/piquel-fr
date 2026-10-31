@@ -513,10 +513,16 @@ describe('a session', () => {
     const { state } = auth.authorization(page.redirectedWith ?? '');
     page.callback({ error: 'access_denied', state: state ?? '', iss: ISSUER });
     await assert.rejects(client.handleCallback(), { code: 'oauth' });
-    // The page restores the session the step-up's navigation dropped.
+    // The page restores the session the step-up's navigation dropped; its callback is
+    // a new page load, with a new client, so only the stored login carries the retry.
     await leaving(client.restore(), page);
     page.callback(auth.authorization(page.redirectedWith ?? ''));
-    const restored = await client.handleCallback();
+    const reloaded = browserClient(await auth.issuer(), {
+      clientId: 'notes-web',
+      redirectUri: REDIRECT_URI,
+      platform: page.platform
+    });
+    const restored = await reloaded.handleCallback();
     assert.ok(restored);
     const navigations = page.navigations.length;
     await Promise.race([

@@ -177,7 +177,8 @@ const notes = await session.fetch('https://notes.example/notes');
   `handleCallback` returns `null`, and `restore` does not try again on that page
   load, nor after a callback that found no login waiting, so a signed-out user does
   not loop. A restore after a step-up that failed keeps that step-up's retry spent,
-  so a page whose request asked for it does not ask again.
+  so a page whose request asked for it does not ask again within a minute of that
+  restore's return.
 - `signInWithPasskey` signs in on the page itself, through WebAuthn related
   origins, for a trusted client whose origin auth approved (see auth's README,
   "Passkey sign-in on an application's own pages"). When it needs auth's pages, it
