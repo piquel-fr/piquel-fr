@@ -3,10 +3,10 @@
 //! A verification link's delivery stores the account and the address's ID, not
 //! the address: the sender reads it when it sends, through
 //! [`EmailRepository::pending_address`], so an address removed or verified in the
-//! meantime receives nothing. Nothing secret is stored either: the link's token is
-//! derived from the address's ID when the message is sent. Notices to an address
-//! that stopped being primary, or was removed, copy the address instead, so a
-//! removal cannot cancel them.
+//! meantime, or of an account no longer active, receives nothing. Nothing secret is
+//! stored either: the link's token is derived from the address's ID when the
+//! message is sent. Notices to an address that stopped being primary, or was
+//! removed, copy the address instead, so a removal cannot cancel them.
 
 use super::{Channel, NewDelivery};
 use crate::{
