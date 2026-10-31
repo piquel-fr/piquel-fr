@@ -77,9 +77,7 @@ digest key at once ends every refresh token and every login in progress, so
 change it in two deploys (see below). Changing it also changes the decoy
 passkey IDs that handle sign-in returns for unknown handles, while real
 accounts keep theirs, so comparing responses from before and after a
-replacement reveals which handles exist. Verification links already sent keep
-working, but a verification email still queued at the change carries a link
-that does not.
+replacement reveals which handles exist.
 
 Provider callback URLs are `/login/github/callback` and `/login/google/callback`
 on the auth origin. GitHub uses `read:user user:email`; Google uses `openid email profile`.

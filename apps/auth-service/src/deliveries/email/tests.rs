@@ -2,15 +2,21 @@
 
 use super::*;
 use crate::{
+    account::AccountService,
+    config::{LinkKeys, TokenDigestKey, TokenDigestKeys},
     recovery::{LINK_LIFETIME, PROBATION, RecoveryLinks},
-    tests::{AUTH_ORIGIN, Replicas, verified_address},
+    security::RequestContext,
+    tests::{AUTH_ORIGIN, Browser, Replicas, verified_address},
 };
 use piquel_common::{AccountStatus, EmailId, Handle, PasskeyId, RecoveryId, config::Origin};
 use piquel_crypto::Secret;
 use piquel_repository::{InsertRecovery, InsertUnverifiedEmail, InsertUser};
-use std::sync::{
-    Arc, Mutex,
-    atomic::{AtomicBool, Ordering},
+use std::{
+    net::{IpAddr, Ipv6Addr},
+    sync::{
+        Arc, Mutex,
+        atomic::{AtomicBool, Ordering},
+    },
 };
 
 /// A relay that keeps every message. The first send can be ambiguous: the relay
@@ -106,6 +112,23 @@ impl Outbox {
             })
             .collect()
     }
+
+    /// The token of the verification link in the last message received, read
+    /// from its body, which may be quoted-printable.
+    fn verification_token(&self) -> String {
+        let sent = self.sent.lock().expect("outbox");
+        let formatted = sent.last().expect("a message").formatted();
+        let body = String::from_utf8_lossy(&formatted)
+            .replace("=\r\n", "")
+            .replace("=3D", "=");
+        let (_, token) = body
+            .split_once("/settings/emails/verify#token=")
+            .expect("a verification link");
+        token
+            .chars()
+            .take_while(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_'))
+            .collect()
+    }
 }
 
 /// A retry after an ambiguous send sends the same message again, with the same
@@ -120,7 +143,7 @@ async fn retries_resend_the_same_message_to_the_current_address() {
     let config = EmailConfig::test(&AUTH_ORIGIN.parse().expect("auth origin"), true);
     let user_id = account(&database).await;
     let email_id = EmailId::new();
-    let token = config.verification_key.token(email_id).expect("token");
+    let token = config.verification_keys.token(email_id).expect("token");
     database
         .emails()
         .insert_unverified(&InsertUnverifiedEmail {
@@ -187,6 +210,88 @@ async fn retries_resend_the_same_message_to_the_current_address() {
     assert_eq!(outbox.headers().len(), 3, "nothing is sent while disabled");
 }
 
+/// A verification email queued on one side of a change of token digest key and
+/// sent from the other, as a rolling deploy or a rollback can, carries a link
+/// that verifies its address. Once the key it was queued under is removed, its
+/// delivery fails, and a disabled account's link is not sent.
+#[tokio::test]
+#[ignore = "requires TEST_DATABASE_URL"]
+async fn a_verification_link_survives_a_change_of_key() {
+    let database = Replicas::database().await;
+    let accounts = AccountService::new(database.clone());
+    let (old, new) = (
+        Secret::generate().expect("key"),
+        Secret::generate().expect("key"),
+    );
+    // Email settings under `current`, accepting `accepted` too.
+    let settings = |current: &Secret, accepted: Option<&Secret>| {
+        let derive = |key: &Secret| TokenDigestKey::derive(key.as_bytes()).expect("digest key");
+        let mut config = EmailConfig::test(&AUTH_ORIGIN.parse().expect("auth origin"), true);
+        config.verification_keys =
+            TokenDigestKeys::new(derive(current), accepted.map(derive)).verification_keys();
+        config
+    };
+    // The change's first deploy accepts the new key, and its second makes it
+    // current.
+    let (before, after) = (settings(&old, Some(&new)), settings(&new, Some(&old)));
+    // Adds an address to a new account under `config`, from a client IP of its
+    // own so no other test shares its limit, and returns the account and the
+    // message its delivery queued.
+    let queue = async |config: &EmailConfig| {
+        let browser = Browser::new_account(&database).await;
+        let ip = IpAddr::V6(Ipv6Addr::from(browser.user_id.as_uuid().as_u128()));
+        let owner = accounts
+            .owner(RequestContext::from_ip(ip), &browser.headers())
+            .await
+            .expect("session lookup")
+            .expect("signed in");
+        let address = format!("{}@example.com", browser.user_id);
+        let added = accounts
+            .add_email(&owner, config, &address)
+            .await
+            .expect("added");
+        let destination = format!("account {}, address {}", browser.user_id, added.id);
+        let payloads = database.deliveries().payloads(&destination).await;
+        let [payload] = <[_; 1]>::try_from(payloads.expect("payloads")).expect("one delivery");
+        let message: EmailMessage = serde_json::from_value(payload).expect("message");
+        (browser.user_id, message)
+    };
+    // Sends `message` to `user_id` under `config`, and returns the outcome and
+    // the relay.
+    let send = async |config: &EmailConfig, user_id, message: &EmailMessage| {
+        let outbox = Arc::new(Outbox::default());
+        let sender = EmailSender::with_mailer(database.clone(), Some(Arc::clone(&outbox)), config);
+        let outcome = sender.deliver(DeliveryId::new(), user_id, message).await;
+        (outcome, outbox)
+    };
+
+    for (queued, sent) in [(&before, &after), (&after, &before)] {
+        let (user_id, message) = queue(queued).await;
+        let (outcome, outbox) = send(sent, user_id, &message).await;
+        assert_eq!(outcome, Ok(()));
+        accounts
+            .verify_email(&outbox.verification_token(), None, RequestContext::TEST)
+            .await
+            .expect("the link verifies");
+    }
+
+    let (user_id, message) = queue(&before).await;
+    let (outcome, _) = send(&settings(&new, None), user_id, &message).await;
+    assert_eq!(
+        outcome,
+        Err(DeliveryError::Permanent(Failure::Message)),
+        "no link under a key no longer configured"
+    );
+    let disabled = database
+        .users()
+        .set_status(user_id, AccountStatus::Disabled)
+        .await;
+    assert!(disabled.expect("status"));
+    let (outcome, outbox) = send(&after, user_id, &message).await;
+    assert_eq!(outcome, Ok(()));
+    assert!(outbox.headers().is_empty(), "no link to a disabled account");
+}
+
 /// A recovery's link goes to its address, naming the account, only while the
 /// link works and the account is active, under the key its recovery started
 /// with, even once a change of token digest key made it the accepted one. With
@@ -204,8 +309,9 @@ async fn a_recovery_link_is_sent_while_it_works() {
     let origin: Origin = "https://auth.piquel.fr".parse().expect("origin");
     let started = Secret::generate().expect("recovery key");
     let current = Secret::generate().expect("recovery key");
-    let before = RecoveryLinks::new(origin.clone(), started.clone(), None);
-    config.recovery_links = RecoveryLinks::new(origin.clone(), current.clone(), Some(started));
+    let before = RecoveryLinks::new(origin.clone(), LinkKeys::new(started.clone(), None));
+    let keys = LinkKeys::new(current.clone(), Some(started));
+    config.recovery_links = RecoveryLinks::new(origin.clone(), keys);
     let (recovery_id, token) = recover(&database, user_id, &before).await;
     let outbox = Arc::new(Outbox::default());
     let sender = EmailSender::with_mailer(database.clone(), Some(Arc::clone(&outbox)), &config);
@@ -236,7 +342,7 @@ async fn a_recovery_link_is_sent_while_it_works() {
     );
     sender.assert_renders(user_id, &link).await;
 
-    config.recovery_links = RecoveryLinks::new(origin, current, None);
+    config.recovery_links = RecoveryLinks::new(origin, LinkKeys::new(current, None));
     let unkeyed = EmailSender::with_mailer(database.clone(), Some(Arc::clone(&outbox)), &config);
     let content = unkeyed.content(user_id, &link).await;
     assert!(
