@@ -76,6 +76,33 @@ export class Http {
     });
   }
 
+  /** @internal Reads `body` whole, or `undefined` once it holds more than `limit` bytes. */
+  static async readBody(
+    body: ReadableStream<Uint8Array> | null,
+    limit: number
+  ): Promise<Uint8Array | undefined> {
+    const chunks: Uint8Array[] = [];
+    let length = 0;
+    const reader = body?.getReader();
+    for (;;) {
+      const chunk = await reader?.read();
+      if (chunk === undefined || chunk.done) break;
+      length += chunk.value.length;
+      if (length > limit) {
+        await reader?.cancel();
+        return undefined;
+      }
+      chunks.push(chunk.value);
+    }
+    const whole = new Uint8Array(length);
+    let offset = 0;
+    for (const chunk of chunks) {
+      whole.set(chunk, offset);
+      offset += chunk.length;
+    }
+    return whole;
+  }
+
   /**
    * Sends `init` to `url` and reads the response. Redirects are not followed: no auth
    * endpoint redirects, and one would carry credentials elsewhere.
@@ -83,7 +110,7 @@ export class Http {
   async send(url: string, init: RequestInit): Promise<Reply> {
     const fetcher = this.#fetch;
     const failed = (cause: unknown) =>
-      new AuthError({ code: 'network' }, `request to ${url} failed`, { cause });
+      new AuthError({ code: 'network', url }, `request to ${url} failed`, { cause });
     let response: Response;
     try {
       response = await fetcher(url, {
@@ -94,31 +121,17 @@ export class Http {
     } catch (error) {
       throw failed(error);
     }
-    const chunks: Uint8Array[] = [];
-    let length = 0;
-    const reader = response.body?.getReader();
+    let body: Uint8Array | undefined;
     try {
-      for (;;) {
-        const chunk = await reader?.read();
-        if (chunk === undefined || chunk.done) break;
-        length += chunk.value.length;
-        if (length > MAX_BODY_BYTES) {
-          await reader?.cancel();
-          throw new AuthError(
-            { code: 'network' },
-            `${url} sent more than ${String(MAX_BODY_BYTES)} bytes`
-          );
-        }
-        chunks.push(chunk.value);
-      }
+      body = await Http.readBody(response.body, MAX_BODY_BYTES);
     } catch (error) {
-      throw error instanceof AuthError ? error : failed(error);
+      throw failed(error);
     }
-    const body = new Uint8Array(length);
-    let offset = 0;
-    for (const chunk of chunks) {
-      body.set(chunk, offset);
-      offset += chunk.length;
+    if (body === undefined) {
+      throw new AuthError(
+        { code: 'network' },
+        `${url} sent more than ${String(MAX_BODY_BYTES)} bytes`
+      );
     }
     return new Reply(url, response, body);
   }

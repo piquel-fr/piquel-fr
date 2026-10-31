@@ -19,3 +19,8 @@ export function decode(text: string): Uint8Array<ArrayBuffer> | undefined {
   // `atob` ignores trailing bits; a value that does not round-trip set some.
   return encode(bytes) === text ? bytes : undefined;
 }
+
+/** `length` random bytes, encoded. */
+export function random(length: number): string {
+  return encode(crypto.getRandomValues(new Uint8Array(length)));
+}

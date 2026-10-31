@@ -97,11 +97,6 @@ const tokenResponse = json.object({
 
 const pushedAuthorization = json.object({ request_uri: json.matching(/^\S+$/, 'a request URI') });
 
-/** Unpadded base64url of `length` random bytes. */
-function random(length = RANDOM_BYTES): string {
-  return base64.encode(crypto.getRandomValues(new Uint8Array(length)));
-}
-
 /** Form-encodes a value, as RFC 6749 §2.3.1 asks for Basic credentials. */
 function formEncoded(value: string): string {
   return new URLSearchParams({ value }).toString().slice('value='.length);
@@ -155,9 +150,9 @@ export class Client {
       issuer: this.issuer.issuer,
       clientId: this.config.clientId,
       redirectUri: this.config.redirectUri,
-      state: random(),
-      nonce: random(),
-      verifier: random(),
+      state: base64.random(RANDOM_BYTES),
+      nonce: base64.random(RANDOM_BYTES),
+      verifier: base64.random(RANDOM_BYTES),
       // Only the requirement, should a whole parsed challenge be passed.
       stepUp: stepUpRequirement(request.stepUp ?? {})
     };

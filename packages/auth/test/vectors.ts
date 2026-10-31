@@ -49,9 +49,9 @@ export const REDIRECT_URI = 'https://client.example.com/callback';
 /** A fake `fetch` answering each URL with its route's response, counting requests. */
 export class FakeFetch {
   readonly requests: { url: string; init: RequestInit }[] = [];
-  readonly routes: Record<string, () => Response>;
+  readonly routes: Record<string, () => Response | Promise<Response>>;
 
-  constructor(routes: Record<string, () => Response>) {
+  constructor(routes: Record<string, () => Response | Promise<Response>>) {
     this.routes = routes;
   }
 
