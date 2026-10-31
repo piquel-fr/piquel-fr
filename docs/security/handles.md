@@ -37,7 +37,7 @@ This was decided in [#255](https://github.com/piquel-fr/piquel-fr/issues/255).
 | Anyone, through handle sign-in | Whether the handle belongs to an account that can sign in with a passkey by handle: one that is active, or scheduled for deletion, and has an unrevoked passkey. If so, that account's credential IDs too, which `WebAuthn` lists for the browser: how many passkeys it has and, from their lengths, often which provider holds them. |
 | Anyone admitted to signup, and every account holder through a rename | Whether the handle, or a look-alike, is held or was held, and which look-alike. |
 | Relying parties the user signs in to | The handle, as `preferred_username`. |
-| Anyone, once a profile is published (#101) | The profile. An unpublished profile answers 404 like an unknown handle, so it reveals nothing beyond what sign-in does. |
+| Anyone, once a profile is published (#101) | The profile. #101 has an unpublished profile answer 404 like an unknown handle, so it reveals nothing beyond what sign-in does. |
 
 The account picker (signing in without a handle) reveals nothing: the
 authenticator names the account.
