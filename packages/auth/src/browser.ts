@@ -72,9 +72,9 @@ const storedLogin: json.Decoder<StoredLogin> = json.object({
 
 /**
  * Signs users in to a page with no server, from {@link browserClient}. Call
- * {@link handleCallback} first on every page load, then {@link restore}: each page
- * load restores at most once, so a page whose user is signed out at auth does not
- * loop.
+ * {@link handleCallback} first on every page load, then {@link restore}: once a
+ * restore came back without a session, the page load does not try again, so a page
+ * whose user is signed out at auth does not loop.
  */
 export class BrowserClient {
   /** The login client it signs in with. */
@@ -116,6 +116,8 @@ export class BrowserClient {
     const { history } = this.platform;
     history.replaceState(history.state, '', stored?.returnTo ?? callback.pathname);
     if (stored === undefined) {
+      // A login this page lost, as a restore's would be lost too: none is tried again.
+      this.#restored = true;
       throw new AuthError(
         { code: 'callback', reason: 'state_mismatch' },
         'no login of this page is waiting for this authorization response'
@@ -136,8 +138,8 @@ export class BrowserClient {
   /**
    * Restores the user's session after a reload: the browser goes to auth with
    * `prompt=none`, and comes back to {@link handleCallback} with a session, or without
-   * one when the user is signed out at auth. Returns `null` without leaving when this
-   * page load already tried.
+   * one when the user is signed out at auth. Returns `null` without leaving once a
+   * restore came back to this page load without a session.
    */
   async restore(request: Pick<SignInRequest, 'scopes' | 'returnTo'> = {}): Promise<null> {
     if (this.#restored) return null;
@@ -304,9 +306,15 @@ export class Session {
    * resource still refuses that retry, it throws the challenge as an
    * `insufficient_user_authentication` error instead of leaving again. A
    * cross-origin resource must expose `WWW-Authenticate` to the page
-   * (`Access-Control-Expose-Headers`).
+   * (`Access-Control-Expose-Headers`). The step-up comes back to `returnTo`, this
+   * page by default; a router's `load`, which runs before the address changes, passes
+   * the page it loads.
    */
-  async fetch(input: RequestInfo | URL, init?: RequestInit): Promise<Response> {
+  async fetch(
+    input: RequestInfo | URL,
+    init?: RequestInit,
+    { returnTo }: Pick<SignInRequest, 'returnTo'> = {}
+  ): Promise<Response> {
     const request = new Request(input, init);
     request.headers.set('authorization', `Bearer ${await this.accessToken()}`);
     const response = await this.#owner.platform.fetch(request);
@@ -324,7 +332,11 @@ export class Session {
       );
     }
     const scopes = this.#tokens.scopes.all.filter((scope) => scope !== 'openid');
-    return this.#owner.login({ scopes, stepUp: requirement });
+    return this.#owner.login({
+      scopes,
+      stepUp: requirement,
+      ...(returnTo === undefined ? {} : { returnTo })
+    });
   }
 
   /**

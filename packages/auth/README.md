@@ -191,8 +191,9 @@ const notes = await session.fetch('https://notes.example/notes');
   answering `insufficient_user_authentication` sends the browser to auth with the
   challenge's `acr_values` and `max_age`, back to the same page; if the resource
   still refuses within a minute of that return, `fetch` throws instead of leaving
-  again. A cross-origin resource must expose `WWW-Authenticate`
-  (`Access-Control-Expose-Headers`).
+  again. A router's `load` runs before the address changes, so it passes the page it
+  loads: `session.fetch(url, init, { returnTo })`. A cross-origin resource must
+  expose `WWW-Authenticate` (`Access-Control-Expose-Headers`).
 - `session.claims` holds the user's ID token claims, and `session.logout()` revokes
   the refresh token and runs RP-initiated logout.
 
