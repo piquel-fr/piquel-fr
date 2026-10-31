@@ -1,4 +1,6 @@
 {
   "extends": "../test/tsconfig.json",
-  "include": ["."]
+  "include": ["."],
+  // The SvelteKit recipe is its own package, with SvelteKit's types.
+  "exclude": ["sveltekit"]
 }
