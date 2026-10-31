@@ -60,7 +60,7 @@ test('a bearer token is read from Authorization, and nothing else', async () => 
     `Bearer scope="notes:write", resource_metadata="${METADATA}"`
   ]);
   const invalid = `Bearer error="invalid_request", resource_metadata="${METADATA}"`;
-  // Several headers are malformed whatever their schemes, as the Rust SDK reads them.
+  // Several headers, one of which is Bearer, are malformed, as the Rust SDK reads them.
   for (const malformed of [
     ['Bearer'],
     ['Bearer  '],
