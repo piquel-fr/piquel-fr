@@ -252,8 +252,8 @@ wrote to during a deploy; `0018` imports the rows written since and drops it.
 Migration `0008` likewise kept `oidc_clients.client_secret_hash` for the previous
 release, with a trigger mirroring its writes into `oidc_client_secrets`, and left
 the origins of older redirect URIs for `run_migrations` to fill in. `0018` drops
-the trigger and makes `oidc_redirect_uris.origin` NOT NULL; auth no longer writes
-the column, which a later release drops.
+the trigger and makes `oidc_redirect_uris.origin` NOT NULL, and `0025` drops the
+column once no deployed release wrote it.
 
 Variants hold only typed IDs, enums, scopes, timestamps and counts, so a secret,
 token, `WebAuthn` state or raw header cannot end up in one. Anything that identifies
