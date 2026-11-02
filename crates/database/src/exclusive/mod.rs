@@ -23,9 +23,13 @@ pub enum LockKey {
     RelatedOrigins = 5,
     /// Sealing the audit chain and signing its checkpoints.
     AuditChain = 6,
-    /// Job runner tests in other crates; no release takes it.
+    /// The job runner panic test; no release takes it.
     #[cfg(feature = "test-support")]
     Test = -1,
+    /// The job runner exclusivity test, apart from [`Self::Test`] since tests
+    /// sharing a database run at once; no release takes it.
+    #[cfg(feature = "test-support")]
+    ExclusivityTest = -2,
 }
 
 impl LockKey {
