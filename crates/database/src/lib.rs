@@ -30,8 +30,9 @@ pub use repositories::{
     dashboard::{DashboardSignIn, InsertHandoff, RedeemedHandoff, StoredDashboardSession},
     deletions::{AccountDeletion, RestoreToken},
     deliveries::{
-        BackchannelLogout, Channel, Delivery, DeliveryOutcome, DeliveryStatus, DeliverySummary,
-        Email, EmailMessage, LogoutRecipient, NewDelivery, PendingAddress, PendingRecovery,
+        BackchannelLogout, Channel, Delivery, DeliveryBacklog, DeliveryOutcome, DeliveryStatus,
+        DeliverySummary, Email, EmailMessage, LogoutRecipient, NewDelivery, PendingAddress,
+        PendingRecovery,
     },
     emails::{InsertUnverifiedEmail, InsertVerifiedEmail, PendingVerification, StoredEmail},
     events::{EventCursor, EventFilter, RecordedEvent, StoredEvent},

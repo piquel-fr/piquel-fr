@@ -953,6 +953,175 @@
     },
     {
       "type": "row",
+      "title": "Deliveries",
+      "id": 23,
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 55
+      },
+      "panels": []
+    },
+    {
+      "type": "timeseries",
+      "title": "Pending deliveries",
+      "description": "Deliveries waiting for an attempt or being attempted, by channel. Every replica counts the whole queue every 30 seconds, so this takes the maximum.",
+      "id": 24,
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 0,
+        "y": 56
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 10,
+            "showPoints": "never",
+            "stacking": {
+              "mode": "none"
+            }
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "max by (channel) (piquel_auth_deliveries_pending{job=\"auth-service\", deployment_environment_name=~\"$environment\"})",
+          "legendFormat": "{{channel}}",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          }
+        }
+      ]
+    },
+    {
+      "type": "timeseries",
+      "title": "Oldest pending delivery",
+      "description": "How long the oldest pending delivery has waited since it was created or last retried by an operator, by channel. A growing age means a channel is stuck.",
+      "id": 25,
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 8,
+        "y": 56
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 10,
+            "showPoints": "never",
+            "stacking": {
+              "mode": "none"
+            }
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "max by (channel) (piquel_auth_deliveries_oldest_pending_age_seconds{job=\"auth-service\", deployment_environment_name=~\"$environment\"})",
+          "legendFormat": "{{channel}}",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          }
+        }
+      ]
+    },
+    {
+      "type": "timeseries",
+      "title": "Delivery attempts",
+      "description": "Attempts per second by channel and outcome: succeeded, retried, failed, or lease_lost when the outcome was discarded.",
+      "id": 26,
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 16,
+        "y": 56
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 10,
+            "showPoints": "never",
+            "stacking": {
+              "mode": "none"
+            }
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum by (channel, outcome) (rate(piquel_auth_deliveries_attempts_total{job=\"auth-service\", deployment_environment_name=~\"$environment\"}[$__rate_interval]))",
+          "legendFormat": "{{channel}} {{outcome}}",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          }
+        }
+      ]
+    },
+    {
+      "type": "row",
       "title": "Logs and traces",
       "id": 20,
       "collapsed": false,
@@ -960,7 +1129,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 55
+        "y": 64
       },
       "panels": []
     },
@@ -977,7 +1146,7 @@
         "h": 12,
         "w": 24,
         "x": 0,
-        "y": 56
+        "y": 65
       },
       "options": {
         "showTime": true,
@@ -1010,7 +1179,7 @@
         "h": 10,
         "w": 24,
         "x": 0,
-        "y": 68
+        "y": 77
       },
       "targets": [
         {

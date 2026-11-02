@@ -342,7 +342,9 @@ trace its logs, and two dashboards in the `piquel.fr` folder:
 
 - **Auth overview**: traffic, errors and latency by route, sign-ins,
   registrations, tokens, refresh revocations, throttling, events by kind, the
-  database pool, cleanup, logs and traces.
+  database pool, cleanup, the delivery queue (pending deliveries, the oldest one's
+  age and attempts by outcome, per channel; see
+  `docs/architecture/delivery-queue.md`), logs and traces.
 - **Admin activity**: what administrators and operators did, to notice a stolen
   administrator session or a compromised server. Its first row counts, over the
   chosen range, administrator rights changed, dashboard requests refused for a
