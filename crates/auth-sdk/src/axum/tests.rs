@@ -7,7 +7,7 @@ use crate::{
     AuthenticationPolicy, ClientConfig, ClientId, Credentials, Issuer, KeyCache, KeySet, Resource,
     SessionId, StepUpRequirement, SystemClock,
     http::Http,
-    tests::{Case, issuer, vector_token},
+    tests::{Case, issuer, metadata, serve, vector_token},
 };
 use ::axum::{
     Router,
@@ -23,7 +23,6 @@ use piquel_common::{
     protocol::{
         challenge::BearerChallenge,
         claims::{Absent, Audience, LogoutEvents, LogoutTokenClaims},
-        metadata::ServerMetadata,
     },
 };
 use serde_json::json;
@@ -258,11 +257,7 @@ impl TokenEndpoint {
                 }
             }),
         );
-        let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
-            .await
-            .expect("bind token endpoint");
-        let address = listener.local_addr().expect("address");
-        tokio::spawn(async move { ::axum::serve(listener, router).await });
+        let address = serve(router).await;
         Self {
             url: format!("http://{address}/token").parse().expect("URL"),
             calls,
@@ -272,12 +267,7 @@ impl TokenEndpoint {
 
 /// The vectors' issuer, with its token endpoint replaced and the system clock.
 fn issuer_with_token_endpoint(token_endpoint: Url) -> Issuer {
-    let discovery = Case::all("discovery")
-        .into_iter()
-        .find(|case| case.name.ends_with("/valid.json"))
-        .expect("discovery vector");
-    let mut metadata: ServerMetadata =
-        serde_json::from_value(discovery.input("document").clone()).expect("metadata");
+    let mut metadata = metadata();
     metadata.token_endpoint = token_endpoint;
     let jwks = serde_json::to_vec(token_case("access-valid").input("jwks")).expect("JWKS");
     Issuer::with_keys(

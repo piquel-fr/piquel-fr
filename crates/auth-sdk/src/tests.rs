@@ -2,14 +2,19 @@
 
 use super::*;
 use crate::{client::PendingLogin, http::Http};
-use ::axum::{Router, http::StatusCode, routing::get};
+use ::axum::{
+    Router,
+    http::StatusCode,
+    routing::{get, post},
+};
 use base64::{Engine, engine::general_purpose::URL_SAFE_NO_PAD};
 use piquel_common::protocol::{
-    challenge::BearerChallenge, claims::AccessTokenClaims, jwt::TokenType,
+    challenge::BearerChallenge, claims::AccessTokenClaims, jwt::TokenType, metadata::ServerMetadata,
 };
 use serde_json::Value;
 use std::{
     fs,
+    net::SocketAddr,
     path::Path,
     sync::{
         Arc, Mutex,
@@ -109,13 +114,22 @@ impl Case {
     }
 }
 
-/// The issuer every token case is validated against, with the case's keys and clock.
-pub(crate) fn issuer(case: &Case) -> Issuer {
+/// The metadata of the valid discovery vector.
+pub(crate) fn metadata() -> ServerMetadata {
     let discovery = Case::all("discovery")
         .into_iter()
-        .find(|case| case.name.ends_with("valid.json"))
+        .find(|case| case.name.ends_with("/valid.json"))
         .expect("valid discovery vector");
-    let metadata = serde_json::from_value(discovery.input("document").clone()).expect("metadata");
+    serde_json::from_value(discovery.input("document").clone()).expect("metadata")
+}
+
+/// The issuer every token case is validated against, with the case's keys and clock.
+pub(crate) fn issuer(case: &Case) -> Issuer {
+    issuer_with(case, metadata())
+}
+
+/// The issuer with `metadata`, and the case's keys and clock.
+fn issuer_with(case: &Case, metadata: ServerMetadata) -> Issuer {
     let keys = KeySet::parse(&serde_json::to_vec(case.input("jwks")).expect("JWKS"))
         .expect("token vectors use valid key sets");
     Issuer::with_keys(
@@ -369,11 +383,7 @@ impl KeyServer {
                 }
             }),
         );
-        let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
-            .await
-            .expect("bind key server");
-        let address = listener.local_addr().expect("key server address");
-        tokio::spawn(async move { ::axum::serve(listener, router).await });
+        let address = serve(router).await;
         Self {
             url: format!("http://{address}/jwks").parse().expect("JWKS URL"),
             requests,
@@ -385,6 +395,16 @@ impl KeyServer {
     fn requests(&self) -> usize {
         self.requests.load(Ordering::SeqCst)
     }
+}
+
+/// Serves `router` on a local port, returning its address.
+pub(crate) async fn serve(router: Router) -> SocketAddr {
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+        .await
+        .expect("bind local server");
+    let address = listener.local_addr().expect("local server address");
+    tokio::spawn(async move { ::axum::serve(listener, router).await });
+    address
 }
 
 /// A token from a vector file.
@@ -479,29 +499,157 @@ async fn key_rotation_refetches_once_and_survives_outages() {
     assert_eq!(server.requests(), 4);
 }
 
+/// The public client `id` of the vectors' issuer, which pushes its authorization
+/// requests to `pushed` when given.
+fn login_client(id: &str, pushed: Option<Url>) -> Client {
+    let mut metadata = metadata();
+    metadata.pushed_authorization_request_endpoint = pushed;
+    issuer_with(&Case::all("tokens").remove(0), metadata).client(ClientConfig {
+        client_id: id.parse::<ClientId>().expect("client ID"),
+        credentials: Credentials::None,
+        redirect_uri: "https://client.example.com/callback".parse().expect("URL"),
+    })
+}
+
+/// A pushed authorization endpoint answering every request with `status` and `body`,
+/// keeping the form it last received.
+struct PushEndpoint {
+    /// The endpoint's URL.
+    url: Url,
+    /// The last form received.
+    received: Arc<Mutex<Vec<(String, String)>>>,
+}
+
+impl PushEndpoint {
+    /// Serves the endpoint on a local port.
+    async fn start(status: StatusCode, body: Value) -> Self {
+        let received = Arc::new(Mutex::new(Vec::new()));
+        let kept = received.clone();
+        let router = Router::new().route(
+            "/par",
+            post(
+                move |::axum::Form(form): ::axum::Form<Vec<(String, String)>>| {
+                    *kept.lock().expect("form lock") = form;
+                    let body = body.clone();
+                    async move { (status, ::axum::Json(body)) }
+                },
+            ),
+        );
+        let address = serve(router).await;
+        Self {
+            url: format!("http://{address}/par").parse().expect("URL"),
+            received,
+        }
+    }
+
+    /// The value of `name` in the last form received.
+    fn field(&self, name: &str) -> Option<String> {
+        self.received
+            .lock()
+            .expect("form lock")
+            .iter()
+            .find(|(field, _)| field == name)
+            .map(|(_, value)| value.clone())
+    }
+}
+
+/// With a pushed authorization endpoint advertised, the request goes there, with the
+/// public client's `client_id`, and the browser gets only `client_id` and the
+/// `request_uri`.
+#[tokio::test]
+async fn authorize_pushes_when_advertised() {
+    let request_uri = "urn:ietf:params:oauth:request_uri:abc";
+    let endpoint = PushEndpoint::start(
+        StatusCode::CREATED,
+        serde_json::json!({ "request_uri": request_uri, "expires_in": 60 }),
+    )
+    .await;
+    let client = login_client("notes-web", Some(endpoint.url.clone()));
+    let request = AuthorizeRequest {
+        step_up: StepUpRequirement::passkey_within(300),
+        ..AuthorizeRequest::default()
+    };
+    let (url, pending) = client.authorize(&request).await.expect("authorize");
+    assert_eq!(endpoint.field("client_id").as_deref(), Some("notes-web"));
+    assert_eq!(endpoint.field("state").as_deref(), Some(pending.state()));
+    // The step-up requirement travels in the pushed request, not the URL.
+    assert_eq!(endpoint.field("acr_values").as_deref(), Some("phr"));
+    assert_eq!(endpoint.field("max_age").as_deref(), Some("300"));
+    assert_eq!(url.path(), metadata().authorization_endpoint.path());
+    let query: Vec<(String, String)> = url.query_pairs().into_owned().collect();
+    assert_eq!(
+        query,
+        [
+            ("client_id".to_owned(), "notes-web".to_owned()),
+            ("request_uri".to_owned(), request_uri.to_owned()),
+        ]
+    );
+}
+
+/// A pushed request auth refuses fails the login with auth's OAuth error.
+#[tokio::test]
+async fn refused_pushes_keep_the_oauth_error() {
+    let endpoint = PushEndpoint::start(
+        StatusCode::BAD_REQUEST,
+        serde_json::json!({ "error": "invalid_scope" }),
+    )
+    .await;
+    let refused = login_client("notes-web", Some(endpoint.url))
+        .authorize(&AuthorizeRequest::default())
+        .await
+        .expect_err("refused");
+    assert_eq!(
+        refused.code(),
+        SdkError::category(protocol::sdk::ErrorCategory::OAuth)
+    );
+    assert!(matches!(
+        refused,
+        LoginError::Push(OAuthError::Rejected { response, .. })
+            if response.error == protocol::oauth::ErrorCode::InvalidScope
+    ));
+}
+
+/// A push succeeds only as RFC 9126 §2.2 answers it: `201 Created` with a request URI.
+#[tokio::test]
+async fn pushes_need_a_created_request_uri() {
+    for (status, request_uri) in [
+        (StatusCode::OK, "urn:ietf:params:oauth:request_uri:abc"),
+        (StatusCode::CREATED, ""),
+    ] {
+        let body = serde_json::json!({ "request_uri": request_uri, "expires_in": 60 });
+        let endpoint = PushEndpoint::start(status, body).await;
+        let unexpected = login_client("notes-web", Some(endpoint.url))
+            .authorize(&AuthorizeRequest::default())
+            .await
+            .expect_err("unexpected answer");
+        assert!(
+            matches!(
+                unexpected,
+                LoginError::Push(OAuthError::UnexpectedResponse { .. })
+            ),
+            "{status} {request_uri:?}: {unexpected:?}"
+        );
+    }
+}
+
 /// A pending login completes only with the client and issuer that started it, before
 /// anything is sent anywhere.
 #[tokio::test]
 async fn pending_logins_complete_only_with_their_client() {
-    let issuer = issuer(&Case::all("tokens").remove(0));
-    let client = |id: &str| {
-        issuer.client(ClientConfig {
-            client_id: id.parse::<ClientId>().expect("client ID"),
-            credentials: Credentials::None,
-            redirect_uri: "https://client.example.com/callback".parse().expect("URL"),
-        })
-    };
-    let (_, pending) = client("notes-web")
+    let (_, pending) = login_client("notes-web", None)
         .authorize(&AuthorizeRequest::default())
+        .await
         .expect("authorize");
     let callback = CallbackParams {
         code: Some("code".into()),
         state: Some(pending.state().into()),
-        iss: Some(issuer.issuer().into()),
+        iss: Some(metadata().issuer),
         ..CallbackParams::default()
     };
     assert!(matches!(
-        client("another-client").complete(pending, &callback).await,
+        login_client("another-client", None)
+            .complete(pending, &callback)
+            .await,
         Err(LoginError::ForeignLogin)
     ));
 }
