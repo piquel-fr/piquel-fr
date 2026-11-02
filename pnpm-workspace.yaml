@@ -1,0 +1,6 @@
+auditConfig:
+  ignoreGhsas:
+    # minimatch DoS, fixed only in minimatch 11, while eslint and
+    # typescript-eslint, its only dependents, require ^10. They are dev
+    # tools matching globs we write. Remove once they accept minimatch 11.
+    - GHSA-g3hv-75wg-m249
