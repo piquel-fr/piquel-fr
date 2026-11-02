@@ -683,7 +683,7 @@ explains how to choose a requirement and handle the challenge.
 need Node 24+ and pnpm (the workspace pins its version).
 `just install-tools` installs `cargo-nextest`, `cargo-deny` and `sqlx-cli`. The
 `db` recipes also need the PostgreSQL 18 server binaries (`initdb`, `pg_ctl`).
-Recipes are grouped into `rust`, `web`, `db`, `auth`, `admin` and `infra` modules under
+Recipes are grouped into `rust`, `web`, `db`, `auth` and `infra` modules under
 `just/`; `just --list --list-submodules` shows every recipe. The root `fmt`,
 `fmt-check`, `lint`, `check` and `audit` run the same recipe in `rust` and `web`.
 Use individual recipes while iterating:

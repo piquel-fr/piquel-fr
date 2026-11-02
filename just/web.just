@@ -17,9 +17,9 @@ lint:
 test-browser *ARGS:
     @pnpm test:browser "$@"
 
-# tests/browser/oidc.spec.ts and related-origins.spec.ts serve the clients' pages
-# themselves and name the same origins. Register the browser checks' public OIDC
-# clients, whose origins have no server, with auth on localhost, as in CI.
+# The clients' origins have no server: tests/browser/oidc.spec.ts and
+# related-origins.spec.ts serve the clients' pages themselves and name the same origins.
+# Register the browser checks' public OIDC clients with auth on localhost, as in CI.
 browser-client:
     @just auth client create browser-e2e --name 'Browser E2E' \
         --redirect-uri https://browser-e2e.test/callback

@@ -24,14 +24,12 @@ user *ARGS:
 session *ARGS:
     @just auth run session "$@"
 
-# Page through, verify or prune the audit history, e.g. `just auth audit verify`
-# or `just auth audit list --user alice`.
+# Page through, verify or prune the audit history, e.g. `just auth audit list --user alice`.
 [positional-arguments]
 audit *ARGS:
     @just auth run audit "$@"
 
-# Read or change one account's settings on its owner's behalf, e.g.
-# `just auth account alice passkeys list`.
+# Read or change one account's settings on its owner's behalf, e.g. `just auth account alice passkeys list`.
 [positional-arguments]
 account *ARGS:
     @just auth run account "$@"
@@ -56,8 +54,8 @@ admin *ARGS:
 handle *ARGS:
     @just auth run handle "$@"
 
-# A local Mailpit SMTP server: set AUTH_SMTP_URL=smtp://localhost:1025 and read
-# the mail at http://localhost:8025. Stops with Ctrl-C.
+# Point auth at it with AUTH_SMTP_URL=smtp://localhost:1025. Stops with Ctrl-C.
+# A local Mailpit SMTP server, with its mail at http://localhost:8025.
 mailpit:
     @docker run --rm --name piquel-mailpit -p 127.0.0.1:1025:1025 -p 127.0.0.1:8025:8025 axllent/mailpit
 
@@ -66,8 +64,8 @@ mailpit:
 keys *ARGS:
     @just auth run keys "$@"
 
-# Write 32 random bytes in unpadded base64url, as AUTH_KEY_ENCRYPTION_KEY and
-# AUTH_TOKEN_DIGEST_KEY take them; refuses to overwrite an existing file.
+# The secret is 32 random bytes in unpadded base64url. Refuses to overwrite an existing file.
+# Write a secret for AUTH_KEY_ENCRYPTION_KEY or AUTH_TOKEN_DIGEST_KEY to PATH.
 generate-secret PATH:
     #!/usr/bin/env bash
     set -euo pipefail
