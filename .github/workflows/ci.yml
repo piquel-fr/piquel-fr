@@ -150,10 +150,13 @@ jobs:
       - &rust-cache
         uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
         with:
+          # rust-cache's key ignores this workflow. Bump the prefix when a job
+          # needs a new cache, as when rust began installing sqlx-cli.
+          prefix-key: v1-rust
           save-if: ${{ github.ref == 'refs/heads/main' }}
       # sqlx-cli publishes no prebuilt binaries. rust-cache keeps binaries
-      # installed after it restores, so this compiles only when main's cache
-      # lacks the latest release.
+      # installed after it restores, so this compiles when main's cache lacks
+      # the latest release, until main next saves a cache.
       - run: just db install-sqlx
       - run: just rust lint
       - run: just test --workspace --run-ignored all
