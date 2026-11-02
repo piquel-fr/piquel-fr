@@ -16,7 +16,10 @@ use axum::{
 };
 use piquel_auth::{KeyCache, KeySet};
 use piquel_common::PasskeyId;
-use piquel_common::{Handle, protocol::jwt::TokenType};
+use piquel_common::{
+    Handle,
+    protocol::jwt::{Algorithm, TokenType},
+};
 use piquel_crypto::Rs256Key;
 use piquel_crypto::Secret;
 use piquel_repository::{
@@ -24,6 +27,7 @@ use piquel_repository::{
 };
 use std::collections::HashMap;
 use tower::ServiceExt;
+use tracing::Instrument;
 
 /// Isolated database fixture with replaceable provider endpoints and unique subjects.
 struct TestApp {
@@ -743,6 +747,81 @@ async fn google_mock_validates_signature_audience_nonce_and_expiry_without_requi
         assert!(error.to_string().contains(expected), "{kind}: {error}");
     }
     task.abort();
+}
+
+/// Fetching Google's signing keys is a client span of the request that needed them,
+/// with its method, host and status only.
+#[tokio::test]
+async fn google_key_fetch_is_a_client_span_of_its_request() {
+    let capture = piquel_telemetry::Telemetry::capture(crate::TELEMETRY_FILTER);
+    let rsa = Rs256Key::generate("google-test").expect("RSA test key");
+    let token = rsa
+        .sign(TokenType::Id, &serde_json::json!({}))
+        .expect("signed token");
+    let keys = rsa.jwks().clone();
+    let mock = Router::new().route("/keys", get(move || async move { Json(keys) }));
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+        .await
+        .expect("mock listener");
+    let url = format!(
+        "http://{}/keys?client=secret",
+        listener.local_addr().expect("address")
+    );
+    let task = tokio::spawn(async move {
+        axum::serve(listener, mock).await.expect("mock server");
+    });
+    let cache = KeyCache::new(url.parse().expect("mock key URL"), reqwest::Client::new());
+    let jws = piquel_auth::Jws::parse(&token).expect("JWS");
+    let request = tracing::info_span!("request");
+    cache
+        .verify(&jws, Algorithm::Rs256)
+        .instrument(request)
+        .await
+        .expect("verified");
+    task.abort();
+
+    let spans = capture.spans();
+    let request = spans
+        .iter()
+        .find(|span| span.name == "request")
+        .expect("request span");
+    let fetch = spans
+        .iter()
+        .find(|span| span.name == "GET")
+        .expect("key fetch span");
+    assert_eq!(fetch.parent_span_id, request.span_context.span_id());
+    assert_eq!(format!("{:?}", fetch.span_kind), "Client");
+    let attributes: Vec<_> = fetch
+        .attributes
+        .iter()
+        .map(|attribute| format!("{}={}", attribute.key, attribute.value))
+        .collect();
+    for expected in [
+        "http.request.method=GET",
+        "http.response.status_code=200",
+        "server.address=127.0.0.1",
+    ] {
+        assert!(
+            attributes.iter().any(|a| a == expected),
+            "{expected}: {attributes:?}"
+        );
+    }
+    assert!(
+        !attributes
+            .iter()
+            .any(|attribute| attribute.contains("/keys") || attribute.contains("secret")),
+        "no path or query: {attributes:?}"
+    );
+    let status = fetch
+        .attributes
+        .iter()
+        .find(|attribute| attribute.key.as_str() == "http.response.status_code")
+        .expect("status");
+    assert_eq!(
+        format!("{:?}", status.value),
+        "I64(200)",
+        "an integer status"
+    );
 }
 
 /// Stable provider subjects take priority over email observations and require an existing passkey.
