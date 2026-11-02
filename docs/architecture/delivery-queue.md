@@ -91,8 +91,8 @@ the database crate) sends account holders transactional messages over SMTP. A
 delivery stores the account's ID as its recipient and a typed `EmailMessage` as
 its payload. A verification link stores only the address's ID: the sender reads
 the address, and the account's handle the message names, when it sends, so a link
-to an address removed, replaced or verified meanwhile is not sent, and the
-delivery succeeds without a send. The notices that an address stopped being
+to an address removed, replaced or verified meanwhile, or of an account no longer
+active, is not sent, and the delivery succeeds without a send. The notices that an address stopped being
 primary, or was removed, copy the address instead, read in the event's
 transaction, so removing the address right after cannot cancel them. A recovery's
 link stores the recovery's ID and the primary address's, and is not sent once the
@@ -106,9 +106,9 @@ A link's token is never stored, not even in the payload: it is an HMAC of the
 address's ID, or the recovery's, under a key derived from the token digest key.
 Settings store a verification token's SHA-256 digest when the address is added,
 and a recovery stores its own when it starts; the sender derives the token again.
-During a change of token digest key, it rebuilds a recovery's link under
-whichever configured key derives the stored digest, so a link sent after the
-change still works; if no configured key does, the delivery fails.
+During a change of token digest key, it rebuilds either link under whichever
+configured key derives the stored digest, so a link sent after the change still
+works; if no configured key does, the delivery fails.
 Every attempt therefore sends the same content and link, with the `Message-ID`
 `<delivery ID@sender's domain>`. If the connection breaks after the
 relay accepted a message, the delivery is retried and the mail may arrive twice;

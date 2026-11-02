@@ -6,8 +6,8 @@ use crate::{
     account::{AccountService, Owner},
     clients::{ClientSettings, NewClient},
     config::{
-        AuditConfig, EmailConfig, FederationConfig, OidcConfig, PasskeyConfig, ProviderConfig,
-        TokenDigestKey, TokenDigestKeys,
+        AuditConfig, EmailConfig, FederationConfig, LinkKeys, OidcConfig, PasskeyConfig,
+        ProviderConfig, TokenDigestKey, TokenDigestKeys,
     },
     passkey::DecoyKey,
     recovery::RecoveryLinks,
@@ -481,11 +481,7 @@ pub(crate) fn operator() -> Operator {
 /// Recovery links with a key of their own: the routes find a recovery by its
 /// token's digest, so they need no key.
 pub(crate) fn recovery_links() -> RecoveryLinks {
-    RecoveryLinks::new(
-        AUTH_ORIGIN.parse().expect("origin"),
-        Secret::generate().expect("recovery key"),
-        None,
-    )
+    RecoveryLinks::new(AUTH_ORIGIN.parse().expect("origin"), LinkKeys::generate())
 }
 
 /// Why the scenarios recover an account.

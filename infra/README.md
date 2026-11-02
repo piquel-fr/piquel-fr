@@ -144,8 +144,8 @@ through rolling deploys and rollbacks:
 2. In a later deploy, swap the two: `AUTH_TOKEN_DIGEST_KEY` points at
    `token-digest-key`, and `AUTH_TOKEN_DIGEST_KEY_ACCEPTED` at `signing-key`.
    Passkey decoys change once then, and so does the email verification key:
-   links already sent keep working, but one still queued then does not, and its
-   owner sends another. From this deploy on, a rollback lands on a
+   links already sent keep working, and one still queued then is sent under
+   the old key. From this deploy on, a rollback lands on a
    release that reads signing keys from the database.
 3. Only then rotate once by hand to see rotation work: `auth-service keys
    rotate`, then a day later `keys list` shows the new key active and `primary`

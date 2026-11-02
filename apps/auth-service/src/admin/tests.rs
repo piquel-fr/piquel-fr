@@ -3,6 +3,7 @@
 
 use super::*;
 use crate::AuditKeys;
+use crate::config::LinkKeys;
 use crate::handles::HandlesError;
 use crate::recovery::RecoveryLinks;
 use crate::security::{CONFIRMATION_MAX_AGE, RequestContext, Session};
@@ -987,7 +988,7 @@ async fn no_grant_while_a_recovery_can_be_undone() {
     let harness = Harness::new().await;
     let admin = harness.admin().await;
     let target = harness.account().await.user_id;
-    let links = RecoveryLinks::new(origin(), Secret::generate().expect("key"), None);
+    let links = RecoveryLinks::new(origin(), LinkKeys::generate());
     let reason = || reason("Lost every passkey");
     let service = harness.service();
     service

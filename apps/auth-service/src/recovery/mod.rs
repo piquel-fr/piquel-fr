@@ -31,6 +31,7 @@ pub(crate) use error::RecoveryError;
 
 use crate::{
     account::{AccountError, AccountService, Owner, Viewer},
+    config::LinkKeys,
     passkey::VerifiedRecoveryUndo,
     routes,
     security::RequestContext,
@@ -47,7 +48,6 @@ use piquel_repository::{
     DatabaseError, DatabaseTransaction, RecoveryState, SessionScope, StoredPasskey, StoredRecovery,
 };
 use serde::Serialize;
-use std::sync::Arc;
 use url::Url;
 
 /// How long a recovery link works.
@@ -60,19 +60,17 @@ pub(crate) const LINK_LIFETIME: Duration = Duration::hours(24);
 /// again, once the recovery settled.
 pub(crate) const PROBATION: Duration = Duration::days(15);
 
-/// Derives recovery links' tokens from recoveries' IDs, with a key derived from
-/// the current token digest key, so every replica, the email sender and the CLI
-/// derive the same token, and builds the links on auth's origin. A link is
-/// checked against its token's stored digest, never re-derived, so changing the
-/// token digest key never breaks a link already sent. During a change, the
-/// sender rebuilds a link under whichever key started its recovery.
+/// Derives recovery links' tokens from recoveries' IDs, with keys derived from
+/// the token digest keys, so every replica, the email sender and the CLI derive
+/// the same token, and builds the links on auth's origin. During a change of
+/// token digest key, the sender rebuilds a link under whichever key started its
+/// recovery ([`LinkKeys`]).
 #[derive(Clone)]
 pub(crate) struct RecoveryLinks {
     /// Auth's origin, where the recovery page is.
     origin: Origin,
-    /// HMAC keys reserved for recovery tokens: the current one, which derives
-    /// every new token, then the one accepted during a change of key, if any.
-    keys: Arc<[Secret]>,
+    /// HMAC keys reserved for recovery tokens.
+    keys: LinkKeys,
 }
 
 /// A recovery whose link still works, found by the link's token: the token
@@ -326,14 +324,9 @@ impl RecoveryView {
 }
 
 impl RecoveryLinks {
-    /// Links on `origin`, with new tokens derived with `current`, and those of
-    /// recoveries started under `accepted` still rebuilt with it.
-    pub(crate) fn new(origin: Origin, current: Secret, accepted: Option<Secret>) -> Self {
-        let keys: Vec<_> = std::iter::once(current).chain(accepted).collect();
-        Self {
-            origin,
-            keys: keys.into(),
-        }
+    /// Links on `origin`, with tokens derived with `keys`.
+    pub(crate) const fn new(origin: Origin, keys: LinkKeys) -> Self {
+        Self { origin, keys }
     }
 
     /// The token of a new recovery `id`'s link, under the current key.
@@ -342,7 +335,7 @@ impl RecoveryLinks {
     ///
     /// Returns [`CryptoError`] if the HMAC provider fails.
     pub(crate) fn token(&self, id: RecoveryId) -> Result<Secret, CryptoError> {
-        Self::derive(&self.keys[0], id)
+        self.keys.token(id.as_uuid().as_bytes())
     }
 
     /// Recovery `id`'s link, as [`Self::url`] builds it, under the key whose
@@ -353,18 +346,8 @@ impl RecoveryLinks {
     ///
     /// Returns [`CryptoError`] if the HMAC provider fails.
     pub(crate) fn link(&self, id: RecoveryId, digest: &[u8]) -> Result<Option<Url>, CryptoError> {
-        for key in self.keys.iter() {
-            let token = Self::derive(key, id)?;
-            if token.digest().as_bytes() == digest {
-                return Ok(Some(self.url(&token)));
-            }
-        }
-        Ok(None)
-    }
-
-    /// The token `key` derives for recovery `id`.
-    fn derive(key: &Secret, id: RecoveryId) -> Result<Secret, CryptoError> {
-        Secret::derive(key.as_bytes(), id.as_uuid().as_bytes())
+        let token = self.keys.rebuild(id.as_uuid().as_bytes(), digest)?;
+        Ok(token.map(|token| self.url(&token)))
     }
 
     /// The link holding `token`: the recovery page, with the token in its

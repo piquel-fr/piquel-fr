@@ -1,6 +1,6 @@
 //! Validated startup configuration, grouped by application.
 
-use crate::{emails::VerificationKey, passkey::DecoyKey, recovery::RecoveryLinks};
+use crate::{emails::VerificationKeys, passkey::DecoyKey, recovery::RecoveryLinks};
 use base64::{Engine, engine::general_purpose::URL_SAFE_NO_PAD};
 use ipnet::IpNet;
 use lettre::{
@@ -30,11 +30,11 @@ const TOKEN_DIGEST_CONTEXT: &[u8] = b"piquel-refresh-token-digest-v1";
 /// digest key. The PEM signing key was used the same way, so decoys stay the same
 /// while it is the current key.
 const PASSKEY_DECOY_CONTEXT: &[u8] = b"piquel-passkey-decoy-credential-v1";
-/// Separates the email verification key from every other use of the current token
-/// digest key, as [`PASSKEY_DECOY_CONTEXT`] does the decoy key.
+/// Separates the email verification key from every other use of a token digest
+/// key, as [`PASSKEY_DECOY_CONTEXT`] does the decoy key.
 const EMAIL_VERIFICATION_CONTEXT: &[u8] = b"piquel-email-verification-token-v1";
-/// Separates the recovery link key from every other use of the current token
-/// digest key, as [`PASSKEY_DECOY_CONTEXT`] does the decoy key.
+/// Separates the recovery link key from every other use of a token digest key,
+/// as [`PASSKEY_DECOY_CONTEXT`] does the decoy key.
 const RECOVERY_LINK_CONTEXT: &[u8] = b"piquel-account-recovery-link-v1";
 /// Fewest bytes a token digest key may have.
 const MIN_TOKEN_DIGEST_KEY_BYTES: usize = 32;
@@ -156,14 +156,14 @@ pub(crate) struct EmailConfig {
     /// Auth's origin, whose settings pages every link in a message opens.
     pub origin: Origin,
     /// Derives verification tokens from address IDs.
-    pub verification_key: VerificationKey,
+    pub verification_keys: VerificationKeys,
     /// Derives recovery links from recovery IDs.
     pub recovery_links: RecoveryLinks,
 }
 
 impl EmailConfig {
-    /// Reads the relay and sender, and derives the verification key from the
-    /// token digest key.
+    /// Reads the relay and sender, and derives the verification keys from the
+    /// token digest keys.
     fn from_environment(
         origin: &Origin,
         digest_keys: &TokenDigestKeys,
@@ -179,7 +179,7 @@ impl EmailConfig {
             smtp,
             from: EMAIL_FROM.parse_or(DEFAULT_EMAIL_FROM)?,
             origin: origin.clone(),
-            verification_key: VerificationKey::new(digest_keys.current.verification.clone()),
+            verification_keys: digest_keys.verification_keys(),
             recovery_links: digest_keys.recovery_links(origin),
         })
     }
@@ -287,12 +287,8 @@ impl EmailConfig {
             }),
             from: DEFAULT_EMAIL_FROM.parse().expect("sender"),
             origin: origin.clone(),
-            verification_key: VerificationKey::new(Secret::generate().expect("verification key")),
-            recovery_links: RecoveryLinks::new(
-                origin.clone(),
-                Secret::generate().expect("recovery key"),
-                None,
-            ),
+            verification_keys: VerificationKeys::new(LinkKeys::generate()),
+            recovery_links: RecoveryLinks::new(origin.clone(), LinkKeys::generate()),
         }
     }
 }
@@ -378,9 +374,11 @@ pub(crate) struct TokenDigestKey {
     /// The passkey decoy key, derived from the same bytes, used only while this
     /// key is current.
     decoy: Secret,
-    /// The email verification key, derived and used like [`Self::decoy`].
+    /// The email verification key, derived like [`Self::decoy`]. It derives new
+    /// links' tokens while this key is current, and rebuilds queued ones while it
+    /// is accepted ([`LinkKeys`]).
     verification: Secret,
-    /// The recovery link key, derived and used like [`Self::decoy`].
+    /// The recovery link key, derived and used like [`Self::verification`].
     recovery: Secret,
 }
 
@@ -421,8 +419,19 @@ impl TokenDigestKeys {
     /// Recovery links on `origin`, under the current key's recovery key, and
     /// rebuilt under the accepted one's for recoveries started before a change.
     pub(crate) fn recovery_links(&self, origin: &Origin) -> RecoveryLinks {
-        let accepted = self.accepted.as_ref().map(|key| key.recovery.clone());
-        RecoveryLinks::new(origin.clone(), self.current.recovery.clone(), accepted)
+        RecoveryLinks::new(origin.clone(), self.link_keys(|key| &key.recovery))
+    }
+
+    /// Verification tokens under the current key's verification key, rebuilt
+    /// under the accepted one's for addresses added before a change.
+    pub(crate) fn verification_keys(&self) -> VerificationKeys {
+        VerificationKeys::new(self.link_keys(|key| &key.verification))
+    }
+
+    /// The link keys `key` picks from the current key, then the accepted one.
+    fn link_keys(&self, key: fn(&TokenDigestKey) -> &Secret) -> LinkKeys {
+        let accepted = self.accepted.as_ref().map(|accepted| key(accepted).clone());
+        LinkKeys::new(key(&self.current).clone(), accepted)
     }
 
     /// Uses `current` for new digests and accepts `accepted` too.
@@ -497,6 +506,65 @@ impl TokenDigestKeys {
         } else {
             "unknown"
         }
+    }
+}
+
+/// The keys of one kind of emailed link, each deriving a link's token from the
+/// ID of what the link acts on: the current one, which derives every new token,
+/// then the one accepted during a change of token digest key, if any. A link is
+/// checked against its token's stored SHA-256 digest, never derived again, so a
+/// change of key never breaks a link already sent, and the email sender rebuilds
+/// a link still queued under whichever key made its digest.
+#[derive(Clone)]
+pub(crate) struct LinkKeys(Arc<[Secret]>);
+
+impl LinkKeys {
+    /// Derives new tokens with `current`, and rebuilds those `accepted` made.
+    pub(crate) fn new(current: Secret, accepted: Option<Secret>) -> Self {
+        Self(std::iter::once(current).chain(accepted).collect())
+    }
+
+    /// The token of a new link for the ID whose bytes are `id`, under the current
+    /// key.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`CryptoError`] if the HMAC provider fails.
+    pub(crate) fn token(&self, id: &[u8; 16]) -> Result<Secret, CryptoError> {
+        Self::derive(&self.0[0], id)
+    }
+
+    /// The token for `id` whose SHA-256 is the stored `digest`, under the key that
+    /// derives it. `None` once no configured key does.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`CryptoError`] if the HMAC provider fails.
+    pub(crate) fn rebuild(
+        &self,
+        id: &[u8; 16],
+        digest: &[u8],
+    ) -> Result<Option<Secret>, CryptoError> {
+        for key in self.0.iter() {
+            let token = Self::derive(key, id)?;
+            if token.digest().as_bytes() == digest {
+                return Ok(Some(token));
+            }
+        }
+        Ok(None)
+    }
+
+    /// The token `key` derives for `id`.
+    fn derive(key: &Secret, id: &[u8; 16]) -> Result<Secret, CryptoError> {
+        Secret::derive(key.as_bytes(), id)
+    }
+}
+
+#[cfg(test)]
+impl LinkKeys {
+    /// A fresh current key, and none accepted.
+    pub(crate) fn generate() -> Self {
+        Self::new(Secret::generate().expect("link key"), None)
     }
 }
 
