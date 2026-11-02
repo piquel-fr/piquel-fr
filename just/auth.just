@@ -54,7 +54,7 @@ admin *ARGS:
 handle *ARGS:
     @just auth run handle "$@"
 
-# Point auth at it with AUTH_SMTP_URL=smtp://localhost:1025. Stops with Ctrl-C.
+# Point auth at the server with AUTH_SMTP_URL=smtp://localhost:1025. Stops with Ctrl-C.
 # A local Mailpit SMTP server, with its mail at http://localhost:8025.
 mailpit:
     @docker run --rm --name piquel-mailpit -p 127.0.0.1:1025:1025 -p 127.0.0.1:8025:8025 axllent/mailpit

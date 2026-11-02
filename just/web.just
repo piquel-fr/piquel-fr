@@ -17,7 +17,7 @@ lint:
 test-browser *ARGS:
     @pnpm test:browser "$@"
 
-# The clients' origins have no server: tests/browser/oidc.spec.ts and
+# The browser checks' clients have origins with no server: tests/browser/oidc.spec.ts and
 # related-origins.spec.ts serve the clients' pages themselves and name the same origins.
 # Register the browser checks' public OIDC clients with auth on localhost, as in CI.
 browser-client:
