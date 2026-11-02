@@ -142,7 +142,8 @@ deliveries ordered after it wait for its lease to expire.
 
 ### Metrics
 
-Labelled by `channel` only, never by destination, client or user. The Auth
+Labelled by `channel`, and the attempt counter also by a closed `outcome`, never
+by destination, client or user. The Auth
 overview dashboard charts them in its Deliveries row.
 
 | Metric | Kind | Meaning |

@@ -1019,7 +1019,7 @@
     {
       "type": "timeseries",
       "title": "Oldest pending delivery",
-      "description": "How long the oldest pending delivery has waited since it was created or retried, by channel. A growing age means a channel is stuck.",
+      "description": "How long the oldest pending delivery has waited since it was created or last retried by an operator, by channel. A growing age means a channel is stuck.",
       "id": 25,
       "datasource": {
         "type": "prometheus",
