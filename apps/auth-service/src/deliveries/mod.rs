@@ -33,8 +33,6 @@ use thiserror::Error;
 use tokio::task::JoinSet;
 use tracing::Instrument;
 
-/// How long a worker holds a claimed delivery: well beyond [`SEND_TIMEOUT`].
-const LEASE: Duration = Duration::from_mins(1);
 /// The longest one send may take, connecting and reading the response included.
 const SEND_TIMEOUT: Duration = Duration::from_secs(10);
 /// How long an idle worker waits before looking for due deliveries again.
@@ -54,6 +52,9 @@ pub(crate) trait Sender: Send + Sync + 'static {
     /// How long after its creation a delivery keeps being retried. A retryable
     /// failure that would retry later than this fails it instead.
     const MAX_AGE: Duration;
+    /// How long a worker holds a claimed delivery: well beyond [`SEND_TIMEOUT`].
+    /// Tests shorten it to see another replica take over a stalled attempt.
+    const LEASE: Duration = Duration::from_mins(1);
 
     /// Attempts to send `delivery`. Every attempt carries the same
     /// [`Delivery::id`], so the receiver can recognize a repeat. Uses
@@ -217,7 +218,7 @@ impl<S: Sender> Worker<S> {
             let claimed = tokio::select! {
                 biased;
                 () = shutdown.requested() => return,
-                claimed = deliveries.claim::<S::Channel>(LEASE) => claimed,
+                claimed = deliveries.claim::<S::Channel>(S::LEASE) => claimed,
             };
             match claimed {
                 Ok(Some(delivery)) => {

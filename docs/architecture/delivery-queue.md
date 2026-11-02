@@ -23,7 +23,8 @@ Auth-service owns sending: the workers, the retry policy and the HTTP client
   but before recording the outcome lets its lease expire, and another worker sends
   the delivery again. Every attempt carries the same delivery ID, which receivers
   use to deduplicate: it is the `jti` of logout tokens and SETs, and the source of
-  an email's `Message-ID`.
+  an email's `Message-ID`. Auth-service's `deliveries/tests.rs` kills a replica
+  mid-send, and stalls another past its lease, to check this end to end.
 - **Ordered per key.** Deliveries that share an ordering key are sent one at a
   time, in the order their transactions committed, whatever the replicas' clocks
   say. A failed one holds back the rest until an operator retries or cancels it,
