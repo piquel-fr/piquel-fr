@@ -154,7 +154,7 @@ macro_rules! run {
 }
 
 /// A checked `sqlx::query_as!` over `domain_events e` in the safe consumer order,
-/// the one rule every ordered reader of the stream follows: `$query` selects and
+/// the one rule every cursor-style reader of the stream follows: `$query` selects and
 /// filters, the macro adds the rule, and `$tail` follows it (`LIMIT`, row locks), e.g.
 /// `in_safe_order!(Row, "SELECT e.id FROM domain_events e WHERE true", "LIMIT $1", 10)`.
 ///
