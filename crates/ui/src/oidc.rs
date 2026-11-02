@@ -104,7 +104,7 @@ pub async fn failure<'a>(
         ErrorCode::UnmetAuthenticationRequirements => {
             "This application needs a stronger sign-in than your account can give right now."
         }
-        ErrorCode::ServerError => "Sign-in is temporarily unavailable. Please try again.",
+        ErrorCode::ServerError => "Something went wrong on our side. Please try again.",
         ErrorCode::InvalidClient
         | ErrorCode::InvalidGrant
         | ErrorCode::InvalidScope

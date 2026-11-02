@@ -56,6 +56,7 @@ pub(crate) use admin::AdminApplication;
 use auth::SignInPage;
 use piquel_common::config::Origin;
 use piquel_repository::Database;
+use piquel_telemetry::HttpTelemetry;
 use piquel_ui::{Area, Onward, QueryError, Title};
 use serde::de::DeserializeOwned;
 use std::{fmt, sync::Arc};
@@ -115,8 +116,8 @@ enum Failure {
     /// a deleted one or none. The account page rendering says so, at `404`, below
     /// the account's bar; no other page names an app.
     Missing,
-    /// Rendering or another internal step failed. It is logged, and Topcoat answers
-    /// `500`.
+    /// Rendering or another internal step failed. It is logged, and the page says
+    /// so, at `500`.
     Internal(Error),
 }
 
@@ -302,26 +303,34 @@ impl WebApplication {
     }
 
     /// Runs the handler `page` of the page titled `title`: its failure becomes the
-    /// page explaining it, and internal failures are logged, since Topcoat logs none
-    /// of the `500`s it answers for them.
+    /// page explaining it. An internal failure is logged, since Topcoat logs none of
+    /// the errors it answers, and becomes the page explaining a server error, which
+    /// shows its trace ID.
     async fn answer(
         cx: &Cx,
         title: &str,
         page: impl Future<Output = std::result::Result<Response, Failure>>,
     ) -> Result<Response> {
         let web = topcoat::context::app_context::<Self>(cx);
-        let answer = match page.await {
-            Ok(response) => Ok(response),
+        let error = match page.await {
+            Ok(response) => return Ok(response),
             Err(Failure::Explained { error, link }) => {
                 let link = link.as_ref().map(|(label, url)| (*label, url.as_str()));
-                web.failure(cx, title, &error, link).await
+                match web.failure(cx, title, &error, link).await {
+                    Ok(response) => return Ok(response),
+                    Err(error) => error,
+                }
             }
-            Err(Failure::Missing) => Err(Error::msg(
-                "a page that is not the account's named a missing app",
-            )),
-            Err(Failure::Internal(error)) => Err(error),
+            Err(Failure::Missing) => {
+                Error::msg("a page that is not the account's named a missing app")
+            }
+            Err(Failure::Internal(error)) => error,
         };
-        answer.inspect_err(|error| ApiError::log_error(&**error))
+        ApiError::log_error(&*error);
+        let failed = OAuthCode::ServerError.reject("the page could not be shown");
+        web.failure(cx, title, &failed, None)
+            .await
+            .inspect_err(|error| ApiError::log_error(&**error))
     }
 
     /// The context the security layer attached to the request.
@@ -388,7 +397,8 @@ impl WebApplication {
     }
 
     /// Answers with `page` inside the document titled `title`, in `area`, under the
-    /// page policy. The brand links the account's settings. Its forms may post to
+    /// page policy, with the trace ID of a server error. The brand links the
+    /// account's settings. Its forms may post to
     /// auth's own pages, and redirect on to the origins of `targets`: browsers apply
     /// `form-action` to a form's redirects too.
     async fn render(
@@ -412,6 +422,7 @@ impl WebApplication {
                 script: script.as_str(),
                 home: routes::page::settings::HOME,
                 area: area,
+                reference: HttpTelemetry::trace_id(status),
                 (page)
             )
         }

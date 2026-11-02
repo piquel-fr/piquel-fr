@@ -400,7 +400,7 @@ pub(crate) async fn copy<'a>(target: &'a str, label: &'a str) -> Result<impl Vie
 
 /// `value` as code, the element `id`, beside a button copying it, named `label`.
 #[component]
-async fn copyable<'a>(id: &'a str, label: &'a str, value: &'a str) -> Result<impl View> {
+pub(crate) async fn copyable<'a>(id: &'a str, label: &'a str, value: &'a str) -> Result<impl View> {
     Ok(view! {
         <div class="row between code-line">
             <code id=(id)>(value)</code>

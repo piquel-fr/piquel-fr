@@ -2,6 +2,7 @@
 //! signing in by auth's handoff page, the dashboard's own confirmation, and the
 //! admin listener's security layer.
 
+use super::AdminApplication;
 use crate::{
     AdminService, AuthConfig, DashboardConfig,
     account::AccountService,
@@ -23,6 +24,7 @@ use axum::{
 use chrono::{DateTime, Utc};
 use piquel_common::{AccountStatus, AuthenticationMethod, UserId};
 use piquel_repository::Database;
+use piquel_telemetry::{HttpTelemetry, Telemetry};
 use piquel_ui::{Checkbox, HandoffQuery};
 use std::net::SocketAddr;
 use url::{Position, Url};
@@ -148,6 +150,39 @@ impl Harness {
         assert_eq!(state, "", "the state is done with");
         Browser::signed_out().with_cookie(BrowserCookie::Dashboard, session)
     }
+}
+
+/// A page that fails internally says so on the dashboard's page, which shows the
+/// trace ID its `X-Trace-Id` header carries, for a report to quote.
+#[tokio::test]
+#[ignore = "requires TEST_DATABASE_URL"]
+async fn a_server_error_shows_its_trace_id() {
+    let _capture = Telemetry::capture("info");
+    let dashboard = DashboardConfig {
+        listener: SocketAddr::from(([127, 0, 0, 1], 0)),
+        origin: DASHBOARD.parse().expect("dashboard origin"),
+    };
+    let config = AuthConfig::test(&AUTH_ORIGIN.parse().expect("auth origin"));
+    // Without the security layer, which gives every page its request context, every
+    // page fails internally.
+    let pages = AdminApplication::new(Replicas::database().await, &config, &dashboard)
+        .expect("dashboard")
+        .routes();
+    let pages = HttpTelemetry::default().wrap(pages);
+    let response = Browser::signed_out()
+        .visit(&pages, &format!("{DASHBOARD}/users"))
+        .await;
+    assert_eq!(response.status(), StatusCode::INTERNAL_SERVER_ERROR);
+    let trace_id = response.headers()[HttpTelemetry::TRACE_ID_HEADER]
+        .to_str()
+        .expect("trace ID")
+        .to_owned();
+    assert!(
+        html(response)
+            .await
+            .contains(&format!(r#"<code id="reference">{trace_id}</code>"#)),
+        "the page shows {trace_id}"
+    );
 }
 
 /// An administrator's passkey session signs in to the dashboard through auth's

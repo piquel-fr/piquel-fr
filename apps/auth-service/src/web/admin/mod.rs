@@ -49,6 +49,7 @@ use chrono::Duration;
 use piquel_common::config::Origin;
 use piquel_crypto::NoteVerifier;
 use piquel_repository::Database;
+use piquel_telemetry::HttpTelemetry;
 use piquel_ui::DashboardTab;
 use serde::Deserialize;
 use std::{
@@ -444,7 +445,8 @@ async fn answers(cx: &Cx, body: Body, next: Next<'_>) -> Result<Response> {
 
 impl AdminApplication {
     /// Answers with `page`, at `status`, in the document every page shares: the
-    /// tabs, the signed-in administrator's handle and signing out.
+    /// tabs, the signed-in administrator's handle and signing out, and the trace
+    /// ID of a server error.
     async fn render(cx: &Cx, status: StatusCode, page: impl View) -> Result<Response> {
         // A browser that is not signed in is sent on by the page itself.
         let admin = Self::admin(cx).await.ok();
@@ -487,6 +489,7 @@ impl AdminApplication {
                 tabs: links,
                 current: current,
                 sign_out: leave,
+                reference: HttpTelemetry::trace_id(status),
                 (page)
             )
         }
@@ -506,7 +509,9 @@ impl AdminApplication {
 
     /// What a page that failed with `error` answers: the [`Answer`] it carries,
     /// that an account which does not administer Piquel has no access, or why the
-    /// admin or account service refused. Other failures fail the page.
+    /// admin or account service refused. Other failures answer as Topcoat does,
+    /// such as a redirect, except that a server error is logged, since Topcoat logs
+    /// none, and its page shows its trace ID.
     async fn failed(cx: &Cx, error: Error) -> Result<Response> {
         if let Some(response) = error.downcast_ref::<Answer>().and_then(Answer::take) {
             return Ok(response);
@@ -530,16 +535,33 @@ impl AdminApplication {
         // fails the page.
         let refused = match error.downcast::<AdminError>() {
             Ok(refused) => ApiError::from(refused),
-            Err(failed) => ApiError::from(
-                failed
-                    .into_error()
-                    .downcast::<AccountError>()
-                    .map_err(topcoat::core::DowncastError::into_error)?,
-            ),
+            Err(failed) => match failed.into_error().downcast::<AccountError>() {
+                Ok(refused) => ApiError::from(refused),
+                Err(failed) => return Self::unexplained(cx, failed.into_error()).await,
+            },
         };
         let (status, detail) = refused.public();
         let page = view! { cx =>
             piquel_ui::dashboard_failure(title: "That did not work", detail: detail)
+        };
+        Self::render(cx, status, page).await
+    }
+
+    /// What a page that failed with `error`, which neither service explains,
+    /// answers: Topcoat's answer, unless it is a server error, which is logged and
+    /// said on the dashboard's page.
+    async fn unexplained(cx: &Cx, error: Error) -> Result<Response> {
+        let answered = error.clone().into_response(cx)?;
+        let status = answered.status();
+        if !status.is_server_error() {
+            return Ok(answered);
+        }
+        ApiError::log_error(&*error);
+        let page = view! { cx =>
+            piquel_ui::dashboard_failure(
+                title: "That did not work",
+                detail: "Something went wrong on our side. Please try again.",
+            )
         };
         Self::render(cx, status, page).await
     }
