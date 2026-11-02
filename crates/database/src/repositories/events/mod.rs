@@ -498,16 +498,10 @@ impl EventRepository<'_> {
         Ok(id)
     }
 
-    /// Returns up to `limit` events after `consumer`'s acknowledged cursor, in a
-    /// safe order, for consumers such as alerts (#83). The audit sealer reads in the
-    /// same order through [`AuditRepository::unsealed`](crate::AuditRepository::unsealed).
-    ///
-    /// Sequence order alone is not safe: a transaction can take sequence 10 and
-    /// commit after another took 11, so a reader that saw 11 would skip 10. Events
-    /// are read in `(txid, sequence)` order instead, and only from transactions
-    /// older than every transaction still running. Those have all finished, so no
-    /// event can later appear before the cursor. The cost is that a long-running
-    /// transaction holds back every consumer until it ends.
+    /// Returns up to `limit` events after `consumer`'s acknowledged cursor, in the
+    /// safe consumer order of `in_safe_order!`, for consumers such as alerts (#83).
+    /// No event can later appear before the cursor. The audit sealer reads in the same
+    /// order through [`AuditRepository::unsealed`](crate::AuditRepository::unsealed).
     ///
     /// # Errors
     ///
@@ -520,7 +514,7 @@ impl EventRepository<'_> {
         run!(
             self,
             fetch_all,
-            sqlx::query_as!(
+            in_safe_order!(
                 EventRow,
                 r#"SELECT
                     e.id AS "id: EventId", e.txid::text::bigint AS "txid!", e.sequence,
@@ -534,10 +528,8 @@ impl EventRepository<'_> {
                 FROM domain_events e
                 LEFT JOIN event_personal_data p ON p.event_id = e.id
                 LEFT JOIN event_consumers c ON c.name = $1
-                WHERE (e.txid, e.sequence) > (COALESCE(c.txid, '0'::xid8), COALESCE(c.sequence, 0))
-                AND e.txid < pg_snapshot_xmin(pg_current_snapshot())
-                ORDER BY e.txid, e.sequence
-                LIMIT $2"#,
+                WHERE (e.txid, e.sequence) > (COALESCE(c.txid, '0'::xid8), COALESCE(c.sequence, 0))"#,
+                "LIMIT $2",
                 consumer,
                 i64::from(limit),
             )

@@ -1,8 +1,8 @@
 //! Domain repository handles backed by a private pool or transaction connection.
 //!
 //! This module holds only what every repository shares: the executor, the
-//! declaration macro, the `run!` query macro and the column types that checked
-//! queries decode into. Each submodule owns one repository together with the
+//! declaration macro, the `run!` query macro, the `in_safe_order!` event order and
+//! the column types that checked queries decode into. Each submodule owns one repository together with the
 //! records it accepts and returns.
 
 use crate::{Database, DatabaseTransaction, ExclusiveConnection};
@@ -151,6 +151,30 @@ macro_rules! run {
         .map_err(Into::<DatabaseError>::into);
         RepositoryExecutor::finish(&span, result)
     }};
+}
+
+/// A checked `sqlx::query_as!` over `domain_events e` in the safe consumer order,
+/// the one rule every cursor-style reader of the stream follows: `$query` selects and
+/// filters, the macro adds the rule, and `$tail` follows it (`LIMIT`, row locks), e.g.
+/// `in_safe_order!(Row, "SELECT e.id FROM domain_events e WHERE true", "LIMIT $1", 10)`.
+///
+/// Sequence order alone is not safe: a transaction can take sequence 10 and commit
+/// after another took 11, so a reader that saw 11 would skip 10. Events are read in
+/// `(txid, sequence)` order instead, and only from transactions older than every
+/// transaction still running. Those have all finished, so no event can later appear
+/// before one already read. The cost is that a long-running transaction holds back
+/// every reader until it ends.
+macro_rules! in_safe_order {
+    ($record:ty, $query:literal, $tail:literal $(, $arg:expr)* $(,)?) => {
+        sqlx::query_as!(
+            $record,
+            $query
+                + " AND e.txid < pg_snapshot_xmin(pg_current_snapshot())"
+                + " ORDER BY e.txid, e.sequence "
+                + $tail
+            $(, $arg)*
+        )
+    };
 }
 
 impl RepositoryExecutor<'_> {
