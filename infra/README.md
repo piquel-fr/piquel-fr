@@ -355,8 +355,10 @@ trace its logs, and two dashboards in the `piquel.fr` folder:
   the matching log lines and traces. Its counts come from the event and failure
   log lines, so they are exact.
 
-To look up a failed request, paste the `X-Trace-Id` of its response, or the
-trace ID the admin dashboard shows for an event, into Explore > Tempo.
+To look up a failed request, paste its trace ID into Explore > Tempo: the
+reference that auth's pages and the admin dashboard show below a server error,
+which a user's report quotes, the `X-Trace-Id` of an API response, or the trace
+ID the admin dashboard shows for an event.
 
 Grafana's route is private, and it never signs in through auth: it is needed
 most when auth is down (see "Recovering auth" in

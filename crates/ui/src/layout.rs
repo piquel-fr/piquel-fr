@@ -1,8 +1,8 @@
 //! The document around every page, and the parts pages share: the frame of each
 //! section of the account's pages, the account's bar and the navigations.
 
-use crate::{Alert, Messages};
-use piquel_common::UserId;
+use crate::{Alert, Messages, clients::copyable};
+use piquel_common::{TraceId, UserId};
 use topcoat::{
     Result,
     view::{Child, View, component, view},
@@ -161,7 +161,8 @@ pub(crate) trait Label: Copy + PartialEq + Send + Sync + 'static {
 /// The document around every page: the head, which links `stylesheet` and loads
 /// the passkey `script`, if the page has one, Piquel's header, whose brand links
 /// `home` and names the page's `area`, and the page as `child`. `title` names the
-/// page in the browser, before "· Piquel".
+/// page in the browser, before "· Piquel". A page answering a server error shows
+/// the `reference` of its trace below, for the user to quote in a report.
 #[component]
 pub async fn document<'a>(
     title: &'a str,
@@ -171,8 +172,10 @@ pub async fn document<'a>(
     script: Option<&'a str>,
     home: &'a str,
     #[default] area: Area,
+    #[default] reference: Option<TraceId>,
     child: Child<'_>,
 ) -> Result<impl View> {
+    let reference = reference.map(|reference| reference.to_string());
     Ok(view! {
         <!DOCTYPE html>
         <html lang="en">
@@ -195,7 +198,15 @@ pub async fn document<'a>(
                             <span class="muted">(area.label())</span>
                         </a>
                     </header>
-                    <main>(child)</main>
+                    <main>
+                        (child)
+                        if let Some(reference) = &reference {
+                            <footer class="reference stack">
+                                <p class="help">"If you report this error, include this reference."</p>
+                                copyable(id: "reference", label: "reference", value: reference.as_str())
+                            </footer>
+                        }
+                    </main>
                 </div>
             </body>
         </html>

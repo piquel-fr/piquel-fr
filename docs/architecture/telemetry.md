@@ -33,8 +33,10 @@ adds the rest in one line.
   request cancelled while its `COMMIT` is in flight can commit an event that is
   never logged or counted. The stored history is the audit record.
 - **Failures.** A 5xx response marks its span failed and returns the trace ID in
-  `X-Trace-Id`, which auth's own pages can read, and CORS exposes to public
-  clients' origins. `tracing::error!` events with an `error` field, such as
+  `X-Trace-Id`, which CORS exposes to public clients' origins. JSON error bodies
+  do not repeat it. A page answering a server error, on auth or the admin
+  dashboard, shows the same trace ID as a reference to quote in a report, since
+  a browser never shows the header; no other page shows one. `tracing::error!` events with an `error` field, such as
   `ApiError::log_error`'s, also mark their span. Every request of an
   administrator the dashboard or auth's handoff page refuses is logged as `admin
   dashboard request refused`, with its `admin.failure` reason.

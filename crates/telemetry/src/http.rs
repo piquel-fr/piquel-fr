@@ -4,11 +4,12 @@ use crate::{Histogram, Telemetry};
 use axum::{
     Router,
     extract::{MatchedPath, Request, State},
-    http::{HeaderName, HeaderValue, Method},
+    http::{HeaderName, HeaderValue, Method, StatusCode},
     middleware::Next,
     response::Response,
 };
 use opentelemetry::KeyValue;
+use piquel_common::TraceId;
 use std::time::Instant;
 use tracing::{Instrument, field::Empty};
 use tracing_opentelemetry::OpenTelemetrySpanExt;
@@ -62,6 +63,17 @@ impl HttpTelemetry {
     /// Response header with the trace ID of a failed request, so a report can be
     /// matched to its trace. Browsers read it only where CORS exposes it.
     pub const TRACE_ID_HEADER: HeaderName = HeaderName::from_static("x-trace-id");
+
+    /// The trace ID that a response at `status`, answered from within its request,
+    /// carries in [`Self::TRACE_ID_HEADER`]: a server error's, and no other. A page
+    /// shows it too, since a browser never shows the header.
+    #[must_use]
+    pub fn trace_id(status: StatusCode) -> Option<TraceId> {
+        status
+            .is_server_error()
+            .then(Telemetry::current_trace_id)
+            .flatten()
+    }
 
     /// Logs requests to `routes` at debug level only; they are still traced and measured.
     #[must_use]

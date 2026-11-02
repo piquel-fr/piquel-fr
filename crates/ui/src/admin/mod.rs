@@ -33,7 +33,7 @@ use crate::{
 };
 use chrono::{DateTime, Utc};
 use piquel_common::{
-    AccountStatus,
+    AccountStatus, TraceId,
     admin::{EventSearch, UserSearch},
 };
 use serde::{Deserialize, Serialize};
@@ -110,7 +110,8 @@ impl Label for Tab {
 /// The document around every dashboard page, titled `title`, linking
 /// `stylesheet`, whose brand links `home`: for the signed-in `administrator`, by
 /// handle, the `tabs`, `current` among them, and the form signing out at
-/// `sign_out`; then the page as `child`.
+/// `sign_out`; then the page as `child`, and the `reference` of a server error's
+/// trace, as [`document`] shows it.
 #[component]
 pub async fn dashboard_frame<'a>(
     title: &'a str,
@@ -124,6 +125,7 @@ pub async fn dashboard_frame<'a>(
     #[default]
     current: Option<Tab>,
     sign_out: &'a str,
+    #[default] reference: Option<TraceId>,
     child: Child<'_>,
 ) -> Result<impl View> {
     Ok(view! {
@@ -132,6 +134,7 @@ pub async fn dashboard_frame<'a>(
             stylesheet: stylesheet,
             home: home,
             area: Area::Admin,
+            reference: reference,
             <section class="dashboard stack">
                 if let Some(administrator) = administrator {
                     <div class="row between">
