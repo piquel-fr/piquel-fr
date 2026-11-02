@@ -34,9 +34,6 @@ use webauthn_rs_proto::ResidentKeyRequirement;
 
 /// Typed challenge payloads and browser binding.
 mod ceremonies;
-/// Stable decoy credentials for usernames without an active account or passkey.
-mod decoy;
-pub(crate) use decoy::DecoyKey;
 /// Passkey failures and their browser response mapping.
 mod error;
 /// Passkey sign-in on the pages of approved related origins.
@@ -69,8 +66,6 @@ pub struct PasskeyApplication {
     oidc: OidcApplication,
     /// Whether ordinary registration needs an invitation.
     invite_required: bool,
-    /// Derives the decoy credentials of unknown usernames.
-    decoy_key: DecoyKey,
 }
 
 /// Human-readable `WebAuthn` relying party name.
@@ -96,7 +91,6 @@ impl PasskeyApplication {
             origin: config.origin.clone(),
             oidc,
             invite_required: config.invite_required,
-            decoy_key: config.decoy_key.clone(),
         })
     }
 
@@ -473,7 +467,7 @@ impl PasskeyApplication {
             }
             None => None,
         };
-        // Only once admitted, so whether a handle is held is no answer to anyone.
+        // Only once admitted, so an uninvited signup hears about its invitation first.
         Handles::new(&app.database)
             .claimable(&handle, None)
             .await
@@ -588,13 +582,11 @@ impl PasskeyApplication {
         Ok(response)
     }
 
-    /// Starts username-based authentication or lets the authenticator identify the account.
+    /// Starts handle-based authentication or lets the authenticator identify the account.
     ///
-    /// A handle without an active account or passkey gets the same response as one
-    /// with them: one lookup query, a stored ceremony and a challenge built by the same
-    /// call, listing stable decoy credentials. That ceremony fails at finish like an
-    /// unregistered passkey, so the handle field reveals no account. Text that is not
-    /// a handle names no account, so it skips the lookup and gets decoys too.
+    /// Handles are public (`docs/security/handles.md`), so a handle without an active
+    /// account or passkey is refused at once, before any ceremony. Text that is not a
+    /// handle names no account, so it is refused the same way.
     async fn start_login(
         State(app): State<Self>,
         headers: HeaderMap,
@@ -602,31 +594,24 @@ impl PasskeyApplication {
     ) -> Result<Response, ApiError> {
         let (ceremony, challenge) =
             if let Some(input) = input.handle.filter(|handle| !handle.is_empty()) {
-                let handle = Handle::parse(&input);
-                let keys = match &handle {
+                let keys = match Handle::parse(&input) {
                     Ok(handle) => {
                         app.database
                             .passkeys()
-                            .list_active_by_handle(handle)
+                            .list_active_by_handle(&handle)
                             .await?
                     }
                     Err(_) => Vec::new(),
                 };
-                let user_id = keys.first().map(|key| key.user_id);
-                let (mut challenge, state) = app
+                let user_id = keys
+                    .first()
+                    .map(|key| key.user_id)
+                    .ok_or(PasskeyError::UnknownHandle)?;
+                let (challenge, state) = app
                     .webauthn
                     .start_passkey_authentication(&Self::decode(keys)?)
                     .map_err(PasskeyError::from)?;
-                let ceremony = if let Some(user_id) = user_id {
-                    Ceremony::Login(LoginCeremony { user_id, state })
-                } else {
-                    challenge.public_key.allow_credentials = app
-                        .decoy_key
-                        .credentials(handle.as_ref().map_or(&input, Handle::as_str))
-                        .map_err(PasskeyError::Crypto)?;
-                    Ceremony::Decoy
-                };
-                (ceremony, challenge)
+                (Ceremony::Login(LoginCeremony { user_id, state }), challenge)
             } else {
                 let (challenge, state) = app.discoverable()?;
                 (Ceremony::Discover(state), challenge)
@@ -674,8 +659,8 @@ impl PasskeyApplication {
 
     /// Checks `credential` against a sign-in `ceremony` with `webauthn`, and
     /// returns the account it signs in to with `WebAuthn`'s verdict, which
-    /// [`Self::accept_credential`] takes. A ceremony that names no account is
-    /// rejected, and recorded, here.
+    /// [`Self::accept_credential`] takes. A discoverable credential that names no
+    /// account is rejected, and recorded, here.
     async fn verify(
         &self,
         webauthn: &Webauthn,
@@ -688,14 +673,6 @@ impl PasskeyApplication {
                 user_id,
                 webauthn.finish_passkey_authentication(credential, &state),
             )),
-            AuthenticationCeremony::Decoy => Err(self
-                .reject(
-                    context,
-                    Actor::Anonymous,
-                    None,
-                    PasskeyError::AccountUnavailable,
-                )
-                .await),
             AuthenticationCeremony::Discover(DiscoverCeremony { state }) => {
                 match self.discover(credential).await {
                     Ok((user_id, keys)) => Ok((

@@ -2,7 +2,7 @@ import { expect, test } from '@playwright/test';
 import { addPasskeys, signUp } from './helpers';
 
 /** Runs against auth's sign-in page, with Chromium's virtual passkey authenticator. */
-test('signing in with a handle, after one with no passkey here is refused', async ({
+test('signing in with a handle, after one without an account is refused', async ({
   page,
   context
 }) => {
@@ -16,11 +16,12 @@ test('signing in with a handle, after one with no passkey here is refused', asyn
   await page.getByRole('button', { name: 'Use a handle instead', exact: true }).click();
   const field = page.getByLabel('Handle', { exact: true });
   const signIn = page.getByRole('button', { name: 'Sign in with a passkey', exact: true });
-  // A handle this authenticator holds no passkey for fails in the ceremony, which
-  // the form says, without telling whether the account exists.
+  // Handles are public, so a handle without an account is refused before any ceremony.
   await field.fill(`nobody-${Date.now().toString(36)}`);
   await signIn.click();
-  await expect(page.locator('form[data-passkey-sign-in]').getByRole('alert')).toBeVisible();
+  await expect(page.locator('form[data-passkey-sign-in]').getByRole('alert')).toHaveText(
+    'No active account has this handle.'
+  );
   await expect(page).toHaveURL(/\/login/);
 
   await field.fill(handle);

@@ -65,9 +65,9 @@ pub(crate) enum PasskeyError {
     /// A discoverable credential returned an invalid account handle.
     #[error("invalid discoverable account handle")]
     InvalidUserHandle(#[source] InvalidValue),
-    /// A decoy ceremony finished: the handle has no active account or passkey.
-    #[error("account unavailable for passkey authentication")]
-    AccountUnavailable,
+    /// Handle sign-in named a handle without an active account or passkey.
+    #[error("no active account has this handle")]
+    UnknownHandle,
     /// The account, or the credential it signed with, was disabled or removed.
     #[error("active account and credential required")]
     AccountInactive,
@@ -113,7 +113,7 @@ pub(crate) enum PasskeyError {
     /// Creating a browser session failed.
     #[error(transparent)]
     Session(#[from] SessionError),
-    /// Generating a browser-binding secret or deriving decoy credentials failed.
+    /// Generating a browser-binding secret failed.
     #[error(transparent)]
     Crypto(#[from] CryptoError),
 }
@@ -151,6 +151,7 @@ impl From<PasskeyError> for ApiError {
             PasskeyError::AccountInactive => {
                 Self::unauthorized("This account is disabled, or this passkey was removed from it.")
             }
+            PasskeyError::UnknownHandle => Self::not_found("No active account has this handle."),
             PasskeyError::PasskeyNotFound => Self::bad_request("Passkey not found."),
             PasskeyError::LastPasskey => {
                 Self::bad_request("Keep at least one passkey on your account.")
@@ -162,11 +163,8 @@ impl From<PasskeyError> for ApiError {
             error @ PasskeyError::SessionChanged => error
                 .rejected("Your session changed during this passkey request. Please start again."),
             // WebAuthn's reasons stay in the logs: some fail before possession is proven,
-            // so showing them would reveal which credentials an account has. A decoy
-            // ceremony gets the same answer as an unregistered passkey, so finishing
-            // one reveals no more than starting it.
+            // so showing them would reveal which credentials an account has.
             error @ (PasskeyError::Webauthn(_)
-            | PasskeyError::AccountUnavailable
             | PasskeyError::SignedForAnotherOrigin
             | PasskeyError::ClientData(_)) => {
                 error.rejected("This passkey could not be verified. Please try again.")
@@ -203,7 +201,6 @@ impl PasskeyError {
         match self {
             Self::CounterRegression => Some(SignInFailure::CounterRegression),
             Self::AccountInactive => Some(SignInFailure::AccountUnavailable),
-            Self::AccountUnavailable => Some(SignInFailure::UnknownAccount),
             Self::Webauthn(_)
             | Self::SignedForAnotherOrigin
             | Self::ClientData(_)
@@ -211,6 +208,7 @@ impl PasskeyError {
             | Self::UserVerificationRequired
             | Self::CredentialRevoked => Some(SignInFailure::InvalidCredential),
             Self::Handle(_)
+            | Self::UnknownHandle
             | Self::PasskeyAlreadyRegistered(_)
             | Self::InvalidDisplayName
             | Self::InvalidPasskeyName
