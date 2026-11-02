@@ -5,7 +5,7 @@ use base64::{Engine, engine::general_purpose::STANDARD};
 use reqwest::{RequestBuilder, StatusCode, header};
 use std::time::Duration;
 use thiserror::Error;
-use tracing::{Instrument, Span, field::Empty};
+use tracing::{Instrument, field::Empty};
 use url::Url;
 
 /// Most bytes read from any response. Metadata, key sets and token responses are a
@@ -180,9 +180,9 @@ impl Http {
         let exchange = async {
             let mut response = self.0.execute(request).await.map_err(failed)?;
             let status = response.status();
-            Span::current().record("http.response.status_code", status.as_u16());
+            span.record("http.response.status_code", status.as_u16());
             if status.is_client_error() || status.is_server_error() {
-                Span::current().record("otel.status_code", "ERROR");
+                span.record("otel.status_code", "ERROR");
             }
             let max_age = response
                 .headers()
