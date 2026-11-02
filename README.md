@@ -697,6 +697,7 @@ Use individual recipes while iterating:
 | Unit tests / focused package tests | `just test` / `just test -p auth-service` |
 | Documentation tests | `just doc-test` |
 | Database integration tests and query cache check, in a scratch cluster | `just db test` |
+| Query cache check alone, against a migrated `TEST_DATABASE_URL` | `just db prepare-check` |
 | Regenerate the query cache after changing SQL or migrations | `just db prepare` |
 | Run any command against a scratch cluster | `just db scratch -- psql` |
 | Browser tests against running servers | `just web test-browser` |
@@ -722,8 +723,9 @@ the query or migration that changed it.
 Database integration tests are explicitly marked ignored for the ordinary test
 command. `just db test` runs them in a throwaway PostgreSQL cluster that listens
 only on a private Unix socket and is deleted afterwards, then runs
-`cargo sqlx prepare --check` against the migrated schema, which catches a
-migration that breaks a cached query. To use an existing disposable database
+`just db prepare-check` (`cargo sqlx prepare --check`) against the migrated
+schema, which catches a migration that breaks a cached query. CI runs that check
+after its database tests. To use an existing disposable database
 instead, set `TEST_DATABASE_URL`; TCP URLs must include `sslmode=disable` or
 `sslmode=verify-full`. It must not target a real account database.
 For browser validation against the actual binary, see [tests/browser/README.md](tests/browser/README.md).

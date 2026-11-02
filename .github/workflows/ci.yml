@@ -4,7 +4,8 @@
 #   checks -> Rust formatting and the Rust dependency audit, which compile nothing
 #   web    -> Prettier, tsc and ESLint, the passkey script included, and the web
 #             dependency audit
-#   rust   -> Clippy, unit, database and doc tests against PostgreSQL
+#   rust   -> Clippy, unit, database and doc tests against PostgreSQL, and the
+#             SQLx query cache checked against the migrated schema
 #   e2e    -> the browser suite over HTTPS against the real binary and PostgreSQL,
 #             with the admin dashboard on its own listener and host
 #   docker -> the deployment image
@@ -149,9 +150,19 @@ jobs:
       - &rust-cache
         uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
         with:
+          # rust-cache's key ignores this workflow. Bump the prefix when a job
+          # needs a new cache, as when rust began installing sqlx-cli.
+          prefix-key: v1-rust
           save-if: ${{ github.ref == 'refs/heads/main' }}
+      # sqlx-cli publishes no prebuilt binaries. rust-cache keeps binaries
+      # installed after it restores, so this compiles when main's cache lacks
+      # the latest release, until main next saves a cache.
+      - run: just db install-sqlx
       - run: just rust lint
       - run: just test --workspace --run-ignored all
+      # The database tests migrated TEST_DATABASE_URL, so a migration that
+      # breaks a cached query fails here even if no test runs that query.
+      - run: just db prepare-check
       - run: just doc
       - run: just doc-test
 

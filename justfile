@@ -27,9 +27,8 @@ install:
     @pnpm install --frozen-lockfile
 
 # Cargo tools used by the test, audit and database recipes.
-install-tools:
+install-tools: db::install-sqlx
     @cargo install --locked cargo-nextest cargo-deny
-    @cargo install --locked sqlx-cli --no-default-features --features rustls,postgres
 
 # The release auth-service executable.
 build: (rust::build "--release")
