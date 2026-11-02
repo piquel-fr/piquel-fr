@@ -164,10 +164,10 @@ impl From<CheckpointRow> for Checkpoint {
 
 impl AuditRepository<'_> {
     /// Returns up to `limit` unsealed events in the order to seal them: the safe
-    /// consumer order of [`EventRepository::read_after`](crate::EventRepository::read_after),
-    /// `(txid, sequence)`, and only events of transactions older than every running
-    /// one. No event can later appear before one returned here, so positions never
-    /// need to be reassigned. The rows stay locked until the transaction ends, so
+    /// consumer order of `in_safe_order!`, which
+    /// [`EventRepository::read_after`](crate::EventRepository::read_after) shares. No
+    /// event can later appear before one returned here, so positions never need to be
+    /// reassigned. The rows stay locked until the transaction ends, so
     /// none changes between being hashed and being sealed.
     ///
     /// # Errors
@@ -177,17 +177,14 @@ impl AuditRepository<'_> {
         run!(
             self,
             fetch_all,
-            sqlx::query_as!(
+            in_safe_order!(
                 EventContent,
                 r#"SELECT
                     id, kind, version, occurred_at, actor, subject_user_id AS subject,
                     client_id AS client, session_id AS session, trace_id, payload
-                FROM domain_events
-                WHERE chain_position IS NULL
-                AND txid < pg_snapshot_xmin(pg_current_snapshot())
-                ORDER BY txid, sequence
-                LIMIT $1
-                FOR UPDATE"#,
+                FROM domain_events e
+                WHERE chain_position IS NULL"#,
+                "LIMIT $1 FOR UPDATE",
                 i64::from(limit),
             )
         )

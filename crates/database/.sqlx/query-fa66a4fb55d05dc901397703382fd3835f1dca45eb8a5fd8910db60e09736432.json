@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "SELECT\n                    id, kind, version, occurred_at, actor, subject_user_id AS subject,\n                    client_id AS client, session_id AS session, trace_id, payload\n                FROM domain_events\n                WHERE chain_position IS NULL\n                AND txid < pg_snapshot_xmin(pg_current_snapshot())\n                ORDER BY txid, sequence\n                LIMIT $1\n                FOR UPDATE",
+  "query": "SELECT\n                    id, kind, version, occurred_at, actor, subject_user_id AS subject,\n                    client_id AS client, session_id AS session, trace_id, payload\n                FROM domain_events e\n                WHERE chain_position IS NULL AND e.txid < pg_snapshot_xmin(pg_current_snapshot()) ORDER BY e.txid, e.sequence LIMIT $1 FOR UPDATE",
   "describe": {
     "columns": [
       {
@@ -72,5 +72,5 @@
       false
     ]
   },
-  "hash": "5675f85c69bf600c5de917f979039329a33026a83b0327511b4d6622a4598c0b"
+  "hash": "fa66a4fb55d05dc901397703382fd3835f1dca45eb8a5fd8910db60e09736432"
 }

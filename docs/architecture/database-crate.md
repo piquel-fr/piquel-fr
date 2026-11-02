@@ -320,8 +320,10 @@ consumer's effects. A sequence number alone is not a safe cursor: a transaction 
 take sequence 10 and commit after another one took 11, and a reader that saw 11
 would skip 10. Consumers therefore read in `(txid, sequence)` order, and only events
 of transactions older than every running one (`txid < pg_snapshot_xmin(...)`), which
-have all finished. A long-running transaction holds back every consumer until it
-ends, so keep transactions short. `history_for_user` lists an account's events,
+have all finished. The rule is written once, in the `in_safe_order!` query macro of
+`repositories/mod.rs`, which `read_after` and the audit sealer's `audit().unsealed`
+both build on. A long-running transaction holds back every consumer until it ends,
+so keep transactions short. `history_for_user` lists an account's events,
 newest first.
 
 ### Sessions
