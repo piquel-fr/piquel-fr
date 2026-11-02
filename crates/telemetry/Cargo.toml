@@ -10,7 +10,7 @@ repository.workspace = true
 test-util = ["opentelemetry_sdk/testing"]
 
 [dependencies]
-piquel-common = { workspace = true, features = ["config"] }
+piquel-common = { workspace = true, features = ["client-spans", "config"] }
 
 async-trait.workspace = true
 axum.workspace = true

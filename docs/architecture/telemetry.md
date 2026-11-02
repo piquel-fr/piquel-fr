@@ -79,9 +79,9 @@ where one exists, and `piquel.auth.*` otherwise. Units follow UCUM: `s`, or
 `{thing}` for counts.
 
 **An outbound HTTP call:** `request.send_traced()` instead of `send()`. It
-records the method, host and status only. Requests the Rust SDK sends, such as
-Google's signing-key fetches through `KeyCache`, get the same span from the SDK
-itself.
+records the method, host and status only. `SendTraced` lives in `piquel-common`
+so the Rust SDK sends its requests, such as Google's signing-key fetches through
+`KeyCache`, the same way.
 
 ## What never goes in telemetry
 

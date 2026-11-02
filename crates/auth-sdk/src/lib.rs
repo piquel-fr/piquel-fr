@@ -84,7 +84,7 @@
 //! or extra trusted roots.
 //!
 //! Each request runs in an `http.client` `tracing` span, at `info` under the
-//! `piquel_auth` target, with its method, host and status only, as OpenTelemetry's
+//! `piquel_common` target, with its method, host and status only, as OpenTelemetry's
 //! HTTP client conventions name them.
 //!
 //! The behavior follows `docs/architecture/sdk.md` in the piquel-fr repository, and is
