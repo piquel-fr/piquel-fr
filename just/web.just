@@ -24,8 +24,8 @@ smoke:
     @bun packages/auth/test/smoke/smoke.js
     @pnpm --filter @piquel/auth exec node test/smoke/workerd.js
 
-# Requires a running auth service; see tests/browser/README.md. Builds the
-# TypeScript SDK first: browser-client.spec.ts serves the built package to its page.
+# Builds the TypeScript SDK first, as browser-client.spec.ts serves the built package.
+# Requires a running auth service; see tests/browser/README.md.
 [positional-arguments]
 test-browser *ARGS:
     @pnpm --filter @piquel/auth build
