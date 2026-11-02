@@ -90,8 +90,9 @@ use thiserror::Error;
 /// The default `service.name` of exported telemetry.
 pub const SERVICE_NAME: &str = "auth-service";
 /// What is traced, and logged unless `RUST_LOG` says otherwise: auth's own
-/// operations, and its database queries and committed events.
-pub const TELEMETRY_FILTER: &str = "auth_service=info,piquel_repository=info";
+/// operations, its database queries and committed events, and the SDK's requests,
+/// such as Google's signing-key fetches.
+pub const TELEMETRY_FILTER: &str = "auth_service=info,piquel_repository=info,piquel_auth=info";
 
 /// Bound on browser ceremony and API JSON bodies.
 const MAX_REQUEST_BODY_BYTES: usize = 64 * 1024;
