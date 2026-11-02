@@ -180,7 +180,8 @@ impl Http {
         let exchange = async {
             let mut response = self.0.execute(request).await.map_err(failed)?;
             let status = response.status();
-            span.record("http.response.status_code", status.as_u16());
+            // tracing-opentelemetry exports unsigned integers as strings.
+            span.record("http.response.status_code", i64::from(status.as_u16()));
             if status.is_client_error() || status.is_server_error() {
                 span.record("otel.status_code", "ERROR");
             }

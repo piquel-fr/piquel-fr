@@ -812,6 +812,16 @@ async fn google_key_fetch_is_a_client_span_of_its_request() {
             .any(|attribute| attribute.contains("/keys") || attribute.contains("secret")),
         "no path or query: {attributes:?}"
     );
+    let status = fetch
+        .attributes
+        .iter()
+        .find(|attribute| attribute.key.as_str() == "http.response.status_code")
+        .expect("status");
+    assert_eq!(
+        format!("{:?}", status.value),
+        "I64(200)",
+        "an integer status"
+    );
 }
 
 /// Stable provider subjects take priority over email observations and require an existing passkey.
