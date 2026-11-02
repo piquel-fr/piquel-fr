@@ -13,7 +13,6 @@ mod db 'just/db.just'
 # auth-service commands with the caller's configuration, and secret generation.
 mod auth 'just/auth.just'
 
-
 # piqueld previews of this worktree, and a local telemetry backend.
 mod infra 'just/infra.just'
 
