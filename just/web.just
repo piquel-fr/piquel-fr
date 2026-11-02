@@ -16,8 +16,8 @@ lint:
 test:
     @pnpm test
 
-# The built TypeScript SDK validating a vector token in Node, Deno, Bun and workerd,
-# the Cloudflare Workers runtime. Needs `deno` and `bun`, as CI installs them.
+# workerd is the Cloudflare Workers runtime. Needs `deno` and `bun`, as CI installs them.
+# Validate a vector token with the built TypeScript SDK in Node, Deno, Bun and workerd.
 smoke:
     @pnpm --filter @piquel/auth build
     @node packages/auth/test/smoke/smoke.js
