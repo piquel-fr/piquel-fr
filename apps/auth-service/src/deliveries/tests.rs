@@ -11,6 +11,7 @@ use axum::{
 use piquel_common::{DeliveryId, UserId, events::DomainEvent};
 use piquel_repository::{DatabaseTransaction, DeliveryStatus, DeliverySummary, NewDelivery};
 use std::{marker::PhantomData, net::IpAddr, sync::Mutex};
+use tokio::sync::{Notify, mpsc};
 
 /// A retryable failure without `Retry-After`.
 const UNAVAILABLE: DeliveryError = DeliveryError::Retryable {
@@ -287,6 +288,8 @@ worker_channels! {
     Resent = "test_worker_resent";
     /// What an attempt and an idle worker export.
     Traced = "test_worker_traced";
+    /// A replica killed, or stalled, while it sends.
+    Killed = "test_worker_killed";
 }
 
 /// How [`Recorder`] answers a delivery.
@@ -298,6 +301,8 @@ enum Behavior {
     Refused,
     /// Permanently refused on the first attempt, accepted after.
     RefusedOnce,
+    /// Accepted.
+    Accepted,
 }
 
 /// Sends channel `C`'s deliveries, keeping the ID each attempt carried.
@@ -322,7 +327,7 @@ impl<C: Channel<Recipient = Behavior, Payload = ()>> Sender for Recorder<C> {
             }),
             Behavior::Refused => Err(refused),
             Behavior::RefusedOnce if first => Err(refused),
-            Behavior::RefusedOnce => Ok(()),
+            Behavior::RefusedOnce | Behavior::Accepted => Ok(()),
         })
     }
 }
@@ -331,6 +336,14 @@ impl<C: Channel<Recipient = Behavior, Payload = ()>> Sender for Recorder<C> {
 /// sending `C`, whose attempts are recorded in the returned list.
 async fn workers<C: Channel<Recipient = Behavior, Payload = ()>>()
 -> (Database, Jobs, Arc<Mutex<Vec<DeliveryId>>>) {
+    let database = cleared::<C>().await;
+    let attempts = Arc::default();
+    let jobs = Jobs::replica(Recorder::<C>(Arc::clone(&attempts), PhantomData)).await;
+    (database, jobs, attempts)
+}
+
+/// A database with no pending delivery left on `C` by an earlier run.
+async fn cleared<C: Channel>() -> Database {
     let database = Replicas::database().await;
     for summary in database
         .deliveries()
@@ -344,10 +357,18 @@ async fn workers<C: Channel<Recipient = Behavior, Payload = ()>>()
             .await
             .expect("clear");
     }
-    let attempts = Arc::default();
-    let mut jobs = Jobs::new();
-    jobs.deliveries(Recorder::<C>(Arc::clone(&attempts), PhantomData), &database);
-    (database, jobs, attempts)
+    database
+}
+
+impl Jobs {
+    /// One replica's workers sending with `sender`, on a pool only they hold:
+    /// dropping them aborts their tasks and closes its connections, as killing the
+    /// replica's process would.
+    async fn replica<S: Sender>(sender: S) -> Self {
+        let mut jobs = Self::new();
+        jobs.deliveries(sender, &Replicas::database().await);
+        jobs
+    }
 }
 
 /// Queues a delivery on `C` that the receiver answers with `behavior`.
@@ -491,4 +512,84 @@ async fn a_resent_delivery_carries_the_same_id() {
         [id, id],
         "both sends carry the delivery's ID"
     );
+}
+
+/// Replica A's sender: reports the ID its attempt carries, hangs until `release`,
+/// then refuses the delivery. Its lease is short, so a stalled attempt outlives it.
+struct Stalled {
+    /// Receives each attempt's delivery ID as its send starts.
+    entered: mpsc::UnboundedSender<DeliveryId>,
+    /// Ends the hanging sends.
+    release: Arc<Notify>,
+}
+
+impl Sender for Stalled {
+    type Channel = Killed;
+    const MAX_AGE: Duration = Duration::from_hours(1);
+    const LEASE: Duration = Duration::from_secs(1);
+
+    async fn send(&self, delivery: &Delivery<Killed>) -> Result<(), DeliveryError> {
+        self.entered.send(delivery.id).expect("the test listens");
+        self.release.notified().await;
+        Err(DeliveryError::Permanent(Failure::Status(
+            StatusCode::FORBIDDEN,
+        )))
+    }
+}
+
+/// A delivery whose replica is killed mid-send, or stalls there, is sent by the
+/// other replica, with the same ID, once its lease expires. A stalled replica's
+/// late outcome, here a refusal, is discarded.
+#[tokio::test]
+#[ignore = "requires TEST_DATABASE_URL"]
+async fn a_delivery_survives_its_replica_dying_mid_send() {
+    for killed in [true, false] {
+        let database = cleared::<Killed>().await;
+        let (entered, mut sends) = mpsc::unbounded_channel();
+        let release = Arc::new(Notify::new());
+        let a = Jobs::replica(Stalled {
+            entered,
+            release: Arc::clone(&release),
+        })
+        .await;
+        let id = queue::<Killed>(&database, Behavior::Accepted).await;
+        let first = tokio::time::timeout(Duration::from_secs(10), sends.recv()).await;
+        assert_eq!(first, Ok(Some(id)), "A sends the delivery");
+        let sent = Arc::default();
+        let b = Jobs::replica(Recorder::<Killed>(Arc::clone(&sent), PhantomData)).await;
+        let a = if killed {
+            drop(a);
+            None
+        } else {
+            Some(a)
+        };
+
+        let delivered = wait_for::<Killed, _>(&database, |listed| {
+            find(listed, id).filter(|d| d.status == DeliveryStatus::Succeeded)
+        })
+        .await;
+        if let Some(a) = a {
+            release.notify_waiters();
+            a.shutdown().await.expect("A's late attempt ends");
+        }
+        b.shutdown().await.expect("no worker panicked");
+
+        let finished = delivered.finished_at.expect("finished") - delivered.created_at;
+        assert!(
+            finished >= TimeDelta::from_std(Stalled::LEASE).expect("lease"),
+            "B waits for A's lease: {finished}, killed: {killed}"
+        );
+        assert_eq!(*sent.lock().expect("sent"), [id], "B sends the same ID");
+        let listed = database
+            .deliveries()
+            .list(None, Some(Killed::NAME), 1000)
+            .await
+            .expect("list");
+        let summary = find(&listed, id).expect("the delivery");
+        assert_eq!(
+            (summary.status, summary.last_error),
+            (DeliveryStatus::Succeeded, None),
+            "A's late refusal is discarded, killed: {killed}"
+        );
+    }
 }
