@@ -2,13 +2,16 @@
 
 use reqwest::{RequestBuilder, Response};
 use tracing::{Instrument, field::Empty};
-use tracing_opentelemetry::OpenTelemetrySpanExt;
 
 /// Sends a `reqwest` request in a client span, e.g. `client.get(url).send_traced()`.
+/// Auth's provider and delivery calls use it, and so does the Rust SDK, so every
+/// request either sends looks the same in a trace.
 pub trait SendTraced {
-    /// Sends the request in a span recording only its method, host and response
-    /// status: never its path, query, headers or body, which carry codes and tokens.
-    /// A failure or 4xx/5xx status marks the span failed.
+    /// Sends the request in an `http.client` span, at `info` under the
+    /// `piquel_common` target, recording only its method, host and response status
+    /// as OpenTelemetry's HTTP client conventions name them: never its path, query,
+    /// headers or body, which carry codes and tokens. A failure or 4xx/5xx status
+    /// marks the span failed.
     fn send_traced(self) -> impl Future<Output = reqwest::Result<Response>> + Send;
 }
 
@@ -16,21 +19,21 @@ impl SendTraced for RequestBuilder {
     async fn send_traced(self) -> reqwest::Result<Response> {
         let (client, request) = self.build_split();
         let request = request?;
-        let method = request.method().as_str().to_owned();
+        let method = request.method().as_str();
         let span = tracing::info_span!(
             "http.client",
             otel.name = method,
             otel.kind = "client",
             otel.status_code = Empty,
+            http.request.method = method,
+            server.address = request.url().host_str(),
+            http.response.status_code = Empty,
         );
-        span.set_attribute("http.request.method", method);
-        if let Some(host) = request.url().host_str() {
-            span.set_attribute("server.address", host.to_owned());
-        }
         let response = client.execute(request).instrument(span.clone()).await;
         match &response {
             Ok(response) => {
-                span.set_attribute(
+                // tracing-opentelemetry exports unsigned integers as strings.
+                span.record(
                     "http.response.status_code",
                     i64::from(response.status().as_u16()),
                 );

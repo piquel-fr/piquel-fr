@@ -6,6 +6,7 @@
 //! the vocabulary macros. Servers add:
 //!
 //! - `admin`: the views of administration.
+//! - `client-spans`: `SendTraced`, a client span around each `reqwest` request.
 //! - `config`: environment variables, validated origins and secret references.
 //! - `email`: email address normalization.
 //! - `events`: the domain events auth records.
@@ -14,6 +15,9 @@
 /// The views of administration: what the admin dashboard shows and the CLI prints.
 #[cfg(feature = "admin")]
 pub mod admin;
+/// Client spans around outbound `reqwest` requests.
+#[cfg(feature = "client-spans")]
+mod client_span;
 /// OAuth client registrations, each field validated by its type.
 pub mod clients;
 /// Environment variables, validated origins and secret references.
@@ -35,6 +39,8 @@ use std::{error::Error as StdError, fmt, str::FromStr};
 use thiserror::Error;
 use uuid::Uuid;
 
+#[cfg(feature = "client-spans")]
+pub use client_span::SendTraced;
 pub use clients::ClientId;
 pub use handle::{Handle, HandleError};
 

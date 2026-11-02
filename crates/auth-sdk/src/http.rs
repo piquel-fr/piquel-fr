@@ -2,10 +2,10 @@
 //! around each request.
 
 use base64::{Engine, engine::general_purpose::STANDARD};
+use piquel_common::SendTraced;
 use reqwest::{RequestBuilder, StatusCode, header};
 use std::time::Duration;
 use thiserror::Error;
-use tracing::{Instrument, field::Empty};
 use url::Url;
 
 /// Most bytes read from any response. Metadata, key sets and token responses are a
@@ -140,10 +140,8 @@ impl Http {
         self.send(url, request, authorization).await
     }
 
-    /// Authenticates, sends and reads a request in an `http.client` span. Like auth's
-    /// own client spans, it records only the method, host and status: never the path,
-    /// query, headers or body, which carry codes and tokens. A failure or 4xx/5xx
-    /// status marks it failed.
+    /// Authenticates, sends and reads a request. It is sent in the `http.client` span
+    /// of [`SendTraced`], which records only the method, host and status.
     async fn send(
         &self,
         url: &Url,
@@ -166,49 +164,26 @@ impl Http {
             url: url.clone(),
             source,
         };
-        let request = request.build().map_err(failed)?;
-        let method = request.method().as_str();
-        let span = tracing::info_span!(
-            "http.client",
-            otel.name = method,
-            otel.kind = "client",
-            otel.status_code = Empty,
-            http.request.method = method,
-            server.address = url.host_str(),
-            http.response.status_code = Empty,
-        );
-        let exchange = async {
-            let mut response = self.0.execute(request).await.map_err(failed)?;
-            let status = response.status();
-            // tracing-opentelemetry exports unsigned integers as strings.
-            span.record("http.response.status_code", i64::from(status.as_u16()));
-            if status.is_client_error() || status.is_server_error() {
-                span.record("otel.status_code", "ERROR");
+        let mut response = request.send_traced().await.map_err(failed)?;
+        let status = response.status();
+        let max_age = response
+            .headers()
+            .get_all(header::CACHE_CONTROL)
+            .iter()
+            .filter_map(|value| value.to_str().ok())
+            .flat_map(|value| value.split(','))
+            .find_map(|directive| directive.trim().strip_prefix("max-age=")?.parse().ok());
+        let mut body = Vec::new();
+        while let Some(chunk) = response.chunk().await.map_err(failed)? {
+            if body.len() + chunk.len() > MAX_BODY_BYTES {
+                return Err(NetworkError::TooLarge { url: url.clone() });
             }
-            let max_age = response
-                .headers()
-                .get_all(header::CACHE_CONTROL)
-                .iter()
-                .filter_map(|value| value.to_str().ok())
-                .flat_map(|value| value.split(','))
-                .find_map(|directive| directive.trim().strip_prefix("max-age=")?.parse().ok());
-            let mut body = Vec::new();
-            while let Some(chunk) = response.chunk().await.map_err(failed)? {
-                if body.len() + chunk.len() > MAX_BODY_BYTES {
-                    return Err(NetworkError::TooLarge { url: url.clone() });
-                }
-                body.extend_from_slice(&chunk);
-            }
-            Ok(Reply {
-                status,
-                max_age,
-                body,
-            })
-        };
-        let reply = exchange.instrument(span.clone()).await;
-        if reply.is_err() {
-            span.record("otel.status_code", "ERROR");
+            body.extend_from_slice(&chunk);
         }
-        reply
+        Ok(Reply {
+            status,
+            max_age,
+            body,
+        })
     }
 }
