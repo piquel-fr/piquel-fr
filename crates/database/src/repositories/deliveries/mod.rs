@@ -213,6 +213,16 @@ pub struct DeliverySummary {
     pub finished_at: Option<DateTime<Utc>>,
 }
 
+/// A channel's pending deliveries, as [`DeliveryRepository::backlog`] counts them.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct DeliveryBacklog {
+    /// Deliveries waiting for an attempt, or being attempted.
+    pub pending: u64,
+    /// When the one waiting longest was created, or last retried by an operator;
+    /// `None` when none is pending.
+    pub oldest: Option<DateTime<Utc>>,
+}
+
 /// A listed delivery as stored.
 struct SummaryRow {
     /// Delivery identifier.
@@ -495,6 +505,29 @@ impl DeliveryRepository<'_> {
         .into_iter()
         .map(DeliverySummary::from)
         .collect())
+    }
+
+    /// How many deliveries of channel `C` are pending, and since when the one
+    /// waiting longest has waited. It reads only pending rows, through
+    /// `deliveries_due_idx`, so it stays cheap however many finished rows are kept.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`DatabaseError`] if the query fails.
+    pub async fn backlog<C: Channel>(&mut self) -> Result<DeliveryBacklog, DatabaseError> {
+        run!(
+            self,
+            fetch_one,
+            sqlx::query_as!(
+                DeliveryBacklog,
+                r#"SELECT
+                    count(*) AS "pending!: Unsigned",
+                    min(COALESCE(retried_at, created_at)) AS oldest
+                FROM deliveries
+                WHERE status = 'pending' AND channel = $1"#,
+                C::NAME,
+            )
+        )
     }
 
     /// Makes a failed delivery, or a cancelled unordered one, due again now, and

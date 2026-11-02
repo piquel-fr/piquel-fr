@@ -1,0 +1,28 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT\n                    count(*) AS \"pending!: Unsigned\",\n                    min(COALESCE(retried_at, created_at)) AS oldest\n                FROM deliveries\n                WHERE status = 'pending' AND channel = $1",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "pending!: Unsigned",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 1,
+        "name": "oldest",
+        "type_info": "Timestamptz"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text"
+      ]
+    },
+    "nullable": [
+      null,
+      null
+    ]
+  },
+  "hash": "a764273f32e8c770873dc86728ca4bcaadb869c6f4f3e400b537fb4259e4e158"
+}

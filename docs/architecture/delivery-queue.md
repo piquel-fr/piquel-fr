@@ -140,6 +140,24 @@ ordered delivery is final, since the deliveries after it may already be sent. Ca
 cannot stop it from reaching the receiver, but its outcome is discarded, and the
 deliveries ordered after it wait for its lease to expire.
 
+### Metrics
+
+Labelled by `channel` only, never by destination, client or user. The Auth
+overview dashboard charts them in its Deliveries row.
+
+| Metric | Kind | Meaning |
+| --- | --- | --- |
+| `piquel.auth.deliveries.attempts{channel, outcome}` | Counter | Attempts by outcome, counted where the worker records it: `succeeded`, `retried`, `failed`, or `lease_lost` when its claim token no longer held the delivery and the outcome was discarded |
+| `piquel.auth.deliveries.pending{channel}` | Gauge | Deliveries waiting for an attempt, or being attempted |
+| `piquel.auth.deliveries.oldest_pending_age{channel}` | Gauge, seconds | Time since the oldest pending delivery was created, or last retried by an operator |
+
+An attempt whose outcome could not be recorded, because the database failed, is
+logged and not counted; its lease expires and it is attempted again. Every
+replica counts each channel's pending deliveries every 30 seconds, through
+`deliveries_due_idx`, and reports the same queue-wide numbers, so dashboards
+take their maximum rather than their sum. A failed count drops the channel's
+gauges until the next one succeeds.
+
 ## Channels
 
 - **`backchannel_logout`**: OIDC Back-Channel Logout 1.0 tokens. Every early end of
@@ -194,7 +212,8 @@ The examples follow the back-channel logout channel
    in order, like SCIM per client and user, since a failure blocks the key.
 
 2. **Register it** by adding it to `Registered` in `deliveries/mod.rs`, a nested
-   list: `pub(crate) type Registered = (BackchannelLogout, ());`.
+   list: adding `Scim` makes it
+   `pub(crate) type Registered = (BackchannelLogout, (Email, (Scim, ())));`.
 
 3. **Send it**, in `apps/auth-service/src/deliveries/`: a type implementing
    `Sender` with `type Channel = BackchannelLogout`. `MAX_AGE` bounds how long it

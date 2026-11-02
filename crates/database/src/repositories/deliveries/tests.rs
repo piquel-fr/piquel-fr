@@ -50,6 +50,8 @@ test_channels! {
     Interrupted = "test_interrupted";
     /// Stuck behind an old failure.
     Abandoned = "test_abandoned";
+    /// Counted for the backlog gauges.
+    Backlogged = "test_backlogged";
 }
 
 /// Copies the subject's handle into each event's delivery, as back-channel
@@ -274,6 +276,49 @@ async fn an_expired_lease_is_claimed_again_and_the_stale_outcome_discarded() {
     assert_eq!(
         (listed.status, listed.last_error.as_deref()),
         (DeliveryStatus::Failed, Some("HTTP 400"))
+    );
+}
+
+/// The backlog counts only the channel's pending deliveries, and dates the
+/// oldest of them.
+#[tokio::test]
+#[ignore = "requires a disposable TEST_DATABASE_URL"]
+async fn the_backlog_counts_pending_deliveries_and_dates_the_oldest() {
+    let pool = Database::test_pool().await;
+    clear::<Backlogged>(&pool).await;
+    let backlog = || async {
+        DeliveryRepository::from_pool(&pool)
+            .backlog::<Backlogged>()
+            .await
+            .expect("backlog")
+    };
+    assert_eq!(
+        backlog().await,
+        DeliveryBacklog {
+            pending: 0,
+            oldest: None
+        }
+    );
+
+    insert::<Backlogged>(&pool, None).await;
+    insert::<Backlogged>(&pool, None).await;
+    let claimed = claim::<Backlogged>(&pool, LEASE).await.expect("claim");
+    finish(&pool, &claimed, &DeliveryOutcome::Succeeded)
+        .await
+        .expect("succeeded");
+
+    let listed = DeliveryRepository::from_pool(&pool)
+        .list(Some(DeliveryStatus::Pending), Some(Backlogged::NAME), 10)
+        .await
+        .expect("list");
+    let [pending] = <[DeliverySummary; 1]>::try_from(listed).expect("one pending delivery");
+    assert_ne!(pending.id, claimed.id);
+    assert_eq!(
+        backlog().await,
+        DeliveryBacklog {
+            pending: 1,
+            oldest: Some(pending.created_at)
+        }
     );
 }
 
