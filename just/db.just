@@ -8,7 +8,13 @@ test *ARGS:
     set -euo pipefail
     if [[ -z "${TEST_DATABASE_URL:-}" ]]; then exec just db scratch just db test "$@"; fi
     cargo nextest run --locked -p auth-service -p piquel-repository --run-ignored all "$@"
-    DATABASE_URL="$TEST_DATABASE_URL" just db _prepare --check
+    just db prepare-check
+
+# Catches a migration that renames a column a cached query uses. `test` runs it
+# last; CI runs it after its database tests migrate the database.
+# Fail if the query cache no longer matches TEST_DATABASE_URL's migrated schema.
+prepare-check:
+    @DATABASE_URL="${TEST_DATABASE_URL:?TEST_DATABASE_URL must name a migrated database}" just db _prepare --check
 
 # Regenerate crates/database/.sqlx from a scratch cluster; commit the result.
 prepare:
@@ -42,6 +48,10 @@ scratch *ARGS:
     export TEST_DATABASE_URL="$DATABASE_URL" PGHOST="$dir" PGUSER=piquel PGDATABASE=postgres
     sqlx migrate run --source crates/database/migrations >/dev/null
     "$@"
+
+# The sqlx-cli build the recipes here use; `just install-tools` installs it too.
+install-sqlx:
+    @cargo install --locked sqlx-cli --no-default-features --features rustls,postgres
 
 # Apply migrations with the caller's auth configuration.
 migrate:

@@ -57,8 +57,10 @@ with `From`, leaving out what administrators never see, so no record repeats a v
 The cache in `.sqlx/` is committed, and `.cargo/config.toml` sets
 `SQLX_OFFLINE=true`, so builds, including image builds, never connect to a
 database. After changing a query or migration, run `just db prepare` and commit
-the cache. Stale query text fails the build; `just db test` runs
-`cargo sqlx prepare --check` to catch a migration that breaks a cached query.
+the cache. Stale query text fails the build; `just db prepare-check`, which
+`just db test` and CI run after the database tests, runs
+`cargo sqlx prepare --check` against the migrated schema to catch a migration
+that breaks a cached query.
 
 Repository tests live in `<module>/tests.rs` or an inline module for small pure
 validation tests.

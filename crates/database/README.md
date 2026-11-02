@@ -16,7 +16,13 @@ renders it. After changing a query or a
 migration, run `just db prepare` and commit the cache with the change.
 
 Integration tests apply the schema and insert uniquely named fixtures into one
-database. They do not create per-test schemas. `just db test` runs them in a
-scratch cluster, or against a disposable `TEST_DATABASE_URL` (local TCP needs
-`sslmode=disable`); ordinary tests skip them. Fixtures may use unchecked
-`sqlx::query`.
+database. Tests that change history the whole database shares, like the audit
+chain, get a migrated schema of their own from `Database::isolated`. `just db test`
+runs them in a scratch cluster, or against a disposable `TEST_DATABASE_URL`
+(local TCP needs `sslmode=disable`); ordinary tests skip them. Fixtures may use
+unchecked `sqlx::query`.
+
+`just db test` ends with `just db prepare-check`, which runs
+`cargo sqlx prepare --check` against the migrated schema, so a migration that
+breaks a cached query fails even when no test runs that query. CI runs the same
+check after its database tests.
