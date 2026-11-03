@@ -3,9 +3,19 @@
 //! see each other's keys, and the replicas of other tests keep theirs.
 
 use super::*;
-use crate::tests::{Replicas, key_encryption_key};
-use piquel_common::protocol::jwt::TokenType;
+use crate::{
+    routes,
+    service::ServiceApplication,
+    tests::{Replicas, key_encryption_key},
+};
+use axum::{
+    body::Body,
+    http::{Request, StatusCode},
+};
+use piquel_common::protocol::jwt::{Jwk, TokenType};
+use piquel_repository::InsertSigningKey;
 use serde_json::{Value, json};
+use tower::ServiceExt;
 
 /// The issuer the test tokens name.
 const ISSUER: &str = "https://auth.example";
@@ -38,6 +48,43 @@ async fn key_set(store: &KeyStore, tx: &mut DatabaseTransaction<'_>) -> KeySet {
     store
         .key_set(&tx.signing_keys().list().await.expect("list"))
         .expect("key set")
+}
+
+/// Stores `key` in `state` as created `at`, with `public` as its public key, and
+/// its private key sealed with `binding`, or `sealed` instead when given.
+async fn insert(
+    store: &KeyStore,
+    tx: &mut DatabaseTransaction<'_>,
+    key: &Rs256Key,
+    state: SigningKeyState,
+    (binding, sealed): (Binding, Option<Vec<u8>>),
+    public: Jwk,
+    at: DateTime<Utc>,
+) -> KeyId {
+    let id: KeyId = key.kid().parse().expect("key ID");
+    let thumbprint = key.public_key().thumbprint().expect("thumbprint");
+    let sealed_private_key = sealed.unwrap_or_else(|| {
+        let associated = binding.associated_data(&id, SigningKeyType::Rsa, &thumbprint);
+        let der = key.private_key_der().expect("DER");
+        store.kek.seal(&der, &associated).expect("seal")
+    });
+    tx.signing_keys()
+        .insert(&InsertSigningKey {
+            id: id.clone(),
+            key_type: SigningKeyType::Rsa,
+            state,
+            public_jwk: public,
+            sealed_private_key,
+            at,
+        })
+        .await
+        .expect("insert");
+    id
+}
+
+/// The IDs of the keys `keys` publishes.
+fn kids(keys: &KeySet) -> Vec<String> {
+    keys.jwks().keys.iter().map(|key| key.kid.clone()).collect()
 }
 
 /// An ID token signed by `keys`, already expired, as a logout hint may be.
@@ -239,7 +286,7 @@ async fn revoking_a_key_removes_it_and_replaces_the_signer() {
     let (store, database) = store().await;
     let mut tx = database.begin().await.expect("transaction");
     clear(&mut tx).await;
-    let mut change = Change::new(&mut tx, &store.kek, Utc::now(), None);
+    let mut change = Change::new(&mut tx, &store, Utc::now(), None);
     change.advance().await.expect("first key");
     change.rotate(true).await.expect("a second key signs");
     let next = change.rotate(false).await.expect("next key");
@@ -253,7 +300,7 @@ async fn revoking_a_key_removes_it_and_replaces_the_signer() {
     let revoked: KeyId = keys.signer().kid().parse().expect("key ID");
     let (token, revoked_hint) = (access_token(&keys), hint(&keys));
 
-    let mut change = Change::new(&mut tx, &store.kek, Utc::now(), None);
+    let mut change = Change::new(&mut tx, &store, Utc::now(), None);
     let replacement = change
         .revoke(&revoked)
         .await
@@ -283,8 +330,7 @@ async fn revoking_a_key_removes_it_and_replaces_the_signer() {
         keys.verify_id_token_hint(&revoked_hint, ISSUER),
         Err(CryptoError::UnknownKey)
     ));
-    let kids: Vec<_> = keys.jwks().keys.iter().map(|key| key.kid.clone()).collect();
-    assert_eq!(kids, [replacement.to_string()]);
+    assert_eq!(kids(&keys), [replacement.to_string()]);
     tx.rollback().await.expect("rollback");
 }
 
@@ -300,7 +346,7 @@ async fn import_fills_an_empty_key_set_once() {
     let token = access_token(&KeySet::single(
         Rs256Key::from_der("primary", &pem.private_key_der().expect("DER")).expect("copy"),
     ));
-    let mut change = Change::new(&mut tx, &store.kek, Utc::now(), None);
+    let mut change = Change::new(&mut tx, &store, Utc::now(), None);
     assert!(change.import(pem).await.expect("import"));
     let again = Rs256Key::generate("primary").expect("another PEM key");
     assert!(
@@ -334,4 +380,174 @@ async fn import_fills_an_empty_key_set_once() {
         "a store whose key-encryption key does not open the keys changes nothing"
     );
     tx.rollback().await.expect("rollback");
+}
+
+/// A `next` key whose private key does not open, or is not the private half of
+/// its public key, is left out of the key set and refused at promotion, while
+/// the active key keeps signing and the rest of rotation goes on; revoking it
+/// lets rotation publish another. A key
+/// sealed with its public key bound, as a later release will seal, opens, is
+/// published and is promoted.
+#[tokio::test]
+#[ignore = "requires TEST_DATABASE_URL"]
+async fn a_next_key_that_cannot_sign_is_never_promoted() {
+    let (store, database) = store().await;
+    let mut tx = database.begin().await.expect("transaction");
+    clear(&mut tx).await;
+    let start = Utc::now();
+    let due = start + PRE_PUBLICATION;
+    assert!(store.tick_in(&mut tx, start).await.expect("first key"));
+    let first: KeyId = key_set(&store, &mut tx)
+        .await
+        .signer()
+        .kid()
+        .parse()
+        .expect("key ID");
+    let mut change = Change::new(&mut tx, &store, start, None);
+    let active = change.rotate(true).await.expect("rotate").to_string();
+    let other = Rs256Key::generate("other").expect("another key");
+    let unsealable = Rs256Key::generate("unsealable").expect("key");
+    let mismatched = Rs256Key::generate("mismatched").expect("key");
+    let cases = [
+        (
+            &unsealable,
+            (Binding::Record, Some(vec![0; 64])),
+            unsealable.public_key().jwk().clone(),
+        ),
+        (
+            &mismatched,
+            (Binding::Record, None),
+            Jwk {
+                kid: mismatched.kid().to_owned(),
+                ..other.public_key().jwk().clone()
+            },
+        ),
+    ];
+    for (key, sealing, public) in cases {
+        let next = insert(
+            &store,
+            &mut tx,
+            key,
+            SigningKeyState::Next,
+            sealing,
+            public,
+            start,
+        )
+        .await;
+        let keys = key_set(&store, &mut tx).await;
+        assert_eq!(keys.signer().kid(), active);
+        assert!(
+            !kids(&keys).contains(&next.to_string()),
+            "{next} is left out"
+        );
+        // The refusal leaves the rest of rotation going: the first key retires.
+        let states = advance(&store, &mut tx, due).await;
+        assert!(
+            states.contains(&(next.clone(), SigningKeyState::Next)),
+            "{states:?}"
+        );
+        assert!(
+            states.contains(&(first.clone(), SigningKeyState::Retired)),
+            "{states:?}"
+        );
+        let mut change = Change::new(&mut tx, &store, due, None);
+        assert_eq!(change.revoke(&next).await.expect("revoke"), None);
+    }
+
+    let bound = Rs256Key::generate("bound").expect("key");
+    let public = bound.public_key().jwk().clone();
+    let next = insert(
+        &store,
+        &mut tx,
+        &bound,
+        SigningKeyState::Next,
+        (Binding::PublicKey, None),
+        public,
+        start,
+    )
+    .await;
+    let published = kids(&key_set(&store, &mut tx).await);
+    assert!(published.contains(&next.to_string()), "{published:?}");
+    assert!(store.tick_in(&mut tx, due).await.expect("promote"));
+    assert_eq!(key_set(&store, &mut tx).await.signer().kid(), next.as_str());
+    tx.rollback().await.expect("rollback");
+}
+
+/// No change goes ahead while the active key cannot be opened, except revoking
+/// it, which replaces it with a key that signs.
+#[tokio::test]
+#[ignore = "requires TEST_DATABASE_URL"]
+async fn revoking_a_broken_active_key_recovers_the_key_set() {
+    let (store, database) = store().await;
+    let mut tx = database.begin().await.expect("transaction");
+    clear(&mut tx).await;
+    let key = Rs256Key::generate("broken").expect("key");
+    let public = key.public_key().jwk().clone();
+    let sealing = (Binding::Record, Some(vec![0; 64]));
+    let broken = insert(
+        &store,
+        &mut tx,
+        &key,
+        SigningKeyState::Active,
+        sealing,
+        public,
+        Utc::now(),
+    )
+    .await;
+    assert!(matches!(
+        store.check(&mut tx, None).await,
+        Err(KeyError::Stored { .. })
+    ));
+    store
+        .check(&mut tx, Some(&broken))
+        .await
+        .expect("revoking skips the check");
+    let mut change = Change::new(&mut tx, &store, Utc::now(), None);
+    let replacement = change
+        .revoke(&broken)
+        .await
+        .expect("revoke")
+        .expect("a replacement signs");
+    assert_eq!(
+        key_set(&store, &mut tx).await.signer().kid(),
+        replacement.as_str()
+    );
+    tx.rollback().await.expect("rollback");
+}
+
+/// A replica whose reloads keep failing keeps its key set, but turns unready once
+/// the set is five minutes old, and stops using it at fifteen. A reload that
+/// succeeds makes it ready again.
+#[tokio::test]
+#[ignore = "requires TEST_DATABASE_URL"]
+async fn a_replica_that_cannot_reload_turns_unready() {
+    let (store, database) = store().await;
+    let keys = store.start().await.expect("keys");
+    let ready = async || {
+        let request = Request::get(routes::service::READY)
+            .body(Body::empty())
+            .expect("request");
+        ServiceApplication::new(database.clone(), keys.clone())
+            .routes()
+            .oneshot(request)
+            .await
+            .expect("response")
+            .status()
+    };
+    assert_eq!(ready().await, StatusCode::NO_CONTENT);
+    // Its key-encryption key opens none of the stored keys.
+    let failing = KeyStore::new(
+        database.clone(),
+        Arc::new(KeyEncryptionKey::generate().expect("another KEK")),
+    );
+    keys.age(UNREADY_AFTER + Duration::from_secs(1));
+    failing.reload(&keys).await;
+    assert_eq!(ready().await, StatusCode::SERVICE_UNAVAILABLE);
+    assert!(keys.current().is_ok(), "an unready replica still signs");
+    keys.age(STALE_AFTER + Duration::from_secs(1));
+    failing.reload(&keys).await;
+    assert!(keys.current().is_err(), "a stale key set is not used");
+    store.reload(&keys).await;
+    assert_eq!(ready().await, StatusCode::NO_CONTENT);
+    assert!(keys.current().is_ok());
 }

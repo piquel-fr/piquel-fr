@@ -394,6 +394,7 @@ impl Flow {
             .app
             .keys
             .current()
+            .expect("fresh keys")
             .verify(
                 tokens["id_token"].as_str().expect("ID token"),
                 TokenType::Id,
@@ -510,6 +511,7 @@ async fn public_consent_pkce_claim_scoping_and_replay() {
         .app
         .keys
         .current()
+        .expect("fresh keys")
         .verify(
             tokens["id_token"]
                 .as_str()
@@ -588,6 +590,7 @@ async fn confidential_refresh_rotation_logout_and_client_binding() {
         .app
         .keys
         .current()
+        .expect("fresh keys")
         .verify(
             tokens["id_token"]
                 .as_str()
@@ -644,6 +647,7 @@ async fn confidential_refresh_rotation_logout_and_client_binding() {
         .app
         .keys
         .current()
+        .expect("fresh keys")
         .verify(
             narrowed["id_token"]
                 .as_str()
@@ -831,6 +835,7 @@ async fn logout_posts_a_logout_token_to_the_clients_of_the_session() {
         .app
         .keys
         .current()
+        .expect("fresh keys")
         .verify(&token, TokenType::Logout, &flow.app.issuer)
         .expect("a logout token signed by auth");
     let issued_at = claims["iat"].as_i64().expect("iat");
@@ -1218,6 +1223,7 @@ async fn authorization_hints_bind_initial_resumed_and_consent_requests() {
         .app
         .keys
         .current()
+        .expect("fresh keys")
         .sign(TokenType::Id, &claims)
         .expect("sign expired hint");
     let response = flow
@@ -1239,6 +1245,7 @@ async fn authorization_hints_bind_initial_resumed_and_consent_requests() {
             .app
             .keys
             .current()
+            .expect("fresh keys")
             .sign(TokenType::Id, &invalid)
             .expect("sign invalid hint");
         let response = flow
@@ -1260,6 +1267,7 @@ async fn authorization_hints_bind_initial_resumed_and_consent_requests() {
         .app
         .keys
         .current()
+        .expect("fresh keys")
         .sign(TokenType::Id, &other)
         .expect("sign other account hint");
     let response = flow

@@ -182,7 +182,7 @@ impl AuthorizationParameters {
         // An expired ID token still identifies the account.
         let claims = app
             .keys
-            .current()
+            .current()?
             .verify_id_token_hint(hint, &app.issuer)
             .map_err(|error| {
                 OAuthCode::InvalidRequest
