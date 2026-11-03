@@ -24,15 +24,17 @@ smoke:
     @bun packages/auth/test/smoke/smoke.js
     @pnpm --filter @piquel/auth exec node test/smoke/workerd.js
 
+# Builds the TypeScript SDK first, as browser-client.spec.ts serves the built package.
 # Requires a running auth service; see tests/browser/README.md.
 [positional-arguments]
 test-browser *ARGS:
+    @pnpm --filter @piquel/auth build
     @pnpm test:browser "$@"
 
 # The browser checks' clients have origins with no server: tests/browser/oidc.spec.ts,
-# related-origins.spec.ts and sdk.spec.ts serve the clients' pages themselves and name
-# the same origins. server.spec.ts's example app is a confidential client, whose
-# secret is in E2E_SERVER_CLIENT_SECRET.
+# related-origins.spec.ts, browser-client.spec.ts and sdk.spec.ts serve the clients'
+# pages themselves and name the same origins. server.spec.ts's example app is a
+# confidential client, whose secret is in E2E_SERVER_CLIENT_SECRET.
 # Register the browser checks' OIDC clients with auth on localhost, as in CI.
 browser-client:
     @just auth client create browser-e2e --name 'Browser E2E' \
