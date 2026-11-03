@@ -17,6 +17,7 @@ mod telemetry;
 mod transaction;
 
 pub use connection::{Database, DatabaseConfig, RuntimeRole};
+pub(crate) use connection::{Limit, Scope};
 pub use error::{DatabaseConnectionError, DatabaseError};
 pub use exclusive::{ExclusiveConnection, LockKey};
 #[cfg(feature = "test-support")]

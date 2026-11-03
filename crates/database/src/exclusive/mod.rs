@@ -23,6 +23,9 @@ pub enum LockKey {
     RelatedOrigins = 5,
     /// Sealing the audit chain and signing its checkpoints.
     AuditChain = 6,
+    /// Schema migrations, held by `Database::run_migrations` for its connection, so
+    /// overlapping `migrate` runs take turns.
+    Migrations = 7,
     /// The job runner panic test; no release takes it.
     #[cfg(feature = "test-support")]
     Test = -1,
@@ -63,12 +66,7 @@ impl Database {
         &self,
         key: LockKey,
     ) -> Result<Option<ExclusiveConnection>, DatabaseError> {
-        let mut connection = tokio::time::timeout(
-            self.pool.options().get_acquire_timeout(),
-            PgConnection::connect_with(&self.pool.connect_options()),
-        )
-        .await
-        .map_err(DatabaseError::Timeout)??;
+        let mut connection = self.connect_dedicated(&self.pool.connect_options()).await?;
         let locked =
             sqlx::query_scalar!(r#"SELECT pg_try_advisory_lock($1) AS "locked!""#, key.id())
                 .fetch_one(&mut connection)

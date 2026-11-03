@@ -165,9 +165,9 @@ deployed code uses the old shape. Migration `0003` dropped
 exception while there were few users, not a precedent. Migration `0021` likewise
 dropped `users.username` when handles moved to their own table: keeping both in sync
 for a release would have let a signup on an old replica create an account without a
-handle, so the old replicas fail until they are replaced instead. SQLx's migrator takes an
-advisory lock, and provisioning the runtime role takes another, so concurrent
-`migrate` runs are safe.
+handle, so the old replicas fail until they are replaced instead. Migrations take
+`LockKey::Migrations`, waiting up to 30 minutes for another run, and provisioning
+the runtime role takes another lock, so concurrent `migrate` runs take turns.
 
 Every five minutes, one replica drains expired ephemeral state in bounded batches
 through `maintenance()`, for up to one minute per pass. The same pass deletes event
@@ -188,6 +188,49 @@ Tests that use `TEST_DATABASE_URL` are explicitly
 marked ignored by the ordinary unit test runner; other crates' tests read stored state
 through helpers behind the `test-support` feature. `just db test` runs them in a
 throwaway PostgreSQL cluster, or against an explicit, disposable `TEST_DATABASE_URL`.
+
+## Time limits
+
+Every connection auth opens, as either role, starts with three limits, set as
+connection options by `DatabaseConfig` (`Limit::DEFAULTS` in
+`src/connection/limits.rs`), so one stuck statement, lock wait or forgotten
+transaction cannot hold connections and locks forever:
+
+| Setting | Default | When it passes |
+| --- | --- | --- |
+| `statement_timeout` | 15 s | The statement is cancelled: `DatabaseError::Cancelled` (`57014`). |
+| `lock_timeout` | 5 s | The lock wait fails: `DatabaseError::LockUnavailable` (`55P03`). |
+| `idle_in_transaction_session_timeout` | 30 s | `PostgreSQL` ends the session, rolling its transaction back. |
+
+The idle limit matters beyond the session itself: event consumers and the audit
+sealer wait for every older transaction to end (see [Consumers](#consumers)), so a
+forgotten one would stop them. Never hold a transaction open across network calls
+or prompts. A person's own `psql` session gets none of these limits.
+
+Work that legitimately takes longer raises only the limit it needs, explicitly,
+with `Limit::set`, never the default:
+
+- **Migrations** (`Database::run_migrations`) run on a dedicated connection. Their
+  statements may run for 30 minutes. They first wait for `LockKey::Migrations` with
+  no lock limit, so only that statement limit bounds the wait, then restore the 5 s lock limit before any DDL, so a migration
+  stuck behind a long transaction fails, and can be rerun, rather than queue every
+  request behind its lock.
+- **Account purge** (`deletions().purge`): 5 minutes per statement, for its
+  transaction. Erasing the personal data of the events an account acted in scans
+  every event, since no index covers actors.
+- **Audit prune** (`DatabaseTransaction::prune_audit_chain`): 30 minutes per
+  statement, for its transaction, since it may delete years of history.
+- **The signing key lock** (`signing_keys().lock()`) waits with no lock limit,
+  only the statement limit, then restores the lock limit: its holder may be
+  generating an RSA key, and a replica starting meanwhile must not fail.
+
+Connections opened outside the pool, for migrations, provisioning and exclusive
+jobs, connect within the pool's acquire timeout, since no statement limit bounds
+connecting.
+
+Everything else fits the defaults: cleanup, the audit sealer and audit
+verification work in batches of at most 1,000 rows, and an account export reads one
+account's rows.
 
 ## Roles
 
@@ -323,7 +366,8 @@ of transactions older than every running one (`txid < pg_snapshot_xmin(...)`), w
 have all finished. The rule is written once, in the `in_safe_order!` query macro of
 `repositories/mod.rs`, which `read_after` and the audit sealer's `audit().unsealed`
 both build on. A long-running transaction holds back every consumer until it ends,
-so keep transactions short. `history_for_user` lists an account's events,
+so keep transactions short; the idle limit (see [Time limits](#time-limits)) ends
+one that is forgotten. `history_for_user` lists an account's events,
 newest first.
 
 ### Sessions

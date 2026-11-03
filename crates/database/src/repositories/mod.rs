@@ -204,6 +204,8 @@ impl RepositoryExecutor<'_> {
     ) -> Result<T, crate::DatabaseError> {
         if let Err(
             crate::DatabaseError::Timeout(_)
+            | crate::DatabaseError::Cancelled(_)
+            | crate::DatabaseError::LockUnavailable(_)
             | crate::DatabaseError::InvalidStoredData { .. }
             | crate::DatabaseError::Operation(_),
         ) = &result
