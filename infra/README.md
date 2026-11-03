@@ -141,12 +141,14 @@ through rolling deploys and rollbacks:
    `signing-key` stays the token digest key (`AUTH_TOKEN_DIGEST_KEY`), so the
    previous release checks every digest this one makes, and
    `token-digest-key` is already accepted (`AUTH_TOKEN_DIGEST_KEY_ACCEPTED`).
-2. In a later deploy, swap the two: `AUTH_TOKEN_DIGEST_KEY` points at
-   `token-digest-key`, and `AUTH_TOKEN_DIGEST_KEY_ACCEPTED` at `signing-key`.
-   The email verification key changes once then: links already sent keep
-   working, and one still queued then is sent under the old key. From this
-   deploy on, a rollback lands on a
-   release that reads signing keys from the database.
+2. Done (#181): a later deploy swapped the two. `AUTH_TOKEN_DIGEST_KEY`
+   points at `token-digest-key`, and `AUTH_TOKEN_DIGEST_KEY_ACCEPTED` at
+   `signing-key`. The email verification key changed once then: links already
+   sent keep working, and one still queued then was sent under the old key.
+   From this deploy on, a rollback must land on a release that reads signing
+   keys from the database: the release before step 1 rejects every digest under
+   `token-digest-key`, so the refresh tokens, codes and pending logins written
+   under it would stop working.
 3. Only then rotate once by hand to see rotation work: `auth-service keys
    rotate`, then a day later `keys list` shows the new key active and `primary`
    retiring. Rotating earlier would let a rollback to the release before step 1
