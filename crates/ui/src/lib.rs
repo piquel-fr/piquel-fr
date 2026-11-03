@@ -1,5 +1,6 @@
 //! The components, layouts and stylesheet of auth.piquel.fr's server-rendered
-//! pages. The admin dashboard serves the stylesheet too, under its own.
+//! pages, and of piquel.fr's own. The admin dashboard serves the stylesheet too,
+//! under its own.
 //!
 //! Components render plain data: `piquel-common` identifiers, vocabularies and
 //! events, and plain rows a page fills from what the service returns. They take
@@ -19,6 +20,7 @@
 //! let html = view! { cx =>
 //!     piquel_ui::document(title: "Sign out", stylesheet: "/assets/style.css",
 //!         script: "/assets/passkey.js", home: "/settings",
+//!         policies: piquel_ui::Policies { privacy: "/privacy", terms: "/terms" },
 //!         piquel_ui::logout(action: "/logout", fields: &[("client_id", "notes")], keep: "/login")
 //!     )
 //! }
@@ -53,6 +55,8 @@ mod oidc;
 mod recovery;
 /// The account's settings.
 mod settings;
+/// piquel.fr's own pages: the homepage and Piquel's policies.
+mod site;
 
 pub use admin::{
     AccountPages, AdminClientRow, AdministratorRow, EventRow, HandoffProof, HandoffQuery,
@@ -73,7 +77,7 @@ pub use developers::{
     new_app, overview,
 };
 pub use form::{Alert, Checkbox, Lines, Messages, Notice, OUT_OF_DATE, Query, QueryError};
-pub use layout::{Area, Section, Title, account, document, intro, signed_out};
+pub use layout::{Area, Policies, Section, Title, account, document, intro, signed_out};
 pub use login::{
     CallbackError, LinkKind, LoginChange, LoginQuery, PendingDestination, SignedIn, Step, sign_in,
 };
@@ -89,3 +93,4 @@ pub use settings::{
     account_data, account_deleted, addresses, connected_apps, devices, history, settings_tabs,
     sign_in_methods, verified, verify,
 };
+pub use site::{HomeLinks, Policy, SUPPORT_ADDRESS, home, policy};

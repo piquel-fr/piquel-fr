@@ -158,8 +158,8 @@ pub(crate) mod dashboard {
 /// Pages browsers visit. Each server-rendered page answers `GET` with the page and
 /// `POST` with its form's result, and is listed in [`ALL`](page::ALL).
 pub(crate) mod page {
-    /// Auth's root, which redirects to the account's settings, so that piquel.fr's
-    /// root, which redirects here, still lands on them.
+    /// Auth's root, which redirects to the account's settings. On the site
+    /// listener, piquel.fr's homepage.
     pub(crate) const ROOT: &str = "/";
     /// Sign-in, social signup and link confirmation.
     pub(crate) const LOGIN: &str = "/login";
@@ -175,6 +175,24 @@ pub(crate) mod page {
     pub(crate) const RECOVER_UNDO: &str = "/recover/undo";
     /// Hands an administrator's passkey session off to the admin dashboard.
     pub(crate) const ADMIN: &str = "/admin";
+    /// Piquel's privacy policy. piquel.fr serves it, and auth too, at the same
+    /// path, so its pages link it on their own origin.
+    pub(crate) const PRIVACY: &str = "/privacy";
+    /// Piquel's terms of service, served as [`PRIVACY`] is.
+    pub(crate) const TERMS: &str = "/terms";
+    /// Where every page's footer links the policies, on the page's own origin.
+    pub(crate) const POLICIES: piquel_ui::Policies<'static> = piquel_ui::Policies {
+        privacy: PRIVACY,
+        terms: TERMS,
+    };
+
+    /// The path of `policy`.
+    pub(crate) const fn policy(policy: piquel_ui::Policy) -> &'static str {
+        match policy {
+            piquel_ui::Policy::Privacy => PRIVACY,
+            piquel_ui::Policy::Terms => TERMS,
+        }
+    }
 
     /// The account's settings, at the paths piquel.fr served them on, so its redirect
     /// keeps old links and sent emails working.

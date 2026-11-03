@@ -3,18 +3,19 @@
 
 use super::WebApplication;
 use crate::{
+    AuthConfig,
     routes::{
         self,
         page::{
-            ROOT,
+            LOGIN, PRIVACY, REGISTER, ROOT, TERMS,
             developers::{self, APP, APP_SECRETS, APP_SETTINGS},
             settings,
         },
     },
     security::BrowserCookie,
     tests::{
-        Browser, OWN_PAGE, Replicas, cookie, html, location, parameter, policy, redirect, register,
-        registration,
+        AUTH_ORIGIN, Browser, OWN_PAGE, Replicas, cookie, html, location, parameter, policy,
+        redirect, register, registration,
     },
 };
 use axum::{
@@ -403,4 +404,46 @@ async fn account_pages_refuse_forms_they_do_not_know() {
 fn every_page_is_mounted_and_classified() {
     let mounted: Vec<_> = WebApplication::pages().map(|(path, ..)| path).into();
     assert_eq!(mounted, routes::page::ALL);
+}
+
+/// piquel.fr serves its homepage and Piquel's policies, which search engines may
+/// index, and sends every other path, with its query, to the same one on auth, so
+/// sent links still open their page. Auth serves the policies too, and its
+/// sign-in and registration pages link them.
+#[tokio::test]
+async fn piquel_fr_serves_its_pages_and_sends_the_rest_to_auth() {
+    let config = AuthConfig::test(&AUTH_ORIGIN.parse().expect("auth origin"));
+    let site = Replicas::site(&config).await;
+    let browser = Browser::signed_out();
+    for (path, heading) in [
+        (ROOT, "One passkey for every Piquel app."),
+        (PRIVACY, "Privacy policy"),
+        (TERMS, "Terms of service"),
+    ] {
+        let response = browser.visit(&site, path).await;
+        assert_eq!(response.status(), StatusCode::OK, "{path}");
+        assert!(policy(&response).contains("form-action 'none'"), "{path}");
+        let page = html(response).await;
+        assert!(page.contains(heading), "{path}");
+        assert!(!page.contains("noindex"), "{path}");
+        assert!(page.contains(r#"href="/privacy""#), "{path}");
+    }
+    let sent = browser
+        .visit(&site, "/settings/emails/verify?remove=1")
+        .await;
+    assert_eq!(sent.status(), StatusCode::TEMPORARY_REDIRECT);
+    assert_eq!(
+        redirect(&sent),
+        format!("{AUTH_ORIGIN}/settings/emails/verify?remove=1")
+    );
+
+    let replicas = Replicas::of(&config).await;
+    let response = browser.visit(&replicas.a, PRIVACY).await;
+    assert_eq!(response.status(), StatusCode::OK);
+    assert!(!html(response).await.contains("noindex"));
+    for path in [LOGIN, REGISTER] {
+        let page = html(browser.visit(&replicas.a, path).await).await;
+        assert!(page.contains(r#"href="/terms""#), "{path}");
+        assert!(page.contains("noindex"), "{path}");
+    }
 }

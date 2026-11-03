@@ -75,14 +75,15 @@ invite_required = "false"
 # Previews keep their telemetry on stderr: the collector does not export to them.
 otlp_endpoint = ""
 
-# piquel.fr serves nothing of its own yet: the gateway sends every path, with its
-# query, to the same one on auth, which serves the account settings. Temporary
-# (307), so browsers cache nothing once piquel.fr serves pages again. See "Web"
-# in infra/README.md.
+# piquel.fr's own pages, the homepage and the policies, which auth serves on its
+# site listener. It redirects every other path, with its query, to the same one
+# on auth, so links sent before the settings moved still work. See "Web" in
+# infra/README.md.
 [[spec.routes]]
 name = "web"
 hostname = "${{ vars.web_host }}"
-redirect = { to = "https://${{ vars.auth_host }}", status = 307, preserve_path = true }
+service = "auth"
+port = 8082
 visibility = "public"
 
 [[spec.routes]]
@@ -204,6 +205,8 @@ AUTH_PUBLIC_LISTENER = "0.0.0.0:8080"
 # origin.
 AUTH_ADMIN_LISTENER = "0.0.0.0:8081"
 AUTH_ADMIN_ORIGIN = "https://${{ vars.admin_host }}"
+# piquel.fr's own pages, which only the `web` route reaches.
+AUTH_SITE_LISTENER = "0.0.0.0:8082"
 AUTH_PUBLIC_BASE_URL = "https://${{ vars.auth_host }}"
 AUTH_INVITE_REQUIRED = "${{ vars.invite_required }}"
 AUTH_SMTP_URL = "smtps://resend@smtp.resend.com:465"

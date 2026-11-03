@@ -479,6 +479,11 @@ impl AdminApplication {
             &href!(sign_out).resolve(cx),
         );
         let administrator = admin.map(|admin| admin.handle.as_str());
+        // The policies are auth's: the dashboard serves no page of its own for them.
+        let (privacy, terms) = (
+            &Self::of(cx).auth.join(routes::page::PRIVACY),
+            &Self::of(cx).auth.join(routes::page::TERMS),
+        );
         let page = Child::new(page);
         let html = view! { cx =>
             piquel_ui::dashboard_frame(
@@ -490,6 +495,7 @@ impl AdminApplication {
                 current: current,
                 sign_out: leave,
                 reference: HttpTelemetry::trace_id(status),
+                policies: piquel_ui::Policies { privacy, terms },
                 (page)
             )
         }

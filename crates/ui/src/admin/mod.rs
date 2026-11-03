@@ -25,7 +25,7 @@ pub use recoveries::{RecoveryKey, RecoveryRow, RecoveryStanding, recovery_list};
 pub use users::{AccountPages, SessionRow, UserRow, user_page, user_search};
 
 use crate::{
-    Area, Checkbox, Query, document,
+    Area, Checkbox, Policies, Query, document,
     form::{Precision, time},
     layout::Label,
     settings::Tab as SettingsTab,
@@ -111,7 +111,7 @@ impl Label for Tab {
 /// `stylesheet`, whose brand links `home`: for the signed-in `administrator`, by
 /// handle, the `tabs`, `current` among them, and the form signing out at
 /// `sign_out`; then the page as `child`, and the `reference` of a server error's
-/// trace, as [`document`] shows it.
+/// trace and the footer linking Piquel's `policies`, as [`document`] shows them.
 #[component]
 pub async fn dashboard_frame<'a>(
     title: &'a str,
@@ -126,6 +126,7 @@ pub async fn dashboard_frame<'a>(
     current: Option<Tab>,
     sign_out: &'a str,
     #[default] reference: Option<TraceId>,
+    policies: Policies<'a>,
     child: Child<'_>,
 ) -> Result<impl View> {
     Ok(view! {
@@ -135,6 +136,7 @@ pub async fn dashboard_frame<'a>(
             home: home,
             area: Area::Admin,
             reference: reference,
+            policies: policies,
             <section class="dashboard stack">
                 if let Some(administrator) = administrator {
                     <div class="row between">

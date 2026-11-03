@@ -309,19 +309,29 @@ survives restarts and replicas: it is stored, as a digest, in PostgreSQL.
 
 ## Web
 
-piquel.fr runs no service. Auth serves the account settings at the paths
-piquel.fr used (`/settings`, `/settings/emails`, `/settings/emails/verify`,
-`/settings/sessions` and `/settings/history`), and answers `/` with a redirect to
-`/settings`. The `web` route sends every path to auth, so links sent before the
-move still open the same page, and browsers keep a verification link's fragment
+piquel.fr's `web` route reaches auth's site listener (`AUTH_SITE_LISTENER`, port
+8082), which serves piquel.fr's own pages: the homepage at `/`, the privacy
+policy at `/privacy` and the terms of service at `/terms`. Google's OAuth
+branding links these three. Auth's public listener serves the two policies at
+the same paths, so its pages link them on their own origin.
+
+Every other path redirects, temporarily (`307`) and with its query, to the same
+one on auth, which serves the account settings at the paths piquel.fr used
+(`/settings`, `/settings/emails`, `/settings/emails/verify`,
+`/settings/sessions` and `/settings/history`). Links sent before the move still
+open the same page, and browsers keep a verification link's fragment
 (`/settings/emails/verify#token=…`). Notice emails link to `/settings/history`
 and never expire: keep the redirect, and those paths on auth, for as long as
 piquel.fr serves nothing at them. A path ending in a slash, which piquel.fr's
 settings also accepted, redirects to the page.
 
-A redirect route sends no headers of its own, so piquel.fr's
-`Strict-Transport-Security` is set at Cloudflare's edge, with the values piquel-web
-sent: `max-age=31536000`, without `includeSubDomains` or `preload`.
+The policies' operator details are placeholders, marked in their text
+(`crates/ui/assets/policies/`): fill them in before relying on them.
+
+Cloudflare's edge also sets piquel.fr's `Strict-Transport-Security`, with the
+values piquel-web sent and auth sends too: `max-age=31536000`, without
+`includeSubDomains` or `preload`. It dates from when the route was a redirect,
+which sends no headers of its own.
 
 ## Telemetry
 

@@ -1,7 +1,8 @@
 //! The server-rendered pages, grouped by area: auth.piquel.fr's sign-in flows
 //! (`auth`), account settings (`settings`) and developer console (`developers`),
-//! and the admin dashboard at admin.piquel.fr ([`admin`]), which has a router and
-//! a security layer of its own. Each handler resolves who acts, calls the
+//! the admin dashboard at admin.piquel.fr ([`admin`]), and piquel.fr's homepage
+//! and policies ([`site`]), each of the last two with a router and a listener of
+//! its own. Each handler resolves who acts, calls the
 //! service in-process and renders `piquel-ui` components. The rest of this
 //! module is auth.piquel.fr's router.
 //!
@@ -37,6 +38,8 @@ mod auth;
 mod developers;
 /// The account's settings.
 mod settings;
+/// piquel.fr's own pages, on the site listener.
+mod site;
 #[cfg(test)]
 mod tests;
 
@@ -59,6 +62,7 @@ use piquel_repository::Database;
 use piquel_telemetry::HttpTelemetry;
 use piquel_ui::{Area, Onward, QueryError, Title};
 use serde::de::DeserializeOwned;
+pub(crate) use site::SiteApplication;
 use std::{fmt, sync::Arc};
 use topcoat::{
     Error, Result,
@@ -398,7 +402,7 @@ impl WebApplication {
 
     /// Answers with `page` inside the document titled `title`, in `area`, under the
     /// page policy, with the trace ID of a server error. The brand links the
-    /// account's settings. Its forms may post to
+    /// account's settings, and the footer the policies. Its forms may post to
     /// auth's own pages, and redirect on to the origins of `targets`: browsers apply
     /// `form-action` to a form's redirects too.
     async fn render(
@@ -423,6 +427,7 @@ impl WebApplication {
                 home: routes::page::settings::HOME,
                 area: area,
                 reference: HttpTelemetry::trace_id(status),
+                policies: routes::page::POLICIES,
                 (page)
             )
         }

@@ -53,6 +53,9 @@ const ADMIN_LISTENER: Variable = Variable::new("AUTH_ADMIN_LISTENER");
 /// The admin dashboard's origin, e.g. `https://admin.piquel.fr`, set with
 /// [`ADMIN_LISTENER`].
 const ADMIN_ORIGIN: Variable = Variable::new("AUTH_ADMIN_ORIGIN");
+/// Optional listener serving piquel.fr's own pages, the homepage and the
+/// policies, and redirecting every other path to auth.
+const SITE_LISTENER: Variable = Variable::new("AUTH_SITE_LISTENER");
 /// `PostgreSQL` transport and database.
 const DATABASE_URL: Variable = Variable::new("AUTH_DATABASE_URL");
 /// Optional separately mounted database password.
@@ -688,6 +691,9 @@ pub struct AuthConfig {
     pub public_listener: SocketAddr,
     /// The admin dashboard, if auth serves it.
     pub dashboard: Option<DashboardConfig>,
+    /// Address bound by the listener serving piquel.fr's own pages, if auth
+    /// serves them.
+    pub site_listener: Option<SocketAddr>,
     /// Passkey policy and origin.
     pub(crate) passkey: PasskeyConfig,
     /// External identity provider policy.
@@ -774,6 +780,7 @@ impl AuthConfig {
         Ok(Self {
             public_listener: PUBLIC_LISTENER.parse_or(DEFAULT_PUBLIC_LISTENER)?,
             dashboard: DashboardConfig::from_environment()?,
+            site_listener: SITE_LISTENER.parse_optional()?,
             passkey: PasskeyConfig::from_environment(&origin)?,
             federation: FederationConfig::from_environment(&origin)?,
             email: EmailConfig::from_environment(&origin, &digest_keys)?,

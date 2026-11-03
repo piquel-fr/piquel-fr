@@ -1,4 +1,5 @@
-//! Serving the public listener and, when configured, the admin dashboard's listener.
+//! Serving the public listener and, when configured, the admin dashboard's and
+//! the site's listeners.
 
 use super::{CliError, Command};
 use crate::{AuthConfig, Jobs, KeyStore};
@@ -9,10 +10,9 @@ use tokio::{net::TcpListener, sync::watch};
 
 impl Command {
     /// Builds the configured service, loads its signing keys, starts background
-    /// jobs and serves the public listener, and the admin dashboard's listener when
-    /// one is configured,
-    /// until a shutdown signal. Once in-flight requests drain, running jobs get a
-    /// grace period to finish.
+    /// jobs and serves the public listener, and the admin dashboard's and the
+    /// site's listeners when they are configured, until a shutdown signal. Once
+    /// in-flight requests drain, running jobs get a grace period to finish.
     pub(super) async fn serve(database: Database) -> Result<(), CliError> {
         let config = AuthConfig::from_environment()?;
         let public = TcpListener::bind(config.public_listener).await?;
@@ -20,26 +20,29 @@ impl Command {
             Some(dashboard) => Some((TcpListener::bind(dashboard.listener).await?, dashboard)),
             None => None,
         };
-        let store = KeyStore::new(database.clone(), Arc::clone(&config.key_encryption_key));
-        let keys = store.start().await?;
-        let router = config.router(database.clone(), &keys)?;
-        let admin = match admin {
-            Some((listener, dashboard)) => {
-                Some((listener, config.admin_router(database.clone(), dashboard)?))
-            }
+        let site = match config.site_listener {
+            Some(address) => Some(TcpListener::bind(address).await?),
             None => None,
         };
+        let store = KeyStore::new(database.clone(), Arc::clone(&config.key_encryption_key));
+        let keys = store.start().await?;
+        let public = Some((
+            "authentication service",
+            public,
+            config.router(database.clone(), &keys)?,
+        ));
+        let admin = match admin {
+            Some((listener, dashboard)) => Some((
+                "admin dashboard",
+                listener,
+                config.admin_router(database.clone(), dashboard)?,
+            )),
+            None => None,
+        };
+        let site = site.map(|listener| ("site", listener, config.site_router(database.clone())));
         database.observe_connections();
         let jobs = Jobs::start(&database, &config, &store, &keys)?;
-        tracing::info!(address=%config.public_listener,"authentication service listening");
         let (stop, _) = watch::channel(false);
-        let admin = async {
-            let Some((listener, admin_router)) = admin else {
-                return Ok(());
-            };
-            tracing::info!(address=%listener.local_addr()?, "admin dashboard listening");
-            Self::listen(listener, admin_router, &stop).await
-        };
         let signal = async {
             let mut stopped = stop.subscribe();
             tokio::select! {
@@ -49,10 +52,16 @@ impl Command {
                 _ = stopped.wait_for(|stopped| *stopped) => {}
             }
         };
-        let (public, admin, ()) = tokio::join!(Self::listen(public, router, &stop), admin, signal);
+        let (public, admin, site, ()) = tokio::join!(
+            Self::listen(public, &stop),
+            Self::listen(admin, &stop),
+            Self::listen(site, &stop),
+            signal,
+        );
         let jobs = jobs.shutdown().await;
         public?;
         admin?;
+        site?;
         Ok(jobs?)
     }
 
@@ -83,13 +92,17 @@ impl Command {
         tracing::info!("shutting down");
     }
 
-    /// Serves `router` on `listener` until `stop` is set. Once this listener ends,
-    /// whatever the reason, it sets `stop`, so the other listener ends too.
+    /// Serves the `served` listener's router, if it is configured, until `stop`
+    /// is set, logging its name and address. Once this listener ends, whatever
+    /// the reason, it sets `stop`, so the other listeners end too.
     async fn listen(
-        listener: TcpListener,
-        router: Router,
+        served: Option<(&str, TcpListener, Router)>,
         stop: &watch::Sender<bool>,
     ) -> std::io::Result<()> {
+        let Some((name, listener, router)) = served else {
+            return Ok(());
+        };
+        tracing::info!(address=%listener.local_addr()?, "{name} listening");
         let mut stopped = stop.subscribe();
         let result = axum::serve(
             listener,

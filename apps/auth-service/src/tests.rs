@@ -86,6 +86,7 @@ impl AuthConfig {
         Self {
             public_listener: SocketAddr::from(([127, 0, 0, 1], 0)),
             dashboard: None,
+            site_listener: None,
             passkey: PasskeyConfig {
                 origin: origin.clone(),
                 invite_required: false,
@@ -153,6 +154,14 @@ impl Replicas {
         config
             .admin_router(Self::database().await, dashboard)
             .expect("dashboard")
+            .layer(Extension(ConnectInfo(Self::peer())))
+    }
+
+    /// The site listener of `config`, serving piquel.fr's pages, for requests from
+    /// a client address of its own.
+    pub(crate) async fn site(config: &AuthConfig) -> Router {
+        config
+            .site_router(Self::database().await)
             .layer(Extension(ConnectInfo(Self::peer())))
     }
 

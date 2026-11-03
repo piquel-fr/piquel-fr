@@ -7,8 +7,9 @@ the developer console.
 The authentication service is **one Rust executable** containing its login,
 onboarding, consent, passkey, settings and developer console pages. PostgreSQL is its only external
 data service. GitHub and Google are optional login providers. The same executable
-serves the admin dashboard at `admin.piquel.fr`, on a listener of its own, and
-`piquel.fr` redirects to auth, keeping the path. See
+serves the admin dashboard at `admin.piquel.fr`, and piquel.fr's homepage and
+policies, each on a listener of its own; every other `piquel.fr` path redirects to
+auth, keeping the path. See
 [infra/README.md](infra/README.md) for repository-driven piqueld deployments.
 
 ## Build
@@ -51,6 +52,7 @@ work from devices on the tailnet. Run the same command after changing code.
 | `AUTH_TRUSTED_PROXIES` | Optional comma-separated proxy peer IPs or CIDRs; these peers must overwrite `X-Forwarded-For` with one client IP. Defaults to piqueld's `PIQUELD_INGRESS_PROXIES` |
 | `AUTH_PUBLIC_LISTENER` | Listener address; defaults to `127.0.0.1:8080` |
 | `AUTH_ADMIN_LISTENER`, `AUTH_ADMIN_ORIGIN` | Optional address of the admin dashboard's listener, e.g. `0.0.0.0:8081`, and the dashboard's origin, e.g. `https://admin.piquel.fr`, set together. Only a private route may reach the listener. Without them, auth serves no dashboard |
+| `AUTH_SITE_LISTENER` | Optional address of the listener serving piquel.fr's homepage and policies, e.g. `0.0.0.0:8082`; it redirects every other path to auth. Without it, auth serves only the policies, on its own origin |
 | `AUTH_KEY_ENCRYPTION_KEY` | Required env/file reference to the key that seals [signing keys](#signing-keys) in the database: 32 bytes as unpadded base64url text. A trailing newline is ignored |
 | `AUTH_TOKEN_DIGEST_KEY` | Required env/file reference to the key under which refresh tokens, authorization codes and pending logins are stored as HMAC digests. Its raw bytes are the key, at least 32 of them. Email verification links and recovery links derive from it too |
 | `AUTH_TOKEN_DIGEST_KEY_ACCEPTED` | Optional env/file reference to another token digest key, accepted but never used for new digests: the next key, or the old one (see [changing the token digest key](#changing-the-token-digest-key)) |
