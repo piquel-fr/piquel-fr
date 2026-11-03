@@ -501,8 +501,10 @@ pub(crate) async fn confirm<'a>(
     Ok(view! {
         if action.inline {
             <button type="button" class=(class) popovertarget=(dialog.as_str()) aria-label=(name.as_deref())>(change.label())</button>
-            <div class="dialog" id=(dialog.as_str()) popover="" role="dialog" aria-labelledby=(format!("{dialog}-title"))>
-                <h2 id=(format!("{dialog}-title"))>(change.title())</h2>
+            // The title's ID is prefixed, so no subject can make it another
+            // dialog's ID: every dialog's starts with "dialog".
+            <div class="dialog" id=(dialog.as_str()) popover="" role="dialog" aria-labelledby=(format!("title-{dialog}"))>
+                <h2 id=(format!("title-{dialog}"))>(change.title())</h2>
                 if let Some(subject) = subject {
                     <p><strong>(subject)</strong></p>
                 }

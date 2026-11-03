@@ -684,8 +684,9 @@ html[data-sidebar='collapsed'] .shell {
 :root[data-theme='dark'] .sidebar .end .theme-toggle button[value='light'] {
   display: flex;
 }
-/* The drawer's backdrop, which only phones show, and its state, a checkbox
-   the top bar's button labels: hidden, but in the tab order ahead of the drawer. */
+/* The drawer's backdrop, which only phones show, and its state, a checkbox the
+   top bar's button labels, which only phones keep in the tab order, ahead of
+   the drawer. */
 .scrim {
   display: none;
 }
