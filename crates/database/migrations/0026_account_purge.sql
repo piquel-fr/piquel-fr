@@ -40,6 +40,11 @@ CREATE INDEX refresh_families_user_idx ON refresh_token_families (user_id);
 CREATE INDEX passkey_credentials_user_idx ON passkey_credentials (user_id);
 CREATE INDEX external_login_identities_user_idx ON external_login_identities (user_id);
 CREATE INDEX handles_user_idx ON handles (user_id);
+-- Purging an owner erases its clients' related origins from the events about
+-- them, and deleting its clients deletes their consents.
+CREATE INDEX domain_events_client_idx ON domain_events (client_id)
+    WHERE client_id IS NOT NULL;
+CREATE INDEX oidc_consents_client_idx ON oidc_consents (client_id);
 
 -- A deleted client keeps only its ID, settings that identify nobody, and its
 -- lifecycle dates: its name, redirect URIs and back-channel logout URI may name a

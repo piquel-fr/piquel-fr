@@ -121,9 +121,9 @@ Important invariants:
   `administrators().lock()` before the account lock, as grants and disabling do,
   so the last active administrator's account cannot be deleted. Callers end its sessions and
   delete the clients it manages first. `deletions().purge` then deletes the rows
-  that reference the account without cascading, the account itself, then the
-  personal data of the events it is the subject or actor of, in the same
-  transaction. Its handles stay in `handles` without an owner, so nobody claims
+  that reference the account without cascading, its clients' related origins
+  from the events about them, the account itself, then the personal data of the
+  events it is the subject or actor of, in the same transaction. Its handles stay in `handles` without an owner, so nobody claims
   them again. The personal data goes last: storing an event's personal data
   key-share locks each account the event names (migration `0022`'s trigger), and
   only deleting the account conflicts with that lock. The account lock's `FOR NO
@@ -372,7 +372,8 @@ always reads it.
   payload; on read it merges them back. Once the row is gone, they and the request
   origin read as `Personal::Erased`. Deleting it never breaks the event.
 - The cleanup pass deletes personal data after 90 days. Account purge deletes it
-  earlier for every event whose subject or actor is the purged account.
+  earlier for every event whose subject or actor is the purged account, and
+  erases the related origins of the clients it owned, whoever's events hold them.
 - A client's related origin, in `related_origin_approved`,
   `related_origin_removed` and an inline `signed_in`, may be a person's own domain,
   so it is `Personal` too, in those kinds' second payload version. Events of the

@@ -267,6 +267,8 @@ impl AccountDeletionRepository<'_> {
     ///
     /// Deletes, in order: the grants, consents, sessions and administrator rights
     /// that reference the account without cascading, and its email deliveries;
+    /// the related origins of its clients, deleted ones included, wherever events
+    /// recorded them, since its domain may be among them;
     /// the account, which cascades to its emails, passkeys, identities, ceremonies
     /// and scheduled deletion, and leaves its handles without an owner, so nobody
     /// claims them again; then the personal data of every event the account is
@@ -308,6 +310,23 @@ impl AccountDeletionRepository<'_> {
             // other channels' deliveries hold no personal data.
             "DELETE FROM deliveries WHERE channel = 'email' AND recipient = to_jsonb($1::uuid::text)",
         );
+        // An operator's approval and another person's inline sign-in name neither
+        // the owner nor its account, so only the client finds them. They read
+        // the removed keys as erased. Ownership goes with the account, so this
+        // runs first; a sign-in it misses still ends with retention.
+        run!(
+            self,
+            execute,
+            sqlx::query!(
+                "UPDATE event_personal_data p
+                SET details = p.details - '/origin' - '/inline/origin'
+                FROM domain_events e
+                JOIN oidc_clients c ON c.id = e.client_id
+                WHERE p.event_id = e.id AND c.owner_id = $1
+                AND p.details ?| ARRAY['/origin', '/inline/origin']",
+                id,
+            )
+        )?;
         let purged = run!(
             self,
             execute,
