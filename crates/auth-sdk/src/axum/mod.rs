@@ -31,7 +31,10 @@
 //!
 //! **Apps that sign users in** mount [`LoginRoutes`] and its layer, then take
 //! [`SignedIn`] or [`MaybeSignedIn`]. Tokens stay server-side, in the application's
-//! [`SessionBackend`]; the browser holds only a random session key.
+//! [`SessionBackend`]; the browser holds only a random session key. Both refuse a
+//! request that is not `GET`, `HEAD`, `OPTIONS` or `TRACE` unless it comes from the
+//! app's own pages, so handlers need no CSRF token; [`CrossOrigin`] opts an endpoint
+//! out.
 //!
 //! ```no_run
 //! use axum::{Router, routing::get};
@@ -86,8 +89,8 @@ pub use bearer::{
     AuthRejection, Authenticated, BearerLayer, BearerService, RequireAuthentication, Scoped,
 };
 pub use login::{
-    InvalidReturnTo, LoginLayer, LoginRoutes, LoginService, MaybeSignedIn, ReturnTo, SignedIn,
-    StepUp,
+    CrossOrigin, InvalidReturnTo, LoginLayer, LoginRoutes, LoginService, MaybeSignedIn, ReturnTo,
+    SignedIn, StepUp,
 };
 #[cfg(any(test, feature = "test-util"))]
 pub use session::{BackendCheckError, check_backend};

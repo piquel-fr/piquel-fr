@@ -1,5 +1,5 @@
 //! Bearer rejections against the shared challenge vectors, the session layer's
-//! refresh lease, logout, and back-channel logout.
+//! refresh lease, the origin check, logout, and back-channel logout.
 
 use super::session::{Lease, LeaseId, Session, SessionKey, Sessions};
 use super::*;
@@ -14,7 +14,7 @@ use ::axum::{
     body::{Body, to_bytes},
     http::{Request, StatusCode, header},
     response::Response,
-    routing::get,
+    routing::{get, post},
 };
 use base64::Engine as _;
 use chrono::{TimeDelta, Utc};
@@ -297,6 +297,11 @@ fn login_app(issuer: &Issuer, backend: &MemoryBackend) -> (Router, LoginRoutes) 
             "/app",
             Router::new().route("/notes", get(|_: SignedIn| async {})),
         )
+        .route(
+            "/notes",
+            post(|_: SignedIn| async {}).delete(|_: SignedIn| async {}),
+        )
+        .route("/widget", post(|_: CrossOrigin<SignedIn>| async {}))
         .nest("/auth", auth.router())
         .layer(auth.layer());
     (app, auth)
@@ -668,49 +673,95 @@ async fn refresh_failures_end_sessions_only_when_the_token_may_be_spent() {
     }
 }
 
-/// Logout is accepted only from the app's own pages: `Sec-Fetch-Site` decides when
-/// sent, and `Origin` only without it. A form on a `no-referrer` page sends
-/// `Origin: null` with `Sec-Fetch-Site: same-origin`.
+/// `Sec-Fetch-Site` and `Origin` headers, and whether they show the app's own pages:
+/// `Sec-Fetch-Site` decides when sent, and `Origin` only without it. A form on a
+/// `no-referrer` page sends `Origin: null` with `Sec-Fetch-Site: same-origin`.
+const ORIGINS: [(Option<&str>, Option<&str>, bool); 8] = [
+    (Some("same-origin"), Some("null"), true),
+    (Some("same-origin"), None, true),
+    (None, Some("https://notes.example.com"), true),
+    (Some("same-site"), Some("https://notes.example.com"), false),
+    (Some("cross-site"), Some("https://notes.example.com"), false),
+    (None, Some("null"), false),
+    (None, None, false),
+    (None, Some("https://evil.notes.example.com"), false),
+];
+
+/// Sends `request` with a `Sec-Fetch-Site` and `Origin` from [`ORIGINS`].
+async fn send_from(
+    app: &Router,
+    mut request: ::axum::http::request::Builder,
+    (fetch_site, origin): (Option<&str>, Option<&str>),
+) -> Response {
+    if let Some(fetch_site) = fetch_site {
+        request = request.header("sec-fetch-site", fetch_site);
+    }
+    if let Some(origin) = origin {
+        request = request.header(header::ORIGIN, origin);
+    }
+    app.clone()
+        .oneshot(request.body(Body::empty()).expect("request"))
+        .await
+        .expect("response")
+}
+
+/// Logout is accepted only from the app's own pages.
 #[tokio::test]
 async fn logout_refuses_other_origins() {
     let issuer = issuer_with_token_endpoint("http://127.0.0.1:9/token".parse().expect("URL"));
-    let (own, sibling) = (
-        Some("https://notes.example.com"),
-        Some("https://evil.notes.example.com"),
-    );
-    for (fetch_site, origin, expected) in [
-        (Some("same-origin"), Some("null"), StatusCode::SEE_OTHER),
-        (Some("same-origin"), None, StatusCode::SEE_OTHER),
-        (None, own, StatusCode::SEE_OTHER),
-        (Some("same-site"), own, StatusCode::FORBIDDEN),
-        (Some("cross-site"), own, StatusCode::FORBIDDEN),
-        (None, Some("null"), StatusCode::FORBIDDEN),
-        (None, None, StatusCode::FORBIDDEN),
-        (None, sibling, StatusCode::FORBIDDEN),
-    ] {
+    for (fetch_site, origin, own) in ORIGINS {
         let backend = MemoryBackend::default();
         let (app, _) = login_app(&issuer, &backend);
-        let login = stored_login(
-            "01936f3e-8c00-7000-8000-000000000001",
-            SessionId::new(),
-            300,
-        );
+        let login = stored_login(USER, SessionId::new(), 300);
         let (key, cookie) = session(&backend, &login).await;
-        let mut request = Request::post("/auth/logout").header(header::COOKIE, cookie);
-        if let Some(fetch_site) = fetch_site {
-            request = request.header("sec-fetch-site", fetch_site);
-        }
-        if let Some(origin) = origin {
-            request = request.header(header::ORIGIN, origin);
-        }
-        let response = app
-            .oneshot(request.body(Body::empty()).expect("request"))
-            .await
-            .expect("response");
+        let request = Request::post("/auth/logout").header(header::COOKIE, cookie);
+        let response = send_from(&app, request, (fetch_site, origin)).await;
         let case = format!("{fetch_site:?} {origin:?}");
+        let expected = if own {
+            StatusCode::SEE_OTHER
+        } else {
+            StatusCode::FORBIDDEN
+        };
         assert_eq!(response.status(), expected, "{case}");
-        let signed_out = expected == StatusCode::SEE_OTHER;
-        assert_eq!(load(&backend, &key).await.is_none(), signed_out, "{case}");
+        assert_eq!(load(&backend, &key).await.is_none(), own, "{case}");
+    }
+}
+
+/// A signed-in handler takes an unsafe request only from the app's own pages, so no
+/// other site, not even a sibling the cookie reaches, acts as the user; without a
+/// cookie too, it is refused rather than asked to sign in. Safe methods and
+/// [`CrossOrigin`] skip the check.
+#[tokio::test]
+async fn signed_in_refuses_unsafe_requests_from_other_origins() {
+    let issuer = issuer_with_token_endpoint("http://127.0.0.1:9/token".parse().expect("URL"));
+    let backend = MemoryBackend::default();
+    let (app, _) = login_app(&issuer, &backend);
+    let (_, cookie) = session(&backend, &stored_login(USER, SessionId::new(), 300)).await;
+    let signed_in =
+        |request: ::axum::http::request::Builder| request.header(header::COOKIE, cookie.as_str());
+    for (fetch_site, origin, own) in ORIGINS {
+        let from = (fetch_site, origin);
+        let case = format!("{fetch_site:?} {origin:?}");
+        let (allowed, refused) = (StatusCode::OK, StatusCode::FORBIDDEN);
+        let expected = if own { allowed } else { refused };
+        for request in [
+            signed_in(Request::post("/notes")),
+            signed_in(Request::delete("/notes")),
+        ] {
+            let response = send_from(&app, request, from).await;
+            assert_eq!(response.status(), expected, "{case}");
+        }
+        let anonymous = send_from(&app, Request::post("/notes"), from).await;
+        let expected = if own {
+            StatusCode::UNAUTHORIZED
+        } else {
+            refused
+        };
+        assert_eq!(anonymous.status(), expected, "anonymous {case}");
+        let page = send_from(&app, signed_in(Request::get("/")), from).await;
+        assert_eq!(page.status(), allowed, "GET {case}");
+        let widget = send_from(&app, signed_in(Request::post("/widget")), from).await;
+        assert_eq!(widget.status(), allowed, "CrossOrigin {case}");
     }
 }
 
