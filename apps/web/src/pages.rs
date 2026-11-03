@@ -64,7 +64,9 @@ pub(crate) struct HomeLinks<'a> {
     pub developers: &'a str,
 }
 
-/// The developer documentation and the SDKs' source.
+/// Piquel's source code.
+const SOURCE: &str = "https://github.com/piquel-fr/piquel-fr";
+/// The developer documentation.
 const DOCUMENTATION: &str = "https://github.com/piquel-fr/piquel-fr#oidc-clients";
 
 /// The body of `page`; the homepage links auth's pages at `links`.
@@ -118,6 +120,11 @@ async fn home(links: HomeLinks<'_>) -> Result<impl View> {
                     <h2>"Open standards and SDKs"</h2>
                     <p>"Piquel speaks OpenID Connect and OAuth 2.0, so any standard library works. The Rust SDK, piquel-auth, validates tokens and signs users in for you."</p>
                     <a href=(DOCUMENTATION)>"Documentation"</a>
+                </article>
+                <article class="card stack wide">
+                    <h2>"Open source"</h2>
+                    <p>"All of Piquel's code is public, under the Apache 2.0 license. Read exactly how your data is handled, report a problem, or contribute."</p>
+                    <a href=(SOURCE)>"Source code"</a>
                 </article>
             </div>
         </section>

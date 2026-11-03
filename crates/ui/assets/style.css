@@ -344,6 +344,10 @@ p {
 .site-grid a {
   justify-self: start;
 }
+/* A card across every column, closing the grid. */
+.site-grid .wide {
+  grid-column: 1 / -1;
+}
 .policy {
   max-width: 720px;
 }
