@@ -313,14 +313,23 @@ impl ProviderConfig {
             Provider::Google => (GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET),
         }
     }
-    /// Reads optional credentials; configuring either requires both.
+    /// Reads optional credentials; configuring either requires both. An empty
+    /// client ID turns the provider off whatever the secret says, so a deployment
+    /// manifest can set both everywhere and leave the ID empty where the provider
+    /// has no app, such as previews (see infra/piqueld.toml).
     fn from_environment(provider: Provider) -> Result<Option<Self>, ConfigurationError> {
         let (id, secret) = Self::variables(provider);
-        if id.optional()?.is_none() && secret.optional()?.is_none() {
-            return Ok(None);
-        }
-        let client_id = id.required()?;
-        if client_id.is_empty() || client_id.len() > MAX_PROVIDER_CLIENT_ID_LENGTH {
+        let client_id = match id.optional()? {
+            Some(client_id) if client_id.is_empty() => return Ok(None),
+            Some(client_id) => client_id,
+            None if secret.optional()?.is_none() => return Ok(None),
+            None => {
+                return Err(ConfigurationError::Missing {
+                    variable: id.name(),
+                });
+            }
+        };
+        if client_id.len() > MAX_PROVIDER_CLIENT_ID_LENGTH {
             return Err(id.invalid("must contain 1 to 512 characters assigned by the provider"));
         }
         let client_secret = secret
