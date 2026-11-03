@@ -166,7 +166,7 @@ exception while there were few users, not a precedent. Migration `0021` likewise
 dropped `users.username` when handles moved to their own table: keeping both in sync
 for a release would have let a signup on an old replica create an account without a
 handle, so the old replicas fail until they are replaced instead. Migrations take
-`LockKey::Migrations`, waiting as long as another run holds it, and provisioning
+`LockKey::Migrations`, waiting up to 30 minutes for another run, and provisioning
 the runtime role takes another lock, so concurrent `migrate` runs take turns.
 
 Every five minutes, one replica drains expired ephemeral state in bounded batches
@@ -212,7 +212,7 @@ with `Limit::set`, never the default:
 
 - **Migrations** (`Database::run_migrations`) run on a dedicated connection. Their
   statements may run for 30 minutes. They first wait for `LockKey::Migrations` with
-  no lock limit, then restore the 5 s lock limit before any DDL, so a migration
+  no lock limit, so only that statement limit bounds the wait, then restore the 5 s lock limit before any DDL, so a migration
   stuck behind a long transaction fails, and can be rerun, rather than queue every
   request behind its lock.
 - **Account purge** (`deletions().purge`): 5 minutes per statement, for its

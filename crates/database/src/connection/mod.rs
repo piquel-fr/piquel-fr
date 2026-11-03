@@ -279,16 +279,20 @@ impl Database {
     /// Runs schema migrations when explicitly requested through the auth binary.
     ///
     /// They run on a dedicated connection, whose statements may take up to
-    /// 30 minutes (`MIGRATION_STATEMENT_TIMEOUT`). It first waits, without a time limit, for
-    /// [`LockKey::Migrations`], so overlapping runs take turns; `SQLx`'s own lock
-    /// is then free. Lock waits get their default limit back before any DDL, so a
-    /// migration blocked by a long transaction fails rather than queue every
-    /// request behind it; run it again once that transaction ends.
+    /// 30 minutes (`MIGRATION_STATEMENT_TIMEOUT`). It first waits for
+    /// [`LockKey::Migrations`], with no lock limit but within that statement
+    /// limit, so overlapping runs take turns; `SQLx`'s own lock is then free. Lock
+    /// waits get their default limit back before any DDL, so a migration blocked
+    /// by a long transaction fails rather than queue every request behind it; run
+    /// it again once that transaction ends.
     ///
     /// # Errors
     ///
-    /// Returns [`DatabaseError::Operation`] if a migration fails or the applied
-    /// history differs from the embedded migrations.
+    /// Returns [`DatabaseError::Timeout`] if connecting takes too long,
+    /// [`DatabaseError::Cancelled`] if another run holds the lock for 30 minutes,
+    /// and [`DatabaseError::Operation`] if a migration fails, including on a lock
+    /// wait past its limit, or the applied history differs from the embedded
+    /// migrations.
     pub async fn run_migrations(&self) -> Result<(), DatabaseError> {
         let mut connection = self.connect_dedicated(&self.pool.connect_options()).await?;
         for limit in [
