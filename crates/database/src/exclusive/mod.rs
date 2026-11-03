@@ -23,6 +23,9 @@ pub enum LockKey {
     RelatedOrigins = 5,
     /// Sealing the audit chain and signing its checkpoints.
     AuditChain = 6,
+    /// Schema migrations, held by `Database::run_migrations` for its connection, so
+    /// overlapping `migrate` runs take turns.
+    Migrations = 7,
     /// The job runner panic test; no release takes it.
     #[cfg(feature = "test-support")]
     Test = -1,

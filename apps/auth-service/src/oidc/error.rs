@@ -170,6 +170,8 @@ impl OAuthError {
             DatabaseError::NotFound => expected.reject_with(description, error),
             DatabaseError::Conflict(_)
             | DatabaseError::Timeout(_)
+            | DatabaseError::Cancelled(_)
+            | DatabaseError::LockUnavailable(_)
             | DatabaseError::InvalidStoredData { .. }
             | DatabaseError::Operation(_) => Self::Database(error),
         }

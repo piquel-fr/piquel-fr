@@ -2,9 +2,14 @@
 //! deletes them.
 
 use super::{AccountDeletionRepository, RepositoryExecutor};
-use crate::DatabaseError;
+use crate::{DatabaseError, Limit, Scope};
 use chrono::{DateTime, Utc};
 use piquel_common::{PasskeyId, UserId};
+use std::time::Duration;
+
+/// Longest each statement of a purge may run: erasing the personal data of the
+/// events the account acted in scans every event, since no index covers actors.
+const PURGE_STATEMENT_TIMEOUT: Duration = Duration::from_mins(5);
 
 /// A restore token's account, and the passkey whose sign-in it continues.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -189,12 +194,20 @@ impl AccountDeletionRepository<'_> {
     /// deletion, and leaves its handles without an owner, so nobody claims them
     /// again. Callers end its sessions, which queues their clients' logout
     /// tokens, and delete the clients it manages first. The events themselves
-    /// stay: they hold only pseudonymous IDs.
+    /// stay: they hold only pseudonymous IDs. Its statements may each run for
+    /// [`PURGE_STATEMENT_TIMEOUT`], until the caller's transaction ends.
     ///
     /// # Errors
     ///
     /// Returns [`DatabaseError`] if a statement fails.
     pub async fn purge(&mut self, user_id: UserId) -> Result<bool, DatabaseError> {
+        run!(
+            self,
+            fetch_one,
+            Limit::STATEMENT
+                .at(PURGE_STATEMENT_TIMEOUT)
+                .set(Scope::Transaction)
+        )?;
         let id = user_id.as_uuid();
         // Each statement is a checked query with its own type, so they cannot share a loop.
         macro_rules! delete {

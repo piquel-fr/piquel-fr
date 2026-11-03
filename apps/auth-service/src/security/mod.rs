@@ -172,6 +172,8 @@ impl From<DatabaseError> for ApiError {
             }
             DatabaseError::Conflict(_) => Self::conflict("This information is already in use."),
             error @ (DatabaseError::Timeout(_)
+            | DatabaseError::Cancelled(_)
+            | DatabaseError::LockUnavailable(_)
             | DatabaseError::InvalidStoredData { .. }
             | DatabaseError::Operation(_)) => Self::internal(error),
         }

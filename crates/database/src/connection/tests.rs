@@ -1,6 +1,7 @@
 //! Focused persistence and security contract tests.
 
-use super::{Database, DatabaseConfig, MIGRATOR, RuntimeRole};
+use super::{Database, DatabaseConfig, Limit, MIGRATOR, RuntimeRole, Scope};
+use crate::DatabaseError;
 use sqlx::postgres::PgSslMode;
 use std::time::Duration;
 /// TCP requires verified TLS unless plaintext is explicitly selected.
@@ -451,5 +452,69 @@ async fn functions_running_as_their_owner_are_not_executable_by_others() {
     assert!(
         executable.is_empty(),
         "executable by others: {executable:?}"
+    );
+}
+
+/// Every connection starts with the default limits. A statement past its limit is
+/// cancelled, and a lock wait past its limit fails, each with its own error.
+/// Each transaction lowers its limit, so the test need not wait out the defaults.
+#[tokio::test]
+#[ignore = "requires a disposable TEST_DATABASE_URL"]
+async fn statements_and_lock_waits_past_their_limits_fail() {
+    Database::test_pool().await;
+    let url = std::env::var("TEST_DATABASE_URL").expect("TEST_DATABASE_URL");
+    let config = DatabaseConfig::new(&url, 2, Duration::from_secs(5)).expect("configuration");
+    let database = Database::connect(config).await.expect("connect");
+    let settings: Vec<String> = sqlx::query_scalar(
+        "SELECT current_setting(name) FROM unnest(ARRAY[
+            'statement_timeout', 'lock_timeout', 'idle_in_transaction_session_timeout'
+        ]) AS name",
+    )
+    .fetch_all(&database.pool)
+    .await
+    .expect("settings");
+    assert_eq!(settings, ["15s", "5s", "30s"]);
+
+    let limit = Duration::from_millis(100);
+    let mut slow = database.begin().await.expect("transaction");
+    Limit::STATEMENT
+        .at(limit)
+        .set(Scope::Transaction)
+        .fetch_one(&mut *slow.inner)
+        .await
+        .expect("statement limit");
+    let cancelled = sqlx::query("SELECT pg_sleep(1)")
+        .execute(&mut *slow.inner)
+        .await
+        .map_err(DatabaseError::from);
+    assert!(
+        matches!(cancelled, Err(DatabaseError::Cancelled(_))),
+        "{cancelled:?}"
+    );
+    drop(slow);
+
+    // A key no other test takes.
+    let key = i64::from_be_bytes(*b"timeout!");
+    let mut holder = database.begin().await.expect("transaction");
+    sqlx::query("SELECT pg_advisory_xact_lock($1)")
+        .bind(key)
+        .execute(&mut *holder.inner)
+        .await
+        .expect("lock");
+    let mut waiter = database.begin().await.expect("transaction");
+    Limit::LOCK
+        .at(limit)
+        .set(Scope::Transaction)
+        .fetch_one(&mut *waiter.inner)
+        .await
+        .expect("lock limit");
+    let unavailable = sqlx::query("SELECT pg_advisory_xact_lock($1)")
+        .bind(key)
+        .execute(&mut *waiter.inner)
+        .await
+        .map_err(DatabaseError::from);
+    assert!(
+        matches!(unavailable, Err(DatabaseError::LockUnavailable(_))),
+        "{unavailable:?}"
     );
 }

@@ -6,11 +6,15 @@
 //! checkpoints and verifies the chain; nothing here trusts a stored hash.
 
 use super::{AuditRepository, Bytes32, RepositoryExecutor, Unsigned};
-use crate::{DatabaseError, DatabaseTransaction};
+use crate::{DatabaseError, DatabaseTransaction, Limit, Scope};
 use chrono::{DateTime, SecondsFormat, Utc};
 use serde::{Serialize, Serializer};
 use serde_json::Value;
+use std::time::Duration;
 use uuid::Uuid;
+
+/// Longest each statement of [`DatabaseTransaction::prune_audit_chain`] may run.
+const PRUNE_STATEMENT_TIMEOUT: Duration = Duration::from_mins(30);
 
 /// What the chain covers of one `domain_events` row: everything but its storage
 /// order (`txid`, `sequence`) and its chain columns. Personal data lives in
@@ -443,7 +447,9 @@ impl DatabaseTransaction<'_> {
     ///
     /// The guard triggers let only this transaction delete sealed events and move
     /// the anchor, and only until this returns. The anchor only moves forward, so
-    /// of two concurrent prunes, the one that would move it back fails.
+    /// of two concurrent prunes, the one that would move it back fails. Deleting
+    /// years of history may take a while, so its statements may each run for
+    /// [`PRUNE_STATEMENT_TIMEOUT`], until the transaction ends.
     ///
     /// # Errors
     ///
@@ -453,6 +459,11 @@ impl DatabaseTransaction<'_> {
         let through = Unsigned::bind(through)?;
         let connection = &mut *self.inner;
         sqlx::query!("SELECT set_config('piquel.audit_prune', 'on', true)")
+            .fetch_one(&mut *connection)
+            .await?;
+        Limit::STATEMENT
+            .at(PRUNE_STATEMENT_TIMEOUT)
+            .set(Scope::Transaction)
             .fetch_one(&mut *connection)
             .await?;
         let deleted = sqlx::query!(

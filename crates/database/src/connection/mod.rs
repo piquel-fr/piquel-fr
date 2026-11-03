@@ -9,6 +9,11 @@ use sqlx::{
 use std::{str::FromStr, time::Duration};
 use url::Url;
 
+/// Time limits on sessions.
+mod limits;
+
+pub(crate) use limits::{Limit, Scope};
+
 /// TCP mode that verifies both the certificate chain and server hostname.
 const VERIFIED_SSL_MODE: &str = "verify-full";
 /// Explicit plaintext opt-in for trusted private networks.
@@ -26,6 +31,10 @@ const SOCKET_HOST: &str = "localhost";
 
 /// The schema migrations embedded at compile time, in version order.
 pub(crate) static MIGRATOR: Migrator = sqlx::migrate!("./migrations");
+
+/// Longest a migration's statement may run: one may rewrite a whole table. Its
+/// lock waits keep the default limit, so DDL never queues requests for long.
+const MIGRATION_STATEMENT_TIMEOUT: Duration = Duration::from_mins(30);
 
 /// Readiness must fail quickly when the database stops responding.
 const HEALTH_CHECK_TIMEOUT: Duration = Duration::from_secs(2);
@@ -134,7 +143,8 @@ impl DatabaseConfig {
         }
 
         let options = PgConnectOptions::from_str(url)
-            .map_err(|source| DatabaseConnectionError::Options(Box::new(source)))?;
+            .map_err(|source| DatabaseConnectionError::Options(Box::new(source)))?
+            .options(Limit::DEFAULTS.map(Limit::option));
         Ok(if require_verified_tls {
             // Keep the effective mode explicit even after validating the URL so
             // future parser changes cannot silently weaken production TLS.
@@ -247,15 +257,38 @@ impl Database {
 
     /// Runs schema migrations when explicitly requested through the auth binary.
     ///
+    /// They run on a dedicated connection, whose statements may take up to
+    /// [`MIGRATION_STATEMENT_TIMEOUT`]. It first waits, without a time limit, for
+    /// [`LockKey::Migrations`], so overlapping runs take turns; `SQLx`'s own lock
+    /// is then free. Lock waits get their default limit back before any DDL, so a
+    /// migration blocked by a long transaction fails rather than queue every
+    /// request behind it; run it again once that transaction ends.
+    ///
     /// # Errors
     ///
     /// Returns [`DatabaseError::Operation`] if a migration fails or the applied
     /// history differs from the embedded migrations.
     pub async fn run_migrations(&self) -> Result<(), DatabaseError> {
+        let mut connection = PgConnection::connect_with(&self.pool.connect_options()).await?;
+        for limit in [
+            Limit::STATEMENT.at(MIGRATION_STATEMENT_TIMEOUT),
+            Limit::LOCK.at(Duration::ZERO),
+        ] {
+            limit.set(Scope::Session).fetch_one(&mut connection).await?;
+        }
+        sqlx::query!("SELECT pg_advisory_lock($1)", LockKey::Migrations.id())
+            .fetch_one(&mut connection)
+            .await?;
+        Limit::LOCK
+            .set(Scope::Session)
+            .fetch_one(&mut connection)
+            .await?;
         MIGRATOR
-            .run(&self.pool)
+            .run(&mut connection)
             .await
-            .map_err(|error| DatabaseError::Operation(Box::new(error)))
+            .map_err(|error| DatabaseError::Operation(Box::new(error)))?;
+        // Closing the connection releases the lock.
+        Ok(connection.close().await?)
     }
 
     /// Creates `role`, or resets its attributes and password, then grants it row

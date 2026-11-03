@@ -249,6 +249,8 @@ impl AdminService {
                 DatabaseError::Conflict(_) => AdminError::EmailClaimed(error),
                 DatabaseError::NotFound
                 | DatabaseError::Timeout(_)
+                | DatabaseError::Cancelled(_)
+                | DatabaseError::LockUnavailable(_)
                 | DatabaseError::InvalidStoredData { .. }
                 | DatabaseError::Operation(_) => error.into(),
             })?;

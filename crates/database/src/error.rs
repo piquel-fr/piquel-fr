@@ -6,6 +6,12 @@ use thiserror::Error;
 /// A boxed underlying error kept as the source for diagnostics.
 type Source = Box<dyn StdError + Send + Sync>;
 
+/// SQLSTATE of a cancelled statement: past its statement timeout, or cancelled by
+/// an operator.
+const QUERY_CANCELED: &str = "57014";
+/// SQLSTATE of a lock not granted within the lock timeout.
+const LOCK_NOT_AVAILABLE: &str = "55P03";
+
 /// Stable, non-SQL database failure categories.
 #[derive(Debug, Error)]
 pub enum DatabaseError {
@@ -18,6 +24,13 @@ pub enum DatabaseError {
     /// The database did not answer within the bounded wait.
     #[error("the database operation timed out")]
     Timeout(#[source] tokio::time::error::Elapsed),
+    /// `PostgreSQL` cancelled the statement, which ran past its statement timeout
+    /// (see `database-crate.md`) or was cancelled by an operator.
+    #[error("the database cancelled a statement that ran too long")]
+    Cancelled(#[source] Source),
+    /// A statement waited for a lock past its lock timeout.
+    #[error("a database lock was not granted in time")]
+    LockUnavailable(#[source] Source),
     /// A stored column could not be decoded into its typed value, e.g. an ID
     /// that is not `UUIDv7` or JSON that does not match its record.
     #[error("stored column {column} is invalid")]
@@ -92,8 +105,14 @@ impl From<sqlx::Error> for DatabaseError {
                 column: index,
                 source,
             },
-            sqlx::Error::Database(database_error) if database_error.is_unique_violation() => {
-                Self::Conflict(Box::new(sqlx::Error::Database(database_error)))
+            sqlx::Error::Database(error) if error.is_unique_violation() => {
+                Self::Conflict(Box::new(sqlx::Error::Database(error)))
+            }
+            sqlx::Error::Database(error) if error.code().as_deref() == Some(QUERY_CANCELED) => {
+                Self::Cancelled(Box::new(sqlx::Error::Database(error)))
+            }
+            sqlx::Error::Database(error) if error.code().as_deref() == Some(LOCK_NOT_AVAILABLE) => {
+                Self::LockUnavailable(Box::new(sqlx::Error::Database(error)))
             }
             error => Self::Operation(Box::new(error)),
         }
