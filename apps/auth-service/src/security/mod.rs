@@ -944,8 +944,7 @@ enum Endpoint {
     /// The account's JSON APIs, which browsers may call only from auth's own pages.
     Account,
     /// Auth's server-rendered pages, sign-in included, which anyone may navigate to,
-    /// and the forms they post; and piquel.fr's pages, the site listener's only
-    /// routes.
+    /// and the forms they post.
     Page,
     /// The admin dashboard's pages, the admin listener's only routes, and the forms
     /// they post.
@@ -984,7 +983,7 @@ impl Endpoint {
             oidc::AUTHORIZE => Self::Authorize,
             oidc::LOGOUT => Self::Logout,
             // The root and a page's path ending in a slash redirect to a page.
-            page::ROOT | page::PRIVACY | page::TERMS => Self::Page,
+            page::ROOT => Self::Page,
             _ if page::ALL.contains(&path.strip_suffix('/').unwrap_or(path)) => Self::Page,
             _ if path.starts_with(ACCOUNT_PREFIX) => Self::Account,
             _ => Self::Other,
@@ -1247,10 +1246,6 @@ enum Listener {
     /// reaching it under another name, by a misrouted ingress or a rebound DNS
     /// name, is refused before anything runs.
     Admin(HeaderValue),
-    /// The site listener, which serves piquel.fr's few pages, none of them with a
-    /// form, and redirects every other path to auth. Its pages share the budget
-    /// of auth's, and, like them, take a form only from auth's own pages.
-    Site,
 }
 
 impl HttpSecurity {
@@ -1282,14 +1277,6 @@ impl HttpSecurity {
             origin: dashboard.as_url().origin(),
             ..Self::new(config, database)
         })
-    }
-
-    /// Derives the site listener's policy from validated startup configuration.
-    pub(crate) fn site(config: &crate::AuthConfig, database: Database) -> Self {
-        Self {
-            listener: Listener::Site,
-            ..Self::new(config, database)
-        }
     }
 
     /// Refuses a request to the admin listener that names another host, by its
@@ -1393,7 +1380,6 @@ impl HttpSecurity {
         let endpoint = match policy.listener {
             Listener::Public => Endpoint::of(&request),
             Listener::Admin(_) => Endpoint::Dashboard,
-            Listener::Site => Endpoint::Page,
         };
         // Set by the origin check, which runs under the deadline; an error response
         // still carries CORS headers once the origin is known to be allowed.

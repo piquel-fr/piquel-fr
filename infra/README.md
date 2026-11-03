@@ -309,11 +309,11 @@ survives restarts and replicas: it is stored, as a digest, in PostgreSQL.
 
 ## Web
 
-piquel.fr's `web` route reaches auth's site listener (`AUTH_SITE_LISTENER`, port
-8082), which serves piquel.fr's own pages: the homepage at `/`, the privacy
-policy at `/privacy` and the terms of service at `/terms`. Google's OAuth
-branding links these three. Auth's public listener serves the two policies at
-the same paths, so its pages link them on their own origin.
+piquel.fr is its own service, `web` (`apps/web`, built by `infra/web.Dockerfile`),
+which the `web` route reaches. It serves the homepage at `/`, the privacy policy at
+`/privacy` and the terms of service at `/terms`, which Google's OAuth branding
+links, and auth's pages link the policies there (`AUTH_WEB_ORIGIN`). It keeps no
+state, so it has no database or secret, and any number of replicas can serve it.
 
 Every other path redirects, temporarily (`307`) and with its query, to the same
 one on auth, which serves the account settings at the paths piquel.fr used
@@ -325,13 +325,10 @@ and never expire: keep the redirect, and those paths on auth, for as long as
 piquel.fr serves nothing at them. A path ending in a slash, which piquel.fr's
 settings also accepted, redirects to the page.
 
-The policies' operator details are placeholders, marked in their text
-(`crates/ui/assets/policies/`): fill them in before relying on them.
-
 Cloudflare's edge also sets piquel.fr's `Strict-Transport-Security`, with the
-values piquel-web sent and auth sends too: `max-age=31536000`, without
-`includeSubDomains` or `preload`. It dates from when the route was a redirect,
-which sends no headers of its own.
+values piquel-web sends: `max-age=31536000`, without `includeSubDomains` or
+`preload`. It dates from when the route was a redirect, which sends no headers
+of its own.
 
 ## Telemetry
 

@@ -1,7 +1,7 @@
 //! Focused parsing checks and database-backed OAuth/OIDC scenarios.
 
 use super::*;
-use crate::config::TokenDigestKey;
+use crate::config::{PolicyLinks, TokenDigestKey};
 use crate::deliveries::{BackchannelLogoutSender, OutboundClient, Sender};
 use crate::recovery::ProbationPasskey;
 use crate::security::{BrowserCookie, Credential, RequestContext, Session};
@@ -142,6 +142,7 @@ impl Flow {
                     TokenDigestKey::derive(&[7; 32]).expect("digest key"),
                     None,
                 )),
+                policies: config.oidc.policies.clone(),
             },
             SigningKeys::new(KeySet::single(
                 Rs256Key::generate("oidc-tests").expect("RSA signing key"),
@@ -1129,6 +1130,7 @@ async fn changing_keys_keeps_codes_and_refresh_tokens() {
                 TokenDigestKey::derive(&[8; 32]).expect("new digest key"),
                 Some(TokenDigestKey::derive(&[7; 32]).expect("old digest key")),
             )),
+            policies: PolicyLinks::on(&crate::tests::WEB_ORIGIN.parse().expect("web origin")),
         },
         SigningKeys::new(KeySet::single(
             Rs256Key::generate("rotated").expect("new signing key"),

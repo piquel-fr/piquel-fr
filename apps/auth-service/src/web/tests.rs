@@ -3,18 +3,17 @@
 
 use super::WebApplication;
 use crate::{
-    AuthConfig,
     routes::{
         self,
         page::{
-            LOGIN, PRIVACY, REGISTER, ROOT, TERMS,
+            REGISTER, ROOT,
             developers::{self, APP, APP_SECRETS, APP_SETTINGS},
             settings,
         },
     },
     security::BrowserCookie,
     tests::{
-        AUTH_ORIGIN, Browser, OWN_PAGE, Replicas, cookie, html, location, parameter, policy,
+        Browser, OWN_PAGE, Replicas, WEB_ORIGIN, cookie, html, location, parameter, policy,
         redirect, register, registration,
     },
 };
@@ -406,44 +405,22 @@ fn every_page_is_mounted_and_classified() {
     assert_eq!(mounted, routes::page::ALL);
 }
 
-/// piquel.fr serves its homepage and Piquel's policies, which search engines may
-/// index, and sends every other path, with its query, to the same one on auth, so
-/// sent links still open their page. Auth serves the policies too, and its
-/// sign-in and registration pages link them.
+/// Piquel's policies are piquel.fr's: every page's footer links them there, the
+/// registration form agrees to them there, and discovery advertises them there.
 #[tokio::test]
-async fn piquel_fr_serves_its_pages_and_sends_the_rest_to_auth() {
-    let config = AuthConfig::test(&AUTH_ORIGIN.parse().expect("auth origin"));
-    let site = Replicas::site(&config).await;
+async fn pages_and_discovery_link_piquel_fr_policies() {
+    let replicas = Replicas::new().await;
     let browser = Browser::signed_out();
-    for (path, heading) in [
-        (ROOT, "One passkey for every Piquel app."),
-        (PRIVACY, "Privacy policy"),
-        (TERMS, "Terms of service"),
-    ] {
-        let response = browser.visit(&site, path).await;
-        assert_eq!(response.status(), StatusCode::OK, "{path}");
-        assert!(policy(&response).contains("form-action 'none'"), "{path}");
-        let page = html(response).await;
-        assert!(page.contains(heading), "{path}");
-        assert!(!page.contains("noindex"), "{path}");
-        assert!(page.contains(r#"href="/privacy""#), "{path}");
+    let page = html(browser.visit(&replicas.a, REGISTER).await).await;
+    for path in ["/privacy", "/terms"] {
+        let link = format!(r#"href="{WEB_ORIGIN}{path}""#);
+        assert_eq!(
+            page.matches(&link).count(),
+            2,
+            "footer and agreement: {path}"
+        );
     }
-    let sent = browser
-        .visit(&site, "/settings/emails/verify?remove=1")
-        .await;
-    assert_eq!(sent.status(), StatusCode::TEMPORARY_REDIRECT);
-    assert_eq!(
-        redirect(&sent),
-        format!("{AUTH_ORIGIN}/settings/emails/verify?remove=1")
-    );
-
-    let replicas = Replicas::of(&config).await;
-    let response = browser.visit(&replicas.a, PRIVACY).await;
-    assert_eq!(response.status(), StatusCode::OK);
-    assert!(!html(response).await.contains("noindex"));
-    for path in [LOGIN, REGISTER] {
-        let page = html(browser.visit(&replicas.a, path).await).await;
-        assert!(page.contains(r#"href="/terms""#), "{path}");
-        assert!(page.contains("noindex"), "{path}");
-    }
+    let discovery = html(browser.visit(&replicas.a, routes::oidc::DISCOVERY).await).await;
+    assert!(discovery.contains(&format!(r#""op_policy_uri":"{WEB_ORIGIN}/privacy""#)));
+    assert!(discovery.contains(&format!(r#""op_tos_uri":"{WEB_ORIGIN}/terms""#)));
 }

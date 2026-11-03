@@ -1,41 +1,50 @@
-//! piquel.fr's own pages: the homepage, which says what Piquel's sign-in is, and
-//! Piquel's policies, which every page's footer links.
+//! piquel.fr's pages: the homepage, which says what Piquel is, and Piquel's
+//! policies, which every Piquel page's footer links.
 
-use crate::intro;
+use piquel_ui::{Policies, intro};
 use topcoat::{
     Result,
     view::{View, ViewHandle, component, view},
 };
 
-/// Where Piquel's users and developers write to.
-pub const SUPPORT_ADDRESS: &str = "support@piquel.fr";
-
-/// One of Piquel's policies. Its text is a fragment of trusted HTML, embedded at
-/// compile time, so it reads and diffs as a document.
+/// One of piquel.fr's pages.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum Policy {
+pub(crate) enum Page {
+    /// The homepage.
+    Home,
     /// What Piquel collects, why, for how long, and who else sees it.
     Privacy,
     /// The terms of using Piquel's accounts, sign-in and developer console.
     Terms,
 }
 
-impl Policy {
-    /// Every policy.
-    pub const ALL: [Self; 2] = [Self::Privacy, Self::Terms];
+impl Page {
+    /// Every page.
+    pub(crate) const ALL: [Self; 3] = [Self::Home, Self::Privacy, Self::Terms];
 
-    /// Its title.
-    #[must_use]
-    pub const fn title(self) -> crate::Title {
+    /// Its path. The policies' are a contract with auth, which links them.
+    pub(crate) const fn path(self) -> &'static str {
         match self {
-            Self::Privacy => crate::Title::Privacy,
-            Self::Terms => crate::Title::Terms,
+            Self::Home => "/",
+            Self::Privacy => Policies::PATHS.privacy,
+            Self::Terms => Policies::PATHS.terms,
         }
     }
 
-    /// Its text, as HTML.
+    /// Its title in the browser, before "· Piquel".
+    pub(crate) const fn title(self) -> &'static str {
+        match self {
+            Self::Home => "Passkey sign-in",
+            Self::Privacy => "Privacy policy",
+            Self::Terms => "Terms of service",
+        }
+    }
+
+    /// A policy's text: a fragment of trusted HTML, embedded at compile time, so it
+    /// reads and diffs as a document.
     const fn text(self) -> &'static str {
         match self {
+            Self::Home => "",
             Self::Privacy => include_str!("../assets/policies/privacy.html"),
             Self::Terms => include_str!("../assets/policies/terms.html"),
         }
@@ -44,7 +53,7 @@ impl Policy {
 
 /// Where the homepage links: auth's pages, and the developer documentation.
 #[derive(Clone, Copy, Debug)]
-pub struct HomeLinks<'a> {
+pub(crate) struct HomeLinks<'a> {
     /// Signing in.
     pub sign_in: &'a str,
     /// Creating an account.
@@ -53,14 +62,29 @@ pub struct HomeLinks<'a> {
     pub settings: &'a str,
     /// The developer console.
     pub developers: &'a str,
-    /// The developer documentation and the SDKs' source.
-    pub documentation: &'a str,
 }
 
-/// piquel.fr's homepage: what Piquel's sign-in is, and each part of it, linking to
-/// auth's pages at `links`.
+/// The developer documentation and the SDKs' source.
+const DOCUMENTATION: &str = "https://github.com/piquel-fr/piquel-fr#oidc-clients";
+
+/// The body of `page`; the homepage links auth's pages at `links`.
 #[component]
-pub async fn home(links: HomeLinks<'_>) -> Result<impl View> {
+pub(crate) async fn page_body(page: Page, links: HomeLinks<'_>) -> Result<impl View> {
+    Ok(view! {
+        match page {
+            Page::Home => home(links: links),
+            Page::Privacy | Page::Terms => {
+                <article class="site policy">
+                    (ViewHandle::unescaped_unchecked(page.text()))
+                </article>
+            }
+        }
+    })
+}
+
+/// The homepage: what Piquel's sign-in is, and each part of it.
+#[component]
+async fn home(links: HomeLinks<'_>) -> Result<impl View> {
     Ok(view! {
         <section class="site stack">
             <div class="site-hero">
@@ -93,19 +117,9 @@ pub async fn home(links: HomeLinks<'_>) -> Result<impl View> {
                 <article class="card stack">
                     <h2>"Open standards and SDKs"</h2>
                     <p>"Piquel speaks OpenID Connect and OAuth 2.0, so any standard library works. The Rust SDK, piquel-auth, validates tokens and signs users in for you."</p>
-                    <a href=(links.documentation)>"Documentation"</a>
+                    <a href=(DOCUMENTATION)>"Documentation"</a>
                 </article>
             </div>
         </section>
-    })
-}
-
-/// The page of the policy `of`.
-#[component]
-pub async fn policy(of: Policy) -> Result<impl View> {
-    Ok(view! {
-        <article class="site policy">
-            (ViewHandle::unescaped_unchecked(of.text()))
-        </article>
     })
 }

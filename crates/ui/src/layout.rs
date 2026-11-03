@@ -1,7 +1,7 @@
 //! The document around every page, and the parts pages share: the frame of each
 //! section of the account's pages, the account's bar and the navigations.
 
-use crate::{Alert, Messages, SUPPORT_ADDRESS, clients::copyable};
+use crate::{Alert, Messages, clients::copyable};
 use piquel_common::{TraceId, UserId};
 use topcoat::{
     Result,
@@ -18,7 +18,7 @@ pub enum Area {
     Section(Section),
     /// The admin dashboard.
     Admin,
-    /// piquel.fr's own pages: the homepage and Piquel's policies. The only pages
+    /// piquel.fr's own pages, which its own server renders. The only pages
     /// search engines may index.
     Site,
 }
@@ -127,12 +127,6 @@ pub enum Title {
     AccountDeleted,
     /// Restoring an account scheduled for deletion.
     Restore,
-    /// piquel.fr's homepage.
-    Home,
-    /// The privacy policy.
-    Privacy,
-    /// The terms of service.
-    Terms,
 }
 
 impl Title {
@@ -154,9 +148,6 @@ impl Title {
             Self::Dashboard => "Admin dashboard",
             Self::AccountDeleted => "Your account is scheduled for deletion",
             Self::Restore => "Restore your account",
-            Self::Home => "Passkey sign-in",
-            Self::Privacy => "Privacy policy",
-            Self::Terms => "Terms of service",
         }
     }
 }
@@ -171,13 +162,25 @@ pub(crate) trait Label: Copy + PartialEq + Send + Sync + 'static {
     fn label(self) -> &'static str;
 }
 
-/// Where every page's footer links Piquel's policies.
+/// Where Piquel's users and developers write to.
+pub const SUPPORT_ADDRESS: &str = "support@piquel.fr";
+
+/// Where every page's footer links Piquel's policies, which piquel.fr serves.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Policies<'a> {
     /// The privacy policy.
     pub privacy: &'a str,
     /// The terms of service.
     pub terms: &'a str,
+}
+
+impl Policies<'static> {
+    /// The policies' paths on piquel.fr: piquel.fr routes them, and auth links
+    /// them on its origin.
+    pub const PATHS: Self = Self {
+        privacy: "/privacy",
+        terms: "/terms",
+    };
 }
 
 /// The document around every page: the head, which links `stylesheet` and loads

@@ -7,9 +7,9 @@ the developer console.
 The authentication service is **one Rust executable** containing its login,
 onboarding, consent, passkey, settings and developer console pages. PostgreSQL is its only external
 data service. GitHub and Google are optional login providers. The same executable
-serves the admin dashboard at `admin.piquel.fr`, and piquel.fr's homepage and
-policies, each on a listener of its own; every other `piquel.fr` path redirects to
-auth, keeping the path. See
+serves the admin dashboard at `admin.piquel.fr`, on a listener of its own.
+`piquel.fr` is its own web server, `apps/web`: it serves Piquel's homepage and
+policies, and redirects every other path to auth, keeping the path. See
 [infra/README.md](infra/README.md) for repository-driven piqueld deployments.
 
 ## Build
@@ -22,10 +22,10 @@ database: SQL is checked against the committed query cache in
 just build
 ```
 
-The executable is `target/release/auth-service`. It embeds the stylesheet
-(`crates/ui/assets/style.css`) and the passkey script
-(`apps/auth-service/assets/passkey.js`) as they are; rebuild Rust after changing
-them.
+The executables are `target/release/auth-service` and `target/release/piquel-web`.
+Auth embeds the stylesheet (`crates/ui/assets/style.css`) and the passkey script
+(`apps/auth-service/assets/passkey.js`) as they are, and piquel-web the stylesheet
+and the policies (`apps/web/assets/policies/`); rebuild Rust after changing them.
 
 ## Development
 
@@ -52,7 +52,7 @@ work from devices on the tailnet. Run the same command after changing code.
 | `AUTH_TRUSTED_PROXIES` | Optional comma-separated proxy peer IPs or CIDRs; these peers must overwrite `X-Forwarded-For` with one client IP. Defaults to piqueld's `PIQUELD_INGRESS_PROXIES` |
 | `AUTH_PUBLIC_LISTENER` | Listener address; defaults to `127.0.0.1:8080` |
 | `AUTH_ADMIN_LISTENER`, `AUTH_ADMIN_ORIGIN` | Optional address of the admin dashboard's listener, e.g. `0.0.0.0:8081`, and the dashboard's origin, e.g. `https://admin.piquel.fr`, set together. Only a private route may reach the listener. Without them, auth serves no dashboard |
-| `AUTH_SITE_LISTENER` | Optional address of the listener serving piquel.fr's homepage and policies, e.g. `0.0.0.0:8082`; it redirects every other path to auth. Without it, auth serves only the policies, on its own origin |
+| `AUTH_WEB_ORIGIN` | piquel.fr's origin, whose privacy policy and terms every page links and discovery advertises; defaults to `https://piquel.fr` |
 | `AUTH_KEY_ENCRYPTION_KEY` | Required env/file reference to the key that seals [signing keys](#signing-keys) in the database: 32 bytes as unpadded base64url text. A trailing newline is ignored |
 | `AUTH_TOKEN_DIGEST_KEY` | Required env/file reference to the key under which refresh tokens, authorization codes and pending logins are stored as HMAC digests. Its raw bytes are the key, at least 32 of them. Email verification links and recovery links derive from it too |
 | `AUTH_TOKEN_DIGEST_KEY_ACCEPTED` | Optional env/file reference to another token digest key, accepted but never used for new digests: the next key, or the old one (see [changing the token digest key](#changing-the-token-digest-key)) |
@@ -95,6 +95,23 @@ just auth serve
 
 The schema intentionally replaces the throwaway prototype. Use a fresh database;
 there is no migration path for prototype account data.
+
+### piquel.fr
+
+`piquel-web` serves piquel.fr: the homepage, the privacy policy at `/privacy` and
+the terms of service at `/terms`. It keeps no state and needs no database or
+secret. It relies on auth only to sign people in: it links auth's pages, and
+redirects every other path, with its query, to the same one on auth. Its
+`/health` answers `204` for piqueld's probe.
+
+| Variable | Meaning |
+| --- | --- |
+| `WEB_AUTH_ORIGIN` | Required auth origin, e.g. `https://auth.piquel.fr` |
+| `WEB_LISTENER` | Listener address; defaults to `127.0.0.1:8080` |
+| `OTEL_*`, `RUST_LOG` | Telemetry, as auth's; its `service.name` is `piquel-web` |
+
+The policies are HTML in `apps/web/assets/policies/`. Their operator details are
+placeholders, marked in their text: fill them in before relying on them.
 
 ### Signing keys
 

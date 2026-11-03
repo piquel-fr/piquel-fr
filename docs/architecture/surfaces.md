@@ -6,7 +6,7 @@ yet are marked *(planned)*.
 | Host | Serves | Used by |
 | --- | --- | --- |
 | `auth.piquel.fr` | OIDC/OAuth endpoints, ceremony pages, account settings, the developer console and the JSON APIs; security center *(planned)* | every application and user |
-| `piquel.fr` | The homepage and Piquel's policies, which auth serves on a listener of its own, and a redirect to auth.piquel.fr that keeps every other path; public profiles *(planned)* | visitors, old links and bookmarks |
+| `piquel.fr` | Its own web server: the homepage and Piquel's policies, and a redirect to auth.piquel.fr that keeps every other path; public profiles *(planned)* | visitors, old links and bookmarks |
 | `admin.piquel.fr` | The admin dashboard, which auth serves on a listener of its own | administrators |
 
 ## auth.piquel.fr
@@ -35,14 +35,15 @@ it on its page before the form posts. Users never unlock settings explicitly.
 
 ## piquel.fr
 
-Auth serves piquel.fr's own pages on its site listener (`AUTH_SITE_LISTENER`):
-the homepage, which says what Piquel's sign-in is and links each surface, the
-privacy policy at `/privacy` and the terms of service at `/terms`. They are
-static, with no session, form or script, and the only pages search engines may
-index. Auth's public listener serves the policies too, at the same paths, so
-every page's footer, the dashboard's included, links them, and so does the
-registration form, which agrees to them. OIDC discovery advertises them as
-`op_policy_uri` and `op_tos_uri`, which the SDK reads with the rest of the
+piquel.fr is its own product, served by its own web server, `apps/web`. It relies
+on auth only to sign people in: it links auth's pages and never shares auth's
+database, keys or process. Today it serves the homepage, which says what Piquel's
+sign-in is and links each surface, the privacy policy at `/privacy` and the terms
+of service at `/terms`. They are static, with no session, form or script, and the
+only pages search engines may index. Auth links the policies there
+(`AUTH_WEB_ORIGIN`): every auth page's footer does, the dashboard's included, and
+so does the registration form, which agrees to them. OIDC discovery advertises
+them as `op_policy_uri` and `op_tos_uri`, which the SDK reads with the rest of the
 metadata.
 
 Every other path redirects to the same one on auth.piquel.fr, with a temporary

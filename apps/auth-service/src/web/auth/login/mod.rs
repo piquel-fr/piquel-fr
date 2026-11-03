@@ -550,7 +550,7 @@ impl WebApplication {
                 query: &kept,
                 login: routes::page::LOGIN,
                 register: routes::page::REGISTER,
-                policies: routes::page::POLICIES,
+                policies: self.policies.links(),
                 alert: alert,
             )
         };

@@ -67,8 +67,7 @@ const PUSHED_REQUEST_SECONDS: i64 = 60;
 /// How long an authorization code stays redeemable.
 const AUTHORIZATION_CODE_MINUTES: i64 = 2;
 /// Developer documentation advertised in the metadata.
-pub(crate) const SERVICE_DOCUMENTATION: &str =
-    "https://github.com/piquel-fr/piquel-fr#oidc-clients";
+const SERVICE_DOCUMENTATION: &str = "https://github.com/piquel-fr/piquel-fr#oidc-clients";
 
 /// The OAuth 2.0 and `OpenID` Connect provider.
 #[derive(Clone)]
@@ -386,8 +385,8 @@ impl OidcApplication {
             service_documentation: SERVICE_DOCUMENTATION
                 .parse()
                 .map_err(OidcConfigError::Documentation)?,
-            op_policy_uri: Some(origin.url(routes::page::PRIVACY)),
-            op_tos_uri: Some(origin.url(routes::page::TERMS)),
+            op_policy_uri: Some(config.policies.privacy.clone()),
+            op_tos_uri: Some(config.policies.terms.clone()),
             scopes_supported: Scope::ALL.into(),
             response_types_supported: ResponseType::ALL.into(),
             response_modes_supported: ResponseMode::ALL.into(),

@@ -1,5 +1,5 @@
-//! One authentication authority: browser flows, settings API, OIDC, and, each on
-//! a listener of its own, the admin dashboard and piquel.fr's own pages.
+//! One authentication authority: browser flows, settings API, OIDC, and the admin
+//! dashboard on a listener of its own.
 /// Settings any administrator may also change, as operations both the owner's
 /// routes and the CLI run.
 mod account;
@@ -78,7 +78,7 @@ pub use keys::{KeyError, KeyStore, SigningKeys};
 use oidc::OidcApplication;
 use passkey::PasskeyApplication;
 use service::ServiceApplication;
-use web::{AdminApplication, SiteApplication, WebApplication};
+use web::{AdminApplication, WebApplication};
 
 use account::AccountApplication;
 use assets::EmbeddedAssets;
@@ -143,7 +143,6 @@ impl AuthConfig {
             .merge(AccountApplication::new(database.clone()).routes())
             .merge(EmailApplication::new(database.clone(), &self.email).routes())
             .merge(web.routes())
-            .merge(SiteApplication::new(&self.oidc.origin).policies())
             .merge(oidc.routes());
         let policy = security::HttpSecurity::new(self, database);
         let protected = application
@@ -183,20 +182,5 @@ impl AuthConfig {
                 security::HttpSecurity::protect,
             ));
         Ok(HttpTelemetry::default().listener("admin").wrap(pages))
-    }
-
-    /// Builds piquel.fr's pages, for the site listener only, under that listener's
-    /// own security layer, which classifies every request as a page's. Its
-    /// telemetry is labelled `piquel.listener = "site"`.
-    pub fn site_router(&self, database: Database) -> Router {
-        let policy = security::HttpSecurity::site(self, database);
-        let pages = SiteApplication::new(&self.oidc.origin)
-            .routes()
-            .layer(DefaultBodyLimit::max(MAX_REQUEST_BODY_BYTES))
-            .layer(middleware::from_fn_with_state(
-                policy,
-                security::HttpSecurity::protect,
-            ));
-        HttpTelemetry::default().listener("site").wrap(pages)
     }
 }

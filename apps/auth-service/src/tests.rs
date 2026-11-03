@@ -7,7 +7,7 @@ use crate::{
     clients::{ClientSettings, NewClient},
     config::{
         AuditConfig, EmailConfig, FederationConfig, LinkKeys, OidcConfig, PasskeyConfig,
-        ProviderConfig, TokenDigestKey, TokenDigestKeys,
+        PolicyLinks, ProviderConfig, TokenDigestKey, TokenDigestKeys,
     },
     recovery::RecoveryLinks,
     routes,
@@ -48,6 +48,8 @@ use tower::ServiceExt;
 
 /// Auth origin of the replicas, and of the fixtures that send requests to them.
 pub(crate) const AUTH_ORIGIN: &str = "https://auth.piquel.fr";
+/// piquel.fr's origin in tests, whose policies auth links.
+pub(crate) const WEB_ORIGIN: &str = "https://piquel.fr";
 /// The key-encryption key of every test that stores signing keys. Tests share one
 /// database, so they must all open the keys any of them stored.
 const KEY_ENCRYPTION_KEY: &str = "dGVzdHMgc2hhcmUgdGhpcyBrZXktZW5jcnlwdGlvbiE";
@@ -86,7 +88,6 @@ impl AuthConfig {
         Self {
             public_listener: SocketAddr::from(([127, 0, 0, 1], 0)),
             dashboard: None,
-            site_listener: None,
             passkey: PasskeyConfig {
                 origin: origin.clone(),
                 invite_required: false,
@@ -103,6 +104,7 @@ impl AuthConfig {
                         .expect("digest key"),
                     None,
                 )),
+                policies: PolicyLinks::on(&WEB_ORIGIN.parse().expect("web origin")),
             },
             key_encryption_key: Arc::new(key_encryption_key()),
             audit: AuditConfig {
@@ -154,14 +156,6 @@ impl Replicas {
         config
             .admin_router(Self::database().await, dashboard)
             .expect("dashboard")
-            .layer(Extension(ConnectInfo(Self::peer())))
-    }
-
-    /// The site listener of `config`, serving piquel.fr's pages, for requests from
-    /// a client address of its own.
-    pub(crate) async fn site(config: &AuthConfig) -> Router {
-        config
-            .site_router(Self::database().await)
             .layer(Extension(ConnectInfo(Self::peer())))
     }
 

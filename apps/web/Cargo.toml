@@ -1,0 +1,24 @@
+[package]
+name = "piquel-web"
+description = "piquel.fr's web server: Piquel's homepage and policies"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+piquel-common = { workspace = true, features = ["config"] }
+piquel-telemetry.workspace = true
+piquel-ui.workspace = true
+
+axum.workspace = true
+thiserror.workspace = true
+tokio.workspace = true
+topcoat = { workspace = true, features = ["view"] }
+tracing.workspace = true
+
+[dev-dependencies]
+tower.workspace = true
+
+[lints]
+workspace = true

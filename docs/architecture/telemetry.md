@@ -43,8 +43,7 @@ adds the rest in one line.
 - **One series per process.** Each process gets a new UUID as its
   `service.instance.id`, so replicas and command-line runs never write to the
   same metric series. The admin dashboard's requests carry `piquel.listener =
-  "admin"`, and piquel.fr's `piquel.listener = "site"`, which tell them apart
-  from the public listener's.
+  "admin"`, which tells them apart from the public listener's.
 
 ## Adding telemetry
 

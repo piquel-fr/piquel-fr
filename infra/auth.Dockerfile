@@ -5,9 +5,10 @@ COPY Cargo.toml Cargo.lock ./
 COPY .cargo .cargo
 # With the shared stylesheet in crates/ui/assets and the passkey script in
 # apps/auth-service/assets, which the executable embeds. It serves the admin
-# dashboard too.
+# dashboard too. The workspace's manifests need every member, piquel-web's
+# included, though only auth-service is built.
 COPY crates crates
-COPY apps/auth-service apps/auth-service
+COPY apps apps
 # The committed audit verifier keys, compiled into `audit verify` and `audit prune`.
 COPY docs/security/audit-key.pub docs/security/audit-key.pub
 RUN cargo build --locked --release -p auth-service
