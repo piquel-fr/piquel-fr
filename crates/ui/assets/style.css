@@ -359,13 +359,6 @@ p {
 .policy p strong {
   color: #182e29;
 }
-/* What the operator must fill in before the policies are final. */
-.policy mark {
-  background: #fbefd5;
-  color: #7a4b00;
-  border-radius: 4px;
-  padding: 0 0.25rem;
-}
 .full {
   width: 100%;
 }

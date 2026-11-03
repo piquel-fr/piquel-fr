@@ -110,8 +110,8 @@ redirects every other path, with its query, to the same one on auth. Its
 | `WEB_LISTENER` | Listener address; defaults to `127.0.0.1:8080` |
 | `OTEL_*`, `RUST_LOG` | Telemetry, as auth's; its `service.name` is `piquel-web` |
 
-The policies are HTML in `apps/web/assets/policies/`. Their operator details are
-placeholders, marked in their text: fill them in before relying on them.
+The policies are HTML in `apps/web/assets/policies/`. Keep them true to what the
+code does: a change to what auth stores, keeps or shares changes them too.
 
 ### Signing keys
 
