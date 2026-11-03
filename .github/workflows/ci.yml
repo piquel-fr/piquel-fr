@@ -8,7 +8,7 @@
 #             SQLx query cache checked against the migrated schema
 #   e2e    -> the browser suite over HTTPS against the real binary and PostgreSQL,
 #             with the admin dashboard on its own listener and host
-#   docker -> the deployment image
+#   docker -> the deployment images: auth and piquel.fr's web server
 #
 # Pull requests run only the jobs their changes can affect (see `changes`).
 # Pushes to main and manual runs run everything. `ci` is the single status to
@@ -66,7 +66,7 @@ jobs:
           predicate-quantifier: every
           filters: |
             rust:
-              - '{Cargo.toml,Cargo.lock,rust-toolchain.toml,justfile,just/**,apps/auth-service/**,crates/**,tests/sdk-vectors/**,.github/workflows/ci.yml}'
+              - '{Cargo.toml,Cargo.lock,rust-toolchain.toml,justfile,just/**,apps/**,crates/**,tests/sdk-vectors/**,.github/workflows/ci.yml}'
               - '!**/*.md'
             web:
               - '**'
@@ -249,6 +249,7 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       - run: docker build --file infra/auth.Dockerfile .
+      - run: docker build --file infra/web.Dockerfile .
 
   ci:
     name: ci

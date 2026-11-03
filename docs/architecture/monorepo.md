@@ -6,11 +6,12 @@ is authentication, with its account settings, and the admin dashboard.
 | Location | Responsibility |
 | --- | --- |
 | `apps/auth-service` | Rust auth authority, browser ceremonies, social adapters, OIDC, server-rendered pages, the settings API, the admin dashboard at admin.piquel.fr, CLI; `assets/passkey.js`, the one script its pages load: the WebAuthn passkey ceremonies and the form hooks that run them |
+| `apps/web` | `piquel-web`, piquel.fr's own web server: the homepage and Piquel's policies (`assets/policies/`), and a redirect of every other path to auth. It relies on auth only to sign people in |
 | `crates/database` | `piquel-repository`: PostgreSQL connections, migrations and typed persistence operations |
 | `crates/auth-sdk` | `piquel-auth`, the public Rust SDK: token validation, typed scopes, login and the JWKS cache auth also uses for Google; `axum` feature: extractors, bearer layer, login routes over an application's own session backend |
 | `crates/common` | `piquel-common`, the one home for shared types: IDs, string enums, `Personal<T>`, and the wire types shared by auth and the SDKs (token claims, discovery metadata, JWK sets, OAuth/OIDC vocabulary and errors, bearer challenges, SDK error codes, and the bodies auth's settings API and the admin views share); `admin` feature: the views of administration, which the admin dashboard shows, the CLI prints as JSON and the database crate decodes into; `client-spans` feature: `SendTraced`, client spans around `reqwest` requests, for auth and the SDK; `config` feature: environment variables, validated origins, secret references; `email` feature: email address normalization; `events` feature: domain events |
 | `crates/crypto` | Random secrets, SHA-256, HMAC, PKCE and RS256 signing |
-| `crates/ui` | `piquel-ui`: the Topcoat components and layouts of auth's server-rendered pages, rendering plain data and taking URLs as props, the admin dashboard's included, and the shared stylesheet, `assets/style.css` |
+| `crates/ui` | `piquel-ui`: the Topcoat components and layouts of auth's server-rendered pages, rendering plain data and taking URLs as props, the admin dashboard's included; the document piquel.fr's pages share, and the shared stylesheet, `assets/style.css` |
 | `crates/telemetry` | `piquel-telemetry`: stderr logs, and OpenTelemetry traces, metrics and logs over OTLP; request spans and access logs for axum routers, client spans, and typed metric instruments; see [telemetry.md](telemetry.md) |
 | `tests/sdk-vectors` | Generated cases every SDK must pass; see [sdk.md](sdk.md) |
 
@@ -32,8 +33,8 @@ after it.
 The auth runtime is one executable with one public HTTP listener, plus the admin
 dashboard's listener when it is configured, which only a private route reaches.
 The executable embeds the shared stylesheet and the passkey script. Auth renders every
-page itself, sign-in included, and the account settings at `/settings`; piquel.fr
-only redirects there. The permanent WebAuthn RP ID is the auth hostname, never a wildcard over
+page itself, sign-in included, and the account settings at `/settings`; piquel.fr's
+server redirects there every path it doesn't serve. The permanent WebAuthn RP ID is the auth hostname, never a wildcard over
 piquel.fr subdomains.
 
 Auth's pages live in `apps/auth-service/src/web`, grouped by area: `auth`, the

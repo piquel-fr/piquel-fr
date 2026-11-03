@@ -45,7 +45,7 @@ use crate::{
     account::AccountService,
     admin::DashboardSignIn,
     assets::EmbeddedAssets,
-    config::EmailConfig,
+    config::{EmailConfig, PolicyLinks},
     federation::FederationApplication,
     oidc::{OAuthCode, OAuthError, OidcApplication, Reject},
     passkey::PasskeyApplication,
@@ -98,6 +98,8 @@ pub(crate) struct WebApplication {
     email: EmailConfig,
     /// The `OpenID` Connect issuer, which the console tells apps to discover.
     issuer: Origin,
+    /// Piquel's policies on piquel.fr, which every page's footer links.
+    policies: PolicyLinks,
     /// Every page's Content-Security-Policy but its `form-action`.
     policy: Arc<str>,
 }
@@ -193,6 +195,7 @@ impl WebApplication {
             invite_required: config.passkey.invite_required,
             email: config.email.clone(),
             issuer: origin.clone(),
+            policies: config.oidc.policies.clone(),
             policy: policy.into(),
         }
     }
@@ -398,7 +401,7 @@ impl WebApplication {
 
     /// Answers with `page` inside the document titled `title`, in `area`, under the
     /// page policy, with the trace ID of a server error. The brand links the
-    /// account's settings. Its forms may post to
+    /// account's settings, and the footer Piquel's policies. Its forms may post to
     /// auth's own pages, and redirect on to the origins of `targets`: browsers apply
     /// `form-action` to a form's redirects too.
     async fn render(
@@ -423,6 +426,7 @@ impl WebApplication {
                 home: routes::page::settings::HOME,
                 area: area,
                 reference: HttpTelemetry::trace_id(status),
+                policies: self.policies.links(),
                 (page)
             )
         }

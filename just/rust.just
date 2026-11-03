@@ -15,7 +15,7 @@ lint:
 audit:
     @cargo deny check advisories licenses
 
-# Build auth-service; pass `--release` for release.
+# Build auth-service and piquel-web; pass `--release` for release.
 [positional-arguments]
 build *ARGS:
-    @cargo build --locked -p auth-service "$@"
+    @cargo build --locked -p auth-service -p piquel-web "$@"

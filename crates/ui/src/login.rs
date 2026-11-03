@@ -6,7 +6,7 @@
 //! which then posts the form, and the page sends the browser on.
 
 use crate::{
-    Title,
+    Policies, Title,
     form::{
         Ceremony, Checkbox, Fields, Precision, Query, change_form, handle_input, new_passkey, open,
         passkey_form, time,
@@ -286,7 +286,8 @@ impl<'a> Step<'a> {
 /// page with `query`, which keeps where the browser goes on to, and its links open
 /// the sign-in page, `login`, and the page creating an account, `register`, with
 /// it. `alert` says why the change just posted failed, or the provider sign-in
-/// that brought the browser here.
+/// that brought the browser here. Creating an account links Piquel's `policies`,
+/// which it agrees to.
 #[component]
 pub async fn sign_in<'a>(
     step: Step<'a>,
@@ -294,6 +295,7 @@ pub async fn sign_in<'a>(
     query: &'a LoginQuery,
     login: &'a str,
     register: &'a str,
+    policies: Policies<'a>,
     #[default] alert: Option<&'a str>,
 ) -> Result<impl View> {
     let action = query.on(page)?;
@@ -374,6 +376,15 @@ pub async fn sign_in<'a>(
             <footer>
                 if let Some((question, label, href)) = &footer {
                     <p class="help">(*question)<a href=(href.as_str())>(*label)</a></p>
+                }
+                if let Step::SignUp { .. } = step {
+                    <p class="help">
+                        "By creating an account, you agree to the "
+                        <a href=(policies.terms)>"Terms of service"</a>
+                        " and acknowledge the "
+                        <a href=(policies.privacy)>"Privacy policy"</a>
+                        "."
+                    </p>
                 }
                 <p class="help">"Your passkey stays with your device or password manager."</p>
             </footer>

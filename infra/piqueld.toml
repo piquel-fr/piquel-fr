@@ -30,8 +30,9 @@ invite_required = "true"
 audit_key = "audit-key"
 # See "Running several replicas" in infra/README.md before raising it.
 auth_replicas = 1
-# Where auth, with the admin dashboard it serves, sends telemetry: the
-# `telemetry` application's collector, imported below. Empty sends none.
+# Where auth, with the admin dashboard it serves, and piquel.fr's web server
+# send telemetry: the `telemetry` application's collector, imported below.
+# Empty sends none.
 otlp_endpoint = "http://collector.telemetry:4318"
 
 [spec.environments.production]
@@ -75,14 +76,14 @@ invite_required = "false"
 # Previews keep their telemetry on stderr: the collector does not export to them.
 otlp_endpoint = ""
 
-# piquel.fr serves nothing of its own yet: the gateway sends every path, with its
-# query, to the same one on auth, which serves the account settings. Temporary
-# (307), so browsers cache nothing once piquel.fr serves pages again. See "Web"
-# in infra/README.md.
+# piquel.fr, its own web server: the homepage and the policies. It redirects
+# every other path, with its query, to the same one on auth, so links sent
+# before the settings moved still work. See "Web" in infra/README.md.
 [[spec.routes]]
 name = "web"
 hostname = "${{ vars.web_host }}"
-redirect = { to = "https://${{ vars.auth_host }}", status = 307, preserve_path = true }
+service = "web"
+port = 8080
 visibility = "public"
 
 [[spec.routes]]
@@ -204,6 +205,8 @@ AUTH_PUBLIC_LISTENER = "0.0.0.0:8080"
 # origin.
 AUTH_ADMIN_LISTENER = "0.0.0.0:8081"
 AUTH_ADMIN_ORIGIN = "https://${{ vars.admin_host }}"
+# piquel.fr, whose policies auth's pages link and discovery advertises.
+AUTH_WEB_ORIGIN = "https://${{ vars.web_host }}"
 AUTH_PUBLIC_BASE_URL = "https://${{ vars.auth_host }}"
 AUTH_INVITE_REQUIRED = "${{ vars.invite_required }}"
 AUTH_SMTP_URL = "smtps://resend@smtp.resend.com:465"
@@ -242,6 +245,30 @@ target = "/run/secrets/smtp-password"
 type = "http"
 port = 8080
 path = "/health/ready"
+
+# piquel.fr's web server. It needs no database and no secret: it relies on auth
+# only to sign people in, through links and redirects.
+[[spec.services]]
+name = "web"
+
+[spec.services.source]
+type = "git"
+repository = "self"
+
+[spec.services.source.build]
+type = "docker"
+dockerfile = "infra/web.Dockerfile"
+
+[spec.services.environment]
+WEB_LISTENER = "0.0.0.0:8080"
+WEB_AUTH_ORIGIN = "https://${{ vars.auth_host }}"
+OTEL_EXPORTER_OTLP_ENDPOINT = "${{ vars.otlp_endpoint }}"
+OTEL_RESOURCE_ATTRIBUTES = "deployment.environment.name=${{ env.name }}"
+
+[spec.services.healthcheck]
+type = "http"
+port = 8080
+path = "/health"
 
 [[spec.services]]
 name = "postgres"

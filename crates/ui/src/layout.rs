@@ -18,6 +18,9 @@ pub enum Area {
     Section(Section),
     /// The admin dashboard.
     Admin,
+    /// piquel.fr's own pages, which its own server renders. The only pages
+    /// search engines may index.
+    Site,
 }
 
 impl Area {
@@ -28,6 +31,7 @@ impl Area {
             Self::Section(Section::Account) => " / account",
             Self::Section(Section::Developers) => " / developers",
             Self::Admin => " / admin",
+            Self::Site => "",
         }
     }
 }
@@ -158,11 +162,33 @@ pub(crate) trait Label: Copy + PartialEq + Send + Sync + 'static {
     fn label(self) -> &'static str;
 }
 
+/// Where Piquel's users and developers write to.
+pub const SUPPORT_ADDRESS: &str = "support@piquel.fr";
+
+/// Where every page's footer links Piquel's policies, which piquel.fr serves.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Policies<'a> {
+    /// The privacy policy.
+    pub privacy: &'a str,
+    /// The terms of service.
+    pub terms: &'a str,
+}
+
+impl Policies<'static> {
+    /// The policies' paths on piquel.fr: piquel.fr routes them, and auth links
+    /// them on its origin.
+    pub const PATHS: Self = Self {
+        privacy: "/privacy",
+        terms: "/terms",
+    };
+}
+
 /// The document around every page: the head, which links `stylesheet` and loads
 /// the passkey `script`, if the page has one, Piquel's header, whose brand links
-/// `home` and names the page's `area`, and the page as `child`. `title` names the
-/// page in the browser, before "· Piquel". A page answering a server error shows
-/// the `reference` of its trace below, for the user to quote in a report.
+/// `home` and names the page's `area`, the page as `child`, and a footer linking
+/// Piquel's `policies`. `title` names the page in the browser, before "· Piquel".
+/// A page answering a server error shows the `reference` of its trace below, for
+/// the user to quote in a report. Only [`Area::Site`]'s pages may be indexed.
 #[component]
 pub async fn document<'a>(
     title: &'a str,
@@ -173,6 +199,7 @@ pub async fn document<'a>(
     home: &'a str,
     #[default] area: Area,
     #[default] reference: Option<TraceId>,
+    policies: Policies<'a>,
     child: Child<'_>,
 ) -> Result<impl View> {
     let reference = reference.map(|reference| reference.to_string());
@@ -182,7 +209,9 @@ pub async fn document<'a>(
             <head>
                 <meta charset="utf-8">
                 <meta name="viewport" content="width=device-width, initial-scale=1">
-                <meta name="robots" content="noindex">
+                if area != Area::Site {
+                    <meta name="robots" content="noindex">
+                }
                 <title>(format!("{title} · Piquel"))</title>
                 <link rel="stylesheet" href=(stylesheet)>
                 if let Some(script) = script {
@@ -207,6 +236,11 @@ pub async fn document<'a>(
                             </footer>
                         }
                     </main>
+                    <footer class="site-footer row">
+                        <a href=(policies.privacy)>"Privacy"</a>
+                        <a href=(policies.terms)>"Terms"</a>
+                        <a href=(format!("mailto:{SUPPORT_ADDRESS}"))>(SUPPORT_ADDRESS)</a>
+                    </footer>
                 </div>
             </body>
         </html>

@@ -6,15 +6,15 @@ use crate::{
     routes::{
         self,
         page::{
-            ROOT,
+            REGISTER, ROOT,
             developers::{self, APP, APP_SECRETS, APP_SETTINGS},
             settings,
         },
     },
     security::BrowserCookie,
     tests::{
-        Browser, OWN_PAGE, Replicas, cookie, html, location, parameter, policy, redirect, register,
-        registration,
+        Browser, OWN_PAGE, Replicas, WEB_ORIGIN, cookie, html, location, parameter, policy,
+        redirect, register, registration,
     },
 };
 use axum::{
@@ -403,4 +403,24 @@ async fn account_pages_refuse_forms_they_do_not_know() {
 fn every_page_is_mounted_and_classified() {
     let mounted: Vec<_> = WebApplication::pages().map(|(path, ..)| path).into();
     assert_eq!(mounted, routes::page::ALL);
+}
+
+/// Piquel's policies are piquel.fr's: every page's footer links them there, the
+/// registration form agrees to them there, and discovery advertises them there.
+#[tokio::test]
+async fn pages_and_discovery_link_piquel_fr_policies() {
+    let replicas = Replicas::new().await;
+    let browser = Browser::signed_out();
+    let page = html(browser.visit(&replicas.a, REGISTER).await).await;
+    for path in ["/privacy", "/terms"] {
+        let link = format!(r#"href="{WEB_ORIGIN}{path}""#);
+        assert_eq!(
+            page.matches(&link).count(),
+            2,
+            "footer and agreement: {path}"
+        );
+    }
+    let discovery = html(browser.visit(&replicas.a, routes::oidc::DISCOVERY).await).await;
+    assert!(discovery.contains(&format!(r#""op_policy_uri":"{WEB_ORIGIN}/privacy""#)));
+    assert!(discovery.contains(&format!(r#""op_tos_uri":"{WEB_ORIGIN}/terms""#)));
 }

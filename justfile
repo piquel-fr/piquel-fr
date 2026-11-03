@@ -1,7 +1,7 @@
 # Validate by default; database and browser tests remain explicit.
 default: validate
 
-# Rust formatting, linting, checks, audits and the auth-service build.
+# Rust formatting, linting, checks, audits and the auth-service and piquel-web builds.
 mod rust 'just/rust.just'
 
 # Web formatting, linting, type checks and the browser tests.

@@ -274,6 +274,8 @@ impl Vectors {
             service_documentation: "https://github.com/piquel-fr/piquel-fr#oidc-clients"
                 .parse()
                 .expect("documentation URL"),
+            op_policy_uri: Some("https://piquel.fr/privacy".parse().expect("policy URL")),
+            op_tos_uri: Some("https://piquel.fr/terms".parse().expect("terms URL")),
             scopes_supported: Scope::ALL.into(),
             response_types_supported: ResponseType::ALL.into(),
             response_modes_supported: ResponseMode::ALL.into(),

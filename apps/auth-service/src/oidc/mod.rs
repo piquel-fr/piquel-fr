@@ -385,6 +385,8 @@ impl OidcApplication {
             service_documentation: SERVICE_DOCUMENTATION
                 .parse()
                 .map_err(OidcConfigError::Documentation)?,
+            op_policy_uri: Some(config.policies.privacy.clone()),
+            op_tos_uri: Some(config.policies.terms.clone()),
             scopes_supported: Scope::ALL.into(),
             response_types_supported: ResponseType::ALL.into(),
             response_modes_supported: ResponseMode::ALL.into(),

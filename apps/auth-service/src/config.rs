@@ -20,6 +20,7 @@ use std::{
     sync::Arc,
     time::Duration,
 };
+use url::Url;
 
 /// Maximum provider-assigned client ID length.
 const MAX_PROVIDER_CLIENT_ID_LENGTH: usize = 512;
@@ -45,6 +46,10 @@ const DEFAULT_PUBLIC_LISTENER: &str = "127.0.0.1:8080";
 
 /// Authentication origin, shared by all application sections.
 pub const PUBLIC_BASE_URL: Variable = Variable::new("AUTH_PUBLIC_BASE_URL");
+/// piquel.fr's origin, whose policies every page links and discovery advertises.
+const WEB_ORIGIN: Variable = Variable::new("AUTH_WEB_ORIGIN");
+/// [`WEB_ORIGIN`] when none is configured: production's.
+const DEFAULT_WEB_ORIGIN: &str = "https://piquel.fr";
 /// HTTP listener behind the HTTPS ingress.
 const PUBLIC_LISTENER: Variable = Variable::new("AUTH_PUBLIC_LISTENER");
 /// Optional listener serving only the admin dashboard, which only a private route
@@ -561,6 +566,37 @@ pub(crate) struct OidcConfig {
     pub origin: Origin,
     /// Keys under which opaque token secrets are stored.
     pub digest_keys: Arc<TokenDigestKeys>,
+    /// Piquel's policies, which discovery advertises.
+    pub policies: PolicyLinks,
+}
+
+/// Piquel's policies, at their paths on piquel.fr: every page's footer links them,
+/// and discovery advertises them as `op_policy_uri` and `op_tos_uri`.
+#[derive(Clone)]
+pub(crate) struct PolicyLinks {
+    /// The privacy policy.
+    pub privacy: Url,
+    /// The terms of service.
+    pub terms: Url,
+}
+
+impl PolicyLinks {
+    /// The policies piquel.fr serves at `web`.
+    pub(crate) fn on(web: &Origin) -> Self {
+        let paths = piquel_ui::Policies::PATHS;
+        Self {
+            privacy: web.url(paths.privacy),
+            terms: web.url(paths.terms),
+        }
+    }
+
+    /// The policies, as a page's footer links them.
+    pub(crate) fn links(&self) -> piquel_ui::Policies<'_> {
+        piquel_ui::Policies {
+            privacy: self.privacy.as_str(),
+            terms: self.terms.as_str(),
+        }
+    }
 }
 
 /// The key that signs audit checkpoints: an Ed25519 key of its own, so it rotates
@@ -781,6 +817,7 @@ impl AuthConfig {
             oidc: OidcConfig {
                 origin,
                 digest_keys,
+                policies: PolicyLinks::on(&WEB_ORIGIN.parse_or(DEFAULT_WEB_ORIGIN)?),
             },
             key_encryption_key: Arc::new(Self::key_encryption_key_from_environment()?),
             trusted_proxies: Self::trusted_proxies()?,

@@ -309,19 +309,26 @@ survives restarts and replicas: it is stored, as a digest, in PostgreSQL.
 
 ## Web
 
-piquel.fr runs no service. Auth serves the account settings at the paths
-piquel.fr used (`/settings`, `/settings/emails`, `/settings/emails/verify`,
-`/settings/sessions` and `/settings/history`), and answers `/` with a redirect to
-`/settings`. The `web` route sends every path to auth, so links sent before the
-move still open the same page, and browsers keep a verification link's fragment
+piquel.fr is its own service, `web` (`apps/web`, built by `infra/web.Dockerfile`),
+which the `web` route reaches. It serves the homepage at `/`, the privacy policy at
+`/privacy` and the terms of service at `/terms`, which Google's OAuth branding
+links, and auth's pages link the policies there (`AUTH_WEB_ORIGIN`). It keeps no
+state, so it has no database or secret, and any number of replicas can serve it.
+
+Every other path redirects, temporarily (`307`) and with its query, to the same
+one on auth, which serves the account settings at the paths piquel.fr used
+(`/settings`, `/settings/emails`, `/settings/emails/verify`,
+`/settings/sessions` and `/settings/history`). Links sent before the move still
+open the same page, and browsers keep a verification link's fragment
 (`/settings/emails/verify#token=…`). Notice emails link to `/settings/history`
 and never expire: keep the redirect, and those paths on auth, for as long as
 piquel.fr serves nothing at them. A path ending in a slash, which piquel.fr's
 settings also accepted, redirects to the page.
 
-A redirect route sends no headers of its own, so piquel.fr's
-`Strict-Transport-Security` is set at Cloudflare's edge, with the values piquel-web
-sent: `max-age=31536000`, without `includeSubDomains` or `preload`.
+Cloudflare's edge also sets piquel.fr's `Strict-Transport-Security`, with the
+values piquel-web sends: `max-age=31536000`, without `includeSubDomains` or
+`preload`. It dates from when the route was a redirect, which sends no headers
+of its own.
 
 ## Telemetry
 

@@ -55,6 +55,14 @@ pub struct ServerMetadata {
     pub jwks_uri: Url,
     /// Human-readable documentation for client developers.
     pub service_documentation: Url,
+    /// The provider's privacy policy, for users (OIDC Discovery 1.0 §3). Absent
+    /// from issuers that predate it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub op_policy_uri: Option<Url>,
+    /// The provider's terms of service, for users (OIDC Discovery 1.0 §3). Absent
+    /// from issuers that predate them.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub op_tos_uri: Option<Url>,
     /// Standard scopes clients may request.
     #[serde(deserialize_with = "known")]
     pub scopes_supported: Vec<Scope>,

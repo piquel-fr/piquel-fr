@@ -39,7 +39,7 @@ use crate::{
     account::{AccountError, AccountService},
     admin::{AdminOperation, DashboardSignIn, SignedInAdmin},
     assets::EmbeddedAssets,
-    config::DashboardConfig,
+    config::{DashboardConfig, PolicyLinks},
     recovery::RecoveryLinks,
     routes,
     security::{ApiError, RequestContext},
@@ -98,6 +98,8 @@ pub(crate) struct AdminApplication {
     audit_key: NoteVerifier,
     /// Every answer's Content-Security-Policy.
     policy: HeaderValue,
+    /// Piquel's policies on piquel.fr, which every page's footer links.
+    policies: PolicyLinks,
 }
 
 /// What a page answers in its place, such as the redirect through auth's handoff
@@ -194,6 +196,7 @@ impl AdminApplication {
             links: config.email.recovery_links.clone(),
             audit_key: config.audit.verifier().clone(),
             policy: HeaderValue::try_from(policy)?,
+            policies: config.oidc.policies.clone(),
         })
     }
 
@@ -490,6 +493,7 @@ impl AdminApplication {
                 current: current,
                 sign_out: leave,
                 reference: HttpTelemetry::trace_id(status),
+                policies: Self::of(cx).policies.links(),
                 (page)
             )
         }
