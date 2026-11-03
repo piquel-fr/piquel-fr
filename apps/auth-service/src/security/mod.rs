@@ -51,8 +51,6 @@ pub(crate) const CSRF_HEADER: &str = "x-piquel-csrf";
 const FETCH_SITE_HEADER: &str = "sec-fetch-site";
 /// Trusted ingress must overwrite this header with exactly one client address.
 const FORWARDED_FOR_HEADER: &str = "x-forwarded-for";
-/// Request budget per category and client in each [`RATE_WINDOW`].
-const REQUESTS_PER_MINUTE: i32 = 120;
 /// Requests refused because their client's budget was exhausted, by category.
 static THROTTLED: Counter<[Label; 1]> = Counter::new(
     "piquel.auth.throttled",
@@ -1266,6 +1264,8 @@ pub(crate) struct HttpSecurity {
     pub trusted_proxies: Arc<Vec<IpNet>>,
     /// Deadline for the whole request, handler included.
     pub request_timeout: StdDuration,
+    /// Request budget per category and client in each [`RATE_WINDOW`].
+    pub requests_per_minute: i32,
     /// Origin of the listener's own pages, allowed on every endpoint.
     pub origin: url::Origin,
     /// Which listener it guards.
@@ -1292,6 +1292,7 @@ impl HttpSecurity {
             database,
             trusted_proxies: Arc::new(config.trusted_proxies.clone()),
             request_timeout: REQUEST_TIMEOUT,
+            requests_per_minute: config.requests_per_minute,
             origin: config.passkey.origin.as_url().origin(),
             listener: Listener::Public,
         }
@@ -1468,7 +1469,7 @@ impl HttpSecurity {
             if !self
                 .database
                 .security()
-                .allow_request(bucket.as_bytes(), REQUESTS_PER_MINUTE, RATE_WINDOW)
+                .allow_request(bucket.as_bytes(), self.requests_per_minute, RATE_WINDOW)
                 .await?
             {
                 THROTTLED.add(1, &[("category", category.as_str())]);
