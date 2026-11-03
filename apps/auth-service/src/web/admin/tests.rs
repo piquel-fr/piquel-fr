@@ -787,6 +787,20 @@ async fn administrators_change_an_accounts_settings_with_a_reason() {
     assert!(refused.contains("This is already the account"), "{refused}");
 }
 
+/// An administrator's settings sidebar links the dashboard; nobody else's does.
+#[tokio::test]
+#[ignore = "requires TEST_DATABASE_URL"]
+async fn administrators_sidebars_link_the_dashboard() {
+    let harness = Harness::new().await;
+    let admin = harness.admin().await;
+    let other = Browser::new_account(&harness.database).await;
+    let page = html(admin.visit(&harness.auth.a, "/settings").await).await;
+    assert!(page.contains("Admin dashboard"), "{page}");
+    assert!(page.contains(DASHBOARD), "{page}");
+    let page = html(other.visit(&harness.auth.a, "/settings").await).await;
+    assert!(!page.contains("Admin dashboard"), "{page}");
+}
+
 /// Granting rights starts from a search: the page lists the accounts matching a
 /// handle, with a button for each that may be granted, and the button's form
 /// makes the account an administrator.

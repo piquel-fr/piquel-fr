@@ -430,11 +430,19 @@ impl WebApplication {
             handle: profile.handle.as_str(),
             administrator,
         };
+        // Only an administrator's sidebar links the dashboard, on deployments
+        // that serve one; its origin starts the handoff itself.
+        let dashboard = self
+            .dashboard
+            .as_ref()
+            .filter(|_| administrator)
+            .map(|sign_in| sign_in.dashboard().serialized());
         let nav = AccountNav {
             section,
             tabs: &TABS,
             current: tab,
             developers: page::developers::HOME,
+            dashboard: dashboard.as_deref(),
         };
         let page = view! { cx =>
             piquel_ui::account(

@@ -804,13 +804,17 @@ pub struct AccountNav<'a> {
     pub current: Option<Tab>,
     /// The developer console's home.
     pub developers: &'a str,
+    /// The admin dashboard, for an account that administers Piquel; a section of
+    /// its own in the sidebar, which nobody else sees.
+    pub dashboard: Option<&'a str>,
 }
 
 /// A signed-in page of `section`, in the account's shell: the sidebar of `nav`
 /// for `who`, signing out by posting to `sign_out`, the preference forms posting
 /// to `preferences_action`, reversing `preferences`, and coming back to `here`,
 /// the page named `title` in the crumb, and the status bar linking Piquel's
-/// `policies`; then what the account's `recovery` that can still be undone asks,
+/// `policies`; an administrator's sidebar also links the dashboard. Then what
+/// the account's `recovery` that can still be undone asks,
 /// if any, such as a [`crate::recovery_banner`]; the page's `head`, such as an
 /// app's tabs, its `messages`, and the page as `child`.
 #[component]
@@ -852,17 +856,35 @@ pub async fn account<'a>(
         current: nav.section == Section::Developers,
         warning: false,
     }];
+    let dashboard: Vec<_> = nav
+        .dashboard
+        .map(|href| NavItem {
+            icon: Icon::Shield,
+            label: "Admin dashboard",
+            href,
+            current: false,
+            warning: false,
+        })
+        .into_iter()
+        .collect();
     Ok(view! {
-        let groups = [
-            NavGroup {
+        let groups: Vec<_> = [
+            Some(NavGroup {
                 label: Some("account"),
                 items: &tabs,
-            },
-            NavGroup {
+            }),
+            Some(NavGroup {
                 label: Some("developers"),
                 items: &console,
-            },
-        ];
+            }),
+            (!dashboard.is_empty()).then_some(NavGroup {
+                label: Some("admin"),
+                items: &dashboard,
+            }),
+        ]
+        .into_iter()
+        .flatten()
+        .collect();
         let frame = Shell {
             home,
             area: nav.section.label(),
