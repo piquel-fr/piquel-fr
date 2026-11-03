@@ -449,7 +449,7 @@ impl DatabaseTransaction<'_> {
     /// the anchor, and only until this returns. The anchor only moves forward, so
     /// of two concurrent prunes, the one that would move it back fails. Deleting
     /// years of history may take a while, so its statements may each run for
-    /// [`PRUNE_STATEMENT_TIMEOUT`], until the transaction ends.
+    /// 30 minutes (`PRUNE_STATEMENT_TIMEOUT`), until the transaction ends.
     ///
     /// # Errors
     ///

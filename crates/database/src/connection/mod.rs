@@ -279,7 +279,7 @@ impl Database {
     /// Runs schema migrations when explicitly requested through the auth binary.
     ///
     /// They run on a dedicated connection, whose statements may take up to
-    /// [`MIGRATION_STATEMENT_TIMEOUT`]. It first waits, without a time limit, for
+    /// 30 minutes (`MIGRATION_STATEMENT_TIMEOUT`). It first waits, without a time limit, for
     /// [`LockKey::Migrations`], so overlapping runs take turns; `SQLx`'s own lock
     /// is then free. Lock waits get their default limit back before any DDL, so a
     /// migration blocked by a long transaction fails rather than queue every

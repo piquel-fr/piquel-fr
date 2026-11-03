@@ -195,7 +195,7 @@ impl AccountDeletionRepository<'_> {
     /// again. Callers end its sessions, which queues their clients' logout
     /// tokens, and delete the clients it manages first. The events themselves
     /// stay: they hold only pseudonymous IDs. Its statements may each run for
-    /// [`PURGE_STATEMENT_TIMEOUT`], until the caller's transaction ends.
+    /// 5 minutes (`PURGE_STATEMENT_TIMEOUT`), until the caller's transaction ends.
     ///
     /// # Errors
     ///
