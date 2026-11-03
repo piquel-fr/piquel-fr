@@ -130,14 +130,29 @@ keys again, which the SDKs do on an unknown `kid`, at most every 30 seconds.
 Auth's own replicas reload within a minute, so until then a token from one may
 fail at another.
 
+A `next` key signs only once its private key opens and matches its public key,
+checked in the transaction that promotes it. Otherwise the active key keeps
+signing, every rotation attempt logs the failure, and `keys revoke <id>` removes
+the bad key so rotation can publish another. Reloads also check the `next` and
+`retiring` keys: one that fails is left out of JWKS and logged.
+
+A replica that cannot reload its keys keeps the set it has, but fails readiness
+after 5 minutes. After 15 minutes it stops using them: endpoints that sign or
+verify answer `503`, so it never trusts a revoked key for longer than that.
+
 #### Revoking a compromised key
 
 `keys revoke <id>` deletes the key. If it was signing, the `next` and `retiring`
 keys go with it, since their private keys were stored alongside, and a new key
-signs at once.
+signs at once. This works even when the active key cannot be opened, which is
+how to recover a key set whose active key is broken. Every other change first
+checks that its `AUTH_KEY_ENCRYPTION_KEY` opens the active key, so check that
+the command runs with the deployment's key: replacing a key with one no replica
+can open makes the replicas unready until it is revoked again with the right one.
 Revocation takes effect in two places, at different times:
 
-- **At auth:** within a minute, every replica stops accepting the key, for
+- **At auth:** within a minute, every replica that can reload stops accepting
+  the key, and one that cannot stops serving within 15 minutes, for
   access tokens at `UserInfo`, and for `id_token_hint`s. The
   tokens it legitimately signed stop working at auth too, so their users sign
   in again through SSO.
@@ -673,7 +688,8 @@ explains how to choose a requirement and handle the challenge.
   at a reverse proxy so users do not share the proxy’s budget. Untrusted headers
   are ignored; missing/ambiguous headers from a trusted proxy fail closed. Security events are
   retained; the IP addresses, browser families and provider subjects recorded with
-  them are deleted after 90 days. Readiness checks PostgreSQL; startup validates configured signing/provider
+  them are deleted after 90 days. Readiness checks PostgreSQL and that the signing keys were reloaded in the last
+  5 minutes; startup validates configured signing/provider
   secrets. Request and provider calls have bounded timeouts.
 
 ## Validation

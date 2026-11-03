@@ -1,5 +1,5 @@
 //! Built-in health routes.
-use crate::{routes, security::ApiError};
+use crate::{SigningKeys, routes, security::ApiError};
 use axum::{Router, extract::State, http::StatusCode, routing::get};
 use piquel_repository::Database;
 
@@ -8,12 +8,14 @@ use piquel_repository::Database;
 pub(crate) struct ServiceApplication {
     /// Database checked by readiness.
     database: Database,
+    /// Signing keys, which readiness requires to have been reloaded recently.
+    keys: SigningKeys,
 }
 
 impl ServiceApplication {
-    /// Builds the health routes over `database`.
-    pub(crate) const fn new(database: Database) -> Self {
-        Self { database }
+    /// Builds the health routes over `database` and this replica's `keys`.
+    pub(crate) const fn new(database: Database, keys: SigningKeys) -> Self {
+        Self { database, keys }
     }
 
     /// Returns all service-wide endpoints with this application as state.
@@ -29,8 +31,10 @@ impl ServiceApplication {
         std::future::ready(StatusCode::NO_CONTENT)
     }
 
-    /// Reports that the database can serve requests.
+    /// Reports that the database can serve requests, and that this replica's
+    /// signing keys were reloaded recently, so it trusts no key revoked since.
     async fn ready(State(app): State<Self>) -> Result<StatusCode, ApiError> {
+        app.keys.ready()?;
         app.database.health_check().await?;
         Ok(StatusCode::NO_CONTENT)
     }

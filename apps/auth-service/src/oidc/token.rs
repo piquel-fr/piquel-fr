@@ -152,7 +152,7 @@ impl TokenGrant<'_> {
             email: email.map(str::to_owned),
             email_verified: email.map(|_| true),
         });
-        let keys = app.keys.current();
+        let keys = app.keys.current()?;
         let access_token = keys.sign(
             TokenType::Access,
             &AccessTokenClaims {
@@ -531,7 +531,7 @@ impl OidcApplication {
             .ok_or_else(|| OAuthCode::InvalidToken.reject(bearer()))?;
         let claims: AccessTokenClaims = self
             .keys
-            .current()
+            .current()?
             .verify(token, TokenType::Access, &self.issuer)
             .map_err(|error| {
                 OAuthCode::InvalidToken

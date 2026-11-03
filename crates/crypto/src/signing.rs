@@ -1,6 +1,6 @@
 //! RSA signing for interoperable `OpenID` Connect ID and access tokens, and the key
 //! set that signs with one key and verifies with every key it publishes.
-use super::CryptoError;
+use super::{CryptoError, Digest};
 use base64::{Engine, engine::general_purpose::URL_SAFE_NO_PAD};
 use chrono::Utc;
 use openssl::{
@@ -112,6 +112,27 @@ impl PublicKey {
     #[must_use]
     pub const fn jwk(&self) -> &Jwk {
         &self.jwk
+    }
+
+    /// The key's JWK thumbprint (RFC 7638): the SHA-256 digest of its required
+    /// members, in lexicographic order and canonical form, so it names the key
+    /// itself, whatever its `kid` or how its JWK spells it.
+    ///
+    /// # Errors
+    /// Preserves failures reading the key from the provider.
+    pub fn thumbprint(&self) -> Result<Digest, CryptoError> {
+        let members = match self.jwk.kty {
+            KeyType::Rsa => {
+                let rsa = self.key.rsa()?;
+                // Base64url never needs escaping in JSON.
+                format!(
+                    r#"{{"e":"{}","kty":"RSA","n":"{}"}}"#,
+                    URL_SAFE_NO_PAD.encode(rsa.e().to_vec()),
+                    URL_SAFE_NO_PAD.encode(rsa.n().to_vec()),
+                )
+            }
+        };
+        Ok(Digest::sha256(members.as_bytes()))
     }
 
     /// Whether this key signs with `alg`. Requiring the header's algorithm to be

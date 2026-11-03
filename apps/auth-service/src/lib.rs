@@ -135,7 +135,7 @@ impl AuthConfig {
             passkeys.clone(),
         );
         let application = Router::new()
-            .merge(ServiceApplication::new(database.clone()).routes())
+            .merge(ServiceApplication::new(database.clone(), keys.clone()).routes())
             .merge(passkeys.routes())
             .merge(federation.clone().routes())
             .merge(HistoryApplication::new(database.clone()).routes())

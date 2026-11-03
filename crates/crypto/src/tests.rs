@@ -91,6 +91,36 @@ fn pkce_matches_rfc() {
     }
 }
 
+/// A JWK thumbprint matches RFC 7638's example, and names the key whatever its ID.
+#[test]
+fn thumbprints_match_rfc() {
+    use piquel_common::protocol::jwt::{Jwk, KeyType};
+    let jwk = Jwk {
+        alg: None,
+        e: "AQAB".to_owned(),
+        kid: "example".to_owned(),
+        kty: KeyType::Rsa,
+        n: "0vx7agoebGcQSuuPiLJXZptN9nndrQmbXEps2aiAFbWhM78LhWx4cbbfAAtVT86zwu1RK7aPFFxuhDR1L6tSoc_BJECPebWKRXjBZCiFV4n3oknjhMstn64tZ_2W-5JsGY4Hc5n9yBXArwl93lqt7_RN5w6Cf0h4QyQ5v-65YGjQR0_FDW2QvzqY368QQMicAtaSqzs8KJZgnYb9c7d0zgdAZHzu6qMQvRL5hajrn1n91CbOpbISD08qNLyrdkt-bFTWhAI4vMQFh6WeZu0fM4lFd2NcRwr3XPksINHaQ-G_xBniIqbw0Ls1jF44-csFCur-kEgU8awapJzKnqDKgw".to_owned(),
+        key_use: None,
+    };
+    let thumbprint = |jwk: Jwk| {
+        PublicKey::from_jwk(jwk)
+            .expect("key")
+            .thumbprint()
+            .expect("thumbprint")
+    };
+    let example = thumbprint(jwk.clone());
+    assert_eq!(
+        example.encoded(),
+        "NzbLsXh8uDCcd-6MNwXF4W_7noWXFZAfHkxZsRGC9Xs"
+    );
+    let renamed = Jwk {
+        kid: "renamed".to_owned(),
+        ..jwk
+    };
+    assert_eq!(thumbprint(renamed), example);
+}
+
 /// Key loading preserves parse sources and rejects unsafe key identifiers and sizes.
 #[test]
 fn rsa_configuration_boundaries() {

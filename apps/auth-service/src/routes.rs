@@ -5,7 +5,7 @@
 pub(crate) mod service {
     /// Liveness probe; answers whenever the process serves HTTP.
     pub(crate) const LIVE: &str = "/health/live";
-    /// Readiness probe; also checks the database.
+    /// Readiness probe; also checks the database and the signing keys' freshness.
     pub(crate) const READY: &str = "/health/ready";
 }
 

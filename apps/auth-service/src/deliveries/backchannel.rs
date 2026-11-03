@@ -7,14 +7,13 @@
 //! attempt: a receiver's replay check also drops repeated sends.
 
 use super::{DeliveryError, Failure, Sender, outbound::OutboundClient};
-use crate::SigningKeys;
+use crate::{SigningKeys, oidc::OAuthError};
 use axum::http::Method;
 use chrono::{DateTime, TimeDelta, Utc};
 use piquel_common::protocol::{
     claims::{Absent, Audience, LogoutEvents, LogoutTokenClaims},
     jwt::TokenType,
 };
-use piquel_crypto::CryptoError;
 use piquel_repository::{BackchannelLogout, Delivery};
 use std::time::Duration;
 
@@ -42,14 +41,16 @@ impl BackchannelLogoutSender {
         }
     }
 
-    /// The logout token of `delivery`, attempted at `now`.
+    /// The logout token of `delivery`, attempted at `now`. Fails, among the
+    /// internal failures of the OIDC endpoints, when signing fails or this
+    /// replica's keys are stale.
     fn token(
         &self,
         delivery: &Delivery<BackchannelLogout>,
         now: DateTime<Utc>,
-    ) -> Result<String, CryptoError> {
+    ) -> Result<String, OAuthError> {
         let recipient = &delivery.recipient;
-        self.keys.current().sign(
+        Ok(self.keys.current()?.sign(
             TokenType::Logout,
             &LogoutTokenClaims {
                 iss: self.issuer.clone(),
@@ -62,7 +63,7 @@ impl BackchannelLogoutSender {
                 events: LogoutEvents,
                 nonce: Absent,
             },
-        )
+        )?)
     }
 }
 

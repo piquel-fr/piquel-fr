@@ -1,7 +1,10 @@
 //! OAuth protocol failures, keeping the cause of every rejection and internal error.
 
 use super::ClientRedirect;
-use crate::security::{ApiError, SessionError};
+use crate::{
+    keys::StaleKeys,
+    security::{ApiError, SessionError},
+};
 use axum::{
     Json,
     http::{HeaderValue, StatusCode, header},
@@ -102,6 +105,9 @@ pub(crate) enum OAuthError {
     /// Signing, hashing or random generation failed.
     #[error(transparent)]
     Crypto(#[from] CryptoError),
+    /// This replica's signing keys are stale, so it neither signs nor verifies.
+    #[error(transparent)]
+    Keys(#[from] StaleKeys),
     /// A persisted or internally constructed URL could not be parsed.
     #[error("OIDC redirect URL is invalid")]
     Url(#[from] url::ParseError),
@@ -194,6 +200,7 @@ impl OAuthError {
             },
             error @ (Self::Database(_)
             | Self::Crypto(_)
+            | Self::Keys(_)
             | Self::Url(_)
             | Self::CookieHeader(_)
             | Self::PageAddress(_)) => error,
@@ -203,8 +210,10 @@ impl OAuthError {
 
 impl OAuthError {
     /// What the client is told: the status, the code and its description. Internal
-    /// failures become `server_error` and are logged as errors; rejections with a
-    /// cause are logged at debug level, since clients trigger them.
+    /// failures become `server_error` and are logged as errors, with `503` when
+    /// this replica's signing keys are stale, since another replica may serve the
+    /// request; rejections with a cause are logged at debug level, since clients
+    /// trigger them.
     pub(crate) fn public(&self) -> (StatusCode, OAuthCode, &str) {
         let (code, description) = match self {
             Self::Protocol {
@@ -217,6 +226,14 @@ impl OAuthError {
                     tracing::debug!(error = %ErrorChain(self), "OAuth request rejected");
                 }
                 (code.clone(), description.as_ref())
+            }
+            Self::Keys(_) => {
+                ApiError::log_error(self);
+                return (
+                    StatusCode::SERVICE_UNAVAILABLE,
+                    OAuthCode::ServerError,
+                    "signing keys are unavailable; try again",
+                );
             }
             Self::Database(_)
             | Self::Crypto(_)
@@ -269,6 +286,7 @@ impl From<OAuthError> for ApiError {
         match error {
             OAuthError::Protocol { description, .. } => Self::bad_request(description),
             OAuthError::Database(error) => error.into(),
+            OAuthError::Keys(error) => error.into(),
             error @ (OAuthError::Crypto(_)
             | OAuthError::Url(_)
             | OAuthError::CookieHeader(_)

@@ -7,6 +7,10 @@
 //! [`RETIRING_WINDOW`], while the tokens it signed may be valid. As `retired` it
 //! verifies only `id_token_hint`s, which may be expired, for [`RETIRED_WINDOW`],
 //! the longest session, and is then deleted.
+//!
+//! Every replica reloads its key set each [`RELOAD_EVERY`]. One that cannot turns
+//! unready after [`UNREADY_AFTER`], and stops using its stale key set after
+//! [`STALE_AFTER`], since it may still trust a revoked key.
 
 use crate::{
     Operator, jobs::Shutdown, oidc::ACCESS_TOKEN_SECONDS, oidc::PublicDocument,
@@ -17,14 +21,14 @@ use piquel_common::{
     events::{DomainEvent, EventContext, SigningKeyChange},
     protocol::jwt::KeyId,
 };
-use piquel_crypto::{CryptoError, KeyEncryptionKey, KeySet, PublicKey, Rs256Key, Secret};
+use piquel_crypto::{CryptoError, Digest, KeyEncryptionKey, KeySet, PublicKey, Rs256Key, Secret};
 use piquel_repository::{
     Database, DatabaseError, DatabaseTransaction, InsertSigningKey, SigningKeyState,
     SigningKeyType, StoredSigningKey,
 };
 use std::{
     sync::{Arc, PoisonError, RwLock},
-    time::Duration,
+    time::{Duration, Instant},
 };
 use thiserror::Error;
 use tokio::time::MissedTickBehavior;
@@ -40,8 +44,14 @@ const RETIRING_WINDOW: TimeDelta =
 /// How long a retired key verifies `id_token_hint`s: the longest session.
 const RETIRED_WINDOW: TimeDelta = TimeDelta::days(SESSION_LIFETIME_DAYS as i64);
 /// How often every replica advances rotation and reloads its key set: also the
-/// longest a revoked key keeps verifying at auth.
+/// longest a revoked key keeps verifying at auth, while reloads succeed.
 const RELOAD_EVERY: Duration = Duration::from_mins(1);
+/// How long a replica may go without reloading its key set before readiness
+/// fails, so traffic moves to the replicas that can, and someone hears of it.
+const UNREADY_AFTER: Duration = Duration::from_mins(5);
+/// How long a replica may go without reloading its key set before it stops using
+/// it: the longest a revoked key keeps verifying at a replica that cannot reload.
+const STALE_AFTER: Duration = Duration::from_mins(15);
 /// Characters of a generated key ID: 22 base64url characters carry 132 random bits.
 const KEY_ID_LENGTH: usize = 22;
 
@@ -64,6 +74,10 @@ pub enum KeyError {
         #[source]
         source: CryptoError,
     },
+    /// A stored private key is not the private half of the public key stored
+    /// with it.
+    #[error("stored signing key {0} does not match its public key")]
+    Mismatched(KeyId),
     /// No key with this ID exists.
     #[error("no signing key has ID {0}")]
     Unknown(KeyId),
@@ -72,26 +86,77 @@ pub enum KeyError {
     NoActiveKey,
 }
 
+/// This replica has not reloaded its key set for too long: it may still trust a
+/// revoked key, or lack the one that signs now.
+#[derive(Debug, Error)]
+#[error("signing keys were last reloaded {}s ago", .age.as_secs())]
+pub(crate) struct StaleKeys {
+    /// How long ago.
+    age: Duration,
+}
+
 /// The key set this replica signs and verifies with. Clones share it, and a reload
 /// replaces it for all of them at once.
 #[derive(Clone)]
-pub struct SigningKeys(Arc<RwLock<Arc<KeySet>>>);
+pub struct SigningKeys(Arc<RwLock<Loaded>>);
+
+/// A key set, and when it was loaded.
+struct Loaded {
+    /// The keys.
+    keys: Arc<KeySet>,
+    /// When they were loaded.
+    at: Instant,
+}
 
 impl SigningKeys {
     /// Shares `keys` until the next reload.
     pub(crate) fn new(keys: KeySet) -> Self {
-        Self(Arc::new(RwLock::new(Arc::new(keys))))
+        Self(Arc::new(RwLock::new(Loaded {
+            keys: Arc::new(keys),
+            at: Instant::now(),
+        })))
     }
 
     /// The current key set. A request keeps the set it started with.
-    pub(crate) fn current(&self) -> Arc<KeySet> {
-        // A writer only swaps the pointer, so a panic cannot leave it half-written.
-        Arc::clone(&self.0.read().unwrap_or_else(PoisonError::into_inner))
+    ///
+    /// # Errors
+    /// Returns [`StaleKeys`] once no reload succeeded for [`STALE_AFTER`].
+    pub(crate) fn current(&self) -> Result<Arc<KeySet>, StaleKeys> {
+        self.loaded_within(STALE_AFTER)
+    }
+
+    /// Whether readiness passes: a reload succeeded in the last [`UNREADY_AFTER`].
+    ///
+    /// # Errors
+    /// Returns [`StaleKeys`] otherwise.
+    pub(crate) fn ready(&self) -> Result<(), StaleKeys> {
+        self.loaded_within(UNREADY_AFTER).map(drop)
+    }
+
+    /// The current key set, if it was loaded at most `limit` ago.
+    fn loaded_within(&self, limit: Duration) -> Result<Arc<KeySet>, StaleKeys> {
+        // A writer only swaps the value, so a panic cannot leave it half-written.
+        let loaded = self.0.read().unwrap_or_else(PoisonError::into_inner);
+        let age = loaded.at.elapsed();
+        if age > limit {
+            return Err(StaleKeys { age });
+        }
+        Ok(Arc::clone(&loaded.keys))
     }
 
     /// Replaces the key set for every clone.
     fn replace(&self, keys: KeySet) {
-        *self.0.write().unwrap_or_else(PoisonError::into_inner) = Arc::new(keys);
+        *self.0.write().unwrap_or_else(PoisonError::into_inner) = Loaded {
+            keys: Arc::new(keys),
+            at: Instant::now(),
+        };
+    }
+
+    /// Makes the key set look loaded `age` ago, as if reloads had failed since.
+    #[cfg(test)]
+    fn age(&self, age: Duration) {
+        let mut loaded = self.0.write().unwrap_or_else(PoisonError::into_inner);
+        loaded.at = Instant::now().checked_sub(age).expect("an earlier instant");
     }
 }
 
@@ -125,9 +190,10 @@ impl KeyStore {
     /// verifiers that cached JWKS see an unknown key until they fetch again.
     ///
     /// # Errors
-    /// Returns database and key generation failures.
+    /// Returns database and key generation failures, and refuses to make a `next`
+    /// key sign if its private key cannot be opened or does not match it.
     pub async fn rotate(&self, operator: &Operator, immediately: bool) -> Result<KeyId, KeyError> {
-        self.change(Some(operator), async |change| {
+        self.change(Some(operator), None, async |change| {
             change.rotate(immediately).await
         })
         .await
@@ -136,14 +202,18 @@ impl KeyStore {
     /// Deletes key `id` at once, for a compromised key: it leaves JWKS, and every
     /// replica stops accepting it within a minute. When it was the active key,
     /// every other key whose private key is still stored, `next` and `retiring`,
-    /// is deleted too, and a new key signs at once; its ID is returned.
+    /// is deleted too, and a new key signs at once; its ID is returned. Revoking
+    /// the active key works even when it cannot be opened, so it recovers a key
+    /// set whose active key is broken.
     ///
     /// # Errors
     /// Returns [`KeyError::Unknown`] for an unknown key, or the database or key
     /// generation failure.
     pub async fn revoke(&self, operator: &Operator, id: &KeyId) -> Result<Option<KeyId>, KeyError> {
-        self.change(Some(operator), async |change| change.revoke(id).await)
-            .await
+        self.change(Some(operator), Some(id), async |change| {
+            change.revoke(id).await
+        })
+        .await
     }
 
     /// Imports `key`, the deployment's PEM key, as the active key, so tokens it
@@ -153,8 +223,10 @@ impl KeyStore {
     /// # Errors
     /// Returns database and sealing failures.
     pub async fn import(&self, operator: &Operator, key: Rs256Key) -> Result<bool, KeyError> {
-        self.change(Some(operator), async |change| change.import(key).await)
-            .await
+        self.change(Some(operator), None, async |change| {
+            change.import(key).await
+        })
+        .await
     }
 
     /// Makes sure a key signs, generating one on first start, and loads the key
@@ -163,14 +235,14 @@ impl KeyStore {
     /// # Errors
     /// Returns database, generation and loading failures.
     pub async fn start(&self) -> Result<SigningKeys, KeyError> {
-        self.change(None, async |change| change.advance().await)
+        self.change(None, None, async |change| change.advance().await)
             .await?;
         Ok(SigningKeys::new(self.key_set(&self.list().await?)?))
     }
 
     /// Every [`RELOAD_EVERY`], advances rotation unless another replica is, then
     /// reloads `keys`, until `shutdown`. Failures are logged and leave the
-    /// current key set in use.
+    /// current key set in use, until it is stale (see [`SigningKeys::current`]).
     pub(crate) async fn run(self, keys: SigningKeys, shutdown: Shutdown) {
         let mut interval = tokio::time::interval(RELOAD_EVERY);
         interval.set_missed_tick_behavior(MissedTickBehavior::Delay);
@@ -183,10 +255,16 @@ impl KeyStore {
             if let Err(error) = self.tick().await {
                 tracing::error!(?error, "signing key rotation failed");
             }
-            match self.list().await.and_then(|stored| self.key_set(&stored)) {
-                Ok(set) => keys.replace(set),
-                Err(error) => tracing::error!(?error, "could not reload signing keys"),
-            }
+            self.reload(&keys).await;
+        }
+    }
+
+    /// Reloads `keys` from the database. A failure is logged, and leaves the
+    /// current key set in use while it is fresh.
+    async fn reload(&self, keys: &SigningKeys) {
+        match self.list().await.and_then(|stored| self.key_set(&stored)) {
+            Ok(set) => keys.replace(set),
+            Err(error) => tracing::error!(?error, "could not reload signing keys"),
         }
     }
 
@@ -208,8 +286,8 @@ impl KeyStore {
         if !tx.signing_keys().try_lock().await? {
             return Ok(false);
         }
-        self.check(tx).await?;
-        Change::new(tx, &self.kek, now, None).advance().await?;
+        self.check(tx, None).await?;
+        Change::new(tx, self, now, None).advance().await?;
         Ok(true)
     }
 
@@ -217,11 +295,20 @@ impl KeyStore {
     /// and the stored keys form a key set, before changing them: otherwise a
     /// command or replica with another key-encryption key would store keys that
     /// no replica can load, and every replica would keep its stale key set.
-    async fn check(&self, tx: &mut DatabaseTransaction<'_>) -> Result<(), KeyError> {
+    ///
+    /// Revoking the active key, `revoking`, keeps no stored private key, so it
+    /// skips the check, which recovers a key set whose active key cannot be
+    /// opened. An operator with the wrong key-encryption key could then replace a
+    /// working key with one no replica opens: replicas turn unready, and revoking
+    /// it again with the right key-encryption key recovers.
+    async fn check(
+        &self,
+        tx: &mut DatabaseTransaction<'_>,
+        revoking: Option<&KeyId>,
+    ) -> Result<(), KeyError> {
         let stored = tx.signing_keys().list().await?;
-        if stored
-            .iter()
-            .any(|key| key.state == SigningKeyState::Active)
+        if Change::find(&stored, SigningKeyState::Active)
+            .is_some_and(|active| Some(&active.id) != revoking)
         {
             self.key_set(&stored)?;
         }
@@ -229,48 +316,55 @@ impl KeyStore {
     }
 
     /// Runs `apply` in a transaction holding the signing key lock, then commits.
+    /// `revoking` names the key the change revokes, if any (see [`Self::check`]).
     async fn change<T>(
         &self,
         operator: Option<&Operator>,
+        revoking: Option<&KeyId>,
         apply: impl AsyncFnOnce(&mut Change<'_, '_>) -> Result<T, KeyError>,
     ) -> Result<T, KeyError> {
         let mut tx = self.database.begin().await?;
         tx.signing_keys().lock().await?;
-        self.check(&mut tx).await?;
+        self.check(&mut tx, revoking).await?;
         let context = operator.map(Operator::context);
-        let value = apply(&mut Change::new(&mut tx, &self.kek, Utc::now(), context)).await?;
+        let value = apply(&mut Change::new(&mut tx, self, Utc::now(), context)).await?;
         tx.commit().await?;
         Ok(value)
     }
 
     /// Builds the key set of `stored` keys: the active one signs, `next` and
     /// `retiring` ones verify and are published with it, retired ones verify hints.
+    /// Each key with a private key is opened first, so only public keys matching
+    /// the private keys sealed with them are trusted. A `next` or `retiring` one
+    /// that fails is left out and logged, rather than failing the whole set: it
+    /// signs nothing, and promotion refuses it.
     fn key_set(&self, stored: &[StoredSigningKey]) -> Result<KeySet, KeyError> {
         let mut signer = None;
         let (mut published, mut retired) = (Vec::new(), Vec::new());
         for key in stored {
-            let invalid = |source| KeyError::Stored {
-                id: key.id.clone(),
-                source,
-            };
-            let public = PublicKey::from_jwk(key.public_jwk.clone()).map_err(invalid)?;
             match key.state {
                 SigningKeyState::Active => {
-                    // The table keeps a private key for every key that is not retired.
-                    let sealed = key.sealed_private_key.as_deref().unwrap_or_default();
-                    let der = self
-                        .kek
-                        .open(sealed, &Change::associated_data(&key.id, key.key_type))
-                        .map_err(invalid)?;
-                    signer = Some(match key.key_type {
-                        SigningKeyType::Rsa => {
-                            Rs256Key::from_der(key.id.as_str(), &der).map_err(invalid)?
-                        }
-                    });
-                    published.push(public);
+                    let private = self.open(key)?;
+                    published.push(private.public_key().clone());
+                    signer = Some(private);
                 }
-                SigningKeyState::Next | SigningKeyState::Retiring => published.push(public),
-                SigningKeyState::Retired => retired.push(public),
+                SigningKeyState::Next | SigningKeyState::Retiring => match self.open(key) {
+                    Ok(private) => published.push(private.public_key().clone()),
+                    Err(error) => tracing::error!(
+                        ?error,
+                        key_id = %key.id,
+                        state = %key.state,
+                        "leaving out a signing key that cannot be opened",
+                    ),
+                },
+                SigningKeyState::Retired => retired.push(
+                    PublicKey::from_jwk(key.public_jwk.clone()).map_err(|source| {
+                        KeyError::Stored {
+                            id: key.id.clone(),
+                            source,
+                        }
+                    })?,
+                ),
             }
         }
         Ok(KeySet::new(
@@ -279,6 +373,67 @@ impl KeyStore {
             retired,
         )?)
     }
+
+    /// Opens `key`'s sealed private key, under either [`Binding`], and checks it
+    /// is the private half of the public key stored with it.
+    fn open(&self, key: &StoredSigningKey) -> Result<Rs256Key, KeyError> {
+        let invalid = |source| KeyError::Stored {
+            id: key.id.clone(),
+            source,
+        };
+        let thumbprint = PublicKey::from_jwk(key.public_jwk.clone())
+            .and_then(|public| public.thumbprint())
+            .map_err(invalid)?;
+        // The table keeps a private key for every key that is not retired.
+        let sealed = key.sealed_private_key.as_deref().unwrap_or_default();
+        // Opening fails only as `Unsealable`, so the attempts lose no detail.
+        let der = Binding::ALL
+            .into_iter()
+            .find_map(|binding| {
+                let associated = binding.associated_data(&key.id, key.key_type, &thumbprint);
+                self.kek.open(sealed, &associated).ok()
+            })
+            .ok_or(CryptoError::Unsealable)
+            .map_err(invalid)?;
+        let private = match key.key_type {
+            SigningKeyType::Rsa => Rs256Key::from_der(key.id.as_str(), &der).map_err(invalid)?,
+        };
+        if private.public_key().thumbprint().map_err(invalid)? != thumbprint {
+            return Err(KeyError::Mismatched(key.id.clone()));
+        }
+        Ok(private)
+    }
+}
+
+/// What the associated data of a sealed private key binds it to, so a sealed key
+/// moved to another record fails to open.
+#[derive(Clone, Copy, Debug)]
+enum Binding {
+    /// The key's ID, its type and its public key's JWK thumbprint, so the
+    /// public key stored with it cannot be swapped either. Releases open it, but
+    /// none seals with it yet: the release before must open it first, or a
+    /// rollback would leave keys no replica can open.
+    PublicKey,
+    /// The key's ID and type: how every release so far seals.
+    Record,
+}
+
+impl Binding {
+    /// Every binding, in the order opening tries them.
+    const ALL: [Self; 2] = [Self::PublicKey, Self::Record];
+    /// The binding new keys are sealed with.
+    const SEALS: Self = Self::Record;
+
+    /// The associated data of the key `id` of `key_type`, whose public key's JWK
+    /// thumbprint is `thumbprint`. Fields are separated by newlines, which none
+    /// contains.
+    fn associated_data(self, id: &KeyId, key_type: SigningKeyType, thumbprint: &Digest) -> Vec<u8> {
+        match self {
+            Self::PublicKey => format!("{id}\n{key_type}\n{}", thumbprint.encoded()),
+            Self::Record => format!("{id}\n{key_type}"),
+        }
+        .into_bytes()
+    }
 }
 
 /// One change to the signing keys: a transaction holding their lock, the time
@@ -286,8 +441,8 @@ impl KeyStore {
 struct Change<'t, 'c> {
     /// Holds the signing key lock until it ends.
     tx: &'t mut DatabaseTransaction<'c>,
-    /// Seals new private keys.
-    kek: &'t KeyEncryptionKey,
+    /// Seals new private keys and opens stored ones.
+    store: &'t KeyStore,
     /// When the change happens.
     now: DateTime<Utc>,
     /// Who makes it, for its events. `None` for rotation by the service itself,
@@ -300,22 +455,16 @@ impl<'t, 'c> Change<'t, 'c> {
     /// A change in `tx`, which must hold the signing key lock.
     const fn new(
         tx: &'t mut DatabaseTransaction<'c>,
-        kek: &'t KeyEncryptionKey,
+        store: &'t KeyStore,
         now: DateTime<Utc>,
         context: Option<EventContext>,
     ) -> Self {
         Self {
             tx,
-            kek,
+            store,
             now,
             context,
         }
-    }
-
-    /// Binds a sealed private key to its record: the key's ID and type, separated
-    /// by a newline, which no key ID contains.
-    fn associated_data(id: &KeyId, key_type: SigningKeyType) -> Vec<u8> {
-        format!("{id}\n{key_type}").into_bytes()
     }
 
     /// Logs a change and records it as made by the operator, if any.
@@ -340,9 +489,9 @@ impl<'t, 'c> Change<'t, 'c> {
     async fn insert(&mut self, key: &Rs256Key, state: SigningKeyState) -> Result<KeyId, KeyError> {
         let key_type = SigningKeyType::Rsa;
         let id: KeyId = key.kid().parse().map_err(|_| CryptoError::KeyId)?;
-        let sealed_private_key = self.kek.seal(
+        let sealed_private_key = self.store.kek.seal(
             &key.private_key_der()?,
-            &Self::associated_data(&id, key_type),
+            &Binding::SEALS.associated_data(&id, key_type, &key.public_key().thumbprint()?),
         )?;
         self.tx
             .signing_keys()
@@ -371,8 +520,17 @@ impl<'t, 'c> Change<'t, 'c> {
         Ok(id)
     }
 
-    /// Makes `next` sign in place of `active`, which keeps being published.
+    /// Makes `next` sign in place of `active`, which keeps being published. First
+    /// opens `next`'s private key and checks it matches its public key, so a key
+    /// that cannot sign is refused, and the active key keeps signing: revoke it,
+    /// and rotation publishes another.
     async fn promote(&mut self, next: &KeyId, active: Option<&KeyId>) -> Result<(), KeyError> {
+        let keys = self.tx.signing_keys().list().await?;
+        let stored = keys
+            .iter()
+            .find(|key| key.id == *next)
+            .ok_or_else(|| KeyError::Unknown(next.clone()))?;
+        self.store.open(stored)?;
         if let Some(active) = active {
             self.tx.signing_keys().deactivate(active, self.now).await?;
             self.record(active, SigningKeyChange::Retiring).await?;

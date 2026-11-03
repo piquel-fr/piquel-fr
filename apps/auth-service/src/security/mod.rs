@@ -1,5 +1,6 @@
 //! Shared browser-session, passkey confirmation and HTTP trust boundaries.
 
+use crate::keys::StaleKeys;
 use crate::recovery::ProbationPasskey;
 use crate::routes::{ACCOUNT_PREFIX, audit, oidc, page, passkey, service};
 use axum::{
@@ -153,6 +154,16 @@ impl ApiError {
         }
     }
 
+    /// Logs why this replica cannot serve the request now and answers `503`, since
+    /// another replica, or this one later, may.
+    pub(crate) fn unavailable(error: impl std::error::Error) -> Self {
+        Self::log_error(&error);
+        Self::new(
+            StatusCode::SERVICE_UNAVAILABLE,
+            "The service is unavailable right now. Please try again.",
+        )
+    }
+
     /// Logs an internal source chain and returns a generic browser message.
     pub(crate) fn internal(error: impl std::error::Error) -> Self {
         Self::log_error(&error);
@@ -177,6 +188,13 @@ impl From<DatabaseError> for ApiError {
             | DatabaseError::InvalidStoredData { .. }
             | DatabaseError::Operation(_)) => Self::internal(error),
         }
+    }
+}
+
+impl From<StaleKeys> for ApiError {
+    /// Stale signing keys are this replica's failure, so another may serve the request.
+    fn from(error: StaleKeys) -> Self {
+        Self::unavailable(error)
     }
 }
 

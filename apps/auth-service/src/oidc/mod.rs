@@ -441,10 +441,9 @@ impl OidcApplication {
     /// Serves the published signing keys: the active key, the `next` one and
     /// those still retiring.
     fn jwks(State(app): State<Self>) -> std::future::Ready<Result<PublicDocument, OAuthError>> {
-        std::future::ready(
-            PublicDocument::new(app.keys.current().jwks())
-                .map_err(|error| CryptoError::Json(error).into()),
-        )
+        std::future::ready(app.keys.current().map_err(Into::into).and_then(|keys| {
+            PublicDocument::new(keys.jwks()).map_err(|error| CryptoError::Json(error).into())
+        }))
     }
 
     /// Authenticates the client at the token, revocation and pushed authorization
