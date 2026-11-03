@@ -2,7 +2,7 @@
  * `WWW-Authenticate: Bearer` challenges (RFC 6750 §3, RFC 9470 §3, RFC 9728 §5.1),
  * written by resource servers and read back by clients, exactly as the Rust SDK does.
  */
-import type { BearerChallenge, StepUpRequirement } from './protocol.ts';
+import type { Acr, BearerChallenge, StepUpRequirement } from './protocol.ts';
 import { includes } from './json.ts';
 import { Scopes } from './scope.ts';
 import { ACR } from './vocabulary.ts';
@@ -27,6 +27,19 @@ function quote(value: string): string {
     return control ? '?' : character;
   });
   return `"${characters.join('')}"`;
+}
+
+/**
+ * The class an `acr_values` list asks for: most preferred first, so the first value
+ * this version knows, as auth picks it (OIDC Core §3.1.2.1).
+ */
+export function readAcrValues(value: string): Acr | undefined {
+  return value.split(/[\t\n\f\r ]+/).find((acr) => includes(ACR, acr));
+}
+
+/** A `max_age` in seconds: a `u32`, as Rust parses it. */
+export function readMaxAge(value: string): number | undefined {
+  return /^\+?[0-9]+$/.test(value) && Number(value) <= 0xffff_ffff ? Number(value) : undefined;
 }
 
 /** A challenge's status and `WWW-Authenticate` value. */
@@ -148,17 +161,16 @@ class ChallengeParser {
           break;
         }
         case 'acr_values': {
-          // Most preferred first: the target is the first value this version knows,
-          // as auth picks it (OIDC Core §3.1.2.1).
-          const target = value.split(/[\t\n\f\r ]+/).find((acr) => includes(ACR, acr));
-          if (includes(ACR, target)) challenge.acr_values = target;
+          const target = readAcrValues(value);
+          if (target !== undefined) challenge.acr_values = target;
           break;
         }
-        case 'max_age':
-          // A `u32`, as Rust parses it.
-          if (!/^\+?[0-9]+$/.test(value) || Number(value) > 0xffff_ffff) return undefined;
-          challenge.max_age = Number(value);
+        case 'max_age': {
+          const maxAge = readMaxAge(value);
+          if (maxAge === undefined) return undefined;
+          challenge.max_age = maxAge;
           break;
+        }
         case 'resource_metadata':
           if (!URL.canParse(value)) return undefined;
           challenge.resource_metadata = new URL(value).href;

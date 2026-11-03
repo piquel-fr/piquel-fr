@@ -208,6 +208,11 @@ export class IdToken extends AuthenticatedToken<IdTokenClaims> {
   static from(claims: IdTokenClaims, token: string, context: Context): IdToken {
     return new IdToken(claims, token, context);
   }
+
+  /** @internal Whether `other` names the same user at the same issuer, as a refresh's ID token must (OIDC Core §12.2). */
+  sameUser(other: IdToken): boolean {
+    return other.claims.sub === this.claims.sub && other.claims.iss === this.claims.iss;
+  }
 }
 
 /** Which sessions a back-channel logout ends: one auth session, or every session of a user. */

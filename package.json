@@ -4,7 +4,7 @@
   "type": "module",
   "packageManager": "pnpm@11.25.0",
   "scripts": {
-    "check": "tsc && tsc -p apps/auth-service/assets && tsc -p packages/auth --noEmit && tsc -p packages/auth/test",
+    "check": "tsc && tsc -p apps/auth-service/assets && tsc -p packages/auth --noEmit && tsc -p packages/auth/test && tsc -p packages/auth/examples",
     "lint": "eslint --max-warnings 0 . && pnpm --filter @piquel/auth lint",
     "test": "pnpm --filter @piquel/auth test",
     "format": "prettier --write .",
