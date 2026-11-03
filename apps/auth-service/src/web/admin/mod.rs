@@ -27,6 +27,8 @@ mod invitations;
 mod lists;
 /// The origins approved for clients' pages to sign users in with passkeys.
 mod origins;
+/// What needs attention, and what the service is doing now.
+mod overview;
 /// An account's settings, which administrators change on its owner's behalf.
 mod settings;
 #[cfg(test)]
@@ -42,7 +44,7 @@ use crate::{
     config::{DashboardConfig, PolicyLinks},
     recovery::RecoveryLinks,
     routes,
-    security::{ApiError, RequestContext},
+    security::{ApiError, BrowserCookie, RequestContext},
 };
 use axum::http::header::InvalidHeaderValue;
 use chrono::Duration;
@@ -50,11 +52,12 @@ use piquel_common::config::Origin;
 use piquel_crypto::NoteVerifier;
 use piquel_repository::Database;
 use piquel_telemetry::HttpTelemetry;
-use piquel_ui::DashboardTab;
+use piquel_ui::{Dashboard, DashboardTab, Health, PreferenceChange, Search, Who};
 use serde::Deserialize;
 use std::{
     future::Future,
-    sync::{Mutex, PoisonError},
+    sync::{Arc, Mutex, PoisonError},
+    time::{Duration as StdDuration, Instant},
 };
 use topcoat::{
     Error, Result,
@@ -62,7 +65,7 @@ use topcoat::{
     router::{
         Body, BodyLimit, HeaderValue, Method, Next, OriginPolicy, Route, Router, StatusCode,
         content::Form,
-        error::{SeeOther, see_other},
+        error::see_other,
         header, href, layer, parse_query_params,
         request::{extensions, headers, method, uri},
         response::{IntoResponse, Response},
@@ -76,6 +79,9 @@ use topcoat::{
 /// shown: showing it asks for a confirmation this much newer than the service
 /// needs.
 const FORM_TIME: Duration = Duration::minutes(2);
+/// How long every page shows the health the overview last found, before a page
+/// reads it again: the status bar must not cost each page the overview's queries.
+const HEALTH_FOR: StdDuration = StdDuration::from_secs(60);
 
 /// The dashboard's pages, and what every one of them needs.
 #[derive(Clone)]
@@ -100,6 +106,8 @@ pub(crate) struct AdminApplication {
     policy: HeaderValue,
     /// Piquel's policies on piquel.fr, which every page's footer links.
     policies: PolicyLinks,
+    /// The health the overview last found, and when, shared by every page.
+    health: Arc<Mutex<Option<(Instant, Health)>>>,
 }
 
 /// What a page answers in its place, such as the redirect through auth's handoff
@@ -182,7 +190,7 @@ impl AdminApplication {
         // A form's answer may send the browser on to auth's handoff page, to sign
         // in or confirm again: browsers apply `form-action` to its redirects too.
         let policy = format!(
-            "default-src 'none'; style-src {}; form-action 'self' {}; \
+            "default-src 'none'; style-src {}; font-src 'self'; form-action 'self' {}; \
              frame-ancestors 'none'; base-uri 'none'",
             dashboard.origin.join(&EmbeddedAssets::STYLESHEET.path()),
             auth.join(routes::page::ADMIN),
@@ -197,6 +205,7 @@ impl AdminApplication {
             audit_key: config.audit.verifier().clone(),
             policy: HeaderValue::try_from(policy)?,
             policies: config.oidc.policies.clone(),
+            health: Arc::default(),
         })
     }
 
@@ -211,7 +220,8 @@ impl AdminApplication {
             // axum's body limit does not reach Topcoat, whose own default is 2 MiB.
             .layer(BodyLimit::max(MAX_REQUEST_BODY_BYTES))
             .layer(answers)
-            .route(root)
+            .route(overview::overview)
+            .route(preferences)
             .route(sign_in)
             .route(sign_out)
             // The settings administrators share with owners, the account
@@ -225,22 +235,27 @@ impl AdminApplication {
             .fold(pages, topcoat::router::RouterBuilder::route)
             .build();
         let service = TowerService::new(pages);
-        let stylesheet = EmbeddedAssets::STYLESHEET.path();
-        routes::dashboard::PREFIXES
-            .iter()
-            .fold(axum::Router::new(), |router, prefix| {
-                let router = router.route_service(prefix, service.clone());
-                match prefix.trim_end_matches('/') {
-                    "" => router,
-                    prefix => router.route_service(&format!("{prefix}/{{*rest}}"), service.clone()),
-                }
-            })
-            .route(
-                &stylesheet,
+        let router =
+            routes::dashboard::PREFIXES
+                .iter()
+                .fold(axum::Router::new(), |router, prefix| {
+                    let router = router.route_service(prefix, service.clone());
+                    match prefix.trim_end_matches('/') {
+                        "" => router,
+                        prefix => {
+                            router.route_service(&format!("{prefix}/{{*rest}}"), service.clone())
+                        }
+                    }
+                });
+        // The stylesheet and the fonts it links, the dashboard's only files.
+        EmbeddedAssets::SHARED.iter().fold(router, |router, asset| {
+            router.route(
+                &asset.path(),
                 axum::routing::get(|uri: axum::http::Uri| {
                     std::future::ready(EmbeddedAssets::serve(uri.path()))
                 }),
             )
+        })
     }
 
     /// The page running `operation`, or `None` when only the CLI runs it, for now.
@@ -446,14 +461,53 @@ async fn answers(cx: &Cx, body: Body, next: Next<'_>) -> Result<Response> {
     Ok(response)
 }
 
+/// The query any dashboard page may carry: what the top bar's search box holds.
+#[derive(Deserialize)]
+struct SearchQuery {
+    /// What was searched for, on the users page.
+    q: Option<String>,
+}
+
 impl AdminApplication {
-    /// Answers with `page`, at `status`, in the document every page shares: the
-    /// tabs, the signed-in administrator's handle and signing out, and the trace
-    /// ID of a server error.
-    async fn render(cx: &Cx, status: StatusCode, page: impl View) -> Result<Response> {
+    /// Whether the service needs attention, as the overview last found, read
+    /// again once that is [`HEALTH_FOR`] old. A browser that is not signed in
+    /// learns nothing.
+    async fn health(cx: &Cx) -> Result<Health> {
+        let app = Self::of(cx);
+        let Ok(admin) = Self::admin(cx).await else {
+            return Ok(Health::Normal);
+        };
+        let cached = app
+            .health
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .filter(|(read, _)| read.elapsed() < HEALTH_FOR)
+            .map(|(_, health)| health);
+        if let Some(health) = cached {
+            return Ok(health);
+        }
+        let problems = app.service.overview(&admin.operator).await?.problems();
+        let health = match u32::try_from(problems.len()).unwrap_or(u32::MAX) {
+            0 => Health::Normal,
+            count => Health::Warnings(count),
+        };
+        *app.health.lock().unwrap_or_else(PoisonError::into_inner) = Some((Instant::now(), health));
+        Ok(health)
+    }
+
+    /// Answers with the page named `title` and `page`, at `status`, in the shell
+    /// every page shares: the sidebar of tabs, the signed-in administrator and
+    /// signing out, the account search, the service's health, and the trace ID
+    /// of a server error.
+    async fn render(cx: &Cx, status: StatusCode, title: &str, page: impl View) -> Result<Response> {
         // A browser that is not signed in is sent on by the page itself.
         let admin = Self::admin(cx).await.ok();
+        let app = Self::of(cx);
         let tabs = [
+            (
+                DashboardTab::Overview,
+                href!(overview::overview).resolve(cx),
+            ),
             (DashboardTab::Users, href!(users::search).resolve(cx)),
             (
                 DashboardTab::Administrators,
@@ -470,31 +524,65 @@ impl AdminApplication {
         let path = uri(cx).path();
         let current = tabs
             .iter()
+            .skip(1)
             .find(|(_, link)| path.starts_with(link.as_str()))
-            .map(|(tab, _)| *tab);
+            .map(|(tab, _)| *tab)
+            .or_else(|| (path == tabs[0].1).then_some(DashboardTab::Overview));
         let links: &Vec<_> = &tabs
             .iter()
             .map(|(tab, link)| (*tab, link.as_str()))
             .collect();
-        let (stylesheet, home, leave) = (
+        let (stylesheet, home, leave, search, prefer) = (
             &EmbeddedAssets::STYLESHEET.path(),
-            &href!(users::search).resolve(cx),
+            &tabs[0].1,
             &href!(sign_out).resolve(cx),
+            &href!(users::search).resolve(cx),
+            &href!(preferences).resolve(cx),
         );
-        let administrator = admin.map(|admin| admin.handle.as_str());
+        let here = uri(cx).path_and_query().map_or("/", |path| path.as_str());
+        let searched = parse_query_params::<SearchQuery>(cx)
+            .ok()
+            .and_then(|query| query.q)
+            .unwrap_or_default();
+        let administrator = admin.map(|admin| Who {
+            user: None,
+            name: admin.handle.as_str(),
+            handle: admin.handle.as_str(),
+            administrator: true,
+        });
+        let me = admin.map_or_else(String::new, |admin| Self::account(cx, admin.user_id));
+        let health = Self::health(cx).await?;
+        let environment = app.auth.host();
+        let dashboard = Dashboard {
+            title,
+            home,
+            administrator,
+            me: &me,
+            tabs: links,
+            current,
+            sign_out: leave,
+            preferences: BrowserCookie::read_preferences(headers(cx)),
+            preferences_action: prefer,
+            here,
+            health,
+            environment,
+            policies: app.policies.links(),
+            search: Search {
+                action: search,
+                name: "q",
+                placeholder: "Search by handle, name, email or ID",
+                value: &searched,
+            },
+            reference: HttpTelemetry::trace_id(status),
+        };
         let page = Child::new(page);
         let html = view! { cx =>
-            piquel_ui::dashboard_frame(
-                title: "Admin",
+            piquel_ui::document(
+                title: title,
                 stylesheet: stylesheet,
-                home: home,
-                administrator: administrator,
-                tabs: links,
-                current: current,
-                sign_out: leave,
-                reference: HttpTelemetry::trace_id(status),
-                policies: Self::of(cx).policies.links(),
-                (page)
+                preferences: dashboard.preferences,
+                admin: true,
+                piquel_ui::dashboard_frame(dashboard: &dashboard, (page))
             )
         }
         .single()
@@ -532,7 +620,7 @@ impl AdminApplication {
             if let AdminError::NotAdministrator = refused {
                 let home = &Self::of(cx).auth.join(routes::page::settings::HOME);
                 let page = view! { cx => piquel_ui::no_access(home: home.as_str()) };
-                return Self::render(cx, StatusCode::FORBIDDEN, page).await;
+                return Self::render(cx, StatusCode::FORBIDDEN, "No access", page).await;
             }
         }
         // A refusal shared with another handle, such as the memoized sign-in's,
@@ -548,7 +636,7 @@ impl AdminApplication {
         let page = view! { cx =>
             piquel_ui::dashboard_failure(title: "That did not work", detail: detail)
         };
-        Self::render(cx, status, page).await
+        Self::render(cx, status, "Refused", page).await
     }
 
     /// What a page that failed with `error`, which neither service explains,
@@ -567,14 +655,27 @@ impl AdminApplication {
                 detail: "Something went wrong on our side. Please try again.",
             )
         };
-        Self::render(cx, status, page).await
+        Self::render(cx, status, "Error", page).await
     }
 }
 
-/// `/`: the account search.
-#[route(GET "/")]
-async fn root(cx: &Cx) -> Result<SeeOther> {
-    Ok(see_other(href!(users::search).resolve(cx)))
+/// `/preferences`: keeps the theme or sidebar width a page's form chose, in
+/// cookies on the dashboard's origin, and goes back to the page, by `POST`; a
+/// `GET` goes to the overview.
+#[route([GET, POST] "/preferences")]
+async fn preferences(cx: &Cx, form: Option<Form<PreferenceChange>>) -> Result<Response> {
+    let home = href!(overview::overview).resolve(cx);
+    let Some(Form(change)) = form.filter(|_| method(cx) == Method::POST) else {
+        return see_other(home).into_response(cx);
+    };
+    // The dashboard's pages send paths; anything else goes to the overview.
+    let back = match change.return_to.as_str() {
+        path if path.starts_with('/') && !path.starts_with("//") && !path.contains('\\') => path,
+        _ => home.as_str(),
+    };
+    let mut response = see_other(back).into_response(cx)?;
+    BrowserCookie::set_preferences_on(&mut response, &change)?;
+    Ok(response)
 }
 
 /// `/sign-in`: redeems auth's handoff code, and goes on to the page the sign-in
@@ -593,7 +694,7 @@ async fn sign_in(cx: &Cx) -> Result<Response> {
         }
         Err(refused @ AdminError::InvalidHandoff) => {
             refused.log_refusal();
-            let retry = href!(root).resolve(cx);
+            let retry = href!(overview::overview).resolve(cx);
             let page = view! { cx =>
                 piquel_ui::dashboard_failure(
                     title: "Sign-in did not work",
@@ -601,7 +702,7 @@ async fn sign_in(cx: &Cx) -> Result<Response> {
                     retry: retry,
                 )
             };
-            AdminApplication::render(cx, StatusCode::BAD_REQUEST, page).await
+            AdminApplication::render(cx, StatusCode::BAD_REQUEST, "Sign in", page).await
         }
         Err(error) => Err(error.into()),
     }
@@ -620,11 +721,11 @@ async fn sign_out(cx: &Cx) -> Result<Response> {
         return Ok(response);
     }
     let (again, auth_sign_out) = (
-        &href!(root).resolve(cx),
+        &href!(overview::overview).resolve(cx),
         &app.auth.join(routes::page::LOGOUT),
     );
     let page = view! { cx =>
         piquel_ui::dashboard_signed_out(sign_in: again, auth_sign_out: auth_sign_out)
     };
-    AdminApplication::render(cx, StatusCode::OK, page).await
+    AdminApplication::render(cx, StatusCode::OK, "Signed out", page).await
 }

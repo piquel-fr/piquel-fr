@@ -140,9 +140,9 @@ async fn signing_in_offers_passkeys_providers_and_a_handle() {
     );
     let page = html(response).await;
     assert!(page.contains("<title>Sign in · Piquel</title>"), "{page}");
-    assert!(page.contains("<h1>Welcome back.</h1>"), "{page}");
+    assert!(page.contains("<h1>Sign in</h1>"), "{page}");
     assert!(
-        page.contains("Sign in with a passkey, or use a linked social account."),
+        page.contains("Sign in with a passkey, or continue with a linked account."),
         "{page}"
     );
     let action = attribute(&link(LOGIN, &query));
@@ -429,10 +429,7 @@ async fn signing_up_starts_with_the_invitation() {
         page.contains("<title>Create your account · Piquel</title>"),
         "{page}"
     );
-    assert!(
-        page.contains("<h1>Your account starts here.</h1>"),
-        "{page}"
-    );
+    assert!(page.contains("<h1>Create your account</h1>"), "{page}");
     assert!(page.contains("data-passkey-register"), "{page}");
     assert!(
         page.contains(r#"<input type="hidden" name="action" value="registered">"#),
@@ -504,7 +501,7 @@ async fn social_signup_names_its_evidence_and_keeps_where_it_goes() {
     .await;
     assert!(
         page.contains(
-            r#"<p class="notice">Finish creating your account to add GitHub sign-in.</p>"#
+            r#"<p class="notice info">Finish creating your account to add GitHub sign-in.</p>"#
         ),
         "{page}"
     );
@@ -581,7 +578,7 @@ async fn linking_confirms_the_account_with_a_passkey() {
         "{page}"
     );
     assert!(
-        page.contains(&format!(r#"<p class="notice">{email}</p>"#)),
+        page.contains(&format!(r#"<p class="notice info">{email}</p>"#)),
         "{page}"
     );
     assert!(page.contains("data-passkey-sign-in"), "{page}");
@@ -795,7 +792,7 @@ async fn failures_are_said_above_the_page() {
         page.contains("No provider sign-in is waiting in this browser. Please start again."),
         "{page}"
     );
-    assert!(page.contains("<h1>Welcome back.</h1>"), "{page}");
+    assert!(page.contains("<h1>Sign in</h1>"), "{page}");
 
     let owner = Browser::new_account(&database).await;
     passkey(&database, owner.user_id).await;

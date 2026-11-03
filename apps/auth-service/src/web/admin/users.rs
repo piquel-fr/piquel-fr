@@ -1,6 +1,6 @@
 //! Account search, one account's page, and the changes made to an account.
 
-use super::{AdminApplication as App, lists, settings};
+use super::{AdminApplication as App, invitations, lists, settings};
 use crate::Reason;
 use piquel_common::{
     AccountStatus, SessionId, UserId,
@@ -8,7 +8,8 @@ use piquel_common::{
 };
 use piquel_repository::{RecentRecovery, RecoveryState};
 use piquel_ui::{
-    AccountPages, Query, RecoveryKey, RecoveryRow, RecoveryStanding, SessionRow, UserRow,
+    AccountPages, Action, Change, Pager, Query, RecoveryKey, RecoveryRow, RecoveryStanding,
+    SessionRow, UserRow,
 };
 use serde::de::IgnoredAny;
 use topcoat::{
@@ -34,44 +35,53 @@ const RECENT_EVENTS: usize = 10;
 struct SearchQuery {
     /// What to search for.
     q: Option<String>,
-    /// Where the page starts.
-    cursor: Option<UserId>,
+    /// The page wanted, counting from 1.
+    page: Option<u32>,
 }
 
 /// `/users`: searches accounts by handle, display name, email or ID.
 #[route(GET "/users")]
 pub(super) async fn search(cx: &Cx) -> Result<Response> {
     let admin = App::admin(cx).await?;
+    let app = App::of(cx);
     let query = query_params::<SearchQuery>(cx)?;
     let q = query.q.clone().unwrap_or_default();
-    let found = App::of(cx)
+    let found = app
         .service
-        .search_users(&admin.operator, &q, query.cursor)
+        .search_users(&admin.operator, &q, query.page)
         .await?;
+    let administrators: Vec<_> = app
+        .service
+        .list_administrators(&admin.operator)
+        .await?
+        .into_iter()
+        .map(|administrator| administrator.user_id)
+        .collect();
     let action = href!(search).resolve(cx);
     let rows: Vec<_> = found
         .users
         .iter()
         .map(|user| UserRow {
             user,
+            administrator: administrators.contains(&user.id),
             href: App::account(cx, user.id),
         })
         .collect();
-    let next = match found.next {
-        Some(cursor) => Some(
-            UserSearch {
-                q: q.clone(),
-                cursor: Some(cursor),
-            }
-            .on(&action)?,
-        ),
-        None => None,
-    };
-    let (action, q, rows) = (&action, &q, &rows);
+    let pager = Pager::of(found.paging, |page| {
+        UserSearch {
+            q: q.clone(),
+            page: Some(page),
+        }
+        .on(&action)
+    })?;
+    let invite = app
+        .invitations
+        .then(|| href!(invitations::create).resolve(cx));
+    let (q, rows, pager, invite) = (&q, &rows, &pager, invite.as_deref());
     let page = view! { cx =>
-        piquel_ui::user_search(action: action.as_str(), q: q.as_str(), rows: rows, next: next)
+        piquel_ui::user_search(q: q.as_str(), rows: rows, pages: pager, invite: invite)
     };
-    App::render(cx, StatusCode::OK, page).await
+    App::render(cx, StatusCode::OK, "Users", page).await
 }
 
 /// `/users/{account}`: everything about one account, and the changes the
@@ -89,14 +99,11 @@ pub(super) async fn detail(cx: &Cx) -> Result<Response> {
     let mut recent = service.events(&admin.operator, filter.clone()).await?;
     recent.events.truncate(RECENT_EVENTS);
     let changeable = !detail.administrator;
+    // A confirmed dashboard shows each change's form on the page itself; one that
+    // is not links the change's page, which confirms first.
+    let inline = admin.operator.is_confirmed(super::FORM_TIME);
+    let action = |href: String| Action { href, inline };
     let links = [
-        match detail.user.status {
-            AccountStatus::Active => href!(disable, Account(id)).resolve(cx),
-            AccountStatus::Disabled => href!(enable, Account(id)).resolve(cx),
-            AccountStatus::Deleting => href!(restore, Account(id)).resolve(cx),
-        },
-        href!(delete, Account(id)).resolve(cx),
-        href!(revoke_sessions, Account(id)).resolve(cx),
         href!(recover, Account(id)).resolve(cx),
         href!(undo_recovery, Account(id)).resolve(cx),
         href!(settings::sign_in, Account(id)).resolve(cx),
@@ -105,9 +112,6 @@ pub(super) async fn detail(cx: &Cx) -> Result<Response> {
         href!(settings::handle, Account(id)).resolve(cx),
     ];
     let [
-        status,
-        deleting,
-        revoking,
         recovering,
         undoing,
         signing_in,
@@ -115,11 +119,18 @@ pub(super) async fn detail(cx: &Cx) -> Result<Response> {
         connected,
         renaming,
     ] = links.each_ref().map(String::as_str);
+    let status = action(match detail.user.status {
+        AccountStatus::Active => href!(disable, Account(id)).resolve(cx),
+        AccountStatus::Disabled => href!(enable, Account(id)).resolve(cx),
+        AccountStatus::Deleting => href!(restore, Account(id)).resolve(cx),
+    });
+    let deleting = action(href!(delete, Account(id)).resolve(cx));
+    let revoking = action(href!(revoke_sessions, Account(id)).resolve(cx));
     let pages = if changeable {
         Ok(AccountPages {
-            status,
-            delete: deleting,
-            revoke_sessions: revoking,
+            status: &status,
+            delete: &deleting,
+            revoke_sessions: &revoking,
             recover: recovering,
             undo_recovery: undoing,
             sign_in: signing_in,
@@ -135,8 +146,9 @@ pub(super) async fn detail(cx: &Cx) -> Result<Response> {
         .iter()
         .map(|session| SessionRow {
             session,
-            revoke: changeable
-                .then(|| href!(revoke_session, Account(id), Session(session.id)).resolve(cx)),
+            revoke: changeable.then(|| {
+                action(href!(revoke_session, Account(id), Session(session.id)).resolve(cx))
+            }),
         })
         .collect();
     let events = App::event_rows(cx, &recent.events);
@@ -152,8 +164,14 @@ pub(super) async fn detail(cx: &Cx) -> Result<Response> {
             all_events: all_events.as_str(),
         )
     };
-    // The account's page is the dashboard's largest view, so its render is boxed.
-    Box::pin(App::render(cx, StatusCode::OK, page)).await
+    // The dashboard's largest page: its future is boxed, off the handler's stack.
+    Box::pin(App::render(
+        cx,
+        StatusCode::OK,
+        detail.user.display_name.as_str(),
+        page,
+    ))
+    .await
 }
 
 /// `/users/{account}/disable`: disables the account with a reason, ending its
@@ -175,19 +193,13 @@ pub(super) async fn disable(cx: &Cx, form: Option<Form<DisableUser>>) -> Result<
     let refusal = refusal.as_deref();
     let page = view! { cx =>
         piquel_ui::dashboard_change(
-            title: "Disable this account",
-            description: "The account can no longer sign in, and every session and refresh grant ends now.",
-            button: "Disable",
+            change: Change::Disable,
             back: back.as_str(),
             refusal: refusal,
-            danger: true,
-            <label>
-                "Reason"
-                <input name="reason" required="" maxlength="500" value=(reason)>
-            </label>
+            reason: reason,
         )
     };
-    App::render(cx, StatusCode::OK, page).await
+    App::render(cx, StatusCode::OK, "Disable", page).await
 }
 
 /// `/users/{account}/enable`: reactivates a disabled account.
@@ -204,14 +216,12 @@ pub(super) async fn enable(cx: &Cx, form: Option<Form<IgnoredAny>>) -> Result<Re
     .await?;
     let page = view! { cx =>
         piquel_ui::dashboard_change(
-            title: "Enable this account",
-            description: "The account can sign in again with its passkeys.",
-            button: "Enable",
+            change: Change::Enable,
             back: back.as_str(),
             refusal: refusal.as_deref(),
         )
     };
-    App::render(cx, StatusCode::OK, page).await
+    App::render(cx, StatusCode::OK, "Enable", page).await
 }
 
 /// `/users/{account}/delete`: schedules the active account's deletion, with a
@@ -234,19 +244,13 @@ pub(super) async fn delete(cx: &Cx, form: Option<Form<ReasonForm>>) -> Result<Re
     let refusal = refusal.as_deref();
     let page = view! { cx =>
         piquel_ui::dashboard_change(
-            title: "Delete this account",
-            description: "The account can no longer sign in, and every session and refresh grant ends now. It is purged with its apps and personal data after 30 days, unless it is restored first; its owner can restore it by signing in with a passkey. To purge at once, use auth-service user delete --immediately, at the terminal.",
-            button: "Schedule the deletion",
+            change: Change::Delete,
             back: back.as_str(),
             refusal: refusal,
-            danger: true,
-            <label>
-                "Reason, shown to the owner in their history"
-                <input name="reason" required="" maxlength="500" value=(reason)>
-            </label>
+            reason: reason,
         )
     };
-    App::render(cx, StatusCode::OK, page).await
+    App::render(cx, StatusCode::OK, "Delete", page).await
 }
 
 /// `/users/{account}/restore`: restores an account scheduled for deletion, with a
@@ -268,18 +272,13 @@ pub(super) async fn restore(cx: &Cx, form: Option<Form<ReasonForm>>) -> Result<R
     let refusal = refusal.as_deref();
     let page = view! { cx =>
         piquel_ui::dashboard_change(
-            title: "Restore this account",
-            description: "The account is no longer scheduled for deletion and can sign in again with its passkeys.",
-            button: "Restore",
+            change: Change::Restore,
             back: back.as_str(),
             refusal: refusal,
-            <label>
-                "Reason, shown to the owner in their history"
-                <input name="reason" required="" maxlength="500" value=(reason)>
-            </label>
+            reason: reason,
         )
     };
-    App::render(cx, StatusCode::OK, page).await
+    App::render(cx, StatusCode::OK, "Restore", page).await
 }
 
 /// `/users/{account}/sessions/revoke`: ends every session of the account.
@@ -296,15 +295,12 @@ pub(super) async fn revoke_sessions(cx: &Cx, form: Option<Form<IgnoredAny>>) -> 
     .await?;
     let page = view! { cx =>
         piquel_ui::dashboard_change(
-            title: "Revoke every session",
-            description: "Every browser signed in to this account is signed out, and its applications lose their refresh grants.",
-            button: "Revoke all",
+            change: Change::RevokeSessions,
             back: back.as_str(),
             refusal: refusal.as_deref(),
-            danger: true,
         )
     };
-    App::render(cx, StatusCode::OK, page).await
+    App::render(cx, StatusCode::OK, "Revoke sessions", page).await
 }
 
 /// `/users/{account}/sessions/{session}/revoke`: ends one session.
@@ -322,15 +318,12 @@ pub(super) async fn revoke_session(cx: &Cx, form: Option<Form<IgnoredAny>>) -> R
     .await?;
     let page = view! { cx =>
         piquel_ui::dashboard_change(
-            title: "Revoke this session",
-            description: "The browser is signed out, and applications signed in through it lose their refresh grants.",
-            button: "Revoke",
+            change: Change::RevokeSession,
             back: back.as_str(),
             refusal: refusal.as_deref(),
-            danger: true,
         )
     };
-    App::render(cx, StatusCode::OK, page).await
+    App::render(cx, StatusCode::OK, "Revoke a session", page).await
 }
 
 /// The form of a change whose reason the owner sees in their history: starting
@@ -367,20 +360,14 @@ pub(super) async fn recover(cx: &Cx, form: Option<Form<ReasonForm>>) -> Result<R
     let rows = &App::recovery_rows(&recent);
     let page = view! { cx =>
         piquel_ui::dashboard_change(
-            title: "Recover this account",
-            description: "For an owner who lost every passkey. Ends every session, removes the account's unverified addresses, and emails its primary verified address a link that enrolls one passkey, once, within a day. For 15 days after, that passkey signs in but confirms no change, and any older passkey can undo the recovery. Follow the evidence policy first. An account that was in someone else's hands needs auth-service user recover --revoke, at the terminal.",
-            button: "Send the recovery link",
+            change: Change::Recover,
             back: back.as_str(),
             refusal: refusal,
-            danger: true,
+            reason: reason,
             piquel_ui::recovery_list(rows: rows)
-            <label>
-                "Reason, shown to the owner in their history: what was asked, never the evidence"
-                <input name="reason" required="" maxlength="500" value=(reason)>
-            </label>
         )
     };
-    App::render(cx, StatusCode::OK, page).await
+    App::render(cx, StatusCode::OK, "Recover", page).await
 }
 
 /// `/users/{account}/undo-recovery`: the account's recent recoveries, then undoes
@@ -405,20 +392,14 @@ pub(super) async fn undo_recovery(cx: &Cx, form: Option<Form<ReasonForm>>) -> Re
     let rows = &App::recovery_rows(&recent);
     let page = view! { cx =>
         piquel_ui::dashboard_change(
-            title: "Undo this account's recovery",
-            description: "For an owner support has confirmed, who has no passkey left from before the recovery, or whose account is disabled. In probation, removes the recovery's passkey, even the last, withdraws every consent and ends every session; its link unused, cancels the link.",
-            button: "Undo the recovery",
+            change: Change::UndoRecovery,
             back: back.as_str(),
             refusal: refusal,
-            danger: true,
+            reason: reason,
             piquel_ui::recovery_list(rows: rows)
-            <label>
-                "Reason, shown to the owner in their history: what was asked, never the evidence"
-                <input name="reason" required="" maxlength="500" value=(reason)>
-            </label>
         )
     };
-    App::render(cx, StatusCode::OK, page).await
+    App::render(cx, StatusCode::OK, "Undo a recovery", page).await
 }
 
 impl App {

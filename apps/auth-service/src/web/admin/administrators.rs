@@ -2,7 +2,7 @@
 
 use super::AdminApplication as App;
 use piquel_common::{UserId, admin::GrantAdministrator};
-use piquel_ui::AdministratorRow;
+use piquel_ui::{Action, AdministratorRow, Change};
 use serde::de::IgnoredAny;
 use topcoat::{
     Result,
@@ -23,6 +23,7 @@ pub(super) async fn list(cx: &Cx) -> Result<Response> {
         .await?;
     // The viewer is an active administrator, so revoking anyone else's rights
     // leaves one; the service refuses the last active administrator's anyway.
+    let inline = admin.operator.is_confirmed(super::FORM_TIME);
     let rows: Vec<_> = administrators
         .iter()
         .map(|administrator| AdministratorRow {
@@ -31,7 +32,10 @@ pub(super) async fn list(cx: &Cx) -> Result<Response> {
             revoke: if administrator.user_id == admin.user_id {
                 Err("You cannot change your own rights.")
             } else {
-                Ok(href!(revoke, Administrator(administrator.user_id)).resolve(cx))
+                Ok(Action {
+                    href: href!(revoke, Administrator(administrator.user_id)).resolve(cx),
+                    inline,
+                })
             },
         })
         .collect();
@@ -39,7 +43,7 @@ pub(super) async fn list(cx: &Cx) -> Result<Response> {
     let page = view! { cx =>
         piquel_ui::administrator_list(rows: rows, grant: granting.as_str())
     };
-    App::render(cx, StatusCode::OK, page).await
+    App::render(cx, StatusCode::OK, "Administrators", page).await
 }
 
 /// `/administrators/grant`: makes an active account an administrator.
@@ -58,9 +62,7 @@ pub(super) async fn grant(cx: &Cx, form: Option<Form<GrantAdministrator>>) -> Re
         .map(|refused| refused.form.user_id.to_string());
     let page = view! { cx =>
         piquel_ui::dashboard_change(
-            title: "Grant administrator rights",
-            description: "The account can use this dashboard and every admin operation. The dashboard cannot change it afterwards, until its rights are revoked.",
-            button: "Grant",
+            change: Change::GrantAdministrator,
             back: back.as_str(),
             refusal: refusal.as_deref(),
             <label>
@@ -69,7 +71,7 @@ pub(super) async fn grant(cx: &Cx, form: Option<Form<GrantAdministrator>>) -> Re
             </label>
         )
     };
-    App::render(cx, StatusCode::OK, page).await
+    App::render(cx, StatusCode::OK, "Grant rights", page).await
 }
 
 /// `/administrators/{administrator}/revoke`: removes another administrator's
@@ -87,13 +89,10 @@ pub(super) async fn revoke(cx: &Cx, form: Option<Form<IgnoredAny>>) -> Result<Re
     .await?;
     let page = view! { cx =>
         piquel_ui::dashboard_change(
-            title: "Revoke administrator rights",
-            description: "The account keeps its sessions, but can no longer use this dashboard.",
-            button: "Revoke",
+            change: Change::RevokeAdministrator,
             back: back.as_str(),
             refusal: refusal.as_deref(),
-            danger: true,
         )
     };
-    App::render(cx, StatusCode::OK, page).await
+    App::render(cx, StatusCode::OK, "Revoke rights", page).await
 }

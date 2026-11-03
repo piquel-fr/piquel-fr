@@ -10,8 +10,7 @@ use crate::{
     },
 };
 use piquel_ui::{
-    Audience, Checkbox, HandleRow, Messages, Notice, ProviderRow, Section, SignInChange,
-    SignInState, Tab,
+    Audience, Checkbox, HandleRow, Messages, Notice, Section, SignInChange, SignInState, Tab,
 };
 use topcoat::{
     Error,
@@ -30,7 +29,7 @@ impl SignInMethods {
 
 impl AccountPage for SignInMethods {
     const SECTION: Section = Section::Account;
-    const PATH: &'static str = settings::HOME;
+    const PATH: &'static str = settings::SIGN_IN;
     const TITLE: &'static str = Self::TAB.label();
     type Change = SignInChange;
     type Row = SignInState;
@@ -76,7 +75,7 @@ impl AccountPage for SignInMethods {
             SignInChange::Link { provider } => {
                 let (to, cookie) = web
                     .federation
-                    .start_link(&owner, provider, settings::HOME)
+                    .start_link(&owner, provider, settings::SIGN_IN)
                     .await?;
                 return Ok(Applied::Elsewhere { to, cookie });
             }
@@ -115,29 +114,7 @@ impl AccountPage for SignInMethods {
         let profile = web.account.profile(&viewer).await?;
         let passkeys = web.account.passkeys(&viewer).await?;
         let identities = web.account.identities(&viewer).await?;
-        // Enabled providers, then any linked one since disabled, so it can still be
-        // unlinked.
-        let enabled: Vec<_> = web.federation.enabled().collect();
-        let mut providers: Vec<_> = enabled
-            .iter()
-            .map(|&provider| ProviderRow {
-                provider,
-                identity: identities
-                    .iter()
-                    .find(|identity| identity.provider == provider),
-                enabled: true,
-            })
-            .collect();
-        providers.extend(
-            identities
-                .iter()
-                .filter(|identity| !enabled.contains(&identity.provider))
-                .map(|identity| ProviderRow {
-                    provider: identity.provider,
-                    identity: Some(identity),
-                    enabled: false,
-                }),
-        );
+        let providers = web.federation.provider_rows(&identities);
         let targets = web
             .federation
             .authorization_endpoints()
@@ -145,7 +122,7 @@ impl AccountPage for SignInMethods {
         let android = PasskeyApplication::offers_google_password_manager(headers(cx));
         let page = Child::new(view! { cx =>
             piquel_ui::sign_in_methods(
-                page: settings::HOME,
+                page: settings::SIGN_IN,
                 handle: Some(HandleRow {
                     handle: profile.handle.as_str(),
                     changeable_at: profile.handle_changeable_at,

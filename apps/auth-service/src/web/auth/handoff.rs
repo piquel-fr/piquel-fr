@@ -17,7 +17,7 @@ use crate::{
     security::ApiError,
 };
 use piquel_common::protocol::claims::Acr;
-use piquel_ui::{Area, Checkbox, HandoffProof, HandoffQuery, LoginQuery, Query, Title};
+use piquel_ui::{Checkbox, HandoffProof, HandoffQuery, LoginQuery, Query, Title};
 use topcoat::{
     context::{Cx, app_context},
     router::{
@@ -145,12 +145,12 @@ impl WebApplication {
             Refusal::NoAccess => {
                 let page = view! { cx => piquel_ui::no_access(home: routes::page::settings::HOME) };
                 Ok(self
-                    .render(
+                    .render_as(
                         cx,
                         StatusCode::FORBIDDEN,
                         Title::Dashboard.as_str(),
-                        Area::SignIn,
                         &[],
+                        true,
                         page,
                     )
                     .await?)
@@ -184,12 +184,12 @@ impl WebApplication {
         };
         let dashboard = sign_in.dashboard().as_url().clone();
         Ok(self
-            .render(
+            .render_as(
                 cx,
                 status,
                 Title::Dashboard.as_str(),
-                Area::SignIn,
                 &[dashboard],
+                true,
                 page,
             )
             .await?)

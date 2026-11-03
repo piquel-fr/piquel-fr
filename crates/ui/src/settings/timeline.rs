@@ -4,6 +4,7 @@ use super::{EmailChange, EmailRow, SignInChange, device_name};
 use crate::{
     Recovery, RecoveryPasskey,
     form::{Fields, Precision, Query, change_form, open, time},
+    layout::page_head,
 };
 use chrono::{DateTime, Utc};
 use piquel_common::{
@@ -14,7 +15,7 @@ use piquel_common::{
 use serde::{Deserialize, Serialize};
 use topcoat::{
     Result,
-    view::{View, component, view},
+    view::{View, class, component, view},
 };
 
 /// A change the history page posts, named by its `action` field. Undoing what a
@@ -127,7 +128,7 @@ impl Holdings<'_> {
 
 impl HistoryRow<'_> {
     /// What happened, naming what the account still holds.
-    fn describe(&self, holdings: &Holdings<'_>) -> String {
+    pub(crate) fn describe(&self, holdings: &Holdings<'_>) -> String {
         match self.entry {
             HistoryEntry::AccountCreated { method } => match method {
                 AuthenticationMethod::Passkey => "Account created with a passkey".to_owned(),
@@ -250,8 +251,22 @@ impl HistoryRow<'_> {
         }
     }
 
+    /// Whether it is something to look at: a failure, a report, or an
+    /// administrator's change.
+    const fn worrying(&self) -> bool {
+        matches!(
+            self.entry,
+            HistoryEntry::TokenReused
+                | HistoryEntry::AccountDisabled
+                | HistoryEntry::CompromiseReported { .. }
+                | HistoryEntry::RecoveryStarted
+                | HistoryEntry::Recovered { .. }
+                | HistoryEntry::DeletionScheduled { .. }
+        ) || matches!(self.actor, HistoryActor::Admin | HistoryActor::Operator)
+    }
+
     /// From where and through which application, after its time.
-    fn details(&self) -> Vec<String> {
+    pub(crate) fn details(&self) -> Vec<String> {
         let mut parts = Vec::new();
         if self.erased {
             parts.push("Device details erased".to_owned());
@@ -343,9 +358,10 @@ pub async fn history<'a>(
         })
         .transpose()?;
     Ok(view! {
-        <p class="help">
-            "Every sign-in and change to your account. If something wasn’t you, say so: we’ll sign out every other device and help you undo it."
-        </p>
+        page_head(
+            title: "Security history",
+            lead: "Every sign-in and change to your account. If something wasn’t you, say so: we’ll sign out every other device and help you undo it.".to_owned(),
+        )
         if let Some(follow_up) = page.reported {
             <div class="notice stack" role="status">
                 <strong>"Your account is secured."</strong>
@@ -364,29 +380,50 @@ pub async fn history<'a>(
         }
         for (day, entries) in HistoryRow::days(rows) {
             <section class="card" aria-label=(day.as_str())>
-                <h2>(day.as_str())</h2>
-                <ul class="list">
+                <header><h2>(day.as_str())</h2></header>
+                <ul class="events">
                     for row in entries {
-                        <li>
-                            entry(row: row, holds: &holds, page: &page, back: back.as_str())
-                        </li>
+                        entry(row: row, holds: &holds, page: &page, back: back.as_str())
                     }
                 </ul>
             </section>
         }
         if rows.is_empty() && page.next.is_none() {
-            if before.is_none() {
-                <p class="empty">"Nothing has happened to your account yet."</p>
-            } else {
-                <p class="empty">"No older activity."</p>
+            <p class="empty">
+                (if before.is_none() { "Nothing has happened to your account yet." } else { "No older activity." })
+            </p>
+        }
+        <div class="row">
+            if let Some(older) = &older {
+                <a class="button secondary" href=(older.as_str())>"Show older activity"</a>
             }
-        }
-        if let Some(older) = &older {
-            <a class="button secondary full" href=(older.as_str())>"Show older activity"</a>
-        }
-        if before.is_some() {
-            <a class="button secondary full" href=(page.page)>"Newest activity"</a>
-        }
+            if before.is_some() {
+                <a class="button secondary" href=(page.page)>"Newest activity"</a>
+            }
+        </div>
+    })
+}
+
+/// The newest `rows` of the history, naming what the account `holds`, as the
+/// overview shows them: each with its day and time.
+#[component]
+pub(crate) async fn activity_feed<'a>(
+    rows: &'a [HistoryRow<'a>],
+    holds: &'a Holdings<'a>,
+) -> Result<impl View> {
+    Ok(view! {
+        <ul class="events">
+            for row in rows {
+                <li>
+                    time(at: row.occurred_at, precision: Precision::Minute)
+                    <span class=(class!("dot", "warning" if row.worrying(), "ok" if !row.worrying()))></span>
+                    <div class="text">
+                        (row.describe(holds))
+                        <small>(row.details().join(" · "))</small>
+                    </div>
+                </li>
+            }
+        </ul>
     })
 }
 
@@ -403,17 +440,32 @@ async fn entry<'a>(
     let description = row.describe(holds);
     let reporting = row.reportable && page.shown.reporting == Some(row.id);
     Ok(view! {
-        <div class="row between">
-            <div>
-                <strong>(description.as_str())</strong>
-                <p class="help">
-                    time(at: row.occurred_at, precision: Precision::Clock)
-                    for part in row.details() {
-                        " · " (part)
-                    }
-                </p>
+        <li>
+            time(at: row.occurred_at, precision: Precision::Clock)
+            <span class=(class!("dot", "warning" if row.worrying(), "ok" if !row.worrying()))></span>
+            <div class="text">
+                (description.as_str())
+                <small class="wrap">(row.details().join(" · "))</small>
                 if let Some(by) = row.by() {
-                    <p class="help">(by)</p>
+                    <small class="wrap">(by)</small>
+                }
+                if reporting {
+                    <div class="notice stack warning">
+                        <strong tabindex="-1" autofocus="">"Secure your account?"</strong>
+                        <p>
+                            "This signs out every device but this one, and every app you use with Piquel must sign in again, including on this device. Your passkeys keep working."
+                        </p>
+                        if row.entry.follow_up().is_some() {
+                            <p>"Afterwards, you can confirm with your passkey to undo this change."</p>
+                        }
+                        change_form(
+                            action: page.page,
+                            change: HistoryChange::Report { event_id: row.id, before },
+                            label: "Sign out everywhere else",
+                            class: "danger",
+                            cancel: back.to_owned(),
+                        )
+                    </div>
                 }
             </div>
             if row.reportable && !reporting {
@@ -424,25 +476,7 @@ async fn entry<'a>(
                     aria_label: format!("This wasn’t me: {description}"),
                 )
             }
-        </div>
-        if reporting {
-            <div class="notice stack">
-                <strong tabindex="-1" autofocus="">"Secure your account?"</strong>
-                <p>
-                    "This signs out every device but this one, and every app you use with Piquel must sign in again, including on this device. Your passkeys keep working."
-                </p>
-                if row.entry.follow_up().is_some() {
-                    <p>"Afterwards, you can confirm with your passkey to undo this change."</p>
-                }
-                change_form(
-                    action: page.page,
-                    change: HistoryChange::Report { event_id: row.id, before },
-                    label: "Sign out everywhere else",
-                    class: "danger",
-                    cancel: back.to_owned(),
-                )
-            </div>
-        }
+        </li>
     })
 }
 

@@ -66,7 +66,8 @@ test('a recovery link adds a passkey, and the owner undoes it with an older one'
       'The recovery is undone. Its link no longer works, and if it was used, its passkey is removed, every device is signed out, and apps ask for access again.'
     )
   ).toBeVisible();
-  await expect(owner.getByText('1 registered', { exact: true })).toBeVisible();
+  await owner.goto('/settings/sign-in');
+  await expect(owner.getByRole('heading', { name: 'Passkeys 1', exact: true })).toBeVisible();
 
   // The undo ended every session, and signed in only the browser that undid it.
   await recovering.reload();

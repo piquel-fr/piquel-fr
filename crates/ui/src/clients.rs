@@ -42,15 +42,6 @@ impl ClientStatus {
             (None, true) => Self::Enabled,
         }
     }
-
-    /// The status in words.
-    pub(crate) const fn state(self) -> &'static str {
-        match self {
-            Self::Suspended { .. } => "Suspended by an administrator",
-            Self::Disabled => "Disabled",
-            Self::Enabled => "Enabled",
-        }
-    }
 }
 
 /// A client, as the pages show it.
@@ -374,11 +365,11 @@ const fn scope_description(scope: Scope) -> &'static str {
 #[component]
 pub(crate) async fn client_status<'a>(client: ClientRow<'a>) -> Result<impl View> {
     Ok(view! {
-        <span class="badge">(client.kind_name())</span>
+        <span class="badge neutral">(client.kind_name())</span>
         if let ClientStatus::Suspended { .. } = client.status {
-            <span class="badge warning">"Suspended"</span>
+            " " <span class="badge danger">"Suspended"</span>
         } else if client.status == ClientStatus::Disabled {
-            <span class="badge warning">"Disabled"</span>
+            " " <span class="badge warning">"Disabled"</span>
         }
     })
 }
@@ -391,7 +382,7 @@ pub(crate) async fn copy<'a>(target: &'a str, label: &'a str) -> Result<impl Vie
     Ok(view! {
         <span class="copy">
             <span class="help" role="status"></span>
-            <button type="button" class="text-button" data-copy=(target) aria-label=(format!("Copy {label}")) hidden="">
+            <button type="button" class="text-button small" data-copy=(target) aria-label=(format!("Copy {label}")) hidden="">
                 "Copy"
             </button>
         </span>
@@ -402,7 +393,7 @@ pub(crate) async fn copy<'a>(target: &'a str, label: &'a str) -> Result<impl Vie
 #[component]
 pub(crate) async fn copyable<'a>(id: &'a str, label: &'a str, value: &'a str) -> Result<impl View> {
     Ok(view! {
-        <div class="row between code-line">
+        <div class="code-line">
             <code id=(id)>(value)</code>
             copy(target: id, label: label)
         </div>
@@ -664,15 +655,22 @@ pub(crate) async fn secrets_list<'a>(
         <ul class="list">
             for secret in secrets {
                 <li>
-                    <strong>"Created " time(at: secret.created_at, precision: Precision::Minute)</strong>
-                    <p class="help">
-                        if let Some(at) = secret.expires_at {
-                            (if at > now { "Stops working " } else { "Stopped working " })
-                            time(at: at, precision: Precision::Minute)
-                        } else {
-                            "Works until you rotate it"
-                        }
-                    </p>
+                    <div class="text">
+                        <strong>"Created " time(at: secret.created_at, precision: Precision::Minute)</strong>
+                        <small>
+                            if let Some(at) = secret.expires_at {
+                                (if at > now { "stops working " } else { "stopped working " })
+                                time(at: at, precision: Precision::Minute)
+                            } else {
+                                "works until you rotate it"
+                            }
+                        </small>
+                    </div>
+                    match secret.expires_at {
+                        Some(at) if at <= now => <span class="badge neutral">"Expired"</span>,
+                        Some(_) => <span class="badge warning">"Expiring"</span>,
+                        None => <span class="badge ok">"Current"</span>,
+                    }
                 </li>
             }
         </ul>
@@ -689,13 +687,15 @@ pub(crate) async fn secret_panel<'a>(
     next: &'a str,
 ) -> Result<impl View> {
     Ok(view! {
-        <section class="card stack" aria-labelledby="secret-heading" data-replace-url=(page)>
-            <h2 id="secret-heading" tabindex="-1" autofocus="">"Your client secret"</h2>
-            <p class="notice error" role="alert">
-                "This is the only time this secret is shown. Store it in your app's secret manager or environment now; Piquel keeps only a digest of it."
-            </p>
-            copyable(id: "client-secret", label: "client secret", value: secret.expose())
-            <a class="button" href=(next)>"I saved it"</a>
+        <section class="card" aria-labelledby="secret-heading" data-replace-url=(page)>
+            <header><h2 id="secret-heading" tabindex="-1" autofocus="">"Your client secret"</h2></header>
+            <div class="body">
+                <p class="notice warning" role="alert">
+                    "This is the only time this secret is shown. Store it in your app's secret manager or environment now; Piquel keeps only a digest of it."
+                </p>
+                copyable(id: "client-secret", label: "client secret", value: secret.expose())
+                <div class="row"><a class="button" href=(next)>"I saved it"</a></div>
+            </div>
         </section>
     })
 }

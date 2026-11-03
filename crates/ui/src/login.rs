@@ -11,7 +11,6 @@ use crate::{
         Ceremony, Checkbox, Fields, Precision, Query, change_form, handle_input, new_passkey, open,
         passkey_form, time,
     },
-    intro,
 };
 use chrono::{DateTime, Utc};
 use piquel_common::{Provider, TokenId, protocol::claims::Acr};
@@ -241,26 +240,23 @@ impl<'a> Step<'a> {
         }
     }
 
-    /// What the page says above its forms: its eyebrow, heading and lead.
-    fn wording(&self) -> (&'static str, &'static str, String) {
+    /// What the page says above its forms: its heading and lead.
+    fn wording(&self) -> (&'static str, String) {
         match self {
             Self::SignIn { passkey_only, .. } => (
-                "Your Piquel account",
-                "Welcome back.",
+                "Sign in",
                 if *passkey_only {
                     "This app asks you to sign in with a passkey."
                 } else {
-                    "Sign in with a passkey, or use a linked social account."
+                    "Sign in with a passkey, or continue with a linked account."
                 }
                 .to_owned(),
             ),
             Self::SignUp { .. } => (
-                "One account. Your services.",
-                "Your account starts here.",
+                "Create your account",
                 "Create a passkey with your device or password manager. You’ll use it to sign in and protect your account settings.".to_owned(),
             ),
             Self::Link { kind, provider, .. } => (
-                "Social sign-in",
                 "Add this sign-in method?",
                 match kind {
                     LinkKind::Explicit => format!(
@@ -274,7 +270,6 @@ impl<'a> Step<'a> {
                 },
             ),
             Self::Restore { handle, .. } => (
-                "Your Piquel account",
                 "Restore your account?",
                 format!("@{handle} is scheduled for deletion."),
             ),
@@ -299,7 +294,7 @@ pub async fn sign_in<'a>(
     #[default] alert: Option<&'a str>,
 ) -> Result<impl View> {
     let action = query.on(page)?;
-    let (eyebrow, title, lead) = step.wording();
+    let (title, lead) = step.wording();
     let footer = match step {
         Step::SignIn { .. } => Some((
             "New to Piquel? ",
@@ -318,77 +313,78 @@ pub async fn sign_in<'a>(
         Step::Link { .. } | Step::Restore { .. } => None,
     };
     Ok(view! {
-        <section class="auth-shell">
-            intro(eyebrow: eyebrow, title: title, lead: lead.as_str())
+        <div>
+            <h1>(title)</h1>
+            <p class="lead">(lead.as_str())</p>
+        </div>
+        match step {
+            Step::SignUp { social: Some((provider, _)), .. } => {
+                <p class="notice info">
+                    (format!("Finish creating your account to add {} sign-in.", provider.name()))
+                </p>
+            }
+            Step::Link { email: Some(email), .. } => {
+                <p class="notice info">(email)</p>
+            }
+            Step::Restore { purge_after, .. } => {
+                <p class="notice warning">
+                    "It will be deleted for good on "
+                    time(at: purge_after, precision: Precision::Day)
+                    ". Restore it to keep it and sign in, or leave it to be deleted."
+                </p>
+            }
+            _ => {}
+        }
+        if let Some(account) = step.signed_in() {
+            <p class="help">(format!("Signed in as @{}.", account.handle))</p>
+        }
+        if let Some(alert) = alert {
+            <p class="notice error" role="alert">(alert)</p>
+        }
+        <div class="stack">
             match step {
-                Step::SignUp { social: Some((provider, _)), .. } => {
-                    <p class="notice">
-                        (format!("Finish creating your account to add {} sign-in.", provider.name()))
-                    </p>
-                }
-                Step::Link { email: Some(email), .. } => {
-                    <p class="notice">(email)</p>
-                }
-                Step::Restore { purge_after, .. } => {
-                    <p class="notice">
-                        "It will be deleted for good on "
-                        time(at: purge_after, precision: Precision::Day)
-                        ". Restore it to keep it and sign in, or leave it to be deleted."
-                    </p>
-                }
-                _ => {}
+                Step::SignIn { passkey_only, handle_open, providers, signed_in } => sign_in_forms(
+                    action: &action,
+                    page: page,
+                    query: query,
+                    passkey_only: passkey_only,
+                    handle_open: handle_open,
+                    providers: providers,
+                    signed_in: signed_in.is_some(),
+                ),
+                Step::SignUp { social, invitation, invite_required, android } => sign_up_form(
+                    action: &action,
+                    social: social,
+                    invitation: invitation,
+                    invite_required: invite_required,
+                    android: android,
+                ),
+                Step::Link { kind, signed_in, handle_open, .. } => link_forms(
+                    action: &action,
+                    page: page,
+                    query: query,
+                    kind: kind,
+                    signed_in: signed_in,
+                    handle_open: handle_open,
+                ),
+                Step::Restore { .. } => restore_forms(action: &action),
             }
-            if let Some(account) = step.signed_in() {
-                <p class="help">(format!("Signed in as @{}.", account.handle))</p>
+        </div>
+        <footer>
+            if let Some((question, label, href)) = &footer {
+                <p class="help">(*question)<a href=(href.as_str())>(*label)</a></p>
             }
-            if let Some(alert) = alert {
-                <p class="notice error" role="alert">(alert)</p>
+            if let Step::SignUp { .. } = step {
+                <p class="help">
+                    "By creating an account, you agree to the "
+                    <a href=(policies.terms)>"Terms of service"</a>
+                    " and acknowledge the "
+                    <a href=(policies.privacy)>"Privacy policy"</a>
+                    "."
+                </p>
             }
-            <div class="stack">
-                match step {
-                    Step::SignIn { passkey_only, handle_open, providers, signed_in } => sign_in_forms(
-                        action: &action,
-                        page: page,
-                        query: query,
-                        passkey_only: passkey_only,
-                        handle_open: handle_open,
-                        providers: providers,
-                        signed_in: signed_in.is_some(),
-                    ),
-                    Step::SignUp { social, invitation, invite_required, android } => sign_up_form(
-                        action: &action,
-                        social: social,
-                        invitation: invitation,
-                        invite_required: invite_required,
-                        android: android,
-                    ),
-                    Step::Link { kind, signed_in, handle_open, .. } => link_forms(
-                        action: &action,
-                        page: page,
-                        query: query,
-                        kind: kind,
-                        signed_in: signed_in,
-                        handle_open: handle_open,
-                    ),
-                    Step::Restore { .. } => restore_forms(action: &action),
-                }
-            </div>
-            <footer>
-                if let Some((question, label, href)) = &footer {
-                    <p class="help">(*question)<a href=(href.as_str())>(*label)</a></p>
-                }
-                if let Step::SignUp { .. } = step {
-                    <p class="help">
-                        "By creating an account, you agree to the "
-                        <a href=(policies.terms)>"Terms of service"</a>
-                        " and acknowledge the "
-                        <a href=(policies.privacy)>"Privacy policy"</a>
-                        "."
-                    </p>
-                }
-                <p class="help">"Your passkey stays with your device or password manager."</p>
-            </footer>
-        </section>
+            <p class="help">"Your passkey stays with your device or password manager."</p>
+        </footer>
     })
 }
 

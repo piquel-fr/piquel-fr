@@ -17,7 +17,7 @@ use piquel_common::{
     AccountStatus, ClientId, DeliveryId, Handle, Personal, RecoveryId, SessionId, TokenId, UserId,
     admin::{
         Administrator, ApprovedOrigin, Client, CreatedInvitation, Email, Event, EventPage,
-        EventSearch, Invitation, ScheduledDeletion, UserDetail, UserPage,
+        EventSearch, Invitation, Paging, ScheduledDeletion, UserDetail, UserPage,
     },
     clients::{ClientField, ClientOwner, ClientRegistration, RelatedOrigin},
     config::Origin,
@@ -35,7 +35,7 @@ use url::Url;
 /// Accounts per search page.
 const USER_PAGE_SIZE: u16 = 50;
 /// Events per page.
-const EVENT_PAGE_SIZE: u16 = 100;
+const EVENT_PAGE_SIZE: u16 = 50;
 
 /// Owns each administrative operation. Dashboard pages and CLI commands are thin
 /// adapters that say which [`Operator`] acts. Every mutation, and viewing an
@@ -56,7 +56,7 @@ const EVENT_PAGE_SIZE: u16 = 100;
 #[derive(Clone)]
 pub struct AdminService {
     /// Accounts, sessions, invitations, clients, events, deliveries and administrators.
-    database: Database,
+    pub(super) database: Database,
     /// Whether email is enabled, so a recovery link can be mailed.
     mails: bool,
 }
@@ -125,23 +125,21 @@ impl AdminService {
         found.ok_or(AdminError::UserNotFound)
     }
 
-    /// Lists accounts matching `query`, by ID, after the `cursor` of a previous page.
+    /// Lists `page` of the accounts matching `query`, by handle: the first page
+    /// when `None`.
     pub(crate) async fn search_users(
         &self,
         operator: &Operator,
         query: &str,
-        cursor: Option<UserId>,
+        page: Option<u32>,
     ) -> Result<UserPage, AdminError> {
         operator.authorize_read(&self.database).await?;
-        let users = self
-            .database
-            .users()
-            .search(query.trim(), cursor, USER_PAGE_SIZE)
-            .await?;
-        let next = (users.len() == usize::from(USER_PAGE_SIZE))
-            .then(|| users.last().map(|user| user.id))
-            .flatten();
-        Ok(UserPage { users, next })
+        let query = query.trim();
+        let mut users = self.database.users();
+        let total = users.count_matching(query).await?;
+        let paging = Paging::new(page, total, u32::from(USER_PAGE_SIZE));
+        let users = users.search(query, paging.offset(), USER_PAGE_SIZE).await?;
+        Ok(UserPage { users, paging })
     }
 
     /// Returns an account's profile, emails, status, passkey labels, identities,
@@ -802,27 +800,23 @@ impl AdminService {
         .await
     }
 
-    /// Returns a page of the events matching `search`, newest first.
+    /// Returns the page of the events matching `search`, newest first.
     pub(crate) async fn events(
         &self,
         operator: &Operator,
         search: EventSearch,
     ) -> Result<EventPage, AdminError> {
         operator.authorize_read(&self.database).await?;
-        let filter = EventFilter {
+        let mut filter = EventFilter {
             subject: search.user,
             kind: search.kind,
-            before: search.before,
-            id: None,
+            ..EventFilter::default()
         };
-        let stored = self
-            .database
-            .events()
-            .list(&filter, u32::from(EVENT_PAGE_SIZE))
-            .await?;
-        let next = (stored.len() == usize::from(EVENT_PAGE_SIZE))
-            .then(|| stored.last().map(|event| event.id))
-            .flatten();
+        let mut events = self.database.events();
+        let total = events.count(&filter).await?;
+        let paging = Paging::new(search.page, total, u32::from(EVENT_PAGE_SIZE));
+        filter.offset = u32::try_from(paging.offset()).unwrap_or(u32::MAX);
+        let stored = events.list(&filter, u32::from(EVENT_PAGE_SIZE)).await?;
         let events = stored
             .into_iter()
             .map(|stored| {
@@ -836,7 +830,7 @@ impl AdminService {
                 })
             })
             .collect::<Result<_, serde_json::Error>>()?;
-        Ok(EventPage { events, next })
+        Ok(EventPage { events, paging })
     }
 
     /// Lists the accounts whose current handle is reserved, by handle: ones an

@@ -21,8 +21,8 @@ use crate::{
 };
 use piquel_common::{Handle, UserId};
 use piquel_ui::{
-    Audience, ConnectedAppChange, ConnectedAppRow, EmailChange, EmailRow, ProviderRow, Recovery,
-    SignInChange, Tab,
+    Audience, Change, ConnectedAppChange, ConnectedAppRow, EmailChange, EmailRow, ProviderRow,
+    Recovery, SignInChange, Tab,
 };
 use serde::{Deserialize, de::DeserializeOwned};
 use topcoat::{
@@ -203,22 +203,17 @@ pub(super) async fn handle(cx: &Cx, form: Option<Form<NewHandle>>) -> Result<Res
     let refused = refused.as_deref();
     let page = view! { cx =>
         piquel_ui::dashboard_change(
-            title: "Rename this account's handle",
-            description: "The account signs in and is shown under the new handle at once. Its old handle stays reserved for it: no other account can take it unless it is released from the terminal, and the account can take it back.",
-            button: "Rename",
+            change: Change::RenameHandle,
             back: back.as_str(),
             refusal: refused,
+            reason: reason,
             <label>
                 "New handle"
                 <input name="handle" required="" maxlength="32" autocomplete="off" value=(typed)>
             </label>
-            <label>
-                "Reason, shown to the owner in their history"
-                <input name="reason" required="" maxlength="500" value=(reason)>
-            </label>
         )
     };
-    App::render(cx, StatusCode::OK, page).await
+    App::render(cx, StatusCode::OK, "Rename handle", page).await
 }
 
 impl App {
@@ -314,6 +309,6 @@ impl App {
         } else {
             StatusCode::OK
         };
-        Self::render(cx, status, page).await
+        Self::render(cx, status, tab.label(), page).await
     }
 }

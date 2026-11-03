@@ -305,9 +305,79 @@ impl UserRepository<'_> {
             == 1)
     }
 
+    /// Counts every account, whatever its status.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`DatabaseError`] if the query fails.
+    pub async fn count(&mut self) -> Result<u64, DatabaseError> {
+        let count = run!(
+            self,
+            fetch_one,
+            sqlx::query_scalar!(r#"SELECT count(*) AS "count!" FROM users"#)
+        )?;
+        Ok(count.try_into().unwrap_or_default())
+    }
+
+    /// Lists the `limit` newest accounts, newest first.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`DatabaseError`] if the query fails or a row is invalid.
+    pub async fn newest(&mut self, limit: u16) -> Result<Vec<User>, DatabaseError> {
+        run!(
+            self,
+            fetch_all,
+            sqlx::query_as!(
+                User,
+                r#"SELECT
+                    u.id AS "id: UserId", h.handle AS "handle: Handle", u.display_name,
+                    u.status AS "status: AccountStatus", u.created_at
+                FROM users u
+                JOIN handles h ON h.user_id = u.id AND h.released_at IS NULL
+                ORDER BY u.created_at DESC, u.id DESC
+                LIMIT $1"#,
+                i64::from(limit),
+            )
+        )
+    }
+
+    /// Counts the accounts [`Self::search`] finds for `query`.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`DatabaseError`] if the query fails.
+    pub async fn count_matching(&mut self, query: &str) -> Result<u64, DatabaseError> {
+        let pattern = Self::pattern(query);
+        let count = run!(
+            self,
+            fetch_one,
+            sqlx::query_scalar!(
+                r#"SELECT count(*) AS "count!"
+                FROM users u
+                JOIN handles h ON h.user_id = u.id AND h.released_at IS NULL
+                WHERE (
+                    $1 = ''
+                    OR u.id::text = $1
+                    OR h.handle ILIKE $2
+                    OR u.display_name ILIKE $2
+                    OR EXISTS (
+                        SELECT FROM user_emails e
+                        WHERE e.user_id = u.id
+                        AND e.normalized_email ILIKE $2
+                    )
+                )"#,
+                query,
+                pattern,
+            )
+        )?;
+        Ok(count.try_into().unwrap_or_default())
+    }
+
     /// Lists up to `limit` accounts whose ID equals `query`, or whose handle,
-    /// display name or any email contains it, ignoring case. An empty query matches
-    /// every account. Results are ordered by ID and continue after `after`.
+    /// display name or any email contains it, ignoring case, skipping the first
+    /// `offset` matches. An empty query matches every account. Results are ordered
+    /// by handle.
     ///
     /// # Errors
     ///
@@ -315,17 +385,10 @@ impl UserRepository<'_> {
     pub async fn search(
         &mut self,
         query: &str,
-        after: Option<UserId>,
+        offset: u64,
         limit: u16,
     ) -> Result<Vec<User>, DatabaseError> {
-        // Escape LIKE wildcards so the query matches literally.
-        let pattern = format!(
-            "%{}%",
-            query
-                .replace('\\', "\\\\")
-                .replace('%', "\\%")
-                .replace('_', "\\_")
-        );
+        let pattern = Self::pattern(query);
         run!(
             self,
             fetch_all,
@@ -347,14 +410,25 @@ impl UserRepository<'_> {
                         AND e.normalized_email ILIKE $2
                     )
                 )
-                AND ($3::uuid IS NULL OR u.id > $3)
-                ORDER BY u.id
-                LIMIT $4"#,
+                ORDER BY h.handle, u.id
+                LIMIT $3 OFFSET $4"#,
                 query,
                 pattern,
-                after.map(UserId::as_uuid),
                 i64::from(limit),
+                i64::try_from(offset).unwrap_or(i64::MAX),
             )
+        )
+    }
+
+    /// The `LIKE` pattern matching `query` anywhere, literally: its wildcards are
+    /// escaped.
+    fn pattern(query: &str) -> String {
+        format!(
+            "%{}%",
+            query
+                .replace('\\', "\\\\")
+                .replace('%', "\\%")
+                .replace('_', "\\_")
         )
     }
 }

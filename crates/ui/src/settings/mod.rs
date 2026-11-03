@@ -1,4 +1,4 @@
-//! The account's settings: the tabs every settings page shares, and each page's
+//! The account's settings: the pages the sidebar lists, and each page's
 //! sections.
 
 /// Connected apps.
@@ -7,6 +7,8 @@ mod connected;
 mod data;
 /// Email addresses, and confirming one.
 mod emails;
+/// The account at a glance.
+mod overview;
 /// Signed-in devices.
 mod sessions;
 /// The handle, passkeys and social sign-in.
@@ -17,11 +19,15 @@ mod timeline;
 pub use connected::{ConnectedAppChange, ConnectedAppRow, ConnectedAppsState, connected_apps};
 pub use data::{DataChange, DataState, account_data, account_deleted};
 pub use emails::{EmailChange, EmailRow, EmailsState, addresses, verified, verify};
+pub use overview::{AccountOverview, OverviewLinks, account_overview};
 pub use sessions::{DeviceChange, DeviceRow, devices};
 pub use sign_in::{HandleRow, ProviderRow, SignInChange, SignInState, sign_in_methods};
 pub use timeline::{HistoryChange, HistoryPage, HistoryRow, HistoryState, Holdings, history};
 
-use crate::layout::{Label, navigation};
+use crate::{
+    icons::Icon,
+    layout::{Label, navigation},
+};
 use piquel_common::events::{Browser, Platform, UserAgentFamily};
 use topcoat::{
     Result,
@@ -69,9 +75,11 @@ impl<'a> Audience<'a> {
     }
 }
 
-/// The settings pages, in the order the tabs list them.
+/// The settings pages, in the order the sidebar lists them.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Tab {
+    /// The account at a glance.
+    Overview,
     /// The handle, passkeys and social sign-in.
     SignIn,
     /// Email addresses.
@@ -91,12 +99,28 @@ impl Tab {
     #[must_use]
     pub const fn label(self) -> &'static str {
         match self {
+            Self::Overview => "Overview",
             Self::SignIn => "Sign-in methods",
             Self::Emails => "Email addresses",
             Self::Devices => "Devices",
             Self::Apps => "Connected apps",
             Self::History => "Security history",
             Self::Data => "Your data",
+        }
+    }
+}
+
+impl Tab {
+    /// Its icon in the sidebar.
+    pub(crate) const fn icon(self) -> Icon {
+        match self {
+            Self::Overview => Icon::Home,
+            Self::SignIn => Icon::Key,
+            Self::Emails => Icon::Mail,
+            Self::Devices => Icon::Device,
+            Self::Apps => Icon::Grid,
+            Self::History => Icon::Clock,
+            Self::Data => Icon::Database,
         }
     }
 }
@@ -108,7 +132,8 @@ impl Label for Tab {
     }
 }
 
-/// The settings tabs, `current` among them, linking each tab's page in `tabs`.
+/// The settings pages an administrator changes for an account, as tabs within
+/// the account's page: `current` among them, linking each tab's page in `tabs`.
 #[component]
 pub async fn settings_tabs<'a>(tabs: &'a [(Tab, &'a str)], current: Tab) -> Result<impl View> {
     Ok(view! {

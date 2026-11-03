@@ -50,6 +50,7 @@ test('downloading the data, deleting the account and restoring it with its passk
   );
   await page.getByRole('button', { name: 'Restore my account', exact: true }).click();
   await expect(page).toHaveURL('/settings');
+  await page.goto('/settings/sign-in');
   await expect(
     page.getByRole('region', { name: 'Handle' }).getByText(`@${handle}`, { exact: true })
   ).toBeVisible();

@@ -1,0 +1,46 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT\n                    u.id AS \"id: UserId\", h.handle AS \"handle: Handle\", u.display_name,\n                    u.status AS \"status: AccountStatus\", u.created_at\n                FROM users u\n                JOIN handles h ON h.user_id = u.id AND h.released_at IS NULL\n                ORDER BY u.created_at DESC, u.id DESC\n                LIMIT $1",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id: UserId",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "handle: Handle",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 2,
+        "name": "display_name",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 3,
+        "name": "status: AccountStatus",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 4,
+        "name": "created_at",
+        "type_info": "Timestamptz"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int8"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "ad1ee3783685d255e0948da4a8191bc1c7c0a2bc1604ddd12cb92ccdc39d36c7"
+}

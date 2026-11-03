@@ -1,10 +1,10 @@
 //! piquel.fr's pages: the homepage, which says what Piquel is, and Piquel's
 //! policies, which every Piquel page's footer links.
 
-use piquel_ui::{Policies, intro};
+use piquel_ui::Policies;
 use topcoat::{
     Result,
-    view::{View, ViewHandle, component, view},
+    view::{View, ViewHandle, class, component, view},
 };
 
 /// One of piquel.fr's pages.
@@ -76,7 +76,7 @@ pub(crate) async fn page_body(page: Page, links: HomeLinks<'_>) -> Result<impl V
 #[component]
 async fn policy(text: &'static str) -> Result<impl View> {
     Ok(view! {
-        <article class="site policy">
+        <article class="policy">
             (ViewHandle::unescaped_unchecked(text))
         </article>
     })
@@ -86,45 +86,42 @@ async fn policy(text: &'static str) -> Result<impl View> {
 #[component]
 async fn home(links: HomeLinks<'_>) -> Result<impl View> {
     Ok(view! {
-        <section class="site stack">
-            <div class="site-hero">
-                intro(
-                    eyebrow: "Piquel",
-                    title: "One passkey for every Piquel app.",
-                    lead: "Piquel is a passkey-first sign-in service. Your Piquel account signs you in to Piquel's apps, and to other apps that use Piquel, with a passkey instead of a password.",
-                )
-                <div class="row">
-                    <a class="button" href=(links.register)>"Create an account"</a>
-                    <a class="button secondary" href=(links.sign_in)>"Sign in"</a>
-                </div>
-            </div>
-            <div class="site-grid">
-                <article class="card stack">
-                    <h2>"Sign in with a passkey"</h2>
-                    <p>"Your passkey stays on your device or in your password manager. There is no password to steal or reuse. You can also link GitHub or Google to sign in."</p>
-                    <a href=(links.sign_in)>"Sign in"</a>
-                </article>
-                <article class="card stack">
-                    <h2>"Your account, in your hands"</h2>
-                    <p>"See and remove your passkeys, linked providers, email addresses, signed-in devices and the apps you allowed. Review your security history, download your data, or delete your account."</p>
-                    <a href=(links.settings)>"Account settings"</a>
-                </article>
-                <article class="card stack">
-                    <h2>"For developers"</h2>
-                    <p>"Register your app as an OpenID Connect client, so its users sign in with their Piquel account. Apps only get what their users approve."</p>
-                    <a href=(links.developers)>"Developer console"</a>
-                </article>
-                <article class="card stack">
-                    <h2>"Open standards and SDKs"</h2>
-                    <p>"Piquel speaks OpenID Connect and OAuth 2.0, so any standard library works. The Rust SDK, piquel-auth, validates tokens and signs users in for you."</p>
-                    <a href=(DOCUMENTATION)>"Documentation"</a>
-                </article>
-                <article class="card stack wide">
-                    <h2>"Open source"</h2>
-                    <p>"All of Piquel's code is public, under the Apache 2.0 license. Read exactly how your data is handled, report a problem, or contribute."</p>
-                    <a href=(SOURCE)>"Source code"</a>
-                </article>
+        <section class="hero">
+            <p class="eyebrow">"Piquel"</p>
+            <h1>"One passkey for every Piquel app."</h1>
+            <p class="lead">"Piquel is a passkey-first sign-in service. Your Piquel account signs you in to Piquel's apps, and to other apps that use Piquel, with a passkey instead of a password."</p>
+            <div class="row">
+                <a class="button" href=(links.register)>"Create an account"</a>
+                <a class="button secondary" href=(links.sign_in)>"Sign in"</a>
             </div>
         </section>
+        <div class="site-grid">
+            feature(title: "Sign in with a passkey", text: "Your passkey stays on your device or in your password manager. There is no password to steal or reuse. You can also link GitHub or Google to sign in.", label: "Sign in", href: links.sign_in)
+            feature(title: "Your account, in your hands", text: "See and remove your passkeys, linked providers, email addresses, signed-in devices and the apps you allowed. Review your security history, download your data, or delete your account.", label: "Account settings", href: links.settings)
+            feature(title: "For developers", text: "Register your app as an OpenID Connect client, so its users sign in with their Piquel account. Apps only get what their users approve.", label: "Developer console", href: links.developers)
+            feature(title: "Open standards and SDKs", text: "Piquel speaks OpenID Connect and OAuth 2.0, so any standard library works. The Rust SDK, piquel-auth, validates tokens and signs users in for you.", label: "Documentation", href: DOCUMENTATION)
+            feature(title: "Open source", text: "All of Piquel's code is public, under the Apache 2.0 license. Read exactly how your data is handled, report a problem, or contribute.", label: "Source code", href: SOURCE, wide: true)
+        </div>
+    })
+}
+
+/// One part of Piquel on the homepage: its `title`, what it does as `text`, and
+/// its link, labelled `label`, to `href`. A `wide` card spans the grid.
+#[component]
+async fn feature<'a>(
+    title: &'a str,
+    text: &'a str,
+    label: &'a str,
+    href: &'a str,
+    #[default] wide: bool,
+) -> Result<impl View> {
+    Ok(view! {
+        <article class=(class!("card", "wide" if wide))>
+            <div class="body">
+                <h2>(title)</h2>
+                <p>(text)</p>
+                <a href=(href)>(label)</a>
+            </div>
+        </article>
     })
 }

@@ -6,7 +6,7 @@ use crate::{AdminError, AuthConfig, Reason, UserRef, recovery::Revoke};
 use chrono::{DateTime, Utc};
 use clap::Subcommand;
 use piquel_common::{
-    PasskeyId, UserId,
+    PasskeyId,
     admin::{UserDetail, UserPage},
 };
 use piquel_repository::{RecentRecovery, RecoveryState};
@@ -20,9 +20,9 @@ pub(super) enum UserCommand {
         /// What to look for. Lists every account when empty.
         #[arg(default_value = "")]
         query: String,
-        /// Continue after this account ID, the last one listed.
+        /// The page to list, counting from 1.
         #[arg(long)]
-        cursor: Option<UserId>,
+        page: Option<u32>,
         /// Output format.
         #[command(flatten)]
         output: Output,
@@ -141,10 +141,10 @@ impl UserCommand {
         match self {
             Self::Search {
                 query,
-                cursor,
+                page,
                 output,
             } => output.print(
-                &service.search_users(operator, &query, cursor).await?,
+                &service.search_users(operator, &query, page).await?,
                 Self::print_page,
             )?,
             Self::Show { user, output } => {
@@ -327,9 +327,7 @@ impl UserCommand {
                 user.display_name
             );
         }
-        if let Some(next) = page.next {
-            eprintln!("More may follow: --cursor {next}");
-        }
+        Output::paging(page.paging, "accounts");
     }
 
     /// Prints an account's facts, then one section per kind of record.

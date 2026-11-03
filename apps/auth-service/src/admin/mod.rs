@@ -11,6 +11,8 @@ mod error;
 mod operation;
 /// Who runs an administrative operation.
 mod operator;
+/// The dashboard's overview.
+mod overview;
 /// The service shared by the dashboard and the CLI.
 mod service;
 /// Signing administrators in to the dashboard.
@@ -22,6 +24,7 @@ pub use error::AdminError;
 pub(crate) use operation::AdminOperation;
 use operator::AdminSession;
 pub use operator::Operator;
+pub(crate) use overview::Problem;
 pub use service::AdminService;
 pub(crate) use sign_in::{DashboardSignIn, SignedInAdmin};
 pub use types::{GracePeriod, HandleProblem, InvalidLifetime, InviteExpiry, Reason, UserRef};

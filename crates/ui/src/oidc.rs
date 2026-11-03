@@ -1,7 +1,7 @@
 //! The pages of OAuth and `OpenID` Connect flows: consent, logout, and why one
 //! cannot go on.
 
-use crate::intro;
+use crate::icons::{Icon, icon};
 use piquel_common::{
     Provider,
     protocol::oauth::{ErrorCode, Scope},
@@ -23,26 +23,26 @@ pub async fn consent(
     transaction: &str,
 ) -> Result<impl View> {
     Ok(view! {
-        <section class="auth-shell stack">
-            intro(
-                eyebrow: "Application access",
-                title: format!("Continue to {client}."),
-                lead: "Review what this application will receive from your Piquel account.",
-            )
-            <div class="card">
-                <h2>(client)</h2>
-                <ul>
-                    for scope in scopes {
-                        <li>(scope_label(scope))</li>
-                    }
-                </ul>
-            </div>
-            <form method="post" action=(action) data-submit-once="">
-                <input type="hidden" name="transaction" value=(transaction)>
-                <button name="decision" value="approve">"Continue"</button>
-                <button class="secondary" name="decision" value="deny">"Cancel"</button>
-            </form>
+        <div>
+            <h1>(format!("Continue to {client}?"))</h1>
+            <p class="lead">"Review what this application will receive from your Piquel account."</p>
+        </div>
+        <section class="card" aria-labelledby="access-heading">
+            <header><h2 id="access-heading">(format!("{client} will receive"))</h2></header>
+            <ul class="list">
+                for scope in scopes {
+                    <li>icon(kind: Icon::Check)<span class="text">(scope_label(scope))</span></li>
+                }
+            </ul>
         </section>
+        <p class="help">
+            (format!("{client} cannot see your passkeys or change your account. You can remove its access at any time from your connected apps."))
+        </p>
+        <form method="post" action=(action) data-submit-once="">
+            <input type="hidden" name="transaction" value=(transaction)>
+            <button name="decision" value="approve">"Continue"</button>
+            <button class="secondary" name="decision" value="deny">"Cancel"</button>
+        </form>
     })
 }
 
@@ -68,20 +68,17 @@ pub async fn logout<'a>(
     keep: &'a str,
 ) -> Result<impl View> {
     Ok(view! {
-        <section class="auth-shell stack">
-            intro(
-                eyebrow: "Your Piquel account",
-                title: "Ready to sign out?",
-                lead: "This will end your Piquel sign-in session in this browser.",
-            )
-            <form method="post" action=(action)>
-                for (name, value) in fields {
-                    <input type="hidden" name=(*name) value=(*value)>
-                }
-                <button>"Sign out"</button>
-            </form>
-            <a href=(keep)>"Keep my session"</a>
-        </section>
+        <div>
+            <h1>"Ready to sign out?"</h1>
+            <p class="lead">"This will end your Piquel sign-in session in this browser."</p>
+        </div>
+        <form method="post" action=(action)>
+            for (name, value) in fields {
+                <input type="hidden" name=(*name) value=(*value)>
+            }
+            <button>"Sign out"</button>
+            <a class="button secondary" href=(keep)>"Keep my session"</a>
+        </form>
     })
 }
 
@@ -117,15 +114,13 @@ pub async fn failure<'a>(
         }
     };
     Ok(view! {
-        <section class="auth-shell stack">
-            intro(eyebrow: "Your Piquel account", title: message)
-            if let Some(description) = description {
-                <p class="notice error" role="alert">(description)</p>
-            }
-            if let Some((label, href)) = link {
-                <a href=(href)>(label)</a>
-            }
-        </section>
+        <h1>(message)</h1>
+        if let Some(description) = description {
+            <p class="notice error" role="alert">(description)</p>
+        }
+        if let Some((label, href)) = link {
+            <a class="button" href=(href)>(label)</a>
+        }
     })
 }
 
@@ -155,9 +150,10 @@ pub async fn onward(href: &str, to: Onward) -> Result<impl View> {
         ),
     };
     Ok(view! {
-        <section class="auth-shell stack">
-            intro(eyebrow: "Your Piquel account", title: title, lead: lead)
-            <a class="button" href=(href)>"Continue"</a>
-        </section>
+        <div>
+            <h1>(title)</h1>
+            <p class="lead">(lead)</p>
+        </div>
+        <a class="button" href=(href)>"Continue"</a>
     })
 }

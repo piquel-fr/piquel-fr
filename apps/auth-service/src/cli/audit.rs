@@ -8,7 +8,6 @@ use crate::{
 };
 use clap::{Args, Subcommand};
 use piquel_common::{
-    EventId,
     admin::{EventPage, EventSearch},
     events::Actor,
 };
@@ -17,7 +16,7 @@ use std::path::PathBuf;
 /// Paging through, verifying and pruning the audit history.
 #[derive(Subcommand)]
 pub(super) enum AuditCommand {
-    /// Page through recorded events, newest first, 100 at a time.
+    /// Page through recorded events, newest first.
     List(ListEvents),
     /// Recompute the chain and check every checkpoint against it. Exits non-zero,
     /// naming the first position that does not match, when the chain is broken.
@@ -131,7 +130,7 @@ impl AuditCommand {
     }
 }
 
-/// Page through recorded events, newest first, 100 at a time.
+/// Page through recorded events, newest first.
 #[derive(Args)]
 pub(super) struct ListEvents {
     /// Only events concerning this account: its handle, ID or verified email.
@@ -140,9 +139,9 @@ pub(super) struct ListEvents {
     /// Only events of this kind, e.g. `session_revoked`.
     #[arg(long)]
     kind: Option<String>,
-    /// Continue with events older than this one, the last one listed.
+    /// The page to list, counting from 1 at the newest events.
     #[arg(long)]
-    before: Option<EventId>,
+    page: Option<u32>,
     /// Output format.
     #[command(flatten)]
     output: Output,
@@ -158,7 +157,7 @@ impl ListEvents {
         let search = EventSearch {
             user,
             kind: self.kind,
-            before: self.before,
+            page: self.page,
         };
         self.output.print(
             &console.service.events(&console.operator, search).await?,
@@ -181,9 +180,7 @@ impl ListEvents {
                 event.event["kind"].as_str().unwrap_or("-"),
             );
         }
-        if let Some(next) = page.next {
-            eprintln!("More may follow: --before {next}");
-        }
+        Output::paging(page.paging, "events");
     }
 
     /// Names who acted in a few words, or as the stored JSON when this release

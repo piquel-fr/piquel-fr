@@ -179,9 +179,9 @@ async fn consent_page_decides_from_its_own_form() {
         "{policy}"
     );
     let html = html(response).await;
-    assert!(html.contains("<h1>Continue to Test app.</h1>"), "{html}");
+    assert!(html.contains("<h1>Continue to Test app?</h1>"), "{html}");
     assert!(
-        html.contains("<li>Your username and display name</li>"),
+        html.contains(r#"<span class="text">Your username and display name</span></li>"#),
         "{html}"
     );
 
@@ -314,7 +314,7 @@ async fn logout_page_ends_the_session_from_its_own_form() {
         )
         .await;
         assert!(
-            after.contains("<h2>Sign in to see your settings</h2>"),
+            after.contains("<h1>Sign in to see your settings</h1>"),
             "{state:?}: {after}"
         );
     }
@@ -335,8 +335,8 @@ async fn account_pages_ask_a_signed_out_browser_to_sign_in() {
     let unknown = "c_unknown".parse().expect("client ID");
     for (path, section) in account_pages(&unknown) {
         let heading = match section {
-            Section::Account => "<h2>Sign in to see your settings</h2>",
-            Section::Developers => "<h2>Sign in to manage your apps</h2>",
+            Section::Account => "<h1>Sign in to see your settings</h1>",
+            Section::Developers => "<h1>Sign in to manage your apps</h1>",
         };
         let slashed = browser
             .visit(&replicas.a, &format!("{path}/?remove=1"))

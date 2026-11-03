@@ -30,13 +30,13 @@ test('an administrator disables a user from the dashboard, and the user is signe
   // change needs the dashboard's own confirmation: auth asks for a passkey, for
   // the dashboard only, then the dashboard shows the change's form.
   await admin.goto(`${adminUrl}/users?q=user-${suffix}`);
-  await admin.getByRole('link', { name: `user-${suffix}`, exact: true }).click();
+  await admin.getByRole('link', { name: `@user-${suffix}`, exact: true }).click();
   await admin.getByRole('link', { name: 'Disable', exact: true }).click();
   await expect(admin.getByRole('heading', { name: "Confirm it's you" })).toBeVisible();
   await admin.getByRole('button', { name: 'Confirm with a passkey', exact: true }).click();
   await admin.getByLabel('Reason').fill('Browser test');
   await admin.getByRole('button', { name: 'Disable', exact: true }).click();
-  await expect(admin.getByText('disabled', { exact: true })).toBeVisible();
+  await expect(admin.getByText('Disabled', { exact: true })).toBeVisible();
   await expect(admin.getByText('No active session.')).toBeVisible();
 
   await user.goto('/settings');
@@ -49,7 +49,7 @@ test('an administrator disables a user from the dashboard, and the user is signe
   await admin.getByRole('button', { name: 'Sign out', exact: true }).click();
   await expect(admin.getByRole('heading', { name: 'Signed out of the dashboard' })).toBeVisible();
   await admin.getByRole('link', { name: 'Sign in again', exact: true }).click();
-  await expect(admin.getByRole('heading', { name: 'Users', exact: true })).toBeVisible();
+  await expect(admin.getByRole('heading', { name: 'Overview', exact: true })).toBeVisible();
 
   // Signed out of Piquel too, the administrator signs in with a passkey on auth,
   // whose sign-in form then goes on through the handoff to the dashboard.

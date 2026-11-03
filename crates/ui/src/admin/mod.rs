@@ -9,25 +9,35 @@
 
 /// The audit chain's state and its checkpoints.
 mod audit;
-/// The lists: administrators, invitations, clients and events.
+/// Domain events, in words.
+mod events;
+/// The lists: administrators, invitations and clients.
 mod lists;
+/// What needs attention, and what the service is doing now.
+mod overview;
 /// An account's recent recoveries.
 mod recoveries;
 /// Account search and one account.
 mod users;
 
 pub use audit::audit_page;
+pub use events::{EventRow, event_list, event_rows};
 pub use lists::{
-    AdminClientRow, AdministratorRow, EventRow, InvitationRow, administrator_list, client_list,
-    event_list, event_rows, invitation_created, invitation_list,
+    AdminClientRow, AdministratorRow, InvitationRow, administrator_list, client_list,
+    invitation_created, invitation_list,
 };
+pub use overview::{AdminOverview, Measure, Problem, admin_overview};
 pub use recoveries::{RecoveryKey, RecoveryRow, RecoveryStanding, recovery_list};
 pub use users::{AccountPages, SessionRow, UserRow, user_page, user_search};
 
 use crate::{
-    Area, Checkbox, Policies, Query, document,
+    Checkbox, Query,
     form::{Precision, time},
-    layout::Label,
+    icons::Icon,
+    layout::{
+        Health, Label, NavGroup, NavItem, Policies, Preferences, Search, Shell, Who, page_head,
+        shell,
+    },
     settings::Tab as SettingsTab,
     settings_tabs,
 };
@@ -74,9 +84,11 @@ pub struct HandoffProof {
 impl Query for UserSearch {}
 impl Query for EventSearch {}
 
-/// A tab of the dashboard.
+/// A page of the dashboard, as the sidebar lists them.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Tab {
+    /// What needs attention, and what the service is doing now.
+    Overview,
     /// Accounts.
     Users,
     /// Who administers Piquel.
@@ -91,12 +103,28 @@ pub enum Tab {
     Audit,
 }
 
+impl Tab {
+    /// Its icon in the sidebar.
+    const fn icon(self) -> Icon {
+        match self {
+            Self::Overview => Icon::Home,
+            Self::Users => Icon::Users,
+            Self::Administrators => Icon::Shield,
+            Self::Invitations => Icon::Invitation,
+            Self::Clients => Icon::Client,
+            Self::Events => Icon::Events,
+            Self::Audit => Icon::Audit,
+        }
+    }
+}
+
 impl Label for Tab {
     /// A tab's link opens its list, so it marks every page of its part.
     const CURRENT: &'static str = "true";
     /// Its name.
     fn label(self) -> &'static str {
         match self {
+            Self::Overview => "Overview",
             Self::Users => "Users",
             Self::Administrators => "Administrators",
             Self::Invitations => "Invitations",
@@ -107,106 +135,373 @@ impl Label for Tab {
     }
 }
 
-/// The document around every dashboard page, titled `title`, linking
-/// `stylesheet`, whose brand links `home`: for the signed-in `administrator`, by
-/// handle, the `tabs`, `current` among them, and the form signing out at
-/// `sign_out`; then the page as `child`, and the `reference` of a server error's
-/// trace and the footer linking Piquel's `policies`, as [`document`] shows them.
+/// What every dashboard page's frame shows.
+#[derive(Clone, Copy, Debug)]
+pub struct Dashboard<'a> {
+    /// The page's name, in the crumb.
+    pub title: &'a str,
+    /// Where the brand links: the overview.
+    pub home: &'a str,
+    /// The signed-in administrator, if the browser is signed in.
+    pub administrator: Option<Who<'a>>,
+    /// The signed-in administrator's own account page, which their avatar links.
+    pub me: &'a str,
+    /// Each tab's page.
+    pub tabs: &'a [(Tab, &'a str)],
+    /// The tab the page belongs to, if any.
+    pub current: Option<Tab>,
+    /// Where signing out posts.
+    pub sign_out: &'a str,
+    /// What the browser chose, which the preference forms reverse.
+    pub preferences: Preferences,
+    /// Where the preference forms post.
+    pub preferences_action: &'a str,
+    /// The page's own path and query, which the preference forms come back to.
+    pub here: &'a str,
+    /// Whether the service needs attention, as the overview finds.
+    pub health: Health,
+    /// The deployment the status bar names.
+    pub environment: &'a str,
+    /// Piquel's policies, which the status bar links.
+    pub policies: Policies<'a>,
+    /// The account search in the top bar, with what was searched, if anything.
+    pub search: Search<'a>,
+    /// The `reference` of a server error's trace, for the user to quote.
+    pub reference: Option<TraceId>,
+}
+
+/// The document around every dashboard page, in the shell `dashboard` describes:
+/// the sidebar of its tabs, the signed-in administrator, the status bar with the
+/// service's health; then the page as `child`.
 #[component]
 pub async fn dashboard_frame<'a>(
-    title: &'a str,
-    stylesheet: &'a str,
-    home: &'a str,
-    #[into]
-    #[default]
-    administrator: Option<&'a str>,
-    tabs: &'a [(Tab, &'a str)],
-    #[into]
-    #[default]
-    current: Option<Tab>,
-    sign_out: &'a str,
-    #[default] reference: Option<TraceId>,
-    policies: Policies<'a>,
+    dashboard: &'a Dashboard<'a>,
     child: Child<'_>,
 ) -> Result<impl View> {
+    let warning = dashboard.health != Health::Normal;
+    let items: Vec<_> = dashboard
+        .tabs
+        .iter()
+        .map(|(tab, href)| NavItem {
+            icon: tab.icon(),
+            label: tab.label(),
+            href,
+            current: dashboard.current == Some(*tab),
+            warning: warning && *tab == Tab::Overview,
+        })
+        .collect();
     Ok(view! {
-        document(
-            title: title,
-            stylesheet: stylesheet,
-            home: home,
-            area: Area::Admin,
-            reference: reference,
-            policies: policies,
-            <section class="dashboard stack">
-                if let Some(administrator) = administrator {
-                    <div class="row between">
-                        <nav class="site-nav" aria-label="Dashboard">
-                            for (tab, href) in tabs {
-                                <a href=(*href) aria-current=((Some(*tab) == current).then_some(Tab::CURRENT))>
-                                    (tab.label())
-                                </a>
-                            }
-                        </nav>
-                        <form class="row" method="post" action=(sign_out) data-submit-once="">
-                            <span class="muted">(format!("@{administrator}"))</span>
-                            <button class="text-button">"Sign out"</button>
-                        </form>
-                    </div>
-                }
-                (child)
-            </section>
-        )
+        let groups = [NavGroup {
+            label: Some("dashboard"),
+            items: &items,
+        }];
+        let frame = Shell {
+            home: dashboard.home,
+            area: "Admin",
+            groups: &groups,
+            who: dashboard.administrator,
+            me: dashboard.administrator.map(|_| dashboard.me),
+            page: dashboard.title,
+            search: dashboard.administrator.map(|_| dashboard.search),
+            preferences: dashboard.preferences,
+            preferences_action: dashboard.preferences_action,
+            here: dashboard.here,
+            sign_out: dashboard.administrator.map(|_| dashboard.sign_out),
+            health: dashboard.health,
+            environment: Some(dashboard.environment),
+            policies: dashboard.policies,
+            reference: dashboard.reference,
+        };
+        shell(frame: &frame, (child))
     })
 }
 
-/// A page heading, with a `lead` line under it, if any.
-#[component]
-pub(crate) async fn heading<'a>(
-    title: &'a str,
-    #[into]
-    #[default]
-    lead: Option<String>,
-) -> Result<impl View> {
-    Ok(view! {
-        <div>
-            <h1>(title)</h1>
-            if let Some(lead) = lead {
-                <p>(lead)</p>
+/// A change the dashboard makes after a confirmation: what it does, in the
+/// words its form and its row's button use.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Change {
+    /// Disabling an account, with a reason.
+    Disable,
+    /// Enabling a disabled account again.
+    Enable,
+    /// Scheduling an account's deletion, with a reason.
+    Delete,
+    /// Restoring an account scheduled for deletion, with a reason.
+    Restore,
+    /// Ending every session of an account.
+    RevokeSessions,
+    /// Ending one session.
+    RevokeSession,
+    /// Revoking an administrator's rights.
+    RevokeAdministrator,
+    /// Granting administrator rights.
+    GrantAdministrator,
+    /// Revoking an invitation.
+    RevokeInvitation,
+    /// Creating an invitation.
+    Invite,
+    /// Starting an account's recovery, with a reason.
+    Recover,
+    /// Undoing an account's recovery, with a reason.
+    UndoRecovery,
+    /// Approving an origin for a client's pages to sign users in with passkeys.
+    ApproveOrigin,
+    /// Removing an approved origin.
+    RemoveOrigin,
+    /// Renaming an account's handle, with a reason.
+    RenameHandle,
+}
+
+impl Change {
+    /// Its title, on its page and its dialog.
+    const fn title(self) -> &'static str {
+        match self {
+            Self::Disable => "Disable this account",
+            Self::Enable => "Enable this account",
+            Self::Delete => "Delete this account",
+            Self::Restore => "Restore this account",
+            Self::RevokeSessions => "Revoke every session",
+            Self::RevokeSession => "Revoke this session",
+            Self::RevokeAdministrator => "Revoke administrator rights",
+            Self::GrantAdministrator => "Grant administrator rights",
+            Self::RevokeInvitation => "Revoke this invitation",
+            Self::Invite => "Invite someone",
+            Self::Recover => "Recover this account",
+            Self::UndoRecovery => "Undo this account's recovery",
+            Self::ApproveOrigin => "Approve an origin",
+            Self::RemoveOrigin => "Remove an origin",
+            Self::RenameHandle => "Rename this account's handle",
+        }
+    }
+
+    /// What it does, below the title.
+    const fn description(self) -> &'static str {
+        match self {
+            Self::Disable => {
+                "The account can no longer sign in, and every session and refresh grant ends now."
             }
-        </div>
-    })
+            Self::Enable => "The account can sign in again with its passkeys.",
+            Self::Delete => {
+                "The account can no longer sign in, and every session and refresh grant ends now. It is purged with its apps and personal data after 30 days, unless it is restored first; its owner can restore it by signing in with a passkey. To purge at once, use auth-service user delete --immediately, at the terminal."
+            }
+            Self::Restore => {
+                "The account is no longer scheduled for deletion and can sign in again with its passkeys."
+            }
+            Self::RevokeSessions => {
+                "Every browser signed in to this account is signed out, and its applications lose their refresh grants."
+            }
+            Self::RevokeSession => {
+                "The browser is signed out, and applications signed in through it lose their refresh grants."
+            }
+            Self::RevokeAdministrator => {
+                "The account keeps its sessions, but can no longer use this dashboard."
+            }
+            Self::GrantAdministrator => {
+                "The account can use this dashboard and every admin operation. The dashboard cannot change it afterwards, until its rights are revoked."
+            }
+            Self::RevokeInvitation => "Its link stops working.",
+            Self::Invite => "Creates a single-use signup link.",
+            Self::Recover => {
+                "For an owner who lost every passkey. Ends every session, removes the account's unverified addresses, and emails its primary verified address a link that enrolls one passkey, once, within a day. For 15 days after, that passkey signs in but confirms no change, and any older passkey can undo the recovery. Follow the evidence policy first. An account that was in someone else's hands needs auth-service user recover --revoke, at the terminal."
+            }
+            Self::UndoRecovery => {
+                "For an owner support has confirmed, who has no passkey left from before the recovery, or whose account is disabled. In probation, removes the recovery's passkey, even the last, withdraws every consent and ends every session; its link unused, cancels the link."
+            }
+            Self::ApproveOrigin => {
+                "Pages of the client on this origin sign users in with their Piquel passkeys. It must be the origin of one of the client's redirect URIs, and browsers honour approved origins on a few domains only, across every client."
+            }
+            Self::RemoveOrigin => {
+                "Pages of the client on this origin stop signing users in, and send them to Piquel's pages instead. Users stay signed in."
+            }
+            Self::RenameHandle => {
+                "The account signs in and is shown under the new handle at once. Its old handle stays reserved for it: no other account can take it unless it is released from the terminal, and the account can take it back."
+            }
+        }
+    }
+
+    /// Its button, on its form.
+    const fn button(self) -> &'static str {
+        match self {
+            Self::Disable => "Disable",
+            Self::Enable => "Enable",
+            Self::Delete => "Schedule the deletion",
+            Self::Restore => "Restore",
+            Self::RevokeSessions => "Revoke all",
+            Self::RevokeSession | Self::RevokeAdministrator | Self::RevokeInvitation => "Revoke",
+            Self::GrantAdministrator => "Grant",
+            Self::Invite => "Create link",
+            Self::Recover => "Send the recovery link",
+            Self::UndoRecovery => "Undo the recovery",
+            Self::ApproveOrigin => "Approve",
+            Self::RemoveOrigin => "Remove",
+            Self::RenameHandle => "Rename",
+        }
+    }
+
+    /// The button opening it, on the row or page it belongs to.
+    const fn label(self) -> &'static str {
+        match self {
+            Self::Delete => "Delete",
+            Self::Recover => "Recover",
+            Self::UndoRecovery => "Undo recovery",
+            Self::GrantAdministrator => "Grant rights",
+            Self::Invite => "Invite someone",
+            Self::Disable
+            | Self::Enable
+            | Self::Restore
+            | Self::RevokeSessions
+            | Self::RevokeSession
+            | Self::RevokeAdministrator
+            | Self::RevokeInvitation
+            | Self::ApproveOrigin
+            | Self::RemoveOrigin
+            | Self::RenameHandle => self.button(),
+        }
+    }
+
+    /// Whether it takes something away, which its buttons show.
+    const fn danger(self) -> bool {
+        matches!(
+            self,
+            Self::Disable
+                | Self::Delete
+                | Self::RevokeSessions
+                | Self::RevokeSession
+                | Self::RevokeAdministrator
+                | Self::RevokeInvitation
+                | Self::Recover
+                | Self::UndoRecovery
+                | Self::RemoveOrigin
+        )
+    }
+
+    /// The label of the reason its form asks for, if it asks for one.
+    const fn reason(self) -> Option<&'static str> {
+        match self {
+            Self::Disable => Some("Reason"),
+            Self::Delete | Self::Restore | Self::RenameHandle => {
+                Some("Reason, shown to the owner in their history")
+            }
+            Self::Recover | Self::UndoRecovery => Some(
+                "Reason, shown to the owner in their history: what was asked, never the evidence",
+            ),
+            Self::Enable
+            | Self::RevokeSessions
+            | Self::RevokeSession
+            | Self::RevokeAdministrator
+            | Self::GrantAdministrator
+            | Self::RevokeInvitation
+            | Self::Invite
+            | Self::ApproveOrigin
+            | Self::RemoveOrigin => None,
+        }
+    }
+}
+
+/// A change's button on a row, with where it posts: its page, at `href`. A
+/// dashboard confirmed with a passkey makes the change `inline`, from a dialog
+/// on the row's page; one that is not links the page, which confirms first.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Action {
+    /// The change's page, whose `POST` makes it.
+    pub href: String,
+    /// Whether the page it is on may show its form in a dialog.
+    pub inline: bool,
+}
+
+impl Action {
+    /// The ID of its dialog, from its page.
+    fn dialog(&self) -> String {
+        let path = self
+            .href
+            .chars()
+            .map(|c| if c.is_ascii_alphanumeric() { c } else { '-' })
+            .collect::<String>();
+        format!("dialog{path}")
+    }
 }
 
 /// The page of one change: what it does, its inputs as `child`, why the last
 /// attempt was refused, if it was, and its button, beside a link back to `back`.
-/// The handler confirms a recent passkey before showing it.
+/// A change that asks why shows its reason input, holding the `reason` last
+/// typed. The handler confirms a recent passkey before showing it.
 #[component]
 pub async fn dashboard_change<'a>(
-    title: &'a str,
-    description: &'a str,
-    button: &'a str,
+    change: Change,
     back: &'a str,
     #[into]
     #[default]
     refusal: Option<&'a str>,
-    #[default] danger: bool,
+    #[into]
+    #[default]
+    reason: Option<&'a str>,
     #[default] child: Child<'_>,
 ) -> Result<impl View> {
     Ok(view! {
-        <section class="card narrow stack">
-            <h1>(title)</h1>
-            <p>(description)</p>
-            if let Some(refusal) = refusal {
-                <p class="notice error" role="alert">(refusal)</p>
-            }
+        page_head(title: change.title(), lead: change.description().to_owned())
+        if let Some(refusal) = refusal {
+            <p class="notice error" role="alert">(refusal)</p>
+        }
+        <section class="card">
             <form class="stack" method="post" data-submit-once="">
                 (child)
+                reason_field(change: change, value: reason)
                 <div class="row actions">
-                    <button class=(class!("danger" if danger))>(button)</button>
+                    <button class=(class!("danger" if change.danger()))>(change.button())</button>
                     <a class="button secondary" href=(back)>"Cancel"</a>
                 </div>
             </form>
         </section>
+    })
+}
+
+/// The reason input of `change`'s form, if it asks why, holding `value`.
+#[component]
+async fn reason_field<'a>(
+    change: Change,
+    #[into]
+    #[default]
+    value: Option<&'a str>,
+) -> Result<impl View> {
+    Ok(view! {
+        if let Some(label) = change.reason() {
+            <label>
+                (label)
+                <input name="reason" required="" maxlength="500" value=(value)>
+            </label>
+        }
+    })
+}
+
+/// A row's button making `change` through `action`: a dialog on the page, posting
+/// to the change's page, once the dashboard confirmed a passkey, which the
+/// browser opens and closes with no script; a link to the change's page
+/// otherwise.
+#[component]
+pub(crate) async fn confirm<'a>(action: &'a Action, change: Change) -> Result<impl View> {
+    let class = if change.danger() {
+        "button danger small"
+    } else {
+        "button secondary small"
+    };
+    let dialog = action.dialog();
+    Ok(view! {
+        if action.inline {
+            <button type="button" class=(class) popovertarget=(dialog.as_str())>(change.label())</button>
+            <div class="dialog" id=(dialog.as_str()) popover="" role="dialog" aria-labelledby=(format!("{dialog}-title"))>
+                <h2 id=(format!("{dialog}-title"))>(change.title())</h2>
+                <p class="help">(change.description())</p>
+                <form method="post" action=(action.href.as_str()) data-submit-once="">
+                    reason_field(change: change)
+                    <div class="row actions">
+                        <button class=(class!("danger" if change.danger()))>(change.button())</button>
+                        <button type="button" class="secondary" popovertarget=(dialog.as_str()) popovertargetaction="hide">"Cancel"</button>
+                    </div>
+                </form>
+            </div>
+        } else {
+            <a class=(class) href=(action.href.as_str())>(change.label())</a>
+        }
     })
 }
 
@@ -224,7 +519,7 @@ pub async fn account_settings<'a>(
     child: Child<'_>,
 ) -> Result<impl View> {
     Ok(view! {
-        <a href=(back)>"Back to the account"</a>
+        <p><a href=(back)>"← Back to the account"</a></p>
         settings_tabs(tabs: tabs, current: current)
         if let Some(refusal) = refusal {
             <p class="notice error" role="alert">(refusal)</p>
@@ -237,20 +532,23 @@ pub async fn account_settings<'a>(
 #[component]
 pub(crate) async fn refused_action<'a>(label: &'a str, reason: &'a str) -> Result<impl View> {
     Ok(view! {
-        <span class="row">
-            <button class="secondary" disabled="" title=(reason)>(label)</button>
+        <span class="refused">
+            <button class="secondary small" disabled="" title=(reason)>(label)</button>
             <small>(reason)</small>
         </span>
     })
 }
 
-/// An account's status.
+/// An account's status, as a badge.
 #[component]
 pub(crate) async fn account_status(status: AccountStatus) -> Result<impl View> {
+    let (tone, label) = match status {
+        AccountStatus::Active => ("ok", "Active"),
+        AccountStatus::Disabled => ("neutral", "Disabled"),
+        AccountStatus::Deleting => ("warning", "Deleting"),
+    };
     Ok(view! {
-        <span class=(class!("badge", "disabled" if status != AccountStatus::Active))>
-            (status.to_string())
-        </span>
+        <span class=(class!("badge", tone))>(label)</span>
     })
 }
 
@@ -265,11 +563,9 @@ pub(crate) async fn moment(at: DateTime<Utc>) -> Result<impl View> {
 #[component]
 pub async fn no_access<'a>(home: &'a str) -> Result<impl View> {
     Ok(view! {
-        <section class="card narrow stack">
-            <h1>"This account has no access"</h1>
-            <p>"Only administrators can use the admin dashboard."</p>
-            <a class="button secondary" href=(home)>"Back to your account"</a>
-        </section>
+        <h1>"This account has no access"</h1>
+        <p class="lead">"Only administrators can use the admin dashboard."</p>
+        <a class="button secondary" href=(home)>"Back to your account"</a>
     })
 }
 
@@ -284,13 +580,11 @@ pub async fn dashboard_failure<'a>(
     retry: Option<String>,
 ) -> Result<impl View> {
     Ok(view! {
-        <section class="card narrow stack">
-            <h1>(title)</h1>
-            <p>(detail)</p>
-            if let Some(retry) = retry {
-                <a class="button" href=(retry)>"Sign in again"</a>
-            }
-        </section>
+        <h1>(title)</h1>
+        <p class="lead">(detail)</p>
+        if let Some(retry) = retry {
+            <div class="row"><a class="button" href=(retry)>"Sign in again"</a></div>
+        }
     })
 }
 
@@ -302,14 +596,12 @@ pub async fn dashboard_signed_out<'a>(
     auth_sign_out: &'a str,
 ) -> Result<impl View> {
     Ok(view! {
-        <section class="card narrow stack">
-            <h1>"Signed out of the dashboard"</h1>
-            <p>"You are still signed in to your Piquel account, so signing in to the dashboard again is quick."</p>
-            <div class="row actions">
-                <a class="button" href=(sign_in)>"Sign in again"</a>
-                <a class="button secondary" href=(auth_sign_out)>"Sign out of Piquel"</a>
-            </div>
-        </section>
+        <h1>"Signed out of the dashboard"</h1>
+        <p class="lead">"You are still signed in to your Piquel account, so signing in to the dashboard again is quick."</p>
+        <div class="row actions">
+            <a class="button" href=(sign_in)>"Sign in again"</a>
+            <a class="button secondary" href=(auth_sign_out)>"Sign out of Piquel"</a>
+        </div>
     })
 }
 
@@ -328,25 +620,25 @@ pub async fn handoff_proof<'a>(
     alert: Option<&'a str>,
 ) -> Result<impl View> {
     Ok(view! {
-        <section class="card narrow stack">
+        <div>
             <h1>"Confirm it's you"</h1>
-            <p>"The admin dashboard needs your passkey before it makes a change. It counts for the dashboard only, for five minutes."</p>
-            if let Some(alert) = alert {
-                <p class="notice error" role="alert">(alert)</p>
-            }
-            <form
-                class="stack"
-                method="post"
-                action=(action)
-                data-passkey-assertion=(proof)
-            >
-                <input type="hidden" name="state" value=(query.state.as_str())>
-                <input type="hidden" name="return_to" value=(query.return_to.as_str())>
-                <input type="hidden" name="assertion" value="">
-                <p class="notice error" role="alert" data-passkey-error="" hidden=""></p>
-                <p class="help" data-unavailable="">"Confirming needs a browser that supports passkeys, with scripts allowed."</p>
-                <button disabled="">"Confirm with a passkey"</button>
-            </form>
-        </section>
+            <p class="lead">"The admin dashboard needs your passkey before it makes a change. It counts for the dashboard only, for five minutes."</p>
+        </div>
+        if let Some(alert) = alert {
+            <p class="notice error" role="alert">(alert)</p>
+        }
+        <form
+            class="stack"
+            method="post"
+            action=(action)
+            data-passkey-assertion=(proof)
+        >
+            <input type="hidden" name="state" value=(query.state.as_str())>
+            <input type="hidden" name="return_to" value=(query.return_to.as_str())>
+            <input type="hidden" name="assertion" value="">
+            <p class="notice error" role="alert" data-passkey-error="" hidden=""></p>
+            <p class="help" data-unavailable="">"Confirming needs a browser that supports passkeys, with scripts allowed."</p>
+            <button disabled="">"Confirm with a passkey"</button>
+        </form>
     })
 }

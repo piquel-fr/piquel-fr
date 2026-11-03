@@ -5,7 +5,7 @@
 use super::{AdminApplication as App, Refusal, lists};
 use crate::{clients::MAX_RELATED_ORIGIN_DOMAINS, security::ApiError};
 use piquel_common::{ClientId, admin::ApproveOrigin, clients::RelatedOrigin};
-use piquel_ui::Query;
+use piquel_ui::{Change, Query};
 use serde::{Serialize, de::IgnoredAny};
 use topcoat::{
     Result,
@@ -50,23 +50,21 @@ pub(super) async fn approve(cx: &Cx, form: Option<Form<ApproveOrigin>>) -> Resul
     })
     .await?;
     let typed = refusal.as_ref().map(|refused| refused.form.origin.clone());
-    let description = format!(
-        "Pages of {id} on this origin sign users in with their Piquel passkeys. It must be the origin of one of the client's redirect URIs, and browsers honour approved origins on at most {MAX_RELATED_ORIGIN_DOMAINS} domains, across every client."
-    );
+    let client =
+        format!("Client {id}. Browsers honour at most {MAX_RELATED_ORIGIN_DOMAINS} domains.");
     let page = view! { cx =>
         piquel_ui::dashboard_change(
-            title: "Approve an origin",
-            description: description.as_str(),
-            button: "Approve",
+            change: Change::ApproveOrigin,
             back: back.as_str(),
             refusal: refusal.as_deref(),
+            <p class="help">(client.as_str())</p>
             <label>
                 "Origin"
                 <input name="origin" required="" autocomplete="off" placeholder="https://notes.example" value=(typed)>
             </label>
         )
     };
-    App::render(cx, StatusCode::OK, page).await
+    App::render(cx, StatusCode::OK, "Approve an origin", page).await
 }
 
 /// `/clients/{client}/origins/remove?origin=…`: stops a client's pages on an
@@ -84,18 +82,14 @@ pub(super) async fn remove(cx: &Cx, form: Option<Form<IgnoredAny>>) -> Result<Re
         service.remove_related_origin(&admin.operator, &id, &origin)
     })
     .await?;
-    let description = format!(
-        "Pages of {id} on {origin} stop signing users in, and send them to Piquel's pages instead. Users stay signed in."
-    );
+    let which = format!("Client {id}, origin {origin}.");
     let page = view! { cx =>
         piquel_ui::dashboard_change(
-            title: "Remove an origin",
-            description: description.as_str(),
-            button: "Remove",
+            change: Change::RemoveOrigin,
             back: back.as_str(),
             refusal: refusal.as_deref(),
-            danger: true,
+            <p class="help">(which.as_str())</p>
         )
     };
-    App::render(cx, StatusCode::OK, page).await
+    App::render(cx, StatusCode::OK, "Remove an origin", page).await
 }

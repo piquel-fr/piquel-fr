@@ -23,9 +23,10 @@ just build
 ```
 
 The executables are `target/release/auth-service` and `target/release/piquel-web`.
-Auth embeds the stylesheet (`crates/ui/assets/style.css`) and the passkey script
-(`apps/auth-service/assets/passkey.js`) as they are, and piquel-web the stylesheet
-and the policies (`apps/web/assets/policies/`); rebuild Rust after changing them.
+Both embed the stylesheet (`crates/ui/assets/style.css`) and its typefaces
+(`crates/ui/assets/fonts`, under the SIL Open Font License); auth also embeds the
+passkey script (`apps/auth-service/assets/passkey.js`), and piquel-web the
+policies (`apps/web/assets/policies/`). Rebuild Rust after changing them.
 
 ## Development
 

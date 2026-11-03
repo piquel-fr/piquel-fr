@@ -799,8 +799,9 @@ async fn deletions_are_scheduled_and_restored_from_the_dashboard() {
     let account = format!("/users/{}", owner.user_id);
     let delete = format!("{account}/delete");
     let dashboard = harness.confirmed(&admin, &delete, Utc::now()).await;
+    // Confirmed, the dashboard shows the change's form on the account's page.
     let page = html(harness.visit(&dashboard, &account).await).await;
-    assert!(page.contains(&format!(r#"href="{delete}""#)), "{page}");
+    assert!(page.contains(&format!(r#"action="{delete}""#)), "{page}");
     let page = html(harness.visit(&dashboard, &delete).await).await;
     assert!(
         page.contains("--immediately"),
@@ -828,10 +829,8 @@ async fn deletions_are_scheduled_and_restored_from_the_dashboard() {
 
     let restore = format!("{account}/restore");
     let page = html(harness.visit(&dashboard, &account).await).await;
-    assert!(
-        page.contains(&format!(r#"href="{restore}">Restore"#)),
-        "{page}"
-    );
+    assert!(page.contains(&format!(r#"action="{restore}""#)), "{page}");
+    assert!(page.contains(">Restore<"), "{page}");
     assert!(!page.contains("/enable"), "{page}");
     assert_eq!(redirect(&post(&restore).await), account);
     assert_eq!(status().await, AccountStatus::Active);

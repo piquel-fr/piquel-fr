@@ -1,6 +1,7 @@
 //! The audit chain's state and its checkpoints.
 
-use super::{heading, moment};
+use super::moment;
+use crate::layout::page_head;
 use piquel_common::admin::{AuditPage, ChainPoint, Pruning, VerificationKeys};
 use topcoat::{
     Result,
@@ -31,44 +32,46 @@ pub async fn audit_page<'a>(
             .map_or_else(|| "None".to_owned(), ChainPoint::to_string)
     };
     Ok(view! {
-        heading(
+        page_head(
             title: "Audit history",
             lead: "Every event is hash-chained, and checkpoints of the chain are signed. \
                    Run auth-service audit verify from a trusted build for the authoritative check."
                 .to_owned(),
         )
-        <section class="card stack">
-            <div class="row between">
+        <section class="card">
+            <header>
                 <h2>"Chain"</h2>
-                <span class=(class!("badge", "warning" if verification.broken.is_some()))>
+                <span class=(class!("badge", "danger" if verification.broken.is_some(), "ok" if verification.broken.is_none()))>
                     (if verification.broken.is_some() { "Broken" } else { "Intact" })
                 </span>
+            </header>
+            <div class="body">
+                if let Some(broken) = &verification.broken {
+                    <p class="notice error" role="alert">
+                        (format!("Broken at position {}: {}.", broken.position, broken.problem))
+                        " The change may also be a removal or insertion just before it."
+                    </p>
+                }
+                if uncommitted {
+                    <p class="notice warning">
+                        "No audit key is committed for this environment, so checkpoints were checked \
+                         against this server's own key, which a compromised server could have used. \
+                         To prune, first save it with auth-service keys audit > audit-key.pub."
+                    </p>
+                }
+                <dl class="facts">
+                    <dt>"Events checked"</dt><dd>(verification.events_checked.to_string())</dd>
+                    <dt>"Checkpoints checked"</dt><dd>(verification.checkpoints_checked.to_string())</dd>
+                    <dt>"Unsealed"</dt><dd>(verification.unsealed.to_string())</dd>
+                    <dt>"Pruned through"</dt><dd><code>(point(&verification.anchor))</code></dd>
+                    <dt>"Newest"</dt><dd><code>(point(&verification.newest))</code></dd>
+                    <dt>"Latest checkpoint"</dt><dd><code>(point(&verification.latest_checkpoint))</code></dd>
+                    <dt>"Keys"</dt><dd>(verification.keys.to_string())</dd>
+                </dl>
             </div>
-            if let Some(broken) = &verification.broken {
-                <p class="notice error" role="alert">
-                    (format!("Broken at position {}: {}.", broken.position, broken.problem))
-                    " The change may also be a removal or insertion just before it."
-                </p>
-            }
-            if uncommitted {
-                <p class="notice">
-                    "No audit key is committed for this environment, so checkpoints were checked \
-                     against this server's own key, which a compromised server could have used. \
-                     To prune, first save it with auth-service keys audit > audit-key.pub."
-                </p>
-            }
-            <dl class="facts">
-                <dt>"Events checked"</dt><dd>(verification.events_checked.to_string())</dd>
-                <dt>"Checkpoints checked"</dt><dd>(verification.checkpoints_checked.to_string())</dd>
-                <dt>"Unsealed"</dt><dd>(verification.unsealed.to_string())</dd>
-                <dt>"Pruned through"</dt><dd><code>(point(&verification.anchor))</code></dd>
-                <dt>"Newest"</dt><dd><code>(point(&verification.newest))</code></dd>
-                <dt>"Latest checkpoint"</dt><dd><code>(point(&verification.latest_checkpoint))</code></dd>
-                <dt>"Keys"</dt><dd>(verification.keys.to_string())</dd>
-            </dl>
         </section>
-        <section class="card stack">
-            <h2>"Checkpoints"</h2>
+        <section class="card">
+            <header><h2>"Checkpoints"</h2></header>
             <p class="help">
                 "Pruning deletes every event up to a checkpoint. It needs the database owner, \
                  which auth never holds, so run the command shown as the owner."
@@ -76,36 +79,38 @@ pub async fn audit_page<'a>(
             if page.checkpoints.is_empty() {
                 <p class="empty">"No checkpoint to show."</p>
             } else {
-                <table>
-                    <thead>
-                        <tr><th>"Position"</th><th>"Signed"</th><th>"Pruning"</th></tr>
-                    </thead>
-                    <tbody>
-                        for checkpoint in &page.checkpoints {
-                            <tr>
-                                <td><code title=(checkpoint.point.hash.as_str())>(checkpoint.point.position.to_string())</code></td>
-                                <td>moment(at: checkpoint.signed_at)</td>
-                                <td>
-                                    match &checkpoint.pruning {
-                                        Pruning::Prunable => {
-                                            <code>(format!("auth-service audit prune --through {}{key}", checkpoint.point.position))</code>
-                                        },
-                                        Pruning::Pruned { .. } => {
-                                            <span class="muted">"Already pruned"</span>
-                                        },
-                                        Pruning::Broken(broken) => {
-                                            <span class="muted">(format!("Not prunable: the chain breaks at {}", broken.position))</span>
-                                        },
-                                    }
-                                </td>
-                            </tr>
-                        }
-                    </tbody>
-                </table>
+                <div class="table-wrap">
+                    <table>
+                        <thead>
+                            <tr><th>"position"</th><th>"signed"</th><th>"pruning"</th></tr>
+                        </thead>
+                        <tbody>
+                            for checkpoint in &page.checkpoints {
+                                <tr>
+                                    <td><code title=(checkpoint.point.hash.as_str())>(checkpoint.point.position.to_string())</code></td>
+                                    <td>moment(at: checkpoint.signed_at)</td>
+                                    <td>
+                                        match &checkpoint.pruning {
+                                            Pruning::Prunable => {
+                                                <code>(format!("auth-service audit prune --through {}{key}", checkpoint.point.position))</code>
+                                            },
+                                            Pruning::Pruned { .. } => {
+                                                <span class="muted">"Already pruned"</span>
+                                            },
+                                            Pruning::Broken(broken) => {
+                                                <span class="muted">(format!("Not prunable: the chain breaks at {}", broken.position))</span>
+                                            },
+                                        }
+                                    </td>
+                                </tr>
+                            }
+                        </tbody>
+                    </table>
+                </div>
             }
         </section>
         if let Some(later) = later {
-            <a class="button secondary" href=(later)>"Later checkpoints"</a>
+            <div class="row"><a class="button secondary" href=(later)>"Later checkpoints"</a></div>
         }
     })
 }

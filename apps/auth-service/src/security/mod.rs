@@ -36,6 +36,7 @@ use piquel_repository::{
     SessionAuthentication, SessionScope, StoredSession,
 };
 use piquel_telemetry::{Counter, HttpTelemetry, Label};
+use piquel_ui::{PreferenceChange, Preferences};
 use std::{
     borrow::Cow,
     net::{IpAddr, SocketAddr},
@@ -251,8 +252,15 @@ piquel_common::str_enum! {
         /// A sign-in to the admin dashboard awaiting auth's handoff, on the
         /// dashboard's origin.
         DashboardState = "__Host-piquel_dashboard_state",
+        /// The theme the browser chose, on each origin.
+        Theme = "__Host-piquel_theme",
+        /// The sidebar's width the browser chose, on each origin.
+        Sidebar = "__Host-piquel_sidebar",
     }
 }
+
+/// How long a preference is kept: a year.
+const PREFERENCE_MAX_AGE: u32 = 365 * 24 * 60 * 60;
 
 impl BrowserCookie {
     /// Lifetime in seconds. Flow cookies outlive their server-side state slightly; a
@@ -266,7 +274,36 @@ impl BrowserCookie {
             | Self::DashboardState
             | Self::Restore => FLOW_COOKIE_MAX_AGE,
             Self::Notice => 60,
+            Self::Theme | Self::Sidebar => PREFERENCE_MAX_AGE,
         }
+    }
+
+    /// The theme and sidebar preferences the browser's cookies carry. A value
+    /// that is none counts as unset.
+    pub(crate) fn read_preferences(headers: &HeaderMap) -> Preferences {
+        Preferences {
+            theme: Self::Theme
+                .value(headers)
+                .and_then(|value| value.parse().ok()),
+            sidebar: Self::Sidebar
+                .value(headers)
+                .and_then(|value| value.parse().ok()),
+        }
+    }
+
+    /// Adds the `Set-Cookie` headers keeping what `change` chose, to the answer of
+    /// the preference page.
+    pub(crate) fn set_preferences_on<B>(
+        response: &mut axum::http::Response<B>,
+        change: &PreferenceChange,
+    ) -> Result<(), InvalidHeaderValue> {
+        if let Some(theme) = change.theme {
+            Self::Theme.append(response, theme.as_str(), Self::Theme.max_age())?;
+        }
+        if let Some(sidebar) = change.sidebar {
+            Self::Sidebar.append(response, sidebar.as_str(), Self::Sidebar.max_age())?;
+        }
+        Ok(())
     }
 
     /// Reads this cookie's value. A duplicated cookie counts as absent, so an
