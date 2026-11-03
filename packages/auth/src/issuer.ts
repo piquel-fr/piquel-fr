@@ -23,6 +23,8 @@ const serverMetadata: json.Decoder<ServerMetadata> = json.object({
   end_session_endpoint: json.url,
   jwks_uri: json.url,
   service_documentation: json.url,
+  op_policy_uri: json.optional(json.url),
+  op_tos_uri: json.optional(json.url),
   scopes_supported: json.known(vocabulary.SCOPES),
   response_types_supported: json.known(vocabulary.RESPONSE_TYPES),
   response_modes_supported: json.known(vocabulary.RESPONSE_MODES),
