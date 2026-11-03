@@ -1,10 +1,11 @@
 //! Signing keys, their lifecycle and the lock that serializes changes to them.
 
 use super::{RepositoryExecutor, SigningKeyRepository};
-use crate::{DatabaseError, LockKey};
+use crate::{DatabaseError, Limit, LockKey, Scope};
 use chrono::{DateTime, Utc};
 use piquel_common::protocol::jwt::{Jwk, KeyId};
 use sqlx::types::Json;
+use std::time::Duration;
 
 piquel_common::str_enum! {
     /// Where a signing key is in its lifecycle.
@@ -70,7 +71,9 @@ pub struct InsertSigningKey {
 
 impl SigningKeyRepository<'_> {
     /// Waits for the lock that serializes signing key changes, held until the
-    /// transaction ends.
+    /// transaction ends. A holder may be generating a key, which can take longer
+    /// than the default lock wait, so the wait is bounded by the statement limit
+    /// alone; the default lock wait then applies again.
     ///
     /// # Errors
     ///
@@ -80,12 +83,18 @@ impl SigningKeyRepository<'_> {
         Self::require_transaction(&self.executor)?;
         run!(
             self,
+            fetch_one,
+            Limit::LOCK.at(Duration::ZERO).set(Scope::Transaction)
+        )?;
+        run!(
+            self,
             execute,
             sqlx::query!(
                 "SELECT pg_advisory_xact_lock($1)",
                 LockKey::SigningKeys.id()
             )
         )?;
+        run!(self, fetch_one, Limit::LOCK.set(Scope::Transaction))?;
         Ok(())
     }
 

@@ -211,6 +211,27 @@ impl Database {
         Ok(Self { pool })
     }
 
+    /// Opens a connection outside the pool, with `options`, for work whose session
+    /// state must never reach the pool. Connecting has the pool's acquire timeout,
+    /// since no statement timeout bounds it.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`DatabaseError::Timeout`] if connecting takes longer, or another
+    /// [`DatabaseError`] if it fails.
+    pub(crate) async fn connect_dedicated(
+        &self,
+        options: &PgConnectOptions,
+    ) -> Result<PgConnection, DatabaseError> {
+        tokio::time::timeout(
+            self.pool.options().get_acquire_timeout(),
+            PgConnection::connect_with(options),
+        )
+        .await
+        .map_err(DatabaseError::Timeout)?
+        .map_err(Into::into)
+    }
+
     /// Checks availability with a bounded, non-sensitive query.
     ///
     /// # Errors
@@ -269,7 +290,7 @@ impl Database {
     /// Returns [`DatabaseError::Operation`] if a migration fails or the applied
     /// history differs from the embedded migrations.
     pub async fn run_migrations(&self) -> Result<(), DatabaseError> {
-        let mut connection = PgConnection::connect_with(&self.pool.connect_options()).await?;
+        let mut connection = self.connect_dedicated(&self.pool.connect_options()).await?;
         for limit in [
             Limit::STATEMENT.at(MIGRATION_STATEMENT_TIMEOUT),
             Limit::LOCK.at(Duration::ZERO),
@@ -306,8 +327,9 @@ impl Database {
     /// superuser, or if a statement fails, e.g. when the owner is not a superuser.
     pub async fn provision(&self, role: &RuntimeRole) -> Result<(), DatabaseError> {
         let options = self.pool.connect_options().as_ref().clone();
-        let mut connection =
-            PgConnection::connect_with(&options.disable_statement_logging()).await?;
+        let mut connection = self
+            .connect_dedicated(&options.disable_statement_logging())
+            .await?;
         let script = sqlx::query_file_scalar!(
             "src/connection/runtime_role.sql",
             role.name,

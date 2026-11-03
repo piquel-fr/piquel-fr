@@ -220,6 +220,13 @@ with `Limit::set`, never the default:
   every event, since no index covers actors.
 - **Audit prune** (`DatabaseTransaction::prune_audit_chain`): 30 minutes per
   statement, for its transaction, since it may delete years of history.
+- **The signing key lock** (`signing_keys().lock()`) waits with no lock limit,
+  only the statement limit, then restores the lock limit: its holder may be
+  generating an RSA key, and a replica starting meanwhile must not fail.
+
+Connections opened outside the pool, for migrations, provisioning and exclusive
+jobs, connect within the pool's acquire timeout, since no statement limit bounds
+connecting.
 
 Everything else fits the defaults: cleanup, the audit sealer and audit
 verification work in batches of at most 1,000 rows, and an account export reads one

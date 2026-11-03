@@ -66,12 +66,7 @@ impl Database {
         &self,
         key: LockKey,
     ) -> Result<Option<ExclusiveConnection>, DatabaseError> {
-        let mut connection = tokio::time::timeout(
-            self.pool.options().get_acquire_timeout(),
-            PgConnection::connect_with(&self.pool.connect_options()),
-        )
-        .await
-        .map_err(DatabaseError::Timeout)??;
+        let mut connection = self.connect_dedicated(&self.pool.connect_options()).await?;
         let locked =
             sqlx::query_scalar!(r#"SELECT pg_try_advisory_lock($1) AS "locked!""#, key.id())
                 .fetch_one(&mut connection)
