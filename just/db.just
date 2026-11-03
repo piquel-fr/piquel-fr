@@ -30,6 +30,8 @@ _prepare *ARGS:
 # which listens only on a socket under /tmp (socket paths are limited to about 100
 # bytes, which a long TMPDIR can exceed). Needs the PostgreSQL 18 server binaries.
 # Run a command against a throwaway migrated cluster, e.g. `just db scratch -- psql`.
+# Every test fixture pools a few connections, and nextest runs one test per core,
+# so the cluster allows more than PostgreSQL's hundred.
 [positional-arguments]
 scratch *ARGS:
     #!/usr/bin/env bash
@@ -42,7 +44,7 @@ scratch *ARGS:
     trap '"$bin/pg_ctl" --pgdata "$dir/data" --mode immediate stop >/dev/null 2>&1 || true; rm -rf "$dir"' EXIT
     "$bin/initdb" --pgdata "$dir/data" --username piquel --auth trust --no-sync >/dev/null
     "$bin/pg_ctl" --pgdata "$dir/data" --log "$dir/postgres.log" --wait \
-        --options "-c listen_addresses='' -c unix_socket_directories='$dir' -c fsync=off" \
+        --options "-c listen_addresses='' -c unix_socket_directories='$dir' -c fsync=off -c max_connections=400" \
         start >/dev/null
     export DATABASE_URL="postgres://piquel@localhost/postgres?host=$dir"
     export TEST_DATABASE_URL="$DATABASE_URL" PGHOST="$dir" PGUSER=piquel PGDATABASE=postgres

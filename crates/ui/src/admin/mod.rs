@@ -23,7 +23,7 @@ mod users;
 pub use audit::audit_page;
 pub use events::{EventRow, event_list, event_rows};
 pub use lists::{
-    AdminClientRow, AdministratorRow, InvitationRow, administrator_list, client_list,
+    AdminClientRow, AdministratorRow, InvitationRow, administrator_list, client_list, grant_search,
     invitation_created, invitation_list,
 };
 pub use overview::{AdminOverview, Measure, Problem, admin_overview};
@@ -254,7 +254,7 @@ pub enum Change {
 
 impl Change {
     /// Its title, on its page and its dialog.
-    const fn title(self) -> &'static str {
+    pub(crate) const fn title(self) -> &'static str {
         match self {
             Self::Disable => "Disable this account",
             Self::Enable => "Enable this account",
@@ -275,7 +275,7 @@ impl Change {
     }
 
     /// What it does, below the title.
-    const fn description(self) -> &'static str {
+    pub(crate) const fn description(self) -> &'static str {
         match self {
             Self::Disable => {
                 "The account can no longer sign in, and every session and refresh grant ends now."
@@ -320,7 +320,7 @@ impl Change {
     }
 
     /// Its button, on its form.
-    const fn button(self) -> &'static str {
+    pub(crate) const fn button(self) -> &'static str {
         match self {
             Self::Disable => "Disable",
             Self::Enable => "Enable",

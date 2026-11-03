@@ -66,7 +66,7 @@ pub use admin::{
     EventRow, HandoffProof, HandoffQuery, InvitationRow, Measure, Problem, RecoveryKey,
     RecoveryRow, RecoveryStanding, SessionRow, Tab as DashboardTab, UserRow, account_settings,
     admin_overview, administrator_list, audit_page, client_list, dashboard_change,
-    dashboard_failure, dashboard_frame, dashboard_signed_out, event_list, event_rows,
+    dashboard_failure, dashboard_frame, dashboard_signed_out, event_list, event_rows, grant_search,
     handoff_proof, invitation_created, invitation_list, no_access, recovery_list, user_page,
     user_search,
 };

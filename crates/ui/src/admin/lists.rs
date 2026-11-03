@@ -1,9 +1,15 @@
 //! The dashboard's lists: administrators, invitations and OIDC clients.
 
-use super::{Action, Change, confirm, moment, refused_action};
-use crate::layout::{Who, avatar, page_head};
+use super::{Action, Change, UserRow, account_status, confirm, moment, refused_action};
+use crate::{
+    icons::{Icon, icon},
+    layout::{Pager, Who, avatar, page_head, pager},
+};
 use chrono::{DateTime, Utc};
-use piquel_common::admin::{Administrator, Client, Invitation};
+use piquel_common::{
+    AccountStatus,
+    admin::{Administrator, Client, Invitation},
+};
 use topcoat::{
     Result,
     view::{View, class, component, view},
@@ -94,6 +100,82 @@ pub async fn administrator_list<'a>(
                 }
             </ul>
         </section>
+    })
+}
+
+/// The page granting administrator rights: a search of accounts, by handle, name,
+/// email or ID, posting `q` back to the page by `GET`, then the accounts `rows`
+/// found, with the `pages` through them, each with the button granting it rights,
+/// which posts its ID to the page. An account that administers already, or
+/// cannot sign in, gets none. `refusal` says why the last grant was refused.
+#[component]
+pub async fn grant_search<'a>(
+    action: &'a str,
+    q: &'a str,
+    rows: &'a [UserRow<'a>],
+    pages: &'a Pager,
+    back: &'a str,
+    #[into]
+    #[default]
+    refusal: Option<&'a str>,
+) -> Result<impl View> {
+    let change = Change::GrantAdministrator;
+    Ok(view! {
+        page_head(
+            title: change.title(),
+            lead: change.description().to_owned(),
+            actions: view! { <a class="button secondary" href=(back)>"Back to administrators"</a> },
+        )
+        if let Some(refusal) = refusal {
+            <p class="notice error" role="alert">(refusal)</p>
+        }
+        <form class="row search" method="get" action=(action) role="search">
+            <label class="search-box grow">
+                icon(kind: Icon::Search)
+                <input
+                    type="search"
+                    name="q"
+                    value=(q)
+                    placeholder="Handle, name, email or account ID"
+                    aria-label="Search accounts"
+                    autocomplete="off"
+                    autofocus=""
+                >
+            </label>
+            <button class="secondary">"Search"</button>
+        </form>
+        if q.is_empty() {
+            <section class="card"><p class="empty">"Search for the account to make an administrator."</p></section>
+        } else {
+            <section class="card">
+                if rows.is_empty() {
+                    <p class="empty">(format!("No account matches “{q}”."))</p>
+                } else {
+                    <ul class="list">
+                        for row in rows {
+                            <li>
+                                avatar(who: row.who())
+                                <div class="text">
+                                    <a href=(row.href.as_str())><strong>(format!("@{}", row.user.handle))</strong></a>
+                                    <small>(row.user.display_name.as_str()) " · " (row.user.id.to_string())</small>
+                                </div>
+                                if row.administrator {
+                                    <span class="badge admin"><span class="dot"></span>"Administrator"</span>
+                                } else if row.user.status != AccountStatus::Active {
+                                    account_status(status: row.user.status)
+                                } else {
+                                    <form method="post" action=(action) data-submit-once="">
+                                        <input type="hidden" name="user_id" value=(row.user.id.to_string())>
+                                        <button class="small" aria-label=(format!("Grant rights to @{}", row.user.handle))>(change.button())</button>
+                                    </form>
+                                }
+                            </li>
+                        }
+                    </ul>
+                }
+            </section>
+            pager(pages: pages, what: "accounts")
+        }
     })
 }
 

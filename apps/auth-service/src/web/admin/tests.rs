@@ -787,6 +787,47 @@ async fn administrators_change_an_accounts_settings_with_a_reason() {
     assert!(refused.contains("This is already the account"), "{refused}");
 }
 
+/// Granting rights starts from a search: the page lists the accounts matching a
+/// handle, with a button for each that may be granted, and the button's form
+/// makes the account an administrator.
+#[tokio::test]
+#[ignore = "requires TEST_DATABASE_URL"]
+async fn rights_are_granted_from_a_search() {
+    let harness = Harness::new().await;
+    let admin = harness.admin().await;
+    let other = Browser::new_account(&harness.database).await;
+    let dashboard = harness
+        .confirmed(&admin, "/administrators/grant", Utc::now())
+        .await;
+    let empty = html(harness.visit(&dashboard, "/administrators/grant").await).await;
+    assert!(empty.contains("Search for the account"), "{empty}");
+    assert!(
+        !empty.contains(r#"name="user_id""#),
+        "nothing listed: {empty}"
+    );
+    let search = format!("/administrators/grant?q={}", other.user_id);
+    let page = html(harness.visit(&dashboard, &search).await).await;
+    assert!(
+        page.contains(&format!(r#"name="user_id" value="{}""#, other.user_id)),
+        "{page}"
+    );
+    let granted = dashboard
+        .submit(
+            &harness.dashboard,
+            &format!("{DASHBOARD}/administrators/grant"),
+            &[("user_id", other.user_id.to_string().as_str())],
+            OWN_PAGE,
+        )
+        .await;
+    assert_eq!(redirect(&granted), "/administrators");
+    let page = html(harness.visit(&dashboard, &search).await).await;
+    assert!(page.contains(">Administrator<"), "{page}");
+    assert!(
+        !page.contains(r#"name="user_id""#),
+        "granted already: {page}"
+    );
+}
+
 /// An administrator schedules an account's deletion and restores it from the
 /// dashboard, each with a reason; the account's page then offers Restore, not
 /// Enable, and only the terminal purges at once.

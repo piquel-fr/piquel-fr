@@ -188,47 +188,7 @@ pub async fn user_page<'a>(
         <div class="two">
             credentials(detail: detail)
         </div>
-        <section class="card">
-            <header>
-                <h2>"Sessions " <span class="count">(sessions.len().to_string())</span></h2>
-                if !sessions.is_empty() {
-                    match pages {
-                        Ok(pages) => {
-                            confirm(action: pages.revoke_sessions, change: Change::RevokeSessions)
-                        },
-                        Err(reason) => {
-                            refused_action(label: "Revoke all", reason: reason)
-                        },
-                    }
-                }
-            </header>
-            if sessions.is_empty() {
-                <p class="empty">"No active session."</p>
-            } else {
-                <div class="table-wrap">
-                    <table>
-                        <thead>
-                            <tr><th>"signed in"</th><th>"methods"</th><th>"last seen"</th><th>"expires"</th><th></th></tr>
-                        </thead>
-                        <tbody>
-                            for row in sessions {
-                                <tr>
-                                    <td>moment(at: row.session.authenticated_at)</td>
-                                    <td>(row.methods())</td>
-                                    <td>moment(at: row.session.last_seen_at)</td>
-                                    <td>moment(at: row.session.expires_at)</td>
-                                    <td class="right">
-                                        if let Some(revoke) = &row.revoke {
-                                            confirm(action: revoke, change: Change::RevokeSession)
-                                        }
-                                    </td>
-                                </tr>
-                            }
-                        </tbody>
-                    </table>
-                </div>
-            }
-        </section>
+        session_list(sessions: sessions, pages: pages)
         <section class="card">
             <header><h2>"Consents " <span class="count">(detail.consents.len().to_string())</span></h2></header>
             if detail.consents.is_empty() {
@@ -254,6 +214,58 @@ pub async fn user_page<'a>(
             event_rows(rows: recent)
         </section>
     })
+}
+
+/// An account's `sessions`, each with the change ending it, and the one ending
+/// them all, or why the `pages` offer none.
+#[component]
+async fn session_list<'a>(
+    sessions: &'a [SessionRow<'a>],
+    pages: Result<AccountPages<'a>, &'a str>,
+) -> Result<impl View> {
+    Ok(view! {
+    <section class="card">
+        <header>
+            <h2>"Sessions " <span class="count">(sessions.len().to_string())</span></h2>
+            if !sessions.is_empty() {
+                match pages {
+                    Ok(pages) => {
+                        confirm(action: pages.revoke_sessions, change: Change::RevokeSessions)
+                    },
+                    Err(reason) => {
+                        refused_action(label: "Revoke all", reason: reason)
+                    },
+                }
+            }
+        </header>
+        if sessions.is_empty() {
+            <p class="empty">"No active session."</p>
+        } else {
+            <div class="table-wrap">
+                <table>
+                    <thead>
+                        <tr><th>"signed in"</th><th>"methods"</th><th>"last seen"</th><th>"expires"</th><th></th></tr>
+                    </thead>
+                    <tbody>
+                        for row in sessions {
+                            <tr>
+                                <td>moment(at: row.session.authenticated_at)</td>
+                                <td>(row.methods())</td>
+                                <td>moment(at: row.session.last_seen_at)</td>
+                                <td>moment(at: row.session.expires_at)</td>
+                                <td class="right">
+                                    if let Some(revoke) = &row.revoke {
+                                        confirm(action: revoke, change: Change::RevokeSession)
+                                    }
+                                </td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+            </div>
+        }
+    </section>
+        })
 }
 
 /// What may be done to `user`, by its `pages`, or why nothing may.

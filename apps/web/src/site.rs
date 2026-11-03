@@ -54,15 +54,13 @@ impl Site {
     /// telemetry.
     pub(crate) fn router(self) -> Router {
         let auth = self.auth.serialized();
-        let router = Page::ALL
-            .into_iter()
-            .fold(Router::new(), |router, page| {
-                let site = self.clone();
-                router.route(
-                    page.path(),
-                    get(move || async move { site.render(page).await }),
-                )
-            });
+        let router = Page::ALL.into_iter().fold(Router::new(), |router, page| {
+            let site = self.clone();
+            router.route(
+                page.path(),
+                get(move || async move { site.render(page).await }),
+            )
+        });
         let router = ASSETS.into_iter().fold(router, |router, asset| {
             router.route(
                 &asset.path(),
@@ -111,7 +109,10 @@ impl Site {
             settings: &settings,
             developers: &developers,
         };
-        let header = [("Sign in", sign_in.as_str()), ("Create an account", register.as_str())];
+        let header = [
+            ("Sign in", sign_in.as_str()),
+            ("Create an account", register.as_str()),
+        ];
         let html = view! { cx =>
             piquel_ui::document(
                 title: page.title(),
