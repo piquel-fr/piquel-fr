@@ -39,6 +39,19 @@ test('an administrator disables a user from the dashboard, and the user is signe
   await expect(admin.getByText('Disabled', { exact: true })).toBeVisible();
   await expect(admin.getByText('No active session.')).toBeVisible();
 
+  // Confirmed now, the dashboard offers the next change in a dialog on the page
+  // itself, which the browser opens and closes with no script: the dashboard
+  // loads none. Cancelling leaves the account as it is; confirming enables it.
+  await admin.getByRole('button', { name: 'Enable', exact: true }).click();
+  const dialog = admin.getByRole('dialog', { name: 'Enable this account' });
+  await expect(dialog).toBeVisible();
+  await dialog.getByRole('button', { name: 'Cancel', exact: true }).click();
+  await expect(dialog).toBeHidden();
+  await expect(admin.getByText('Disabled', { exact: true })).toBeVisible();
+  await admin.getByRole('button', { name: 'Enable', exact: true }).click();
+  await dialog.getByRole('button', { name: 'Enable', exact: true }).click();
+  await expect(admin.getByText('Active', { exact: true })).toBeVisible();
+
   await user.goto('/settings');
   await expect(user.getByRole('link', { name: 'Sign in', exact: true })).toBeVisible();
   await expect(user.getByText(`@user-${suffix}`, { exact: true })).toHaveCount(0);

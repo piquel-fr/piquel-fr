@@ -2,7 +2,7 @@
 //! numbers against the week's, the newest events and the newest accounts.
 
 use super::{AdminApplication as App, lists, users};
-use crate::admin::Problem;
+use crate::admin::{Kinds, Problem};
 use piquel_common::admin::EventSearch;
 use piquel_ui::{AdminOverview, Measure, Query, UserRow};
 use topcoat::{
@@ -18,6 +18,7 @@ pub(super) async fn overview(cx: &Cx) -> Result<Response> {
     let admin = App::admin(cx).await?;
     let service = &App::of(cx).service;
     let overview = service.overview(&admin.operator).await?;
+    App::remember_health(cx, &overview);
     let administrators: Vec<_> = service
         .list_administrators(&admin.operator)
         .await?
@@ -26,7 +27,7 @@ pub(super) async fn overview(cx: &Cx) -> Result<Response> {
         .collect();
     let events_page = href!(lists::events).resolve(cx);
     let failures = EventSearch {
-        kind: Some("sign_in_failed".to_owned()),
+        kind: Some(Kinds::FAILED.to_owned()),
         ..EventSearch::default()
     }
     .on(&events_page)?;

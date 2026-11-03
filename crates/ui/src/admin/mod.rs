@@ -38,8 +38,7 @@ use crate::{
         Health, Label, NavGroup, NavItem, Policies, Preferences, Search, Shell, Who, page_head,
         shell,
     },
-    settings::Tab as SettingsTab,
-    settings_tabs,
+    settings::{Tab as SettingsTab, settings_tabs},
 };
 use chrono::{DateTime, Utc};
 use piquel_common::{
@@ -119,8 +118,6 @@ impl Tab {
 }
 
 impl Label for Tab {
-    /// A tab's link opens its list, so it marks every page of its part.
-    const CURRENT: &'static str = "true";
     /// Its name.
     fn label(self) -> &'static str {
         match self {
@@ -159,8 +156,8 @@ pub struct Dashboard<'a> {
     pub preferences_action: &'a str,
     /// The page's own path and query, which the preference forms come back to.
     pub here: &'a str,
-    /// Whether the service needs attention, as the overview finds.
-    pub health: Health,
+    /// Whether the service needs attention, as the overview finds, if known.
+    pub health: Option<Health>,
     /// The deployment the status bar names.
     pub environment: &'a str,
     /// Piquel's policies, which the status bar links.
@@ -179,7 +176,9 @@ pub async fn dashboard_frame<'a>(
     dashboard: &'a Dashboard<'a>,
     child: Child<'_>,
 ) -> Result<impl View> {
-    let warning = dashboard.health != Health::Normal;
+    let warning = dashboard
+        .health
+        .is_some_and(|health| health != Health::Normal);
     let items: Vec<_> = dashboard
         .tabs
         .iter()
@@ -199,6 +198,7 @@ pub async fn dashboard_frame<'a>(
         let frame = Shell {
             home: dashboard.home,
             area: "Admin",
+            area_home: dashboard.home,
             groups: &groups,
             who: dashboard.administrator,
             me: dashboard.administrator.map(|_| dashboard.me),
@@ -468,18 +468,22 @@ async fn reason_field<'a>(
         if let Some(label) = change.reason() {
             <label>
                 (label)
-                <input name="reason" required="" maxlength="500" value=(value)>
+                <input name="reason" required="" maxlength="500" value=(value) autofocus="">
             </label>
         }
     })
 }
 
 /// A row's button making `change` through `action`: a dialog on the page, posting
-/// to the change's page, once the dashboard confirmed a passkey, which the
-/// browser opens and closes with no script; a link to the change's page
-/// otherwise.
+/// to the change's page with the hidden fields of `child`, once the dashboard
+/// confirmed a passkey, which the browser opens and closes with no script; a
+/// link to the change's page otherwise.
 #[component]
-pub(crate) async fn confirm<'a>(action: &'a Action, change: Change) -> Result<impl View> {
+pub(crate) async fn confirm<'a>(
+    action: &'a Action,
+    change: Change,
+    #[default] child: Child<'_>,
+) -> Result<impl View> {
     let class = if change.danger() {
         "button danger small"
     } else {
@@ -493,6 +497,7 @@ pub(crate) async fn confirm<'a>(action: &'a Action, change: Change) -> Result<im
                 <h2 id=(format!("{dialog}-title"))>(change.title())</h2>
                 <p class="help">(change.description())</p>
                 <form method="post" action=(action.href.as_str()) data-submit-once="">
+                    (child)
                     reason_field(change: change)
                     <div class="row actions">
                         <button class=(class!("danger" if change.danger()))>(change.button())</button>

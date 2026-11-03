@@ -26,8 +26,6 @@ pub struct OverviewLinks<'a> {
     pub sign_in: &'a str,
     /// The devices.
     pub devices: &'a str,
-    /// The connected apps.
-    pub apps: &'a str,
     /// The security history.
     pub history: &'a str,
 }

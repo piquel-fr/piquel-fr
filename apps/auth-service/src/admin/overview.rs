@@ -17,11 +17,11 @@ const DELIVERY_PATIENCE: Duration = Duration::minutes(15);
 
 /// The kinds of event the overview counts, by the serde tags
 /// [`DomainEvent`](piquel_common::events::DomainEvent) stores them under.
-struct Kinds;
+pub(crate) struct Kinds;
 
 impl Kinds {
     /// A rejected passkey or provider authentication.
-    const FAILED: &'static str = "sign_in_failed";
+    pub(crate) const FAILED: &'static str = "sign_in_failed";
     /// A browser signed in.
     const SIGNED_IN: &'static str = "signed_in";
     /// A client exchanged a code for tokens.
@@ -39,11 +39,13 @@ pub struct Rate {
 }
 
 impl Rate {
-    /// The rate of `last_hour` against `week`, a week's total.
+    /// The rate of `last_hour` against `week`, a week's total that includes the
+    /// last hour: the usual hour is the week before it, so a spike never raises
+    /// its own baseline.
     const fn new(last_hour: u64, week: u64) -> Self {
         Self {
             last_hour,
-            usual: week.div_ceil(HOURS_PER_WEEK),
+            usual: week.saturating_sub(last_hour).div_ceil(HOURS_PER_WEEK - 1),
         }
     }
 

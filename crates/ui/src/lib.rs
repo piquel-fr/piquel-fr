@@ -82,9 +82,8 @@ pub use developers::{
 };
 pub use form::{Alert, Checkbox, Lines, Messages, Notice, OUT_OF_DATE, Query, QueryError};
 pub use layout::{
-    AccountNav, Health, Pager, Policies, PreferenceChange, Preferences, SUPPORT_ADDRESS, Search,
-    Section, Sidebar, Theme, Title, Who, account, auth_shell, document, page_head, signed_out,
-    site_shell,
+    AccountNav, Health, Pager, Policies, PreferenceChange, Preferences, SOURCE, Search, Section,
+    Sidebar, Theme, Title, Who, account, auth_shell, document, signed_out, site_shell,
 };
 pub use login::{
     CallbackError, LinkKind, LoginChange, LoginQuery, PendingDestination, SignedIn, Step, sign_in,
@@ -99,5 +98,5 @@ pub use settings::{
     DataState, DeviceChange, DeviceRow, EmailChange, EmailRow, EmailsState, HandleRow,
     HistoryChange, HistoryPage, HistoryRow, HistoryState, Holdings, OverviewLinks, ProviderRow,
     SignInChange, SignInState, Tab, account_data, account_deleted, account_overview, addresses,
-    connected_apps, devices, history, settings_tabs, sign_in_methods, verified, verify,
+    connected_apps, devices, history, sign_in_methods, verified, verify,
 };

@@ -22,7 +22,7 @@ use topcoat::{
 };
 
 /// The repository every page links in its status bar.
-const SOURCE: &str = "https://github.com/piquel-fr/piquel-fr";
+pub const SOURCE: &str = "https://github.com/piquel-fr/piquel-fr";
 
 /// A section of the account's pages, which the sidebar groups.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -335,6 +335,8 @@ pub struct Shell<'a> {
     pub home: &'a str,
     /// The part of Piquel the page belongs to, after the brand.
     pub area: &'a str,
+    /// Where the crumb's area links: the part's own home.
+    pub area_home: &'a str,
     /// The sidebar's links.
     pub groups: &'a [NavGroup<'a>],
     /// Who is signed in, if the sidebar shows them.
@@ -353,8 +355,8 @@ pub struct Shell<'a> {
     pub here: &'a str,
     /// Where signing out posts, if the sidebar offers it.
     pub sign_out: Option<&'a str>,
-    /// What the status bar says of the service.
-    pub health: Health,
+    /// What the status bar says of the service, if the page checked.
+    pub health: Option<Health>,
     /// The deployment the status bar names, if it names one.
     pub environment: Option<&'a str>,
     /// Piquel's policies, which the status bar links.
@@ -372,6 +374,9 @@ pub async fn shell<'a>(frame: &'a Shell<'a>, child: Child<'_>) -> Result<impl Vi
     Ok(view! {
         <div class="shell">
             <a class="skip" href="#content">"Skip to content"</a>
+            // The drawer's state, ahead of the drawer so the keyboard goes on
+            // into it once opened; the top bar's button is its label.
+            <input type="checkbox" id="menu" class="menu-state" aria-label="Menu">
             sidebar(frame: frame)
             <label class="scrim" for="menu" aria-hidden="true"></label>
             <div class="main">
@@ -385,7 +390,7 @@ pub async fn shell<'a>(frame: &'a Shell<'a>, child: Child<'_>) -> Result<impl Vi
                         </footer>
                     }
                 </main>
-                status_bar(health: Some(frame.health), environment: frame.environment, policies: frame.policies)
+                status_bar(health: frame.health, environment: frame.environment, policies: frame.policies)
             </div>
         </div>
     })
@@ -467,14 +472,13 @@ async fn sidebar<'a>(frame: &'a Shell<'a>) -> Result<impl View> {
 async fn topbar<'a>(frame: &'a Shell<'a>) -> Result<impl View> {
     Ok(view! {
         <header class="topbar">
-            <label class="menu-button" for="menu">
-                <input type="checkbox" id="menu" aria-label="Menu">
+            <label class="menu-button" for="menu" aria-hidden="true">
                 icon(kind: Icon::Menu)
             </label>
             <div class="crumb">
-                <a href=(frame.home)>(frame.area.to_lowercase())</a>
+                <a href=(frame.area_home)>(frame.area.to_lowercase())</a>
                 <span aria-hidden="true">"/"</span>
-                <b>(frame.page.to_lowercase())</b>
+                <b>(frame.page)</b>
             </div>
             <div class="right">
                 if let Some(search) = frame.search {
@@ -888,6 +892,10 @@ pub async fn account<'a>(
         let frame = Shell {
             home,
             area: nav.section.label(),
+            area_home: match nav.section {
+                Section::Account => home,
+                Section::Developers => nav.developers,
+            },
             groups: &groups,
             who: Some(who),
             me: Some(home),
@@ -897,7 +905,7 @@ pub async fn account<'a>(
             preferences_action,
             here,
             sign_out: Some(sign_out),
-            health: Health::Normal,
+            health: None,
             environment: None,
             policies,
             reference,

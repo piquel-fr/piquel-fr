@@ -97,7 +97,6 @@ impl AccountPage for Overview {
         let links = OverviewLinks {
             sign_in: settings::SIGN_IN,
             devices: settings::SESSIONS,
-            apps: settings::APPS,
             history: settings::HISTORY,
         };
         let page = Child::new(view! { cx =>

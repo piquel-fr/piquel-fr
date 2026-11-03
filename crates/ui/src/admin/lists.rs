@@ -120,6 +120,11 @@ pub async fn grant_search<'a>(
     refusal: Option<&'a str>,
 ) -> Result<impl View> {
     let change = Change::GrantAdministrator;
+    // The page is shown only to a confirmed dashboard, so every grant is a dialog.
+    let grant = Action {
+        href: action.to_owned(),
+        inline: true,
+    };
     Ok(view! {
         page_head(
             title: change.title(),
@@ -164,10 +169,11 @@ pub async fn grant_search<'a>(
                                 } else if row.user.status != AccountStatus::Active {
                                     account_status(status: row.user.status)
                                 } else {
-                                    <form method="post" action=(action) data-submit-once="">
+                                    confirm(
+                                        action: &grant,
+                                        change: change,
                                         <input type="hidden" name="user_id" value=(row.user.id.to_string())>
-                                        <button class="small" aria-label=(format!("Grant rights to @{}", row.user.handle))>(change.button())</button>
-                                    </form>
+                                    )
                                 }
                             </li>
                         }

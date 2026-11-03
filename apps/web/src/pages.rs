@@ -1,7 +1,7 @@
 //! piquel.fr's pages: the homepage, which says what Piquel is, and Piquel's
 //! policies, which every Piquel page's footer links.
 
-use piquel_ui::Policies;
+use piquel_ui::{Policies, SOURCE};
 use topcoat::{
     Result,
     view::{View, ViewHandle, class, component, view},
@@ -54,8 +54,6 @@ pub(crate) struct HomeLinks<'a> {
     pub developers: &'a str,
 }
 
-/// Piquel's source code.
-const SOURCE: &str = "https://github.com/piquel-fr/piquel-fr";
 /// The developer documentation.
 const DOCUMENTATION: &str = "https://github.com/piquel-fr/piquel-fr#oidc-clients";
 

@@ -191,29 +191,40 @@ impl Activity {
     /// The kind of event counted as a sign-in through an app, by the tag
     /// [`DomainEvent`] stores it under.
     const APP_SIGN_INS: [&'static str; 1] = ["grant_issued"];
-    /// The kinds counted as security events: sign-ins and their failures, and
-    /// every change to how the account is reached.
-    const SECURITY: [&'static str; 20] = [
+    /// The kinds counted as security events: every kind the security history
+    /// shows, as [`DomainEvent::history_entry`] decides, so the count and the
+    /// feed agree. A refresh grant's revocation is left out: the history shows
+    /// only a replay's, which a count by kind cannot tell from the rest.
+    const SECURITY: [&'static str; 29] = [
+        "account_created",
         "signed_in",
-        "sign_in_failed",
         "session_revoked",
         "passkey_added",
+        "passkey_renamed",
         "passkey_removed",
         "identity_linked",
         "identity_unlinked",
         "email_added",
-        "email_removed",
+        "email_verified",
         "primary_email_changed",
+        "email_removed",
         "consent_granted",
         "consent_revoked",
         "code_replayed",
-        "compromise_reported",
+        "account_disabled",
+        "account_enabled",
+        "account_viewed",
+        "administrator_granted",
+        "administrator_revoked",
+        "handle_changed",
         "recovery_started",
         "recovery_completed",
         "recovery_undone",
-        "handle_changed",
-        "account_disabled",
+        "account_exported",
         "account_deletion_scheduled",
+        "account_restored",
+        "compromise_reported",
+        "imported",
     ];
 }
 

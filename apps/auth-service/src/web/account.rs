@@ -29,11 +29,11 @@ use topcoat::{
     Error,
     context::{Cx, app_context},
     router::{
-        Body, RouteHandlerFn, StatusCode,
+        Body, Method, RouteHandlerFn, StatusCode,
         content::Form,
         error::see_other,
         parse_query_params,
-        request::{FromRequest, headers, uri},
+        request::{FromRequest, headers, method, uri},
         response::{IntoResponse, Response},
     },
     view::{Child, view},
@@ -421,9 +421,20 @@ impl WebApplication {
         let administrator = self.account.is_administrator(&viewer).await?;
         let session = reader.owner().session_id();
         let confirmed = reader.owner().was_passkey_confirmed();
-        let here = uri(cx)
-            .path_and_query()
-            .map_or(page::settings::HOME, |path| path.as_str());
+        // The preference forms come back here by GET, which a page answering a
+        // POST, such as one showing a new secret, cannot show again: those come
+        // back to the section's home.
+        let section_home = match section {
+            Section::Account => page::settings::HOME,
+            Section::Developers => page::developers::HOME,
+        };
+        let here = if method(cx) == Method::POST {
+            section_home
+        } else {
+            uri(cx)
+                .path_and_query()
+                .map_or(page::settings::HOME, |path| path.as_str())
+        };
         let who = Who {
             user: Some(reader.owner().user()),
             name: &profile.display_name,

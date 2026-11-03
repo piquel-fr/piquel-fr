@@ -107,7 +107,8 @@ body.admin {
 }
 
 /* Typefaces, embedded with the executable: the Latin subsets of DM Sans and
-   DM Mono (SIL Open Font License, see assets/fonts/OFL.txt). */
+   DM Mono (SIL Open Font License, see assets/fonts/OFL-DM-Sans.txt and
+   OFL-DM-Mono.txt). */
 @font-face {
   font-family: 'DM Sans';
   font-style: normal;
@@ -486,9 +487,6 @@ legend {
   grid-column: 2;
   margin: 0;
 }
-.search {
-  flex-wrap: nowrap;
-}
 .search input {
   flex: 1;
   min-width: 10rem;
@@ -686,9 +684,20 @@ html[data-sidebar='collapsed'] .shell {
 :root[data-theme='dark'] .sidebar .end .theme-toggle button[value='light'] {
   display: flex;
 }
-/* The drawer's backdrop, which only phones show. */
+/* The drawer's backdrop, which only phones show, and its state, a checkbox
+   the top bar's button labels: hidden, but in the tab order ahead of the drawer. */
 .scrim {
   display: none;
+}
+.menu-state {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  min-height: 0;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
 }
 /* Collapsing: the rail keeps the icons, whose titles name them. */
 .sidebar .collapse {
@@ -756,8 +765,7 @@ html[data-sidebar='collapsed'] .sidebar .count.warning {
   right: 7px;
   margin: 0;
 }
-html[data-sidebar='collapsed'] .sidebar .theme-toggle,
-html[data-sidebar='collapsed'] .sidebar .theme-toggle form {
+html[data-sidebar='collapsed'] .sidebar .theme-toggle {
   width: 100%;
 }
 /* The page: a top bar, its content and the status bar. */
@@ -816,6 +824,7 @@ body.admin .main::before {
 }
 .topbar .search {
   width: min(320px, 40vw);
+  flex-wrap: nowrap;
 }
 .topbar .me {
   display: inline-flex;
@@ -1206,6 +1215,9 @@ body.admin .auth::before {
   margin: auto;
   inset: 0;
   width: min(480px, calc(100vw - 2rem));
+  max-height: calc(100vh - 2rem);
+  max-height: calc(100dvh - 2rem);
+  overflow: auto;
   padding: 1.1rem 1.2rem;
   border: 1px solid var(--line);
   border-radius: 10px;
@@ -1769,17 +1781,9 @@ th.right {
     color: var(--muted);
     cursor: pointer;
   }
-  .topbar .menu-button:has(input:focus-visible) {
+  .shell:has(.menu-state:focus-visible) .menu-button {
     outline: 2px solid var(--focus);
     outline-offset: 2px;
-  }
-  .topbar .menu-button input {
-    position: absolute;
-    width: 1px;
-    height: 1px;
-    min-height: 0;
-    padding: 0;
-    opacity: 0;
   }
   .topbar,
   .status {

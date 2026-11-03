@@ -42,13 +42,14 @@ use crate::{
     admin::{AdminOperation, DashboardSignIn, SignedInAdmin},
     assets::EmbeddedAssets,
     config::{DashboardConfig, PolicyLinks},
+    federation::ReturnTo,
     recovery::RecoveryLinks,
     routes,
     security::{ApiError, BrowserCookie, RequestContext},
 };
 use axum::http::header::InvalidHeaderValue;
 use chrono::Duration;
-use piquel_common::config::Origin;
+use piquel_common::{ErrorChain, config::Origin};
 use piquel_crypto::NoteVerifier;
 use piquel_repository::Database;
 use piquel_telemetry::HttpTelemetry;
@@ -471,11 +472,12 @@ struct SearchQuery {
 impl AdminApplication {
     /// Whether the service needs attention, as the overview last found, read
     /// again once that is [`HEALTH_FOR`] old. A browser that is not signed in
-    /// learns nothing.
-    async fn health(cx: &Cx) -> Result<Health> {
+    /// learns nothing, and neither does a page whose read fails: the status bar
+    /// never costs the page, so a failed read is logged and shows as normal.
+    async fn health(cx: &Cx) -> Health {
         let app = Self::of(cx);
         let Ok(admin) = Self::admin(cx).await else {
-            return Ok(Health::Normal);
+            return Health::Normal;
         };
         let cached = app
             .health
@@ -484,26 +486,34 @@ impl AdminApplication {
             .filter(|(read, _)| read.elapsed() < HEALTH_FOR)
             .map(|(_, health)| health);
         if let Some(health) = cached {
-            return Ok(health);
+            return health;
         }
-        let problems = app.service.overview(&admin.operator).await?.problems();
-        let health = match u32::try_from(problems.len()).unwrap_or(u32::MAX) {
+        match app.service.overview(&admin.operator).await {
+            Ok(overview) => Self::remember_health(cx, &overview),
+            Err(error) => {
+                tracing::warn!(error = %ErrorChain(&error), "the health check failed");
+                Health::Normal
+            }
+        }
+    }
+
+    /// Keeps what `overview` found as the health every page shows for the next
+    /// [`HEALTH_FOR`], and says what that is.
+    pub(super) fn remember_health(cx: &Cx, overview: &crate::admin::Overview) -> Health {
+        let health = match u32::try_from(overview.problems().len()).unwrap_or(u32::MAX) {
             0 => Health::Normal,
             count => Health::Warnings(count),
         };
-        *app.health.lock().unwrap_or_else(PoisonError::into_inner) = Some((Instant::now(), health));
-        Ok(health)
+        *Self::of(cx)
+            .health
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner) = Some((Instant::now(), health));
+        health
     }
 
-    /// Answers with the page named `title` and `page`, at `status`, in the shell
-    /// every page shares: the sidebar of tabs, the signed-in administrator and
-    /// signing out, the account search, the service's health, and the trace ID
-    /// of a server error.
-    async fn render(cx: &Cx, status: StatusCode, title: &str, page: impl View) -> Result<Response> {
-        // A browser that is not signed in is sent on by the page itself.
-        let admin = Self::admin(cx).await.ok();
-        let app = Self::of(cx);
-        let tabs = [
+    /// Each tab's page, in the sidebar's order.
+    fn tabs(cx: &Cx) -> [(DashboardTab, String); 7] {
+        [
             (
                 DashboardTab::Overview,
                 href!(overview::overview).resolve(cx),
@@ -520,14 +530,30 @@ impl AdminApplication {
             (DashboardTab::Clients, href!(lists::clients).resolve(cx)),
             (DashboardTab::Events, href!(lists::events).resolve(cx)),
             (DashboardTab::Audit, href!(audit::verify).resolve(cx)),
-        ];
+        ]
+    }
+
+    /// The tab the request's page belongs to, among `tabs`: the one whose page
+    /// the path starts with, or the overview for its own path alone.
+    fn current_tab(cx: &Cx, tabs: &[(DashboardTab, String)]) -> Option<DashboardTab> {
         let path = uri(cx).path();
-        let current = tabs
-            .iter()
+        tabs.iter()
             .skip(1)
             .find(|(_, link)| path.starts_with(link.as_str()))
             .map(|(tab, _)| *tab)
-            .or_else(|| (path == tabs[0].1).then_some(DashboardTab::Overview));
+            .or_else(|| (path == tabs[0].1).then_some(DashboardTab::Overview))
+    }
+
+    /// Answers with the page named `title` and `page`, at `status`, in the shell
+    /// every page shares: the sidebar of tabs, the signed-in administrator and
+    /// signing out, the account search, the service's health, and the trace ID
+    /// of a server error.
+    async fn render(cx: &Cx, status: StatusCode, title: &str, page: impl View) -> Result<Response> {
+        // A browser that is not signed in is sent on by the page itself.
+        let admin = Self::admin(cx).await.ok();
+        let app = Self::of(cx);
+        let tabs = Self::tabs(cx);
+        let current = Self::current_tab(cx, &tabs);
         let links: &Vec<_> = &tabs
             .iter()
             .map(|(tab, link)| (*tab, link.as_str()))
@@ -539,7 +565,13 @@ impl AdminApplication {
             &href!(users::search).resolve(cx),
             &href!(preferences).resolve(cx),
         );
-        let here = uri(cx).path_and_query().map_or("/", |path| path.as_str());
+        // The preference forms come back here by GET, which a page answering a
+        // POST cannot show again, so those come back to the overview.
+        let here = if method(cx) == Method::POST {
+            home.as_str()
+        } else {
+            uri(cx).path_and_query().map_or("/", |path| path.as_str())
+        };
         let searched = parse_query_params::<SearchQuery>(cx)
             .ok()
             .and_then(|query| query.q)
@@ -552,7 +584,7 @@ impl AdminApplication {
         });
         // The avatar leads to the administrator's own settings, on auth.
         let me = app.auth.join(routes::page::settings::HOME);
-        let health = Self::health(cx).await?;
+        let health = Self::health(cx).await;
         let environment = app.auth.host();
         let dashboard = Dashboard {
             title,
@@ -565,7 +597,7 @@ impl AdminApplication {
             preferences: BrowserCookie::read_preferences(headers(cx)),
             preferences_action: prefer,
             here,
-            health,
+            health: Some(health),
             environment,
             policies: app.policies.links(),
             search: Search {
@@ -670,10 +702,8 @@ async fn preferences(cx: &Cx, form: Option<Form<PreferenceChange>>) -> Result<Re
         return see_other(home).into_response(cx);
     };
     // The dashboard's pages send paths; anything else goes to the overview.
-    let back = match change.return_to.as_str() {
-        path if path.starts_with('/') && !path.starts_with("//") && !path.contains('\\') => path,
-        _ => home.as_str(),
-    };
+    let back =
+        ReturnTo::parse(Some(&change.return_to)).map_or(home, |back| back.as_str().to_owned());
     let mut response = see_other(back).into_response(cx)?;
     BrowserCookie::set_preferences_on(&mut response, &change)?;
     Ok(response)

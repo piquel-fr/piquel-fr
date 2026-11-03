@@ -7,7 +7,8 @@ use piquel_common::{
     AuthenticationMethod, Personal,
     admin::Event,
     events::{
-        Actor, DomainEvent, GrantRevocation, RecordedOrigin, RevocationReason, SignInFailure,
+        Actor, DomainEvent, GrantRevocation, JobName, RecordedOrigin, RevocationReason,
+        SignInFailure,
     },
 };
 use serde_json::Value;
@@ -93,15 +94,18 @@ impl EventRow<'_> {
             Ok(Actor::Admin { .. }) => ("an administrator".to_owned(), true),
             Ok(Actor::Cli { os_user, host }) => (format!("the terminal, {os_user}@{host}"), true),
             Ok(Actor::Client { client_id }) => (format!("the app {client_id}"), false),
-            Ok(Actor::System { job }) => (format!("the {} job", Self::snake(&job)), false),
+            Ok(Actor::System { job }) => (format!("the {} job", Self::job(job)), false),
             Ok(Actor::Anonymous) => ("someone not signed in".to_owned(), false),
             Ok(Actor::Unrecorded) | Err(_) => ("nobody recorded".to_owned(), false),
         }
     }
 
-    /// A job's name as its event stores it.
-    fn snake(job: &impl std::fmt::Debug) -> String {
-        format!("{job:?}").to_lowercase()
+    /// A job's name, as its event stores it.
+    fn job(job: JobName) -> String {
+        serde_json::to_value(job)
+            .ok()
+            .and_then(|name| name.as_str().map(ToOwned::to_owned))
+            .unwrap_or_else(|| format!("{job:?}").to_lowercase())
     }
 
     /// Its stored JSON, pretty-printed.
