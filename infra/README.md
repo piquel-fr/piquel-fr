@@ -258,8 +258,11 @@ To enable a provider in an environment:
    - **Google**: in a Google Cloud project, configure the Google Auth Platform
      (branding, audience External, data access `openid`, `email` and `profile`),
      then add an OAuth client of type Web application, with the callback URL as
-     its only authorized redirect URI. Until the app is published, only its
-     test users can sign in; these scopes need no verification to publish.
+     its only authorized redirect URI. Branding links to `https://piquel.fr`,
+     `https://piquel.fr/privacy` and `https://piquel.fr/terms`, on the
+     authorized domain `piquel.fr`, verified in Search Console. Until the app
+     is published, only its test users can sign in; these scopes need no
+     verification to publish.
 2. Store the secret, mountable by that environment only, before the deploy that
    mounts it:
 
