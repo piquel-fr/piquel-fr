@@ -340,6 +340,14 @@ impl UserCommand {
         println!("Status:\t{}", user.status);
         println!("Created:\t{}", user.created_at.to_rfc3339());
         println!("Administrator:\t{}", detail.administrator);
+        if let Some(deletion) = &detail.deletion {
+            println!("Purged after:\t{}", deletion.purge_after.to_rfc3339());
+            if let Some(failure) = &deletion.failure {
+                println!("Purge failures:\t{}", failure.attempts);
+                println!("Next attempt:\t{}", failure.next_attempt_at.to_rfc3339());
+                println!("Last error:\t{}", failure.last_error);
+            }
+        }
         println!("\nEMAIL\tVERIFIED\tPRIMARY");
         for email in &detail.emails {
             println!(

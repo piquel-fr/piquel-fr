@@ -1641,7 +1641,7 @@ async fn related_pages_sign_in_for_pkce_bound_codes() {
         panic!("an inline passkey sign-in");
     };
     assert_eq!(inline.client_id, page.client.id);
-    assert_eq!(inline.origin, page.origin);
+    assert_eq!(inline.origin, page.origin.into(), "kept as personal data");
     let session = fixture
         .app
         .database

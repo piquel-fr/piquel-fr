@@ -293,14 +293,14 @@ pub enum DomainEvent {
         /// The client whose pages are on the origin.
         client_id: ClientId,
         /// The approved origin.
-        origin: RelatedOrigin,
+        origin: RecordedOrigin,
     },
     /// An approved origin was removed: its pages can no longer sign users in.
     RelatedOriginRemoved {
         /// The client whose pages were on the origin.
         client_id: ClientId,
         /// The removed origin.
-        origin: RelatedOrigin,
+        origin: RecordedOrigin,
     },
     /// The user reported an event of their history as not theirs. Their other
     /// sessions follow as [`Self::SessionRevoked`], and every refresh family of the
@@ -369,6 +369,12 @@ impl DomainEvent {
                 reason: RevocationReason::UserRevoked,
                 ..
             } => 2,
+            Self::RelatedOriginApproved { origin, .. }
+            | Self::RelatedOriginRemoved { origin, .. }
+            | Self::SignedIn {
+                inline: Some(InlineSignIn { origin, .. }),
+                ..
+            } => origin.version(),
             _ => Self::FIRST_VERSION,
         }
     }
@@ -570,7 +576,9 @@ impl DomainEvent {
             Self::AccountCreated { method, .. } => HistoryEntry::AccountCreated { method: *method },
             Self::SignedIn { method, inline, .. } => HistoryEntry::SignedIn {
                 method: *method,
-                origin: inline.as_ref().map(|inline| inline.origin.clone()),
+                origin: inline
+                    .as_ref()
+                    .and_then(|inline| inline.origin.value().cloned()),
             },
             Self::SessionRevoked { reason, .. } => match reason {
                 // Switching accounts signs this one out of the browser.
@@ -702,7 +710,8 @@ pub enum HistoryEntry {
     SignedIn {
         /// How it authenticated.
         method: AuthenticationMethod,
-        /// The application page's origin, when it signed the user in itself.
+        /// The application page's origin, when it signed the user in itself and
+        /// the origin was not erased since.
         #[serde(skip_serializing_if = "Option::is_none")]
         origin: Option<RelatedOrigin>,
     },
@@ -1000,7 +1009,47 @@ pub struct InlineSignIn {
     /// The client whose pushed authorization request the sign-in completed.
     pub client_id: ClientId,
     /// The page's origin.
-    pub origin: RelatedOrigin,
+    pub origin: RecordedOrigin,
+}
+
+/// A client's related origin, as an event names it. An origin may be a person's
+/// own domain, so events keep it as personal data, which retention and purges
+/// erase. Events recorded before it was kept that way hold it in their payload,
+/// and so in the audit chain, which cannot change: those stay
+/// [`Self::Sealed`], in payload version 1, until the history is pruned.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(untagged)]
+pub enum RecordedOrigin {
+    /// Kept as personal data, in payload version 2.
+    Personal(Personal<RelatedOrigin>),
+    /// Kept in the event, in payload version 1. Nothing records one anymore.
+    Sealed(RelatedOrigin),
+}
+
+impl RecordedOrigin {
+    /// The origin, unless it was erased.
+    #[must_use]
+    pub const fn value(&self) -> Option<&RelatedOrigin> {
+        match self {
+            Self::Personal(Personal::Value(origin)) | Self::Sealed(origin) => Some(origin),
+            Self::Personal(Personal::Erased) => None,
+        }
+    }
+
+    /// The payload version of the event that holds it.
+    const fn version(&self) -> i16 {
+        match self {
+            Self::Personal(_) => 2,
+            Self::Sealed(_) => DomainEvent::FIRST_VERSION,
+        }
+    }
+}
+
+impl From<RelatedOrigin> for RecordedOrigin {
+    /// Records the origin as personal data.
+    fn from(origin: RelatedOrigin) -> Self {
+        Self::Personal(Personal::Value(origin))
+    }
 }
 
 crate::str_enum! {

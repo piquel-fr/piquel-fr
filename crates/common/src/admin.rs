@@ -68,6 +68,32 @@ pub struct UserDetail {
     pub sessions: Vec<Session>,
     /// Remembered consents to applications.
     pub consents: Vec<Consent>,
+    /// The account's deletion, while it is scheduled.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub deletion: Option<ScheduledDeletion>,
+}
+
+/// An account's scheduled deletion.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ScheduledDeletion {
+    /// When it was scheduled.
+    pub requested_at: DateTime<Utc>,
+    /// When the purge job may delete the account.
+    pub purge_after: DateTime<Utc>,
+    /// Why its purge keeps failing, once it failed.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub failure: Option<PurgeFailure>,
+}
+
+/// Why an account's purge keeps failing, and when it is tried again.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PurgeFailure {
+    /// Failed attempts in a row.
+    pub attempts: u64,
+    /// The latest failure's message chain.
+    pub last_error: String,
+    /// When the purge job tries again.
+    pub next_attempt_at: DateTime<Utc>,
 }
 
 /// An email address of an account.

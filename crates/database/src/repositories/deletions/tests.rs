@@ -6,8 +6,9 @@ use piquel_common::{
     AccountStatus, Handle, PasskeyId, Personal, Provider, SessionId, TokenId,
     events::{Actor, Browser, DomainEvent, EventContext, Platform, RequestOrigin, UserAgentFamily},
 };
-use sqlx::PgPool;
-use std::net::IpAddr;
+use piquel_common::{AuthenticationMethod, events::SignInFailure};
+use sqlx::{Acquire, PgPool};
+use std::{net::IpAddr, time::Duration as StdDuration};
 
 /// Inserts an active account whose handle is `prefix` and part of its ID.
 async fn insert_user(pool: &PgPool, prefix: &str) -> (UserId, Handle) {
@@ -389,4 +390,123 @@ async fn purge_leaves_nothing_that_references_or_identifies_the_account() {
         .expect("lookup")
         .expect("the handle stays");
     assert_eq!(holder.user_id, None, "without an owner");
+}
+
+/// A request that stores personal data about the account while it is being
+/// purged, such as a failed sign-in's IP address, leaves none behind. Here the
+/// request holds migration 0022's key-share lock on the account until the purge
+/// waits for it, then commits: the purge must erase what it stored.
+#[tokio::test]
+#[ignore = "requires a disposable TEST_DATABASE_URL"]
+async fn personal_data_stored_during_a_purge_is_erased() {
+    let pool = Database::test_pool().await;
+    let (user, _) = insert_user(&pool, "racing").await;
+    let failed = EventContext {
+        actor: Actor::Anonymous,
+        origin: RequestOrigin {
+            client_ip: Some(IpAddr::from([192, 0, 2, 66])),
+            user_agent_family: None,
+        },
+        reason: None,
+    };
+    let mut request = DatabaseTransaction::new(pool.begin().await.expect("transaction"));
+    request
+        .record(
+            &failed,
+            Some(user),
+            DomainEvent::SignInFailed {
+                method: AuthenticationMethod::Passkey,
+                reason: SignInFailure::InvalidCredential,
+            },
+        )
+        .await
+        .expect("failed sign-in");
+
+    let mut connection = pool.acquire().await.expect("connection");
+    let pid: i32 = sqlx::query_scalar("SELECT pg_backend_pid()")
+        .fetch_one(&mut *connection)
+        .await
+        .expect("pid");
+    let purging = tokio::spawn(async move {
+        let mut tx = DatabaseTransaction::new(connection.begin().await.expect("transaction"));
+        let purged = tx.deletions().purge(user).await.expect("purge");
+        tx.commit().await.expect("commit");
+        purged
+    });
+    // Only deleting the account waits for the request's lock.
+    let blocked = async {
+        while !sqlx::query_scalar::<_, bool>(
+            "SELECT coalesce(bool_or(wait_event_type = 'Lock'), FALSE)
+            FROM pg_stat_activity WHERE pid = $1",
+        )
+        .bind(pid)
+        .fetch_one(&pool)
+        .await
+        .expect("activity")
+        {
+            tokio::time::sleep(StdDuration::from_millis(10)).await;
+        }
+    };
+    tokio::time::timeout(StdDuration::from_secs(10), blocked)
+        .await
+        .expect("the purge waits for the request");
+    request.commit().await.expect("commit");
+    assert!(purging.await.expect("purge task"));
+
+    let events = EventRepository::from_pool(&pool)
+        .history_for_user(user, 10)
+        .await
+        .expect("history");
+    let [event] = <[_; 1]>::try_from(events).expect("the failed sign-in stays");
+    assert_eq!(event.origin, Personal::Erased);
+}
+
+/// A failed purge waits its backoff behind the other due accounts, doubling with
+/// each failure up to the cap, and is counted once it keeps failing.
+#[tokio::test]
+#[ignore = "requires a disposable TEST_DATABASE_URL"]
+async fn failed_purges_back_off_behind_other_accounts() {
+    let pool = Database::test_pool().await;
+    let (failing, _) = insert_user(&pool, "failing").await;
+    let (other, _) = insert_user(&pool, "other").await;
+    let mut deletions = AccountDeletionRepository::from_pool(&pool);
+    // Other tests' accounts may be due too, so only these two are compared.
+    let order = async |deletions: &mut AccountDeletionRepository<'_>| {
+        deletions
+            .due(u32::MAX)
+            .await
+            .expect("due")
+            .into_iter()
+            .filter(|user| [failing, other].contains(user))
+            .collect::<Vec<_>>()
+    };
+    deletions
+        .schedule(failing, Utc::now() - Duration::days(2))
+        .await
+        .expect("schedule");
+    deletions
+        .schedule(other, Utc::now() - Duration::days(1))
+        .await
+        .expect("schedule");
+    assert_eq!(order(&mut deletions).await, [failing, other]);
+    assert_eq!(deletions.failure(failing).await.expect("failure"), None);
+
+    let (backoff, cap) = (Duration::minutes(5), Duration::minutes(12));
+    let mut delays = Vec::new();
+    for _ in 0..3 {
+        deletions
+            .record_failure(failing, "boom", backoff, cap)
+            .await
+            .expect("record");
+        let failure = deletions
+            .failure(failing)
+            .await
+            .expect("failure")
+            .expect("failed");
+        assert_eq!(failure.last_error, "boom");
+        delays.push((failure.next_attempt_at - Utc::now()).num_minutes());
+    }
+    assert_eq!(delays, [4, 9, 11], "5, 10, then capped at 12 minutes");
+    assert_eq!(order(&mut deletions).await, [other], "waits its backoff");
+    assert!(deletions.count_failing(3).await.expect("count") >= 1);
 }

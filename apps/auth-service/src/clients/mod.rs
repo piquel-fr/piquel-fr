@@ -530,7 +530,7 @@ impl<'a, 't> ClientRegistry<'a, 't> {
             })?;
         self.record(DomainEvent::RelatedOriginApproved {
             client_id: id.clone(),
-            origin: origin.clone(),
+            origin: origin.clone().into(),
         })
         .await
     }
@@ -553,7 +553,7 @@ impl<'a, 't> ClientRegistry<'a, 't> {
         }
         self.record(DomainEvent::RelatedOriginRemoved {
             client_id: id.clone(),
-            origin: origin.clone(),
+            origin: origin.clone().into(),
         })
         .await
     }

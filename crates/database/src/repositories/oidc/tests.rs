@@ -222,7 +222,8 @@ async fn public_client_origins_follow_registrations() {
 
 /// Purging an account keeps its deleted clients' tombstones, without their
 /// owner, and is refused while it owns a live client, which would otherwise
-/// become a client no account manages.
+/// become a client no account manages. A tombstone keeps nothing that may name a
+/// person: no name, redirect URIs or back-channel logout URI.
 #[tokio::test]
 #[ignore = "requires a disposable TEST_DATABASE_URL"]
 async fn purging_an_owner_needs_its_live_clients_deleted() {
@@ -233,7 +234,12 @@ async fn purging_an_owner_needs_its_live_clients_deleted() {
         .await
         .expect("user");
     let owner = account.id;
-    let client = registration(ClientKind::Public, &origin());
+    let site = origin();
+    let mut client = registration(ClientKind::Public, &site);
+    client.post_logout_uris =
+        PostLogoutUris::new([format!("{site}/bye").parse().expect("post-logout URI")])
+            .expect("one logout page");
+    client.backchannel_logout_uri = Some(format!("{site}/logout").parse().expect("logout URI"));
     let mut oidc = OidcRepository::from_pool(&pool);
     oidc.create_client(&client, ClientOwner::Account(owner))
         .await
@@ -255,6 +261,11 @@ async fn purging_an_owner_needs_its_live_clients_deleted() {
         .expect("find")
         .expect("the tombstone stays");
     assert_eq!(tombstone.owner_id, None);
+    assert!(tombstone.deleted_at.is_some());
+    let kept = serde_json::to_string(&tombstone).expect("serialize");
+    for personal in [site.as_str(), "Client test"] {
+        assert!(!kept.contains(personal), "{personal} in {kept}");
+    }
 }
 
 /// A connection to a new scratch schema with the migrations in `versions` applied,

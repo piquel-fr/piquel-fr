@@ -381,13 +381,18 @@ probation sign-in.
   passkey, as its sign-in would have: a recovery's passkey in probation confirms
   nothing.
 - **Purge:** every five minutes, one replica purges the accounts past their grace
-  period. It deletes the apps the account registered, leaving tombstones without
-  an owner, then the account with its emails, passkeys, identities, sessions,
-  grants, consents and email deliveries, and the personal data (IP, device,
-  provider subjects, operators' reasons) of every event it is the subject or actor
-  of. The events stay, with pseudonymous IDs only. Its handles stay in the handles
-  table without an owner, so no account claims them until an operator releases
-  them (`handle release`).
+  period. It deletes the apps the account registered, leaving tombstones with
+  only their ID, settings and dates, then the account with its emails, passkeys,
+  identities, sessions, grants, consents and email deliveries, and the personal
+  data (IP, device, provider subjects, app origins, operators' reasons) of every
+  event it is the subject or actor of, including one a request records while the
+  purge runs. The events stay, with pseudonymous IDs only. Its handles stay in the
+  handles table without an owner, so no account claims them until an operator
+  releases them (`handle release`). A purge that fails is retried after 5
+  minutes, then twice as long after each further failure, up to a day, behind
+  the other due accounts. The account's admin page and `user show` give its
+  failures and last error, and `piquel.auth.account_purge.failing` counts the
+  accounts that failed 3 times in a row.
 
 Administrators schedule and restore deletions from the account's page on the
 admin dashboard, with a reason the owner sees in their history. Operators do the
@@ -437,7 +442,7 @@ just auth client update notes --backchannel-logout-uri https://notes.example/aut
 just auth client disable notes       # enable undoes it
 just auth client rotate-secret notes --grace 24h
 just auth client suspend notes       # its owner cannot enable it; unsuspend lifts it
-just auth client delete notes        # for good: the ID is never reused
+just auth client delete notes        # for good: the ID is never reused, the name and URIs are erased
 ```
 
 Clients are public by default and authenticate with PKCE alone (`none`).

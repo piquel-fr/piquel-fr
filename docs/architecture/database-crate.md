@@ -121,9 +121,20 @@ Important invariants:
   `administrators().lock()` before the account lock, as grants and disabling do,
   so the last active administrator's account cannot be deleted. Callers end its sessions and
   delete the clients it manages first. `deletions().purge` then deletes the rows
-  that reference the account without cascading, the personal data of the events it
-  is the subject or actor of, and the account itself, in the same transaction. Its
-  handles stay in `handles` without an owner, so nobody claims them again.
+  that reference the account without cascading, the account itself, then the
+  personal data of the events it is the subject or actor of, in the same
+  transaction. Its handles stay in `handles` without an owner, so nobody claims
+  them again. The personal data goes last: storing an event's personal data
+  key-share locks each account the event names (migration `0022`'s trigger), and
+  only deleting the account conflicts with that lock. The account lock's `FOR NO
+  KEY UPDATE` does not, despite what that migration's comment says. So the
+  delete waits for every request that stored personal data while the account
+  existed, and the next statement erases it; a later one waits for the purge,
+  finds the account gone and stores none.
+- A deleted client keeps its row, so its ID is never reused, but a trigger erases
+  its name, redirect URIs and back-channel logout URI, which may name a person or
+  their domain: only its ID, settings that identify nobody and lifecycle dates stay.
+  Its name becomes empty, which the history reads as no name.
 - Active provider subjects and active provider-per-account links are unique.
   Unlink marks the identity revoked and releases both constraints.
 - Verified email ownership is unique across active accounts. Email is optional;
@@ -186,7 +197,14 @@ taken per transaction, by `signing_keys().lock()` or `try_lock()`: it serializes
 every change to `signing_keys`, so rotation runs on one replica at a time and never
 races a `keys` command.
 The account purge job (`LockKey::AccountPurge`) also runs every five minutes,
-purging up to 100 accounts past their grace period, each in its own transaction.
+purging up to 100 due accounts, each in its own transaction. A failure is recorded
+on the `account_deletions` row, with its attempts, error and next attempt, which
+waits 5 minutes, doubling after each failure up to a day. Due accounts are read in
+the order they became due, past their grace period and their next attempt, so
+accounts that keep failing never hold back the others. After each run the job sets
+`piquel.auth.account_purge.failing`, the accounts that failed 3 times in a row.
+The purge's queries use indexes, including the actor's user ID in
+`domain_events`, so its cost does not grow with everyone's history.
 Tests that use `TEST_DATABASE_URL` are explicitly
 marked ignored by the ordinary unit test runner; other crates' tests read stored state
 through helpers behind the `test-support` feature. `just db test` runs them in a
@@ -218,9 +236,6 @@ with `Limit::set`, never the default:
   no lock limit, so only that statement limit bounds the wait, then restore the 5 s lock limit before any DDL, so a migration
   stuck behind a long transaction fails, and can be rerun, rather than queue every
   request behind its lock.
-- **Account purge** (`deletions().purge`): 5 minutes per statement, for its
-  transaction. Erasing the personal data of the events an account acted in scans
-  every event, since no index covers actors.
 - **Audit prune** (`DatabaseTransaction::prune_audit_chain`): 30 minutes per
   statement, for its transaction, since it may delete years of history.
 - **The signing key lock** (`signing_keys().lock()`) waits with no lock limit,
@@ -355,6 +370,11 @@ always reads it.
   origin read as `Personal::Erased`. Deleting it never breaks the event.
 - The cleanup pass deletes personal data after 90 days. Account purge deletes it
   earlier for every event whose subject or actor is the purged account.
+- A client's related origin, in `related_origin_approved`,
+  `related_origin_removed` and an inline `signed_in`, may be a person's own domain,
+  so it is `Personal` too, in those kinds' second payload version. Events of the
+  first version hold it in the payload, which the audit chain covers, so it stays
+  there until the history is pruned; they read as `RecordedOrigin::Sealed`.
 - `subject_user_id` has no foreign key: history outlives the account. Subject and
   actor UUIDs are pseudonymous, not anonymous: applications hold the same `sub`.
 

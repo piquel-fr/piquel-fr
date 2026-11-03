@@ -1,0 +1,34 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT attempts::bigint AS \"attempts!: Unsigned\",\n                    last_error AS \"last_error!\", next_attempt_at AS \"next_attempt_at!\"\n                FROM account_deletions\n                WHERE user_id = $1 AND attempts > 0",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "attempts!: Unsigned",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 1,
+        "name": "last_error!",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 2,
+        "name": "next_attempt_at!",
+        "type_info": "Timestamptz"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      null,
+      true,
+      true
+    ]
+  },
+  "hash": "78fe4174a2846734ebd91e6d4af3d9e2aacfb99235ffa813f586f49059378578"
+}

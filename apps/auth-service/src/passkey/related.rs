@@ -160,7 +160,10 @@ impl PasskeyApplication {
             context,
             user_id,
             credential,
-            InlineSignIn { client_id, origin },
+            InlineSignIn {
+                client_id,
+                origin: origin.into(),
+            },
         )
         .await
         .map_err(PasskeyError::from)?;
