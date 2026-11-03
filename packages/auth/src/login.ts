@@ -44,6 +44,8 @@ const REFRESH_LEASE = 60_000;
 const REFRESH_WAIT = 25_000;
 /** How often a request waiting for another's refresh reloads the session. */
 const REFRESH_POLL = 50;
+/** Methods that must not change anything, so any origin may send them with the session cookie. */
+const SAFE_METHODS = new Set(['GET', 'HEAD', 'OPTIONS', 'TRACE']);
 /** Most bytes in a `return_to` path. */
 const MAX_RETURN_TO_BYTES = 2048;
 /**
@@ -84,6 +86,16 @@ export type LoginOptions = {
   sessionLifetime?: number;
 };
 
+/** How {@link Login.session} reads a request's session. */
+export type SessionOptions = {
+  /**
+   * Takes unsafe requests from other origins too, for an endpoint other origins call
+   * with the session cookie, such as a sibling site's `fetch` with credentials under
+   * CORS. The endpoint then guards against cross-site request forgery itself.
+   */
+  crossOrigin?: boolean;
+};
+
 /** A route: its method, and what answers it. */
 type Route = { method: 'GET' | 'POST'; answer: (request: Request) => Promise<Response> };
 
@@ -109,7 +121,8 @@ type Route = { method: 'GET' | 'POST'; answer: (request: Request) => Promise<Res
  *   auth's keys cannot be fetched and 500 when the backend fails, so auth retries.
  *
  * Every route answers with `Cache-Control: no-store`, and 500 when the backend fails,
- * reporting the failure with `console.error`.
+ * reporting the failure with `console.error`. {@link Login.session} applies logout's
+ * origin rule to every unsafe request, so handlers need no CSRF token.
  *
  * ```ts
  * const login = new Login(issuer.client({ clientId, clientSecret, redirectUri }), {
@@ -121,6 +134,7 @@ type Route = { method: 'GET' | 'POST'; answer: (request: Request) => Promise<Res
  *   const routed = await login.handle(request);
  *   if (routed) return routed;
  *   const user = await login.session(request);
+ *   if (user instanceof Response) return user; // 403: an unsafe request from another site
  *   if (!user) return login.signIn(request);
  *   return new Response(`Hello ${user.name}`);
  * }
@@ -199,8 +213,28 @@ export class Login {
    * wait for its result. A session whose refresh fails for good ends. Call it once
    * per request: on a step-up login's return, it marks the user as the retry.
    * Backend failures propagate.
+   *
+   * A request that is not `GET`, `HEAD`, `OPTIONS` or `TRACE` must come from the app's
+   * own pages, or the answer is a 403 response to send, before the session is read,
+   * with or without a cookie: `Sec-Fetch-Site: same-origin` when the browser sends
+   * it, and otherwise an `Origin` equal to the redirect URI's. So no other site, not
+   * even a sibling the `SameSite=Lax` cookie reaches, acts as the user, and handlers
+   * need no CSRF token. `{ crossOrigin: true }` skips the check, for an endpoint
+   * other origins must call with the session cookie.
    */
-  async session(request: Request): Promise<SignedIn | null> {
+  session(request: Request, options: { crossOrigin: true }): Promise<SignedIn | null>;
+  session(request: Request, options?: SessionOptions): Promise<SignedIn | Response | null>;
+  async session(
+    request: Request,
+    options: SessionOptions = {}
+  ): Promise<SignedIn | Response | null> {
+    if (
+      options.crossOrigin !== true &&
+      !SAFE_METHODS.has(request.method) &&
+      !this.#sameOrigin(request)
+    ) {
+      return Login.text(403, "This request must come from this site's own pages.");
+    }
     const key = SessionKey.parse(Login.#cookie(request, SESSION_COOKIE));
     if (key === undefined) return null;
     let current = await this.#sessions.load(key);
@@ -375,7 +409,8 @@ export class Login {
   /**
    * Whether a browser request comes from this app's own pages, whose origin is the
    * redirect URI's: `Sec-Fetch-Site: same-origin` when the browser sends it, and
-   * otherwise an `Origin` equal to the app's, which `null` never is.
+   * otherwise an `Origin` equal to the app's, which `null` never is. Logout and
+   * {@link Login.session} both ask it.
    */
   #sameOrigin(request: Request): boolean {
     const site = request.headers.get('sec-fetch-site');
@@ -595,6 +630,7 @@ export class Login {
  *
  * ```ts
  * const user = await login.session(request);
+ * if (user instanceof Response) return user;
  * if (!user) return login.signIn(request);
  * // A passkey sign-in within the last five minutes, or a redirect through login.
  * const stepUp = user.require({ acr_values: 'phr', max_age: 300 });

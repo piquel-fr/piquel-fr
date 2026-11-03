@@ -243,7 +243,9 @@ on a page with `Referrer-Policy: no-referrer` sends `Origin: null` with
 `Sec-Fetch-Site: same-origin`, so it is accepted. Safe methods must not change
 anything. An endpoint that other origins call with the cookie, such as a sibling
 site's `fetch` with credentials under CORS, opts out explicitly (`CrossOrigin` in
-axum) and guards against cross-site request forgery itself.
+axum, `session(request, { crossOrigin: true })` in TypeScript, where `session()`
+otherwise answers with the 403 response to send) and guards against cross-site
+request forgery itself.
 
 ## Back-channel logout
 

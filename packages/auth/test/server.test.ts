@@ -1,8 +1,18 @@
-/** Server-side login: cookies, `return_to`, logout, the refresh lease, back-channel logout and step-up. */
+/**
+ * Server-side login: cookies, `return_to`, the origin check, logout, the refresh lease,
+ * back-channel logout and step-up.
+ */
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { Issuer, type IdTokenClaims, type LogoutTokenClaims } from '../src/index.ts';
-import { Login, MemoryBackend, checkBackend, type SessionBackend } from '../src/server.ts';
+import {
+  Login,
+  MemoryBackend,
+  SignedIn,
+  checkBackend,
+  type SessionBackend,
+  type SessionOptions
+} from '../src/server.ts';
 import {
   DISCOVERY_URL,
   DOCUMENT,
@@ -21,6 +31,23 @@ const BACKCHANNEL_LOGOUT_EVENT = 'http://schemas.openid.net/event/backchannel-lo
 const ATTRIBUTES = 'Path=/; Secure; HttpOnly; SameSite=Lax';
 const USER = '01936f3e-8c00-7000-8000-000000000001';
 const OTHER_USER = '01936f3e-8c00-7000-8000-000000000002';
+const SESSION_COOKIE = '__Host-piquel-session';
+
+/**
+ * `Sec-Fetch-Site` and `Origin` headers, and whether they show the app's own pages:
+ * `Sec-Fetch-Site` decides when sent, and `Origin` only without it. A form on a
+ * `no-referrer` page sends `Origin: null` with `Sec-Fetch-Site: same-origin`.
+ */
+const ORIGINS: [Record<string, string>, boolean][] = [
+  [{ 'sec-fetch-site': 'same-origin', origin: 'null' }, true],
+  [{ 'sec-fetch-site': 'same-origin' }, true],
+  [{ origin: APP }, true],
+  [{ 'sec-fetch-site': 'same-site', origin: APP }, false],
+  [{ 'sec-fetch-site': 'cross-site', origin: APP }, false],
+  [{ origin: 'null' }, false],
+  [{}, false],
+  [{ origin: 'https://evil.notes.example' }, false]
+];
 
 /** A UUIDv7 ending in `n`, for session and token IDs. */
 function uuid(n: number): string {
@@ -180,9 +207,11 @@ class Browser {
     return response;
   }
 
-  /** The session of a request for `path`. */
-  session(path = '/') {
-    return this.#auth.login.session(this.request(path));
+  /** The session of a `GET` of `path`, which the origin check lets through. */
+  async session(path = '/') {
+    const user = await this.#auth.login.session(this.request(path));
+    assert.ok(!(user instanceof Response));
+    return user;
   }
 
   /**
@@ -223,13 +252,13 @@ test('a sign-in sets host-only cookies, under a fresh session key each time', as
     new RegExp(`^__Host-piquel-session=[\\w-]{43}; ${ATTRIBUTES}; Max-Age=43200$`)
   );
   assert.ok(cookies.includes(`__Host-piquel-login=; ${ATTRIBUTES}; Max-Age=0`));
-  const first = browser.cookies.get('__Host-piquel-session');
+  const first = browser.cookies.get(SESSION_COOKIE);
   assert.equal((await browser.session())?.claims.sub, USER);
 
   // Signing in again replaces the session: the first key is worthless after.
   const old = browser.request('/');
   await browser.signIn();
-  assert.notEqual(browser.cookies.get('__Host-piquel-session'), first);
+  assert.notEqual(browser.cookies.get(SESSION_COOKIE), first);
   assert.equal(await auth.login.session(old), null);
   assert.equal((await browser.session())?.claims.sub, USER);
 });
@@ -262,47 +291,48 @@ test('return_to accepts only same-origin paths', async () => {
 
 test('logout accepts only requests from the app’s own pages', async () => {
   const auth = await Auth.start();
-  const refused = [
-    { 'sec-fetch-site': 'cross-site', origin: APP },
-    { 'sec-fetch-site': 'same-site' },
-    { origin: 'https://evil.example' },
-    { origin: 'null' },
-    {}
-  ];
+  for (const [headers, own] of ORIGINS) {
+    const name = JSON.stringify(headers);
+    const browser = new Browser(auth);
+    await browser.signIn();
+    const key = browser.cookies.get(SESSION_COOKIE) ?? '';
+    const idToken = (await browser.session())?.idToken.token;
+    const out = await browser.send('/auth/logout', { method: 'POST', headers });
+    assert.equal(out.status, own ? 303 : 403, name);
+    browser.cookies.set(SESSION_COOKIE, key);
+    assert.equal((await browser.session()) === null, own, name);
+    if (!own) continue;
+    const location = new URL(out.headers.get('location') ?? '');
+    assert.equal(`${location.origin}${location.pathname}`, `${ISSUER}/oidc/logout`, name);
+    assert.equal(location.searchParams.get('id_token_hint'), idToken, name);
+    assert.ok(
+      out.headers.getSetCookie().includes(`${SESSION_COOKIE}=; ${ATTRIBUTES}; Max-Age=0`),
+      name
+    );
+  }
+  assert.equal((await new Browser(auth).send('/auth/logout')).status, 405);
+});
+
+test('session() takes unsafe requests only from the app’s own pages, unless told otherwise', async () => {
+  const auth = await Auth.start();
   const browser = new Browser(auth);
   await browser.signIn();
-  for (const headers of refused) {
-    const response = await browser.send('/auth/logout', { method: 'POST', headers });
-    assert.equal(response.status, 403, JSON.stringify(headers));
+  const anonymous = new Browser(auth);
+  const answer = (user: SignedIn | Response | null) =>
+    user instanceof Response ? user.status : user === null ? 'signed out' : 'signed in';
+  for (const [headers, own] of ORIGINS) {
+    const name = JSON.stringify(headers);
+    const read = (from: Browser, method: string, options?: SessionOptions) =>
+      auth.login.session(from.request('/notes', { method, headers }), options).then(answer);
+    // Without a cookie too, a request from elsewhere is refused, not signed out.
+    assert.equal(await read(browser, 'POST'), own ? 'signed in' : 403, name);
+    assert.equal(await read(browser, 'DELETE'), own ? 'signed in' : 403, name);
+    assert.equal(await read(anonymous, 'POST'), own ? 'signed out' : 403, name);
+    // Safe methods and the opt-out skip the check.
+    assert.equal(await read(browser, 'GET'), 'signed in', name);
+    assert.equal(await read(browser, 'POST', { crossOrigin: true }), 'signed in', name);
+    assert.equal(await read(anonymous, 'POST', { crossOrigin: true }), 'signed out', name);
   }
-  assert.ok(await browser.session());
-  assert.equal((await browser.send('/auth/logout')).status, 405);
-
-  // A form on a page sending no referrer posts `Origin: null` from the same origin.
-  const idToken = (await browser.session())?.idToken.token ?? '';
-  const out = await browser.send('/auth/logout', {
-    method: 'POST',
-    headers: { 'sec-fetch-site': 'same-origin', origin: 'null' }
-  });
-  assert.equal(out.status, 303);
-  const location = new URL(out.headers.get('location') ?? '');
-  assert.equal(`${location.origin}${location.pathname}`, `${ISSUER}/oidc/logout`);
-  assert.equal(location.searchParams.get('id_token_hint'), idToken);
-  assert.ok(
-    out.headers.getSetCookie().includes(`__Host-piquel-session=; ${ATTRIBUTES}; Max-Age=0`)
-  );
-  assert.equal(browser.cookies.has('__Host-piquel-session'), false);
-
-  // Without Sec-Fetch-Site, the Origin must be the app's.
-  await browser.signIn();
-  const key = browser.cookies.get('__Host-piquel-session');
-  const viaOrigin = await browser.send('/auth/logout', {
-    method: 'POST',
-    headers: { origin: APP }
-  });
-  assert.equal(viaOrigin.status, 303);
-  browser.cookies.set('__Host-piquel-session', key ?? '');
-  assert.equal(await browser.session(), null);
 });
 
 test('concurrent requests with an expired access token refresh it once', async () => {
@@ -438,7 +468,7 @@ test('a step-up returns to the page, retries once, then answers 403', async () =
   const requirement = { acr_values: 'phr', max_age: 60 } as const;
   // A page whose API keeps refusing, as one that still asks for a step-up.
   const page = async () => {
-    const user = await auth.login.session(browser.request('/settings?tab=1'));
+    const user = await browser.session('/settings?tab=1');
     assert.ok(user);
     return user.stepUp(requirement);
   };
@@ -473,8 +503,11 @@ test('a step-up returns to the page, retries once, then answers 403', async () =
   // The marker is spent, so a later visit is a new action.
   assert.equal((await page()).status, 303);
   // Other methods cannot follow a redirect.
-  const posted = await auth.login.session(browser.request('/settings', { method: 'POST' }));
-  assert.equal(posted?.stepUp(requirement).status, 401);
+  const posted = await auth.login.session(
+    browser.request('/settings', { method: 'POST', headers: { 'sec-fetch-site': 'same-origin' } })
+  );
+  assert.ok(posted instanceof SignedIn);
+  assert.equal(posted.stepUp(requirement).status, 401);
 });
 
 test('the memory backend keeps the backend contract, which a read-then-write one breaks', async () => {

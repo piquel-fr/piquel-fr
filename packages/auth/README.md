@@ -110,7 +110,8 @@ const login = new Login(
 export async function fetch(request: Request): Promise<Response> {
   const routed = await login.handle(request); // the routes under /auth; null otherwise
   if (routed) return routed;
-  const user = await login.session(request); // null, or the signed-in user
+  const user = await login.session(request); // null, the signed-in user, or a 403
+  if (user instanceof Response) return user; // an unsafe request from another site
   if (!user) return login.signIn(request); // through login, and back to this page
   const stepUp = user.require({ acr_values: 'phr', max_age: 300 });
   if (stepUp) return stepUp; // a recent passkey sign-in, or through login again
@@ -131,6 +132,14 @@ export async function fetch(request: Request): Promise<Response> {
   concurrent request and replica, through a lease in the session record; a refresh
   whose outcome is unknown, or that auth refuses with `invalid_grant`, ends the
   session.
+- **Cross-site writes**: `SameSite=Lax` keeps the cookie off other sites' posts, but
+  not off a sibling's under the same domain. So `session()` answers a request that is
+  not `GET`, `HEAD`, `OPTIONS` or `TRACE` with a 403 response, before reading the
+  session and with or without a cookie, unless it comes from the app's own pages, by
+  logout's rule. Handlers need no CSRF token. An endpoint that other origins call
+  with the cookie, such as a sibling site's `fetch` with credentials under CORS, opts
+  out with `login.session(request, { crossOrigin: true })`, which never answers 403,
+  and guards against cross-site request forgery itself.
 - **Back-channel logout** ends every session started under the token's `sid`, or
   every session of its `sub`, on every replica sharing the backend. A replayed token
   changes nothing.

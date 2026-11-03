@@ -55,6 +55,7 @@ async function handle(request: Request): Promise<Response> {
   const routed = await login.handle(request);
   if (routed) return routed;
   const user = await login.session(request);
+  if (user instanceof Response) return user; // 403: an unsafe request from another site
   switch (new URL(request.url).pathname) {
     case '/':
       if (!user) return page('<h1>Notes</h1><a href="/auth/login">Sign in</a>');

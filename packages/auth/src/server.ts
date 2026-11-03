@@ -18,12 +18,13 @@
  *   const routed = await login.handle(request); // /auth/login, /callback, /logout, /backchannel-logout
  *   if (routed) return routed;
  *   const user = await login.session(request);
+ *   if (user instanceof Response) return user; // 403: an unsafe request from another site
  *   if (!user) return login.signIn(request);
  *   return new Response(`Hello ${user.name}`);
  * }
  * ```
  */
-export { Login, SignedIn, type LoginOptions } from './login.ts';
+export { Login, SignedIn, type LoginOptions, type SessionOptions } from './login.ts';
 export {
   MemoryBackend,
   checkBackend,
