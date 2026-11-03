@@ -16,7 +16,7 @@ policies, and redirects every other path to auth, keeping the path. See
 
 Requires Rust (pinned by `rust-toolchain.toml`) and just 1.42+. Building needs no
 database: SQL is checked against the committed query cache in
-`crates/database/.sqlx/`. It needs no Node either: nothing builds JavaScript.
+`crates/database/.sqlx/`. It needs no Node either: auth builds no JavaScript.
 
 ```sh
 just build
@@ -734,7 +734,8 @@ Use individual recipes while iterating:
 | Full validation (format, Clippy/ESLint, Rust/TypeScript checks, unit/doc tests, audits) | `just validate` |
 | Format Rust and web / check formatting | `just fmt` / `just fmt-check` |
 | Rust / TypeScript checks (tsc, the passkey script's JSDoc types included) | `just rust check` / `just web check` |
-| Clippy and ESLint, warnings denied | `just lint` (`just rust lint` / `just web lint`) |
+| Clippy and ESLint, warnings denied; `publint` and `attw` on the built TypeScript SDK | `just lint` (`just rust lint` / `just web lint`) |
+| Regenerate the SDK vectors / the TypeScript SDK's wire types | `just sdk-vectors` / `just sdk-types` |
 | Unit tests / focused package tests | `just test` / `just test -p auth-service` |
 | Documentation tests | `just doc-test` |
 | Database integration tests and query cache check, in a scratch cluster | `just db test` |

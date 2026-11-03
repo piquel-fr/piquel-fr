@@ -1,0 +1,17 @@
+{
+  "compilerOptions": {
+    "strict": true,
+    "exactOptionalPropertyTypes": true,
+    "noUncheckedIndexedAccess": true,
+    "target": "es2023",
+    "module": "nodenext",
+    "lib": ["es2023", "DOM"],
+    "types": [],
+    "declaration": true,
+    "rootDir": "src",
+    "outDir": "dist",
+    "verbatimModuleSyntax": true,
+    "isolatedModules": true
+  },
+  "include": ["src"]
+}

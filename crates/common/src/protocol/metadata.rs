@@ -25,6 +25,7 @@ pub const OPENID_CONFIGURATION_PATH: &str = "/.well-known/openid-configuration";
 /// break older clients. Later capabilities add fields
 /// here, optional ones skipped when `None`.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(test, derive(ts_rs::TS), ts(optional_fields))]
 #[expect(
     clippy::struct_excessive_bools,
     reason = "RFC 8414 and OIDC Discovery define these capability flags as JSON booleans"

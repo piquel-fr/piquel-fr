@@ -353,6 +353,7 @@ impl fmt::Display for ErrorDescription {
 /// # Ok::<(), serde_json::Error>(())
 /// ```
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(test, derive(ts_rs::TS), ts(optional_fields))]
 pub struct ErrorResponse {
     /// What went wrong.
     pub error: ErrorCode,
