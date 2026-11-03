@@ -6,6 +6,8 @@
  * - **Resource servers** validate access tokens with {@link Issuer.resource}, and
  *   declare their scopes with {@link defineScopes}, so an undeclared scope does not
  *   compile.
+ * - **Applications** sign users in with {@link Issuer.client}: the authorization
+ *   code flow with PKCE, pushed authorization requests, and the RFC 9207 issuer check.
  * - {@link KeyCache} verifies JWS signatures against any JWKS URL, refetching on key
  *   rotation without letting unknown key IDs flood the issuer.
  * - Every failure is an {@link AuthError}, whose `toResponse()` answers with the
@@ -16,6 +18,13 @@
  */
 export type * from './protocol.ts';
 export { formatChallenge, parseChallenge, type FormattedChallenge } from './challenge.ts';
+export {
+  Client,
+  type AuthorizeRequest,
+  type ClientConfig,
+  type PendingLogin,
+  type Tokens
+} from './client.ts';
 export { AuthError, type AuthErrorCode, type AuthErrorDetail, type TokenReason } from './error.ts';
 export type { Fetch } from './http.ts';
 export { Issuer, type IssuerOptions } from './issuer.ts';
@@ -23,4 +32,11 @@ export { Jws, KeyCache, type JwsHeader, type KeyCacheOptions } from './keys.ts';
 export { Resource, type ResourceConfig } from './resource.ts';
 export { Scopes, defineScopes } from './scope.ts';
 export type { Clock } from './time.ts';
-export { AccessToken, type ClaimsReader, type Subject } from './token.ts';
+export {
+  AccessToken,
+  type ClaimsReader,
+  IdToken,
+  LogoutToken,
+  type LogoutTarget,
+  type Subject
+} from './token.ts';

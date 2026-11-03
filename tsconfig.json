@@ -11,6 +11,7 @@
     "lib": ["esnext", "DOM", "DOM.Iterable"],
     "types": ["node"],
     "verbatimModuleSyntax": true,
+    "allowImportingTsExtensions": true,
     "isolatedModules": true
   },
   "include": ["*.js", "*.ts", "tests/browser/**/*.ts"]

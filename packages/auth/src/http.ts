@@ -63,6 +63,19 @@ export class Http {
     return this.send(url, { method: 'GET', headers });
   }
 
+  /** Sends a form `POST`. */
+  post(
+    url: string,
+    form: Record<string, string>,
+    headers: Record<string, string> = {}
+  ): Promise<Reply> {
+    return this.send(url, {
+      method: 'POST',
+      headers: { ...headers, 'content-type': 'application/x-www-form-urlencoded' },
+      body: new URLSearchParams(form).toString()
+    });
+  }
+
   /**
    * Sends `init` to `url` and reads the response. Redirects are not followed: no auth
    * endpoint redirects, and one would carry credentials elsewhere.
