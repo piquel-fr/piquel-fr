@@ -144,7 +144,8 @@ pub struct Dashboard<'a> {
     pub home: &'a str,
     /// The signed-in administrator, if the browser is signed in.
     pub administrator: Option<Who<'a>>,
-    /// The signed-in administrator's own account page, which their avatar links.
+    /// The signed-in administrator's account settings, on auth, which their
+    /// avatar links.
     pub me: &'a str,
     /// Each tab's page.
     pub tabs: &'a [(Tab, &'a str)],

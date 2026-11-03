@@ -550,7 +550,8 @@ impl AdminApplication {
             handle: admin.handle.as_str(),
             administrator: true,
         });
-        let me = admin.map_or_else(String::new, |admin| Self::account(cx, admin.user_id));
+        // The avatar leads to the administrator's own settings, on auth.
+        let me = app.auth.join(routes::page::settings::HOME);
         let health = Self::health(cx).await?;
         let environment = app.auth.host();
         let dashboard = Dashboard {
