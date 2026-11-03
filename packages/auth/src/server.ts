@@ -1,6 +1,6 @@
 /**
  * Server-side login for `@piquel/auth`, over standard `Request` and `Response`, so
- * it runs as is in Node, Deno, Bun, Workers, Hono, SvelteKit and the like. Tokens
+ * it runs as is in Node, Bun, Workers, Hono, SvelteKit and the like. Tokens
  * stay on the server, in the application's {@link SessionBackend}; the browser holds
  * only a random session key.
  *

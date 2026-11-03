@@ -95,7 +95,7 @@ A confidential client authenticates with HTTP Basic, and a public one sends its
 
 `@piquel/auth/server` is the recommended way to sign users in: tokens stay on the
 server, and the browser holds only a random session key. It takes a standard
-`Request` and returns a `Response`, so it runs as is in Node, Deno, Bun, Workers,
+`Request` and returns a `Response`, so it runs as is in Node, Bun, Workers,
 Hono or SvelteKit. [`examples/server.ts`](examples/server.ts) is a whole app on
 Node's `http` server.
 
