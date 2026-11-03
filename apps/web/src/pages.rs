@@ -39,16 +39,6 @@ impl Page {
             Self::Terms => "Terms of service",
         }
     }
-
-    /// A policy's text: a fragment of trusted HTML, embedded at compile time, so it
-    /// reads and diffs as a document.
-    const fn text(self) -> &'static str {
-        match self {
-            Self::Home => "",
-            Self::Privacy => include_str!("../assets/policies/privacy.html"),
-            Self::Terms => include_str!("../assets/policies/terms.html"),
-        }
-    }
 }
 
 /// Where the homepage links: auth's pages, and the developer documentation.
@@ -75,12 +65,20 @@ pub(crate) async fn page_body(page: Page, links: HomeLinks<'_>) -> Result<impl V
     Ok(view! {
         match page {
             Page::Home => home(links: links),
-            Page::Privacy | Page::Terms => {
-                <article class="site policy">
-                    (ViewHandle::unescaped_unchecked(page.text()))
-                </article>
-            }
+            Page::Privacy => policy(text: include_str!("../assets/policies/privacy.html")),
+            Page::Terms => policy(text: include_str!("../assets/policies/terms.html")),
         }
+    })
+}
+
+/// A policy, whose `text` is a fragment of trusted HTML, embedded at compile time
+/// so it reads and diffs as a document.
+#[component]
+async fn policy(text: &'static str) -> Result<impl View> {
+    Ok(view! {
+        <article class="site policy">
+            (ViewHandle::unescaped_unchecked(text))
+        </article>
     })
 }
 

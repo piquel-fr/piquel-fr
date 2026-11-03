@@ -31,8 +31,8 @@ audit_key = "audit-key"
 # See "Running several replicas" in infra/README.md before raising it.
 auth_replicas = 1
 # Where auth, with the admin dashboard it serves, and piquel.fr's web server
-# send telemetry: the
-# `telemetry` application's collector, imported below. Empty sends none.
+# send telemetry: the `telemetry` application's collector, imported below.
+# Empty sends none.
 otlp_endpoint = "http://collector.telemetry:4318"
 
 [spec.environments.production]

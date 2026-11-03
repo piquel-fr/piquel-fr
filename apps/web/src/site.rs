@@ -4,7 +4,7 @@
 use crate::pages::{HomeLinks, Page, page_body};
 use axum::{
     Router,
-    http::{HeaderName, HeaderValue, StatusCode, Uri, header, uri::PathAndQuery},
+    http::{HeaderValue, StatusCode, Uri, header, uri::PathAndQuery},
     middleware,
     response::{IntoResponse, Redirect, Response},
     routing::get,
@@ -152,9 +152,8 @@ impl Site {
         ] {
             headers.insert(name, HeaderValue::from_static(value));
         }
-        let cache: HeaderName = header::CACHE_CONTROL;
         headers
-            .entry(cache)
+            .entry(header::CACHE_CONTROL)
             .or_insert(HeaderValue::from_static("no-store"));
         response
     }
