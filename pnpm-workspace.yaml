@@ -8,3 +8,7 @@ auditConfig:
     # typescript-eslint, its only dependents, require ^10. They are dev
     # tools matching globs we write. Remove once they accept minimatch 11.
     - GHSA-g3hv-75wg-m249
+# workerd's install script only fetches its binary when the platform package is
+# missing, which pnpm installs anyway.
+allowBuilds:
+  workerd: false

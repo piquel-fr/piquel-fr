@@ -35,7 +35,22 @@ export default defineConfig(
       // Node globals, so ESLint's environment-unaware check only adds noise.
       'no-undef': 'off',
       // The codebase consistently declares object shapes as type aliases.
-      '@typescript-eslint/consistent-type-definitions': ['error', 'type']
+      '@typescript-eslint/consistent-type-definitions': ['error', 'type'],
+      // node:test reports the promises `test` and `describe` return itself.
+      '@typescript-eslint/no-floating-promises': [
+        'error',
+        {
+          allowForKnownSafeCalls: [
+            { from: 'package', package: 'node:test', name: ['test', 'describe'] }
+          ]
+        }
+      ]
     }
+  },
+  {
+    // The runtime smoke scripts import the built package, which does not exist yet
+    // when linting runs, so they get the rules that need no types.
+    files: ['packages/auth/test/smoke/*.js'],
+    extends: [ts.configs.disableTypeChecked]
   }
 );

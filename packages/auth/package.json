@@ -25,11 +25,13 @@
   ],
   "scripts": {
     "build": "tsc",
-    "lint": "tsc && publint --strict && attw --pack --profile esm-only"
+    "lint": "tsc && publint --strict && attw --pack --profile esm-only",
+    "test": "node --test 'test/**/*.test.ts'"
   },
   "devDependencies": {
     "@arethetypeswrong/cli": "0.18.5",
     "publint": "0.3.25",
-    "typescript": "6.0.3"
+    "typescript": "6.0.3",
+    "workerd": "1.20261023.1"
   }
 }
