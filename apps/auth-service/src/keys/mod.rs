@@ -230,13 +230,19 @@ impl KeyStore {
     }
 
     /// Makes sure a key signs, generating one on first start, and loads the key
-    /// set. Waits for any rotation in progress.
+    /// set. Waits for any rotation in progress. A rotation step that fails, such
+    /// as a refused promotion, is logged and rolled back, so a replica still
+    /// starts with the active key, as running ones keep signing with it.
     ///
     /// # Errors
-    /// Returns database, generation and loading failures.
+    /// Returns the database or loading failure when no active key can be loaded.
     pub async fn start(&self) -> Result<SigningKeys, KeyError> {
-        self.change(None, None, async |change| change.advance().await)
-            .await?;
+        if let Err(error) = self
+            .change(None, None, async |change| change.advance().await)
+            .await
+        {
+            tracing::error!(?error, "signing key rotation failed at startup");
+        }
         Ok(SigningKeys::new(self.key_set(&self.list().await?)?))
     }
 
