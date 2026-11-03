@@ -1,0 +1,17 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE account_deletions\n                SET attempts = attempts + 1, last_error = $2,\n                    -- The exponent stops at 30, so no backoff overflows an interval.\n                    next_attempt_at = now() + least(\n                        $3::bigint * power(2, least(attempts, 30)), $4::bigint\n                    ) * interval '1 second'\n                WHERE user_id = $1 AND purge_after <= now()",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Text",
+        "Int8",
+        "Int8"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "015646f7af450ccf36b910a4e160f67b00bad61026e7571fb7d0e0488a7a0c92"
+}

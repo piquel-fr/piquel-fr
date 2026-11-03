@@ -152,7 +152,8 @@ pub(super) async fn detail(cx: &Cx) -> Result<Response> {
             all_events: all_events.as_str(),
         )
     };
-    App::render(cx, StatusCode::OK, page).await
+    // The account's page is the dashboard's largest view, so its render is boxed.
+    Box::pin(App::render(cx, StatusCode::OK, page)).await
 }
 
 /// `/users/{account}/disable`: disables the account with a reason, ending its

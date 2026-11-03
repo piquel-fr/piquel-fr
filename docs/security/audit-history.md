@@ -52,6 +52,12 @@ IP addresses, browser families and every `Personal` payload value live in
 those rows without touching the chain. The trade-off is that personal data is
 not tamper-evident.
 
+What a sealed event holds therefore cannot be erased without breaking the chain.
+Apps' related origins were held there until they became personal data: events
+recorded before then keep them, in payload version 1, until the history is
+pruned through them. Subject and actor IDs stay, as pseudonymous IDs, and so do
+an operator's `os_user` and `host`, which are accountability data.
+
 ### Checkpoints
 
 Every five minutes, if new events were sealed, the sealer signs a checkpoint of

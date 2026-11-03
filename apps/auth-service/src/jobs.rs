@@ -9,14 +9,17 @@ use crate::{
 };
 use chrono::Utc;
 use piquel_common::{
-    AccountStatus, UserId,
+    AccountStatus, ErrorChain, UserId,
     events::{Actor, EventContext, JobName, RequestOrigin},
 };
 use piquel_repository::{
     Database, DatabaseError, DatabaseTransaction, ExclusiveConnection, LockKey,
 };
-use piquel_telemetry::{Counter, Histogram};
-use std::{sync::Arc, time::Duration};
+use piquel_telemetry::{Counter, Gauge, Histogram};
+use std::{
+    sync::{Arc, Mutex, PoisonError},
+    time::Duration,
+};
 use tokio::{
     sync::watch,
     task::{JoinError, JoinSet},
@@ -89,6 +92,7 @@ impl Jobs {
     ) -> Result<Self, StartupError> {
         let mut jobs = Self::new();
         jobs.exclusive(Cleanup, database.clone());
+        AccountPurge::observe();
         jobs.exclusive(AccountPurge, database.clone());
         jobs.exclusive(Sealer::new(config.audit.key.clone()), database.clone());
         let (store, reloaded) = (store.clone(), keys.clone());
@@ -310,14 +314,48 @@ impl ExclusiveJob for Cleanup {
     }
 }
 
+/// Accounts whose purge keeps failing, from [`FAILING_PURGES_COUNT`].
+static FAILING_PURGES: Gauge = Gauge::new(
+    "piquel.auth.account_purge.failing",
+    "{account}",
+    "Accounts scheduled for deletion whose purge failed at least 3 times in a row.",
+);
+/// The latest count of [`FAILING_PURGES`] on this replica, and when it was taken.
+/// The replica running the purge counts after each run.
+static FAILING_PURGES_COUNT: Mutex<Option<(u64, Instant)>> = Mutex::new(None);
+
 /// Purges the accounts whose deletion grace period ended, each in a transaction of
 /// its own, attributed to [`JobName::AccountPurge`]. One run purges at most
-/// [`Self::BATCH_SIZE`] accounts; the next run continues.
+/// [`Self::BATCH_SIZE`] accounts; the next run continues. A failed purge is
+/// recorded with its error and retried after a backoff, so accounts that keep
+/// failing never hold back the others, and [`FAILING_PURGES`] counts them.
 pub(crate) struct AccountPurge;
 
 impl AccountPurge {
     /// Accounts one run purges at most.
     const BATCH_SIZE: u32 = 100;
+    /// The delay after a first failure, doubled after each further one.
+    const BACKOFF: chrono::Duration = chrono::Duration::minutes(5);
+    /// The longest delay between attempts.
+    const MAX_BACKOFF: chrono::Duration = chrono::Duration::days(1);
+    /// Failures in a row after which [`FAILING_PURGES`] counts an account.
+    const FAILING_ATTEMPTS: u16 = 3;
+
+    /// Registers [`FAILING_PURGES`]. Every replica runs the job in turn, so each
+    /// reports the count of its own latest run, at most one run older than the
+    /// newest; one whose count is older than two runs, because it stopped running
+    /// the job, reports none. Alerts read the minimum across replicas, or wait one
+    /// run, before taking a count as current.
+    fn observe() {
+        FAILING_PURGES.observe(|| {
+            let counted = *FAILING_PURGES_COUNT
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner);
+            counted
+                .filter(|(_, at)| at.elapsed() < Self::EVERY * 2)
+                .map(|(count, _)| (count, ()))
+        });
+    }
 
     /// Purges `user_id` in `tx` if it is still scheduled for deletion and due,
     /// rechecked under the account lock, since it may have been restored meanwhile.
@@ -353,8 +391,8 @@ impl ExclusiveJob for AccountPurge {
     type Error = DeletionError;
 
     /// Stops after the current account once shutdown is requested. A failing
-    /// account is logged and skipped, so it cannot hold back the others; the next
-    /// run retries it.
+    /// account is logged and recorded, which delays its next attempt, so it cannot
+    /// hold back the others. Then counts the accounts that keep failing.
     async fn run(
         &self,
         connection: &mut ExclusiveConnection,
@@ -367,8 +405,20 @@ impl ExclusiveJob for AccountPurge {
             let tx = connection.begin().await?;
             if let Err(error) = Self::purge(tx, user_id).await {
                 tracing::error!(?error, %user_id, "could not purge account");
+                let message = ErrorChain(&error).to_string();
+                connection
+                    .deletions()
+                    .record_failure(user_id, &message, Self::BACKOFF, Self::MAX_BACKOFF)
+                    .await?;
             }
         }
+        let failing = connection
+            .deletions()
+            .count_failing(Self::FAILING_ATTEMPTS)
+            .await?;
+        *FAILING_PURGES_COUNT
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner) = Some((failing, Instant::now()));
         Ok(())
     }
 }

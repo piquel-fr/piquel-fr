@@ -138,7 +138,8 @@ impl HistoryItem {
         })
     }
 
-    /// The names of the registered clients, by ID, for [`Self::new`].
+    /// The names of the registered clients, by ID, for [`Self::new`]. A deleted
+    /// client's name was erased with it, so its entries name no client.
     async fn client_names(
         mut oidc: OidcRepository<'_>,
     ) -> Result<BTreeMap<ClientId, String>, DatabaseError> {
@@ -146,6 +147,7 @@ impl HistoryItem {
             .list_clients()
             .await?
             .into_iter()
+            .filter(|client| client.deleted_at.is_none())
             .map(|client| (client.id, client.display_name))
             .collect())
     }

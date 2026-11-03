@@ -204,9 +204,12 @@ fn event_kinds_match_their_serde_tags() {
         },
         DomainEvent::RelatedOriginApproved {
             client_id: client_id.clone(),
-            origin: origin.clone(),
+            origin: origin.clone().into(),
         },
-        DomainEvent::RelatedOriginRemoved { client_id, origin },
+        DomainEvent::RelatedOriginRemoved {
+            client_id,
+            origin: origin.into(),
+        },
         DomainEvent::CompromiseReported {
             event_id: EventId::new(),
         },

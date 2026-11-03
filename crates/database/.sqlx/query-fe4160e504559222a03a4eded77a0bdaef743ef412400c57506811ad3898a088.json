@@ -1,0 +1,22 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT user_id AS \"user_id: UserId\"\n                FROM account_deletions\n                WHERE greatest(next_attempt_at, purge_after) <= now()\n                ORDER BY greatest(next_attempt_at, purge_after)\n                LIMIT $1",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "user_id: UserId",
+        "type_info": "Uuid"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int8"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "fe4160e504559222a03a4eded77a0bdaef743ef412400c57506811ad3898a088"
+}

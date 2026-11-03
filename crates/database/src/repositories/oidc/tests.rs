@@ -1,19 +1,23 @@
 //! Client registrations against a real database: secret rotation, the origins
 //! public clients may call from, when pushed authorization requests can be claimed,
 //! and which clients of live sessions the back-channel logout migration finds.
-use crate::repositories::{OidcRepository, UserRepository};
-use crate::{Database, InsertAuthorizationRequest, InsertUser, connection::MIGRATOR};
+use crate::repositories::{EventRepository, OidcRepository, UserRepository};
+use crate::{
+    Database, DatabaseTransaction, InsertAuthorizationRequest, InsertUser, RecordedEvent,
+    connection::MIGRATOR,
+};
 use chrono::{DateTime, Duration, Utc};
 use piquel_common::{
-    ClientId, SessionId, TokenId, UserId,
+    AuthenticationMethod, ClientId, Personal, SessionId, TokenId, UserId,
     clients::{
         AllowedScopes, ClientKind, ClientOwner, ClientRegistration, PostLogoutUris, RedirectUris,
-        ScopeName,
+        RelatedOrigin, ScopeName,
     },
+    events::{Actor, DomainEvent, EventContext, InlineSignIn, RecordedOrigin, RequestOrigin},
     protocol::oauth::Scope,
 };
 use sqlx::{Connection, PgConnection, PgPool};
-use std::ops::RangeBounds;
+use std::{net::IpAddr, ops::RangeBounds};
 
 /// A registration of `kind` named after a fresh ID, redirecting to `origin`.
 fn registration(kind: ClientKind, origin: &str) -> ClientRegistration {
@@ -222,7 +226,8 @@ async fn public_client_origins_follow_registrations() {
 
 /// Purging an account keeps its deleted clients' tombstones, without their
 /// owner, and is refused while it owns a live client, which would otherwise
-/// become a client no account manages.
+/// become a client no account manages. A tombstone keeps nothing that may name a
+/// person: no name, redirect URIs or back-channel logout URI.
 #[tokio::test]
 #[ignore = "requires a disposable TEST_DATABASE_URL"]
 async fn purging_an_owner_needs_its_live_clients_deleted() {
@@ -233,7 +238,12 @@ async fn purging_an_owner_needs_its_live_clients_deleted() {
         .await
         .expect("user");
     let owner = account.id;
-    let client = registration(ClientKind::Public, &origin());
+    let site = origin();
+    let mut client = registration(ClientKind::Public, &site);
+    client.post_logout_uris =
+        PostLogoutUris::new([format!("{site}/bye").parse().expect("post-logout URI")])
+            .expect("one logout page");
+    client.backchannel_logout_uri = Some(format!("{site}/logout").parse().expect("logout URI"));
     let mut oidc = OidcRepository::from_pool(&pool);
     oidc.create_client(&client, ClientOwner::Account(owner))
         .await
@@ -255,6 +265,11 @@ async fn purging_an_owner_needs_its_live_clients_deleted() {
         .expect("find")
         .expect("the tombstone stays");
     assert_eq!(tombstone.owner_id, None);
+    assert!(tombstone.deleted_at.is_some());
+    let kept = serde_json::to_string(&tombstone).expect("serialize");
+    for personal in [site.as_str(), "Client test"] {
+        assert!(!kept.contains(personal), "{personal} in {kept}");
+    }
 }
 
 /// A connection to a new scratch schema with the migrations in `versions` applied,
@@ -346,4 +361,80 @@ async fn migration_finds_the_clients_of_live_sessions() {
         .execute(&mut connection)
         .await
         .expect("drop schema");
+}
+
+/// Purging an app's owner erases the app's related origins from events that name
+/// neither the owner nor its account: an operator's approval and another person's
+/// inline sign-in. That person's own personal data stays.
+#[tokio::test]
+#[ignore = "requires a disposable TEST_DATABASE_URL"]
+async fn purging_an_owner_erases_its_clients_origins() {
+    let pool = Database::test_pool().await;
+    let owner = InsertUser::named("origins");
+    let person = InsertUser::named("signer");
+    for account in [&owner, &person] {
+        UserRepository::from_pool(&pool)
+            .insert(account)
+            .await
+            .expect("user");
+    }
+    let site = origin();
+    let client = registration(ClientKind::Public, &site);
+    OidcRepository::from_pool(&pool)
+        .create_client(&client, ClientOwner::Account(owner.id))
+        .await
+        .expect("create");
+    let related: RelatedOrigin = site.parse().expect("origin");
+    let operator = EventContext {
+        actor: Actor::Cli {
+            os_user: "operator".into(),
+            host: "host".into(),
+        },
+        origin: RequestOrigin::default(),
+        reason: None,
+    };
+    let signing_in = EventContext {
+        actor: Actor::User {
+            user_id: person.id,
+            session_id: None,
+        },
+        origin: RequestOrigin {
+            client_ip: Some(IpAddr::from([192, 0, 2, 9])),
+            user_agent_family: None,
+        },
+        reason: None,
+    };
+    let approved = |origin| DomainEvent::RelatedOriginApproved {
+        client_id: client.id.clone(),
+        origin,
+    };
+    let session_id = SessionId::new();
+    let signed_in = |origin| DomainEvent::SignedIn {
+        session_id,
+        method: AuthenticationMethod::Passkey,
+        inline: Some(InlineSignIn {
+            client_id: client.id.clone(),
+            origin,
+        }),
+    };
+    let mut tx = DatabaseTransaction::new(pool.begin().await.expect("transaction"));
+    tx.record(&operator, None, approved(related.clone().into()))
+        .await
+        .expect("approval");
+    tx.record(&signing_in, Some(person.id), signed_in(related.into()))
+        .await
+        .expect("sign-in");
+    tx.oidc().delete_client(&client.id).await.expect("delete");
+    assert!(tx.deletions().purge(owner.id).await.expect("purge"));
+    tx.commit().await.expect("commit");
+
+    let erased = || RecordedOrigin::Personal(Personal::Erased);
+    let events = EventRepository::from_pool(&pool)
+        .history_for_client(&client.id, 10)
+        .await
+        .expect("history");
+    let [sign_in, approval] = <[_; 2]>::try_from(events).expect("both events stay");
+    assert_eq!(approval.event, RecordedEvent::Known(approved(erased())));
+    assert_eq!(sign_in.event, RecordedEvent::Known(signed_in(erased())));
+    assert_eq!(sign_in.origin, Personal::Value(signing_in.origin));
 }

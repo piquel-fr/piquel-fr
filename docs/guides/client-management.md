@@ -65,7 +65,10 @@ redirect URI stops the pending sign-ins that use it.
 
 Deleting an app also revokes its refresh tokens and removes its secrets and the
 consents users gave it. Its ID stays reserved forever, because tokens name their
-client in `aud`: no one, not even an operator, can register it again.
+client in `aud`: no one, not even an operator, can register it again. Nothing else
+that could name you stays: its name, redirect URIs and back-channel logout URI are
+erased, so security histories show it only as an app, and the admin dashboard by
+its ID.
 
 An app's "last used" is the last time a token was issued to it, to within an hour.
 Each change is recorded in the client's history with your account as the actor:

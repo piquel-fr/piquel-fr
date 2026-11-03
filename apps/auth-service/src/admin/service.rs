@@ -17,7 +17,7 @@ use piquel_common::{
     AccountStatus, ClientId, DeliveryId, Handle, Personal, RecoveryId, SessionId, TokenId, UserId,
     admin::{
         Administrator, ApprovedOrigin, Client, CreatedInvitation, Email, Event, EventPage,
-        EventSearch, Invitation, UserDetail, UserPage,
+        EventSearch, Invitation, ScheduledDeletion, UserDetail, UserPage,
     },
     clients::{ClientField, ClientOwner, ClientRegistration, RelatedOrigin},
     config::Origin,
@@ -145,7 +145,8 @@ impl AdminService {
     }
 
     /// Returns an account's profile, emails, status, passkey labels, identities,
-    /// sessions and consents. Recorded, since it shows personal data.
+    /// sessions, consents and scheduled deletion, with why its purge keeps
+    /// failing. Recorded, since it shows personal data.
     pub(crate) async fn view_user(
         &self,
         operator: &Operator,
@@ -177,6 +178,14 @@ impl AdminService {
                 .map(Into::into)
                 .collect(),
             consents: tx.oidc().list_consents(user_id).await?,
+            deletion: match tx.deletions().find(user_id).await? {
+                Some(deletion) => Some(ScheduledDeletion {
+                    requested_at: deletion.requested_at,
+                    purge_after: deletion.purge_after,
+                    failure: tx.deletions().failure(user_id).await?,
+                }),
+                None => None,
+            },
             user: user.into(),
         };
         tx.record(

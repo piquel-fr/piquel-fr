@@ -128,6 +128,14 @@ pub async fn user_page<'a>(
             <dl class="facts">
                 <dt>"Account ID"</dt><dd><code>(user.id.to_string())</code></dd>
                 <dt>"Created"</dt><dd>moment(at: user.created_at)</dd>
+                if let Some(deletion) = &detail.deletion {
+                    <dt>"Purged after"</dt><dd>moment(at: deletion.purge_after)</dd>
+                    if let Some(failure) = &deletion.failure {
+                        <dt>"Failed purges"</dt><dd>(failure.attempts.to_string())</dd>
+                        <dt>"Next attempt"</dt><dd>moment(at: failure.next_attempt_at)</dd>
+                        <dt>"Last error"</dt><dd><code>(failure.last_error.as_str())</code></dd>
+                    }
+                }
             </dl>
             account_actions(user: user, pages: pages)
         </section>

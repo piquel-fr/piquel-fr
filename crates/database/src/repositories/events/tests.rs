@@ -1,7 +1,11 @@
 //! Recording, personal data, the consumer cursor and the audit log import.
 use super::*;
 use crate::{Database, DatabaseTransaction};
-use piquel_common::{PasskeyId, Provider, events::RevocationReason};
+use piquel_common::{
+    PasskeyId, Provider,
+    clients::RelatedOrigin,
+    events::{RecordedOrigin, RevocationReason},
+};
 use sqlx::{Connection, PgConnection, PgPool};
 use std::time::Duration;
 
@@ -235,6 +239,73 @@ async fn versions_are_per_event() {
     .await
     .expect("versions");
     assert_eq!(versions, [1, 2]);
+}
+
+/// A related origin is personal data, in an event's second payload version.
+/// Events that kept it in the payload, before, still read as their first version.
+#[tokio::test]
+#[ignore = "requires a disposable TEST_DATABASE_URL"]
+async fn related_origins_are_personal_but_older_events_still_read() {
+    let pool = Database::test_pool().await;
+    let user = insert_user(&pool).await;
+    let client_id: ClientId = format!("origins_{user}").parse().expect("client ID");
+    let origin: RelatedOrigin = format!("https://{}.example", user.as_uuid().simple())
+        .parse()
+        .expect("origin");
+    let approved = |origin| DomainEvent::RelatedOriginApproved {
+        client_id: client_id.clone(),
+        origin,
+    };
+    let mut events = EventRepository::from_pool(&pool);
+    events
+        .insert_written_elsewhere(
+            user,
+            "related_origin_approved",
+            DomainEvent::FIRST_VERSION,
+            &serde_json::json!({"client_id": client_id, "origin": origin}),
+        )
+        .await
+        .expect("sealed event");
+    record(&pool, user, approved(origin.clone().into())).await;
+
+    let read = || async {
+        EventRepository::from_pool(&pool)
+            .history_for_user(user, 10)
+            .await
+            .expect("history")
+            .into_iter()
+            .map(|stored| stored.event)
+            .collect::<Vec<_>>()
+    };
+    assert_eq!(
+        read().await,
+        [
+            RecordedEvent::Known(approved(origin.clone().into())),
+            RecordedEvent::Known(approved(RecordedOrigin::Sealed(origin.clone()))),
+        ]
+    );
+    let payloads: Vec<(i16, Value)> = sqlx::query_as(
+        "SELECT version, payload FROM domain_events WHERE subject_user_id = $1 ORDER BY sequence",
+    )
+    .bind(user.as_uuid())
+    .fetch_all(&pool)
+    .await
+    .expect("payloads");
+    assert_eq!(payloads[1].0, 2);
+    assert_eq!(payloads[1].1["origin"], ERASED);
+
+    sqlx::query(
+        "DELETE FROM event_personal_data p USING domain_events e
+        WHERE p.event_id = e.id AND e.subject_user_id = $1",
+    )
+    .bind(user.as_uuid())
+    .execute(&pool)
+    .await
+    .expect("erase");
+    assert_eq!(
+        read().await[0],
+        RecordedEvent::Known(approved(RecordedOrigin::Personal(Personal::Erased)))
+    );
 }
 
 /// Events a newer release wrote, of a kind this one does not know or a known kind

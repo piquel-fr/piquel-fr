@@ -22,7 +22,8 @@ use serde::Serialize;
 use sqlx::types::Json;
 
 /// A registered client with its exact URI allowlists. A deleted client is still
-/// returned, disabled, with its `deleted_at`.
+/// returned, disabled, with its `deleted_at`, but without its name, redirect URIs
+/// or back-channel logout URI, which migration 0026's trigger erases.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 #[expect(
     clippy::struct_excessive_bools,
@@ -31,7 +32,7 @@ use sqlx::types::Json;
 pub struct StoredOidcClient {
     /// Client identifier.
     pub id: ClientId,
-    /// Name shown on consent screens.
+    /// Name shown on consent screens; empty once the client is deleted.
     pub display_name: String,
     /// Public, or confidential with secrets.
     pub kind: ClientKind,
@@ -368,7 +369,9 @@ impl OidcRepository<'_> {
 
     /// Deletes a client, leaving its row as a tombstone so its ID is never reused:
     /// disables it, revokes its refresh families, and removes its secrets and
-    /// consents; a trigger removes its approved related origins. Pending
+    /// consents; triggers remove its approved related origins, and its name,
+    /// redirect URIs and back-channel logout URI, which may identify a person, so
+    /// only its ID, settings and lifecycle dates stay. Pending
     /// authorization requests and codes need an enabled client, so they stop working
     /// too.
     ///
