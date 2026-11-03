@@ -193,8 +193,9 @@ impl Activity {
     const APP_SIGN_INS: [&'static str; 1] = ["grant_issued"];
     /// The kinds counted as security events: every kind the security history
     /// shows, as [`DomainEvent::history_entry`] decides, so the count and the
-    /// feed agree. A refresh grant's revocation is left out: the history shows
-    /// only a replay's, which a count by kind cannot tell from the rest.
+    /// feed agree, as far as a count by kind can: a refresh grant's revocation
+    /// is left out, since the history shows only a replay's, and a session's
+    /// expiry is counted, since the history hides only that reason.
     const SECURITY: [&'static str; 29] = [
         "account_created",
         "signed_in",

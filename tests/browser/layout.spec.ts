@@ -30,16 +30,19 @@ test('the settings and sign-in pages fit every window size', async ({ browser })
     for (const path of ['/settings', '/settings/sign-in', '/settings/history', '/developers']) {
       await page.goto(path);
       expect(await scrollsSideways(page), `${viewport.name} ${path}`).toBe(false);
-      const menu = page.getByRole('checkbox', { name: 'Menu' });
+      const menu = page.locator('.menu-button');
       const nav = page.getByRole('link', { name: 'Devices', exact: true });
       if (viewport.width <= 860) {
         // A drawer: hidden until the menu opens it, and the links then work.
+        // The keyboard reaches the drawer's state ahead of the drawer itself.
         await expect(menu, `${viewport.name} ${path}`).toBeVisible();
         await expect(nav).toBeHidden();
-        await menu.check();
+        await page.locator('#menu').focus();
+        await page.keyboard.press('Space');
         await expect(nav).toBeVisible();
       } else {
         await expect(menu, `${viewport.name} ${path}`).toBeHidden();
+        await expect(page.locator('#menu')).toBeHidden();
         await expect(nav).toBeVisible();
       }
     }

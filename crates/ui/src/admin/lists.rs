@@ -158,6 +158,7 @@ pub async fn grant_search<'a>(
                 } else {
                     <ul class="list">
                         for row in rows {
+                            let subject = format!("@{}", row.user.handle);
                             <li>
                                 avatar(who: row.who())
                                 <div class="text">
@@ -172,6 +173,7 @@ pub async fn grant_search<'a>(
                                     confirm(
                                         action: &grant,
                                         change: change,
+                                        subject: subject.as_str(),
                                         <input type="hidden" name="user_id" value=(row.user.id.to_string())>
                                     )
                                 }

@@ -690,14 +690,7 @@ html[data-sidebar='collapsed'] .shell {
   display: none;
 }
 .menu-state {
-  position: absolute;
-  width: 1px;
-  height: 1px;
-  min-height: 0;
-  margin: -1px;
-  padding: 0;
-  overflow: hidden;
-  clip: rect(0 0 0 0);
+  display: none;
 }
 /* Collapsing: the rail keeps the icons, whose titles name them. */
 .sidebar .collapse {
@@ -1780,6 +1773,19 @@ th.right {
     border-radius: 6px;
     color: var(--muted);
     cursor: pointer;
+  }
+  /* The state, in the tab order ahead of the drawer, out of sight. */
+  .menu-state {
+    display: block;
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 1px;
+    height: 1px;
+    min-height: 0;
+    margin: 0;
+    padding: 0;
+    opacity: 0;
   }
   .shell:has(.menu-state:focus-visible) .menu-button {
     outline: 2px solid var(--focus);

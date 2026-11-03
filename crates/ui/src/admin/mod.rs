@@ -411,14 +411,16 @@ pub struct Action {
 }
 
 impl Action {
-    /// The ID of its dialog, from its page.
-    fn dialog(&self) -> String {
-        let path = self
+    /// The ID of its dialog, from its page and the `subject` it acts on, when
+    /// several rows of a page post to the same page.
+    fn dialog(&self, subject: Option<&str>) -> String {
+        let id = self
             .href
             .chars()
+            .chain(subject.unwrap_or_default().chars())
             .map(|c| if c.is_ascii_alphanumeric() { c } else { '-' })
             .collect::<String>();
-        format!("dialog{path}")
+        format!("dialog{id}")
     }
 }
 
@@ -477,11 +479,16 @@ async fn reason_field<'a>(
 /// A row's button making `change` through `action`: a dialog on the page, posting
 /// to the change's page with the hidden fields of `child`, once the dashboard
 /// confirmed a passkey, which the browser opens and closes with no script; a
-/// link to the change's page otherwise.
+/// link to the change's page otherwise. When several rows of a page make the
+/// same change to different things, each names its `subject`, which its dialog
+/// shows and its button is named by.
 #[component]
 pub(crate) async fn confirm<'a>(
     action: &'a Action,
     change: Change,
+    #[into]
+    #[default]
+    subject: Option<&'a str>,
     #[default] child: Child<'_>,
 ) -> Result<impl View> {
     let class = if change.danger() {
@@ -489,12 +496,16 @@ pub(crate) async fn confirm<'a>(
     } else {
         "button secondary small"
     };
-    let dialog = action.dialog();
+    let dialog = action.dialog(subject);
+    let name = subject.map(|subject| format!("{}: {subject}", change.title()));
     Ok(view! {
         if action.inline {
-            <button type="button" class=(class) popovertarget=(dialog.as_str())>(change.label())</button>
+            <button type="button" class=(class) popovertarget=(dialog.as_str()) aria-label=(name.as_deref())>(change.label())</button>
             <div class="dialog" id=(dialog.as_str()) popover="" role="dialog" aria-labelledby=(format!("{dialog}-title"))>
                 <h2 id=(format!("{dialog}-title"))>(change.title())</h2>
+                if let Some(subject) = subject {
+                    <p><strong>(subject)</strong></p>
+                }
                 <p class="help">(change.description())</p>
                 <form method="post" action=(action.href.as_str()) data-submit-once="">
                     (child)
@@ -506,7 +517,7 @@ pub(crate) async fn confirm<'a>(
                 </form>
             </div>
         } else {
-            <a class=(class) href=(action.href.as_str())>(change.label())</a>
+            <a class=(class) href=(action.href.as_str()) aria-label=(name.as_deref())>(change.label())</a>
         }
     })
 }
