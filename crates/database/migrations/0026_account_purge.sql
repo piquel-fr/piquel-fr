@@ -46,6 +46,25 @@ CREATE INDEX domain_events_client_idx ON domain_events (client_id)
     WHERE client_id IS NOT NULL;
 CREATE INDEX oidc_consents_client_idx ON oidc_consents (client_id);
 
+-- Personal data is erased, never rewritten. Purging an app's owner erases the
+-- app's related origins from other people's events by removing them from
+-- `details`, the only column the runtime role may update; any other update fails.
+CREATE FUNCTION guard_personal_data_erasure() RETURNS TRIGGER
+LANGUAGE plpgsql SET search_path = pg_catalog, public, pg_temp AS $$
+BEGIN
+    IF NOT EXISTS (
+        SELECT FROM jsonb_each(NEW.details) kept
+        WHERE OLD.details -> kept.key IS DISTINCT FROM kept.value
+    ) THEN
+        RETURN NEW;
+    END IF;
+    RAISE EXCEPTION 'personal data of event % can only be erased', OLD.event_id
+        USING ERRCODE = 'integrity_constraint_violation';
+END $$;
+CREATE TRIGGER event_personal_data_guard_erasure
+    BEFORE UPDATE ON event_personal_data
+    FOR EACH ROW EXECUTE FUNCTION guard_personal_data_erasure();
+
 -- A deleted client keeps only its ID, settings that identify nobody, and its
 -- lifecycle dates: its name, redirect URIs and back-channel logout URI may name a
 -- person or their domain. Its name becomes empty rather than NULL, which the

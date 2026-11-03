@@ -367,7 +367,7 @@ async fn runtime_role_has_only_row_privileges() {
     for statement in [
         "UPDATE domain_events SET kind = kind",
         "DELETE FROM domain_events",
-        "UPDATE event_personal_data SET details = details",
+        "UPDATE event_personal_data SET client_ip = client_ip",
         "UPDATE audit_checkpoints SET note = note",
         "DELETE FROM audit_checkpoints",
         "UPDATE audit_anchor SET position = position",
@@ -391,6 +391,7 @@ async fn runtime_role_has_only_row_privileges() {
             .and_then(sqlx::error::DatabaseError::code);
         assert_eq!(code.as_deref(), Some("42501"), "{statement}: {error}");
     }
+    assert_personal_data_only_erases(&runtime).await;
     runtime.pool.close().await;
 
     let owner_name = sqlx::query_scalar::<_, String>("SELECT current_user::text")
@@ -517,4 +518,44 @@ async fn statements_and_lock_waits_past_their_limits_fail() {
         matches!(unavailable, Err(DatabaseError::LockUnavailable(_))),
         "{unavailable:?}"
     );
+}
+
+/// Erasing a purged owner's origins removes values from `details` as `runtime`;
+/// no update may add or change one.
+async fn assert_personal_data_only_erases(runtime: &Database) {
+    for (statement, allowed) in [
+        (
+            "UPDATE event_personal_data SET details = details - '/origin'",
+            true,
+        ),
+        (
+            "UPDATE event_personal_data SET details = details || '{\"/origin\": 1}'",
+            false,
+        ),
+    ] {
+        let mut probe = runtime.pool.begin().await.expect("begin");
+        let personal = sqlx::query(
+            "WITH event AS (
+                INSERT INTO domain_events (id, kind, version, payload, actor)
+                VALUES (uuidv7(), 'test', 1, '{}', '{}') RETURNING id
+            )
+            INSERT INTO event_personal_data (event_id, details)
+            SELECT id, '{\"/origin\": \"https://a.example\", \"/name\": \"A\"}' FROM event",
+        )
+        .execute(&mut *probe)
+        .await;
+        personal.expect("personal data");
+        let updated = sqlx::query(statement).execute(&mut *probe).await;
+        probe.rollback().await.expect("rollback");
+        match updated {
+            Ok(_) => assert!(allowed, "{statement} was allowed"),
+            Err(error) => {
+                assert!(!allowed, "{statement}: {error}");
+                let code = error
+                    .as_database_error()
+                    .and_then(sqlx::error::DatabaseError::code);
+                assert_eq!(code.as_deref(), Some("23000"), "{statement}: {error}");
+            }
+        }
+    }
 }

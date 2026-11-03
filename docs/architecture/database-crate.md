@@ -268,9 +268,10 @@ the runtime role or resets its attributes and password, and grants it:
     [Audit chain](#audit-chain));
   - `audit_checkpoints`: `SELECT, INSERT`;
   - `audit_anchor`: `SELECT`;
-  - `event_personal_data`: `SELECT, INSERT, DELETE`, so it can be erased but not
-    rewritten. Queries on it therefore cannot use `FOR UPDATE`, which needs
-    `UPDATE`;
+  - `event_personal_data`: `SELECT, INSERT, DELETE`, and `UPDATE` on `details`
+    only, so it can be erased but not rewritten: a trigger refuses an update
+    that does anything but remove values from `details`, as a purge does with
+    its clients' related origins;
   - `event_consumers`: `SELECT, INSERT, UPDATE`;
   - `_sqlx_migrations`: nothing.
 
