@@ -58,8 +58,8 @@ work from devices on the tailnet. Run the same command after changing code.
 | `AUTH_TOKEN_DIGEST_KEY_ACCEPTED` | Optional env/file reference to another token digest key, accepted but never used for new digests: the next key, or the old one (see [changing the token digest key](#changing-the-token-digest-key)) |
 | `AUTH_AUDIT_KEY_PROVIDER` | Required env/file reference to the key that signs audit checkpoints: a 32-byte Ed25519 seed as 64 hex characters. See `docs/security/audit-history.md` |
 | `AUTH_INVITE_REQUIRED` | `true` by default; set `false` to allow public registration |
-| `AUTH_GITHUB_CLIENT_ID`, `AUTH_GITHUB_CLIENT_SECRET` | Both required to enable GitHub; secret is an env/file reference |
-| `AUTH_GOOGLE_CLIENT_ID`, `AUTH_GOOGLE_CLIENT_SECRET` | Both required to enable Google; secret is an env/file reference |
+| `AUTH_GITHUB_CLIENT_ID`, `AUTH_GITHUB_CLIENT_SECRET` | Both required to enable GitHub; secret is an env/file reference. An empty client ID turns GitHub off, and its secret is then not read |
+| `AUTH_GOOGLE_CLIENT_ID`, `AUTH_GOOGLE_CLIENT_SECRET` | Both required to enable Google, as for GitHub |
 | `AUTH_SMTP_URL` | Optional SMTP relay, `smtps://USER@HOST:465` (implicit TLS) or `smtp://USER@HOST:587` (STARTTLS required); unset disables email. Only a loopback host, such as a local Mailpit, may be reached without TLS |
 | `AUTH_SMTP_PASSWORD` | Env/file reference for the URL user's password; required with a user, never in the URL |
 | `AUTH_EMAIL_FROM` | Sender of every message; defaults to `Piquel <security@piquel.fr>` |
@@ -80,6 +80,7 @@ change it in two deploys (see below).
 
 Provider callback URLs are `/login/github/callback` and `/login/google/callback`
 on the auth origin. GitHub uses `read:user user:email`; Google uses `openid email profile`.
+See "Sign-in providers" in [infra/README.md](infra/README.md) for registering them.
 To add another provider, see `docs/architecture/federation-providers.md`.
 Never put provider secrets or confidential-client secrets in frontend configuration.
 Enabled provider secrets are loaded and validated at startup; restart the service

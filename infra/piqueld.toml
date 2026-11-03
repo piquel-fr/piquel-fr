@@ -34,6 +34,16 @@ auth_replicas = 1
 # send telemetry: the `telemetry` application's collector, imported below.
 # Empty sends none.
 otlp_endpoint = "http://collector.telemetry:4318"
+# GitHub and Google sign-in. An empty client ID turns the provider off; its
+# secret is then mounted but never read, so environments without the provider
+# mount the unused placeholder. Production and staging each have their own OAuth
+# apps, whose secrets are stored by hand; previews have none, since providers
+# only redirect back to the callback URLs registered with them. See "Sign-in
+# providers" in infra/README.md.
+github_client_id = ""
+github_secret = "no-provider-secret"
+google_client_id = ""
+google_secret = "no-provider-secret"
 
 [spec.environments.production]
 promote_from = "staging"
@@ -46,6 +56,10 @@ admin_host = "admin.piquel.fr"
 smtp_secret = "resend-production"
 email_from = "Piquel <security@piquel.fr>"
 audit_key = "audit-key-production"
+github_client_id = "Ov23litrz0WrDWqrawEM"
+github_secret = "github-production"
+google_client_id = "329657457544-fmlaqdhf3ofcuglb254jmnprdb5s65hc.apps.googleusercontent.com"
+google_secret = "google-production"
 
 [spec.environments.staging]
 sync = true
@@ -59,6 +73,10 @@ admin_host = "admin.staging.piquel.fr"
 smtp_secret = "resend-dev"
 email_from = "Piquel <security@dev.piquel.fr>"
 audit_key = "audit-key-staging"
+github_client_id = "Ov23liZe9WmU9A4fqlqw"
+github_secret = "github-staging"
+google_client_id = "329657457544-v4rtrpcqouifihtc3as6impmn8065ncn.apps.googleusercontent.com"
+google_secret = "google-staging"
 
 # Flat hostnames, so the `*.dev.piquel.fr` certificate covers every preview.
 # Preview databases start empty, so anyone on the tailnet may register.
@@ -117,6 +135,12 @@ visibility = "public"
 application = "telemetry"
 service = "collector"
 environment = "production"
+
+# Mounted as the client secret of a sign-in provider an environment leaves off,
+# since every mount needs a secret. Auth never reads it.
+[[spec.secrets]]
+name = "no-provider-secret"
+generate = { type = "random", bytes = 32, encoding = "hex" }
 
 # The PostgreSQL superuser's password, which only the database and the `migrate`
 # job get.
@@ -212,6 +236,10 @@ AUTH_INVITE_REQUIRED = "${{ vars.invite_required }}"
 AUTH_SMTP_URL = "smtps://resend@smtp.resend.com:465"
 AUTH_SMTP_PASSWORD = "file:///run/secrets/smtp-password"
 AUTH_EMAIL_FROM = "${{ vars.email_from }}"
+AUTH_GITHUB_CLIENT_ID = "${{ vars.github_client_id }}"
+AUTH_GITHUB_CLIENT_SECRET = "file:///run/secrets/github-client-secret"
+AUTH_GOOGLE_CLIENT_ID = "${{ vars.google_client_id }}"
+AUTH_GOOGLE_CLIENT_SECRET = "file:///run/secrets/google-client-secret"
 OTEL_EXPORTER_OTLP_ENDPOINT = "${{ vars.otlp_endpoint }}"
 OTEL_RESOURCE_ATTRIBUTES = "deployment.environment.name=${{ env.name }}"
 
@@ -240,6 +268,16 @@ target = "/run/secrets/audit-key"
 [[spec.services.secrets]]
 name = "${{ vars.smtp_secret }}"
 target = "/run/secrets/smtp-password"
+
+# Stored by hand like the Resend key, or the unused placeholder where the
+# provider is off: see "Sign-in providers" in infra/README.md.
+[[spec.services.secrets]]
+name = "${{ vars.github_secret }}"
+target = "/run/secrets/github-client-secret"
+
+[[spec.services.secrets]]
+name = "${{ vars.google_secret }}"
+target = "/run/secrets/google-client-secret"
 
 [spec.services.healthcheck]
 type = "http"
