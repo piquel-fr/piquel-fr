@@ -8,7 +8,6 @@
 use crate::{
     Notice, Title,
     form::{Ceremony, Fields, Precision, fragment_form, new_passkey, passkey_form, time},
-    intro,
 };
 use chrono::{DateTime, Utc};
 use piquel_common::{PasskeyId, RecoveryId, SessionId};
@@ -17,9 +16,6 @@ use topcoat::{
     Result,
     view::{View, component, view},
 };
-
-/// Above the title of each recovery page.
-const EYEBROW: &str = "Your Piquel account";
 
 /// Why a recovery link's form stays disabled without scripts.
 const NEEDS_SCRIPTS: &str = "Opening this link needs scripts allowed.";
@@ -227,39 +223,37 @@ pub async fn recover<'a>(
         } => format!("Add a passkey to @{handle} ({display_name})"),
     };
     Ok(view! {
-        <section class="auth-shell stack">
-            intro(eyebrow: EYEBROW, title: title)
-            match step {
-                RecoverStep::Open => fragment_form(
-                    action: action,
-                    change: RecoverChange::Open { token: String::new() },
-                    fragments: &["token"],
-                    label: "Continue",
-                    unavailable: NEEDS_SCRIPTS,
-                    alert: alert,
-                    alert_replaces_missing: true,
-                    missing: view! { incomplete() },
-                ),
-                RecoverStep::Enroll { expires_at, token, probation_days, android, .. } => {
-                    <div class="stack" data-replace-url=(action)>
-                        <p>"This link works until " time(at: expires_at, precision: Precision::Minute) "."</p>
-                        <p class="notice">
-                            (format!(
-                                "For the next {probation_days} days, this passkey signs you in but can't confirm changes to your security settings, and the recovery can still be undone."
-                            ))
-                        </p>
-                        passkey_form(
-                            action: action,
-                            ceremony: Ceremony::Recover { token },
-                            change: RecoverChange::Recovered {},
-                            label: "Create a passkey",
-                            class: "full",
-                            new_passkey(label: "Passkey name", android: android)
-                        )
-                    </div>
-                }
+        <h1>(title)</h1>
+        match step {
+            RecoverStep::Open => fragment_form(
+                action: action,
+                change: RecoverChange::Open { token: String::new() },
+                fragments: &["token"],
+                label: "Continue",
+                unavailable: NEEDS_SCRIPTS,
+                alert: alert,
+                alert_replaces_missing: true,
+                missing: view! { incomplete() },
+            ),
+            RecoverStep::Enroll { expires_at, token, probation_days, android, .. } => {
+                <div class="stack" data-replace-url=(action)>
+                    <p class="lead">"This link works until " time(at: expires_at, precision: Precision::Minute) "."</p>
+                    <p class="notice warning">
+                        (format!(
+                            "For the next {probation_days} days, this passkey signs you in but can't confirm changes to your security settings, and the recovery can still be undone."
+                        ))
+                    </p>
+                    passkey_form(
+                        action: action,
+                        ceremony: Ceremony::Recover { token },
+                        change: RecoverChange::Recovered {},
+                        label: "Create a passkey",
+                        class: "full",
+                        new_passkey(label: "Passkey name", android: android)
+                    )
+                </div>
             }
-        </section>
+        }
     })
 }
 
@@ -297,44 +291,42 @@ pub async fn undo_recovery<'a>(
     #[default] alert: Option<&'a str>,
 ) -> Result<impl View> {
     Ok(view! {
-        <section class="auth-shell stack">
-            intro(eyebrow: EYEBROW, title: Title::UndoRecovery.as_str())
-            match step {
-                UndoStep::Open { signed_in } => fragment_form(
-                    action: action,
-                    change: UndoChange::Open { recovery: None },
-                    fragments: &["recovery"],
-                    label: "Continue",
-                    unavailable: NEEDS_SCRIPTS,
-                    alert: alert,
-                    alert_replaces_missing: true,
-                    // A link that names a recovery wins over the account's own.
-                    missing: view! {
-                        match signed_in {
-                            Some((recovery, handle)) => undoing(action: action, recovery: recovery, handle: Some(handle)),
-                            None => incomplete(),
-                        }
-                    },
-                ),
-                UndoStep::Undo { recovery, handle } => {
-                    <div class="card stack">
-                        undoing(action: action, recovery: recovery, handle: handle)
-                    </div>
-                }
-                UndoStep::Nothing => {
-                    <div class="card stack">
-                        <h2>"There's nothing to undo"</h2>
-                        <p>"The recovery was undone or cancelled, or has settled, or this link is wrong."</p>
-                    </div>
-                }
-                UndoStep::Done => {
-                    <div class="card stack">
-                        <p role="status">(Notice::RecoveryUndone.message())</p>
-                        <p>"Your account is disabled, so you're not signed in. Contact Piquel support to enable it."</p>
-                    </div>
-                }
+        <h1>(Title::UndoRecovery.as_str())</h1>
+        match step {
+            UndoStep::Open { signed_in } => fragment_form(
+                action: action,
+                change: UndoChange::Open { recovery: None },
+                fragments: &["recovery"],
+                label: "Continue",
+                unavailable: NEEDS_SCRIPTS,
+                alert: alert,
+                alert_replaces_missing: true,
+                // A link that names a recovery wins over the account's own.
+                missing: view! {
+                    match signed_in {
+                        Some((recovery, handle)) => undoing(action: action, recovery: recovery, handle: Some(handle)),
+                        None => incomplete(),
+                    }
+                },
+            ),
+            UndoStep::Undo { recovery, handle } => {
+                <div class="card"><div class="body">
+                    undoing(action: action, recovery: recovery, handle: handle)
+                </div></div>
             }
-        </section>
+            UndoStep::Nothing => {
+                <div class="card"><div class="body">
+                    <h2>"There's nothing to undo"</h2>
+                    <p class="help">"The recovery was undone or cancelled, or has settled, or this link is wrong."</p>
+                </div></div>
+            }
+            UndoStep::Done => {
+                <div class="card"><div class="body">
+                    <p role="status">(Notice::RecoveryUndone.message())</p>
+                    <p class="help">"Your account is disabled, so you're not signed in. Contact Piquel support to enable it."</p>
+                </div></div>
+            }
+        }
     })
 }
 
@@ -399,7 +391,7 @@ async fn undoing<'a>(
                 class: "full",
             )
         } else {
-            <p class="notice">"You have no passkey from before this recovery, so only Piquel support can undo it."</p>
+            <p class="notice info">"You have no passkey from before this recovery, so only Piquel support can undo it."</p>
         }
     })
 }
@@ -429,15 +421,15 @@ pub async fn recovery_banner<'a>(
     let key = recovery.dismiss_key(session, confirmed);
     let href = recovery.undo_href(undo);
     Ok(view! {
-        <section class="notice stack" data-dismiss=(key.as_str()) hidden="">
+        <section class="notice warning stack" data-dismiss=(key.as_str()) hidden="">
             <p>(recovery.question())</p>
             <div class="row">
-                <button type="button" class="secondary" data-dismisses=(key.as_str())>"Yes, it was me"</button>
-                <a href=(href.as_str())>(recovery.refusal())</a>
+                <button type="button" class="secondary small" data-dismisses=(key.as_str())>"Yes, it was me"</button>
+                <a class="button danger small" href=(href.as_str())>(recovery.refusal())</a>
             </div>
         </section>
         if let RecoveryStage::Probation { settles_at, .. } = recovery.stage {
-            <p class="notice">
+            <p class="notice warning">
                 "Until "
                 time(at: settles_at, precision: Precision::Day)
                 ", the passkey the recovery added signs in but can't confirm changes to your security settings. "
@@ -463,11 +455,9 @@ pub async fn recovery_prompt<'a>(
 ) -> Result<impl View> {
     let href = recovery.undo_href(undo);
     Ok(view! {
-        <section class="auth-shell stack">
-            intro(eyebrow: EYEBROW, title: recovery.question())
-            <a class="button" href=(continue_href)>"Yes, continue"</a>
-            <a href=(href.as_str())>(recovery.refusal())</a>
-        </section>
+        <h1>(recovery.question())</h1>
+        <a class="button" href=(continue_href)>"Yes, continue"</a>
+        <a class="button secondary" href=(href.as_str())>(recovery.refusal())</a>
     })
 }
 

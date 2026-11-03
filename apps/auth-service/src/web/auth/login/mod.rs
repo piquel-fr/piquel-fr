@@ -21,8 +21,8 @@ use crate::{
 use axum::extract::Query as UriQuery;
 use piquel_common::{events::RevocationReason, protocol::claims::Acr};
 use piquel_ui::{
-    Area, CallbackError, LinkKind, LoginChange, LoginQuery, Onward, Query, QueryError, SignedIn,
-    Step, Title,
+    CallbackError, LinkKind, LoginChange, LoginQuery, Onward, Query, QueryError, SignedIn, Step,
+    Title,
 };
 use topcoat::{
     Error,
@@ -413,9 +413,7 @@ impl WebApplication {
                         )
                     };
                     let title = Title::SignIn.as_str();
-                    return Ok(self
-                        .render(cx, StatusCode::OK, title, Area::SignIn, &[], prompt)
-                        .await?);
+                    return Ok(self.render(cx, StatusCode::OK, title, &[], prompt).await?);
                 }
                 let next = self
                     .oidc
@@ -555,14 +553,7 @@ impl WebApplication {
             )
         };
         Ok(self
-            .render(
-                cx,
-                status,
-                step.title().as_str(),
-                Area::SignIn,
-                &targets,
-                view,
-            )
+            .render(cx, status, step.title().as_str(), &targets, view)
             .await?)
     }
 }

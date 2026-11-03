@@ -17,8 +17,7 @@ use crate::{
     security::ApiError,
 };
 use piquel_ui::{
-    Area, Notice, RecoverChange, RecoverStep, Recovery, RecoveryPasskey, Title, UndoChange,
-    UndoStep,
+    Notice, RecoverChange, RecoverStep, Recovery, RecoveryPasskey, Title, UndoChange, UndoStep,
 };
 use topcoat::{
     context::{Cx, app_context},
@@ -202,9 +201,7 @@ impl WebApplication {
         let view =
             view! { cx => piquel_ui::recover(action: page::RECOVER, step: step, alert: alert) };
         let title = Title::Recover.as_str();
-        Ok(self
-            .render(cx, status, title, Area::SignIn, &[], view)
-            .await?)
+        Ok(self.render(cx, status, title, &[], view).await?)
     }
 
     /// The undo page at `step`, at `status`, saying why its form was refused in
@@ -220,8 +217,6 @@ impl WebApplication {
             piquel_ui::undo_recovery(action: page::RECOVER_UNDO, step: step, alert: alert)
         };
         let title = Title::UndoRecovery.as_str();
-        Ok(self
-            .render(cx, status, title, Area::SignIn, &[], view)
-            .await?)
+        Ok(self.render(cx, status, title, &[], view).await?)
     }
 }

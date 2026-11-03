@@ -393,6 +393,24 @@ impl SessionRepository<'_> {
         )
     }
 
+    /// Counts every account's unrevoked, unexpired sessions.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`DatabaseError`] if the query fails.
+    pub async fn count_active(&mut self) -> Result<u64, DatabaseError> {
+        let count = run!(
+            self,
+            fetch_one,
+            sqlx::query_scalar!(
+                r#"SELECT count(*) AS "count!"
+                FROM sessions
+                WHERE revoked_at IS NULL AND expires_at > now()"#
+            )
+        )?;
+        Ok(count.try_into().unwrap_or_default())
+    }
+
     /// Records activity of the session from `ip`, at most once every
     /// [`LAST_SEEN_INTERVAL`], so session reads rarely become writes.
     ///

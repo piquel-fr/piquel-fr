@@ -48,6 +48,9 @@ pub struct EventFilter {
     pub before: Option<EventId>,
     /// Only this event.
     pub id: Option<EventId>,
+    /// How many matching events to skip, newest first: the dashboard pages by
+    /// number, while readers that follow the stream page by `before`.
+    pub offset: u32,
 }
 
 /// A recorded event with its personal data merged back in.
@@ -374,8 +377,31 @@ impl EventRepository<'_> {
         self.list(&filter, limit).await
     }
 
-    /// Lists up to `limit` events matching `filter`, newest first. A `before` event
-    /// that does not exist, or concerns another account than `subject`, matches nothing.
+    /// Counts the events matching `filter`, whatever its `before`, `id` and
+    /// `offset`: how many a numbered page is of.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`DatabaseError`] if the query fails.
+    pub async fn count(&mut self, filter: &EventFilter) -> Result<u64, DatabaseError> {
+        let count = run!(
+            self,
+            fetch_one,
+            sqlx::query_scalar!(
+                r#"SELECT count(*) AS "count!"
+                FROM domain_events
+                WHERE ($1::uuid IS NULL OR subject_user_id = $1)
+                AND ($2::text IS NULL OR kind = $2)"#,
+                filter.subject.map(UserId::as_uuid),
+                filter.kind.as_deref(),
+            )
+        )?;
+        Ok(count.try_into().unwrap_or_default())
+    }
+
+    /// Lists up to `limit` events matching `filter`, newest first, after its
+    /// `offset`. A `before` event that does not exist, or concerns another account
+    /// than `subject`, matches nothing.
     ///
     /// # Errors
     ///
@@ -413,17 +439,48 @@ impl EventRepository<'_> {
                 )
                 AND ($5::uuid IS NULL OR e.id = $5)
                 ORDER BY e.sequence DESC
-                LIMIT $4"#,
+                LIMIT $4 OFFSET $6"#,
                 filter.subject.map(UserId::as_uuid),
                 filter.kind.as_deref(),
                 filter.before.map(EventId::as_uuid),
                 i64::from(limit),
                 filter.id.map(EventId::as_uuid),
+                i64::from(filter.offset),
             )
         )?
         .into_iter()
         .map(StoredEvent::try_from)
         .collect()
+    }
+
+    /// Counts the events of any of `kinds`, the serde tags of [`DomainEvent`]
+    /// variants, recorded since `since`: every account's, or only those
+    /// concerning `subject`.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`DatabaseError`] if the query fails.
+    pub async fn count_since(
+        &mut self,
+        subject: Option<UserId>,
+        kinds: &[String],
+        since: DateTime<Utc>,
+    ) -> Result<u64, DatabaseError> {
+        let count = run!(
+            self,
+            fetch_one,
+            sqlx::query_scalar!(
+                r#"SELECT count(*) AS "count!"
+                FROM domain_events
+                WHERE occurred_at >= $1
+                AND kind = ANY($2)
+                AND ($3::uuid IS NULL OR subject_user_id = $3)"#,
+                since,
+                kinds,
+                subject.map(UserId::as_uuid),
+            )
+        )?;
+        Ok(count.try_into().unwrap_or_default())
     }
 
     /// Lists the events concerning a client, newest first, for tests of client changes.

@@ -1,9 +1,8 @@
 //! The account's data: downloading it, and deleting the account.
 
 use crate::{
-    Section, Title,
     form::{Precision, Query, change_form, open, time},
-    layout::frame,
+    layout::page_head,
 };
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
@@ -51,29 +50,42 @@ pub async fn account_data<'a>(
     confirmed: bool,
 ) -> Result<impl View> {
     Ok(view! {
-        <section class="card stack" aria-labelledby="export-heading">
-            <h2 id="export-heading">"Download your data"</h2>
+        page_head(title: "Your data", lead: "Everything Piquel keeps about you, and leaving.".to_owned())
+        <section class="card" aria-labelledby="export-heading">
+            <header>
+                <h2 id="export-heading">"Download your data"</h2>
+                change_form(
+                    action: page,
+                    change: DataChange::Export,
+                    label: "Download your data",
+                    class: "secondary small",
+                    confirm: !confirmed,
+                )
+            </header>
             <p class="help">
                 "Everything Piquel keeps about your account, in one JSON file: your profile, email addresses, passkeys, devices, connected apps, the apps you registered, account recoveries and your security history. It holds no passkey keys or secrets."
             </p>
-            change_form(
-                action: page,
-                change: DataChange::Export,
-                label: "Download your data",
-                class: "secondary full",
-                confirm: !confirmed,
-            )
         </section>
-        <section class="card stack" aria-labelledby="delete-heading">
-            <h2 id="delete-heading">"Delete your account"</h2>
+        <section class="card" aria-labelledby="delete-heading">
+            <header>
+                <h2 id="delete-heading">"Delete your account"</h2>
+                if !state.deleting {
+                    open(
+                        page: page,
+                        opens: DataState { deleting: true },
+                        label: "Delete account",
+                        danger: true,
+                    )
+                }
+            </header>
             <p class="help">
                 (format!(
                     "Your account stops working at once and every device is signed out. It is deleted for good after {grace_days} days, with the apps you registered; until then, signing in with your passkey restores it. Apps you signed in to keep their own records of you."
                 ))
             </p>
             if state.deleting {
-                <div class="notice stack">
-                    <p tabindex="-1" autofocus="">"Delete your account?"</p>
+                <div class="open-row">
+                    <strong tabindex="-1" autofocus="">"Delete your account?"</strong>
                     change_form(
                         action: page,
                         change: DataChange::Delete { handle: String::new() },
@@ -93,13 +105,6 @@ pub async fn account_data<'a>(
                         </label>
                     )
                 </div>
-            } else {
-                open(
-                    page: page,
-                    opens: DataState { deleting: true },
-                    label: "Delete account",
-                    secondary: true,
-                )
             }
         </section>
     })
@@ -113,17 +118,12 @@ pub async fn account_deleted<'a>(
     sign_in: &'a str,
 ) -> Result<impl View> {
     Ok(view! {
-        frame(
-            section: Section::Account,
-            title: Title::AccountDeleted.as_str(),
-            <div class="card stack">
-                <p>
-                    "Every device was signed out. Your account will be deleted for good on "
-                    time(at: purge_after, precision: Precision::Day)
-                    ". Changed your mind? Sign in with your passkey before then to restore it."
-                </p>
-                <a class="button secondary" href=(sign_in)>"Restore my account"</a>
-            </div>
-        )
+        <h1>"Your account is scheduled for deletion"</h1>
+        <p class="lead">
+            "Every device was signed out. Your account will be deleted for good on "
+            time(at: purge_after, precision: Precision::Day)
+            ". Changed your mind? Sign in with your passkey before then to restore it."
+        </p>
+        <a class="button secondary" href=(sign_in)>"Restore my account"</a>
     })
 }

@@ -1,8 +1,11 @@
 //! Connected apps: the apps that keep access to the account.
 
 use super::Audience;
-use crate::form::{Query, change_form, open};
-use crate::oidc::scope_label;
+use crate::{
+    form::{Query, change_form, open},
+    layout::page_head,
+    oidc::scope_label,
+};
 use piquel_common::ClientId;
 use serde::{Deserialize, Serialize};
 use topcoat::{
@@ -57,28 +60,24 @@ pub async fn connected_apps<'a>(
     audience: Audience<'a>,
 ) -> Result<impl View> {
     Ok(view! {
-        <p class="help">
-            (if audience.owns() {
-                "The apps you sign in to with Piquel that keep access to your account, and what they can see. Remove any you no longer use."
-            } else {
-                "The apps that keep access to this account, and what they can see."
-            })
-        </p>
+        if audience.owns() {
+            page_head(
+                title: "Connected apps",
+                lead: "The apps you sign in to with Piquel that keep access to your account, and what they can see. Remove any you no longer use.".to_owned(),
+            )
+        }
         <section class="card" aria-labelledby="apps-heading">
-            <div class="row between">
-                <h2 id="apps-heading">"Connected apps"</h2>
-                <span class="badge">(format!("{} connected", rows.len()))</span>
-            </div>
+            <header>
+                <h2 id="apps-heading">"Connected apps " <span class="count">(rows.len().to_string())</span></h2>
+            </header>
             <ul class="list">
                 for row in rows {
-                    <li>
-                        app_row(
-                            page: page,
-                            row: *row,
-                            removing: state.removing.as_ref() == Some(row.client_id),
-                            audience: audience,
-                        )
-                    </li>
+                    app_row(
+                        page: page,
+                        row: *row,
+                        removing: state.removing.as_ref() == Some(row.client_id),
+                        audience: audience,
+                    )
                 }
             </ul>
             if rows.is_empty() {
@@ -101,10 +100,10 @@ async fn app_row<'a>(
 ) -> Result<impl View> {
     let name = row.name;
     let away = match (row.offline, audience.owns()) {
-        (true, true) => "It can use your account while you’re away.",
-        (false, true) => "It can use your account only while you’re signed in to it.",
-        (true, false) => "It can use the account while its owner is away.",
-        (false, false) => "It can use the account only while its owner is signed in to it.",
+        (true, true) => "Can use your account while you’re away.",
+        (false, true) => "Can use your account only while you’re signed in to it.",
+        (true, false) => "Can use the account while its owner is away.",
+        (false, false) => "Can use the account only while its owner is signed in to it.",
     };
     let again = if row.first_party {
         format!("Piquel makes {name}, so signing in to it again gives it access without asking.")
@@ -113,44 +112,37 @@ async fn app_row<'a>(
     } else {
         format!("{name} will need the owner’s approval again to use the account.")
     };
+    let sees: Vec<_> = row.scopes.iter().map(|scope| scope_label(scope)).collect();
     Ok(view! {
-        <div class="stack">
-            <div class="row between">
-                <div class="row">
-                    <strong>(name)</strong>
-                    if row.first_party {
-                        <span class="badge">"Made by Piquel"</span>
-                    }
-                </div>
-                if !removing {
-                    open(
-                        page: page,
-                        opens: ConnectedAppsState { removing: Some(row.client_id.clone()) },
-                        label: "Remove access",
-                        aria_label: format!("Remove access for {name}"),
-                    )
+        <li class=(if removing { "open" } else { "" })>
+            <div class="text">
+                <strong>(name)</strong>
+                if row.first_party {
+                    " " <span class="badge">"Made by Piquel"</span>
                 }
+                <small>(format!("Sees: {}", sees.join(", ")))</small>
+                <small>(away)</small>
             </div>
-            <ul>
-                for scope in row.scopes {
-                    <li>(scope_label(scope))</li>
-                }
-            </ul>
-            <p class="help">(away)</p>
             if removing {
-                <div class="notice stack">
-                    <strong tabindex="-1" autofocus="">(format!("Remove {name}’s access?"))</strong>
-                    <p>(again) " Access it already has can last up to 5 minutes."</p>
-                    change_form(
-                        action: page,
-                        change: ConnectedAppChange::Remove { client_id: row.client_id.clone() },
-                        label: "Remove access",
-                        class: "danger",
-                        reason: audience.asks_reason(),
-                        cancel: page.to_owned(),
-                    )
-                </div>
+                <strong tabindex="-1" autofocus="">(format!("Remove {name}’s access?"))</strong>
+                <p class="help">(again) " Access it already has can last up to 5 minutes."</p>
+                change_form(
+                    action: page,
+                    change: ConnectedAppChange::Remove { client_id: row.client_id.clone() },
+                    label: "Remove access",
+                    class: "danger",
+                    reason: audience.asks_reason(),
+                    cancel: page.to_owned(),
+                )
+            } else {
+                open(
+                    page: page,
+                    opens: ConnectedAppsState { removing: Some(row.client_id.clone()) },
+                    label: "Remove access",
+                    aria_label: format!("Remove access for {name}"),
+                    danger: true,
+                )
             }
-        </div>
+        </li>
     })
 }

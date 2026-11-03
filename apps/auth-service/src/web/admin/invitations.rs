@@ -4,7 +4,7 @@ use super::AdminApplication as App;
 use crate::{AdminError, InviteExpiry};
 use chrono::Utc;
 use piquel_common::{TokenId, admin::CreateInvitation};
-use piquel_ui::InvitationRow;
+use piquel_ui::{Action, Change, InvitationRow};
 use serde::de::IgnoredAny;
 use topcoat::{
     Result,
@@ -39,13 +39,18 @@ pub(super) async fn list(cx: &Cx) -> Result<Response> {
     } else {
         None
     };
+    let inline = admin.operator.is_confirmed(super::FORM_TIME);
     let rows: Option<Vec<_>> = invitations.as_ref().map(|invitations| {
         invitations
             .iter()
             .map(|invitation| InvitationRow {
                 invitation,
-                revoke: (invitation.redeemed_at.is_none() && invitation.revoked_at.is_none())
-                    .then(|| href!(revoke, Invitation(invitation.id)).resolve(cx)),
+                revoke: (invitation.redeemed_at.is_none() && invitation.revoked_at.is_none()).then(
+                    || Action {
+                        href: href!(revoke, Invitation(invitation.id)).resolve(cx),
+                        inline,
+                    },
+                ),
             })
             .collect()
     });
@@ -53,7 +58,7 @@ pub(super) async fn list(cx: &Cx) -> Result<Response> {
     let page = view! { cx =>
         piquel_ui::invitation_list(rows: rows, create: creating.as_str(), now: Utc::now())
     };
-    App::render(cx, StatusCode::OK, page).await
+    App::render(cx, StatusCode::OK, "Invitations", page).await
 }
 
 /// `/invitations/new`: creates an invitation and shows its link, once.
@@ -98,9 +103,7 @@ pub(super) async fn create(cx: &Cx, form: Option<Form<CreateInvitation>>) -> Res
             },
             None => {
                 piquel_ui::dashboard_change(
-                    title: "Invite someone",
-                    description: "Creates a single-use signup link.",
-                    button: "Create link",
+                    change: Change::Invite,
                     back: back.as_str(),
                     refusal: refused,
                     <label>
@@ -112,7 +115,7 @@ pub(super) async fn create(cx: &Cx, form: Option<Form<CreateInvitation>>) -> Res
             },
         }
     };
-    App::render(cx, StatusCode::OK, page).await
+    App::render(cx, StatusCode::OK, "Invite someone", page).await
 }
 
 /// `/invitations/{invitation}/revoke`: revokes an unredeemed invitation.
@@ -130,13 +133,10 @@ pub(super) async fn revoke(cx: &Cx, form: Option<Form<IgnoredAny>>) -> Result<Re
     .await?;
     let page = view! { cx =>
         piquel_ui::dashboard_change(
-            title: "Revoke this invitation",
-            description: "Its link stops working.",
-            button: "Revoke",
+            change: Change::RevokeInvitation,
             back: back.as_str(),
             refusal: refusal.as_deref(),
-            danger: true,
         )
     };
-    App::render(cx, StatusCode::OK, page).await
+    App::render(cx, StatusCode::OK, "Revoke an invitation", page).await
 }

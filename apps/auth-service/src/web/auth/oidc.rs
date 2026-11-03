@@ -6,7 +6,7 @@ use crate::{
     oidc::{AuthorizationDecision, LogoutQuery, OAuthError, TransactionQuery},
     routes,
 };
-use piquel_ui::{Area, LoginQuery, Query, Title};
+use piquel_ui::{LoginQuery, Query, Title};
 use std::slice;
 use topcoat::{
     Error,
@@ -41,7 +41,6 @@ impl WebApplication {
                 cx,
                 StatusCode::OK,
                 Title::Consent.as_str(),
-                Area::SignIn,
                 slice::from_ref(&redirect),
                 page,
             )
@@ -78,7 +77,6 @@ impl WebApplication {
                 cx,
                 StatusCode::OK,
                 Title::Logout.as_str(),
-                Area::SignIn,
                 slice::from_ref(&destination),
                 page,
             )

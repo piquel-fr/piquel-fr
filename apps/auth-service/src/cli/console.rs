@@ -5,7 +5,7 @@
 use super::CliError;
 use crate::{AdminService, AuthConfig, Operator, UserRef, account::AccountService};
 use clap::{Args, ValueEnum};
-use piquel_common::UserId;
+use piquel_common::{UserId, admin::Paging};
 use piquel_repository::Database;
 use serde::Serialize;
 use std::io::{BufRead, IsTerminal};
@@ -73,6 +73,20 @@ impl Output {
             OutputFormat::Table => table(value),
         }
         Ok(())
+    }
+
+    /// Says where a page of `what` stands, and how to go on, after a table.
+    pub(super) fn paging(paging: Paging, what: &str) {
+        eprintln!(
+            "Page {} of {}: {} {what} in all.{}",
+            paging.page,
+            paging.pages,
+            paging.total,
+            paging
+                .next()
+                .map(|next| format!(" Next: --page {next}"))
+                .unwrap_or_default()
+        );
     }
 }
 

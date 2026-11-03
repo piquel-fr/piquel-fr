@@ -225,6 +225,7 @@ impl WebApplication {
     ) -> Result<Response, Failure> {
         let framed = Framed {
             section: Section::Developers,
+            tab: None,
             title,
             head,
             page,

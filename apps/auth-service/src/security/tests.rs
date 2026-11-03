@@ -2,7 +2,7 @@
 
 use super::*;
 use crate::routes::{audit, federation, passkey};
-use crate::tests::Replicas;
+use crate::tests::{REQUESTS_PER_MINUTE, Replicas};
 use axum::{Router, body::Body, http::Request as HttpRequest, middleware, routing::any};
 use piquel_common::{
     Handle, TokenId,
@@ -92,6 +92,7 @@ impl SecurityFixture {
         let policy = HttpSecurity {
             trusted_proxies: Arc::new(vec![]),
             request_timeout: std::time::Duration::from_secs(30),
+            requests_per_minute: REQUESTS_PER_MINUTE,
             database,
             origin: site(),
             listener: Listener::Public,

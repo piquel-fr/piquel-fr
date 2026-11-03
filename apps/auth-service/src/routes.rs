@@ -139,12 +139,15 @@ pub(crate) mod oidc {
 pub(crate) mod dashboard {
     /// Redeems auth's handoff code, signing the browser in to the dashboard.
     pub(crate) const SIGN_IN: &str = "/sign-in";
+    /// Keeps the theme and sidebar preferences a page's forms post, in cookies.
+    pub(crate) const PREFERENCES: &str = "/preferences";
     /// Every path the dashboard serves is one of these, or under one: the admin
     /// listener mounts the pages on them, and nowhere else.
-    pub(crate) const PREFIXES: [&str; 10] = [
+    pub(crate) const PREFIXES: [&str; 11] = [
         "/",
         SIGN_IN,
         "/sign-out",
+        PREFERENCES,
         "/assets",
         "/users",
         "/administrators",
@@ -175,12 +178,16 @@ pub(crate) mod page {
     pub(crate) const RECOVER_UNDO: &str = "/recover/undo";
     /// Hands an administrator's passkey session off to the admin dashboard.
     pub(crate) const ADMIN: &str = "/admin";
+    /// Keeps the theme and sidebar preferences a page's forms post, in cookies.
+    pub(crate) const PREFERENCES: &str = "/preferences";
 
     /// The account's settings, at the paths piquel.fr served them on, so its redirect
     /// keeps old links and sent emails working.
     pub(crate) mod settings {
-        /// Sign-in methods: passkeys and social sign-in.
+        /// The account at a glance.
         pub(crate) const HOME: &str = "/settings";
+        /// Sign-in methods: passkeys and social sign-in.
+        pub(crate) const SIGN_IN: &str = "/settings/sign-in";
         /// Email addresses.
         pub(crate) const EMAILS: &str = "/settings/emails";
         /// Confirming an address, from its verification link.
@@ -220,13 +227,15 @@ pub(crate) mod page {
 
     /// Every server-rendered page's route, which the security layer classifies as
     /// pages.
-    pub(crate) const ALL: [&str; 19] = [
+    pub(crate) const ALL: [&str; 21] = [
         LOGIN,
         REGISTER,
         CONSENT,
         LOGOUT,
         ADMIN,
+        PREFERENCES,
         settings::HOME,
+        settings::SIGN_IN,
         settings::EMAILS,
         settings::VERIFY,
         settings::SESSIONS,

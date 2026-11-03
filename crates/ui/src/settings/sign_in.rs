@@ -7,6 +7,7 @@ use crate::{
         Ceremony, Checkbox, Precision, Query, change_form, handle_input, new_passkey, open,
         passkey_form, time,
     },
+    layout::page_head,
 };
 use chrono::{DateTime, Utc};
 use piquel_common::{
@@ -121,6 +122,12 @@ pub async fn sign_in_methods<'a>(
     #[default] handle: Option<HandleRow<'a>>,
 ) -> Result<impl View> {
     Ok(view! {
+        if audience.owns() {
+            page_head(
+                title: "Sign-in methods",
+                lead: "The passkeys and linked providers that can sign in to your account.".to_owned(),
+            )
+        }
         if let Some(handle) = handle {
             handle_card(page: page, row: handle, state: state, audience: audience)
         }
@@ -149,44 +156,53 @@ async fn handle_card<'a>(
     let current = row.handle;
     Ok(view! {
         <section class="card" aria-labelledby="handle-heading">
-            <h2 id="handle-heading">"Handle"</h2>
-            <p class="help">
-                "Your public name on Piquel and the name you sign in with. Apps you use see it as your username."
-            </p>
-            if state.changing_handle.0 && row.changeable_at.is_none() {
-                change_form(
-                    action: page,
-                    change: SignInChange::Handle { handle: String::new() },
-                    label: "Change handle",
-                    confirm: audience.confirms(),
-                    cancel: page.to_owned(),
-                    handle_input(new: true, value: state.handle.as_deref().or(Some(current)), focus: true)
-                    <div class="notice stack">
-                        <p>
-                            <strong>(format!("@{current} stops working right away."))</strong>
-                            " Links to it, and apps and services that look you up by it, stop finding you."
-                        </p>
-                        <p>"It stays reserved for you: nobody else can take it unless Piquel support releases it, and you can take it back later. You can change your handle once every 30 days."</p>
-                    </div>
-                )
-            } else {
-                <div class="row between">
-                    <div>
-                        <strong>(format!("@{current}"))</strong>
-                        if let Some(at) = row.changeable_at {
-                            <p class="help">
-                                "You can change it again on " time(at: at, precision: Precision::Day) "."
-                            </p>
-                        }
-                    </div>
+            <header>
+                <h2 id="handle-heading">"Handle"</h2>
+                if !(state.changing_handle.0 && row.changeable_at.is_none()) {
                     open(
                         page: page,
                         opens: SignInState { changing_handle: Checkbox(true), ..SignInState::default() },
                         label: "Change",
                         aria_label: "Change handle".to_owned(),
                         disabled: row.changeable_at.is_some(),
+                        secondary: true,
+                    )
+                }
+            </header>
+            if state.changing_handle.0 && row.changeable_at.is_none() {
+                <div class="open-row">
+                    change_form(
+                        action: page,
+                        change: SignInChange::Handle { handle: String::new() },
+                        label: "Change handle",
+                        confirm: audience.confirms(),
+                        cancel: page.to_owned(),
+                        handle_input(new: true, value: state.handle.as_deref().or(Some(current)), focus: true)
+                        <div class="notice warning stack">
+                            <p>
+                                <strong>(format!("@{current} stops working right away."))</strong>
+                                " Links to it, and apps and services that look you up by it, stop finding you."
+                            </p>
+                            <p>"It stays reserved for you: nobody else can take it unless Piquel support releases it, and you can take it back later. You can change your handle once every 30 days."</p>
+                        </div>
                     )
                 </div>
+            } else {
+                <ul class="list">
+                    <li>
+                        <div class="text">
+                            <strong>(format!("@{current}"))</strong>
+                            <small>
+                                "Your public name on Piquel and the name you sign in with. Apps you use see it as your username."
+                            </small>
+                            if let Some(at) = row.changeable_at {
+                                <small>
+                                    "You can change it again on " time(at: at, precision: Precision::Day) "."
+                                </small>
+                            }
+                        </div>
+                    </li>
+                </ul>
             }
         </section>
     })
@@ -206,26 +222,20 @@ async fn passkey_list<'a>(
     let added = recovery.and_then(Recovery::passkey);
     Ok(view! {
         <section class="card" aria-labelledby="passkeys-heading">
-            <div class="row between">
-                <h2 id="passkeys-heading">"Passkeys"</h2>
-                <span class="badge">(format!("{count} registered"))</span>
-            </div>
-            <p class="help">
-                "Saved securely with your device or password manager. Keep a second passkey so you can always get back in."
-            </p>
+            <header>
+                <h2 id="passkeys-heading">"Passkeys " <span class="count">(count.to_string())</span></h2>
+            </header>
             <ul class="list">
                 for passkey in passkeys {
                     let recovered = added == Some(passkey.id);
-                    <li>
-                        passkey_row(
-                            page: page,
-                            passkey: passkey,
-                            recovered: recovered,
-                            removable: count > 1 && !recovery.is_some_and(|recovery| recovery.keeps(passkey.id)),
-                            state: state,
-                            audience: audience,
-                        )
-                    </li>
+                    passkey_row(
+                        page: page,
+                        passkey: passkey,
+                        recovered: recovered,
+                        removable: count > 1 && !recovery.is_some_and(|recovery| recovery.keeps(passkey.id)),
+                        state: state,
+                        audience: audience,
+                    )
                 }
             </ul>
             if passkeys.is_empty() {
@@ -233,26 +243,31 @@ async fn passkey_list<'a>(
                     (if audience.owns() { "Add your first passkey to protect your account." } else { "No passkey." })
                 </p>
             }
-            if audience.owns() {
-                enroll(page: page, android: android)
-            }
-            <p class="help">"Your last passkey cannot be removed."</p>
-            match recovery.map(|recovery| recovery.stage) {
-                Some(RecoveryStage::Open { .. }) => {
-                    <p class="help">"Passkeys can't be removed while the recovery can be cancelled."</p>
-                }
-                Some(RecoveryStage::Probation { settles_at, .. }) => {
-                    <p class="help">
+            <p class="help">
+                "Saved securely with your device or password manager. Keep a second passkey so you can always get back in: your last passkey cannot be removed."
+                match recovery.map(|recovery| recovery.stage) {
+                    Some(RecoveryStage::Open { .. }) => {
+                        " Passkeys can't be removed while the recovery can be cancelled."
+                    }
+                    Some(RecoveryStage::Probation { settles_at, .. }) => {
                         (if added.is_some() && count > 1 {
-                            format!("Only {} can be removed until the recovery settles on ", RecoveryPasskey::NAME)
+                            format!(" Only {} can be removed until the recovery settles on ", RecoveryPasskey::NAME)
                         } else {
-                            "Passkeys can't be removed until the recovery settles on ".to_owned()
+                            " Passkeys can't be removed until the recovery settles on ".to_owned()
                         })
                         time(at: settles_at, precision: Precision::Day)
                         "."
-                    </p>
+                    }
+                    None => {}
                 }
-                None => {}
+            </p>
+            if audience.owns() {
+                <details class="disclosure">
+                    <summary><span class="button secondary small">"Add a passkey"</span></summary>
+                    <div class="open-row">
+                        enroll(page: page, android: android)
+                    </div>
+                </details>
             }
         </section>
     })
@@ -283,25 +298,27 @@ async fn passkey_row<'a>(
     };
     Ok(view! {
         if state.renaming == Some(id) && !recovered {
-            change_form(
-                action: page,
-                change: SignInChange::Rename { id, friendly_name: String::new() },
-                label: "Save name",
-                reason: audience.asks_reason(),
-                cancel: page.to_owned(),
-                <label>
-                    "Passkey name"
-                    <input
-                        name="friendly_name"
-                        value=(state.name.as_deref().unwrap_or(name))
-                        maxlength="80"
-                        required=""
-                        autofocus=""
-                    >
-                </label>
-            )
+            <li class="open">
+                change_form(
+                    action: page,
+                    change: SignInChange::Rename { id, friendly_name: String::new() },
+                    label: "Save name",
+                    reason: audience.asks_reason(),
+                    cancel: page.to_owned(),
+                    <label>
+                        "Passkey name"
+                        <input
+                            name="friendly_name"
+                            value=(state.name.as_deref().unwrap_or(name))
+                            maxlength="80"
+                            required=""
+                            autofocus=""
+                        >
+                    </label>
+                )
+            </li>
         } else if state.removing == Some(id) && removable {
-            <div class="stack">
+            <li class="open">
                 <strong tabindex="-1" autofocus="">(removal)</strong>
                 <p class="help">"You won’t be able to use this passkey to sign in again."</p>
                 change_form(
@@ -313,42 +330,40 @@ async fn passkey_row<'a>(
                     reason: audience.asks_reason(),
                     cancel: page.to_owned(),
                 )
-            </div>
+            </li>
         } else {
-            <div class="row between">
-                <div>
-                    <div class="row">
-                        <strong>(name)</strong>
-                        if recovered {
-                            <span class="badge">"Added by the recovery"</span>
-                        }
-                    </div>
-                    <p class="help">
-                        "Added "
+            <li>
+                <div class="text">
+                    <strong>(name)</strong>
+                    if recovered {
+                        " " <span class="badge warning">"Added by the recovery"</span>
+                    }
+                    <small>
+                        "added "
                         time(at: passkey.created_at, precision: precision)
                         if recovered {
                             (format!(" · ID {id}"))
                         }
-                    </p>
+                    </small>
                 </div>
-                <div class="row">
-                    if !recovered {
-                        open(
-                            page: page,
-                            opens: SignInState { renaming: Some(id), ..SignInState::default() },
-                            label: "Rename",
-                            aria_label: format!("Rename {name}"),
-                        )
-                    }
+                if !recovered {
                     open(
                         page: page,
-                        opens: SignInState { removing: Some(id), ..SignInState::default() },
-                        label: "Remove",
-                        aria_label: format!("Remove {name}"),
-                        disabled: !removable,
+                        opens: SignInState { renaming: Some(id), ..SignInState::default() },
+                        label: "Rename",
+                        aria_label: format!("Rename {name}"),
+                        secondary: true,
                     )
-                </div>
-            </div>
+                }
+                open(
+                    page: page,
+                    opens: SignInState { removing: Some(id), ..SignInState::default() },
+                    label: "Remove",
+                    aria_label: format!("Remove {name}"),
+                    disabled: !removable,
+                    danger: true,
+                )
+            </li>
         }
     })
 }
@@ -362,8 +377,8 @@ async fn enroll(page: &str, android: bool) -> Result<impl View> {
             action: page,
             ceremony: Ceremony::Enroll,
             change: SignInChange::Enrolled {},
-            label: "Add a passkey",
-            class: "secondary full",
+            label: "Create the passkey",
+            class: "",
             new_passkey(label: "New passkey name", android: android)
         )
     })
@@ -377,22 +392,26 @@ async fn social<'a>(
     state: &'a SignInState,
     audience: Audience<'a>,
 ) -> Result<impl View> {
+    let linked = providers
+        .iter()
+        .filter(|row| row.identity.is_some())
+        .count();
     Ok(view! {
         <section class="card" aria-labelledby="social-heading">
-            <h2 id="social-heading">"Social sign-in"</h2>
-            <p class="help">
-                "Linked providers can sign you in. Only a passkey can authorize changes to these settings."
-            </p>
+            <header>
+                <h2 id="social-heading">
+                    "Social sign-in"
+                    <span class="count">(format!("{linked} / {}", providers.len()))</span>
+                </h2>
+            </header>
             <ul class="list">
                 for row in providers {
-                    <li>
-                        provider_row(
-                            page: page,
-                            row: *row,
-                            unlinking: state.unlinking == Some(row.provider),
-                            audience: audience,
-                        )
-                    </li>
+                    provider_row(
+                        page: page,
+                        row: *row,
+                        unlinking: state.unlinking == Some(row.provider),
+                        audience: audience,
+                    )
                 }
             </ul>
             if providers.is_empty() {
@@ -400,6 +419,9 @@ async fn social<'a>(
                     (if audience.owns() { "Social sign-in is not available yet." } else { "No linked provider." })
                 </p>
             }
+            <p class="help">
+                "Linked providers can sign you in. Only a passkey can authorize changes to these settings."
+            </p>
         </section>
     })
 }
@@ -416,38 +438,8 @@ async fn provider_row<'a>(
     let provider = row.provider;
     let name = provider.name();
     Ok(view! {
-        <div class="row between">
-            <div>
-                <strong>(name)</strong>
-                <p class="help">
-                    (match row.identity {
-                        Some(identity) => identity.linked_email.as_deref().unwrap_or("Linked to your account"),
-                        None => "Not linked",
-                    })
-                </p>
-                if !row.enabled {
-                    <p class="help">(format!("{name} sign-in is currently unavailable."))</p>
-                }
-            </div>
-            if row.identity.is_some() {
-                open(
-                    page: page,
-                    opens: SignInState { unlinking: Some(provider), ..SignInState::default() },
-                    label: "Unlink",
-                    aria_label: format!("Unlink {name}"),
-                    secondary: true,
-                )
-            } else if row.enabled && audience.owns() {
-                change_form(
-                    action: page,
-                    change: SignInChange::Link { provider },
-                    label: format!("Link {name}"),
-                    class: "secondary",
-                )
-            }
-        </div>
         if row.identity.is_some() && unlinking {
-            <div class="notice stack">
+            <li class="open">
                 <p tabindex="-1" autofocus="">(format!("Remove {name} sign-in? Your passkeys will still work."))</p>
                 change_form(
                     action: page,
@@ -458,7 +450,38 @@ async fn provider_row<'a>(
                     reason: audience.asks_reason(),
                     cancel: page.to_owned(),
                 )
-            </div>
+            </li>
+        } else {
+            <li>
+                <div class="text">
+                    <strong>(name)</strong>
+                    <small>
+                        (match row.identity {
+                            Some(identity) => identity.linked_email.as_deref().unwrap_or("linked to your account"),
+                            None => "not linked",
+                        })
+                        if !row.enabled {
+                            (format!(" · {name} sign-in is currently unavailable."))
+                        }
+                    </small>
+                </div>
+                if row.identity.is_some() {
+                    open(
+                        page: page,
+                        opens: SignInState { unlinking: Some(provider), ..SignInState::default() },
+                        label: "Unlink",
+                        aria_label: format!("Unlink {name}"),
+                        danger: true,
+                    )
+                } else if row.enabled && audience.owns() {
+                    change_form(
+                        action: page,
+                        change: SignInChange::Link { provider },
+                        label: format!("Link {name}"),
+                        class: "secondary small",
+                    )
+                }
+            </li>
         }
     })
 }

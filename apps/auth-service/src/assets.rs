@@ -1,5 +1,6 @@
-//! The stylesheet and passkey script of auth's pages, embedded under paths naming
-//! their content, so browsers and shared caches keep them forever.
+//! The stylesheet, typefaces and passkey script of auth's pages, embedded under
+//! paths that never serve other content, so browsers and shared caches keep them
+//! forever.
 
 use crate::security::{ApiError, CacheClass, Cached};
 use axum::{
@@ -32,12 +33,21 @@ impl EmbeddedAssets {
     /// The passkey script, the one script of auth's pages.
     pub(crate) const SCRIPT: Asset =
         Asset::script("passkey", include_bytes!("../assets/passkey.js"));
+    /// The files the admin dashboard serves too: the stylesheet and the
+    /// typefaces it links.
+    pub(crate) const SHARED: [Asset; 4] = [
+        Self::STYLESHEET,
+        piquel_ui::FONTS[0],
+        piquel_ui::FONTS[1],
+        piquel_ui::FONTS[2],
+    ];
 
     /// Serves the embedded file at exactly `path`. A file's path changes with its
-    /// content, so nothing needs revalidating.
+    /// content, or its version, so nothing needs revalidating.
     pub(crate) fn serve(path: &str) -> Result<Response, ApiError> {
-        let asset = [Self::STYLESHEET, Self::SCRIPT]
+        let asset = Self::SHARED
             .into_iter()
+            .chain([Self::SCRIPT])
             .find(|asset| asset.path() == path)
             .ok_or(AssetError::NotFound)?;
         let headers = [(header::CONTENT_TYPE, asset.content_type())];
@@ -50,13 +60,15 @@ mod tests {
     //! Focused coverage of embedded file serving.
     use super::*;
 
-    /// The pages' stylesheet and passkey script are served at the paths naming their
-    /// content, as their own type, so they are cached forever.
+    /// The pages' stylesheet, typefaces and passkey script are served at the paths
+    /// naming their content or version, as their own type, so they are cached
+    /// forever.
     #[test]
     fn the_pages_files_are_immutable() {
         for (asset, content_type) in [
             (EmbeddedAssets::STYLESHEET, "text/css; charset=utf-8"),
             (EmbeddedAssets::SCRIPT, "text/javascript; charset=utf-8"),
+            (piquel_ui::FONTS[0], "font/woff2"),
         ] {
             let response = EmbeddedAssets::serve(&asset.path()).expect("found");
             assert_eq!(response.headers()[header::CONTENT_TYPE], content_type);

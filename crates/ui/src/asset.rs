@@ -1,9 +1,11 @@
-//! Files pages link, embedded in the executable serving them under paths naming
-//! their content, so browsers and shared caches keep them forever.
+//! Files pages link, embedded in the executable serving them under paths that
+//! never serve other content, so browsers and shared caches keep them forever.
 
 /// A file pages link, such as [`STYLESHEET`], embedded at compile time. Its
 /// [`path`](Self::path) names a hash of its content, so a changed file is served
-/// at a new path and a cached copy never goes stale.
+/// at a new path and a cached copy never goes stale. A font's path names its
+/// version instead, since the stylesheet, a static file, links it by name: a
+/// new version of a font gets a new name.
 #[derive(Clone, Copy)]
 pub struct Asset {
     /// Its public name before the hash.
@@ -24,6 +26,8 @@ enum Kind {
     Stylesheet,
     /// A JavaScript module.
     Script,
+    /// A WOFF2 font.
+    Font,
 }
 
 impl Kind {
@@ -32,6 +36,7 @@ impl Kind {
         match self {
             Self::Stylesheet => "css",
             Self::Script => "js",
+            Self::Font => "woff2",
         }
     }
 
@@ -40,6 +45,7 @@ impl Kind {
         match self {
             Self::Stylesheet => "text/css; charset=utf-8",
             Self::Script => "text/javascript; charset=utf-8",
+            Self::Font => "font/woff2",
         }
     }
 }
@@ -55,6 +61,12 @@ impl Asset {
     #[must_use]
     pub const fn script(stem: &'static str, bytes: &'static [u8]) -> Self {
         Self::new(stem, Kind::Script, bytes)
+    }
+
+    /// The WOFF2 font of `bytes`, named `stem`, which must name its version.
+    #[must_use]
+    pub const fn font(stem: &'static str, bytes: &'static [u8]) -> Self {
+        Self::new(stem, Kind::Font, bytes)
     }
 
     /// The `kind` of file of `bytes`, named `stem`. A constant asset is hashed at
@@ -77,15 +89,19 @@ impl Asset {
     }
 
     /// Where it is served: `/assets/{stem}.{hash}.{extension}`, the hash in 16
-    /// hexadecimal digits.
+    /// hexadecimal digits, or `/assets/{stem}.{extension}` for a font, whose stem
+    /// names its version.
     #[must_use]
     pub fn path(&self) -> String {
-        format!(
-            "/assets/{}.{:016x}.{}",
-            self.stem,
-            self.hash,
-            self.kind.extension()
-        )
+        match self.kind {
+            Kind::Font => format!("/assets/{}.{}", self.stem, self.kind.extension()),
+            Kind::Stylesheet | Kind::Script => format!(
+                "/assets/{}.{:016x}.{}",
+                self.stem,
+                self.hash,
+                self.kind.extension()
+            ),
+        }
     }
 
     /// Its content.
@@ -101,19 +117,47 @@ impl Asset {
     }
 }
 
-/// The stylesheet of piquel.fr's pages: auth's, and the admin dashboard's, which
-/// adds its own.
+/// The stylesheet of piquel.fr's pages: auth's and the admin dashboard's.
 pub const STYLESHEET: Asset = Asset::stylesheet("style", include_bytes!("../assets/style.css"));
+
+/// The typefaces the stylesheet links, by the paths it names: the Latin subsets
+/// of DM Sans, a variable weight, and DM Mono at two weights.
+pub const FONTS: [Asset; 3] = [
+    Asset::font(
+        "dm-sans-v17-latin",
+        include_bytes!("../assets/fonts/dm-sans-v17-latin.woff2"),
+    ),
+    Asset::font(
+        "dm-mono-v16-latin-400",
+        include_bytes!("../assets/fonts/dm-mono-v16-latin-400.woff2"),
+    ),
+    Asset::font(
+        "dm-mono-v16-latin-500",
+        include_bytes!("../assets/fonts/dm-mono-v16-latin-500.woff2"),
+    ),
+];
 
 #[cfg(test)]
 mod tests {
     //! The paths naming assets' content.
     use super::*;
 
-    /// The path names the content's 64-bit FNV-1a hash, here the published one of `a`.
+    /// The path names the content's 64-bit FNV-1a hash, here the published one of `a`,
+    /// except a font's, which names its version.
     #[test]
     fn the_path_names_the_content() {
         let asset = Asset::stylesheet("style", b"a");
         assert_eq!(asset.path(), "/assets/style.af63dc4c8601ec8c.css");
+        let font = Asset::font("dm-sans-v17-latin", b"a");
+        assert_eq!(font.path(), "/assets/dm-sans-v17-latin.woff2");
+    }
+
+    /// The stylesheet links every font at the path it is served on.
+    #[test]
+    fn the_stylesheet_links_the_fonts() {
+        let stylesheet = std::str::from_utf8(STYLESHEET.bytes()).expect("utf-8");
+        for font in FONTS {
+            assert!(stylesheet.contains(&font.path()), "{}", font.path());
+        }
     }
 }

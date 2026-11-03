@@ -12,7 +12,7 @@ use crate::{
         client_facts, client_form, client_status, copy, secret_panel, secrets_list,
     },
     form::{Checkbox, Precision, Query, change_form, open, time},
-    layout::{Label, navigation},
+    layout::{Label, navigation, page_head},
 };
 use chrono::{DateTime, Utc};
 use piquel_common::{clients::ClientKind, protocol::oauth::Scope};
@@ -249,45 +249,57 @@ pub async fn apps<'a>(links: &'a [AppLink<'a>], limit: u32, new: &'a str) -> Res
     let count = links.len();
     let room = u32::try_from(count).is_ok_and(|count| count < limit);
     Ok(view! {
+        page_head(
+            title: "Your apps",
+            lead: "The apps you registered, which sign users in with Piquel.".to_owned(),
+            actions: view! {
+                if room {
+                    <a class="button" href=(new)>"New app"</a>
+                }
+            },
+        )
         <section class="card" aria-labelledby="apps-heading">
-            <div class="row between">
-                <h2 id="apps-heading">"Your apps"</h2>
-                <span class="badge">(format!("{count} of {limit}"))</span>
-            </div>
+            <header>
+                <h2 id="apps-heading">"Apps " <span class="count">(format!("{count} / {limit}"))</span></h2>
+            </header>
             <ul class="list">
                 for app in links {
                     <li>
-                        <a href=(app.page.as_str())><strong>(app.client.name)</strong></a>
-                        <p class="help"><code>(app.client.id.as_str())</code></p>
-                        <p class="help">
-                            (format!("{} · {} · ", app.client.kind_name(), app.client.status.state()))
-                            if let Some(at) = app.client.last_used_at {
-                                "last used " time(at: at, precision: Precision::Day)
-                            } else {
-                                "never used"
-                            }
-                        </p>
+                        <div class="text">
+                            <a href=(app.page.as_str())><strong>(app.client.name)</strong></a>
+                            " " client_status(client: app.client)
+                            <small>
+                                <code>(app.client.id.as_str())</code>
+                                (format!(" · {} · ", app.client.kind_name()))
+                                if let Some(at) = app.client.last_used_at {
+                                    "last used " time(at: at, precision: Precision::Day)
+                                } else {
+                                    "never used"
+                                }
+                            </small>
+                        </div>
+                        <a class="button secondary small" href=(app.page.as_str())>"Open"</a>
                     </li>
                 }
             </ul>
             if links.is_empty() {
                 <p class="empty">"You have no apps yet. Register one to get its client ID."</p>
             }
-            if room {
-                <a class="button full" href=(new)>"New app"</a>
-            } else {
+            if !room {
                 <p class="help">"Delete an app to register another."</p>
             }
         </section>
-        <section class="card stack" aria-labelledby="docs-heading">
-            <h2 id="docs-heading">"How it works"</h2>
-            <p>
-                "Piquel is a standard OpenID Connect provider. Each app gets a client ID, and apps with a backend a secret. Use the Rust SDK, or any OpenID Connect library with the settings on your app's page."
-            </p>
-            <ul>
-                <li><a href=(RUST_SDK)>"Rust SDK (" <code>"piquel-auth"</code> ")"</a></li>
-                <li><a href=(STEP_UP_GUIDE)>"Asking for a passkey before sensitive actions (step-up)"</a></li>
-            </ul>
+        <section class="card" aria-labelledby="docs-heading">
+            <header><h2 id="docs-heading">"How it works"</h2></header>
+            <div class="body">
+                <p>
+                    "Piquel is a standard OpenID Connect provider. Each app gets a client ID, and apps with a backend a secret. Use the Rust SDK, or any OpenID Connect library with the settings on your app's page."
+                </p>
+                <ul>
+                    <li><a href=(RUST_SDK)>"Rust SDK (" <code>"piquel-auth"</code> ")"</a></li>
+                    <li><a href=(STEP_UP_GUIDE)>"Asking for a passkey before sensitive actions (step-up)"</a></li>
+                </ul>
+            </div>
         </section>
     })
 }
@@ -318,7 +330,10 @@ pub async fn new_app<'a>(
             secret_panel(secret: &registered.secret, page: page, next: registered.overview.as_str())
         } else {
             back_to_apps(home: home)
-            <h2>"Register an app"</h2>
+            page_head(
+                title: "Register an app",
+                lead: "Its client ID is ready as soon as it is registered.".to_owned(),
+            )
             client_form(
                 action: page,
                 change: NewAppChange::Register { kind: None, draft: ClientDraft::default() },
@@ -347,10 +362,11 @@ pub async fn app_header<'a>(
         .collect();
     Ok(view! {
         back_to_apps(home: home)
-        <div class="row">
-            <h2>(client.name)</h2>
-            client_status(client: client)
-        </div>
+        page_head(
+            title: client.name,
+            lead: client.id.to_string(),
+            actions: view! { client_status(client: client) },
+        )
         navigation(label: "App", class: "tabs", links: &tabs, current: current)
     })
 }
@@ -374,40 +390,44 @@ pub async fn overview<'a>(
                 ": it cannot sign users in. Contact them to restore it."
             </p>
         } else if client.status == ClientStatus::Disabled {
-            <p class="notice">
+            <p class="notice warning">
                 "This app is disabled: it cannot sign users in until you enable it in its settings."
             </p>
         }
         <section class="card" aria-labelledby="oidc-heading">
-            <h2 id="oidc-heading">"OpenID Connect settings"</h2>
-            <p class="help">
-                "For any OpenID Connect library. Use the authorization code flow with PKCE (S256)"
-                if confidential {
-                    ", and send the client secret with HTTP Basic authentication"
-                }
-                "."
-            </p>
-            client_facts(client: client, connection: connection)
-            if let Some(secrets) = secrets {
+            <header><h2 id="oidc-heading">"OpenID Connect settings"</h2></header>
+            <div class="body">
                 <p class="help">
-                    "Keep the client secret on your server, for example in a " <code>"PIQUEL_CLIENT_SECRET"</code>
-                    " environment variable. Lost it? Rotate it on the " <a href=(secrets)>"Secrets"</a> " tab."
+                    "For any OpenID Connect library. Use the authorization code flow with PKCE (S256)"
+                    if confidential {
+                        ", and send the client secret with HTTP Basic authentication"
+                    }
+                    "."
                 </p>
-            }
+                client_facts(client: client, connection: connection)
+                if let Some(secrets) = secrets {
+                    <p class="help">
+                        "Keep the client secret on your server, for example in a " <code>"PIQUEL_CLIENT_SECRET"</code>
+                        " environment variable. Lost it? Rotate it on the " <a href=(secrets)>"Secrets"</a> " tab."
+                    </p>
+                }
+            </div>
         </section>
-        <section class="card stack" aria-labelledby="rust-heading">
-            <div class="row between">
+        <section class="card" aria-labelledby="rust-heading">
+            <header>
                 <h2 id="rust-heading">"Rust with axum"</h2>
                 copy(target: "rust-example", label: "Rust example")
+            </header>
+            <div class="body">
+                <p class="help">
+                    "The " <a href=(RUST_SDK)>"Rust SDK"</a> " signs users in on your server and keeps their tokens there."
+                </p>
+                <pre><code id="rust-example">(example)</code></pre>
             </div>
-            <p class="help">
-                "The " <a href=(RUST_SDK)>"Rust SDK"</a> " signs users in on your server and keeps their tokens there."
-            </p>
-            <pre><code id="rust-example">(example)</code></pre>
         </section>
-        <section class="card stack" aria-labelledby="step-up-heading">
-            <h2 id="step-up-heading">"Sensitive actions"</h2>
-            <p>
+        <section class="card" aria-labelledby="step-up-heading">
+            <header><h2 id="step-up-heading">"Sensitive actions"</h2></header>
+            <p class="help">
                 "Before an action that needs a fresh passkey, such as deleting data, your app can ask users to sign in again with one. "
                 <a href=(STEP_UP_GUIDE)>"The step-up guide"</a> " explains how."
             </p>
@@ -457,52 +477,54 @@ pub async fn app_settings<'a>(
             error: error,
             confirm: !confirmed,
         )
-        <section class="card stack" aria-labelledby="danger-heading">
-            <h2 id="danger-heading">"Danger zone"</h2>
-            <div class="row between">
-                <div>
-                    <strong>(title)</strong>
-                    <p class="help">(help)</p>
-                </div>
-                if let Some((change, label)) = toggle {
-                    change_form(
-                        action: page,
-                        change: change,
-                        label: label,
-                        class: "secondary",
-                        confirm: !confirmed,
-                    )
-                }
-            </div>
-            if state.deleting.0 {
-                <div class="notice stack">
-                    <strong tabindex="-1" autofocus="">(format!("Delete “{}”?", client.name))</strong>
-                    <p>
-                        "It stops working at once: its refresh tokens are revoked, and its secrets and the consents users gave it are removed. This cannot be undone."
-                    </p>
-                    change_form(
-                        action: page,
-                        change: AppChange::Delete {},
-                        label: "Delete for good",
-                        class: "danger",
-                        confirm: !confirmed,
-                        cancel: page.to_owned(),
-                    )
-                </div>
-            } else {
-                <div class="row between">
-                    <div>
-                        <strong>"Delete this app"</strong>
-                        <p class="help">"Its client ID is never used again."</p>
+        <section class="card" aria-labelledby="danger-heading">
+            <header><h2 id="danger-heading">"Danger zone"</h2></header>
+            <ul class="list">
+                <li>
+                    <div class="text">
+                        <strong>(title)</strong>
+                        <small>(help)</small>
                     </div>
-                    open(
-                        page: page,
-                        opens: AppSettingsState { deleting: Checkbox(true), draft: None },
-                        label: "Delete",
-                        secondary: true,
-                    )
-                </div>
-            }
+                    if let Some((change, label)) = toggle {
+                        change_form(
+                            action: page,
+                            change: change,
+                            label: label,
+                            class: "secondary small",
+                            confirm: !confirmed,
+                        )
+                    }
+                </li>
+                if state.deleting.0 {
+                    <li class="open">
+                        <strong tabindex="-1" autofocus="">(format!("Delete “{}”?", client.name))</strong>
+                        <p class="help">
+                            "It stops working at once: its refresh tokens are revoked, and its secrets and the consents users gave it are removed. This cannot be undone."
+                        </p>
+                        change_form(
+                            action: page,
+                            change: AppChange::Delete {},
+                            label: "Delete for good",
+                            class: "danger",
+                            confirm: !confirmed,
+                            cancel: page.to_owned(),
+                        )
+                    </li>
+                } else {
+                    <li>
+                        <div class="text">
+                            <strong>"Delete this app"</strong>
+                            <small>"Its client ID is never used again."</small>
+                        </div>
+                        open(
+                            page: page,
+                            opens: AppSettingsState { deleting: Checkbox(true), draft: None },
+                            label: "Delete",
+                            danger: true,
+                        )
+                    </li>
+                }
+            </ul>
         </section>
     })
 }
@@ -524,31 +546,33 @@ pub async fn app_secrets<'a>(
             secret_panel(secret: secret, page: page, next: page)
         }
         <section class="card" aria-labelledby="secrets-heading">
-            <h2 id="secrets-heading">"Client secrets"</h2>
+            <header><h2 id="secrets-heading">"Client secrets " <span class="count">(secrets.len().to_string())</span></h2></header>
+            secrets_list(secrets: secrets, now: now)
             <p class="help">
                 "Your server sends one with HTTP Basic authentication. Piquel shows a secret only when it creates it."
             </p>
-            secrets_list(secrets: secrets, now: now)
         </section>
-        <section class="card stack" aria-labelledby="rotate-heading">
-            <h2 id="rotate-heading">"Rotate the secret"</h2>
-            <p class="help">
-                "Get a new secret, and give your app time to switch to it: the earlier ones keep working for the period you choose."
-            </p>
-            change_form(
-                action: page,
-                change: SecretsChange::Rotate { grace: None },
-                label: "Rotate secret",
-                confirm: !confirmed,
-                <label>
-                    "Earlier secrets keep working"
-                    <select name="grace">
-                        for grace in Grace::ALL {
-                            <option value=(grace.as_str()) selected=(grace == chosen)>(grace.label())</option>
-                        }
-                    </select>
-                </label>
-            )
+        <section class="card" aria-labelledby="rotate-heading">
+            <header><h2 id="rotate-heading">"Rotate the secret"</h2></header>
+            <div class="body">
+                <p class="help">
+                    "Get a new secret, and give your app time to switch to it: the earlier ones keep working for the period you choose."
+                </p>
+                change_form(
+                    action: page,
+                    change: SecretsChange::Rotate { grace: None },
+                    label: "Rotate secret",
+                    confirm: !confirmed,
+                    <label>
+                        "Earlier secrets keep working"
+                        <select name="grace">
+                            for grace in Grace::ALL {
+                                <option value=(grace.as_str()) selected=(grace == chosen)>(grace.label())</option>
+                            }
+                        </select>
+                    </label>
+                )
+            </div>
         </section>
     })
 }

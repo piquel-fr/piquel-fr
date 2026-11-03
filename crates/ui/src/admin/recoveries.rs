@@ -63,7 +63,7 @@ pub async fn recovery_list<'a>(rows: &'a [RecoveryRow]) -> Result<impl View> {
         } else {
             <table>
                 <thead>
-                    <tr><th>"Started"</th><th>"State"</th><th>"Passkey"</th></tr>
+                    <tr><th>"started"</th><th>"state"</th><th>"passkey"</th></tr>
                 </thead>
                 <tbody>
                     for row in rows {

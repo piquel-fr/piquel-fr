@@ -178,6 +178,93 @@ impl HistoryItem {
     }
 }
 
+/// What happened to the account over a period, as its overview counts it.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub(crate) struct Activity {
+    /// How many times apps exchanged a code for tokens: sign-ins through apps.
+    pub(crate) app_sign_ins: u64,
+    /// How many security events were recorded: sign-ins, failures and changes.
+    pub(crate) security_events: u64,
+}
+
+impl Activity {
+    /// The kind of event counted as a sign-in through an app, by the tag
+    /// [`DomainEvent`] stores it under.
+    const APP_SIGN_INS: [&'static str; 1] = ["grant_issued"];
+    /// The kinds counted as security events: every kind the security history
+    /// shows, as [`DomainEvent::history_entry`] decides, so the count and the
+    /// feed agree, as far as a count by kind can: a refresh grant's revocation
+    /// is left out, since the history shows only a replay's, and a session's
+    /// expiry is counted, since the history hides only that reason.
+    const SECURITY: [&'static str; 29] = [
+        "account_created",
+        "signed_in",
+        "session_revoked",
+        "passkey_added",
+        "passkey_renamed",
+        "passkey_removed",
+        "identity_linked",
+        "identity_unlinked",
+        "email_added",
+        "email_verified",
+        "primary_email_changed",
+        "email_removed",
+        "consent_granted",
+        "consent_revoked",
+        "code_replayed",
+        "account_disabled",
+        "account_enabled",
+        "account_viewed",
+        "administrator_granted",
+        "administrator_revoked",
+        "handle_changed",
+        "recovery_started",
+        "recovery_completed",
+        "recovery_undone",
+        "account_exported",
+        "account_deletion_scheduled",
+        "account_restored",
+        "compromise_reported",
+        "imported",
+    ];
+}
+
+impl AccountService {
+    /// Counts what happened to the account since `since`.
+    pub(crate) async fn activity(
+        &self,
+        viewer: &Viewer,
+        since: DateTime<Utc>,
+    ) -> Result<Activity, AccountError> {
+        viewer.authorize(&self.database).await?;
+        let kinds = |kinds: &[&str]| {
+            kinds
+                .iter()
+                .map(|kind| (*kind).to_owned())
+                .collect::<Vec<_>>()
+        };
+        let mut events = self.database.events();
+        Ok(Activity {
+            app_sign_ins: events
+                .count_since(Some(viewer.user()), &kinds(&Activity::APP_SIGN_INS), since)
+                .await?,
+            security_events: events
+                .count_since(Some(viewer.user()), &kinds(&Activity::SECURITY), since)
+                .await?,
+        })
+    }
+
+    /// Whether the account administers Piquel, which its pages mark.
+    pub(crate) async fn is_administrator(&self, viewer: &Viewer) -> Result<bool, AccountError> {
+        viewer.authorize(&self.database).await?;
+        Ok(self
+            .database
+            .administrators()
+            .contains(viewer.user())
+            .await?)
+    }
+}
+
 impl HistoryApplication {
     /// Serves the history from `database`.
     pub(crate) const fn new(database: Database) -> Self {

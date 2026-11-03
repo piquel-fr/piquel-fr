@@ -9,8 +9,7 @@ use crate::{
     },
 };
 use piquel_ui::{
-    EmailRow, HistoryChange, HistoryPage, HistoryRow, HistoryState, Holdings, Messages, Section,
-    Tab,
+    EmailRow, HistoryChange, HistoryPage, HistoryState, Holdings, Messages, Section, Tab,
 };
 use topcoat::{
     context::Cx,
@@ -80,25 +79,7 @@ impl AccountPage for History {
             None => None,
         };
         let email_rows: Vec<_> = emails.iter().map(EmailRow::from).collect();
-        let rows: Vec<_> = history
-            .entries
-            .iter()
-            .map(|item| HistoryRow {
-                id: item.id,
-                occurred_at: item.occurred_at,
-                entry: &item.entry,
-                actor: item.actor,
-                reportable: item.reportable(),
-                reason: item.reason.as_deref(),
-                client: item
-                    .client
-                    .as_ref()
-                    .map(|client| (client.id.as_str(), client.name.as_deref())),
-                ip: item.ip,
-                device: item.device,
-                erased: item.erased,
-            })
-            .collect();
+        let rows = history.rows();
         let holds = Holdings {
             passkeys: &passkeys,
             emails: &email_rows,
@@ -107,7 +88,7 @@ impl AccountPage for History {
         };
         let page = HistoryPage {
             page: settings::HISTORY,
-            sign_in: settings::HOME,
+            sign_in: settings::SIGN_IN,
             emails: settings::EMAILS,
             shown,
             next: history.next,

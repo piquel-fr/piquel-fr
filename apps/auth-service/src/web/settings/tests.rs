@@ -34,11 +34,11 @@ async fn devices_page_signs_other_devices_out() {
     Browser::sign_in(&database, browser.user_id).await;
     let page = html(browser.visit(&replicas.a, settings::SESSIONS).await).await;
     assert!(
-        page.contains(r#"<span class="badge">3 active</span>"#),
+        page.contains(r#"Signed-in devices <span class="count">3</span>"#),
         "{page}"
     );
     assert!(
-        page.contains(r#"<span class="badge">This device</span>"#),
+        page.contains(r#"<span class="badge ok">This device</span>"#),
         "{page}"
     );
     let forged = format!("{}?done=others_signed_out", settings::SESSIONS);
@@ -59,7 +59,7 @@ async fn devices_page_signs_other_devices_out() {
     );
     let page = html(browser.visit(&replicas.a, settings::SESSIONS).await).await;
     assert!(
-        page.contains(r#"<span class="badge">2 active</span>"#),
+        page.contains(r#"Signed-in devices <span class="count">2</span>"#),
         "{page}"
     );
 
@@ -78,7 +78,7 @@ async fn devices_page_signs_other_devices_out() {
     assert!(attributes.ends_with("Max-Age=0"), "{attributes}");
     let page = html(shown).await;
     assert!(
-        page.contains(r#"<span class="badge">1 active</span>"#),
+        page.contains(r#"Signed-in devices <span class="count">1</span>"#),
         "{page}"
     );
     assert!(
@@ -111,7 +111,10 @@ async fn connected_apps_are_listed_and_removed() {
         .expect("consent");
     let page = html(browser.visit(&replicas.a, settings::APPS).await).await;
     assert!(page.contains("Your verified email address"), "{page}");
-    assert!(page.contains("1 connected"), "{page}");
+    assert!(
+        page.contains(r#"Connected apps <span class="count">1</span>"#),
+        "{page}"
+    );
 
     let removing = ConnectedAppsState {
         removing: Some(client.id.clone()),
@@ -236,10 +239,7 @@ async fn addresses_change_their_primary_and_are_removed() {
     let page = html(browser.visit(&replicas.a, settings::EMAILS).await).await;
     assert!(!page.contains(&first), "{page}");
     assert!(page.contains(&format!("<span>{second}</span>")), "{page}");
-    assert!(
-        page.contains("Primary: receives security notices"),
-        "{page}"
-    );
+    assert!(page.contains("Receives security notices"), "{page}");
 }
 
 /// The handle can change once its cooldown is over. A refusal says why, with the
@@ -261,7 +261,7 @@ async fn the_handle_changes_once_its_cooldown_is_over() {
             .handle
     };
     let (current, taken) = (handle(&browser).await, handle(&taken).await);
-    let page = html(browser.visit(&replicas.a, settings::HOME).await).await;
+    let page = html(browser.visit(&replicas.a, settings::SIGN_IN).await).await;
     assert!(
         page.contains(&format!("<strong>@{current}</strong>")),
         "{page}"
@@ -277,14 +277,14 @@ async fn the_handle_changes_once_its_cooldown_is_over() {
         changing_handle: Checkbox(true),
         ..SignInState::default()
     };
-    let path = opened.on(settings::HOME).expect("query");
+    let path = opened.on(settings::SIGN_IN).expect("query");
     let page = html(browser.visit(&replicas.a, &path).await).await;
     assert!(page.contains(&format!(r#"value="{current}""#)), "{page}");
     let change = |handle: &str| SignInChange::Handle {
         handle: handle.to_owned(),
     };
     let refused = browser
-        .post(&replicas, settings::HOME, &change(taken.as_str()))
+        .post(&replicas, settings::SIGN_IN, &change(taken.as_str()))
         .await;
     assert_eq!(refused.status(), StatusCode::CONFLICT);
     let page = html(refused).await;
@@ -293,11 +293,11 @@ async fn the_handle_changes_once_its_cooldown_is_over() {
 
     let renamed = format!("renamed-{}", &browser.user_id.to_string()[24..]);
     let changed = browser
-        .post(&replicas, settings::HOME, &change(&renamed))
+        .post(&replicas, settings::SIGN_IN, &change(&renamed))
         .await;
-    assert_eq!(redirect(&changed), settings::HOME);
+    assert_eq!(redirect(&changed), settings::SIGN_IN);
     assert_eq!(cookie(&changed, BrowserCookie::Notice).0, "handle_changed");
-    let page = html(browser.visit(&replicas.a, settings::HOME).await).await;
+    let page = html(browser.visit(&replicas.a, settings::SIGN_IN).await).await;
     assert!(
         page.contains(&format!("<strong>@{renamed}</strong>")),
         "{page}"
@@ -323,7 +323,7 @@ async fn disabled_providers_can_still_be_unlinked() {
         })
         .await
         .expect("identity");
-    let page = html(browser.visit(&replicas.a, settings::HOME).await).await;
+    let page = html(browser.visit(&replicas.a, settings::SIGN_IN).await).await;
     assert!(
         page.contains("GitHub sign-in is currently unavailable."),
         "{page}"
@@ -332,12 +332,12 @@ async fn disabled_providers_can_still_be_unlinked() {
     let unlink = SignInChange::Unlink {
         provider: Provider::GitHub,
     };
-    let unlinked = browser.post(&replicas, settings::HOME, &unlink).await;
+    let unlinked = browser.post(&replicas, settings::SIGN_IN, &unlink).await;
     assert_eq!(
         cookie(&unlinked, BrowserCookie::Notice).0,
         "identity_unlinked"
     );
-    let page = html(browser.visit(&replicas.a, settings::HOME).await).await;
+    let page = html(browser.visit(&replicas.a, settings::SIGN_IN).await).await;
     assert!(
         page.contains("Social sign-in is not available yet."),
         "{page}"
@@ -354,7 +354,7 @@ async fn linking_starts_at_the_provider() {
     let replicas = Replicas::with_github(config).await;
     let database = Replicas::database().await;
     let browser = Browser::new_account(&database).await;
-    let page = browser.visit(&replicas.a, settings::HOME).await;
+    let page = browser.visit(&replicas.a, settings::SIGN_IN).await;
     let policy = policy(&page);
     assert!(
         policy.ends_with("; form-action 'self' https://github.com"),
@@ -364,7 +364,7 @@ async fn linking_starts_at_the_provider() {
     let link = SignInChange::Link {
         provider: Provider::GitHub,
     };
-    let started = browser.post(&replicas, settings::HOME, &link).await;
+    let started = browser.post(&replicas, settings::SIGN_IN, &link).await;
     assert_eq!(started.status(), StatusCode::SEE_OTHER);
     let to = url::Url::parse(redirect(&started)).expect("provider URL");
     assert_eq!(
@@ -396,7 +396,7 @@ async fn linking_starts_at_the_provider() {
         (
             Some(browser.user_id),
             Some(browser.session_id),
-            settings::HOME
+            settings::SIGN_IN
         )
     );
 }

@@ -653,7 +653,8 @@ pub(crate) async fn handle_input<'a>(
     })
 }
 
-/// A button opening `page` with the query `opens`, by a `GET` form.
+/// A button opening `page` with the query `opens`, by a `GET` form: a quiet
+/// text button, a `secondary` one, or a `danger` one for a removal.
 #[component]
 pub(crate) async fn open<'a>(
     page: &'a str,
@@ -664,15 +665,19 @@ pub(crate) async fn open<'a>(
     aria_label: Option<String>,
     #[default] disabled: bool,
     #[default] secondary: bool,
+    #[default] danger: bool,
 ) -> Result<impl View> {
+    let class = if danger {
+        "danger small"
+    } else if secondary {
+        "secondary small"
+    } else {
+        "text-button"
+    };
     Ok(view! {
         <form method="get" action=(page)>
             hidden(fields: opens)
-            <button
-                class=(if secondary { "secondary" } else { "text-button" })
-                aria-label=(aria_label.as_deref())
-                disabled=(disabled)
-            >
+            <button class=(class) aria-label=(aria_label.as_deref()) disabled=(disabled)>
                 (label)
             </button>
         </form>

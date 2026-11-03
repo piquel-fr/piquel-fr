@@ -10,6 +10,9 @@ test('settings on auth: passkeys, devices, an email link and signing out', async
   cdp.on('WebAuthn.credentialAsserted', () => (assertions += 1));
   const username = `settings-${Date.now().toString(36)}`;
   await signUp(page, username, 'First passkey');
+  // The settings open on the overview; the sidebar leads to the sign-in methods.
+  await page.getByRole('link', { name: 'Sign-in methods', exact: true }).click();
+  await expect(page).toHaveURL('/settings/sign-in');
   await expect(
     page.getByRole('region', { name: 'Handle' }).getByText(`@${username}`, { exact: true })
   ).toBeVisible();
@@ -24,9 +27,12 @@ test('settings on auth: passkeys, devices, an email link and signing out', async
 
   // An authenticator already holding the account's credential refuses a second one:
   // the form says why, and can be tried again.
+  // The form is folded behind a button until it is wanted.
   const enroll = page.locator('form[data-passkey-enroll]');
+  await expect(enroll).toBeHidden();
+  await page.getByText('Add a passkey', { exact: true }).click();
   await page.getByLabel('New passkey name', { exact: true }).fill('Second passkey');
-  await page.getByRole('button', { name: 'Add a passkey', exact: true }).click();
+  await page.getByRole('button', { name: 'Create the passkey', exact: true }).click();
   await expect(enroll.getByRole('alert')).toBeVisible();
 
   // The passkey script enables adding a passkey, then comes back with the notice.
@@ -42,7 +48,7 @@ test('settings on auth: passkeys, devices, an email link and signing out', async
       automaticPresenceSimulation: true
     }
   });
-  await page.getByRole('button', { name: 'Add a passkey', exact: true }).click();
+  await page.getByRole('button', { name: 'Create the passkey', exact: true }).click();
   await expect(page.getByText('The passkey was added.')).toBeVisible();
   await expect(page.getByText('Second passkey', { exact: true })).toBeVisible();
 

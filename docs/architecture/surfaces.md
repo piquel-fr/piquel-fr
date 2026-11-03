@@ -15,9 +15,10 @@ The auth executable owns everything that authenticates someone or issues a
 credential: discovery, JWKS, authorization, token, userinfo, logout, and the
 pages a ceremony needs (login, signup, consent, passkey confirmation, account
 recovery at `/recover` and `/recover/undo`, device verification *(planned)*). It
-also serves the account settings at `/settings`, on the paths piquel.fr used, and
-redirects its root there, and the developer console, where accounts register
-their own OIDC clients, at `/developers`. The admin dashboard is the same
+also serves the account settings at `/settings`, an overview first, with the
+sign-in methods at `/settings/sign-in` and the other pages on the paths
+piquel.fr used, and redirects its root there, and the developer console, where
+accounts register their own OIDC clients, at `/developers`. The admin dashboard is the same
 executable too, on another listener and host (see admin.piquel.fr below).
 
 The account API is routes in the same executable. It is small next to the pages
@@ -93,7 +94,11 @@ minutes, which a confirmation for auth's pages never gives. A page that changes
 something sends the browser to the handoff page to confirm before showing its form:
 there, a passkey proves the handoff in a ceremony started for it, and the
 dashboard keeps that time as its confirmation. The auth session's own
-confirmation stays as it was.
+confirmation stays as it was. Once confirmed, a short change such as revoking a
+session confirms in a dialog on the list page itself, which the browser opens
+and closes with no script (`popovertarget`), posting to the change's own page;
+a dashboard not confirmed yet links that page instead, which confirms first.
+Lists page by number, with their totals, as the CLI's `--page` does.
 
 Administrators manage the administrator list too, but never their own rights or
 the last active administrator's, and the dashboard never changes an administrator's

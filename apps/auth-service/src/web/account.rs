@@ -17,30 +17,28 @@ use crate::{
     federation::FlowCookie,
     routes::page,
     security::{ApiError, BrowserCookie, SessionError},
+    web::settings::TABS,
 };
 use piquel_common::ErrorChain;
-use piquel_ui::{Alert, Area, FieldError, LoginQuery, Messages, Notice, Query, Recovery, Section};
+use piquel_telemetry::HttpTelemetry;
+use piquel_ui::{
+    AccountNav, Alert, FieldError, LoginQuery, Messages, Notice, Query, Recovery, Section, Tab, Who,
+};
 use serde::{Deserialize, de::DeserializeOwned};
 use topcoat::{
     Error,
     context::{Cx, app_context},
     router::{
-        Body, RouteHandlerFn, StatusCode,
+        Body, Method, RouteHandlerFn, StatusCode,
         content::Form,
         error::see_other,
         parse_query_params,
-        request::{FromRequest, headers, uri},
+        request::{FromRequest, headers, method, uri},
         response::{IntoResponse, Response},
     },
     view::{Child, view},
 };
 use url::Url;
-
-/// Each section of the account's pages and the page the account's bar links.
-const SECTIONS: [(Section, &str); 2] = [
-    (Section::Account, page::settings::HOME),
-    (Section::Developers, page::developers::HOME),
-];
 
 /// A page of the signed-in account: its section and path, the change its form
 /// posts, its query, what a change does, and how the page renders.
@@ -223,9 +221,11 @@ impl Reader {
 pub(super) struct Framed<'a> {
     /// The section it belongs to.
     pub(super) section: Section,
+    /// The settings tab it is, if it is one, which the sidebar marks.
+    pub(super) tab: Option<Tab>,
     /// Its title in the browser.
     pub(super) title: &'a str,
-    /// What opens it, above its messages: the settings tabs, or an app's header.
+    /// What opens it, above its messages, such as an app's header.
     pub(super) head: Child<'a>,
     /// The page.
     pub(super) page: Child<'a>,
@@ -350,6 +350,7 @@ impl WebApplication {
                 let head = view! { cx => piquel_ui::back_to_apps(home: page::developers::HOME) };
                 let framed = Framed {
                     section: P::SECTION,
+                    tab: None,
                     title: P::TITLE,
                     head: Child::new(head),
                     page: Child::default(),
@@ -389,9 +390,9 @@ impl WebApplication {
     }
 
     /// Answers with the account page `framed`, at the status and with the messages
-    /// of `outcome`, in its section's frame, below the account's bar and what the
-    /// account's recovery that can still be undone asks, if any. Its forms may
-    /// redirect to `targets`.
+    /// of `outcome`, in the account's shell: the sidebar of its sections, then
+    /// what the account's recovery that can still be undone asks, if any. Its
+    /// forms may redirect to `targets`.
     pub(super) async fn account_page(
         &self,
         cx: &Cx,
@@ -402,11 +403,13 @@ impl WebApplication {
     ) -> Result<Response, Failure> {
         let Framed {
             section,
+            tab,
             title,
             head,
             page,
         } = framed;
-        let profile = match self.account.profile(&reader.viewer()).await {
+        let viewer = reader.viewer();
+        let profile = match self.account.profile(&viewer).await {
             Ok(profile) => profile,
             Err(AccountError::Owner(SessionError::Missing)) => {
                 return self
@@ -415,16 +418,55 @@ impl WebApplication {
             }
             Err(error) => return Err(error.into()),
         };
+        let administrator = self.account.is_administrator(&viewer).await?;
         let session = reader.owner().session_id();
         let confirmed = reader.owner().was_passkey_confirmed();
+        // The preference forms come back here by GET, which a page answering a
+        // POST, such as one showing a new secret, cannot show again: those come
+        // back to the section's home.
+        let section_home = match section {
+            Section::Account => page::settings::HOME,
+            Section::Developers => page::developers::HOME,
+        };
+        let here = if method(cx) == Method::POST {
+            section_home
+        } else {
+            uri(cx)
+                .path_and_query()
+                .map_or(page::settings::HOME, |path| path.as_str())
+        };
+        let who = Who {
+            user: Some(reader.owner().user()),
+            name: &profile.display_name,
+            handle: profile.handle.as_str(),
+            administrator,
+        };
+        // Only an administrator's sidebar links the dashboard, on deployments
+        // that serve one; its origin starts the handoff itself.
+        let dashboard = self
+            .dashboard
+            .as_ref()
+            .filter(|_| administrator)
+            .map(|sign_in| sign_in.dashboard().serialized());
+        let nav = AccountNav {
+            section,
+            tabs: &TABS,
+            current: tab,
+            developers: page::developers::HOME,
+            dashboard: dashboard.as_deref(),
+        };
         let page = view! { cx =>
             piquel_ui::account(
-                section: section,
-                user: reader.owner().user(),
-                display_name: &profile.display_name,
-                handle: profile.handle.as_str(),
-                sections: &SECTIONS,
+                nav: nav,
+                who: who,
+                title: title,
+                home: page::settings::HOME,
                 sign_out: page::LOGOUT,
+                preferences: BrowserCookie::read_preferences(headers(cx)),
+                preferences_action: page::PREFERENCES,
+                here: here,
+                policies: self.policies.links(),
+                reference: HttpTelemetry::trace_id(status),
                 recovery: view! {
                     if let Some(recovery) = reader.recovery() {
                         piquel_ui::recovery_banner(
@@ -441,7 +483,7 @@ impl WebApplication {
             )
         };
         Ok(self
-            .render(cx, status, title, Area::Section(section), targets, page)
+            .render_document(cx, status, title, targets, false, page)
             .await?)
     }
 
@@ -464,8 +506,6 @@ impl WebApplication {
         }
         .on(page::LOGIN)?;
         let page = view! { cx => piquel_ui::signed_out(section: section, sign_in: &sign_in) };
-        Ok(self
-            .render(cx, status, title, Area::Section(section), &[], page)
-            .await?)
+        Ok(self.render(cx, status, title, &[], page).await?)
     }
 }

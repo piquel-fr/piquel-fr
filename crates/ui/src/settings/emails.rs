@@ -2,9 +2,8 @@
 
 use super::Audience;
 use crate::{
-    Section, Title,
     form::{Query, change_form, fragment_form, open},
-    layout::{frame, private_address},
+    layout::{page_head, private_address},
 };
 use piquel_common::EmailId;
 use serde::{Deserialize, Serialize};
@@ -83,50 +82,55 @@ pub async fn addresses<'a>(
     // replace it.
     let replaceable = emails.iter().any(|email| email.verified && !email.primary);
     Ok(view! {
-        <p class="help">
-            "Piquel sends security notices to your primary address, and apps you sign in to receive it. Every address is verified before it is used."
-        </p>
+        if audience.owns() {
+            page_head(
+                title: "Email addresses",
+                lead: "Piquel sends security notices to your primary address, and apps you sign in to receive it. Every address is verified before it is used.".to_owned(),
+            )
+        }
         <section class="card" aria-labelledby="emails-heading">
-            <div class="row between">
-                <h2 id="emails-heading">"Your addresses"</h2>
-                <span class="badge">(format!("{} added", emails.len()))</span>
-            </div>
+            <header>
+                <h2 id="emails-heading">"Your addresses " <span class="count">(emails.len().to_string())</span></h2>
+            </header>
             <ul class="list">
                 for email in emails {
-                    <li>
-                        address_row(
-                            page: page,
-                            email: *email,
-                            replaceable: replaceable,
-                            state: state,
-                            audience: audience,
-                            sends: sends,
-                        )
-                    </li>
+                    address_row(
+                        page: page,
+                        email: *email,
+                        replaceable: replaceable,
+                        state: state,
+                        audience: audience,
+                        sends: sends,
+                    )
                 }
             </ul>
             if emails.is_empty() {
                 <p class="empty">"Add an address so Piquel can tell you about changes to your account."</p>
             }
+            // Open again after an addition that failed, with what was typed.
             if audience.owns() && sends {
-                change_form(
-                    action: page,
-                    change: EmailChange::Add { email: String::new() },
-                    label: "Send a confirmation link",
-                    class: "secondary full",
-                    confirm: audience.confirms(),
-                    <label>
-                        "Add an address"
-                        <input
-                            type="email"
-                            name="email"
-                            value=(state.adding.as_deref())
-                            autocomplete="email"
-                            maxlength="254"
-                            required=""
-                        >
-                    </label>
-                )
+                <details class="disclosure" open=(state.adding.is_some())>
+                    <summary><span class="button secondary small">"Add an address"</span></summary>
+                    <div class="open-row">
+                        change_form(
+                            action: page,
+                            change: EmailChange::Add { email: String::new() },
+                            label: "Send a confirmation link",
+                            confirm: audience.confirms(),
+                            <label>
+                                "Email address"
+                                <input
+                                    type="email"
+                                    name="email"
+                                    value=(state.adding.as_deref())
+                                    autocomplete="email"
+                                    maxlength="254"
+                                    required=""
+                                >
+                            </label>
+                        )
+                    </div>
+                </details>
             } else if audience.owns() {
                 <p class="help">"Piquel cannot send email right now, so addresses cannot be added."</p>
             }
@@ -151,28 +155,53 @@ async fn address_row<'a>(
     let address = email.address;
     let blocked = email.primary && replaceable;
     Ok(view! {
-        <div class="row between">
-            <div>
-                <strong>private_address(address: address)</strong>
-                <p class="help">
-                    (if blocked {
-                        "Primary: receives security notices. Make another address primary to remove it."
-                    } else if email.primary {
-                        "Primary: receives security notices"
-                    } else if email.verified {
-                        "Verified"
-                    } else {
-                        "Waiting for confirmation: open the link we sent"
-                    })
+        if state.removing == Some(id) {
+            <li class="open">
+                <p tabindex="-1" autofocus="">
+                    (format!("Remove {address}?"))
+                    if email.primary {
+                        " Piquel will no longer be able to email you security notices."
+                    }
                 </p>
-            </div>
-            <div class="row">
+                change_form(
+                    action: page,
+                    change: EmailChange::Remove { id },
+                    label: "Confirm removal",
+                    class: "danger",
+                    confirm: audience.confirms(),
+                    reason: audience.asks_reason(),
+                    cancel: page.to_owned(),
+                )
+            </li>
+        } else {
+            <li>
+                <div class="text">
+                    <strong>private_address(address: address)</strong>
+                    if email.primary {
+                        " " <span class="badge">"Primary"</span>
+                    } else if email.verified {
+                        " " <span class="badge ok">"Verified"</span>
+                    } else {
+                        " " <span class="badge warning">"Waiting for confirmation"</span>
+                    }
+                    <small>
+                        (if blocked {
+                            "Receives security notices. Make another address primary to remove it."
+                        } else if email.primary {
+                            "Receives security notices"
+                        } else if email.verified {
+                            "Verified"
+                        } else {
+                            "Open the link we sent to confirm it"
+                        })
+                    </small>
+                </div>
                 if email.verified && !email.primary {
                     change_form(
                         action: page,
                         change: EmailChange::Primary { id },
                         label: "Make primary",
-                        class: "text-button",
+                        class: "secondary small",
                         aria_label: format!("Make primary {address}"),
                         confirm: audience.confirms(),
                         // On every verified row: only the refused one keeps its
@@ -189,7 +218,7 @@ async fn address_row<'a>(
                         action: page,
                         change: EmailChange::Add { email: address.to_owned() },
                         label: "Resend link",
-                        class: "text-button",
+                        class: "secondary small",
                         aria_label: format!("Resend link to {address}"),
                         confirm: audience.confirms(),
                     )
@@ -200,27 +229,9 @@ async fn address_row<'a>(
                     label: "Remove",
                     aria_label: format!("Remove {address}"),
                     disabled: blocked,
+                    danger: true,
                 )
-            </div>
-        </div>
-        if state.removing == Some(id) {
-            <div class="notice stack">
-                <p tabindex="-1" autofocus="">
-                    (format!("Remove {address}?"))
-                    if email.primary {
-                        " Piquel will no longer be able to email you security notices."
-                    }
-                </p>
-                change_form(
-                    action: page,
-                    change: EmailChange::Remove { id },
-                    label: "Confirm removal",
-                    class: "danger",
-                    confirm: audience.confirms(),
-                    reason: audience.asks_reason(),
-                    cancel: page.to_owned(),
-                )
-            </div>
+            </li>
         }
     })
 }
@@ -238,25 +249,22 @@ pub async fn verify<'a>(
     #[default] alert: Option<&'a str>,
 ) -> Result<impl View> {
     Ok(view! {
-        frame(
-            section: Section::Account,
-            title: Title::VerifyEmail.as_str(),
-            fragment_form(
-                action: action,
-                change: (),
-                fragments: &["token"],
-                label: "Confirm this address",
-                unavailable: "Confirming an address needs scripts allowed.",
-                alert: alert,
-                missing: view! {
-                    <h2>"This link is incomplete"</h2>
-                    <p>"Open the link from the email again, or add the address again to get a new one."</p>
-                    <a class="button secondary" href=(emails)>"Manage your addresses"</a>
-                },
-                <p>
-                    "Confirm only if you added this address to your own Piquel account: the email names the account it joins."
-                </p>
-            )
+        <h1>"Confirm your email address"</h1>
+        fragment_form(
+            action: action,
+            change: (),
+            fragments: &["token"],
+            label: "Confirm this address",
+            unavailable: "Confirming an address needs scripts allowed.",
+            alert: alert,
+            missing: view! {
+                <h2>"This link is incomplete"</h2>
+                <p>"Open the link from the email again, or add the address again to get a new one."</p>
+                <a class="button secondary" href=(emails)>"Manage your addresses"</a>
+            },
+            <p class="help">
+                "Confirm only if you added this address to your own Piquel account: the email names the account it joins."
+            </p>
         )
     })
 }
@@ -266,19 +274,13 @@ pub async fn verify<'a>(
 #[component]
 pub async fn verified<'a>(address: &'a str, primary: bool, emails: &'a str) -> Result<impl View> {
     Ok(view! {
-        frame(
-            section: Section::Account,
-            title: Title::VerifyEmail.as_str(),
-            <div class="card stack">
-                <h2>"Address confirmed"</h2>
-                <p>
-                    (format!(
-                        "{address} is verified{}.",
-                        if primary { " and is now your primary address" } else { "" }
-                    ))
-                </p>
-                <a class="button" href=(emails)>"Manage your addresses"</a>
-            </div>
-        )
+        <h1>"Address confirmed"</h1>
+        <p class="lead">
+            (format!(
+                "{address} is verified{}.",
+                if primary { " and is now your primary address" } else { "" }
+            ))
+        </p>
+        <a class="button" href=(emails)>"Manage your addresses"</a>
     })
 }

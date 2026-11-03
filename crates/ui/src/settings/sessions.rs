@@ -1,7 +1,10 @@
 //! Signed-in devices.
 
 use super::device_name;
-use crate::form::{Precision, change_form, time};
+use crate::{
+    form::{Precision, change_form, time},
+    layout::page_head,
+};
 use chrono::{DateTime, TimeDelta, Utc};
 use piquel_common::{AuthenticationMethod, SessionId, events::UserAgentFamily};
 use serde::{Deserialize, Serialize};
@@ -46,7 +49,7 @@ pub struct DeviceRow<'a> {
 
 impl DeviceRow<'_> {
     /// Its name, or that none was recorded.
-    fn name(&self) -> String {
+    pub(crate) fn name(&self) -> String {
         self.device.as_ref().map_or_else(
             || "An unrecorded device".to_owned(),
             |device| device_name(*device),
@@ -54,7 +57,7 @@ impl DeviceRow<'_> {
     }
 
     /// How it signed in, from where, and when it was last active, as of `now`.
-    fn details(&self, now: DateTime<Utc>) -> String {
+    pub(crate) fn details(&self, now: DateTime<Utc>) -> String {
         let methods = self
             .methods
             .iter()
@@ -105,53 +108,52 @@ pub async fn devices<'a>(
 ) -> Result<impl View> {
     let others = rows.iter().any(|row| !row.current);
     Ok(view! {
-        <p class="help">
-            "Every browser signed in to your account. Signing one out also signs out the apps you use through it. Don’t recognize one? Sign it out, then review your security history."
-        </p>
+        page_head(
+            title: "Devices",
+            lead: "Every browser signed in to your account. Signing one out also signs out the apps you use through it. Don’t recognize one? Sign it out, then review your security history.".to_owned(),
+            actions: view! {
+                if others {
+                    change_form(
+                        action: page,
+                        change: DeviceChange::SignOutOthers,
+                        label: "Sign out of all other devices",
+                        class: "secondary small",
+                    )
+                }
+            },
+        )
         <section class="card" aria-labelledby="sessions-heading">
-            <div class="row between">
-                <h2 id="sessions-heading">"Signed-in devices"</h2>
-                <span class="badge">(format!("{} active", rows.len()))</span>
-            </div>
+            <header>
+                <h2 id="sessions-heading">"Signed-in devices " <span class="count">(rows.len().to_string())</span></h2>
+            </header>
             <ul class="list">
                 for row in rows {
                     let name = row.name();
                     <li>
-                        <div class="row between">
-                            <div>
-                                <div class="row">
-                                    <strong>(name.as_str())</strong>
-                                    if row.current {
-                                        <span class="badge">"This device"</span>
-                                    }
-                                </div>
-                                <p class="help">(row.details(now))</p>
-                                <p class="help">
-                                    "Signed in "
-                                    time(at: row.authenticated_at, precision: Precision::Day)
-                                </p>
-                            </div>
-                            if !row.current {
-                                change_form(
-                                    action: page,
-                                    change: DeviceChange::SignOut { id: row.id },
-                                    label: "Sign out",
-                                    class: "text-button",
-                                    aria_label: format!("Sign out {name}"),
-                                )
+                        <div class="text">
+                            <strong>(name.as_str())</strong>
+                            if row.current {
+                                " " <span class="badge ok">"This device"</span>
                             }
+                            <small>(row.details(now))</small>
+                            <small>
+                                "signed in "
+                                time(at: row.authenticated_at, precision: Precision::Day)
+                            </small>
                         </div>
+                        if !row.current {
+                            change_form(
+                                action: page,
+                                change: DeviceChange::SignOut { id: row.id },
+                                label: "Sign out",
+                                class: "secondary small",
+                                aria_label: format!("Sign out {name}"),
+                            )
+                        }
                     </li>
                 }
             </ul>
-            if others {
-                change_form(
-                    action: page,
-                    change: DeviceChange::SignOutOthers,
-                    label: "Sign out of all other devices",
-                    class: "secondary full",
-                )
-            } else {
+            if !others {
                 <p class="empty">"You’re only signed in on this device."</p>
             }
         </section>

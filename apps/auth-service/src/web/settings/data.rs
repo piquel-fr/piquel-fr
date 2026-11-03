@@ -9,7 +9,7 @@ use crate::{
         account::{AccountPage, Applied, Reader},
     },
 };
-use piquel_ui::{Area, DataChange, DataState, Messages, Section, Tab, Title};
+use piquel_ui::{DataChange, DataState, Messages, Section, Tab, Title};
 use topcoat::{
     Error,
     context::Cx,
@@ -113,10 +113,7 @@ impl WebApplication {
             piquel_ui::account_deleted(purge_after: deleted.purge_after, sign_in: page::LOGIN)
         };
         let title = Title::AccountDeleted.as_str();
-        let area = Area::Section(Section::Account);
-        let mut response = self
-            .render(cx, StatusCode::OK, title, area, &[], page)
-            .await?;
+        let mut response = self.render(cx, StatusCode::OK, title, &[], page).await?;
         deleted.clear_on(&mut response).map_err(Error::from)?;
         Ok(response)
     }

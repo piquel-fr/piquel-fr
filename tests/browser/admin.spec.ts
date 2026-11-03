@@ -30,14 +30,38 @@ test('an administrator disables a user from the dashboard, and the user is signe
   // change needs the dashboard's own confirmation: auth asks for a passkey, for
   // the dashboard only, then the dashboard shows the change's form.
   await admin.goto(`${adminUrl}/users?q=user-${suffix}`);
-  await admin.getByRole('link', { name: `user-${suffix}`, exact: true }).click();
+  await admin.getByRole('link', { name: `@user-${suffix}`, exact: true }).click();
   await admin.getByRole('link', { name: 'Disable', exact: true }).click();
   await expect(admin.getByRole('heading', { name: "Confirm it's you" })).toBeVisible();
   await admin.getByRole('button', { name: 'Confirm with a passkey', exact: true }).click();
   await admin.getByLabel('Reason').fill('Browser test');
   await admin.getByRole('button', { name: 'Disable', exact: true }).click();
-  await expect(admin.getByText('disabled', { exact: true })).toBeVisible();
+  await expect(admin.getByText('Disabled', { exact: true })).toBeVisible();
   await expect(admin.getByText('No active session.')).toBeVisible();
+
+  // Confirmed now, the dashboard offers the next change in a dialog on the page
+  // itself, which the browser opens and closes with no script: the dashboard
+  // loads none. Cancelling leaves the account as it is; confirming enables it.
+  await admin.getByRole('button', { name: 'Enable', exact: true }).click();
+  const dialog = admin.getByRole('dialog', { name: 'Enable this account' });
+  await expect(dialog).toBeVisible();
+  await dialog.getByRole('button', { name: 'Cancel', exact: true }).click();
+  await expect(dialog).toBeHidden();
+  await expect(admin.getByText('Disabled', { exact: true })).toBeVisible();
+  await admin.getByRole('button', { name: 'Enable', exact: true }).click();
+  await dialog.getByRole('button', { name: 'Enable', exact: true }).click();
+  await expect(admin.getByText('Active', { exact: true })).toBeVisible();
+
+  // Rights are granted from a search, each result confirming in its own dialog.
+  await admin.goto(`${adminUrl}/administrators/grant?q=${suffix}`);
+  await admin
+    .getByRole('button', { name: `Grant administrator rights: @user-${suffix}`, exact: true })
+    .click();
+  const grant = admin.getByRole('dialog', { name: 'Grant administrator rights' });
+  await expect(grant.getByText(`@user-${suffix}`)).toBeVisible();
+  await grant.getByRole('button', { name: 'Grant', exact: true }).click();
+  await expect(admin).toHaveURL(`${adminUrl}/administrators`);
+  await expect(admin.getByRole('link', { name: `@user-${suffix}`, exact: true })).toBeVisible();
 
   await user.goto('/settings');
   await expect(user.getByRole('link', { name: 'Sign in', exact: true })).toBeVisible();
@@ -49,7 +73,7 @@ test('an administrator disables a user from the dashboard, and the user is signe
   await admin.getByRole('button', { name: 'Sign out', exact: true }).click();
   await expect(admin.getByRole('heading', { name: 'Signed out of the dashboard' })).toBeVisible();
   await admin.getByRole('link', { name: 'Sign in again', exact: true }).click();
-  await expect(admin.getByRole('heading', { name: 'Users', exact: true })).toBeVisible();
+  await expect(admin.getByRole('heading', { name: 'Overview', exact: true })).toBeVisible();
 
   // Signed out of Piquel too, the administrator signs in with a passkey on auth,
   // whose sign-in form then goes on through the handoff to the dashboard.

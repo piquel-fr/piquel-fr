@@ -253,7 +253,7 @@ async fn disabling_ends_sessions_and_is_recorded() {
             EventSearch {
                 user: Some(user.user_id),
                 kind: Some("account_disabled".into()),
-                before: None,
+                page: None,
             },
         )
         .await

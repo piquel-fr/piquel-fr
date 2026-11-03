@@ -1,9 +1,10 @@
 //! Who administers Piquel: the list, granting rights and revoking them.
 
 use super::AdminApplication as App;
-use piquel_common::{UserId, admin::GrantAdministrator};
-use piquel_ui::AdministratorRow;
-use serde::de::IgnoredAny;
+use crate::AdminError;
+use piquel_common::{UserId, admin::UserSearch};
+use piquel_ui::{Action, AdministratorRow, Change, Pager, Query, UserRow};
+use serde::{Deserialize, de::IgnoredAny};
 use topcoat::{
     Result,
     context::Cx,
@@ -23,6 +24,7 @@ pub(super) async fn list(cx: &Cx) -> Result<Response> {
         .await?;
     // The viewer is an active administrator, so revoking anyone else's rights
     // leaves one; the service refuses the last active administrator's anyway.
+    let inline = admin.operator.is_confirmed(super::FORM_TIME);
     let rows: Vec<_> = administrators
         .iter()
         .map(|administrator| AdministratorRow {
@@ -31,7 +33,10 @@ pub(super) async fn list(cx: &Cx) -> Result<Response> {
             revoke: if administrator.user_id == admin.user_id {
                 Err("You cannot change your own rights.")
             } else {
-                Ok(href!(revoke, Administrator(administrator.user_id)).resolve(cx))
+                Ok(Action {
+                    href: href!(revoke, Administrator(administrator.user_id)).resolve(cx),
+                    inline,
+                })
             },
         })
         .collect();
@@ -39,37 +44,76 @@ pub(super) async fn list(cx: &Cx) -> Result<Response> {
     let page = view! { cx =>
         piquel_ui::administrator_list(rows: rows, grant: granting.as_str())
     };
-    App::render(cx, StatusCode::OK, page).await
+    App::render(cx, StatusCode::OK, "Administrators", page).await
 }
 
-/// `/administrators/grant`: makes an active account an administrator.
+/// What [`grant`] takes: by `GET`, the search for the account, from its query;
+/// by `POST`, the account to grant, from its form. One type, since the extractor
+/// reads a `GET`'s query as its form.
+#[derive(Clone, Deserialize)]
+pub(super) struct GrantForm {
+    /// The account to grant rights, which the button posts.
+    user_id: Option<UserId>,
+    /// What to search for.
+    #[serde(default)]
+    q: String,
+    /// The page wanted, counting from 1.
+    page: Option<u32>,
+}
+
+/// `/administrators/grant`: finds the account, by handle, name, email or ID, then
+/// makes it an administrator.
 #[route([GET, POST] "/administrators/grant")]
-pub(super) async fn grant(cx: &Cx, form: Option<Form<GrantAdministrator>>) -> Result<Response> {
+pub(super) async fn grant(cx: &Cx, form: Option<Form<GrantForm>>) -> Result<Response> {
     let admin = App::admin(cx).await?;
     App::confirm(cx, admin)?;
     let service = &App::of(cx).service;
     let back = href!(list).resolve(cx);
-    let refusal = App::submit(cx, form, back.clone(), |input: GrantAdministrator| {
-        service.grant_administrator(&admin.operator, input.user_id)
+    let (q, page) = form
+        .as_ref()
+        .map(|Form(form)| (form.q.clone(), form.page))
+        .unwrap_or_default();
+    let refusal = App::submit(cx, form, back.clone(), |input: GrantForm| async move {
+        let user_id = input.user_id.ok_or(AdminError::UserNotFound)?;
+        service.grant_administrator(&admin.operator, user_id).await
     })
     .await?;
-    let typed = refusal
-        .as_ref()
-        .map(|refused| refused.form.user_id.to_string());
+    let found = service.search_users(&admin.operator, &q, page).await?;
+    let administrators: Vec<_> = service
+        .list_administrators(&admin.operator)
+        .await?
+        .into_iter()
+        .map(|administrator| administrator.user_id)
+        .collect();
+    let action = href!(grant).resolve(cx);
+    let rows: Vec<_> = found
+        .users
+        .iter()
+        .map(|user| UserRow {
+            user,
+            administrator: administrators.contains(&user.id),
+            href: App::account(cx, user.id),
+        })
+        .collect();
+    let pager = Pager::of(found.paging, |page| {
+        UserSearch {
+            q: q.clone(),
+            page: Some(page),
+        }
+        .on(&action)
+    })?;
+    let (q, rows, pager, refusal) = (&q, &rows, &pager, refusal.as_deref());
     let page = view! { cx =>
-        piquel_ui::dashboard_change(
-            title: "Grant administrator rights",
-            description: "The account can use this dashboard and every admin operation. The dashboard cannot change it afterwards, until its rights are revoked.",
-            button: "Grant",
+        piquel_ui::grant_search(
+            action: action.as_str(),
+            q: q.as_str(),
+            rows: rows,
+            pages: pager,
             back: back.as_str(),
-            refusal: refusal.as_deref(),
-            <label>
-                "Account ID"
-                <input name="user_id" required="" autocomplete="off" placeholder="From the account's page" value=(typed)>
-            </label>
+            refusal: refusal,
         )
     };
-    App::render(cx, StatusCode::OK, page).await
+    App::render(cx, StatusCode::OK, "Grant rights", page).await
 }
 
 /// `/administrators/{administrator}/revoke`: removes another administrator's
@@ -87,13 +131,10 @@ pub(super) async fn revoke(cx: &Cx, form: Option<Form<IgnoredAny>>) -> Result<Re
     .await?;
     let page = view! { cx =>
         piquel_ui::dashboard_change(
-            title: "Revoke administrator rights",
-            description: "The account keeps its sessions, but can no longer use this dashboard.",
-            button: "Revoke",
+            change: Change::RevokeAdministrator,
             back: back.as_str(),
             refusal: refusal.as_deref(),
-            danger: true,
         )
     };
-    App::render(cx, StatusCode::OK, page).await
+    App::render(cx, StatusCode::OK, "Revoke rights", page).await
 }

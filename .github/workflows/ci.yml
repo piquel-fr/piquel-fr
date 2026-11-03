@@ -192,6 +192,9 @@ jobs:
       AUTH_PUBLIC_BASE_URL: https://localhost:3443
       AUTH_PUBLIC_LISTENER: 127.0.0.1:3000
       AUTH_INVITE_REQUIRED: 'false'
+      # The suite runs serially from one address, and spends in a minute what a
+      # person would in an hour.
+      AUTH_REQUESTS_PER_MINUTE: '1000'
       # The dashboard on its own host, as admin.piquel.fr is: browsers resolve
       # `*.localhost` to the loopback address.
       AUTH_ADMIN_LISTENER: 127.0.0.1:3001

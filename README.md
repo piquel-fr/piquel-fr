@@ -23,9 +23,10 @@ just build
 ```
 
 The executables are `target/release/auth-service` and `target/release/piquel-web`.
-Auth embeds the stylesheet (`crates/ui/assets/style.css`) and the passkey script
-(`apps/auth-service/assets/passkey.js`) as they are, and piquel-web the stylesheet
-and the policies (`apps/web/assets/policies/`); rebuild Rust after changing them.
+Both embed the stylesheet (`crates/ui/assets/style.css`) and its typefaces
+(`crates/ui/assets/fonts`, under the SIL Open Font License); auth also embeds the
+passkey script (`apps/auth-service/assets/passkey.js`), and piquel-web the
+policies (`apps/web/assets/policies/`). Rebuild Rust after changing them.
 
 ## Development
 
@@ -50,6 +51,7 @@ work from devices on the tailnet. Run the same command after changing code.
 | `AUTH_DATABASE_OWNER_URL`, `AUTH_DATABASE_OWNER_PASSWORD` | Optional schema owner `migrate` connects as instead, in the same formats. It then creates or resets the role `AUTH_DATABASE_URL` names, with the `AUTH_DATABASE_PASSWORD` password and only row access to the app tables. The owner must be a superuser |
 | `AUTH_PUBLIC_BASE_URL` | Exact auth origin, normally `https://auth.piquel.fr` |
 | `AUTH_TRUSTED_PROXIES` | Optional comma-separated proxy peer IPs or CIDRs; these peers must overwrite `X-Forwarded-For` with one client IP. Defaults to piqueld's `PIQUELD_INGRESS_PROXIES` |
+| `AUTH_REQUESTS_PER_MINUTE` | Optional requests a client may make a minute in each rate category (pages, sign-in, tokens, …); defaults to `120` |
 | `AUTH_PUBLIC_LISTENER` | Listener address; defaults to `127.0.0.1:8080` |
 | `AUTH_ADMIN_LISTENER`, `AUTH_ADMIN_ORIGIN` | Optional address of the admin dashboard's listener, e.g. `0.0.0.0:8081`, and the dashboard's origin, e.g. `https://admin.piquel.fr`, set together. Only a private route may reach the listener. Without them, auth serves no dashboard |
 | `AUTH_WEB_ORIGIN` | piquel.fr's origin, whose privacy policy and terms every page links and discovery advertises; defaults to `https://piquel.fr` |

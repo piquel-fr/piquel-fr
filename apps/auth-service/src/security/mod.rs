@@ -36,6 +36,7 @@ use piquel_repository::{
     SessionAuthentication, SessionScope, StoredSession,
 };
 use piquel_telemetry::{Counter, HttpTelemetry, Label};
+use piquel_ui::{PreferenceChange, Preferences};
 use std::{
     borrow::Cow,
     net::{IpAddr, SocketAddr},
@@ -50,8 +51,6 @@ pub(crate) const CSRF_HEADER: &str = "x-piquel-csrf";
 const FETCH_SITE_HEADER: &str = "sec-fetch-site";
 /// Trusted ingress must overwrite this header with exactly one client address.
 const FORWARDED_FOR_HEADER: &str = "x-forwarded-for";
-/// Request budget per category and client in each [`RATE_WINDOW`].
-const REQUESTS_PER_MINUTE: i32 = 120;
 /// Requests refused because their client's budget was exhausted, by category.
 static THROTTLED: Counter<[Label; 1]> = Counter::new(
     "piquel.auth.throttled",
@@ -251,8 +250,15 @@ piquel_common::str_enum! {
         /// A sign-in to the admin dashboard awaiting auth's handoff, on the
         /// dashboard's origin.
         DashboardState = "__Host-piquel_dashboard_state",
+        /// The theme the browser chose, on each origin.
+        Theme = "__Host-piquel_theme",
+        /// The sidebar's width the browser chose, on each origin.
+        Sidebar = "__Host-piquel_sidebar",
     }
 }
+
+/// How long a preference is kept: a year.
+const PREFERENCE_MAX_AGE: u32 = 365 * 24 * 60 * 60;
 
 impl BrowserCookie {
     /// Lifetime in seconds. Flow cookies outlive their server-side state slightly; a
@@ -266,7 +272,36 @@ impl BrowserCookie {
             | Self::DashboardState
             | Self::Restore => FLOW_COOKIE_MAX_AGE,
             Self::Notice => 60,
+            Self::Theme | Self::Sidebar => PREFERENCE_MAX_AGE,
         }
+    }
+
+    /// The theme and sidebar preferences the browser's cookies carry. A value
+    /// that is none counts as unset.
+    pub(crate) fn read_preferences(headers: &HeaderMap) -> Preferences {
+        Preferences {
+            theme: Self::Theme
+                .value(headers)
+                .and_then(|value| value.parse().ok()),
+            sidebar: Self::Sidebar
+                .value(headers)
+                .and_then(|value| value.parse().ok()),
+        }
+    }
+
+    /// Adds the `Set-Cookie` headers keeping what `change` chose, to the answer of
+    /// the preference page.
+    pub(crate) fn set_preferences_on<B>(
+        response: &mut axum::http::Response<B>,
+        change: &PreferenceChange,
+    ) -> Result<(), InvalidHeaderValue> {
+        if let Some(theme) = change.theme {
+            Self::Theme.append(response, theme.as_str(), Self::Theme.max_age())?;
+        }
+        if let Some(sidebar) = change.sidebar {
+            Self::Sidebar.append(response, sidebar.as_str(), Self::Sidebar.max_age())?;
+        }
+        Ok(())
     }
 
     /// Reads this cookie's value. A duplicated cookie counts as absent, so an
@@ -1229,6 +1264,8 @@ pub(crate) struct HttpSecurity {
     pub trusted_proxies: Arc<Vec<IpNet>>,
     /// Deadline for the whole request, handler included.
     pub request_timeout: StdDuration,
+    /// Request budget per category and client in each [`RATE_WINDOW`].
+    pub requests_per_minute: i32,
     /// Origin of the listener's own pages, allowed on every endpoint.
     pub origin: url::Origin,
     /// Which listener it guards.
@@ -1255,6 +1292,7 @@ impl HttpSecurity {
             database,
             trusted_proxies: Arc::new(config.trusted_proxies.clone()),
             request_timeout: REQUEST_TIMEOUT,
+            requests_per_minute: config.requests_per_minute,
             origin: config.passkey.origin.as_url().origin(),
             listener: Listener::Public,
         }
@@ -1431,7 +1469,7 @@ impl HttpSecurity {
             if !self
                 .database
                 .security()
-                .allow_request(bucket.as_bytes(), REQUESTS_PER_MINUTE, RATE_WINDOW)
+                .allow_request(bucket.as_bytes(), self.requests_per_minute, RATE_WINDOW)
                 .await?
             {
                 THROTTLED.add(1, &[("category", category.as_str())]);

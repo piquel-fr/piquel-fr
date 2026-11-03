@@ -321,21 +321,22 @@ async fn settings_show_the_recovery() {
     let key = |stage| format!("piquel-recovery:{}:{stage}:confirmed", browser.session_id);
     let asks = |page: &str, stage, refusal| {
         let key = key(stage);
-        let banner = format!(r#"<section class="notice stack" data-dismiss="{key}" hidden="">"#);
+        let banner =
+            format!(r#"<section class="notice warning stack" data-dismiss="{key}" hidden="">"#);
         let answer = format!(r#"data-dismisses="{key}""#);
         let undo = format!(
-            r#"<a href="{RECOVER_UNDO}#recovery={}">{refusal}</a>"#,
+            r#"<a class="button danger small" href="{RECOVER_UNDO}#recovery={}">{refusal}</a>"#,
             recovering.id
         );
         page.contains(&banner) && page.contains(&answer) && page.contains(&undo)
     };
-    let page = html(browser.visit(&replicas.a, settings::HOME).await).await;
+    let page = html(browser.visit(&replicas.a, settings::SIGN_IN).await).await;
     assert!(asks(&page, "open", "No, cancel it"), "{page}");
     let locked = "Passkeys can't be removed while the recovery can be cancelled.";
     assert!(page.contains(locked), "{page}");
 
     let passkey = recovering.enroll("Sneaky name").await;
-    let page = html(browser.visit(&replicas.a, settings::HOME).await).await;
+    let page = html(browser.visit(&replicas.a, settings::SIGN_IN).await).await;
     assert!(asks(&page, "probation", "No, undo it"), "{page}");
     let recovery = database.recoveries().find(recovering.id).await;
     let settles_at = recovery.expect("lookup").expect("recovery").settles_at;
@@ -345,10 +346,10 @@ async fn settings_show_the_recovery() {
         "Only the recovery's passkey can be removed until the recovery settles on {settles_at}."
     );
     assert!(page.contains(&only), "{page}");
-    let mark = r#"<strong>The recovery's passkey</strong><span class="badge">Added by the recovery</span>"#;
+    let mark = r#"<strong>The recovery's passkey</strong> <span class="badge warning">Added by the recovery</span>"#;
     assert!(page.contains(mark), "{page}");
     let added = format!(
-        "Added {} · ID {}",
+        "added {} · ID {}",
         time(passkey.created_at, MINUTE),
         passkey.id
     );
@@ -367,7 +368,7 @@ async fn settings_show_the_recovery() {
         "{page}"
     );
 
-    let opened = |state: SignInState| state.on(settings::HOME).expect("link");
+    let opened = |state: SignInState| state.on(settings::SIGN_IN).expect("link");
     let removing = opened(SignInState {
         removing: Some(passkey.id),
         ..SignInState::default()
@@ -376,7 +377,7 @@ async fn settings_show_the_recovery() {
         renaming: Some(passkey.id),
         ..SignInState::default()
     });
-    for path in [settings::HOME, &removing, &renaming, settings::HISTORY] {
+    for path in [settings::SIGN_IN, &removing, &renaming, settings::HISTORY] {
         let page = html(browser.visit(&replicas.a, path).await).await;
         assert!(!page.contains("Sneaky name"), "{path}: {page}");
     }
@@ -442,7 +443,7 @@ async fn a_sign_in_for_an_app_asks_about_a_recovery() {
     let yes = format!(r#"<a class="button" href="{resume}">Yes, continue</a>"#);
     assert!(page.contains(&yes), "{page}");
     let no = format!(
-        r#"<a href="{RECOVER_UNDO}#recovery={}">No, cancel it</a>"#,
+        r#"<a class="button secondary" href="{RECOVER_UNDO}#recovery={}">No, cancel it</a>"#,
         recovering.id
     );
     assert!(page.contains(&no), "{page}");

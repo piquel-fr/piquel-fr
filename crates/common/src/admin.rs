@@ -36,9 +36,9 @@ pub struct UserSearch {
     /// Empty matches every account.
     #[serde(default)]
     pub q: String,
-    /// The previous page's [`UserPage::next`], to continue after it.
+    /// The page wanted, counting from 1; the first when absent.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub cursor: Option<UserId>,
+    pub page: Option<u32>,
 }
 
 /// One page of accounts, by ID.
@@ -46,8 +46,79 @@ pub struct UserSearch {
 pub struct UserPage {
     /// The matching accounts.
     pub users: Vec<User>,
-    /// The cursor of the next page, when there may be one.
-    pub next: Option<UserId>,
+    /// Where the page stands among every match.
+    pub paging: Paging,
+}
+
+/// Where a page of a list stands: pages count from 1, and a list with no match
+/// has one empty page.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Paging {
+    /// The page shown.
+    pub page: u32,
+    /// How many pages there are.
+    pub pages: u32,
+    /// How many items match, over every page.
+    pub total: u64,
+    /// How many items a page holds at most.
+    pub per_page: u32,
+}
+
+impl Paging {
+    /// Page `page` of `total` items, `per_page` at a time. A page past the last
+    /// reads as the last, so a stale link still shows something.
+    #[must_use]
+    pub fn new(page: Option<u32>, total: u64, per_page: u32) -> Self {
+        let pages = total
+            .div_ceil(u64::from(per_page))
+            .clamp(1, u64::from(u32::MAX));
+        let pages = u32::try_from(pages).unwrap_or(u32::MAX);
+        Self {
+            page: page.unwrap_or(1).clamp(1, pages),
+            pages,
+            total,
+            per_page,
+        }
+    }
+
+    /// How many items the pages before this one hold: the query's offset.
+    #[must_use]
+    pub fn offset(self) -> u64 {
+        u64::from(self.page - 1) * u64::from(self.per_page)
+    }
+
+    /// The numbers of the first and last item of the page, counting from 1, or
+    /// `None` when nothing matches.
+    #[must_use]
+    pub fn range(self) -> Option<(u64, u64)> {
+        (self.total > 0).then(|| {
+            let first = self.offset() + 1;
+            (
+                first,
+                (first + u64::from(self.per_page) - 1).min(self.total),
+            )
+        })
+    }
+
+    /// The page before this one, if there is one.
+    #[must_use]
+    pub const fn previous(self) -> Option<u32> {
+        if self.page > 1 {
+            Some(self.page - 1)
+        } else {
+            None
+        }
+    }
+
+    /// The page after this one, if there is one.
+    #[must_use]
+    pub const fn next(self) -> Option<u32> {
+        if self.page < self.pages {
+            Some(self.page + 1)
+        } else {
+            None
+        }
+    }
 }
 
 /// Everything an administrator sees about one account.
@@ -250,9 +321,9 @@ pub struct EventSearch {
     /// Only events of this kind, e.g. `session_revoked`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub kind: Option<String>,
-    /// The previous page's [`EventPage::next`], to continue with older events.
+    /// The page wanted, counting from 1 at the newest; the first when absent.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub before: Option<EventId>,
+    pub page: Option<u32>,
 }
 
 /// One page of domain events, newest first.
@@ -260,8 +331,8 @@ pub struct EventSearch {
 pub struct EventPage {
     /// The matching events.
     pub events: Vec<Event>,
-    /// The cursor of the next, older page, when there may be one.
-    pub next: Option<EventId>,
+    /// Where the page stands among every match.
+    pub paging: Paging,
 }
 
 /// A recorded domain event.

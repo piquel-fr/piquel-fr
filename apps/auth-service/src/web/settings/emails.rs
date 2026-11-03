@@ -10,7 +10,7 @@ use crate::{
     },
 };
 use piquel_ui::{
-    Area, Audience, EmailChange, EmailRow, EmailsState, Messages, Notice, Section, Tab, Title,
+    Audience, EmailChange, EmailRow, EmailsState, Messages, Notice, Section, Tab, Title,
 };
 use serde::Deserialize;
 use topcoat::{
@@ -172,15 +172,6 @@ impl WebApplication {
         page: impl View,
     ) -> Result<Response, Failure> {
         let title = Title::VerifyEmail.as_str();
-        Ok(self
-            .render(
-                cx,
-                status,
-                title,
-                Area::Section(Section::Account),
-                &[],
-                page,
-            )
-            .await?)
+        Ok(self.render(cx, status, title, &[], page).await?)
     }
 }

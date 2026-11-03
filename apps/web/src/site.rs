@@ -1,5 +1,5 @@
-//! The router: piquel.fr's pages and the shared stylesheet, and a redirect of
-//! every other path to auth.
+//! The router: piquel.fr's pages, the shared stylesheet and typefaces, and a
+//! redirect of every other path to auth.
 
 use crate::pages::{HomeLinks, Page, page_body};
 use axum::{
@@ -11,7 +11,7 @@ use axum::{
 };
 use piquel_common::config::Origin;
 use piquel_telemetry::HttpTelemetry;
-use piquel_ui::{Area, Policies, STYLESHEET};
+use piquel_ui::{Asset, FONTS, Policies, STYLESHEET};
 use topcoat::{
     context::Cx,
     view::{ViewExt, view},
@@ -20,10 +20,13 @@ use topcoat::{
 /// The health probe piqueld polls. It is free, and quiet in telemetry.
 pub(crate) const HEALTH: &str = "/health";
 
-/// Every page's Content-Security-Policy: the stylesheet, on piquel.fr itself, and
-/// nothing else. No page has a script or a form.
-const POLICY: &str = "default-src 'none'; style-src 'self'; frame-ancestors 'none'; \
-                      base-uri 'none'; form-action 'none'";
+/// Every page's Content-Security-Policy: the stylesheet and its typefaces, on
+/// piquel.fr itself, and nothing else. No page has a script or a form.
+const POLICY: &str = "default-src 'none'; style-src 'self'; font-src 'self'; \
+                      frame-ancestors 'none'; base-uri 'none'; form-action 'none'";
+
+/// The files every page links, embedded with the executable.
+const ASSETS: [Asset; 4] = [STYLESHEET, FONTS[0], FONTS[1], FONTS[2]];
 
 /// How long browsers and shared caches may keep a page: they change only with a
 /// release.
@@ -42,25 +45,29 @@ impl Site {
         Self { auth }
     }
 
-    /// Every route: the pages, the stylesheet and the health probe, then a
-    /// temporary redirect of every other path, with its query, to the same one on
-    /// auth, so links sent before the settings moved, such as security notices',
-    /// still open their page; browsers keep the fragment. Temporary, so browsers
-    /// cache nothing should piquel.fr serve that path later. Every answer carries
-    /// the security headers, inside the request telemetry.
+    /// Every route: the pages, the stylesheet with its typefaces and the health
+    /// probe, then a temporary redirect of every other path, with its query, to
+    /// the same one on auth, so links sent before the settings moved, such as
+    /// security notices', still open their page; browsers keep the fragment.
+    /// Temporary, so browsers cache nothing should piquel.fr serve that path
+    /// later. Every answer carries the security headers, inside the request
+    /// telemetry.
     pub(crate) fn router(self) -> Router {
-        let stylesheet = STYLESHEET.path();
         let auth = self.auth.serialized();
-        let router = Page::ALL
-            .into_iter()
-            .fold(Router::new(), |router, page| {
-                let site = self.clone();
-                router.route(
-                    page.path(),
-                    get(move || async move { site.render(page).await }),
-                )
-            })
-            .route(&stylesheet, get(|| std::future::ready(Self::stylesheet())))
+        let router = Page::ALL.into_iter().fold(Router::new(), |router, page| {
+            let site = self.clone();
+            router.route(
+                page.path(),
+                get(move || async move { site.render(page).await }),
+            )
+        });
+        let router = ASSETS.into_iter().fold(router, |router, asset| {
+            router.route(
+                &asset.path(),
+                get(move || std::future::ready(Self::asset(asset))),
+            )
+        });
+        let router = router
             .route(HEALTH, get(|| std::future::ready(StatusCode::NO_CONTENT)))
             .fallback(move |uri: Uri| {
                 let path = uri.path_and_query().map_or("/", PathAndQuery::as_str);
@@ -72,20 +79,21 @@ impl Site {
         HttpTelemetry::default().quiet(&[HEALTH]).wrap(router)
     }
 
-    /// The shared stylesheet, at the path naming its content, so caches keep it
-    /// forever.
-    fn stylesheet() -> Response {
+    /// A shared file, at the path naming its content or version, so caches keep
+    /// it forever.
+    fn asset(asset: Asset) -> Response {
         (
             [
-                (header::CONTENT_TYPE, STYLESHEET.content_type()),
+                (header::CONTENT_TYPE, asset.content_type()),
                 (header::CACHE_CONTROL, "public, max-age=31536000, immutable"),
             ],
-            STYLESHEET.bytes(),
+            asset.bytes(),
         )
             .into_response()
     }
 
-    /// Answers with `page` in Piquel's document, which links the policies here.
+    /// Answers with `page` in Piquel's document and the site's frame, whose
+    /// status bar links the policies here.
     async fn render(&self, page: Page) -> Response {
         let cx = Cx::default();
         let stylesheet = STYLESHEET.path();
@@ -101,14 +109,21 @@ impl Site {
             settings: &settings,
             developers: &developers,
         };
+        let header = [
+            ("Sign in", sign_in.as_str()),
+            ("Create an account", register.as_str()),
+        ];
         let html = view! { cx =>
             piquel_ui::document(
                 title: page.title(),
                 stylesheet: &stylesheet,
-                home: Page::Home.path(),
-                area: Area::Site,
-                policies: Policies::PATHS,
-                page_body(page: page, links: links)
+                indexable: true,
+                piquel_ui::site_shell(
+                    home: Page::Home.path(),
+                    links: &header,
+                    policies: Policies::PATHS,
+                    page_body(page: page, links: links)
+                )
             )
         }
         .single()
@@ -202,8 +217,10 @@ mod tests {
             assert!(html.contains(r#"href="/privacy""#), "{page:?}");
             assert!(html.contains(&STYLESHEET.path()), "{page:?}");
         }
-        let stylesheet = visit(&STYLESHEET.path()).await;
-        assert_eq!(stylesheet.status(), StatusCode::OK);
+        for asset in ASSETS {
+            let served = visit(&asset.path()).await;
+            assert_eq!(served.status(), StatusCode::OK, "{}", asset.path());
+        }
     }
 
     /// Every other path, a sent settings link's included, goes on to auth with its

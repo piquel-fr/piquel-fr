@@ -1,15 +1,21 @@
-//! The dashboard's lists: administrators, invitations, OIDC clients and events.
+//! The dashboard's lists: administrators, invitations and OIDC clients.
 
-use super::{heading, moment, refused_action};
+use super::{Action, Change, UserRow, account_status, confirm, moment, refused_action};
+use crate::{
+    icons::{Icon, icon},
+    layout::{Pager, Who, avatar, page_head, pager},
+};
 use chrono::{DateTime, Utc};
-use piquel_common::admin::{Administrator, Client, Event, Invitation};
-use serde_json::Value;
+use piquel_common::{
+    AccountStatus,
+    admin::{Administrator, Client, Invitation},
+};
 use topcoat::{
     Result,
-    view::{View, component, view},
+    view::{View, class, component, view},
 };
 
-/// An administrator, the link to their account, and the page revoking their
+/// An administrator, the link to their account, and the change revoking their
 /// rights, or why the dashboard cannot.
 #[derive(Clone, Debug)]
 pub struct AdministratorRow<'a> {
@@ -17,8 +23,8 @@ pub struct AdministratorRow<'a> {
     pub administrator: &'a Administrator,
     /// Their account's page.
     pub account: String,
-    /// The page revoking their rights, or why it cannot be done here.
-    pub revoke: Result<String, &'a str>,
+    /// Revoking their rights, or why it cannot be done here.
+    pub revoke: Result<Action, &'a str>,
 }
 
 /// An OIDC client, the origins approved for its pages to sign users in with
@@ -34,66 +40,27 @@ pub struct AdminClientRow<'a> {
     pub approve: Result<String, &'a str>,
 }
 
-/// An invitation, and the page revoking it while it can still be used.
+/// An invitation, and the change revoking it while it can still be used.
 #[derive(Clone, Debug)]
 pub struct InvitationRow<'a> {
     /// The invitation.
     pub invitation: &'a Invitation,
-    /// The page revoking it, while it is open.
-    pub revoke: Option<String>,
-}
-
-/// An event, and the link to the account it concerns, if any.
-#[derive(Clone, Debug)]
-pub struct EventRow<'a> {
-    /// The event.
-    pub event: &'a Event,
-    /// The page of the account it concerns.
-    pub account: Option<String>,
-}
-
-impl EventRow<'_> {
-    /// The event's kind, or `unknown`.
-    fn kind(&self) -> String {
-        Self::text(&self.event.event, "kind")
-    }
-
-    /// Who caused it, by type, or `unknown`.
-    fn actor(&self) -> String {
-        Self::text(&self.event.actor, "type")
-    }
-
-    /// The text `value` holds under `key`, or `unknown`.
-    fn text(value: &Value, key: &str) -> String {
-        value
-            .get(key)
-            .and_then(Value::as_str)
-            .unwrap_or("unknown")
-            .to_owned()
-    }
-
-    /// Its data, as JSON.
-    fn data(&self) -> String {
-        self.event
-            .event
-            .get("data")
-            .map(Value::to_string)
-            .unwrap_or_default()
-    }
+    /// Revoking it, while it is open.
+    pub revoke: Option<Action>,
 }
 
 impl InvitationRow<'_> {
-    /// Whether it can still be used, as of `now`.
-    fn state(&self, now: DateTime<Utc>) -> &'static str {
+    /// Whether it can still be used, as of `now`, as a badge's tone and label.
+    fn state(&self, now: DateTime<Utc>) -> (&'static str, &'static str) {
         let invitation = self.invitation;
         if invitation.redeemed_at.is_some() {
-            "Redeemed"
+            ("ok", "Redeemed")
         } else if invitation.revoked_at.is_some() {
-            "Revoked"
+            ("danger", "Revoked")
         } else if invitation.expires_at <= now {
-            "Expired"
+            ("neutral", "Expired")
         } else {
-            "Open"
+            ("", "Open")
         }
     }
 }
@@ -105,31 +72,118 @@ pub async fn administrator_list<'a>(
     grant: &'a str,
 ) -> Result<impl View> {
     Ok(view! {
-        <div class="row between">
-            heading(title: "Administrators")
-            <a class="button" href=(grant)>"Grant rights"</a>
-        </div>
+        page_head(
+            title: "Administrators",
+            lead: "The accounts that can use this dashboard and every admin operation.".to_owned(),
+            actions: view! { <a class="button" href=(grant)>"Grant rights"</a> },
+        )
         <section class="card">
-            <table>
-                <thead>
-                    <tr><th>"Username"</th><th>"Since"</th><th></th></tr>
-                </thead>
-                <tbody>
-                    for row in rows {
-                        <tr>
-                            <td><a href=(row.account.as_str())>(row.administrator.handle.as_str())</a></td>
-                            <td>moment(at: row.administrator.granted_at)</td>
-                            <td>
-                                match &row.revoke {
-                                    Ok(href) => <a href=(href.as_str())>"Revoke"</a>,
-                                    Err(reason) => refused_action(label: "Revoke", reason: reason),
-                                }
-                            </td>
-                        </tr>
-                    }
-                </tbody>
-            </table>
+            <ul class="list">
+                for row in rows {
+                    let who = Who {
+                        user: None,
+                        name: row.administrator.handle.as_str(),
+                        handle: row.administrator.handle.as_str(),
+                        administrator: true,
+                    };
+                    <li>
+                        avatar(who: who)
+                        <div class="text">
+                            <a href=(row.account.as_str())><strong>(format!("@{}", row.administrator.handle))</strong></a>
+                            <small>"since " moment(at: row.administrator.granted_at)</small>
+                        </div>
+                        match &row.revoke {
+                            Ok(action) => confirm(action: action, change: Change::RevokeAdministrator),
+                            Err(reason) => refused_action(label: "Revoke", reason: reason),
+                        }
+                    </li>
+                }
+            </ul>
         </section>
+    })
+}
+
+/// The page granting administrator rights: a search of accounts, by handle, name,
+/// email or ID, posting `q` back to the page by `GET`, then the accounts `rows`
+/// found, with the `pages` through them, each with the button granting it rights,
+/// which posts its ID to the page. An account that administers already, or
+/// cannot sign in, gets none. `refusal` says why the last grant was refused.
+#[component]
+pub async fn grant_search<'a>(
+    action: &'a str,
+    q: &'a str,
+    rows: &'a [UserRow<'a>],
+    pages: &'a Pager,
+    back: &'a str,
+    #[into]
+    #[default]
+    refusal: Option<&'a str>,
+) -> Result<impl View> {
+    let change = Change::GrantAdministrator;
+    // The page is shown only to a confirmed dashboard, so every grant is a dialog.
+    let grant = Action {
+        href: action.to_owned(),
+        inline: true,
+    };
+    Ok(view! {
+        page_head(
+            title: change.title(),
+            lead: change.description().to_owned(),
+            actions: view! { <a class="button secondary" href=(back)>"Back to administrators"</a> },
+        )
+        if let Some(refusal) = refusal {
+            <p class="notice error" role="alert">(refusal)</p>
+        }
+        <form class="row search" method="get" action=(action) role="search">
+            <label class="search-box grow">
+                icon(kind: Icon::Search)
+                <input
+                    type="search"
+                    name="q"
+                    value=(q)
+                    placeholder="Handle, name, email or account ID"
+                    aria-label="Search accounts"
+                    autocomplete="off"
+                    autofocus=""
+                >
+            </label>
+            <button class="secondary">"Search"</button>
+        </form>
+        if q.is_empty() {
+            <section class="card"><p class="empty">"Search for the account to make an administrator."</p></section>
+        } else {
+            <section class="card">
+                if rows.is_empty() {
+                    <p class="empty">(format!("No account matches “{q}”."))</p>
+                } else {
+                    <ul class="list">
+                        for row in rows {
+                            let subject = format!("@{}", row.user.handle);
+                            <li>
+                                avatar(who: row.who())
+                                <div class="text">
+                                    <a href=(row.href.as_str())><strong>(format!("@{}", row.user.handle))</strong></a>
+                                    <small>(row.user.display_name.as_str()) " · " (row.user.id.to_string())</small>
+                                </div>
+                                if row.administrator {
+                                    <span class="badge admin"><span class="dot"></span>"Administrator"</span>
+                                } else if row.user.status != AccountStatus::Active {
+                                    account_status(status: row.user.status)
+                                } else {
+                                    confirm(
+                                        action: &grant,
+                                        change: change,
+                                        subject: subject.as_str(),
+                                        <input type="hidden" name="user_id" value=(row.user.id.to_string())>
+                                    )
+                                }
+                            </li>
+                        }
+                    </ul>
+                }
+            </section>
+            pager(pages: pages, what: "accounts")
+        }
     })
 }
 
@@ -144,39 +198,46 @@ pub async fn invitation_list<'a>(
     Ok(view! {
         match rows {
             None => {
-                heading(title: "Invitations")
+                page_head(
+                    title: "Invitations",
+                    lead: "Single-use signup links, while signup needs one.".to_owned(),
+                )
                 <section class="card">
-                    <p>"Signup is open: anyone can register without an invitation."</p>
+                    <p class="empty">"Signup is open: anyone can register without an invitation, so there is none to manage."</p>
                 </section>
             },
             Some(rows) => {
-                <div class="row between">
-                    heading(title: "Invitations")
-                    <a class="button" href=(create)>"Invite"</a>
-                </div>
+                page_head(
+                    title: "Invitations",
+                    lead: "Single-use signup links, while signup needs one.".to_owned(),
+                    actions: view! { <a class="button" href=(create)>"Invite someone"</a> },
+                )
                 <section class="card">
                     if rows.is_empty() {
                         <p class="empty">"No invitation yet."</p>
                     } else {
-                        <table>
-                            <thead>
-                                <tr><th>"Created"</th><th>"Expires"</th><th>"State"</th><th></th></tr>
-                            </thead>
-                            <tbody>
-                                for row in rows {
-                                    <tr>
-                                        <td>moment(at: row.invitation.created_at)</td>
-                                        <td>moment(at: row.invitation.expires_at)</td>
-                                        <td>(row.state(now))</td>
-                                        <td>
-                                            if let Some(revoke) = &row.revoke {
-                                                <a href=(revoke.as_str())>"Revoke"</a>
-                                            }
-                                        </td>
-                                    </tr>
-                                }
-                            </tbody>
-                        </table>
+                        <div class="table-wrap">
+                            <table>
+                                <thead>
+                                    <tr><th>"created"</th><th>"expires"</th><th>"state"</th><th></th></tr>
+                                </thead>
+                                <tbody>
+                                    for row in rows {
+                                        let (tone, label) = row.state(now);
+                                        <tr>
+                                            <td>moment(at: row.invitation.created_at)</td>
+                                            <td>moment(at: row.invitation.expires_at)</td>
+                                            <td><span class=(class!("badge", tone))>(label)</span></td>
+                                            <td class="right">
+                                                if let Some(revoke) = &row.revoke {
+                                                    confirm(action: revoke, change: Change::RevokeInvitation)
+                                                }
+                                            </td>
+                                        </tr>
+                                    }
+                                </tbody>
+                            </table>
+                        </div>
                     }
                 </section>
             },
@@ -194,12 +255,16 @@ pub async fn invitation_created<'a>(
     back: &'a str,
 ) -> Result<impl View> {
     Ok(view! {
-        <section class="card narrow stack">
-            <h1>"Invitation created"</h1>
-            <p>"Send this link to the person you invite. It is shown only now, and works once."</p>
-            <input readonly="" value=(link) aria-label="Signup link">
-            <p class="muted">"Expires " moment(at: expires_at)</p>
-            <a class="button secondary" href=(back)>"Done"</a>
+        page_head(
+            title: "Invitation created",
+            lead: "Send this link to the person you invite. It is shown only now, and works once.".to_owned(),
+        )
+        <section class="card">
+            <div class="body">
+                <input readonly="" value=(link) aria-label="Signup link">
+                <p class="help">"Expires " moment(at: expires_at)</p>
+                <div class="row"><a class="button secondary" href=(back)>"Done"</a></div>
+            </div>
         </section>
     })
 }
@@ -209,7 +274,7 @@ pub async fn invitation_created<'a>(
 #[component]
 pub async fn client_list<'a>(rows: &'a [AdminClientRow<'a>]) -> Result<impl View> {
     Ok(view! {
-        heading(
+        page_head(
             title: "Clients",
             lead: "Applications that sign users in with Piquel.".to_owned(),
         )
@@ -219,105 +284,39 @@ pub async fn client_list<'a>(rows: &'a [AdminClientRow<'a>]) -> Result<impl View
         for row in rows {
             let client = row.client;
             <section class="card">
-                <div class="row between">
+                <header>
                     <h2>(client.display_name.as_str()) " " <code>(client.id.to_string())</code></h2>
-                    <div class="row">
-                        <span class="badge">(client.status())</span>
+                    <span class="row">
+                        <span class=(class!("badge", "ok" if client.status() == "Enabled", "warning" if client.status() != "Enabled"))>(client.status())</span>
                         if client.trusted { <span class="badge">"Trusted"</span> }
-                    </div>
+                    </span>
+                </header>
+                <div class="body">
+                    <dl class="facts">
+                        <dt>"Redirect URIs"</dt><dd>(client.redirect_uris.join(", "))</dd>
+                        <dt>"After sign-out"</dt><dd>(client.post_logout_uris.join(", "))</dd>
+                        <dt>"Back-channel logout"</dt><dd>(client.backchannel_logout_uri.as_deref().unwrap_or("Not told"))</dd>
+                        <dt>"Scopes"</dt><dd>(client.allowed_scopes.join(" "))</dd>
+                        <dt>"Audiences"</dt><dd>(client.allowed_audiences.join(" "))</dd>
+                        <dt>"Refresh tokens"</dt><dd>(if client.allow_refresh { "Allowed" } else { "No" })</dd>
+                        <dt>"Pushed requests"</dt><dd>(if client.require_pushed_authorization_requests { "Required" } else { "Optional" })</dd>
+                        <dt>"Authentication"</dt><dd><code>(client.token_endpoint_auth_method.to_string())</code></dd>
+                        <dt>"Passkey sign-in on"</dt>
+                        <dd class="stack tight">
+                            for (origin, remove) in &row.origins {
+                                <span class="row">
+                                    <code>(*origin)</code>
+                                    <a href=(remove.as_str())>"Remove"</a>
+                                </span>
+                            }
+                            match &row.approve {
+                                Ok(href) => <a href=(href.as_str())>"Approve an origin"</a>,
+                                Err(reason) => refused_action(label: "Approve an origin", reason: reason),
+                            }
+                        </dd>
+                    </dl>
                 </div>
-                <dl class="facts">
-                    <dt>"Redirect URIs"</dt><dd>(client.redirect_uris.join(", "))</dd>
-                    <dt>"After sign-out"</dt><dd>(client.post_logout_uris.join(", "))</dd>
-                    <dt>"Back-channel logout"</dt><dd>(client.backchannel_logout_uri.as_deref().unwrap_or("Not told"))</dd>
-                    <dt>"Scopes"</dt><dd>(client.allowed_scopes.join(" "))</dd>
-                    <dt>"Audiences"</dt><dd>(client.allowed_audiences.join(" "))</dd>
-                    <dt>"Refresh tokens"</dt><dd>(if client.allow_refresh { "Allowed" } else { "No" })</dd>
-                    <dt>"Pushed requests"</dt><dd>(if client.require_pushed_authorization_requests { "Required" } else { "Optional" })</dd>
-                    <dt>"Authentication"</dt><dd><code>(client.token_endpoint_auth_method.to_string())</code></dd>
-                    <dt>"Passkey sign-in on"</dt>
-                    <dd class="stack">
-                        for (origin, remove) in &row.origins {
-                            <span class="row">
-                                <code>(*origin)</code>
-                                <a href=(remove.as_str())>"Remove"</a>
-                            </span>
-                        }
-                        match &row.approve {
-                            Ok(href) => <a href=(href.as_str())>"Approve an origin"</a>,
-                            Err(reason) => refused_action(label: "Approve an origin", reason: reason),
-                        }
-                    </dd>
-                </dl>
             </section>
-        }
-    })
-}
-
-/// Domain events, newest first: the filter form posting `user` and `kind` back
-/// to `action` by `GET`, the events, and the `older` page's link, if there is one.
-#[component]
-pub async fn event_list<'a>(
-    action: &'a str,
-    #[into]
-    #[default]
-    user: Option<String>,
-    #[into]
-    #[default]
-    kind: Option<&'a str>,
-    rows: &'a [EventRow<'a>],
-    #[into]
-    #[default]
-    older: Option<String>,
-) -> Result<impl View> {
-    Ok(view! {
-        heading(title: "Events")
-        <form method="get" action=(action) class="row search">
-            <input name="user" value=(user) placeholder="Account ID" aria-label="Account ID">
-            <input name="kind" value=(kind) placeholder="Kind, e.g. session_revoked" aria-label="Event kind">
-            <button>"Filter"</button>
-        </form>
-        <section class="card">
-            event_rows(rows: rows)
-        </section>
-        if let Some(older) = older {
-            <a class="button secondary" href=(older)>"Older events"</a>
-        }
-    })
-}
-
-/// A table of events, each linking to the account it concerns.
-#[component]
-pub async fn event_rows<'a>(rows: &'a [EventRow<'a>]) -> Result<impl View> {
-    Ok(view! {
-        if rows.is_empty() {
-            <p class="empty">"No event."</p>
-        } else {
-            <table>
-                <thead>
-                    <tr><th>"When"</th><th>"Kind"</th><th>"Account"</th><th>"By"</th><th>"Details"</th><th>"Trace"</th></tr>
-                </thead>
-                <tbody>
-                    for row in rows {
-                        <tr>
-                            <td>moment(at: row.event.occurred_at)</td>
-                            <td><code>(row.kind())</code></td>
-                            <td>
-                                if let Some(account) = &row.account {
-                                    <a href=(account.as_str())>"Account"</a>
-                                }
-                            </td>
-                            <td>(row.actor())</td>
-                            <td><code class="details">(row.data())</code></td>
-                            <td>
-                                if let Some(trace_id) = row.event.trace_id {
-                                    <code title="Search Grafana for this trace ID">(trace_id.to_string())</code>
-                                }
-                            </td>
-                        </tr>
-                    }
-                </tbody>
-            </table>
         }
     })
 }

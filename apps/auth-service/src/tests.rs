@@ -111,6 +111,7 @@ impl AuthConfig {
                 key: Arc::new(NoteKey::generate("auth.piquel.fr/audit").expect("audit key")),
             },
             trusted_proxies: vec![],
+            requests_per_minute: REQUESTS_PER_MINUTE,
         }
     }
 }
@@ -183,6 +184,9 @@ impl Replicas {
         database
     }
 }
+
+/// The request budget the test configuration allows, as production does.
+pub(crate) const REQUESTS_PER_MINUTE: i32 = 120;
 
 /// Largest response body [`Browser::call`] and the page tests read.
 pub(crate) const MAX_RESPONSE_BYTES: usize = 256 * 1024;

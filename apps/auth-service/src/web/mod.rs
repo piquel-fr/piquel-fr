@@ -47,17 +47,18 @@ use crate::{
     assets::EmbeddedAssets,
     config::{EmailConfig, PolicyLinks},
     federation::FederationApplication,
+    federation::ReturnTo,
     oidc::{OAuthCode, OAuthError, OidcApplication, Reject},
     passkey::PasskeyApplication,
     routes,
-    security::{ApiError, RequestContext},
+    security::{ApiError, BrowserCookie, RequestContext},
 };
 pub(crate) use admin::AdminApplication;
 use auth::SignInPage;
 use piquel_common::config::Origin;
 use piquel_repository::Database;
 use piquel_telemetry::HttpTelemetry;
-use piquel_ui::{Area, Onward, QueryError, Title};
+use piquel_ui::{Onward, PreferenceChange, QueryError, Title};
 use serde::de::DeserializeOwned;
 use std::{fmt, sync::Arc};
 use topcoat::{
@@ -69,7 +70,7 @@ use topcoat::{
         content::Form,
         error::see_other,
         header, parse_query_params,
-        request::{FromRequest, extensions},
+        request::{FromRequest, extensions, headers},
         response::{IntoResponse, Response},
         tower::TowerService,
     },
@@ -178,8 +179,8 @@ impl WebApplication {
         // A source with a path needs the whole URL: `'self'` names none. The passkey
         // script's ceremonies fetch auth's own JSON routes.
         let policy = format!(
-            "default-src 'none'; style-src {}; script-src {}; connect-src 'self'; \
-             frame-ancestors 'none'; base-uri 'none'",
+            "default-src 'none'; style-src {}; script-src {}; font-src 'self'; \
+             connect-src 'self'; frame-ancestors 'none'; base-uri 'none'",
             origin.join(&EmbeddedAssets::STYLESHEET.path()),
             origin.join(&EmbeddedAssets::SCRIPT.path()),
         );
@@ -201,9 +202,10 @@ impl WebApplication {
     }
 
     /// Each page's route, the handler showing it and the one submitting its form.
-    fn pages() -> [(&'static str, RouteHandlerFn, RouteHandlerFn); 19] {
+    fn pages() -> [(&'static str, RouteHandlerFn, RouteHandlerFn); 21] {
         use routes::page::{
-            ADMIN, CONSENT, LOGIN, LOGOUT, RECOVER, RECOVER_UNDO, REGISTER, settings::VERIFY,
+            ADMIN, CONSENT, LOGIN, LOGOUT, PREFERENCES, RECOVER, RECOVER_UNDO, REGISTER,
+            settings::VERIFY,
         };
         [
             page!(
@@ -236,6 +238,13 @@ impl WebApplication {
                 Self::admin,
                 Self::admin_proof
             ),
+            page!(
+                PREFERENCES,
+                Title::Preferences.as_str(),
+                Self::preferences,
+                Self::prefer
+            ),
+            Self::entry::<settings::Overview>(),
             Self::entry::<settings::SignInMethods>(),
             Self::entry::<settings::Addresses>(),
             page!(
@@ -395,22 +404,81 @@ impl WebApplication {
     /// a link submits no form, so no `form-action` governs where it redirects.
     async fn link(&self, cx: &Cx, title: &str, target: &Url, to: Onward) -> Result<Response> {
         let page = view! { cx => piquel_ui::onward(href: target.as_str(), to: to) };
-        self.render(cx, StatusCode::OK, title, Area::SignIn, &[], page)
-            .await
+        self.render(cx, StatusCode::OK, title, &[], page).await
     }
 
-    /// Answers with `page` inside the document titled `title`, in `area`, under the
-    /// page policy, with the trace ID of a server error. The brand links the
-    /// account's settings, and the footer Piquel's policies. Its forms may post to
-    /// auth's own pages, and redirect on to the origins of `targets`: browsers apply
-    /// `form-action` to a form's redirects too.
-    async fn render(
+    /// `GET /preferences`: nothing to show; the settings instead.
+    fn preferences(cx: &Cx) -> impl Future<Output = std::result::Result<Response, Failure>> {
+        std::future::ready(
+            see_other(routes::page::settings::HOME)
+                .into_response(cx)
+                .map_err(Failure::from),
+        )
+    }
+
+    /// `POST /preferences`: keeps the theme or sidebar width the form chose, in
+    /// cookies, and goes back to the page the form was on. A page that is not a
+    /// path on auth, from an edited form, goes back to the settings.
+    async fn prefer(cx: &Cx, body: Body) -> std::result::Result<Response, Failure> {
+        let change: PreferenceChange = Self::form(cx, body).await?;
+        let back = ReturnTo::parse(Some(&change.return_to)).unwrap_or_default();
+        let mut response = see_other(back.as_str()).into_response(cx)?;
+        BrowserCookie::set_preferences_on(&mut response, &change).map_err(Error::from)?;
+        Ok(response)
+    }
+
+    /// Answers with `page` in the narrow frame of a page outside the account's
+    /// shell, titled `title`, under the page policy, with the trace ID of a server
+    /// error. Its forms may post to auth's own pages, and redirect on to the
+    /// origins of `targets`.
+    fn render<'a>(
+        &'a self,
+        cx: &'a Cx,
+        status: StatusCode,
+        title: &'a str,
+        targets: &'a [Url],
+        page: impl View + 'a,
+    ) -> impl Future<Output = Result<Response>> + 'a {
+        self.render_as(cx, status, title, targets, false, page)
+    }
+
+    /// [`Self::render`], as a page of the admin dashboard when `admin`: auth's
+    /// pages on the way to it look like it, not like the account's.
+    pub(in crate::web) async fn render_as(
         &self,
         cx: &Cx,
         status: StatusCode,
         title: &str,
-        area: Area,
         targets: &[Url],
+        admin: bool,
+        page: impl View,
+    ) -> Result<Response> {
+        let page = Child::new(page);
+        let framed = view! { cx =>
+            piquel_ui::auth_shell(
+                home: routes::page::settings::HOME,
+                reference: HttpTelemetry::trace_id(status),
+                admin: admin,
+                policies: self.policies.links(),
+                (page)
+            )
+        };
+        self.render_document(cx, status, title, targets, admin, framed)
+            .await
+    }
+
+    /// Answers with the whole `page`, its shell included, inside the document
+    /// titled `title`, under the page policy, with the browser's theme and sidebar
+    /// preferences, coloured as the admin dashboard when `admin`. Its forms may
+    /// post to auth's own pages, and redirect on to the origins of `targets`:
+    /// browsers apply `form-action` to a form's redirects too.
+    pub(in crate::web) async fn render_document(
+        &self,
+        cx: &Cx,
+        status: StatusCode,
+        title: &str,
+        targets: &[Url],
+        admin: bool,
         page: impl View,
     ) -> Result<Response> {
         let page = Child::new(page);
@@ -418,15 +486,14 @@ impl WebApplication {
             EmbeddedAssets::STYLESHEET.path(),
             EmbeddedAssets::SCRIPT.path(),
         );
+        let preferences = BrowserCookie::read_preferences(headers(cx));
         let html = view! { cx =>
             piquel_ui::document(
                 title: title,
                 stylesheet: &stylesheet,
                 script: script.as_str(),
-                home: routes::page::settings::HOME,
-                area: area,
-                reference: HttpTelemetry::trace_id(status),
-                policies: self.policies.links(),
+                preferences: preferences,
+                admin: admin,
                 (page)
             )
         }
@@ -470,7 +537,6 @@ impl WebApplication {
         let description = status.is_client_error().then_some(description);
         let page =
             view! { cx => piquel_ui::failure(code: &code, description: description, link: link) };
-        self.render(cx, status, title, Area::SignIn, &[], page)
-            .await
+        self.render(cx, status, title, &[], page).await
     }
 }

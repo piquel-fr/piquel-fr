@@ -27,15 +27,24 @@ Keep implementations simple. Follow neighbouring modules and share repeated logi
   the changes and queries their forms and links send. They render plain data,
   `piquel-common` IDs, vocabularies and events, or plain rows such as `EmailRow`
   or `ClientRow` that the pages map the service's views into, and take URLs as
-  props; they know nothing of the domain, the database or HTTP. `form` holds what
-  every form shares, including the `Checkbox` and `Lines` types for values a form
-  sends as text; `clients` the client views the console shares with the future
-  dashboard; `settings` and `developers` each section's pages; `asset` the
-  files pages link, embedded under paths naming their content, and the shared
-  stylesheet, `STYLESHEET`, which the admin dashboard serves with its own. It
-  depends only on `piquel-common`
-  (with `events`), `chrono`, `serde`, `serde_urlencoded` and Topcoat's `view`, so
-  it compiles beside the database crate.
+  props; they know nothing of the domain, the database or HTTP. `layout` holds
+  the document and the two frames: the shell of a signed-in page, a sidebar of
+  `NavItem`s beside the page and a status bar below it, which the account's
+  pages (`account`) and the admin dashboard (`dashboard_frame`) both fill, and
+  `auth_shell`, the narrow column of the pages a signed-out browser sees. The
+  theme and the sidebar's width are `Preferences` the page's forms post as a
+  `PreferenceChange` and cookies keep, read on the root element by the
+  stylesheet, so they work without scripts; on phones, a checkbox the stylesheet
+  reads opens the sidebar as a drawer. `form` holds what every form shares,
+  including the `Checkbox` and `Lines` types for values a form sends as text;
+  `clients` the client views the console shares with the dashboard; `settings`,
+  `developers` and `admin` each area's pages, an overview first; `icons` the
+  inline glyphs; `asset` the files pages link, embedded in the executable: the
+  stylesheet, `STYLESHEET`, under a path naming its content, and the `FONTS` it
+  links, under paths naming their version, which the admin dashboard serves
+  with its own. It depends only on `piquel-common` (with `events`), `chrono`,
+  `serde`, `serde_urlencoded` and Topcoat's `view`, so it compiles beside the
+  database crate.
 
 Application code uses `Secret`, `Digest`, `Pkce`, `Rs256Key`, `KeySet`,
 `KeyEncryptionKey` and `NoteKey` instead of calling `openssl`, `sha2` or `rand`
@@ -84,8 +93,10 @@ one event per session; set cookies after commit with `BrowserCookie::set_on`
 and clear them with `clear_on`. Both preserve other Set-Cookie headers. A page
 never sets or clears a flow cookie: the federation operation it calls returns the
 change as a `FlowCookie`, which the page applies to its response. Pages write only
-the notice cookie, with `BrowserCookie::set_notice_on`, and the session cookie only
-through `AccountService::sign_out`, whose `SignedOut` clears it on the response.
+the notice cookie, with `BrowserCookie::set_notice_on`, the theme and sidebar
+preferences, with `set_preferences_on` from `POST /preferences`, and the session
+cookie only through `AccountService::sign_out`, whose `SignedOut` clears it on the
+response.
 
 `AuthConfig::router` builds applications without writing to the database, so tests
 build two on one database as replicas (`Replicas` in `src/tests.rs`).
@@ -103,7 +114,8 @@ acts, calls the service in-process and renders `piquel-ui` components, or return
 a `Failure`, which `WebApplication::answer` turns into the page explaining it. A
 form that succeeds answers `303`. Pages use no Topcoat browser runtime, `suspense`, `live!`
 or `asset!`, and register every route explicitly. Their Content-Security-Policy
-loads only the stylesheet and the passkey script embedded under `/assets/`, lets the
+loads only the stylesheet, its typefaces and the passkey script embedded under
+`/assets/`, lets the
 script fetch only auth itself (`connect-src 'self'`), for its passkey ceremonies,
 and lets forms post only to auth and to where they redirect, since browsers apply
 `form-action` to a form's redirects: the consent and logout pages' redirect
@@ -114,6 +126,12 @@ a page linking there instead of the `303`. The security layer accepts a
 page's form only from auth's own pages (`BrowserRequest::is_same_origin`): plain
 forms send no CSRF header, and send `Origin: null` under `Referrer-Policy:
 no-referrer`.
+
+`WebApplication::render` wraps a page a signed-out browser sees in the auth
+shell, and `render_document` a page that brings its own shell, as the account's
+pages do; both read the browser's `Preferences` from the `Theme` and `Sidebar`
+cookies, which `POST /preferences` sets and sends the browser back from, to the
+path its form named. The dashboard has the same page on its own origin.
 
 Each page of the signed-in account, a settings tab (`src/web/settings`) or a
 developer console page (`src/web/developers`), is an `AccountPage`

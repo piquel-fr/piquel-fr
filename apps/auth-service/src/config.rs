@@ -98,6 +98,11 @@ const INVITE_REQUIRED: Variable = Variable::new("AUTH_INVITE_REQUIRED");
 const CLIENTS_FILE: Variable = Variable::new("AUTH_CLIENTS_FILE");
 /// Operator-specified trusted ingress peers.
 const TRUSTED_PROXIES: Variable = Variable::new("AUTH_TRUSTED_PROXIES");
+/// How many requests a client may make a minute, in each rate category.
+const REQUESTS_PER_MINUTE: Variable = Variable::new("AUTH_REQUESTS_PER_MINUTE");
+/// [`REQUESTS_PER_MINUTE`] when none is configured: enough for a person, not
+/// for a browser suite or a scraper.
+const DEFAULT_REQUESTS_PER_MINUTE: &str = "120";
 /// Default ingress peers provided by piqueld.
 const INGRESS_PROXIES: Variable = Variable::new("PIQUELD_INGRESS_PROXIES");
 
@@ -747,6 +752,8 @@ pub struct AuthConfig {
     pub(crate) audit: AuditConfig,
     /// Trusted reverse-proxy peers.
     pub(crate) trusted_proxies: Vec<IpNet>,
+    /// How many requests a client may make a minute, in each rate category.
+    pub(crate) requests_per_minute: i32,
 }
 
 impl AuthConfig {
@@ -830,7 +837,16 @@ impl AuthConfig {
             },
             key_encryption_key: Arc::new(Self::key_encryption_key_from_environment()?),
             trusted_proxies: Self::trusted_proxies()?,
+            requests_per_minute: Self::requests_per_minute()?,
         })
+    }
+
+    /// `AUTH_REQUESTS_PER_MINUTE`, a positive count the counters can hold.
+    fn requests_per_minute() -> Result<i32, ConfigurationError> {
+        let budget: std::num::NonZeroU32 =
+            REQUESTS_PER_MINUTE.parse_or(DEFAULT_REQUESTS_PER_MINUTE)?;
+        i32::try_from(budget.get())
+            .map_err(|source| REQUESTS_PER_MINUTE.error("is too large", source))
     }
 
     /// Loads what the `user recover` command needs to print a recovery link: the

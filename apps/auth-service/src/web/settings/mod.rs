@@ -1,7 +1,7 @@
-//! The account's settings, at `/settings`: the tabs every settings page shares.
+//! The account's settings, at `/settings`: the pages the sidebar lists.
 //!
-//! Each tab is an [`AccountPage`](super::account::AccountPage) of the account
-//! section, keeping its [`Tab`] to mark it among the tabs. Confirming an address,
+//! Each is an [`AccountPage`](super::account::AccountPage) of the account
+//! section, keeping its [`Tab`] to mark it in the sidebar. Confirming an address,
 //! from its emailed link, is a page of its own.
 
 /// Connected apps.
@@ -12,6 +12,8 @@ mod data;
 mod emails;
 /// Security history.
 mod history;
+/// The account at a glance.
+mod overview;
 /// Signed-in devices.
 mod sessions;
 /// The handle, passkeys and social sign-in.
@@ -23,6 +25,7 @@ pub(super) use connected::ConnectedApps;
 pub(super) use data::AccountData;
 pub(super) use emails::Addresses;
 pub(super) use history::History;
+pub(super) use overview::Overview;
 pub(super) use sessions::Devices;
 pub(super) use sign_in::SignInMethods;
 
@@ -30,18 +33,29 @@ use super::{
     Failure, WebApplication,
     account::{Framed, Reader},
 };
-use crate::{emails::EmailView, grants::ConnectedApp, routes::page::settings};
-use piquel_ui::{ConnectedAppRow, EmailRow, Messages, Section, Tab};
+use crate::{
+    emails::EmailView,
+    federation::FederationApplication,
+    grants::ConnectedApp,
+    history::{HistoryItem, HistoryPage},
+    routes::page::settings,
+    sessions::SessionItem,
+};
+use piquel_common::protocol::api::Identity;
+use piquel_ui::{
+    ConnectedAppRow, DeviceRow, EmailRow, HistoryRow, Messages, ProviderRow, Section, Tab,
+};
 use topcoat::{
     context::Cx,
     router::{StatusCode, response::Response},
-    view::{Child, view},
+    view::Child,
 };
 use url::Url;
 
-/// Each tab and the page it links.
-const TABS: [(Tab, &str); 6] = [
-    (Tab::SignIn, settings::HOME),
+/// Each tab and the page it links, in the sidebar's order.
+pub(super) const TABS: [(Tab, &str); 7] = [
+    (Tab::Overview, settings::HOME),
+    (Tab::SignIn, settings::SIGN_IN),
     (Tab::Emails, settings::EMAILS),
     (Tab::Devices, settings::SESSIONS),
     (Tab::Apps, settings::APPS),
@@ -74,9 +88,82 @@ impl<'a> From<&'a ConnectedApp> for ConnectedAppRow<'a> {
     }
 }
 
+impl<'a> From<&'a SessionItem> for DeviceRow<'a> {
+    /// The session as a page shows it.
+    fn from(session: &'a SessionItem) -> Self {
+        Self {
+            id: session.id,
+            current: session.current,
+            device: session.device,
+            ip: session.ip,
+            methods: &session.methods,
+            authenticated_at: session.authenticated_at,
+            last_seen_at: session.last_seen_at,
+        }
+    }
+}
+
+impl<'a> From<&'a HistoryItem> for HistoryRow<'a> {
+    /// The entry as a page shows it.
+    fn from(item: &'a HistoryItem) -> Self {
+        Self {
+            id: item.id,
+            occurred_at: item.occurred_at,
+            entry: &item.entry,
+            actor: item.actor,
+            reportable: item.reportable(),
+            reason: item.reason.as_deref(),
+            client: item
+                .client
+                .as_ref()
+                .map(|client| (client.id.as_str(), client.name.as_deref())),
+            ip: item.ip,
+            device: item.device,
+            erased: item.erased,
+        }
+    }
+}
+
+impl HistoryPage {
+    /// Its entries as a page shows them.
+    pub(super) fn rows(&self) -> Vec<HistoryRow<'_>> {
+        self.entries.iter().map(HistoryRow::from).collect()
+    }
+}
+
+impl FederationApplication {
+    /// The social sign-in providers as the pages list them: the enabled ones,
+    /// then any linked `identities` since disabled, so they can still be
+    /// unlinked.
+    pub(super) fn provider_rows<'a>(&self, identities: &'a [Identity]) -> Vec<ProviderRow<'a>> {
+        let enabled: Vec<_> = self.enabled().collect();
+        let mut providers: Vec<_> = enabled
+            .iter()
+            .map(|&provider| ProviderRow {
+                provider,
+                identity: identities
+                    .iter()
+                    .find(|identity| identity.provider == provider),
+                enabled: true,
+            })
+            .collect();
+        providers.extend(
+            identities
+                .iter()
+                .filter(|identity| !enabled.contains(&identity.provider))
+                .map(|identity| ProviderRow {
+                    provider: identity.provider,
+                    identity: Some(identity),
+                    enabled: false,
+                }),
+        );
+        providers
+    }
+}
+
 impl WebApplication {
-    /// Answers with the settings tab `tab`, `page`, below the tabs, at the status
-    /// and with the messages of `outcome`. Its forms may redirect to `targets`.
+    /// Answers with the settings tab `tab`, `page`, at the status and with the
+    /// messages of `outcome`. Its forms may redirect to `targets`.
     async fn settings_page(
         &self,
         cx: &Cx,
@@ -86,11 +173,11 @@ impl WebApplication {
         targets: &[Url],
         page: Child<'_>,
     ) -> Result<Response, Failure> {
-        let head = view! { cx => piquel_ui::settings_tabs(tabs: &TABS, current: tab) };
         let framed = Framed {
             section: Section::Account,
+            tab: Some(tab),
             title: tab.label(),
-            head: Child::new(head),
+            head: Child::default(),
             page,
         };
         self.account_page(cx, reader, outcome, targets, framed)

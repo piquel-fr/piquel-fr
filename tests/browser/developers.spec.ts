@@ -30,7 +30,7 @@ test('the developer console registers an app, shows its secret once, and the app
     expect(posts).toEqual([]);
     expect(await page.content()).not.toContain(shown);
   };
-  await page.getByRole('link', { name: 'Developers', exact: true }).click();
+  await page.getByRole('link', { name: 'Your apps', exact: true }).click();
   await expect(page.getByRole('heading', { name: 'Your apps' })).toBeVisible();
   await page.getByRole('link', { name: 'New app', exact: true }).click();
 
@@ -102,7 +102,7 @@ test('the developer console registers an app, shows its secret once, and the app
     nonce
   }).toString();
   await page.goto(authorization.href);
-  await expect(page.getByRole('heading', { name: 'Continue to Console E2E.' })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Continue to Console E2E?' })).toBeVisible();
   await page.getByRole('button', { name: 'Continue', exact: true }).click();
   await page.waitForURL((url) => url.origin === client);
   const code = new URL(page.url()).searchParams.get('code') ?? '';

@@ -52,7 +52,7 @@ async fn assert_missing(response: Response) {
     assert_eq!(response.status(), StatusCode::NOT_FOUND);
     let page = html(response).await;
     assert!(page.contains(MISSING), "{page}");
-    let section = format!(r#"<a href="{HOME}" aria-current="true">Developers</a>"#);
+    let section = format!(r#"<a href="{HOME}" title="Your apps" aria-current="page">"#);
     assert!(page.contains(&section), "{page}");
 }
 
@@ -154,8 +154,8 @@ async fn secrets_show_once_in_the_answer_that_makes_them() {
         page.contains(&format!(r#"data-replace-url="{secrets}""#)),
         "{page}"
     );
-    assert!(page.contains("Stops working "), "{page}");
-    assert!(page.contains("Works until you rotate it"), "{page}");
+    assert!(page.contains("stops working "), "{page}");
+    assert!(page.contains("works until you rotate it"), "{page}");
     let secrets = database.oidc().client_secrets(&id).await.expect("secrets");
     let [earlier, newest] = secrets.as_slice() else {
         panic!("{secrets:?}");

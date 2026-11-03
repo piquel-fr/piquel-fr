@@ -1,6 +1,7 @@
-//! The components, layouts and stylesheet of auth.piquel.fr's server-rendered
-//! pages, and the document and stylesheet piquel.fr's server shares with them. The
-//! admin dashboard and piquel.fr serve the stylesheet too, under their own.
+//! The components, layouts, stylesheet and typefaces of auth.piquel.fr's
+//! server-rendered pages. The admin dashboard serves them too, under its own
+//! origin, and shares the shell: a sidebar beside the page, a status bar below
+//! it, and the theme and sidebar preferences a cookie keeps.
 //!
 //! Components render plain data: `piquel-common` identifiers, vocabularies and
 //! events, and plain rows a page fills from what the service returns. They take
@@ -19,9 +20,10 @@
 //! let cx = Cx::default();
 //! let html = view! { cx =>
 //!     piquel_ui::document(title: "Sign out", stylesheet: "/assets/style.css",
-//!         script: "/assets/passkey.js", home: "/settings",
-//!         policies: piquel_ui::Policies::PATHS,
-//!         piquel_ui::logout(action: "/logout", fields: &[("client_id", "notes")], keep: "/login")
+//!         script: "/assets/passkey.js",
+//!         piquel_ui::auth_shell(home: "/settings", policies: piquel_ui::Policies::PATHS,
+//!             piquel_ui::logout(action: "/logout", fields: &[("client_id", "notes")], keep: "/login")
+//!         )
 //!     )
 //! }
 //! .single()
@@ -34,7 +36,8 @@
 
 /// The admin dashboard, and auth's page handing administrators off to it.
 mod admin;
-/// Files pages link, embedded under paths naming their content: the stylesheet.
+/// Files pages link, embedded in the executable: the stylesheet and the
+/// typefaces.
 mod asset;
 /// An OIDC client's status, facts, settings form and secrets, which the console
 /// shows and the admin dashboard will.
@@ -44,7 +47,9 @@ mod developers;
 /// What forms and links send, what a page says of a change, and the parts of
 /// every form.
 mod form;
-/// The document around every page, and the parts pages share.
+/// The icons the pages draw inline.
+mod icons;
+/// The document around every page, and the frames pages share.
 mod layout;
 /// The sign-in pages.
 mod login;
@@ -57,14 +62,15 @@ mod recovery;
 mod settings;
 
 pub use admin::{
-    AccountPages, AdminClientRow, AdministratorRow, EventRow, HandoffProof, HandoffQuery,
-    InvitationRow, RecoveryKey, RecoveryRow, RecoveryStanding, SessionRow, Tab as DashboardTab,
-    UserRow, account_settings, administrator_list, audit_page, client_list, dashboard_change,
-    dashboard_failure, dashboard_frame, dashboard_signed_out, event_list, event_rows,
+    AccountPages, Action, AdminClientRow, AdminOverview, AdministratorRow, Change, Dashboard,
+    EventRow, HandoffProof, HandoffQuery, InvitationRow, Measure, Problem, RecoveryKey,
+    RecoveryRow, RecoveryStanding, SessionRow, Tab as DashboardTab, UserRow, account_settings,
+    admin_overview, administrator_list, audit_page, client_list, dashboard_change,
+    dashboard_failure, dashboard_frame, dashboard_signed_out, event_list, event_rows, grant_search,
     handoff_proof, invitation_created, invitation_list, no_access, recovery_list, user_page,
     user_search,
 };
-pub use asset::{Asset, STYLESHEET};
+pub use asset::{Asset, FONTS, STYLESHEET};
 pub use clients::{
     ClientDraft, ClientRow, ClientStatus, Connection, FieldError, Grace, Revealed, ScopeChoice,
     SecretRow,
@@ -76,7 +82,8 @@ pub use developers::{
 };
 pub use form::{Alert, Checkbox, Lines, Messages, Notice, OUT_OF_DATE, Query, QueryError};
 pub use layout::{
-    Area, Policies, SUPPORT_ADDRESS, Section, Title, account, document, intro, signed_out,
+    AccountNav, Health, Pager, Policies, PreferenceChange, Preferences, SOURCE, Search, Section,
+    Sidebar, Theme, Title, Who, account, auth_shell, document, signed_out, site_shell,
 };
 pub use login::{
     CallbackError, LinkKind, LoginChange, LoginQuery, PendingDestination, SignedIn, Step, sign_in,
@@ -87,9 +94,9 @@ pub use recovery::{
     recover, recovery_banner, recovery_prompt, undo_recovery,
 };
 pub use settings::{
-    Audience, ConnectedAppChange, ConnectedAppRow, ConnectedAppsState, DataChange, DataState,
-    DeviceChange, DeviceRow, EmailChange, EmailRow, EmailsState, HandleRow, HistoryChange,
-    HistoryPage, HistoryRow, HistoryState, Holdings, ProviderRow, SignInChange, SignInState, Tab,
-    account_data, account_deleted, addresses, connected_apps, devices, history, settings_tabs,
-    sign_in_methods, verified, verify,
+    AccountOverview, Audience, ConnectedAppChange, ConnectedAppRow, ConnectedAppsState, DataChange,
+    DataState, DeviceChange, DeviceRow, EmailChange, EmailRow, EmailsState, HandleRow,
+    HistoryChange, HistoryPage, HistoryRow, HistoryState, Holdings, OverviewLinks, ProviderRow,
+    SignInChange, SignInState, Tab, account_data, account_deleted, account_overview, addresses,
+    connected_apps, devices, history, sign_in_methods, verified, verify,
 };
