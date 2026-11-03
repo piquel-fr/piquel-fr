@@ -21,9 +21,10 @@ CREATE INDEX account_deletions_due_idx
 DROP INDEX account_deletions_purge_idx;
 
 -- A purge erases the personal data of the events the account acted in, found by
--- the actor's user ID. Every other actor has none, so the index leaves them out.
-CREATE INDEX domain_events_actor_user_idx ON domain_events ((actor ->> 'user_id'))
-    WHERE actor ->> 'user_id' IS NOT NULL;
+-- the actor's user ID. The index is not partial: PostgreSQL keeps no statistics
+-- on a partial index's expression, and without them it estimates so many matches
+-- that it scans every event's personal data instead.
+CREATE INDEX domain_events_actor_user_idx ON domain_events ((actor ->> 'user_id'));
 -- A purge deletes the email deliveries addressed to the account.
 CREATE INDEX deliveries_email_recipient_idx ON deliveries (recipient)
     WHERE channel = 'email';
