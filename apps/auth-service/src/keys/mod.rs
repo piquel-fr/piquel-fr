@@ -230,19 +230,13 @@ impl KeyStore {
     }
 
     /// Makes sure a key signs, generating one on first start, and loads the key
-    /// set. Waits for any rotation in progress. A rotation step that fails, such
-    /// as a refused promotion, is logged and rolled back, so a replica still
-    /// starts with the active key, as running ones keep signing with it.
+    /// set. Waits for any rotation in progress.
     ///
     /// # Errors
-    /// Returns the database or loading failure when no active key can be loaded.
+    /// Returns database, generation and loading failures.
     pub async fn start(&self) -> Result<SigningKeys, KeyError> {
-        if let Err(error) = self
-            .change(None, None, async |change| change.advance().await)
-            .await
-        {
-            tracing::error!(?error, "signing key rotation failed at startup");
-        }
+        self.change(None, None, async |change| change.advance().await)
+            .await?;
         Ok(SigningKeys::new(self.key_set(&self.list().await?)?))
     }
 
@@ -560,12 +554,14 @@ impl<'t, 'c> Change<'t, 'c> {
                 self.generate(SigningKeyState::Active).await?;
             }
             // Only a manual change leaves a published key with none signing.
-            (None, Some(next)) => self.promote(&next.id, None).await?,
+            (None, Some(next)) => self.promote(&next.id, None).await.or_else(Self::refused)?,
             (Some(active), None) if older_than(active.activated_at, ROTATION_PERIOD) => {
                 self.generate(SigningKeyState::Next).await?;
             }
             (Some(active), Some(next)) if older_than(Some(next.created_at), PRE_PUBLICATION) => {
-                self.promote(&next.id, Some(&active.id)).await?;
+                self.promote(&next.id, Some(&active.id))
+                    .await
+                    .or_else(Self::refused)?;
             }
             (Some(_), _) => {}
         }
@@ -586,6 +582,19 @@ impl<'t, 'c> Change<'t, 'c> {
             }
         }
         Ok(())
+    }
+
+    /// Logs `error` if it refuses a promotion, which writes nothing, so rotation
+    /// still ends expired keys while the active key keeps signing. Any other
+    /// error stays one.
+    fn refused(error: KeyError) -> Result<(), KeyError> {
+        match error {
+            KeyError::Stored { .. } | KeyError::Mismatched(_) => {
+                tracing::error!(?error, "next signing key cannot sign; revoke it");
+                Ok(())
+            }
+            error => Err(error),
+        }
     }
 
     /// See [`KeyStore::rotate`].

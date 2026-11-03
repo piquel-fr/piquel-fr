@@ -383,8 +383,9 @@ async fn import_fills_an_empty_key_set_once() {
 }
 
 /// A `next` key whose private key does not open, or is not the private half of
-/// its public key, is left out of the key set and refused at promotion, and the
-/// active key keeps signing; revoking it lets rotation publish another. A key
+/// its public key, is left out of the key set and refused at promotion, while
+/// the active key keeps signing and the rest of rotation goes on; revoking it
+/// lets rotation publish another. A key
 /// sealed with its public key bound, as a later release will seal, opens, is
 /// published and is promoted.
 #[tokio::test]
@@ -396,7 +397,14 @@ async fn a_next_key_that_cannot_sign_is_never_promoted() {
     let start = Utc::now();
     let due = start + PRE_PUBLICATION;
     assert!(store.tick_in(&mut tx, start).await.expect("first key"));
-    let active = key_set(&store, &mut tx).await.signer().kid().to_owned();
+    let first: KeyId = key_set(&store, &mut tx)
+        .await
+        .signer()
+        .kid()
+        .parse()
+        .expect("key ID");
+    let mut change = Change::new(&mut tx, &store, start, None);
+    let active = change.rotate(true).await.expect("rotate").to_string();
     let other = Rs256Key::generate("other").expect("another key");
     let unsealable = Rs256Key::generate("unsealable").expect("key");
     let mismatched = Rs256Key::generate("mismatched").expect("key");
@@ -428,22 +436,18 @@ async fn a_next_key_that_cannot_sign_is_never_promoted() {
         .await;
         let keys = key_set(&store, &mut tx).await;
         assert_eq!(keys.signer().kid(), active);
-        assert_eq!(
-            kids(&keys),
-            std::slice::from_ref(&active),
+        assert!(
+            !kids(&keys).contains(&next.to_string()),
             "{next} is left out"
         );
-        let refused = store.tick_in(&mut tx, due).await;
-        assert!(
-            matches!(
-                &refused,
-                Err(KeyError::Stored { id, .. } | KeyError::Mismatched(id)) if *id == next
-            ),
-            "{refused:?}"
-        );
-        let states = states(&mut tx).await;
+        // The refusal leaves the rest of rotation going: the first key retires.
+        let states = advance(&store, &mut tx, due).await;
         assert!(
             states.contains(&(next.clone(), SigningKeyState::Next)),
+            "{states:?}"
+        );
+        assert!(
+            states.contains(&(first.clone(), SigningKeyState::Retired)),
             "{states:?}"
         );
         let mut change = Change::new(&mut tx, &store, due, None);
