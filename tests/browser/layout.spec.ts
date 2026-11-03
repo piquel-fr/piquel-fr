@@ -1,10 +1,13 @@
 import { expect, test, type Page } from '@playwright/test';
 import { signUp, withPasskeys } from './helpers';
 
-/** The window sizes the pages must work at, phones to a wide desktop. */
+/**
+ * The window sizes the pages must work at, the smallest phone to a wide desktop,
+ * either side of the drawer's breakpoint. Few, and few pages each: auth's pages
+ * share one request budget a minute, which the whole suite spends.
+ */
 const viewports = [
   { name: 'small phone', width: 320, height: 568 },
-  { name: 'phone', width: 390, height: 844 },
   { name: 'tablet', width: 768, height: 1024 },
   { name: 'laptop', width: 1280, height: 800 },
   { name: 'desktop', width: 1920, height: 1080 }
@@ -27,7 +30,8 @@ test('the settings and sign-in pages fit every window size', async ({ browser })
   await signUp(page, handle);
   for (const viewport of viewports) {
     await page.setViewportSize(viewport);
-    for (const path of ['/settings', '/settings/sign-in', '/settings/history', '/developers']) {
+    // One page of each section: every page shares the shell.
+    for (const path of ['/settings', '/developers']) {
       await page.goto(path);
       expect(await scrollsSideways(page), `${viewport.name} ${path}`).toBe(false);
       const menu = page.locator('.menu-button');
