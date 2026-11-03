@@ -4,7 +4,7 @@
 #   checks -> Rust formatting and the Rust dependency audit, which compile nothing
 #   web    -> Prettier, tsc and ESLint, the passkey script included, the
 #             TypeScript SDK's package checks, tests and runtime smoke in Node,
-#             Deno, Bun and workerd, and the web dependency audit
+#             Bun and workerd, and the web dependency audit
 #   rust   -> Clippy, unit, database and doc tests against PostgreSQL, and the
 #             SQLx query cache checked against the migrated schema
 #   e2e    -> the browser suite over HTTPS against the real binary and PostgreSQL,
@@ -122,9 +122,6 @@ jobs:
       - run: just web check
       - run: just web lint
       - run: just web test
-      - uses: denoland/setup-deno@22d081ff2d3a40755e97629de92e3bcbfa7cf2ed # v2.0.5
-        with:
-          deno-version: v2.x
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
         with:
           bun-version: 1.x

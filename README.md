@@ -737,7 +737,7 @@ Use individual recipes while iterating:
 | Clippy and ESLint, warnings denied; `publint` and `attw` on the built TypeScript SDK | `just lint` (`just rust lint` / `just web lint`) |
 | Regenerate the SDK vectors / the TypeScript SDK's wire types | `just sdk-vectors` / `just sdk-types` |
 | Unit tests / focused package tests | `just test` / `just test -p auth-service` |
-| TypeScript SDK tests, the shared vectors included / the built SDK in Node, Deno, Bun and workerd | `just web test` / `just web smoke` |
+| TypeScript SDK tests, the shared vectors included / the built SDK in Node, Bun and workerd | `just web test` / `just web smoke` |
 | Documentation tests | `just doc-test` |
 | Database integration tests and query cache check, in a scratch cluster | `just db test` |
 | Query cache check alone, against a migrated `TEST_DATABASE_URL` | `just db prepare-check` |

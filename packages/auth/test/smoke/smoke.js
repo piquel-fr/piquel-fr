@@ -1,5 +1,5 @@
 // The resource validator in any runtime: validates one vector token with the built
-// package, discovery and key fetch served by a fake fetch. Node, Deno and Bun run
+// package, discovery and key fetch served by a fake fetch. Node and Bun run
 // this file; workerd calls its `test` handler (see workerd.js), since it allows no
 // I/O or timers outside a handler.
 import { Issuer } from '../../dist/index.js';

@@ -2,7 +2,7 @@
 
 The TypeScript SDK for [auth.piquel.fr](https://auth.piquel.fr). It is ESM only and
 has no runtime dependencies: it uses `fetch` and WebCrypto, so it runs in browsers,
-Node 22+, Deno, Bun and Cloudflare Workers. It follows the
+Node 22+, Bun and Cloudflare Workers. It follows the
 [SDK design](../../docs/architecture/sdk.md) and passes the shared
 [test vectors](../../tests/sdk-vectors/README.md), as the Rust SDK does.
 
@@ -76,4 +76,4 @@ const claims: unknown = JSON.parse(new TextDecoder().decode(jws.payload));
 `src/protocol.ts` is generated from the Rust wire types by `just sdk-types`; do not
 edit it. `just web test` runs the unit tests and every shared vector with Node's test
 runner on the TypeScript sources, and `just web smoke` validates a vector token with
-the built package in Node, Deno, Bun and workerd.
+the built package in Node, Bun and workerd.
