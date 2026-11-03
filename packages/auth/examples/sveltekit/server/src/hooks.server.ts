@@ -14,30 +14,16 @@ const login = new Login(
   { backend: new MemoryBackend(), scopes: ['profile'] }
 );
 
-/** This app's origin, which its own form posts carry. */
-const origin = new URL(ORIGIN).origin;
-
-/** A form post from another site, which SvelteKit refuses unless vite.config.js trusts it. */
-function crossSiteForm(request: Request): boolean {
-  const type = request.headers.get('content-type')?.split(';')[0]?.trim().toLowerCase() ?? '';
-  const form = ['', 'application/x-www-form-urlencoded', 'multipart/form-data', 'text/plain'];
-  return (
-    ['POST', 'PUT', 'PATCH', 'DELETE'].includes(request.method) &&
-    form.includes(type) &&
-    request.headers.get('origin') !== origin
-  );
-}
-
 export const handle: Handle = async ({ event, resolve }) => {
-  // Back-channel logout is signed; every other cross-site form post is refused.
-  if (event.url.pathname !== '/auth/backchannel-logout' && crossSiteForm(event.request)) {
-    return new Response('Cross-site form submissions are forbidden.', { status: 403 });
-  }
   const routed = await login.handle(event.request); // /auth/login, /callback, /logout, …
   if (routed) return routed;
   // `event.url` names the page even when the request is for its `__data.json`.
   const { method, headers } = event.request;
   const page = new Request(event.url, { method, headers });
-  event.locals.user = await login.session(page);
+  const user = await login.session(page);
+  // 403 for a post, put, patch or delete from another site's pages, before any
+  // form action or endpoint runs.
+  if (user instanceof Response) return user;
+  event.locals.user = user;
   return resolve(event);
 };
