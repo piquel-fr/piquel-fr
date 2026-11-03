@@ -369,6 +369,16 @@ jwks_uri: string,
  */
 service_documentation: string,
 /**
+ * The provider's privacy policy, for users (OIDC Discovery 1.0 §3). Absent
+ * from issuers that predate it.
+ */
+op_policy_uri?: string,
+/**
+ * The provider's terms of service, for users (OIDC Discovery 1.0 §3). Absent
+ * from issuers that predate them.
+ */
+op_tos_uri?: string,
+/**
  * Standard scopes clients may request.
  */
 scopes_supported: Array<Scope>,
