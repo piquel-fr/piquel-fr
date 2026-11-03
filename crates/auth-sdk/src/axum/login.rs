@@ -516,6 +516,21 @@ impl Login {
         .is_same_origin(&self.client.config().redirect_uri.origin())
     }
 
+    /// The 403 for a request that is not a safe method (`GET`, `HEAD`, `OPTIONS`,
+    /// `TRACE`) from another origin's pages, so no other site, not even a sibling the
+    /// `SameSite=Lax` cookie reaches, acts as the user. `None` lets the request
+    /// through; without [`LoginLayer`], reading the session answers 500 instead.
+    fn refuse_other_origin(parts: &Parts) -> Option<Response> {
+        let login = parts.extensions.get::<Arc<Self>>()?;
+        (!parts.method.is_safe() && !login.same_origin(&parts.headers)).then(|| {
+            (
+                StatusCode::FORBIDDEN,
+                "This request must come from this site's own pages.",
+            )
+                .into_response()
+        })
+    }
+
     /// `POST /logout`: deletes the session and redirects to RP-initiated logout.
     /// `POST` only, and only from the app's own pages, so another site cannot sign
     /// the user out.
@@ -883,6 +898,12 @@ where
 /// The signed-in user. Without a session, a `GET` is redirected through login and
 /// back; other methods get 401. Needs [`LoginRoutes::layer`].
 ///
+/// A request that is not `GET`, `HEAD`, `OPTIONS` or `TRACE` must come from the app's
+/// own pages, or it gets 403 before the session is read: `Sec-Fetch-Site:
+/// same-origin` when the browser sends it, and otherwise an `Origin` equal to the
+/// redirect URI's. So handlers need no CSRF token. Take [`CrossOrigin<SignedIn>`]
+/// for an endpoint other origins must call with the session cookie.
+///
 /// ```no_run
 /// use piquel_auth::axum::SignedIn;
 ///
@@ -1023,8 +1044,66 @@ impl<St: Send + Sync> FromRequestParts<St> for SignedIn {
     type Rejection = Response;
 
     async fn from_request_parts(parts: &mut Parts, state: &St) -> Result<Self, Response> {
-        if let Some(user) = MaybeSignedIn::from_request_parts(parts, state).await?.0 {
-            return Ok(user);
+        if let Some(refusal) = Login::refuse_other_origin(parts) {
+            return Err(refusal);
+        }
+        let CrossOrigin(user) = CrossOrigin::<Self>::from_request_parts(parts, state).await?;
+        Ok(user)
+    }
+}
+
+/// The signed-in user, if any. Never rejects, except with 500 when the session
+/// backend fails or [`LoginRoutes::layer`] is missing, and with 403 when a request
+/// that is not a safe method comes from another origin, as for [`SignedIn`].
+///
+/// ```no_run
+/// use piquel_auth::axum::MaybeSignedIn;
+///
+/// async fn landing(MaybeSignedIn(user): MaybeSignedIn) -> String {
+///     match user {
+///         Some(user) => format!("Welcome back, {}", user.name()),
+///         None => "Welcome! Sign in at /auth/login".into(),
+///     }
+/// }
+/// ```
+#[derive(Clone, Debug)]
+pub struct MaybeSignedIn(pub Option<SignedIn>);
+
+impl<St: Send + Sync> FromRequestParts<St> for MaybeSignedIn {
+    type Rejection = Response;
+
+    async fn from_request_parts(parts: &mut Parts, state: &St) -> Result<Self, Response> {
+        if let Some(refusal) = Login::refuse_other_origin(parts) {
+            return Err(refusal);
+        }
+        let CrossOrigin(user) = CrossOrigin::<Self>::from_request_parts(parts, state).await?;
+        Ok(user)
+    }
+}
+
+/// [`SignedIn`] or [`MaybeSignedIn`] without the origin check, for an endpoint other
+/// origins call with the session cookie, such as a sibling site's `fetch` with
+/// credentials under CORS. The endpoint then guards against cross-site request
+/// forgery itself.
+///
+/// ```no_run
+/// use piquel_auth::axum::{CrossOrigin, SignedIn};
+///
+/// async fn widget_vote(CrossOrigin(user): CrossOrigin<SignedIn>) -> String {
+///     format!("Vote recorded for {}", user.name())
+/// }
+/// ```
+#[derive(Clone, Debug)]
+pub struct CrossOrigin<T>(pub T);
+
+impl<St: Send + Sync> FromRequestParts<St> for CrossOrigin<SignedIn> {
+    type Rejection = Response;
+
+    async fn from_request_parts(parts: &mut Parts, state: &St) -> Result<Self, Response> {
+        let CrossOrigin(MaybeSignedIn(user)) =
+            CrossOrigin::<MaybeSignedIn>::from_request_parts(parts, state).await?;
+        if let Some(user) = user {
+            return Ok(Self(user));
         }
         if parts.method != Method::GET {
             return Err(StatusCode::UNAUTHORIZED.into_response());
@@ -1045,23 +1124,7 @@ impl<St: Send + Sync> FromRequestParts<St> for SignedIn {
     }
 }
 
-/// The signed-in user, if any. Never rejects, except with 500 when the session
-/// backend fails or [`LoginRoutes::layer`] is missing.
-///
-/// ```no_run
-/// use piquel_auth::axum::MaybeSignedIn;
-///
-/// async fn landing(MaybeSignedIn(user): MaybeSignedIn) -> String {
-///     match user {
-///         Some(user) => format!("Welcome back, {}", user.name()),
-///         None => "Welcome! Sign in at /auth/login".into(),
-///     }
-/// }
-/// ```
-#[derive(Clone, Debug)]
-pub struct MaybeSignedIn(pub Option<SignedIn>);
-
-impl<St: Send + Sync> FromRequestParts<St> for MaybeSignedIn {
+impl<St: Send + Sync> FromRequestParts<St> for CrossOrigin<MaybeSignedIn> {
     type Rejection = Response;
 
     async fn from_request_parts(parts: &mut Parts, _: &St) -> Result<Self, Response> {
@@ -1073,7 +1136,7 @@ impl<St: Send + Sync> FromRequestParts<St> for MaybeSignedIn {
         login
             .session(&parts.headers, retry)
             .await
-            .map(Self)
+            .map(|user| Self(MaybeSignedIn(user)))
             .map_err(|error| Login::store_failure(&error))
     }
 }

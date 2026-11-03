@@ -1,5 +1,5 @@
 //! Whether a browser request comes from a site's own pages: the CSRF rule that
-//! auth's pages and the SDK's login routes share. `SameSite=Lax` cookies alone would
+//! auth's pages and the SDK's logout route and session extractors share. `SameSite=Lax` cookies alone would
 //! still let a sibling site under the same domain post with them.
 //!
 //! `Sec-Fetch-Site` decides whenever the browser sends it, as every current browser

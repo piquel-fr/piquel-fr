@@ -217,11 +217,20 @@ refresh may have reached auth without its answer being saved (a timeout, a lost
 response, a lease that expired unreleased), the stored token may be spent, so the
 session ends and the user signs in again rather than risk a reuse that would revoke
 the family. `invalid_grant` ends the session too. Any other error answer from auth
-keeps it, as does a refresh that could not connect to auth. Logout accepts only
-requests from the app's own pages: `Sec-Fetch-Site: same-origin` when the browser
-sends it, and otherwise an `Origin` equal to the app's, which `null` never is. A form
+keeps it, as does a refresh that could not connect to auth.
+
+`SameSite=Lax` keeps the session cookie off other sites' posts, but not off a
+sibling site's under the same domain: any `*.piquel.fr` page could post to an app as
+its signed-in user. So logout, and every request that is not `GET`, `HEAD`, `OPTIONS`
+or `TRACE` to a handler reading the session, are accepted only from the app's own
+pages: `Sec-Fetch-Site: same-origin` when the browser sends it, and otherwise an
+`Origin` equal to the app's, which `null` never is. Anything else gets 403 before
+the session is read, with or without a cookie, so handlers need no CSRF token. A form
 on a page with `Referrer-Policy: no-referrer` sends `Origin: null` with
-`Sec-Fetch-Site: same-origin`, so it is accepted.
+`Sec-Fetch-Site: same-origin`, so it is accepted. Safe methods must not change
+anything. An endpoint that other origins call with the cookie, such as a sibling
+site's `fetch` with credentials under CORS, opts out explicitly (`CrossOrigin` in
+axum) and guards against cross-site request forgery itself.
 
 ## Back-channel logout
 
