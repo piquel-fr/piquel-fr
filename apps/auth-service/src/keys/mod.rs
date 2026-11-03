@@ -418,7 +418,7 @@ enum Binding {
     /// The key's ID, its type and its public key's JWK thumbprint, so the
     /// public key stored with it cannot be swapped either. Releases open it, but
     /// none seals with it yet: the release before must open it first, or a
-    /// rollback would leave keys no replica can open.
+    /// rollback would leave keys no replica can open (#316).
     PublicKey,
     /// The key's ID and type: how every release so far seals.
     Record,
