@@ -93,8 +93,10 @@ one event per session; set cookies after commit with `BrowserCookie::set_on`
 and clear them with `clear_on`. Both preserve other Set-Cookie headers. A page
 never sets or clears a flow cookie: the federation operation it calls returns the
 change as a `FlowCookie`, which the page applies to its response. Pages write only
-the notice cookie, with `BrowserCookie::set_notice_on`, and the session cookie only
-through `AccountService::sign_out`, whose `SignedOut` clears it on the response.
+the notice cookie, with `BrowserCookie::set_notice_on`, the theme and sidebar
+preferences, with `set_preferences_on` from `POST /preferences`, and the session
+cookie only through `AccountService::sign_out`, whose `SignedOut` clears it on the
+response.
 
 `AuthConfig::router` builds applications without writing to the database, so tests
 build two on one database as replicas (`Replicas` in `src/tests.rs`).
@@ -112,7 +114,8 @@ acts, calls the service in-process and renders `piquel-ui` components, or return
 a `Failure`, which `WebApplication::answer` turns into the page explaining it. A
 form that succeeds answers `303`. Pages use no Topcoat browser runtime, `suspense`, `live!`
 or `asset!`, and register every route explicitly. Their Content-Security-Policy
-loads only the stylesheet and the passkey script embedded under `/assets/`, lets the
+loads only the stylesheet, its typefaces and the passkey script embedded under
+`/assets/`, lets the
 script fetch only auth itself (`connect-src 'self'`), for its passkey ceremonies,
 and lets forms post only to auth and to where they redirect, since browsers apply
 `form-action` to a form's redirects: the consent and logout pages' redirect

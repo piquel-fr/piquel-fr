@@ -15,7 +15,7 @@ use piquel_repository::{RecentRecovery, RecoveryState};
 #[derive(Subcommand)]
 pub(super) enum UserCommand {
     /// Search accounts by ID, or by part of a handle, display name or email,
-    /// ignoring case. Lists 50 at a time, by ID.
+    /// ignoring case. Lists 50 at a time, by handle.
     Search {
         /// What to look for. Lists every account when empty.
         #[arg(default_value = "")]
