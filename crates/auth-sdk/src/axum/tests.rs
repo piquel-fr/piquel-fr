@@ -301,7 +301,12 @@ fn login_app(issuer: &Issuer, backend: &MemoryBackend) -> (Router, LoginRoutes) 
             "/notes",
             post(|_: SignedIn| async {}).delete(|_: SignedIn| async {}),
         )
+        .route("/maybe", post(|_: MaybeSignedIn| async {}))
         .route("/widget", post(|_: CrossOrigin<SignedIn>| async {}))
+        .route(
+            "/maybe-widget",
+            post(|_: CrossOrigin<MaybeSignedIn>| async {}),
+        )
         .nest("/auth", auth.router())
         .layer(auth.layer());
     (app, auth)
@@ -727,9 +732,9 @@ async fn logout_refuses_other_origins() {
     }
 }
 
-/// A signed-in handler takes an unsafe request only from the app's own pages, so no
-/// other site, not even a sibling the cookie reaches, acts as the user; without a
-/// cookie too, it is refused rather than asked to sign in. Safe methods and
+/// `SignedIn` and `MaybeSignedIn` take an unsafe request only from the app's own
+/// pages, so no other site, not even a sibling the cookie reaches, acts as the user;
+/// without a cookie too, it is refused rather than asked to sign in. Safe methods and
 /// [`CrossOrigin`] skip the check.
 #[tokio::test]
 async fn signed_in_refuses_unsafe_requests_from_other_origins() {
@@ -747,6 +752,8 @@ async fn signed_in_refuses_unsafe_requests_from_other_origins() {
         for request in [
             signed_in(Request::post("/notes")),
             signed_in(Request::delete("/notes")),
+            signed_in(Request::post("/maybe")),
+            Request::post("/maybe"),
         ] {
             let response = send_from(&app, request, from).await;
             assert_eq!(response.status(), expected, "{case}");
@@ -760,8 +767,10 @@ async fn signed_in_refuses_unsafe_requests_from_other_origins() {
         assert_eq!(anonymous.status(), expected, "anonymous {case}");
         let page = send_from(&app, signed_in(Request::get("/")), from).await;
         assert_eq!(page.status(), allowed, "GET {case}");
-        let widget = send_from(&app, signed_in(Request::post("/widget")), from).await;
-        assert_eq!(widget.status(), allowed, "CrossOrigin {case}");
+        for path in ["/widget", "/maybe-widget"] {
+            let response = send_from(&app, signed_in(Request::post(path)), from).await;
+            assert_eq!(response.status(), allowed, "{path} {case}");
+        }
     }
 }
 
