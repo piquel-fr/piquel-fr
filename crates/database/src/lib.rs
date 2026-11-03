@@ -27,6 +27,7 @@ pub use repositories::{
     DeliveryRepository, EmailRepository, EventRepository, FederationRepository, HandleRepository,
     MaintenanceRepository, OidcRepository, PasskeyRepository, RecoveryRepository,
     SecurityRepository, SessionRepository, SigningKeyRepository, TokenRepository, UserRepository,
+    administrators::AdministratorsLocked,
     audit::{ChainLink, Checkpoint, EventContent, SealedEvent},
     dashboard::{DashboardSignIn, InsertHandoff, RedeemedHandoff, StoredDashboardSession},
     deletions::{AccountDeletion, RestoreToken},

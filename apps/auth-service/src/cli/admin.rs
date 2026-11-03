@@ -17,7 +17,8 @@ pub(super) enum AdminCommand {
         /// The account: its handle, ID or verified email.
         user: UserRef,
     },
-    /// Remove an account's administrator rights. The last administrator keeps theirs.
+    /// Remove an account's administrator rights. The last active administrator
+    /// keeps theirs.
     Revoke {
         /// The account: its handle, ID or verified email.
         user: UserRef,

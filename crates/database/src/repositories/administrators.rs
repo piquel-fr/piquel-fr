@@ -4,21 +4,28 @@ use super::{AdministratorRepository, RepositoryExecutor};
 use crate::DatabaseError;
 use piquel_common::{Handle, UserId, admin::Administrator};
 
+/// Proof that the transaction took [`AdministratorRepository::lock`], which
+/// [`AdministratorRepository::is_last_active`] needs to give an answer that holds
+/// until commit. Only `lock` makes one; it proves nothing in another transaction.
+#[derive(Debug)]
+pub struct AdministratorsLocked(());
+
 impl AdministratorRepository<'_> {
     /// Serializes changes to the administrator list until the transaction ends:
-    /// grants and revocations wait for each other, so a count read after this lock
-    /// stays true until commit. Reads and [`Self::contains_for_share`] do not wait.
+    /// grants, revocations, and disabling or deleting an account, wait for each
+    /// other, so [`Self::is_last_active`] stays true until commit. Reads and
+    /// [`Self::contains_for_share`] do not wait.
     ///
     /// # Errors
     ///
     /// Returns [`DatabaseError`] if the lock cannot be taken.
-    pub async fn lock(&mut self) -> Result<(), DatabaseError> {
+    pub async fn lock(&mut self) -> Result<AdministratorsLocked, DatabaseError> {
         run!(
             self,
             execute,
             sqlx::query!("LOCK TABLE administrators IN SHARE ROW EXCLUSIVE MODE")
         )?;
-        Ok(())
+        Ok(AdministratorsLocked(()))
     }
 
     /// Makes the account an administrator. Returns `false` if it already is one.
@@ -94,23 +101,29 @@ impl AdministratorRepository<'_> {
         .is_some())
     }
 
-    /// Reports whether an active account other than `user_id` is an administrator,
-    /// so removing `user_id` would still leave someone to administer.
+    /// Reports whether `user_id` is the only active administrator, so revoking its
+    /// rights, disabling it or deleting it would leave nobody to administer. Every
+    /// such change asks first, under the lock `_locked` proves: two of them cannot
+    /// both see the other's administrator still active.
     ///
     /// # Errors
     ///
     /// Returns [`DatabaseError`] if the query fails.
-    pub async fn others_active(&mut self, user_id: UserId) -> Result<bool, DatabaseError> {
+    pub async fn is_last_active(
+        &mut self,
+        _locked: &AdministratorsLocked,
+        user_id: UserId,
+    ) -> Result<bool, DatabaseError> {
         run!(
             self,
             fetch_one,
             sqlx::query_scalar!(
-                r#"SELECT EXISTS (
-                    SELECT FROM administrators a
-                    JOIN users u ON u.id = a.user_id
-                    WHERE a.user_id <> $1
-                    AND u.status = 'active'
-                ) AS "others!""#,
+                // True when every active administrator is `user_id`, and there is
+                // one: `bool_and` of no rows is null.
+                r#"SELECT COALESCE(bool_and(a.user_id = $1), FALSE) AS "last!"
+                FROM administrators a
+                JOIN users u ON u.id = a.user_id
+                WHERE u.status = 'active'"#,
                 user_id.as_uuid(),
             )
         )

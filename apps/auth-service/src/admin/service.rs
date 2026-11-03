@@ -50,7 +50,9 @@ const EVENT_PAGE_SIZE: u16 = 100;
 /// write, just before committing. Those on accounts refuse
 /// administrator accounts unless the CLI acts, so a stolen dashboard session
 /// cannot lock other administrators out; revoking their rights comes first, and is itself
-/// guarded.
+/// guarded. Nothing, the CLI included, revokes, disables or deletes the last
+/// active administrator: each asks `AdministratorRepository::is_last_active`
+/// under the administrator lock, so two such changes cannot both pass.
 #[derive(Clone)]
 pub struct AdminService {
     /// Accounts, sessions, invitations, clients, events, deliveries and administrators.
@@ -195,6 +197,7 @@ impl AdminService {
     /// Disables an account and ends all its sessions and refresh grants in one
     /// transaction, so its next request and token refresh fail. A recovery link
     /// not used yet stops working, so re-enabling the account does not revive it.
+    /// Nobody can disable the last active administrator.
     pub(crate) async fn disable_user(
         &self,
         operator: &Operator,
@@ -202,13 +205,14 @@ impl AdminService {
         reason: Reason,
     ) -> Result<(), AdminError> {
         let mut tx = self.database.begin().await?;
-        // Deleting an account checks that another administrator stays active under
-        // this lock, so disabling one must wait for it.
-        tx.administrators().lock().await?;
+        let locked = tx.administrators().lock().await?;
         match operator.lock(&mut tx, user_id).await?.status {
             AccountStatus::Active => {}
             AccountStatus::Disabled => return Err(AdminError::AlreadyDisabled),
             AccountStatus::Deleting => return Err(AdminError::DeletionScheduled),
+        }
+        if tx.administrators().is_last_active(&locked, user_id).await? {
+            return Err(AdminError::LastAdministrator);
         }
         tx.users()
             .set_status(user_id, AccountStatus::Disabled)
@@ -960,8 +964,8 @@ impl AdminService {
     }
 
     /// Removes the administrator rights of `user_id`. Administrators cannot remove
-    /// their own, and nobody can remove the last administrator's: someone must be
-    /// left to administer.
+    /// their own, and nobody can remove the last active administrator's: someone
+    /// must be left to administer.
     ///
     /// # Errors
     /// Fails when the operator may not make changes, the account is not an
@@ -973,15 +977,13 @@ impl AdminService {
     ) -> Result<(), AdminError> {
         operator.refuse_own_rights(user_id)?;
         let mut tx = self.database.begin().await?;
-        tx.administrators().lock().await?;
-        let administrators = tx.administrators().list().await?;
-        if !administrators.iter().any(|admin| admin.user_id == user_id) {
-            return Err(AdminError::NotAnAdministrator);
-        }
-        if administrators.len() == 1 {
+        let locked = tx.administrators().lock().await?;
+        if tx.administrators().is_last_active(&locked, user_id).await? {
             return Err(AdminError::LastAdministrator);
         }
-        tx.administrators().revoke(user_id).await?;
+        if !tx.administrators().revoke(user_id).await? {
+            return Err(AdminError::NotAnAdministrator);
+        }
         let revoked = DomainEvent::AdministratorRevoked {};
         Self::finish(tx, operator, Some(user_id), vec![revoked]).await
     }

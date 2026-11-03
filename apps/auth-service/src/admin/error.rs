@@ -115,8 +115,9 @@ pub enum AdminError {
     /// Administrators cannot grant or revoke their own rights from the dashboard.
     #[error("administrators cannot change their own rights")]
     OwnRights,
-    /// The last administrator's rights cannot be revoked.
-    #[error("the last administrator's rights cannot be revoked")]
+    /// The last active administrator's rights cannot be revoked, nor their account
+    /// disabled, so someone is always left to administer.
+    #[error("the account is the last active administrator: grant another administrator first")]
     LastAdministrator,
     /// The handle cannot be the account's: invalid, reserved or not free.
     #[error(transparent)]

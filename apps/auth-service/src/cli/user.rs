@@ -36,7 +36,8 @@ pub(super) enum UserCommand {
         #[command(flatten)]
         output: Output,
     },
-    /// Disable an account and end its sessions and refresh tokens.
+    /// Disable an account and end its sessions and refresh tokens. Never the last
+    /// active administrator's.
     Disable {
         /// The account: its handle, ID or verified email.
         user: UserRef,

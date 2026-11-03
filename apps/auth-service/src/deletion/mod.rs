@@ -95,16 +95,13 @@ impl<'a, 't> Deletions<'a, 't> {
         tx: &mut DatabaseTransaction<'_>,
         user_id: UserId,
     ) -> Result<StoredUser, DeletionError> {
-        tx.administrators().lock().await?;
+        let locked = tx.administrators().lock().await?;
         let user = tx
             .users()
             .find_by_id_for_update(user_id)
             .await?
             .ok_or(DeletionError::NotFound)?;
-        if user.status == AccountStatus::Active
-            && tx.administrators().contains(user_id).await?
-            && !tx.administrators().others_active(user_id).await?
-        {
+        if tx.administrators().is_last_active(&locked, user_id).await? {
             return Err(DeletionError::LastAdministrator);
         }
         Ok(user)

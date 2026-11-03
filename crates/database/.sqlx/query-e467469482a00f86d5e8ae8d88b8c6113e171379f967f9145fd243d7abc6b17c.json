@@ -1,0 +1,22 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT COALESCE(bool_and(a.user_id = $1), FALSE) AS \"last!\"\n                FROM administrators a\n                JOIN users u ON u.id = a.user_id\n                WHERE u.status = 'active'",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "last!",
+        "type_info": "Bool"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      null
+    ]
+  },
+  "hash": "e467469482a00f86d5e8ae8d88b8c6113e171379f967f9145fd243d7abc6b17c"
+}

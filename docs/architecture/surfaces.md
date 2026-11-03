@@ -84,8 +84,9 @@ dashboard keeps that time as its confirmation. The auth session's own
 confirmation stays as it was.
 
 Administrators manage the administrator list too, but never their own rights or
-the last administrator's, and the dashboard never changes an administrator's
-account. Every admin operation is also an `auth-service` CLI command; granting the
+the last active administrator's, and the dashboard never changes an administrator's
+account. Nothing, the CLI included, disables or deletes the last active
+administrator's account either. Every admin operation is also an `auth-service` CLI command; granting the
 first administrator is one.
 
 ### Changing an account on its owner's behalf
