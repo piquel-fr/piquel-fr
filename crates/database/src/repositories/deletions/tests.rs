@@ -462,7 +462,8 @@ async fn personal_data_stored_during_a_purge_is_erased() {
 }
 
 /// A failed purge waits its backoff behind the other due accounts, doubling with
-/// each failure up to the cap, and is counted once it keeps failing.
+/// each failure up to the cap, and is counted once it keeps failing. A failure
+/// recorded after the account was scheduled again is dropped.
 #[tokio::test]
 #[ignore = "requires a disposable TEST_DATABASE_URL"]
 async fn failed_purges_back_off_behind_other_accounts() {
@@ -509,4 +510,17 @@ async fn failed_purges_back_off_behind_other_accounts() {
     assert_eq!(delays, [4, 9, 11], "5, 10, then capped at 12 minutes");
     assert_eq!(order(&mut deletions).await, [other], "waits its backoff");
     assert!(deletions.count_failing(3).await.expect("count") >= 1);
+
+    // Restored and scheduled again while an attempt failed: the new schedule
+    // starts without the old failure.
+    assert!(deletions.cancel(failing).await.expect("cancel"));
+    deletions
+        .schedule(failing, Utc::now() + Duration::days(30))
+        .await
+        .expect("schedule again");
+    deletions
+        .record_failure(failing, "late", backoff, cap)
+        .await
+        .expect("record");
+    assert_eq!(deletions.failure(failing).await.expect("failure"), None);
 }

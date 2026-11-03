@@ -134,7 +134,10 @@ Important invariants:
 - A deleted client keeps its row, so its ID is never reused, but a trigger erases
   its name, redirect URIs and back-channel logout URI, which may name a person or
   their domain: only its ID, settings that identify nobody and lifecycle dates stay.
-  Its name becomes empty, which the history reads as no name.
+  Its name becomes empty, which the history reads as no name. Operational copies
+  of its URLs go with their own retention: pending authorization requests within
+  minutes, codes about a day later, and logout deliveries after 7 days, or 30 if
+  they failed.
 - Active provider subjects and active provider-per-account links are unique.
   Unlink marks the identity revoked and releases both constraints.
 - Verified email ownership is unique across active accounts. Email is optional;

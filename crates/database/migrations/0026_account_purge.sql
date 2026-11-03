@@ -14,9 +14,10 @@ ALTER TABLE account_deletions
     ADD COLUMN next_attempt_at TIMESTAMPTZ,
     ADD CHECK ((attempts = 0) = (last_error IS NULL)),
     ADD CHECK ((last_error IS NULL) = (next_attempt_at IS NULL));
--- The purge job reads due accounts in the order they became due.
+-- The purge job reads due accounts in the order they became due. greatest()
+-- ignores a NULL next_attempt_at.
 CREATE INDEX account_deletions_due_idx
-    ON account_deletions ((coalesce(next_attempt_at, purge_after)));
+    ON account_deletions ((greatest(next_attempt_at, purge_after)));
 DROP INDEX account_deletions_purge_idx;
 
 -- A purge erases the personal data of the events the account acted in, found by
@@ -26,11 +27,18 @@ CREATE INDEX domain_events_actor_user_idx ON domain_events ((actor ->> 'user_id'
 -- A purge deletes the email deliveries addressed to the account.
 CREATE INDEX deliveries_email_recipient_idx ON deliveries (recipient)
     WHERE channel = 'email';
--- Deleting the account cascades to the addresses it owns. The other foreign keys
--- to users without an index are on short-lived state: ceremonies, codes and
--- pending sign-ins, which cleanup keeps small.
+-- A purge deletes, or deleting the account cascades or sets NULL in, every row
+-- of the account, revoked or released ones included, which the partial indexes
+-- on these columns leave out. The other foreign keys to users without an index
+-- are on short-lived state: ceremonies, codes and pending sign-ins, which
+-- cleanup keeps small.
 CREATE INDEX active_verified_email_ownership_user_idx
     ON active_verified_email_ownership (user_id);
+CREATE INDEX sessions_user_idx ON sessions (user_id);
+CREATE INDEX refresh_families_user_idx ON refresh_token_families (user_id);
+CREATE INDEX passkey_credentials_user_idx ON passkey_credentials (user_id);
+CREATE INDEX external_login_identities_user_idx ON external_login_identities (user_id);
+CREATE INDEX handles_user_idx ON handles (user_id);
 
 -- A deleted client keeps only its ID, settings that identify nobody, and its
 -- lifecycle dates: its name, redirect URIs and back-channel logout URI may name a

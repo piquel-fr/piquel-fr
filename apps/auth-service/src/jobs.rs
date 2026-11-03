@@ -341,9 +341,11 @@ impl AccountPurge {
     /// Failures in a row after which [`FAILING_PURGES`] counts an account.
     const FAILING_ATTEMPTS: u16 = 3;
 
-    /// Registers [`FAILING_PURGES`]. A replica reports the count only while it is
-    /// fresh, within two runs, so one that stopped winning the job's lock never
-    /// reports a stale count beside the replica now running it.
+    /// Registers [`FAILING_PURGES`]. Every replica runs the job in turn, so each
+    /// reports the count of its own latest run, at most one run older than the
+    /// newest; one whose count is older than two runs, because it stopped running
+    /// the job, reports none. Alerts read the minimum across replicas, or wait one
+    /// run, before taking a count as current.
     fn observe() {
         FAILING_PURGES.observe(|| {
             let counted = *FAILING_PURGES_COUNT

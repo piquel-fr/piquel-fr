@@ -109,8 +109,8 @@ impl AccountDeletionRepository<'_> {
             sqlx::query_scalar!(
                 r#"SELECT user_id AS "user_id: UserId"
                 FROM account_deletions
-                WHERE coalesce(next_attempt_at, purge_after) <= now()
-                ORDER BY coalesce(next_attempt_at, purge_after)
+                WHERE greatest(next_attempt_at, purge_after) <= now()
+                ORDER BY greatest(next_attempt_at, purge_after)
                 LIMIT $1"#,
                 i64::from(limit),
             )
@@ -119,7 +119,8 @@ impl AccountDeletionRepository<'_> {
 
     /// Records a failed purge of the account with its error, and delays the next
     /// attempt by `backoff` doubled for each earlier failure, up to `max_backoff`.
-    /// Does nothing if the account is no longer scheduled.
+    /// Does nothing if the account is no longer due, as when it was restored and
+    /// scheduled again since the attempt, so a new schedule starts without failures.
     ///
     /// # Errors
     ///
@@ -141,7 +142,7 @@ impl AccountDeletionRepository<'_> {
                     next_attempt_at = now() + least(
                         $3::bigint * power(2, least(attempts, 30)), $4::bigint
                     ) * interval '1 second'
-                WHERE user_id = $1",
+                WHERE user_id = $1 AND purge_after <= now()",
                 user_id.as_uuid(),
                 error,
                 backoff.num_seconds(),
