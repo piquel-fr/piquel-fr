@@ -105,8 +105,11 @@ Important invariants:
   before a removal or finds its code expired, and rereads an untrusted client's
   consent under that lock, so a code issued from a consent withdrawn meanwhile
   fails.
-- Grants and revocations of administrator rights take `administrators().lock()`
-  first, so the last-administrator check stays true until they commit. An
+- Grants and revocations of administrator rights, and disabling an account, take
+  `administrators().lock()` first. Revoking, disabling and deleting ask
+  `is_last_active`, which takes the lock's proof, so its answer stays true until
+  they commit, and two of them never leave the instance without an active
+  administrator. An
   administrator's mutation that changes an account locks it first, as a grant
   does. Every admin mutation checks its caller after its last write, just before
   committing: it share-locks the caller's rights, so a revocation waits for it,
@@ -115,8 +118,8 @@ Important invariants:
 - An account scheduled for deletion has status `deleting` and an
   `account_deletions` row; it keeps its verified emails until it is purged, so
   restoring it never collides. Scheduling and purging take
-  `administrators().lock()` before the account lock, as grants do, so the last
-  active administrator's account cannot be deleted. Callers end its sessions and
+  `administrators().lock()` before the account lock, as grants and disabling do,
+  so the last active administrator's account cannot be deleted. Callers end its sessions and
   delete the clients it manages first. `deletions().purge` then deletes the rows
   that reference the account without cascading, the personal data of the events it
   is the subject or actor of, and the account itself, in the same transaction. Its

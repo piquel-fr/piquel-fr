@@ -21,7 +21,8 @@ pub(super) async fn list(cx: &Cx) -> Result<Response> {
         .service
         .list_administrators(&admin.operator)
         .await?;
-    let last = administrators.len() <= 1;
+    // The viewer is an active administrator, so revoking anyone else's rights
+    // leaves one; the service refuses the last active administrator's anyway.
     let rows: Vec<_> = administrators
         .iter()
         .map(|administrator| AdministratorRow {
@@ -29,8 +30,6 @@ pub(super) async fn list(cx: &Cx) -> Result<Response> {
             account: App::account(cx, administrator.user_id),
             revoke: if administrator.user_id == admin.user_id {
                 Err("You cannot change your own rights.")
-            } else if last {
-                Err("The last administrator's rights stay.")
             } else {
                 Ok(href!(revoke, Administrator(administrator.user_id)).resolve(cx))
             },

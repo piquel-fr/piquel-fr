@@ -4,6 +4,7 @@
 use super::*;
 use crate::AuditKeys;
 use crate::config::LinkKeys;
+use crate::deletion::DeletionError;
 use crate::handles::HandlesError;
 use crate::recovery::RecoveryLinks;
 use crate::security::{CONFIRMATION_MAX_AGE, RequestContext, Session};
@@ -53,16 +54,26 @@ pub(crate) struct Harness {
 impl Harness {
     /// Connects to the migrated test database.
     pub(crate) async fn new() -> Self {
+        let database = Database::connect(Self::config()).await.expect("database");
+        database.run_migrations().await.expect("migrations");
+        Self { database }
+    }
+
+    /// Connects to a schema of its own, for a scenario that must know every
+    /// administrator, which the shared database's other tests keep adding.
+    async fn isolated() -> Self {
+        let database = Database::isolated(Self::config())
+            .await
+            .expect("isolated database");
+        Self { database }
+    }
+
+    /// The test database's configuration.
+    fn config() -> DatabaseConfig {
         let url = piquel_common::config::Variable::new("TEST_DATABASE_URL")
             .required()
             .expect("TEST_DATABASE_URL must name a disposable PostgreSQL database");
-        let database = Database::connect(
-            DatabaseConfig::new(&url, 5, std::time::Duration::from_secs(5)).expect("config"),
-        )
-        .await
-        .expect("database");
-        database.run_migrations().await.expect("migrations");
-        Self { database }
+        DatabaseConfig::new(&url, 5, std::time::Duration::from_secs(5)).expect("config")
     }
 
     /// Creates an account with the handle `handle`, without a session.
@@ -681,6 +692,64 @@ async fn administrators_acting_on_each_other_are_refused() {
             );
         }
     }
+}
+
+/// Nothing, the CLI included, revokes, disables or deletes the last active
+/// administrator; a disabled administrator does not count. Two such changes
+/// queued on the administrator lock cannot both pass: the second sees the first.
+#[tokio::test]
+#[ignore = "requires TEST_DATABASE_URL"]
+async fn the_last_active_administrator_stays() {
+    let harness = Harness::isolated().await;
+    let (service, cli) = (harness.service(), cli());
+    let (a, b) = (harness.admin().await, harness.admin().await);
+    service
+        .disable_user(&cli, b.user_id, reason("Away"))
+        .await
+        .expect("disable");
+    let last = AdminError::LastAdministrator;
+    let refusals = [
+        (
+            service.disable_user(&cli, a.user_id, reason("Away")).await,
+            &last,
+            "disable",
+        ),
+        (
+            service
+                .schedule_deletion(&cli, a.user_id, reason("Away"))
+                .await,
+            &AdminError::Deletion(DeletionError::LastAdministrator),
+            "delete",
+        ),
+        (
+            service.revoke_administrator(&cli, a.user_id).await,
+            &last,
+            "revoke",
+        ),
+    ];
+    for (refused, expected, case) in refusals {
+        assert_refused(&refused.expect_err(case), expected, case);
+    }
+
+    service.enable_user(&cli, b.user_id).await.expect("enable");
+    let mut held = harness.database.begin().await.expect("transaction");
+    held.administrators().lock().await.expect("lock");
+    let (disabled, revoked, ()) = tokio::join!(
+        service.disable_user(&cli, a.user_id, reason("Away")),
+        service.revoke_administrator(&cli, b.user_id),
+        async {
+            until_blocked(&mut held, 2).await;
+            held.commit().await.expect("commit");
+        }
+    );
+    assert!(
+        matches!(
+            (&disabled, &revoked),
+            (Ok(()), Err(AdminError::LastAdministrator))
+                | (Err(AdminError::LastAdministrator), Ok(()))
+        ),
+        "{disabled:?}, {revoked:?}"
+    );
 }
 
 /// Production's committed audit keys.
