@@ -5,7 +5,10 @@ debug binary `just rust build` makes, behind Caddy over HTTPS, as configured bel
 
 `settings.spec.ts` checks auth's own settings pages: renaming, adding and removing
 passkeys, a passkey ceremony that fails, the passkey confirmation the passkey
-script runs, devices, an email link's token and signing out.
+script runs, devices, an email link's token and signing out. It also removes a
+connected app, which then asks for consent again; reports a passkey in the
+security history as not the owner's, which signs out another device holding the
+same passkey and offers to remove it.
 
 `sign-in.spec.ts` signs in with a handle, after a handle this authenticator holds
 no passkey for is refused in the form. Every spec signs up through `/register`.
@@ -19,7 +22,11 @@ setting refused beside its input, the back-channel logout URI its overview shows
 once registered, the secret shown once, in an answer no cache
 keeps and nowhere in the URL, history or storage, and the app then signing a user
 in, redeeming the code with its secret. Its app runs on `https://console-e2e.test`,
-which the test serves as `oidc.spec.ts` does its client.
+which the test serves as `oidc.spec.ts` does its client. A second test rotates an
+app's secret with no grace, which leaves only the new one redeeming codes,
+changes its back-channel logout URI in its settings, which refuse an `http://`
+one beside its input, and clears it, then disables the app, which auth then
+refuses to sign anyone in to until it is enabled, and deletes it.
 
 `oidc.spec.ts` signs in through `browser-e2e`, a public, untrusted client at
 `https://browser-e2e.test` that may request `openid`, `profile` and `email`. No
@@ -78,8 +85,16 @@ http://127.0.0.1:4100/`, which prints the secret, there.
 
 Run `just preview` to build and deploy this checkout over HTTPS on piqueld. Set
 `E2E_AUTH_URL` to the printed auth origin, then run `just web test-browser`. If
-signup requires an invitation, provide an unused `E2E_INVITATION`. Previews allow
-registration without one.
+signup requires an invitation, as in CI, set `E2E_INVITE` to a command that
+prints a new signup link, e.g. `just auth invite create` with the deployment's
+configuration: every signup runs it. Previews allow registration without one.
+
+`E2E_MAIL_URL` names the API of a [Mailpit](https://mailpit.axllent.org) that
+receives the deployment's email, as CI's does over plain SMTP on its loopback
+address, `AUTH_SMTP_URL=smtp://127.0.0.1:1025`. The tests that confirm an
+address or follow a recovery link read the email there, and are skipped without
+it. A run sends three confirmation links, and auth sends at most ten an hour to
+one IP address, so reruns against one deployment wait between batches.
 
 `CHROMIUM_EXECUTABLE` can select an existing Chromium installation.
 `E2E_ALLOW_SELF_SIGNED_TLS=1` permits local test certificates only.
@@ -95,10 +110,26 @@ those external systems.
 through auth's handoff page, confirms a change with a passkey for the dashboard
 only, and disables an account, whose settings page then loses its session; signing
 out of the dashboard keeps the Piquel session, and signed out of both, a passkey
-sign-in on auth goes on to the dashboard. Set `E2E_ADMIN_URL` to the
-dashboard's origin and `E2E_GRANT_ADMIN` to a command that grants administrator
-rights to the handle appended to it, e.g. `just auth admin grant` with the
-deployment's configuration. Without them, the test is skipped.
+sign-in on auth goes on to the dashboard. Its other tests grant administrator
+rights from a search and revoke them, each change moving on the audit chain,
+which stays intact; create an invitation, whose link signs one account up once,
+and revoke another, which then signs nobody up, when `E2E_INVITE` is set; approve
+an origin for `browser-e2e-sdk`'s pages, which `/.well-known/webauthn` then
+lists, and remove it; and, with `E2E_MAIL_URL`, change an account's passkeys,
+addresses and connected apps on its owner's behalf, whose history shows each
+reason, and start a recovery whose link is mailed, then undo it. Support also
+renames a handle, which an owner may change only 30 days after signup: the new
+one signs in at once, and the old one no longer does. Set
+`E2E_ADMIN_URL` to the dashboard's origin and `E2E_GRANT_ADMIN` to a command
+that grants administrator rights to the handle appended to it, e.g. `just auth
+admin grant` with the deployment's configuration. Without them, the tests are
+skipped.
+
+`web.spec.ts` follows auth's footer to the policies on piquel.fr's web server,
+`apps/web`, which allow nothing but their stylesheet, its homepage to auth's
+pages, and a settings link sent before the settings moved to auth on to auth,
+with its fragment. CI runs it on `web.localhost`, and sets `AUTH_WEB_ORIGIN` to
+it. Set `E2E_WEB_URL` to its origin; without it, the test is skipped.
 
 `recovery.spec.ts` recovers an account as support does, against a deployment
 whose CLI it can run, as CI and previews are. `user recover` prints the link,

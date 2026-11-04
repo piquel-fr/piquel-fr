@@ -1,24 +1,81 @@
-import { expect, test } from '@playwright/test';
-import { execFileSync } from 'node:child_process';
-import { signedUp } from './helpers';
+import { expect, test, type Browser, type Page } from '@playwright/test';
+import {
+  addPasskeys,
+  addSecondPasskey,
+  authorization,
+  authUrl,
+  cli,
+  consent,
+  mailed,
+  mailUrl,
+  serveClient,
+  signedUp,
+  signUp,
+  withPasskeys
+} from './helpers';
 
 const adminUrl = process.env.E2E_ADMIN_URL ?? '';
 // A command that makes the account named by its last argument an administrator,
 // e.g. `just auth admin grant` or `piquelctl app exec … -- auth-service admin grant`.
-const grantAdmin = process.env.E2E_GRANT_ADMIN;
+const grantAdmin = process.env.E2E_GRANT_ADMIN ?? '';
 
 /** Runs against a deployment with the dashboard, as CI's and previews have. */
+test.skip(
+  !adminUrl || !grantAdmin,
+  'Set E2E_ADMIN_URL and E2E_GRANT_ADMIN to run the dashboard tests.'
+);
+
+/** A browser of its own, signed up as `handle`, an administrator. */
+async function administrator(browser: Browser, handle: string): Promise<Page> {
+  const page = await signedUp(browser, handle);
+  cli(grantAdmin, handle);
+  return page;
+}
+
+/**
+ * Confirms the dashboard with a passkey, which its first change asks for: auth asks
+ * for one, for the dashboard only, then the dashboard shows the change's form.
+ */
+async function confirmDashboard(admin: Page): Promise<void> {
+  await expect(admin.getByRole('heading', { name: "Confirm it's you" })).toBeVisible();
+  await admin.getByRole('button', { name: 'Confirm with a passkey', exact: true }).click();
+  await admin.waitForURL((url) => url.origin === adminUrl);
+}
+
+/** Opens the dashboard's page of the account `handle`. */
+async function openAccount(admin: Page, handle: string): Promise<void> {
+  await admin.goto(`${adminUrl}/users?q=${handle}`);
+  await admin.getByRole('link', { name: `@${handle}`, exact: true }).click();
+}
+
+/** Adds `address` to the account signed in on `page`, confirmed with its emailed link. */
+async function addAddress(page: Page, address: string): Promise<void> {
+  await page.goto('/settings/emails');
+  await page.getByText('Add an address', { exact: true }).click();
+  await page.getByLabel('Email address', { exact: true }).fill(address);
+  await page.getByRole('button', { name: 'Send a confirmation link', exact: true }).click();
+  await expect(
+    page.getByText('We sent a confirmation link. Open it to confirm the address.')
+  ).toBeVisible();
+  await page.goto(await mailed(address, /https?:\/\/\S+\/settings\/emails\/verify#token=\S+/));
+  await page.getByRole('button', { name: 'Confirm this address', exact: true }).click();
+  await expect(page.getByRole('heading', { name: 'Address confirmed' })).toBeVisible();
+}
+
+/** The entry of the security history on `page` saying `change`, made by an administrator for `reason`. */
+function entry(page: Page, change: string, reason: string) {
+  return page
+    .getByRole('listitem')
+    .filter({ hasText: change })
+    .filter({ hasText: `By a Piquel administrator: “${reason}”` })
+    .first();
+}
+
 test('an administrator disables a user from the dashboard, and the user is signed out', async ({
   browser
 }) => {
-  test.skip(
-    !adminUrl || !grantAdmin,
-    'Set E2E_ADMIN_URL and E2E_GRANT_ADMIN to run the dashboard test.'
-  );
   const suffix = Date.now().toString(36);
-  const admin = await signedUp(browser, `admin-${suffix}`);
-  const [command, ...args] = (grantAdmin ?? '').split(' ');
-  execFileSync(command, [...args, `admin-${suffix}`], { stdio: 'inherit' });
+  const admin = await administrator(browser, `admin-${suffix}`);
   const user = await signedUp(browser, `user-${suffix}`);
 
   // Auth's handoff page tells a non-administrator so, and hands nothing off.
@@ -27,13 +84,10 @@ test('an administrator disables a user from the dashboard, and the user is signe
   await expect(user.getByRole('table')).toHaveCount(0);
 
   // The administrator's passkey session hands off to the dashboard silently. A
-  // change needs the dashboard's own confirmation: auth asks for a passkey, for
-  // the dashboard only, then the dashboard shows the change's form.
-  await admin.goto(`${adminUrl}/users?q=user-${suffix}`);
-  await admin.getByRole('link', { name: `@user-${suffix}`, exact: true }).click();
+  // change needs the dashboard's own confirmation.
+  await openAccount(admin, `user-${suffix}`);
   await admin.getByRole('link', { name: 'Disable', exact: true }).click();
-  await expect(admin.getByRole('heading', { name: "Confirm it's you" })).toBeVisible();
-  await admin.getByRole('button', { name: 'Confirm with a passkey', exact: true }).click();
+  await confirmDashboard(admin);
   await admin.getByLabel('Reason').fill('Browser test');
   await admin.getByRole('button', { name: 'Disable', exact: true }).click();
   await expect(admin.getByText('Disabled', { exact: true })).toBeVisible();
@@ -51,17 +105,6 @@ test('an administrator disables a user from the dashboard, and the user is signe
   await admin.getByRole('button', { name: 'Enable', exact: true }).click();
   await dialog.getByRole('button', { name: 'Enable', exact: true }).click();
   await expect(admin.getByText('Active', { exact: true })).toBeVisible();
-
-  // Rights are granted from a search, each result confirming in its own dialog.
-  await admin.goto(`${adminUrl}/administrators/grant?q=${suffix}`);
-  await admin
-    .getByRole('button', { name: `Grant administrator rights: @user-${suffix}`, exact: true })
-    .click();
-  const grant = admin.getByRole('dialog', { name: 'Grant administrator rights' });
-  await expect(grant.getByText(`@user-${suffix}`)).toBeVisible();
-  await grant.getByRole('button', { name: 'Grant', exact: true }).click();
-  await expect(admin).toHaveURL(`${adminUrl}/administrators`);
-  await expect(admin.getByRole('link', { name: `@user-${suffix}`, exact: true })).toBeVisible();
 
   await user.goto('/settings');
   await expect(user.getByRole('link', { name: 'Sign in', exact: true })).toBeVisible();
@@ -84,4 +127,329 @@ test('an administrator disables a user from the dashboard, and the user is signe
   await admin.goto(`${adminUrl}/users`);
   await admin.getByRole('button', { name: 'Sign in with a passkey', exact: true }).click();
   await expect(admin.getByRole('heading', { name: 'Users', exact: true })).toBeVisible();
+});
+
+test('rights granted from the dashboard open it, until revoked, and the audit chain keeps both', async ({
+  browser
+}) => {
+  const suffix = Date.now().toString(36);
+  const admin = await administrator(browser, `granter-${suffix}`);
+  const user = await signedUp(browser, `grantee-${suffix}`);
+
+  // The chain's newest position, once every event so far is sealed, within seconds.
+  const newest = async () => {
+    await expect
+      .poll(
+        async () => {
+          await admin.goto(`${adminUrl}/audit`);
+          return admin.locator('dt:text-is("Unsealed") + dd').textContent();
+        },
+        { timeout: 15_000 }
+      )
+      .toBe('0');
+    await expect(admin.getByText('Intact', { exact: true })).toBeVisible();
+    await expect(admin.getByText('Broken', { exact: true })).toHaveCount(0);
+    // A point of the chain reads as its position, then its hash.
+    const point = await admin.locator('dt:text-is("Newest") + dd').textContent();
+    return Number(point?.split(' ')[0]);
+  };
+  const before = await newest();
+
+  // Rights are granted from a search, each result confirming in its own dialog.
+  await admin.goto(`${adminUrl}/administrators/grant?q=grantee-${suffix}`);
+  await confirmDashboard(admin);
+  await admin
+    .getByRole('button', { name: `Grant administrator rights: @grantee-${suffix}`, exact: true })
+    .click();
+  const grant = admin.getByRole('dialog', { name: 'Grant administrator rights' });
+  await expect(grant.getByText(`@grantee-${suffix}`)).toBeVisible();
+  await grant.getByRole('button', { name: 'Grant', exact: true }).click();
+  await expect(admin).toHaveURL(`${adminUrl}/administrators`);
+  const row = (handle: string) =>
+    admin
+      .getByRole('listitem')
+      .filter({ has: admin.getByRole('link', { name: `@${handle}`, exact: true }) });
+  await expect(row(`grantee-${suffix}`)).toBeVisible();
+  // Nobody changes their own rights.
+  await expect(row(`granter-${suffix}`).getByRole('button', { name: 'Revoke' })).toBeDisabled();
+  await expect(row(`granter-${suffix}`)).toContainText('You cannot change your own rights.');
+  await user.goto(`${adminUrl}/users`);
+  await expect(user.getByRole('heading', { name: 'Users', exact: true })).toBeVisible();
+  // The grant joined the audit chain, which still verifies.
+  const granted = await newest();
+  expect(granted).toBeGreaterThan(before);
+
+  await admin.goto(`${adminUrl}/administrators`);
+  await row(`grantee-${suffix}`).getByRole('button', { name: 'Revoke', exact: true }).click();
+  const revoke = admin.getByRole('dialog', { name: 'Revoke administrator rights' });
+  await revoke.getByRole('button', { name: 'Revoke', exact: true }).click();
+  await expect(admin).toHaveURL(`${adminUrl}/administrators`);
+  await expect(row(`grantee-${suffix}`)).toHaveCount(0);
+  // So did the revocation.
+  expect(await newest()).toBeGreaterThan(granted);
+  // The account keeps its session, but no longer reaches the dashboard.
+  await user.goto(`${adminUrl}/users`);
+  await expect(user.getByRole('heading', { name: 'This account has no access' })).toBeVisible();
+});
+
+test('an invitation from the dashboard signs one person up, and a revoked one nobody', async ({
+  browser
+}) => {
+  test.skip(!process.env.E2E_INVITE, 'Signup needs no invitation: set E2E_INVITE where it does.');
+  const suffix = Date.now().toString(36);
+  const admin = await administrator(browser, `inviter-${suffix}`);
+  /** Creates an invitation, valid for a day, and answers its link. */
+  const invite = async () => {
+    await admin.goto(`${adminUrl}/invitations`);
+    await admin.getByRole('link', { name: 'Invite someone', exact: true }).click();
+    await admin.getByLabel('Valid for').fill('1d');
+    await admin.getByRole('button', { name: 'Create link', exact: true }).click();
+    await expect(admin.getByRole('heading', { name: 'Invitation created' })).toBeVisible();
+    return admin.getByLabel('Signup link').inputValue();
+  };
+  /** Whether signing up as `handle` with `link`'s invitation is refused. */
+  const refused = async (link: string, handle: string) => {
+    const page = await withPasskeys(browser);
+    await page.goto(link);
+    await page.getByLabel('Handle', { exact: true }).fill(handle);
+    await page.getByLabel('Passkey name', { exact: true }).fill('Passkey');
+    await page.getByRole('button', { name: 'Create account with a passkey' }).click();
+    await expect(page.getByRole('alert')).toBeVisible();
+    await expect(page).toHaveURL(/\/register/);
+  };
+  await admin.goto(`${adminUrl}/invitations/new`);
+  await confirmDashboard(admin);
+  const first = await invite();
+  expect(new URL(first).origin).toBe(authUrl);
+
+  // The link signs one account up, once.
+  await signUp(await withPasskeys(browser), `invited-${suffix}`, 'Passkey', first);
+  await refused(first, `again-${suffix}`);
+
+  // A revoked link signs nobody up. The open invitation is the only one with a
+  // button: the redeemed one has none.
+  const second = await invite();
+  await admin.getByRole('link', { name: 'Done', exact: true }).click();
+  // Invitations list newest first.
+  await admin.getByRole('row').nth(1).getByRole('button', { name: 'Revoke', exact: true }).click();
+  await admin
+    .getByRole('dialog', { name: 'Revoke this invitation' })
+    .getByRole('button', { name: 'Revoke', exact: true })
+    .click();
+  await expect(admin).toHaveURL(`${adminUrl}/invitations`);
+  await expect(admin.getByRole('row').nth(1)).toContainText('Revoked');
+  await refused(second, `revoked-${suffix}`);
+});
+
+test('an origin approved from the dashboard is listed for passkeys until removed', async ({
+  browser
+}) => {
+  // `browser-e2e-sdk`, a trusted client, redirects to this origin.
+  const origin = 'https://sdk-e2e.test';
+  const admin = await administrator(browser, `origins-${Date.now().toString(36)}`);
+  /** The origins auth lists for browsers to accept passkeys on. */
+  const related = async () => {
+    const response = await admin.request.get(new URL('/.well-known/webauthn', authUrl).href);
+    return ((await response.json()) as { origins: string[] }).origins;
+  };
+  const card = admin
+    .locator('section')
+    .filter({ has: admin.getByRole('heading', { name: 'Browser E2E SDK browser-e2e-sdk' }) });
+  expect(await related()).not.toContain(origin);
+
+  await admin.goto(`${adminUrl}/clients`);
+  await card.getByRole('link', { name: 'Approve an origin', exact: true }).click();
+  await confirmDashboard(admin);
+  // An origin of none of the client's redirect URIs is refused, keeping what was typed.
+  const field = admin.getByLabel('Origin', { exact: true });
+  await field.fill('https://elsewhere-e2e.test');
+  await admin.getByRole('button', { name: 'Approve', exact: true }).click();
+  await expect(admin.getByRole('alert')).toBeVisible();
+  await expect(field).toHaveValue('https://elsewhere-e2e.test');
+  await field.fill(origin);
+  await admin.getByRole('button', { name: 'Approve', exact: true }).click();
+  await expect(admin).toHaveURL(`${adminUrl}/clients`);
+  await expect(card.getByText(origin, { exact: true })).toBeVisible();
+  expect(await related()).toContain(origin);
+
+  await card.getByRole('link', { name: 'Remove', exact: true }).click();
+  await expect(admin.getByText(`Client browser-e2e-sdk, origin ${origin}.`)).toBeVisible();
+  await admin.getByRole('button', { name: 'Remove', exact: true }).click();
+  await expect(admin).toHaveURL(`${adminUrl}/clients`);
+  await expect(card.getByText(origin, { exact: true })).toHaveCount(0);
+  expect(await related()).not.toContain(origin);
+});
+
+test("an administrator changes an account's passkeys, addresses and apps, and its owner sees why", async ({
+  browser
+}) => {
+  test.skip(!mailUrl, 'Set E2E_MAIL_URL to the API of the Mailpit receiving the email.');
+  // The `browser-e2e` public client's origin, which the test serves.
+  const client = 'https://browser-e2e.test';
+  const suffix = Date.now().toString(36);
+  const handle = `behalf-${suffix}`;
+  const [first, second] = [`first-${suffix}@e2e.test`, `second-${suffix}@e2e.test`];
+  const admin = await administrator(browser, `support-${suffix}`);
+
+  // The owner adds two addresses, a second passkey and an app.
+  const context = await browser.newContext();
+  const owner = await context.newPage();
+  const { cdp, authenticatorId } = await addPasskeys(context, owner);
+  await serveClient(context, cdp, client);
+  await signUp(owner, handle, 'First passkey');
+  await addAddress(owner, first);
+  await addAddress(owner, second);
+  const lost = await addSecondPasskey(owner, cdp, authenticatorId, 'Second passkey');
+  await owner.goto(authorization('browser-e2e', `${client}/callback`).url);
+  await consent(owner, 'Browser E2E', client);
+
+  // Every change asks why, beside its own form.
+  await openAccount(admin, handle);
+  await admin.getByRole('link', { name: 'Sign-in methods', exact: true }).click();
+  await confirmDashboard(admin);
+  await admin.getByRole('button', { name: 'Rename Second passkey', exact: true }).click();
+  await admin.getByLabel('Passkey name', { exact: true }).fill('Lost passkey');
+  await admin.getByLabel('Reason, shown to the owner in their history').fill('Named for the owner');
+  await admin.getByRole('button', { name: 'Save name', exact: true }).click();
+  await admin.getByRole('button', { name: 'Remove Lost passkey', exact: true }).click();
+  await admin.getByLabel('Reason, shown to the owner in their history').fill('Reported lost');
+  await admin.getByRole('button', { name: 'Confirm removal', exact: true }).click();
+  await expect(admin.getByRole('heading', { name: 'Passkeys 1', exact: true })).toBeVisible();
+
+  const tabs = admin.getByRole('navigation').filter({ hasText: 'Connected apps' });
+  await tabs.getByRole('link', { name: 'Email addresses', exact: true }).click();
+  // Making an address primary takes its reason on its own row.
+  const row = admin.getByRole('listitem').filter({ hasText: second });
+  await row.getByLabel('Reason, shown to the owner in their history').fill('Asked by the owner');
+  await row.getByRole('button', { name: `Make primary ${second}`, exact: true }).click();
+  await admin.getByRole('button', { name: `Remove ${first}`, exact: true }).click();
+  await admin.getByLabel('Reason, shown to the owner in their history').fill('Mailbox closed');
+  await admin.getByRole('button', { name: 'Confirm removal', exact: true }).click();
+  await expect(admin.getByText(first)).toHaveCount(0);
+
+  await tabs.getByRole('link', { name: 'Connected apps', exact: true }).click();
+  await admin.getByRole('button', { name: 'Remove access for Browser E2E', exact: true }).click();
+  await admin.getByLabel('Reason, shown to the owner in their history').fill('Unwanted app');
+  await admin.getByRole('button', { name: 'Remove access', exact: true }).click();
+  await expect(admin.getByText('No app has access to this account.')).toBeVisible();
+
+  // Removing a passkey signed the owner out. They sign in with the one left.
+  await owner.goto('/settings/sign-in');
+  await expect(owner.getByRole('heading', { name: 'Sign in to see your settings' })).toBeVisible();
+  await cdp.send('WebAuthn.removeVirtualAuthenticator', { authenticatorId: lost });
+  await cdp.send('WebAuthn.setAutomaticPresenceSimulation', { authenticatorId, enabled: true });
+  await owner.getByRole('link', { name: 'Sign in', exact: true }).click();
+  await owner.getByRole('button', { name: 'Sign in with a passkey', exact: true }).click();
+
+  // The owner's settings show the changes, and their history who made them, and why.
+  await expect(owner).toHaveURL('/settings/sign-in');
+  await expect(owner.getByRole('heading', { name: 'Passkeys 1', exact: true })).toBeVisible();
+  await owner.goto('/settings/emails');
+  await expect(owner.getByText(first)).toHaveCount(0);
+  await expect(owner.getByRole('listitem').filter({ hasText: second })).toContainText('Primary');
+  await owner.goto('/settings/apps');
+  await expect(owner.getByText('No apps have access to your account.')).toBeVisible();
+  await owner.goto('/settings/history');
+  for (const [change, reason] of [
+    ['Passkey renamed', 'Named for the owner'],
+    ['Passkey removed', 'Reported lost'],
+    [`Primary email address changed to ${second}`, 'Asked by the owner'],
+    ['Email address removed', 'Mailbox closed'],
+    ['App access withdrawn', 'Unwanted app']
+  ]) {
+    await expect(entry(owner, change, reason)).toBeVisible();
+  }
+});
+
+test('a recovery started from the dashboard mails its link, and the dashboard undoes it', async ({
+  browser
+}) => {
+  test.skip(!mailUrl, 'Set E2E_MAIL_URL to the API of the Mailpit receiving the email.');
+  const suffix = Date.now().toString(36);
+  const handle = `lost-${suffix}`;
+  const address = `${handle}@e2e.test`;
+  const admin = await administrator(browser, `rescuer-${suffix}`);
+  const owner = await signedUp(browser, handle);
+  // The link goes only to a verified primary address.
+  await addAddress(owner, address);
+
+  await openAccount(admin, handle);
+  await admin.getByRole('link', { name: 'Recover', exact: true }).click();
+  await confirmDashboard(admin);
+  const reason = 'Reason, shown to the owner in their history: what was asked, never the evidence';
+  await admin.getByLabel(reason).fill('Lost every passkey');
+  await admin.getByRole('button', { name: 'Send the recovery link', exact: true }).click();
+  await expect(admin.getByRole('heading', { name: handle, level: 1 })).toBeVisible();
+
+  // Whoever holds the mailbox adds a passkey with the link.
+  const recovering = await withPasskeys(browser);
+  await recovering.goto(await mailed(address, /https?:\/\/\S+\/recover#token=\S+/));
+  await recovering.getByRole('button', { name: 'Continue', exact: true }).click();
+  await recovering.getByLabel('Passkey name', { exact: true }).fill('Recovered passkey');
+  await recovering.getByRole('button', { name: 'Create a passkey', exact: true }).click();
+  await expect(
+    recovering.getByText('Your account is recovered. Your new passkey signs you in.')
+  ).toBeVisible();
+
+  // Support undoes it for an owner it confirmed: the recovery's passkey goes, and
+  // every session with it.
+  await admin.getByRole('link', { name: 'Undo recovery', exact: true }).click();
+  await admin.getByLabel(reason).fill('Not the owner');
+  await admin.getByRole('button', { name: 'Undo the recovery', exact: true }).click();
+  await recovering.reload();
+  await expect(recovering.getByRole('link', { name: 'Sign in', exact: true })).toBeVisible();
+
+  // The owner signs in with the passkey from before, and reads both in the history.
+  await owner.goto('/login');
+  await owner.getByRole('button', { name: 'Sign in with a passkey', exact: true }).click();
+  await expect(owner).toHaveURL('/settings');
+  await owner.goto('/settings/sign-in');
+  await expect(owner.getByRole('heading', { name: 'Passkeys 1', exact: true })).toBeVisible();
+  await owner.goto('/settings/history');
+  await expect(
+    entry(owner, 'Account recovery started by Piquel support', 'Lost every passkey')
+  ).toBeVisible();
+  await expect(entry(owner, 'Account recovery undone', 'Not the owner')).toBeVisible();
+});
+
+test('a handle support renames signs in at once, while the owner waits a month', async ({
+  browser
+}) => {
+  const suffix = Date.now().toString(36);
+  const admin = await administrator(browser, `renamer-${suffix}`);
+  const owner = await signedUp(browser, `old-${suffix}`);
+  // An owner changes their handle once every 30 days, counting from signup.
+  await owner.goto('/settings/sign-in');
+  const card = owner.getByRole('region', { name: 'Handle' });
+  await expect(card.getByRole('button', { name: 'Change handle', exact: true })).toBeDisabled();
+  await expect(card.getByText(/You can change it again on/)).toBeVisible();
+
+  // Support renames it without waiting, such as a handle that impersonates another.
+  await openAccount(admin, `old-${suffix}`);
+  await admin.getByRole('link', { name: 'Rename handle', exact: true }).click();
+  await confirmDashboard(admin);
+  await admin.getByLabel('New handle').fill(`new-${suffix}`);
+  await admin.getByLabel('Reason, shown to the owner in their history').fill('Impersonation');
+  await admin.getByRole('button', { name: 'Rename', exact: true }).click();
+  await expect(admin.getByText(`@new-${suffix}`, { exact: true })).toBeVisible();
+
+  await owner.reload();
+  await expect(card.getByText(`@new-${suffix}`, { exact: true })).toBeVisible();
+  await owner.goto('/settings/history');
+  await expect(entry(owner, 'Handle changed', 'Impersonation')).toBeVisible();
+
+  // The old handle signs nobody in; the new one does.
+  await owner.context().clearCookies();
+  await owner.goto('/login');
+  await owner.getByRole('button', { name: 'Use a handle instead', exact: true }).click();
+  const field = owner.getByLabel('Handle', { exact: true });
+  const signIn = owner.getByRole('button', { name: 'Sign in with a passkey', exact: true });
+  await field.fill(`old-${suffix}`);
+  await signIn.click();
+  await expect(owner.locator('form[data-passkey-sign-in]').getByRole('alert')).toHaveText(
+    'No active account has this handle.'
+  );
+  await field.fill(`new-${suffix}`);
+  await signIn.click();
+  await expect(owner).toHaveURL('/settings');
 });
