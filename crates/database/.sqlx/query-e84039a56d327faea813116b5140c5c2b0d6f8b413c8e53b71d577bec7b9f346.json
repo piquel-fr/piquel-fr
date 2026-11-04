@@ -1,0 +1,23 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE users u\n                SET display_name = $2, profile_version = u.profile_version + 1,\n                    updated_at = now()\n                FROM users old\n                WHERE u.id = $1 AND old.id = u.id AND old.display_name <> $2\n                RETURNING old.display_name",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "display_name",
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Text"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "e84039a56d327faea813116b5140c5c2b0d6f8b413c8e53b71d577bec7b9f346"
+}

@@ -172,6 +172,10 @@ fn event_kinds_match_their_serde_tags() {
             old: Personal::Value("a_b".into()),
             new: Personal::Value(Handle::parse("a-b").expect("handle")),
         },
+        DomainEvent::DisplayNameChanged {
+            old: Personal::Value("A B".into()),
+            new: Personal::Value("A. B.".into()),
+        },
         DomainEvent::HandleReleased {
             handle: Personal::Value(Handle::parse("a-b").expect("handle")),
         },

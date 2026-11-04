@@ -34,8 +34,8 @@ use crate::{
     handles,
     history::{HistoryPage, HistoryQuery},
     operations::operations,
-    passkey::Rename,
-    routes::{apps, emails, federation, history, passkey, sessions},
+    passkey::{DisplayName, Rename},
+    routes::{apps, emails, federation, history, passkey, profile, sessions},
     security::{RequestContext, SessionError},
     sessions::{Revoked, SessionItem},
 };
@@ -47,10 +47,12 @@ use axum::{
 };
 use chrono::{DateTime, Utc};
 use piquel_common::{
-    ClientId, EmailId, Handle, PasskeyId, SessionId,
+    ClientId, EmailId, Handle, PasskeyId, Personal, SessionId,
+    events::DomainEvent,
     protocol::api::{Identity, Passkey},
 };
 use piquel_repository::{Database, StoredUser};
+use serde::Deserialize;
 
 operations! {
     /// Every shared settings operation of the settings API. The owner's router
@@ -86,6 +88,8 @@ operations! {
         RemoveApp,
         /// Page through the account's security history.
         ViewHistory,
+        /// Change the display name.
+        ChangeDisplayName,
     }
 }
 
@@ -93,7 +97,8 @@ operations! {
 /// all, and the `account` command the shared ones. An operation only the owner may
 /// run takes the [`Owner`] it acts as, a shared change the [`Subject`] it acts on,
 /// and a read the [`Viewer`] it shows. Each operation lives with its setting in the
-/// passkey, federation, emails, sessions, history, grants or clients module.
+/// passkey, federation, emails, sessions, history, grants or clients module; the
+/// profile's live here.
 #[derive(Clone)]
 pub(crate) struct AccountService {
     /// Accounts, their settings and events.
@@ -129,10 +134,35 @@ impl AccountService {
             .map(Profile::from)
             .ok_or(SessionError::Missing)?)
     }
+
+    /// Changes the account's display name to `name`, trimmed, and bumps its profile version,
+    /// so relying parties refresh `name`. A name grants nothing, so the owner's
+    /// session is enough. The name the account already has changes nothing.
+    pub(crate) async fn change_display_name(
+        &self,
+        subject: &Subject,
+        name: String,
+    ) -> Result<(), AccountError> {
+        let name = DisplayName::parse(name.trim().to_owned())?;
+        let mut tx = self.database.begin().await?;
+        subject.lock(&mut tx).await?;
+        if let Some(old) = tx.users().rename(subject.user(), name.as_str()).await? {
+            tx.record(
+                &subject.context(),
+                Some(subject.user()),
+                DomainEvent::DisplayNameChanged {
+                    old: Personal::Value(old),
+                    new: Personal::Value(name.into()),
+                },
+            )
+            .await?;
+        }
+        subject.commit(tx).await
+    }
 }
 
 /// The account as auth's pages show it to the browser signed in to it: in the
-/// account's bar, on the sign-in and undo pages, and in its handle's settings.
+/// account's bar, on the sign-in and undo pages, and in its profile's settings.
 pub(crate) struct Profile {
     /// Its handle, the login name.
     pub(crate) handle: Handle,
@@ -152,6 +182,13 @@ impl From<StoredUser> for Profile {
             display_name: user.display_name,
         }
     }
+}
+
+/// A change to the account's profile, as the owner's route takes it.
+#[derive(Deserialize)]
+struct ProfileChange {
+    /// The new display name, validated by the operation.
+    display_name: String,
 }
 
 /// The owner's routes for the shared settings, at `/account`.
@@ -207,6 +244,7 @@ impl AccountApplication {
             Op::ListApps => (apps::LIST, get(Self::apps)),
             Op::RemoveApp => (apps::ITEM, delete(Self::remove_app)),
             Op::ViewHistory => (history::LIST, get(Self::history)),
+            Op::ChangeDisplayName => (profile::ITEM, patch(Self::change_display_name)),
         }
     }
 
@@ -332,6 +370,19 @@ impl AccountApplication {
         Path(client): Path<ClientId>,
     ) -> Result<StatusCode, AccountError> {
         app.service.remove_app(&subject, &client).await?;
+        Ok(StatusCode::NO_CONTENT)
+    }
+
+    /// Changes the display name. A name grants nothing, so the owner's session is
+    /// enough.
+    async fn change_display_name(
+        State(app): State<Self>,
+        subject: Subject,
+        Json(input): Json<ProfileChange>,
+    ) -> Result<StatusCode, AccountError> {
+        app.service
+            .change_display_name(&subject, input.display_name)
+            .await?;
         Ok(StatusCode::NO_CONTENT)
     }
 

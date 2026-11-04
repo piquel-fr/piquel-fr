@@ -274,6 +274,11 @@ impl EventRow<'_> {
             DomainEvent::HandleChanged { old, new } => Description::new("Handle changed")
                 .personal("from", &old)
                 .personal("to", &new),
+            DomainEvent::DisplayNameChanged { old, new } => {
+                Description::new("Display name changed")
+                    .personal("from", &old)
+                    .personal("to", &new)
+            }
             DomainEvent::HandleReleased { handle } => {
                 Description::new("Handle released for anyone to claim").personal("handle", &handle)
             }

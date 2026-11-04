@@ -94,6 +94,7 @@ impl DomainEvent {
             Self::AdministratorGranted {} => HistoryEntry::AdministratorGranted,
             Self::AdministratorRevoked {} => HistoryEntry::AdministratorRevoked,
             Self::HandleChanged { .. } => HistoryEntry::HandleChanged,
+            Self::DisplayNameChanged { .. } => HistoryEntry::DisplayNameChanged,
             Self::RecoveryStarted { .. } => HistoryEntry::RecoveryStarted,
             Self::RecoveryCompleted { passkey_id, .. } => HistoryEntry::Recovered {
                 passkey_id: *passkey_id,
@@ -263,6 +264,9 @@ pub enum HistoryEntry {
     /// The account's handle changed.
     #[serde(rename = "account.handle_changed")]
     HandleChanged,
+    /// The account's display name changed.
+    #[serde(rename = "account.display_name_changed")]
+    DisplayNameChanged,
     /// An operator started recovering the account.
     #[serde(rename = "account.recovery_started")]
     RecoveryStarted,
@@ -339,6 +343,7 @@ impl HistoryEntry {
             | Self::AdministratorGranted
             | Self::AdministratorRevoked
             | Self::HandleChanged
+            | Self::DisplayNameChanged
             | Self::AccountExported
             | Self::DeletionScheduled { .. }
             | Self::AccountRestored
@@ -381,6 +386,7 @@ impl HistoryEntry {
             | Self::AdministratorGranted
             | Self::AdministratorRevoked
             | Self::HandleChanged
+            | Self::DisplayNameChanged
             | Self::RecoveryStarted
             | Self::Recovered { .. }
             | Self::RecoveryUndone

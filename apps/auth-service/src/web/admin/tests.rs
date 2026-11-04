@@ -830,6 +830,54 @@ async fn administrators_change_an_accounts_settings_with_a_reason() {
     assert!(refused.contains("This is already the account"), "{refused}");
 }
 
+/// An administrator changes an account's display name from its page, with a
+/// reason, and the owner's history says who did and why. A blank name is refused
+/// beside the form, which keeps the reason typed.
+#[tokio::test]
+#[ignore = "requires TEST_DATABASE_URL"]
+async fn administrators_change_an_accounts_display_name() {
+    let harness = Harness::new().await;
+    let admin = harness.admin().await;
+    let owner = Browser::new_account(&harness.database).await;
+    let user = owner.user_id;
+    let account = format!("/users/{user}");
+    let name = format!("{account}/name");
+    let dashboard = harness.confirmed(&admin, &account, Utc::now()).await;
+    let page = html(harness.visit(&dashboard, &account).await).await;
+    assert!(
+        page.contains(&format!(r#"href="{name}">Change display name</a>"#)),
+        "{page}"
+    );
+    let post = async |fields: &[(&str, &str)]| {
+        let url = format!("{DASHBOARD}{name}");
+        dashboard
+            .submit(&harness.dashboard, &url, fields, OWN_PAGE)
+            .await
+    };
+
+    let reason = ("reason", "Asked by email");
+    let page = html(post(&[("display_name", " "), reason]).await).await;
+    assert!(page.contains("Choose a display name"), "{page}");
+    assert!(page.contains(r#"value="Asked by email""#), "{page}");
+
+    let done = post(&[("display_name", " Renamed by support "), reason]).await;
+    assert_eq!(redirect(&done), account);
+    let stored = harness
+        .database
+        .users()
+        .find_by_id(user)
+        .await
+        .expect("lookup")
+        .expect("user");
+    assert_eq!(stored.display_name, "Renamed by support");
+    let history = owner
+        .visit(&harness.auth.a, routes::page::settings::HISTORY)
+        .await;
+    let page = html(history).await;
+    assert!(page.contains("Display name changed"), "{page}");
+    assert!(page.contains("Asked by email"), "{page}");
+}
+
 /// An administrator's settings sidebar links the dashboard; nobody else's does.
 #[tokio::test]
 #[ignore = "requires TEST_DATABASE_URL"]

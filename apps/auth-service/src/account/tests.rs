@@ -204,6 +204,92 @@ async fn administrators_change_another_account_on_its_behalf() {
     assert_eq!(entry["reason"], REASON);
 }
 
+/// The owner and an administrator change the display name with the same
+/// operation, each recorded as theirs, the administrator's with their reason, and
+/// each bumping the profile version so apps refresh `name`. The name the account
+/// already has, once trimmed, changes nothing; a blank name, or another administrator's
+/// account, is refused.
+#[tokio::test]
+#[ignore = "requires TEST_DATABASE_URL"]
+async fn owners_and_administrators_change_the_display_name() {
+    let fixture = Fixture::new().await;
+    let database = &fixture.harness.database;
+    let browser = Browser::new_account(database).await;
+    let user = browser.user_id;
+    let service = &fixture.service;
+    let stored = async || {
+        let user = database.users().find_by_id(user).await.expect("lookup");
+        user.expect("user")
+    };
+    let original = stored().await;
+    let owner = Subject::from(browser.owner(database).await);
+    let admin = || Subject::operator(user, fixture.operator(Duration::seconds(10)), reason());
+
+    let rename = async |subject: &Subject, name: &str| {
+        service.change_display_name(subject, name.into()).await
+    };
+    rename(&owner, "Alice B").await.expect("owner");
+    rename(&admin(), "Alice C").await.expect("administrator");
+    rename(&admin(), " Alice C ")
+        .await
+        .expect("unchanged, once trimmed");
+    assert!(matches!(
+        rename(&owner, " ").await,
+        Err(AccountError::Passkey(PasskeyError::InvalidDisplayName))
+    ));
+    let other_admin = fixture.harness.admin().await.user_id;
+    let refused = Subject::operator(other_admin, fixture.operator(Duration::zero()), reason());
+    assert!(matches!(
+        rename(&refused, "Alice D").await,
+        Err(AccountError::Operator(AdminError::AdministratorTarget))
+    ));
+
+    let changed = stored().await;
+    assert_eq!(changed.display_name, "Alice C");
+    assert_eq!(changed.profile_version, original.profile_version + 2);
+    let history = database
+        .events()
+        .history_for_user(user, 20)
+        .await
+        .expect("history");
+    let recorded: Vec<_> = history
+        .iter()
+        .filter_map(|stored| match stored.event.known() {
+            Some(DomainEvent::DisplayNameChanged { old, new }) => Some((
+                old.clone(),
+                new.clone(),
+                stored.actor.clone(),
+                stored.reason.as_deref(),
+            )),
+            _ => None,
+        })
+        .collect();
+    let name = |name: &str| Personal::Value(name.to_owned());
+    assert_eq!(
+        recorded,
+        [
+            (
+                name("Alice B"),
+                name("Alice C"),
+                Actor::Admin {
+                    user_id: fixture.admin.user_id,
+                    session_id: fixture.admin.session_id,
+                },
+                Some(REASON),
+            ),
+            (
+                name(&original.display_name),
+                name("Alice B"),
+                Actor::User {
+                    user_id: user,
+                    session_id: Some(browser.session_id),
+                },
+                None,
+            ),
+        ]
+    );
+}
+
 impl AccountOperation {
     /// Runs this operation as `viewer`, if it reads. `None` for a change, which
     /// checks its operator before it commits. The match is exhaustive, so a new
@@ -227,7 +313,8 @@ impl AccountOperation {
             | Self::RemoveEmail
             | Self::RevokeSession
             | Self::RevokeOtherSessions
-            | Self::RemoveApp => return None,
+            | Self::RemoveApp
+            | Self::ChangeDisplayName => return None,
         })
     }
 }

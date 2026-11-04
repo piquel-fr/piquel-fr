@@ -114,9 +114,9 @@ owner is an `AccountService` operation: a change takes a `Subject`, the account 
 who acts on it, and a read a `Viewer`, the account and who reads it. The owner's
 settings pages and `/account` routes run them as the owner of the session cookie,
 the only way to act as an owner. The `auth-service account <user> …`
-command runs them as the operator at the terminal, and the dashboard's sign-in
-methods, email addresses, connected apps and security history pages call them
-in-process as an administrator, rendering the owner's own settings sections
+command runs them as the operator at the terminal, and the dashboard's display
+name, sign-in methods, email addresses, connected apps and security history
+pages call them in-process as an administrator, rendering the owner's own settings sections
 without what adds a way in, and asking for a reason with each change. All run the same safety
 rules: for example, one active passkey always remains, whoever removes the
 others.
@@ -131,6 +131,7 @@ signed out, and confirming with a passkey by the session it confirms.
 
 | Area | Shared | Owner only |
 | --- | --- | --- |
+| Display name | change | |
 | Passkeys | list, rename, remove | add, confirm |
 | Social identities | list, unlink | link |
 | Email addresses | list, choose the primary among verified, remove | add, verify |

@@ -1,4 +1,4 @@
-//! `/settings`: the handle, passkeys and social sign-in.
+//! `/settings`: the handle, display name, passkeys and social sign-in.
 
 use crate::{
     account::{AccountError, Owner, Subject},
@@ -10,7 +10,7 @@ use crate::{
     },
 };
 use piquel_ui::{
-    Audience, Checkbox, HandleRow, Messages, Notice, Section, SignInChange, SignInState, Tab,
+    Audience, Checkbox, Messages, Notice, ProfileRow, Section, SignInChange, SignInState, Tab,
 };
 use topcoat::{
     Error,
@@ -42,6 +42,11 @@ impl AccountPage for SignInMethods {
                 handle: Some(handle.clone()),
                 ..closed
             },
+            SignInChange::DisplayName { display_name } => SignInState {
+                changing_display_name: Checkbox(true),
+                display_name: Some(display_name.clone()),
+                ..closed
+            },
             SignInChange::Rename { id, friendly_name } => SignInState {
                 renaming: Some(*id),
                 name: Some(friendly_name.clone()),
@@ -71,6 +76,12 @@ impl AccountPage for SignInMethods {
             SignInChange::Handle { handle } => {
                 web.account.rename_handle(&owner, &handle).await?;
                 Notice::HandleChanged
+            }
+            SignInChange::DisplayName { display_name } => {
+                web.account
+                    .change_display_name(&Subject::from(owner), display_name)
+                    .await?;
+                Notice::DisplayNameChanged
             }
             SignInChange::Link { provider } => {
                 let (to, cookie) = web
@@ -123,9 +134,10 @@ impl AccountPage for SignInMethods {
         let page = Child::new(view! { cx =>
             piquel_ui::sign_in_methods(
                 page: settings::SIGN_IN,
-                handle: Some(HandleRow {
+                profile: Some(ProfileRow {
                     handle: profile.handle.as_str(),
                     changeable_at: profile.handle_changeable_at,
+                    display_name: profile.display_name.as_str(),
                 }),
                 passkeys: &passkeys,
                 providers: &providers,

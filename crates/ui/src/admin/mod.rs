@@ -290,6 +290,8 @@ pub enum Change {
     UnsuspendClient,
     /// Deleting a client for good.
     DeleteClient,
+    /// Changing an account's display name, with a reason.
+    ChangeDisplayName,
     /// Freeing a released handle for anyone to claim.
     ReleaseHandle,
     /// Reserving a handle, with who or what it is kept for.
@@ -331,6 +333,7 @@ impl Change {
             Self::SuspendClient => "Suspend this client",
             Self::UnsuspendClient => "Lift this client's suspension",
             Self::DeleteClient => "Delete this client",
+            Self::ChangeDisplayName => "Change this account's display name",
             Self::ReleaseHandle => "Release this handle",
             Self::ReserveHandle => "Reserve a handle",
             Self::UnreserveHandle => "Remove this reservation",
@@ -382,6 +385,9 @@ impl Change {
             }
             Self::ChangeHandle => {
                 "The account signs in and is shown under the new handle at once. Its old handle stays reserved for it: no other account can take it unless it is released on the Handles page, and the account can take it back."
+            }
+            Self::ChangeDisplayName => {
+                "The account is shown under the new name at once. Applications receive it as its name once they refresh its profile."
             }
             Self::ReleaseHandle => {
                 "Anyone can claim the handle again, such as after a trademark dispute. The account that held it can no longer take it back."
@@ -442,6 +448,7 @@ impl Change {
             Self::SuspendClient => "Suspend",
             Self::UnsuspendClient => "Lift the suspension",
             Self::DeleteClient => "Delete for good",
+            Self::ChangeDisplayName => "Change",
             Self::ReleaseHandle => "Release",
             Self::ReserveHandle => "Reserve",
             Self::RetryDelivery => "Retry",
@@ -473,6 +480,7 @@ impl Change {
             | Self::EnableClient
             | Self::DisableClient
             | Self::SuspendClient
+            | Self::ChangeDisplayName
             | Self::ReleaseHandle
             | Self::ReserveHandle
             | Self::UnreserveHandle
@@ -510,7 +518,7 @@ impl Change {
     const fn reason(self) -> Option<&'static str> {
         match self {
             Self::Disable => Some("Reason"),
-            Self::Delete | Self::Restore | Self::ChangeHandle => {
+            Self::Delete | Self::Restore | Self::ChangeHandle | Self::ChangeDisplayName => {
                 Some("Reason, shown to the owner in their history")
             }
             Self::ReserveHandle => Some("Who or what it is kept for"),

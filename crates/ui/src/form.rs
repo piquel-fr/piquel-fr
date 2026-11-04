@@ -43,6 +43,8 @@ piquel_common::str_enum! {
     pub enum Notice {
         /// The handle changed.
         HandleChanged = "handle_changed",
+        /// The display name changed.
+        DisplayNameChanged = "display_name_changed",
         /// A passkey was added.
         PasskeyAdded = "passkey_added",
         /// A passkey was renamed.
@@ -86,6 +88,7 @@ impl Notice {
     pub(crate) const fn message(self) -> &'static str {
         match self {
             Self::HandleChanged => "Your handle changed.",
+            Self::DisplayNameChanged => "Your display name changed.",
             Self::PasskeyAdded => "The passkey was added.",
             Self::PasskeyRenamed => "The passkey was renamed.",
             Self::PasskeyRemoved => "The passkey was removed.",

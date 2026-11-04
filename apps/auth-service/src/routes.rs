@@ -108,6 +108,12 @@ pub(crate) mod apps {
     pub(crate) const ITEM: &str = "/account/apps/{client_id}";
 }
 
+/// The account's profile, which relying parties receive.
+pub(crate) mod profile {
+    /// Changes the display name.
+    pub(crate) const ITEM: &str = "/account/profile";
+}
+
 /// The audit chain's signed checkpoints, public so anyone can keep copies.
 pub(crate) mod audit {
     /// The newest checkpoint, as a signed note.

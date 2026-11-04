@@ -190,6 +190,7 @@ impl HistoryRow<'_> {
             HistoryEntry::AdministratorGranted => "Administrator rights granted".to_owned(),
             HistoryEntry::AdministratorRevoked => "Administrator rights removed".to_owned(),
             HistoryEntry::HandleChanged => "Handle changed".to_owned(),
+            HistoryEntry::DisplayNameChanged => "Display name changed".to_owned(),
             HistoryEntry::RecoveryStarted => {
                 "Account recovery started by Piquel support".to_owned()
             }

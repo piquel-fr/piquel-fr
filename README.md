@@ -260,6 +260,7 @@ just auth session revoke-all alice        # every session of the account
 just auth audit list --user alice --kind session_revoked
 just auth audit verify                    # recompute the tamper-evident chain
 just auth account alice passkeys list     # the account's settings, as its owner sees them
+just auth account alice name set "Alice B" --reason "Asked by email"
 just auth account alice passkeys revoke <passkey-id> --reason "Phone stolen"
 just auth account alice emails remove <email-id> --reason "Asked by email"
 just auth account alice apps remove <client-id> --reason "Impersonating app"
@@ -280,8 +281,9 @@ just auth account alice apps remove <client-id> --reason "Impersonating app"
   `sessions revoke-all` describe what they will change and ask for confirmation.
   Without a terminal they refuse unless given `--yes`.
 - `account <user>` reads and changes the settings administrators share with the
-  owner: passkeys, social identities, email addresses, sessions, connected apps
-  and the security history, with the owner's own operations. It never adds a way
+  owner: the display name, passkeys, social identities, email addresses,
+  sessions, connected apps and the security history, with the owner's own
+  operations. It never adds a way
   to sign in or an address. Every change needs `--reason`, which the owner sees in
   their history; reads are recorded as views, which only the audit shows, not the
   owner. See
@@ -698,7 +700,10 @@ explains how to choose a requirement and handle the challenge.
   [handles.md](docs/security/handles.md)).
   The sign-in methods settings change the handle, which needs a passkey
   confirmation like other sensitive changes and is refused within 30 days of the
-  last change, saying when it may change again.
+  last change, saying when it may change again. They change the display name
+  too, which grants nothing, so it needs only ordinary login and no cooldown
+  (`PATCH /account/profile` with `{"display_name": …}`). Either bumps the profile
+  version, so relying parties refresh `preferred_username` or `name`.
 - Social-first signup remains pending until its first passkey is committed. Only
   a registration that names the pending identity shown on the signup page attaches
   it; plain registration ignores it. A social login can never replace an
@@ -711,8 +716,8 @@ explains how to choose a requirement and handle the challenge.
   the confirmation and is never extended by use, and it never applies to another
   session. Without one, a page asks for the passkey before it posts the change, or,
   for a client's URIs, once the change is refused; the API answers `403` with
-  `"code": "step_up_required"` and `max_age`. Reads, renaming a passkey and a
-  client's other settings need only ordinary login.
+  `"code": "step_up_required"` and `max_age`. Reads, renaming a passkey, changing
+  the display name and a client's other settings need only ordinary login.
 - Matching verified email suggests linking; it never grants account access.
   Linking requires possession of the provider account and the target account's
   passkey confirmation. Explicit linking, started from settings, permits
