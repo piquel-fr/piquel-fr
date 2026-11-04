@@ -24,5 +24,5 @@ unchecked `sqlx::query`.
 
 `just db test` ends with `just db prepare-check`, which runs
 `cargo sqlx prepare --check` against the migrated schema, so a migration that
-breaks a cached query fails even when no test runs that query. CI runs the same
-check after its database tests.
+breaks a cached query fails even when no test runs that query, as does a cached
+query the code no longer uses. CI runs the same check after its database tests.
