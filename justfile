@@ -20,14 +20,14 @@ alias format := fmt
 alias preview := infra::preview
 alias preview-delete := infra::preview-delete
 
-validate: fmt-check lint check test web::test doc doc-test audit
+validate: fmt-check lint unused check test web::test doc doc-test audit
 
 install:
     @pnpm install --frozen-lockfile
 
 # Cargo tools used by the test, coverage, audit and database recipes.
 install-tools: db::install-sqlx
-    @cargo install --locked cargo-nextest cargo-llvm-cov cargo-deny
+    @cargo install --locked cargo-nextest cargo-llvm-cov cargo-deny cargo-machete
 
 # The release auth-service executable.
 build: (rust::build "--release")
@@ -40,6 +40,9 @@ fmt-check: rust::fmt-check web::fmt-check
 lint: rust::lint web::lint
 
 check: rust::check web::check
+
+# Unused Rust dependencies, and unused web files, exports and dependencies.
+unused: rust::unused web::unused
 
 # Extra nextest arguments can select a package or test expression.
 [positional-arguments]

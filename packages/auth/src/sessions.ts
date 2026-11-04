@@ -162,7 +162,7 @@ export type StoredLogin = Tokens & {
 };
 
 /** @internal A login waiting for its callback, with where to send the user afterwards. */
-export type PendingAuthorization = {
+type PendingAuthorization = {
   /** The PKCE verifier, `state` and `nonce` of the login. */
   login: PendingLogin;
   /** Where the user goes once signed in, a checked same-origin path. */
@@ -185,7 +185,7 @@ export type Session = {
  * (`changed`); a lease expired without being given back, so auth may have rotated the
  * refresh token and the session must end (`abandoned`); or the session is gone.
  */
-export type Lease =
+type Lease =
   { kind: 'acquired'; until: number } | { kind: 'busy' | 'changed' | 'abandoned' | 'missing' };
 
 /** A count from 0, such as a time in milliseconds. */

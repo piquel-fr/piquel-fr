@@ -727,22 +727,23 @@ explains how to choose a requirement and handle the challenge.
 ## Validation
 
 `just` runs `validate` by default.
-`just install` installs the web tools, Prettier, ESLint, tsc and Playwright, which
-need Node 24+ and pnpm (the workspace pins its version).
-`just install-tools` installs `cargo-nextest`, `cargo-llvm-cov`, `cargo-deny` and
-`sqlx-cli`. The `db` recipes and `just coverage` also need the PostgreSQL 18
-server binaries (`initdb`, `pg_ctl`).
+`just install` installs the web tools, Prettier, ESLint, tsc, knip and Playwright,
+which need Node 24+ and pnpm (the workspace pins its version).
+`just install-tools` installs `cargo-nextest`, `cargo-llvm-cov`, `cargo-deny`,
+`cargo-machete` and `sqlx-cli`. The `db` recipes and `just coverage` also need the
+PostgreSQL 18 server binaries (`initdb`, `pg_ctl`).
 Recipes are grouped into `rust`, `web`, `db`, `auth` and `infra` modules under
 `just/`; `just --list --list-submodules` shows every recipe. The root `fmt`,
-`fmt-check`, `lint`, `check` and `audit` run the same recipe in `rust` and `web`.
+`fmt-check`, `lint`, `unused`, `check` and `audit` run the same recipe in `rust` and `web`.
 Use individual recipes while iterating:
 
 | Task | Recipe |
 | --- | --- |
-| Full validation (format, Clippy/ESLint, Rust/TypeScript checks, Rust and SDK unit tests, doc tests, audits) | `just validate` |
+| Full validation (format, Clippy/ESLint, unused code and dependencies, Rust/TypeScript checks, Rust and SDK unit tests, doc tests, audits) | `just validate` |
 | Format Rust and web / check formatting | `just fmt` / `just fmt-check` |
 | Rust / TypeScript checks (tsc, the passkey script's JSDoc types included) | `just rust check` / `just web check` |
 | Clippy and ESLint, warnings denied; `publint` and `attw` on the built TypeScript SDK | `just lint` (`just rust lint` / `just web lint`) |
+| Unused Rust dependencies (cargo-machete); unused web files, exports and dependencies (knip, entry points in `knip.json`) | `just unused` (`just rust unused` / `just web unused`) |
 | Regenerate the SDK vectors / the TypeScript SDK's wire types | `just sdk-vectors` / `just sdk-types` |
 | Unit tests / focused package tests | `just test` / `just test -p auth-service` |
 | TypeScript SDK tests with coverage, the shared vectors included / the built SDK in Node, Bun and workerd | `just web test` / `just web smoke` |

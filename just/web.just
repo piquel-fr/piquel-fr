@@ -49,5 +49,9 @@ browser-client:
         --redirect-uri http://127.0.0.1:4100/auth/callback --post-logout-uri http://127.0.0.1:4100/ \
         --secret env://E2E_SERVER_CLIENT_SECRET
 
+# Unused files, exports and dependencies, by knip; knip.json lists its entry points.
+unused:
+    @pnpm unused
+
 audit:
     @pnpm audit

@@ -1,8 +1,9 @@
 # Continuous integration for piquel.fr. Every job runs the same `just` recipes
 # as local validation:
 #
-#   checks -> Rust formatting and the Rust dependency audit, which compile nothing
-#   web    -> Prettier, tsc and ESLint, the passkey script included, the
+#   checks -> Rust formatting, unused Rust dependencies and the Rust dependency
+#             audit, which compile nothing
+#   web    -> Prettier, tsc, ESLint and knip, the passkey script included, the
 #             TypeScript SDK's package checks, tests with coverage and runtime
 #             smoke in Node, Bun and workerd, and the web dependency audit
 #   rust   -> Clippy, unit and database tests against PostgreSQL with
@@ -94,8 +95,9 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       - uses: taiki-e/install-action@3f74d7c16a4242f1c95561e98edc25d36adb4375 # v2
         with:
-          tool: just,cargo-deny
+          tool: just,cargo-deny,cargo-machete@0.9.2
       - run: just rust fmt-check
+      - run: just rust unused
       - if: needs.changes.outputs.deps == 'true'
         run: just rust audit
 
@@ -123,6 +125,7 @@ jobs:
       - run: just web fmt-check
       - run: just web check
       - run: just web lint
+      - run: just web unused
       - run: just web test
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
         with:
