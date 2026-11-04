@@ -253,6 +253,35 @@ async fn google_signed_tokens_require_well_typed_trusted_issuer_and_audience() {
     assert!(verify(&claims).await.is_err());
 }
 
+/// Google vouches only for the addresses it hosts, Gmail's and its Workspace
+/// domain's, and only once it verified them.
+#[test]
+fn google_is_authoritative_only_for_verified_addresses_it_hosts() {
+    let authoritative = |email: &str, verified: bool, hd: Option<&str>| {
+        serde_json::from_value::<GoogleClaims>(serde_json::json!({
+            "iss": "https://accounts.google.com", "aud": "client", "sub": "subject",
+            "iat": 0, "exp": 0, "nonce": "nonce",
+            "email": email, "email_verified": verified, "hd": hd,
+        }))
+        .expect("claims")
+        .authoritative()
+    };
+    assert!(authoritative("ada@gmail.com", true, None));
+    assert!(authoritative("ada@Example.com", true, Some("example.com")));
+    assert!(!authoritative("ada@gmail.com", false, None));
+    assert!(!authoritative("ada@example.com", true, None));
+    assert!(!authoritative(
+        "ada@example.com",
+        true,
+        Some("other.example")
+    ));
+    assert!(!authoritative(
+        "ada@sub.example.com",
+        true,
+        Some("example.com")
+    ));
+}
+
 /// Resolved credentials fail at startup with variable context and the original source.
 #[test]
 fn provider_secrets_fail_early_with_context() {

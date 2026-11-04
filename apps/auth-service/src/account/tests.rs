@@ -789,7 +789,7 @@ impl Confirming {
                 service.remove_email(&subject, state.address).await
             }
             Self::LinkIdentity => service
-                .link_identity(&owner, &state.pending)
+                .link_identity(&owner, &state.email, &state.pending)
                 .await
                 .map(drop),
             Self::UnlinkIdentity => {

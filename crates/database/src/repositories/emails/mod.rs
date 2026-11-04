@@ -313,6 +313,33 @@ impl EmailRepository<'_> {
         Ok(())
     }
 
+    /// Whether an account other than `user_id` holds `normalized` verified: an
+    /// active one, or one scheduled for deletion, which keeps its addresses so
+    /// that restoring it finds them. Verifying the address for `user_id` would
+    /// fail meanwhile.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`DatabaseError`] if the query fails.
+    pub async fn is_owned_elsewhere(
+        &mut self,
+        normalized: &str,
+        user_id: UserId,
+    ) -> Result<bool, DatabaseError> {
+        run!(
+            self,
+            fetch_one,
+            sqlx::query_scalar!(
+                r#"SELECT EXISTS (
+                    SELECT 1 FROM active_verified_email_ownership
+                    WHERE normalized_email = $1 AND user_id <> $2
+                ) AS "owned!""#,
+                normalized,
+                user_id.as_uuid(),
+            )
+        )
+    }
+
     /// Finds the verified address owned by an active account, preferring its
     /// primary row.
     ///

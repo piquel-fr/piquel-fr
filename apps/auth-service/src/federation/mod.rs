@@ -548,6 +548,7 @@ impl FederationApplication {
                 issuer: self.endpoints[&provider].issuer.into(),
                 subject: identity.subject,
                 email: identity.email,
+                email_authoritative: identity.email_authoritative,
                 display_name: identity.display_name,
                 picture_url: identity.picture.map(|picture| picture.as_str().to_owned()),
                 return_to,

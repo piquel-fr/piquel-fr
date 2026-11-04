@@ -4,7 +4,7 @@
 use super::moment;
 use crate::layout::{Pager, page_head, pager};
 use piquel_common::{
-    AuthenticationMethod, Personal,
+    AuthenticationMethod, Personal, Provider,
     admin::Event,
     events::{
         Actor, CodeRedemptionFailure, DomainEvent, GrantRevocation, JobName, RecordedOrigin,
@@ -206,11 +206,14 @@ impl EventRow<'_> {
             DomainEvent::IdentityUnlinked { provider } => {
                 Description::new(format!("{} sign-in unlinked", provider.name()))
             }
-            DomainEvent::EmailAdded { email_id, address } => {
-                Description::new("Email address added, unverified")
-                    .personal("address", &address)
-                    .with("email", email_id)
-            }
+            DomainEvent::EmailAdded {
+                email_id,
+                address,
+                provider,
+            } => Description::new("Email address added")
+                .personal("address", &address)
+                .with("email", email_id)
+                .maybe("from", provider.map(Provider::name)),
             DomainEvent::EmailVerified { email_id } => {
                 Description::new("Email address confirmed").with("email", email_id)
             }

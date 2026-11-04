@@ -3,7 +3,7 @@
 use super::{FederationRepository, RepositoryExecutor};
 use crate::DatabaseError;
 use chrono::{DateTime, Utc};
-use piquel_common::{EmailId, Provider, SessionId, TokenId, UserId, protocol::api::Identity};
+use piquel_common::{Provider, SessionId, TokenId, UserId, protocol::api::Identity};
 
 /// An in-flight redirect to a social login provider, bound to the initiating
 /// browser.
@@ -106,8 +106,12 @@ pub struct PendingFederation {
     pub issuer: String,
     /// Provider subject; 1 to 255 characters.
     pub subject: String,
-    /// Email the provider reported, if any.
+    /// Email the provider reported verified, if any.
     pub email: Option<String>,
+    /// Whether the provider is authoritative for `email`: it hosts the mailbox,
+    /// so the address cannot have changed owners since the provider verified it.
+    /// Only such an address is imported verified.
+    pub email_authoritative: bool,
     /// Display name suggested by the provider.
     pub display_name: String,
     /// URL of the profile picture the provider reported, if any, on one of its
@@ -339,15 +343,16 @@ impl FederationRepository<'_> {
             sqlx::query!(
                 "INSERT INTO pending_federation (
                     id, browser_digest, provider_name, issuer, subject, email,
-                    display_name, return_to, link_user_id, link_session_id, expires_at,
-                    picture_url
-                ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)",
+                    email_authoritative, display_name, return_to, link_user_id,
+                    link_session_id, expires_at, picture_url
+                ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)",
                 input.id.as_uuid(),
                 input.browser_digest,
                 input.provider.as_str(),
                 input.issuer,
                 input.subject,
                 input.email,
+                input.email_authoritative,
                 input.display_name,
                 input.return_to,
                 input.link_user_id.map(UserId::as_uuid),
@@ -375,7 +380,7 @@ impl FederationRepository<'_> {
                 PendingFederation,
                 r#"SELECT
                     id AS "id: TokenId", browser_digest, provider_name AS "provider: Provider",
-                    issuer, subject, email, display_name, return_to,
+                    issuer, subject, email, email_authoritative, display_name, return_to,
                     link_user_id AS "link_user_id: UserId",
                     link_session_id AS "link_session_id: SessionId", expires_at, picture_url
                 FROM pending_federation
@@ -412,7 +417,7 @@ impl FederationRepository<'_> {
                 AND expires_at > now()
                 RETURNING
                     id AS "id: TokenId", browser_digest, provider_name AS "provider: Provider",
-                    issuer, subject, email, display_name, return_to,
+                    issuer, subject, email, email_authoritative, display_name, return_to,
                     link_user_id AS "link_user_id: UserId",
                     link_session_id AS "link_session_id: SessionId", expires_at, picture_url"#,
                 id.as_uuid(),
@@ -436,52 +441,6 @@ impl FederationRepository<'_> {
                 WHERE browser_digest = $1
                 AND consumed_at IS NULL",
                 digest,
-            )
-        )?;
-        Ok(())
-    }
-
-    /// Adds `email` as the verified primary address of an account that has
-    /// none. Does nothing if the account already has a verified address or has
-    /// `email` waiting for verification, or another active account owns `email`:
-    /// a provider observation never replaces the first local address or takes
-    /// another account's address.
-    ///
-    /// # Errors
-    ///
-    /// Returns [`DatabaseError`] if the query fails.
-    pub async fn set_first_email(
-        &mut self,
-        user_id: UserId,
-        email: &str,
-    ) -> Result<(), DatabaseError> {
-        run!(
-            self,
-            execute,
-            sqlx::query!(
-                "INSERT INTO user_emails (id, user_id, normalized_email, verified_at, is_primary)
-                SELECT $1, $2, $3, now(), true
-                WHERE NOT EXISTS (
-                    SELECT 1
-                    FROM user_emails
-                    WHERE user_id = $2
-                    AND verified_at IS NOT NULL
-                )
-                AND NOT EXISTS (
-                    SELECT 1
-                    FROM user_emails
-                    WHERE user_id = $2
-                    AND normalized_email = $3
-                )
-                AND NOT EXISTS (
-                    SELECT 1
-                    FROM active_verified_email_ownership
-                    WHERE normalized_email = $3
-                    AND user_id <> $2
-                )",
-                EmailId::new().as_uuid(),
-                user_id.as_uuid(),
-                email,
             )
         )?;
         Ok(())

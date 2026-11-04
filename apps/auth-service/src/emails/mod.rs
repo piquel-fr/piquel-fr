@@ -18,13 +18,14 @@ use crate::{
 use axum::{Json, Router, extract::State, http::StatusCode, routing::post};
 use chrono::{Duration, Utc};
 use piquel_common::{
-    EmailId, Personal, UserId,
+    EmailId, ErrorChain, Personal, Provider, UserId,
     email::NormalizedEmail,
     events::{Actor, DomainEvent, EventContext},
 };
 use piquel_crypto::{CryptoError, Digest, Secret};
 use piquel_repository::{
-    Database, DatabaseError, DatabaseTransaction, InsertUnverifiedEmail, StoredEmail,
+    Database, DatabaseError, DatabaseTransaction, InsertUnverifiedEmail, InsertVerifiedEmail,
+    PendingFederation, StoredEmail,
 };
 use serde::{Deserialize, Serialize};
 use std::{net::IpAddr, time::Duration as StdDuration};
@@ -238,6 +239,171 @@ impl EmailApplication {
         }
         Ok(())
     }
+
+    /// Refuses another address for an account that holds `count`.
+    const fn room(count: usize) -> Result<(), EmailError> {
+        if count >= MAX_EMAILS {
+            return Err(EmailError::TooMany { max: MAX_EMAILS });
+        }
+        Ok(())
+    }
+
+    /// Imports the address `pending`'s provider verified into `user_id`'s
+    /// account, as `context`'s from `client_ip`, while linking that identity in
+    /// `tx`. It joins verified and primary when the provider is authoritative for
+    /// it; otherwise unverified, with its verification email, as when the owner
+    /// adds it, since it may have changed owners since the provider verified it.
+    /// Only an account with no verified address and without it takes one, and
+    /// never one another account holds verified, even while that one is being
+    /// deleted: a provider never replaces the owner's own address or takes
+    /// someone else's. An address that would be one
+    /// too many, or whose link cannot be sent now, is skipped, since signing in
+    /// matters more: the owner can add it later. Another account verifying the
+    /// same address in the same instant still fails the ownership trigger, and so
+    /// the transaction; retrying skips the address.
+    pub(crate) async fn import(
+        tx: &mut DatabaseTransaction<'_>,
+        context: &EventContext,
+        config: &EmailConfig,
+        client_ip: IpAddr,
+        user_id: UserId,
+        pending: &PendingFederation,
+    ) -> Result<(), EmailError> {
+        let Some(address) = &pending.email else {
+            return Ok(());
+        };
+        let address = NormalizedEmail::parse(address).map_err(EmailError::Invalid)?;
+        let emails = tx.emails().list(user_id).await?;
+        if emails
+            .iter()
+            .any(|email| email.verified_at.is_some() || email.normalized_email == address.as_str())
+            || tx
+                .emails()
+                .is_owned_elsewhere(address.as_str(), user_id)
+                .await?
+        {
+            return Ok(());
+        }
+        let added = Added {
+            context,
+            user_id,
+            address: &address,
+            provider: Some(pending.provider),
+        };
+        let imported = match Self::room(emails.len()) {
+            Ok(()) if pending.email_authoritative => added.verified(tx).await,
+            Ok(()) => added.unverified(tx, config, client_ip).await.map(drop),
+            Err(error) => Err(error),
+        };
+        match imported {
+            Err(
+                error @ (EmailError::TooMany { .. }
+                | EmailError::Disabled
+                | EmailError::Unsendable(_)
+                | EmailError::RateLimited { .. }),
+            ) => {
+                tracing::info!(error = %ErrorChain(&error), provider = pending.provider.as_str(), "provider address not imported");
+                Ok(())
+            }
+            imported => imported,
+        }
+    }
+}
+
+/// An address joining an account, as `context`'s, and the provider it is
+/// imported from, if any. Every address joins through it, so each is recorded
+/// and counted the same way.
+struct Added<'a> {
+    /// Who adds it.
+    context: &'a EventContext,
+    /// The account it joins.
+    user_id: UserId,
+    /// The address.
+    address: &'a NormalizedEmail,
+    /// The provider it is imported from.
+    provider: Option<Provider>,
+}
+
+impl Added<'_> {
+    /// Adds the address unverified, and records it with its verification email,
+    /// counted against the hourly limits of the account, `client_ip` and the
+    /// mailbox. Returns its ID.
+    async fn unverified(
+        self,
+        tx: &mut DatabaseTransaction<'_>,
+        config: &EmailConfig,
+        client_ip: IpAddr,
+    ) -> Result<EmailId, EmailError> {
+        if config.smtp.is_none() {
+            return Err(EmailError::Disabled);
+        }
+        // The sender must be able to send to it, or its link would never arrive.
+        self.address
+            .as_str()
+            .parse::<lettre::Address>()
+            .map_err(EmailError::Unsendable)?;
+        EmailApplication::limit(tx, self.user_id, client_ip, self.address).await?;
+        let id = EmailId::new();
+        let digest = config
+            .verification_keys
+            .token(id)
+            .map_err(EmailError::Crypto)?
+            .digest();
+        tx.emails()
+            .insert_unverified(&InsertUnverifiedEmail {
+                id,
+                user_id: self.user_id,
+                normalized_email: self.address.as_str(),
+                secret_digest: digest.as_bytes(),
+                expires_at: Utc::now() + VERIFICATION_LIFETIME,
+            })
+            .await?;
+        self.record(tx, id).await?;
+        Ok(id)
+    }
+
+    /// Adds the address verified, as the primary one of an account that has
+    /// none, which a provider authoritative for it vouches for.
+    async fn verified(self, tx: &mut DatabaseTransaction<'_>) -> Result<(), EmailError> {
+        let id = EmailId::new();
+        tx.emails()
+            .insert_verified(&InsertVerifiedEmail {
+                id,
+                user_id: self.user_id,
+                normalized_email: self.address.as_str().to_owned(),
+                is_primary: true,
+                verified_at: Utc::now(),
+            })
+            .await?;
+        self.record(tx, id).await?;
+        let subject = Some(self.user_id);
+        tx.record(
+            self.context,
+            subject,
+            DomainEvent::EmailVerified { email_id: id },
+        )
+        .await?;
+        let primary = DomainEvent::PrimaryEmailChanged {
+            email_id: id,
+            previous_email_id: None,
+        };
+        tx.record(self.context, subject, primary).await?;
+        Ok(())
+    }
+
+    /// Records the address's addition as `id`.
+    async fn record(
+        &self,
+        tx: &mut DatabaseTransaction<'_>,
+        id: EmailId,
+    ) -> Result<(), EmailError> {
+        let added = DomainEvent::EmailAdded {
+            email_id: id,
+            address: Personal::Value(self.address.clone()),
+            provider: self.provider,
+        };
+        Ok(tx.record(self.context, Some(self.user_id), added).await?)
+    }
 }
 
 /// The account's addresses. Any administrator may also list them, choose the
@@ -265,15 +431,7 @@ impl AccountService {
         config: &EmailConfig,
         address: &str,
     ) -> Result<EmailView, AccountError> {
-        if config.smtp.is_none() {
-            return Err(EmailError::Disabled.into());
-        }
         let address = NormalizedEmail::parse(address).map_err(EmailError::Invalid)?;
-        // The sender must be able to send to it, or its link would never arrive.
-        address
-            .as_str()
-            .parse::<lettre::Address>()
-            .map_err(EmailError::Unsendable)?;
         let user = owner.user();
         let context = owner.context();
         let mut tx = self.database.begin().await?;
@@ -290,34 +448,16 @@ impl AccountService {
             EmailApplication::delete(&mut tx, &context, user, existing.id).await?;
             count -= 1;
         }
-        if count >= MAX_EMAILS {
-            return Err(EmailError::TooMany { max: MAX_EMAILS }.into());
-        }
-        EmailApplication::limit(&mut tx, user, owner.request().client_ip, &address).await?;
-        let id = EmailId::new();
-        let digest = config
-            .verification_keys
-            .token(id)
-            .map_err(EmailError::Crypto)?
-            .digest();
-        tx.emails()
-            .insert_unverified(&InsertUnverifiedEmail {
-                id,
-                user_id: user,
-                normalized_email: address.as_str(),
-                secret_digest: digest.as_bytes(),
-                expires_at: Utc::now() + VERIFICATION_LIFETIME,
-            })
+        EmailApplication::room(count)?;
+        let added = Added {
+            context: &context,
+            user_id: user,
+            address: &address,
+            provider: None,
+        };
+        let id = added
+            .unverified(&mut tx, config, owner.request().client_ip)
             .await?;
-        tx.record(
-            &context,
-            Some(user),
-            DomainEvent::EmailAdded {
-                email_id: id,
-                address: Personal::Value(address.clone()),
-            },
-        )
-        .await?;
         tx.commit().await?;
         Ok(EmailView {
             id,

@@ -1,0 +1,26 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO pending_federation (\n                    id, browser_digest, provider_name, issuer, subject, email,\n                    email_authoritative, display_name, return_to, link_user_id,\n                    link_session_id, expires_at, picture_url\n                ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Bytea",
+        "Text",
+        "Text",
+        "Text",
+        "Text",
+        "Bool",
+        "Text",
+        "Text",
+        "Uuid",
+        "Uuid",
+        "Timestamptz",
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "a92f6a7c99e899e8fbe3ca1d71e7693b35fffe1bba3adeaaa1e1de0a05fb9ca2"
+}

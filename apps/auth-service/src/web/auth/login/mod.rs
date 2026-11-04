@@ -340,7 +340,7 @@ impl WebApplication {
                     .ok_or_else(|| ApiError::from(SessionError::Missing))?;
                 let (return_to, cookie) = self
                     .account
-                    .link_identity(&owner, headers(cx))
+                    .link_identity(&owner, &self.email, headers(cx))
                     .await
                     .map_err(ApiError::from)?;
                 let continuation = Continuation::new(&visit.query, Some(&return_to));

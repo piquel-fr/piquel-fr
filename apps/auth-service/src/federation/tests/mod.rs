@@ -35,6 +35,8 @@ struct TestApp {
     secret_file: std::path::PathBuf,
     /// Unique numeric subject returned by this fixture’s provider.
     subject: String,
+    /// Email settings that send, so imported addresses get their links.
+    email: crate::config::EmailConfig,
 }
 impl Drop for TestApp {
     /// Stops the fixture server and attempts to remove its temporary secret.
@@ -138,6 +140,10 @@ impl TestApp {
             task,
             secret_file,
             subject: subject.to_string(),
+            email: crate::config::EmailConfig::test(
+                &"https://auth.piquel.fr/".parse().expect("origin"),
+                true,
+            ),
         }
     }
     /// Runs a complete GitHub authorization start and bound callback.
@@ -229,12 +235,20 @@ impl TestApp {
         owner: Option<UserId>,
         email: Option<&str>,
     ) -> (PendingFederation, HeaderMap) {
-        let secret = Secret::generate().expect("browser secret");
-        let pending = PendingFederation {
+        self.pending_from(|pending| PendingFederation {
             email: email.map(str::to_owned),
             link_user_id: owner,
-            ..pending_sign_in(&secret)
-        };
+            ..pending
+        })
+        .await
+    }
+    /// Stores the browser-bound evidence `change` makes of a new GitHub signup's.
+    async fn pending_from(
+        &self,
+        change: impl FnOnce(PendingFederation) -> PendingFederation,
+    ) -> (PendingFederation, HeaderMap) {
+        let secret = Secret::generate().expect("browser secret");
+        let pending = change(pending_sign_in(&secret));
         self.app
             .database
             .federation()

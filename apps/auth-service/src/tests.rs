@@ -470,6 +470,7 @@ pub(crate) fn pending_sign_in(browser: &Secret) -> PendingFederation {
         issuer: "https://github.com".into(),
         subject: TokenId::new().to_string(),
         email: None,
+        email_authoritative: false,
         display_name: "Social account".into(),
         picture_url: None,
         return_to: routes::page::settings::HOME.into(),

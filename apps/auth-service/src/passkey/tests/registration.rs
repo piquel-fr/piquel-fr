@@ -62,6 +62,7 @@ async fn signup_applies_the_handle_rules() {
             origin: AUTH_ORIGIN.parse().expect("origin"),
             invite_required: true,
         },
+        &fixture.app.email,
         None,
         fixture.app.oidc.clone(),
     )

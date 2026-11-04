@@ -243,6 +243,10 @@ pub(super) struct VerifiedIdentity {
     pub(super) subject: String,
     /// Normalized verified email, if the provider gave a valid one.
     pub(super) email: Option<String>,
+    /// Whether the provider is authoritative for `email`, hosting its mailbox. A
+    /// provider verified an address once, and the address may have changed owners
+    /// since, as a lapsed domain does, unless the provider hosts it.
+    pub(super) email_authoritative: bool,
     /// Profile name proposed for onboarding, at most `MAX_DISPLAY_NAME_CHARS` long.
     pub(super) display_name: String,
     /// The profile picture the provider reported, if it is one of its own.
@@ -251,11 +255,11 @@ pub(super) struct VerifiedIdentity {
 
 impl VerifiedIdentity {
     /// Rejects unstorable subjects, drops invalid emails and pictures, and bounds
-    /// the display name.
+    /// the display name. The email comes with whether the provider hosts it.
     fn new(
         provider: Provider,
         subject: String,
-        email: Option<String>,
+        (email, authoritative): (Option<String>, bool),
         (name, fallback_name): (Option<String>, String),
         picture: Option<&str>,
     ) -> Result<Self, ProviderError> {
@@ -265,15 +269,17 @@ impl VerifiedIdentity {
         if subject.len() > MAX_SUBJECT_BYTES {
             return Err(ProviderError::SubjectTooLong(subject.len()));
         }
+        // An invalid optional email is dropped; email never proves account ownership.
+        let email = email.and_then(|email| {
+            NormalizedEmail::parse(&email)
+                .inspect_err(|error| tracing::debug!(%error, "ignored provider email"))
+                .ok()
+                .map(|email| email.as_str().to_owned())
+        });
         Ok(Self {
             subject,
-            // An invalid optional email is dropped; email never proves account ownership.
-            email: email.and_then(|email| {
-                NormalizedEmail::parse(&email)
-                    .inspect_err(|error| tracing::debug!(%error, "ignored provider email"))
-                    .ok()
-                    .map(|email| email.as_str().to_owned())
-            }),
+            email_authoritative: authoritative && email.is_some(),
+            email,
             display_name: name
                 .filter(|name| !name.trim().is_empty())
                 .unwrap_or(fallback_name)

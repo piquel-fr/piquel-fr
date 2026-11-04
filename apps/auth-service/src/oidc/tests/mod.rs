@@ -4,9 +4,7 @@ use super::*;
 use crate::config::TokenDigestKey;
 use crate::security::{BrowserCookie, RequestContext, Session};
 use crate::tests::{AUTH_ORIGIN, Replicas, TlsListener, location, parameter, until_blocked};
-use crate::{
-    AuthConfig, federation::FederationApplication, passkey::PasskeyApplication, web::WebApplication,
-};
+use crate::{AuthConfig, federation::FederationApplication, web::WebApplication};
 use axum::{
     body::{Body, to_bytes},
     http::{Method, Request, StatusCode},
@@ -148,8 +146,7 @@ impl Flow {
             )),
         )
         .expect("OIDC application");
-        let passkeys = PasskeyApplication::new(db.clone(), &config.passkey, None, app.clone())
-            .expect("passkeys");
+        let passkeys = config.passkeys(db.clone(), app.clone()).expect("passkeys");
         Self {
             router: WebApplication::new(db, &config, app.clone(), federation, passkeys)
                 .routes()

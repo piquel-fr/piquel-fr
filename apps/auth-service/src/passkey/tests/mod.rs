@@ -78,8 +78,8 @@ impl Fixture {
             .await
             .expect("signing keys");
         let oidc = OidcApplication::new(database.clone(), &config.oidc, keys).expect("OIDC app");
-        let app =
-            PasskeyApplication::new(database, &config.passkey, None, oidc).expect("passkey app");
+        let app = PasskeyApplication::new(database, &config.passkey, &config.email, None, oidc)
+            .expect("passkey app");
         let user_id = UserId::new();
         let username = format!("key-{}", &TokenId::new().to_string()[24..]);
         app.database

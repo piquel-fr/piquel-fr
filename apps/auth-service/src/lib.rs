@@ -175,6 +175,7 @@ impl AuthConfig {
         Ok(PasskeyApplication::new(
             database,
             &self.passkey,
+            &self.email,
             dashboard,
             oidc,
         )?)

@@ -30,7 +30,12 @@ Pick how the provider proves identity:
 - **OAuth only** (like GitHub): fetch the profile with the access token.
 
 Either way, the subject must be the provider's stable account ID, never an email.
-Keep an email only if the provider says it is verified.
+Keep an email only if the provider says it is verified, and call it authoritative
+only if the provider hosts the mailbox, as Google does for Gmail addresses and its
+Workspace domains': a provider verified other addresses once, and they may have
+changed owners since, as a lapsed domain does. Signup and linking import an
+authoritative address verified, and any other unverified, with a verification
+email.
 
 ## 1. Name the provider
 
@@ -86,9 +91,10 @@ specific to the provider:
   - Read every response through `Self::json`. It enforces the size limit and keeps
     the provider's OAuth error when a request fails.
   - Build the result with `VerifiedIdentity::new`, which bounds the subject and
-    display name and drops invalid emails and pictures. Pass the profile picture's
-    URL if the provider reports one: a social signup imports it as the account's
-    first picture.
+    display name and drops invalid emails and pictures. Pass whether the provider
+    hosts the email's mailbox (`true` only for an address it hosts), and the
+    profile picture's URL if the provider reports one: a social signup imports it
+    as the account's first picture.
 - **Response types:** private `Deserialize` structs for the provider's JSON.
 
 ## 5. Connect it in `providers/mod.rs`
