@@ -516,11 +516,11 @@ test('a handle support renames signs in at once, while the owner waits a month',
 
   // Support renames it without waiting, such as a handle that impersonates another.
   await openAccount(admin, `old-${suffix}`);
-  await admin.getByRole('link', { name: 'Rename handle', exact: true }).click();
+  await admin.getByRole('link', { name: 'Change handle', exact: true }).click();
   await confirmDashboard(admin);
   await admin.getByLabel('New handle').fill(`new-${suffix}`);
   await admin.getByLabel('Reason, shown to the owner in their history').fill('Impersonation');
-  await admin.getByRole('button', { name: 'Rename', exact: true }).click();
+  await admin.getByRole('button', { name: 'Change handle', exact: true }).click();
   await expect(admin.getByText(`@new-${suffix}`, { exact: true })).toBeVisible();
 
   await owner.reload();

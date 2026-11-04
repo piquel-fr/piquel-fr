@@ -338,13 +338,19 @@ impl AdminApplication {
         })
     }
 
-    /// `message` as the dashboard shows it, starting with a capital: admin
-    /// refusals are worded to follow `error: ` at the terminal.
+    /// `message` as the dashboard shows it, starting with a capital when it starts
+    /// with a plain word: admin refusals are worded to follow `error: ` at the
+    /// terminal. One starting with a name, such as `redirect_uris`, keeps it.
     fn sentence(message: &str) -> String {
+        let plain = message
+            .split_whitespace()
+            .next()
+            .is_some_and(|word| word.bytes().all(|byte| byte.is_ascii_lowercase()));
         let mut chars = message.chars();
-        chars.next().map_or_else(String::new, |first| {
-            first.to_uppercase().chain(chars).collect()
-        })
+        match chars.next() {
+            Some(first) if plain => first.to_ascii_uppercase().to_string() + chars.as_str(),
+            _ => message.to_owned(),
+        }
     }
 
     /// The dashboard's application context.
