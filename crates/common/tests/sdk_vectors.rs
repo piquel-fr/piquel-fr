@@ -2,6 +2,10 @@
 //! and the shared protocol types, signing with auth's own signer. Without
 //! `UPDATE_SDK_VECTORS=1` it only compares, so `just validate` fails on stale files;
 //! `just sdk-vectors` rewrites them. The format is described in that directory's README.
+#![expect(
+    clippy::expect_used,
+    reason = "a test, whose builder helpers fail it with a message rather than return errors"
+)]
 
 use base64::{Engine, engine::general_purpose::URL_SAFE_NO_PAD};
 use chrono::{DateTime, Duration, Utc};

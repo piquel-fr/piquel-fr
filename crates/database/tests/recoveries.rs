@@ -1,6 +1,11 @@
 //! Persistence guarantees behind account recoveries: their links, their state,
 //! and the database backstops that hold for every writer, a release older than
 //! recovery included.
+#![expect(
+    clippy::expect_used,
+    reason = "a test, whose setup helpers fail it with a message rather than return errors"
+)]
+
 use chrono::{DateTime, Duration, Utc};
 use piquel_common::{
     AuthenticationMethod, Handle, PasskeyId, RecoveryId, SessionId, UserId,
