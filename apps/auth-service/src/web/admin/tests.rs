@@ -1065,8 +1065,9 @@ async fn clients_are_registered_changed_and_suspended_from_the_dashboard() {
     let page = format!("/clients/{id}");
     assert_eq!(redirect(&created), page);
     let settings = format!("{page}/settings");
+    // The secrets page shows what a rotation sealed for it, never this.
     harness
-        .shown_once(&dashboard, &created, "pqcs_", &settings)
+        .shown_once(&dashboard, &created, "pqcs_", &format!("{page}/secret"))
         .await;
     let stored = stored_client(&harness.database, &id).await;
     assert!(stored.trusted);
