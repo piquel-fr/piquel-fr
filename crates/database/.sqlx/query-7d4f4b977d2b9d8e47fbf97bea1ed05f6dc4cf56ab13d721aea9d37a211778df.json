@@ -1,0 +1,34 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT handle AS \"handle: Handle\", reason, reserved_at\n                FROM reserved_handles\n                WHERE skeleton = handle_skeleton($1)",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "handle: Handle",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 1,
+        "name": "reason",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 2,
+        "name": "reserved_at",
+        "type_info": "Timestamptz"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "7d4f4b977d2b9d8e47fbf97bea1ed05f6dc4cf56ab13d721aea9d37a211778df"
+}

@@ -47,7 +47,11 @@ impl AdminOperation {
                     .map(drop),
             ],
             Self::ListAdministrators => vec![service.list_administrators(operator).await.map(drop)],
-            Self::CheckHandles => vec![service.check_handles(operator).await.map(drop)],
+            Self::CheckHandles => vec![
+                service.check_handles(operator).await.map(drop),
+                service.list_released_handles(operator).await.map(drop),
+                service.list_reserved_handles(operator).await.map(drop),
+            ],
             Self::ListSigningKeys => vec![service.list_signing_keys(operator).await.map(drop)],
             Self::ListDeliveries => vec![
                 service
@@ -96,6 +100,8 @@ impl AdminOperation {
             | Self::RevokeAdministrator
             | Self::RenameHandle
             | Self::ReleaseHandle
+            | Self::ReserveHandle
+            | Self::UnreserveHandle
             | Self::RetryDelivery
             | Self::CancelDelivery
             | Self::RecoverAccount

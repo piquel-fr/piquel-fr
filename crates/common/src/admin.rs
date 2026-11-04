@@ -659,3 +659,28 @@ pub struct SigningKey {
     /// When it left the key set.
     pub retired_at: Option<DateTime<Utc>>,
 }
+
+/// A handle an administrator reserved: nobody takes it, or a look-alike, until an
+/// administrator gives it to an account or removes it from the list.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ReservedHandle {
+    /// The reserved handle.
+    pub handle: Handle,
+    /// Who or what it is kept for.
+    pub reason: String,
+    /// When it was reserved.
+    pub reserved_at: DateTime<Utc>,
+}
+
+/// A handle no account holds, but that is kept from others until an operator
+/// releases it: one an account held before, which only it may claim again, or a
+/// purged account's last one.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ReleasedHandle {
+    /// The handle.
+    pub handle: Handle,
+    /// The account that held it, or `None` once purged.
+    pub user_id: Option<UserId>,
+    /// When the account stopped using it, or `None` for a purged account's last one.
+    pub released_at: Option<DateTime<Utc>>,
+}

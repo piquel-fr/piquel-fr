@@ -277,6 +277,12 @@ impl EventRow<'_> {
             DomainEvent::HandleReleased { handle } => {
                 Description::new("Handle released for anyone to claim").personal("handle", &handle)
             }
+            DomainEvent::HandleReserved { handle } => {
+                Description::new(format!("Handle @{handle} reserved"))
+            }
+            DomainEvent::HandleUnreserved { handle } => {
+                Description::new(format!("Handle @{handle} no longer reserved"))
+            }
             DomainEvent::ClientRegistered { client_id, kind } => {
                 Description::new(format!("Client {client_id} registered")).with("kind", kind)
             }

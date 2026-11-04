@@ -2,7 +2,7 @@
 //! the admin operations share.
 use crate::account::{AccountError, AccountService, Owner};
 use chrono::{Duration, Utc};
-use piquel_common::{Handle, Personal, UserId, events::DomainEvent};
+use piquel_common::{Handle, HandleError, Personal, UserId, events::DomainEvent};
 use piquel_repository::{Database, DatabaseError, DatabaseTransaction, StoredUser};
 
 /// Refusals and their response mapping.
@@ -24,6 +24,17 @@ impl<'a> Handles<'a> {
     /// Checks handles against `database`.
     pub(crate) const fn new(database: &'a Database) -> Self {
         Self { database }
+    }
+
+    /// Refuses `handle` when the handle rules reserve it, or an administrator did,
+    /// or a look-alike of either. Signup and the owner's renames call it; an
+    /// administrator may skip it.
+    pub(crate) async fn ensure_unreserved(&self, handle: &Handle) -> Result<(), HandlesError> {
+        handle.ensure_unreserved()?;
+        match self.database.handles().reservation(handle).await? {
+            Some(reserved) => Err(HandleError::Reserved(reserved.handle.into()).into()),
+            None => Ok(()),
+        }
     }
 
     /// Fails with the reason `user`, or a new account, cannot take `handle`, from the
@@ -100,7 +111,9 @@ impl AccountService {
         input: &str,
     ) -> Result<Handle, AccountError> {
         let handle = Handle::parse(input).map_err(HandlesError::from)?;
-        handle.ensure_unreserved().map_err(HandlesError::from)?;
+        Handles::new(&self.database)
+            .ensure_unreserved(&handle)
+            .await?;
         let mut tx = self.database.begin().await?;
         owner.lock_confirmed(&mut tx).await?;
         // Already locked, which the confirmation check does not return.

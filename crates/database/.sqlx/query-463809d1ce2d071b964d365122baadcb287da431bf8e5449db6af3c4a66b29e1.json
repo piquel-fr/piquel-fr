@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO reserved_handles (handle, reason) VALUES ($1, $2)\n                ON CONFLICT DO NOTHING",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "463809d1ce2d071b964d365122baadcb287da431bf8e5449db6af3c4a66b29e1"
+}

@@ -24,8 +24,9 @@ pub const MIN_LENGTH: usize = 3;
 pub const MAX_LENGTH: usize = 32;
 
 /// Names signup and self-service renames refuse, along with every handle sharing
-/// one's [skeleton](Handle::skeleton). Operators may still assign them.
-const RESERVED: &[&str] = &[
+/// one's [skeleton](Handle::skeleton). Operators may still assign them, and
+/// administrators reserve more, which auth keeps in its database.
+pub const RESERVED: &[&str] = &[
     // Infrastructure labels: a handle may become a subdomain of piquel.fr.
     "auth",
     "admin",

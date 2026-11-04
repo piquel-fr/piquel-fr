@@ -9,7 +9,10 @@
 use super::{HandleRepository, RepositoryExecutor};
 use crate::{DatabaseError, DatabaseTransaction};
 use chrono::{DateTime, Utc};
-use piquel_common::{Handle, UserId};
+use piquel_common::{
+    Handle, UserId,
+    admin::{ReleasedHandle, ReservedHandle},
+};
 
 /// A handle row.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -22,6 +25,39 @@ pub struct StoredHandle {
     pub claimed_at: DateTime<Utc>,
     /// When it stopped being its account's handle, or `None` while it is.
     pub released_at: Option<DateTime<Utc>>,
+}
+
+/// A handle an administrator reserved, and why.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct StoredReservation {
+    /// The reserved handle.
+    pub handle: Handle,
+    /// Who or what it is kept for.
+    pub reason: String,
+    /// When it was reserved.
+    pub reserved_at: DateTime<Utc>,
+}
+
+impl From<StoredHandle> for ReleasedHandle {
+    /// Keeps who held it and when they stopped.
+    fn from(row: StoredHandle) -> Self {
+        Self {
+            handle: row.handle,
+            user_id: row.user_id,
+            released_at: row.released_at,
+        }
+    }
+}
+
+impl From<StoredReservation> for ReservedHandle {
+    /// The reservation as administrators see it.
+    fn from(row: StoredReservation) -> Self {
+        Self {
+            handle: row.handle,
+            reason: row.reason,
+            reserved_at: row.reserved_at,
+        }
+    }
 }
 
 impl HandleRepository<'_> {
@@ -86,6 +122,108 @@ impl HandleRepository<'_> {
                 ORDER BY handle"#,
             )
         )
+    }
+
+    /// Lists the handles no account holds but that are kept from others: released
+    /// ones, which only their former owner may claim again, and purged accounts'
+    /// last ones, by handle.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`DatabaseError`] if the query fails or a row is invalid.
+    pub async fn list_released(&mut self) -> Result<Vec<StoredHandle>, DatabaseError> {
+        run!(
+            self,
+            fetch_all,
+            sqlx::query_as!(
+                StoredHandle,
+                r#"SELECT handle AS "handle: Handle", user_id AS "user_id: UserId", claimed_at,
+                    released_at
+                FROM handles
+                WHERE released_at IS NOT NULL OR user_id IS NULL
+                ORDER BY handle"#,
+            )
+        )
+    }
+
+    /// Finds the reservation sharing `handle`'s skeleton: the handle itself, or the
+    /// one it looks like. Skeletons are unique, so there is at most one.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`DatabaseError`] if the query fails or the row is invalid.
+    pub async fn reservation(
+        &mut self,
+        handle: &Handle,
+    ) -> Result<Option<StoredReservation>, DatabaseError> {
+        run!(
+            self,
+            fetch_optional,
+            sqlx::query_as!(
+                StoredReservation,
+                r#"SELECT handle AS "handle: Handle", reason, reserved_at
+                FROM reserved_handles
+                WHERE skeleton = handle_skeleton($1)"#,
+                handle.as_str(),
+            )
+        )
+    }
+
+    /// Lists the handles administrators reserved, by handle.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`DatabaseError`] if the query fails or a row is invalid.
+    pub async fn list_reserved(&mut self) -> Result<Vec<StoredReservation>, DatabaseError> {
+        run!(
+            self,
+            fetch_all,
+            sqlx::query_as!(
+                StoredReservation,
+                r#"SELECT handle AS "handle: Handle", reason, reserved_at
+                FROM reserved_handles
+                ORDER BY handle"#,
+            )
+        )
+    }
+
+    /// Reserves `handle` for `reason`. Returns `false`, having changed nothing, if
+    /// it or a look-alike is reserved already.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`DatabaseError`] if the query fails.
+    pub async fn reserve(&mut self, handle: &Handle, reason: &str) -> Result<bool, DatabaseError> {
+        Ok(run!(
+            self,
+            execute,
+            sqlx::query!(
+                "INSERT INTO reserved_handles (handle, reason) VALUES ($1, $2)
+                ON CONFLICT DO NOTHING",
+                handle.as_str(),
+                reason,
+            )
+        )?
+        .rows_affected()
+            == 1)
+    }
+
+    /// Removes the reservation of `handle`, and returns whether there was one.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`DatabaseError`] if the query fails.
+    pub async fn unreserve(&mut self, handle: &Handle) -> Result<bool, DatabaseError> {
+        Ok(run!(
+            self,
+            execute,
+            sqlx::query!(
+                "DELETE FROM reserved_handles WHERE handle = $1",
+                handle.as_str(),
+            )
+        )?
+        .rows_affected()
+            == 1)
     }
 
     /// Deletes a released handle, or the last one of a purged account, so anyone may

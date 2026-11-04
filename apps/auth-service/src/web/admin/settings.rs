@@ -276,7 +276,7 @@ pub(super) async fn handle(cx: &Cx, form: Option<Form<NewHandle>>) -> Result<Res
     let refused = refused.as_deref();
     let page = view! { cx =>
         piquel_ui::dashboard_change(
-            change: Change::RenameHandle,
+            change: Change::ChangeHandle,
             back: back.as_str(),
             refusal: refused,
             reason: reason,
@@ -287,7 +287,7 @@ pub(super) async fn handle(cx: &Cx, form: Option<Form<NewHandle>>) -> Result<Res
             piquel_ui::reserved_handle_choice(checked: allow_reserved)
         )
     };
-    App::render(cx, StatusCode::OK, "Rename handle", page).await
+    App::render(cx, StatusCode::OK, "Change handle", page).await
 }
 
 impl App {

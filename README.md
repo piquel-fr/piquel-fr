@@ -345,7 +345,11 @@ or CLI operator.
 ```sh
 just auth handle check                                  # accounts whose handle is reserved
 just auth handle rename old-name new-name --reason "…"  # --allow-reserved to assign a reserved name
+just auth handle released                               # handles no account holds, kept from others
 just auth handle release old-name                       # let anyone claim a released handle again
+just auth handle reserve jane --reason "For Jane, joining in May"
+just auth handle reserved                               # reserved handles, then the built-in names
+just auth handle unreserve jane
 ```
 
 Operators rename without the 30-day cooldown of settings renames, but not to a
@@ -355,10 +359,18 @@ version, so relying parties refresh `preferred_username`. `release` deletes a
 handle no account holds anymore, the only way one returns to the pool, for cases
 like a trademark dispute; to free a current handle, rename its account first.
 Every change is recorded as a domain event with its operator; a rename also with
-its reason, which the owner sees in their history. Administrators rename from the
-dashboard the same way, with a reason, and may allow a reserved handle as
-`--allow-reserved` does; its Handles page lists the accounts `handle check` lists,
-and releases handles.
+its reason, which the owner sees in their history.
+
+`reserve` keeps a handle for someone: signup and the settings refuse it and its
+look-alikes, as they do the built-in reserved names (`admin`, `support`, …),
+until an operator gives it with `rename --allow-reserved` or `unreserve`s it. Its
+reason says who or what it is kept for. An account already holding it keeps it,
+and `handle check` lists it.
+
+The dashboard's Handles page does all of this: it lists the reserved handles,
+with the built-in names, the accounts holding one, and the released handles, and
+reserves, unreserves and releases them. An account's Change handle page renames
+it with a reason, and may allow a reserved handle as `--allow-reserved` does.
 
 Upgrading from a release that stored usernames: run its `handle check`, and rename
 every account it lists with its `handle rename`, before deploying. The migration
@@ -676,7 +688,8 @@ explains how to choose a requirement and handle the challenge.
   `preferred_username`: 3–32 characters of `[a-z0-9-]`, without a leading, trailing
   or double hyphen, so it is a valid DNS label. Signup trims and lowercases it, and
   refuses reserved names (infrastructure labels such as `auth` and `www`, RFC 2142
-  mailboxes, piquel.fr routes and the brand) and names that look like one: hyphens
+  mailboxes, piquel.fr routes, the brand, and the handles administrators reserve)
+  and names that look like one: hyphens
   are dropped, and `0`, `1` or `i`, `5`, `rn` and `vv` read as `o`, `l`, `s`, `m` and
   `w`. Every handle and look-alike stays unique, current or not: a handle is not
   reassigned to another account unless an operator releases it, though its former

@@ -25,7 +25,7 @@ mod audit;
 mod clients;
 /// The outbound delivery queue.
 mod deliveries;
-/// Reserved handles, and releasing one.
+/// The reserved and released handles, and the accounts holding a reserved one.
 mod handles;
 /// Signup invitations.
 mod invitations;
@@ -314,6 +314,8 @@ impl AdminApplication {
             Op::RemoveRelatedOrigin => &origins::remove,
             Op::CheckHandles => &handles::check,
             Op::ReleaseHandle => &handles::release,
+            Op::ReserveHandle => &handles::reserve,
+            Op::UnreserveHandle => &handles::unreserve,
             Op::ListDeliveries => &deliveries::list,
             Op::RetryDelivery => &deliveries::retry,
             Op::CancelDelivery => &deliveries::cancel,
@@ -334,6 +336,21 @@ impl AdminApplication {
             // shows the command instead.
             | Op::PruneAuditChain => return None,
         })
+    }
+
+    /// `message` as the dashboard shows it, starting with a capital when it starts
+    /// with a plain word: admin refusals are worded to follow `error: ` at the
+    /// terminal. One starting with a name, such as `redirect_uris`, keeps it.
+    fn sentence(message: &str) -> String {
+        let plain = message
+            .split_whitespace()
+            .next()
+            .is_some_and(|word| word.bytes().all(|byte| byte.is_ascii_lowercase()));
+        let mut chars = message.chars();
+        match chars.next() {
+            Some(first) if plain => first.to_ascii_uppercase().to_string() + chars.as_str(),
+            _ => message.to_owned(),
+        }
     }
 
     /// The dashboard's application context.
@@ -429,7 +446,7 @@ impl AdminApplication {
                     Err(Error::msg("an admin change failed"))
                 }
                 (_, message) => Ok(Some(Err(Refused {
-                    message: message.to_owned(),
+                    message: Self::sentence(message),
                     form: input,
                 }))),
             },
@@ -705,7 +722,7 @@ impl AdminApplication {
         };
         let (status, detail) = refused.public();
         let page = view! { cx =>
-            piquel_ui::dashboard_failure(title: "That did not work", detail: detail)
+            piquel_ui::dashboard_failure(title: "That did not work", detail: Self::sentence(detail))
         };
         Self::render(cx, status, "Refused", page).await
     }

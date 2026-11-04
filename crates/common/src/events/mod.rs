@@ -212,6 +212,18 @@ pub enum DomainEvent {
         /// The released handle.
         handle: Personal<Handle>,
     },
+    /// An administrator reserved a handle: nobody takes it, or a look-alike, until
+    /// an administrator gives it to an account or removes it. The event's reason
+    /// says who or what it is kept for.
+    HandleReserved {
+        /// The reserved handle.
+        handle: Handle,
+    },
+    /// An administrator removed a handle from the reserved list.
+    HandleUnreserved {
+        /// The handle.
+        handle: Handle,
+    },
     /// An OIDC client was registered, enabled. A confidential client got its first secret.
     ClientRegistered {
         /// The new client.
@@ -442,6 +454,8 @@ impl DomainEvent {
             | Self::DeliveryRetried { .. }
             | Self::DeliveryCancelled { .. }
             | Self::HandleReleased { .. }
+            | Self::HandleReserved { .. }
+            | Self::HandleUnreserved { .. }
             | Self::CompromiseReported { .. }
             | Self::SigningKeyChanged { .. }
             | Self::AccountExported {}
@@ -485,6 +499,8 @@ impl DomainEvent {
             | Self::AdministratorRevoked {}
             | Self::HandleChanged { .. }
             | Self::HandleReleased { .. }
+            | Self::HandleReserved { .. }
+            | Self::HandleUnreserved { .. }
             | Self::ClientRegistered { .. }
             | Self::ClientUpdated { .. }
             | Self::ClientEnabled { .. }
@@ -543,6 +559,8 @@ impl DomainEvent {
             Self::AdministratorRevoked {} => "administrator_revoked",
             Self::HandleChanged { .. } => "handle_changed",
             Self::HandleReleased { .. } => "handle_released",
+            Self::HandleReserved { .. } => "handle_reserved",
+            Self::HandleUnreserved { .. } => "handle_unreserved",
             Self::ClientRegistered { .. } => "client_registered",
             Self::ClientUpdated { .. } => "client_updated",
             Self::ClientEnabled { .. } => "client_enabled",

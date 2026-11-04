@@ -229,9 +229,13 @@ impl Administration {
                 AdminCommand::List { .. } => Op::ListAdministrators,
             },
             Self::Handle(command) => match command {
-                HandleCommand::Check => Op::CheckHandles,
+                HandleCommand::Check | HandleCommand::Released | HandleCommand::Reserved => {
+                    Op::CheckHandles
+                }
                 HandleCommand::Rename { .. } => Op::RenameHandle,
                 HandleCommand::Release { .. } => Op::ReleaseHandle,
+                HandleCommand::Reserve { .. } => Op::ReserveHandle,
+                HandleCommand::Unreserve { .. } => Op::UnreserveHandle,
             },
             Self::Deliveries(command) => match command {
                 DeliveriesCommand::List { .. } => Op::ListDeliveries,

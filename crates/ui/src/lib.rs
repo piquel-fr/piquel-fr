@@ -63,15 +63,15 @@ mod settings;
 
 pub use admin::{
     AccountPages, Action, AdminClientRow, AdminOverview, AdministratorRow, Change, ClientChanges,
-    ClientPage, Dashboard, DeliveryRow, EventRow, HandoffProof, HandoffQuery, InvitationRow,
-    Measure, NewClientForm, OperatorDraft, Problem, RecoveryKey, RecoveryRow, RecoveryStanding,
-    Registration, ReservedHandle, SessionRow, SigningKeyRow, Tab as DashboardTab, UserRow,
-    account_settings, admin_overview, administrator_list, audit_page, client_created, client_list,
-    client_page, client_registration, client_secrets, dashboard_change, dashboard_failure,
-    dashboard_frame, dashboard_signed_out, delivery_list, event_list, event_rows, grant_search,
-    handle_list, handle_release, handoff_proof, invitation_created, invitation_list, no_access,
-    recovery_list, reserved_handle_choice, signing_key_list, signing_key_rotation, user_page,
-    user_search,
+    ClientPage, Dashboard, DeliveryRow, EventRow, HandlesPage, HandoffProof, HandoffQuery,
+    InvitationRow, Measure, NewClientForm, OperatorDraft, Problem, RecoveryKey, RecoveryRow,
+    RecoveryStanding, Registration, ReleasedRow, ReservationRow, ReservedHolder, SessionRow,
+    SigningKeyRow, Tab as DashboardTab, UserRow, account_settings, admin_overview,
+    administrator_list, audit_page, client_created, client_list, client_page, client_registration,
+    client_secrets, dashboard_change, dashboard_failure, dashboard_frame, dashboard_signed_out,
+    delivery_list, event_list, event_rows, grant_search, handle_list, handoff_proof,
+    invitation_created, invitation_list, no_access, recovery_list, reserved_handle_choice,
+    signing_key_list, signing_key_rotation, user_page, user_search,
 };
 pub use asset::{Asset, FONTS, STYLESHEET};
 pub use clients::{

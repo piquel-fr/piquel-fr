@@ -35,7 +35,9 @@ impl PasskeyApplication {
         Json(input): Json<RegistrationStart>,
     ) -> Result<Response, ApiError> {
         let handle = Handle::parse(&input.handle).map_err(HandlesError::from)?;
-        handle.ensure_unreserved().map_err(HandlesError::from)?;
+        Handles::new(&app.database)
+            .ensure_unreserved(&handle)
+            .await?;
         let display_name = DisplayName::parse(if input.display_name.is_empty() {
             handle.as_str().to_owned()
         } else {

@@ -5,12 +5,14 @@ use super::AdminService;
 use crate::{
     admin::{AdminError, HandleProblem, Operator, Reason, UserRef},
     deletion::Deletions,
-    handles::{Handles, HandlesError},
+    handles::Handles,
     security::Session,
 };
 use piquel_common::{
-    AccountStatus, Handle, Personal, SessionId, UserId,
-    admin::{Email, Paging, ScheduledDeletion, UserDetail, UserPage},
+    AccountStatus, Handle, HandleError, Personal, SessionId, UserId,
+    admin::{
+        Email, Paging, ReleasedHandle, ReservedHandle, ScheduledDeletion, UserDetail, UserPage,
+    },
     email::NormalizedEmail,
     events::{DomainEvent, EventContext, RevocationReason},
 };
@@ -314,8 +316,9 @@ impl AdminService {
         Self::finish(tx, operator, Some(session.user_id), vec![]).await
     }
 
-    /// Lists the accounts whose current handle is reserved, by handle: ones an
-    /// operator assigned on purpose, or that a later release reserved.
+    /// Lists the accounts whose current handle is reserved, by the handle rules or
+    /// an administrator, by handle: ones an operator assigned on purpose, or that a
+    /// later release or reservation reserved.
     ///
     /// # Errors
     /// Fails when the operator may not read, or the query fails.
@@ -324,14 +327,20 @@ impl AdminService {
         operator: &Operator,
     ) -> Result<Vec<HandleProblem>, AdminError> {
         operator.authorize_read(&self.database).await?;
-        Ok(self
-            .database
-            .handles()
+        let mut handles = self.database.handles();
+        let reserved = handles.list_reserved().await?;
+        Ok(handles
             .list_current()
             .await?
             .into_iter()
             .filter_map(|current| {
-                let error = current.handle.ensure_unreserved().err()?;
+                let skeleton = current.handle.skeleton();
+                let error = current.handle.ensure_unreserved().err().or_else(|| {
+                    reserved
+                        .iter()
+                        .find(|reservation| reservation.handle.skeleton() == skeleton)
+                        .map(|reservation| HandleError::Reserved(reservation.handle.to_string()))
+                })?;
                 Some(HandleProblem {
                     user_id: current.user_id?,
                     handle: current.handle,
@@ -342,9 +351,9 @@ impl AdminService {
     }
 
     /// Gives the account `user_id` the handle `handle`, for `reason`, as a settings
-    /// rename does but without its cooldown. Reserved names are refused unless
-    /// `allow_reserved`. The reason is recorded with the change, as personal data
-    /// the owner sees in their history.
+    /// rename does but without its cooldown. Reserved names, built in or reserved by
+    /// an administrator, are refused unless `allow_reserved`. The reason is recorded
+    /// with the change, as personal data the owner sees in their history.
     ///
     /// # Errors
     /// Fails when the operator may not make changes, the account is unknown, or
@@ -359,7 +368,9 @@ impl AdminService {
         allow_reserved: bool,
     ) -> Result<(), AdminError> {
         if !allow_reserved {
-            handle.ensure_unreserved().map_err(HandlesError::from)?;
+            Handles::new(&self.database)
+                .ensure_unreserved(&handle)
+                .await?;
         }
         let mut tx = self.database.begin().await?;
         let user = operator.lock(&mut tx, user_id).await?;
@@ -395,5 +406,77 @@ impl AdminService {
             handle: Personal::Value(handle),
         };
         Self::finish(tx, operator, released.user_id, vec![event]).await
+    }
+
+    /// Lists the handles no account holds but that are kept from others, by
+    /// handle: released ones, and purged accounts' last ones. Each may be released.
+    ///
+    /// # Errors
+    /// Fails when the operator may not read, or the query fails.
+    pub(crate) async fn list_released_handles(
+        &self,
+        operator: &Operator,
+    ) -> Result<Vec<ReleasedHandle>, AdminError> {
+        operator.authorize_read(&self.database).await?;
+        Ok(Self::views(self.database.handles().list_released().await?))
+    }
+
+    /// Lists the handles administrators reserved, by handle. The handle rules
+    /// reserve [`Handle`]'s built-in names too, which no operation changes.
+    ///
+    /// # Errors
+    /// Fails when the operator may not read, or the query fails.
+    pub(crate) async fn list_reserved_handles(
+        &self,
+        operator: &Operator,
+    ) -> Result<Vec<ReservedHandle>, AdminError> {
+        operator.authorize_read(&self.database).await?;
+        Ok(Self::views(self.database.handles().list_reserved().await?))
+    }
+
+    /// Reserves `handle` for `reason`, which says who or what it is kept for:
+    /// signup and the settings refuse it and its look-alikes until an administrator
+    /// gives it to an account, or removes it from the list. An account already
+    /// holding it keeps it.
+    ///
+    /// # Errors
+    /// Fails when the operator may not make changes, or the handle rules reserve
+    /// it, or a look-alike, already.
+    pub(crate) async fn reserve_handle(
+        &self,
+        operator: &Operator,
+        handle: Handle,
+        reason: Reason,
+    ) -> Result<(), AdminError> {
+        if handle.ensure_unreserved().is_err() {
+            return Err(AdminError::HandleReserved);
+        }
+        let context = Self::context(operator, reason);
+        let mut tx = self.database.begin().await?;
+        let reason = context.reason.as_deref().unwrap_or_default();
+        if !tx.handles().reserve(&handle, reason).await? {
+            return Err(AdminError::HandleReserved);
+        }
+        tx.record(&context, None, DomainEvent::HandleReserved { handle })
+            .await?;
+        Self::finish(tx, operator, None, vec![]).await
+    }
+
+    /// Removes `handle` from the reserved list, so anyone may claim it again.
+    ///
+    /// # Errors
+    /// Fails when the operator may not make changes, or no administrator reserved
+    /// `handle`.
+    pub(crate) async fn unreserve_handle(
+        &self,
+        operator: &Operator,
+        handle: Handle,
+    ) -> Result<(), AdminError> {
+        let mut tx = self.database.begin().await?;
+        if !tx.handles().unreserve(&handle).await? {
+            return Err(AdminError::HandleNotReserved);
+        }
+        let event = DomainEvent::HandleUnreserved { handle };
+        Self::finish(tx, operator, None, vec![event]).await
     }
 }

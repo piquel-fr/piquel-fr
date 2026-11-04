@@ -35,7 +35,9 @@ pub use clients::{
 };
 pub use deliveries::{DeliveryRow, delivery_list};
 pub use events::{EventRow, event_list, event_rows};
-pub use handles::{ReservedHandle, handle_list, handle_release, reserved_handle_choice};
+pub use handles::{
+    HandlesPage, ReleasedRow, ReservationRow, ReservedHolder, handle_list, reserved_handle_choice,
+};
 pub use keys::{SigningKeyRow, signing_key_list, signing_key_rotation};
 pub use lists::{
     AdministratorRow, InvitationRow, administrator_list, grant_search, invitation_created,
@@ -276,8 +278,8 @@ pub enum Change {
     ApproveOrigin,
     /// Removing an approved origin.
     RemoveOrigin,
-    /// Renaming an account's handle, with a reason.
-    RenameHandle,
+    /// Changing an account's handle, with a reason.
+    ChangeHandle,
     /// Letting a disabled client sign users in again.
     EnableClient,
     /// Stopping a client signing users in, until it is enabled again.
@@ -290,6 +292,10 @@ pub enum Change {
     DeleteClient,
     /// Freeing a released handle for anyone to claim.
     ReleaseHandle,
+    /// Reserving a handle, with who or what it is kept for.
+    ReserveHandle,
+    /// Removing a handle from the reserved list.
+    UnreserveHandle,
     /// Attempting a failed or cancelled delivery again.
     RetryDelivery,
     /// Cancelling a pending or failed delivery.
@@ -319,13 +325,15 @@ impl Change {
             Self::UndoRecovery => "Undo this account's recovery",
             Self::ApproveOrigin => "Add approved origin",
             Self::RemoveOrigin => "Remove approved origin",
-            Self::RenameHandle => "Rename this account's handle",
+            Self::ChangeHandle => "Change this account's handle",
             Self::EnableClient => "Enable this client",
             Self::DisableClient => "Disable this client",
             Self::SuspendClient => "Suspend this client",
             Self::UnsuspendClient => "Lift this client's suspension",
             Self::DeleteClient => "Delete this client",
-            Self::ReleaseHandle => "Release a handle",
+            Self::ReleaseHandle => "Release this handle",
+            Self::ReserveHandle => "Reserve a handle",
+            Self::UnreserveHandle => "Remove this reservation",
             Self::RetryDelivery => "Retry this delivery",
             Self::CancelDelivery => "Cancel this delivery",
             Self::RotateSigningKey => "Rotate the signing key",
@@ -372,11 +380,17 @@ impl Change {
             Self::RemoveOrigin => {
                 "Pages of the client on this origin stop signing users in, and send them to Piquel's pages instead. Users stay signed in."
             }
-            Self::RenameHandle => {
+            Self::ChangeHandle => {
                 "The account signs in and is shown under the new handle at once. Its old handle stays reserved for it: no other account can take it unless it is released on the Handles page, and the account can take it back."
             }
             Self::ReleaseHandle => {
-                "Anyone can claim the handle again, such as after a trademark dispute. Only a released handle, or a purged account's last one, can be: an account's current handle never is, so rename the account first."
+                "Anyone can claim the handle again, such as after a trademark dispute. The account that held it can no longer take it back."
+            }
+            Self::ReserveHandle => {
+                "Nobody can take the handle, or one that looks like it, at signup or in their settings. Give it to the account it is kept for with Change handle and “Allow a reserved handle”. An account that already holds it keeps it."
+            }
+            Self::UnreserveHandle => {
+                "Anyone can claim the handle again, unless an account holds or held it."
             }
             Self::RetryDelivery => {
                 "It is attempted again now. A cancelled ordered delivery cannot be retried: the deliveries after it may already have gone on without it."
@@ -423,12 +437,13 @@ impl Change {
             Self::Recover => "Send the recovery link",
             Self::UndoRecovery => "Undo the recovery",
             Self::ApproveOrigin => "Add",
-            Self::RemoveOrigin => "Remove",
-            Self::RenameHandle => "Rename",
+            Self::RemoveOrigin | Self::UnreserveHandle => "Remove",
+            Self::ChangeHandle => "Change handle",
             Self::SuspendClient => "Suspend",
             Self::UnsuspendClient => "Lift the suspension",
             Self::DeleteClient => "Delete for good",
             Self::ReleaseHandle => "Release",
+            Self::ReserveHandle => "Reserve",
             Self::RetryDelivery => "Retry",
             // Not "Cancel", which closes its dialog.
             Self::CancelDelivery => "Cancel delivery",
@@ -454,11 +469,13 @@ impl Change {
             | Self::RevokeInvitation
             | Self::ApproveOrigin
             | Self::RemoveOrigin
-            | Self::RenameHandle
+            | Self::ChangeHandle
             | Self::EnableClient
             | Self::DisableClient
             | Self::SuspendClient
             | Self::ReleaseHandle
+            | Self::ReserveHandle
+            | Self::UnreserveHandle
             | Self::RetryDelivery
             | Self::CancelDelivery
             | Self::RotateSigningKey
@@ -483,6 +500,7 @@ impl Change {
                 | Self::SuspendClient
                 | Self::DeleteClient
                 | Self::ReleaseHandle
+                | Self::UnreserveHandle
                 | Self::CancelDelivery
                 | Self::RevokeSigningKey
         )
@@ -492,9 +510,10 @@ impl Change {
     const fn reason(self) -> Option<&'static str> {
         match self {
             Self::Disable => Some("Reason"),
-            Self::Delete | Self::Restore | Self::RenameHandle => {
+            Self::Delete | Self::Restore | Self::ChangeHandle => {
                 Some("Reason, shown to the owner in their history")
             }
+            Self::ReserveHandle => Some("Who or what it is kept for"),
             Self::Recover | Self::UndoRecovery => Some(
                 "Reason, shown to the owner in their history: what was asked, never the evidence",
             ),
@@ -513,6 +532,7 @@ impl Change {
             | Self::UnsuspendClient
             | Self::DeleteClient
             | Self::ReleaseHandle
+            | Self::UnreserveHandle
             | Self::RetryDelivery
             | Self::CancelDelivery
             | Self::RotateSigningKey

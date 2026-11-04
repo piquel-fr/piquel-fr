@@ -42,7 +42,7 @@ pub use repositories::{
         ConsumedFederationTransaction, InsertExternalIdentity, InsertFederationTransaction,
         PendingFederation, StoredExternalIdentity,
     },
-    handles::StoredHandle,
+    handles::{StoredHandle, StoredReservation},
     maintenance::{DigestUsage, DigestedSecret},
     oidc::{
         CodeRedemptionError, ConsumedAuthorizationCode, InsertAuthorizationCode,

@@ -1364,7 +1364,7 @@ async fn deliveries_are_cancelled_and_retried_from_the_dashboard() {
     // Cancelled already, it is refused, saying why.
     let refused = html(post(&cancel).await).await;
     assert!(
-        refused.contains("no pending or failed delivery"),
+        refused.contains("No pending or failed delivery"),
         "{refused}"
     );
     assert_eq!(redirect(&post(&retry).await), "/deliveries");
@@ -1433,75 +1433,107 @@ async fn signing_keys_are_rotated_and_revoked_from_the_dashboard() {
         "{actor:?}"
     );
     let unknown = html(post(&revoke).await).await;
-    assert!(unknown.contains("no signing key has ID"), "{unknown}");
+    assert!(unknown.contains("No signing key has ID"), "{unknown}");
 }
 
-/// A reserved handle is given only when the form allows it; the handles page
-/// then lists the account, linking its rename, and once renamed again, the
-/// reserved handle is released for anyone to claim.
+/// The handles page manages every handle. An administrator reserves one for
+/// someone, which the page lists and the rename form refuses until it allows a
+/// reserved handle; the account holding it is then listed. Renamed again, its
+/// old handle shows as released, and its row's release frees it; the
+/// reservation's row removes it. Each change is recorded as the administrator's.
 #[tokio::test]
 #[ignore = "requires TEST_DATABASE_URL"]
-async fn reserved_handles_are_assigned_listed_and_released() {
+async fn handles_are_reserved_given_released_and_unreserved() {
     let harness = Harness::new().await;
     let admin = harness.admin().await;
     let owner = Browser::new_account(&harness.database).await;
     let user = owner.user_id;
+    let suffix = &user.to_string()[24..];
+    let kept = format!("kept-{suffix}");
     let rename = format!("/users/{user}/handle");
-    let dashboard = harness.confirmed(&admin, &rename, Utc::now()).await;
+    let dashboard = harness
+        .confirmed(&admin, "/handles/reserve", Utc::now())
+        .await;
     let post = async |path: &str, fields: &[(&str, &str)]| {
         let url = format!("{DASHBOARD}{path}");
         dashboard
             .submit(&harness.dashboard, &url, fields, OWN_PAGE)
             .await
     };
+    let page = html(harness.visit(&dashboard, "/handles").await).await;
+    assert!(page.contains("<code>support</code>"), "built in: {page}");
+
+    let reserve = [("handle", kept.as_str()), ("reason", "For the new CTO")];
+    assert_eq!(
+        redirect(&post("/handles/reserve", &reserve).await),
+        "/handles"
+    );
+    let refused = html(post("/handles/reserve", &reserve).await).await;
+    assert!(
+        refused.contains("This handle, or one that looks like it, is reserved already"),
+        "{refused}"
+    );
+    let unreserve = format!("/handles/unreserve?handle={kept}");
+    let page = html(harness.visit(&dashboard, "/handles").await).await;
+    assert!(page.contains("For the new CTO"), "{page}");
+    assert!(page.contains(&format!(r#"action="{unreserve}""#)), "{page}");
+
     let page = html(harness.visit(&dashboard, &rename).await).await;
     assert!(page.contains(r#"name="allow_reserved""#), "{page}");
-    let reserved = [("handle", "hostmaster"), ("reason", "Official account")];
-    let refused = post(&rename, &reserved).await;
-    assert_eq!(refused.status(), StatusCode::OK, "the form says why");
-    let refused = html(refused).await;
+    let give = [("handle", kept.as_str()), ("reason", "Reserved for them")];
+    let refused = html(post(&rename, &give).await).await;
     assert!(refused.contains("role=\"alert\""), "{refused}");
-    assert!(refused.contains(r#"value="hostmaster""#), "kept: {refused}");
-    let allowed = [reserved.as_slice(), &[("allow_reserved", "on")]].concat();
+    assert!(
+        refused.contains(&format!(r#"value="{kept}""#)),
+        "kept: {refused}"
+    );
+    let allowed = [give.as_slice(), &[("allow_reserved", "on")]].concat();
     assert_eq!(
         redirect(&post(&rename, &allowed).await),
         format!("/users/{user}")
     );
-
     let page = html(harness.visit(&dashboard, "/handles").await).await;
-    assert!(page.contains("@hostmaster"), "{page}");
-    assert!(page.contains(&rename), "{page}");
-    let back = format!("back-{}", &user.to_string()[24..]);
-    let renamed = [
-        ("handle", back.as_str()),
-        ("reason", "Official account ended"),
-    ];
+    assert!(page.contains(&rename), "the holder is listed: {page}");
+
+    let back = format!("back-{suffix}");
+    let renamed = [("handle", back.as_str()), ("reason", "Moved on")];
     assert_eq!(
         redirect(&post(&rename, &renamed).await),
         format!("/users/{user}")
     );
+    let release = format!("/handles/release?handle={kept}");
     let page = html(harness.visit(&dashboard, "/handles").await).await;
-    assert!(!page.contains("@hostmaster"), "{page}");
+    assert!(
+        page.contains(&format!(r#"action="{release}""#)),
+        "released: {page}"
+    );
+    assert_eq!(redirect(&post(&release, &[]).await), "/handles");
+    let refused = html(post(&release, &[]).await).await;
+    assert!(refused.contains("This handle is not released"), "{refused}");
+    assert_eq!(redirect(&post(&unreserve, &[]).await), "/handles");
+    let page = html(harness.visit(&dashboard, "/handles").await).await;
+    assert!(
+        !page.contains(&release) && !page.contains(&unreserve),
+        "{page}"
+    );
 
-    let release = [("handle", "hostmaster")];
-    assert_eq!(
-        redirect(&post("/handles/release", &release).await),
-        "/handles"
-    );
-    let refused = html(post("/handles/release", &release).await).await;
-    assert!(
-        refused.contains("no released handle is this one"),
-        "{refused}"
-    );
-    let actor = harness
-        .actor_of("handle_released", |event| {
-            matches!(event, DomainEvent::HandleReleased { .. })
-        })
-        .await;
-    assert!(
-        matches!(actor, Some(Actor::Admin { user_id, .. }) if user_id == admin.user_id),
-        "{actor:?}"
-    );
+    for kind in ["handle_reserved", "handle_released", "handle_unreserved"] {
+        let actor = harness
+            .actor_of(kind, |event| match event {
+                DomainEvent::HandleReserved { handle } | DomainEvent::HandleUnreserved { handle } => {
+                    handle.as_str() == kept
+                }
+                DomainEvent::HandleReleased { handle } => {
+                    matches!(handle, piquel_common::Personal::Value(handle) if handle.as_str() == kept)
+                }
+                _ => false,
+            })
+            .await;
+        assert!(
+            matches!(actor, Some(Actor::Admin { user_id, .. }) if user_id == admin.user_id),
+            "{kind}: {actor:?}"
+        );
+    }
 }
 
 /// An administrator reads an account's security history as its owner sees it,
