@@ -864,9 +864,25 @@ impl OidcApplication {
 
 #[cfg(test)]
 mod tests {
-    //! `max_age` and consent decision parsing.
+    //! Prompt, `max_age` and consent decision parsing.
     use super::*;
     use piquel_common::{AuthenticationMethod, SessionId};
+    /// Duplicates are allowed, unknown values are rejected, and `none` stands alone.
+    #[test]
+    fn prompts_enforce_interaction_policy() {
+        let interaction = |prompt: &str| {
+            AuthorizationParameters {
+                prompt: Some(prompt.into()),
+                ..AuthorizationParameters::default()
+            }
+            .interaction()
+        };
+        let interactive = interaction("login consent select_account login");
+        assert_eq!(interactive.ok(), Some(Interaction::LoginAndConsent));
+        assert_eq!(interaction("").ok(), Some(Interaction::AsNeeded));
+        assert!(interaction("none login").is_err());
+        assert!(interaction("unrecognized").is_err());
+    }
     /// `max_age` holds up to its boundary at authorize too. `0` needs a sign-in after
     /// the request, a negative age is never met, and one past `u32` limits nothing.
     #[test]
