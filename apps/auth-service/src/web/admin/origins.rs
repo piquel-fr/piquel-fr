@@ -36,7 +36,7 @@ pub(super) async fn approve(cx: &Cx, form: Option<Form<ApproveOrigin>>) -> Resul
     let admin = App::admin(cx).await?;
     App::confirm(cx, admin)?;
     let app = App::of(cx);
-    let id = path_param::<Client>(cx)?.clone();
+    let id = App::changing(cx, admin).await?.client.id;
     let back = href!(clients::detail, Client(id.clone())).resolve(cx);
     let refusal = App::submit(cx, form, back.clone(), async |input: ApproveOrigin| {
         let origin: RelatedOrigin = input

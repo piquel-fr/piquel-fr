@@ -6,8 +6,9 @@
 //! [`AdminApplication::page`](super::AdminApplication::page).
 //!
 //! A page whose change could only be refused says so in place of its form: a
-//! deleted client's change pages, and a public client's secrets page, which has
-//! none, answer with the registry's refusal.
+//! deleted client's change pages, approving an origin for its pages among them,
+//! and a public client's secrets page, which has none, answer with the
+//! registry's refusal.
 //!
 //! The registration page sits beside the clients' own, at `/clients/new`, so a
 //! client with that ID has no overview here; the rest of its pages, and the
@@ -421,7 +422,7 @@ impl App {
     /// The client the path names, for a page that changes it. A deleted client
     /// changes no more, so each of its change pages answers at once with the
     /// registry's refusal, as its form would once posted.
-    async fn changing(cx: &Cx, admin: &SignedInAdmin) -> Result<ClientDetails> {
+    pub(super) async fn changing(cx: &Cx, admin: &SignedInAdmin) -> Result<ClientDetails> {
         let id = path_param::<Client>(cx)?;
         let details = Self::of(cx)
             .service

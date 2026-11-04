@@ -1136,6 +1136,7 @@ async fn pages_that_could_only_fail_refuse_at_once() {
         "/clients"
     );
     for change in [
+        "origins/approve",
         "settings",
         "enable",
         "disable",
