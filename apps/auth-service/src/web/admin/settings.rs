@@ -339,7 +339,7 @@ pub(super) async fn display_name(cx: &Cx, form: Option<Form<NewDisplayName>>) ->
             reason: reason,
             <label>
                 "New display name"
-                <input name="display_name" required="" maxlength="80" autocomplete="off" value=(typed)>
+                <input name="display_name" required="" maxlength="80" autocomplete="off" value=(typed) autofocus="">
             </label>
         )
     };
