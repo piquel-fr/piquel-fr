@@ -1,0 +1,132 @@
+/* The stylesheet of piquel.fr's pages: auth's sign-in, settings and developer
+   console, and the admin dashboard. One token set colours everything; the dark
+   set applies when the browser prefers it, unless the page chose a theme. The
+   admin dashboard's pages swap the brand marks for red, and keep the accent of
+   links and buttons, so red there always means an administrator or a loss.
+   Every rule works without scripts: the dashboard loads none. */
+
+/* Tokens: light. */
+:root {
+  --bg: #eef0f4;
+  --surface: #fff;
+  --surface-2: #f3f4f7;
+  --fg: #111625;
+  --muted: #5b6476;
+  --line: rgba(15, 18, 30, 0.12);
+  --accent: #4353e0;
+  --on-accent: #fff;
+  --accent-soft: rgba(67, 83, 224, 0.1);
+  --brand: #4353e0;
+  --on-brand: #fff;
+  --brand-soft: rgba(67, 83, 224, 0.1);
+  --danger: #c62f2f;
+  --danger-soft: rgba(198, 47, 47, 0.1);
+  --ok: #13874f;
+  --ok-soft: rgba(19, 135, 79, 0.12);
+  --warning: #a85a00;
+  --warning-soft: rgba(168, 90, 0, 0.12);
+  --admin-ring: #d62d2d;
+  --admin-line: linear-gradient(90deg, #d62d2d, #f07a3c);
+  --focus: #4353e0;
+  --radius: 7px;
+  --sans: 'DM Sans', ui-sans-serif, system-ui, -apple-system, 'Segoe UI', sans-serif;
+  --mono: 'DM Mono', ui-monospace, SFMono-Regular, Menlo, monospace;
+  --sidebar: 232px;
+  --sidebar-collapsed: 56px;
+  color-scheme: light;
+}
+/* Tokens: dark, by preference unless the page chose light, and by choice. */
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme='light']) {
+    --bg: #0b0d11;
+    --surface: #12151b;
+    --surface-2: #181c24;
+    --fg: #e9ebf0;
+    --muted: #8b92a3;
+    --line: rgba(255, 255, 255, 0.09);
+    --accent: #7c93ff;
+    --on-accent: #0b0d11;
+    --accent-soft: rgba(124, 147, 255, 0.14);
+    --brand: #7c93ff;
+    --on-brand: #0b0d11;
+    --brand-soft: rgba(124, 147, 255, 0.14);
+    --danger: #ff6b6b;
+    --danger-soft: rgba(255, 107, 107, 0.14);
+    --ok: #5fd39a;
+    --ok-soft: rgba(95, 211, 154, 0.14);
+    --warning: #f5b64a;
+    --warning-soft: rgba(245, 182, 74, 0.14);
+    --admin-ring: #ff4d4d;
+    --admin-line: linear-gradient(90deg, #ff4d4d, #ff8a5b);
+    --focus: #9fb0ff;
+    color-scheme: dark;
+  }
+}
+:root[data-theme='dark'] {
+  --bg: #0b0d11;
+  --surface: #12151b;
+  --surface-2: #181c24;
+  --fg: #e9ebf0;
+  --muted: #8b92a3;
+  --line: rgba(255, 255, 255, 0.09);
+  --accent: #7c93ff;
+  --on-accent: #0b0d11;
+  --accent-soft: rgba(124, 147, 255, 0.14);
+  --brand: #7c93ff;
+  --on-brand: #0b0d11;
+  --brand-soft: rgba(124, 147, 255, 0.14);
+  --danger: #ff6b6b;
+  --danger-soft: rgba(255, 107, 107, 0.14);
+  --ok: #5fd39a;
+  --ok-soft: rgba(95, 211, 154, 0.14);
+  --warning: #f5b64a;
+  --warning-soft: rgba(245, 182, 74, 0.14);
+  --admin-ring: #ff4d4d;
+  --admin-line: linear-gradient(90deg, #ff4d4d, #ff8a5b);
+  --focus: #9fb0ff;
+  color-scheme: dark;
+}
+/* The admin dashboard: the brand marks turn red, so no page is mistaken for
+   the account's, while links and buttons keep the accent. */
+body.admin {
+  --brand: #c62f2f;
+  --on-brand: #fff;
+  --brand-soft: rgba(198, 47, 47, 0.1);
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme='light']) body.admin {
+    --brand: #ff6b6b;
+    --on-brand: #1a0b0b;
+    --brand-soft: rgba(255, 107, 107, 0.14);
+  }
+}
+:root[data-theme='dark'] body.admin {
+  --brand: #ff6b6b;
+  --on-brand: #1a0b0b;
+  --brand-soft: rgba(255, 107, 107, 0.14);
+}
+
+/* Typefaces, embedded with the executable: the Latin subsets of DM Sans and
+   DM Mono (SIL Open Font License, see assets/fonts/OFL-DM-Sans.txt and
+   OFL-DM-Mono.txt). */
+@font-face {
+  font-family: 'DM Sans';
+  font-style: normal;
+  font-weight: 400 700;
+  font-display: swap;
+  src: url('/assets/dm-sans-v17-latin.woff2') format('woff2');
+}
+@font-face {
+  font-family: 'DM Mono';
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url('/assets/dm-mono-v16-latin-400.woff2') format('woff2');
+}
+@font-face {
+  font-family: 'DM Mono';
+  font-style: normal;
+  font-weight: 500;
+  font-display: swap;
+  src: url('/assets/dm-mono-v16-latin-500.woff2') format('woff2');
+}

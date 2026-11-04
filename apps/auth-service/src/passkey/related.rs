@@ -5,8 +5,9 @@
 //! request, and the sign-in creates a session only the client's tokens use.
 
 use super::{
-    AuthenticationCeremony, LoginCeremony, PasskeyApplication, PasskeyError, SignIn,
-    ceremonies::RelatedCeremony,
+    PasskeyApplication, PasskeyError,
+    acceptance::SignIn,
+    ceremonies::{AuthenticationCeremony, LoginCeremony, RelatedCeremony},
     types::{AuthenticationFinish, RelatedOrigins, RelatedStart},
 };
 use crate::{

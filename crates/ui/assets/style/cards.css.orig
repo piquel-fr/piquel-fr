@@ -1,0 +1,220 @@
+/* Cards: a bordered surface, with an optional header row. */
+.card {
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  min-width: 0;
+}
+.card > header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.6rem;
+  flex-wrap: wrap;
+  padding: 0.65rem 0.9rem;
+  border-bottom: 1px solid var(--line);
+}
+.card > header h2 {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+.card > header a {
+  font-size: 0.86rem;
+  font-weight: 500;
+  text-decoration: none;
+}
+.card > header a:hover {
+  text-decoration: underline;
+}
+.card > .body,
+.card > form {
+  padding: 0.9rem;
+}
+.card > .body {
+  display: grid;
+  gap: 0.9rem;
+}
+.card > p.help,
+.card > p.empty {
+  padding: 0.7rem 0.9rem;
+}
+.count {
+  font-family: var(--mono);
+  font-size: 0.74rem;
+  font-weight: 400;
+  color: var(--muted);
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  padding: 0 0.3rem;
+}
+.empty {
+  color: var(--muted);
+}
+
+/* Lists of rows inside a card: the text keeps its room, and the row's buttons
+   wrap under it on a narrow window. */
+.list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.list > li,
+.item {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.5rem 0.7rem;
+  padding: 0.65rem 0.9rem;
+  border-bottom: 1px solid var(--line);
+  min-width: 0;
+}
+.list > li:last-child,
+.item:last-child {
+  border-bottom: 0;
+}
+.list > li.open {
+  display: grid;
+}
+.item .text,
+.list .text {
+  flex: 1 1 14rem;
+  min-width: 0;
+}
+.item small,
+.list .text small,
+.list .text .help {
+  display: block;
+  font-family: var(--mono);
+  font-size: 0.78rem;
+}
+.item strong,
+.list .text strong {
+  font-weight: 600;
+}
+/* A row opened for editing or confirmation. */
+.open-row {
+  display: grid;
+  gap: 0.8rem;
+  padding: 0.8rem 0.9rem;
+  border-top: 1px solid var(--line);
+  background: var(--surface-2);
+}
+.open-row:first-child {
+  border-top: 0;
+}
+/* A form folded behind a button, such as adding a passkey: the summary looks
+   like the button, and the form opens below it. */
+.disclosure {
+  border-top: 1px solid var(--line);
+}
+.disclosure > summary {
+  display: flex;
+  list-style: none;
+  padding: 0.6rem 0.9rem;
+  cursor: pointer;
+}
+.disclosure > summary::-webkit-details-marker {
+  display: none;
+}
+.disclosure > summary:focus {
+  outline: none;
+}
+.disclosure > summary:focus-visible .button {
+  outline: 2px solid var(--focus);
+  outline-offset: 2px;
+}
+.disclosure[open] > summary .button {
+  background: var(--accent-soft);
+  color: var(--accent);
+  border-color: transparent;
+}
+.disclosure > .open-row {
+  border-top: 0;
+}
+/* A change the service would refuse: its button, disabled, and why. */
+.refused {
+  display: grid;
+  gap: 0.15rem;
+  justify-items: end;
+  max-width: 18rem;
+  text-align: right;
+}
+.refused small {
+  font-size: 0.76rem;
+}
+/* A confirmation the browser opens over the page, with no script, and closes
+   on a click outside or Escape. */
+.dialog {
+  margin: auto;
+  inset: 0;
+  width: min(480px, calc(100vw - 2rem));
+  max-height: calc(100vh - 2rem);
+  max-height: calc(100dvh - 2rem);
+  overflow: auto;
+  padding: 1.1rem 1.2rem;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--surface);
+  color: var(--fg);
+  box-shadow: 0 24px 60px rgba(0, 0, 0, 0.35);
+}
+.dialog:popover-open {
+  display: grid;
+  gap: 0.8rem;
+}
+.dialog::backdrop {
+  background: rgba(0, 0, 0, 0.45);
+}
+.dialog h2 {
+  font-size: 1.05rem;
+}
+/* Where a list's page stands, and the pages before and after it. */
+.pager {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.6rem;
+  flex-wrap: wrap;
+  font-size: 0.86rem;
+}
+
+/* Tables. */
+table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.9rem;
+}
+th,
+td {
+  text-align: left;
+  padding: 0.55rem 0.9rem;
+  border-bottom: 1px solid var(--line);
+  vertical-align: middle;
+}
+th {
+  font-family: var(--mono);
+  font-size: 0.74rem;
+  font-weight: 500;
+  color: var(--muted);
+  background: var(--surface-2);
+  white-space: nowrap;
+}
+tbody tr:last-child td {
+  border-bottom: 0;
+}
+td.right,
+th.right {
+  text-align: right;
+}
+/* A table scrolls sideways in its card rather than wrapping its cells' words. */
+.table-wrap {
+  overflow-x: auto;
+}
+.table-wrap td {
+  white-space: nowrap;
+}
+.details {
+  font-size: 0.78rem;
+  overflow-wrap: anywhere;
+}

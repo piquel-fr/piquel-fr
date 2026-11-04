@@ -1,8 +1,7 @@
 //! Passkey failures and their single conversion boundary to browser responses.
 
-use super::ApiError;
 use crate::handles::HandlesError;
-use crate::security::SessionError;
+use crate::security::{ApiError, SessionError};
 use piquel_common::{InvalidValue, events::SignInFailure};
 use piquel_crypto::CryptoError;
 use piquel_repository::DatabaseError;

@@ -1,0 +1,389 @@
+/* Shell: the sidebar beside the page, which the status bar closes. */
+.shell {
+  display: grid;
+  grid-template-columns: var(--sidebar) minmax(0, 1fr);
+  min-height: 100vh;
+}
+html[data-sidebar='collapsed'] .shell {
+  grid-template-columns: var(--sidebar-collapsed) minmax(0, 1fr);
+}
+.sidebar {
+  position: sticky;
+  top: 0;
+  height: 100vh;
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+  padding: 0.7rem 0.5rem;
+  background: var(--surface);
+  border-right: 1px solid var(--line);
+  overflow-y: auto;
+  overflow-x: hidden;
+}
+.sidebar .top {
+  display: flex;
+  align-items: center;
+  gap: 0.3rem;
+  padding: 0.3rem 0.4rem 0.9rem;
+}
+.sidebar .top form {
+  display: contents;
+}
+.sidebar .close {
+  display: none;
+}
+.sidebar .brand {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  min-width: 0;
+  font-weight: 700;
+  font-size: 1rem;
+  letter-spacing: -0.02em;
+  color: var(--fg);
+  text-decoration: none;
+}
+.mark {
+  display: grid;
+  place-items: center;
+  flex: none;
+  width: 22px;
+  height: 22px;
+  border-radius: 6px;
+  background: var(--brand);
+  color: var(--on-brand);
+  font-family: var(--mono);
+  font-size: 0.8rem;
+  font-weight: 500;
+}
+.area {
+  margin-left: 0.1rem;
+  padding: 0.05rem 0.4rem;
+  border-radius: 4px;
+  background: var(--brand-soft);
+  color: var(--brand);
+  font-size: 0.72rem;
+  font-weight: 600;
+}
+.sidebar .group {
+  padding: 0.75rem 0.5rem 0.25rem;
+  font-family: var(--mono);
+  font-size: 0.72rem;
+  color: var(--muted);
+}
+.sidebar nav {
+  display: grid;
+  gap: 0.1rem;
+}
+.sidebar nav a,
+.sidebar .end a,
+.sidebar .end button {
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 0.55rem;
+  width: 100%;
+  min-height: 34px;
+  padding: 0.35rem 0.5rem;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--muted);
+  font-weight: 500;
+  font-size: 0.9rem;
+  text-align: left;
+  text-decoration: none;
+  white-space: nowrap;
+  cursor: pointer;
+}
+.sidebar nav a:hover,
+.sidebar .end a:hover,
+.sidebar .end button:hover {
+  background: var(--surface-2);
+  color: var(--fg);
+  filter: none;
+}
+.sidebar nav a[aria-current] {
+  background: var(--surface-2);
+  color: var(--fg);
+  box-shadow: inset 2px 0 0 var(--brand);
+}
+.sidebar .count {
+  margin-left: auto;
+  font-family: var(--mono);
+  font-size: 0.74rem;
+  color: var(--muted);
+}
+.sidebar .count.warning {
+  width: 8px;
+  height: 8px;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: var(--warning);
+}
+.sidebar .end {
+  margin-top: auto;
+  padding-top: 0.5rem;
+  border-top: 1px solid var(--line);
+  display: grid;
+  gap: 0.1rem;
+}
+.sidebar .who {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.4rem 0.5rem;
+  font-size: 0.88rem;
+  font-weight: 500;
+  min-width: 0;
+}
+.sidebar .who small {
+  display: block;
+  font-family: var(--mono);
+  font-size: 0.74rem;
+  font-weight: 400;
+}
+.sidebar .who > div {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+/* The theme switch: one form, whose button for the other theme shows. These
+   rules outweigh the sidebar's button rule above. */
+.sidebar .end .theme-toggle button {
+  display: none;
+}
+.sidebar .end .theme-toggle button[value='dark'] {
+  display: flex;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme='light']) .sidebar .end .theme-toggle button[value='dark'] {
+    display: none;
+  }
+  :root:not([data-theme='light']) .sidebar .end .theme-toggle button[value='light'] {
+    display: flex;
+  }
+}
+:root[data-theme='dark'] .sidebar .end .theme-toggle button[value='dark'] {
+  display: none;
+}
+:root[data-theme='dark'] .sidebar .end .theme-toggle button[value='light'] {
+  display: flex;
+}
+/* The drawer's backdrop, which only phones show, and its state, a checkbox the
+   top bar's button labels, which only phones keep in the tab order, ahead of
+   the drawer. */
+.scrim {
+  display: none;
+}
+.menu-state {
+  display: none;
+}
+/* Collapsing: the rail keeps the icons, whose titles name them. */
+.sidebar .collapse {
+  margin-left: auto;
+  width: 28px;
+  min-height: 28px;
+  padding: 0;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+}
+.sidebar .collapse:hover {
+  background: var(--surface-2);
+  color: var(--fg);
+  filter: none;
+}
+html[data-sidebar='collapsed'] .sidebar {
+  padding-inline: 0.4rem;
+  align-items: center;
+}
+html[data-sidebar='collapsed'] .sidebar .top {
+  flex-direction: column;
+  gap: 0.6rem;
+  padding: 0.3rem 0 0.6rem;
+}
+html[data-sidebar='collapsed'] .sidebar .brand .name,
+html[data-sidebar='collapsed'] .sidebar .area,
+html[data-sidebar='collapsed'] .sidebar .label,
+html[data-sidebar='collapsed'] .sidebar .count:not(.warning),
+html[data-sidebar='collapsed'] .sidebar .who > div {
+  display: none;
+}
+html[data-sidebar='collapsed'] .sidebar .collapse {
+  margin: 0;
+  transform: rotate(180deg);
+}
+html[data-sidebar='collapsed'] .sidebar .group {
+  width: 24px;
+  height: 0;
+  padding: 0;
+  margin: 0.4rem 0;
+  border-top: 1px solid var(--line);
+  overflow: hidden;
+}
+html[data-sidebar='collapsed'] .sidebar nav,
+html[data-sidebar='collapsed'] .sidebar .end {
+  width: 100%;
+}
+html[data-sidebar='collapsed'] .sidebar nav a,
+html[data-sidebar='collapsed'] .sidebar .end a,
+html[data-sidebar='collapsed'] .sidebar .end button,
+html[data-sidebar='collapsed'] .sidebar .who {
+  justify-content: center;
+  padding: 0.45rem 0;
+  position: relative;
+}
+html[data-sidebar='collapsed'] .sidebar nav a[aria-current] {
+  box-shadow: inset 0 0 0 1px var(--line);
+}
+html[data-sidebar='collapsed'] .sidebar .count.warning {
+  position: absolute;
+  top: 5px;
+  right: 7px;
+  margin: 0;
+}
+html[data-sidebar='collapsed'] .sidebar .theme-toggle {
+  width: 100%;
+}
+/* The page: a top bar, its content and the status bar. */
+.main {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 100vh;
+}
+body.admin .main::before {
+  content: '';
+  height: 3px;
+  background: var(--admin-line);
+  flex: none;
+}
+.topbar {
+  display: flex;
+  align-items: center;
+  gap: 0.8rem;
+  min-height: 46px;
+  padding: 0.35rem 1.4rem;
+  background: var(--surface);
+  border-bottom: 1px solid var(--line);
+}
+.topbar .menu-button {
+  display: none;
+}
+.crumb {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  min-width: 0;
+  font-family: var(--mono);
+  font-size: 0.84rem;
+  color: var(--muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.crumb b {
+  color: var(--fg);
+  font-weight: 500;
+}
+.crumb a {
+  color: inherit;
+  text-decoration: none;
+}
+.crumb a:hover {
+  color: var(--fg);
+}
+.topbar .right {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+}
+.topbar .search {
+  width: min(320px, 40vw);
+  flex-wrap: nowrap;
+}
+.topbar .me {
+  display: inline-flex;
+  border-radius: 50%;
+}
+.topbar .me:hover .avatar {
+  filter: brightness(1.12);
+}
+.search-box {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0 0.5rem;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--bg);
+  color: var(--muted);
+  font-weight: 400;
+}
+.search-box:focus-within {
+  border-color: var(--focus);
+}
+.search-box input {
+  min-height: 30px;
+  padding: 0.2rem 0;
+  border: 0;
+  background: transparent;
+  font-size: 0.86rem;
+}
+.search-box input:focus-visible {
+  outline: none;
+}
+.content {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+  padding: 1.4rem;
+  width: 100%;
+  max-width: 1200px;
+  margin-inline: auto;
+}
+.content.narrow {
+  max-width: 640px;
+}
+.page-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 1rem;
+  flex-wrap: wrap;
+}
+.page-head .lead {
+  margin-top: 0.15rem;
+}
+.status {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  min-height: 32px;
+  padding: 0.3rem 1.4rem;
+  background: var(--surface);
+  border-top: 1px solid var(--line);
+  font-size: 0.8rem;
+  color: var(--muted);
+  flex-wrap: wrap;
+}
+.status .right {
+  margin-left: auto;
+  display: flex;
+  gap: 0.9rem;
+}
+.status a {
+  color: inherit;
+}
+.status .health {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+}
