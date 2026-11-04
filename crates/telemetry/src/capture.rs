@@ -1,4 +1,8 @@
 //! What a test would export, captured in memory through the production layers.
+#![expect(
+    clippy::expect_used,
+    reason = "test-only helpers, which panic on failure as the `# Panics` sections document"
+)]
 
 use crate::Telemetry;
 use opentelemetry_sdk::{

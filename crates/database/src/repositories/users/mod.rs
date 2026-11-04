@@ -57,6 +57,10 @@ impl InsertUser {
     ///
     /// Panics if `prefix` cannot start a handle.
     #[must_use]
+    #[expect(
+        clippy::expect_used,
+        reason = "test-only constructor; documented under `# Panics`"
+    )]
     pub fn named(prefix: &str) -> Self {
         let id = UserId::new();
         Self {

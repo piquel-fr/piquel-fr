@@ -1,0 +1,2 @@
+# `expect_used` holds for production code only; tests may panic on failure.
+allow-expect-in-tests = true
