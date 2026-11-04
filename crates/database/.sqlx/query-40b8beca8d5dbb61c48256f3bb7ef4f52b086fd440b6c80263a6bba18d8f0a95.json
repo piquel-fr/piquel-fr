@@ -1,0 +1,24 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT count(*) AS \"count!\"\n                FROM domain_events\n                WHERE ($1::uuid IS NULL OR subject_user_id = $1)\n                AND ($2::text IS NULL OR kind = $2)\n                AND ($3::text IS NULL OR kind <> $3)",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "count!",
+        "type_info": "Int8"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Text",
+        "Text"
+      ]
+    },
+    "nullable": [
+      null
+    ]
+  },
+  "hash": "40b8beca8d5dbb61c48256f3bb7ef4f52b086fd440b6c80263a6bba18d8f0a95"
+}

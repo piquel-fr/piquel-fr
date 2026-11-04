@@ -161,12 +161,7 @@ impl AdminService {
         let mut tx = self.database.begin().await?;
         let since = Utc::now() - PROBATION;
         let recent = tx.recoveries().recent(user_id, since).await?;
-        tx.record(
-            &operator.context(),
-            Some(user_id),
-            DomainEvent::AccountViewed {},
-        )
-        .await?;
+        operator.record_view(&mut tx, user_id).await?;
         tx.commit().await?;
         Ok(recent)
     }

@@ -152,9 +152,12 @@ When an administrator or operator acts:
 - Every change needs their reason, renaming the handle included. It is stored with
   each event as personal data, and the owner sees it in their security history,
   next to "By a Piquel administrator".
-- Events record the administrator or operator as their actor. A page's reads are
-  recorded as one view of the account, as `user show` is. The owner's history
-  leaves views out: it shows changes, with their reasons, not reads.
+- Events record the administrator or operator as their actor. Their reads are
+  recorded as a view of the account, as `user show` is, once an hour per
+  administrator session or operator. The owner's history leaves views out: it
+  shows changes, with their reasons, not reads. The dashboard's event lists and
+  `audit list` leave them out too, unless "Show views" or `--views` asks for
+  them, or the kind filter is `account_viewed`.
 - An administrator may not change another administrator's account: it is refused
   before waiting for the account lock and again under it. A change checks the
   administrator's rights, session and passkey confirmation once more before it

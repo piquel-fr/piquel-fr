@@ -25,8 +25,10 @@ impl AdminService {
         search: EventSearch,
     ) -> Result<EventPage, AdminError> {
         operator.authorize_read(&self.database).await?;
+        let viewed = DomainEvent::AccountViewed {}.kind();
         let mut filter = EventFilter {
             subject: search.user,
+            except_kind: (!search.views && search.kind.is_none()).then(|| viewed.to_owned()),
             kind: search.kind,
             ..EventFilter::default()
         };

@@ -4,6 +4,35 @@ use super::*;
 use piquel_common::events::RevocationReason;
 use serde_json::json;
 
+/// The event list shows changes: an administrator's views of an account only
+/// when asked for.
+#[tokio::test]
+#[ignore = "requires TEST_DATABASE_URL"]
+async fn views_are_listed_only_when_asked_for() {
+    let harness = Harness::new().await;
+    let service = harness.service();
+    let administrator = operator(harness.admin().await, Utc::now());
+    let user = harness.account().await.user_id;
+    service.view_user(&administrator, user).await.expect("view");
+    let kinds = async |views| {
+        let search = EventSearch {
+            user: Some(user),
+            views,
+            ..EventSearch::default()
+        };
+        let page = service
+            .events(&administrator, search)
+            .await
+            .expect("events");
+        page.events
+            .into_iter()
+            .map(|event| event.event["kind"].clone())
+            .collect::<Vec<_>>()
+    };
+    assert!(!kinds(false).await.contains(&json!("account_viewed")));
+    assert!(kinds(true).await.contains(&json!("account_viewed")));
+}
+
 /// Disabling an account ends its sessions at once and records why; enabling it
 /// restores it, and both show in the events, attributed to the administrator.
 #[tokio::test]
@@ -77,7 +106,7 @@ async fn disabling_ends_sessions_and_is_recorded() {
             EventSearch {
                 user: Some(user.user_id),
                 kind: Some("account_disabled".into()),
-                page: None,
+                ..EventSearch::default()
             },
         )
         .await

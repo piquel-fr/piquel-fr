@@ -1,0 +1,25 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT EXISTS (\n                    SELECT 1 FROM domain_events\n                    WHERE kind = $1 AND occurred_at >= $2 AND subject_user_id = $3\n                    AND actor = $4\n                ) AS \"caused!\"",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "caused!",
+        "type_info": "Bool"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Timestamptz",
+        "Uuid",
+        "Jsonb"
+      ]
+    },
+    "nullable": [
+      null
+    ]
+  },
+  "hash": "0448dbb57f6793276820a304f03049c5626f1b0b3dda24acc79027ada2210203"
+}

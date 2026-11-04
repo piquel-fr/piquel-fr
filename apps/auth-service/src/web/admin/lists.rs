@@ -6,7 +6,7 @@ use piquel_common::{
     admin::{Event, EventSearch},
     events::Actor,
 };
-use piquel_ui::{EventRow, Pager, Query};
+use piquel_ui::{Checkbox, EventRow, Pager, Query};
 use topcoat::{
     Result,
     context::Cx,
@@ -21,11 +21,14 @@ struct EventsQuery {
     user: Option<UserId>,
     /// Only events of this kind.
     kind: Option<String>,
+    /// Whether administrators' views of accounts are listed too.
+    views: Option<Checkbox>,
     /// The page wanted, counting from 1.
     page: Option<u32>,
 }
 
-/// `/events`: domain events, newest first, filtered by account and kind.
+/// `/events`: domain events, newest first, filtered by account and kind, with
+/// administrators' views of accounts only when asked for.
 #[route(GET "/events")]
 pub(super) async fn events(cx: &Cx) -> Result<Response> {
     let admin = App::admin(cx).await?;
@@ -33,6 +36,7 @@ pub(super) async fn events(cx: &Cx) -> Result<Response> {
     let filter = EventSearch {
         user: query.user,
         kind: query.kind.clone(),
+        views: query.views.is_some(),
         page: query.page,
     };
     let found = App::of(cx)
@@ -47,9 +51,16 @@ pub(super) async fn events(cx: &Cx) -> Result<Response> {
         }
         .on(&action)
     })?;
+    let toggle_views = EventSearch {
+        views: !filter.views,
+        page: None,
+        ..filter.clone()
+    }
+    .on(&action)?;
     let rows = &App::event_rows(cx, &found.events);
-    let (action, user, kind, pager) = (
+    let (action, toggle_views, user, kind, pager) = (
         &action,
+        &toggle_views,
         filter.user.map(|user| user.to_string()),
         filter.kind.as_deref(),
         &pager,
@@ -59,6 +70,8 @@ pub(super) async fn events(cx: &Cx) -> Result<Response> {
             action: action.as_str(),
             user: user,
             kind: kind,
+            views: filter.views,
+            toggle_views: toggle_views.as_str(),
             rows: rows,
             pages: pager,
         )

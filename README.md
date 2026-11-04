@@ -258,6 +258,7 @@ just auth user restore alice --reason "Changed their mind"
 just auth session revoke <session-id>     # one session, as `user show` lists it
 just auth session revoke-all alice        # every session of the account
 just auth audit list --user alice --kind session_revoked
+just auth audit list --user alice --views # with administrators' views of the account
 just auth audit verify                    # recompute the tamper-evident chain
 just auth account alice passkeys list     # the account's settings, as its owner sees them
 just auth account alice name set "Alice B" --reason "Asked by email"
@@ -285,8 +286,8 @@ just auth account alice apps remove <client-id> --reason "Impersonating app"
   sessions, connected apps and the security history, with the owner's own
   operations. It never adds a way
   to sign in or an address. Every change needs `--reason`, which the owner sees in
-  their history; reads are recorded as views, which only the audit shows, not the
-  owner. See
+  their history; reads are recorded as views, once an hour per operator, which
+  only the audit shows, not the owner. See
   [surfaces.md](docs/architecture/surfaces.md#changing-an-account-on-its-owners-behalf)
   for what is shared.
 - `user recover` is for an owner who lost every passkey. It signs the account
