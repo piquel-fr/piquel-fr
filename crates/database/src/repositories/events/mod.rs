@@ -488,7 +488,7 @@ impl EventRepository<'_> {
     /// # Errors
     ///
     /// Returns [`DatabaseError`] if the query fails or a stored event does not decode.
-    #[cfg(feature = "test-util")]
+    #[cfg(any(test, feature = "test-util"))]
     pub async fn history_for_client(
         &mut self,
         client_id: &ClientId,

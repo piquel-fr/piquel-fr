@@ -20,7 +20,7 @@ pub use connection::{Database, DatabaseConfig, RuntimeRole};
 pub(crate) use connection::{Limit, Scope};
 pub use error::{DatabaseConnectionError, DatabaseError};
 pub use exclusive::{ExclusiveConnection, LockKey};
-#[cfg(feature = "test-util")]
+#[cfg(any(test, feature = "test-util"))]
 pub use repositories::audit::Tamper;
 pub use repositories::{
     AccountDeletionRepository, AdministratorRepository, AuditRepository, DashboardRepository,

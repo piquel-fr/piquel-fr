@@ -322,7 +322,7 @@ impl DeliveryRepository<'_> {
     /// # Errors
     ///
     /// Returns [`DatabaseError`] if the query fails.
-    #[cfg(feature = "test-util")]
+    #[cfg(any(test, feature = "test-util"))]
     pub async fn payloads(
         &mut self,
         destination: &str,

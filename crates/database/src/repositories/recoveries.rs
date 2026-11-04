@@ -420,7 +420,7 @@ impl RecoveryRepository<'_> {
     /// # Errors
     ///
     /// Returns [`DatabaseError`] if the update fails.
-    #[cfg(feature = "test-util")]
+    #[cfg(any(test, feature = "test-util"))]
     pub async fn expire(&mut self, id: RecoveryId) -> Result<(), DatabaseError> {
         run!(
             self,
@@ -439,7 +439,7 @@ impl RecoveryRepository<'_> {
     /// # Errors
     ///
     /// Returns [`DatabaseError`] if the update fails.
-    #[cfg(feature = "test-util")]
+    #[cfg(any(test, feature = "test-util"))]
     pub async fn backdate_completion(
         &mut self,
         id: RecoveryId,
