@@ -7,11 +7,11 @@ use chrono::{DateTime, Duration, Utc};
 use piquel_common::{
     SessionId, UserId,
     config::{ConfigurationError, Variable},
-    events::{Actor, EventContext, RequestOrigin},
+    events::{Actor, DomainEvent, EventContext, RequestOrigin},
     protocol::{claims::Acr, step_up::StepUpRequirement},
 };
 use piquel_repository::{
-    Database, DatabaseTransaction, SessionAuthentication, StoredSession, StoredUser,
+    Database, DatabaseError, DatabaseTransaction, SessionAuthentication, StoredSession, StoredUser,
 };
 
 /// The operating system user running a command, recorded on the events it causes.
@@ -30,6 +30,10 @@ const PASSKEY: StepUpRequirement = StepUpRequirement {
 };
 /// A passkey confirmation recent enough for a mutation.
 const RECENT_PASSKEY: StepUpRequirement = StepUpRequirement::passkey_within(CONFIRMATION_MAX_AGE);
+/// How long one recorded view of an account covers the same viewer's later reads
+/// of it, so an investigation reloading the account's pages records one view an
+/// hour, not one per page.
+const VIEW_WINDOW: Duration = Duration::hours(1);
 
 /// Who runs an administrative operation: an administrator through the admin
 /// dashboard, or an operator at the command line.
@@ -95,6 +99,28 @@ impl Operator {
                 reason: None,
             },
         }
+    }
+
+    /// Records in `tx` that this operator viewed `user_id`'s account, which holds
+    /// personal data, unless they already did, in this same session, within
+    /// [`VIEW_WINDOW`]. Two reads at once may both record; a page's reads run one
+    /// after another.
+    pub(crate) async fn record_view(
+        &self,
+        tx: &mut DatabaseTransaction<'_>,
+        user_id: UserId,
+    ) -> Result<(), DatabaseError> {
+        let context = self.context();
+        let event = DomainEvent::AccountViewed {};
+        let since = Utc::now() - VIEW_WINDOW;
+        if !tx
+            .events()
+            .caused_since(&context.actor, user_id, event.kind(), since)
+            .await?
+        {
+            tx.record(&context, Some(user_id), event).await?;
+        }
+        Ok(())
     }
 
     /// Whether the operator's passkey confirmation will still meet a mutation's

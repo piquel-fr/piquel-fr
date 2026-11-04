@@ -110,7 +110,9 @@ those external systems.
 through auth's handoff page, confirms a change with a passkey for the dashboard
 only, and disables an account, whose settings page then loses its session; signing
 out of the dashboard keeps the Piquel session, and signed out of both, a passkey
-sign-in on auth goes on to the dashboard. Its other tests grant administrator
+sign-in on auth goes on to the dashboard. Another lists an account's events without
+the administrator's view of it until "Show views", which keeps the account filter,
+and hides it again with "Hide views". Its other tests grant administrator
 rights from a search and revoke them, each change moving on the audit chain,
 which stays intact; create an invitation, whose link signs one account up once,
 and revoke another, which then signs nobody up, when `E2E_INVITE` is set; approve

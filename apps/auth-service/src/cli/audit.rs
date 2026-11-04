@@ -139,6 +139,10 @@ pub(super) struct ListEvents {
     /// Only events of this kind, e.g. `session_revoked`.
     #[arg(long)]
     kind: Option<String>,
+    /// List administrators' and operators' views of accounts too, which are left
+    /// out unless `--kind account_viewed` asks for them.
+    #[arg(long)]
+    views: bool,
     /// The page to list, counting from 1 at the newest events.
     #[arg(long)]
     page: Option<u32>,
@@ -157,6 +161,7 @@ impl ListEvents {
         let search = EventSearch {
             user,
             kind: self.kind,
+            views: self.views,
             page: self.page,
         };
         self.output.print(

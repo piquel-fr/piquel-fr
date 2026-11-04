@@ -323,6 +323,10 @@ pub struct EventSearch {
     /// Only events of this kind, e.g. `session_revoked`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub kind: Option<String>,
+    /// Whether administrators' views of accounts are listed too. They are left
+    /// out unless asked for, here or as the `kind`, so the list shows changes.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub views: bool,
     /// The page wanted, counting from 1 at the newest; the first when absent.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub page: Option<u32>,

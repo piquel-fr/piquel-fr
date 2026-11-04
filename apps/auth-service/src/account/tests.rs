@@ -356,8 +356,9 @@ async fn every_settings_read_checks_its_administrator() {
 }
 
 /// An administrator's read shows every session, none of them theirs, and is
-/// recorded as a view of the account, by them: one per viewer, so a page reading
-/// several settings records one view.
+/// recorded as a view of the account, by them: once an hour, so a page reading
+/// several settings, and its reload, record one view. Another administrator's
+/// reads record their own.
 #[tokio::test]
 #[ignore = "requires TEST_DATABASE_URL"]
 async fn administrators_reads_are_recorded_as_views() {
@@ -373,6 +374,11 @@ async fn administrators_reads_are_recorded_as_views() {
         [(target.session_id, false)]
     );
     fixture.service.passkeys(&viewer).await.expect("passkeys");
+    let reload = Viewer::operator(target.user_id, fixture.operator(Duration::zero()));
+    fixture.service.passkeys(&reload).await.expect("reload");
+    let other = fixture.harness.admin().await;
+    let other = Viewer::operator(target.user_id, operator(other, Utc::now()));
+    fixture.service.passkeys(&other).await.expect("other admin");
     let history = fixture
         .harness
         .database
@@ -384,9 +390,10 @@ async fn administrators_reads_are_recorded_as_views() {
         .iter()
         .filter(|stored| stored.event.known() == Some(&DomainEvent::AccountViewed {}))
         .collect();
-    let [view] = views.as_slice() else {
-        panic!("one view for two reads: {views:?}");
+    let [other, view] = views.as_slice() else {
+        panic!("one view per administrator: {views:?}");
     };
+    assert_ne!(other.actor, view.actor);
     assert_eq!(
         view.actor,
         Actor::Admin {

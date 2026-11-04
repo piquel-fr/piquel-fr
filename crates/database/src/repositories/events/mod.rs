@@ -43,6 +43,8 @@ pub struct EventFilter {
     /// Only events of this kind, the serde tag of a [`DomainEvent`] variant, e.g.
     /// `session_revoked`.
     pub kind: Option<String>,
+    /// No events of this kind, e.g. `account_viewed`.
+    pub except_kind: Option<String>,
     /// Only events recorded before this one, to page through older events. With a
     /// `subject`, the cursor must be one of that account's events.
     pub before: Option<EventId>,
@@ -391,9 +393,11 @@ impl EventRepository<'_> {
                 r#"SELECT count(*) AS "count!"
                 FROM domain_events
                 WHERE ($1::uuid IS NULL OR subject_user_id = $1)
-                AND ($2::text IS NULL OR kind = $2)"#,
+                AND ($2::text IS NULL OR kind = $2)
+                AND ($3::text IS NULL OR kind <> $3)"#,
                 filter.subject.map(UserId::as_uuid),
                 filter.kind.as_deref(),
+                filter.except_kind.as_deref(),
             )
         )?;
         Ok(count.try_into().unwrap_or_default())
@@ -438,6 +442,7 @@ impl EventRepository<'_> {
                     )
                 )
                 AND ($5::uuid IS NULL OR e.id = $5)
+                AND ($7::text IS NULL OR e.kind <> $7)
                 ORDER BY e.sequence DESC
                 LIMIT $4 OFFSET $6"#,
                 filter.subject.map(UserId::as_uuid),
@@ -446,6 +451,7 @@ impl EventRepository<'_> {
                 i64::from(limit),
                 filter.id.map(EventId::as_uuid),
                 i64::from(filter.offset),
+                filter.except_kind.as_deref(),
             )
         )?
         .into_iter()
@@ -481,6 +487,36 @@ impl EventRepository<'_> {
             )
         )?;
         Ok(count.try_into().unwrap_or_default())
+    }
+
+    /// Whether `actor` caused an event of `kind`, a [`DomainEvent`] variant's serde
+    /// tag, concerning `subject` since `since`: how a view is recorded once an hour.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`DatabaseError`] if the query fails.
+    pub async fn caused_since(
+        &mut self,
+        actor: &Actor,
+        subject: UserId,
+        kind: &str,
+        since: DateTime<Utc>,
+    ) -> Result<bool, DatabaseError> {
+        run!(
+            self,
+            fetch_one,
+            sqlx::query_scalar!(
+                r#"SELECT EXISTS (
+                    SELECT 1 FROM domain_events
+                    WHERE kind = $1 AND occurred_at >= $2 AND subject_user_id = $3
+                    AND actor = $4
+                ) AS "caused!""#,
+                kind,
+                since,
+                subject.as_uuid(),
+                Json(actor) as _,
+            )
+        )
     }
 
     /// Lists the events concerning a client, newest first, for tests of client changes.

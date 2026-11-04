@@ -122,12 +122,7 @@ impl AdminService {
             },
             user: user.into(),
         };
-        tx.record(
-            &operator.context(),
-            Some(user_id),
-            DomainEvent::AccountViewed {},
-        )
-        .await?;
+        operator.record_view(&mut tx, user_id).await?;
         tx.commit().await?;
         Ok(detail)
     }

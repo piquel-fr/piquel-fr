@@ -129,6 +129,29 @@ test('an administrator disables a user from the dashboard, and the user is signe
   await expect(admin.getByRole('heading', { name: 'Users', exact: true })).toBeVisible();
 });
 
+test("an administrator's views of an account are listed only when shown", async ({ browser }) => {
+  const suffix = Date.now().toString(36);
+  const admin = await administrator(browser, `admin-${suffix}`);
+  await signedUp(browser, `user-${suffix}`);
+  await openAccount(admin, `user-${suffix}`);
+  await admin.getByRole('link', { name: 'All events', exact: true }).click();
+  const viewed = admin.getByText('Account details viewed');
+  const created = admin.getByText('Account created with a passkey');
+
+  // The toggle is a link, so it applies at once, keeping the account filter, which
+  // the form then keeps it through.
+  await expect(created).toBeVisible();
+  await expect(viewed).toHaveCount(0);
+  await admin.getByRole('link', { name: 'Show views', exact: true }).click();
+  await expect(viewed).toBeVisible();
+  await expect(created).toBeVisible();
+  await admin.getByRole('button', { name: 'Filter', exact: true }).click();
+  await expect(viewed).toBeVisible();
+  await admin.getByRole('link', { name: 'Hide views', exact: true }).click();
+  await expect(viewed).toHaveCount(0);
+  await expect(created).toBeVisible();
+});
+
 test('rights granted from the dashboard open it, until revoked, and the audit chain keeps both', async ({
   browser
 }) => {

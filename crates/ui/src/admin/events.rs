@@ -422,7 +422,10 @@ impl EventRow<'_> {
 }
 
 /// Domain events, newest first: the filter form posting `user` and `kind` back to
-/// `action` by `GET`, the events, and the `pages` through them.
+/// `action` by `GET`, keeping whether administrators' `views` of accounts are
+/// shown, a link to the same list with the views shown or hidden the other way,
+/// `toggle_views`, offered only when no kind is chosen (a kind decides the views
+/// by itself), the events, and the `pages` through them.
 #[component]
 pub async fn event_list<'a>(
     action: &'a str,
@@ -432,6 +435,8 @@ pub async fn event_list<'a>(
     #[into]
     #[default]
     kind: Option<&'a str>,
+    #[default] views: bool,
+    toggle_views: &'a str,
     rows: &'a [EventRow<'a>],
     pages: &'a Pager,
 ) -> Result<impl View> {
@@ -443,7 +448,15 @@ pub async fn event_list<'a>(
         <form method="get" action=(action) class="row search">
             <input name="user" value=(user) placeholder="Account ID" aria-label="Account ID">
             <input name="kind" value=(kind) placeholder="Kind, e.g. session_revoked" aria-label="Event kind">
+            if views {
+                <input type="hidden" name="views" value="on">
+            }
             <button class="secondary">"Filter"</button>
+            if kind.is_none() {
+                <a class="button secondary" href=(toggle_views)>
+                    (if views { "Hide views" } else { "Show views" })
+                </a>
+            }
         </form>
         <section class="card">
             event_rows(rows: rows)
