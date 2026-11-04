@@ -891,10 +891,10 @@ async fn deletions_are_scheduled_and_restored_from_the_dashboard() {
     assert_eq!(status().await, AccountStatus::Active);
 }
 
-/// The clients page lists each client's approved origins. An administrator
-/// approves one of a trusted client's redirect origins, and removes it again;
-/// a malformed origin, or one that is not a redirect origin, is refused beside
-/// the form. An untrusted client's page says why it has none.
+/// A client's page lists its approved origins. An administrator
+/// approves one of a trusted client's redirect origins from its page, and
+/// removes it again; a malformed origin, or one that is not a redirect origin, is
+/// refused beside the form. An untrusted client's page says why it has none.
 #[tokio::test]
 #[ignore = "requires TEST_DATABASE_URL"]
 async fn related_origins_are_approved_and_removed_from_the_dashboard() {
@@ -916,9 +916,16 @@ async fn related_origins_are_approved_and_removed_from_the_dashboard() {
         .expect("untrusted client");
     let approve = format!("/clients/{}/origins/approve", client.id);
     let dashboard = harness.confirmed(&admin, &approve, Utc::now()).await;
-    let page = html(harness.visit(&dashboard, "/clients").await).await;
+    let client_page = format!("/clients/{}", client.id);
+    let page = html(harness.visit(&dashboard, &client_page).await).await;
     assert!(page.contains(&approve), "{page}");
-    assert!(page.contains("pages sign users in themselves."), "{page}");
+    let other = html(
+        harness
+            .visit(&dashboard, &format!("/clients/{}", untrusted.id))
+            .await,
+    )
+    .await;
+    assert!(other.contains("pages sign users in themselves."), "{other}");
     let post = async |path: &str, fields: &[(&str, &str)]| {
         let url = format!("{DASHBOARD}{path}");
         dashboard
@@ -941,9 +948,9 @@ async fn related_origins_are_approved_and_removed_from_the_dashboard() {
 
     assert_eq!(
         redirect(&post(&approve, &[("origin", &origin)]).await),
-        "/clients"
+        client_page
     );
-    let page = html(harness.visit(&dashboard, "/clients").await).await;
+    let page = html(harness.visit(&dashboard, &client_page).await).await;
     assert!(page.contains(&origin), "{page}");
     let listed = AdminService::new(harness.database.clone(), true)
         .list_related_origins(&operator())
@@ -961,7 +968,7 @@ async fn related_origins_are_approved_and_removed_from_the_dashboard() {
         url::form_urlencoded::byte_serialize(origin.as_bytes()).collect::<String>()
     );
     assert!(page.contains(&remove), "{page}");
-    assert_eq!(redirect(&post(&remove, &[]).await), "/clients");
+    assert_eq!(redirect(&post(&remove, &[]).await), client_page);
     let listed = AdminService::new(harness.database.clone(), true)
         .list_related_origins(&operator())
         .await
@@ -970,5 +977,120 @@ async fn related_origins_are_approved_and_removed_from_the_dashboard() {
         !listed
             .iter()
             .any(|approved| approved.origin.as_str() == origin)
+    );
+}
+
+/// The stored registration of client `id`.
+async fn stored_client(database: &Database, id: &str) -> piquel_repository::StoredOidcClient {
+    database
+        .oidc()
+        .find_client(id)
+        .await
+        .expect("lookup")
+        .expect("client")
+}
+
+/// An administrator registers a confidential client with the settings only
+/// operators choose, its secret shown once; a refused registration keeps what was
+/// typed. Its page then changes them, keeping the scopes beyond the standard ones,
+/// suspends it, rotates its secret and deletes it.
+#[tokio::test]
+#[ignore = "requires TEST_DATABASE_URL"]
+async fn clients_are_registered_changed_and_suspended_from_the_dashboard() {
+    let harness = Harness::new().await;
+    let admin = harness.admin().await;
+    let dashboard = harness.confirmed(&admin, "/clients/new", Utc::now()).await;
+    let post = async |path: &str, fields: &[(&str, &str)]| {
+        let url = format!("{DASHBOARD}{path}");
+        dashboard
+            .submit(&harness.dashboard, &url, fields, OWN_PAGE)
+            .await
+    };
+    let id = format!("ops-{}", UserId::new());
+    let registration = |redirect: &'static str| {
+        [
+            ("id", id.as_str()),
+            ("display_name", "Ops app"),
+            ("kind", "confidential"),
+            ("redirect_uris", redirect),
+            ("openid", "on"),
+            ("other_scopes", "notes.read\r\n"),
+            ("trusted", "on"),
+            ("backchannel_logout_uri", "https://ops.example/backchannel"),
+        ]
+    };
+
+    let refused = html(post("/clients/new", &registration("not a URI")).await).await;
+    assert!(refused.contains("redirect_uris"), "{refused}");
+    assert!(refused.contains(&format!(r#"value="{id}""#)), "{refused}");
+    let created = html(post("/clients/new", &registration("https://ops.example/cb")).await).await;
+    assert!(
+        created.contains("pqcs_"),
+        "the secret shows once: {created}"
+    );
+    let stored = stored_client(&harness.database, &id).await;
+    assert!(stored.trusted);
+    assert_eq!(stored.owner_id, None);
+    assert_eq!(stored.allowed_scopes, ["openid", "notes.read"]);
+    assert_eq!(
+        stored.backchannel_logout_uri.as_deref(),
+        Some("https://ops.example/backchannel")
+    );
+
+    let list = html(harness.visit(&dashboard, "/clients").await).await;
+    let page = format!("/clients/{id}");
+    assert!(list.contains(&format!(r#"href="{page}""#)), "{list}");
+    let settings = format!("{page}/settings");
+    let form = html(harness.visit(&dashboard, &settings).await).await;
+    assert!(form.contains(">notes.read</textarea>"), "{form}");
+    let saved = post(
+        &settings,
+        &[
+            ("display_name", "Ops app"),
+            ("redirect_uris", "https://ops.example/cb"),
+            ("openid", "on"),
+            ("other_scopes", "notes.read"),
+            ("backchannel_logout_uri", ""),
+        ],
+    )
+    .await;
+    assert_eq!(redirect(&saved), page);
+    let stored = stored_client(&harness.database, &id).await;
+    assert!(!stored.trusted, "an unchecked box clears the trust");
+    assert_eq!(stored.backchannel_logout_uri, None);
+    assert_eq!(stored.allowed_scopes, ["openid", "notes.read"]);
+
+    assert_eq!(redirect(&post(&format!("{page}/suspend"), &[]).await), page);
+    assert!(
+        stored_client(&harness.database, &id)
+            .await
+            .suspended_at
+            .is_some()
+    );
+    let shown = html(harness.visit(&dashboard, &page).await).await;
+    assert!(shown.contains("Lift the suspension first."), "{shown}");
+    let enable = html(post(&format!("{page}/enable"), &[]).await).await;
+    assert!(enable.contains("was suspended"), "{enable}");
+
+    let rotated = html(post(&format!("{page}/secret"), &[("action", "rotate")]).await).await;
+    assert!(rotated.contains("pqcs_"), "{rotated}");
+    let secrets = harness
+        .database
+        .oidc()
+        .client_secrets(&id.parse().expect("client ID"))
+        .await
+        .expect("secrets");
+    assert_eq!(secrets.len(), 2);
+    assert!(secrets[0].expires_at.is_some(), "the first one is expiring");
+
+    assert_eq!(
+        redirect(&post(&format!("{page}/delete"), &[]).await),
+        "/clients"
+    );
+    let shown = html(harness.visit(&dashboard, &page).await).await;
+    assert!(shown.contains("Deleted on"), "{shown}");
+    assert!(
+        !shown.contains(&settings),
+        "a deleted client changes no more: {shown}"
     );
 }

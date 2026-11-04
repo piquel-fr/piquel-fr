@@ -114,8 +114,9 @@ sign-in on auth goes on to the dashboard. Its other tests grant administrator
 rights from a search and revoke them, each change moving on the audit chain,
 which stays intact; create an invitation, whose link signs one account up once,
 and revoke another, which then signs nobody up, when `E2E_INVITE` is set; approve
-an origin for `browser-e2e-sdk`'s pages, which `/.well-known/webauthn` then
-lists, and remove it; and, with `E2E_MAIL_URL`, change an account's passkeys,
+an origin for `browser-e2e-sdk`'s pages from its client page, which
+`/.well-known/webauthn` then lists, and remove it; register a confidential client,
+its secret shown once, suspend it, rotate its secret and delete it; and, with `E2E_MAIL_URL`, change an account's passkeys,
 addresses and connected apps on its owner's behalf, whose history shows each
 reason, and start a recovery whose link is mailed, then undo it. Support also
 renames a handle, which an owner may change only 30 days after signup: the new

@@ -3,7 +3,8 @@
 //! only. The policy lives in the input types rather than in callers: an owner
 //! never chooses a client's ID, which auth generates, or its trust, so its
 //! clients always show the consent screen, and scopes are limited to the standard
-//! [`Scope`]s.
+//! [`Scope`]s. [`OperatorSettings`] validate the same settings for an operator,
+//! who also chooses any scope and a client's trust.
 
 use super::{ClientRegistry, ClientRegistryError, MAX_DAILY_REGISTRATIONS, MAX_OWNED_CLIENTS};
 use crate::{
@@ -43,6 +44,15 @@ pub(crate) struct ClientSettings {
     pub(crate) require_pushed_authorization_requests: bool,
     /// Where auth posts logout tokens, if anywhere.
     pub(crate) backchannel_logout_uri: Option<String>,
+}
+
+/// The settings an operator chooses for any client: an owner's, with any scope
+/// rather than the standard ones alone, and the client's trust.
+pub(crate) struct OperatorSettings {
+    /// What an owner would choose, its scopes any [`ScopeName`].
+    pub(crate) settings: ClientSettings,
+    /// Whether the client skips the consent screen.
+    pub(crate) trusted: bool,
 }
 
 /// A client an owner registers.
@@ -166,6 +176,18 @@ impl ClientSettings {
                 })
             })
             .collect::<Result<Vec<_>, _>>()?;
+        self.validated(id, kind, scopes, false)
+    }
+
+    /// Validates every setting but the scopes, already `scopes`, and builds the
+    /// registration of client `id` of `kind`, `trusted` or not.
+    fn validated(
+        self,
+        id: ClientId,
+        kind: ClientKind,
+        scopes: Vec<ScopeName>,
+        trusted: bool,
+    ) -> Result<ClientRegistration, InvalidSetting> {
         Ok(ClientRegistration {
             id,
             display_name: self
@@ -186,7 +208,7 @@ impl ClientSettings {
             allowed_scopes: AllowedScopes::new(scopes)
                 .map_err(InvalidSetting::with(ClientField::AllowedScopes))?,
             allow_refresh: self.allow_refresh,
-            trusted: false,
+            trusted,
             require_pushed_authorization_requests: self.require_pushed_authorization_requests,
             backchannel_logout_uri: self
                 .backchannel_logout_uri
@@ -202,6 +224,28 @@ impl ClientSettings {
         uris.iter()
             .map(|uri| uri.parse().map_err(InvalidSetting::with(field.clone())))
             .collect()
+    }
+}
+
+impl OperatorSettings {
+    /// Validates every setting, naming the first one that is invalid, and builds
+    /// the registration of client `id` of `kind`.
+    pub(crate) fn registration(
+        self,
+        id: ClientId,
+        kind: ClientKind,
+    ) -> Result<ClientRegistration, InvalidSetting> {
+        let scopes = self
+            .settings
+            .allowed_scopes
+            .iter()
+            .map(|scope| {
+                scope
+                    .parse()
+                    .map_err(InvalidSetting::with(ClientField::AllowedScopes))
+            })
+            .collect::<Result<_, _>>()?;
+        self.settings.validated(id, kind, scopes, self.trusted)
     }
 }
 

@@ -27,7 +27,8 @@ use crate::GracePeriod;
 /// The clients an account owns: their policy and the owner's operations.
 mod owned;
 pub(crate) use owned::{
-    ClientPatch, ClientSettings, NewClient, OwnedClient, OwnedClientError, OwnedClientView,
+    ClientPatch, ClientSettings, InvalidSetting, NewClient, OperatorSettings, OwnedClient,
+    OwnedClientError, OwnedClientView,
 };
 
 /// Scopes a new client may request when none are given.
