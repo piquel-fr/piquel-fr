@@ -112,6 +112,9 @@ impl AccountOperation {
     /// match is exhaustive, so a new operation does not compile without one.
     const fn invocation(self) -> &'static [&'static str] {
         match self {
+            Self::ChangeDisplayName => &[
+                "account", "alice", "name", "set", "Alice B", "--reason", "Asked",
+            ],
             Self::ListPasskeys => &["account", "alice", "passkeys", "list"],
             Self::RenamePasskey => &[
                 "account", "alice", "passkeys", "rename", AN_ID, "Phone", "--reason", "Asked",

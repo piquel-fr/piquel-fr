@@ -257,6 +257,35 @@ impl UserRepository<'_> {
         Ok(())
     }
 
+    /// Gives the account `id` the display name `name`, and bumps its profile version
+    /// so relying parties refresh `name`. Returns the previous name, or `None` if the
+    /// account already had this one, or does not exist: nothing changes then.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`DatabaseError`] if the query fails.
+    pub async fn rename(
+        &mut self,
+        id: UserId,
+        name: &str,
+    ) -> Result<Option<String>, DatabaseError> {
+        // The joined row is the one before the update, so it keeps the old name.
+        Ok(run!(
+            self,
+            fetch_optional,
+            sqlx::query_scalar!(
+                "UPDATE users u
+                SET display_name = $2, profile_version = u.profile_version + 1,
+                    updated_at = now()
+                FROM users old
+                WHERE u.id = $1 AND old.id = u.id AND old.display_name <> $2
+                RETURNING old.display_name",
+                id.as_uuid(),
+                name,
+            )
+        )?)
+    }
+
     /// Moves the account's last handle change `days` into the past, so tests need
     /// not wait out the rename cooldown.
     ///

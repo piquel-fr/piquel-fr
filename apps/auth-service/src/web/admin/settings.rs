@@ -1,7 +1,7 @@
 //! An account's settings, which an administrator changes on its owner's behalf:
 //! the owner's own sections and operations, for the changes administrators share
-//! with owners, each with the reason they give, the owner's handle, and the
-//! security history as the owner sees it.
+//! with owners, each with the reason they give, the owner's handle and display
+//! name, and the security history as the owner sees it.
 //!
 //! Reads take a [`Viewer`] and changes a [`Subject`] of the administrator, so the
 //! service checks their rights, refuses an administrator's account, and records
@@ -62,6 +62,15 @@ struct NewHandle {
     allow_reserved: Checkbox,
 }
 
+/// The form giving an account a new display name.
+#[derive(Clone, Deserialize)]
+struct NewDisplayName {
+    /// The name.
+    display_name: String,
+    /// Why, recorded with the change and shown to the owner in their history.
+    reason: String,
+}
+
 /// The query of [`history`]: the entry the page starts after, if not the newest.
 #[derive(Default, Deserialize)]
 struct HistoryQuery {
@@ -86,6 +95,10 @@ pub(super) async fn sign_in(cx: &Cx, body: Body) -> Result<Response> {
             SignInChange::Remove { id } => Ok(account.revoke_passkey(&subject, id).await?),
             SignInChange::Unlink { provider } => {
                 Ok(account.unlink_identity(&subject, provider).await?)
+            }
+            SignInChange::DisplayName { display_name: name } => {
+                let name = name.trim().to_owned();
+                Ok(account.change_display_name(&subject, name).await?)
             }
             // The owner renames, with the cooldown; an administrator, on the handle
             // page.
@@ -123,7 +136,15 @@ pub(super) async fn sign_in(cx: &Cx, body: Body) -> Result<Response> {
             recovery: recovery.as_ref(),
         )
     };
-    App::settings_page(cx, user, Tab::SignIn, refused.as_deref(), section).await
+    // The largest settings section: its future is boxed, off the handler's stack.
+    Box::pin(App::settings_page(
+        cx,
+        user,
+        Tab::SignIn,
+        refused.as_deref(),
+        section,
+    ))
+    .await
 }
 
 /// `/users/{account}/emails`: the account's addresses, to make a verified one
@@ -288,6 +309,44 @@ pub(super) async fn handle(cx: &Cx, form: Option<Form<NewHandle>>) -> Result<Res
         )
     };
     App::render(cx, StatusCode::OK, "Change handle", page).await
+}
+
+/// `/users/{account}/name`: gives the account a new display name, with the
+/// owner's own operation.
+#[route([GET, POST] "/users/{account}/name")]
+pub(super) async fn display_name(cx: &Cx, form: Option<Form<NewDisplayName>>) -> Result<Response> {
+    let (admin, user) = App::settings(cx).await?;
+    let back = App::account(cx, user);
+    let refused = App::submit(cx, form, back.clone(), |input: NewDisplayName| async move {
+        let subject = App::subject(user, admin, input.reason)?;
+        let name = input.display_name.trim().to_owned();
+        App::of(cx)
+            .account
+            .change_display_name(&subject, name)
+            .await
+            .map_err(Refusal::from)
+    })
+    .await?;
+    let (typed, reason) = refused.as_ref().map_or(("", ""), |refused| {
+        (
+            refused.form.display_name.as_str(),
+            refused.form.reason.as_str(),
+        )
+    });
+    let refused = refused.as_deref();
+    let page = view! { cx =>
+        piquel_ui::dashboard_change(
+            change: Change::ChangeDisplayName,
+            back: back.as_str(),
+            refusal: refused,
+            reason: reason,
+            <label>
+                "New display name"
+                <input name="display_name" required="" maxlength="80" autocomplete="off" value=(typed)>
+            </label>
+        )
+    };
+    App::render(cx, StatusCode::OK, "Change display name", page).await
 }
 
 impl App {

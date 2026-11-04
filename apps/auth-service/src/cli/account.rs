@@ -31,6 +31,9 @@ pub(super) struct AccountCommand {
 /// sign in or to receive the account's email.
 #[derive(Subcommand)]
 enum Setting {
+    /// Change the display name.
+    #[command(subcommand)]
+    Name(Name),
     /// List, rename or remove passkeys.
     #[command(subcommand)]
     Passkeys(Passkeys),
@@ -54,6 +57,20 @@ enum Setting {
         /// Output format.
         #[command(flatten)]
         output: Output,
+    },
+}
+
+/// The account's display name, which `user show` shows.
+#[derive(Subcommand)]
+enum Name {
+    /// Change the display name, which applications receive as `name` once they
+    /// refresh the profile.
+    Set {
+        /// The new name: at most 80 characters, not blank.
+        name: String,
+        /// Why.
+        #[command(flatten)]
+        change: Change,
     },
 }
 
@@ -212,6 +229,7 @@ impl AccountCommand {
     pub(super) const fn operation(&self) -> AccountOperation {
         type Op = AccountOperation;
         match &self.setting {
+            Setting::Name(Name::Set { .. }) => Op::ChangeDisplayName,
             Setting::Passkeys(command) => match command {
                 Passkeys::List { .. } => Op::ListPasskeys,
                 Passkeys::Rename { .. } => Op::RenamePasskey,
@@ -247,6 +265,11 @@ impl AccountCommand {
         let account = &console.account;
         let read = || Viewer::operator(id, console.operator.clone());
         match setting {
+            Setting::Name(Name::Set { name, change }) => {
+                account
+                    .change_display_name(&change.on(id, console), name)
+                    .await?;
+            }
             Setting::Passkeys(Passkeys::List { output }) => {
                 output.print(&account.passkeys(&read()).await?[..], Self::print_passkeys)?;
             }

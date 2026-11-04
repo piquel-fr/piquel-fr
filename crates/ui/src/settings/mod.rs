@@ -21,7 +21,7 @@ pub use data::{DataChange, DataState, account_data, account_deleted};
 pub use emails::{EmailChange, EmailRow, EmailsState, addresses, verified, verify};
 pub use overview::{AccountOverview, OverviewLinks, account_overview};
 pub use sessions::{DeviceChange, DeviceRow, devices};
-pub use sign_in::{HandleRow, ProviderRow, SignInChange, SignInState, sign_in_methods};
+pub use sign_in::{ProfileRow, ProviderRow, SignInChange, SignInState, sign_in_methods};
 pub use timeline::{HistoryChange, HistoryPage, HistoryRow, HistoryState, Holdings, history};
 
 use crate::{
@@ -82,7 +82,7 @@ impl<'a> Audience<'a> {
 pub enum Tab {
     /// The account at a glance.
     Overview,
-    /// The handle, passkeys and social sign-in.
+    /// The handle, display name, passkeys and social sign-in.
     SignIn,
     /// Email addresses.
     Emails,

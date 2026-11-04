@@ -206,6 +206,14 @@ pub enum DomainEvent {
         /// The new handle.
         new: Personal<Handle>,
     },
+    /// The account's display name changed. Relying parties see it as a new
+    /// `name` once they refresh the profile.
+    DisplayNameChanged {
+        /// The previous name.
+        old: Personal<String>,
+        /// The new name.
+        new: Personal<String>,
+    },
     /// An operator deleted a released handle, so anyone may claim it again. Its
     /// former owner, if not purged, is the subject.
     HandleReleased {
@@ -448,6 +456,7 @@ impl DomainEvent {
             | Self::AdministratorGranted {}
             | Self::AdministratorRevoked {}
             | Self::HandleChanged { .. }
+            | Self::DisplayNameChanged { .. }
             | Self::RecoveryStarted { .. }
             | Self::RecoveryCompleted { .. }
             | Self::RecoveryUndone { .. }
@@ -498,6 +507,7 @@ impl DomainEvent {
             | Self::AdministratorGranted {}
             | Self::AdministratorRevoked {}
             | Self::HandleChanged { .. }
+            | Self::DisplayNameChanged { .. }
             | Self::HandleReleased { .. }
             | Self::HandleReserved { .. }
             | Self::HandleUnreserved { .. }
@@ -558,6 +568,7 @@ impl DomainEvent {
             Self::AdministratorGranted {} => "administrator_granted",
             Self::AdministratorRevoked {} => "administrator_revoked",
             Self::HandleChanged { .. } => "handle_changed",
+            Self::DisplayNameChanged { .. } => "display_name_changed",
             Self::HandleReleased { .. } => "handle_released",
             Self::HandleReserved { .. } => "handle_reserved",
             Self::HandleUnreserved { .. } => "handle_unreserved",

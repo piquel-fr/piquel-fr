@@ -246,7 +246,8 @@ impl AdminApplication {
             .route(settings::sign_in)
             .route(settings::emails)
             .route(settings::apps)
-            .route(settings::history);
+            .route(settings::history)
+            .route(settings::display_name);
         let pages = AdminOperation::ALL
             .iter()
             .filter_map(|operation| Self::page(*operation))

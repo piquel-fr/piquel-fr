@@ -304,6 +304,51 @@ async fn the_handle_changes_once_its_cooldown_is_over() {
     );
 }
 
+/// The display name changes from the sign-in methods, without a passkey
+/// confirmation. A refusal says why, with the name typed still in the form, and a
+/// change says so.
+#[tokio::test]
+#[ignore = "requires TEST_DATABASE_URL"]
+async fn the_display_name_changes_without_a_confirmation() {
+    let replicas = Replicas::new().await;
+    let database = Replicas::database().await;
+    let browser = Browser::sign_in_with(
+        &database,
+        Browser::new_account(&database).await.user_id,
+        AuthenticationMethod::Federation,
+    )
+    .await;
+    let opened = SignInState {
+        changing_display_name: Checkbox(true),
+        ..SignInState::default()
+    };
+    let path = opened.on(settings::SIGN_IN).expect("query");
+    let page = html(browser.visit(&replicas.a, &path).await).await;
+    assert!(page.contains(r#"value="Browser test""#), "{page}");
+    let change = |name: &str| SignInChange::DisplayName {
+        display_name: name.to_owned(),
+    };
+    let long = "n".repeat(81);
+    let refused = browser
+        .post(&replicas, settings::SIGN_IN, &change(&long))
+        .await;
+    assert_eq!(refused.status(), StatusCode::BAD_REQUEST);
+    let page = html(refused).await;
+    assert!(page.contains("Choose a display name"), "{page}");
+    assert!(page.contains(&format!(r#"value="{long}""#)), "{page}");
+
+    let changed = browser
+        .post(&replicas, settings::SIGN_IN, &change(" Alice "))
+        .await;
+    assert_eq!(redirect(&changed), settings::SIGN_IN);
+    assert_eq!(
+        cookie(&changed, BrowserCookie::Notice).0,
+        "display_name_changed"
+    );
+    let page = html(browser.visit(&replicas.a, settings::SIGN_IN).await).await;
+    assert!(page.contains("<strong>Alice</strong>"), "{page}");
+}
+
 /// A provider linked before it was disabled is still listed, and can be unlinked.
 #[tokio::test]
 #[ignore = "requires TEST_DATABASE_URL"]

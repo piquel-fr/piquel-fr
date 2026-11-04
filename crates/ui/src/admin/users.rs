@@ -139,6 +139,8 @@ pub struct AccountPages<'a> {
     pub history: &'a str,
     /// Giving it a new handle.
     pub handle: &'a str,
+    /// Giving it a new display name.
+    pub display_name: &'a str,
 }
 
 /// One account's page: `detail`, with the `pages` changing it, or why there are
@@ -299,6 +301,7 @@ async fn account_actions<'a>(
                     <a class="button secondary small" href=(pages.apps)>"Connected apps"</a>
                     <a class="button secondary small" href=(pages.history)>"Security history"</a>
                     <a class="button secondary small" href=(pages.handle)>"Change handle"</a>
+                    <a class="button secondary small" href=(pages.display_name)>"Change display name"</a>
                 },
                 Err(reason) => {
                     refused_action(label: "Change", reason: reason)

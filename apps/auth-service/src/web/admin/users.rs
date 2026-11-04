@@ -111,6 +111,7 @@ pub(super) async fn detail(cx: &Cx) -> Result<Response> {
         href!(settings::apps, Account(id)).resolve(cx),
         href!(settings::history, Account(id)).resolve(cx),
         href!(settings::handle, Account(id)).resolve(cx),
+        href!(settings::display_name, Account(id)).resolve(cx),
     ];
     let [
         recovering,
@@ -120,6 +121,7 @@ pub(super) async fn detail(cx: &Cx) -> Result<Response> {
         connected,
         happened,
         renaming,
+        naming,
     ] = links.each_ref().map(String::as_str);
     let status = action(match detail.user.status {
         AccountStatus::Active => href!(disable, Account(id)).resolve(cx),
@@ -140,6 +142,7 @@ pub(super) async fn detail(cx: &Cx) -> Result<Response> {
             apps: connected,
             history: happened,
             handle: renaming,
+            display_name: naming,
         })
     } else {
         Err(ADMINISTRATOR_TARGET)
