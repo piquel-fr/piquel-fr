@@ -49,7 +49,7 @@ pub struct InsertUser {
     pub display_name: String,
 }
 
-#[cfg(any(test, feature = "test-support"))]
+#[cfg(any(test, feature = "test-util"))]
 impl InsertUser {
     /// An account whose handle is `prefix` and a random suffix, for tests.
     ///
@@ -259,7 +259,7 @@ impl UserRepository<'_> {
     /// # Errors
     ///
     /// Returns [`DatabaseError`] if the query fails.
-    #[cfg(feature = "test-support")]
+    #[cfg(feature = "test-util")]
     pub async fn age_handle_change(&mut self, id: UserId, days: i32) -> Result<(), DatabaseError> {
         run!(
             self,
