@@ -21,10 +21,10 @@ test("piquel.fr's pages lead to auth, and auth's footer back to its policies", a
   await page.getByRole('link', { name: 'Terms', exact: true }).click();
   await expect(page).toHaveURL(`${webUrl}/terms`);
   await expect(page.getByRole('heading', { name: 'Terms of service', level: 1 })).toBeVisible();
-  // The stylesheet applied: the policy is laid out as an article, not as bare HTML.
+  // The stylesheet applied: it lays the policy out as a grid.
   expect(
     await page.locator('article.policy').evaluate((article) => getComputedStyle(article).display)
-  ).not.toBe('inline');
+  ).toBe('grid');
 
   // The homepage sends people to auth to sign up, sign in and register apps.
   await page.getByRole('link', { name: 'Piquel home' }).click();
@@ -38,10 +38,10 @@ test("piquel.fr's pages lead to auth, and auth's footer back to its policies", a
   await expect(page).toHaveURL(`${authUrl}/register`);
   await page.goto(webUrl);
   await page.getByRole('link', { name: 'Developer console', exact: true }).click();
-  await expect(page).toHaveURL(new RegExp(`^${authUrl}/`));
+  await expect(page).toHaveURL((url) => url.origin === authUrl);
 
   // A settings link sent before the settings moved to auth still opens its page,
-  // with its query and its fragment.
+  // with its fragment.
   await page.goto(`${webUrl}/settings/emails/verify#token=sent`);
   await expect(page).toHaveURL(`${authUrl}/settings/emails/verify#token=sent`);
   await expect(

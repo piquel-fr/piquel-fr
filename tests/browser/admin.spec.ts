@@ -136,10 +136,17 @@ test('rights granted from the dashboard open it, until revoked, and the audit ch
   const admin = await administrator(browser, `granter-${suffix}`);
   const user = await signedUp(browser, `grantee-${suffix}`);
 
-  // The chain's newest position, which each change moves on.
+  // The chain's newest position, once every event so far is sealed, within seconds.
   const newest = async () => {
-    await admin.goto(`${adminUrl}/audit`);
-    await expect(admin.getByRole('heading', { name: 'Audit history' })).toBeVisible();
+    await expect
+      .poll(
+        async () => {
+          await admin.goto(`${adminUrl}/audit`);
+          return admin.locator('dt:text-is("Unsealed") + dd').textContent();
+        },
+        { timeout: 15_000 }
+      )
+      .toBe('0');
     await expect(admin.getByText('Intact', { exact: true })).toBeVisible();
     await expect(admin.getByText('Broken', { exact: true })).toHaveCount(0);
     // A point of the chain reads as its position, then its hash.
@@ -147,8 +154,6 @@ test('rights granted from the dashboard open it, until revoked, and the audit ch
     return Number(point?.split(' ')[0]);
   };
   const before = await newest();
-  // Each event joins the chain once sealed, within seconds.
-  const sealed = () => expect.poll(newest, { timeout: 15_000 }).toBeGreaterThan(before);
 
   // Rights are granted from a search, each result confirming in its own dialog.
   await admin.goto(`${adminUrl}/administrators/grant?q=grantee-${suffix}`);
@@ -170,18 +175,21 @@ test('rights granted from the dashboard open it, until revoked, and the audit ch
   await expect(row(`granter-${suffix}`)).toContainText('You cannot change your own rights.');
   await user.goto(`${adminUrl}/users`);
   await expect(user.getByRole('heading', { name: 'Users', exact: true })).toBeVisible();
+  // The grant joined the audit chain, which still verifies.
+  const granted = await newest();
+  expect(granted).toBeGreaterThan(before);
 
+  await admin.goto(`${adminUrl}/administrators`);
   await row(`grantee-${suffix}`).getByRole('button', { name: 'Revoke', exact: true }).click();
   const revoke = admin.getByRole('dialog', { name: 'Revoke administrator rights' });
   await revoke.getByRole('button', { name: 'Revoke', exact: true }).click();
   await expect(admin).toHaveURL(`${adminUrl}/administrators`);
   await expect(row(`grantee-${suffix}`)).toHaveCount(0);
+  // So did the revocation.
+  expect(await newest()).toBeGreaterThan(granted);
   // The account keeps its session, but no longer reaches the dashboard.
   await user.goto(`${adminUrl}/users`);
   await expect(user.getByRole('heading', { name: 'This account has no access' })).toBeVisible();
-
-  // Both changes joined the audit chain, which still verifies.
-  await sealed();
 });
 
 test('an invitation from the dashboard signs one person up, and a revoked one nobody', async ({
@@ -233,7 +241,9 @@ test('an invitation from the dashboard signs one person up, and a revoked one no
   await refused(second, `revoked-${suffix}`);
 });
 
-test('an origin approved from the dashboard signs users in until removed', async ({ browser }) => {
+test('an origin approved from the dashboard is listed for passkeys until removed', async ({
+  browser
+}) => {
   // `browser-e2e-sdk`, a trusted client, redirects to this origin.
   const origin = 'https://sdk-e2e.test';
   const admin = await administrator(browser, `origins-${Date.now().toString(36)}`);

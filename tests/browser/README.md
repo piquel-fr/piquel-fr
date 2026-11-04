@@ -8,8 +8,7 @@ passkeys, a passkey ceremony that fails, the passkey confirmation the passkey
 script runs, devices, an email link's token and signing out. It also removes a
 connected app, which then asks for consent again; reports a passkey in the
 security history as not the owner's, which signs out another device holding the
-same passkey and offers to remove it; and renames the handle, which signs in at
-once while the old one no longer does, and not again for 30 days.
+same passkey and offers to remove it.
 
 `sign-in.spec.ts` signs in with a handle, after a handle this authenticator holds
 no passkey for is refused in the form. Every spec signs up through `/register`.
@@ -93,7 +92,8 @@ configuration: every signup runs it. Previews allow registration without one.
 receives the deployment's email, as CI's does over plain SMTP on its loopback
 address, `AUTH_SMTP_URL=smtp://127.0.0.1:1025`. The tests that confirm an
 address or follow a recovery link read the email there, and are skipped without
-it.
+it. A run sends three confirmation links, and auth sends at most ten an hour to
+one IP address, so reruns against one deployment wait between batches.
 
 `CHROMIUM_EXECUTABLE` can select an existing Chromium installation.
 `E2E_ALLOW_SELF_SIGNED_TLS=1` permits local test certificates only.
@@ -116,7 +116,9 @@ and revoke another, which then signs nobody up, when `E2E_INVITE` is set; approv
 an origin for `browser-e2e-sdk`'s pages, which `/.well-known/webauthn` then
 lists, and remove it; and, with `E2E_MAIL_URL`, change an account's passkeys,
 addresses and connected apps on its owner's behalf, whose history shows each
-reason, and start a recovery whose link is mailed, then undo it. Set
+reason, and start a recovery whose link is mailed, then undo it. Support also
+renames a handle, which an owner may change only 30 days after signup: the new
+one signs in at once, and the old one no longer does. Set
 `E2E_ADMIN_URL` to the dashboard's origin and `E2E_GRANT_ADMIN` to a command
 that grants administrator rights to the handle appended to it, e.g. `just auth
 admin grant` with the deployment's configuration. Without them, the tests are
