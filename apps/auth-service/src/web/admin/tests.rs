@@ -4,7 +4,7 @@
 
 use super::AdminApplication;
 use crate::{
-    AdminService, AuthConfig, DashboardConfig,
+    AdminService, AuthConfig, DashboardConfig, Reason,
     account::AccountService,
     admin::DashboardSignIn,
     config::EmailConfig,
@@ -22,8 +22,14 @@ use axum::{
     response::Response,
 };
 use chrono::{DateTime, Utc};
-use piquel_common::{AccountStatus, AuthenticationMethod, UserId};
-use piquel_repository::Database;
+use piquel_common::{
+    AccountStatus, AuthenticationMethod, Handle, UserId,
+    events::{Actor, DomainEvent, SigningKeyChange},
+};
+use piquel_repository::{
+    Channel, Database, DatabaseError, DatabaseTransaction, EventFilter, NewDelivery,
+    SigningKeyState,
+};
 use piquel_telemetry::{HttpTelemetry, Telemetry};
 use piquel_ui::{Checkbox, HandoffQuery};
 use std::net::SocketAddr;
@@ -1267,4 +1273,288 @@ async fn a_client_named_new_has_its_overview() {
     );
     let registration = html(harness.visit(&dashboard, "/clients/new").await).await;
     assert!(registration.contains(r#"name="id""#), "{registration}");
+}
+
+/// A delivery no worker sends, which the dashboard's tests list, cancel and retry.
+struct Unsent;
+
+impl Channel for Unsent {
+    const NAME: &'static str = "test_dashboard_unsent";
+    type Recipient = ();
+    type Payload = ();
+
+    fn deliveries(
+        _: &DomainEvent,
+        _: Option<UserId>,
+        _: &mut DatabaseTransaction<'_>,
+    ) -> impl Future<Output = Result<Vec<NewDelivery<Self>>, DatabaseError>> + Send {
+        std::future::ready(Ok(vec![]))
+    }
+}
+
+impl Harness {
+    /// The actor of the newest event of `kind` that `found` picks, if any.
+    async fn actor_of(&self, kind: &str, found: impl Fn(&DomainEvent) -> bool) -> Option<Actor> {
+        let filter = EventFilter {
+            kind: Some(kind.into()),
+            ..EventFilter::default()
+        };
+        let events = self
+            .database
+            .events()
+            .list(&filter, 100)
+            .await
+            .expect("events");
+        events
+            .into_iter()
+            .find(|stored| stored.event.known().is_some_and(&found))
+            .map(|stored| stored.actor)
+    }
+}
+
+/// The deliveries page lists a channel's deliveries, filtered by status, each with
+/// the change it may take: a pending one is cancelled from its row's dialog, and
+/// then retried, each recorded as the administrator's. The overview's waiting
+/// deliveries link the page.
+#[tokio::test]
+#[ignore = "requires TEST_DATABASE_URL"]
+async fn deliveries_are_cancelled_and_retried_from_the_dashboard() {
+    let harness = Harness::new().await;
+    let admin = harness.admin().await;
+    let delivery = NewDelivery::<Unsent> {
+        destination: "https://receiver.example".into(),
+        recipient: (),
+        payload: (),
+        ordering_key: None,
+    };
+    let id = harness
+        .database
+        .deliveries()
+        .insert(None, delivery)
+        .await
+        .expect("insert");
+    let (cancel, retry) = (
+        format!("/deliveries/{id}/cancel"),
+        format!("/deliveries/{id}/retry"),
+    );
+    let dashboard = harness.confirmed(&admin, &cancel, Utc::now()).await;
+    let listed = format!("/deliveries?status=&channel={}", Unsent::NAME);
+    let page = html(harness.visit(&dashboard, &listed).await).await;
+    assert!(page.contains(&format!(r#"action="{cancel}""#)), "{page}");
+    assert!(
+        !page.contains(&retry),
+        "a pending delivery is not retried: {page}"
+    );
+    let failed = format!("/deliveries?status=failed&channel={}", Unsent::NAME);
+    let page = html(harness.visit(&dashboard, &failed).await).await;
+    assert!(page.contains("No delivery."), "{page}");
+    let unknown = harness.visit(&dashboard, "/deliveries?status=lost").await;
+    assert_eq!(unknown.status(), StatusCode::BAD_REQUEST);
+
+    let post = async |path: &str| {
+        let url = format!("{DASHBOARD}{path}");
+        dashboard
+            .submit(&harness.dashboard, &url, &[], OWN_PAGE)
+            .await
+    };
+    assert_eq!(redirect(&post(&cancel).await), "/deliveries");
+    let page = html(harness.visit(&dashboard, &listed).await).await;
+    assert!(page.contains(&format!(r#"action="{retry}""#)), "{page}");
+    assert!(page.contains("Cancelled"), "{page}");
+    // Cancelled already, it is refused, saying why.
+    let refused = html(post(&cancel).await).await;
+    assert!(
+        refused.contains("no pending or failed delivery"),
+        "{refused}"
+    );
+    assert_eq!(redirect(&post(&retry).await), "/deliveries");
+    for kind in ["delivery_cancelled", "delivery_retried"] {
+        let actor = harness
+            .actor_of(kind, |event| {
+                matches!(
+                    event,
+                    DomainEvent::DeliveryCancelled { delivery_id }
+                        | DomainEvent::DeliveryRetried { delivery_id } if *delivery_id == id
+                )
+            })
+            .await;
+        assert!(
+            matches!(actor, Some(Actor::Admin { user_id, .. }) if user_id == admin.user_id),
+            "{kind}: {actor:?}"
+        );
+    }
+}
+
+/// The signing keys page lists every key; an administrator publishes a next key
+/// and revokes it, each change recorded as theirs. Importing stays at the
+/// terminal.
+#[tokio::test]
+#[ignore = "requires TEST_DATABASE_URL"]
+async fn signing_keys_are_rotated_and_revoked_from_the_dashboard() {
+    let harness = Harness::new().await;
+    let admin = harness.admin().await;
+    let dashboard = harness.confirmed(&admin, "/keys/rotate", Utc::now()).await;
+    let page = html(harness.visit(&dashboard, "/keys").await).await;
+    assert!(page.contains("auth-service keys import"), "{page}");
+    let post = async |path: &str| {
+        let url = format!("{DASHBOARD}{path}");
+        dashboard
+            .submit(&harness.dashboard, &url, &[], OWN_PAGE)
+            .await
+    };
+    assert_eq!(redirect(&post("/keys/rotate").await), "/keys");
+    let next = harness
+        .database
+        .signing_keys()
+        .list()
+        .await
+        .expect("keys")
+        .into_iter()
+        .find(|key| key.state == SigningKeyState::Next)
+        .expect("a next key")
+        .id;
+    let revoke = format!("/keys/{next}/revoke");
+    let page = html(harness.visit(&dashboard, "/keys").await).await;
+    assert!(page.contains(&format!(r#"action="{revoke}""#)), "{page}");
+    assert_eq!(redirect(&post(&revoke).await), "/keys");
+    let keys = harness.database.signing_keys().list().await.expect("keys");
+    assert!(keys.iter().all(|key| key.id != next), "revoked");
+    let actor = harness
+        .actor_of("signing_key_changed", |event| {
+            matches!(
+                event,
+                DomainEvent::SigningKeyChanged { key_id, change: SigningKeyChange::Revoked }
+                    if *key_id == next
+            )
+        })
+        .await;
+    assert!(
+        matches!(actor, Some(Actor::Admin { user_id, .. }) if user_id == admin.user_id),
+        "{actor:?}"
+    );
+    let unknown = html(post(&revoke).await).await;
+    assert!(unknown.contains("no signing key has ID"), "{unknown}");
+}
+
+/// A reserved handle is given only when the form allows it; the handles page
+/// then lists the account, linking its rename, and once renamed again, the
+/// reserved handle is released for anyone to claim.
+#[tokio::test]
+#[ignore = "requires TEST_DATABASE_URL"]
+async fn reserved_handles_are_assigned_listed_and_released() {
+    let harness = Harness::new().await;
+    let admin = harness.admin().await;
+    let owner = Browser::new_account(&harness.database).await;
+    let user = owner.user_id;
+    let rename = format!("/users/{user}/handle");
+    let dashboard = harness.confirmed(&admin, &rename, Utc::now()).await;
+    let post = async |path: &str, fields: &[(&str, &str)]| {
+        let url = format!("{DASHBOARD}{path}");
+        dashboard
+            .submit(&harness.dashboard, &url, fields, OWN_PAGE)
+            .await
+    };
+    let page = html(harness.visit(&dashboard, &rename).await).await;
+    assert!(page.contains(r#"name="allow_reserved""#), "{page}");
+    let reserved = [("handle", "hostmaster"), ("reason", "Official account")];
+    let refused = post(&rename, &reserved).await;
+    assert_eq!(refused.status(), StatusCode::OK, "the form says why");
+    let refused = html(refused).await;
+    assert!(refused.contains("role=\"alert\""), "{refused}");
+    assert!(refused.contains(r#"value="hostmaster""#), "kept: {refused}");
+    let allowed = [reserved.as_slice(), &[("allow_reserved", "on")]].concat();
+    assert_eq!(
+        redirect(&post(&rename, &allowed).await),
+        format!("/users/{user}")
+    );
+
+    let page = html(harness.visit(&dashboard, "/handles").await).await;
+    assert!(page.contains("@hostmaster"), "{page}");
+    assert!(page.contains(&rename), "{page}");
+    let back = format!("back-{}", &user.to_string()[24..]);
+    let renamed = [
+        ("handle", back.as_str()),
+        ("reason", "Official account ended"),
+    ];
+    assert_eq!(
+        redirect(&post(&rename, &renamed).await),
+        format!("/users/{user}")
+    );
+    let page = html(harness.visit(&dashboard, "/handles").await).await;
+    assert!(!page.contains("@hostmaster"), "{page}");
+
+    let release = [("handle", "hostmaster")];
+    assert_eq!(
+        redirect(&post("/handles/release", &release).await),
+        "/handles"
+    );
+    let refused = html(post("/handles/release", &release).await).await;
+    assert!(
+        refused.contains("no released handle is this one"),
+        "{refused}"
+    );
+    let actor = harness
+        .actor_of("handle_released", |event| {
+            matches!(event, DomainEvent::HandleReleased { .. })
+        })
+        .await;
+    assert!(
+        matches!(actor, Some(Actor::Admin { user_id, .. }) if user_id == admin.user_id),
+        "{actor:?}"
+    );
+}
+
+/// An administrator reads an account's security history as its owner sees it,
+/// from the account's settings tabs, without a confirmation and without
+/// reporting anything, and the read is recorded as a view.
+#[tokio::test]
+#[ignore = "requires TEST_DATABASE_URL"]
+async fn administrators_read_an_accounts_history() {
+    let harness = Harness::new().await;
+    let admin = harness.admin().await;
+    let owner = Browser::new_account(&harness.database).await;
+    let renamed =
+        Handle::parse(&format!("seen-{}", &owner.user_id.to_string()[24..])).expect("handle");
+    AdminService::new(harness.database.clone(), true)
+        .rename_handle(
+            &operator(),
+            owner.user_id,
+            renamed,
+            Reason::parse("Asked by email".into()).expect("reason"),
+            false,
+        )
+        .await
+        .expect("rename");
+    let history = format!("/users/{}/history", owner.user_id);
+    let dashboard = harness.sign_in(&admin, &history).await;
+    let page = html(harness.visit(&dashboard, &history).await).await;
+    assert!(page.contains("Security history"), "{page}");
+    assert!(page.contains("as its owner sees it"), "{page}");
+    // The owner's changes show, with who made them and why; views do not.
+    assert!(page.contains("Handle changed"), "{page}");
+    assert!(
+        page.contains("By a Piquel operator: “Asked by email”"),
+        "{page}"
+    );
+    assert!(
+        !page.contains("This wasn’t me"),
+        "only the owner reports: {page}"
+    );
+    let viewed = harness
+        .database
+        .events()
+        .history_for_user(owner.user_id, 10)
+        .await
+        .expect("history");
+    assert!(viewed.iter().any(|event| {
+        matches!(event.event.known(), Some(DomainEvent::AccountViewed {}))
+            && matches!(event.actor, Actor::Admin { user_id, .. } if user_id == admin.user_id)
+    }));
+    let sign_in = format!("/users/{}/sign-in", owner.user_id);
+    let dashboard = harness.confirmed(&admin, &sign_in, Utc::now()).await;
+    let page = html(harness.visit(&dashboard, &sign_in).await).await;
+    assert!(
+        page.contains(&format!(r#"href="{history}""#)),
+        "a tab: {page}"
+    );
 }

@@ -7,8 +7,10 @@
 
 pub use crate::protocol::api::{Identity, Passkey};
 use crate::{
-    AccountStatus, AuthenticationMethod, ClientId, EventId, Handle, SessionId, TokenId, TraceId,
-    UserId, clients::RelatedOrigin, protocol::oauth::ClientAuthMethod,
+    AccountStatus, AuthenticationMethod, ClientId, DeliveryId, EventId, Handle, SessionId, TokenId,
+    TraceId, UserId,
+    clients::RelatedOrigin,
+    protocol::{jwt::KeyId, oauth::ClientAuthMethod},
 };
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
@@ -554,4 +556,106 @@ pub enum Pruning {
     },
     /// The chain breaks at or before it.
     Broken(ChainBreak),
+}
+
+crate::str_enum! {
+    /// Where a delivery is in its life.
+    pub enum DeliveryStatus {
+        /// Waiting for its next attempt, or being attempted.
+        Pending = "pending",
+        /// The receiver accepted it.
+        Succeeded = "succeeded",
+        /// A permanent error, or retryable errors past the channel's maximum age.
+        Failed = "failed",
+        /// An operator cancelled it.
+        Cancelled = "cancelled",
+    }
+}
+
+/// A delivery as operators list it, without its recipient or payload.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct DeliverySummary {
+    /// Delivery identifier.
+    pub id: DeliveryId,
+    /// Its channel's name.
+    pub channel: String,
+    /// Where it goes.
+    pub destination: String,
+    /// Where it is in its life.
+    pub status: DeliveryStatus,
+    /// Attempts so far.
+    pub attempts: u64,
+    /// Its ordering key and its place in that order, if it is ordered.
+    pub ordering: Option<(String, i64)>,
+    /// When the next attempt is due, while pending.
+    pub next_attempt_at: DateTime<Utc>,
+    /// The latest attempt's error.
+    pub last_error: Option<String>,
+    /// When it was created.
+    pub created_at: DateTime<Utc>,
+    /// When it succeeded, failed or was cancelled.
+    pub finished_at: Option<DateTime<Utc>>,
+}
+
+impl DeliverySummary {
+    /// Whether an operator may attempt it again: a failed delivery, or a
+    /// cancelled one no other delivery is ordered after.
+    #[must_use]
+    pub const fn retryable(&self) -> bool {
+        match self.status {
+            DeliveryStatus::Failed => true,
+            DeliveryStatus::Cancelled => self.ordering.is_none(),
+            DeliveryStatus::Pending | DeliveryStatus::Succeeded => false,
+        }
+    }
+
+    /// Whether an operator may cancel it: while pending or failed.
+    #[must_use]
+    pub const fn cancellable(&self) -> bool {
+        matches!(
+            self.status,
+            DeliveryStatus::Pending | DeliveryStatus::Failed
+        )
+    }
+}
+
+crate::str_enum! {
+    /// Where a signing key is in its lifecycle.
+    pub enum SigningKeyState {
+        /// Published ahead of use, so verifiers have it before it signs.
+        Next = "next",
+        /// Signs new tokens; one per key type.
+        Active = "active",
+        /// No longer signs, but stays published while its tokens may be valid.
+        Retiring = "retiring",
+        /// Unpublished, its private key erased; verifies only `id_token_hint`s.
+        Retired = "retired",
+    }
+}
+
+crate::str_enum! {
+    /// The family of a signing key, which fixes the algorithms it signs with.
+    pub enum SigningKeyType {
+        /// RSA, signing RS256.
+        Rsa = "rsa",
+    }
+}
+
+/// A signing key, without its public or private key.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SigningKey {
+    /// The key's `kid`.
+    pub id: KeyId,
+    /// Its family.
+    pub key_type: SigningKeyType,
+    /// Where it is in its lifecycle.
+    pub state: SigningKeyState,
+    /// When it was generated or imported.
+    pub created_at: DateTime<Utc>,
+    /// When it started signing.
+    pub activated_at: Option<DateTime<Utc>>,
+    /// When it stopped signing.
+    pub deactivated_at: Option<DateTime<Utc>>,
+    /// When it left the key set.
+    pub retired_at: Option<DateTime<Utc>>,
 }

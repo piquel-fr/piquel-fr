@@ -543,3 +543,58 @@ test('a handle support renames signs in at once, while the owner waits a month',
   await signIn.click();
   await expect(owner).toHaveURL('/settings');
 });
+
+/**
+ * The pages that once only the terminal had, against the same deployment: an
+ * account's security history, signing keys, the delivery queue and handles. Each
+ * change leaves the deployment as it found it.
+ */
+test('an administrator reads a history, rotates a key and checks the queue and handles', async ({
+  browser
+}) => {
+  const suffix = Date.now().toString(36);
+  const admin = await administrator(browser, `keeper-${suffix}`);
+  await signedUp(browser, `owner-${suffix}`);
+
+  // Reading the history needs no confirmation, and reports nothing: only the
+  // owner can.
+  await openAccount(admin, `owner-${suffix}`);
+  await admin.getByRole('link', { name: 'Security history', exact: true }).click();
+  await expect(admin.getByRole('heading', { name: 'Security history', exact: true })).toBeVisible();
+  await expect(admin.getByText('Account created with a passkey')).toBeVisible();
+  await expect(admin.getByRole('button', { name: /This wasn’t me/ })).toHaveCount(0);
+
+  // Rotating publishes a key that waits a day; revoking it from its row's dialog
+  // leaves the key set as it was.
+  await admin.getByRole('link', { name: 'Signing keys', exact: true }).click();
+  await admin.getByRole('link', { name: 'Rotate', exact: true }).click();
+  await confirmDashboard(admin);
+  await admin.getByRole('button', { name: 'Rotate', exact: true }).click();
+  await expect(admin).toHaveURL(`${adminUrl}/keys`);
+  // The badge, not the revoke dialog's text, which every row holds.
+  const waiting = admin
+    .getByRole('row')
+    .filter({ has: admin.getByText('Waiting', { exact: true }) });
+  await expect(waiting).toHaveCount(1);
+  const id = (await waiting.locator('code').first().textContent()) ?? '';
+  await waiting
+    .getByRole('button', { name: `Revoke this signing key: ${id}`, exact: true })
+    .click();
+  const revoke = admin.getByRole('dialog', { name: 'Revoke this signing key' });
+  await revoke.getByRole('button', { name: 'Revoke', exact: true }).click();
+  await expect(admin.getByRole('row').filter({ hasText: id })).toHaveCount(0);
+
+  // The queue filters by status without a script.
+  await admin.getByRole('link', { name: 'Deliveries', exact: true }).click();
+  await admin.getByLabel('Status').selectOption('failed');
+  await admin.getByRole('button', { name: 'Filter', exact: true }).click();
+  await expect(admin).toHaveURL(/status=failed/);
+  await expect(admin.getByRole('heading', { name: 'Deliveries', exact: true })).toBeVisible();
+
+  // A handle an account holds is never released, and the form says so.
+  await admin.getByRole('link', { name: 'Handles', exact: true }).click();
+  await admin.getByRole('link', { name: 'Release a handle', exact: true }).click();
+  await admin.getByLabel('Handle', { exact: true }).fill(`owner-${suffix}`);
+  await admin.getByRole('button', { name: 'Release', exact: true }).click();
+  await expect(admin.getByRole('alert')).toContainText('no released handle is this one');
+});

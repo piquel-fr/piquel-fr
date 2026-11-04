@@ -9,6 +9,7 @@
 use super::{DeliveryRepository, RepositoryExecutor, Unsigned};
 use crate::{DatabaseError, DatabaseTransaction};
 use chrono::{DateTime, Utc};
+pub use piquel_common::admin::{DeliveryStatus, DeliverySummary};
 use piquel_common::{DeliveryId, EventId, UserId, events::DomainEvent};
 use serde::{Serialize, de::DeserializeOwned};
 use serde_json::Value;
@@ -172,45 +173,6 @@ impl DeliveryOutcome {
             Self::Failed { error } => (DeliveryStatus::Failed, None, Some(error)),
         }
     }
-}
-
-piquel_common::str_enum! {
-    /// Where a delivery is in its life.
-    pub enum DeliveryStatus {
-        /// Waiting for its next attempt, or being attempted.
-        Pending = "pending",
-        /// The receiver accepted it.
-        Succeeded = "succeeded",
-        /// A permanent error, or retryable errors past the channel's maximum age.
-        Failed = "failed",
-        /// An operator cancelled it.
-        Cancelled = "cancelled",
-    }
-}
-
-/// A delivery as operators list it, without its recipient or payload.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct DeliverySummary {
-    /// Delivery identifier.
-    pub id: DeliveryId,
-    /// Its channel's name.
-    pub channel: String,
-    /// Where it goes.
-    pub destination: String,
-    /// Where it is in its life.
-    pub status: DeliveryStatus,
-    /// Attempts so far.
-    pub attempts: u64,
-    /// Its ordering key and its place in that order, if it is ordered.
-    pub ordering: Option<(String, i64)>,
-    /// When the next attempt is due, while pending.
-    pub next_attempt_at: DateTime<Utc>,
-    /// The latest attempt's error.
-    pub last_error: Option<String>,
-    /// When it was created.
-    pub created_at: DateTime<Utc>,
-    /// When it succeeded, failed or was cancelled.
-    pub finished_at: Option<DateTime<Utc>>,
 }
 
 /// A channel's pending deliveries, as [`DeliveryRepository::backlog`] counts them.

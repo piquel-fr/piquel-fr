@@ -151,7 +151,7 @@ pub(crate) mod dashboard {
     pub(crate) const PREFERENCES: &str = "/preferences";
     /// Every path the dashboard serves is one of these, or under one: the admin
     /// listener mounts the pages on them, and nowhere else.
-    pub(crate) const PREFIXES: [&str; 11] = [
+    pub(crate) const PREFIXES: [&str; 14] = [
         "/",
         SIGN_IN,
         "/sign-out",
@@ -160,8 +160,11 @@ pub(crate) mod dashboard {
         "/users",
         "/administrators",
         "/invitations",
+        "/handles",
         "/clients",
         "/events",
+        "/deliveries",
+        "/keys",
         "/audit",
     ];
 }

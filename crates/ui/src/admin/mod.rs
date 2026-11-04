@@ -11,8 +11,14 @@
 mod audit;
 /// The OIDC clients, one client, and registering and changing them.
 mod clients;
+/// The outbound delivery queue.
+mod deliveries;
 /// Domain events, in words.
 mod events;
+/// Accounts whose handle is reserved, and releasing a handle.
+mod handles;
+/// Signing keys.
+mod keys;
 /// The lists: administrators and invitations.
 mod lists;
 /// What needs attention, and what the service is doing now.
@@ -27,7 +33,10 @@ pub use clients::{
     AdminClientRow, ClientChanges, ClientPage, NewClientForm, OperatorDraft, Registration,
     client_created, client_list, client_page, client_registration, client_secrets,
 };
+pub use deliveries::{DeliveryRow, delivery_list};
 pub use events::{EventRow, event_list, event_rows};
+pub use handles::{ReservedHandle, handle_list, handle_release, reserved_handle_choice};
+pub use keys::{SigningKeyRow, signing_key_list, signing_key_rotation};
 pub use lists::{
     AdministratorRow, InvitationRow, administrator_list, grant_search, invitation_created,
     invitation_list,
@@ -100,10 +109,16 @@ pub enum Tab {
     Administrators,
     /// Signup invitations.
     Invitations,
+    /// Reserved handles, and releasing one.
+    Handles,
     /// The OIDC clients.
     Clients,
     /// Domain events.
     Events,
+    /// The outbound delivery queue.
+    Deliveries,
+    /// The keys signing tokens.
+    SigningKeys,
     /// The tamper-evident audit chain.
     Audit,
 }
@@ -116,8 +131,11 @@ impl Tab {
             Self::Users => Icon::Users,
             Self::Administrators => Icon::Shield,
             Self::Invitations => Icon::Invitation,
+            Self::Handles => Icon::At,
             Self::Clients => Icon::Client,
             Self::Events => Icon::Events,
+            Self::Deliveries => Icon::Send,
+            Self::SigningKeys => Icon::Key,
             Self::Audit => Icon::Audit,
         }
     }
@@ -131,8 +149,11 @@ impl Label for Tab {
             Self::Users => "Users",
             Self::Administrators => "Administrators",
             Self::Invitations => "Invitations",
+            Self::Handles => "Handles",
             Self::Clients => "Clients",
             Self::Events => "Events",
+            Self::Deliveries => "Deliveries",
+            Self::SigningKeys => "Signing keys",
             Self::Audit => "Audit",
         }
     }
@@ -267,6 +288,16 @@ pub enum Change {
     UnsuspendClient,
     /// Deleting a client for good.
     DeleteClient,
+    /// Freeing a released handle for anyone to claim.
+    ReleaseHandle,
+    /// Attempting a failed or cancelled delivery again.
+    RetryDelivery,
+    /// Cancelling a pending or failed delivery.
+    CancelDelivery,
+    /// Publishing a new signing key.
+    RotateSigningKey,
+    /// Deleting a signing key at once.
+    RevokeSigningKey,
 }
 
 impl Change {
@@ -294,6 +325,11 @@ impl Change {
             Self::SuspendClient => "Suspend this client",
             Self::UnsuspendClient => "Lift this client's suspension",
             Self::DeleteClient => "Delete this client",
+            Self::ReleaseHandle => "Release a handle",
+            Self::RetryDelivery => "Retry this delivery",
+            Self::CancelDelivery => "Cancel this delivery",
+            Self::RotateSigningKey => "Rotate the signing key",
+            Self::RevokeSigningKey => "Revoke this signing key",
         }
     }
 
@@ -337,7 +373,22 @@ impl Change {
                 "Pages of the client on this origin stop signing users in, and send them to Piquel's pages instead. Users stay signed in."
             }
             Self::RenameHandle => {
-                "The account signs in and is shown under the new handle at once. Its old handle stays reserved for it: no other account can take it unless it is released from the terminal, and the account can take it back."
+                "The account signs in and is shown under the new handle at once. Its old handle stays reserved for it: no other account can take it unless it is released on the Handles page, and the account can take it back."
+            }
+            Self::ReleaseHandle => {
+                "Anyone can claim the handle again, such as after a trademark dispute. Only a released handle, or a purged account's last one, can be: an account's current handle never is, so rename the account first."
+            }
+            Self::RetryDelivery => {
+                "It is attempted again now. A cancelled delivery that others are ordered after cannot be retried: they went on without it."
+            }
+            Self::CancelDelivery => {
+                "It is not attempted again, and the deliveries ordered after it go on without it."
+            }
+            Self::RotateSigningKey => {
+                "Publishes a new key, which signs after a day, once verifiers have fetched it; the current key signs until then. A key already waiting is kept. Every replica picks up the change within a minute."
+            }
+            Self::RevokeSigningKey => {
+                "For a compromised key. It leaves the key set at once, and every replica stops accepting its tokens within a minute; verifiers that cached it keep accepting them for up to an hour. Revoking the key that signs also deletes the waiting and retiring keys, whose private keys were stored beside it, and a new key signs at once."
             }
             Self::EnableClient => "It can sign users in, exchange codes and refresh tokens again.",
             Self::DisableClient => {
@@ -363,7 +414,10 @@ impl Change {
             Self::Delete => "Schedule the deletion",
             Self::Restore => "Restore",
             Self::RevokeSessions => "Revoke all",
-            Self::RevokeSession | Self::RevokeAdministrator | Self::RevokeInvitation => "Revoke",
+            Self::RevokeSession
+            | Self::RevokeAdministrator
+            | Self::RevokeInvitation
+            | Self::RevokeSigningKey => "Revoke",
             Self::GrantAdministrator => "Grant",
             Self::Invite => "Create link",
             Self::Recover => "Send the recovery link",
@@ -374,6 +428,11 @@ impl Change {
             Self::SuspendClient => "Suspend",
             Self::UnsuspendClient => "Lift the suspension",
             Self::DeleteClient => "Delete for good",
+            Self::ReleaseHandle => "Release",
+            Self::RetryDelivery => "Retry",
+            // Not "Cancel", which closes its dialog.
+            Self::CancelDelivery => "Cancel delivery",
+            Self::RotateSigningKey => "Rotate",
         }
     }
 
@@ -398,7 +457,12 @@ impl Change {
             | Self::RenameHandle
             | Self::EnableClient
             | Self::DisableClient
-            | Self::SuspendClient => self.button(),
+            | Self::SuspendClient
+            | Self::ReleaseHandle
+            | Self::RetryDelivery
+            | Self::CancelDelivery
+            | Self::RotateSigningKey
+            | Self::RevokeSigningKey => self.button(),
         }
     }
 
@@ -418,6 +482,9 @@ impl Change {
                 | Self::DisableClient
                 | Self::SuspendClient
                 | Self::DeleteClient
+                | Self::ReleaseHandle
+                | Self::CancelDelivery
+                | Self::RevokeSigningKey
         )
     }
 
@@ -444,7 +511,12 @@ impl Change {
             | Self::DisableClient
             | Self::SuspendClient
             | Self::UnsuspendClient
-            | Self::DeleteClient => None,
+            | Self::DeleteClient
+            | Self::ReleaseHandle
+            | Self::RetryDelivery
+            | Self::CancelDelivery
+            | Self::RotateSigningKey
+            | Self::RevokeSigningKey => None,
         }
     }
 }

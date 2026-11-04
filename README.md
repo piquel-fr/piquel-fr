@@ -137,6 +137,10 @@ signed as hints. On first start with no keys, auth generates one that signs at
 once. One replica at a time takes each step, under a PostgreSQL advisory lock
 that the `keys` commands take too. None of them needs the service running:
 
+The admin dashboard's Signing keys page lists, rotates and revokes keys the same
+way. Importing stays at the terminal, so the PEM private key never passes
+through a browser.
+
 ```sh
 just auth keys list                  # IDs, states and dates
 just auth keys rotate                # publish a next key; it signs in 24 hours
@@ -314,7 +318,8 @@ just auth account alice apps remove <client-id> --reason "Impersonating app"
   to recover one.
 - Failures print their causes and exit with 1; usage errors exit with 2.
 
-Administrators manage accounts, sessions, invitations, other administrators and
+Administrators manage accounts, their settings and security history, sessions,
+invitations, other administrators, handles, the delivery queue, signing keys and
 the origins approved for clients' pages to sign users in from the admin dashboard,
 which auth serves on `AUTH_ADMIN_LISTENER` for the dashboard's origin,
 `AUTH_ADMIN_ORIGIN`, and which only a private route reaches.
@@ -351,7 +356,9 @@ handle no account holds anymore, the only way one returns to the pool, for cases
 like a trademark dispute; to free a current handle, rename its account first.
 Every change is recorded as a domain event with its operator; a rename also with
 its reason, which the owner sees in their history. Administrators rename from the
-dashboard the same way, with a reason.
+dashboard the same way, with a reason, and may allow a reserved handle as
+`--allow-reserved` does; its Handles page lists the accounts `handle check` lists,
+and releases handles.
 
 Upgrading from a release that stored usernames: run its `handle check`, and rename
 every account it lists with its `handle rename`, before deploying. The migration

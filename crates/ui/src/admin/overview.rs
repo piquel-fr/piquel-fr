@@ -30,6 +30,8 @@ pub enum Problem<'a> {
         pending: u64,
         /// Since when the oldest waits.
         oldest: DateTime<Utc>,
+        /// The delivery queue.
+        deliveries: &'a str,
     },
 }
 
@@ -210,13 +212,14 @@ async fn problem_notice<'a>(problem: &'a Problem<'a>) -> Result<impl View> {
                     <a class="button secondary small" href=(*events)>"See the failures"</a>
                 </section>
             },
-            Problem::DeliveriesWaiting { pending, oldest } => {
+            Problem::DeliveriesWaiting { pending, oldest, deliveries } => {
                 <section class="notice warning" role="alert">
                     icon(kind: Icon::Warning)
                     <div class="text">
                         <strong>(format!("{pending} message{} waiting to be delivered", if *pending == 1 { " is" } else { "s are" }))</strong>
-                        <small>"The oldest has waited since " moment(at: *oldest) ". Check the email delivery and the delivery queue: auth-service deliveries list."</small>
+                        <small>"The oldest has waited since " moment(at: *oldest) ". Check that email can be sent, and whether a failed delivery holds the others back."</small>
                     </div>
+                    <a class="button secondary small" href=(*deliveries)>"See the queue"</a>
                 </section>
             },
         }

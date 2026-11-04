@@ -13,7 +13,7 @@
 //! [`STALE_AFTER`], since it may still trust a revoked key.
 
 use crate::{
-    Operator, jobs::Shutdown, oidc::ACCESS_TOKEN_SECONDS, oidc::PublicDocument,
+    AdminError, Operator, jobs::Shutdown, oidc::ACCESS_TOKEN_SECONDS, oidc::PublicDocument,
     security::SESSION_LIFETIME_DAYS,
 };
 use chrono::{DateTime, TimeDelta, Utc};
@@ -84,6 +84,10 @@ pub enum KeyError {
     /// No key signs, so no key set can be built.
     #[error("no signing key is active; run `auth-service keys rotate --now`")]
     NoActiveKey,
+    /// The operator may no longer make the change, checked just before it
+    /// commits, as every admin change is.
+    #[error(transparent)]
+    Refused(Box<AdminError>),
 }
 
 /// This replica has not reloaded its key set for too long: it may still trust a
@@ -315,8 +319,10 @@ impl KeyStore {
         Ok(())
     }
 
-    /// Runs `apply` in a transaction holding the signing key lock, then commits.
-    /// `revoking` names the key the change revokes, if any (see [`Self::check`]).
+    /// Runs `apply` in a transaction holding the signing key lock, then commits
+    /// once `operator`, if any, is authorized again after the last write, as
+    /// `AdminService` authorizes every change. `revoking` names the key the
+    /// change revokes, if any (see [`Self::check`]).
     async fn change<T>(
         &self,
         operator: Option<&Operator>,
@@ -328,6 +334,12 @@ impl KeyStore {
         self.check(&mut tx, revoking).await?;
         let context = operator.map(Operator::context);
         let value = apply(&mut Change::new(&mut tx, self, Utc::now(), context)).await?;
+        if let Some(operator) = operator {
+            operator
+                .authorize(&mut tx)
+                .await
+                .map_err(|refused| KeyError::Refused(Box::new(refused)))?;
+        }
         tx.commit().await?;
         Ok(value)
     }

@@ -139,6 +139,7 @@ impl Command {
             _ => (AuthConfig::database_from_environment()?, None),
         };
         let database = Database::connect(config).await?;
+        let operation = self.operation();
         match self {
             Self::Serve => Self::serve(database).await,
             Self::Migrate => {
@@ -148,8 +149,23 @@ impl Command {
                 }
                 Ok(())
             }
-            Self::Keys(command) => command.run(database).await,
+            Self::Keys(command) => {
+                let span = tracing::info_span!("keys command", admin.operation = ?operation);
+                command.run(database).instrument(span).await
+            }
             Self::Administration(command) => command.run(&Console::new(database)?).await,
+        }
+    }
+
+    /// The operation this command runs, if it runs one.
+    const fn operation(&self) -> Option<Operation> {
+        match self {
+            Self::Serve | Self::Migrate => None,
+            Self::Keys(command) => match command.operation() {
+                Some(operation) => Some(Operation::Admin(operation)),
+                None => None,
+            },
+            Self::Administration(command) => Some(command.operation()),
         }
     }
 }

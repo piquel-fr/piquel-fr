@@ -17,6 +17,7 @@ mod administrators;
 mod deliveries;
 mod handles;
 mod invitations;
+mod keys;
 mod mutations;
 mod reads;
 

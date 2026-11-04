@@ -9,6 +9,8 @@ mod accounts;
 mod clients;
 /// The event log, the audit chain that signs it, and the deliveries events cause.
 mod events;
+/// Signing keys, through the key store the caller holds.
+mod keys;
 /// Recovering an account whose owner lost every passkey, and undoing it.
 mod recovery;
 

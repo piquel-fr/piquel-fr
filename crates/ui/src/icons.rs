@@ -57,6 +57,10 @@ pub enum Icon {
     Warning,
     /// Linking.
     Link,
+    /// Outbound deliveries.
+    Send,
+    /// Handles.
+    At,
 }
 
 impl Icon {
@@ -100,6 +104,11 @@ impl Icon {
             Self::Warning => &["M8 2l6.5 11.5h-13zM8 6.5v3.5M8 12.2v.3"],
             Self::Link => &[
                 "M6.5 9.5a3 3 0 004.2 0l2-2a3 3 0 00-4.2-4.2l-1 1M9.5 6.5a3 3 0 00-4.2 0l-2 2a3 3 0 004.2 4.2l1-1",
+            ],
+            Self::Send => &["M14 2L7 9", "M14 2l-4.5 12L7 9 2 6.5z"],
+            Self::At => &[
+                "M10.5 8a2.5 2.5 0 11-5 0 2.5 2.5 0 015 0z",
+                "M10.5 8v1a2 2 0 004 0V8a6.5 6.5 0 10-2.5 5.1",
             ],
         }
     }

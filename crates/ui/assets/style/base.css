@@ -358,7 +358,8 @@ legend {
   grid-column: 2;
   margin: 0;
 }
-.search input {
+.search input,
+.search select {
   flex: 1;
   min-width: 10rem;
 }

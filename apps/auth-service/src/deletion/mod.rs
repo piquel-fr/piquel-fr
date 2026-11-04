@@ -235,7 +235,9 @@ impl<'a, 't> Deletions<'a, 't> {
 }
 
 /// Exporting, deleting and restoring, which only the owner may do.
-/// Administrators schedule, restore and purge through `AdminService`.
+/// Administrators schedule, restore and purge through `AdminService`, but never
+/// export: an export leaves auth, so it goes only to the owner's own confirmed
+/// session, never through an administrator who would hand it on.
 impl AccountService {
     /// Every record of the owner's account, read from one snapshot. It holds IP
     /// and email addresses, so it needs a recent passkey confirmation, checked

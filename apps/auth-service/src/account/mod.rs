@@ -9,7 +9,11 @@
 //! a way to sign in or to receive the account's email, which would let them take
 //! the account over. Adding a passkey, linking an identity, adding an address
 //! and reporting a history entry take an [`Owner`], which only the session cookie
-//! builds, so an administrator cannot call them. Verifying an address is
+//! builds, so an administrator cannot call them. So does downloading the
+//! account's data: the export copies every IP address and the whole history out
+//! of auth, and only the owner's recently confirmed session may receive it.
+//! Support recovers an owner who lost every passkey instead, who then downloads
+//! it themselves. Verifying an address is
 //! authorized by its link's token instead, and takes the signed-in owner only if
 //! there is one, to refuse a browser signed in to another account. The owner's
 //! clients, which administrators manage through `AdminService`, are the owner's
