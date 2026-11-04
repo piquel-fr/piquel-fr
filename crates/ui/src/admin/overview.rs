@@ -215,7 +215,7 @@ async fn problem_notice<'a>(problem: &'a Problem<'a>) -> Result<impl View> {
                     icon(kind: Icon::Warning)
                     <div class="text">
                         <strong>(format!("{pending} message{} waiting to be delivered", if *pending == 1 { " is" } else { "s are" }))</strong>
-                        <small>"The oldest has waited since " moment(at: *oldest) ". Check the email delivery and the delivery queue: auth-service delivery list."</small>
+                        <small>"The oldest has waited since " moment(at: *oldest) ". Check the email delivery and the delivery queue: auth-service deliveries list."</small>
                     </div>
                 </section>
             },
