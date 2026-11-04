@@ -3,7 +3,7 @@ name = "piquel-auth"
 description = "Validate auth.piquel.fr tokens, declare typed scopes and sign users in"
 version.workspace = true
 edition.workspace = true
-license.workspace = true
+license = "Apache-2.0"
 repository.workspace = true
 
 [features]

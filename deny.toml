@@ -4,8 +4,18 @@ version = 2
 [licenses]
 version = 2
 # Permissive dependencies and unchanged MPL library files may be distributed
-# with this Apache-2.0 service; retain their notices in source distributions.
+# with Piquel's code; retain their notices in source distributions.
 allow = ["Apache-2.0", "MIT", "BSD-3-Clause", "ISC", "Unicode-3.0", "Zlib", "CDLA-Permissive-2.0", "MPL-2.0"]
-# lettre's quoted-printable encoder. 0BSD is public-domain equivalent, even more
-# permissive than MIT, so it is allowed for this crate rather than everywhere.
-exceptions = [{ crate = "quoted_printable", allow = ["0BSD"] }]
+exceptions = [
+    # lettre's quoted-printable encoder. 0BSD is public-domain equivalent, even
+    # more permissive than MIT, so it is allowed for this crate rather than everywhere.
+    { crate = "quoted_printable", allow = ["0BSD"] },
+    # Piquel's own non-commercial crates. PolyForm is allowed for them by name,
+    # never for third-party dependencies.
+    { crate = "auth-service", allow = ["PolyForm-Noncommercial-1.0.0"] },
+    { crate = "piquel-crypto", allow = ["PolyForm-Noncommercial-1.0.0"] },
+    { crate = "piquel-web", allow = ["PolyForm-Noncommercial-1.0.0"] },
+    { crate = "piquel-repository", allow = ["PolyForm-Noncommercial-1.0.0"] },
+    { crate = "piquel-telemetry", allow = ["PolyForm-Noncommercial-1.0.0"] },
+    { crate = "piquel-ui", allow = ["PolyForm-Noncommercial-1.0.0"] },
+]

@@ -98,7 +98,7 @@ async fn home(links: HomeLinks<'_>) -> Result<impl View> {
             feature(title: "Your account, in your hands", text: "See and remove your passkeys, linked providers, email addresses, signed-in devices and the apps you allowed. Review your security history, download your data, or delete your account.", label: "Account settings", href: links.settings)
             feature(title: "For developers", text: "Register your app as an OpenID Connect client, so its users sign in with their Piquel account. Apps only get what their users approve.", label: "Developer console", href: links.developers)
             feature(title: "Open standards and SDKs", text: "Piquel speaks OpenID Connect and OAuth 2.0, so any standard library works. The Rust SDK, piquel-auth, validates tokens and signs users in for you.", label: "Documentation", href: DOCUMENTATION)
-            feature(title: "Open source", text: "All of Piquel's code is public, under the Apache 2.0 license. Read exactly how your data is handled, report a problem, or contribute.", label: "Source code", href: SOURCE, wide: true)
+            feature(title: "Public source", text: "All of Piquel's code is public. Read exactly how your data is handled, report a problem, or contribute. You may use it for anything but commercial purposes, and the SDKs are free for any app under Apache 2.0.", label: "Source code", href: SOURCE, wide: true)
         </div>
     })
 }

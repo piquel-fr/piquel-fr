@@ -584,7 +584,7 @@ pub(crate) async fn status_bar<'a>(
             if let Some(environment) = environment {
                 <span class="mono">(environment)</span>
             }
-            <span>"Piquel is open source"</span>
+            <span>"Piquel's code is public"</span>
             <span class="right">
                 <a href=(SOURCE)>"Source"</a>
                 <a href=(policies.privacy)>"Privacy"</a>

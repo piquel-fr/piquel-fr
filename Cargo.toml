@@ -13,7 +13,9 @@ members = [
 
 [workspace.package]
 edition = "2024"
-license = "Apache-2.0"
+# Non-commercial by default. The SDK and the crate it depends on (auth-sdk,
+# common) override this with Apache-2.0, so any application can use them.
+license = "PolyForm-Noncommercial-1.0.0"
 repository = "https://github.com/piquel-fr/piquel-fr"
 version = "0.1.0"
 
