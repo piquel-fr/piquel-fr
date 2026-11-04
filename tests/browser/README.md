@@ -25,8 +25,8 @@ in, redeeming the code with its secret. Its app runs on `https://console-e2e.tes
 which the test serves as `oidc.spec.ts` does its client. A second test rotates an
 app's secret with no grace, which leaves only the new one redeeming codes,
 changes its back-channel logout URI in its settings, which refuse an `http://`
-one beside its input, and clears it, then disables the app, which auth then refuses to sign anyone in to until it is
-enabled, and deletes it.
+one beside its input, and clears it, then disables the app, which auth then
+refuses to sign anyone in to until it is enabled, and deletes it.
 
 `oidc.spec.ts` signs in through `browser-e2e`, a public, untrusted client at
 `https://browser-e2e.test` that may request `openid`, `profile` and `email`. No
