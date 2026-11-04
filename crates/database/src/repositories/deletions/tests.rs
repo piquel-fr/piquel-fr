@@ -193,10 +193,10 @@ async fn purge_leaves_nothing_that_references_or_identifies_the_account() {
         INSERT INTO administrators (user_id) VALUES ('{user}');
         INSERT INTO authorization_requests (
             id, secret_digest, client_id, redirect_uri, client_state, pkce_challenge, scopes,
-            audience, force_login, force_consent, expires_at, hinted_user_id
+            audience, interaction, expires_at, hinted_user_id
         ) VALUES (
             uuidv7(), uuid_send('{user}'), '{client}', 'https://client.example/callback', 'state',
-            'challenge', '[]', 'test', FALSE, FALSE, now() + interval '5 minutes', '{user}'
+            'challenge', '[]', 'test', 'as_needed', now() + interval '5 minutes', '{user}'
         );
         INSERT INTO sessions (id, user_id, authentication_methods, authenticated_at, expires_at, last_seen_at)
         VALUES ('{session}', '{user}', '[\"passkey\"]', now(), now() + interval '1 day', now());

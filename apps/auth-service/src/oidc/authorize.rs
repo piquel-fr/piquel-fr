@@ -3,8 +3,8 @@
 
 use super::{
     AUTHORIZATION_CODE_MINUTES, AUTHORIZATION_REQUEST_MINUTES, Claim, CodeChallengeMethod,
-    MAX_STATE_BYTES, OAuthCode, OAuthError, OidcApplication, OpaqueToken, PUSHED_REQUEST_SECONDS,
-    Prompt, Reject, ResponseMode, ResponseType, Scopes, TokenPrefix,
+    Interaction, MAX_STATE_BYTES, OAuthCode, OAuthError, OidcApplication, OpaqueToken,
+    PUSHED_REQUEST_SECONDS, Prompt, Reject, ResponseMode, ResponseType, Scopes, TokenPrefix,
 };
 use crate::{
     routes,
@@ -124,7 +124,7 @@ impl AuthorizationParameters {
             .ok_or_else(|| {
                 OAuthCode::InvalidTarget.reject("audience is not registered for this client")
             })?;
-        let prompts = self.prompts()?;
+        let interaction = self.interaction()?;
         let lifetime = if pushed {
             Duration::seconds(PUSHED_REQUEST_SECONDS)
         } else {
@@ -144,9 +144,7 @@ impl AuthorizationParameters {
             nonce: self.nonce.clone(),
             scopes: scopes.into_stored(),
             audience,
-            force_consent: prompts.force_consent,
-            force_login: prompts.force_login,
-            prompt_none: prompts.silent,
+            interaction,
             max_age: self.max_age,
             hinted_user_id,
             target_acr: self.acr_values.as_deref().and_then(Acr::select),
@@ -250,8 +248,9 @@ impl AuthorizationParameters {
         Scopes::parse(&self.scope)
     }
 
-    /// Checks `nonce` and `max_age`, then parses `prompt`.
-    fn prompts(&self) -> Result<Prompts, OAuthError> {
+    /// Checks `nonce` and `max_age`, then parses `prompt`: known values, repeats
+    /// allowed, and `none` alone.
+    fn interaction(&self) -> Result<Interaction, OAuthError> {
         if self
             .nonce
             .as_ref()
@@ -263,7 +262,22 @@ impl AuthorizationParameters {
         if self.max_age.is_some_and(|age| age < 0) {
             return Err(OAuthCode::InvalidRequest.reject("max_age cannot be negative"));
         }
-        Prompts::parse(self.prompt.as_deref().unwrap_or_default())
+        let prompts = self
+            .prompt
+            .as_deref()
+            .unwrap_or_default()
+            .split_ascii_whitespace()
+            .map(str::parse)
+            .collect::<Result<Vec<Prompt>, _>>()
+            .map_err(|error| {
+                let supported = Prompt::ALL.map(Prompt::as_str).join(", ");
+                OAuthCode::InvalidRequest
+                    .reject_with(format!("prompt values must be among: {supported}"), error)
+            })?;
+        Interaction::from_prompts(prompts).ok_or_else(|| {
+            OAuthCode::InvalidRequest
+                .reject("prompt=none cannot be combined with other prompt values")
+        })
     }
 }
 
@@ -372,14 +386,14 @@ impl OidcApplication {
         let requires_login = session.as_ref().is_none_or(|session| {
             !Self::session_satisfies(
                 session,
-                request.force_login,
+                request.interaction.forces_login(),
                 request.max_age,
                 request.hinted_user_id,
                 request.target_acr,
                 None,
             )
         });
-        if request.prompt_none && requires_login {
+        if request.interaction.is_silent() && requires_login {
             return Err(back(OAuthCode::LoginRequired.reject(SILENT_LOGIN_REQUIRED)));
         }
         app.database
@@ -667,7 +681,7 @@ impl OidcApplication {
     pub(super) fn satisfies(request: &StoredAuthorizationRequest, session: &StoredSession) -> bool {
         Self::session_satisfies(
             session,
-            request.force_login,
+            request.interaction.forces_login(),
             request.max_age,
             request.hinted_user_id,
             request.target_acr,
@@ -774,7 +788,7 @@ impl OidcApplication {
         transaction: String,
     ) -> Result<Url, OAuthError> {
         let request = self.find_authorization_request(&transaction).await?;
-        let silent = request.prompt_none;
+        let silent = request.interaction.is_silent();
         let redirect = Url::parse(&request.redirect_uri)?;
         let client_redirect = self.client_redirect(&redirect, &request.client_state);
         let back =
@@ -823,7 +837,7 @@ impl OidcApplication {
         request: &StoredAuthorizationRequest,
         session: &StoredSession,
     ) -> Result<bool, OAuthError> {
-        if request.force_consent {
+        if request.interaction.forces_consent() {
             return Ok(false);
         }
         let client = self
@@ -848,59 +862,11 @@ impl OidcApplication {
     }
 }
 
-/// Browser interaction required by a request's `prompt` values.
-#[derive(Default)]
-struct Prompts {
-    /// `none`: fail instead of showing login or consent pages.
-    silent: bool,
-    /// `login` or `select_account`: sign in again even with a session.
-    force_login: bool,
-    /// `consent`: ask for consent even for trusted or already consented clients.
-    force_consent: bool,
-}
-
-impl Prompts {
-    /// Parses space-separated prompt values. `none` cannot be combined with others.
-    fn parse(value: &str) -> Result<Self, OAuthError> {
-        let mut policy = Self::default();
-        for prompt in value.split_ascii_whitespace() {
-            match prompt.parse().map_err(|error| {
-                let supported = Prompt::ALL.map(Prompt::as_str).join(", ");
-                OAuthCode::InvalidRequest
-                    .reject_with(format!("prompt values must be among: {supported}"), error)
-            })? {
-                Prompt::None => policy.silent = true,
-                Prompt::Login | Prompt::SelectAccount => policy.force_login = true,
-                Prompt::Consent => policy.force_consent = true,
-            }
-        }
-        if policy.silent && (policy.force_login || policy.force_consent) {
-            return Err(OAuthCode::InvalidRequest
-                .reject("prompt=none cannot be combined with other prompt values"));
-        }
-        Ok(policy)
-    }
-}
-
 #[cfg(test)]
 mod tests {
-    //! Prompt, `max_age` and consent decision parsing.
+    //! `max_age` and consent decision parsing.
     use super::*;
     use piquel_common::{AuthenticationMethod, SessionId};
-    /// Duplicates are allowed, flags follow the values, and `none` stands alone.
-    #[test]
-    fn prompts_enforce_interaction_policy() {
-        let silent = Prompts::parse(Prompt::None.as_str()).expect("silent prompt");
-        assert!(silent.silent);
-        assert!(!silent.force_login && !silent.force_consent);
-        let interactive =
-            Prompts::parse("login consent select_account login").expect("interaction prompts");
-        assert!(!interactive.silent);
-        assert!(interactive.force_login && interactive.force_consent);
-        assert!(Prompts::parse("none login").is_err());
-        assert!(Prompts::parse("unrecognized").is_err());
-        assert!(Prompts::parse("").is_ok());
-    }
     /// `max_age` holds up to its boundary at authorize too. `0` needs a sign-in after
     /// the request, a negative age is never met, and one past `u32` limits nothing.
     #[test]

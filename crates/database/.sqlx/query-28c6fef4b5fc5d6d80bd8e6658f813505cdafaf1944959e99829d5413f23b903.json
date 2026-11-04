@@ -1,0 +1,29 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO authorization_requests (\n                    id, secret_digest, client_id, redirect_uri, client_state,\n                    nonce, pkce_challenge, scopes, audience, interaction,\n                    max_age, expires_at, hinted_user_id, target_acr, pushed, digest_key\n                ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Bytea",
+        "Text",
+        "Text",
+        "Text",
+        "Text",
+        "Text",
+        "Jsonb",
+        "Text",
+        "Text",
+        "Int8",
+        "Timestamptz",
+        "Uuid",
+        "Text",
+        "Bool",
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "28c6fef4b5fc5d6d80bd8e6658f813505cdafaf1944959e99829d5413f23b903"
+}

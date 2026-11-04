@@ -47,7 +47,7 @@ impl OidcApplication {
         let (opaque, request) = self
             .claim(tx.oidc(), client_id.as_str(), request_uri)
             .await?;
-        if request.force_consent || request.prompt_none {
+        if request.interaction.forces_consent() || request.interaction.is_silent() {
             return Err(ApiError::interaction_required(
                 "This sign-in request needs Piquel's own pages.",
             ));

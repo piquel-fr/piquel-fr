@@ -182,7 +182,9 @@ deployed code uses the old shape. Migration `0003` dropped
 exception while there were few users, not a precedent. Migration `0021` likewise
 dropped `users.username` when handles moved to their own table: keeping both in sync
 for a release would have let a signup on an old replica create an account without a
-handle, so the old replicas fail until they are replaced instead. Migrations take
+handle, so the old replicas fail until they are replaced instead. Migration `0028`
+merged `authorization_requests`' prompt flags into `interaction` the same way:
+requests live for minutes, so syncing both shapes would buy little. Migrations take
 `LockKey::Migrations`, waiting up to 30 minutes for another run, and provisioning
 the runtime role takes another lock, so concurrent `migrate` runs take turns.
 

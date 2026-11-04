@@ -72,6 +72,77 @@ crate::str_enum! {
 }
 
 crate::str_enum! {
+    /// The browser interaction an authorization request allows, from its `prompt`
+    /// values. `none` excludes every other value (OIDC Core §3.1.2.1), so no
+    /// variant both forbids pages and forces one. The spellings are storage values,
+    /// not wire ones: build it from the request with [`Self::from_prompts`].
+    pub enum Interaction {
+        /// No `prompt`: show the sign-in and consent pages only when needed.
+        AsNeeded = "as_needed",
+        /// `login` or `select_account`: sign in again even with a session.
+        Login = "login",
+        /// `consent`: ask for consent even for trusted or already consented clients.
+        Consent = "consent",
+        /// `login` or `select_account`, and `consent`.
+        LoginAndConsent = "login_consent",
+        /// `none`: fail rather than show the user a page.
+        None = "none",
+    }
+}
+
+impl Interaction {
+    /// Combines a request's `prompt` values, repeats allowed. Returns `None` when
+    /// `none` comes with any other value.
+    ///
+    /// ```
+    /// use piquel_common::protocol::oauth::{Interaction, Prompt};
+    ///
+    /// let both = Interaction::from_prompts([Prompt::Consent, Prompt::SelectAccount]);
+    /// assert_eq!(both, Some(Interaction::LoginAndConsent));
+    /// assert_eq!(Interaction::from_prompts([]), Some(Interaction::AsNeeded));
+    /// let repeated = Interaction::from_prompts([Prompt::Login, Prompt::Login]);
+    /// assert_eq!(repeated, Some(Interaction::Login));
+    /// assert_eq!(Interaction::from_prompts([Prompt::None, Prompt::Login]), None);
+    /// ```
+    pub fn from_prompts(prompts: impl IntoIterator<Item = Prompt>) -> Option<Self> {
+        let (mut none, mut login, mut consent) = (false, false, false);
+        for prompt in prompts {
+            match prompt {
+                Prompt::None => none = true,
+                Prompt::Login | Prompt::SelectAccount => login = true,
+                Prompt::Consent => consent = true,
+            }
+        }
+        match (none, login, consent) {
+            (true, false, false) => Some(Self::None),
+            (true, _, _) => Option::None,
+            (false, false, false) => Some(Self::AsNeeded),
+            (false, true, false) => Some(Self::Login),
+            (false, false, true) => Some(Self::Consent),
+            (false, true, true) => Some(Self::LoginAndConsent),
+        }
+    }
+
+    /// Whether the user must sign in again even with a session.
+    #[must_use]
+    pub const fn forces_login(self) -> bool {
+        matches!(self, Self::Login | Self::LoginAndConsent)
+    }
+
+    /// Whether the user must consent again even if they already did.
+    #[must_use]
+    pub const fn forces_consent(self) -> bool {
+        matches!(self, Self::Consent | Self::LoginAndConsent)
+    }
+
+    /// Whether the request fails rather than show the user a page.
+    #[must_use]
+    pub const fn is_silent(self) -> bool {
+        matches!(self, Self::None)
+    }
+}
+
+crate::str_enum! {
     /// Standard OIDC scopes. Clients may also be granted registered extension scopes.
     pub enum Scope {
         /// Issue an ID token and allow `UserInfo`.
