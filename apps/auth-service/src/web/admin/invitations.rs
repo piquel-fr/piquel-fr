@@ -3,7 +3,10 @@
 use super::AdminApplication as App;
 use crate::{AdminError, InviteExpiry};
 use chrono::Utc;
-use piquel_common::{TokenId, admin::CreateInvitation};
+use piquel_common::{
+    TokenId,
+    admin::{CreateInvitation, CreatedInvitation},
+};
 use piquel_ui::{Action, Change, InvitationRow};
 use serde::de::IgnoredAny;
 use topcoat::{
@@ -61,12 +64,18 @@ pub(super) async fn list(cx: &Cx) -> Result<Response> {
     App::render(cx, StatusCode::OK, "Invitations", page).await
 }
 
-/// `/invitations/new`: creates an invitation and shows its link, once.
+/// `/invitations/new`: creates an invitation, then comes back here, which shows
+/// its link once.
 #[route([GET, POST] "/invitations/new")]
 pub(super) async fn create(cx: &Cx, form: Option<Form<CreateInvitation>>) -> Result<Response> {
     App::invitations(cx)?;
     let admin = App::admin(cx).await?;
-    App::confirm(cx, admin)?;
+    // The page showing a new link needs no confirmation: sending the browser to
+    // confirm would lose the link.
+    let revealed: Option<CreatedInvitation> = App::revealed(cx, admin);
+    if revealed.is_none() {
+        App::confirm(cx, admin)?;
+    }
     let app = App::of(cx);
     let back = href!(list).resolve(cx);
     let created = App::change(cx, form, |input: CreateInvitation| async move {
@@ -84,9 +93,9 @@ pub(super) async fn create(cx: &Cx, form: Option<Form<CreateInvitation>>) -> Res
     .await?;
     let back = &back;
     let (created, refused) = match created {
-        Some(Ok(created)) => (Some(created), None),
+        Some(Ok(created)) => return App::reveal(cx, admin, href!(create).resolve(cx), created),
         Some(Err(refused)) => (None, Some(refused)),
-        None => (None, None),
+        None => (revealed, None),
     };
     let typed = refused
         .as_ref()

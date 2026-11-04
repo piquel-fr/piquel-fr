@@ -221,6 +221,11 @@ test('an invitation from the dashboard signs one person up, and a revoked one no
   await confirmDashboard(admin);
   const first = await invite();
   expect(new URL(first).origin).toBe(authUrl);
+  // The link shows once, on a page reached by `GET`: reloading it shows the form
+  // again, and creates nothing.
+  await admin.reload();
+  await expect(admin.getByRole('heading', { name: 'Invitation created' })).toHaveCount(0);
+  await expect(admin.getByLabel('Valid for')).toBeVisible();
 
   // The link signs one account up, once.
   await signUp(await withPasskeys(browser), `invited-${suffix}`, 'Passkey', first);
@@ -305,18 +310,20 @@ test('an administrator registers a client, suspends it and rotates its secret, e
   await expect(admin.getByRole('textbox', { name: 'Client ID', exact: true })).toHaveValue(id);
   await redirects.fill(`https://${id}.test/callback`);
 
-  // A confidential client's first secret shows only in the answer registering it,
-  // which no cache keeps.
-  const registered = admin.waitForResponse(
-    (response) => response.request().method() === 'POST' && response.url().endsWith('/clients/new')
+  // Registering goes on to the client's page, which shows a confidential client's
+  // first secret once, in an answer no cache keeps, the secret in no URL.
+  // Reloading it, with no script to rewrite the history, posts nothing again.
+  const shown = admin.waitForResponse(
+    (response) =>
+      response.request().method() === 'GET' && response.url() === `${adminUrl}/clients/${id}`
   );
   await admin.getByRole('button', { name: 'Register', exact: true }).click();
-  expect((await registered).headers()['cache-control']).toBe('no-store, no-transform');
+  expect((await shown).headers()['cache-control']).toBe('no-store, no-transform');
+  await expect(admin).toHaveURL(`${adminUrl}/clients/${id}`);
   await expect(admin.getByRole('heading', { name: 'Your client secret' })).toBeVisible();
   const secret = (await admin.locator('#client-secret').textContent()) ?? '';
   expect(secret).toMatch(/^pqcs_/);
-  await admin.getByRole('link', { name: 'I saved it', exact: true }).click();
-  await expect(admin).toHaveURL(`${adminUrl}/clients/${id}`);
+  await admin.reload();
   await expect(admin.getByRole('heading', { name: `E2E ${suffix}` })).toBeVisible();
   expect(await admin.content()).not.toContain(secret);
 
@@ -328,14 +335,20 @@ test('an administrator registers a client, suspends it and rotates its secret, e
   await expect(admin.getByText('Suspended', { exact: true })).toBeVisible();
   await expect(admin.getByRole('button', { name: 'Lift suspension', exact: true })).toBeVisible();
 
-  // A rotation shows the new secret the same way, once.
+  // A rotation shows the new secret the same way, once: reloading neither shows
+  // it again nor rotates again.
   await admin.getByRole('link', { name: 'Rotate the secret', exact: true }).click();
   await admin.getByRole('button', { name: 'Rotate secret', exact: true }).click();
+  await expect(admin).toHaveURL(`${adminUrl}/clients/${id}/secret`);
   await expect(admin.getByRole('heading', { name: 'Your client secret' })).toBeVisible();
   const rotated = (await admin.locator('#client-secret').textContent()) ?? '';
   expect(rotated).toMatch(/^pqcs_/);
   expect(rotated).not.toBe(secret);
   await expect(admin.getByText('Expiring', { exact: true })).toBeVisible();
+  await admin.reload();
+  await expect(admin.getByRole('heading', { name: 'Your client secret' })).toHaveCount(0);
+  expect(await admin.content()).not.toContain(rotated);
+  await expect(admin.getByText('Expiring', { exact: true })).toHaveCount(1);
 
   // Deleting it goes back to the list, which still opens its page.
   await admin.getByRole('link', { name: 'Back to the client', exact: false }).click();

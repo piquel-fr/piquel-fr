@@ -31,6 +31,8 @@ mod lists;
 mod origins;
 /// What needs attention, and what the service is doing now.
 mod overview;
+/// What a change makes and its page shows once, across the change's redirect.
+mod reveal;
 /// An account's settings, which administrators change on its owner's behalf.
 mod settings;
 #[cfg(test)]
@@ -52,7 +54,7 @@ use crate::{
 use axum::http::header::InvalidHeaderValue;
 use chrono::Duration;
 use piquel_common::{ErrorChain, config::Origin};
-use piquel_crypto::NoteVerifier;
+use piquel_crypto::{KeyEncryptionKey, NoteVerifier};
 use piquel_repository::Database;
 use piquel_telemetry::HttpTelemetry;
 use piquel_ui::{Dashboard, DashboardTab, Health, PreferenceChange, Search, Who};
@@ -105,6 +107,8 @@ pub(crate) struct AdminApplication {
     /// The server's own audit key, which the audit page verifies with when none
     /// is committed for this environment.
     audit_key: NoteVerifier,
+    /// Seals what a change shows once, across its redirect.
+    kek: Arc<KeyEncryptionKey>,
     /// Every answer's Content-Security-Policy.
     policy: HeaderValue,
     /// Piquel's policies on piquel.fr, which every page's footer links.
@@ -206,6 +210,7 @@ impl AdminApplication {
             invitations: config.passkey.invite_required,
             links: config.email.recovery_links.clone(),
             audit_key: config.audit.verifier().clone(),
+            kek: config.key_encryption_key.clone(),
             policy: HeaderValue::try_from(policy)?,
             policies: config.oidc.policies.clone(),
             health: Arc::default(),
@@ -453,13 +458,17 @@ impl<I> std::ops::Deref for Refused<I> {
 
 /// Answers a page that failed with an [`Answer`] with it, and one the service
 /// refused with what the refusal means, and gives every answer the dashboard's
-/// Content-Security-Policy.
+/// Content-Security-Policy. A `GET`'s answer deletes what a change sealed for its
+/// page to show, which shows once.
 #[layer("/")]
 async fn answers(cx: &Cx, body: Body, next: Next<'_>) -> Result<Response> {
     let mut response = match next.run(cx, body).await {
         Ok(response) => response,
         Err(error) => AdminApplication::failed(cx, error).await?,
     };
+    if method(cx) == Method::GET && BrowserCookie::DashboardReveal.value(headers(cx)).is_some() {
+        BrowserCookie::DashboardReveal.clear_on(&mut response)?;
+    }
     response.headers_mut().insert(
         header::CONTENT_SECURITY_POLICY,
         AdminApplication::of(cx).policy.clone(),

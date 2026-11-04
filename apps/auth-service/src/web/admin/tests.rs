@@ -77,6 +77,43 @@ impl Harness {
             .expect("grant");
     }
 
+    /// Follows `changed`, a change's redirect to the page showing what it made
+    /// once, as `browser` with the sealed cookie the change set, and returns that
+    /// page, which shows `made`. Its answer deletes the cookie, and `made` shows
+    /// no more: not on the page again, as on a reload, nor with the cookie on
+    /// another page, `elsewhere`.
+    async fn shown_once(
+        &self,
+        browser: &Browser,
+        changed: &Response,
+        made: &str,
+        elsewhere: &str,
+    ) -> String {
+        let page = redirect(changed).to_owned();
+        let (sealed, _) = cookie(changed, BrowserCookie::DashboardReveal);
+        let carrying = Browser {
+            user_id: browser.user_id,
+            session_id: browser.session_id,
+            cookie: format!(
+                "{}; {}={sealed}",
+                browser.cookie,
+                BrowserCookie::DashboardReveal
+            ),
+        };
+        let shown = self.visit(&carrying, &page).await;
+        assert_eq!(shown.status(), StatusCode::OK, "{page}");
+        let (deleted, attributes) = cookie(&shown, BrowserCookie::DashboardReveal);
+        assert_eq!(deleted, "");
+        assert!(attributes.contains("Max-Age=0"), "{attributes}");
+        let shown = html(shown).await;
+        assert!(shown.contains(made), "{shown}");
+        let reloaded = html(self.visit(browser, &page).await).await;
+        assert!(!reloaded.contains(made), "{reloaded}");
+        let misplaced = html(self.visit(&carrying, elsewhere).await).await;
+        assert!(!misplaced.contains(made), "{misplaced}");
+        shown
+    }
+
     /// Visits the dashboard's `path` as `browser`.
     async fn visit(&self, browser: &Browser, path: &str) -> Response {
         browser
@@ -991,7 +1028,8 @@ async fn stored_client(database: &Database, id: &str) -> piquel_repository::Stor
 }
 
 /// An administrator registers a confidential client with the settings only
-/// operators choose, its secret shown once; a refused registration keeps what was
+/// operators choose, its secret shown once, on the page registering goes on
+/// to; a refused registration keeps what was
 /// typed. Its page then changes them, keeping the scopes beyond the standard ones,
 /// suspends it, rotates its secret and deletes it.
 #[tokio::test]
@@ -1023,11 +1061,13 @@ async fn clients_are_registered_changed_and_suspended_from_the_dashboard() {
     let refused = html(post("/clients/new", &registration("not a URI")).await).await;
     assert!(refused.contains("redirect_uris"), "{refused}");
     assert!(refused.contains(&format!(r#"value="{id}""#)), "{refused}");
-    let created = html(post("/clients/new", &registration("https://ops.example/cb")).await).await;
-    assert!(
-        created.contains("pqcs_"),
-        "the secret shows once: {created}"
-    );
+    let created = post("/clients/new", &registration("https://ops.example/cb")).await;
+    let page = format!("/clients/{id}");
+    assert_eq!(redirect(&created), page);
+    let settings = format!("{page}/settings");
+    harness
+        .shown_once(&dashboard, &created, "pqcs_", &settings)
+        .await;
     let stored = stored_client(&harness.database, &id).await;
     assert!(stored.trusted);
     assert_eq!(stored.owner_id, None);
@@ -1038,9 +1078,7 @@ async fn clients_are_registered_changed_and_suspended_from_the_dashboard() {
     );
 
     let list = html(harness.visit(&dashboard, "/clients").await).await;
-    let page = format!("/clients/{id}");
     assert!(list.contains(&format!(r#"href="{page}""#)), "{list}");
-    let settings = format!("{page}/settings");
     let form = html(harness.visit(&dashboard, &settings).await).await;
     assert!(form.contains(">notes.read</textarea>"), "{form}");
     let saved = post(
@@ -1072,8 +1110,11 @@ async fn clients_are_registered_changed_and_suspended_from_the_dashboard() {
     let enable = html(post(&format!("{page}/enable"), &[]).await).await;
     assert!(enable.contains("lift the suspension"), "{enable}");
 
-    let rotated = html(post(&format!("{page}/secret"), &[("action", "rotate")]).await).await;
-    assert!(rotated.contains("pqcs_"), "{rotated}");
+    let rotated = post(&format!("{page}/secret"), &[("action", "rotate")]).await;
+    assert_eq!(redirect(&rotated), format!("{page}/secret"));
+    harness
+        .shown_once(&dashboard, &rotated, "pqcs_", &page)
+        .await;
     let secrets = harness
         .database
         .oidc()
@@ -1152,4 +1193,34 @@ async fn pages_that_could_only_fail_refuse_at_once() {
         )
         .await;
     }
+}
+
+/// An invitation's link shows once, on the page creating it goes back to.
+#[tokio::test]
+#[ignore = "requires TEST_DATABASE_URL"]
+async fn an_invitations_link_shows_once() {
+    let origin = AUTH_ORIGIN.parse().expect("auth origin");
+    let mut config = AuthConfig::test(&origin);
+    config.passkey.invite_required = true;
+    let harness = Harness::of(config).await;
+    let admin = harness.admin().await;
+    let dashboard = harness
+        .confirmed(&admin, "/invitations/new", Utc::now())
+        .await;
+    let created = dashboard
+        .submit(
+            &harness.dashboard,
+            &format!("{DASHBOARD}/invitations/new"),
+            &[("expires_in", "1d")],
+            OWN_PAGE,
+        )
+        .await;
+    assert_eq!(redirect(&created), "/invitations/new");
+    let shown = harness
+        .shown_once(&dashboard, &created, "invitation=", "/invitations")
+        .await;
+    assert!(
+        shown.contains(&format!("{AUTH_ORIGIN}/register?")),
+        "{shown}"
+    );
 }
