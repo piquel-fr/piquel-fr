@@ -2,7 +2,8 @@
 # statistics. CI fails while any of them is missing or out of date. Linguist
 # already knows Cargo.lock and pnpm-lock.yaml.
 
-# SQLx's query cache, written by `just db prepare`.
+# SQLx's query cache, written by `just db prepare`. `just db prepare-check` fails
+# unless it holds exactly the queries the code uses, with no leftover files.
 crates/database/.sqlx/** linguist-generated
 # The SDK test vectors, written by `just sdk-vectors`; the keys and README are not.
 tests/sdk-vectors/**/*.json linguist-generated

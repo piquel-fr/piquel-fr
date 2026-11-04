@@ -10,11 +10,23 @@ test *ARGS:
     cargo nextest run --locked -p auth-service -p piquel-repository --run-ignored all "$@"
     just db prepare-check
 
-# Catches a migration that renames a column a cached query uses. `test` runs it
-# last; CI runs it after its database tests migrate the database.
-# Fail if the query cache no longer matches TEST_DATABASE_URL's migrated schema.
+# Catches a migration that renames a column a cached query uses, and a cached
+# query the code no longer uses. `test` runs it last; CI runs it after its
+# database tests migrate the database.
+# Fail unless the query cache matches exactly what the code compiles against
+# TEST_DATABASE_URL's migrated schema.
 prepare-check:
-    @DATABASE_URL="${TEST_DATABASE_URL:?TEST_DATABASE_URL must name a migrated database}" just db _prepare --check
+    #!/usr/bin/env bash
+    set -euo pipefail
+    DATABASE_URL="${TEST_DATABASE_URL:?TEST_DATABASE_URL must name a migrated database}" just db _prepare --check
+    # --check fails on a missing or changed query but only warns about a leftover
+    # one. It regenerates the cache into the target directory first, so compare
+    # that with the committed cache; a sqlx-cli that moves it fails here too.
+    target=$(cargo metadata --format-version 1 --no-deps | sed -n 's/.*"target_directory":"\([^"]*\)".*/\1/p')
+    if ! diff -r crates/database/.sqlx "$target/sqlx-prepare-check"; then
+        echo 'prepare check failed: crates/database/.sqlx differs from the regenerated cache; run `just db prepare`' >&2
+        exit 1
+    fi
 
 # Regenerate crates/database/.sqlx from a scratch cluster; commit the result.
 prepare:

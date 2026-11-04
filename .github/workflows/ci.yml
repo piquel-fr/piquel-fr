@@ -6,7 +6,7 @@
 #             TypeScript SDK's package checks, tests and runtime smoke in Node,
 #             Bun and workerd, and the web dependency audit
 #   rust   -> Clippy, unit, database and doc tests against PostgreSQL, and the
-#             SQLx query cache checked against the migrated schema
+#             SQLx query cache checked to match the migrated schema exactly
 #   e2e    -> the browser suite over HTTPS against the real binary and PostgreSQL,
 #             with the admin dashboard on its own listener and host, and the
 #             binary's CLI granting administrators and recovering accounts
@@ -168,7 +168,8 @@ jobs:
       - run: just rust lint
       - run: just test --workspace --run-ignored all
       # The database tests migrated TEST_DATABASE_URL, so a migration that
-      # breaks a cached query fails here even if no test runs that query.
+      # breaks a cached query fails here even if no test runs that query, as
+      # does a cached query the code no longer uses.
       - run: just db prepare-check
       - run: just doc
       - run: just doc-test

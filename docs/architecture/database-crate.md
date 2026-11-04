@@ -60,7 +60,7 @@ database. After changing a query or migration, run `just db prepare` and commit
 the cache. Stale query text fails the build; `just db prepare-check`, which
 `just db test` and CI run after the database tests, runs
 `cargo sqlx prepare --check` against the migrated schema to catch a migration
-that breaks a cached query.
+that breaks a cached query, and fails on a cached query the code no longer uses.
 
 Repository tests live in `<module>/tests.rs` or an inline module for small pure
 validation tests.
