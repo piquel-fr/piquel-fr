@@ -8,7 +8,8 @@
 #   rust   -> Clippy, unit, database and doc tests against PostgreSQL, and the
 #             SQLx query cache checked against the migrated schema
 #   e2e    -> the browser suite over HTTPS against the real binary and PostgreSQL,
-#             with the admin dashboard on its own listener and host
+#             with the admin dashboard on its own listener and host, and the
+#             binary's CLI granting administrators and recovering accounts
 #   docker -> the deployment images: auth and piquel.fr's web server
 #
 # Pull requests run only the jobs their changes can affect (see `changes`).
@@ -201,6 +202,7 @@ jobs:
       AUTH_ADMIN_ORIGIN: https://admin.localhost:3443
       E2E_ADMIN_URL: https://admin.localhost:3443
       E2E_GRANT_ADMIN: target/debug/auth-service admin grant
+      E2E_RECOVER: target/debug/auth-service user recover
       # The secret `just web browser-client` registers for the example app of
       # @piquel/auth/server, which server.spec.ts starts. It guards nothing.
       E2E_SERVER_CLIENT_SECRET: YnJvd3Nlci1lMmUtc2VydmVyIHNlY3JldCBmb3IgY2k
@@ -214,18 +216,25 @@ jobs:
       # The binary embeds the passkey script and the stylesheet, as in the
       # deployed image.
       - run: just rust build
+      # The keys reach every later step, so the commands the suite runs, such as
+      # `user recover`, which derives its link with the token digest key, share
+      # them with the service.
+      - name: Generate the keys
+        run: |
+          just auth generate-secret "$RUNNER_TEMP/key-encryption-key"
+          just auth generate-secret "$RUNNER_TEMP/token-digest-key"
+          openssl rand -hex 32 > "$RUNNER_TEMP/audit-key"
+          {
+            echo "AUTH_KEY_ENCRYPTION_KEY=file://$RUNNER_TEMP/key-encryption-key"
+            echo "AUTH_TOKEN_DIGEST_KEY=file://$RUNNER_TEMP/token-digest-key"
+            echo "AUTH_AUDIT_KEY_PROVIDER=file://$RUNNER_TEMP/audit-key"
+          } >> "$GITHUB_ENV"
       # The service accepts only HTTPS origins, as in production. Caddy
       # terminates TLS with its local CA, which the suite is told to accept.
       # The suite signs in through the public OIDC client from
       # tests/browser/README.md, whose origin has no server.
       - name: Start the auth service
         run: |
-          just auth generate-secret "$RUNNER_TEMP/key-encryption-key"
-          just auth generate-secret "$RUNNER_TEMP/token-digest-key"
-          openssl rand -hex 32 > "$RUNNER_TEMP/audit-key"
-          export AUTH_KEY_ENCRYPTION_KEY="file://$RUNNER_TEMP/key-encryption-key"
-          export AUTH_TOKEN_DIGEST_KEY="file://$RUNNER_TEMP/token-digest-key"
-          export AUTH_AUDIT_KEY_PROVIDER="file://$RUNNER_TEMP/audit-key"
           cat > "$RUNNER_TEMP/Caddyfile" <<'EOF'
           {
             auto_https disable_redirects

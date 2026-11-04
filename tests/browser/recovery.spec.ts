@@ -7,7 +7,7 @@ import { signedUp, withPasskeys } from './helpers';
 // user recover`.
 const recover = process.env.E2E_RECOVER;
 
-/** Runs against a deployment whose CLI the test can run, such as a preview. */
+/** Runs against a deployment whose CLI the test can run, such as CI or a preview. */
 test('a recovery link adds a passkey, and the owner undoes it with an older one', async ({
   browser
 }) => {
