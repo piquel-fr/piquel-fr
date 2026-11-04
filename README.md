@@ -769,7 +769,7 @@ the query or migration that changed it.
 Database integration tests are explicitly marked ignored for the ordinary test
 command. `just db test` runs them in a throwaway PostgreSQL cluster that listens
 only on a private Unix socket and is deleted afterwards, then runs
-`just db prepare-check` (`cargo sqlx prepare --check`) against the migrated
+`just db prepare-check` against the migrated
 schema, which catches a migration that breaks a cached query and a cached query
 the code no longer uses. CI runs that check
 after its database tests. To use an existing disposable database
