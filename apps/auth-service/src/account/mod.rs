@@ -135,7 +135,7 @@ impl AccountService {
             .ok_or(SessionError::Missing)?)
     }
 
-    /// Changes the account's display name to `name`, and bumps its profile version,
+    /// Changes the account's display name to `name`, trimmed, and bumps its profile version,
     /// so relying parties refresh `name`. A name grants nothing, so the owner's
     /// session is enough. The name the account already has changes nothing.
     pub(crate) async fn change_display_name(
@@ -143,7 +143,7 @@ impl AccountService {
         subject: &Subject,
         name: String,
     ) -> Result<(), AccountError> {
-        let name = DisplayName::parse(name)?;
+        let name = DisplayName::parse(name.trim().to_owned())?;
         let mut tx = self.database.begin().await?;
         subject.lock(&mut tx).await?;
         if let Some(old) = tx.users().rename(subject.user(), name.as_str()).await? {

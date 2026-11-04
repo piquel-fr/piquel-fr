@@ -207,7 +207,7 @@ async fn administrators_change_another_account_on_its_behalf() {
 /// The owner and an administrator change the display name with the same
 /// operation, each recorded as theirs, the administrator's with their reason, and
 /// each bumping the profile version so apps refresh `name`. The name the account
-/// already has changes nothing; a blank name, or another administrator's
+/// already has, once trimmed, changes nothing; a blank name, or another administrator's
 /// account, is refused.
 #[tokio::test]
 #[ignore = "requires TEST_DATABASE_URL"]
@@ -230,7 +230,9 @@ async fn owners_and_administrators_change_the_display_name() {
     };
     rename(&owner, "Alice B").await.expect("owner");
     rename(&admin(), "Alice C").await.expect("administrator");
-    rename(&admin(), "Alice C").await.expect("unchanged");
+    rename(&admin(), " Alice C ")
+        .await
+        .expect("unchanged, once trimmed");
     assert!(matches!(
         rename(&owner, " ").await,
         Err(AccountError::Passkey(PasskeyError::InvalidDisplayName))

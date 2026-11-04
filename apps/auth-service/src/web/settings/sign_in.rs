@@ -78,9 +78,8 @@ impl AccountPage for SignInMethods {
                 Notice::HandleChanged
             }
             SignInChange::DisplayName { display_name } => {
-                let name = display_name.trim().to_owned();
                 web.account
-                    .change_display_name(&Subject::from(owner), name)
+                    .change_display_name(&Subject::from(owner), display_name)
                     .await?;
                 Notice::DisplayNameChanged
             }

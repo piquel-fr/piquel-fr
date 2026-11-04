@@ -316,10 +316,9 @@ pub(super) async fn display_name(cx: &Cx, form: Option<Form<NewDisplayName>>) ->
     let back = App::account(cx, user);
     let refused = App::submit(cx, form, back.clone(), |input: NewDisplayName| async move {
         let subject = App::subject(user, admin, input.reason)?;
-        let name = input.display_name.trim().to_owned();
         App::of(cx)
             .account
-            .change_display_name(&subject, name)
+            .change_display_name(&subject, input.display_name)
             .await
             .map_err(Refusal::from)
     })
