@@ -3,7 +3,9 @@
 use super::*;
 use piquel_repository::SessionScope;
 
-/// Checks public-client consent, PKCE, scoped claims and one-use authorization codes.
+/// Checks public-client consent, PKCE, scoped claims and one-use authorization codes:
+/// a redemption with the wrong verifier uses its code up, so trying it again is a
+/// replay.
 #[tokio::test]
 #[ignore = "requires TEST_DATABASE_URL"]
 async fn public_consent_pkce_claim_scoping_and_replay() {
@@ -15,11 +17,14 @@ async fn public_consent_pkce_claim_scoping_and_replay() {
         parameter(&flow.client_redirect(&response), "error"),
         OAuthCode::ConsentRequired.as_str()
     );
+    let burned = flow.code(Scope::OpenId.as_str()).await;
+    for verifier in ["wrong", Flow::verifier()] {
+        assert_eq!(
+            flow.exchange(&burned, verifier, None).await.status(),
+            StatusCode::BAD_REQUEST
+        );
+    }
     let code = flow.code(Scope::OpenId.as_str()).await;
-    assert_eq!(
-        flow.exchange(&code, "wrong", None).await.status(),
-        StatusCode::BAD_REQUEST
-    );
     let response = flow.exchange(&code, Flow::verifier(), None).await;
     assert_eq!(response.status(), StatusCode::OK);
     let tokens = Flow::json(response).await;
@@ -64,7 +69,7 @@ async fn public_consent_pkce_claim_scoping_and_replay() {
     assert_eq!(location(&response).path(), "/login");
     let client_id = flow.client.id.clone();
     assert_eq!(
-        flow.events().await[..3],
+        flow.events().await[..5],
         [
             DomainEvent::CodeReplayed {
                 client_id: client_id.clone(),
@@ -74,12 +79,18 @@ async fn public_consent_pkce_claim_scoping_and_replay() {
                 family_id: None,
                 scopes: vec![Scope::OpenId.as_str().into()],
             },
+            DomainEvent::CodeReplayed {
+                client_id: client_id.clone(),
+            },
+            DomainEvent::CodeRedemptionFailed {
+                client_id: client_id.clone(),
+                reason: CodeRedemptionFailure::InvalidVerifier,
+            },
             DomainEvent::ConsentGranted {
                 client_id,
                 scopes: vec![Scope::OpenId.as_str().into()],
             },
-        ],
-        "a failed exchange records nothing"
+        ]
     );
 }
 

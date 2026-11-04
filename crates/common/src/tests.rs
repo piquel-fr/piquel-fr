@@ -95,7 +95,9 @@ fn trace_ids_are_lower_case_hex() {
     reason = "one literal per event kind, so it grows with `DomainEvent`"
 )]
 fn event_kinds_match_their_serde_tags() {
-    use events::{DomainEvent, GrantRevocation, RevocationReason, SignInFailure};
+    use events::{
+        CodeRedemptionFailure, DomainEvent, GrantRevocation, RevocationReason, SignInFailure,
+    };
     use serde_json::json;
 
     let session_id = SessionId::new();
@@ -154,6 +156,10 @@ fn event_kinds_match_their_serde_tags() {
         },
         DomainEvent::CodeReplayed {
             client_id: client_id.clone(),
+        },
+        DomainEvent::CodeRedemptionFailed {
+            client_id: client_id.clone(),
+            reason: CodeRedemptionFailure::InvalidVerifier,
         },
         DomainEvent::InvitationCreated {
             expires_at: chrono::Utc::now(),

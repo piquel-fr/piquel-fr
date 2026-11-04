@@ -2,7 +2,7 @@
 
 use super::{
     ACCESS_TOKEN_SECONDS, AuthScheme, GrantType, OAuthCode, OAuthError, OidcApplication,
-    OpaqueToken, Reject, Scope, Scopes, TokenPrefix, TokenType,
+    OpaqueToken, Reject, Scope, Scopes, TokenPrefix, TokenType, policy::ClientPolicy,
 };
 use crate::{
     routes,
@@ -16,7 +16,7 @@ use axum::{
 use chrono::{Duration, Utc};
 use piquel_common::{
     ClientId, SessionId, TokenId, UserId,
-    events::{DomainEvent, EventContext, GrantRevocation},
+    events::{CodeRedemptionFailure, DomainEvent, EventContext, GrantRevocation},
     protocol::{
         claims::{
             AccessTokenClaims, Audience, AuthenticationClaims, IdTokenClaims, ProfileClaims,
@@ -52,6 +52,41 @@ pub(super) struct TokenForm {
 }
 
 impl TokenForm {
+    /// Whether this form redeems the consumed `code` for the authenticated
+    /// `client_id`: the code was issued to it, for this `redirect_uri`, and this
+    /// `code_verifier` matches its PKCE challenge. Answers why it does not, with
+    /// the rejection.
+    fn redeems(
+        &self,
+        code: &ConsumedAuthorizationCode,
+        client_id: &ClientId,
+    ) -> Result<(), (CodeRedemptionFailure, OAuthError)> {
+        if &code.client_id != client_id {
+            return Err((
+                CodeRedemptionFailure::WrongClient,
+                OAuthCode::InvalidGrant.reject("code was issued to another client"),
+            ));
+        }
+        if self.redirect_uri.as_deref() != Some(&code.redirect_uri) {
+            return Err((
+                CodeRedemptionFailure::RedirectMismatch,
+                OAuthCode::InvalidGrant
+                    .reject("redirect_uri must match the one sent with the authorization request"),
+            ));
+        }
+        piquel_crypto::Pkce::verify(
+            self.code_verifier.as_deref().unwrap_or_default(),
+            &code.pkce_challenge,
+        )
+        .map_err(|error| {
+            (
+                CodeRedemptionFailure::InvalidVerifier,
+                OAuthCode::InvalidGrant
+                    .reject_with(format!("code_verifier is invalid: {error}"), error),
+            )
+        })
+    }
+
     /// Permits refresh scope narrowing while rejecting additions to the original grant.
     fn refresh_scopes(&self, granted: &[String]) -> Result<Scopes, OAuthError> {
         let Some(requested) = self.scope.as_deref() else {
@@ -255,9 +290,11 @@ impl OidcApplication {
     }
 
     /// Exchanges a one-use code for the authenticated client after checking its client,
-    /// redirect and PKCE binding, and that an untrusted client still has the user's
-    /// consent, then records the grant. A replayed code has its refresh family
-    /// revoked and committed before the rejection.
+    /// redirect and PKCE binding, that the client's current policy still allows it,
+    /// and that an untrusted client still has the user's consent, then records the
+    /// grant. A replayed code has its refresh family revoked and committed before
+    /// the rejection; a code redeemed with the wrong client, redirect or verifier is
+    /// used up, and recorded, before it.
     async fn exchange_code(
         &self,
         form: TokenForm,
@@ -285,20 +322,15 @@ impl OidcApplication {
             Ok(code) => code,
             Err(error) => return Err(Self::code_rejection(tx, context, client_id, error).await),
         };
-        if &code.client_id != client_id {
-            return Err(OAuthCode::InvalidGrant.reject("code was issued to another client"));
+        // A failed redemption still uses the code up, and is recorded: a code is
+        // tried once, and trying it again is a replay.
+        if let Err((reason, error)) = form.redeems(&code, client_id) {
+            let failed = DomainEvent::CodeRedemptionFailed {
+                client_id: client_id.clone(),
+                reason,
+            };
+            return Err(Self::commit_rejection(tx, context, code.user_id, [failed], error).await);
         }
-        if form.redirect_uri.as_deref() != Some(&code.redirect_uri) {
-            return Err(OAuthCode::InvalidGrant
-                .reject("redirect_uri must match the one sent with the authorization request"));
-        }
-        piquel_crypto::Pkce::verify(
-            form.code_verifier.as_deref().unwrap_or_default(),
-            &code.pkce_challenge,
-        )
-        .map_err(|error| {
-            OAuthCode::InvalidGrant.reject_with(format!("code_verifier is invalid: {error}"), error)
-        })?;
         let user = tx
             .users()
             .find_active_by_id_for_update(code.user_id)
@@ -312,11 +344,13 @@ impl OidcApplication {
             .await?
             .filter(|session| session.user_id == user.id)
             .ok_or_else(|| OAuthCode::InvalidGrant.reject(SESSION_ENDED))?;
-        let client = tx
-            .oidc()
-            .find_client(code.client_id.as_str())
-            .await?
-            .ok_or_else(|| OAuthCode::InvalidClient.reject("the client is no longer registered"))?;
+        // Share-locked until the grant commits, so no change to the client, such as
+        // a suspension, commits between this check and the tokens.
+        let policy = ClientPolicy::share(&mut tx, client_id).await?;
+        policy
+            .allows_code(&code)
+            .map_err(|refusal| refusal.reject(OAuthCode::InvalidGrant))?;
+        let client = policy.client();
         // Reread under the account lock: authorization checks remembered consent
         // before taking it, so it may issue a code just as the consent is withdrawn.
         if !client.trusted
@@ -349,7 +383,7 @@ impl OidcApplication {
             context,
             Some(user.id),
             DomainEvent::GrantIssued {
-                client_id: client.id,
+                client_id: client.id.clone(),
                 family_id,
                 scopes: scopes.into_stored(),
             },

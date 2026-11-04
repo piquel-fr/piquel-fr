@@ -20,8 +20,8 @@ pub use context::{
 };
 pub use history::{FollowUp, HistoryActor, HistoryEntry};
 pub use payload::{
-    GrantRevocation, ImportedAudit, InlineSignIn, RecordedOrigin, RecoveryRevocation,
-    RevocationReason, SignInFailure, SigningKeyChange,
+    CodeRedemptionFailure, GrantRevocation, ImportedAudit, InlineSignIn, RecordedOrigin,
+    RecoveryRevocation, RevocationReason, SignInFailure, SigningKeyChange,
 };
 
 use crate::{
@@ -173,6 +173,14 @@ pub enum DomainEvent {
     CodeReplayed {
         /// The client that redeemed the code.
         client_id: ClientId,
+    },
+    /// A client's redemption of an authorization code failed, which used the code
+    /// up: redeeming it again is a [`Self::CodeReplayed`].
+    CodeRedemptionFailed {
+        /// The client that redeemed the code.
+        client_id: ClientId,
+        /// Why it failed.
+        reason: CodeRedemptionFailure,
     },
     /// A signup invitation was created.
     InvitationCreated {
@@ -429,6 +437,7 @@ impl DomainEvent {
             | Self::GrantIssued { client_id, .. }
             | Self::GrantRevoked { client_id, .. }
             | Self::CodeReplayed { client_id }
+            | Self::CodeRedemptionFailed { client_id, .. }
             | Self::ClientRegistered { client_id, .. }
             | Self::ClientUpdated { client_id, .. }
             | Self::ClientEnabled { client_id }
@@ -515,6 +524,7 @@ impl DomainEvent {
             | Self::GrantIssued { .. }
             | Self::GrantRevoked { .. }
             | Self::CodeReplayed { .. }
+            | Self::CodeRedemptionFailed { .. }
             | Self::InvitationCreated { .. }
             | Self::InvitationRevoked { .. }
             | Self::AccountDisabled { .. }
@@ -579,6 +589,7 @@ impl DomainEvent {
             Self::GrantIssued { .. } => "grant_issued",
             Self::GrantRevoked { .. } => "grant_revoked",
             Self::CodeReplayed { .. } => "code_replayed",
+            Self::CodeRedemptionFailed { .. } => "code_redemption_failed",
             Self::InvitationCreated { .. } => "invitation_created",
             Self::InvitationRevoked { .. } => "invitation_revoked",
             Self::AccountDisabled { .. } => "account_disabled",

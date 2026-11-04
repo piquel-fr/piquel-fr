@@ -1,7 +1,10 @@
 //! Sign-in from related pages on approved origins.
 
 use super::*;
-use crate::tests::{change, register};
+use crate::{
+    ClientRegistry,
+    tests::{change, operator, register, until_blocked},
+};
 use piquel_common::clients::RelatedOrigin;
 
 /// PKCE verifier of the pushed requests related pages complete.
@@ -413,5 +416,44 @@ async fn a_probation_passkey_meets_no_phr_on_related_pages() {
     assert_eq!(
         fixture.finish_related(&page, &started).await.status(),
         StatusCode::OK
+    );
+}
+
+/// Removing a page's origin while its sign-in finishes refuses the sign-in:
+/// completing it checks the origin again under its client's lock, which the
+/// removal holds until it commits.
+#[tokio::test]
+#[ignore = "requires TEST_DATABASE_URL"]
+async fn removing_an_origin_during_a_sign_in_refuses_it() {
+    let mut fixture = Fixture::new().await;
+    let replicas = Replicas::new().await;
+    fixture.on(&replicas.a);
+    let page = RelatedPage::approved(&fixture.app.database).await;
+    let request_uri = fixture.push(&page, &[]).await;
+    let started = Fixture::json(fixture.start_related(&page, &request_uri).await).await;
+    let assertion = fixture.assertion_for(page.origin.url().clone(), &started);
+    let database = fixture.app.database.clone();
+    let mut removal = database.begin().await.expect("transaction");
+    ClientRegistry::new(&mut removal, operator().context())
+        .remove_origin(&page.client.id, &page.origin)
+        .await
+        .expect("removed");
+
+    let finish = fixture.post_from(
+        page.origin.as_str(),
+        routes::passkey::RELATED_FINISH,
+        json!({"ceremony_id":started["ceremony_id"],"credential":assertion}),
+    );
+    let (finished, ()) = tokio::join!(finish, async {
+        until_blocked(&mut removal, 1).await;
+        removal.commit().await.expect("commit");
+    });
+    assert_eq!(finished.status(), StatusCode::BAD_REQUEST);
+    let events = fixture.events().await;
+    assert!(
+        !events
+            .iter()
+            .any(|event| matches!(event, DomainEvent::SignedIn { .. })),
+        "{events:?}"
     );
 }

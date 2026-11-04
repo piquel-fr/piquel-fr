@@ -520,6 +520,33 @@ impl OidcRepository<'_> {
         Ok(())
     }
 
+    /// Finds a client, as [`Self::find_client`] does, once its row is
+    /// share-locked until the transaction ends: no change to the client commits
+    /// before then, while other transactions acting on it under the same lock, such
+    /// as code exchanges and refresh rotations, run alongside. `None` if it is
+    /// unknown.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`DatabaseError`] if a query fails or the row is invalid.
+    pub async fn share_client(
+        &mut self,
+        id: &ClientId,
+    ) -> Result<Option<StoredOidcClient>, DatabaseError> {
+        let found = run!(
+            self,
+            fetch_optional,
+            sqlx::query_scalar!(
+                "SELECT id FROM oidc_clients WHERE id = $1 FOR SHARE",
+                id.as_str(),
+            )
+        )?;
+        match found {
+            Some(_) => self.find_client(id.as_str()).await,
+            None => Ok(None),
+        }
+    }
+
     /// Finds a client, enabled or not, with its URI allowlists.
     ///
     /// # Errors

@@ -1,0 +1,77 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE authorization_codes c\n                SET consumed_at = now()\n                FROM sessions s, users u\n                WHERE c.id = $1\n                AND c.secret_digest = ANY($2)\n                AND c.consumed_at IS NULL\n                AND c.expires_at > now()\n                AND s.id = c.session_id\n                AND s.revoked_at IS NULL\n                AND s.expires_at > now()\n                AND u.id = c.user_id\n                AND u.status = 'active'\n                RETURNING\n                    c.id AS \"id: TokenId\", c.client_id AS \"client_id: ClientId\",\n                    c.user_id AS \"user_id: UserId\",\n                    c.session_id AS \"session_id: SessionId\", c.redirect_uri, c.pkce_challenge,\n                    c.nonce, c.scopes AS \"scopes: JsonArray<String>\", c.audience,\n                    c.authentication AS \"authentication: SessionAuthentication\"",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id: TokenId",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "client_id: ClientId",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 2,
+        "name": "user_id: UserId",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 3,
+        "name": "session_id: SessionId",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 4,
+        "name": "redirect_uri",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 5,
+        "name": "pkce_challenge",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 6,
+        "name": "nonce",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 7,
+        "name": "scopes: JsonArray<String>",
+        "type_info": "Jsonb"
+      },
+      {
+        "ordinal": 8,
+        "name": "audience",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 9,
+        "name": "authentication: SessionAuthentication",
+        "type_info": "Jsonb"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "ByteaArray"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      true,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "a35642846dde2778d46c8f41779fceb2f261b43d1566b88f638ef89fdf736ad5"
+}

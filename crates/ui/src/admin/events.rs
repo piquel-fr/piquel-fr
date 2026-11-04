@@ -7,8 +7,8 @@ use piquel_common::{
     AuthenticationMethod, Personal,
     admin::Event,
     events::{
-        Actor, DomainEvent, GrantRevocation, JobName, RecordedOrigin, RevocationReason,
-        SignInFailure,
+        Actor, CodeRedemptionFailure, DomainEvent, GrantRevocation, JobName, RecordedOrigin,
+        RevocationReason, SignInFailure,
     },
 };
 use serde_json::Value;
@@ -253,6 +253,16 @@ impl EventRow<'_> {
             }
             DomainEvent::CodeReplayed { client_id } => {
                 Description::new(format!("{client_id} redeemed an authorization code twice"))
+            }
+            DomainEvent::CodeRedemptionFailed { client_id, reason } => {
+                let why = match reason {
+                    CodeRedemptionFailure::WrongClient => "it was issued to another app",
+                    CodeRedemptionFailure::RedirectMismatch => "the redirect URI differed",
+                    CodeRedemptionFailure::InvalidVerifier => "the PKCE verifier was wrong",
+                };
+                Description::new(format!(
+                    "{client_id} failed to redeem an authorization code: {why}"
+                ))
             }
             DomainEvent::InvitationCreated { expires_at } => {
                 Description::new("Invitation created").with("valid until", expires_at.to_rfc3339())

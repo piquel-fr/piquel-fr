@@ -132,6 +132,19 @@ crate::str_enum! {
 }
 
 crate::str_enum! {
+    /// Why a client's redemption of an authorization code failed, which uses the
+    /// code up.
+    pub enum CodeRedemptionFailure {
+        /// The code was issued to another client.
+        WrongClient = "wrong_client",
+        /// The `redirect_uri` differs from the authorization request's.
+        RedirectMismatch = "redirect_mismatch",
+        /// The PKCE `code_verifier` does not match the request's challenge.
+        InvalidVerifier = "invalid_verifier",
+    }
+}
+
+crate::str_enum! {
     /// A step in a signing key's lifecycle: published as `next`, signing as
     /// `active`, still published as `retiring`, then kept for `id_token_hint`
     /// alone as `retired`, until it is deleted.
