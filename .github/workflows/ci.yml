@@ -3,10 +3,11 @@
 #
 #   checks -> Rust formatting and the Rust dependency audit, which compile nothing
 #   web    -> Prettier, tsc and ESLint, the passkey script included, the
-#             TypeScript SDK's package checks, tests and runtime smoke in Node,
-#             Bun and workerd, and the web dependency audit
-#   rust   -> Clippy, unit, database and doc tests against PostgreSQL, and the
-#             SQLx query cache checked to match the migrated schema exactly
+#             TypeScript SDK's package checks, tests with coverage and runtime
+#             smoke in Node, Bun and workerd, and the web dependency audit
+#   rust   -> Clippy, unit and database tests against PostgreSQL with
+#             coverage, doc tests, and the SQLx query cache checked to match
+#             the migrated schema exactly
 #   e2e    -> the browser suite over HTTPS against the real binary and PostgreSQL,
 #             with the admin dashboard on its own listener and host, and the
 #             binary's CLI granting administrators and recovering accounts
@@ -153,7 +154,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       - uses: taiki-e/install-action@3f74d7c16a4242f1c95561e98edc25d36adb4375 # v2
         with:
-          tool: just,cargo-nextest
+          tool: just,cargo-nextest,cargo-llvm-cov
       - &rust-cache
         uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
         with:
@@ -166,7 +167,15 @@ jobs:
       # the latest release, until main next saves a cache.
       - run: just db install-sqlx
       - run: just rust lint
-      - run: just test --workspace --run-ignored all
+      # Every unit and database test, instrumented. Coverage is reported, not
+      # enforced: per crate in the log, per line in the rust-coverage artifact.
+      # cargo-llvm-cov adds the llvm-tools-preview component it needs.
+      - run: just coverage
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: rust-coverage
+          path: target/lcov.info
+          if-no-files-found: error
       # The database tests migrated TEST_DATABASE_URL, so a migration that
       # breaks a cached query fails here even if no test runs that query, as
       # does a cached query the code no longer uses.

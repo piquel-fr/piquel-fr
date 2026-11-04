@@ -725,8 +725,9 @@ explains how to choose a requirement and handle the challenge.
 `just` runs `validate` by default.
 `just install` installs the web tools, Prettier, ESLint, tsc and Playwright, which
 need Node 24+ and pnpm (the workspace pins its version).
-`just install-tools` installs `cargo-nextest`, `cargo-deny` and `sqlx-cli`. The
-`db` recipes also need the PostgreSQL 18 server binaries (`initdb`, `pg_ctl`).
+`just install-tools` installs `cargo-nextest`, `cargo-llvm-cov`, `cargo-deny` and
+`sqlx-cli`. The `db` recipes and `just coverage` also need the PostgreSQL 18
+server binaries (`initdb`, `pg_ctl`).
 Recipes are grouped into `rust`, `web`, `db`, `auth` and `infra` modules under
 `just/`; `just --list --list-submodules` shows every recipe. The root `fmt`,
 `fmt-check`, `lint`, `check` and `audit` run the same recipe in `rust` and `web`.
@@ -740,9 +741,10 @@ Use individual recipes while iterating:
 | Clippy and ESLint, warnings denied; `publint` and `attw` on the built TypeScript SDK | `just lint` (`just rust lint` / `just web lint`) |
 | Regenerate the SDK vectors / the TypeScript SDK's wire types | `just sdk-vectors` / `just sdk-types` |
 | Unit tests / focused package tests | `just test` / `just test -p auth-service` |
-| TypeScript SDK tests, the shared vectors included / the built SDK in Node, Bun and workerd | `just web test` / `just web smoke` |
+| TypeScript SDK tests with coverage, the shared vectors included / the built SDK in Node, Bun and workerd | `just web test` / `just web smoke` |
 | Documentation tests | `just doc-test` |
 | Database integration tests and query cache check, in a scratch cluster | `just db test` |
+| Rust coverage per crate over every test, database tests included, in a scratch cluster; `target/lcov.info` | `just coverage` |
 | Query cache check alone, against a migrated `TEST_DATABASE_URL` | `just db prepare-check` |
 | Regenerate the query cache after changing SQL or migrations | `just db prepare` |
 | Run any command against a scratch cluster | `just db scratch -- psql` |
@@ -753,7 +755,10 @@ Use individual recipes while iterating:
 
 CI runs these recipes on every pull request whose changes they can affect,
 including the database and browser tests, and on every push to `main`.
-Require its `ci` check: it summarizes the others.
+Require its `ci` check: it summarizes the others. CI runs the Rust tests through
+`just coverage`, printing coverage per crate and uploading `lcov.info` as the
+`rust-coverage` artifact; `just web test` prints the TypeScript SDK's coverage.
+Coverage is reported only; nothing fails on it.
 
 Web code is formatted by Prettier and linted by type-aware ESLint (typescript-eslint
 `strictTypeChecked`), configured once at the repository root.
