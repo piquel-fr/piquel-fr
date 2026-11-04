@@ -4,6 +4,7 @@
  */
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
+import { BACKCHANNEL_LOGOUT_EVENT } from '../src/claims.ts';
 import { Issuer, type IdTokenClaims, type LogoutTokenClaims } from '../src/index.ts';
 import {
   Login,
@@ -26,7 +27,6 @@ import {
 const APP = 'https://notes.example';
 const CLIENT_ID = 'notes-web';
 const PAR_URL = `${ISSUER}/oauth/par`;
-const BACKCHANNEL_LOGOUT_EVENT = 'http://schemas.openid.net/event/backchannel-logout';
 /** The attributes every cookie of the login routes has. */
 const ATTRIBUTES = 'Path=/; Secure; HttpOnly; SameSite=Lax';
 const USER = '01936f3e-8c00-7000-8000-000000000001';

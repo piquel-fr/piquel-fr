@@ -12,6 +12,10 @@ fmt-check:
 lint:
     @cargo clippy --locked --workspace --all-targets -- -D warnings
 
+# Dependencies a crate declares but never names, by cargo-machete.
+unused:
+    @cargo machete
+
 audit:
     @cargo deny check advisories licenses
 
