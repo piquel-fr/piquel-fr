@@ -263,8 +263,8 @@ owner operation looks the client up as the owner's first, so any other client is
 not found, and nothing checks ownership again. Clients are read from the database on each
 request and nothing is cached, so changes apply at once on every replica.
 
-Periodic work implements `ExclusiveJob` in `apps/auth-service/src/jobs.rs`, and
-`Jobs::start` schedules it. A job receives only its locked `ExclusiveConnection`,
+Periodic work implements `ExclusiveJob` in `apps/auth-service/src/jobs/mod.rs`,
+and `Jobs::start` schedules it. A job receives only its locked `ExclusiveConnection`,
 never the `Database`, so everything it does happens while it holds the lock.
 Messages for other systems are never sent from handlers: the event's channels queue
 them, and delivery workers send them. See [the delivery queue](delivery-queue.md).
@@ -321,3 +321,8 @@ security reasoning, protocol quirks, ordering and locking where they are not obv
 Keep documentation current. Tests should cover meaningful logic and boundaries;
 avoid repeated smoke tests. Run checks relevant to changed code while iterating,
 then the required workspace checks before handing over an integration change.
+
+Unit tests live in `#[cfg(test)] mod tests;` with a sibling `tests.rs`, so a
+module with tests is `foo/mod.rs` and `foo/tests.rs`. A test block of 30 lines or
+fewer may stay inline. A test file that outgrows one read becomes a `tests/`
+directory: `tests/mod.rs` holds the shared fixtures, and each flow gets a file.

@@ -221,7 +221,7 @@ removes the restart gap after a crash; it adds no capacity.
   clients, and the public-client origins CORS allows, are read from the
   database on each request, so a client change reaches every replica at once.
 - **Background work.** Jobs run through one runner
-  (`apps/auth-service/src/jobs.rs`). An exclusive job, such as expired-state
+  (`apps/auth-service/src/jobs/mod.rs`). An exclusive job, such as expired-state
   cleanup or the purge of deleted accounts, each every five minutes, or audit
   sealing every five seconds, holds a PostgreSQL advisory lock while it runs, so
   one replica at a time runs it and the others skip that run. A run that fails

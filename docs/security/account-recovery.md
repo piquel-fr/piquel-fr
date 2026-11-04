@@ -38,7 +38,7 @@ undo), `AdminService::recover_account`, `recent_recoveries` and `undo_recovery`
 (`apps/auth-service/src/admin/service.rs`), the passkey routes
 (`apps/auth-service/src/passkey`), the pages `/recover` and `/recover/undo`
 (`apps/auth-service/src/web/auth/recovery`, with their views in
-`crates/ui/src/recovery.rs`), migration `0019_account_recoveries`, the CLI's
+`crates/ui/src/recovery/mod.rs`), migration `0019_account_recoveries`, the CLI's
 `user recover` and `user undo-recovery`, and the dashboard's Recover and Undo
 recovery pages (`apps/auth-service/src/web/admin/users.rs`). Tests named below
 live in `apps/auth-service/src/recovery/tests/` unless another file is given;
