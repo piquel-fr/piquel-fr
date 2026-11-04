@@ -14,7 +14,7 @@ use piquel_common::{
         RelatedOrigin, ScopeName,
     },
     events::{Actor, DomainEvent, EventContext, InlineSignIn, RecordedOrigin, RequestOrigin},
-    protocol::oauth::Scope,
+    protocol::oauth::{Interaction, Scope},
 };
 use sqlx::{Connection, PgConnection, PgPool};
 use std::{net::IpAddr, ops::RangeBounds};
@@ -138,9 +138,7 @@ async fn pushed_requests_are_claimed_only_before_they_expire() {
             pkce_challenge: "challenge".into(),
             scopes: vec![Scope::OpenId.as_str().into()],
             audience: client.id.to_string(),
-            force_login: false,
-            force_consent: false,
-            prompt_none: false,
+            interaction: Interaction::AsNeeded,
             max_age: None,
             hinted_user_id: None,
             target_acr: None,

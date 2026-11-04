@@ -3,7 +3,11 @@
 use super::{JsonArray, OidcRepository, RepositoryExecutor};
 use crate::{DatabaseError, SessionAuthentication};
 use chrono::{DateTime, Utc};
-use piquel_common::{ClientId, SessionId, TokenId, UserId, admin::Consent, protocol::claims::Acr};
+use piquel_common::{
+    ClientId, SessionId, TokenId, UserId,
+    admin::Consent,
+    protocol::{claims::Acr, oauth::Interaction},
+};
 use sqlx::types::Json;
 
 piquel_common::str_enum! {
@@ -35,10 +39,6 @@ pub struct StoredApp {
 /// A validated authorization request, stored while the user logs in and
 /// consents. A pushed one waits for the browser to claim it first.
 #[derive(Clone, Debug)]
-#[expect(
-    clippy::struct_excessive_bools,
-    reason = "The flags are the row's independent boolean columns."
-)]
 pub struct InsertAuthorizationRequest {
     /// Request identifier.
     pub id: TokenId,
@@ -64,12 +64,8 @@ pub struct InsertAuthorizationRequest {
     pub scopes: Vec<String>,
     /// Requested token audience.
     pub audience: String,
-    /// `prompt=login` or `select_account`: the user must authenticate again.
-    pub force_login: bool,
-    /// `prompt=consent`: the user must consent again.
-    pub force_consent: bool,
-    /// `prompt=none`: fail rather than show the user a page.
-    pub prompt_none: bool,
+    /// The pages `prompt` forces or forbids.
+    pub interaction: Interaction,
     /// `max_age` in seconds since the last authentication.
     pub max_age: Option<i64>,
     /// Account the client asked for, kept across login and consent.
@@ -101,12 +97,8 @@ pub struct StoredAuthorizationRequest {
     pub scopes: Vec<String>,
     /// Requested token audience.
     pub audience: String,
-    /// `prompt=login` or `select_account`: the user must authenticate again.
-    pub force_login: bool,
-    /// `prompt=consent`: the user must consent again.
-    pub force_consent: bool,
-    /// `prompt=none`: fail rather than show the user a page.
-    pub prompt_none: bool,
+    /// The pages `prompt` forces or forbids.
+    pub interaction: Interaction,
     /// `max_age` in seconds since the last authentication.
     pub max_age: Option<i64>,
     /// Account the client asked for.
@@ -214,13 +206,9 @@ impl OidcRepository<'_> {
             sqlx::query!(
                 "INSERT INTO authorization_requests (
                     id, secret_digest, client_id, redirect_uri, client_state,
-                    nonce, pkce_challenge, scopes, audience, force_login,
-                    max_age, expires_at, force_consent, hinted_user_id, target_acr,
-                    pushed, prompt_none, digest_key
-                ) VALUES (
-                    $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17,
-                    $18
-                )",
+                    nonce, pkce_challenge, scopes, audience, interaction,
+                    max_age, expires_at, hinted_user_id, target_acr, pushed, digest_key
+                ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)",
                 input.id.as_uuid(),
                 input.secret_digest,
                 input.client_id.as_str(),
@@ -230,14 +218,12 @@ impl OidcRepository<'_> {
                 input.pkce_challenge,
                 Json(&input.scopes) as _,
                 input.audience,
-                input.force_login,
+                input.interaction.as_str(),
                 input.max_age,
                 input.expires_at,
-                input.force_consent,
                 input.hinted_user_id.map(UserId::as_uuid),
                 input.target_acr.map(Acr::as_str),
                 input.pushed,
-                input.prompt_none,
                 input.digest_key,
             )
         )?;
@@ -283,8 +269,8 @@ impl OidcRepository<'_> {
                     r.id AS "id: TokenId", r.client_id AS "client_id: ClientId",
                     c.display_name AS client_display_name,
                     r.redirect_uri, r.client_state, r.nonce, r.pkce_challenge,
-                    r.scopes AS "scopes: JsonArray<String>", r.audience, r.force_login,
-                    r.force_consent, r.prompt_none, r.max_age,
+                    r.scopes AS "scopes: JsonArray<String>", r.audience,
+                    r.interaction AS "interaction: Interaction", r.max_age,
                     r.hinted_user_id AS "hinted_user_id: UserId",
                     r.target_acr AS "target_acr: Acr",
                     r.claimed_at AS "started_at!""#,
@@ -319,8 +305,8 @@ impl OidcRepository<'_> {
                     r.id AS "id: TokenId", r.client_id AS "client_id: ClientId",
                     c.display_name AS client_display_name,
                     r.redirect_uri, r.client_state, r.nonce, r.pkce_challenge,
-                    r.scopes AS "scopes: JsonArray<String>", r.audience, r.force_login,
-                    r.force_consent, r.prompt_none, r.max_age,
+                    r.scopes AS "scopes: JsonArray<String>", r.audience,
+                    r.interaction AS "interaction: Interaction", r.max_age,
                     r.hinted_user_id AS "hinted_user_id: UserId",
                     r.target_acr AS "target_acr: Acr",
                     COALESCE(r.claimed_at, r.created_at) AS "started_at!"
@@ -379,8 +365,8 @@ impl OidcRepository<'_> {
                     r.id AS "id: TokenId", r.client_id AS "client_id: ClientId",
                     c.display_name AS client_display_name,
                     r.redirect_uri, r.client_state, r.nonce, r.pkce_challenge,
-                    r.scopes AS "scopes: JsonArray<String>", r.audience, r.force_login,
-                    r.force_consent, r.prompt_none, r.max_age,
+                    r.scopes AS "scopes: JsonArray<String>", r.audience,
+                    r.interaction AS "interaction: Interaction", r.max_age,
                     r.hinted_user_id AS "hinted_user_id: UserId",
                     r.target_acr AS "target_acr: Acr",
                     COALESCE(r.claimed_at, r.created_at) AS "started_at!""#,

@@ -39,8 +39,8 @@ use piquel_common::{
         jwt::{Algorithm, Claim, TokenType},
         metadata::ServerMetadata,
         oauth::{
-            self, ClientAuthMethod, CodeChallengeMethod, GrantType, Prompt, ResponseMode,
-            ResponseType, Scope, SubjectType,
+            self, ClientAuthMethod, CodeChallengeMethod, GrantType, Interaction, Prompt,
+            ResponseMode, ResponseType, Scope, SubjectType,
         },
     },
 };
