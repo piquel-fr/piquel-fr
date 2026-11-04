@@ -10,8 +10,9 @@
 #             coverage, doc tests, and the SQLx query cache checked to match
 #             the migrated schema exactly
 #   e2e    -> the browser suite over HTTPS against the real binary and PostgreSQL,
-#             with the admin dashboard on its own listener and host, and the
-#             binary's CLI granting administrators and recovering accounts
+#             with the admin dashboard on its own listener and host, piquel.fr's
+#             web server on its own host, Mailpit receiving auth's email, and
+#             the binary's CLI granting administrators and recovering accounts
 #   docker -> the deployment images: auth and piquel.fr's web server
 #
 # Pull requests run only the jobs their changes can affect (see `changes`).
@@ -195,6 +196,11 @@ jobs:
     timeout-minutes: 30
     services:
       postgres: *postgres
+      # Receives auth's email over plain SMTP on the loopback address, and lets
+      # the suite read it from its API.
+      mailpit:
+        image: axllent/mailpit:v1.27
+        ports: ['1025:1025', '8025:8025']
     env:
       E2E_AUTH_URL: https://localhost:3443
       E2E_ALLOW_SELF_SIGNED_TLS: '1'
@@ -206,7 +212,17 @@ jobs:
       E2E_DATABASE_PASSWORD: runtime
       AUTH_PUBLIC_BASE_URL: https://localhost:3443
       AUTH_PUBLIC_LISTENER: 127.0.0.1:3000
-      AUTH_INVITE_REQUIRED: 'false'
+      # Signup needs an invitation, as in production: each signup of the suite
+      # takes a new one from the CLI.
+      AUTH_INVITE_REQUIRED: 'true'
+      E2E_INVITE: target/debug/auth-service invite create
+      AUTH_SMTP_URL: smtp://127.0.0.1:1025
+      E2E_MAIL_URL: http://127.0.0.1:8025
+      # piquel.fr on its own host, whose policies auth's pages link.
+      AUTH_WEB_ORIGIN: https://web.localhost:3443
+      E2E_WEB_URL: https://web.localhost:3443
+      WEB_LISTENER: 127.0.0.1:3002
+      WEB_AUTH_ORIGIN: https://localhost:3443
       # The suite runs serially from one address, and spends in a minute what a
       # person would in an hour.
       AUTH_REQUESTS_PER_MINUTE: '1000'
@@ -247,7 +263,7 @@ jobs:
       # terminates TLS with its local CA, which the suite is told to accept.
       # The suite signs in through the public OIDC client from
       # tests/browser/README.md, whose origin has no server.
-      - name: Start the auth service
+      - name: Start the auth service and piquel.fr
         run: |
           cat > "$RUNNER_TEMP/Caddyfile" <<'EOF'
           {
@@ -260,12 +276,17 @@ jobs:
           admin.localhost:3443 {
             reverse_proxy 127.0.0.1:3001
           }
+          web.localhost:3443 {
+            reverse_proxy 127.0.0.1:3002
+          }
           EOF
           docker run --detach --name caddy --network host --volume "$RUNNER_TEMP/Caddyfile:/etc/caddy/Caddyfile:ro" caddy:2-alpine
           target/debug/auth-service migrate
           just web browser-client
           target/debug/auth-service serve > "$RUNNER_TEMP/auth.log" 2>&1 &
+          target/debug/piquel-web > "$RUNNER_TEMP/web.log" 2>&1 &
           curl -kfsS --retry 30 --retry-delay 1 --retry-all-errors "$E2E_AUTH_URL/health/ready"
+          curl -kfsS --retry 30 --retry-delay 1 --retry-all-errors "$E2E_WEB_URL/health"
       # The headless build matching the pinned Playwright, so runner image
       # updates cannot change the browser under test.
       - run: pnpm exec playwright install --only-shell chromium
