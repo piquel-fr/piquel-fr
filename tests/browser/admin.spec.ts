@@ -315,7 +315,8 @@ test('an administrator registers a client, suspends it and rotates its secret, e
   // Reloading it, with no script to rewrite the history, posts nothing again.
   const shown = admin.waitForResponse(
     (response) =>
-      response.request().method() === 'GET' && response.url() === `${adminUrl}/clients/${id}/overview`
+      response.request().method() === 'GET' &&
+      response.url() === `${adminUrl}/clients/${id}/overview`
   );
   await admin.getByRole('button', { name: 'Register', exact: true }).click();
   expect((await shown).headers()['cache-control']).toBe('no-store, no-transform');
