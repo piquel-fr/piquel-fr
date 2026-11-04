@@ -1,0 +1,10 @@
+# Generated files, which GitHub collapses in diffs and leaves out of language
+# statistics. CI fails while any of them is stale. Linguist already knows
+# Cargo.lock and pnpm-lock.yaml.
+
+# SQLx's query cache, written by `just db prepare`.
+crates/database/.sqlx/** linguist-generated
+# The SDK test vectors, written by `just sdk-vectors`; the keys and README are not.
+tests/sdk-vectors/**/*.json linguist-generated
+# The TypeScript SDK's wire types, written by `just sdk-types`.
+packages/auth/src/protocol.ts linguist-generated
