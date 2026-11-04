@@ -96,15 +96,12 @@ pub(super) async fn sign_in(cx: &Cx, body: Body) -> Result<Response> {
             SignInChange::Unlink { provider } => {
                 Ok(account.unlink_identity(&subject, provider).await?)
             }
-            SignInChange::DisplayName { display_name: name } => {
-                let name = name.trim().to_owned();
-                Ok(account.change_display_name(&subject, name).await?)
-            }
-            // The owner renames, with the cooldown; an administrator, on the handle
-            // page.
-            SignInChange::Handle { .. } | SignInChange::Link { .. } | SignInChange::Enrolled {} => {
-                Err(App::owners())
-            }
+            // The owner renames here; an administrator, on the handle page, without
+            // the cooldown, and on the display name page.
+            SignInChange::Handle { .. }
+            | SignInChange::DisplayName { .. }
+            | SignInChange::Link { .. }
+            | SignInChange::Enrolled {} => Err(App::owners()),
         }
     })
     .await?;
