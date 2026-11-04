@@ -131,8 +131,9 @@ jobs:
       - if: needs.changes.outputs.deps == 'true'
         run: just web audit
 
-  # Clippy runs first so lint failures report early; the tests then reuse the
-  # dependencies it compiled for build scripts and proc macros.
+  # Clippy runs first so lint failures report early; the doc tests then reuse
+  # the dependencies it compiled for build scripts and proc macros. Coverage
+  # builds its own instrumented copy of everything, in target/llvm-cov-target.
   rust:
     name: rust
     needs: changes
