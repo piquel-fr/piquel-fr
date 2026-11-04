@@ -1,6 +1,6 @@
 # Generated files, which GitHub collapses in diffs and leaves out of language
-# statistics. CI fails while any of them is stale. Linguist already knows
-# Cargo.lock and pnpm-lock.yaml.
+# statistics. CI fails while any of them is missing or out of date. Linguist
+# already knows Cargo.lock and pnpm-lock.yaml.
 
 # SQLx's query cache, written by `just db prepare`.
 crates/database/.sqlx/** linguist-generated
