@@ -276,9 +276,9 @@ just auth account alice apps remove <client-id> --reason "Impersonating app"
   Without a terminal they refuse unless given `--yes`.
 - `account <user>` reads and changes the settings administrators share with the
   owner: passkeys, social identities, email addresses, sessions, connected apps
-  and the security history, with the owner's own operations. It never adds a way to sign in or an
-  address. Every change needs `--reason`, which the owner sees in their history;
-  reads are recorded as views. See
+  and the security history, with the owner's own operations. It never adds a way
+  to sign in or an address. Every change needs `--reason`, which the owner sees in
+  their history; reads are recorded as views. See
   [surfaces.md](docs/architecture/surfaces.md#changing-an-account-on-its-owners-behalf)
   for what is shared.
 - `user recover` is for an owner who lost every passkey. It signs the account
