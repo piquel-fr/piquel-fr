@@ -46,7 +46,8 @@ pub enum Audience<'a> {
     },
     /// An administrator, on the owner's behalf: only the changes they share with
     /// the owner, each with the reason they give, and nothing that adds a way in
-    /// or an address. The dashboard confirmed their passkey before showing it.
+    /// or an address. The dashboard confirmed their passkey before showing a
+    /// change.
     Administrator {
         /// The reason they typed for a change that was refused, which the open
         /// row's form shows again; empty otherwise.
@@ -69,7 +70,8 @@ impl<'a> Audience<'a> {
         }
     }
 
-    /// Whether it may add a way in, or an address.
+    /// Whether it is the owner: it may add a way in or an address, and report a
+    /// history entry.
     pub(crate) const fn owns(self) -> bool {
         matches!(self, Self::Owner { .. })
     }

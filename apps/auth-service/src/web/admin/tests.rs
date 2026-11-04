@@ -1530,7 +1530,7 @@ async fn administrators_read_an_accounts_history() {
     let page = html(harness.visit(&dashboard, &history).await).await;
     assert!(page.contains("Security history"), "{page}");
     assert!(page.contains("as its owner sees it"), "{page}");
-    // The owner's changes show, with who made them and why; views do not.
+    // The owner's changes show, with who made them and why.
     assert!(page.contains("Handle changed"), "{page}");
     assert!(
         page.contains("By a Piquel operator: “Asked by email”"),

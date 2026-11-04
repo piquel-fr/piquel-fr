@@ -379,7 +379,7 @@ impl Change {
                 "Anyone can claim the handle again, such as after a trademark dispute. Only a released handle, or a purged account's last one, can be: an account's current handle never is, so rename the account first."
             }
             Self::RetryDelivery => {
-                "It is attempted again now. A cancelled delivery that others are ordered after cannot be retried: they went on without it."
+                "It is attempted again now. A cancelled ordered delivery cannot be retried: the deliveries after it may already have gone on without it."
             }
             Self::CancelDelivery => {
                 "It is not attempted again, and the deliveries ordered after it go on without it."
