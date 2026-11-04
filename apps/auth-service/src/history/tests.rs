@@ -141,7 +141,10 @@ async fn pages_hold_only_the_callers_entries() {
                 session_id: bob.session_id,
             },
             // The view is hidden; the change shows.
-            vec![DomainEvent::AccountViewed {}, DomainEvent::AccountEnabled {}],
+            vec![
+                DomainEvent::AccountViewed {},
+                DomainEvent::AccountEnabled {},
+            ],
         )
         .await;
     harness
