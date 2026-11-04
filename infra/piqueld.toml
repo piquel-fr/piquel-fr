@@ -159,15 +159,16 @@ generate = { type = "random", bytes = 32, encoding = "hex" }
 name = "key-encryption-key"
 generate = { type = "random", bytes = 32, encoding = "base64url" }
 
-# Will digest refresh tokens, codes and pending logins. Accepted for now, so the
-# release that makes it current can roll back (see infra/README.md).
+# The current token digest key: it digests refresh tokens, codes and pending
+# logins, and email verification and recovery links derive from it. Change it
+# only as "Changing the token digest key" in README.md describes.
 [[spec.secrets]]
 name = "token-digest-key"
 generate = { type = "random", bytes = 32, encoding = "base64url" }
 
 # The signing key before keys moved to the database. The `signing-key-import`
-# job imports it, and it stays the token digest key until the migration in
-# infra/README.md moves digests to `token-digest-key`.
+# job imports it. It was the token digest key until `token-digest-key` took
+# over, and stays accepted until digests under it expire (see infra/README.md).
 [[spec.secrets]]
 name = "signing-key"
 generate = { type = "rsa", bits = 3072 }
@@ -221,8 +222,8 @@ dockerfile = "infra/auth.Dockerfile"
 AUTH_DATABASE_URL = "postgres://piquel_auth@postgres:5432/piquel?sslmode=disable"
 AUTH_DATABASE_PASSWORD = "file:///run/secrets/database-runtime-password"
 AUTH_KEY_ENCRYPTION_KEY = "file:///run/secrets/key-encryption-key"
-AUTH_TOKEN_DIGEST_KEY = "file:///run/secrets/signing-key"
-AUTH_TOKEN_DIGEST_KEY_ACCEPTED = "file:///run/secrets/token-digest-key"
+AUTH_TOKEN_DIGEST_KEY = "file:///run/secrets/token-digest-key"
+AUTH_TOKEN_DIGEST_KEY_ACCEPTED = "file:///run/secrets/signing-key"
 AUTH_AUDIT_KEY_PROVIDER = "file:///run/secrets/audit-key"
 AUTH_PUBLIC_LISTENER = "0.0.0.0:8080"
 # The admin dashboard, which only the private `admin` route reaches, for its own
