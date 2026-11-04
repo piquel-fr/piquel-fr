@@ -953,12 +953,12 @@ async fn related_origins_are_approved_and_removed_from_the_dashboard() {
         .expect("untrusted client");
     let approve = format!("/clients/{}/origins/approve", client.id);
     let dashboard = harness.confirmed(&admin, &approve, Utc::now()).await;
-    let client_page = format!("/clients/{}", client.id);
+    let client_page = format!("/clients/{}/overview", client.id);
     let page = html(harness.visit(&dashboard, &client_page).await).await;
     assert!(page.contains(&approve), "{page}");
     let other = html(
         harness
-            .visit(&dashboard, &format!("/clients/{}", untrusted.id))
+            .visit(&dashboard, &format!("/clients/{}/overview", untrusted.id))
             .await,
     )
     .await;
@@ -1062,12 +1062,13 @@ async fn clients_are_registered_changed_and_suspended_from_the_dashboard() {
     assert!(refused.contains("redirect_uris"), "{refused}");
     assert!(refused.contains(&format!(r#"value="{id}""#)), "{refused}");
     let created = post("/clients/new", &registration("https://ops.example/cb")).await;
-    let page = format!("/clients/{id}");
+    let client = format!("/clients/{id}");
+    let page = format!("{client}/overview");
     assert_eq!(redirect(&created), page);
-    let settings = format!("{page}/settings");
+    let settings = format!("{client}/settings");
     // The secrets page shows what a rotation sealed for it, never this.
     harness
-        .shown_once(&dashboard, &created, "pqcs_", &format!("{page}/secret"))
+        .shown_once(&dashboard, &created, "pqcs_", &format!("{client}/secret"))
         .await;
     let stored = stored_client(&harness.database, &id).await;
     assert!(stored.trusted);
@@ -1099,7 +1100,10 @@ async fn clients_are_registered_changed_and_suspended_from_the_dashboard() {
     assert_eq!(stored.backchannel_logout_uri, None);
     assert_eq!(stored.allowed_scopes, ["openid", "notes.read"]);
 
-    assert_eq!(redirect(&post(&format!("{page}/suspend"), &[]).await), page);
+    assert_eq!(
+        redirect(&post(&format!("{client}/suspend"), &[]).await),
+        page
+    );
     assert!(
         stored_client(&harness.database, &id)
             .await
@@ -1108,11 +1112,11 @@ async fn clients_are_registered_changed_and_suspended_from_the_dashboard() {
     );
     let shown = html(harness.visit(&dashboard, &page).await).await;
     assert!(shown.contains("Lift the suspension first."), "{shown}");
-    let enable = html(post(&format!("{page}/enable"), &[]).await).await;
+    let enable = html(post(&format!("{client}/enable"), &[]).await).await;
     assert!(enable.contains("lift the suspension"), "{enable}");
 
-    let rotated = post(&format!("{page}/secret"), &[("action", "rotate")]).await;
-    assert_eq!(redirect(&rotated), format!("{page}/secret"));
+    let rotated = post(&format!("{client}/secret"), &[("action", "rotate")]).await;
+    assert_eq!(redirect(&rotated), format!("{client}/secret"));
     harness
         .shown_once(&dashboard, &rotated, "pqcs_", &page)
         .await;
@@ -1126,7 +1130,7 @@ async fn clients_are_registered_changed_and_suspended_from_the_dashboard() {
     assert!(secrets[0].expires_at.is_some(), "the first one is expiring");
 
     assert_eq!(
-        redirect(&post(&format!("{page}/delete"), &[]).await),
+        redirect(&post(&format!("{client}/delete"), &[]).await),
         "/clients"
     );
     let shown = html(harness.visit(&dashboard, &page).await).await;
@@ -1166,15 +1170,16 @@ async fn pages_that_could_only_fail_refuse_at_once() {
         ("redirect_uris", "https://spa.example/cb"),
         ("openid", "on"),
     ];
-    let page = format!("/clients/{id}");
+    let client = format!("/clients/{id}");
+    let page = format!("{client}/overview");
     assert_eq!(redirect(&post("/clients/new", &registration).await), page);
     let taken = html(post("/clients/new", &registration).await).await;
     assert!(taken.contains("is taken"), "{taken}");
 
-    let secret = format!("{page}/secret");
+    let secret = format!("{client}/secret");
     refused(&secret, StatusCode::BAD_REQUEST, "is public").await;
     assert_eq!(
-        redirect(&post(&format!("{page}/delete"), &[]).await),
+        redirect(&post(&format!("{client}/delete"), &[]).await),
         "/clients"
     );
     for change in [
@@ -1188,7 +1193,7 @@ async fn pages_that_could_only_fail_refuse_at_once() {
         "secret",
     ] {
         refused(
-            &format!("{page}/{change}"),
+            &format!("{client}/{change}"),
             StatusCode::CONFLICT,
             "was deleted",
         )
@@ -1224,4 +1229,42 @@ async fn an_invitations_link_shows_once() {
         shown.contains(&format!("{AUTH_ORIGIN}/register?")),
         "{shown}"
     );
+}
+
+/// A client whose ID is `new` has its overview like any other, apart from the
+/// registration page.
+#[tokio::test]
+#[ignore = "requires TEST_DATABASE_URL"]
+async fn a_client_named_new_has_its_overview() {
+    let harness = Harness::new().await;
+    let admin = harness.admin().await;
+    let dashboard = harness.confirmed(&admin, "/clients/new", Utc::now()).await;
+    // IDs are never reused, so an earlier run's client may hold it already.
+    if harness
+        .database
+        .oidc()
+        .find_client("new")
+        .await
+        .expect("lookup")
+        .is_none()
+    {
+        let client = piquel_common::clients::ClientRegistration {
+            id: "new".parse().expect("client ID"),
+            ..crate::tests::registration(
+                piquel_common::clients::ClientKind::Public,
+                "https://new.example",
+            )
+        };
+        crate::tests::register(&harness.database, &client)
+            .await
+            .expect("client");
+    }
+
+    let overview = html(harness.visit(&dashboard, "/clients/new/overview").await).await;
+    assert!(
+        overview.contains(r#"href="/clients/new/settings""#),
+        "{overview}"
+    );
+    let registration = html(harness.visit(&dashboard, "/clients/new").await).await;
+    assert!(registration.contains(r#"name="id""#), "{registration}");
 }

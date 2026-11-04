@@ -257,7 +257,7 @@ test('an origin approved from the dashboard is listed for passkeys until removed
     const response = await admin.request.get(new URL('/.well-known/webauthn', authUrl).href);
     return ((await response.json()) as { origins: string[] }).origins;
   };
-  const page = `${adminUrl}/clients/browser-e2e-sdk`;
+  const page = `${adminUrl}/clients/browser-e2e-sdk/overview`;
   const card = admin
     .locator('section')
     .filter({ has: admin.getByRole('heading', { name: 'Passkey sign-in' }) });
@@ -315,11 +315,11 @@ test('an administrator registers a client, suspends it and rotates its secret, e
   // Reloading it, with no script to rewrite the history, posts nothing again.
   const shown = admin.waitForResponse(
     (response) =>
-      response.request().method() === 'GET' && response.url() === `${adminUrl}/clients/${id}`
+      response.request().method() === 'GET' && response.url() === `${adminUrl}/clients/${id}/overview`
   );
   await admin.getByRole('button', { name: 'Register', exact: true }).click();
   expect((await shown).headers()['cache-control']).toBe('no-store, no-transform');
-  await expect(admin).toHaveURL(`${adminUrl}/clients/${id}`);
+  await expect(admin).toHaveURL(`${adminUrl}/clients/${id}/overview`);
   await expect(admin.getByRole('heading', { name: 'Your client secret' })).toBeVisible();
   const secret = (await admin.locator('#client-secret').textContent()) ?? '';
   expect(secret).toMatch(/^pqcs_/);
