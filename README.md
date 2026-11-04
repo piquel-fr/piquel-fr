@@ -781,3 +781,11 @@ HTTP fixtures, including real signed Google ID tokens. Browser tests use Chromiu
 synced virtual authenticator and real Rust/PostgreSQL endpoints. Actual Apple/Google
 device synchronization and live provider credentials require separate validation;
 virtual authenticators and provider fixtures do not establish that evidence.
+
+## License
+
+Piquel is free to use, change and share for any purpose except a commercial one,
+under the [PolyForm Noncommercial License 1.0.0](LICENSE). The SDKs, and the
+crate they depend on, are under the [Apache License 2.0](LICENSE-APACHE) instead,
+so any application, commercial or not, can sign its users in with Piquel:
+`crates/auth-sdk`, `crates/common` and `packages/auth`.

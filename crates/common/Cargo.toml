@@ -3,7 +3,7 @@ name = "piquel-common"
 description = "Identifiers, vocabularies and auth protocol wire types shared across Piquel"
 version.workspace = true
 edition.workspace = true
-license.workspace = true
+license = "Apache-2.0"
 repository.workspace = true
 
 [features]
