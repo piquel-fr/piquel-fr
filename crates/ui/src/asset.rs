@@ -117,8 +117,31 @@ impl Asset {
     }
 }
 
+/// The stylesheet's parts, `assets/style/{part}.css`, joined into one file in
+/// the order they cascade, each after the blank line that separates sections.
+macro_rules! stylesheet {
+    ($first:literal $(, $part:literal)* $(,)?) => {
+        concat!(
+            include_str!(concat!("../assets/style/", $first, ".css"))
+            $(, "\n", include_str!(concat!("../assets/style/", $part, ".css")))*
+        )
+    };
+}
+
 /// The stylesheet of piquel.fr's pages: auth's and the admin dashboard's.
-pub const STYLESHEET: Asset = Asset::stylesheet("style", include_bytes!("../assets/style.css"));
+pub const STYLESHEET: Asset = Asset::stylesheet(
+    "style",
+    stylesheet!(
+        "tokens",
+        "base",
+        "shell",
+        "frames",
+        "cards",
+        "components",
+        "narrow",
+    )
+    .as_bytes(),
+);
 
 /// The typefaces the stylesheet links, by the paths it names: the Latin subsets
 /// of DM Sans, a variable weight, and DM Mono at two weights.

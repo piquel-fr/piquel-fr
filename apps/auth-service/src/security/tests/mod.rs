@@ -1,14 +1,33 @@
 //! Focused persistence and security contract tests.
 
 use super::*;
-use crate::tests::REQUESTS_PER_MINUTE;
-use axum::{Router, body::Body, http::Request as HttpRequest, middleware, routing::any};
-use piquel_common::{
-    clients::{ClientKind, ClientOwner},
-    events::{Browser, Platform},
+use super::{
+    endpoint::{Endpoint, RateCategory},
+    http::{CorsGrant, FETCH_SITE_HEADER, FORWARDED_FOR_HEADER, Listener},
 };
-use piquel_repository::DatabaseConfig;
-use std::net::{IpAddr, Ipv6Addr};
+use crate::routes::{oidc, page, service};
+use crate::tests::REQUESTS_PER_MINUTE;
+use axum::{
+    Router,
+    body::Body,
+    extract::{ConnectInfo, Request},
+    http::{HeaderMap, Method, Request as HttpRequest},
+    middleware,
+    routing::any,
+};
+use chrono::{Duration, Utc};
+use ipnet::IpNet;
+use piquel_common::{
+    AuthenticationMethod, SessionId, UserId,
+    clients::{ClientKind, ClientOwner},
+    events::{Actor, Browser, Platform, RevocationReason, UserAgentFamily},
+};
+use piquel_crypto::Digest;
+use piquel_repository::{Database, DatabaseConfig, SessionScope, StoredSession};
+use std::{
+    net::{IpAddr, Ipv6Addr, SocketAddr},
+    sync::Arc,
+};
 use tower::ServiceExt;
 
 mod caching;

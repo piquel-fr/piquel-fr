@@ -1,0 +1,171 @@
+/* Phones and narrow windows: the sidebar becomes a drawer the menu button
+   opens, with no script, through a checkbox the shell reads. */
+@media (max-width: 860px) {
+  .shell,
+  html[data-sidebar='collapsed'] .shell {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .sidebar {
+    position: fixed;
+    inset: 0 auto 0 0;
+    z-index: 20;
+    width: min(280px, 85vw);
+    height: 100vh;
+    height: 100dvh;
+    padding-bottom: calc(0.7rem + env(safe-area-inset-bottom));
+    transform: translateX(-100%);
+    /* Hidden once off screen, so its links leave the tab order too. */
+    visibility: hidden;
+    transition:
+      transform 0.18s ease-out,
+      visibility 0s 0.18s;
+    box-shadow: 0 0 40px rgba(0, 0, 0, 0.3);
+  }
+  /* Expanded always: the rail is never collapsed in a drawer. */
+  html[data-sidebar='collapsed'] .sidebar {
+    align-items: stretch;
+    padding-inline: 0.5rem;
+  }
+  html[data-sidebar='collapsed'] .sidebar .top {
+    flex-direction: row;
+    gap: 0.3rem;
+    padding: 0.3rem 0.4rem 0.9rem;
+  }
+  html[data-sidebar='collapsed'] .sidebar .brand .name,
+  html[data-sidebar='collapsed'] .sidebar .area,
+  html[data-sidebar='collapsed'] .sidebar .label,
+  html[data-sidebar='collapsed'] .sidebar .count:not(.warning),
+  html[data-sidebar='collapsed'] .sidebar .who > div {
+    display: initial;
+  }
+  html[data-sidebar='collapsed'] .sidebar .group {
+    width: auto;
+    height: auto;
+    padding: 0.75rem 0.5rem 0.25rem;
+    margin: 0;
+    border-top: 0;
+    overflow: visible;
+  }
+  html[data-sidebar='collapsed'] .sidebar nav a,
+  html[data-sidebar='collapsed'] .sidebar .end a,
+  html[data-sidebar='collapsed'] .sidebar .end button,
+  html[data-sidebar='collapsed'] .sidebar .who {
+    justify-content: flex-start;
+    padding: 0.35rem 0.5rem;
+  }
+  html[data-sidebar='collapsed'] .sidebar .count.warning {
+    position: static;
+  }
+  .sidebar form .collapse {
+    display: none;
+  }
+  .sidebar .close {
+    display: grid;
+    place-items: center;
+    margin-left: auto;
+    width: 28px;
+    height: 28px;
+    border-radius: 6px;
+    color: var(--muted);
+    cursor: pointer;
+  }
+  .shell:has(#menu:checked) .sidebar {
+    transform: none;
+    visibility: visible;
+    transition-delay: 0s;
+  }
+  .scrim {
+    position: fixed;
+    inset: 0;
+    z-index: 19;
+    background: rgba(0, 0, 0, 0.45);
+  }
+  .shell:has(#menu:checked) .scrim {
+    display: block;
+  }
+  .topbar .menu-button {
+    display: inline-grid;
+    place-items: center;
+    width: 34px;
+    height: 34px;
+    border: 1px solid var(--line);
+    border-radius: 6px;
+    color: var(--muted);
+    cursor: pointer;
+  }
+  /* The state, in the tab order ahead of the drawer, out of sight. */
+  .menu-state {
+    display: block;
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 1px;
+    height: 1px;
+    min-height: 0;
+    margin: 0;
+    padding: 0;
+    opacity: 0;
+  }
+  .shell:has(.menu-state:focus-visible) .menu-button {
+    outline: 2px solid var(--focus);
+    outline-offset: 2px;
+  }
+  .topbar,
+  .status {
+    padding-inline: 1rem;
+  }
+  .topbar .search {
+    width: auto;
+    flex: 1 1 6rem;
+    max-width: 50%;
+  }
+  .crumb {
+    flex: 1 1 auto;
+  }
+  .content {
+    padding: 1rem;
+  }
+}
+/* Phones: the search box takes a row of its own below the crumb. */
+@media (max-width: 600px) {
+  .topbar {
+    flex-wrap: wrap;
+    row-gap: 0.5rem;
+  }
+  .topbar .right {
+    display: contents;
+  }
+  .topbar .me {
+    margin-left: auto;
+  }
+  .topbar .search {
+    order: 10;
+    flex: 1 1 100%;
+    max-width: none;
+  }
+}
+@media (max-width: 520px) {
+  html {
+    font-size: 14.5px;
+  }
+  .stats {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  th:not(:first-child),
+  td:not(:first-child) {
+    padding-left: 0.5rem;
+  }
+  .events time {
+    width: 4.6rem;
+  }
+  .card > header {
+    padding-inline: 0.75rem;
+  }
+  .list > li,
+  .item,
+  .card > .body,
+  .card > form,
+  .open-row {
+    padding-inline: 0.75rem;
+  }
+}

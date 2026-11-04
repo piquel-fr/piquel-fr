@@ -1,6 +1,14 @@
 //! Focused name validation and database-backed `WebAuthn` ceremony invariants.
 
 use super::*;
+use super::{
+    acceptance::{Acceptance, Accepted, CREDENTIAL_COUNTER_POINTER},
+    ceremonies::{
+        AuthenticationCeremony, Ceremony, ConfirmationCeremony, DiscoverCeremony,
+        EnrollmentCeremony, RegistrationCeremony,
+    },
+    types::DisplayName,
+};
 use crate::{
     account::AccountApplication,
     tests::{AUTH_ORIGIN, Browser, Replicas},
@@ -9,10 +17,13 @@ use axum::{
     body::{Body, to_bytes},
     http::{Method, Request},
 };
-use piquel_common::{TokenId, events::SignInFailure, protocol::claims::Acr};
+use piquel_common::{
+    AccountStatus, AuthenticationMethod, Handle, TokenId, events::SignInFailure,
+    protocol::claims::Acr,
+};
 use piquel_crypto::Secret;
-use piquel_repository::{DatabaseConfig, SessionAuthentication, StoredSession};
-use serde_json::json;
+use piquel_repository::{DatabaseConfig, InsertUser, SessionAuthentication, StoredSession};
+use serde_json::{Value, json};
 use tower::ServiceExt;
 use url::Url;
 use webauthn_authenticator_rs::{WebauthnAuthenticator, softpasskey::SoftPasskey};

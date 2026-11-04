@@ -1,0 +1,400 @@
+/* Badges: a state in a small rounded label. */
+.badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  padding: 0.05rem 0.45rem;
+  border-radius: 5px;
+  font-size: 0.76rem;
+  font-weight: 600;
+  background: var(--accent-soft);
+  color: var(--accent);
+  vertical-align: middle;
+  white-space: nowrap;
+}
+.badge.ok {
+  background: var(--ok-soft);
+  color: var(--ok);
+}
+.badge.warning {
+  background: var(--warning-soft);
+  color: var(--warning);
+}
+.badge.danger {
+  background: var(--danger-soft);
+  color: var(--danger);
+}
+.badge.neutral {
+  background: var(--surface-2);
+  color: var(--muted);
+  border: 1px solid var(--line);
+}
+.badge.admin {
+  background: var(--danger-soft);
+  color: var(--danger);
+}
+.badge .dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: currentColor;
+}
+.dot {
+  display: inline-block;
+  flex: none;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: currentColor;
+}
+.dot.ok {
+  background: var(--ok);
+}
+.dot.warning {
+  background: var(--warning);
+}
+.dot.danger {
+  background: var(--danger);
+}
+.dot.accent {
+  background: var(--accent);
+}
+
+/* Avatars: initials, ringed in red for administrators. */
+.avatar {
+  display: inline-grid;
+  place-items: center;
+  flex: none;
+  width: 26px;
+  height: 26px;
+  padding: 0;
+  border-radius: 50%;
+  background: var(--accent-soft);
+  color: var(--accent);
+  font-size: 0.68rem;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+}
+.avatar.admin {
+  box-shadow:
+    0 0 0 2px var(--surface),
+    0 0 0 3.5px var(--admin-ring);
+}
+.avatar.small {
+  width: 20px;
+  height: 20px;
+  font-size: 0.58rem;
+}
+.avatar.small.admin {
+  box-shadow:
+    0 0 0 1.5px var(--surface),
+    0 0 0 3px var(--admin-ring);
+}
+
+/* Messages: what the last change did, why one failed, and what to do. */
+.notice {
+  display: flex;
+  gap: 0.6rem;
+  align-items: flex-start;
+  padding: 0.65rem 0.8rem;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--surface);
+  box-shadow: inset 3px 0 0 var(--ok);
+  font-size: 0.92rem;
+}
+.notice.error {
+  box-shadow: inset 3px 0 0 var(--danger);
+  color: var(--danger);
+}
+.notice.warning {
+  box-shadow: inset 3px 0 0 var(--warning);
+}
+.notice.info {
+  box-shadow: inset 3px 0 0 var(--muted);
+}
+.notice > svg {
+  flex: none;
+  margin-top: 0.15rem;
+}
+.notice .text {
+  flex: 1;
+  min-width: 0;
+}
+.notice .text small {
+  display: block;
+  color: var(--muted);
+}
+.notice.stack {
+  display: grid;
+  gap: 0.7rem;
+}
+.hint {
+  display: flex;
+  gap: 0.7rem;
+  align-items: center;
+  flex-wrap: wrap;
+  padding: 0.7rem 0.9rem;
+  border: 1px solid color-mix(in srgb, var(--accent) 30%, transparent);
+  border-radius: var(--radius);
+  background: var(--accent-soft);
+}
+.hint > svg {
+  color: var(--accent);
+  flex: none;
+}
+.hint .text {
+  flex: 1;
+  min-width: 14rem;
+}
+.hint .text small {
+  display: block;
+  color: var(--muted);
+}
+
+/* Overview tiles. */
+.stats {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 0.7rem;
+}
+.stat {
+  padding: 0.7rem 0.9rem;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  min-width: 0;
+}
+.stat .label {
+  display: block;
+  font-size: 0.82rem;
+  color: var(--muted);
+}
+.stat .value {
+  display: block;
+  margin: 0.2rem 0 0.1rem;
+  font-size: 1.45rem;
+  font-weight: 600;
+  letter-spacing: -0.02em;
+  line-height: 1.2;
+  font-variant-numeric: tabular-nums;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.stat .value small {
+  font-size: 0.85rem;
+  font-weight: 400;
+}
+.stat .detail {
+  display: block;
+  font-family: var(--mono);
+  font-size: 0.76rem;
+  color: var(--muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.stat .detail.ok {
+  color: var(--ok);
+}
+.stat .detail.warning {
+  color: var(--warning);
+}
+.stat.warning {
+  border-color: var(--warning);
+  box-shadow: inset 0 0 0 1px var(--warning);
+}
+.stat.warning .value {
+  color: var(--warning);
+}
+@media (max-width: 900px) {
+  .stats {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+/* Event feeds: a time, a coloured dot, what happened and its mono detail. */
+.events {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.events > li {
+  display: flex;
+  gap: 0.6rem;
+  align-items: flex-start;
+  padding: 0.55rem 0.9rem;
+  border-bottom: 1px solid var(--line);
+  font-size: 0.9rem;
+}
+.events > li:last-child {
+  border-bottom: 0;
+}
+.events time {
+  flex: none;
+  width: 8.4rem;
+  padding-top: 0.15rem;
+  font-size: 0.76rem;
+}
+.events .dot {
+  margin-top: 0.5rem;
+}
+.events .text {
+  flex: 1;
+  min-width: 0;
+}
+.events .text small {
+  display: block;
+  font-family: var(--mono);
+  font-size: 0.76rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.events .text small.wrap {
+  white-space: normal;
+}
+.events .fact {
+  color: var(--fg);
+}
+/* An event's kind and trace, which open its stored JSON. */
+.events .raw {
+  margin-top: 0.15rem;
+  font-family: var(--mono);
+  font-size: 0.74rem;
+  color: var(--muted);
+}
+.events .raw summary {
+  list-style: none;
+  cursor: pointer;
+  overflow-wrap: anywhere;
+}
+.events .raw summary::-webkit-details-marker {
+  display: none;
+}
+.events .raw summary::before {
+  content: '▸ ';
+}
+.events .raw[open] summary::before {
+  content: '▾ ';
+}
+.events .raw summary:hover {
+  color: var(--fg);
+}
+.events .raw pre {
+  margin-top: 0.4rem;
+  max-height: 18rem;
+  overflow: auto;
+}
+.events .raw pre code {
+  font-size: 0.74rem;
+}
+
+/* A record's facts: each name beside its value. */
+.facts {
+  display: grid;
+  grid-template-columns: max-content minmax(0, 1fr);
+  gap: 0.45rem 1.2rem;
+  margin: 0;
+  font-size: 0.92rem;
+}
+.facts dt {
+  color: var(--muted);
+}
+.facts dd {
+  margin: 0;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+@media (max-width: 520px) {
+  .facts {
+    grid-template-columns: 1fr;
+    gap: 0.15rem;
+  }
+  .facts dd {
+    margin-bottom: 0.4rem;
+  }
+}
+
+/* A value with a copy button beside it. */
+.copy {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+}
+.code-line {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  padding: 0.25rem 0.2rem 0.25rem 0.6rem;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--surface-2);
+}
+.code-line code {
+  flex: 1;
+  min-width: 0;
+}
+
+/* Tabs within a page, such as an app's. */
+.tabs {
+  display: flex;
+  gap: 0.2rem;
+  border-bottom: 1px solid var(--line);
+  overflow-x: auto;
+}
+.tabs a {
+  padding: 0.5rem 0.7rem;
+  margin-bottom: -1px;
+  border-bottom: 2px solid transparent;
+  color: var(--muted);
+  font-weight: 500;
+  font-size: 0.9rem;
+  text-decoration: none;
+  white-space: nowrap;
+}
+.tabs a[aria-current] {
+  border-bottom-color: var(--accent);
+  color: var(--fg);
+}
+
+/* An email address, blurred until its visually hidden checkbox is checked. */
+.private-address {
+  display: inline;
+  position: relative;
+  font: inherit;
+  cursor: pointer;
+}
+.private-address input {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  min-height: 0;
+  padding: 0;
+  opacity: 0;
+}
+.private-address span {
+  filter: blur(5px);
+  transition: filter 0.15s;
+}
+.private-address input:checked + span {
+  filter: none;
+}
+.private-address:has(input:focus-visible) span {
+  outline: 2px solid var(--focus);
+  outline-offset: 3px;
+}
+
+/* Icons. */
+.icon {
+  width: 16px;
+  height: 16px;
+  flex: none;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.5;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
