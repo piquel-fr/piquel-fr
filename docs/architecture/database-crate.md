@@ -23,7 +23,7 @@ values before any SQL runs.
 
 Each repository has its own module under `src/repositories/` (`users`, `handles`, `emails`,
 `sessions`, `events`, `audit`, `deliveries`, `passkeys`, `oidc`, `tokens`, `federation`,
-`security`, `maintenance`, `administrators`, `deletions`), holding its methods and the
+`security`, `maintenance`, `administrators`, `deletions`, `pictures`), holding its methods and the
 records they take and return.
 `repositories/mod.rs` holds only shared plumbing: the executor, the
 `repositories!` macro that declares every handle and its accessors on `Database`,
@@ -138,6 +138,10 @@ Important invariants:
   of its URLs go with their own retention: pending authorization requests within
   minutes, codes about a day later, and logout deliveries after 7 days, or 30 if
   they failed.
+- An account has at most one profile picture. Setting or removing it bumps the
+  account's `profile_version` in the same statement, and its URL's ID changes with
+  every upload. Only an active account's current picture is served. The row
+  cascades with its account, so a purge by any release removes it.
 - Active provider subjects and active provider-per-account links are unique.
   Unlink marks the identity revoked and releases both constraints.
 - Verified email ownership is unique across active accounts. Email is optional;

@@ -24,7 +24,7 @@ use axum::{
 };
 use chrono::{DateTime, Utc};
 use piquel_common::{
-    AccountStatus, AuthenticationMethod, Handle, UserId,
+    AccountStatus, AuthenticationMethod, Handle, PictureId, UserId,
     events::{Actor, DomainEvent, SigningKeyChange},
 };
 use piquel_repository::{
@@ -260,7 +260,8 @@ async fn signing_in_hands_off_through_auth_once() {
     let script = EmbeddedAssets::DASHBOARD_SCRIPT.path();
     assert!(
         csp.contains(&format!("script-src {DASHBOARD}{script};"))
-            && csp.contains("connect-src 'self';"),
+            && csp.contains("connect-src 'self';")
+            && csp.contains(&format!("img-src {AUTH_ORIGIN};")),
         "{csp}"
     );
     let handle = format!("@browser-{}", &admin.user_id.to_string()[24..]);
@@ -485,6 +486,53 @@ async fn administrators_remove_an_accounts_app() {
         page.contains("No app has access to this account."),
         "{page}"
     );
+}
+
+/// An administrator removes the picture of a disabled account, which shows
+/// nowhere while the account is disabled, with a reason, from its Profile page.
+#[tokio::test]
+#[ignore = "requires TEST_DATABASE_URL"]
+async fn administrators_remove_a_disabled_accounts_picture() {
+    let harness = Harness::new().await;
+    let admin = harness.admin().await;
+    let owner = Browser::new_account(&harness.database).await;
+    harness
+        .database
+        .pictures()
+        .set(owner.user_id, PictureId::new(), b"picture")
+        .await
+        .expect("picture");
+    harness
+        .database
+        .users()
+        .set_status(owner.user_id, AccountStatus::Disabled)
+        .await
+        .expect("disable");
+    let profile = format!("/users/{}/profile", owner.user_id);
+    let dashboard = harness.confirmed(&admin, &profile, Utc::now()).await;
+    let page = html(harness.visit(&dashboard, &profile).await).await;
+    assert!(
+        !page.contains(r#"<img class="avatar"#),
+        "nothing to load: {page}"
+    );
+    assert!(page.contains("Remove picture"), "{page}");
+    // Its changes on other pages ask for a passkey on this one first.
+    let handle = format!("/users/{}/handle", owner.user_id);
+    assert!(
+        page.contains(&format!(
+            r#"<a data-confirm-first="" class="button secondary small" href="{handle}""#
+        )),
+        "{page}"
+    );
+
+    let url = format!("{DASHBOARD}{profile}");
+    let remove = [("action", "remove"), ("reason", "Impersonates someone")];
+    let done = dashboard
+        .submit(&harness.dashboard, &url, &remove, OWN_PAGE)
+        .await;
+    assert_eq!(redirect(&done), profile);
+    let stored = harness.database.pictures().find(owner.user_id).await;
+    assert!(stored.expect("read").is_none(), "removed");
 }
 
 /// A change the service refuses shows the form again with what was typed: a
@@ -898,7 +946,7 @@ async fn administrators_change_an_accounts_settings_with_a_reason() {
     );
     let renamed = format!("renamed-{}", &user.to_string()[24..]);
     let done = post(&handle, &[("handle", renamed.as_str()), reason]).await;
-    assert_eq!(redirect(&done), format!("/users/{user}"));
+    assert_eq!(redirect(&done), format!("/users/{user}/profile"));
     let stored = harness
         .database
         .users()
@@ -943,7 +991,7 @@ async fn administrators_change_an_accounts_display_name() {
     assert!(page.contains(r#"value="Asked by email""#), "{page}");
 
     let done = post(&[("display_name", " Renamed by support "), reason]).await;
-    assert_eq!(redirect(&done), account);
+    assert_eq!(redirect(&done), format!("{account}/profile"));
     let stored = harness
         .database
         .users()
@@ -1620,7 +1668,7 @@ async fn handles_are_reserved_given_released_and_unreserved() {
     let allowed = [give.as_slice(), &[("allow_reserved", "on")]].concat();
     assert_eq!(
         redirect(&post(&rename, &allowed).await),
-        format!("/users/{user}")
+        format!("/users/{user}/profile")
     );
     let page = html(harness.visit(&dashboard, "/handles").await).await;
     assert!(page.contains(&rename), "the holder is listed: {page}");
@@ -1629,7 +1677,7 @@ async fn handles_are_reserved_given_released_and_unreserved() {
     let renamed = [("handle", back.as_str()), ("reason", "Moved on")];
     assert_eq!(
         redirect(&post(&rename, &renamed).await),
-        format!("/users/{user}")
+        format!("/users/{user}/profile")
     );
     let release = format!("/handles/release?handle={kept}");
     let page = html(harness.visit(&dashboard, "/handles").await).await;

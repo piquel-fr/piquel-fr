@@ -23,6 +23,8 @@ pub struct AdministratorRow<'a> {
     pub administrator: &'a Administrator,
     /// Their account's page.
     pub account: String,
+    /// Where their profile picture is served, if they have one.
+    pub picture: Option<String>,
     /// Revoking their rights, or why it cannot be done here.
     pub revoke: Result<Action, &'a str>,
 }
@@ -71,6 +73,7 @@ pub async fn administrator_list<'a>(
                         user: None,
                         name: row.administrator.handle.as_str(),
                         handle: row.administrator.handle.as_str(),
+                        picture: row.picture.as_deref(),
                         administrator: true,
                     };
                     <li>

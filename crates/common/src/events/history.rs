@@ -95,6 +95,8 @@ impl DomainEvent {
             Self::AdministratorRevoked {} => HistoryEntry::AdministratorRevoked,
             Self::HandleChanged { .. } => HistoryEntry::HandleChanged,
             Self::DisplayNameChanged { .. } => HistoryEntry::DisplayNameChanged,
+            Self::PictureChanged { .. } => HistoryEntry::PictureChanged,
+            Self::PictureRemoved {} => HistoryEntry::PictureRemoved,
             Self::RecoveryStarted { .. } => HistoryEntry::RecoveryStarted,
             Self::RecoveryCompleted { passkey_id, .. } => HistoryEntry::Recovered {
                 passkey_id: *passkey_id,
@@ -267,6 +269,12 @@ pub enum HistoryEntry {
     /// The account's display name changed.
     #[serde(rename = "account.display_name_changed")]
     DisplayNameChanged,
+    /// The account got a new profile picture.
+    #[serde(rename = "account.picture_changed")]
+    PictureChanged,
+    /// The account's profile picture was removed.
+    #[serde(rename = "account.picture_removed")]
+    PictureRemoved,
     /// An operator started recovering the account.
     #[serde(rename = "account.recovery_started")]
     RecoveryStarted,
@@ -344,6 +352,8 @@ impl HistoryEntry {
             | Self::AdministratorRevoked
             | Self::HandleChanged
             | Self::DisplayNameChanged
+            | Self::PictureChanged
+            | Self::PictureRemoved
             | Self::AccountExported
             | Self::DeletionScheduled { .. }
             | Self::AccountRestored
@@ -387,6 +397,8 @@ impl HistoryEntry {
             | Self::AdministratorRevoked
             | Self::HandleChanged
             | Self::DisplayNameChanged
+            | Self::PictureChanged
+            | Self::PictureRemoved
             | Self::RecoveryStarted
             | Self::Recovered { .. }
             | Self::RecoveryUndone

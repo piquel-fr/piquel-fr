@@ -115,7 +115,7 @@ a `Failure`, which `WebApplication::answer` turns into the page explaining it. A
 form that succeeds answers `303`. Pages use no Topcoat browser runtime, `suspense`, `live!`
 or `asset!`, and register every route explicitly. Their Content-Security-Policy
 loads only the stylesheet, its typefaces and the passkey script embedded under
-`/assets/`, lets the
+`/assets/` and auth's own profile pictures, lets the
 script fetch only auth itself (`connect-src 'self'`), for its passkey ceremonies,
 and lets forms post only to auth and to where they redirect, since browsers apply
 `form-action` to a form's redirects: the consent and logout pages' redirect
@@ -156,7 +156,9 @@ pages are never cached. One that fails renders the page again, with the change's
 row open, what was typed into it and the service's message, beside its input when
 it names a setting. A
 query that does not parse opens nothing, and a form that does not decode changes
-nothing, logging why at debug level.
+nothing, logging why at debug level. A page whose form uploads a file, the
+profile's, reads its `multipart/form-data` itself (`AccountPage::decode`), under
+a body limit of its own.
 
 The sign-in pages (`src/web/auth/login`), `/login` and `/register`, serve signed-out
 browsers, so they are pages of their own rather than `AccountPage`s. Their query,

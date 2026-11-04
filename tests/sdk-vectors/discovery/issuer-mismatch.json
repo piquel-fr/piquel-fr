@@ -15,6 +15,7 @@
         "sub",
         "name",
         "preferred_username",
+        "picture",
         "email",
         "email_verified",
         "profile_version",

@@ -61,6 +61,7 @@ export const CLAIMS = spellings<Claim>({
   azp: true,
   name: true,
   preferred_username: true,
+  picture: true,
   email: true,
   email_verified: true,
   profile_version: true,

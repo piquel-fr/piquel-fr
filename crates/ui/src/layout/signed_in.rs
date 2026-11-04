@@ -46,6 +46,9 @@ pub struct Who<'a> {
     pub name: &'a str,
     /// Their handle.
     pub handle: &'a str,
+    /// Where their profile picture is served, which their avatar shows instead of
+    /// their initials.
+    pub picture: Option<&'a str>,
     /// Whether they administer Piquel, which rings their avatar in red.
     pub administrator: bool,
 }
@@ -343,16 +346,39 @@ async fn theme_toggle<'a>(action: &'a str, here: &'a str) -> Result<impl View> {
     })
 }
 
-/// `who`'s initials, ringed in red for an administrator.
+/// How large an [`avatar`] is.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub(crate) enum AvatarSize {
+    /// In a list's dense rows.
+    Small,
+    /// Beside a name.
+    #[default]
+    Normal,
+    /// On the profile page, where the picture is what the page is about.
+    Large,
+}
+
+/// `who`'s profile picture, or their initials when they have none, ringed in red
+/// for an administrator. It is decorative beside their name, so it has no text of
+/// its own.
 #[component]
-pub(crate) async fn avatar<'a>(who: Who<'a>, #[default] small: bool) -> Result<impl View> {
+pub(crate) async fn avatar<'a>(who: Who<'a>, #[default] size: AvatarSize) -> Result<impl View> {
+    let class = class!(
+        "avatar",
+        "admin" if who.administrator,
+        "small" if size == AvatarSize::Small,
+        "large" if size == AvatarSize::Large,
+    );
+    let title = if who.administrator {
+        "Administrator"
+    } else {
+        who.name
+    };
     Ok(view! {
-        <span
-            class=(class!("avatar", "admin" if who.administrator, "small" if small))
-            title=(if who.administrator { "Administrator" } else { who.name })
-            aria-hidden="true"
-        >
-            (who.initials())
-        </span>
+        if let Some(picture) = who.picture {
+            <img class=(class) src=(picture) title=(title) alt="" width="96" height="96">
+        } else {
+            <span class=(class) title=(title) aria-hidden="true">(who.initials())</span>
+        }
     })
 }

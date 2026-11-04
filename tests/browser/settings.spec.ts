@@ -20,9 +20,7 @@ test('settings on auth: passkeys, devices, an email link and signing out', async
   // The settings open on the overview; the sidebar leads to the sign-in methods.
   await page.getByRole('link', { name: 'Sign-in methods', exact: true }).click();
   await expect(page).toHaveURL('/settings/sign-in');
-  await expect(
-    page.getByRole('region', { name: 'Handle' }).getByText(`@${username}`, { exact: true })
-  ).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Sign-in methods', level: 1 })).toBeVisible();
   await page.getByRole('button', { name: 'Rename First passkey', exact: true }).click();
   await page.getByLabel('Passkey name', { exact: true }).fill('My first passkey');
   await page.getByRole('button', { name: 'Save name', exact: true }).click();

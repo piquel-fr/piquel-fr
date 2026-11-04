@@ -35,7 +35,8 @@ use crate::{
     history::{HistoryPage, HistoryQuery},
     operations::operations,
     passkey::{DisplayName, Rename},
-    routes::{apps, emails, federation, history, passkey, profile, sessions},
+    pictures::PictureView,
+    routes::{apps, emails, federation, history, passkey, pictures, profile, sessions},
     security::{RequestContext, SessionError},
     sessions::{Revoked, SessionItem},
 };
@@ -47,7 +48,7 @@ use axum::{
 };
 use chrono::{DateTime, Utc};
 use piquel_common::{
-    ClientId, EmailId, Handle, PasskeyId, Personal, SessionId,
+    ClientId, EmailId, Handle, PasskeyId, Personal, PictureId, SessionId,
     events::DomainEvent,
     protocol::api::{Identity, Passkey},
 };
@@ -90,6 +91,10 @@ operations! {
         ViewHistory,
         /// Change the display name.
         ChangeDisplayName,
+        /// Show the account's profile picture.
+        ViewPicture,
+        /// Remove the account's profile picture.
+        RemovePicture,
     }
 }
 
@@ -97,8 +102,8 @@ operations! {
 /// all, and the `account` command the shared ones. An operation only the owner may
 /// run takes the [`Owner`] it acts as, a shared change the [`Subject`] it acts on,
 /// and a read the [`Viewer`] it shows. Each operation lives with its setting in the
-/// passkey, federation, emails, sessions, history, grants or clients module; the
-/// profile's live here.
+/// passkey, federation, emails, sessions, history, grants, clients or pictures
+/// module; the profile's live here.
 #[derive(Clone)]
 pub(crate) struct AccountService {
     /// Accounts, their settings and events.
@@ -170,6 +175,8 @@ pub(crate) struct Profile {
     pub(crate) handle_changeable_at: Option<DateTime<Utc>>,
     /// The name shown to the user and to relying parties.
     pub(crate) display_name: String,
+    /// Its profile picture, if any.
+    pub(crate) picture: Option<PictureId>,
 }
 
 impl From<StoredUser> for Profile {
@@ -180,6 +187,7 @@ impl From<StoredUser> for Profile {
             handle: user.handle,
             handle_changeable_at: (changeable_at > Utc::now()).then_some(changeable_at),
             display_name: user.display_name,
+            picture: user.picture,
         }
     }
 }
@@ -245,6 +253,8 @@ impl AccountApplication {
             Op::RemoveApp => (apps::ITEM, delete(Self::remove_app)),
             Op::ViewHistory => (history::LIST, get(Self::history)),
             Op::ChangeDisplayName => (profile::ITEM, patch(Self::change_display_name)),
+            Op::ViewPicture => (pictures::OWN, get(Self::picture)),
+            Op::RemovePicture => (pictures::OWN, delete(Self::remove_picture)),
         }
     }
 
@@ -383,6 +393,23 @@ impl AccountApplication {
         app.service
             .change_display_name(&subject, input.display_name)
             .await?;
+        Ok(StatusCode::NO_CONTENT)
+    }
+
+    /// The account's profile picture, or `null` without one.
+    async fn picture(
+        State(app): State<Self>,
+        viewer: Viewer,
+    ) -> Result<Json<Option<PictureView>>, AccountError> {
+        Ok(Json(app.service.picture(&viewer).await?))
+    }
+
+    /// Removes the account's profile picture.
+    async fn remove_picture(
+        State(app): State<Self>,
+        subject: Subject,
+    ) -> Result<StatusCode, AccountError> {
+        app.service.remove_picture(&subject).await?;
         Ok(StatusCode::NO_CONTENT)
     }
 

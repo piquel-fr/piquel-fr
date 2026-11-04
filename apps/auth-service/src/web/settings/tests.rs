@@ -5,8 +5,8 @@ use crate::{
     routes::page::settings,
     security::BrowserCookie,
     tests::{
-        AUTH_ORIGIN, Browser, MAX_RESPONSE_BYTES, OWN_PAGE, Replicas, cookie, html, parameter,
-        policy, redirect,
+        AUTH_ORIGIN, Browser, MAX_RESPONSE_BYTES, OWN_PAGE, Replicas, cookie, detailed_png, html,
+        parameter, policy, redirect,
     },
     web::tests::value_after,
 };
@@ -18,8 +18,8 @@ use piquel_common::{
 use piquel_crypto::Secret;
 use piquel_repository::InsertExternalIdentity;
 use piquel_ui::{
-    Checkbox, ConnectedAppChange, ConnectedAppsState, DataChange, DeviceChange, EmailChange,
-    HistoryChange, HistoryState, Query, SignInChange, SignInState,
+    ConnectedAppChange, ConnectedAppsState, DataChange, DeviceChange, EmailChange, HistoryChange,
+    HistoryState, PICTURE_FIELD, ProfileChange, ProfileDialog, ProfileState, Query, SignInChange,
 };
 
 /// The devices page lists every signed-in browser, and signs one or all of the
@@ -261,9 +261,9 @@ async fn the_handle_changes_once_its_cooldown_is_over() {
             .handle
     };
     let (current, taken) = (handle(&browser).await, handle(&taken).await);
-    let page = html(browser.visit(&replicas.a, settings::SIGN_IN).await).await;
+    let page = html(browser.visit(&replicas.a, settings::PROFILE).await).await;
     assert!(
-        page.contains(&format!("<strong>@{current}</strong>")),
+        page.contains(&format!(r#"<span class="mono">@{current}</span>"#)),
         "{page}"
     );
     assert!(page.contains("You can change it again on"), "{page}");
@@ -273,18 +273,18 @@ async fn the_handle_changes_once_its_cooldown_is_over() {
         .age_handle_change(browser.user_id, 31)
         .await
         .expect("age");
-    let opened = SignInState {
-        changing_handle: Checkbox(true),
-        ..SignInState::default()
+    let opened = ProfileState {
+        open: Some(ProfileDialog::Handle),
+        ..ProfileState::default()
     };
-    let path = opened.on(settings::SIGN_IN).expect("query");
+    let path = opened.on(settings::PROFILE).expect("query");
     let page = html(browser.visit(&replicas.a, &path).await).await;
     assert!(page.contains(&format!(r#"value="{current}""#)), "{page}");
-    let change = |handle: &str| SignInChange::Handle {
+    let change = |handle: &str| ProfileChange::Handle {
         handle: handle.to_owned(),
     };
     let refused = browser
-        .post(&replicas, settings::SIGN_IN, &change(taken.as_str()))
+        .post(&replicas, settings::PROFILE, &change(taken.as_str()))
         .await;
     assert_eq!(refused.status(), StatusCode::CONFLICT);
     let page = html(refused).await;
@@ -293,20 +293,19 @@ async fn the_handle_changes_once_its_cooldown_is_over() {
 
     let renamed = format!("renamed-{}", &browser.user_id.to_string()[24..]);
     let changed = browser
-        .post(&replicas, settings::SIGN_IN, &change(&renamed))
+        .post(&replicas, settings::PROFILE, &change(&renamed))
         .await;
-    assert_eq!(redirect(&changed), settings::SIGN_IN);
+    assert_eq!(redirect(&changed), settings::PROFILE);
     assert_eq!(cookie(&changed, BrowserCookie::Notice).0, "handle_changed");
-    let page = html(browser.visit(&replicas.a, settings::SIGN_IN).await).await;
+    let page = html(browser.visit(&replicas.a, settings::PROFILE).await).await;
     assert!(
-        page.contains(&format!("<strong>@{renamed}</strong>")),
+        page.contains(&format!(r#"<span class="mono">@{renamed}</span>"#)),
         "{page}"
     );
 }
 
-/// The display name changes from the sign-in methods, without a passkey
-/// confirmation. A refusal says why, with the name typed still in the form, and a
-/// change says so.
+/// The display name changes from the profile, without a passkey confirmation. A
+/// refusal says why, with the name typed still in the form, and a change says so.
 #[tokio::test]
 #[ignore = "requires TEST_DATABASE_URL"]
 async fn the_display_name_changes_without_a_confirmation() {
@@ -318,19 +317,19 @@ async fn the_display_name_changes_without_a_confirmation() {
         AuthenticationMethod::Federation,
     )
     .await;
-    let opened = SignInState {
-        changing_display_name: Checkbox(true),
-        ..SignInState::default()
+    let opened = ProfileState {
+        open: Some(ProfileDialog::Name),
+        ..ProfileState::default()
     };
-    let path = opened.on(settings::SIGN_IN).expect("query");
+    let path = opened.on(settings::PROFILE).expect("query");
     let page = html(browser.visit(&replicas.a, &path).await).await;
     assert!(page.contains(r#"value="Browser test""#), "{page}");
-    let change = |name: &str| SignInChange::DisplayName {
+    let change = |name: &str| ProfileChange::DisplayName {
         display_name: name.to_owned(),
     };
     let long = "n".repeat(81);
     let refused = browser
-        .post(&replicas, settings::SIGN_IN, &change(&long))
+        .post(&replicas, settings::PROFILE, &change(&long))
         .await;
     assert_eq!(refused.status(), StatusCode::BAD_REQUEST);
     let page = html(refused).await;
@@ -338,15 +337,15 @@ async fn the_display_name_changes_without_a_confirmation() {
     assert!(page.contains(&format!(r#"value="{long}""#)), "{page}");
 
     let changed = browser
-        .post(&replicas, settings::SIGN_IN, &change(" Alice "))
+        .post(&replicas, settings::PROFILE, &change(" Alice "))
         .await;
-    assert_eq!(redirect(&changed), settings::SIGN_IN);
+    assert_eq!(redirect(&changed), settings::PROFILE);
     assert_eq!(
         cookie(&changed, BrowserCookie::Notice).0,
         "display_name_changed"
     );
-    let page = html(browser.visit(&replicas.a, settings::SIGN_IN).await).await;
-    assert!(page.contains("<strong>Alice</strong>"), "{page}");
+    let page = html(browser.visit(&replicas.a, settings::PROFILE).await).await;
+    assert!(page.contains("<dd>Alice</dd>"), "{page}");
 }
 
 /// A provider linked before it was disabled is still listed, and can be unlinked.
@@ -710,4 +709,95 @@ async fn data_page_downloads_the_data_and_deletes_the_account() {
     assert!(page.contains("Restore my account"), "{page}");
     let page = html(social.visit(&replicas.a, settings::DATA).await).await;
     assert!(!page.contains("Download your data"), "signed out: {page}");
+}
+
+/// The profile page uploads a picture, which the account's shell shows and anyone may
+/// load with immutable caching; refuses what is not an image or is too large,
+/// saying why; and removes it, after which its URL serves nothing and removing it
+/// again says why.
+#[tokio::test]
+#[ignore = "requires TEST_DATABASE_URL"]
+async fn profile_page_sets_serves_and_removes_the_picture() {
+    let replicas = Replicas::new().await;
+    let database = Replicas::database().await;
+    let browser = Browser::new_account(&database).await;
+    let page = html(browser.visit(&replicas.a, settings::PROFILE).await).await;
+    assert!(
+        page.contains(r#"<span class="avatar large""#),
+        "initials: {page}"
+    );
+    assert!(page.contains(r#"enctype="multipart/form-data""#), "{page}");
+
+    let upload = |file: Vec<u8>| {
+        let browser = &browser;
+        let replicas = &replicas;
+        async move {
+            browser
+                .upload(
+                    replicas,
+                    settings::PROFILE,
+                    &ProfileChange::Upload,
+                    (PICTURE_FIELD, &file),
+                )
+                .await
+        }
+    };
+    let uploaded = upload(detailed_png()).await;
+    assert_eq!(redirect(&uploaded), settings::PROFILE);
+    assert_eq!(
+        cookie(&uploaded, BrowserCookie::Notice).0,
+        "picture_changed"
+    );
+    let page = html(browser.visit(&replicas.a, settings::PROFILE).await).await;
+    let path = value_after(&page, r#"<img class="avatar large" src=""#).to_owned();
+    assert!(path.starts_with("/pictures/"), "{page}");
+    assert!(
+        page.contains(&format!(r#"<img class="avatar" src="{path}""#)),
+        "the sidebar and the top bar"
+    );
+
+    let served = Browser::signed_out().visit(&replicas.a, &path).await;
+    assert_eq!(served.status(), StatusCode::OK);
+    let headers = served.headers();
+    assert_eq!(headers[header::CONTENT_TYPE], "image/jpeg");
+    assert_eq!(
+        headers[header::CACHE_CONTROL],
+        "public, max-age=31536000, immutable, no-transform"
+    );
+    assert_eq!(headers[header::ACCESS_CONTROL_ALLOW_ORIGIN], "*");
+
+    for (file, message) in [
+        (b"not an image".to_vec(), "Choose a PNG, JPEG or GIF image."),
+        (
+            vec![0; crate::pictures::MAX_UPLOAD_BYTES + 1],
+            "Choose an image of at most 10 MB.",
+        ),
+    ] {
+        let refused = upload(file).await;
+        assert_eq!(refused.status(), StatusCode::BAD_REQUEST);
+        let page = html(refused).await;
+        assert!(page.contains(message), "{page}");
+    }
+
+    let removed = browser
+        .post(&replicas, settings::PROFILE, &ProfileChange::Remove)
+        .await;
+    assert_eq!(cookie(&removed, BrowserCookie::Notice).0, "picture_removed");
+    let gone = Browser::signed_out().visit(&replicas.a, &path).await;
+    assert_eq!(gone.status(), StatusCode::NOT_FOUND);
+    assert_eq!(
+        gone.headers()[header::CACHE_CONTROL],
+        "no-store, no-transform"
+    );
+    // Removing it again, as from a tab still showing it, says why above the
+    // profile: the page has no removal dialog left to say it in.
+    let again = browser
+        .post(&replicas, settings::PROFILE, &ProfileChange::Remove)
+        .await;
+    assert_eq!(again.status(), StatusCode::NOT_FOUND);
+    let page = html(again).await;
+    assert!(
+        page.contains("The account has no profile picture."),
+        "{page}"
+    );
 }

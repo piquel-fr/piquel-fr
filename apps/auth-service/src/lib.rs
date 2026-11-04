@@ -41,6 +41,8 @@ mod oidc;
 mod operations;
 /// `WebAuthn` ceremonies and passkey management.
 mod passkey;
+/// Profile pictures: setting, removing and serving them.
+mod pictures;
 /// Account recovery for owners who lost every passkey.
 mod recovery;
 /// Every HTTP path the service serves.
@@ -77,6 +79,7 @@ pub use jobs::Jobs;
 pub use keys::{KeyError, KeyStore, SigningKeys};
 use oidc::OidcApplication;
 use passkey::PasskeyApplication;
+use pictures::PictureApplication;
 use service::ServiceApplication;
 use web::{AdminApplication, WebApplication};
 
@@ -142,6 +145,7 @@ impl AuthConfig {
             .merge(AuditApplication::new(database.clone()).routes())
             .merge(AccountApplication::new(database.clone()).routes())
             .merge(EmailApplication::new(database.clone(), &self.email).routes())
+            .merge(PictureApplication::new(database.clone()).routes())
             .merge(web.routes())
             .merge(oidc.routes());
         let policy = security::HttpSecurity::new(self, database);

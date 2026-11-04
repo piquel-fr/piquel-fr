@@ -48,6 +48,8 @@ crate::str_enum! {
         Name = "name",
         /// Username, with the profile scope.
         Username = "preferred_username",
+        /// Profile picture URL, with the profile scope.
+        Picture = "picture",
         /// Primary email, with the email scope.
         Email = "email",
         /// Always true: only verified emails are released.

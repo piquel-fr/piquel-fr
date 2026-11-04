@@ -7,8 +7,8 @@
 
 pub use crate::protocol::api::{Identity, Passkey};
 use crate::{
-    AccountStatus, AuthenticationMethod, ClientId, DeliveryId, EventId, Handle, SessionId, TokenId,
-    TraceId, UserId,
+    AccountStatus, AuthenticationMethod, ClientId, DeliveryId, EventId, Handle, PictureId,
+    SessionId, TokenId, TraceId, UserId,
     clients::RelatedOrigin,
     protocol::{jwt::KeyId, oauth::ClientAuthMethod},
 };
@@ -27,6 +27,9 @@ pub struct User {
     pub display_name: String,
     /// Whether the account can sign in.
     pub status: AccountStatus,
+    /// The account's profile picture, served at `/pictures/{id}` on auth, while the
+    /// account is active: auth serves it only then.
+    pub picture: Option<PictureId>,
     /// When the account was created.
     pub created_at: DateTime<Utc>,
 }
@@ -391,6 +394,9 @@ pub struct Administrator {
     pub user_id: UserId,
     /// The account's handle.
     pub handle: Handle,
+    /// The account's profile picture, served at `/pictures/{id}` on auth, while the
+    /// account is active: auth serves it only then.
+    pub picture: Option<PictureId>,
     /// When the rights were granted.
     pub granted_at: DateTime<Utc>,
 }

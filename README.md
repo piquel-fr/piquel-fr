@@ -265,6 +265,7 @@ just auth account alice name set "Alice B" --reason "Asked by email"
 just auth account alice passkeys revoke <passkey-id> --reason "Phone stolen"
 just auth account alice emails remove <email-id> --reason "Asked by email"
 just auth account alice apps remove <client-id> --reason "Impersonating app"
+just auth account alice picture remove --reason "Impersonates someone"
 ```
 
 - Accounts are named by handle, ID or a verified email of an active account.
@@ -283,11 +284,11 @@ just auth account alice apps remove <client-id> --reason "Impersonating app"
   Without a terminal they refuse unless given `--yes`.
 - `account <user>` reads and changes the settings administrators share with the
   owner: the display name, passkeys, social identities, email addresses,
-  sessions, connected apps and the security history, with the owner's own
-  operations. It never adds a way
-  to sign in or an address. Every change needs `--reason`, which the owner sees in
-  their history; reads are recorded as views, once an hour per operator, which
-  only the audit shows, not the owner. See
+  sessions, connected apps, the profile picture and the security history, with
+  the owner's own operations. It never adds a way to sign in or an address. Every
+  change needs `--reason`, which the owner sees in their history; reads are
+  recorded as views, once an hour per operator, which only the audit shows, not
+  the owner. See
   [surfaces.md](docs/architecture/surfaces.md#changing-an-account-on-its-owners-behalf)
   for what is shared.
 - `user recover` is for an owner who lost every passkey. It signs the account
@@ -699,12 +700,16 @@ explains how to choose a requirement and handle the challenge.
   owner may take it back. Handles are not secret: handle sign-in says when no
   active account has one, and signup names the look-alike that blocks one (see
   [handles.md](docs/security/handles.md)).
-  The sign-in methods settings change the handle, which needs a passkey
-  confirmation like other sensitive changes and is refused within 30 days of the
-  last change, saying when it may change again. They change the display name
-  too, which grants nothing, so it needs only ordinary login and no cooldown
+  The Profile settings change the handle, which needs a passkey confirmation
+  like other sensitive changes and is refused within 30 days of the last change,
+  saying when it may change again. They change the display name too, which
+  grants nothing, so it needs only ordinary login and no cooldown
   (`PATCH /account/profile` with `{"display_name": …}`). Either bumps the profile
   version, so relying parties refresh `preferred_username` or `name`.
+- An account's profile picture, set on the Profile settings tab, is released as
+  `picture` with the `profile` scope: a 512-pixel square JPEG auth encodes from the
+  upload, keeping none of its metadata, at a URL whose image never changes (see
+  [surfaces.md](docs/architecture/surfaces.md#profile-pictures)).
 - Social-first signup remains pending until its first passkey is committed. Only
   a registration that names the pending identity shown on the signup page attaches
   it; plain registration ignores it. A social login can never replace an

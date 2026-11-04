@@ -10,6 +10,11 @@ connected app, which then asks for consent again; reports a passkey in the
 security history as not the owner's, which signs out another device holding the
 same passkey and offers to remove it.
 
+`profile.spec.ts` uses the Profile tab's dialogs, which open with no script: it
+uploads a picture, which the tab, the sidebar and the top bar load under the
+pages' Content-Security-Policy, closes the notice saying so, changes the display
+name, and removes the picture.
+
 `sign-in.spec.ts` signs in with a handle, after a handle this authenticator holds
 no passkey for is refused in the form. Every spec signs up through `/register`.
 

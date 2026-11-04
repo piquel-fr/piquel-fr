@@ -1,0 +1,30 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "WITH p AS (\n                    INSERT INTO profile_pictures (user_id, id, image) VALUES ($1, $2, $3)\n                    ON CONFLICT (user_id) DO UPDATE\n                    SET id = EXCLUDED.id, image = EXCLUDED.image, created_at = now()\n                    RETURNING user_id, id, created_at\n                )\n                UPDATE users u\n                SET profile_version = u.profile_version + 1, updated_at = now()\n                FROM p WHERE u.id = p.user_id\n                RETURNING p.id AS \"id: PictureId\", p.created_at",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id: PictureId",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "created_at",
+        "type_info": "Timestamptz"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid",
+        "Bytea"
+      ]
+    },
+    "nullable": [
+      false,
+      false
+    ]
+  },
+  "hash": "400f204bffe32a0cee4d11b673db5cd7db75345a2e388283e6ad8b16288f6ec0"
+}

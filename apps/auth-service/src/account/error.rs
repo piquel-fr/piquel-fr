@@ -10,6 +10,7 @@ use crate::{
     handles::HandlesError,
     history::HistoryError,
     passkey::PasskeyError,
+    pictures::PictureError,
     recovery::RecoveryError,
     security::{ApiError, SessionError},
     sessions::SessionsError,
@@ -39,6 +40,9 @@ pub(crate) enum AccountError {
     /// The handle could not be changed.
     #[error(transparent)]
     Handle(#[from] HandlesError),
+    /// The profile picture could not be set or removed.
+    #[error(transparent)]
+    Picture(#[from] PictureError),
     /// A history entry could not be reported.
     #[error(transparent)]
     History(#[from] HistoryError),
@@ -72,6 +76,7 @@ impl From<AccountError> for ApiError {
             AccountError::Session(error) => error.into(),
             AccountError::Grant(error) => error.into(),
             AccountError::Handle(error) => error.into(),
+            AccountError::Picture(error) => error.into(),
             AccountError::History(error) => error.into(),
             AccountError::Client(error) => error.into(),
             AccountError::Recovery(error) => error.into(),

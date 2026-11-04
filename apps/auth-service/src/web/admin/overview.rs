@@ -4,7 +4,7 @@
 use super::{AdminApplication as App, deliveries, lists, users};
 use crate::admin::{Kinds, Problem};
 use piquel_common::admin::EventSearch;
-use piquel_ui::{AdminOverview, Measure, Query, UserRow};
+use piquel_ui::{AdminOverview, Measure, Query};
 use topcoat::{
     Result,
     context::Cx,
@@ -66,15 +66,7 @@ pub(super) async fn overview(cx: &Cx) -> Result<Response> {
         },
     ];
     let events = App::event_rows(cx, &overview.events);
-    let newest: Vec<_> = overview
-        .newest
-        .iter()
-        .map(|user| UserRow {
-            user,
-            administrator: administrators.contains(&user.id),
-            href: App::account(cx, user.id),
-        })
-        .collect();
+    let newest = App::user_rows(cx, &overview.newest, &administrators);
     let all_users = href!(users::search).resolve(cx);
     let page = AdminOverview {
         problems: &problems,

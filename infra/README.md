@@ -189,15 +189,16 @@ decoding script the pages' Content-Security-Policy blocks.
 | Class | `Cache-Control` | Responses |
 | --- | --- | --- |
 | `NoStore` | `no-store, no-transform` | APIs, OAuth, server-rendered pages, errors, everything not below |
-| `Immutable` | `public, max-age=31536000, immutable, no-transform` | the pages' content-hashed stylesheet and script, under `/assets/` |
+| `Immutable` | `public, max-age=31536000, immutable, no-transform` | the pages' content-hashed stylesheet and script, under `/assets/`, and profile pictures, under `/pictures/`, named by their upload |
 | `Public` | `public, max-age=N, no-transform` | discovery and JWKS, for an hour |
 
 Every page is server-rendered and `no-store`, so a deploy never leaves a cached page
 pointing at a stylesheet or script the new binary no longer serves. The Cloudflare Tunnel
 caches the immutable files, as it does any static file type the origin lets it
-store. `Public` responses are the same for everyone, with
-`Access-Control-Allow-Origin: *` and no credentials; the immutable files carry
-no CORS headers. Staging and previews are private routes and bypass
+store. Profile pictures have no file extension, so it keeps none of them: a
+removed picture stops being served at once. `Public` responses are the same for everyone, with
+`Access-Control-Allow-Origin: *` and no credentials, as profile pictures have;
+the stylesheet and script carry no CORS headers. Staging and previews are private routes and bypass
 Cloudflare.
 
 ### Running several replicas

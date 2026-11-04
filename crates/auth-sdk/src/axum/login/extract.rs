@@ -53,6 +53,15 @@ impl SignedIn {
             .unwrap_or(&claims.sub)
     }
 
+    /// The URL of the user's profile picture, a square JPEG, when the `profile`
+    /// scope was granted and the account has one. The image at a URL never
+    /// changes, so `<img>` tags and caches may keep it; a new picture comes with a
+    /// new URL, at the next sign-in.
+    #[must_use]
+    pub fn picture(&self) -> Option<&str> {
+        self.login.id_token.claims().profile.picture.as_deref()
+    }
+
     /// The user's account ID.
     ///
     /// # Errors

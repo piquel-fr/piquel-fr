@@ -14,9 +14,11 @@ mod emails;
 mod history;
 /// The account at a glance.
 mod overview;
+/// The profile: its handle, display name and picture.
+mod profile;
 /// Signed-in devices.
 mod sessions;
-/// The handle, passkeys and social sign-in.
+/// Passkeys and social sign-in.
 mod sign_in;
 #[cfg(test)]
 mod tests;
@@ -26,6 +28,7 @@ pub(super) use data::AccountData;
 pub(super) use emails::Addresses;
 pub(super) use history::History;
 pub(super) use overview::Overview;
+pub(super) use profile::Profile;
 pub(super) use sessions::Devices;
 pub(super) use sign_in::SignInMethods;
 
@@ -53,9 +56,10 @@ use topcoat::{
 use url::Url;
 
 /// Each tab and the page it links, in the sidebar's order.
-pub(super) const TABS: [(Tab, &str); 7] = [
+pub(super) const TABS: [(Tab, &str); 8] = [
     (Tab::Overview, settings::HOME),
     (Tab::SignIn, settings::SIGN_IN),
+    (Tab::Profile, settings::PROFILE),
     (Tab::Emails, settings::EMAILS),
     (Tab::Devices, settings::SESSIONS),
     (Tab::Apps, settings::APPS),

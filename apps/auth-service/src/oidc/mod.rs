@@ -34,6 +34,7 @@ use base64::Engine;
 use piquel_common::{
     TokenId,
     clients::ClientKind,
+    config::Origin,
     protocol::{
         claims::{Acr, ProfileClaims},
         jwt::{Algorithm, Claim, TokenType},
@@ -76,6 +77,8 @@ pub struct OidcApplication {
     database: Database,
     /// HTTPS issuer origin, without a trailing slash.
     issuer: String,
+    /// The same origin, which the `picture` claim's URLs are on.
+    origin: Origin,
     /// Keys under which opaque token secrets are stored.
     digest_keys: Arc<TokenDigestKeys>,
     /// Keys that sign and verify tokens, reloaded from the database.
@@ -233,6 +236,7 @@ impl Scopes {
                 Scope::Profile => {
                     released.preferred_username = claims.preferred_username.take();
                     released.name = claims.name.take();
+                    released.picture = claims.picture.take();
                     released.profile_version = claims.profile_version.take();
                 }
                 Scope::Email => {
@@ -270,10 +274,11 @@ impl Scopes {
 }
 
 /// Claims listed in the metadata, in their published order.
-const SUPPORTED_CLAIMS: [Claim; 10] = [
+const SUPPORTED_CLAIMS: [Claim; 11] = [
     Claim::Subject,
     Claim::Name,
     Claim::Username,
+    Claim::Picture,
     Claim::Email,
     Claim::EmailVerified,
     Claim::ProfileVersion,
@@ -361,6 +366,7 @@ impl OidcApplication {
         Ok(Self {
             database,
             issuer: config.origin.serialized(),
+            origin: config.origin.clone(),
             digest_keys: config.digest_keys.clone(),
             keys,
             metadata: PublicDocument::new(&Self::metadata(config)?)?,

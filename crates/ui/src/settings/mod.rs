@@ -9,9 +9,11 @@ mod data;
 mod emails;
 /// The account at a glance.
 mod overview;
+/// The profile: the handle, display name and picture apps see.
+mod profile;
 /// Signed-in devices.
 mod sessions;
-/// The handle, passkeys and social sign-in.
+/// Passkeys and social sign-in.
 mod sign_in;
 /// Security history.
 mod timeline;
@@ -20,8 +22,12 @@ pub use connected::{ConnectedAppChange, ConnectedAppRow, ConnectedAppsState, con
 pub use data::{DataChange, DataState, account_data, account_deleted};
 pub use emails::{EmailChange, EmailRow, EmailsState, addresses, verified, verify};
 pub use overview::{AccountOverview, OverviewLinks, account_overview};
+pub use profile::{
+    PICTURE_FIELD, PICTURE_TYPES, ProfileChange, ProfileDialog, ProfilePages, ProfileState,
+    profile_settings,
+};
 pub use sessions::{DeviceChange, DeviceRow, devices};
-pub use sign_in::{ProfileRow, ProviderRow, SignInChange, SignInState, sign_in_methods};
+pub use sign_in::{ProviderRow, SignInChange, SignInState, sign_in_methods};
 pub use timeline::{HistoryChange, HistoryPage, HistoryRow, HistoryState, Holdings, history};
 
 use crate::{
@@ -82,8 +88,10 @@ impl<'a> Audience<'a> {
 pub enum Tab {
     /// The account at a glance.
     Overview,
-    /// The handle, display name, passkeys and social sign-in.
+    /// Passkeys and social sign-in.
     SignIn,
+    /// The handle, display name and picture apps see.
+    Profile,
     /// Email addresses.
     Emails,
     /// Signed-in devices.
@@ -103,6 +111,7 @@ impl Tab {
         match self {
             Self::Overview => "Overview",
             Self::SignIn => "Sign-in methods",
+            Self::Profile => "Profile",
             Self::Emails => "Email addresses",
             Self::Devices => "Devices",
             Self::Apps => "Connected apps",
@@ -118,6 +127,7 @@ impl Tab {
         match self {
             Self::Overview => Icon::Home,
             Self::SignIn => Icon::Key,
+            Self::Profile => Icon::Profile,
             Self::Emails => Icon::Mail,
             Self::Devices => Icon::Device,
             Self::Apps => Icon::Grid,
@@ -136,7 +146,10 @@ impl Label for Tab {
     /// The tabs an administrator changes, whose pages confirm first: all those
     /// [`settings_tabs`] shows but the history, which they only read.
     fn confirms_first(self) -> bool {
-        matches!(self, Self::SignIn | Self::Emails | Self::Apps)
+        matches!(
+            self,
+            Self::SignIn | Self::Profile | Self::Emails | Self::Apps
+        )
     }
 }
 

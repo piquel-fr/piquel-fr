@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "SELECT\n                    u.id AS \"id: UserId\", h.handle AS \"handle: Handle\", u.handle_changed_at,\n                    u.display_name, u.profile_version AS \"profile_version: Unsigned\",\n                    u.status AS \"status: AccountStatus\", u.created_at, u.updated_at\n                FROM users u\n                JOIN handles h ON h.user_id = u.id AND h.released_at IS NULL\n                WHERE u.id = $1",
+  "query": "SELECT\n                    u.id AS \"id: UserId\", h.handle AS \"handle: Handle\", u.handle_changed_at,\n                    u.display_name, u.profile_version AS \"profile_version: Unsigned\",\n                    u.status AS \"status: AccountStatus\", u.created_at, u.updated_at,\n                    p.id AS \"picture?: PictureId\"\n                FROM users u\n                JOIN handles h ON h.user_id = u.id AND h.released_at IS NULL\n                LEFT JOIN profile_pictures p ON p.user_id = u.id AND u.status = 'active'\n                WHERE h.handle = $1",
   "describe": {
     "columns": [
       {
@@ -42,11 +42,16 @@
         "ordinal": 7,
         "name": "updated_at",
         "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 8,
+        "name": "picture?: PictureId",
+        "type_info": "Uuid"
       }
     ],
     "parameters": {
       "Left": [
-        "Uuid"
+        "Text"
       ]
     },
     "nullable": [
@@ -57,8 +62,9 @@
       false,
       false,
       false,
+      false,
       false
     ]
   },
-  "hash": "4b32d16144930279c6e65b17a0158297090e680d34a10ac5732dbcc09f0bfaed"
+  "hash": "c431dfbd0401cf05210ec6e110250c6f8481e4ef448b87dbb823c11ad6b09a91"
 }

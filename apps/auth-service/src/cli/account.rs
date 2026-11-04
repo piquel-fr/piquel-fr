@@ -8,6 +8,7 @@ use crate::{
     emails::EmailView,
     grants::ConnectedApp,
     history::HistoryPage,
+    pictures::PictureView,
     sessions::{Revoked, SessionItem},
 };
 use clap::{Args, Subcommand};
@@ -49,6 +50,9 @@ enum Setting {
     /// List the apps that keep access, or remove one's access.
     #[command(subcommand)]
     Apps(Apps),
+    /// Show or remove the profile picture.
+    #[command(subcommand)]
+    Picture(Picture),
     /// Page through the security history as the owner sees it, newest first.
     History {
         /// Continue with entries older than this one, the last one listed.
@@ -207,6 +211,23 @@ enum Apps {
     },
 }
 
+/// The account's profile picture. Only the owner sets one.
+#[derive(Subcommand)]
+enum Picture {
+    /// Show the picture's ID, path on auth and when it was uploaded.
+    Show {
+        /// Output format.
+        #[command(flatten)]
+        output: Output,
+    },
+    /// Remove the picture, such as one that impersonates someone.
+    Remove {
+        /// Why.
+        #[command(flatten)]
+        change: Change,
+    },
+}
+
 /// The `--reason` every change takes.
 #[derive(Args)]
 struct Change {
@@ -252,6 +273,10 @@ impl AccountCommand {
             Setting::Apps(command) => match command {
                 Apps::List { .. } => Op::ListApps,
                 Apps::Remove { .. } => Op::RemoveApp,
+            },
+            Setting::Picture(command) => match command {
+                Picture::Show { .. } => Op::ViewPicture,
+                Picture::Remove { .. } => Op::RemovePicture,
             },
             Setting::History { .. } => Op::ViewHistory,
         }
@@ -342,6 +367,14 @@ impl AccountCommand {
             Setting::Apps(Apps::Remove { client, change }) => {
                 account.remove_app(&change.on(id, console), &client).await?;
             }
+            Setting::Picture(Picture::Show { output }) => {
+                output.print(&account.picture(&read()).await?, |picture| {
+                    Self::print_picture(picture.as_ref());
+                })?;
+            }
+            Setting::Picture(Picture::Remove { change }) => {
+                account.remove_picture(&change.on(id, console)).await?;
+            }
             Setting::History { before, output } => {
                 output.print(
                     &account.history(&read(), before).await?,
@@ -350,6 +383,17 @@ impl AccountCommand {
             }
         }
         Ok(())
+    }
+
+    /// Prints the picture, or that there is none.
+    fn print_picture(picture: Option<&PictureView>) {
+        match picture {
+            Some(picture) => println!(
+                "ID:\t{}\nPath:\t{}\nUploaded:\t{}",
+                picture.id, picture.url, picture.created_at
+            ),
+            None => println!("No profile picture."),
+        }
     }
 
     /// Prints one passkey per line.

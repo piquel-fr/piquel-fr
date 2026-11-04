@@ -3,7 +3,7 @@
 use super::AdminApplication as App;
 use crate::AdminError;
 use piquel_common::{UserId, admin::UserSearch};
-use piquel_ui::{Action, AdministratorRow, Change, Pager, Query, UserRow};
+use piquel_ui::{Action, AdministratorRow, Change, Pager, Query};
 use serde::{Deserialize, de::IgnoredAny};
 use topcoat::{
     Result,
@@ -30,6 +30,7 @@ pub(super) async fn list(cx: &Cx) -> Result<Response> {
         .map(|administrator| AdministratorRow {
             administrator,
             account: App::account(cx, administrator.user_id),
+            picture: App::picture(cx, administrator.picture),
             revoke: if administrator.user_id == admin.user_id {
                 Err("You cannot change your own rights.")
             } else {
@@ -86,15 +87,7 @@ pub(super) async fn grant(cx: &Cx, form: Option<Form<GrantForm>>) -> Result<Resp
         .map(|administrator| administrator.user_id)
         .collect();
     let action = href!(grant).resolve(cx);
-    let rows: Vec<_> = found
-        .users
-        .iter()
-        .map(|user| UserRow {
-            user,
-            administrator: administrators.contains(&user.id),
-            href: App::account(cx, user.id),
-        })
-        .collect();
+    let rows = App::user_rows(cx, &found.users, &administrators);
     let pager = Pager::of(found.paging, |page| {
         UserSearch {
             q: q.clone(),

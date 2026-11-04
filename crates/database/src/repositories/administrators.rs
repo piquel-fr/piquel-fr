@@ -2,7 +2,7 @@
 
 use super::{AdministratorRepository, RepositoryExecutor};
 use crate::DatabaseError;
-use piquel_common::{Handle, UserId, admin::Administrator};
+use piquel_common::{Handle, PictureId, UserId, admin::Administrator};
 
 /// Proof that the transaction took [`AdministratorRepository::lock`], which
 /// [`AdministratorRepository::is_last_active`] needs to give an answer that holds
@@ -140,9 +140,13 @@ impl AdministratorRepository<'_> {
             fetch_all,
             sqlx::query_as!(
                 Administrator,
-                r#"SELECT a.user_id AS "user_id: UserId", h.handle AS "handle: Handle", a.granted_at
+                r#"SELECT
+                    a.user_id AS "user_id: UserId", h.handle AS "handle: Handle",
+                    p.id AS "picture?: PictureId", a.granted_at
                 FROM administrators a
                 JOIN handles h ON h.user_id = a.user_id AND h.released_at IS NULL
+                JOIN users u ON u.id = a.user_id
+                LEFT JOIN profile_pictures p ON p.user_id = u.id AND u.status = 'active'
                 ORDER BY a.granted_at, a.user_id"#
             )
         )

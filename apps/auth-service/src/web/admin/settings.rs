@@ -1,7 +1,7 @@
 //! An account's settings, which an administrator changes on its owner's behalf:
 //! the owner's own sections and operations, for the changes administrators share
-//! with owners, each with the reason they give, the owner's handle and display
-//! name, and the security history as the owner sees it.
+//! with owners, each with the reason they give, the owner's handle, display
+//! name and profile picture, and the security history as the owner sees it.
 //!
 //! Reads take a [`Viewer`] and changes a [`Subject`] of the administrator, so the
 //! service checks their rights, refuses an administrator's account, and records
@@ -23,7 +23,8 @@ use crate::{
 use piquel_common::{EventId, Handle, UserId};
 use piquel_ui::{
     Audience, Change, Checkbox, ConnectedAppChange, ConnectedAppRow, EmailChange, EmailRow,
-    HistoryPage, HistoryState, Holdings, ProviderRow, Recovery, SignInChange, Tab,
+    HistoryPage, HistoryState, Holdings, ProfileChange, ProfileDialog, ProfilePages, ProfileState,
+    ProviderRow, Recovery, SignInChange, Tab, Who,
 };
 use serde::{Deserialize, de::DeserializeOwned};
 use topcoat::{
@@ -96,12 +97,7 @@ pub(super) async fn sign_in(cx: &Cx, body: Body) -> Result<Response> {
             SignInChange::Unlink { provider } => {
                 Ok(account.unlink_identity(&subject, provider).await?)
             }
-            // The owner renames here; an administrator, on the handle page, without
-            // the cooldown, and on the display name page.
-            SignInChange::Handle { .. }
-            | SignInChange::DisplayName { .. }
-            | SignInChange::Link { .. }
-            | SignInChange::Enrolled {} => Err(App::owners()),
+            SignInChange::Link { .. } | SignInChange::Enrolled {} => Err(App::owners()),
         }
     })
     .await?;
@@ -139,6 +135,78 @@ pub(super) async fn sign_in(cx: &Cx, body: Body) -> Result<Response> {
         user,
         Tab::SignIn,
         refused.as_deref(),
+        section,
+    ))
+    .await
+}
+
+/// `/users/{account}/profile`: the account's profile picture, to remove it, such as
+/// one that impersonates someone or offends. Only the owner sets one.
+#[route([GET, POST] "/users/{account}/profile")]
+pub(super) async fn profile(cx: &Cx, body: Body) -> Result<Response> {
+    let (admin, user) = App::settings(cx).await?;
+    let form = App::posted::<Administered<ProfileChange>>(cx, body).await?;
+    let refused = App::submit(cx, form, App::here(cx), |posted| async move {
+        let subject = App::subject(user, admin, posted.reason)?;
+        match posted.change {
+            ProfileChange::Remove => Ok(App::of(cx).account.remove_picture(&subject).await?),
+            // An administrator changes the name and the handle on their own pages,
+            // which take no cooldown.
+            ProfileChange::Upload
+            | ProfileChange::DisplayName { .. }
+            | ProfileChange::Handle { .. } => Err(App::owners()),
+        }
+    })
+    .await?;
+    let viewer = App::viewer(user, admin);
+    let account = &App::of(cx).account;
+    let profile = account.profile(&viewer).await?;
+    let administrator = account.is_administrator(&viewer).await?;
+    // Stored in any status; shown only while the account is active.
+    let stored = account.picture(&viewer).await?.is_some();
+    let picture = App::picture(cx, profile.picture);
+    let reason = refused
+        .as_ref()
+        .map_or("", |refused| refused.form.reason.as_str());
+    let page = &App::here(cx);
+    let who = Who {
+        user: None,
+        name: &profile.display_name,
+        handle: profile.handle.as_str(),
+        picture: picture.as_deref(),
+        administrator,
+    };
+    let alert = refused.as_deref();
+    // Only removing the picture is posted here, so only its dialog reopens.
+    let state = &ProfileState {
+        open: refused.is_some().then_some(ProfileDialog::Remove),
+        ..ProfileState::default()
+    };
+    let links = [
+        href!(display_name, Account(user)).resolve(cx),
+        href!(handle, Account(user)).resolve(cx),
+    ];
+    let section = view! { cx =>
+        piquel_ui::profile_settings(
+            page: page.as_str(),
+            who: who,
+            stored: stored,
+            changeable_at: None,
+            state: state,
+            audience: Audience::Administrator { reason },
+            pages: Some(ProfilePages { display_name: &links[0], handle: &links[1] }),
+            alert: alert,
+        )
+    };
+    // The refusal is said in the dialog shown again, not behind it, or above the
+    // profile when the page no longer has that dialog. The page's
+    // dialogs make its future large: it is boxed, off the handler's stack.
+    Box::pin(App::settings_tab(
+        cx,
+        user,
+        Tab::Profile,
+        alert.is_some(),
+        None,
         section,
     ))
     .await
@@ -264,11 +332,12 @@ pub(super) async fn history(cx: &Cx) -> Result<Response> {
 
 /// `/users/{account}/handle`: gives the account a new handle, such as one that
 /// impersonates another account, without the settings' cooldown, and a reserved
-/// one only when the form allows it.
+/// one only when the form allows it. It leads back to the account's Profile tab,
+/// which shows the handle.
 #[route([GET, POST] "/users/{account}/handle")]
 pub(super) async fn handle(cx: &Cx, form: Option<Form<NewHandle>>) -> Result<Response> {
     let (admin, user) = App::settings(cx).await?;
-    let back = App::account(cx, user);
+    let back = href!(profile, Account(user)).resolve(cx);
     let refused = App::submit(cx, form, back.clone(), |input: NewHandle| async move {
         let handle = Handle::parse(input.handle.trim()).map_err(HandlesError::from)?;
         let reason = Reason::parse(input.reason)?;
@@ -309,11 +378,12 @@ pub(super) async fn handle(cx: &Cx, form: Option<Form<NewHandle>>) -> Result<Res
 }
 
 /// `/users/{account}/name`: gives the account a new display name, with the
-/// owner's own operation.
+/// owner's own operation. It leads back to the account's Profile tab, which shows
+/// the name.
 #[route([GET, POST] "/users/{account}/name")]
 pub(super) async fn display_name(cx: &Cx, form: Option<Form<NewDisplayName>>) -> Result<Response> {
     let (admin, user) = App::settings(cx).await?;
-    let back = App::account(cx, user);
+    let back = href!(profile, Account(user)).resolve(cx);
     let refused = App::submit(cx, form, back.clone(), |input: NewDisplayName| async move {
         let subject = App::subject(user, admin, input.reason)?;
         App::of(cx)
@@ -413,8 +483,24 @@ impl App {
         refused: Option<&str>,
         section: impl View,
     ) -> Result<Response> {
+        Self::settings_tab(cx, user, tab, refused.is_some(), refused, section).await
+    }
+
+    /// Answers with `user`'s settings tab `tab`, its `section` under the tabs, as
+    /// refused when the change just posted was `refused`, and saying why above the
+    /// tabs, its `refusal`, unless the section says it itself, as the profile's
+    /// dialogs do.
+    async fn settings_tab(
+        cx: &Cx,
+        user: UserId,
+        tab: Tab,
+        refused: bool,
+        refusal: Option<&str>,
+        section: impl View,
+    ) -> Result<Response> {
         let links = [
             (Tab::SignIn, href!(sign_in, Account(user)).resolve(cx)),
+            (Tab::Profile, href!(profile, Account(user)).resolve(cx)),
             (Tab::Emails, href!(emails, Account(user)).resolve(cx)),
             (Tab::Apps, href!(apps, Account(user)).resolve(cx)),
             (Tab::History, href!(history, Account(user)).resolve(cx)),
@@ -428,11 +514,11 @@ impl App {
             piquel_ui::account_settings(
                 tabs: tabs,
                 current: tab,
-                refusal: refused,
+                refusal: refusal,
                 (section)
             )
         };
-        let status = if refused.is_some() {
+        let status = if refused {
             StatusCode::BAD_REQUEST
         } else {
             StatusCode::OK

@@ -191,6 +191,8 @@ impl HistoryRow<'_> {
             HistoryEntry::AdministratorRevoked => "Administrator rights removed".to_owned(),
             HistoryEntry::HandleChanged => "Handle changed".to_owned(),
             HistoryEntry::DisplayNameChanged => "Display name changed".to_owned(),
+            HistoryEntry::PictureChanged => "Profile picture changed".to_owned(),
+            HistoryEntry::PictureRemoved => "Profile picture removed".to_owned(),
             HistoryEntry::RecoveryStarted => {
                 "Account recovery started by Piquel support".to_owned()
             }

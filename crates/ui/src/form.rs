@@ -20,7 +20,8 @@
 use crate::{
     AppChange, AppSettingsState, ConnectedAppChange, ConnectedAppsState, DataChange, DataState,
     DeviceChange, EmailChange, EmailsState, FieldError, HistoryChange, HistoryState, LoginChange,
-    LoginQuery, NewAppChange, RecoverChange, SecretsChange, SignInChange, SignInState, UndoChange,
+    LoginQuery, NewAppChange, ProfileChange, RecoverChange, SecretsChange, SignInChange,
+    SignInState, UndoChange,
 };
 use chrono::{DateTime, SecondsFormat, Utc};
 use piquel_common::{
@@ -45,6 +46,10 @@ piquel_common::str_enum! {
         HandleChanged = "handle_changed",
         /// The display name changed.
         DisplayNameChanged = "display_name_changed",
+        /// The profile picture changed.
+        PictureChanged = "picture_changed",
+        /// The profile picture was removed.
+        PictureRemoved = "picture_removed",
         /// A passkey was added.
         PasskeyAdded = "passkey_added",
         /// A passkey was renamed.
@@ -89,6 +94,10 @@ impl Notice {
         match self {
             Self::HandleChanged => "Your handle changed.",
             Self::DisplayNameChanged => "Your display name changed.",
+            Self::PictureChanged => {
+                "Your profile picture changed. Apps show it once they refresh your profile."
+            }
+            Self::PictureRemoved => "Your profile picture was removed.",
             Self::PasskeyAdded => "The passkey was added.",
             Self::PasskeyRenamed => "The passkey was renamed.",
             Self::PasskeyRemoved => "The passkey was removed.",
@@ -216,6 +225,8 @@ fields! {
     Login(LoginChange),
     /// A change of the sign-in methods.
     SignIn(SignInChange),
+    /// A change of the profile.
+    Profile(ProfileChange),
     /// A change of the addresses.
     Email(EmailChange),
     /// A change of the devices.

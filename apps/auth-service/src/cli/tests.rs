@@ -156,6 +156,15 @@ impl AccountOperation {
                 "account", "alice", "apps", "remove", "notes", "--reason", "Asked",
             ],
             Self::ViewHistory => &["account", "alice", "history"],
+            Self::ViewPicture => &["account", "alice", "picture", "show"],
+            Self::RemovePicture => &[
+                "account",
+                "alice",
+                "picture",
+                "remove",
+                "--reason",
+                "Impersonation",
+            ],
         }
     }
 }

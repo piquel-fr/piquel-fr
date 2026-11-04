@@ -63,7 +63,7 @@ pub async fn account_data<'a>(
                 )
             </header>
             <p class="help">
-                "Everything Piquel keeps about your account, in one JSON file: your profile, email addresses, passkeys, devices, connected apps, the apps you registered, account recoveries and your security history. It holds no passkey keys or secrets."
+                "Everything Piquel keeps about your account, in one JSON file: your profile and its picture, email addresses, passkeys, devices, connected apps, the apps you registered, account recoveries and your security history. It holds no passkey keys or secrets."
             </p>
         </section>
         <section class="card" aria-labelledby="delete-heading">

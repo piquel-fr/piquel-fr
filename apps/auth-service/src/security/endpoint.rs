@@ -1,7 +1,7 @@
 //! How the HTTP boundary classifies a route, which its origin, CSRF and rate
 //! policies all read, and the independent request budgets of each class.
 
-use crate::routes::{ACCOUNT_PREFIX, audit, oidc, page, passkey, service};
+use crate::routes::{ACCOUNT_PREFIX, audit, oidc, page, passkey, pictures, service};
 use axum::extract::{MatchedPath, Request};
 
 /// How the HTTP boundary treats a route. Origin, CSRF and rate policy all read this one
@@ -17,6 +17,8 @@ pub(super) enum Endpoint {
     Discovery,
     /// Public audit checkpoints, read from the database and readable from any origin.
     Checkpoints,
+    /// Profile pictures, which any origin may load, cookie-less, like any image.
+    Picture,
     /// Liveness and readiness probes polled by the orchestrator.
     Health,
     /// Authorization requests, including cross-site form navigation.
@@ -62,6 +64,7 @@ impl Endpoint {
             }
             passkey::RELATED_START | passkey::RELATED_FINISH => Self::RelatedLogin,
             audit::LATEST_CHECKPOINT | audit::CHECKPOINTS => Self::Checkpoints,
+            pictures::IMAGE => Self::Picture,
             service::LIVE | service::READY => Self::Health,
             oidc::AUTHORIZE => Self::Authorize,
             oidc::LOGOUT => Self::Logout,
@@ -79,6 +82,7 @@ impl Endpoint {
             Self::OAuthBackChannel | Self::UserInfo | Self::Authorize | Self::Logout => true,
             Self::Discovery
             | Self::Checkpoints
+            | Self::Picture
             | Self::Health
             | Self::Account
             | Self::Page
@@ -105,6 +109,7 @@ impl Endpoint {
             Self::Page => Some(RateCategory::Page),
             Self::Dashboard => Some(RateCategory::Dashboard),
             Self::Checkpoints => Some(RateCategory::Audit),
+            Self::Picture => Some(RateCategory::Picture),
             Self::Discovery | Self::Health => None,
         }
     }
@@ -131,5 +136,7 @@ piquel_common::str_enum! {
         Dashboard = "dashboard",
         /// Reads of the public audit checkpoints.
         Audit = "audit",
+        /// Profile pictures, which a page listing accounts loads many of at once.
+        Picture = "picture",
     }
 }

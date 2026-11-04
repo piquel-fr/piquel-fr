@@ -25,8 +25,9 @@ pub use repositories::audit::Tamper;
 pub use repositories::{
     AccountDeletionRepository, AdministratorRepository, AuditRepository, DashboardRepository,
     DeliveryRepository, EmailRepository, EventRepository, FederationRepository, HandleRepository,
-    MaintenanceRepository, OidcRepository, PasskeyRepository, RecoveryRepository,
-    SecurityRepository, SessionRepository, SigningKeyRepository, TokenRepository, UserRepository,
+    MaintenanceRepository, OidcRepository, PasskeyRepository, PictureRepository,
+    RecoveryRepository, SecurityRepository, SessionRepository, SigningKeyRepository,
+    TokenRepository, UserRepository,
     administrators::AdministratorsLocked,
     audit::{ChainLink, Checkpoint, EventContent, SealedEvent},
     dashboard::{DashboardSignIn, InsertHandoff, RedeemedHandoff, StoredDashboardSession},
@@ -50,6 +51,7 @@ pub use repositories::{
         StoredAuthorizationRequest, StoredClientSecret, StoredOidcClient,
     },
     passkeys::{CeremonyKind, ConsumedCeremony, InsertCeremony, InsertPasskey, StoredPasskey},
+    pictures::StoredPicture,
     recoveries::{InsertRecovery, RecentRecovery, RecoveryPasskey, RecoveryState, StoredRecovery},
     sessions::{
         InsertSession, LAST_SEEN_INTERVAL, SessionAuthentication, SessionScope, StoredSession,

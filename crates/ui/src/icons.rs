@@ -13,6 +13,8 @@ pub enum Icon {
     Home,
     /// Passkeys and sign-in methods.
     Key,
+    /// The profile.
+    Profile,
     /// Email addresses.
     Mail,
     /// Devices.
@@ -78,6 +80,10 @@ impl Icon {
                 "M2.5 4v8c0 1.1 2.5 2 5.5 2s5.5-.9 5.5-2V4M2.5 8c0 1.1 2.5 2 5.5 2s5.5-.9 5.5-2",
             ],
             Self::Code => &["M5.5 4.5L2 8l3.5 3.5M10.5 4.5L14 8l-3.5 3.5"],
+            Self::Profile => &[
+                "M10.5 5a2.5 2.5 0 11-5 0 2.5 2.5 0 015 0z",
+                "M3 14c0-2.8 2.2-4.5 5-4.5s5 1.7 5 4.5",
+            ],
             Self::Users => &[
                 "M8.5 5.5a2.5 2.5 0 11-5 0 2.5 2.5 0 015 0z",
                 "M1.5 13.5c0-2.5 2-4 4.5-4s4.5 1.5 4.5 4M11 3.5a2.5 2.5 0 010 4.5M14.5 13.5c0-2-1.2-3.3-3-3.8",

@@ -27,6 +27,7 @@ fn serializes_every_category_in_its_documented_shape() {
     let session = SessionId::new();
     let grant = TokenId::new();
     let event = EventId::new();
+    let picture = PictureId::new();
     let client: ClientId = "notes".parse().expect("client");
     let device = UserAgentFamily {
         browser: Browser::Firefox,
@@ -44,6 +45,13 @@ fn serializes_every_category_in_its_documented_shape() {
             created_at: at,
             updated_at: at,
         },
+        picture: Some(Picture::new(
+            StoredPicture {
+                id: picture,
+                created_at: at,
+            },
+            b"jpeg",
+        )),
         handles: vec![HandleHeld::from(StoredHandle {
             handle: "ada".parse().expect("handle"),
             user_id: Some(user),
@@ -142,7 +150,7 @@ fn serializes_every_category_in_its_documented_shape() {
         serde_json::to_value(&export).expect("export"),
         json!({
             "format": "piquel.account-export",
-            "version": 1,
+            "version": 2,
             "exported_at": time,
             "profile": {
                 "id": user,
@@ -151,6 +159,12 @@ fn serializes_every_category_in_its_documented_shape() {
                 "status": "active",
                 "created_at": time,
                 "updated_at": time,
+            },
+            "picture": {
+                "id": picture,
+                "created_at": time,
+                "content_type": "image/jpeg",
+                "data": "anBlZw==",
             },
             "handles": [{"handle": "ada", "claimed_at": time, "released_at": null}],
             "administrator": true,

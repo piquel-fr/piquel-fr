@@ -11,8 +11,9 @@
 //! fallback, so the security layer classifies them as pages by their route: it
 //! attaches the request context, spends the pages' own rate budget, and accepts a
 //! form only from auth's own pages. Every page's Content-Security-Policy loads
-//! nothing but the stylesheet and the passkey script, and lets its forms post only
-//! to auth and to where they redirect.
+//! nothing but the stylesheet, the passkey script and auth's own images, the
+//! profile pictures, and lets its forms post only to auth and to where they
+//! redirect.
 
 /// A page's entry in [`WebApplication::pages`]: its path, and the handlers showing it
 /// and taking its form, whose failures explain themselves as the page `title`.
@@ -50,7 +51,7 @@ use crate::{
     federation::ReturnTo,
     oidc::{OAuthCode, OAuthError, OidcApplication, Reject},
     passkey::PasskeyApplication,
-    routes,
+    pictures, routes,
     security::{ApiError, BrowserCookie, RequestContext},
 };
 pub(crate) use admin::AdminApplication;
@@ -177,10 +178,11 @@ impl WebApplication {
     ) -> Self {
         let origin = &config.oidc.origin;
         // A source with a path needs the whole URL: `'self'` names none. The passkey
-        // script's ceremonies fetch auth's own JSON routes.
+        // script's ceremonies fetch auth's own JSON routes. Profile pictures are
+        // auth's own.
         let policy = format!(
             "default-src 'none'; style-src {}; script-src {}; font-src 'self'; \
-             connect-src 'self'; frame-ancestors 'none'; base-uri 'none'",
+             connect-src 'self'; img-src 'self'; frame-ancestors 'none'; base-uri 'none'",
             origin.join(&EmbeddedAssets::STYLESHEET.path()),
             origin.join(&EmbeddedAssets::SCRIPT.path()),
         );
@@ -202,7 +204,7 @@ impl WebApplication {
     }
 
     /// Each page's route, the handler showing it and the one submitting its form.
-    fn pages() -> [(&'static str, RouteHandlerFn, RouteHandlerFn); 21] {
+    fn pages() -> [(&'static str, RouteHandlerFn, RouteHandlerFn); 22] {
         use routes::page::{
             ADMIN, CONSENT, LOGIN, LOGOUT, PREFERENCES, RECOVER, RECOVER_UNDO, REGISTER,
             settings::VERIFY,
@@ -246,6 +248,7 @@ impl WebApplication {
             ),
             Self::entry::<settings::Overview>(),
             Self::entry::<settings::SignInMethods>(),
+            Self::entry::<settings::Profile>(),
             Self::entry::<settings::Addresses>(),
             page!(
                 VERIFY,
@@ -286,7 +289,12 @@ impl WebApplication {
             // stricter rule: Topcoat's also takes `Sec-Fetch-Site: none`.
             .origin_policy(OriginPolicy::dangerous_disable())
             // axum's body limit does not reach Topcoat, whose own default is 2 MiB.
-            .layer(BodyLimit::max(MAX_REQUEST_BODY_BYTES));
+            .layer(BodyLimit::max(MAX_REQUEST_BODY_BYTES))
+            // An upload's image, and the rest of its form.
+            .layer(
+                BodyLimit::max(pictures::MAX_UPLOAD_BYTES + MAX_REQUEST_BODY_BYTES)
+                    .at(routes::page::settings::PROFILE),
+            );
         for (path, show, submit) in Self::pages() {
             pages = pages
                 .route(RouteFn::new(Method::GET, path, show))

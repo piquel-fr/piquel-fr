@@ -128,9 +128,10 @@ who acts on it, and a read a `Viewer`, the account and who reads it. The owner's
 settings pages and `/account` routes run them as the owner of the session cookie,
 the only way to act as an owner. The `auth-service account <user> …`
 command runs them as the operator at the terminal, and the dashboard's display
-name, sign-in methods, email addresses, connected apps and security history
-pages call them in-process as an administrator, rendering the owner's own settings sections
-without what adds a way in, and asking for a reason with each change. All run the same safety
+name, sign-in methods, profile picture, email addresses, connected apps and
+security history pages call them in-process as an administrator, rendering the
+owner's own settings sections without what adds a way in, and asking for a
+reason with each change. All run the same safety
 rules: for example, one active passkey always remains, whoever removes the
 others.
 
@@ -146,6 +147,7 @@ signed out, and confirming with a passkey by the session it confirms.
 | --- | --- | --- |
 | Display name | change | |
 | Passkeys | list, rename, remove | add, confirm |
+| Profile picture | view, remove | set |
 | Social identities | list, unlink | link |
 | Email addresses | list, choose the primary among verified, remove | add, verify |
 | Sessions | list, sign out one, sign out all | |
@@ -214,6 +216,45 @@ and withdraws every consent, and only prints the link. No account is recovered
 while it holds administrator rights, and none is made an administrator while a
 recovery of it can be undone. [Account recovery](../security/account-recovery.md)
 states the policy and support's evidence policy.
+
+## Profile pictures
+
+An account may have one profile picture, which apps receive as the `picture`
+claim under the `profile` scope, in ID tokens, access tokens and UserInfo, and
+which every avatar shows in place of the initials: the account's sidebar and top
+bar, and the dashboard's account lists and pages. The SDKs read it as
+`SignedIn::picture()` in Rust and `user.picture` in TypeScript, and the admin API's
+accounts carry its ID. The owner sets it on the settings' Profile tab, which
+shows the account as apps do, with its handle, display name and picture, each
+changed in a dialog the popover API opens with no script; the picture's is a
+`multipart/form-data` form. `PUT /account/picture` sets it too. Administrators
+may view and remove it, with a reason, such as one that impersonates someone,
+but never set one; their Profile tab links the dashboard's own pages for the
+name and the handle.
+
+- **Only auth's own image.** Auth decodes an upload of at most 10 MiB, a PNG, JPEG
+  or GIF recognized by its content, one at a time per replica. It refuses one
+  whose header declares more than 8192 pixels on a side or 24 megapixels, or
+  whose decoded image is over 96 MiB, before decoding it, and bounds what the
+  decoder allocates. It turns the image upright from its EXIF orientation, crops
+  it to its centred square before scaling it to 512 pixels, flattens transparency
+  onto white and encodes a JPEG of at most 128 KiB. The upload itself is never
+  stored, so no metadata, such as a photo's location, survives. JPEG because
+  every consumer of `picture` reads it, and the `image` crate's WebP encoder is
+  lossless only, several times larger. WebP uploads are refused until its decoder
+  checks a frame's size against the canvas it declares before decoding it.
+- **Stored in PostgreSQL**, in `profile_pictures`, one row per account, which the
+  account's purge removes with it. At about 50 KiB a picture, auth needs no object
+  store until pictures dominate the database.
+- **Served at `/pictures/{id}`**, by the ID of its upload: a new picture gets a new
+  ID and URL, and setting or removing one bumps `profile_version`. The image at a
+  URL never changes, so it is cached as immutable, for a year, with
+  `Access-Control-Allow-Origin: *`. The path has no file extension, so the
+  edge keeps no copy of its own: once replaced or removed, or once its account is
+  disabled or scheduled for deletion, a picture's URL answers `404` at once. Its
+  requests have a rate budget of their own. A random ID rather than the content's
+  hash, since a hash would let anyone holding an image check whether an account
+  uses it, and re-encoding leaves nothing to deduplicate.
 
 ## Contracts
 

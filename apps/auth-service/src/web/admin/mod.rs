@@ -8,8 +8,9 @@
 //! the admin listener mounts them there, never as the fallback, so the listener's
 //! security layer gives each its request context and rate budget. Every answer
 //! carries the dashboard's Content-Security-Policy: its own script and
-//! stylesheet alone, fetching from the dashboard only, and forms posting only to
-//! the dashboard, whose answer may go on to auth's handoff page.
+//! stylesheet alone, with auth's profile pictures, fetching from the dashboard
+//! only, and forms posting only to the dashboard, whose answer may go on to
+//! auth's handoff page.
 //!
 //! A browser without a dashboard session goes through auth's handoff page and
 //! back. A page that changes something needs the dashboard's own passkey
@@ -217,14 +218,16 @@ impl AdminApplication {
         // A form's answer may send the browser on to auth's handoff page, to sign
         // in or confirm again: browsers apply `form-action` to its redirects too.
         // The script fetches only the passkey ceremonies of the dashboard's own.
+        // Profile pictures are served by auth.
         let policy = format!(
-            "default-src 'none'; script-src {}; style-src {}; font-src 'self'; \
+            "default-src 'none'; script-src {}; style-src {}; font-src 'self'; img-src {}; \
              connect-src 'self'; form-action 'self' {}; frame-ancestors 'none'; \
              base-uri 'none'",
             dashboard
                 .origin
                 .join(&EmbeddedAssets::DASHBOARD_SCRIPT.path()),
             dashboard.origin.join(&EmbeddedAssets::STYLESHEET.path()),
+            auth.serialized(),
             auth.join(routes::page::ADMIN),
         );
         Ok(Self {
@@ -264,6 +267,7 @@ impl AdminApplication {
             // The settings administrators share with owners, the account
             // service's operations.
             .route(settings::sign_in)
+            .route(settings::profile)
             .route(settings::emails)
             .route(settings::apps)
             .route(settings::history)
@@ -717,10 +721,12 @@ impl AdminApplication {
             .ok()
             .and_then(|query| query.q)
             .unwrap_or_default();
+        let picture = admin.and_then(|admin| Self::picture(cx, admin.picture));
         let administrator = admin.map(|admin| Who {
             user: None,
             name: admin.handle.as_str(),
             handle: admin.handle.as_str(),
+            picture: picture.as_deref(),
             administrator: true,
         });
         // The avatar leads to the administrator's own settings, on auth.

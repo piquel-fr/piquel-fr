@@ -176,6 +176,11 @@ pub struct ProfileClaims {
     /// Display name, with the profile scope.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub name: Option<String>,
+    /// URL of the profile picture, a square JPEG, with the profile scope. Absent
+    /// when the account has none. A new picture has a new URL, so the image at one
+    /// never changes and may be cached for good.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub picture: Option<String>,
     /// Bumped when profile claims change, so clients can tell cached data is stale.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub profile_version: Option<u64>,

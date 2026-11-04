@@ -279,6 +279,10 @@ impl EventRow<'_> {
                     .personal("from", &old)
                     .personal("to", &new)
             }
+            DomainEvent::PictureChanged { picture_id } => {
+                Description::new("Profile picture changed").with("picture", picture_id)
+            }
+            DomainEvent::PictureRemoved {} => Description::new("Profile picture removed"),
             DomainEvent::HandleReleased { handle } => {
                 Description::new("Handle released for anyone to claim").personal("handle", &handle)
             }

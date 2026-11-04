@@ -26,7 +26,7 @@ pub use payload::{
 
 use crate::{
     AuthenticationMethod, ClientId, DeliveryId, EmailId, EventId, Handle, PasskeyId, Personal,
-    Provider, RecoveryId, SessionId, TokenId,
+    PictureId, Provider, RecoveryId, SessionId, TokenId,
     clients::{ClientField, ClientKind},
     email::NormalizedEmail,
     protocol::jwt::KeyId,
@@ -214,6 +214,14 @@ pub enum DomainEvent {
         /// The new name.
         new: Personal<String>,
     },
+    /// The account got a new profile picture, replacing any other. Relying
+    /// parties see its new URL as `picture` once they refresh the profile.
+    PictureChanged {
+        /// The new picture.
+        picture_id: PictureId,
+    },
+    /// The account's profile picture was removed.
+    PictureRemoved {},
     /// An operator deleted a released handle, so anyone may claim it again. Its
     /// former owner, if not purged, is the subject.
     HandleReleased {
@@ -457,6 +465,8 @@ impl DomainEvent {
             | Self::AdministratorRevoked {}
             | Self::HandleChanged { .. }
             | Self::DisplayNameChanged { .. }
+            | Self::PictureChanged { .. }
+            | Self::PictureRemoved {}
             | Self::RecoveryStarted { .. }
             | Self::RecoveryCompleted { .. }
             | Self::RecoveryUndone { .. }
@@ -508,6 +518,8 @@ impl DomainEvent {
             | Self::AdministratorRevoked {}
             | Self::HandleChanged { .. }
             | Self::DisplayNameChanged { .. }
+            | Self::PictureChanged { .. }
+            | Self::PictureRemoved {}
             | Self::HandleReleased { .. }
             | Self::HandleReserved { .. }
             | Self::HandleUnreserved { .. }
@@ -569,6 +581,8 @@ impl DomainEvent {
             Self::AdministratorRevoked {} => "administrator_revoked",
             Self::HandleChanged { .. } => "handle_changed",
             Self::DisplayNameChanged { .. } => "display_name_changed",
+            Self::PictureChanged { .. } => "picture_changed",
+            Self::PictureRemoved {} => "picture_removed",
             Self::HandleReleased { .. } => "handle_released",
             Self::HandleReserved { .. } => "handle_reserved",
             Self::HandleUnreserved { .. } => "handle_unreserved",

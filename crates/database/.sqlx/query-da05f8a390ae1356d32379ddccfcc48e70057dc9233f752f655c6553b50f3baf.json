@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "WITH p AS (\n                    DELETE FROM profile_pictures WHERE user_id = $1 RETURNING user_id\n                )\n                UPDATE users\n                SET profile_version = profile_version + 1, updated_at = now()\n                WHERE id IN (SELECT user_id FROM p)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "da05f8a390ae1356d32379ddccfcc48e70057dc9233f752f655c6553b50f3baf"
+}
