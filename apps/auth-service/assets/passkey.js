@@ -377,8 +377,9 @@ class Passkeys {
  * - an element marked `data-replace-url` makes its value the page's address: a page
  *   answering a form with what only it may show, such as a secret, then reloads by
  *   `GET`, never posting the form again.
- * - an element marked `data-dismiss` starts hidden, and shows unless this browser
- *   dismissed its value, a key; a `data-dismisses` element inside it dismisses its key
+ * - an element marked `data-dismiss` shows unless this browser dismissed its value, a
+ *   key, whether it was rendered hidden, as a hint is, or shown, as a security question
+ *   is, so it asks without scripts; a `data-dismisses` element inside it dismisses its key
  *   when clicked, hiding it from then on and giving the focus to the page's heading.
  *   Where the browser keeps no local storage, it shows on every page, and a dismissal
  *   hides it on that page only.

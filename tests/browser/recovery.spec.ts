@@ -41,8 +41,8 @@ test('a recovery link adds a passkey, and the owner undoes it with an older one'
     recovering.getByText(/the passkey the recovery added signs in but can.t confirm changes/)
   ).toBeVisible();
   // Answering the question hides it for this session, across page loads, and gives
-  // the focus to the page's heading. The passkey script, which shows it, has run once
-  // the page has loaded.
+  // the focus to the page's heading. The passkey script, which hides it once answered,
+  // has run once the page has loaded.
   const itWasMe = recovering.getByRole('button', { name: 'Yes, it was me', exact: true });
   await itWasMe.click();
   await expect(itWasMe).toBeHidden();

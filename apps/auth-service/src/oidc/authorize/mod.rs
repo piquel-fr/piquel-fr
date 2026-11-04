@@ -30,9 +30,9 @@ use axum::{
     http::HeaderMap,
     response::Redirect,
 };
-use piquel_common::protocol::claims::Acr;
+use piquel_common::{RecoveryId, protocol::claims::Acr};
 use piquel_repository::StoredAuthorizationRequest;
-use piquel_ui::LoginQuery;
+use piquel_ui::{Checkbox, LoginQuery};
 use serde::{Deserialize, Serialize};
 use url::Url;
 
@@ -50,6 +50,18 @@ pub(crate) struct TransactionQuery {
 }
 
 impl piquel_ui::Query for TransactionQuery {}
+
+/// Whether the browser answered the question a sign-in for an application asks
+/// while the account has a recovery that can still be undone: was it the
+/// owner's? Only the sign-in page's form answers it, so no link can skip it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum RecoveryQuestion {
+    /// Not yet: a sign-in for the authorization asks it before going on.
+    Unanswered,
+    /// The browser said yes to this recovery's question, and goes on. A question
+    /// about another recovery, as another account's, is still asked.
+    Answered(RecoveryId),
+}
 
 /// A pending authorization, as the sign-in page continuing it sees it.
 pub(crate) struct AuthorizationView {
@@ -125,7 +137,7 @@ impl OidcApplication {
         let next = if requires_login {
             app.sign_in_page(transaction, request.target_acr)?
         } else {
-            app.continue_authorization(context, &headers, transaction)
+            app.continue_authorization(context, &headers, transaction, RecoveryQuestion::Unanswered)
                 .await?
         };
         Ok(Redirect::to(next.as_str()))
@@ -143,7 +155,12 @@ impl OidcApplication {
                 .reject_with(format!("resume request is malformed: {error}"), error)
         })?;
         let next = app
-            .continue_authorization(context, &headers, q.transaction)
+            .continue_authorization(
+                context,
+                &headers,
+                q.transaction,
+                RecoveryQuestion::Unanswered,
+            )
             .await?;
         Ok(Redirect::to(next.as_str()))
     }
@@ -205,12 +222,17 @@ impl OidcApplication {
     /// falls short, straight to the client if consent is already given, otherwise to
     /// consent. `prompt=none` returns an error to the client instead of showing a page.
     /// Looking the session up records its activity, so single sign-on keeps it current.
-    /// The sign-in pages call it once the browser signed in.
+    /// The sign-in pages call it once the browser signed in, and every other sign-in,
+    /// a provider's or a restore, goes on through it by resuming the authorization.
+    /// A sign-in for this authorization first goes to the sign-in page's question
+    /// about the account's recovery that can still be undone, until `recovery` says
+    /// the browser answered it.
     pub(crate) async fn continue_authorization(
         &self,
         context: RequestContext,
         headers: &HeaderMap,
         transaction: String,
+        recovery: RecoveryQuestion,
     ) -> Result<Url, OAuthError> {
         let request = self.find_authorization_request(&transaction).await?;
         let silent = request.interaction.is_silent();
@@ -239,6 +261,23 @@ impl OidcApplication {
             }
             return self.sign_in_page(transaction, request.target_acr);
         };
+        // A silent request shows no page, and only another tab's sign-in in the
+        // instant since it started could have signed in for it.
+        if !silent && Self::signed_in_for(&request, &session) {
+            let mut tx = self.database.begin().await?;
+            let undoable = Self::undoable_recovery(&mut tx, session.user_id).await?;
+            tx.commit().await?;
+            if let Some(id) = undoable
+                && recovery != RecoveryQuestion::Answered(id)
+            {
+                let query = LoginQuery {
+                    transaction: Some(transaction),
+                    recovery: Checkbox(true),
+                    ..LoginQuery::default()
+                };
+                return self.page(routes::page::LOGIN, &query);
+            }
+        }
         if self.can_authorize(&request, &session).await? {
             let input = AuthorizationDecision {
                 transaction,

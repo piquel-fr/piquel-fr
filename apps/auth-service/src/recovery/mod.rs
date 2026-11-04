@@ -168,6 +168,11 @@ impl UndoableRecovery {
         })
     }
 
+    /// The recovery.
+    pub(crate) const fn id(&self) -> RecoveryId {
+        self.recovery.id
+    }
+
     /// Whether its link was used, so it is in probation: starting another
     /// recovery waits until it is undone or settles.
     pub(crate) const fn is_probation(&self) -> bool {

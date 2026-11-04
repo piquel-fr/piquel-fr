@@ -193,11 +193,25 @@ link is only mailed, so `--revoke` stays at the terminal.
   their older passkey signs in to it. In probation, a notice no answer hides
   says that until `settles_at` its passkey confirms nothing, and, with no
   passkey from before, that only support can undo it; the passkey list says
-  which passkeys can't be removed meanwhile. A passkey sign-in that continues to
-  an app asks the same question before going on. An owner with an older passkey
-  learns of it by signing in, even when the notice only reached a hijacked
-  mailbox (`web::auth::recovery::tests::settings_show_the_recovery`,
-  `web::auth::recovery::tests::a_sign_in_for_an_app_asks_about_a_recovery`).
+  which passkeys can't be removed meanwhile. The question shows without scripts
+  too, and the passkey script hides it once answered. Every sign-in that continues
+  to an app asks the same question before going on, whichever way it signed in:
+  a passkey or a link on the sign-in page, a provider, or a restore all go on
+  through the pending authorization (`OidcApplication::continue_authorization`),
+  which sends a session that signed in for it to the sign-in page's question.
+  Only that page's form answers it, naming the recovery, so no link skips it and
+  no answer about another recovery counts. The answer is not kept: the account's
+  pages still ask. A browser that signed in before the authorization started is
+  not asked. Typing the consent page's address by hand skips the question, which
+  only the browser that started the authorization can do, since it alone holds
+  the authorization's token: an owner skipping their own question, or a link
+  holder, who gains nothing by skipping it. A sign-in on an application's own page
+  (related origins) cannot ask, so it answers the application
+  `interaction_required`, which sends the user to auth's pages. An owner with an
+  older passkey learns of it by signing in, even when the notice only reached a
+  hijacked mailbox (`web::auth::recovery::tests::settings_show_the_recovery`,
+  `web::auth::recovery::tests::every_sign_in_for_an_app_asks_about_a_recovery`,
+  `passkey::tests::related_pages::a_probation_passkey_signs_in_on_auths_pages_only`).
 
 ## Probation
 
@@ -222,7 +236,11 @@ link is only mailed, so `--revoke` stays at the terminal.
   account, grants something that outlives a session, or ends the owner's
   ability to undo (a future account deletion, for example) needs a passkey
   confirmation. App consents are the one exception, and undo withdraws all of
-  them (U2).
+  them (U2). Restoring an account scheduled for deletion takes back a deletion
+  that only a confirmed session or support could make, so a recovery's passkey
+  in probation is offered no restore: signing in to such an account with it is
+  refused, and only another of its passkeys (U1), or support, restores it
+  (`a_probation_passkey_neither_exports_deletes_nor_restores_the_account`).
 - **P3.** What a probation session can still do, which undo does not revert
   because none of it is a way in: rename passkeys (no page shows the recovery's
   passkey by its name: the passkey list and the history call it "the recovery's

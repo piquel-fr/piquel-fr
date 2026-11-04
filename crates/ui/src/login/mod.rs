@@ -13,7 +13,7 @@ use crate::{
     },
 };
 use chrono::{DateTime, Utc};
-use piquel_common::{Provider, TokenId, protocol::claims::Acr};
+use piquel_common::{Provider, RecoveryId, TokenId, protocol::claims::Acr};
 use serde::{Deserialize, Serialize};
 use topcoat::{
     Result,
@@ -100,6 +100,10 @@ pub struct LoginQuery {
     /// "Use a handle instead" is open: signing in asks for the account's handle.
     #[serde(default, skip_serializing_if = "Checkbox::is_off")]
     pub handle: Checkbox,
+    /// The browser signed in for the authorization, and the page asks whether the
+    /// account's recovery that can still be undone was its owner's before going on.
+    #[serde(default, skip_serializing_if = "Checkbox::is_off")]
+    pub recovery: Checkbox,
 }
 
 impl Query for LoginQuery {}
@@ -155,6 +159,12 @@ pub enum LoginChange {
     Restore {},
     /// Leaves that account scheduled for deletion, and forgets the offer.
     KeepScheduled {},
+    /// Says the account's recovery that can still be undone was its owner's, and
+    /// goes on to the application.
+    RecoveryRecognized {
+        /// The recovery the question was about.
+        recovery: RecoveryId,
+    },
 }
 
 /// Why a provider's pending sign-in must be linked rather than create an account.

@@ -65,9 +65,11 @@ impl OidcApplication {
     /// A new session meets any `prompt=login` and `max_age`, and the sign-in offered
     /// only the hinted account's passkeys. A recovered passkey during its probation
     /// does not confirm the session, so it meets no `acr_values=phr`: the page then
-    /// sends the browser to auth, whose answer the client understands. The client
-    /// is share-locked and must still allow the request, be trusted and have
-    /// `origin` approved, so a change made during the ceremony applies to it.
+    /// sends the browser to auth, whose answer the client understands. While the
+    /// account has a recovery that can still be undone, it sends the browser to auth
+    /// too, whose sign-in asks whether it was the owner's. The client is
+    /// share-locked and must still allow the request, be trusted and have `origin`
+    /// approved, so a change made during the ceremony applies to it.
     pub(crate) async fn complete_inline(
         &self,
         tx: &mut DatabaseTransaction<'_>,
@@ -88,6 +90,15 @@ impl OidcApplication {
         if !Self::satisfies(&request, session) {
             return Err(ApiError::interaction_required(
                 "This sign-in does not meet what the application asked for.",
+            ));
+        }
+        // The question needs auth's pages, which the redirect flow shows.
+        if Self::undoable_recovery(tx, session.user_id)
+            .await?
+            .is_some()
+        {
+            return Err(ApiError::interaction_required(
+                "This account has a recovery that can still be undone. Sign in on Piquel's pages to continue.",
             ));
         }
         let code = self.issue_code(tx, &request, session).await?;

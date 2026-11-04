@@ -18,7 +18,9 @@ use crate::config::{OidcConfig, TokenDigestKeys};
 use crate::keys::SigningKeys;
 use crate::routes;
 use crate::security::{CacheClass, Cached};
-pub(crate) use authorize::{AuthorizationDecision, AuthorizationView, TransactionQuery};
+pub(crate) use authorize::{
+    AuthorizationDecision, AuthorizationView, RecoveryQuestion, TransactionQuery,
+};
 pub use error::OidcConfigError;
 pub(crate) use error::{OAuthCode, OAuthError, Reject};
 pub(crate) use inline::{InlineClaim, InlineResponse};
