@@ -25,9 +25,9 @@ validate: fmt-check lint check test web::test doc doc-test audit
 install:
     @pnpm install --frozen-lockfile
 
-# Cargo tools used by the test, audit and database recipes.
+# Cargo tools used by the test, coverage, audit and database recipes.
 install-tools: db::install-sqlx
-    @cargo install --locked cargo-nextest cargo-deny
+    @cargo install --locked cargo-nextest cargo-llvm-cov cargo-deny
 
 # The release auth-service executable.
 build: (rust::build "--release")
@@ -52,6 +52,32 @@ doc:
 
 doc-test:
     @cargo test --locked --doc --workspace
+
+# Uses a scratch cluster unless TEST_DATABASE_URL names a disposable database,
+# which the database tests leave migrated. Instrumented builds live in
+# target/llvm-cov-target; `cargo llvm-cov report --html` renders the last run.
+# Extra arguments go to `cargo llvm-cov nextest`; target/lcov.info has the
+# coverage per line.
+# Coverage per crate of every Rust test, database tests included.
+[positional-arguments]
+coverage *ARGS:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    if [[ -z "${TEST_DATABASE_URL:-}" ]]; then exec just db scratch just coverage "$@"; fi
+    cargo llvm-cov nextest --locked --workspace --run-ignored all --lcov --output-path target/lcov.info "$@"
+    # lcov names each source file by absolute path; its crate is the
+    # apps/<name> or crates/<name> directory holding it.
+    awk -v root="$PWD/" '
+        function row(name, hit, lines, fn_hit, fns) {
+            return sprintf("%-20s %6.2f%% of %6d lines   %6.2f%% of %5d functions", name, 100 * hit / lines, lines, 100 * fn_hit / fns, fns)
+        }
+        /^SF:/ { split(substr($0, length(root) + 4), path, "/"); crate = path[1] "/" path[2] }
+        /^LF:/ { lf[crate] += substr($0, 4) } /^LH:/ { lh[crate] += substr($0, 4) }
+        /^FNF:/ { ff[crate] += substr($0, 5) } /^FNH:/ { fh[crate] += substr($0, 5) }
+        END {
+            for (c in lf) { print row(c, lh[c], lf[c], fh[c], ff[c]) | "sort"; LH += lh[c]; LF += lf[c]; FH += fh[c]; FF += ff[c] }
+            close("sort"); print row("workspace", LH, LF, FH, FF)
+        }' target/lcov.info
 
 # Regenerate tests/sdk-vectors; `just test` fails while the committed files are stale.
 sdk-vectors:

@@ -12,7 +12,8 @@ fmt-check:
 lint:
     @pnpm lint
 
-# The TypeScript SDK's unit tests, every shared vector included.
+# The TypeScript SDK's unit tests, every shared vector included, with line, branch
+# and function coverage of its sources.
 test:
     @pnpm test
 
