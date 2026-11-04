@@ -10,9 +10,9 @@
 //! and a public client's secrets page, which has none, answer with the
 //! registry's refusal.
 //!
-//! The registration page sits beside the clients' own, at `/clients/new`, so a
-//! client with that ID has no overview here; the rest of its pages, and the
-//! CLI, still reach it.
+//! Every page of one client sits under its ID, its overview too, at
+//! `/clients/{client}/overview`, so none shares a path with the registration
+//! page at `/clients/new`, whatever the client's ID.
 
 use super::{
     AdminApplication as App, Refusal,
@@ -65,10 +65,10 @@ pub(super) async fn list(cx: &Cx) -> Result<Response> {
     App::render(cx, StatusCode::OK, "Clients", page).await
 }
 
-/// `/clients/{client}`: everything about one client, its secrets' lifetimes and
+/// `/clients/{client}/overview`: everything about one client, its secrets' lifetimes and
 /// approved origins, and the changes the dashboard may make to it. Just after the
 /// client's registration, it shows its first secret instead, once.
-#[route(GET "/clients/{client}")]
+#[route(GET "/clients/{client}/overview")]
 pub(super) async fn detail(cx: &Cx) -> Result<Response> {
     let admin = App::admin(cx).await?;
     let service = &App::of(cx).service;
