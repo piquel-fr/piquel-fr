@@ -408,6 +408,7 @@ fn every_page_is_mounted_and_classified() {
 /// Piquel's policies are piquel.fr's: every page's footer links them there, the
 /// registration form agrees to them there, and discovery advertises them there.
 #[tokio::test]
+#[ignore = "requires TEST_DATABASE_URL"]
 async fn pages_and_discovery_link_piquel_fr_policies() {
     let replicas = Replicas::new().await;
     let browser = Browser::signed_out();
