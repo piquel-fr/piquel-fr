@@ -1,4 +1,4 @@
-//! The dashboard's lists: administrators, invitations and OIDC clients.
+//! The dashboard's lists: administrators and invitations.
 
 use super::{Action, Change, UserRow, account_status, confirm, moment, refused_action};
 use crate::{
@@ -8,7 +8,7 @@ use crate::{
 use chrono::{DateTime, Utc};
 use piquel_common::{
     AccountStatus,
-    admin::{Administrator, Client, Invitation},
+    admin::{Administrator, Invitation},
 };
 use topcoat::{
     Result,
@@ -25,19 +25,6 @@ pub struct AdministratorRow<'a> {
     pub account: String,
     /// Revoking their rights, or why it cannot be done here.
     pub revoke: Result<Action, &'a str>,
-}
-
-/// An OIDC client, the origins approved for its pages to sign users in with
-/// passkeys, each with the page removing it, and the page approving another, or
-/// why the client cannot have one.
-#[derive(Clone, Debug)]
-pub struct AdminClientRow<'a> {
-    /// The client.
-    pub client: &'a Client,
-    /// Its approved origins, as browsers send them, and the pages removing them.
-    pub origins: Vec<(&'a str, String)>,
-    /// The page approving an origin, or why it cannot be done.
-    pub approve: Result<String, &'a str>,
 }
 
 /// An invitation, and the change revoking it while it can still be used.
@@ -266,57 +253,5 @@ pub async fn invitation_created<'a>(
                 <div class="row"><a class="button secondary" href=(back)>"Done"</a></div>
             </div>
         </section>
-    })
-}
-
-/// Every OIDC client and its settings, read-only but for the origins whose pages
-/// sign users in with passkeys.
-#[component]
-pub async fn client_list<'a>(rows: &'a [AdminClientRow<'a>]) -> Result<impl View> {
-    Ok(view! {
-        page_head(
-            title: "Clients",
-            lead: "Applications that sign users in with Piquel.".to_owned(),
-        )
-        if rows.is_empty() {
-            <section class="card"><p class="empty">"No client is registered."</p></section>
-        }
-        for row in rows {
-            let client = row.client;
-            <section class="card">
-                <header>
-                    <h2>(client.display_name.as_str()) " " <code>(client.id.to_string())</code></h2>
-                    <span class="row">
-                        <span class=(class!("badge", "ok" if client.status() == "Enabled", "warning" if client.status() != "Enabled"))>(client.status())</span>
-                        if client.trusted { <span class="badge">"Trusted"</span> }
-                    </span>
-                </header>
-                <div class="body">
-                    <dl class="facts">
-                        <dt>"Redirect URIs"</dt><dd>(client.redirect_uris.join(", "))</dd>
-                        <dt>"After sign-out"</dt><dd>(client.post_logout_uris.join(", "))</dd>
-                        <dt>"Back-channel logout"</dt><dd>(client.backchannel_logout_uri.as_deref().unwrap_or("Not told"))</dd>
-                        <dt>"Scopes"</dt><dd>(client.allowed_scopes.join(" "))</dd>
-                        <dt>"Audiences"</dt><dd>(client.allowed_audiences.join(" "))</dd>
-                        <dt>"Refresh tokens"</dt><dd>(if client.allow_refresh { "Allowed" } else { "No" })</dd>
-                        <dt>"Pushed requests"</dt><dd>(if client.require_pushed_authorization_requests { "Required" } else { "Optional" })</dd>
-                        <dt>"Authentication"</dt><dd><code>(client.token_endpoint_auth_method.to_string())</code></dd>
-                        <dt>"Passkey sign-in on"</dt>
-                        <dd class="stack tight">
-                            for (origin, remove) in &row.origins {
-                                <span class="row">
-                                    <code>(*origin)</code>
-                                    <a href=(remove.as_str())>"Remove"</a>
-                                </span>
-                            }
-                            match &row.approve {
-                                Ok(href) => <a href=(href.as_str())>"Approve an origin"</a>,
-                                Err(reason) => refused_action(label: "Approve an origin", reason: reason),
-                            }
-                        </dd>
-                    </dl>
-                </div>
-            </section>
-        }
     })
 }

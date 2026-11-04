@@ -1,7 +1,6 @@
 //! An OIDC client as the pages managing it show it: its status, its facts, the
 //! form of its settings, its secrets and the one just made. The developer console
-//! shows an account's own apps with these, and the admin dashboard will show every
-//! client with them.
+//! shows an account's own apps with these, and the admin dashboard every client.
 
 use crate::form::{Checkbox, Fields, Lines, Precision, change_form, time};
 use chrono::{DateTime, Utc};
@@ -469,7 +468,7 @@ async fn refusal<'a>(of: &'a Described<'a>) -> Result<impl View> {
 /// `name` choosing it, `checked` or not, which takes the focus if `autofocus`:
 /// its `label` beside it, then its `detail` below, which describes it.
 #[component]
-async fn choice<'a>(
+pub(crate) async fn choice<'a>(
     name: &'a str,
     #[default] value: Option<&'a str>,
     checked: bool,
@@ -553,7 +552,8 @@ async fn scope_choices<'a>(chosen: ScopeChoice, scopes: &'a Described<'a>) -> Re
 /// its help. The service's `error` shows beside the input of its setting, which
 /// takes the focus, or above the inputs for a setting with no place for one (see
 /// [`FieldError::placed`]). With `confirm`, the passkey script confirms with a
-/// passkey first.
+/// passkey first. The admin dashboard adds the inputs only operators fill in:
+/// `head` after the name, and `child` after the rest.
 #[component]
 pub(crate) async fn client_form<'a>(
     action: &'a str,
@@ -563,6 +563,10 @@ pub(crate) async fn client_form<'a>(
     label: &'a str,
     #[default] error: Option<FieldError<'a>>,
     #[default] confirm: bool,
+    #[into]
+    #[default]
+    head: Child<'_>,
+    #[default] child: Child<'_>,
 ) -> Result<impl View> {
     let unplaced = error.filter(|error| !error.placed());
     let name = Described::of(error, &ClientField::DisplayName);
@@ -594,6 +598,7 @@ pub(crate) async fn client_form<'a>(
                 </label>
                 help(of: &name, "Users see it when they sign in to your app.")
                 refusal(of: &name)
+                (head)
                 if let Some(chosen) = kind {
                     kind_question(chosen: chosen)
                 }
@@ -645,6 +650,7 @@ pub(crate) async fn client_form<'a>(
                     },
                 )
                 backchannel_input(uri: &draft.backchannel_logout_uri, of: &backchannel)
+                (child)
             )
         </div>
     })
@@ -709,8 +715,9 @@ pub(crate) async fn secrets_list<'a>(
 }
 
 /// A client `secret` Piquel just made, shown once, with a button copying it, on
-/// `page`, whose address the passkey script puts back so that reloading it gets
-/// the page without the secret; saving it leads on to `next`.
+/// `page`, whose address the passkey script, where the page loads it, puts back
+/// so that reloading it gets the page without the secret; saving it leads on to
+/// `next`. The admin dashboard loads no script, so its copy button stays hidden.
 #[component]
 pub(crate) async fn secret_panel<'a>(
     secret: &'a Revealed,

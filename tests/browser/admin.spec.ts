@@ -252,32 +252,102 @@ test('an origin approved from the dashboard is listed for passkeys until removed
     const response = await admin.request.get(new URL('/.well-known/webauthn', authUrl).href);
     return ((await response.json()) as { origins: string[] }).origins;
   };
+  const page = `${adminUrl}/clients/browser-e2e-sdk`;
   const card = admin
     .locator('section')
-    .filter({ has: admin.getByRole('heading', { name: 'Browser E2E SDK browser-e2e-sdk' }) });
+    .filter({ has: admin.getByRole('heading', { name: 'Passkey sign-in' }) });
   expect(await related()).not.toContain(origin);
 
+  // The clients list opens each client's page, which lists its approved origins.
   await admin.goto(`${adminUrl}/clients`);
-  await card.getByRole('link', { name: 'Approve an origin', exact: true }).click();
+  await admin.getByRole('link', { name: 'Browser E2E SDK', exact: true }).click();
+  await expect(admin).toHaveURL(page);
+  await card.getByRole('link', { name: 'Add approved origin', exact: true }).click();
   await confirmDashboard(admin);
   // An origin of none of the client's redirect URIs is refused, keeping what was typed.
   const field = admin.getByLabel('Origin', { exact: true });
   await field.fill('https://elsewhere-e2e.test');
-  await admin.getByRole('button', { name: 'Approve', exact: true }).click();
+  await admin.getByRole('button', { name: 'Add', exact: true }).click();
   await expect(admin.getByRole('alert')).toBeVisible();
   await expect(field).toHaveValue('https://elsewhere-e2e.test');
   await field.fill(origin);
-  await admin.getByRole('button', { name: 'Approve', exact: true }).click();
-  await expect(admin).toHaveURL(`${adminUrl}/clients`);
+  await admin.getByRole('button', { name: 'Add', exact: true }).click();
+  await expect(admin).toHaveURL(page);
   await expect(card.getByText(origin, { exact: true })).toBeVisible();
   expect(await related()).toContain(origin);
 
-  await card.getByRole('link', { name: 'Remove', exact: true }).click();
+  await card.getByRole('link', { name: `Remove ${origin}`, exact: true }).click();
   await expect(admin.getByText(`Client browser-e2e-sdk, origin ${origin}.`)).toBeVisible();
   await admin.getByRole('button', { name: 'Remove', exact: true }).click();
-  await expect(admin).toHaveURL(`${adminUrl}/clients`);
+  await expect(admin).toHaveURL(page);
   await expect(card.getByText(origin, { exact: true })).toHaveCount(0);
   expect(await related()).not.toContain(origin);
+});
+
+test('an administrator registers a client, suspends it and rotates its secret, each shown once', async ({
+  browser
+}) => {
+  const suffix = Date.now().toString(36);
+  const admin = await administrator(browser, `clients-${suffix}`);
+  const id = `e2e-${suffix}`;
+
+  // Registering is a change, so the dashboard confirms with a passkey first.
+  await admin.goto(`${adminUrl}/clients`);
+  await admin.getByRole('link', { name: 'Register a client', exact: true }).click();
+  await confirmDashboard(admin);
+  await admin.getByRole('textbox', { name: 'Client ID', exact: true }).fill(id);
+  await admin.getByRole('textbox', { name: 'App name', exact: true }).fill(`E2E ${suffix}`);
+  const redirects = admin.getByRole('textbox', { name: 'Redirect URIs', exact: true });
+  await redirects.fill('not a URI');
+  await admin.getByRole('button', { name: 'Register', exact: true }).click();
+  // A refused setting keeps what was typed.
+  await expect(admin.getByRole('alert')).toContainText('redirect_uris');
+  await expect(admin.getByRole('textbox', { name: 'Client ID', exact: true })).toHaveValue(id);
+  await redirects.fill(`https://${id}.test/callback`);
+
+  // A confidential client's first secret shows only in the answer registering it,
+  // which no cache keeps.
+  const registered = admin.waitForResponse(
+    (response) => response.request().method() === 'POST' && response.url().endsWith('/clients/new')
+  );
+  await admin.getByRole('button', { name: 'Register', exact: true }).click();
+  expect((await registered).headers()['cache-control']).toBe('no-store, no-transform');
+  await expect(admin.getByRole('heading', { name: 'Your client secret' })).toBeVisible();
+  const secret = (await admin.locator('#client-secret').textContent()) ?? '';
+  expect(secret).toMatch(/^pqcs_/);
+  await admin.getByRole('link', { name: 'I saved it', exact: true }).click();
+  await expect(admin).toHaveURL(`${adminUrl}/clients/${id}`);
+  await expect(admin.getByRole('heading', { name: `E2E ${suffix}` })).toBeVisible();
+  expect(await admin.content()).not.toContain(secret);
+
+  // Confirmed now, the client's page suspends it from a dialog: it stops working,
+  // and only an administrator can let its owner enable it again.
+  await admin.getByRole('button', { name: 'Suspend', exact: true }).click();
+  const suspend = admin.getByRole('dialog', { name: 'Suspend this client' });
+  await suspend.getByRole('button', { name: 'Suspend', exact: true }).click();
+  await expect(admin.getByText('Suspended', { exact: true })).toBeVisible();
+  await expect(admin.getByRole('button', { name: 'Lift suspension', exact: true })).toBeVisible();
+
+  // A rotation shows the new secret the same way, once.
+  await admin.getByRole('link', { name: 'Rotate the secret', exact: true }).click();
+  await admin.getByRole('button', { name: 'Rotate secret', exact: true }).click();
+  await expect(admin.getByRole('heading', { name: 'Your client secret' })).toBeVisible();
+  const rotated = (await admin.locator('#client-secret').textContent()) ?? '';
+  expect(rotated).toMatch(/^pqcs_/);
+  expect(rotated).not.toBe(secret);
+  await expect(admin.getByText('Expiring', { exact: true })).toBeVisible();
+
+  // Deleting it goes back to the list, which still opens its page.
+  await admin.getByRole('link', { name: 'Back to the client', exact: false }).click();
+  await admin.getByRole('button', { name: 'Delete', exact: true }).click();
+  const remove = admin.getByRole('dialog', { name: 'Delete this client' });
+  await remove.getByRole('button', { name: 'Delete for good', exact: true }).click();
+  await expect(admin).toHaveURL(`${adminUrl}/clients`);
+  await admin
+    .getByRole('row', { name: new RegExp(id) })
+    .getByRole('link')
+    .click();
+  await expect(admin.getByText(/Deleted on/)).toBeVisible();
 });
 
 test("an administrator changes an account's passkeys, addresses and apps, and its owner sees why", async ({

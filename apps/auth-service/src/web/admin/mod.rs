@@ -21,9 +21,11 @@
 mod administrators;
 /// The audit chain's state, and the checkpoints it may be pruned through.
 mod audit;
+/// The OIDC clients, one client, and the changes made to them.
+mod clients;
 /// Signup invitations.
 mod invitations;
-/// The OIDC clients and domain events.
+/// Domain events.
 mod lists;
 /// The origins approved for clients' pages to sign users in with passkeys.
 mod origins;
@@ -277,7 +279,16 @@ impl AdminApplication {
             Op::ListInvitations => &invitations::list,
             Op::CreateInvitation => &invitations::create,
             Op::RevokeInvitation => &invitations::revoke,
-            Op::ListClients => &lists::clients,
+            Op::ListClients => &clients::list,
+            Op::ViewClient => &clients::detail,
+            Op::CreateClient => &clients::create,
+            Op::UpdateClient => &clients::edit,
+            Op::EnableClient => &clients::enable,
+            Op::DisableClient => &clients::disable,
+            Op::SuspendClient => &clients::suspend,
+            Op::UnsuspendClient => &clients::unsuspend,
+            Op::DeleteClient => &clients::delete,
+            Op::RotateClientSecret => &clients::rotate,
             Op::ListEvents => &lists::events,
             Op::VerifyAuditChain => &audit::verify,
             Op::ListAdministrators => &administrators::list,
@@ -287,16 +298,10 @@ impl AdminApplication {
             Op::RemoveRelatedOrigin => &origins::remove,
             // Purging at once cannot be undone, so only the terminal offers it.
             Op::PurgeUser
-            | Op::ViewClient
-            | Op::CreateClient
+            // A deployment applies its own clients, with the secret it generated:
+            // only the terminal takes a secret. The dashboard registers clients
+            // with `CreateClient`, and Piquel makes their secrets.
             | Op::ApplyClient
-            | Op::UpdateClient
-            | Op::EnableClient
-            | Op::DisableClient
-            | Op::SuspendClient
-            | Op::UnsuspendClient
-            | Op::DeleteClient
-            | Op::RotateClientSecret
             | Op::CheckHandles
             | Op::ReleaseHandle
             | Op::ListDeliveries
@@ -527,7 +532,7 @@ impl AdminApplication {
                 DashboardTab::Invitations,
                 href!(invitations::list).resolve(cx),
             ),
-            (DashboardTab::Clients, href!(lists::clients).resolve(cx)),
+            (DashboardTab::Clients, href!(clients::list).resolve(cx)),
             (DashboardTab::Events, href!(lists::events).resolve(cx)),
             (DashboardTab::Audit, href!(audit::verify).resolve(cx)),
         ]

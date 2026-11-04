@@ -1,10 +1,13 @@
 //! The origins approved for clients' pages to sign users in with passkeys:
-//! approving one and removing one, as `client origin add|remove` do. The clients
-//! page lists them.
+//! approving one and removing one, as `client origin add|remove` do. Each
+//! client's page lists its own.
 
-use super::{AdminApplication as App, Refusal, lists};
+use super::{
+    AdminApplication as App, Refusal,
+    clients::{self, Client},
+};
 use crate::{clients::MAX_RELATED_ORIGIN_DOMAINS, security::ApiError};
-use piquel_common::{ClientId, admin::ApproveOrigin, clients::RelatedOrigin};
+use piquel_common::{admin::ApproveOrigin, clients::RelatedOrigin};
 use piquel_ui::{Change, Query};
 use serde::{Serialize, de::IgnoredAny};
 use topcoat::{
@@ -15,8 +18,6 @@ use topcoat::{
     },
     view::view,
 };
-
-path_param!(pub client: ClientId, error = not_found);
 
 /// The query of [`remove`]: the approved origin to remove.
 #[query_params(error = bad_request)]
@@ -36,7 +37,7 @@ pub(super) async fn approve(cx: &Cx, form: Option<Form<ApproveOrigin>>) -> Resul
     App::confirm(cx, admin)?;
     let app = App::of(cx);
     let id = path_param::<Client>(cx)?.clone();
-    let back = href!(lists::clients).resolve(cx);
+    let back = href!(clients::detail, Client(id.clone())).resolve(cx);
     let refusal = App::submit(cx, form, back.clone(), async |input: ApproveOrigin| {
         let origin: RelatedOrigin = input
             .origin
@@ -64,7 +65,7 @@ pub(super) async fn approve(cx: &Cx, form: Option<Form<ApproveOrigin>>) -> Resul
             </label>
         )
     };
-    App::render(cx, StatusCode::OK, "Approve an origin", page).await
+    App::render(cx, StatusCode::OK, Change::ApproveOrigin.title(), page).await
 }
 
 /// `/clients/{client}/origins/remove?origin=…`: stops a client's pages on an
@@ -77,7 +78,7 @@ pub(super) async fn remove(cx: &Cx, form: Option<Form<IgnoredAny>>) -> Result<Re
     let service = &App::of(cx).service;
     let id = path_param::<Client>(cx)?.clone();
     let origin = query_params::<OriginQuery>(cx)?.origin.clone();
-    let back = href!(lists::clients).resolve(cx);
+    let back = href!(clients::detail, Client(id.clone())).resolve(cx);
     let refusal = App::submit(cx, form, back.clone(), |_| {
         service.remove_related_origin(&admin.operator, &id, &origin)
     })
@@ -91,5 +92,5 @@ pub(super) async fn remove(cx: &Cx, form: Option<Form<IgnoredAny>>) -> Result<Re
             <p class="help">(which.as_str())</p>
         )
     };
-    App::render(cx, StatusCode::OK, "Remove an origin", page).await
+    App::render(cx, StatusCode::OK, Change::RemoveOrigin.title(), page).await
 }

@@ -9,9 +9,11 @@
 
 /// The audit chain's state and its checkpoints.
 mod audit;
+/// The OIDC clients, one client, and registering and changing them.
+mod clients;
 /// Domain events, in words.
 mod events;
-/// The lists: administrators, invitations and clients.
+/// The lists: administrators and invitations.
 mod lists;
 /// What needs attention, and what the service is doing now.
 mod overview;
@@ -21,10 +23,14 @@ mod recoveries;
 mod users;
 
 pub use audit::audit_page;
+pub use clients::{
+    AdminClientRow, ClientChanges, ClientPage, NewClientForm, OperatorDraft, Registration,
+    client_created, client_list, client_page, client_registration, client_secrets,
+};
 pub use events::{EventRow, event_list, event_rows};
 pub use lists::{
-    AdminClientRow, AdministratorRow, InvitationRow, administrator_list, client_list, grant_search,
-    invitation_created, invitation_list,
+    AdministratorRow, InvitationRow, administrator_list, grant_search, invitation_created,
+    invitation_list,
 };
 pub use overview::{AdminOverview, Measure, Problem, admin_overview};
 pub use recoveries::{RecoveryKey, RecoveryRow, RecoveryStanding, recovery_list};
@@ -251,11 +257,22 @@ pub enum Change {
     RemoveOrigin,
     /// Renaming an account's handle, with a reason.
     RenameHandle,
+    /// Letting a disabled client sign users in again.
+    EnableClient,
+    /// Stopping a client signing users in, until it is enabled again.
+    DisableClient,
+    /// Suspending a client, so that its owner cannot enable it.
+    SuspendClient,
+    /// Lifting a client's suspension.
+    UnsuspendClient,
+    /// Deleting a client for good.
+    DeleteClient,
 }
 
 impl Change {
     /// Its title, on its page and its dialog.
-    pub(crate) const fn title(self) -> &'static str {
+    #[must_use]
+    pub const fn title(self) -> &'static str {
         match self {
             Self::Disable => "Disable this account",
             Self::Enable => "Enable this account",
@@ -269,9 +286,14 @@ impl Change {
             Self::Invite => "Invite someone",
             Self::Recover => "Recover this account",
             Self::UndoRecovery => "Undo this account's recovery",
-            Self::ApproveOrigin => "Approve an origin",
-            Self::RemoveOrigin => "Remove an origin",
+            Self::ApproveOrigin => "Add approved origin",
+            Self::RemoveOrigin => "Remove approved origin",
             Self::RenameHandle => "Rename this account's handle",
+            Self::EnableClient => "Enable this client",
+            Self::DisableClient => "Disable this client",
+            Self::SuspendClient => "Suspend this client",
+            Self::UnsuspendClient => "Lift this client's suspension",
+            Self::DeleteClient => "Delete this client",
         }
     }
 
@@ -317,14 +339,27 @@ impl Change {
             Self::RenameHandle => {
                 "The account signs in and is shown under the new handle at once. Its old handle stays reserved for it: no other account can take it unless it is released from the terminal, and the account can take it back."
             }
+            Self::EnableClient => "It can sign users in, exchange codes and refresh tokens again.",
+            Self::DisableClient => {
+                "It stops signing users in, exchanging codes and refreshing tokens at once. Its owner can enable it again."
+            }
+            Self::SuspendClient => {
+                "It stops working at once, and its owner cannot enable it again until an administrator lifts the suspension. Its owner sees that it was suspended."
+            }
+            Self::UnsuspendClient => {
+                "Its owner can enable it again. It stays disabled until someone does."
+            }
+            Self::DeleteClient => {
+                "It stops working at once: its refresh tokens are revoked, and its secrets and the consents users gave it are removed. Its ID can never be registered again. This cannot be undone."
+            }
         }
     }
 
     /// Its button, on its form.
     pub(crate) const fn button(self) -> &'static str {
         match self {
-            Self::Disable => "Disable",
-            Self::Enable => "Enable",
+            Self::Disable | Self::DisableClient => "Disable",
+            Self::Enable | Self::EnableClient => "Enable",
             Self::Delete => "Schedule the deletion",
             Self::Restore => "Restore",
             Self::RevokeSessions => "Revoke all",
@@ -333,16 +368,20 @@ impl Change {
             Self::Invite => "Create link",
             Self::Recover => "Send the recovery link",
             Self::UndoRecovery => "Undo the recovery",
-            Self::ApproveOrigin => "Approve",
+            Self::ApproveOrigin => "Add",
             Self::RemoveOrigin => "Remove",
             Self::RenameHandle => "Rename",
+            Self::SuspendClient => "Suspend",
+            Self::UnsuspendClient => "Lift the suspension",
+            Self::DeleteClient => "Delete for good",
         }
     }
 
     /// The button opening it, on the row or page it belongs to.
     const fn label(self) -> &'static str {
         match self {
-            Self::Delete => "Delete",
+            Self::Delete | Self::DeleteClient => "Delete",
+            Self::UnsuspendClient => "Lift suspension",
             Self::Recover => "Recover",
             Self::UndoRecovery => "Undo recovery",
             Self::GrantAdministrator => "Grant rights",
@@ -356,7 +395,10 @@ impl Change {
             | Self::RevokeInvitation
             | Self::ApproveOrigin
             | Self::RemoveOrigin
-            | Self::RenameHandle => self.button(),
+            | Self::RenameHandle
+            | Self::EnableClient
+            | Self::DisableClient
+            | Self::SuspendClient => self.button(),
         }
     }
 
@@ -373,6 +415,9 @@ impl Change {
                 | Self::Recover
                 | Self::UndoRecovery
                 | Self::RemoveOrigin
+                | Self::DisableClient
+                | Self::SuspendClient
+                | Self::DeleteClient
         )
     }
 
@@ -394,7 +439,12 @@ impl Change {
             | Self::RevokeInvitation
             | Self::Invite
             | Self::ApproveOrigin
-            | Self::RemoveOrigin => None,
+            | Self::RemoveOrigin
+            | Self::EnableClient
+            | Self::DisableClient
+            | Self::SuspendClient
+            | Self::UnsuspendClient
+            | Self::DeleteClient => None,
         }
     }
 }
