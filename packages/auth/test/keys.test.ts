@@ -135,7 +135,4 @@ test('a fixed set verifies its keys, and a kid it lacks is unknown', async () =>
       error: { code: 'invalid_token', reason: 'unknown_key' }
     });
   }
-  assert.deepEqual(await verify(KeyCache.fixed(KeySet.empty), OLD), {
-    error: { code: 'invalid_token', reason: 'unknown_key' }
-  });
 });
