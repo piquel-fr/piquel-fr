@@ -137,10 +137,6 @@ signed as hints. On first start with no keys, auth generates one that signs at
 once. One replica at a time takes each step, under a PostgreSQL advisory lock
 that the `keys` commands take too. None of them needs the service running:
 
-The admin dashboard's Signing keys page lists, rotates and revokes keys the same
-way. Importing stays at the terminal, so the PEM private key never passes
-through a browser.
-
 ```sh
 just auth keys list                  # IDs, states and dates
 just auth keys rotate                # publish a next key; it signs in 24 hours
@@ -149,6 +145,10 @@ just auth keys revoke <id>           # delete a key at once
 just auth keys digest-usage          # stored token digests per digest key
 just auth keys import file:///path/key.pem   # import a PEM key into an empty key set
 ```
+
+The admin dashboard's Signing keys page lists, rotates and revokes keys the same
+way. Importing stays at the terminal, so the PEM private key never passes
+through a browser.
 
 `keys rotate` publishes the next key ahead of schedule. It still waits 24 hours
 before signing, so no verifier meets an unknown key. `--now` skips the wait:
