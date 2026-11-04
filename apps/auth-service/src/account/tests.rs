@@ -218,6 +218,7 @@ impl AccountOperation {
             Self::ListIdentities => service.identities(viewer).await.map(drop),
             Self::ListEmails => service.emails(viewer).await.map(drop),
             Self::ListSessions => service.sessions(viewer).await.map(drop),
+            Self::ListApps => service.apps(viewer).await.map(drop),
             Self::ViewHistory => service.history(viewer, None).await.map(drop),
             Self::RenamePasskey
             | Self::RevokePasskey
@@ -225,7 +226,8 @@ impl AccountOperation {
             | Self::MakeEmailPrimary
             | Self::RemoveEmail
             | Self::RevokeSession
-            | Self::RevokeOtherSessions => return None,
+            | Self::RevokeOtherSessions
+            | Self::RemoveApp => return None,
         })
     }
 }

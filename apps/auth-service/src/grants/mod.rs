@@ -1,9 +1,11 @@
 //! The apps that keep access to the account, and removing that access: what
-//! [`AccountService`] serves the settings' connected apps. Their scenarios run with
-//! the OIDC flow tests, which issue the grants they remove.
+//! [`AccountService`] serves the settings' connected apps, the `/account/apps`
+//! routes and the `account … apps` command. Their scenarios run with the OIDC flow
+//! tests, which issue the grants they remove.
 use crate::account::{AccountError, AccountService, Subject, Viewer};
 use piquel_common::{ClientId, events::DomainEvent, protocol::oauth::Scope};
 use piquel_repository::StoredApp;
+use serde::Serialize;
 
 /// Removal failures and their browser response mapping.
 mod error;
@@ -11,6 +13,7 @@ pub(crate) use error::GrantError;
 
 /// An app that keeps access to the account: one it consented to, or one whose
 /// refresh grant still works.
+#[derive(Serialize)]
 pub(crate) struct ConnectedApp {
     /// Its client ID, to remove it.
     pub(crate) client_id: ClientId,

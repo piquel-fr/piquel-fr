@@ -257,6 +257,7 @@ just auth audit verify                    # recompute the tamper-evident chain
 just auth account alice passkeys list     # the account's settings, as its owner sees them
 just auth account alice passkeys revoke <passkey-id> --reason "Phone stolen"
 just auth account alice emails remove <email-id> --reason "Asked by email"
+just auth account alice apps remove <client-id> --reason "Impersonating app"
 ```
 
 - Accounts are named by handle, ID or a verified email of an active account.
@@ -274,8 +275,8 @@ just auth account alice emails remove <email-id> --reason "Asked by email"
   `sessions revoke-all` describe what they will change and ask for confirmation.
   Without a terminal they refuse unless given `--yes`.
 - `account <user>` reads and changes the settings administrators share with the
-  owner: passkeys, social identities, email addresses, sessions and the security
-  history, with the owner's own operations. It never adds a way to sign in or an
+  owner: passkeys, social identities, email addresses, sessions, connected apps
+  and the security history, with the owner's own operations. It never adds a way to sign in or an
   address. Every change needs `--reason`, which the owner sees in their history;
   reads are recorded as views. See
   [surfaces.md](docs/architecture/surfaces.md#changing-an-account-on-its-owners-behalf)
@@ -569,8 +570,10 @@ client and scope; explicitly trusted clients bypass consent. Users see the apps
 they consented to, or whose refresh grants still work, under Connected apps in
 settings (`/settings/apps`), and remove an app's access there: its refresh grants
 end, it asks for consent again, and its outstanding codes stop working. Access
-tokens it already holds expire within five minutes. An administrator removes one
-the same way from the account's Connected apps page on the dashboard, with a
+tokens it already holds expire within five minutes. The settings API serves them too
+(`GET /account/apps`, `DELETE /account/apps/{client_id}`). An administrator removes
+one the same way from the account's Connected apps page on the dashboard, and an
+operator with `auth-service account <user> apps remove <client-id>`, each with a
 reason the owner sees in their history.
 
 #### Passkey sign-in on an application's own pages

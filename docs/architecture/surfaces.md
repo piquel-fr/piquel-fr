@@ -135,7 +135,7 @@ signed out, and confirming with a passkey by the session it confirms.
 | Social identities | list, unlink | link |
 | Email addresses | list, choose the primary among verified, remove | add, verify |
 | Sessions | list, sign out one, sign out all | |
-| Connected apps (settings pages and dashboard only) | list, remove an app's access | |
+| Connected apps | list, remove an app's access | |
 | Security history | read | report an entry |
 | OIDC clients (the developer console) | | all; administrators use `AdminService`'s |
 
