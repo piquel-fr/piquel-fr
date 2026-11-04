@@ -66,12 +66,20 @@ pub(super) async fn list(cx: &Cx) -> Result<Response> {
 }
 
 /// `/clients/{client}`: everything about one client, its secrets' lifetimes and
-/// approved origins, and the changes the dashboard may make to it.
+/// approved origins, and the changes the dashboard may make to it. Just after the
+/// client's registration, it shows its first secret instead, once.
 #[route(GET "/clients/{client}")]
 pub(super) async fn detail(cx: &Cx) -> Result<Response> {
     let admin = App::admin(cx).await?;
     let service = &App::of(cx).service;
     let id = path_param::<Client>(cx)?.clone();
+    if let Some(secret) = App::revealed(cx, admin).map(Revealed::new) {
+        let (secret, page) = (&secret, &href!(detail, Client(id)).resolve(cx));
+        let page = view! { cx =>
+            piquel_ui::client_created(secret: secret, page: page.as_str())
+        };
+        return App::render(cx, StatusCode::OK, "Client registered", page).await;
+    }
     let details = service.client_details(&admin.operator, &id).await?;
     let approved = service.list_related_origins(&admin.operator).await?;
     let stored = &details.client;
@@ -145,9 +153,8 @@ pub(super) async fn detail(cx: &Cx) -> Result<Response> {
     Box::pin(App::render(cx, StatusCode::OK, App::title(stored), page)).await
 }
 
-/// `/clients/new`: registers a client operators manage. A confidential one shows
-/// its first secret, which nothing shows again, in this answer; a public one goes
-/// on to its page.
+/// `/clients/new`: registers a client operators manage, then goes on to its page,
+/// which shows a confidential one's first secret, once.
 #[route([GET, POST] "/clients/new")]
 pub(super) async fn create(cx: &Cx, form: Option<Form<NewClientForm>>) -> Result<Response> {
     let admin = App::admin(cx).await?;
@@ -162,14 +169,12 @@ pub(super) async fn create(cx: &Cx, form: Option<Form<NewClientForm>>) -> Result
     })
     .await?;
     let (shown, refusal) = match created {
-        Some(Ok((id, None))) => return Err(see_other(href!(detail, Client(id)).resolve(cx)).into()),
-        Some(Ok((id, Some(secret)))) => {
-            let page = &href!(detail, Client(id)).resolve(cx);
-            let secret = &Revealed::new(secret.expose().to_owned());
-            let page = view! { cx =>
-                piquel_ui::client_created(secret: secret, page: page.as_str())
+        Some(Ok((id, secret))) => {
+            let page = href!(detail, Client(id)).resolve(cx);
+            return match secret {
+                Some(secret) => App::reveal(cx, admin, page, secret.expose()),
+                None => Err(see_other(page).into()),
             };
-            return App::render(cx, StatusCode::OK, "Client registered", page).await;
         }
         Some(Err(refused)) => (refused.form.clone(), Some(refused.message)),
         None => (App::new_client(), None),
@@ -213,32 +218,32 @@ pub(super) async fn edit(cx: &Cx, form: Option<Form<OperatorDraft>>) -> Result<R
 }
 
 /// `/clients/{client}/secret`: a confidential client's secrets, and rotating
-/// them. The new secret, which nothing shows again, shows in this answer.
+/// them. A rotation comes back here, which shows the new secret once.
 #[route([GET, POST] "/clients/{client}/secret")]
 pub(super) async fn rotate(cx: &Cx, form: Option<Form<SecretsChange>>) -> Result<Response> {
     let admin = App::admin(cx).await?;
-    App::confirm(cx, admin)?;
+    // The page showing a new secret needs no confirmation: sending the browser
+    // to confirm would lose the secret.
+    let rotated = App::revealed(cx, admin).map(Revealed::new);
+    if rotated.is_none() {
+        App::confirm(cx, admin)?;
+    }
     let service = &App::of(cx).service;
     let details = App::changing(cx, admin).await?;
     let id = details.client.id.clone();
     if details.client.kind == ClientKind::Public {
         return Err(AdminError::from(ClientRegistryError::Public(id)).into());
     }
-    let rotated = App::change(cx, form, async |SecretsChange::Rotate { grace }| {
+    let here = href!(rotate, Client(id.clone())).resolve(cx);
+    let changed = App::change(cx, form, async |SecretsChange::Rotate { grace }| {
         let grace = grace.unwrap_or_default().into();
         service
             .rotate_client_secret(&admin.operator, &id, grace)
             .await
     })
     .await?;
-    let (state, refusal) = match rotated {
-        Some(Ok(secret)) => (
-            SecretsState {
-                grace: None,
-                rotated: Some(Revealed::new(secret.expose().to_owned())),
-            },
-            None,
-        ),
+    let (state, refusal) = match changed {
+        Some(Ok(secret)) => return App::reveal(cx, admin, here, secret.expose()),
         Some(Err(refused)) => {
             let SecretsChange::Rotate { grace } = refused.form;
             (
@@ -249,12 +254,13 @@ pub(super) async fn rotate(cx: &Cx, form: Option<Form<SecretsChange>>) -> Result
                 Some(refused.message),
             )
         }
-        None => (SecretsState::default(), None),
-    };
-    // A rotation just made has one more secret to list.
-    let details = match &state.rotated {
-        Some(_) => service.client_details(&admin.operator, &id).await?,
-        None => details,
+        None => (
+            SecretsState {
+                grace: None,
+                rotated,
+            },
+            None,
+        ),
     };
     let secrets: Vec<_> = details
         .secrets
@@ -265,7 +271,7 @@ pub(super) async fn rotate(cx: &Cx, form: Option<Form<SecretsChange>>) -> Result
         })
         .collect();
     let (here, back, name, secrets, state, refusal) = (
-        &href!(rotate, Client(id.clone())).resolve(cx),
+        &here,
         &href!(detail, Client(id.clone())).resolve(cx),
         App::title(&details.client),
         &secrets,

@@ -33,6 +33,9 @@ piquel_common::str_enum! {
         /// A sign-in to the admin dashboard awaiting auth's handoff, on the
         /// dashboard's origin.
         DashboardState = "__Host-piquel_dashboard_state",
+        /// What a dashboard change made and its page shows once, such as a client
+        /// secret, sealed, across the redirect that follows the change's form.
+        DashboardReveal = "__Host-piquel_dashboard_reveal",
         /// The theme the browser chose, on each origin.
         Theme = "__Host-piquel_theme",
         /// The sidebar's width the browser chose, on each origin.
@@ -54,7 +57,7 @@ impl BrowserCookie {
             | Self::FederationPending
             | Self::DashboardState
             | Self::Restore => FLOW_COOKIE_MAX_AGE,
-            Self::Notice => 60,
+            Self::Notice | Self::DashboardReveal => 60,
             Self::Theme | Self::Sidebar => PREFERENCE_MAX_AGE,
         }
     }
@@ -89,7 +92,7 @@ impl BrowserCookie {
 
     /// Reads this cookie's value. A duplicated cookie counts as absent, so an
     /// injected value can never shadow the browser's own.
-    fn value(self, headers: &HeaderMap) -> Option<&str> {
+    pub(crate) fn value(self, headers: &HeaderMap) -> Option<&str> {
         let mut values = headers
             .get_all(header::COOKIE)
             .iter()
@@ -114,6 +117,16 @@ impl BrowserCookie {
         secret: &Secret,
     ) -> Result<(), InvalidHeaderValue> {
         self.append(response, &secret.encoded(), self.max_age())
+    }
+
+    /// Adds a `Set-Cookie` header storing `value`, text a cookie may hold such as
+    /// base64url, to an axum response or a page's.
+    pub(crate) fn set_text_on<B>(
+        self,
+        response: &mut axum::http::Response<B>,
+        value: &str,
+    ) -> Result<(), InvalidHeaderValue> {
+        self.append(response, value, self.max_age())
     }
 
     /// The notice [`Self::Notice`] carries, of the change just made. An unknown or

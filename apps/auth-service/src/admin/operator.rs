@@ -113,6 +113,14 @@ impl Operator {
         }
     }
 
+    /// The auth session an administrator acts in; the terminal has none.
+    pub(crate) const fn session(&self) -> Option<SessionId> {
+        match self {
+            Self::Admin(session) => Some(session.session_id),
+            Self::Cli { .. } => None,
+        }
+    }
+
     /// The administrator's account, if an administrator acts.
     pub(super) const fn administrator(&self) -> Option<UserId> {
         match self {
