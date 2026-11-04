@@ -97,6 +97,10 @@ impl AdminOperation {
             Self::ListDeliveries => &["deliveries", "list"],
             Self::RetryDelivery => &["deliveries", "retry", AN_ID],
             Self::CancelDelivery => &["deliveries", "cancel", AN_ID],
+            Self::ListSigningKeys => &["keys", "list"],
+            Self::RotateSigningKey => &["keys", "rotate", "--now"],
+            Self::RevokeSigningKey => &["keys", "revoke", "primary"],
+            Self::ImportSigningKey => &["keys", "import", "file://key.pem"],
         }
     }
 }
@@ -168,10 +172,8 @@ fn every_operation_has_its_command() {
         let arguments = std::iter::once(&"auth-service").chain(invocation);
         let parsed =
             Cli::try_parse_from(arguments).unwrap_or_else(|error| panic!("{operation:?}: {error}"));
-        let Some(Command::Administration(command)) = parsed.command else {
-            panic!("{operation:?}: not an administrative command");
-        };
-        assert_eq!(command.operation(), operation);
+        let command = parsed.command.expect("a command");
+        assert_eq!(command.operation(), Some(operation));
     }
 }
 

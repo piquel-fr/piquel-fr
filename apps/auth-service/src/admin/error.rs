@@ -1,7 +1,8 @@
 //! Admin failures, from the dashboard or the CLI, and their status and message.
 
 use crate::{
-    ClientRegistryError, deletion::DeletionError, handles::HandlesError, security::ApiError,
+    ClientRegistryError, KeyError, deletion::DeletionError, handles::HandlesError,
+    security::ApiError,
 };
 use piquel_common::{DeliveryId, PasskeyId, protocol::step_up::StepUpRequirement};
 use piquel_crypto::CryptoError;
@@ -147,6 +148,20 @@ pub enum AdminError {
     /// The audit chain could not be verified or pruned.
     #[error(transparent)]
     Audit(#[from] crate::AuditError),
+    /// A signing key change was refused or failed.
+    #[error(transparent)]
+    SigningKey(KeyError),
+}
+
+impl From<KeyError> for AdminError {
+    /// Keeps the operator's own refusal as it is, so the dashboard asks for a
+    /// confirmation or a sign-in as for any change.
+    fn from(error: KeyError) -> Self {
+        match error {
+            KeyError::Refused(refused) => *refused,
+            error => Self::SigningKey(error),
+        }
+    }
 }
 
 impl AdminError {
@@ -190,6 +205,7 @@ impl AdminError {
             Self::Event(_) => "event",
             Self::Link(_) => "link",
             Self::Audit(_) => "audit",
+            Self::SigningKey(_) => "signing_key",
         }
     }
 
@@ -235,7 +251,8 @@ impl From<AdminError> for ApiError {
             | AdminError::InvitationNotFound
             | AdminError::ClientNotFound
             | AdminError::DeliveryNotFound { .. }
-            | AdminError::HandleNotReleased => Self::not_found(message),
+            | AdminError::HandleNotReleased
+            | AdminError::SigningKey(KeyError::Unknown(_)) => Self::not_found(message),
             AdminError::AlreadyDisabled
             | AdminError::AlreadyActive
             | AdminError::EmailClaimed(_)
@@ -249,14 +266,23 @@ impl From<AdminError> for ApiError {
             | AdminError::AccountDisabled
             | AdminError::DeletionScheduled
             | AdminError::AlreadyAdministrator
-            | AdminError::NotAnAdministrator => Self::conflict(message),
-            AdminError::Database(error) => error.into(),
+            | AdminError::NotAnAdministrator
+            // A stored key that cannot sign is refused, and the form says which.
+            | AdminError::SigningKey(
+                KeyError::Stored { .. } | KeyError::Mismatched(_) | KeyError::NoActiveKey,
+            ) => Self::conflict(message),
+            AdminError::Database(error) | AdminError::SigningKey(KeyError::Database(error)) => {
+                error.into()
+            }
             AdminError::Client(error) => error.for_operators(),
             AdminError::Deletion(error) => error.into(),
             error @ (AdminError::Crypto(_)
             | AdminError::Event(_)
             | AdminError::Link(_)
-            | AdminError::Audit(_)) => Self::internal(error),
+            | AdminError::Audit(_)
+            | AdminError::SigningKey(KeyError::Crypto(_) | KeyError::Refused(_))) => {
+                Self::internal(error)
+            }
         }
     }
 }

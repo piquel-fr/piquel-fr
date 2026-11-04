@@ -1,8 +1,12 @@
 //! Signing keys, token digest keys and the audit key. None needs the HTTP
 //! service, and every replica picks up a signing key change within a minute.
+//! Signing key commands run their admin operation, as the dashboard's signing
+//! keys page does.
 
-use super::CliError;
-use crate::{AuditConfig, AuthConfig, KeyStore, Operator, PUBLIC_BASE_URL, TokenDigestKeys};
+use super::{CliError, Console};
+use crate::{
+    AuditConfig, AuthConfig, KeyStore, PUBLIC_BASE_URL, TokenDigestKeys, admin::AdminOperation,
+};
 use chrono::{DateTime, Utc};
 use clap::Subcommand;
 use piquel_common::{config::SecretReference, protocol::jwt::KeyId};
@@ -54,7 +58,21 @@ pub(super) enum KeysCommand {
 }
 
 impl KeysCommand {
-    /// Runs this command on `database`.
+    /// The admin operation this command runs, if any. Checking token digest keys
+    /// and printing the audit key's verifier read the deployment's configuration,
+    /// which operators change outside auth, so neither is one.
+    pub(super) const fn operation(&self) -> Option<AdminOperation> {
+        Some(match self {
+            Self::List => AdminOperation::ListSigningKeys,
+            Self::Rotate { .. } => AdminOperation::RotateSigningKey,
+            Self::Revoke { .. } => AdminOperation::RevokeSigningKey,
+            Self::Import { .. } => AdminOperation::ImportSigningKey,
+            Self::DigestUsage | Self::Audit => return None,
+        })
+    }
+
+    /// Runs this command on `database`, a signing key's as the operator at this
+    /// terminal.
     pub(super) async fn run(self, database: Database) -> Result<(), CliError> {
         let store = || -> Result<KeyStore, CliError> {
             Ok(KeyStore::new(
@@ -62,13 +80,17 @@ impl KeysCommand {
                 Arc::new(AuthConfig::key_encryption_key_from_environment()?),
             ))
         };
+        let console = || Console::new(database.clone());
         match self {
             Self::List => {
+                let Console {
+                    service, operator, ..
+                } = &console()?;
                 let format = |at: Option<DateTime<Utc>>| {
                     at.map_or_else(|| "-".to_owned(), |at| at.to_rfc3339())
                 };
                 println!("ID\tTYPE\tSTATE\tCREATED\tACTIVATED\tDEACTIVATED\tRETIRED");
-                for key in database.signing_keys().list().await? {
+                for key in service.list_signing_keys(operator).await? {
                     println!(
                         "{}\t{}\t{}\t{}\t{}\t{}\t{}",
                         key.id,
@@ -82,14 +104,21 @@ impl KeysCommand {
                 }
             }
             Self::Rotate { now } => {
-                let id = store()?.rotate(&Operator::terminal()?, now).await?;
+                let Console {
+                    service, operator, ..
+                } = &console()?;
+                let id = service.rotate_signing_key(operator, &store()?, now).await?;
                 println!("{id}");
             }
             Self::Revoke { id } => {
-                if let Some(replacement) = store()?.revoke(&Operator::terminal()?, &id).await? {
-                    eprintln!("Key {id} revoked; key {replacement} signs from now on.");
-                } else {
-                    eprintln!("Key {id} revoked.");
+                let Console {
+                    service, operator, ..
+                } = &console()?;
+                match service.revoke_signing_key(operator, &store()?, &id).await? {
+                    Some(replacement) => {
+                        eprintln!("Key {id} revoked; key {replacement} signs from now on.");
+                    }
+                    None => eprintln!("Key {id} revoked."),
                 }
             }
             Self::DigestUsage => {
@@ -110,10 +139,13 @@ impl KeysCommand {
                 println!("{}", config.verifier());
             }
             Self::Import { pem, id } => {
+                let Console {
+                    service, operator, ..
+                } = &console()?;
                 let pem = pem.resolve().map_err(CliError::PemUnreadable)?;
                 let key =
                     Rs256Key::from_pem(id.as_str(), pem.utf8()?).map_err(CliError::InvalidPem)?;
-                if store()?.import(&Operator::terminal()?, key).await? {
+                if service.import_signing_key(operator, &store()?, key).await? {
                     eprintln!("Key {id} imported; it signs from now on.");
                 } else {
                     eprintln!("Signing keys already exist; nothing was imported.");

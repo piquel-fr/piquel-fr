@@ -23,8 +23,14 @@ mod administrators;
 mod audit;
 /// The OIDC clients, one client, and the changes made to them.
 mod clients;
+/// The outbound delivery queue.
+mod deliveries;
+/// Reserved handles, and releasing one.
+mod handles;
 /// Signup invitations.
 mod invitations;
+/// Signing keys.
+mod keys;
 /// Domain events.
 mod lists;
 /// The origins approved for clients' pages to sign users in with passkeys.
@@ -41,7 +47,7 @@ mod tests;
 mod users;
 
 use crate::{
-    AdminError, AdminService, AuthConfig, MAX_REQUEST_BODY_BYTES,
+    AdminError, AdminService, AuthConfig, KeyStore, MAX_REQUEST_BODY_BYTES,
     account::{AccountError, AccountService},
     admin::{AdminOperation, DashboardSignIn, SignedInAdmin},
     assets::EmbeddedAssets,
@@ -109,6 +115,8 @@ pub(crate) struct AdminApplication {
     audit_key: NoteVerifier,
     /// Seals what a change shows once, across its redirect.
     kek: Arc<KeyEncryptionKey>,
+    /// The signing keys, which the signing keys page rotates and revokes.
+    keys: KeyStore,
     /// Every answer's Content-Security-Policy.
     policy: HeaderValue,
     /// Piquel's policies on piquel.fr, which every page's footer links.
@@ -205,6 +213,7 @@ impl AdminApplication {
         Ok(Self {
             service: AdminService::new(database.clone(), config.email.smtp.is_some()),
             account: AccountService::new(database.clone()),
+            keys: KeyStore::new(database.clone(), Arc::clone(&config.key_encryption_key)),
             sign_in: DashboardSignIn::new(database, auth.clone(), dashboard.origin.clone()),
             auth,
             invitations: config.passkey.invite_required,
@@ -236,7 +245,8 @@ impl AdminApplication {
             // service's operations.
             .route(settings::sign_in)
             .route(settings::emails)
-            .route(settings::apps);
+            .route(settings::apps)
+            .route(settings::history);
         let pages = AdminOperation::ALL
             .iter()
             .filter_map(|operation| Self::page(*operation))
@@ -266,7 +276,8 @@ impl AdminApplication {
         })
     }
 
-    /// The page running `operation`, or `None` when only the CLI runs it, for now.
+    /// The page running `operation`, or `None` when only the CLI runs it, for the
+    /// reason next to its arm.
     fn page(operation: AdminOperation) -> Option<&'static dyn Route> {
         type Op = AdminOperation;
         Some(match operation {
@@ -301,17 +312,24 @@ impl AdminApplication {
             Op::RevokeAdministrator => &administrators::revoke,
             Op::ApproveRelatedOrigin => &origins::approve,
             Op::RemoveRelatedOrigin => &origins::remove,
+            Op::CheckHandles => &handles::check,
+            Op::ReleaseHandle => &handles::release,
+            Op::ListDeliveries => &deliveries::list,
+            Op::RetryDelivery => &deliveries::retry,
+            Op::CancelDelivery => &deliveries::cancel,
+            Op::ListSigningKeys => &keys::list,
+            Op::RotateSigningKey => &keys::rotate,
+            Op::RevokeSigningKey => &keys::revoke,
             // Purging at once cannot be undone, so only the terminal offers it.
             Op::PurgeUser
+            // Importing takes the deployment's PEM private key, which must never
+            // pass through a browser: the terminal reads it from a file or the
+            // environment, into an empty key set only.
+            | Op::ImportSigningKey
             // A deployment applies its own clients, with the secret it generated:
             // only the terminal takes a secret. The dashboard registers clients
             // with `CreateClient`, and Piquel makes their secrets.
             | Op::ApplyClient
-            | Op::CheckHandles
-            | Op::ReleaseHandle
-            | Op::ListDeliveries
-            | Op::RetryDelivery
-            | Op::CancelDelivery
             // Pruning needs the schema owner, which auth never holds: the audit page
             // shows the command instead.
             | Op::PruneAuditChain => return None,
@@ -526,7 +544,7 @@ impl AdminApplication {
     }
 
     /// Each tab's page, in the sidebar's order.
-    fn tabs(cx: &Cx) -> [(DashboardTab, String); 7] {
+    fn tabs(cx: &Cx) -> [(DashboardTab, String); 10] {
         [
             (
                 DashboardTab::Overview,
@@ -541,8 +559,14 @@ impl AdminApplication {
                 DashboardTab::Invitations,
                 href!(invitations::list).resolve(cx),
             ),
+            (DashboardTab::Handles, href!(handles::check).resolve(cx)),
             (DashboardTab::Clients, href!(clients::list).resolve(cx)),
             (DashboardTab::Events, href!(lists::events).resolve(cx)),
+            (
+                DashboardTab::Deliveries,
+                href!(deliveries::list).resolve(cx),
+            ),
+            (DashboardTab::SigningKeys, href!(keys::list).resolve(cx)),
             (DashboardTab::Audit, href!(audit::verify).resolve(cx)),
         ]
     }

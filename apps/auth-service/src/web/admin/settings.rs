@@ -1,6 +1,7 @@
 //! An account's settings, which an administrator changes on its owner's behalf:
 //! the owner's own sections and operations, for the changes administrators share
-//! with owners, each with the reason they give, and the owner's handle.
+//! with owners, each with the reason they give, the owner's handle, and the
+//! security history as the owner sees it.
 //!
 //! Reads take a [`Viewer`] and changes a [`Subject`] of the administrator, so the
 //! service checks their rights, refuses an administrator's account, and records
@@ -19,10 +20,10 @@ use crate::{
         settings::{Addresses, ConnectedApps, SignInMethods},
     },
 };
-use piquel_common::{Handle, UserId};
+use piquel_common::{EventId, Handle, UserId};
 use piquel_ui::{
-    Audience, Change, ConnectedAppChange, ConnectedAppRow, EmailChange, EmailRow, ProviderRow,
-    Recovery, SignInChange, Tab,
+    Audience, Change, Checkbox, ConnectedAppChange, ConnectedAppRow, EmailChange, EmailRow,
+    HistoryPage, HistoryState, Holdings, ProviderRow, Recovery, SignInChange, Tab,
 };
 use serde::{Deserialize, de::DeserializeOwned};
 use topcoat::{
@@ -56,6 +57,16 @@ struct NewHandle {
     handle: String,
     /// Why, recorded with the change and shown to the owner in their history.
     reason: String,
+    /// Whether a reserved handle, or one that looks like another, is allowed.
+    #[serde(default)]
+    allow_reserved: Checkbox,
+}
+
+/// The query of [`history`]: the entry the page starts after, if not the newest.
+#[derive(Default, Deserialize)]
+struct HistoryQuery {
+    /// The entry the page starts after.
+    before: Option<EventId>,
 }
 
 /// `/users/{account}/sign-in`: the account's passkeys and linked identities, to
@@ -181,9 +192,61 @@ pub(super) async fn apps(cx: &Cx, body: Body) -> Result<Response> {
     App::settings_page(cx, user, Tab::Apps, refused.as_deref(), section).await
 }
 
+/// `/users/{account}/history`: the account's security history, as its owner
+/// sees it, a page at a time. It changes nothing, so it needs no confirmation:
+/// reporting an entry is the owner's alone.
+#[route(GET "/users/{account}/history")]
+pub(super) async fn history(cx: &Cx) -> Result<Response> {
+    let user = *path_param::<Account>(cx)?;
+    let admin = App::admin(cx).await?;
+    let before = parse_query_params::<HistoryQuery>(cx)
+        .unwrap_or_default()
+        .before;
+    let viewer = App::viewer(user, admin);
+    let account = &App::of(cx).account;
+    let history = account.history(&viewer, before).await?;
+    let passkeys = account.passkeys(&viewer).await?;
+    let addresses = account.emails(&viewer).await?;
+    let linked: Vec<_> = account
+        .identities(&viewer)
+        .await?
+        .into_iter()
+        .map(|identity| identity.provider)
+        .collect();
+    let recovery = account.recovery_notice(&viewer).await?.map(Recovery::from);
+    let email_rows: Vec<_> = addresses.iter().map(EmailRow::from).collect();
+    let rows = history.rows();
+    let holds = Holdings {
+        passkeys: &passkeys,
+        emails: &email_rows,
+        linked: &linked,
+        recovery: recovery.as_ref(),
+    };
+    let links = [
+        App::here(cx),
+        href!(sign_in, Account(user)).resolve(cx),
+        href!(emails, Account(user)).resolve(cx),
+    ];
+    let page = HistoryPage {
+        page: &links[0],
+        sign_in: &links[1],
+        emails: &links[2],
+        shown: HistoryState {
+            before,
+            ..HistoryState::default()
+        },
+        next: history.next,
+        reported: None,
+        audience: Audience::Administrator { reason: "" },
+    };
+    let rows = &rows;
+    let section = view! { cx => piquel_ui::history(rows: rows, holds: holds, page: page) };
+    App::settings_page(cx, user, Tab::History, None, section).await
+}
+
 /// `/users/{account}/handle`: gives the account a new handle, such as one that
-/// impersonates another account, without the settings' cooldown. A reserved
-/// handle is refused here: only the terminal may assign one.
+/// impersonates another account, without the settings' cooldown, and a reserved
+/// one only when the form allows it.
 #[route([GET, POST] "/users/{account}/handle")]
 pub(super) async fn handle(cx: &Cx, form: Option<Form<NewHandle>>) -> Result<Response> {
     let (admin, user) = App::settings(cx).await?;
@@ -193,12 +256,22 @@ pub(super) async fn handle(cx: &Cx, form: Option<Form<NewHandle>>) -> Result<Res
         let reason = Reason::parse(input.reason)?;
         App::of(cx)
             .service
-            .rename_handle(&admin.operator, user, handle, reason, false)
+            .rename_handle(
+                &admin.operator,
+                user,
+                handle,
+                reason,
+                input.allow_reserved.0,
+            )
             .await
     })
     .await?;
-    let (typed, reason) = refused.as_ref().map_or(("", ""), |refused| {
-        (refused.form.handle.as_str(), refused.form.reason.as_str())
+    let (typed, reason, allow_reserved) = refused.as_ref().map_or(("", "", false), |refused| {
+        (
+            refused.form.handle.as_str(),
+            refused.form.reason.as_str(),
+            refused.form.allow_reserved.0,
+        )
     });
     let refused = refused.as_deref();
     let page = view! { cx =>
@@ -211,6 +284,7 @@ pub(super) async fn handle(cx: &Cx, form: Option<Form<NewHandle>>) -> Result<Res
                 "New handle"
                 <input name="handle" required="" maxlength="32" autocomplete="off" value=(typed)>
             </label>
+            piquel_ui::reserved_handle_choice(checked: allow_reserved)
         )
     };
     App::render(cx, StatusCode::OK, "Rename handle", page).await
@@ -288,6 +362,7 @@ impl App {
             (Tab::SignIn, href!(sign_in, Account(user)).resolve(cx)),
             (Tab::Emails, href!(emails, Account(user)).resolve(cx)),
             (Tab::Apps, href!(apps, Account(user)).resolve(cx)),
+            (Tab::History, href!(history, Account(user)).resolve(cx)),
         ];
         let tabs: &Vec<_> = &links
             .iter()

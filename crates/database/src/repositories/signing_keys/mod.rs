@@ -3,31 +3,13 @@
 use super::{RepositoryExecutor, SigningKeyRepository};
 use crate::{DatabaseError, Limit, LockKey, Scope};
 use chrono::{DateTime, Utc};
-use piquel_common::protocol::jwt::{Jwk, KeyId};
+pub use piquel_common::admin::{SigningKeyState, SigningKeyType};
+use piquel_common::{
+    admin::SigningKey,
+    protocol::jwt::{Jwk, KeyId},
+};
 use sqlx::types::Json;
 use std::time::Duration;
-
-piquel_common::str_enum! {
-    /// Where a signing key is in its lifecycle.
-    pub enum SigningKeyState {
-        /// Published ahead of use, so verifiers have it before it signs.
-        Next = "next",
-        /// Signs new tokens; one per key type.
-        Active = "active",
-        /// No longer signs, but stays published while its tokens may be valid.
-        Retiring = "retiring",
-        /// Unpublished, its private key erased; verifies only `id_token_hint`s.
-        Retired = "retired",
-    }
-}
-
-piquel_common::str_enum! {
-    /// The family of a signing key, which fixes the algorithms it signs with.
-    pub enum SigningKeyType {
-        /// RSA, signing RS256.
-        Rsa = "rsa",
-    }
-}
 
 /// A stored signing key.
 #[derive(Clone, Debug)]
@@ -50,6 +32,21 @@ pub struct StoredSigningKey {
     pub deactivated_at: Option<DateTime<Utc>>,
     /// When it left the key set.
     pub retired_at: Option<DateTime<Utc>>,
+}
+
+impl From<StoredSigningKey> for SigningKey {
+    /// Keeps what operators are shown: neither half of the key.
+    fn from(key: StoredSigningKey) -> Self {
+        Self {
+            id: key.id,
+            key_type: key.key_type,
+            state: key.state,
+            created_at: key.created_at,
+            activated_at: key.activated_at,
+            deactivated_at: key.deactivated_at,
+            retired_at: key.retired_at,
+        }
+    }
 }
 
 /// A new signing key, published as `next` or signing at once as `active`.

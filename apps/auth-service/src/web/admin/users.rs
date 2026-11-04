@@ -109,6 +109,7 @@ pub(super) async fn detail(cx: &Cx) -> Result<Response> {
         href!(settings::sign_in, Account(id)).resolve(cx),
         href!(settings::emails, Account(id)).resolve(cx),
         href!(settings::apps, Account(id)).resolve(cx),
+        href!(settings::history, Account(id)).resolve(cx),
         href!(settings::handle, Account(id)).resolve(cx),
     ];
     let [
@@ -117,6 +118,7 @@ pub(super) async fn detail(cx: &Cx) -> Result<Response> {
         signing_in,
         addresses,
         connected,
+        happened,
         renaming,
     ] = links.each_ref().map(String::as_str);
     let status = action(match detail.user.status {
@@ -136,6 +138,7 @@ pub(super) async fn detail(cx: &Cx) -> Result<Response> {
             sign_in: signing_in,
             emails: addresses,
             apps: connected,
+            history: happened,
             handle: renaming,
         })
     } else {

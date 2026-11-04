@@ -1,6 +1,6 @@
 //! Security history.
 
-use super::{EmailChange, EmailRow, SignInChange, device_name};
+use super::{Audience, EmailChange, EmailRow, SignInChange, device_name};
 use crate::{
     Recovery, RecoveryPasskey,
     form::{Fields, Precision, Query, change_form, open, time},
@@ -328,12 +328,15 @@ pub struct HistoryPage<'a> {
     pub next: Option<EventId>,
     /// The report just made, and what undoes its entry, if anything.
     pub reported: Option<Option<FollowUp>>,
-    /// Whether the session needs no passkey confirmation to undo it.
-    pub confirmed: bool,
+    /// Who reads it: the owner reports entries, confirming with a passkey to undo
+    /// one unless the session needs no confirmation; an administrator only reads
+    /// it, as the owner sees it.
+    pub audience: Audience<'a>,
 }
 
 /// The security history page: `rows`, newest first and grouped by day, naming
-/// what the account `holds`, on `page`. An open report takes the focus.
+/// what the account `holds`, on `page`. An open report takes the focus; only the
+/// owner reports.
 #[component]
 pub async fn history<'a>(
     rows: &'a [HistoryRow<'a>],
@@ -356,11 +359,19 @@ pub async fn history<'a>(
             .on(page.page)
         })
         .transpose()?;
+    let owner = page.audience.owns();
+    let lead = if owner {
+        "Every sign-in and change to your account. If something wasn’t you, say so: we’ll sign out every other device and help you undo it."
+    } else {
+        "Every sign-in and change to the account, as its owner sees it. Only the owner can report an entry as not theirs."
+    };
+    let empty = match (before, owner) {
+        (Some(_), _) => "No older activity.",
+        (None, true) => "Nothing has happened to your account yet.",
+        (None, false) => "Nothing has happened to this account yet.",
+    };
     Ok(view! {
-        page_head(
-            title: "Security history",
-            lead: "Every sign-in and change to your account. If something wasn’t you, say so: we’ll sign out every other device and help you undo it.".to_owned(),
-        )
+        page_head(title: "Security history", lead: lead.to_owned())
         if let Some(follow_up) = page.reported {
             <div class="notice stack" role="status">
                 <strong>"Your account is secured."</strong>
@@ -372,7 +383,7 @@ pub async fn history<'a>(
                         change: undo.change.clone(),
                         label: undo.label.clone(),
                         class: "danger",
-                        confirm: !page.confirmed,
+                        confirm: page.audience.confirms(),
                     )
                 }
             </div>
@@ -388,9 +399,7 @@ pub async fn history<'a>(
             </section>
         }
         if rows.is_empty() && page.next.is_none() {
-            <p class="empty">
-                (if before.is_none() { "Nothing has happened to your account yet." } else { "No older activity." })
-            </p>
+            <p class="empty">(empty)</p>
         }
         <div class="row">
             if let Some(older) = &older {
@@ -437,7 +446,8 @@ async fn entry<'a>(
 ) -> Result<impl View> {
     let before = page.shown.before;
     let description = row.describe(holds);
-    let reporting = row.reportable && page.shown.reporting == Some(row.id);
+    let reportable = row.reportable && page.audience.owns();
+    let reporting = reportable && page.shown.reporting == Some(row.id);
     Ok(view! {
         <li>
             time(at: row.occurred_at, precision: Precision::Clock)
@@ -467,7 +477,7 @@ async fn entry<'a>(
                     </div>
                 }
             </div>
-            if row.reportable && !reporting {
+            if reportable && !reporting {
                 open(
                     page: page.page,
                     opens: HistoryState { before, reporting: Some(row.id), reported: None },

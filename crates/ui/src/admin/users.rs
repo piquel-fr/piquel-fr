@@ -135,6 +135,8 @@ pub struct AccountPages<'a> {
     pub emails: &'a str,
     /// The apps that keep access to it.
     pub apps: &'a str,
+    /// Its security history, as its owner sees it.
+    pub history: &'a str,
     /// Giving it a new handle.
     pub handle: &'a str,
 }
@@ -295,6 +297,7 @@ async fn account_actions<'a>(
                     <a class="button secondary small" href=(pages.sign_in)>"Sign-in methods"</a>
                     <a class="button secondary small" href=(pages.emails)>"Email addresses"</a>
                     <a class="button secondary small" href=(pages.apps)>"Connected apps"</a>
+                    <a class="button secondary small" href=(pages.history)>"Security history"</a>
                     <a class="button secondary small" href=(pages.handle)>"Rename handle"</a>
                 },
                 Err(reason) => {

@@ -115,9 +115,9 @@ who acts on it, and a read a `Viewer`, the account and who reads it. The owner's
 settings pages and `/account` routes run them as the owner of the session cookie,
 the only way to act as an owner. The `auth-service account <user> …`
 command runs them as the operator at the terminal, and the dashboard's sign-in
-methods, email addresses and connected apps pages call them in-process as an
-administrator, rendering the owner's own settings sections without what adds a
-way in, and asking for a reason with each change. All run the same safety
+methods, email addresses, connected apps and security history pages call them
+in-process as an administrator, rendering the owner's own settings sections
+without what adds a way in, and asking for a reason with each change. All run the same safety
 rules: for example, one active passkey always remains, whoever removes the
 others.
 
@@ -137,7 +137,14 @@ signed out, and confirming with a passkey by the session it confirms.
 | Sessions | list, sign out one, sign out all | |
 | Connected apps | list, remove an app's access | |
 | Security history | read | report an entry |
+| Account data | | download |
 | OIDC clients (the developer console) | | all; administrators use `AdminService`'s |
+
+Downloading the account's data stays the owner's although administrators may
+read most of it: the export copies every IP address and the whole history out
+of auth in one file, which only the owner's recently confirmed session receives.
+Support never hands one over; an owner who lost every passkey is recovered
+first, and downloads it themselves.
 
 When an administrator or operator acts:
 

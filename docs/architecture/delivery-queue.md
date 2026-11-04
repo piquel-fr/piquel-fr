@@ -7,7 +7,9 @@ receiver must not slow a login, and a message must survive a restart.
 
 The repository owns the queue (`crates/database/src/repositories/deliveries/`).
 Auth-service owns sending: the workers, the retry policy and the HTTP client
-(`apps/auth-service/src/deliveries/`). Operators use `auth-service deliveries`.
+(`apps/auth-service/src/deliveries/`). Operators list, retry and cancel
+deliveries with `auth-service deliveries` or on the admin dashboard's Deliveries
+page.
 
 ## Guarantees
 

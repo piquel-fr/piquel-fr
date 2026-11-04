@@ -9,7 +9,7 @@ use crate::{
     },
 };
 use piquel_ui::{
-    EmailRow, HistoryChange, HistoryPage, HistoryState, Holdings, Messages, Section, Tab,
+    Audience, EmailRow, HistoryChange, HistoryPage, HistoryState, Holdings, Messages, Section, Tab,
 };
 use topcoat::{
     context::Cx,
@@ -93,7 +93,9 @@ impl AccountPage for History {
             shown,
             next: history.next,
             reported,
-            confirmed: reader.is_recent(),
+            audience: Audience::Owner {
+                confirmed: reader.is_recent(),
+            },
         };
         let page =
             Child::new(view! { cx => piquel_ui::history(rows: &rows, holds: holds, page: page) });

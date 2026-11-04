@@ -85,6 +85,14 @@ operations! {
         RetryDelivery,
         /// Cancel a pending or failed delivery.
         CancelDelivery,
+        /// List signing keys, with their state and dates.
+        ListSigningKeys,
+        /// Publish a new signing key, or make it sign at once.
+        RotateSigningKey,
+        /// Delete a signing key at once, such as a compromised one.
+        RevokeSigningKey,
+        /// Import the deployment's PEM signing key into an empty key set.
+        ImportSigningKey,
         /// Recompute the audit chain and check its checkpoints.
         VerifyAuditChain,
         /// Delete the audit history through a checkpoint.
