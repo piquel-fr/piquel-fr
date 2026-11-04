@@ -1,13 +1,15 @@
 //! The routes' handlers: starting a login, completing it, and both logouts.
 
 use super::{
-    LOGIN_COOKIE, Login, PENDING_LIFETIME, SESSION_COOKIE, STEP_UP_COOKIE, STEP_UP_RETURN,
+    Login, MAX_PENDING_BYTES, MAX_PENDING_COOKIE_BYTES, MAX_PENDING_LOGINS, PENDING_LIFETIME,
+    STEP_UP_RETURN,
 };
 use crate::{
     Acr, AuthorizeRequest, CallbackParams, LoginError, StepUpRequirement, TokenError,
     axum::{
         StoredLogin,
         bearer::ErrorChain,
+        seal::SealError,
         session::{PendingAuthorization, SessionKey},
     },
 };
@@ -18,7 +20,7 @@ use axum::{
     response::{IntoResponse, Redirect, Response},
 };
 use base64::{Engine, engine::general_purpose::URL_SAFE_NO_PAD};
-use chrono::TimeDelta;
+use chrono::{DateTime, TimeDelta, Utc};
 use serde::Deserialize;
 use std::sync::Arc;
 
@@ -45,9 +47,10 @@ pub(super) struct LogoutForm {
 }
 
 impl Login {
-    /// `GET /login`: stores a pending login and redirects to auth.
+    /// `GET /login`: keeps a pending login in a sealed cookie and redirects to auth.
     pub(super) async fn start(
         State(login): State<Arc<Self>>,
+        headers: HeaderMap,
         Query(query): Query<StartQuery>,
     ) -> Response {
         let return_to = query
@@ -63,16 +66,12 @@ impl Login {
             step_up,
             ..AuthorizeRequest::default()
         };
-        let randomness_unavailable = || {
-            tracing::error!("operating system randomness is unavailable");
-            StatusCode::INTERNAL_SERVER_ERROR.into_response()
-        };
-        let Ok(key) = SessionKey::generate() else {
-            return randomness_unavailable();
-        };
         let (url, pending) = match login.client.authorize(&request).await {
             Ok(started) => started,
-            Err(LoginError::Randomness(_)) => return randomness_unavailable(),
+            Err(LoginError::Randomness(_)) => {
+                tracing::error!("operating system randomness is unavailable");
+                return StatusCode::INTERNAL_SERVER_ERROR.into_response();
+            }
             // Auth refused or could not take the pushed request.
             Err(error) => {
                 tracing::warn!(error = %ErrorChain(&error), "sign-in could not start");
@@ -83,48 +82,158 @@ impl Login {
                     .into_response();
             }
         };
-        let pending = PendingAuthorization {
+        // The SDK's `state` is base64url, so it always names a cookie.
+        let Some(name) = login.cookies.pending(pending.state()) else {
+            return StatusCode::INTERNAL_SERVER_ERROR.into_response();
+        };
+        let now = login.now();
+        let mut pending = PendingAuthorization {
             login: pending,
             return_to,
             step_up: query.step_up,
+            expires_at: now + PENDING_LIFETIME,
         };
-        let expires = login.now() + PENDING_LIFETIME;
-        if let Err(error) = login.sessions.insert_pending(&key, &pending, expires).await {
-            return Self::store_failure(&error);
+        let mut sealed = login.seal_pending(&pending, &name);
+        if sealed
+            .as_ref()
+            .is_ok_and(|sealed| name.len() + sealed.len() > MAX_PENDING_COOKIE_BYTES)
+        {
+            tracing::debug!("return_to is too long for the login cookie; returning home");
+            pending.return_to = login.home.clone();
+            sealed = login.seal_pending(&pending, &name);
         }
+        let sealed = match sealed {
+            Ok(sealed) => sealed,
+            Err(error) => {
+                tracing::error!(error = %ErrorChain(&error), "a pending login could not be sealed");
+                return StatusCode::INTERNAL_SERVER_ERROR.into_response();
+            }
+        };
         let mut response = Redirect::to(url.as_str()).into_response();
-        response.headers_mut().append(
+        let cookies = response.headers_mut();
+        for stale in login.stale_logins(&headers, now, name.len() + sealed.len()) {
+            cookies.append(
+                header::SET_COOKIE,
+                Self::set_cookie(stale, "", TimeDelta::zero()),
+            );
+        }
+        cookies.append(
             header::SET_COOKIE,
-            Self::set_cookie(LOGIN_COOKIE, key.as_cookie(), PENDING_LIFETIME),
+            Self::set_cookie(&name, &sealed, PENDING_LIFETIME),
         );
         response
     }
 
-    /// `GET /callback`: completes the pending login and starts a session.
+    /// The associated data of the pending login cookie `name`: the client ID and the
+    /// name, so a cookie opens only for the login its `state` names, and only for this
+    /// client, even when another app on the host shares the cookie key and its
+    /// cookies' names start like this app's.
+    fn pending_context(&self, name: &str) -> String {
+        format!("{}\0{name}", self.client.config().client_id)
+    }
+
+    /// `pending`, sealed for the cookie `name`.
+    fn seal_pending(
+        &self,
+        pending: &PendingAuthorization,
+        name: &str,
+    ) -> Result<String, SealError> {
+        self.cookie_key.0.seal(pending, &self.pending_context(name))
+    }
+
+    /// The pending login `sealed` holds as the cookie `name`, expired or not, if it
+    /// opens: only then is the cookie this client's to read or drop.
+    fn open_pending(&self, sealed: &str, name: &str) -> Option<PendingAuthorization> {
+        self.cookie_key.0.open(sealed, &self.pending_context(name))
+    }
+
+    /// The pending login cookies a new login of `adding` bytes drops: this client's
+    /// that expired, and the oldest beyond [`MAX_PENDING_LOGINS`] or
+    /// [`MAX_PENDING_BYTES`]. A cookie that does not open is not this client's, or
+    /// was sealed under an older key, and is left to its `Max-Age`.
+    fn stale_logins<'a>(
+        &self,
+        headers: &'a HeaderMap,
+        now: DateTime<Utc>,
+        adding: usize,
+    ) -> Vec<&'a str> {
+        let (mut live, mut stale) = (Vec::new(), Vec::new());
+        for (name, sealed) in Self::cookies(headers) {
+            if !name.starts_with(&self.cookies.pending) {
+                continue;
+            }
+            match self.open_pending(sealed, name) {
+                Some(pending) if pending.expires_at > now => {
+                    live.push((pending.expires_at, name, name.len() + sealed.len()));
+                }
+                Some(_) => stale.push(name),
+                None => {}
+            }
+        }
+        // Newest first, keeping each while it fits.
+        live.sort_unstable_by_key(|&(expires_at, _, _)| std::cmp::Reverse(expires_at));
+        let (mut count, mut bytes) = (1, adding);
+        for (_, name, size) in live {
+            if count < MAX_PENDING_LOGINS && bytes + size <= MAX_PENDING_BYTES {
+                count += 1;
+                bytes += size;
+            } else {
+                stale.push(name);
+            }
+        }
+        stale
+    }
+
+    /// `GET /callback`: completes the pending login its `state` names and starts a
+    /// session. Only that login's cookie is read and dropped, so a callback for
+    /// another login, or a link with a made-up `state`, leaves logins in progress
+    /// alone. Auth redeems a code once, so a copied cookie completes nothing twice.
     pub(super) async fn callback(
         State(login): State<Arc<Self>>,
         headers: HeaderMap,
         Query(callback): Query<CallbackParams>,
     ) -> Response {
-        let Some(key) = Self::cookie(&headers, LOGIN_COOKIE).and_then(SessionKey::parse) else {
+        let name = callback
+            .state
+            .as_deref()
+            .and_then(|state| login.cookies.pending(state));
+        let pending = name.as_deref().and_then(|name| {
+            let sealed = Self::cookie(&headers, name)?;
+            login.open_pending(sealed, name)
+        });
+        // A cookie that does not open, perhaps another app's, is left alone.
+        let (Some(name), Some(pending)) = (name, pending) else {
             return (
                 StatusCode::BAD_REQUEST,
                 "This sign-in has no pending login; start again.",
             )
                 .into_response();
         };
-        let pending = match login.sessions.take_pending(&key, login.now()).await {
-            Ok(Some(pending)) => pending,
-            Ok(None) => {
-                return (
-                    StatusCode::BAD_REQUEST,
-                    "This sign-in expired or was already used; start again.",
-                )
-                    .into_response();
-            }
-            Err(error) => return Self::store_failure(&error),
+        let mut response = if pending.expires_at > login.now() {
+            login.complete(&headers, pending, &callback).await
+        } else {
+            (
+                StatusCode::BAD_REQUEST,
+                "This sign-in expired; start again.",
+            )
+                .into_response()
         };
-        let tokens = match login.client.complete(pending.login, &callback).await {
+        // Spent whatever the outcome: the code may have been redeemed.
+        response.headers_mut().append(
+            header::SET_COOKIE,
+            Self::set_cookie(&name, "", TimeDelta::zero()),
+        );
+        response
+    }
+
+    /// Completes `pending` from `callback` and starts its session.
+    async fn complete(
+        &self,
+        headers: &HeaderMap,
+        pending: PendingAuthorization,
+        callback: &CallbackParams,
+    ) -> Response {
+        let tokens = match self.client.complete(pending.login, callback).await {
             Ok(tokens) => tokens,
             Err(error) => {
                 tracing::debug!(error = %ErrorChain(&error), "sign-in failed");
@@ -136,22 +245,23 @@ impl Login {
                 return (status, format!("Sign-in failed: {error}.")).into_response();
             }
         };
-        let issuer = login.client.issuer().issuer().to_owned();
+        let issuer = self.client.issuer().issuer().to_owned();
         let (Some(stored), Ok(session)) =
             (StoredLogin::new(issuer, tokens), SessionKey::generate())
         else {
             return StatusCode::BAD_GATEWAY.into_response();
         };
         // A fresh key on every sign-in: a key planted before login is worthless after.
-        if let Some(previous) = Self::cookie(&headers, SESSION_COOKIE).and_then(SessionKey::parse)
-            && let Err(error) = login.sessions.delete(&previous).await
+        if let Some(previous) =
+            Self::cookie(headers, &self.cookies.session).and_then(SessionKey::parse)
+            && let Err(error) = self.sessions.delete(&previous).await
         {
             return Self::store_failure(&error);
         }
-        let now = login.now();
-        match login
+        let now = self.now();
+        match self
             .sessions
-            .insert(&session, &stored, now + login.lifetime, now)
+            .insert(&session, &stored, now + self.lifetime, now)
             .await
         {
             Ok(true) => {}
@@ -169,22 +279,18 @@ impl Login {
         let cookies = response.headers_mut();
         cookies.append(
             header::SET_COOKIE,
-            Self::set_cookie(SESSION_COOKIE, session.as_cookie(), login.lifetime),
-        );
-        cookies.append(
-            header::SET_COOKIE,
-            Self::set_cookie(LOGIN_COOKIE, "", TimeDelta::zero()),
+            Self::set_cookie(&self.cookies.session, session.as_cookie(), self.lifetime),
         );
         // A step-up marks its return; any other sign-in drops an unused marker, which
         // belonged to the session this one replaces.
         let marker = if pending.step_up {
             Self::set_cookie(
-                STEP_UP_COOKIE,
+                &self.cookies.step_up,
                 &URL_SAFE_NO_PAD.encode(pending.return_to.as_str()),
                 STEP_UP_RETURN,
             )
         } else {
-            Self::set_cookie(STEP_UP_COOKIE, "", TimeDelta::zero())
+            Self::set_cookie(&self.cookies.step_up, "", TimeDelta::zero())
         };
         cookies.append(header::SET_COOKIE, marker);
         response
@@ -201,12 +307,14 @@ impl Login {
                 .into_response();
         }
         let mut destination = login.home.as_str().to_owned();
-        if let Some(key) = Self::cookie(&headers, SESSION_COOKIE).and_then(SessionKey::parse) {
+        if let Some(key) =
+            Self::cookie(&headers, &login.cookies.session).and_then(SessionKey::parse)
+        {
             match login.sessions.load(&key, login.now()).await {
                 Ok(Some(session)) => {
                     destination = login
                         .client
-                        .logout_url(&session.login.id_token, login.after_logout.as_ref())
+                        .logout_url(session.login.id_token(), login.after_logout.as_ref())
                         .into();
                 }
                 Ok(None) => {}
@@ -217,7 +325,7 @@ impl Login {
             }
         }
         let mut response = Redirect::to(&destination).into_response();
-        for cookie in [SESSION_COOKIE, STEP_UP_COOKIE] {
+        for cookie in [&login.cookies.session, &login.cookies.step_up] {
             response.headers_mut().append(
                 header::SET_COOKIE,
                 Self::set_cookie(cookie, "", TimeDelta::zero()),

@@ -1,7 +1,7 @@
 //! Reading the request's session, and refreshing its access token under the
 //! lease the SDK keeps in the session record, so one request at a time calls auth.
 
-use super::{Login, SESSION_COOKIE, SignedIn};
+use super::{Login, SignedIn};
 use crate::axum::{
     StoredLogin,
     bearer::ErrorChain,
@@ -34,14 +34,15 @@ impl Login {
         headers: &HeaderMap,
         retry: bool,
     ) -> Result<Option<SignedIn>, BackendError> {
-        let Some(key) = Self::cookie(headers, SESSION_COOKIE).and_then(SessionKey::parse) else {
+        let Some(key) = Self::cookie(headers, &self.cookies.session).and_then(SessionKey::parse)
+        else {
             return Ok(None);
         };
         let Some(mut current) = self.sessions.load(&key, self.now()).await? else {
             return Ok(None);
         };
         let login = &current.login;
-        if login.refresh_token.is_some() && login.expires_at <= self.now() + REFRESH_MARGIN {
+        if login.refresh_token().is_some() && login.expires_at() <= self.now() + REFRESH_MARGIN {
             match self.refresh(&key, current).await? {
                 Some(refreshed) => current = refreshed,
                 None => return Ok(None),
@@ -122,7 +123,7 @@ impl Login {
             .to_std()
             .ok()
             .filter(|budget| !budget.is_zero());
-        let (Some(refresh), Some(budget)) = (&current.login.refresh_token, budget) else {
+        let (Some(refresh), Some(budget)) = (current.login.refresh_token(), budget) else {
             // Nothing to refresh, or no time left to do it safely: auth was not
             // called, so give the lease back with the session unchanged.
             return self.save(key, lease, until, current.login).await;

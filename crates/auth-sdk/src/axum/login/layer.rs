@@ -1,7 +1,7 @@
 //! The layer around the app's routes: it hands the extractors the login state,
 //! marks a step-up's return, and redirects [`StepUp`] responses through login.
 
-use super::{Login, STEP_UP_COOKIE, StepUp};
+use super::{Login, StepUp};
 use crate::axum::BoxFuture;
 use axum::{
     extract::Request,
@@ -95,7 +95,7 @@ where
         // The `GET` a step-up login returns to is its retry, and uses up the marker.
         // Another tab loading the same page within the minute would use it instead.
         let retry = method == Method::GET
-            && Login::cookie(request.headers(), STEP_UP_COOKIE)
+            && Login::cookie(request.headers(), &login.cookies.step_up)
                 .and_then(|page| URL_SAFE_NO_PAD.decode(page).ok())
                 .is_some_and(|page| page == path.as_bytes());
         if retry {
@@ -107,7 +107,7 @@ where
             if retry {
                 response.headers_mut().append(
                     header::SET_COOKIE,
-                    Login::set_cookie(STEP_UP_COOKIE, "", TimeDelta::zero()),
+                    Login::set_cookie(&login.cookies.step_up, "", TimeDelta::zero()),
                 );
             }
             Ok(response)

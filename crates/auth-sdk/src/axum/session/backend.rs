@@ -173,10 +173,10 @@ pub trait SessionBackend: Clone + Send + Sync + 'static {
 /// [`SessionBackend`] for real persistence.
 ///
 /// ```
-/// use piquel_auth::axum::{LoginRoutes, MemoryBackend};
-/// # fn run(client: piquel_auth::Client) {
-/// let auth = LoginRoutes::new(client, MemoryBackend::default());
-/// # }
+/// use piquel_auth::axum::{CookieKey, LoginRoutes, MemoryBackend};
+/// # fn run(client: piquel_auth::Client) -> Result<(), piquel_auth::axum::CookieKeyError> {
+/// let auth = LoginRoutes::new(client, MemoryBackend::default(), CookieKey::generate()?);
+/// # Ok(()) }
 /// ```
 #[derive(Clone, Default)]
 pub struct MemoryBackend(Arc<Mutex<HashMap<String, SessionRecord>>>);

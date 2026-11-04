@@ -1,7 +1,7 @@
 //! Session storage. Applications implement [`SessionBackend`], four plain operations
 //! on opaque records, wherever they want to keep sessions. The SDK keeps everything
-//! else: the record format and its validation, expiry, pending logins, the refresh
-//! lease that stops two requests from redeeming one refresh token, and the indexes
+//! else: the record format, its sealing and validation, expiry, the refresh lease
+//! that stops two requests from redeeming one refresh token, and the indexes
 //! back-channel logout finds sessions with.
 
 /// The storage interface applications implement, and the in-memory backend.
@@ -30,53 +30,60 @@ use std::fmt;
 /// Random bytes in a session key: 256 bits.
 const KEY_BYTES: usize = 32;
 
-/// A signed-in user's tokens, kept server-side.
+/// A signed-in user's tokens, kept server-side. Its tokens are reached through
+/// methods, and it does not serialize, so the refresh token cannot reach a browser
+/// by way of a handler's `Json`.
 ///
 /// ```no_run
 /// # async fn run(user: piquel_auth::axum::SignedIn) -> Result<(), reqwest::Error> {
 /// // Call an API for the user with their access token, refreshed by the login layer.
 /// let notes = reqwest::Client::new()
 ///     .get("https://notes.piquel.fr/api/notes")
-///     .bearer_auth(user.login().access_token.expose())
+///     .bearer_auth(user.login().access_token().expose())
 ///     .send()
 ///     .await?;
 /// # Ok(()) }
 /// ```
+#[derive(Clone, Debug)]
+pub struct StoredLogin(LoginData);
+
+/// What a [`StoredLogin`] holds, as the sealed session record stores it.
 #[derive(Clone, Debug, Serialize, Deserialize)]
-pub struct StoredLogin {
+pub(super) struct LoginData {
     /// The issuer the user signed in with.
-    pub issuer: String,
+    issuer: String,
     /// The validated ID token of the sign-in, or of the latest refresh that sent one.
-    pub id_token: IdToken,
+    id_token: IdToken,
     /// The latest access token.
-    pub access_token: BearerToken,
+    access_token: BearerToken,
     /// When the access token expires.
-    pub expires_at: DateTime<Utc>,
+    expires_at: DateTime<Utc>,
     /// Scopes granted to the access token.
-    pub scopes: Scopes,
+    scopes: Scopes,
     /// The refresh token, with `offline_access`. Auth rotates it on every refresh.
-    pub refresh_token: Option<RefreshToken>,
+    refresh_token: Option<RefreshToken>,
 }
 
 impl StoredLogin {
     /// The login `tokens` describe, if they hold the ID token every sign-in returns.
     pub(super) fn new(issuer: String, tokens: Tokens) -> Option<Self> {
-        Some(Self {
+        Some(Self(LoginData {
             issuer,
             id_token: tokens.id_token?,
             access_token: tokens.access_token,
             expires_at: tokens.expires_at,
             scopes: tokens.scopes,
             refresh_token: tokens.refresh_token,
-        })
+        }))
     }
 
     /// This login after a refresh returned `tokens`. An absent ID token or refresh
     /// token keeps the current one. `None` if a new ID token names another user or
     /// issuer (OIDC Core §12.2).
     pub(super) fn refreshed(&self, tokens: Tokens) -> Option<Self> {
+        let current = &self.0;
         let same = |id_token: &IdToken| {
-            let (new, old) = (id_token.claims(), self.id_token.claims());
+            let (new, old) = (id_token.claims(), current.id_token.claims());
             new.sub == old.sub && new.iss == old.iss
         };
         if tokens
@@ -86,31 +93,69 @@ impl StoredLogin {
         {
             return None;
         }
-        Some(Self {
-            issuer: self.issuer.clone(),
-            id_token: tokens.id_token.unwrap_or_else(|| self.id_token.clone()),
+        Some(Self(LoginData {
+            issuer: current.issuer.clone(),
+            id_token: tokens.id_token.unwrap_or_else(|| current.id_token.clone()),
             access_token: tokens.access_token,
             expires_at: tokens.expires_at,
             scopes: tokens.scopes,
-            refresh_token: tokens.refresh_token.or_else(|| self.refresh_token.clone()),
-        })
+            refresh_token: tokens
+                .refresh_token
+                .or_else(|| current.refresh_token.clone()),
+        }))
+    }
+
+    /// The issuer the user signed in with.
+    #[must_use]
+    pub fn issuer(&self) -> &str {
+        &self.0.issuer
+    }
+
+    /// The validated ID token of the sign-in, or of the latest refresh that sent one.
+    #[must_use]
+    pub const fn id_token(&self) -> &IdToken {
+        &self.0.id_token
+    }
+
+    /// The latest access token, to call APIs for the user.
+    #[must_use]
+    pub const fn access_token(&self) -> &BearerToken {
+        &self.0.access_token
+    }
+
+    /// When the access token expires.
+    #[must_use]
+    pub const fn expires_at(&self) -> DateTime<Utc> {
+        self.0.expires_at
+    }
+
+    /// Scopes granted to the access token.
+    #[must_use]
+    pub const fn scopes(&self) -> &Scopes {
+        &self.0.scopes
+    }
+
+    /// The refresh token, which only the SDK redeems.
+    pub(super) const fn refresh_token(&self) -> Option<&RefreshToken> {
+        self.0.refresh_token.as_ref()
     }
 
     /// The user's `sub`.
     #[must_use]
     pub fn subject(&self) -> &str {
-        &self.id_token.claims().sub
+        &self.0.id_token.claims().sub
     }
 
     /// Auth's session ID, if the ID token carries one.
     #[must_use]
     pub fn sid(&self) -> Option<SessionId> {
-        self.id_token.claims().authentication.sid
+        self.0.id_token.claims().authentication.sid
     }
 }
 
 /// A session's random key, held by the browser in a cookie. Backends see only its
-/// SHA-256, so reading the backend does not give access to sessions.
+/// SHA-256, and the record under it is sealed with a key derived from it, so reading
+/// the backend gives neither sessions nor tokens.
 #[derive(Clone, PartialEq, Eq, Hash)]
 pub(super) struct SessionKey(String);
 
@@ -141,10 +186,9 @@ impl SessionKey {
         &self.0
     }
 
-    /// The backend key of this session's record of `kind`: the SHA-256 of the key,
-    /// namespaced so sessions and pending logins never collide.
-    fn record(&self, kind: &str) -> String {
-        hashed(kind, &[&self.0])
+    /// The key's text, the secret its record's name and sealing key derive from.
+    fn secret(&self) -> &str {
+        &self.0
     }
 }
 
@@ -162,7 +206,8 @@ fn random(bytes: usize) -> Result<String, rand::Error> {
     Ok(URL_SAFE_NO_PAD.encode(buffer))
 }
 
-/// A login waiting for its callback, with where to send the user afterwards.
+/// A login waiting for its callback, with where to send the user afterwards. The
+/// browser keeps it, sealed, in a cookie named for its `state`.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub(super) struct PendingAuthorization {
     /// The PKCE verifier, `state` and `nonce` of the login.
@@ -171,4 +216,7 @@ pub(super) struct PendingAuthorization {
     pub(super) return_to: ReturnTo,
     /// Whether the login steps up, so the return to `return_to` is its retry.
     pub(super) step_up: bool,
+    /// When the login expires, checked as well as the cookie's `Max-Age`, which a
+    /// copied cookie escapes.
+    pub(super) expires_at: DateTime<Utc>,
 }

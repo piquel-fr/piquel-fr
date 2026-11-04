@@ -189,8 +189,8 @@ Login uses the authorization code flow with S256 PKCE, `state` and `nonce`:
    only `client_id` and the returned `request_uri`; otherwise the URL carries the
    request. So a client auth requires to push still signs in. A push auth refuses
    is an `oauth` error, and one that cannot reach auth a `network` error. The
-   pending login is stored server-side and consumed by the callback, so a callback
-   completes at most once.
+   pending login holds the verifier, so it never reaches the browser unsealed. Auth
+   redeems a code once, so a callback completes at most once.
 2. The callback is checked before the code goes anywhere:
    1. `state` equals the pending login's (`state_mismatch`).
    2. RFC 9207 §2.4: when the response carries `iss`, it must equal the issuer
@@ -212,6 +212,28 @@ Server-side apps keep tokens in a server-side session and give the browser only 
 random session key, as the Rust SDK's axum login routes and `@piquel/auth/server`
 do, in a `__Host-` cookie that is `Secure`, `HttpOnly` and `SameSite=Lax`. Every
 sign-in starts a session under a fresh key. Refresh tokens never reach the browser.
+The rest of this section describes the Rust SDK; `@piquel/auth/server` does not do
+it yet, and keeps its pending logins and plain session records in the backend, under
+fixed cookie names.
+
+The type holding a session's tokens does not serialize, so a handler cannot send
+them to the browser either.
+
+While the browser is at auth, it keeps the pending login itself, in a cookie named
+for its `state` and sealed (AES-256-GCM, under a key derived with HKDF-SHA256) with
+a cookie key the app configures, the same on every replica. The client ID and the
+cookie's name are its associated data, and the sealed value carries its own expiry,
+ten minutes, as the cookie's `Max-Age` does. So starting a login writes nothing
+server-side, logins started together in several tabs each complete, and a callback
+whose `state` names no cookie of the browser's touches no login in progress. Only a
+cookie that opens is read or dropped, so another app's cookies are never touched,
+even ones whose names start alike. A browser keeps at most three logins, in at most
+6000 bytes of cookies; a login beyond either drops the oldest, and one whose
+`return_to` would not fit in a 4000-byte cookie returns to the home page instead.
+The callback drops its login's cookie whatever the outcome.
+
+Cookie names carry the client ID, `__Host-piquel-<client_id>-session`, `-step-up`
+and `-login-<state>`, so apps sharing a host keep their own.
 
 Browser apps with no server are public clients and keep tokens in the page's memory
 only. Only the pending login crosses a redirect, in `sessionStorage`, and its
@@ -224,11 +246,16 @@ return.
 Applications choose where sessions live by implementing a small storage backend:
 load, an insert that stores only where no record is, a compare-and-swap replace, and
 a remove that reports whether the record existed. The SDK keeps everything else: the
-record format and its validation, expiry, pending logins, the refresh lease, and the
-records back-channel logout needs. Backends see only opaque records under
-the SHA-256 of each session key, so reading the backend does not give access to
-sessions. The SDK ships an in-memory backend for development and tests, and a check
-applications run against their own backend.
+record format and its validation, expiry, the refresh lease, and the records
+back-channel logout needs. In the Rust SDK, a session's record is named by the
+SHA-256 of the client ID and its session key, and sealed with AES-256-GCM under a
+key derived from the session key with HKDF-SHA256, the record's name bound as
+associated data. The backend never sees the session key, so reading it gives neither
+sessions nor tokens, and a record opens only under its own name, for its own client.
+A record that does not open is a missing session. The records back-channel logout
+needs hold only record names, expiries and digests. The SDK ships an in-memory
+backend for development and tests, and a check applications run against their own
+backend.
 
 Auth rotates refresh tokens and revokes the whole family on reuse, so concurrent
 refreshes of one session are serialized through a lease the SDK keeps in the session

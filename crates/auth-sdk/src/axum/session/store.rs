@@ -1,15 +1,19 @@
-//! The SDK's session logic over an application's backend: the record format and
-//! its validation, expiry, pending logins, the refresh lease, and the indexes
-//! back-channel logout finds sessions with.
+//! The SDK's session logic over an application's backend: the record format, its
+//! sealing and validation, expiry, the refresh lease, and the indexes back-channel
+//! logout finds sessions with.
 
 use super::{
-    PendingAuthorization, SessionKey, SessionRecord, StoredLogin,
+    LoginData, SessionKey, SessionRecord, StoredLogin,
     backend::{BackendError, ErasedBackend},
     hashed, random,
 };
 use crate::{
-    LEEWAY, LogoutScope, LogoutToken,
-    axum::{SessionBackend, bearer::ErrorChain},
+    ClientId, LEEWAY, LogoutScope, LogoutToken,
+    axum::{
+        SessionBackend,
+        bearer::ErrorChain,
+        seal::{Purpose, SealingKey},
+    },
 };
 use chrono::{DateTime, TimeDelta, Utc};
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
@@ -29,11 +33,11 @@ struct LeaseState {
     until: DateTime<Utc>,
 }
 
-/// What a session record's `data` holds.
+/// What a session record's `data` holds, sealed.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 struct SessionData {
     /// The signed-in user's tokens.
-    login: StoredLogin,
+    login: LoginData,
     /// The refresh lease, while an attempt holds it.
     lease: Option<LeaseState>,
 }
@@ -116,17 +120,20 @@ impl LeaseId {
     }
 }
 
-/// The SDK's session logic over an application's backend: record format, expiry,
-/// pending logins and the refresh lease.
+/// The SDK's session logic over an application's backend, for one client: record
+/// format, sealing, expiry and the refresh lease.
 #[derive(Clone)]
-pub(crate) struct Sessions(Arc<dyn ErasedBackend>);
+pub(crate) struct Sessions {
+    /// Where records live.
+    backend: Arc<dyn ErasedBackend>,
+    /// The client whose sessions these are, part of every session record's name.
+    client: ClientId,
+}
 
-/// Record kind of a signed-in session. `v2` sessions are listed in the logout
-/// indexes; earlier ones are not, so back-channel logout could not find them, and
-/// they are no longer read: their users sign in again.
-const SESSION: &str = "session-v2";
-/// Record kind of a pending login.
-const PENDING: &str = "pending";
+/// Record kind of a signed-in session. `v3` sessions are sealed and named for their
+/// client; earlier ones held tokens in plain text and are no longer read: their users
+/// sign in again.
+const SESSION: &str = "session-v3";
 /// Record kind of the sessions of one auth session, by issuer and `sid`.
 const SID_INDEX: &str = "logout-sid";
 /// Record kind of the sessions of one user, by issuer and `sub`.
@@ -134,10 +141,74 @@ const SUB_INDEX: &str = "logout-sub";
 /// Record kind of an applied logout token, by issuer and `jti`.
 const LOGOUT_JTI: &str = "logout-jti";
 
+/// Where one session lives: its record's name and the key sealing the record, both
+/// derived from the session key, which the backend never sees.
+struct SessionSlot {
+    /// The record's name: the SHA-256 of the client and the session key.
+    name: String,
+    /// The record's sealing key, derived from the session key.
+    seal: SealingKey,
+}
+
+impl SessionSlot {
+    /// `record`'s session data, unless it is expired, or does not open: written by
+    /// another version, for another record or client, or corrupted. Such a record is
+    /// treated as missing rather than trusted.
+    fn open(&self, record: &SessionRecord, now: DateTime<Utc>) -> Option<SessionData> {
+        if record.expires_at <= now {
+            return None;
+        }
+        let data = self.seal.open(&record.data, &self.name);
+        if data.is_none() {
+            tracing::warn!("ignoring a session record that does not open");
+        }
+        data
+    }
+
+    /// A record holding `data` sealed, at `version`, expiring at `expires_at`.
+    fn record(
+        &self,
+        data: &SessionData,
+        version: u64,
+        expires_at: DateTime<Utc>,
+    ) -> Result<SessionRecord, BackendError> {
+        Ok(SessionRecord {
+            version,
+            data: self.seal.seal(data, &self.name)?,
+            expires_at,
+        })
+    }
+}
+
 impl Sessions {
-    /// Sessions in `backend`.
-    pub(crate) fn new(backend: impl SessionBackend) -> Self {
-        Self(Arc::new(backend))
+    /// The sessions of `client` in `backend`.
+    pub(crate) fn new(backend: impl SessionBackend, client: ClientId) -> Self {
+        Self {
+            backend: Arc::new(backend),
+            client,
+        }
+    }
+
+    /// Where the session under `key` lives. The record is named for the client too,
+    /// so an app sharing the backend never finds another app's sessions.
+    fn slot(&self, key: &SessionKey) -> Result<SessionSlot, BackendError> {
+        Ok(SessionSlot {
+            name: hashed(SESSION, &[self.client.as_str(), key.secret()]),
+            seal: SealingKey::derive(key.secret().as_bytes(), Purpose::Session)?,
+        })
+    }
+
+    /// The session record under `slot` and its data, unless it is missing, expired or
+    /// does not open.
+    async fn read_session(
+        &self,
+        slot: &SessionSlot,
+        now: DateTime<Utc>,
+    ) -> Result<Option<(SessionRecord, SessionData)>, BackendError> {
+        let Some(record) = self.backend.load(&slot.name).await? else {
+            return Ok(None);
+        };
+        Ok(slot.open(&record, now).map(|data| (record, data)))
     }
 
     /// The decoded data of `record`, unless it is expired or unreadable. An unreadable
@@ -159,28 +230,10 @@ impl Sessions {
         key: &str,
         now: DateTime<Utc>,
     ) -> Result<Option<(SessionRecord, T)>, BackendError> {
-        let Some(record) = self.0.load(key).await? else {
+        let Some(record) = self.backend.load(key).await? else {
             return Ok(None);
         };
         Ok(Self::decode(&record, now).map(|data| (record, data)))
-    }
-
-    /// Stores `data` under the fresh random `key`, until `expires_at`.
-    async fn create(
-        &self,
-        key: &str,
-        data: &impl Serialize,
-        expires_at: DateTime<Utc>,
-    ) -> Result<(), BackendError> {
-        if self
-            .0
-            .insert(key, &Self::record(data, 1, expires_at)?)
-            .await?
-        {
-            Ok(())
-        } else {
-            Err(WriteError::KeyTaken.into())
-        }
     }
 
     /// Rewrites the record under `key`. `change` gets its data, `None` when it is
@@ -195,7 +248,7 @@ impl Sessions {
         change: impl Fn(Option<&T>) -> Option<(T, DateTime<Utc>)> + Send,
     ) -> Result<(bool, Option<T>), BackendError> {
         for _ in 0..UPDATE_ATTEMPTS {
-            let stored = self.0.load(key).await?;
+            let stored = self.backend.load(key).await?;
             let current = stored.as_ref().and_then(|record| Self::decode(record, now));
             let Some((data, expires_at)) = change(current.as_ref()) else {
                 return Ok((false, current));
@@ -206,10 +259,10 @@ impl Sessions {
             // the deleted one cannot overwrite its successor.
             let written = if let Some(record) = &stored {
                 let next = Self::record(&data, record.version + 1, expires_at)?;
-                self.0.replace(key, record.version, &next).await?
+                self.backend.replace(key, record.version, &next).await?
             } else {
                 let version = u64::try_from(now.timestamp_micros()).unwrap_or(1);
-                self.0
+                self.backend
                     .insert(key, &Self::record(&data, version, expires_at)?)
                     .await?
             };
@@ -239,9 +292,9 @@ impl Sessions {
         key: &SessionKey,
         now: DateTime<Utc>,
     ) -> Result<Option<Session>, BackendError> {
-        let session = self.read::<SessionData>(&key.record(SESSION), now).await?;
+        let session = self.read_session(&self.slot(key)?, now).await?;
         Ok(session.map(|(record, data)| Session {
-            login: data.login,
+            login: StoredLogin(data.login),
             version: record.version,
             leased: data.lease.is_some(),
         }))
@@ -257,15 +310,22 @@ impl Sessions {
         expires_at: DateTime<Utc>,
         now: DateTime<Utc>,
     ) -> Result<bool, BackendError> {
-        let name = key.record(SESSION);
+        let slot = self.slot(key)?;
         let data = SessionData {
-            login: login.clone(),
+            login: login.0.clone(),
             lease: None,
         };
-        self.create(&name, &data, expires_at).await?;
+        if !self
+            .backend
+            .insert(&slot.name, &slot.record(&data, 1, expires_at)?)
+            .await?
+        {
+            return Err(WriteError::KeyTaken.into());
+        }
+        let name = slot.name;
         let listed = self.list(&name, login, expires_at, now).await;
         if !matches!(listed, Ok(true))
-            && let Err(error) = self.0.remove(&name).await
+            && let Err(error) = self.backend.remove(&name).await
         {
             // The browser never gets this session's key, so the record is unreachable.
             tracing::warn!(error = %ErrorChain(error.as_ref()), "could not delete a session that failed to start");
@@ -284,7 +344,7 @@ impl Sessions {
         now: DateTime<Utc>,
     ) -> Result<bool, BackendError> {
         if let Some(sid) = login.sid() {
-            let index = hashed(SID_INDEX, &[&login.issuer, &sid.to_string()]);
+            let index = hashed(SID_INDEX, &[login.issuer(), &sid.to_string()]);
             let (joined, _) = self
                 .update(&index, now, |index: Option<&IndexData>| {
                     let index = index.cloned().unwrap_or_default();
@@ -295,7 +355,7 @@ impl Sessions {
                 return Ok(false);
             }
         }
-        let index = hashed(SUB_INDEX, &[&login.issuer, login.subject()]);
+        let index = hashed(SUB_INDEX, &[login.issuer(), login.subject()]);
         self.update(&index, now, |index: Option<&IndexData>| {
             Some(
                 index
@@ -371,14 +431,14 @@ impl Sessions {
             .into_iter()
             .flat_map(|index| index.sessions.into_keys())
         {
-            self.0.remove(&session).await?;
+            self.backend.remove(&session).await?;
         }
         Ok(())
     }
 
     /// Ends the session under `key`.
     pub(crate) async fn delete(&self, key: &SessionKey) -> Result<(), BackendError> {
-        self.0.remove(&key.record(SESSION)).await.map(drop)
+        self.backend.remove(&self.slot(key)?.name).await.map(drop)
     }
 
     /// Takes the refresh lease as `lease` until `now + ttl`, but only while the
@@ -391,8 +451,8 @@ impl Sessions {
         ttl: Duration,
         now: DateTime<Utc>,
     ) -> Result<Lease, BackendError> {
-        let name = key.record(SESSION);
-        let Some((record, mut data)) = self.read::<SessionData>(&name, now).await? else {
+        let slot = self.slot(key)?;
+        let Some((record, mut data)) = self.read_session(&slot, now).await? else {
             return Ok(Lease::Missing);
         };
         match &data.lease {
@@ -409,14 +469,16 @@ impl Sessions {
             id: lease.0.clone(),
             until,
         });
-        let leased = Self::record(&data, version + 1, record.expires_at)?;
-        Ok(if self.0.replace(&name, version, &leased).await? {
-            Lease::Acquired(until)
-        } else {
-            // Another request wrote between the read and the write, most likely
-            // taking the lease: wait for its result.
-            Lease::Busy
-        })
+        let leased = slot.record(&data, version + 1, record.expires_at)?;
+        Ok(
+            if self.backend.replace(&slot.name, version, &leased).await? {
+                Lease::Acquired(until)
+            } else {
+                // Another request wrote between the read and the write, most likely
+                // taking the lease: wait for its result.
+                Lease::Busy
+            },
+        )
     }
 
     /// Writes `login` and gives the lease back, but only if `lease` still holds it and
@@ -433,8 +495,8 @@ impl Sessions {
         login: StoredLogin,
         now: impl Fn() -> DateTime<Utc> + Send + Sync,
     ) -> Result<Option<Session>, BackendError> {
-        let name = key.record(SESSION);
-        let Some((record, data)) = self.read::<SessionData>(&name, now()).await? else {
+        let slot = self.slot(key)?;
+        let Some((record, data)) = self.read_session(&slot, now()).await? else {
             return Ok(None);
         };
         let now = now();
@@ -446,40 +508,19 @@ impl Sessions {
             return Ok(None);
         }
         let version = record.version + 1;
-        let data = SessionData { login, lease: None };
-        let saved = Self::record(&data, version, record.expires_at)?;
+        let data = SessionData {
+            login: login.0,
+            lease: None,
+        };
+        let saved = slot.record(&data, version, record.expires_at)?;
         Ok(self
-            .0
-            .replace(&name, record.version, &saved)
+            .backend
+            .replace(&slot.name, record.version, &saved)
             .await?
             .then_some(Session {
-                login: data.login,
+                login: StoredLogin(data.login),
                 version,
                 leased: false,
             }))
-    }
-
-    /// Keeps a pending login under `key`, until `expires_at`.
-    pub(crate) async fn insert_pending(
-        &self,
-        key: &SessionKey,
-        pending: &PendingAuthorization,
-        expires_at: DateTime<Utc>,
-    ) -> Result<(), BackendError> {
-        self.create(&key.record(PENDING), pending, expires_at).await
-    }
-
-    /// Takes the pending login under `key`, at most once: only the request whose
-    /// removal succeeds gets it.
-    pub(crate) async fn take_pending(
-        &self,
-        key: &SessionKey,
-        now: DateTime<Utc>,
-    ) -> Result<Option<PendingAuthorization>, BackendError> {
-        let name = key.record(PENDING);
-        let Some((_, pending)) = self.read(&name, now).await? else {
-            return Ok(None);
-        };
-        Ok(self.0.remove(&name).await?.then_some(pending))
     }
 }

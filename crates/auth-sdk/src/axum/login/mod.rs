@@ -14,11 +14,11 @@ pub use extract::{CrossOrigin, MaybeSignedIn, SignedIn, StepUp};
 pub use layer::{LoginLayer, LoginService};
 
 use super::{
-    SessionBackend,
+    CookieKey, SessionBackend,
     bearer::ErrorChain,
     session::{BackendError, Sessions},
 };
-use crate::{Client, Scopes, StepUpRequirement};
+use crate::{Client, ClientId, Scopes, StepUpRequirement};
 use axum::{
     Router,
     http::{HeaderMap, HeaderValue, StatusCode, header, request::Parts},
@@ -31,14 +31,6 @@ use serde::{Deserialize, Serialize};
 use std::{fmt, str::FromStr, sync::Arc};
 use url::Url;
 
-/// Cookie holding the session key. `__Host-` makes browsers require `Secure`,
-/// `Path=/` and no `Domain`, so no other host can set or read it.
-const SESSION_COOKIE: &str = "__Host-piquel-session";
-/// Cookie holding the pending login's key while the browser is at auth.
-const LOGIN_COOKIE: &str = "__Host-piquel-login";
-/// Cookie naming, in base64url, the page a step-up login returns to, so that page's
-/// request is known to be the retry.
-const STEP_UP_COOKIE: &str = "__Host-piquel-step-up";
 /// How long the browser has to follow the redirect back after a step-up login.
 const STEP_UP_RETURN: TimeDelta = TimeDelta::minutes(1);
 /// How long a login may take at auth.
@@ -47,6 +39,57 @@ const PENDING_LIFETIME: TimeDelta = TimeDelta::minutes(10);
 const DEFAULT_SESSION_LIFETIME: TimeDelta = TimeDelta::hours(12);
 /// Most bytes in a `return_to` path.
 const MAX_RETURN_TO_BYTES: usize = 2048;
+/// Most logins one browser may have in progress, one cookie each. A login started
+/// beyond it drops the oldest.
+const MAX_PENDING_LOGINS: usize = 3;
+/// Most bytes in a pending login cookie's name and value. Browsers keep cookies of
+/// up to 4096 bytes, attributes included; a login whose `return_to` would outgrow it
+/// returns to the home page instead.
+const MAX_PENDING_COOKIE_BYTES: usize = 4000;
+/// Most bytes in all of a browser's pending login cookies together, the new one
+/// included: common proxies refuse a `Cookie` header over 8 KiB, which the session
+/// and the app's own cookies share. A login started beyond it drops the oldest.
+const MAX_PENDING_BYTES: usize = 6000;
+/// Longest `state` a pending login's cookie is named for; the SDK's are 43 bytes.
+const MAX_STATE_BYTES: usize = 64;
+
+/// The names of the login routes' cookies. Each carries the client ID, so apps
+/// sharing a host keep their own. `__Host-` makes browsers require `Secure`,
+/// `Path=/` and no `Domain`, so no other host can set or read them.
+#[derive(Clone, Debug)]
+struct CookieNames {
+    /// Holds the session key.
+    session: String,
+    /// Names, in base64url, the page a step-up login returns to, so that page's
+    /// request is known to be the retry.
+    step_up: String,
+    /// Starts the name of each pending login's cookie, which ends with its `state`,
+    /// so logins started together in several tabs do not overwrite each other.
+    pending: String,
+}
+
+impl CookieNames {
+    /// The names for `client`, whose IDs are letters, digits, `.`, `_` and `-`, all
+    /// valid in a cookie name.
+    fn new(client: &ClientId) -> Self {
+        let prefix = format!("__Host-piquel-{client}");
+        Self {
+            session: format!("{prefix}-session"),
+            step_up: format!("{prefix}-step-up"),
+            pending: format!("{prefix}-login-"),
+        }
+    }
+
+    /// The name of the cookie holding the login started with `state`, if `state` has
+    /// the shape the SDK sends: base64url, at most 64 bytes.
+    fn pending(&self, state: &str) -> Option<String> {
+        let valid = (1..=MAX_STATE_BYTES).contains(&state.len())
+            && state
+                .bytes()
+                .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_'));
+        valid.then(|| format!("{}{state}", self.pending))
+    }
+}
 
 /// A path on this app to send the user back to: same-origin and relative, so login
 /// cannot be turned into an open redirect. It starts with one `/` (not `//` or
@@ -120,6 +163,10 @@ struct Login {
     client: Client,
     /// Where sessions live.
     sessions: Sessions,
+    /// Seals the pending logins the browser keeps.
+    cookie_key: Arc<CookieKey>,
+    /// The cookies' names.
+    cookies: CookieNames,
     /// Scopes requested besides `openid`.
     scopes: Scopes,
     /// Where users go after login when no `return_to` was given, and after logout
@@ -135,11 +182,14 @@ struct Login {
 
 /// Server-side login for apps: the routes, and the layer the session extractors need.
 ///
-/// - `GET /login?return_to=…` stores a pending login under a fresh random key and
-///   redirects to auth, pushing the request first when auth advertises it
-///   ([`Client::authorize`]). It answers 502 if the push fails.
-/// - `GET /callback` completes it, then starts a session under another fresh key,
-///   ending any session the browser already had.
+/// - `GET /login?return_to=…` keeps a pending login in a cookie named for its
+///   `state`, sealed with the [`CookieKey`], and redirects to auth, pushing the
+///   request first when auth advertises it ([`Client::authorize`]). It writes
+///   nothing to the backend, and answers 502 if the push fails. Each tab's login has
+///   its own cookie, so logins started together all complete; a browser keeps at
+///   most three, dropping the oldest.
+/// - `GET /callback` completes the login its `state` names, then starts a session
+///   under a fresh random key, ending any session the browser already had.
 /// - `POST /logout` deletes the session and redirects to RP-initiated logout.
 /// - `POST /backchannel-logout` receives auth's logout tokens (OIDC Back-Channel
 ///   Logout 1.0) and deletes the sessions they name: every session started under the
@@ -159,7 +209,7 @@ struct Login {
 /// use chrono::TimeDelta;
 /// use piquel_auth::{
 ///     ClientConfig, Credentials,
-///     axum::{LoginRoutes, SignedIn},
+///     axum::{CookieKey, LoginRoutes, SignedIn},
 /// };
 ///
 /// async fn home(user: SignedIn) -> String {
@@ -172,7 +222,9 @@ struct Login {
 ///     // The callback route below, as registered with auth.
 ///     redirect_uri: "https://notes.piquel.fr/account/callback".parse()?,
 /// });
-/// let auth = LoginRoutes::new(client, backend)
+/// // The same key on every replica, kept like the client secret.
+/// let key = CookieKey::from_base64(&std::env::var("NOTES_COOKIE_KEY")?)?;
+/// let auth = LoginRoutes::new(client, backend, key)
 ///     .scopes("profile offline_access".parse()?)
 ///     .after_login("/notes".parse()?)
 ///     .after_logout("https://notes.piquel.fr/".parse()?)
@@ -199,12 +251,16 @@ impl fmt::Debug for LoginRoutes {
 }
 
 impl LoginRoutes {
-    /// Login with `client`, keeping sessions in `backend`.
+    /// Login with `client`, keeping sessions in `backend` and sealing pending logins
+    /// with `cookie_key`.
     #[must_use]
-    pub fn new(client: Client, backend: impl SessionBackend) -> Self {
+    pub fn new(client: Client, backend: impl SessionBackend, cookie_key: CookieKey) -> Self {
+        let id = &client.config().client_id;
         Self(Login {
+            sessions: Sessions::new(backend, id.clone()),
+            cookie_key: Arc::new(cookie_key),
+            cookies: CookieNames::new(id),
             client,
-            sessions: Sessions::new(backend),
             scopes: Scopes::default(),
             home: ReturnTo::root(),
             after_logout: None,
@@ -269,17 +325,19 @@ impl LoginRoutes {
 }
 
 impl Login {
-    /// Reads a cookie from the request.
-    fn cookie<'a>(headers: &'a HeaderMap, name: &str) -> Option<&'a str> {
+    /// The request's cookies, as name and value.
+    fn cookies(headers: &HeaderMap) -> impl Iterator<Item = (&str, &str)> {
         headers
             .get_all(header::COOKIE)
             .iter()
             .filter_map(|value| value.to_str().ok())
             .flat_map(|value| value.split(';'))
-            .find_map(|pair| {
-                let (key, value) = pair.trim().split_once('=')?;
-                (key == name).then_some(value)
-            })
+            .filter_map(|pair| pair.trim().split_once('='))
+    }
+
+    /// Reads a cookie from the request.
+    fn cookie<'a>(headers: &'a HeaderMap, name: &str) -> Option<&'a str> {
+        Self::cookies(headers).find_map(|(key, value)| (key == name).then_some(value))
     }
 
     /// A `Set-Cookie` value for a host-only, script-inaccessible cookie; zero
@@ -289,7 +347,8 @@ impl Login {
             "{name}={value}; Path=/; Secure; HttpOnly; SameSite=Lax; Max-Age={}",
             max_age.num_seconds().max(0)
         );
-        // Names are constants and values base64url, so the header is always valid.
+        // Names are made of client ID and base64url characters, and values are
+        // base64url, so the header is always valid.
         HeaderValue::try_from(cookie).unwrap_or(HeaderValue::from_static(""))
     }
 

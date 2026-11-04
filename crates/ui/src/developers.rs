@@ -182,7 +182,7 @@ impl Label for AppTab {
 
 impl ClientRow<'_> {
     /// A Rust program signing users in through this app at `issuer`, with the Rust
-    /// SDK's axum routes. It never holds the secret: it reads it from the
+    /// SDK's axum routes. It never holds a secret: it reads them from the
     /// environment.
     fn rust_example(&self, issuer: &str) -> String {
         let id = self.id;
@@ -210,7 +210,7 @@ impl ClientRow<'_> {
 // axum = "0.8"
 // tokio = {{ version = "1", features = ["macros", "rt-multi-thread", "net"] }}
 use axum::{{Router, routing::get}};
-use piquel_auth::axum::{{LoginRoutes, MemoryBackend, SignedIn}};
+use piquel_auth::axum::{{CookieKey, LoginRoutes, MemoryBackend, SignedIn}};
 use piquel_auth::{{ClientConfig, Credentials, Issuer}};
 
 async fn home(user: SignedIn) -> String {{
@@ -227,7 +227,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {{
         redirect_uri: "{redirect}".parse()?,
     }};
     // Sessions in memory, lost on restart: implement SessionBackend to keep them.
-    let auth = LoginRoutes::new(issuer.client(config), MemoryBackend::default())
+    // Seals logins in progress; set PIQUEL_COOKIE_KEY="$(openssl rand -base64 32)",
+    // the same on every replica.
+    let cookie_key = CookieKey::from_base64(&std::env::var("PIQUEL_COOKIE_KEY")?)?;
+    let auth = LoginRoutes::new(issuer.client(config), MemoryBackend::default(), cookie_key)
         .scopes("{scopes}".parse()?);
     let app = Router::new()
         .route("/", get(home))

@@ -30,15 +30,16 @@
 //! ```
 //!
 //! **Apps that sign users in** mount [`LoginRoutes`] and its layer, then take
-//! [`SignedIn`] or [`MaybeSignedIn`]. Tokens stay server-side, in the application's
-//! [`SessionBackend`]; the browser holds only a random session key. Both refuse a
+//! [`SignedIn`] or [`MaybeSignedIn`]. Tokens stay server-side, sealed in the
+//! application's [`SessionBackend`]; the browser holds only a random session key,
+//! and while it is at auth, its pending login sealed with a [`CookieKey`]. Both refuse a
 //! request that is not `GET`, `HEAD`, `OPTIONS` or `TRACE` unless it comes from the
 //! app's own pages, so handlers need no CSRF token; [`CrossOrigin`] opts an endpoint
 //! out.
 //!
 //! ```no_run
 //! use axum::{Router, routing::get};
-//! use piquel_auth::axum::{LoginRoutes, MemoryBackend, SignedIn};
+//! use piquel_auth::axum::{CookieKey, LoginRoutes, MemoryBackend, SignedIn};
 //! # use piquel_auth::{ClientConfig, Credentials, Issuer};
 //!
 //! async fn home(user: SignedIn) -> String {
@@ -52,8 +53,10 @@
 //! #     credentials: Credentials::None,
 //! #     redirect_uri: "https://notes.piquel.fr/auth/callback".parse()?,
 //! # };
-//! // `MemoryBackend` is for development: implement `SessionBackend` to persist sessions.
-//! let auth = LoginRoutes::new(issuer.client(config), MemoryBackend::default())
+//! // `MemoryBackend` and a generated key are for development: implement
+//! // `SessionBackend` to persist sessions, and share one `CookieKey::from_base64`
+//! // between replicas.
+//! let auth = LoginRoutes::new(issuer.client(config), MemoryBackend::default(), CookieKey::generate()?)
 //!     .scopes("profile".parse()?)
 //!     .after_login("/notes".parse()?);
 //! let app: Router = Router::new()
@@ -80,6 +83,8 @@
 mod bearer;
 /// Server-side login routes and session extractors.
 mod login;
+/// Sealing session records and pending logins.
+mod seal;
 /// Session storage.
 mod session;
 #[cfg(test)]
@@ -92,6 +97,7 @@ pub use login::{
     CrossOrigin, InvalidReturnTo, LoginLayer, LoginRoutes, LoginService, MaybeSignedIn, ReturnTo,
     SignedIn, StepUp,
 };
+pub use seal::{CookieKey, CookieKeyError};
 #[cfg(any(test, feature = "test-util"))]
 pub use session::{BackendCheckError, check_backend};
 pub use session::{MemoryBackend, SessionBackend, SessionRecord, StoredLogin};

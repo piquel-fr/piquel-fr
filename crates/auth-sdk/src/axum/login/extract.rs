@@ -44,7 +44,7 @@ impl SignedIn {
     /// The user's name: the display name, else the username, else the account ID.
     #[must_use]
     pub fn name(&self) -> &str {
-        let claims = self.login.id_token.claims();
+        let claims = self.login.id_token().claims();
         claims
             .profile
             .name
@@ -58,13 +58,13 @@ impl SignedIn {
     /// # Errors
     /// [`TokenError::InvalidSubject`] if `sub` is not an account ID.
     pub fn user_id(&self) -> Result<UserId, TokenError> {
-        self.login.id_token.user_id()
+        self.login.id_token().user_id()
     }
 
     /// The ID token of the sign-in.
     #[must_use]
     pub const fn id_token(&self) -> &IdToken {
-        &self.login.id_token
+        self.login.id_token()
     }
 
     /// The stored login, with the access token to call APIs for the user.
@@ -98,7 +98,7 @@ impl SignedIn {
     /// # Errors
     /// The [`StepUp`] asking for `P`'s requirement.
     pub fn require<P: AuthenticationPolicy>(&self) -> Result<(), StepUp> {
-        let signed_in = &self.login.id_token;
+        let signed_in = self.login.id_token();
         if signed_in
             .require_authentication(P::REQUIREMENT, self.checked_at)
             .is_ok()
@@ -127,7 +127,7 @@ impl SignedIn {
     ///     let http = reqwest::Client::new();
     ///     let Ok(answer) = http
     ///         .get("https://api.example.com/settings")
-    ///         .bearer_auth(user.login().access_token.expose())
+    ///         .bearer_auth(user.login().access_token().expose())
     ///         .send()
     ///         .await
     ///     else {

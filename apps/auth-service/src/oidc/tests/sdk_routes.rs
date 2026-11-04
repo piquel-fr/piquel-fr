@@ -35,7 +35,9 @@ impl LoginApp {
     async fn start() -> Self {
         use piquel_auth::{
             ClientConfig, Credentials, Resource,
-            axum::{BearerLayer, LoginRoutes, MemoryBackend, RequireAuthentication, SignedIn},
+            axum::{
+                BearerLayer, CookieKey, LoginRoutes, MemoryBackend, RequireAuthentication, SignedIn,
+            },
             protocol::challenge::BearerChallenge,
         };
         let tcp = tokio::net::TcpListener::bind("127.0.0.1:0")
@@ -92,7 +94,7 @@ impl LoginApp {
                 let request = Request::get(path)
                     .header(
                         header::AUTHORIZATION,
-                        format!("Bearer {}", user.login().access_token.expose()),
+                        format!("Bearer {}", user.login().access_token().expose()),
                     )
                     .body(Body::empty())
                     .expect("API request");
@@ -108,7 +110,8 @@ impl LoginApp {
                 }
             }
         };
-        let auth = LoginRoutes::new(client, MemoryBackend::default())
+        let key = CookieKey::generate().expect("cookie key");
+        let auth = LoginRoutes::new(client, MemoryBackend::default(), key)
             .scopes("profile offline_access".parse().expect("scopes"))
             .after_logout(
                 flow.client.post_logout_uris[0]
@@ -120,7 +123,7 @@ impl LoginApp {
             .route(
                 "/notes",
                 axum::routing::get(|user: SignedIn| async move {
-                    user.login().access_token.expose().to_owned()
+                    user.login().access_token().expose().to_owned()
                 }),
             )
             .route("/settings", axum::routing::get(call_api("/settings")))
@@ -128,6 +131,12 @@ impl LoginApp {
             .nest("/auth", auth.router())
             .layer(auth.layer());
         Self { flow, app, clock }
+    }
+
+    /// The name of the login routes' cookie ending in `suffix`, which names the
+    /// client.
+    fn named(&self, suffix: &str) -> String {
+        format!("__Host-piquel-{}-{suffix}", self.flow.client.id)
     }
 
     /// Sends a request to the app with an optional cookie. Posts carry the app's
@@ -187,8 +196,15 @@ impl LoginApp {
                 "{cookie}"
             );
         }
+        // Pushed requests keep `state` out of the URL: the cookie is named for it.
+        let pending = self.named("login-");
+        let cookie = Self::cookies(&start)
+            .into_iter()
+            .find(|cookie| cookie.starts_with(&pending))
+            .and_then(|cookie| cookie.split(';').next().map(str::to_owned))
+            .expect("pending login cookie");
         (
-            Self::cookie(&start, "__Host-piquel-login"),
+            cookie,
             Url::parse(&Self::location(&start)).expect("authorization URL"),
         )
     }
@@ -250,15 +266,17 @@ async fn sdk_login_routes_run_against_the_provider() {
     let callback = app.sign_in(&LoginApp::location(&page), None).await;
     assert_eq!(LoginApp::location(&callback), "/notes?page=2");
     let cookies = LoginApp::cookies(&callback);
+    let session = app.named("session");
     assert!(
         cookies
             .iter()
-            .any(|cookie| cookie.starts_with("__Host-piquel-session=")
+            .any(|cookie| cookie.starts_with(&format!("{session}="))
                 && cookie.ends_with("; Path=/; Secure; HttpOnly; SameSite=Lax; Max-Age=43200"))
     );
-    assert!(cookies.iter().any(|cookie| cookie
-        == "__Host-piquel-login=; Path=/; Secure; HttpOnly; SameSite=Lax; Max-Age=0"));
-    let first = LoginApp::cookie(&callback, "__Host-piquel-session");
+    let pending = app.named("login-");
+    assert!(cookies.iter().any(|cookie| cookie.starts_with(&pending)
+        && cookie.ends_with("=; Path=/; Secure; HttpOnly; SameSite=Lax; Max-Age=0")));
+    let first = LoginApp::cookie(&callback, &app.named("session"));
     let shown = app.send(Method::GET, "/notes", Some(&first)).await;
     assert_eq!(shown.status(), StatusCode::OK);
     let access = Flow::text(shown).await;
@@ -266,7 +284,7 @@ async fn sdk_login_routes_run_against_the_provider() {
     // A second sign-in rotates the session and ends the first one.
     let callback = app.sign_in("/auth/login", Some(&first)).await;
     assert_eq!(LoginApp::location(&callback), "/");
-    let second = LoginApp::cookie(&callback, "__Host-piquel-session");
+    let second = LoginApp::cookie(&callback, &app.named("session"));
     assert_ne!(first, second);
     let stale = app.send(Method::GET, "/notes", Some(&first)).await;
     assert_eq!(LoginApp::location(&stale), "/auth/login?return_to=%2Fnotes");
@@ -293,7 +311,7 @@ async fn sdk_login_routes_run_against_the_provider() {
     assert!(
         LoginApp::cookies(&logout)
             .iter()
-            .any(|cookie| cookie.starts_with("__Host-piquel-session=;"))
+            .any(|cookie| cookie.starts_with(&format!("{}=;", app.named("session"))))
     );
     let after = app.send(Method::GET, "/notes", Some(&second)).await;
     assert_eq!(after.status(), StatusCode::SEE_OTHER);
@@ -336,7 +354,7 @@ async fn sdk_step_up_runs_against_the_provider() {
         .sign_in_again(AuthenticationMethod::Federation)
         .await;
     let callback = app.sign_in("/auth/login", None).await;
-    let first = LoginApp::cookie(&callback, "__Host-piquel-session");
+    let first = LoginApp::cookie(&callback, &app.named("session"));
 
     let page = app.send(Method::GET, "/settings", Some(&first)).await;
     let login = LoginApp::location(&page);
@@ -387,8 +405,8 @@ async fn sdk_step_up_runs_against_the_provider() {
         .await;
     let callback = app.finish_login(browser, pending, Some(&first)).await;
     assert_eq!(LoginApp::location(&callback), "/settings");
-    let second = LoginApp::cookie(&callback, "__Host-piquel-session");
-    let retry = LoginApp::cookie(&callback, "__Host-piquel-step-up");
+    let second = LoginApp::cookie(&callback, &app.named("session"));
+    let retry = LoginApp::cookie(&callback, &app.named("step-up"));
 
     let page = app
         .send(
@@ -400,7 +418,7 @@ async fn sdk_step_up_runs_against_the_provider() {
     assert!(
         LoginApp::cookies(&page)
             .iter()
-            .any(|cookie| cookie.starts_with("__Host-piquel-step-up=;")),
+            .any(|cookie| cookie.starts_with(&format!("{}=;", app.named("step-up")))),
         "the retry marker is used up"
     );
     assert_eq!(page.status(), StatusCode::OK);
@@ -414,8 +432,8 @@ async fn sdk_step_up_runs_against_the_provider() {
     assert_eq!(login, "/auth/login?return_to=%2Fstubborn&step_up=true");
     let callback = app.sign_in(&login, Some(&second)).await;
     assert_eq!(LoginApp::location(&callback), "/stubborn");
-    let third = LoginApp::cookie(&callback, "__Host-piquel-session");
-    let retry = LoginApp::cookie(&callback, "__Host-piquel-step-up");
+    let third = LoginApp::cookie(&callback, &app.named("session"));
+    let retry = LoginApp::cookie(&callback, &app.named("step-up"));
     let cookies = format!("{third}; {retry}");
     // Only the returning `GET` is the retry.
     let other = app.send(Method::POST, "/stubborn", Some(&cookies)).await;
@@ -426,13 +444,13 @@ async fn sdk_step_up_runs_against_the_provider() {
     // An ordinary sign-in drops a marker its return never used.
     let page = app.send(Method::GET, "/stubborn", Some(&third)).await;
     let callback = app.sign_in(&LoginApp::location(&page), Some(&third)).await;
-    let fourth = LoginApp::cookie(&callback, "__Host-piquel-session");
-    let unused = LoginApp::cookie(&callback, "__Host-piquel-step-up");
+    let fourth = LoginApp::cookie(&callback, &app.named("session"));
+    let unused = LoginApp::cookie(&callback, &app.named("step-up"));
     let callback = app.sign_in("/auth/login", Some(&fourth)).await;
     assert!(
         LoginApp::cookies(&callback)
             .iter()
-            .any(|cookie| cookie.starts_with("__Host-piquel-step-up=;")),
+            .any(|cookie| cookie.starts_with(&format!("{}=;", app.named("step-up")))),
         "the unused marker {unused} is dropped"
     );
 }

@@ -327,9 +327,10 @@ pub struct Tokens {
     pub refresh_token: Option<RefreshToken>,
 }
 
-/// A login waiting for its callback. Store it server-side, keyed by [`Self::state`],
-/// and pass it to [`Client::complete`], which consumes it so a callback completes at
-/// most once.
+/// A login waiting for its callback. It holds the PKCE verifier, so keep it
+/// server-side, keyed by [`Self::state`], or seal it into a cookie as the axum login
+/// routes do, and pass it to [`Client::complete`]. Auth redeems a code once, so a
+/// callback completes at most once.
 #[derive(Clone, Serialize, Deserialize)]
 pub struct PendingLogin {
     /// Issuer the login was started with.
@@ -508,7 +509,7 @@ struct ClientInner {
 /// });
 ///
 /// // 1. Send the browser to `url`, and keep the pending login server-side under its
-/// //    state, never in the browser: it holds the PKCE verifier.
+/// //    state, never in the browser unsealed: it holds the PKCE verifier.
 /// let (url, pending) = client
 ///     .authorize(&AuthorizeRequest {
 ///         scopes: "profile offline_access".parse()?,
@@ -558,7 +559,7 @@ impl Client {
     }
 
     /// Starts a login: the authorization URL to redirect the browser to, and the
-    /// pending login to store server-side until the callback.
+    /// pending login to keep until the callback.
     ///
     /// When discovery advertises a pushed authorization endpoint, the request is
     /// pushed there (RFC 9126), authenticated as at the token endpoint, and the URL
