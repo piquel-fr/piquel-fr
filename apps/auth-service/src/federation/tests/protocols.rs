@@ -277,3 +277,65 @@ fn provider_secrets_fail_early_with_context() {
     std::fs::remove_file(path).expect("remove secret");
     assert_eq!(resolved.client_secret.expose_secret(), b"secret");
 }
+
+/// A provider's picture is kept only on its own picture host, over HTTPS, and
+/// asks for the stored size.
+#[test]
+fn provider_pictures_stay_on_the_provider_s_host() {
+    let parsed = |provider, url: &str| {
+        ProviderPicture::parse(provider, url).map(|picture| picture.as_str().to_owned())
+    };
+    assert_eq!(
+        parsed(
+            Provider::GitHub,
+            "https://avatars.githubusercontent.com/u/1?v=4&s=40"
+        )
+        .as_deref(),
+        Some("https://avatars.githubusercontent.com/u/1?v=4&s=512")
+    );
+    assert_eq!(
+        parsed(
+            Provider::Google,
+            "https://lh3.googleusercontent.com/a/ACg8oc=s96-c"
+        )
+        .as_deref(),
+        Some("https://lh3.googleusercontent.com/a/ACg8oc=s512-c")
+    );
+    for (provider, url) in [
+        (Provider::GitHub, "http://avatars.githubusercontent.com/u/1"),
+        (
+            Provider::GitHub,
+            "https://avatars.githubusercontent.com:8443/u/1",
+        ),
+        (
+            Provider::GitHub,
+            "https://user@avatars.githubusercontent.com/u/1",
+        ),
+        (
+            Provider::GitHub,
+            "https://avatars.githubusercontent.com.example/u/1",
+        ),
+        (
+            Provider::GitHub,
+            "https://lh3.googleusercontent.com/a/x=s96-c",
+        ),
+        (
+            Provider::Google,
+            "https://avatars.githubusercontent.com/u/1",
+        ),
+        (
+            Provider::Google,
+            "https://googleusercontent.com.example/a=s96-c",
+        ),
+        (Provider::Google, "https://127.0.0.1/a=s96-c"),
+        (Provider::Google, "not a URL"),
+    ] {
+        assert_eq!(parsed(provider, url), None, "{url}");
+    }
+    let long = format!("https://avatars.githubusercontent.com/{}", "a".repeat(2048));
+    assert_eq!(parsed(Provider::GitHub, &long), None);
+    // Within the limit as reported, past it once it asks for the size.
+    let host = "https://avatars.githubusercontent.com/";
+    let near = format!("{host}{}", "a".repeat(2048 - host.len()));
+    assert_eq!(parsed(Provider::GitHub, &near), None);
+}

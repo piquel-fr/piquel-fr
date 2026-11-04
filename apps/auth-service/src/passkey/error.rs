@@ -264,4 +264,7 @@ pub enum PasskeyConfigError {
     /// `WebAuthn` rejected its validated configuration.
     #[error("WebAuthn initialization failed")]
     Webauthn(#[from] WebauthnError),
+    /// The HTTP client that fetches providers' pictures could not initialize.
+    #[error("could not initialize the outbound HTTP client")]
+    Outbound(#[source] reqwest::Error),
 }

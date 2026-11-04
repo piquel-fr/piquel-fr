@@ -41,6 +41,7 @@ use error::InvalidReturnTo;
 pub(crate) use identities::{PendingKind, PendingView};
 /// Provider protocol facts and verified identity exchange.
 mod providers;
+pub(crate) use providers::ProviderPicture;
 use providers::{ProviderEndpoints, VerifiedIdentity};
 
 /// Lifetime of a started flow and of pending provider evidence.
@@ -548,6 +549,7 @@ impl FederationApplication {
                 subject: identity.subject,
                 email: identity.email,
                 display_name: identity.display_name,
+                picture_url: identity.picture.map(|picture| picture.as_str().to_owned()),
                 return_to,
                 link_user_id,
                 link_session_id,

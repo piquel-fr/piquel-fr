@@ -1,14 +1,22 @@
-//! The account API's picture upload, through the whole service.
+//! The account API's picture upload, through the whole service, and importing a
+//! provider's picture into an account.
 
+use super::PictureError;
 use crate::{
+    account::{AccountError, AccountService},
+    deliveries::OutboundClient,
+    federation::ProviderPicture,
     routes::pictures,
-    security::CSRF_HEADER,
-    tests::{AUTH_ORIGIN, Browser, MAX_RESPONSE_BYTES, Replicas, detailed_png},
+    security::{CSRF_HEADER, RequestContext},
+    tests::{AUTH_ORIGIN, Browser, MAX_RESPONSE_BYTES, Replicas, TlsListener, detailed_png},
 };
 use axum::{
+    Router,
     body::{Body, to_bytes},
     http::{Method, Request, StatusCode, header},
+    routing::get,
 };
+use piquel_common::events::Actor;
 use serde_json::Value;
 use tower::ServiceExt;
 
@@ -56,4 +64,55 @@ async fn the_account_api_uploads_a_picture() {
     let (status, read) = owner.call(&replicas.a, Method::GET, pictures::OWN).await;
     assert_eq!(status, StatusCode::OK);
     assert_eq!(read, uploaded);
+}
+
+/// A signup's provider picture becomes the account's first picture; a second
+/// import leaves a picture the account already has; a picture that is not there
+/// fails, changing nothing.
+#[tokio::test]
+#[ignore = "requires TEST_DATABASE_URL"]
+async fn a_provider_picture_is_imported_once() {
+    let database = Replicas::database().await;
+    let user = Browser::new_account(&database).await.user_id;
+    let png = |side| {
+        let mut png = std::io::Cursor::new(Vec::new());
+        image::DynamicImage::new_rgb8(side, side)
+            .write_to(&mut png, image::ImageFormat::Png)
+            .expect("PNG");
+        png.into_inner()
+    };
+    let (first, second) = (png(40), png(80));
+    let provider = Router::new()
+        .route("/first", get(move || std::future::ready(first.clone())))
+        .route("/second", get(move || std::future::ready(second.clone())));
+    let tcp = tokio::net::TcpListener::bind("127.0.0.1:0")
+        .await
+        .expect("bind provider");
+    let origin = format!(
+        "https://localhost:{}",
+        tcp.local_addr().expect("address").port()
+    );
+    let client = OutboundClient::local(TlsListener::serve(tcp, provider));
+    let account = AccountService::new(database.clone());
+    let context = RequestContext::TEST.actor(Actor::User {
+        user_id: user,
+        session_id: None,
+    });
+    let import = async |path: &str| {
+        let url = ProviderPicture::local(&format!("{origin}{path}"));
+        account.import_picture(&client, user, &context, &url).await
+    };
+    let current = async || database.pictures().find(user).await.expect("read");
+
+    import("/first").await.expect("imported");
+    let imported = current().await.expect("a picture");
+    import("/second").await.expect("kept");
+    assert_eq!(current().await, Some(imported), "an existing picture stays");
+
+    database.pictures().remove(user).await.expect("remove");
+    assert!(matches!(
+        import("/missing").await,
+        Err(AccountError::Picture(PictureError::Fetch(_)))
+    ));
+    assert_eq!(current().await, None);
 }

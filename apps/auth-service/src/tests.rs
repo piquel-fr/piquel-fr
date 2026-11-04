@@ -471,6 +471,7 @@ pub(crate) fn pending_sign_in(browser: &Secret) -> PendingFederation {
         subject: TokenId::new().to_string(),
         email: None,
         display_name: "Social account".into(),
+        picture_url: None,
         return_to: routes::page::settings::HOME.into(),
         link_user_id: None,
         link_session_id: None,

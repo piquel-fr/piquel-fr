@@ -255,6 +255,15 @@ name and the handle.
   requests have a rate budget of their own. A random ID rather than the content's
   hash, since a hash would let anyone holding an image check whether an account
   uses it, and re-encoding leaves nothing to deduplicate.
+- **Imported at a social signup.** An account created with GitHub or Google
+  starts with the picture the provider reported: GitHub's avatar, or Google's
+  `picture` claim, asked for at 512 pixels. Only a URL on the provider's own
+  picture host is kept, with the signup's pending evidence. Once the account is
+  committed, auth fetches it once, off the signup's request, with the client
+  deliveries use, which reaches only public addresses and follows no redirect,
+  asking only for the formats it reads, and encodes it as an upload. A picture
+  that cannot be fetched or encoded is logged; the signup has already
+  succeeded. Later sign-ins import nothing, so a removed picture stays removed.
 
 ## Contracts
 

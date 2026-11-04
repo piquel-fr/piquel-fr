@@ -20,11 +20,12 @@ use axum::{
     response::{IntoResponse, Response},
 };
 use piquel_common::{
-    AuthenticationMethod, Handle, UserId,
+    AuthenticationMethod, ErrorChain, Handle, UserId,
     events::{Actor, DomainEvent},
 };
 use piquel_crypto::Secret;
 use piquel_repository::{DatabaseError, InsertUser};
+use tracing::Instrument;
 use webauthn_rs::{Webauthn, prelude::*};
 
 impl PasskeyApplication {
@@ -161,13 +162,33 @@ impl PasskeyApplication {
         )
         .await?;
         let passkey = Self::insert_passkey(&mut tx, &actor, user_id, key, friendly_name).await?;
-        if let Some(pending) = pending {
-            FederationApplication::attach_signup(&mut tx, &actor, pending, &headers, user_id)
-                .await?;
-        }
+        let picture = match pending {
+            Some(pending) => {
+                FederationApplication::attach_signup(&mut tx, &actor, pending, &headers, user_id)
+                    .await?
+            }
+            None => None,
+        };
         let mut response =
             Self::complete_sign_in(tx, context, &headers, user_id, Credential::Passkey(passkey))
                 .await?;
+        // Once the account is committed, and off the request, so a slow provider or
+        // uploads waiting to be decoded never hold up the sign-up. A picture that
+        // cannot be imported is only logged: the owner may upload one.
+        if let Some(picture) = picture {
+            let (account, outbound) = (app.service(), app.outbound.clone());
+            tokio::spawn(
+                async move {
+                    if let Err(error) = account
+                        .import_picture(&outbound, user_id, &actor, &picture)
+                        .await
+                    {
+                        tracing::warn!(error = %ErrorChain(&error), "provider picture not imported");
+                    }
+                }
+                .in_current_span(),
+            );
+        }
         // Ordinary registration leaves any unrelated pending social flow untouched.
         if pending.is_some() {
             BrowserCookie::FederationPending

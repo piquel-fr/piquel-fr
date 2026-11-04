@@ -1,7 +1,7 @@
 //! Google sign-in: `OpenID` Connect, so the identity comes only from a signed ID token.
 
 use super::{
-    FederationApplication, FederationConfigError, IdentityStrategy, MAX_TOKEN_BYTES,
+    FederationApplication, FederationConfigError, IdentityStrategy, MAX_TOKEN_BYTES, Provider,
     ProviderEndpoints, ProviderError, VerifiedIdentity,
 };
 use chrono::Utc;
@@ -117,10 +117,11 @@ impl FederationApplication {
         let token: GoogleToken = Self::json(response).await?;
         let claims = GoogleClaims::verify(&token.id_token, protocol, client_id, nonce).await?;
         VerifiedIdentity::new(
+            Provider::Google,
             claims.sub,
             claims.email.filter(|_| claims.email_verified),
-            claims.name,
-            FALLBACK_NAME.into(),
+            (claims.name, FALLBACK_NAME.into()),
+            claims.picture.as_deref(),
         )
     }
 }
@@ -156,6 +157,8 @@ pub(in crate::federation) struct GoogleClaims {
     email_verified: bool,
     /// Profile name proposed for onboarding.
     name: Option<String>,
+    /// The profile picture's URL, with the `profile` scope.
+    picture: Option<String>,
 }
 
 impl GoogleClaims {
