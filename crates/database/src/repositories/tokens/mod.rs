@@ -447,7 +447,7 @@ impl TokenRepository<'_> {
     /// # Errors
     ///
     /// Returns [`DatabaseError`] if the query fails.
-    #[cfg(feature = "test-util")]
+    #[cfg(any(test, feature = "test-util"))]
     pub async fn lock_family(&mut self, id: TokenId) -> Result<(), DatabaseError> {
         run!(
             self,

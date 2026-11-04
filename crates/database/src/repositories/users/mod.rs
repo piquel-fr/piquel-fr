@@ -263,7 +263,7 @@ impl UserRepository<'_> {
     /// # Errors
     ///
     /// Returns [`DatabaseError`] if the query fails.
-    #[cfg(feature = "test-util")]
+    #[cfg(any(test, feature = "test-util"))]
     pub async fn age_handle_change(&mut self, id: UserId, days: i32) -> Result<(), DatabaseError> {
         run!(
             self,

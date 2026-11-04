@@ -27,11 +27,11 @@ pub enum LockKey {
     /// overlapping `migrate` runs take turns.
     Migrations = 7,
     /// The job runner panic test; no release takes it.
-    #[cfg(feature = "test-util")]
+    #[cfg(any(test, feature = "test-util"))]
     Test = -1,
     /// The job runner exclusivity test, apart from [`Self::Test`] since tests
     /// sharing a database run at once; no release takes it.
-    #[cfg(feature = "test-util")]
+    #[cfg(any(test, feature = "test-util"))]
     ExclusivityTest = -2,
 }
 
