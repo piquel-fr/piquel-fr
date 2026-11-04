@@ -348,6 +348,12 @@ test('an administrator registers a client, suspends it and rotates its secret, e
     .getByRole('link')
     .click();
   await expect(admin.getByText(/Deleted on/)).toBeVisible();
+
+  // Its change pages, opened by URL, say why instead of showing a form that
+  // could only be refused.
+  await admin.goto(`${adminUrl}/clients/${id}/settings`);
+  await expect(admin.getByText(`client ${id} was deleted`)).toBeVisible();
+  await expect(admin.getByRole('button', { name: 'Save changes', exact: true })).toHaveCount(0);
 });
 
 test("an administrator changes an account's passkeys, addresses and apps, and its owner sees why", async ({
