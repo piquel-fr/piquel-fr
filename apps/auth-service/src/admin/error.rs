@@ -251,12 +251,39 @@ impl From<AdminError> for ApiError {
             | AdminError::AlreadyAdministrator
             | AdminError::NotAnAdministrator => Self::conflict(message),
             AdminError::Database(error) => error.into(),
-            AdminError::Client(error) => error.into(),
+            AdminError::Client(error) => error.for_operators(),
             AdminError::Deletion(error) => error.into(),
             error @ (AdminError::Crypto(_)
             | AdminError::Event(_)
             | AdminError::Link(_)
             | AdminError::Audit(_)) => Self::internal(error),
+        }
+    }
+}
+
+impl ClientRegistryError {
+    /// The registry's refusal, as an administrator reads it: its own words, which
+    /// name the client and say what to do, where an owner reads the console's.
+    /// Administrators choose IDs and see deleted clients, which owners do not.
+    fn for_operators(self) -> ApiError {
+        let message = self.to_string();
+        match self {
+            Self::Unknown(_) | Self::OriginNotApproved { .. } => ApiError::not_found(message),
+            Self::Exists { .. }
+            | Self::Deleted(_)
+            | Self::Suspended(_)
+            | Self::QuotaExceeded
+            | Self::DailyLimitExceeded
+            | Self::TooManyDomains(_)
+            | Self::OriginApproved { .. } => ApiError::conflict(message),
+            Self::Public(_)
+            | Self::MissingSecret(_)
+            | Self::Immutable(_)
+            | Self::Untrusted(_)
+            | Self::NotRedirectOrigin { .. }
+            | Self::PublicSuffix(_) => ApiError::bad_request(message),
+            Self::Database(error) => error.into(),
+            error @ Self::Crypto(_) => ApiError::internal(error),
         }
     }
 }

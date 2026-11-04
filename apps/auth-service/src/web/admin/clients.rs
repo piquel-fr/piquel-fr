@@ -5,6 +5,10 @@
 //! Applying a client a deployment manages stays the CLI's: see
 //! [`AdminApplication::page`](super::AdminApplication::page).
 //!
+//! A page whose change could only be refused says so in place of its form: a
+//! deleted client's change pages, and a public client's secrets page, which has
+//! none, answer with the registry's refusal.
+//!
 //! The registration page sits beside the clients' own, at `/clients/new`, so a
 //! client with that ID has no overview here; the rest of its pages, and the
 //! CLI, still reach it.
@@ -14,7 +18,8 @@ use super::{
     origins::{self, OriginQuery},
 };
 use crate::{
-    AdminError, AdminService, Operator,
+    AdminError, AdminService, ClientDetails, ClientRegistryError, Operator,
+    admin::SignedInAdmin,
     clients::{ClientSettings, InvalidSetting, OperatorSettings},
     security::ApiError,
 };
@@ -182,7 +187,8 @@ pub(super) async fn edit(cx: &Cx, form: Option<Form<OperatorDraft>>) -> Result<R
     let admin = App::admin(cx).await?;
     App::confirm(cx, admin)?;
     let service = &App::of(cx).service;
-    let id = path_param::<Client>(cx)?.clone();
+    let stored = App::changing(cx, admin).await?.client;
+    let id = stored.id.clone();
     let back = href!(detail, Client(id.clone())).resolve(cx);
     let refusal = App::submit(cx, form, back.clone(), async |draft: OperatorDraft| {
         service
@@ -195,7 +201,6 @@ pub(super) async fn edit(cx: &Cx, form: Option<Form<OperatorDraft>>) -> Result<R
             .map(drop)
     })
     .await?;
-    let stored = service.client_details(&admin.operator, &id).await?.client;
     let shown = match &refusal {
         Some(refused) => refused.form.clone(),
         None => OperatorDraft::of(&App::client_row(&stored), stored.trusted),
@@ -213,7 +218,11 @@ pub(super) async fn rotate(cx: &Cx, form: Option<Form<SecretsChange>>) -> Result
     let admin = App::admin(cx).await?;
     App::confirm(cx, admin)?;
     let service = &App::of(cx).service;
-    let id = path_param::<Client>(cx)?.clone();
+    let details = App::changing(cx, admin).await?;
+    let id = details.client.id.clone();
+    if details.client.kind == ClientKind::Public {
+        return Err(AdminError::from(ClientRegistryError::Public(id)).into());
+    }
     let rotated = App::change(cx, form, async |SecretsChange::Rotate { grace }| {
         let grace = grace.unwrap_or_default().into();
         service
@@ -241,7 +250,11 @@ pub(super) async fn rotate(cx: &Cx, form: Option<Form<SecretsChange>>) -> Result
         }
         None => (SecretsState::default(), None),
     };
-    let details = service.client_details(&admin.operator, &id).await?;
+    // A rotation just made has one more secret to list.
+    let details = match &state.rotated {
+        Some(_) => service.client_details(&admin.operator, &id).await?,
+        None => details,
+    };
     let secrets: Vec<_> = details
         .secrets
         .iter()
@@ -323,7 +336,7 @@ impl Toggle {
         let admin = App::admin(cx).await?;
         App::confirm(cx, admin)?;
         let service = &App::of(cx).service;
-        let id = path_param::<Client>(cx)?.clone();
+        let id = App::changing(cx, admin).await?.client.id;
         let back = href!(detail, Client(id.clone())).resolve(cx);
         let done = match self {
             Self::Delete => href!(list).resolve(cx),
@@ -397,14 +410,29 @@ impl From<InvalidSetting> for Refusal {
     }
 }
 
-impl From<crate::ClientRegistryError> for Refusal {
+impl From<ClientRegistryError> for Refusal {
     /// What the dashboard does about the registry refusing a change.
-    fn from(error: crate::ClientRegistryError) -> Self {
+    fn from(error: ClientRegistryError) -> Self {
         AdminError::from(error).into()
     }
 }
 
 impl App {
+    /// The client the path names, for a page that changes it. A deleted client
+    /// changes no more, so each of its change pages answers at once with the
+    /// registry's refusal, as its form would once posted.
+    async fn changing(cx: &Cx, admin: &SignedInAdmin) -> Result<ClientDetails> {
+        let id = path_param::<Client>(cx)?;
+        let details = Self::of(cx)
+            .service
+            .client_details(&admin.operator, id)
+            .await?;
+        if details.client.deleted_at.is_some() {
+            return Err(AdminError::from(ClientRegistryError::Deleted(id.clone())).into());
+        }
+        Ok(details)
+    }
+
     /// The client `stored`, as the console's pieces show it.
     fn client_row(stored: &StoredOidcClient) -> ClientRow<'_> {
         ClientRow {

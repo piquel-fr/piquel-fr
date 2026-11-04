@@ -1070,7 +1070,7 @@ async fn clients_are_registered_changed_and_suspended_from_the_dashboard() {
     let shown = html(harness.visit(&dashboard, &page).await).await;
     assert!(shown.contains("Lift the suspension first."), "{shown}");
     let enable = html(post(&format!("{page}/enable"), &[]).await).await;
-    assert!(enable.contains("was suspended"), "{enable}");
+    assert!(enable.contains("lift the suspension"), "{enable}");
 
     let rotated = html(post(&format!("{page}/secret"), &[("action", "rotate")]).await).await;
     assert!(rotated.contains("pqcs_"), "{rotated}");
@@ -1093,4 +1093,62 @@ async fn clients_are_registered_changed_and_suspended_from_the_dashboard() {
         !shown.contains(&settings),
         "a deleted client changes no more: {shown}"
     );
+}
+
+/// A page whose change the registry could only refuse says so in place of its
+/// form: a public client's secrets page, and every change page of a deleted
+/// client. Registering a taken ID says it is taken.
+#[tokio::test]
+#[ignore = "requires TEST_DATABASE_URL"]
+async fn pages_that_could_only_fail_refuse_at_once() {
+    let harness = Harness::new().await;
+    let admin = harness.admin().await;
+    let dashboard = harness.confirmed(&admin, "/clients/new", Utc::now()).await;
+    let post = async |path: &str, fields: &[(&str, &str)]| {
+        let url = format!("{DASHBOARD}{path}");
+        dashboard
+            .submit(&harness.dashboard, &url, fields, OWN_PAGE)
+            .await
+    };
+    let refused = async |path: &str, status: StatusCode, says: &str| {
+        let response = harness.visit(&dashboard, path).await;
+        assert_eq!(response.status(), status, "{path}");
+        let page = html(response).await;
+        assert!(page.contains(says), "{path}: {page}");
+    };
+    let id = format!("spa-{}", UserId::new());
+    let registration = [
+        ("id", id.as_str()),
+        ("display_name", "Single-page app"),
+        ("kind", "public"),
+        ("redirect_uris", "https://spa.example/cb"),
+        ("openid", "on"),
+    ];
+    let page = format!("/clients/{id}");
+    assert_eq!(redirect(&post("/clients/new", &registration).await), page);
+    let taken = html(post("/clients/new", &registration).await).await;
+    assert!(taken.contains("is taken"), "{taken}");
+
+    let secret = format!("{page}/secret");
+    refused(&secret, StatusCode::BAD_REQUEST, "is public").await;
+    assert_eq!(
+        redirect(&post(&format!("{page}/delete"), &[]).await),
+        "/clients"
+    );
+    for change in [
+        "settings",
+        "enable",
+        "disable",
+        "suspend",
+        "unsuspend",
+        "delete",
+        "secret",
+    ] {
+        refused(
+            &format!("{page}/{change}"),
+            StatusCode::CONFLICT,
+            "was deleted",
+        )
+        .await;
+    }
 }
