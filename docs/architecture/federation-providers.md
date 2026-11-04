@@ -107,11 +107,11 @@ provider by that name, so they need no other change.
 
 ## 7. Test it
 
-Add tests to `apps/auth-service/src/federation/tests.rs`, serving the provider's
-endpoints from a local mock (see the GitHub fixture in `TestApp` and the Google
-mock test). Cover the evidence the provider must reject, such as a wrong
-audience, a wrong nonce, an expired token or a bad signature, not only the
-successful sign-in.
+Add tests to `apps/auth-service/src/federation/tests/protocols.rs`, serving the
+provider's endpoints from a local mock (see the GitHub fixture in `TestApp`, in
+`tests/mod.rs`, and the Google mock test). Cover the evidence the provider must
+reject, such as a wrong audience, a wrong nonce, an expired token or a bad
+signature, not only the successful sign-in.
 
 ## 8. Register and enable it
 

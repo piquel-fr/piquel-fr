@@ -92,7 +92,7 @@ under their own retention rules. User IDs are pseudonymous, so they are allowed
 on spans and log lines. The collector also deletes `url.query`, `url.full`,
 `client.address` and `http.*.header.*` attributes, as a second line of defense.
 
-`passkey::tests::telemetry_exports_no_secret_of_a_sign_in_and_code_exchange`
+`passkey::tests::telemetry::telemetry_exports_no_secret_of_a_sign_in_and_code_exchange`
 runs a passkey sign-in and a code exchange through the production layers, with
 `Telemetry::capture`, and fails if any of their secrets is exported. Extend it
 when a flow handles a new kind of secret.

@@ -38,10 +38,10 @@ undo), `AdminService::recover_account`, `recent_recoveries` and `undo_recovery`
 (`apps/auth-service/src/admin/service.rs`), the passkey routes
 (`apps/auth-service/src/passkey`), the pages `/recover` and `/recover/undo`
 (`apps/auth-service/src/web/auth/recovery`, with their views in
-`crates/ui/src/recovery.rs`), migration `0019_account_recoveries`, the CLI's
+`crates/ui/src/recovery/mod.rs`), migration `0019_account_recoveries`, the CLI's
 `user recover` and `user undo-recovery`, and the dashboard's Recover and Undo
 recovery pages (`apps/auth-service/src/web/admin/users.rs`). Tests named below
-live in `apps/auth-service/src/recovery/tests.rs` unless another file is given;
+live in `apps/auth-service/src/recovery/tests/` unless another file is given;
 `crates/database/tests/recoveries.rs` is shortened to `db:`.
 
 ## States
@@ -115,7 +115,7 @@ link is only mailed, so `--revoke` stays at the terminal.
   recovery can be undone, with no override. Granted during a probation, they
   would go live for whoever used the link once it settles
   (`what_a_start_replaces_and_refuses`,
-  `admin::tests::no_grant_while_a_recovery_can_be_undone`,
+  `admin::tests::administrators::no_grant_while_a_recovery_can_be_undone`,
   `db: no_grant_while_a_recovery_can_be_undone`).
 
 ## The link
@@ -237,7 +237,7 @@ link is only mailed, so `--revoke` stays at the terminal.
   answers the client `unmet_authentication_requirements` (OpenID Connect Unmet
   Authentication Requirements 1.0). A social sign-in, which a passkey could still
   step up, goes to sign in as before
-  (`oidc::tests::a_probation_sign_in_short_of_the_target_answers_the_client`).
+  (`oidc::tests::step_up::a_probation_sign_in_short_of_the_target_answers_the_client`).
   `Acr::select`'s documentation says an account may not reach every class.
 - **P5.** Probation lasts 15 days. A session lasts up to 30, so the session the
   link signed in can outlive it: it stays unconfirmed until the recovery's passkey
@@ -303,8 +303,8 @@ on a disabled account (U4a)
   which carries no credential to sign in with, while sign-in and confirmation
   still refuse a disabled account. A disable written by a release older than
   this one doesn't change that (`the_owner_undoes_a_disabled_accounts_recovery`,
-  `passkey::tests::only_an_undo_accepts_a_disabled_accounts_passkey`). Disabling
-  still cancels an unused link (`what_a_start_replaces_and_refuses`).
+  `passkey::tests::validation::only_an_undo_accepts_a_disabled_accounts_passkey`).
+  Disabling still cancels an unused link (`what_a_start_replaces_and_refuses`).
 - **U5.** Support undoes for an owner with no passkey left from before it, or
   whose account is disabled: `auth-service user undo-recovery <user> --reason
   "…"`, or the dashboard's Undo recovery page. It is the same U2 or U3, recorded
@@ -313,7 +313,7 @@ on a disabled account (U4a)
   restores nothing it revoked (`support_undoes_and_takes_the_last_passkey`).
 - **U6.** A consent, code exchange or refresh that waited for the account lock
   while an undo ran doesn't survive it: each re-reads its session under the lock
-  (`oidc::tests::a_consent_whose_session_ended_while_waiting_is_not_saved`, and
+  (`oidc::tests::authorization::a_consent_whose_session_ended_while_waiting_is_not_saved`, and
   the code exchange's and rotation's own session checks).
 
 What undo doesn't reach: what the link holder did inside apps that don't ask for

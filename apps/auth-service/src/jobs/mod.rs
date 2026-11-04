@@ -1,0 +1,427 @@
+//! Background work: periodic jobs coordinated across replicas, and the delivery
+//! workers every replica runs (see `crate::deliveries`).
+
+use crate::{
+    AuthConfig, KeyStore, SigningKeys, StartupError,
+    audit::Sealer,
+    deletion::{DeletionError, Deletions},
+    deliveries::{BackchannelLogoutSender, EmailSender, OutboundClient},
+};
+use chrono::Utc;
+use piquel_common::{
+    AccountStatus, ErrorChain, UserId,
+    events::{Actor, EventContext, JobName, RequestOrigin},
+};
+use piquel_repository::{
+    Database, DatabaseError, DatabaseTransaction, ExclusiveConnection, LockKey,
+};
+use piquel_telemetry::{Counter, Gauge, Histogram};
+use std::{
+    sync::{Arc, Mutex, PoisonError},
+    time::Duration,
+};
+use tokio::{
+    sync::watch,
+    task::{JoinError, JoinSet},
+    time::{Instant, MissedTickBehavior},
+};
+use tracing::Instrument;
+
+/// How long running jobs may take to finish after shutdown starts.
+const SHUTDOWN_GRACE: Duration = Duration::from_secs(10);
+
+/// A periodic task that runs on at most one replica at a time. It receives only the
+/// locked connection, never the pool, so all its work happens while it holds the lock.
+pub(crate) trait ExclusiveJob: Send + Sync + 'static {
+    /// Names the job in logs.
+    const NAME: &'static str;
+    /// Keeps other replicas from running the job at the same time.
+    const LOCK: LockKey;
+    /// How often each replica tries to run the job.
+    const EVERY: Duration;
+    /// Why a run failed.
+    type Error: std::error::Error + Send + Sync + 'static;
+
+    /// Runs the job once. A long run should stop early once `shutdown` is requested;
+    /// otherwise it is cancelled after [`SHUTDOWN_GRACE`].
+    fn run(
+        &self,
+        connection: &mut ExclusiveConnection,
+        shutdown: &Shutdown,
+    ) -> impl Future<Output = Result<(), Self::Error>> + Send;
+}
+
+/// Tells running jobs that the service is shutting down.
+#[derive(Clone)]
+pub(crate) struct Shutdown(watch::Receiver<bool>);
+
+impl Shutdown {
+    /// Resolves once shutdown has been requested.
+    pub(crate) async fn requested(&self) {
+        // An error means the runner is gone, which is a shutdown too.
+        let _ = self.0.clone().wait_for(|&requested| requested).await;
+    }
+
+    /// Whether shutdown has been requested, without waiting, for work that
+    /// checks between steps.
+    pub(crate) fn is_requested(&self) -> bool {
+        *self.0.borrow()
+    }
+}
+
+/// Every background job of the service, running until [`Self::shutdown`].
+pub struct Jobs {
+    /// One task per job.
+    tasks: JoinSet<()>,
+    /// Set to `true` on shutdown.
+    shutdown: watch::Sender<bool>,
+}
+
+impl Jobs {
+    /// Starts every job on `database`: signing key rotation in `store` and the
+    /// reloads of this replica's `keys`, audit chain sealing with `config`'s audit
+    /// key, and the delivery workers of every channel, configured by `config`.
+    ///
+    /// # Errors
+    /// Fails if the outbound HTTP client cannot initialize.
+    pub fn start(
+        database: &Database,
+        config: &AuthConfig,
+        store: &KeyStore,
+        keys: &SigningKeys,
+    ) -> Result<Self, StartupError> {
+        let mut jobs = Self::new();
+        jobs.exclusive(Cleanup, database.clone());
+        AccountPurge::observe();
+        jobs.exclusive(AccountPurge, database.clone());
+        jobs.exclusive(Sealer::new(config.audit.key.clone()), database.clone());
+        let (store, reloaded) = (store.clone(), keys.clone());
+        jobs.spawn(|shutdown| store.run(reloaded, shutdown));
+        let logout = BackchannelLogoutSender::new(
+            config.oidc.origin.serialized(),
+            keys.clone(),
+            OutboundClient::new().map_err(StartupError::Outbound)?,
+        );
+        jobs.deliveries(logout, database);
+        jobs.deliveries(EmailSender::new(database.clone(), &config.email), database);
+        Ok(jobs)
+    }
+
+    /// A runner without jobs.
+    pub(crate) fn new() -> Self {
+        Self {
+            tasks: JoinSet::new(),
+            shutdown: watch::Sender::new(false),
+        }
+    }
+
+    /// Stops starting runs, waits up to the `SHUTDOWN_GRACE` period for running ones, then
+    /// cancels the rest. Cancelling a job drops its connection, which releases its lock;
+    /// cancelling a delivery attempt leaves its lease to expire, so it is sent again.
+    ///
+    /// # Errors
+    /// Returns the first job loop that panicked. Runs that panic are only logged.
+    pub async fn shutdown(mut self) -> Result<(), JoinError> {
+        self.shutdown.send_replace(true);
+        let mut panicked = None;
+        let drained =
+            tokio::time::timeout(SHUTDOWN_GRACE, Self::drain(&mut self.tasks, &mut panicked)).await;
+        if drained.is_err() {
+            tracing::warn!("cancelling background jobs still running after the grace period");
+            self.tasks.abort_all();
+            Self::drain(&mut self.tasks, &mut panicked).await;
+        }
+        panicked.map_or(Ok(()), Err)
+    }
+
+    /// Waits for every task in `tasks` to end, keeping the first panic in `panicked`.
+    /// Cancellations are expected at shutdown and ignored.
+    async fn drain(tasks: &mut JoinSet<()>, panicked: &mut Option<JoinError>) {
+        while let Some(result) = tasks.join_next().await {
+            if let Err(error) = result
+                && error.is_panic()
+            {
+                panicked.get_or_insert(error);
+            }
+        }
+    }
+
+    /// Runs the task `start` returns until it ends. It should end soon after the
+    /// [`Shutdown`] it receives is requested.
+    pub(crate) fn spawn<F>(&mut self, start: impl FnOnce(Shutdown) -> F)
+    where
+        F: Future<Output = ()> + Send + 'static,
+    {
+        self.tasks.spawn(start(Shutdown(self.shutdown.subscribe())));
+    }
+
+    /// Every [`ExclusiveJob::EVERY`], runs `job` if no other replica is running it.
+    fn exclusive<J: ExclusiveJob>(&mut self, job: J, database: Database) {
+        let job = Arc::new(job);
+        self.spawn(|shutdown| async move {
+            let mut interval = tokio::time::interval(J::EVERY);
+            interval.set_missed_tick_behavior(MissedTickBehavior::Delay);
+            loop {
+                tokio::select! {
+                    biased;
+                    () = shutdown.requested() => return,
+                    _ = interval.tick() => {}
+                }
+                // Dropping a half-opened connection on shutdown releases its lock.
+                let connection = tokio::select! {
+                    biased;
+                    () = shutdown.requested() => return,
+                    connection = database.try_exclusive(J::LOCK) => connection,
+                };
+                match connection {
+                    Ok(Some(connection)) => {
+                        // Each run is a trace of its own: its queries, the events it
+                        // records, and how it ended.
+                        let span = tracing::info_span!(
+                            parent: None,
+                            "job",
+                            otel.name = J::NAME,
+                            job = J::NAME,
+                        );
+                        Self::run(Arc::clone(&job), connection, shutdown.clone())
+                            .instrument(span)
+                            .await;
+                    }
+                    Ok(None) => tracing::debug!(job = J::NAME, "another replica runs this job"),
+                    Err(error) => {
+                        tracing::error!(?error, job = J::NAME, "could not take job lock");
+                    }
+                }
+            }
+        });
+    }
+
+    /// Runs `job` once on its own task, so a panic ends only this run: the job runs
+    /// again at its next interval. The task lives in a set that aborts it when
+    /// dropped, so cancelling the caller cancels the run and frees the lock. The
+    /// run's task stays in the caller's span.
+    async fn run<J: ExclusiveJob>(
+        job: Arc<J>,
+        mut connection: ExclusiveConnection,
+        shutdown: Shutdown,
+    ) {
+        let mut run = JoinSet::new();
+        run.spawn(
+            async move {
+                let result = job.run(&mut connection, &shutdown).await;
+                (connection, result)
+            }
+            .in_current_span(),
+        );
+        match run.join_next().await {
+            Some(Ok((connection, result))) => {
+                if let Err(error) = result {
+                    tracing::error!(?error, job = J::NAME, "background job failed");
+                }
+                if let Err(error) = connection.release().await {
+                    tracing::error!(?error, job = J::NAME, "could not release job lock");
+                }
+            }
+            // Unwinding dropped the connection, which releases the lock.
+            Some(Err(error)) => tracing::error!(?error, job = J::NAME, "background job panicked"),
+            // The set holds exactly one task.
+            None => {}
+        }
+    }
+}
+
+/// Rows each cleanup pass deleted or changed.
+static CLEANUP_CHANGED: Counter = Counter::new(
+    "piquel.auth.cleanup.changed",
+    "{row}",
+    "Rows cleanup deleted or changed: expired state, personal data past retention and stuck deliveries.",
+);
+/// How long each cleanup pass took.
+static CLEANUP_DURATION: Histogram = Histogram::new(
+    "piquel.auth.cleanup.duration",
+    "s",
+    "Duration of cleanup passes.",
+    &[0.01, 0.1, 1.0, 5.0, 15.0, 30.0, 60.0, 90.0],
+);
+/// Cleanup passes that ran out of budget with rows left.
+static CLEANUP_OVERRUNS: Counter = Counter::new(
+    "piquel.auth.cleanup.overruns",
+    "{pass}",
+    "Cleanup passes that stopped at their time budget with rows left to clean.",
+);
+
+/// Drains expired authentication state, event personal data and finished
+/// deliveries past their retention, and abandons delivery ordering keys stuck
+/// behind an old failure, in bounded batches until a pass finds nothing or a
+/// one-minute budget runs out.
+/// Short pauses between batches keep cleanup from monopolizing the database under
+/// heavy churn.
+struct Cleanup;
+
+impl Cleanup {
+    /// Maximum time spent draining one pass.
+    const BUDGET: Duration = Duration::from_mins(1);
+    /// Pause between full batches, allowing live requests to use the pool.
+    const PAUSE: Duration = Duration::from_millis(100);
+    /// Per-table batch bound.
+    const BATCH_SIZE: u32 = 1_000;
+
+    /// Runs one batch and returns how many rows it changed. Abandoning stuck keys
+    /// needs a transaction of its own, so its locks last until it decides.
+    async fn batch(connection: &mut ExclusiveConnection) -> Result<u64, DatabaseError> {
+        let mut tx = connection.begin().await?;
+        let abandoned = tx.abandon_stuck_deliveries(Self::BATCH_SIZE).await?;
+        tx.commit().await?;
+        let purged = connection
+            .maintenance()
+            .purge_expired_auth_state(Self::BATCH_SIZE)
+            .await?;
+        Ok(abandoned + purged)
+    }
+}
+
+impl ExclusiveJob for Cleanup {
+    const NAME: &'static str = "cleanup";
+    const LOCK: LockKey = LockKey::Cleanup;
+    const EVERY: Duration = Duration::from_mins(5);
+    type Error = DatabaseError;
+
+    /// Stops after the current batch once shutdown is requested.
+    async fn run(
+        &self,
+        connection: &mut ExclusiveConnection,
+        shutdown: &Shutdown,
+    ) -> Result<(), DatabaseError> {
+        let started = Instant::now();
+        let deadline = started + Self::BUDGET;
+        let mut changed = Self::batch(connection).await?;
+        while changed > 0 {
+            CLEANUP_CHANGED.add(changed, &());
+            if Instant::now() >= deadline {
+                CLEANUP_OVERRUNS.add(1, &());
+                tracing::warn!("expired authentication state cleanup is falling behind");
+                break;
+            }
+            tokio::select! {
+                biased;
+                () = shutdown.requested() => break,
+                () = tokio::time::sleep(Self::PAUSE) => {}
+            }
+            changed = Self::batch(connection).await?;
+        }
+        CLEANUP_DURATION.record(started.elapsed().as_secs_f64(), &());
+        Ok(())
+    }
+}
+
+/// Accounts whose purge keeps failing, from [`FAILING_PURGES_COUNT`].
+static FAILING_PURGES: Gauge = Gauge::new(
+    "piquel.auth.account_purge.failing",
+    "{account}",
+    "Accounts scheduled for deletion whose purge failed at least 3 times in a row.",
+);
+/// The latest count of [`FAILING_PURGES`] on this replica, and when it was taken.
+/// The replica running the purge counts after each run.
+static FAILING_PURGES_COUNT: Mutex<Option<(u64, Instant)>> = Mutex::new(None);
+
+/// Purges the accounts whose deletion grace period ended, each in a transaction of
+/// its own, attributed to [`JobName::AccountPurge`]. One run purges at most
+/// [`Self::BATCH_SIZE`] accounts; the next run continues. A failed purge is
+/// recorded with its error and retried after a backoff, so accounts that keep
+/// failing never hold back the others, and [`FAILING_PURGES`] counts them.
+pub(crate) struct AccountPurge;
+
+impl AccountPurge {
+    /// Accounts one run purges at most.
+    const BATCH_SIZE: u32 = 100;
+    /// The delay after a first failure, doubled after each further one.
+    const BACKOFF: chrono::Duration = chrono::Duration::minutes(5);
+    /// The longest delay between attempts.
+    const MAX_BACKOFF: chrono::Duration = chrono::Duration::days(1);
+    /// Failures in a row after which [`FAILING_PURGES`] counts an account.
+    const FAILING_ATTEMPTS: u16 = 3;
+
+    /// Registers [`FAILING_PURGES`]. Every replica runs the job in turn, so each
+    /// reports the count of its own latest run, at most one run older than the
+    /// newest; one whose count is older than two runs, because it stopped running
+    /// the job, reports none. Alerts read the minimum across replicas, or wait one
+    /// run, before taking a count as current.
+    fn observe() {
+        FAILING_PURGES.observe(|| {
+            let counted = *FAILING_PURGES_COUNT
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner);
+            counted
+                .filter(|(_, at)| at.elapsed() < Self::EVERY * 2)
+                .map(|(count, _)| (count, ()))
+        });
+    }
+
+    /// Purges `user_id` in `tx` if it is still scheduled for deletion and due,
+    /// rechecked under the account lock, since it may have been restored meanwhile.
+    pub(crate) async fn purge(
+        mut tx: DatabaseTransaction<'_>,
+        user_id: UserId,
+    ) -> Result<(), DeletionError> {
+        let user = Deletions::lock(&mut tx, user_id).await?;
+        let due = tx
+            .deletions()
+            .find(user_id)
+            .await?
+            .is_some_and(|deletion| deletion.purge_after <= Utc::now());
+        if user.status != AccountStatus::Deleting || !due {
+            return Ok(());
+        }
+        let context = EventContext {
+            actor: Actor::System {
+                job: JobName::AccountPurge,
+            },
+            origin: RequestOrigin::default(),
+            reason: None,
+        };
+        Deletions::new(&mut tx, context).purge(&user).await?;
+        Ok(tx.commit().await?)
+    }
+}
+
+impl ExclusiveJob for AccountPurge {
+    const NAME: &'static str = "account-purge";
+    const LOCK: LockKey = LockKey::AccountPurge;
+    const EVERY: Duration = Duration::from_mins(5);
+    type Error = DeletionError;
+
+    /// Stops after the current account once shutdown is requested. A failing
+    /// account is logged and recorded, which delays its next attempt, so it cannot
+    /// hold back the others. Then counts the accounts that keep failing.
+    async fn run(
+        &self,
+        connection: &mut ExclusiveConnection,
+        shutdown: &Shutdown,
+    ) -> Result<(), DeletionError> {
+        for user_id in connection.deletions().due(Self::BATCH_SIZE).await? {
+            if shutdown.is_requested() {
+                break;
+            }
+            let tx = connection.begin().await?;
+            if let Err(error) = Self::purge(tx, user_id).await {
+                tracing::error!(?error, %user_id, "could not purge account");
+                let message = ErrorChain(&error).to_string();
+                connection
+                    .deletions()
+                    .record_failure(user_id, &message, Self::BACKOFF, Self::MAX_BACKOFF)
+                    .await?;
+            }
+        }
+        let failing = connection
+            .deletions()
+            .count_failing(Self::FAILING_ATTEMPTS)
+            .await?;
+        *FAILING_PURGES_COUNT
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner) = Some((failing, Instant::now()));
+        Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests;
