@@ -178,8 +178,29 @@ test('a rotation retires the old secret, and a disabled or deleted app signs nob
   expect(await signsIn(first)).toBe(401);
   expect(await signsIn(second)).toBe(200);
 
-  // Disabled, the app signs nobody in until it is enabled again.
+  // The settings change the back-channel logout URI, refusing one beside its input,
+  // and an empty one stops logout tokens.
   await page.goto(`/developers/clients/${id}`);
+  await tabs.getByRole('link', { name: 'Settings', exact: true }).click();
+  const logout = page.getByLabel('Back-channel logout URI', { exact: true });
+  const save = page.getByRole('button', { name: 'Save changes', exact: true });
+  await logout.fill('http://console-e2e.test/auth/backchannel-logout');
+  await save.click();
+  await expect(page.locator('#backchannel_logout_uri-error')).toContainText('must use https');
+  await expect(logout).toHaveValue('http://console-e2e.test/auth/backchannel-logout');
+  await logout.fill(`${client}/auth/backchannel-logout`);
+  await save.click();
+  await expect(page.getByText('Your changes were saved.')).toBeVisible();
+  await page.goto(`/developers/clients/${id}`);
+  await expect(page.locator('#backchannel-logout')).toHaveText(`${client}/auth/backchannel-logout`);
+  await tabs.getByRole('link', { name: 'Settings', exact: true }).click();
+  await logout.fill('');
+  await save.click();
+  await expect(page.getByText('Your changes were saved.')).toBeVisible();
+  await page.goto(`/developers/clients/${id}`);
+  await expect(page.locator('#backchannel-logout')).toHaveCount(0);
+
+  // Disabled, the app signs nobody in until it is enabled again.
   await tabs.getByRole('link', { name: 'Settings', exact: true }).click();
   await page.getByRole('button', { name: 'Disable', exact: true }).click();
   await expect(page.getByText('The app was disabled.')).toBeVisible();

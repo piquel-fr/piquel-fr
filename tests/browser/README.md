@@ -23,8 +23,9 @@ once registered, the secret shown once, in an answer no cache
 keeps and nowhere in the URL, history or storage, and the app then signing a user
 in, redeeming the code with its secret. Its app runs on `https://console-e2e.test`,
 which the test serves as `oidc.spec.ts` does its client. A second test rotates an
-app's secret with no grace, which leaves only the new one redeeming codes, then
-disables the app, which auth then refuses to sign anyone in to until it is
+app's secret with no grace, which leaves only the new one redeeming codes,
+changes its back-channel logout URI in its settings, which refuse an `http://`
+one beside its input, and clears it, then disables the app, which auth then refuses to sign anyone in to until it is
 enabled, and deletes it.
 
 `oidc.spec.ts` signs in through `browser-e2e`, a public, untrusted client at
