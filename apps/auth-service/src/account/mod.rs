@@ -26,11 +26,12 @@ pub(crate) use subject::{ConfirmedOwner, ConfirmedSubject, Owner, Subject, Viewe
 use crate::{
     emails::EmailView,
     federation::FederationError,
+    grants::ConnectedApp,
     handles,
     history::{HistoryPage, HistoryQuery},
     operations::operations,
     passkey::Rename,
-    routes::{emails, federation, history, passkey, sessions},
+    routes::{apps, emails, federation, history, passkey, sessions},
     security::{RequestContext, SessionError},
     sessions::{Revoked, SessionItem},
 };
@@ -42,7 +43,7 @@ use axum::{
 };
 use chrono::{DateTime, Utc};
 use piquel_common::{
-    EmailId, Handle, PasskeyId, SessionId,
+    ClientId, EmailId, Handle, PasskeyId, SessionId,
     protocol::api::{Identity, Passkey},
 };
 use piquel_repository::{Database, StoredUser};
@@ -50,8 +51,7 @@ use piquel_repository::{Database, StoredUser};
 operations! {
     /// Every shared settings operation of the settings API. The owner's router
     /// maps each to its route, and the `account` command has a command for each,
-    /// which a CLI test checks. Connected apps are not among them yet: only the
-    /// settings pages and the dashboard list and remove them.
+    /// which a CLI test checks.
     pub(crate) enum AccountOperation {
         /// List the account's passkeys.
         ListPasskeys,
@@ -76,6 +76,10 @@ operations! {
         RevokeSession,
         /// Sign every other session out.
         RevokeOtherSessions,
+        /// List the apps that keep access to the account.
+        ListApps,
+        /// Remove one app's access.
+        RemoveApp,
         /// Page through the account's security history.
         ViewHistory,
     }
@@ -196,6 +200,8 @@ impl AccountApplication {
             Op::ListSessions => (sessions::LIST, get(Self::sessions)),
             Op::RevokeSession => (sessions::ITEM, delete(Self::revoke_session)),
             Op::RevokeOtherSessions => (sessions::REVOKE_OTHERS, post(Self::revoke_other_sessions)),
+            Op::ListApps => (apps::LIST, get(Self::apps)),
+            Op::RemoveApp => (apps::ITEM, delete(Self::remove_app)),
             Op::ViewHistory => (history::LIST, get(Self::history)),
         }
     }
@@ -304,6 +310,25 @@ impl AccountApplication {
         subject: Subject,
     ) -> Result<Json<Revoked>, AccountError> {
         Ok(Json(app.service.revoke_other_sessions(&subject).await?))
+    }
+
+    /// Lists the apps that keep access to the account, by name.
+    async fn apps(
+        State(app): State<Self>,
+        viewer: Viewer,
+    ) -> Result<Json<Vec<ConnectedApp>>, AccountError> {
+        Ok(Json(app.service.apps(&viewer).await?))
+    }
+
+    /// Removes one app's access. It only takes access away, so the owner's session
+    /// is enough.
+    async fn remove_app(
+        State(app): State<Self>,
+        subject: Subject,
+        Path(client): Path<ClientId>,
+    ) -> Result<StatusCode, AccountError> {
+        app.service.remove_app(&subject, &client).await?;
+        Ok(StatusCode::NO_CONTENT)
     }
 
     /// Returns a page of the account's history, newest first.

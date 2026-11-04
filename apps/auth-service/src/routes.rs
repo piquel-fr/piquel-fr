@@ -100,6 +100,14 @@ pub(crate) mod sessions {
     pub(crate) const REVOKE_OTHERS: &str = "/account/sessions/revoke-others";
 }
 
+/// The apps that keep access to the account.
+pub(crate) mod apps {
+    /// Lists the apps that keep access to the account.
+    pub(crate) const LIST: &str = "/account/apps";
+    /// Removes one app's access.
+    pub(crate) const ITEM: &str = "/account/apps/{client_id}";
+}
+
 /// The audit chain's signed checkpoints, public so anyone can keep copies.
 pub(crate) mod audit {
     /// The newest checkpoint, as a signed note.

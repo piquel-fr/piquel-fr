@@ -6,12 +6,13 @@ use crate::{
     Reason, UserRef,
     account::{AccountOperation, Subject, Viewer},
     emails::EmailView,
+    grants::ConnectedApp,
     history::HistoryPage,
     sessions::{Revoked, SessionItem},
 };
 use clap::{Args, Subcommand};
 use piquel_common::{
-    EmailId, EventId, PasskeyId, Provider, SessionId, UserId,
+    ClientId, EmailId, EventId, PasskeyId, Provider, SessionId, UserId,
     protocol::api::{Identity, Passkey},
 };
 
@@ -42,6 +43,9 @@ enum Setting {
     /// List sessions, or sign them out.
     #[command(subcommand)]
     Sessions(Sessions),
+    /// List the apps that keep access, or remove one's access.
+    #[command(subcommand)]
+    Apps(Apps),
     /// Page through the security history as the owner sees it, newest first.
     History {
         /// Continue with entries older than this one, the last one listed.
@@ -165,6 +169,27 @@ enum Sessions {
     },
 }
 
+/// The apps that keep access to the account: those it consented to, and those
+/// whose refresh grant still works.
+#[derive(Subcommand)]
+enum Apps {
+    /// List the apps, by name.
+    List {
+        /// Output format.
+        #[command(flatten)]
+        output: Output,
+    },
+    /// Remove an app's access: its refresh grants end and it asks for consent
+    /// again. The account's sessions stay signed in.
+    Remove {
+        /// The app's client ID, as `list` shows it.
+        client: ClientId,
+        /// Why.
+        #[command(flatten)]
+        change: Change,
+    },
+}
+
 /// The `--reason` every change takes.
 #[derive(Args)]
 struct Change {
@@ -205,6 +230,10 @@ impl AccountCommand {
                 Sessions::List { .. } => Op::ListSessions,
                 Sessions::Revoke { .. } => Op::RevokeSession,
                 Sessions::RevokeAll { .. } => Op::RevokeOtherSessions,
+            },
+            Setting::Apps(command) => match command {
+                Apps::List { .. } => Op::ListApps,
+                Apps::Remove { .. } => Op::RemoveApp,
             },
             Setting::History { .. } => Op::ViewHistory,
         }
@@ -284,6 +313,12 @@ impl AccountCommand {
                     .await?;
                 eprintln!("Signed out {revoked} sessions.");
             }
+            Setting::Apps(Apps::List { output }) => {
+                output.print(&account.apps(&read()).await?[..], Self::print_apps)?;
+            }
+            Setting::Apps(Apps::Remove { client, change }) => {
+                account.remove_app(&change.on(id, console), &client).await?;
+            }
             Setting::History { before, output } => {
                 output.print(
                     &account.history(&read(), before).await?,
@@ -343,6 +378,22 @@ impl AccountCommand {
                 session.authenticated_at.to_rfc3339(),
                 session.last_seen_at.to_rfc3339(),
                 session.expires_at.to_rfc3339()
+            );
+        }
+    }
+
+    /// Prints one app per line. `OFFLINE` says whether it holds a refresh grant, to
+    /// act while the owner is away.
+    fn print_apps(apps: &[ConnectedApp]) {
+        println!("CLIENT ID\tNAME\tFIRST PARTY\tOFFLINE\tSCOPES");
+        for app in apps {
+            println!(
+                "{}\t{}\t{}\t{}\t{}",
+                app.client_id,
+                app.name,
+                app.first_party,
+                app.offline,
+                app.scopes.join(" ")
             );
         }
     }

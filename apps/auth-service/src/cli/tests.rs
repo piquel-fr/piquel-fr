@@ -9,9 +9,11 @@ use crate::{
     tests::{Browser, Replicas, operator},
 };
 use piquel_common::{
-    AccountStatus,
+    AccountStatus, UserId,
+    clients::ClientKind,
     events::{Actor, DomainEvent},
 };
+use piquel_repository::StoredEvent;
 
 impl AdminOperation {
     /// A full command line that runs this operation, after `auth-service`. The
@@ -140,6 +142,10 @@ impl AccountOperation {
                 "--reason",
                 "Lost",
             ],
+            Self::ListApps => &["account", "alice", "apps", "list"],
+            Self::RemoveApp => &[
+                "account", "alice", "apps", "remove", "notes", "--reason", "Asked",
+            ],
             Self::ViewHistory => &["account", "alice", "history"],
         }
     }
@@ -186,6 +192,43 @@ fn confirmation_needs_a_terminal_or_yes() {
     assert!(matches!(ask(false, true, "no\n"), Err(CliError::Declined)));
 }
 
+impl Administration {
+    /// Parses `arguments`, after `auth-service`, as an administrative command.
+    fn parse(arguments: &[&str]) -> Self {
+        let arguments = std::iter::once(&"auth-service").chain(arguments);
+        match Cli::try_parse_from(arguments).expect("arguments").command {
+            Some(Command::Administration(command)) => command,
+            _ => panic!("an administrative command"),
+        }
+    }
+
+    /// Runs this command on `database` as the test operator.
+    async fn run_on(self, database: &Database) {
+        let console = Console {
+            service: AdminService::new(database.clone(), true),
+            account: AccountService::new(database.clone()),
+            operator: operator(),
+        };
+        self.run(&console).await.expect("command");
+    }
+}
+
+/// The first event of `kind` in `user`'s history, newest first, which must exist.
+async fn recorded(
+    database: &Database,
+    user: UserId,
+    kind: impl Fn(&DomainEvent) -> bool,
+) -> StoredEvent {
+    database
+        .events()
+        .history_for_user(user, 10)
+        .await
+        .expect("history")
+        .into_iter()
+        .find(|event| event.event.known().is_some_and(&kind))
+        .expect("recorded")
+}
+
 /// `user disable` runs the admin operation: the account is disabled, signed out,
 /// and the change is recorded as the operator's, with the reason.
 #[tokio::test]
@@ -194,26 +237,9 @@ async fn user_disable_runs_the_admin_operation() {
     let database = Replicas::database().await;
     let browser = Browser::new_account(&database).await;
     let user = browser.user_id.to_string();
-    let Some(Command::Administration(command)) = Cli::try_parse_from([
-        "auth-service",
-        "user",
-        "disable",
-        &user,
-        "--reason",
-        "Spam",
-        "--yes",
-    ])
-    .expect("arguments")
-    .command
-    else {
-        panic!("an administrative command");
-    };
-    let console = Console {
-        service: AdminService::new(database.clone(), true),
-        account: AccountService::new(database.clone()),
-        operator: operator(),
-    };
-    command.run(&console).await.expect("disable");
+    Administration::parse(&["user", "disable", &user, "--reason", "Spam", "--yes"])
+        .run_on(&database)
+        .await;
 
     let account = database
         .users()
@@ -222,25 +248,15 @@ async fn user_disable_runs_the_admin_operation() {
         .expect("lookup")
         .expect("account");
     assert_eq!(account.status, AccountStatus::Disabled);
-    let history = database
-        .events()
-        .history_for_user(browser.user_id, 10)
-        .await
-        .expect("history");
-    let disabled = history
-        .iter()
-        .find(|event| {
-            matches!(
-                event.event.known(),
-                Some(DomainEvent::AccountDisabled { .. })
-            )
-        })
-        .expect("recorded");
+    let disabled = recorded(&database, browser.user_id, |event| {
+        matches!(event, DomainEvent::AccountDisabled { .. })
+    })
+    .await;
     assert!(matches!(&disabled.actor, Actor::Cli { os_user, .. } if os_user == "test"));
-    assert!(history.iter().any(|event| matches!(
-        event.event.known(),
-        Some(DomainEvent::SessionRevoked { session_id, .. }) if *session_id == browser.session_id
-    )));
+    recorded(&database, browser.user_id, |event| {
+        matches!(event, DomainEvent::SessionRevoked { session_id, .. } if *session_id == browser.session_id)
+    })
+    .await;
 }
 
 /// `account … sessions revoke-all` runs the shared operation as the operator: every
@@ -251,8 +267,7 @@ async fn account_commands_run_the_shared_operation() {
     let database = Replicas::database().await;
     let browser = Browser::new_account(&database).await;
     let user = browser.user_id.to_string();
-    let Some(Command::Administration(command)) = Cli::try_parse_from([
-        "auth-service",
+    Administration::parse(&[
         "account",
         &user,
         "sessions",
@@ -261,32 +276,62 @@ async fn account_commands_run_the_shared_operation() {
         "Lost phone",
         "--yes",
     ])
-    .expect("arguments")
-    .command
-    else {
-        panic!("an administrative command");
-    };
-    let console = Console {
-        service: AdminService::new(database.clone(), true),
-        account: AccountService::new(database.clone()),
-        operator: operator(),
-    };
-    command.run(&console).await.expect("revoke");
+    .run_on(&database)
+    .await;
 
-    let history = database
-        .events()
-        .history_for_user(browser.user_id, 10)
-        .await
-        .expect("history");
-    let revoked = history
-        .iter()
-        .find(|event| {
-            matches!(
-                event.event.known(),
-                Some(DomainEvent::SessionRevoked { session_id, .. }) if *session_id == browser.session_id
-            )
-        })
-        .expect("recorded");
+    let revoked = recorded(&database, browser.user_id, |event| {
+        matches!(event, DomainEvent::SessionRevoked { session_id, .. } if *session_id == browser.session_id)
+    })
+    .await;
     assert!(matches!(&revoked.actor, Actor::Cli { os_user, .. } if os_user == "test"));
     assert_eq!(revoked.reason.as_deref(), Some("Lost phone"));
+}
+
+/// `account … apps remove` removes the app's access with the operation the
+/// settings and the dashboard run: the consent is gone, and its removal is
+/// recorded as the operator's, with the reason.
+#[tokio::test]
+#[ignore = "requires TEST_DATABASE_URL"]
+async fn account_apps_remove_withdraws_the_consent() {
+    let database = Replicas::database().await;
+    let browser = Browser::new_account(&database).await;
+    let client = crate::tests::registration(ClientKind::Public, "https://client.example");
+    crate::tests::register(&database, &client)
+        .await
+        .expect("register");
+    database
+        .oidc()
+        .save_consent(
+            browser.user_id,
+            &client.id,
+            client.id.as_str(),
+            &["openid".into()],
+        )
+        .await
+        .expect("consent");
+    let user = browser.user_id.to_string();
+    Administration::parse(&[
+        "account",
+        &user,
+        "apps",
+        "remove",
+        client.id.as_str(),
+        "--reason",
+        "Impersonating app",
+    ])
+    .run_on(&database)
+    .await;
+
+    let apps = database
+        .oidc()
+        .list_apps(browser.user_id)
+        .await
+        .expect("apps");
+    assert!(apps.is_empty());
+    let removed = recorded(&database, browser.user_id, |event| {
+        matches!(event, DomainEvent::ConsentRevoked { client_id } if *client_id == client.id)
+    })
+    .await;
+    assert!(matches!(&removed.actor, Actor::Cli { os_user, .. } if os_user == "test"));
+    assert_eq!(removed.reason.as_deref(), Some("Impersonating app"));
 }
