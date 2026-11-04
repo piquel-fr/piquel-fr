@@ -100,10 +100,10 @@ rights to the handle appended to it, e.g. `just auth admin grant` with the
 deployment's configuration. Without them, the test is skipped.
 
 `recovery.spec.ts` recovers an account as support does, against a deployment
-whose CLI it can run, as CI and previews are. `user recover` prints the link, which a
-second browser opens to add a passkey: it lands on settings with the probation's
-restriction and the question "Was this you?", which stays answered there across
-page loads. The owner's browser, which the start signed out, signs in with the
+whose CLI it can run, as CI and previews are. `user recover` prints the link,
+which a second browser opens to add a passkey: it lands on settings with the
+probation's restriction and the question "Was this you?", which stays answered
+there across page loads. The owner's browser, which the start signed out, signs in with the
 passkey from before the recovery, follows the question to the undo page and
 undoes the recovery, which signs the second browser out. Set `E2E_RECOVER` to a
 command that runs `auth-service user recover` on the deployment, to which the
