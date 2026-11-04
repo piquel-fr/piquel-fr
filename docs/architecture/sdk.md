@@ -212,9 +212,9 @@ Server-side apps keep tokens in a server-side session and give the browser only 
 random session key, as the Rust SDK's axum login routes and `@piquel/auth/server`
 do, in a `__Host-` cookie that is `Secure`, `HttpOnly` and `SameSite=Lax`. Every
 sign-in starts a session under a fresh key. Refresh tokens never reach the browser.
-The rest of this section describes the Rust SDK; `@piquel/auth/server` does not do
-it yet, and keeps its pending logins and plain session records in the backend, under
-fixed cookie names.
+The next three paragraphs, and the sealing of session records below, describe the
+Rust SDK; `@piquel/auth/server` does not do them yet, and keeps its pending logins
+and plain session records in the backend, under fixed cookie names.
 
 The type holding a session's tokens does not serialize, so a handler cannot send
 them to the browser either.
