@@ -1,8 +1,8 @@
 //! OAuth client registrations. Each field has a type that validates it when built,
 //! so a [`ClientRegistration`](crate::clients::ClientRegistration) cannot hold an
 //! invalid value, and the repository, which accepts nothing else, never stores one.
-//! Every error names the field and the value it rejected, e.g.
-//! `redirect URI http://example.com/cb must use https`.
+//! Every error names the value it rejected, e.g.
+//! `URI http://example.com/cb must use https`.
 //!
 //! ```
 //! use piquel_common::clients::{ClientId, InvalidRedirectUri, RedirectUri};
