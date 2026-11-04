@@ -175,6 +175,12 @@ fn event_kinds_match_their_serde_tags() {
         DomainEvent::HandleReleased {
             handle: Personal::Value(Handle::parse("a-b").expect("handle")),
         },
+        DomainEvent::HandleReserved {
+            handle: Handle::parse("a-b").expect("handle"),
+        },
+        DomainEvent::HandleUnreserved {
+            handle: Handle::parse("a-b").expect("handle"),
+        },
         DomainEvent::ClientRegistered {
             client_id: client_id.clone(),
             kind: clients::ClientKind::Public,

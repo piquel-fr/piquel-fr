@@ -118,6 +118,9 @@ impl DomainEvent {
             | Self::InvitationRevoked { .. }
             // The handle was the account's no more.
             | Self::HandleReleased { .. }
+            // Reservations concern names, not an account.
+            | Self::HandleReserved { .. }
+            | Self::HandleUnreserved { .. }
             // Changes to an application concern no account.
             | Self::ClientRegistered { .. }
             | Self::ClientUpdated { .. }

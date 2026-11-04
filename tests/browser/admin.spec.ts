@@ -591,10 +591,19 @@ test('an administrator reads a history, rotates a key and checks the queue and h
   await expect(admin).toHaveURL(/status=failed/);
   await expect(admin.getByRole('heading', { name: 'Deliveries', exact: true })).toBeVisible();
 
-  // A handle an account holds is never released, and the form says so.
+  // A handle is reserved for someone, listed with why, and removed again from
+  // its row's dialog.
   await admin.getByRole('link', { name: 'Handles', exact: true }).click();
-  await admin.getByRole('link', { name: 'Release a handle', exact: true }).click();
-  await admin.getByLabel('Handle', { exact: true }).fill(`owner-${suffix}`);
-  await admin.getByRole('button', { name: 'Release', exact: true }).click();
-  await expect(admin.getByRole('alert')).toContainText('no released handle is this one');
+  await admin.getByRole('link', { name: 'Reserve a handle', exact: true }).click();
+  await admin.getByLabel('Handle', { exact: true }).fill(`kept-${suffix}`);
+  await admin.getByLabel('Who or what it is kept for').fill('Browser test');
+  await admin.getByRole('button', { name: 'Reserve', exact: true }).click();
+  await expect(admin).toHaveURL(`${adminUrl}/handles`);
+  await expect(admin.getByText('Browser test')).toBeVisible();
+  await admin
+    .getByRole('button', { name: `Remove this reservation: @kept-${suffix}`, exact: true })
+    .click();
+  const unreserve = admin.getByRole('dialog', { name: 'Remove this reservation' });
+  await unreserve.getByRole('button', { name: 'Remove', exact: true }).click();
+  await expect(admin.getByText(`@kept-${suffix}`, { exact: true })).toHaveCount(0);
 });

@@ -131,3 +131,79 @@ async fn operators_rename_and_release_handles() {
         .await
         .expect("release");
 }
+
+/// An administrator reserves a handle for someone: nobody takes it, or a
+/// look-alike, at signup or in the settings, until an administrator gives it to
+/// an account, which `handle check` then lists; removed from the list, anyone may
+/// take it. Built-in names and look-alikes of reserved ones are not reserved twice.
+#[tokio::test]
+#[ignore = "requires TEST_DATABASE_URL"]
+async fn administrators_reserve_handles_until_they_give_them_out() {
+    let harness = Harness::new().await;
+    let service = harness.service();
+    let suffix = &TokenId::new().to_string()[24..];
+    let kept = Handle::parse(&format!("kept-{suffix}")).expect("handle");
+    let look_alike = Handle::parse(&format!("kept{suffix}")).expect("handle");
+    let handles = crate::handles::Handles::new(&harness.database);
+    let reserved = |result: Result<(), HandlesError>| matches!(result, Err(HandlesError::Refused(HandleError::Reserved(name))) if name == kept.as_str());
+    assert!(handles.ensure_unreserved(&kept).await.is_ok());
+    service
+        .reserve_handle(&cli(), kept.clone(), reason("For the new CTO"))
+        .await
+        .expect("reserve");
+    assert!(reserved(handles.ensure_unreserved(&kept).await));
+    assert!(reserved(handles.ensure_unreserved(&look_alike).await));
+    for again in [
+        kept.clone(),
+        look_alike,
+        Handle::parse("support").expect("handle"),
+    ] {
+        assert!(matches!(
+            service.reserve_handle(&cli(), again, reason("Again")).await,
+            Err(AdminError::HandleReserved)
+        ));
+    }
+    let listed = service.list_reserved_handles(&cli()).await.expect("list");
+    let reservation = listed
+        .iter()
+        .find(|reservation| reservation.handle == kept)
+        .expect("listed");
+    assert_eq!(reservation.reason, "For the new CTO");
+
+    let user = harness.named(&format!("cto-{suffix}")).await;
+    let give = |allow_reserved| {
+        let (service, kept) = (service.clone(), kept.clone());
+        async move {
+            service
+                .rename_handle(
+                    &cli(),
+                    user,
+                    kept,
+                    reason("Reserved for them"),
+                    allow_reserved,
+                )
+                .await
+        }
+    };
+    assert!(matches!(
+        give(false).await,
+        Err(AdminError::Handle(HandlesError::Refused(
+            HandleError::Reserved(_)
+        )))
+    ));
+    give(true).await.expect("given");
+    let problems = service.check_handles(&cli()).await.expect("check");
+    assert!(problems.iter().any(|problem| problem.user_id == user));
+
+    service
+        .unreserve_handle(&cli(), kept.clone())
+        .await
+        .expect("unreserve");
+    assert!(matches!(
+        service.unreserve_handle(&cli(), kept.clone()).await,
+        Err(AdminError::HandleNotReserved)
+    ));
+    assert!(handles.ensure_unreserved(&kept).await.is_ok());
+    let problems = service.check_handles(&cli()).await.expect("check");
+    assert!(!problems.iter().any(|problem| problem.user_id == user));
+}

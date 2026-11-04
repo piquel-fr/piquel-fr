@@ -125,8 +125,15 @@ pub enum AdminError {
     Handle(#[from] HandlesError),
     /// No released handle, or purged account's, is this one; an account's current
     /// handle is never released.
-    #[error("no released handle is this one")]
+    #[error("this handle is not released: an account holds it, or none ever did")]
     HandleNotReleased,
+    /// The handle rules or an administrator reserve the handle, or a look-alike,
+    /// already.
+    #[error("this handle, or one that looks like it, is reserved already")]
+    HandleReserved,
+    /// No administrator reserved this handle.
+    #[error("this handle is not on the reserved list")]
+    HandleNotReserved,
     /// Persistence failed.
     #[error(transparent)]
     Database(#[from] DatabaseError),
@@ -198,6 +205,8 @@ impl AdminError {
             Self::LastAdministrator => "last_administrator",
             Self::Handle(_) => "handle",
             Self::HandleNotReleased => "handle_not_released",
+            Self::HandleReserved => "handle_reserved",
+            Self::HandleNotReserved => "handle_not_reserved",
             Self::Database(_) => "database",
             Self::Client(_) => "client",
             Self::Deletion(_) => "deletion",
@@ -252,6 +261,7 @@ impl From<AdminError> for ApiError {
             | AdminError::ClientNotFound
             | AdminError::DeliveryNotFound { .. }
             | AdminError::HandleNotReleased
+            | AdminError::HandleNotReserved
             | AdminError::SigningKey(KeyError::Unknown(_)) => Self::not_found(message),
             AdminError::AlreadyDisabled
             | AdminError::AlreadyActive
@@ -267,6 +277,7 @@ impl From<AdminError> for ApiError {
             | AdminError::DeletionScheduled
             | AdminError::AlreadyAdministrator
             | AdminError::NotAnAdministrator
+            | AdminError::HandleReserved
             // A stored key that cannot sign is refused, and the form says which.
             | AdminError::SigningKey(
                 KeyError::Stored { .. } | KeyError::Mismatched(_) | KeyError::NoActiveKey,

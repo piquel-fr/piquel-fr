@@ -1,4 +1,5 @@
-//! Checking accounts' handles against the handle rules, and changing them.
+//! Checking accounts' handles against the handle rules, changing them, and the
+//! handles kept from others: released ones and reserved ones.
 
 use super::{CliError, Console};
 use crate::{Reason, UserRef};
@@ -33,6 +34,26 @@ pub(super) enum HandleCommand {
         #[arg(value_parser = Handle::parse)]
         handle: Handle,
     },
+    /// List released handles and purged accounts' last ones, which `release` frees.
+    Released,
+    /// List the handles administrators reserved, then the built-in reserved names.
+    Reserved,
+    /// Reserve a handle: signup and the settings refuse it and its look-alikes until
+    /// an administrator gives it with `rename --allow-reserved`, or `unreserve`s it.
+    Reserve {
+        /// The handle.
+        #[arg(value_parser = Handle::parse)]
+        handle: Handle,
+        /// Who or what it is kept for: 1 to 500 characters.
+        #[arg(long)]
+        reason: Reason,
+    },
+    /// Remove a handle from the reserved list, so anyone may claim it again.
+    Unreserve {
+        /// The handle.
+        #[arg(value_parser = Handle::parse)]
+        handle: Handle,
+    },
 }
 
 impl HandleCommand {
@@ -59,6 +80,34 @@ impl HandleCommand {
                     .await?;
             }
             Self::Release { handle } => service.release_handle(operator, handle).await?,
+            Self::Released => {
+                for released in service.list_released_handles(operator).await? {
+                    let user = released
+                        .user_id
+                        .map_or_else(|| "purged".to_owned(), |user| user.to_string());
+                    let at = released
+                        .released_at
+                        .map_or_else(|| "-".to_owned(), |at| at.to_rfc3339());
+                    println!("{}\t{user}\t{at}", released.handle);
+                }
+            }
+            Self::Reserved => {
+                for reserved in service.list_reserved_handles(operator).await? {
+                    println!(
+                        "{}\t{}\t{}",
+                        reserved.handle,
+                        reserved.reserved_at.to_rfc3339(),
+                        reserved.reason
+                    );
+                }
+                for name in piquel_common::handle::RESERVED {
+                    println!("{name}\tbuilt-in\t-");
+                }
+            }
+            Self::Reserve { handle, reason } => {
+                service.reserve_handle(operator, handle, reason).await?;
+            }
+            Self::Unreserve { handle } => service.unreserve_handle(operator, handle).await?,
         }
         Ok(())
     }

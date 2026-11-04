@@ -298,7 +298,7 @@ async fn account_actions<'a>(
                     <a class="button secondary small" href=(pages.emails)>"Email addresses"</a>
                     <a class="button secondary small" href=(pages.apps)>"Connected apps"</a>
                     <a class="button secondary small" href=(pages.history)>"Security history"</a>
-                    <a class="button secondary small" href=(pages.handle)>"Rename handle"</a>
+                    <a class="button secondary small" href=(pages.handle)>"Change handle"</a>
                 },
                 Err(reason) => {
                     refused_action(label: "Change", reason: reason)

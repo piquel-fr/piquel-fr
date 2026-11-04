@@ -94,6 +94,8 @@ impl AdminOperation {
                 "Impersonation",
             ],
             Self::ReleaseHandle => &["handle", "release", "alice"],
+            Self::ReserveHandle => &["handle", "reserve", "alice", "--reason", "For Alice"],
+            Self::UnreserveHandle => &["handle", "unreserve", "alice"],
             Self::ListDeliveries => &["deliveries", "list"],
             Self::RetryDelivery => &["deliveries", "retry", AN_ID],
             Self::CancelDelivery => &["deliveries", "cancel", AN_ID],

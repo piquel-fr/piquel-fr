@@ -25,7 +25,7 @@ mod audit;
 mod clients;
 /// The outbound delivery queue.
 mod deliveries;
-/// Reserved handles, and releasing one.
+/// The reserved and released handles, and the accounts holding a reserved one.
 mod handles;
 /// Signup invitations.
 mod invitations;
@@ -314,6 +314,8 @@ impl AdminApplication {
             Op::RemoveRelatedOrigin => &origins::remove,
             Op::CheckHandles => &handles::check,
             Op::ReleaseHandle => &handles::release,
+            Op::ReserveHandle => &handles::reserve,
+            Op::UnreserveHandle => &handles::unreserve,
             Op::ListDeliveries => &deliveries::list,
             Op::RetryDelivery => &deliveries::retry,
             Op::CancelDelivery => &deliveries::cancel,
@@ -333,6 +335,15 @@ impl AdminApplication {
             // Pruning needs the schema owner, which auth never holds: the audit page
             // shows the command instead.
             | Op::PruneAuditChain => return None,
+        })
+    }
+
+    /// `message` as the dashboard shows it, starting with a capital: admin
+    /// refusals are worded to follow `error: ` at the terminal.
+    fn sentence(message: &str) -> String {
+        let mut chars = message.chars();
+        chars.next().map_or_else(String::new, |first| {
+            first.to_uppercase().chain(chars).collect()
         })
     }
 
@@ -429,7 +440,7 @@ impl AdminApplication {
                     Err(Error::msg("an admin change failed"))
                 }
                 (_, message) => Ok(Some(Err(Refused {
-                    message: message.to_owned(),
+                    message: Self::sentence(message),
                     form: input,
                 }))),
             },
@@ -705,7 +716,7 @@ impl AdminApplication {
         };
         let (status, detail) = refused.public();
         let page = view! { cx =>
-            piquel_ui::dashboard_failure(title: "That did not work", detail: detail)
+            piquel_ui::dashboard_failure(title: "That did not work", detail: Self::sentence(detail))
         };
         Self::render(cx, status, "Refused", page).await
     }
