@@ -1,7 +1,7 @@
-/** The key cache's fetch rules: one refetch per unknown kid, spacing, freshness and outages. */
+/** The key cache's fetch rules: one refetch per unknown kid, spacing, freshness and outages, and fixed sets. */
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { Jws, KeyCache } from '../src/index.ts';
+import { Jws, KeyCache, KeySet } from '../src/index.ts';
 import * as base64 from '../src/base64.ts';
 import { FakeFetch, JWKS_URI, ManualClock, outcome, vector } from './vectors.ts';
 
@@ -124,4 +124,15 @@ test('a weak RSA key verifies nothing, however its modulus is written', async ()
   assert.deepEqual(await verify(keys, String(weak.token)), {
     error: { code: 'invalid_token', reason: 'bad_signature' }
   });
+});
+
+test('a fixed set verifies its keys, and a kid it lacks is unknown', async () => {
+  const keys = KeyCache.fixed(KeySet.parse(jwks('rotation-before')));
+  assert.deepEqual(await verify(keys, OLD), { ok: 'verified' });
+  // No fetch can add a key, so a missing one is unknown rather than unavailable.
+  for (const missing of [NEW, UNKNOWN]) {
+    assert.deepEqual(await verify(keys, missing), {
+      error: { code: 'invalid_token', reason: 'unknown_key' }
+    });
+  }
 });

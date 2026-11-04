@@ -11,7 +11,8 @@
  *   `@piquel/auth/server` builds the routes and sessions of a server-side app on it,
  *   and `@piquel/auth/browser` a public client for apps without a server.
  * - {@link KeyCache} verifies JWS signatures against any JWKS URL, refetching on key
- *   rotation without letting unknown key IDs flood the issuer.
+ *   rotation without letting unknown key IDs flood the issuer, or against a pinned
+ *   {@link KeySet} with {@link KeyCache.fixed}.
  * - Every failure is an {@link AuthError}, whose `toResponse()` answers with the
  *   canonical `WWW-Authenticate` challenge.
  *
@@ -30,7 +31,7 @@ export {
 export { AuthError, type AuthErrorCode, type AuthErrorDetail, type TokenReason } from './error.ts';
 export type { Fetch } from './http.ts';
 export { Issuer, type IssuerOptions } from './issuer.ts';
-export { Jws, KeyCache, type JwsHeader, type KeyCacheOptions } from './keys.ts';
+export { Jws, KeyCache, KeySet, type JwsHeader, type KeyCacheOptions } from './keys.ts';
 export { Resource, type ResourceConfig } from './resource.ts';
 export { Scopes, defineScopes } from './scope.ts';
 export type { Clock } from './time.ts';

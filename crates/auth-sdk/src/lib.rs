@@ -67,8 +67,9 @@
 //!
 //! [`KeyCache`] caches a JWKS for any issuer. An unknown `kid` triggers one refetch,
 //! fetches happen at most every 30 seconds, and the last good keys survive an outage.
-//! Each [`Issuer`] holds one for its own keys. [`Jws`] parses a token so it can be
-//! checked by hand, as for Google ID tokens.
+//! Each [`Issuer`] holds one for its own keys, and [`KeyCache::fixed`] holds a
+//! [`KeySet`] that is never fetched, for pinned keys. [`Jws`] parses a token so it
+//! can be checked by hand, as for Google ID tokens.
 //!
 //! # Errors
 //!
