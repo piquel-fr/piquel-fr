@@ -187,7 +187,6 @@ impl HistoryRow<'_> {
             }
             HistoryEntry::AccountDisabled => "Account disabled".to_owned(),
             HistoryEntry::AccountEnabled => "Account re-enabled".to_owned(),
-            HistoryEntry::AccountViewed => "Account details viewed".to_owned(),
             HistoryEntry::AdministratorGranted => "Administrator rights granted".to_owned(),
             HistoryEntry::AdministratorRevoked => "Administrator rights removed".to_owned(),
             HistoryEntry::HandleChanged => "Handle changed".to_owned(),

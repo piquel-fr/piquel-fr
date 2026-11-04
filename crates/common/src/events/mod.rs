@@ -174,6 +174,7 @@ pub enum DomainEvent {
     /// A disabled account was reactivated.
     AccountEnabled {},
     /// An administrator viewed the account's details, which hold personal data.
+    /// Kept for the audit only: the owner's history shows changes, not reads.
     AccountViewed {},
     /// The account became an administrator.
     AdministratorGranted {},
@@ -642,7 +643,6 @@ impl DomainEvent {
             // The reason is written for administrators and may name other people.
             Self::AccountDisabled { .. } => HistoryEntry::AccountDisabled,
             Self::AccountEnabled {} => HistoryEntry::AccountEnabled,
-            Self::AccountViewed {} => HistoryEntry::AccountViewed,
             Self::AdministratorGranted {} => HistoryEntry::AdministratorGranted,
             Self::AdministratorRevoked {} => HistoryEntry::AdministratorRevoked,
             Self::HandleChanged { .. } => HistoryEntry::HandleChanged,
@@ -686,6 +686,9 @@ impl DomainEvent {
             | Self::DeliveryCancelled { .. }
             | Self::SigningKeyChanged { .. }
             | Self::AuditHistoryPruned { .. }
+            // A read may be a misclick or a confidential inquiry; the owner sees
+            // changes, each with its reason, not what an administrator looked at.
+            | Self::AccountViewed {}
             // Nobody can read the history of an account that no longer exists.
             | Self::AccountPurged {} => return None,
         })
@@ -800,9 +803,6 @@ pub enum HistoryEntry {
     /// The account was reactivated.
     #[serde(rename = "account.enabled")]
     AccountEnabled,
-    /// An administrator viewed the account's details.
-    #[serde(rename = "account.viewed")]
-    AccountViewed,
     /// The account became an administrator.
     #[serde(rename = "administrator.granted")]
     AdministratorGranted,
@@ -885,7 +885,6 @@ impl HistoryEntry {
             | Self::TokenReused
             | Self::AccountDisabled
             | Self::AccountEnabled
-            | Self::AccountViewed
             | Self::AdministratorGranted
             | Self::AdministratorRevoked
             | Self::HandleChanged
@@ -928,7 +927,6 @@ impl HistoryEntry {
             | Self::TokenReused
             | Self::AccountDisabled
             | Self::AccountEnabled
-            | Self::AccountViewed
             | Self::AdministratorGranted
             | Self::AdministratorRevoked
             | Self::HandleChanged

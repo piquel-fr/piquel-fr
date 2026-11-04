@@ -140,7 +140,8 @@ async fn pages_hold_only_the_callers_entries() {
                 user_id: bob.user_id,
                 session_id: bob.session_id,
             },
-            vec![DomainEvent::AccountViewed {}],
+            // The view is hidden; the change shows.
+            vec![DomainEvent::AccountViewed {}, DomainEvent::AccountEnabled {}],
         )
         .await;
     harness
@@ -166,7 +167,7 @@ async fn pages_hold_only_the_callers_entries() {
     );
     assert_eq!(
         (&entries[1]["kind"], &entries[1]["actor"]),
-        (&json!("account.viewed"), &json!("admin"))
+        (&json!("account.enabled"), &json!("admin"))
     );
     assert_eq!(entries[2]["kind"], "passkey.renamed");
     assert_eq!(entries[2]["actor"], "account");
