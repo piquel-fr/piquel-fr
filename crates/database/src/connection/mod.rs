@@ -347,7 +347,7 @@ impl Database {
     }
 }
 
-#[cfg(feature = "test-support")]
+#[cfg(feature = "test-util")]
 impl Database {
     /// Connects to `config`'s database in a schema of its own, created and migrated
     /// for this call, so a test can change history that the whole database shares,

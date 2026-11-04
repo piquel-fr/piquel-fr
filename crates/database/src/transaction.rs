@@ -79,7 +79,7 @@ impl<'a> DatabaseTransaction<'a> {
     /// # Errors
     ///
     /// Returns [`DatabaseError`] if the query fails.
-    #[cfg(feature = "test-support")]
+    #[cfg(feature = "test-util")]
     pub async fn blocked_transactions(&mut self) -> Result<i64, DatabaseError> {
         sqlx::query_scalar!(
             // `pg_locks` is read afresh by every query; `pg_stat_activity` would

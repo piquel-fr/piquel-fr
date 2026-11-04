@@ -490,7 +490,7 @@ impl DatabaseTransaction<'_> {
 /// A change an attacker with database access could make, for verification tests.
 /// [`AuditRepository::tamper`] applies it with the guard triggers disabled, so run
 /// it only on a database of its own (see `Database::isolated`).
-#[cfg(feature = "test-support")]
+#[cfg(feature = "test-util")]
 #[derive(Clone, Debug)]
 pub enum Tamper {
     /// Replaces the payload of the event at a position.
@@ -516,7 +516,7 @@ pub enum Tamper {
     ErasePersonalData(u64),
 }
 
-#[cfg(feature = "test-support")]
+#[cfg(feature = "test-util")]
 impl AuditRepository<'_> {
     /// Applies `tamper` with the guard triggers disabled.
     ///

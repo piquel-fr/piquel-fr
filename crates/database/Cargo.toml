@@ -21,7 +21,7 @@ uuid.workspace = true
 [features]
 # Helpers that let other crates' tests observe stored state, and move a
 # recovery's clock.
-test-support = []
+test-util = []
 
 [lints]
 workspace = true

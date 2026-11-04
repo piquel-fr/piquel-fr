@@ -20,7 +20,7 @@ prepare-check:
 prepare:
     @just db scratch just db _prepare
 
-# Test targets and the `test-support` feature are included so checked queries
+# Test targets and the `test-util` feature are included so checked queries
 # compiled only for tests are cached too.
 [positional-arguments]
 _prepare *ARGS:

@@ -210,7 +210,7 @@ The purge's queries use indexes, including the actor's user ID in
 `domain_events`, so its cost does not grow with everyone's history.
 Tests that use `TEST_DATABASE_URL` are explicitly
 marked ignored by the ordinary unit test runner; other crates' tests read stored state
-through helpers behind the `test-support` feature. `just db test` runs them in a
+through helpers behind the `test-util` feature. `just db test` runs them in a
 throwaway PostgreSQL cluster, or against an explicit, disposable `TEST_DATABASE_URL`.
 
 ## Time limits
@@ -476,7 +476,7 @@ one that would move it back fails. Personal data is not covered, so retention
 keeps deleting `event_personal_data` freely.
 
 Verification tests need history no other test shares: `Database::isolated` (behind
-`test-support`) migrates a schema of its own, and `audit().tamper` applies the
+`test-util`) migrates a schema of its own, and `audit().tamper` applies the
 changes an attacker could make, with the trigger disabled.
 
 ### Security history

@@ -2,7 +2,7 @@
 //!
 //! Applications receive typed repositories and never a pool, executor, row, or
 //! `SQLx` error. Repositories expose only the operations used by the service, plus
-//! read-only helpers behind the `test-support` feature for other crates' tests.
+//! read-only helpers behind the `test-util` feature for other crates' tests.
 /// Validated `PostgreSQL` transport and bounded connection pools.
 mod connection;
 /// Typed persistence and connection failures.
@@ -20,7 +20,7 @@ pub use connection::{Database, DatabaseConfig, RuntimeRole};
 pub(crate) use connection::{Limit, Scope};
 pub use error::{DatabaseConnectionError, DatabaseError};
 pub use exclusive::{ExclusiveConnection, LockKey};
-#[cfg(feature = "test-support")]
+#[cfg(feature = "test-util")]
 pub use repositories::audit::Tamper;
 pub use repositories::{
     AccountDeletionRepository, AdministratorRepository, AuditRepository, DashboardRepository,
