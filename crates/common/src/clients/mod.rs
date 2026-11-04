@@ -1,8 +1,8 @@
 //! OAuth client registrations. Each field has a type that validates it when built,
 //! so a [`ClientRegistration`](crate::clients::ClientRegistration) cannot hold an
 //! invalid value, and the repository, which accepts nothing else, never stores one.
-//! Every error names the field and the value it rejected, e.g.
-//! `redirect URI http://example.com/cb must use https`.
+//! Every error names the value it rejected, e.g.
+//! `URI http://example.com/cb must use https`.
 //!
 //! ```
 //! use piquel_common::clients::{ClientId, InvalidRedirectUri, RedirectUri};
@@ -264,11 +264,12 @@ impl FromStr for DisplayName {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct RedirectUri(Url);
 
-/// Why a redirect URI was rejected.
+/// Why a [`RedirectUri`] was rejected. The messages say "URI" alone, since
+/// post-logout pages and back-channel logout endpoints are checked as callbacks are.
 #[derive(Clone, Debug, PartialEq, Eq, Error)]
 pub enum InvalidRedirectUri {
     /// The value is not an absolute URL.
-    #[error("redirect URI {uri:?} is not an absolute URL")]
+    #[error("URI {uri:?} is not an absolute URL")]
     NotAbsolute {
         /// The rejected value.
         uri: String,
@@ -278,7 +279,7 @@ pub enum InvalidRedirectUri {
     },
     /// The URL uses another scheme, or HTTP on a host other than a loopback IP.
     #[error(
-        "redirect URI {uri} must use https; http is allowed only on a loopback IP, \
+        "URI {uri} must use https; http is allowed only on a loopback IP, \
          e.g. http://127.0.0.1:8080/callback"
     )]
     Insecure {
@@ -286,16 +287,16 @@ pub enum InvalidRedirectUri {
         uri: String,
     },
     /// The URL holds a user name or password. The value is omitted: it may hold a secret.
-    #[error("redirect URIs must not contain a user name or password")]
+    #[error("URIs must not contain a user name or password")]
     Credentials,
     /// The URL has a fragment, which authorization responses cannot carry (RFC 6749 §3.1.2).
-    #[error("redirect URI {uri} must not contain a fragment")]
+    #[error("URI {uri} must not contain a fragment")]
     Fragment {
         /// The rejected value.
         uri: String,
     },
     /// The URL is not written in its normalized form.
-    #[error("redirect URI {uri} must be written as {canonical}, as clients will send it")]
+    #[error("URI {uri} must be written as {canonical}, as clients will send it")]
     NotCanonical {
         /// The rejected value.
         uri: String,

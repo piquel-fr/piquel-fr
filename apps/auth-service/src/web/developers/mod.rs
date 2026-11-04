@@ -187,7 +187,8 @@ impl<'a> From<&'a OwnedClientView> for ClientRow<'a> {
 }
 
 impl From<ClientDraft> for ClientSettings {
-    /// The settings as the form sent them, its name trimmed.
+    /// The settings as the form sent them, its name and back-channel logout URI
+    /// trimmed. An empty URI is none.
     fn from(draft: ClientDraft) -> Self {
         Self {
             display_name: draft.display_name.trim().to_owned(),
@@ -196,6 +197,9 @@ impl From<ClientDraft> for ClientSettings {
             allowed_scopes: draft.scopes.names(),
             allow_refresh: draft.allow_refresh.0,
             require_pushed_authorization_requests: draft.require_pushed_authorization_requests.0,
+            backchannel_logout_uri: Some(draft.backchannel_logout_uri.trim())
+                .filter(|uri| !uri.is_empty())
+                .map(str::to_owned),
         }
     }
 }
