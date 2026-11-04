@@ -1,8 +1,13 @@
 /** Every case in tests/sdk-vectors, with the case's clock and a fake fetch. */
 import assert from 'node:assert/strict';
 import { describe, test } from 'node:test';
-import { Issuer, formatChallenge, parseChallenge, type BearerChallenge } from '../src/index.ts';
-import { KeySet } from '../src/keys.ts';
+import {
+  Issuer,
+  KeySet,
+  formatChallenge,
+  parseChallenge,
+  type BearerChallenge
+} from '../src/index.ts';
 import {
   DISCOVERY_URL,
   DOCUMENT,
@@ -32,10 +37,11 @@ describe('discovery vectors', () => {
 describe('jwks vectors', () => {
   for (const vector of cases('jwks')) {
     test(vector.name, async () => {
-      const result = await outcome(() =>
-        Promise.resolve({ kids: KeySet.parse(vector.input.jwks).kids })
-      );
-      assert.deepEqual(result, vector.expected);
+      // As the parsed document, and as its JSON text.
+      for (const document of [vector.input.jwks, JSON.stringify(vector.input.jwks)]) {
+        const result = await outcome(() => Promise.resolve({ kids: KeySet.parse(document).kids }));
+        assert.deepEqual(result, vector.expected);
+      }
     });
   }
 });

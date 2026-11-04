@@ -201,7 +201,16 @@ class SigningKey {
   }
 }
 
-/** The usable keys of a JSON Web Key Set. */
+/**
+ * The usable keys of a JSON Web Key Set. Parse one to pin keys, or to verify offline,
+ * with {@link KeyCache.fixed}:
+ *
+ * ```ts
+ * const keys = KeySet.parse(await readFile('jwks.json', 'utf8'));
+ * keys.kids; // ['key-2026']: keys for encryption, or of an unknown type, are skipped
+ * const cache = KeyCache.fixed(keys);
+ * ```
+ */
 export class KeySet {
   /** Keys in document order. */
   readonly #keys: SigningKey[];
@@ -210,20 +219,22 @@ export class KeySet {
     this.#keys = keys;
   }
 
-  /** The empty set a cache holds before its first fetch. */
+  /** The empty set a cache holds before its first fetch, which verifies nothing. */
   static readonly empty = new KeySet([]);
 
   /**
-   * Parses a key set. Keys this SDK cannot use are skipped, as RFC 7517 §5 asks: an
-   * unknown `kty` or `alg`, a `use` other than `sig`, no `kid`, or material that is
-   * not base64url. Throws `keys` errors when the document is not a key set
-   * (`invalid_document`), or two usable keys share a `kid` (`duplicate_key_id`).
+   * Parses a key set, from its JSON text or the parsed document. Keys this SDK cannot
+   * use are skipped, as RFC 7517 §5 asks: an unknown `kty` or `alg`, a `use` other
+   * than `sig`, no `kid`, or material that is not base64url. Throws `keys` errors when
+   * the document is not a key set (`invalid_document`), or two usable keys share a
+   * `kid` (`duplicate_key_id`).
    */
   static parse(document: unknown): KeySet {
-    return KeySet.#decode(() => document);
+    // A JSON string is never a key set, so a string can only be the document's text.
+    return KeySet.#decode(() => (typeof document === 'string' ? json.parse(document) : document));
   }
 
-  /** Parses a key set from a response body. */
+  /** @internal Parses a key set from a response body. */
   static read(reply: Reply): KeySet {
     return KeySet.#decode(() => reply.json());
   }
@@ -278,9 +289,18 @@ export type KeyCacheOptions = {
   clock?: Clock;
 };
 
+/** Where a cache's keys come from. */
+type Source = {
+  /** The JWKS URL. */
+  url: string;
+  /** Client fetching it. */
+  http: Http;
+};
+
 /**
- * A cache of an issuer's signing keys, usable with any JWKS URL. Share one per
- * issuer: every verification shares its keys and fetch spacing.
+ * A cache of an issuer's signing keys, usable with any JWKS URL, or a fixed set with
+ * {@link KeyCache.fixed}. Share one per issuer: every verification shares its keys
+ * and fetch spacing.
  *
  * - An unknown `kid` triggers one refetch, then fails with `unknown_key`.
  * - Keys are fetched at most once every 30 seconds, whatever the reason, so unknown
@@ -290,8 +310,8 @@ export type KeyCacheOptions = {
  * - A failed fetch keeps the last good keys, and still counts as a fetch.
  */
 export class KeyCache {
-  readonly #url: string;
-  readonly #http: Http;
+  /** Where keys are fetched from; `undefined` for a fixed set. */
+  readonly #source: Source | undefined;
   readonly #clock: Clock;
   /** Keys from the last successful fetch. */
   #keys = KeySet.empty;
@@ -305,10 +325,30 @@ export class KeyCache {
   #fetching: Promise<void> | undefined;
 
   /** Keys fetched from `jwksUri` on first use. */
-  constructor(jwksUri: string, options: KeyCacheOptions = {}) {
-    this.#url = jwksUri;
-    this.#http = new Http(options.fetch);
+  constructor(jwksUri: string, options?: KeyCacheOptions);
+  /** @internal A fixed set; {@link KeyCache.fixed} is its public name. */
+  constructor(keys: KeySet);
+  constructor(source: string | KeySet, options: KeyCacheOptions = {}) {
+    if (typeof source === 'string') {
+      this.#source = { url: source, http: new Http(options.fetch) };
+    } else {
+      this.#source = undefined;
+      this.#keys = source;
+    }
     this.#clock = options.clock ?? Date.now;
+  }
+
+  /**
+   * Keys that never change and are never fetched, for tests, pinned keys and offline
+   * verification. A `kid` the set lacks fails with `unknown_key`.
+   *
+   * ```ts
+   * const keys = KeyCache.fixed(KeySet.parse(pinnedJwks));
+   * await keys.verify(jws, jws.requireAlgorithm(['RS256']));
+   * ```
+   */
+  static fixed(keys: KeySet): KeyCache {
+    return new KeyCache(keys);
   }
 
   /**
@@ -346,7 +386,10 @@ export class KeyCache {
     return fresh ? this.#keys.find(kid) : undefined;
   }
 
-  /** The key named `kid`, fetching keys when they are stale or lack it and the last fetch is old enough. */
+  /**
+   * The key named `kid`, fetching keys when they are stale or lack it and the last
+   * fetch is old enough. A fixed set is never fresh, so every lookup reads it here.
+   */
   async #key(kid: string): Promise<SigningKey> {
     const fresh = this.#fresh(kid);
     if (fresh !== undefined) return fresh;
@@ -354,12 +397,16 @@ export class KeyCache {
     while (this.#fetching !== undefined) await this.#fetching;
     const fetched = this.#fresh(kid);
     if (fetched !== undefined) return fetched;
+    const source = this.#source;
     const now = this.#clock();
-    if (this.#fetchedAt === undefined || now - this.#fetchedAt >= MIN_FETCH_INTERVAL) {
+    if (
+      source !== undefined &&
+      (this.#fetchedAt === undefined || now - this.#fetchedAt >= MIN_FETCH_INTERVAL)
+    ) {
       // Counted as failed until it succeeds.
       this.#fetchedAt = now;
       this.#failed = true;
-      const fetching = this.#refresh(now, kid);
+      const fetching = this.#refresh(source, now, kid);
       this.#fetching = fetching.then(
         () => undefined,
         () => undefined
@@ -382,9 +429,9 @@ export class KeyCache {
   }
 
   /** Fetches the key set, keeping the old one if the fetch fails. */
-  async #refresh(now: number, kid: string): Promise<void> {
+  async #refresh(source: Source, now: number, kid: string): Promise<void> {
     try {
-      const reply = (await this.#http.get(this.#url)).ok();
+      const reply = (await source.http.get(source.url)).ok();
       const keys = KeySet.read(reply);
       const lifetime = reply.maxAge === undefined ? DEFAULT_LIFETIME : reply.maxAge * 1000;
       this.#keys = keys;

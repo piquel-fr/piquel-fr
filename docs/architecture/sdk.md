@@ -123,6 +123,11 @@ This handles signing key rotation: auth publishes the new key before it signs wi
 it, so tokens from both keys verify during the overlap. Both SDKs' key caches work
 with any JWKS URL, so auth also uses the Rust one for Google.
 
+A key cache can also hold a fixed set, parsed by the rules above, for pinned keys,
+offline verification and tests (`KeyCache::fixed(KeySet::parse(..))` in Rust,
+`KeyCache.fixed(KeySet.parse(..))` in TypeScript). It is never fetched, so a `kid`
+it lacks fails with `unknown_key`.
+
 ## Scopes
 
 Scopes are space-separated strings on the wire (RFC 6749 §3.3), and each token is

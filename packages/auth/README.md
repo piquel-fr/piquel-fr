@@ -228,6 +228,19 @@ await keys.verify(jws, jws.requireAlgorithm(['RS256']));
 const claims: unknown = JSON.parse(new TextDecoder().decode(jws.payload));
 ```
 
+To pin keys, or verify with no network, parse a key set and give it to
+`KeyCache.fixed`, which never fetches, so a key ID the set lacks fails with
+`unknown_key`. `KeySet.parse` takes the JSON text or the parsed document, skips keys
+it cannot use (an unknown `kty` or `alg`, a `use` other than `sig`) and throws a
+`keys` error on two keys with one `kid`:
+
+```ts
+import { readFile } from 'node:fs/promises';
+import { KeyCache, KeySet } from '@piquel/auth';
+
+const keys = KeyCache.fixed(KeySet.parse(await readFile('jwks.json', 'utf8')));
+```
+
 ## Development
 
 `src/protocol.ts` is generated from the Rust wire types by `just sdk-types`; do not
