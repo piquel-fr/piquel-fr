@@ -489,7 +489,10 @@ the query itself excludes other accounts. `DomainEvent::history_entry` decides
 what a user sees. It names every variant, under
 `#[deny(clippy::wildcard_enum_match_arm)]`, so a new event cannot be added without
 that decision. Ceremonies, rejected attempts, token bookkeeping and invitations
-are hidden; admin and CLI actions show with the kind of actor, never the operator.
+are hidden; admin and CLI changes show with the kind of actor, never the operator.
+An administrator's views of the account are hidden too: a read may be a misclick
+or a confidential inquiry, so the owner sees changes, each with its reason, and
+only the audit keeps the views.
 
 `POST /account/history/{event_id}/report` reports an entry the user caused as not
 theirs. One transaction records `CompromiseReported`, ends the account's other
