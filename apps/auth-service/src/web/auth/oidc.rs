@@ -6,6 +6,7 @@ use crate::{
     oidc::{AuthorizationDecision, LogoutQuery, OAuthError, TransactionQuery},
     routes,
 };
+use piquel_common::Handle;
 use piquel_ui::{LoginQuery, Query, Title};
 use std::slice;
 use topcoat::{
@@ -17,22 +18,29 @@ use topcoat::{
 use url::Url;
 
 impl WebApplication {
-    /// `GET /authorize?transaction=…`: what the application asks to receive, and the
+    /// `GET /authorize?transaction=…`: what the application asks to receive, where
+    /// it sends the browser, who registered it and who is signed in, and the
     /// buttons deciding on it.
     pub(in crate::web) async fn consent(cx: &Cx) -> Result<Response, Failure> {
         let web = app_context::<Self>(cx);
         let TransactionQuery { transaction } = Self::query(cx)?;
-        let request = web
+        let consent = web
             .oidc
             .consent(headers(cx), &transaction)
             .await
             .map_err(|error| Failure::signing_in(error, &transaction))?;
-        let redirect = Url::parse(&request.redirect_uri).map_err(OAuthError::from)?;
+        let redirect = Url::parse(&consent.request.redirect_uri).map_err(OAuthError::from)?;
+        let host = redirect.host_str().unwrap_or_default().to_owned();
+        let sign_in = LoginQuery::continuing(&transaction).on(routes::page::LOGIN)?;
         let page = view! { cx =>
             piquel_ui::consent(
-                client: &request.client_display_name,
-                scopes: &request.scopes,
+                client: &consent.request.client_display_name,
+                host: &host,
+                registered_by: consent.registered_by.as_ref().map(Handle::as_str),
+                account: consent.account.as_str(),
+                scopes: &consent.request.scopes,
                 action: routes::page::CONSENT,
+                sign_in: &sign_in,
                 transaction: &transaction,
             )
         };
@@ -101,11 +109,7 @@ impl Failure {
     /// Explains `error` with a link to sign in again, which then continues the
     /// pending authorization `transaction`.
     fn signing_in(error: OAuthError, transaction: &str) -> Self {
-        let query = LoginQuery {
-            transaction: Some(transaction.to_owned()),
-            ..LoginQuery::default()
-        };
-        match query.on(routes::page::LOGIN) {
+        match LoginQuery::continuing(transaction).on(routes::page::LOGIN) {
             Ok(sign_in) => Self::Explained {
                 error,
                 link: Some(("Sign in again", sign_in)),

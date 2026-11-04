@@ -135,6 +135,29 @@ fn related_origins_are_bare_https_domain_origins() {
     assert!(serde_json::from_str::<RelatedOrigin>("\"https://notes.example/\"").is_err());
 }
 
+/// A name containing a reserved brand, however it is spaced, cased or disguised
+/// as a look-alike, is refused; one merely sharing letters with a brand is not.
+#[test]
+fn reserved_brands_are_refused_inside_names() {
+    for (name, brand) in [
+        ("Piquel", Some("piquel")),
+        ("Piquel Settings", Some("piquel")),
+        ("my-PIQUEL.fr app", Some("piquel")),
+        ("P1quel", Some("piquel")),
+        ("Sign in with G00gle", Some("google")),
+        ("GitHub Desktop", Some("github")),
+        ("Notes", None),
+        ("Pique Notes", None),
+    ] {
+        let name: DisplayName = name.parse().expect("display name");
+        assert_eq!(
+            name.ensure_unreserved(),
+            brand.map_or(Ok(()), |brand| Err(ReservedDisplayName(brand))),
+            "{name:?}"
+        );
+    }
+}
+
 /// Display names are nonblank and count characters, not bytes; scopes are tokens.
 #[test]
 fn names_and_scopes_are_bounded() {

@@ -105,6 +105,16 @@ pub struct LoginQuery {
 impl Query for LoginQuery {}
 
 impl LoginQuery {
+    /// The sign-in page's query continuing the pending authorization
+    /// `transaction`, as the consent page and its failures link to it.
+    #[must_use]
+    pub fn continuing(transaction: &str) -> Self {
+        Self {
+            transaction: Some(transaction.to_owned()),
+            ..Self::default()
+        }
+    }
+
     /// What the links between the sign-in pages keep: where the browser goes on to,
     /// and the class of authentication it must reach.
     fn continued(&self) -> Self {
@@ -423,7 +433,7 @@ async fn sign_in_forms<'a>(
             }
         }
         if signed_in {
-            switch_account(action: action, label: "Sign out")
+            switch_account(action: action, label: "Sign out", class: "secondary")
         }
     })
 }
@@ -517,7 +527,7 @@ async fn link_forms<'a>(
         }
         // An explicit link belongs to this session: signing out would strand it.
         if signed_in.is_some() && kind == LinkKind::Email {
-            switch_account(action: action, label: "Use a different account")
+            switch_account(action: action, label: "Use a different account", class: "secondary")
         }
         change_form(
             action: action,
@@ -528,16 +538,21 @@ async fn link_forms<'a>(
     })
 }
 
-/// Signing the browser out by posting to `action`, so another account can sign in
-/// or take the link, with a button labelled `label`.
+/// Signing the browser out by posting to `action`, a sign-in page, so another
+/// account can sign in or take the link, with a button labelled `label`, of
+/// `class`. The consent page offers it too.
 #[component]
-async fn switch_account<'a>(action: &'a str, label: &'a str) -> Result<impl View> {
+pub(crate) async fn switch_account<'a>(
+    action: &'a str,
+    label: &'a str,
+    class: &'a str,
+) -> Result<impl View> {
     Ok(view! {
         change_form(
             action: action,
             change: LoginChange::SwitchAccount {},
             label: label,
-            class: "secondary",
+            class: class,
         )
     })
 }

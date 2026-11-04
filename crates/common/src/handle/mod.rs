@@ -139,8 +139,9 @@ impl Handle {
         Self::fold(&self.0)
     }
 
-    /// Computes the [skeleton](Self::skeleton) of a valid handle.
-    fn fold(handle: &str) -> String {
+    /// Computes the [skeleton](Self::skeleton) of a valid handle, or of any
+    /// lowercase ASCII text, as client names are compared with reserved brands.
+    pub(crate) fn fold(handle: &str) -> String {
         handle
             .chars()
             .filter_map(|character| match character {

@@ -20,7 +20,7 @@
 //! ```
 
 use crate::{
-    UserId,
+    Handle, UserId,
     protocol::oauth::{ClientAuthMethod, Scope, Scopes},
 };
 use serde::{Deserialize, Serialize};
@@ -32,6 +32,24 @@ use url::{Host, Url};
 const MAX_IDENTIFIER_LENGTH: usize = 64;
 /// Longest display name, in characters.
 const MAX_DISPLAY_NAME_CHARS: usize = 80;
+/// Brands only operators may name a client after, since an account's client with
+/// one would read as theirs on the consent page. A name containing one, or a
+/// look-alike, is refused for clients accounts own: see
+/// [`DisplayName::ensure_unreserved`]. Short common words, such as "apple" or
+/// "meta", are left out, since they appear inside ordinary names.
+pub const RESERVED_BRANDS: &[&str] = &[
+    "piquel",
+    "google",
+    "microsoft",
+    "github",
+    "gitlab",
+    "facebook",
+    "instagram",
+    "discord",
+    "paypal",
+    "amazon",
+    "twitter",
+];
 /// Starts every client ID auth generates.
 const GENERATED_ID_PREFIX: &str = "c_";
 /// Characters after [`GENERATED_ID_PREFIX`], 5 random bits each.
@@ -230,11 +248,41 @@ pub struct DisplayName(String);
 )]
 pub struct InvalidDisplayName(String);
 
+/// A display name containing a brand of [`RESERVED_BRANDS`], or a look-alike.
+#[derive(Clone, Debug, PartialEq, Eq, Error)]
+#[error("names containing \"{0}\", or a look-alike, are reserved")]
+pub struct ReservedDisplayName(&'static str);
+
 impl DisplayName {
     /// The name as shown.
     #[must_use]
     pub fn as_str(&self) -> &str {
         &self.0
+    }
+
+    /// Refuses a name containing a brand of [`RESERVED_BRANDS`], as clients accounts
+    /// own must. The name is compared without case, spaces or punctuation, and by
+    /// its handle [skeleton](Handle::skeleton), so "P1quel-Settings" and "G00gle"
+    /// are refused too. Letters outside ASCII are dropped, not folded.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`ReservedDisplayName`] with the brand the name contains.
+    pub fn ensure_unreserved(&self) -> Result<(), ReservedDisplayName> {
+        let letters: String = self
+            .0
+            .chars()
+            .filter(char::is_ascii_alphanumeric)
+            .map(|character| character.to_ascii_lowercase())
+            .collect();
+        let name = Handle::fold(&letters);
+        match RESERVED_BRANDS
+            .iter()
+            .find(|brand| name.contains(&Handle::fold(brand)))
+        {
+            Some(brand) => Err(ReservedDisplayName(brand)),
+            None => Ok(()),
+        }
     }
 }
 

@@ -13,7 +13,7 @@ use crate::{
     },
     security::BrowserCookie,
     tests::{
-        Browser, OWN_PAGE, Replicas, WEB_ORIGIN, cookie, html, location, parameter, policy,
+        Browser, OWN_PAGE, Replicas, WEB_ORIGIN, change, cookie, html, location, parameter, policy,
         redirect, register, registration,
     },
 };
@@ -24,7 +24,7 @@ use axum::{
 };
 use piquel_common::{
     ClientId,
-    clients::{ClientKind, ClientRegistration},
+    clients::{ClientKind, ClientOwner, ClientRegistration},
 };
 use piquel_ui::{DeviceChange, Section};
 use serde::Serialize;
@@ -210,7 +210,8 @@ fn account_pages(app: &ClientId) -> Vec<(String, Section)> {
     settings.into_iter().chain(console).chain(app).collect()
 }
 
-/// The consent page shows what the application asks for. Its form decides once, and
+/// The consent page shows what the application asks for, and nothing about who
+/// registered one operators manage. Its form decides once, and
 /// only from auth's own pages and within the body limit; its policy lets the form
 /// redirect to the application.
 #[tokio::test]
@@ -237,6 +238,7 @@ async fn consent_page_decides_from_its_own_form() {
         ),
         "{html}"
     );
+    assert!(!html.contains("Unverified"), "{html}");
 
     let transaction = parameter(&page, "transaction");
     let approve = [
@@ -279,6 +281,54 @@ async fn consent_page_decides_from_its_own_form() {
         .submit(routes::page::CONSENT, &approve, OWN_PAGE)
         .await;
     assert_eq!(replayed.status(), StatusCode::BAD_REQUEST);
+}
+
+/// An app an account registered says so on its consent page: where it sends the
+/// browser, who registered it and that nobody verified it, beside the account
+/// signed in, which can switch to another one and come back to the authorization.
+#[tokio::test]
+#[ignore = "requires TEST_DATABASE_URL"]
+async fn consent_page_says_who_asks_and_who_answers() {
+    let database = Replicas::database().await;
+    let owner = Browser::new_account(&database).await;
+    let client = registration(ClientKind::Public, "https://notes.example");
+    change(&database, async |registry| {
+        registry
+            .create(ClientOwner::Account(owner.user_id), &client, None)
+            .await
+    })
+    .await
+    .expect("client");
+    let harness = Harness {
+        browser: Browser::new_account(&database).await,
+        replicas: Replicas::new().await,
+        client,
+    };
+    let handle = async |browser: &Browser| {
+        let user = database.users().find_by_id(browser.user_id).await;
+        user.expect("lookup").expect("account").handle
+    };
+    let page = harness.consent_page().await;
+    let html = html(harness.follow(&page).await).await;
+    for shown in [
+        "You’ll be sent to <strong>notes.example</strong>".to_owned(),
+        format!("Unverified app, registered by @{}", handle(&owner).await),
+        format!("Signed in as @{}.", handle(&harness.browser).await),
+    ] {
+        assert!(html.contains(&shown), "{shown}: {html}");
+    }
+
+    let query = value_after(&html, &format!(r#"action="{}?"#, routes::page::LOGIN));
+    let sign_in = format!("{}?{query}", routes::page::LOGIN);
+    assert_eq!(
+        query,
+        format!("transaction={}", parameter(&page, "transaction"))
+    );
+    let switched = harness
+        .submit(&sign_in, &[("action", "switch_account")], OWN_PAGE)
+        .await;
+    assert_eq!(switched.status(), StatusCode::SEE_OTHER);
+    assert_eq!(redirect(&switched), sign_in);
 }
 
 /// No Content-Security-Policy can name a native application's loopback callback, or

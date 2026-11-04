@@ -7,14 +7,14 @@ use crate::{
         AUTHORIZATION_CODE_MINUTES, OAuthCode, OAuthError, OidcApplication, OpaqueToken, Reject,
         TokenPrefix,
     },
-    security::{RequestContext, Session},
+    security::{RequestContext, Session, SessionError},
 };
 use axum::http::HeaderMap;
 use chrono::{Duration, Utc};
-use piquel_common::events::DomainEvent;
+use piquel_common::{Handle, UserId, events::DomainEvent};
 use piquel_repository::{
     DatabaseTransaction, InsertAuthorizationCode, SessionAuthentication,
-    StoredAuthorizationRequest, StoredSession,
+    StoredAuthorizationRequest, StoredOidcClient, StoredSession,
 };
 use serde::Deserialize;
 use url::Url;
@@ -35,6 +35,18 @@ impl AuthorizationDecision {
     }
 }
 
+/// A pending authorization as the consent page shows it: who asks, and who would
+/// answer.
+pub(crate) struct ConsentRequest {
+    /// The request.
+    pub(crate) request: StoredAuthorizationRequest,
+    /// The handle of the account that registered the client, which nobody
+    /// verified; `None` for a client operators registered.
+    pub(crate) registered_by: Option<Handle>,
+    /// The handle of the account the browser is signed in to, which would approve.
+    pub(crate) account: Handle,
+}
+
 /// Consent choice posted by the consent page.
 #[derive(Debug, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
@@ -51,16 +63,51 @@ pub(super) enum ConsentDecision {
 
 impl OidcApplication {
     /// The pending authorization the consent page shows, once the browser's session
-    /// meets its requirements.
+    /// meets its requirements, with who registered its client and who is signed in.
     pub(crate) async fn consent(
         &self,
         headers: &HeaderMap,
         transaction: &str,
-    ) -> Result<StoredAuthorizationRequest, OAuthError> {
+    ) -> Result<ConsentRequest, OAuthError> {
         let session = Session::required(&self.database, headers).await?;
         let request = self.find_authorization_request(transaction).await?;
         Self::require_authorization_session(&request, &session)?;
-        Ok(request)
+        let registered_by = match self.client(&request).await?.owner_id {
+            Some(owner) => Some(self.handle(owner).await?.ok_or_else(Self::unregistered)?),
+            None => None,
+        };
+        let account = self
+            .handle(session.user_id)
+            .await?
+            .ok_or(SessionError::Missing)?;
+        Ok(ConsentRequest {
+            request,
+            registered_by,
+            account,
+        })
+    }
+
+    /// The current handle of account `user`, or `None` once it is purged.
+    async fn handle(&self, user: UserId) -> Result<Option<Handle>, OAuthError> {
+        let user = self.database.users().find_by_id(user).await?;
+        Ok(user.map(|user| user.handle))
+    }
+
+    /// The client `request` is for, as it is registered now.
+    async fn client(
+        &self,
+        request: &StoredAuthorizationRequest,
+    ) -> Result<StoredOidcClient, OAuthError> {
+        self.database
+            .oidc()
+            .find_client(request.client_id.as_str())
+            .await?
+            .ok_or_else(Self::unregistered)
+    }
+
+    /// Refuses a request whose client, or its owner, is gone since it was found.
+    fn unregistered() -> OAuthError {
+        OAuthCode::InvalidRequest.reject("the client is no longer registered")
     }
 
     /// Consumes the pending authorization and returns the client redirect: an error
@@ -176,15 +223,7 @@ impl OidcApplication {
         if request.interaction.forces_consent() {
             return Ok(false);
         }
-        let client = self
-            .database
-            .oidc()
-            .find_client(request.client_id.as_str())
-            .await?
-            .ok_or_else(|| {
-                OAuthCode::InvalidRequest.reject("the client is no longer registered")
-            })?;
-        Ok(client.trusted
+        Ok(self.client(request).await?.trusted
             || self
                 .database
                 .oidc()

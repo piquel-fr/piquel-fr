@@ -1,7 +1,10 @@
 //! The pages of OAuth and `OpenID` Connect flows: consent, logout, and why one
 //! cannot go on.
 
-use crate::icons::{Icon, icon};
+use crate::{
+    icons::{Icon, icon},
+    login::switch_account,
+};
 use piquel_common::{
     Provider,
     protocol::oauth::{ErrorCode, Scope},
@@ -11,22 +14,39 @@ use topcoat::{
     view::{View, component, view},
 };
 
-/// The consent page: what the application named `client` asks to receive through
-/// `scopes`, and the decision on the pending `transaction`, posted to `action` as
-/// `decision=approve` or `decision=deny`. The form posts once: a second decision
-/// would find the authorization already used.
+/// The consent page: what the application named `client`, which sends the browser
+/// back to `host`, asks to receive through `scopes`, and the decision on the
+/// pending `transaction`, posted to `action` as `decision=approve` or
+/// `decision=deny`. An application an account registered, `registered_by` by its
+/// handle, is labelled unverified. The page names the signed-in `account`, and
+/// offers to switch accounts by posting to `sign_in`, the sign-in page continuing
+/// the transaction. The form posts once: a second decision would find the
+/// authorization already used.
 #[component]
-pub async fn consent(
-    client: &str,
-    scopes: &[String],
-    action: &str,
-    transaction: &str,
+pub async fn consent<'a>(
+    client: &'a str,
+    host: &'a str,
+    #[default] registered_by: Option<&'a str>,
+    account: &'a str,
+    scopes: &'a [String],
+    action: &'a str,
+    sign_in: &'a str,
+    transaction: &'a str,
 ) -> Result<impl View> {
     Ok(view! {
         <div>
             <h1>(format!("Continue to {client}?"))</h1>
-            <p class="lead">"Review what this application will receive from your Piquel account."</p>
+            <p class="lead">"You’ll be sent to " <strong>(host)</strong> " after you decide."</p>
         </div>
+        if let Some(owner) = registered_by {
+            <p class="notice warning">
+                icon(kind: Icon::Warning)
+                <span class="text">
+                    (format!("Unverified app, registered by @{owner}"))
+                    <small>"Piquel hasn’t checked who runs it. Continue only if you trust it."</small>
+                </span>
+            </p>
+        }
         <section class="card" aria-labelledby="access-heading">
             <header><h2 id="access-heading">(format!("{client} will receive"))</h2></header>
             <ul class="list">
@@ -43,6 +63,10 @@ pub async fn consent(
             <button name="decision" value="approve">"Continue"</button>
             <button class="secondary" name="decision" value="deny">"Cancel"</button>
         </form>
+        <footer>
+            <p class="help">(format!("Signed in as @{account}."))</p>
+            switch_account(action: sign_in, label: "Not you? Switch account", class: "text-button")
+        </footer>
     })
 }
 
@@ -54,7 +78,7 @@ pub(crate) fn scope_label(scope: &str) -> &str {
         Ok(Scope::OpenId) => "Your account identifier",
         Ok(Scope::Profile) => "Your username, display name and profile picture",
         Ok(Scope::Email) => "Your verified email address",
-        Ok(Scope::OfflineAccess) => "Stay signed in",
+        Ok(Scope::OfflineAccess) => "Access your account while you’re away",
         Err(_) => scope,
     }
 }
