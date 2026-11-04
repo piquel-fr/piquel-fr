@@ -129,14 +129,12 @@ pub async fn handle_list<'a>(page: HandlesPage<'a>) -> Result<impl View> {
                             <div class="text">
                                 <strong>(handle.as_str())</strong>
                                 <small>
+                                    // Only a purged account's last handle has no release time.
                                     match (&row.account, row.released.released_at) {
                                         (Some(account), Some(at)) => {
                                             "Held by " <a href=(account.as_str())>"an account"</a> " until " moment(at: at)
                                         },
-                                        (Some(account), None) => {
-                                            "Held by " <a href=(account.as_str())>"an account"</a>
-                                        },
-                                        (None, _) => "Held by an account since purged",
+                                        _ => "Held by an account since purged",
                                     }
                                 </small>
                             </div>

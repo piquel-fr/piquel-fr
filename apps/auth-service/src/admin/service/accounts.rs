@@ -352,8 +352,8 @@ impl AdminService {
 
     /// Gives the account `user_id` the handle `handle`, for `reason`, as a settings
     /// rename does but without its cooldown. Reserved names, built in or reserved by
-    /// an administrator, are refused unless `allow_reserved`. The reason is recorded with the change, as personal data
-    /// the owner sees in their history.
+    /// an administrator, are refused unless `allow_reserved`. The reason is recorded
+    /// with the change, as personal data the owner sees in their history.
     ///
     /// # Errors
     /// Fails when the operator may not make changes, the account is unknown, or
