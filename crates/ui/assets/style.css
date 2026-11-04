@@ -429,10 +429,14 @@ select:focus-visible {
   outline-offset: 0;
   border-color: var(--focus);
 }
-textarea {
-  resize: vertical;
+/* URIs read best monospaced. */
+textarea,
+input[type='url'] {
   font-family: var(--mono);
   font-size: 0.85rem;
+}
+textarea {
+  resize: vertical;
   min-height: 5rem;
 }
 label {

@@ -46,6 +46,8 @@ test('the developer console registers an app, shows its secret once, and the app
   // A confidential app's secret shows only in the answer to its registration, which
   // no cache keeps, and never reaches a URL, the history or the browser's storage.
   await redirects.fill(`${client}/callback`);
+  const logout = `${client}/auth/backchannel-logout`;
+  await page.getByLabel('Back-channel logout URI', { exact: true }).fill(logout);
   const registered = page.waitForResponse(
     (response) =>
       response.request().method() === 'POST' && response.url().endsWith('/developers/new')
@@ -73,6 +75,7 @@ test('the developer console registers an app, shows its secret once, and the app
   const id = overview.split('/').at(-1) ?? '';
   await expect(page.locator('#client-id')).toHaveText(id);
   await expect(page.locator('#client-auth')).toHaveText('client_secret_basic');
+  await expect(page.locator('#backchannel-logout')).toHaveText(logout);
   expect(await page.content()).not.toContain(secret);
 
   // A rotation shows the new secret the same way, once.

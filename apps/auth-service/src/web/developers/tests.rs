@@ -69,12 +69,12 @@ fn assert_unstored(response: &Response) {
 }
 
 /// A browser's form bodies decode as the console's changes: a textarea's lines,
-/// one field per checkbox, absent when unchecked, the kind's radio and the
-/// grace's select.
+/// one field per checkbox, absent when unchecked, a text input's value, the kind's
+/// radio and the grace's select.
 #[test]
 fn browser_forms_decode() {
     let Form(save) = Form::<AppChange>::from_bytes(
-        b"action=save&display_name=Notes&redirect_uris=https%3A%2F%2Fa.example%2Fcb%0D%0A%0D%0A+https%3A%2F%2Fb.example%2Fcb+&post_logout_uris=&openid=on&allow_refresh=on",
+        b"action=save&display_name=Notes&redirect_uris=https%3A%2F%2Fa.example%2Fcb%0D%0A%0D%0A+https%3A%2F%2Fb.example%2Fcb+&post_logout_uris=&openid=on&allow_refresh=on&backchannel_logout_uri=https%3A%2F%2Fa.example%2Flogout",
     )
     .expect("save");
     let AppChange::Save { draft } = save else {
@@ -90,6 +90,7 @@ fn browser_forms_decode() {
                 .collect(),
             scopes: [Scope::OpenId].into_iter().collect(),
             allow_refresh: Checkbox(true),
+            backchannel_logout_uri: "https://a.example/logout".into(),
             ..ClientDraft::default()
         }
     );
@@ -379,4 +380,75 @@ async fn refused_settings_are_said_beside_their_input() {
     );
     let page = html(browser.visit(&replicas.a, HOME).await).await;
     assert!(page.contains("You have no apps yet."), "{page}");
+}
+
+/// A back-channel logout URI is set when an app is registered, which its overview
+/// and settings show, then changed and removed from its settings. One the service
+/// refuses is said beside its input, which shows what was typed, and the stored
+/// one stays.
+#[tokio::test]
+#[ignore = "requires TEST_DATABASE_URL"]
+async fn backchannel_logout_uris_are_set_changed_and_removed() {
+    let replicas = Replicas::new().await;
+    let database = Replicas::database().await;
+    let browser = Browser::new_account(&database).await;
+    let callback = "https://console.example/callback";
+    let with = |uri: &str| ClientDraft {
+        backchannel_logout_uri: uri.into(),
+        ..draft(callback)
+    };
+    let told = "https://console.example/auth/backchannel-logout";
+    let register = NewAppChange::Register {
+        kind: Some(ClientKind::Public),
+        draft: with(told),
+    };
+    let registered = browser.post(&replicas, NEW, &register).await;
+    assert_eq!(registered.status(), StatusCode::SEE_OTHER);
+    let overview = redirect(&registered).to_owned();
+    let page = html(browser.visit(&replicas.a, &overview).await).await;
+    let fact = format!(r#"<code id="backchannel-logout">{told}</code>"#);
+    assert!(page.contains(&fact), "{page}");
+    let id: ClientId = overview
+        .strip_prefix("/developers/clients/")
+        .expect("an app's overview")
+        .parse()
+        .expect("app ID");
+    let settings = developers::of(APP_SETTINGS, &id);
+    let page = html(browser.visit(&replicas.a, &settings).await).await;
+    assert!(page.contains(&format!(r#"value="{told}""#)), "{page}");
+    let stored = async || {
+        database
+            .oidc()
+            .find_client(id.as_str())
+            .await
+            .expect("lookup")
+            .expect("the app")
+            .backchannel_logout_uri
+    };
+
+    let insecure = "http://console.example/logout";
+    let save = AppChange::Save {
+        draft: with(insecure),
+    };
+    let refused = browser.post(&replicas, &settings, &save).await;
+    assert_eq!(refused.status(), StatusCode::BAD_REQUEST);
+    let page = html(refused).await;
+    let error = value_after(
+        &page,
+        r#"<p class="field-error" id="backchannel_logout_uri-error">"#,
+    );
+    assert!(error.contains("must use https"), "{error}");
+    assert!(page.contains(&format!(r#"value="{insecure}""#)), "{page}");
+    assert_eq!(stored().await.as_deref(), Some(told));
+
+    let moved = "https://console.example/logout";
+    let save = AppChange::Save { draft: with(moved) };
+    let saved = browser.post(&replicas, &settings, &save).await;
+    assert_eq!(saved.status(), StatusCode::SEE_OTHER);
+    assert_eq!(stored().await.as_deref(), Some(moved));
+    // A blank input is no URI.
+    let save = AppChange::Save { draft: with(" ") };
+    let saved = browser.post(&replicas, &settings, &save).await;
+    assert_eq!(saved.status(), StatusCode::SEE_OTHER);
+    assert_eq!(stored().await, None);
 }

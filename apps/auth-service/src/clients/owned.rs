@@ -2,8 +2,8 @@
 //! under, and the [`AccountService`] operations that apply it, for the owner
 //! only. The policy lives in the input types rather than in callers: an owner
 //! never chooses a client's ID, which auth generates, or its trust, so its
-//! clients always show the consent screen, scopes are limited to the standard
-//! [`Scope`]s, and only an operator sets a back-channel logout URI.
+//! clients always show the consent screen, and scopes are limited to the standard
+//! [`Scope`]s.
 
 use super::{ClientRegistry, ClientRegistryError, MAX_DAILY_REGISTRATIONS, MAX_OWNED_CLIENTS};
 use crate::{
@@ -27,8 +27,7 @@ use std::error::Error;
 use thiserror::Error;
 
 /// The settings an owner chooses, validated when a client is registered or
-/// changed with them. A back-channel logout URI is not one of them: only the
-/// operator sets it for now.
+/// changed with them.
 pub(crate) struct ClientSettings {
     /// The name consent screens show.
     pub(crate) display_name: String,
@@ -42,6 +41,8 @@ pub(crate) struct ClientSettings {
     pub(crate) allow_refresh: bool,
     /// Whether the client must push its authorization requests (RFC 9126).
     pub(crate) require_pushed_authorization_requests: bool,
+    /// Where auth posts logout tokens, if anywhere.
+    pub(crate) backchannel_logout_uri: Option<String>,
 }
 
 /// A client an owner registers.
@@ -68,6 +69,12 @@ pub(crate) struct ClientPatch {
     pub(crate) allow_refresh: Option<bool>,
     /// Whether authorization requests must be pushed.
     pub(crate) require_pushed_authorization_requests: Option<bool>,
+    /// Where logout tokens are posted: `Some(None)` stops posting them.
+    #[expect(
+        clippy::option_option,
+        reason = "A patch keeps the URI, removes it or sets it: the outer `None` keeps it."
+    )]
+    pub(crate) backchannel_logout_uri: Option<Option<String>>,
 }
 
 /// One of an owner's live clients, with its owner. Only
@@ -101,7 +108,7 @@ pub(crate) struct OwnedClientView {
     pub(crate) allow_refresh: bool,
     /// Whether the client must push its authorization requests (RFC 9126).
     pub(crate) require_pushed_authorization_requests: bool,
-    /// Where logout tokens are posted, which only an operator sets.
+    /// Where logout tokens are posted, if anywhere.
     pub(crate) backchannel_logout_uri: Option<String>,
     /// Whether it signs users in, as its owner or an operator chose.
     pub(crate) enabled: bool,
@@ -139,13 +146,12 @@ pub(crate) struct InvalidSetting {
 
 impl ClientSettings {
     /// Validates every setting, naming the first one that is invalid, and builds
-    /// the registration of an untrusted client `id` of `kind`, posting logout
-    /// tokens to `backchannel_logout_uri`, if anywhere.
+    /// the registration of an untrusted client `id` of `kind`. Each URI is a
+    /// [`RedirectUri`], as the `client` command parses it.
     fn registration(
         self,
         id: ClientId,
         kind: ClientKind,
-        backchannel_logout_uri: Option<RedirectUri>,
     ) -> Result<ClientRegistration, InvalidSetting> {
         let scopes = self
             .allowed_scopes
@@ -182,7 +188,12 @@ impl ClientSettings {
             allow_refresh: self.allow_refresh,
             trusted: false,
             require_pushed_authorization_requests: self.require_pushed_authorization_requests,
-            backchannel_logout_uri,
+            backchannel_logout_uri: self
+                .backchannel_logout_uri
+                .as_deref()
+                .map(str::parse)
+                .transpose()
+                .map_err(InvalidSetting::with(ClientField::BackchannelLogoutUri))?,
         })
     }
 
@@ -207,21 +218,15 @@ impl From<ClientSettings> for ClientPatch {
             require_pushed_authorization_requests: Some(
                 settings.require_pushed_authorization_requests,
             ),
+            backchannel_logout_uri: Some(settings.backchannel_logout_uri),
         }
     }
 }
 
 impl ClientPatch {
-    /// The registration of `current` with the given settings replaced, keeping its
-    /// back-channel logout URI. It is validated as a new one is, so a change cannot
-    /// do what registration may not.
+    /// The registration of `current` with the given settings replaced. It is
+    /// validated as a new one is, so a change cannot do what registration may not.
     fn apply(self, current: &StoredOidcClient) -> Result<ClientRegistration, InvalidSetting> {
-        let backchannel_logout_uri = current
-            .backchannel_logout_uri
-            .as_deref()
-            .map(str::parse)
-            .transpose()
-            .map_err(InvalidSetting::with(ClientField::BackchannelLogoutUri))?;
         ClientSettings {
             display_name: self
                 .display_name
@@ -239,8 +244,11 @@ impl ClientPatch {
             require_pushed_authorization_requests: self
                 .require_pushed_authorization_requests
                 .unwrap_or(current.require_pushed_authorization_requests),
+            backchannel_logout_uri: self
+                .backchannel_logout_uri
+                .unwrap_or_else(|| current.backchannel_logout_uri.clone()),
         }
-        .registration(current.id.clone(), current.kind, backchannel_logout_uri)
+        .registration(current.id.clone(), current.kind)
     }
 }
 
@@ -362,7 +370,7 @@ impl AccountService {
             .map_err(OwnedClientError::from)?;
         let registration = new
             .settings
-            .registration(ClientId::generated(random.as_bytes()), new.kind, None)
+            .registration(ClientId::generated(random.as_bytes()), new.kind)
             .map_err(OwnedClientError::from)?;
         let mut tx = self.database.begin().await?;
         owner.lock_confirmed(&mut tx).await?;

@@ -579,6 +579,7 @@ impl ClientSettings {
             allowed_scopes: vec!["openid".into(), "offline_access".into()],
             allow_refresh: true,
             require_pushed_authorization_requests: false,
+            backchannel_logout_uri: None,
         }
     }
 }

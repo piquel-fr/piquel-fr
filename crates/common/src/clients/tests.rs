@@ -44,7 +44,7 @@ fn redirect_uris_follow_the_transport_and_exact_match_rules() {
             .parse::<RedirectUri>()
             .expect_err("http")
             .to_string(),
-        "redirect URI http://example.com/cb must use https; http is allowed only on a \
+        "URI http://example.com/cb must use https; http is allowed only on a \
          loopback IP, e.g. http://127.0.0.1:8080/callback"
     );
     for (value, expected) in [

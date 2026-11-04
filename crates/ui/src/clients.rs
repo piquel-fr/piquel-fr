@@ -243,6 +243,9 @@ pub struct ClientDraft {
     /// Whether it must push its authorization requests.
     #[serde(default, skip_serializing_if = "Checkbox::is_off")]
     pub require_pushed_authorization_requests: Checkbox,
+    /// Where auth posts its logout tokens; empty for nowhere.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub backchannel_logout_uri: String,
 }
 
 impl From<&ClientRow<'_>> for ClientDraft {
@@ -261,6 +264,7 @@ impl From<&ClientRow<'_>> for ClientDraft {
             require_pushed_authorization_requests: Checkbox(
                 client.require_pushed_authorization_requests,
             ),
+            backchannel_logout_uri: client.backchannel_logout_uri.unwrap_or_default().to_owned(),
         }
     }
 }
@@ -283,11 +287,11 @@ impl FieldError<'_> {
             ClientField::DisplayName
             | ClientField::RedirectUris
             | ClientField::PostLogoutUris
-            | ClientField::AllowedScopes => true,
+            | ClientField::AllowedScopes
+            | ClientField::BackchannelLogoutUri => true,
             ClientField::AllowRefresh
             | ClientField::Trusted
             | ClientField::RequirePushedAuthorizationRequests
-            | ClientField::BackchannelLogoutUri
             | ClientField::Other(_) => false,
         }
     }
@@ -565,6 +569,7 @@ pub(crate) async fn client_form<'a>(
     let redirects = Described::of(error, &ClientField::RedirectUris);
     let logouts = Described::of(error, &ClientField::PostLogoutUris);
     let scopes = Described::of(error, &ClientField::AllowedScopes);
+    let backchannel = Described::of(error, &ClientField::BackchannelLogoutUri);
     Ok(view! {
         <div class="card">
             change_form(
@@ -639,8 +644,34 @@ pub(crate) async fn client_form<'a>(
                         "Your app must post its sign-in requests to " <code>"/oauth/par"</code> " (RFC 9126), so none of their parameters travel through the browser."
                     },
                 )
+                backchannel_input(uri: &draft.backchannel_logout_uri, of: &backchannel)
             )
         </div>
+    })
+}
+
+/// The input of a client's back-channel logout URI, showing `uri`, described as
+/// `of` says.
+#[component]
+async fn backchannel_input<'a>(uri: &'a str, of: &'a Described<'a>) -> Result<impl View> {
+    Ok(view! {
+        <label>
+            "Back-channel logout URI"
+            <input
+                name="backchannel_logout_uri"
+                type="url"
+                value=(uri)
+                placeholder="https://app.example/auth/backchannel-logout"
+                aria-invalid=(of.flag())
+                aria-describedby=(of.described_by())
+                autofocus=(of.refused())
+            >
+        </label>
+        help(
+            of: of,
+            "Optional: where Piquel posts a logout token when a user's session ends, so your app can end its own. The Piquel SDKs serve it beside their login routes, e.g. at " <code>"/auth/backchannel-logout"</code> ". Piquel posts only to HTTPS URIs with public addresses."
+        )
+        refusal(of: of)
     })
 }
 
