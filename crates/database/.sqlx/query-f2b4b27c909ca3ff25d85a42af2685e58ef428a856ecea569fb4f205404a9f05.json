@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "SELECT\n                    id AS \"id: TokenId\", browser_digest, provider_name AS \"provider: Provider\",\n                    issuer, subject, email, display_name, return_to,\n                    link_user_id AS \"link_user_id: UserId\",\n                    link_session_id AS \"link_session_id: SessionId\", expires_at\n                FROM pending_federation\n                WHERE browser_digest = $1\n                AND consumed_at IS NULL\n                AND expires_at > now()",
+  "query": "UPDATE pending_federation\n                SET consumed_at = now()\n                WHERE id = $1\n                AND browser_digest = $2\n                AND consumed_at IS NULL\n                AND expires_at > now()\n                RETURNING\n                    id AS \"id: TokenId\", browser_digest, provider_name AS \"provider: Provider\",\n                    issuer, subject, email, display_name, return_to,\n                    link_user_id AS \"link_user_id: UserId\",\n                    link_session_id AS \"link_session_id: SessionId\", expires_at, picture_url",
   "describe": {
     "columns": [
       {
@@ -57,10 +57,16 @@
         "ordinal": 10,
         "name": "expires_at",
         "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 11,
+        "name": "picture_url",
+        "type_info": "Text"
       }
     ],
     "parameters": {
       "Left": [
+        "Uuid",
         "Bytea"
       ]
     },
@@ -75,8 +81,9 @@
       false,
       true,
       true,
-      false
+      false,
+      true
     ]
   },
-  "hash": "51d92751246e5449be0d11b866b6cdcd9e466cb02c5f6ef496fbb50c08449feb"
+  "hash": "f2b4b27c909ca3ff25d85a42af2685e58ef428a856ecea569fb4f205404a9f05"
 }

@@ -157,6 +157,86 @@ impl IdentityStrategy {
     }
 }
 
+/// The URL of a profile picture a provider reported: HTTPS, on that provider's
+/// own picture host, so importing it fetches nothing else, and asking for the size
+/// auth stores. Parsed when the provider reports it, and again when it is read
+/// back from the pending evidence.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct ProviderPicture(Url);
+
+impl ProviderPicture {
+    /// The longest URL kept, which the pending evidence's column also bounds.
+    const MAX_LENGTH: usize = 2048;
+    /// GitHub's host for avatars.
+    const GITHUB_HOST: &str = "avatars.githubusercontent.com";
+    /// The domain of Google's hosts for profile pictures, such as
+    /// `lh3.googleusercontent.com`.
+    const GOOGLE_DOMAIN: &str = ".googleusercontent.com";
+
+    /// `url` as `provider`'s picture, or `None` when it is not one: not HTTPS, on
+    /// another host or port, with credentials, or too long.
+    pub(crate) fn parse(provider: Provider, url: &str) -> Option<Self> {
+        if url.len() > Self::MAX_LENGTH {
+            return None;
+        }
+        let mut url = Url::parse(url).ok()?;
+        if url.scheme() != "https"
+            || url.port().is_some()
+            || !url.username().is_empty()
+            || url.password().is_some()
+        {
+            return None;
+        }
+        let host = url.host_str()?.to_owned();
+        let side = crate::pictures::SIDE.to_string();
+        match provider {
+            Provider::GitHub => {
+                if host != Self::GITHUB_HOST {
+                    return None;
+                }
+                // GitHub scales an avatar to its `s` parameter.
+                let kept: Vec<(String, String)> = url
+                    .query_pairs()
+                    .filter(|(name, _)| name != "s")
+                    .map(|(name, value)| (name.into_owned(), value.into_owned()))
+                    .collect();
+                url.query_pairs_mut()
+                    .clear()
+                    .extend_pairs(kept)
+                    .append_pair("s", &side);
+            }
+            Provider::Google => {
+                if !host.ends_with(Self::GOOGLE_DOMAIN) {
+                    return None;
+                }
+                // Google scales a picture to the `=s96-c` its path ends with.
+                let resized = url.path().rsplit_once("=s").and_then(|(base, size)| {
+                    let digits = size.split('-').next()?;
+                    (!digits.is_empty() && digits.bytes().all(|byte| byte.is_ascii_digit()))
+                        .then(|| format!("{base}=s{side}-c"))
+                });
+                if let Some(path) = resized {
+                    url.set_path(&path);
+                }
+            }
+        }
+        // Asking for the size may have made it longer.
+        (url.as_str().len() <= Self::MAX_LENGTH).then_some(Self(url))
+    }
+
+    /// The URL.
+    pub(crate) fn as_str(&self) -> &str {
+        self.0.as_str()
+    }
+
+    /// `url` taken as a provider's picture unchecked, so tests import from a
+    /// local server.
+    #[cfg(test)]
+    pub(crate) fn local(url: &str) -> Self {
+        Self(Url::parse(url).expect("picture URL"))
+    }
+}
+
 /// Provider evidence that passed every check; usable for login or explicit linking.
 pub(super) struct VerifiedIdentity {
     /// Stable provider account ID, independent of the email address.
@@ -165,15 +245,19 @@ pub(super) struct VerifiedIdentity {
     pub(super) email: Option<String>,
     /// Profile name proposed for onboarding, at most `MAX_DISPLAY_NAME_CHARS` long.
     pub(super) display_name: String,
+    /// The profile picture the provider reported, if it is one of its own.
+    pub(super) picture: Option<ProviderPicture>,
 }
 
 impl VerifiedIdentity {
-    /// Rejects unstorable subjects, drops invalid emails and bounds the display name.
+    /// Rejects unstorable subjects, drops invalid emails and pictures, and bounds
+    /// the display name.
     fn new(
+        provider: Provider,
         subject: String,
         email: Option<String>,
-        name: Option<String>,
-        fallback_name: String,
+        (name, fallback_name): (Option<String>, String),
+        picture: Option<&str>,
     ) -> Result<Self, ProviderError> {
         if subject.is_empty() {
             return Err(ProviderError::EmptySubject);
@@ -196,6 +280,7 @@ impl VerifiedIdentity {
                 .chars()
                 .take(MAX_DISPLAY_NAME_CHARS)
                 .collect(),
+            picture: picture.and_then(|picture| ProviderPicture::parse(provider, picture)),
         })
     }
 }

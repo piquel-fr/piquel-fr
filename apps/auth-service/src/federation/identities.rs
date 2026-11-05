@@ -1,6 +1,6 @@
 //! Pending and linked social identities: signup, linking, listing and unlinking.
 
-use super::{FederationApplication, FederationError, Flow, FlowCookie, Provider};
+use super::{FederationApplication, FederationError, Flow, FlowCookie, Provider, ProviderPicture};
 use crate::account::{AccountError, AccountService, Owner, Subject, Viewer};
 use crate::security::BrowserCookie;
 use axum::http::HeaderMap;
@@ -34,14 +34,16 @@ impl FederationApplication {
         Ok(id)
     }
 
-    /// Attaches verified signup evidence only inside account-and-first-passkey creation.
+    /// Attaches verified signup evidence only inside account-and-first-passkey
+    /// creation. Returns the profile picture the provider reported, which the
+    /// caller imports once the account is committed.
     pub(crate) async fn attach_signup(
         tx: &mut DatabaseTransaction<'_>,
         context: &EventContext,
         pending_id: TokenId,
         headers: &HeaderMap,
         user_id: UserId,
-    ) -> Result<(), FederationError> {
+    ) -> Result<Option<ProviderPicture>, FederationError> {
         let browser = BrowserCookie::FederationPending
             .read(headers)
             .ok_or(FederationError::PendingBrowserMissing)?;
@@ -64,9 +66,13 @@ impl FederationApplication {
         if let Some(email) = &pending.email {
             tx.federation().set_first_email(user_id, email).await?;
         }
-        Ok(tx
-            .record(context, Some(user_id), Self::linked(&pending))
-            .await?)
+        tx.record(context, Some(user_id), Self::linked(&pending))
+            .await?;
+        // Checked again, as stored evidence is read back.
+        Ok(pending
+            .picture_url
+            .as_deref()
+            .and_then(|url| ProviderPicture::parse(pending.provider, url)))
     }
 
     /// The event recording that `pending`'s identity was linked.

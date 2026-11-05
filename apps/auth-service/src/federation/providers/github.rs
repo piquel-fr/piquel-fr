@@ -1,8 +1,8 @@
 //! GitHub sign-in: plain OAuth, so the identity comes from GitHub's API, not a token.
 
 use super::{
-    FederationApplication, IdentityStrategy, MAX_TOKEN_BYTES, ProviderEndpoints, ProviderError,
-    ProviderRejection, VerifiedIdentity,
+    FederationApplication, IdentityStrategy, MAX_TOKEN_BYTES, Provider, ProviderEndpoints,
+    ProviderError, ProviderRejection, VerifiedIdentity,
 };
 use axum::http::StatusCode;
 use piquel_telemetry::SendTraced;
@@ -100,7 +100,13 @@ impl FederationApplication {
             .into_iter()
             .find(|email| email.verified && email.primary)
             .map(|email| email.email);
-        VerifiedIdentity::new(user.id.to_string(), email, user.name, user.login)
+        VerifiedIdentity::new(
+            Provider::GitHub,
+            user.id.to_string(),
+            email,
+            (user.name, user.login),
+            user.avatar_url.as_deref(),
+        )
     }
 }
 
@@ -130,6 +136,8 @@ struct GitHubUser {
     name: Option<String>,
     /// Username, used as the display name when `name` is unset.
     login: String,
+    /// The avatar's URL: the picture the account chose, or one GitHub generated.
+    avatar_url: Option<String>,
 }
 
 /// One address from GitHub's email list.

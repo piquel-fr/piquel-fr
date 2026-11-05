@@ -708,7 +708,8 @@ explains how to choose a requirement and handle the challenge.
   version, so relying parties refresh `preferred_username` or `name`.
 - An account's profile picture, set on the Profile settings tab, is released as
   `picture` with the `profile` scope: a 512-pixel square JPEG auth encodes from the
-  upload, keeping none of its metadata, at a URL whose image never changes (see
+  upload, keeping none of its metadata, at a URL whose image never changes. A
+  social signup starts with the provider's picture (see
   [surfaces.md](docs/architecture/surfaces.md#profile-pictures)).
 - Social-first signup remains pending until its first passkey is committed. Only
   a registration that names the pending identity shown on the signup page attaches

@@ -13,10 +13,12 @@ mod encoding;
 #[cfg(test)]
 mod tests;
 
-pub(crate) use encoding::MAX_UPLOAD_BYTES;
+pub(crate) use encoding::{MAX_UPLOAD_BYTES, SIDE};
 
 use crate::{
     account::{AccountError, AccountService, Owner, Subject, Viewer},
+    deliveries::{DeliveryError, OutboundClient},
+    federation::ProviderPicture,
     routes,
     security::{ApiError, CacheClass, Cached},
 };
@@ -30,7 +32,10 @@ use axum::{
 };
 use chrono::{DateTime, Utc};
 use encoding::Jpeg;
-use piquel_common::{PictureId, events::DomainEvent};
+use piquel_common::{
+    PictureId, UserId,
+    events::{DomainEvent, EventContext},
+};
 use piquel_repository::{Database, DatabaseError, StoredPicture};
 use serde::Serialize;
 use thiserror::Error;
@@ -62,6 +67,9 @@ pub(crate) enum PictureError {
     /// The decoding task panicked or was cancelled.
     #[error("the decoding task failed")]
     Task(#[from] tokio::task::JoinError),
+    /// A provider's picture could not be fetched.
+    #[error("the provider's picture could not be fetched")]
+    Fetch(#[source] DeliveryError),
     /// The account has no picture to remove.
     #[error("the account has no profile picture")]
     Missing,
@@ -90,9 +98,10 @@ impl From<PictureError> for ApiError {
             ),
             PictureError::Missing => Self::not_found("The account has no profile picture."),
             PictureError::Database(error) => error.into(),
-            error @ (PictureError::Encoding(_) | PictureError::Busy(_) | PictureError::Task(_)) => {
-                Self::internal(error)
-            }
+            error @ (PictureError::Encoding(_)
+            | PictureError::Fetch(_)
+            | PictureError::Busy(_)
+            | PictureError::Task(_)) => Self::internal(error),
         }
     }
 }
@@ -141,6 +150,44 @@ impl AccountService {
         .await?;
         tx.commit().await?;
         Ok(picture.into())
+    }
+
+    /// Imports the picture at `url`, one a provider reported, as the picture of
+    /// the account `user`, which `context` names, unless it has one already: the
+    /// first picture of an account a social signup created. The image is fetched
+    /// with `client`, which reaches only public addresses and follows no
+    /// redirect, before the transaction.
+    pub(crate) async fn import_picture(
+        &self,
+        client: &OutboundClient,
+        user: UserId,
+        context: &EventContext,
+        url: &ProviderPicture,
+    ) -> Result<(), AccountError> {
+        let upload = client
+            .get(url.as_str(), piquel_ui::PICTURE_TYPES, MAX_UPLOAD_BYTES + 1)
+            .await
+            .map_err(PictureError::Fetch)?;
+        let jpeg = Jpeg::encode(upload).await?;
+        let mut tx = self.database.begin().await?;
+        if tx
+            .users()
+            .find_active_by_id_for_update(user)
+            .await?
+            .is_none()
+            || tx.pictures().find(user).await?.is_some()
+        {
+            return Ok(());
+        }
+        let id = PictureId::new();
+        tx.pictures().set(user, id, jpeg.as_bytes()).await?;
+        tx.record(
+            context,
+            Some(user),
+            DomainEvent::PictureChanged { picture_id: id },
+        )
+        .await?;
+        Ok(tx.commit().await?)
     }
 
     /// The account's picture, if it has one.

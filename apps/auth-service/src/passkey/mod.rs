@@ -3,6 +3,7 @@
 //! dashboard's own passkey confirmation, on its origin.
 use crate::account::AccountService;
 use crate::config::PasskeyConfig;
+use crate::deliveries::OutboundClient;
 use crate::oidc::OidcApplication;
 use crate::routes;
 use crate::security::{self, BrowserCookie, Credential, RequestContext};
@@ -68,6 +69,8 @@ pub struct PasskeyApplication {
     dashboard: Option<Origin>,
     /// Whether ordinary registration needs an invitation.
     invite_required: bool,
+    /// Fetches the picture a social signup's provider reported.
+    outbound: OutboundClient,
 }
 
 /// Human-readable `WebAuthn` relying party name.
@@ -93,6 +96,7 @@ impl PasskeyApplication {
             oidc,
             dashboard: dashboard.cloned(),
             invite_required: config.invite_required,
+            outbound: OutboundClient::new().map_err(PasskeyConfigError::Outbound)?,
         })
     }
 

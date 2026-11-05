@@ -3,7 +3,10 @@
 //! HTTPS, its address public, and redirects are never followed.
 
 use super::{DeliveryError, Failure, SEND_TIMEOUT};
-use axum::http::{HeaderMap, Method, StatusCode, header::RETRY_AFTER};
+use axum::http::{
+    HeaderMap, Method, StatusCode,
+    header::{ACCEPT, RETRY_AFTER},
+};
 use chrono::{DateTime, NaiveDateTime, Utc};
 use ipnet::{Ipv4Net, Ipv6Net};
 use piquel_telemetry::SendTraced;
@@ -63,18 +66,20 @@ const NAT64: Ipv6Net = Ipv6Net::new_assert(Ipv6Addr::new(0x64, 0xff9b, 0, 0, 0, 
 /// 6to4 (RFC 3056): bits 16 to 48 are the IPv4 address reached.
 const SIX_TO_FOUR: Ipv6Net = Ipv6Net::new_assert(Ipv6Addr::new(0x2002, 0, 0, 0, 0, 0, 0, 0), 16);
 
-/// A successful response, with at most [`MAX_RESPONSE_BYTES`] of its body.
-// Back-channel logout needs only the status class; channels that read answers,
-// such as SCIM, will read these. `expect` fails the build once one does.
-#[cfg_attr(
-    not(test),
-    expect(dead_code, reason = "No channel reads response contents yet.")
-)]
+/// A successful response, with at most its caller's limit of its body:
+/// [`MAX_RESPONSE_BYTES`] for [`OutboundClient::send`].
+// Back-channel logout needs only the status class, and a fetched file only its
+// body; channels that read the status, such as SCIM, will. `expect` fails the
+// build once one does.
 #[derive(Debug)]
 pub(crate) struct OutboundResponse {
     /// The successful status.
+    #[cfg_attr(
+        not(test),
+        expect(dead_code, reason = "No channel reads a response's status yet.")
+    )]
     pub status: StatusCode,
-    /// The body's first [`MAX_RESPONSE_BYTES`] bytes.
+    /// The body's first bytes, up to the limit.
     pub body: Vec<u8>,
 }
 
@@ -145,6 +150,39 @@ impl OutboundClient {
         destination: &str,
         request: impl FnOnce(RequestBuilder) -> RequestBuilder,
     ) -> Result<OutboundResponse, DeliveryError> {
+        self.request(method, destination, MAX_RESPONSE_BYTES, request)
+            .await
+    }
+
+    /// Fetches `destination` with `GET`, as [`Self::send`] sends, asking for the
+    /// media types `accept` names, and returns at most `limit` bytes of its body:
+    /// a file a third party names, such as a provider's profile picture.
+    ///
+    /// # Errors
+    ///
+    /// As [`Self::send`].
+    pub(crate) async fn get(
+        &self,
+        destination: &str,
+        accept: &str,
+        limit: usize,
+    ) -> Result<Vec<u8>, DeliveryError> {
+        let response = self
+            .request(Method::GET, destination, limit, |request| {
+                request.header(ACCEPT, accept)
+            })
+            .await?;
+        Ok(response.body)
+    }
+
+    /// [`Self::send`], keeping at most `limit` bytes of the body.
+    async fn request(
+        &self,
+        method: Method,
+        destination: &str,
+        limit: usize,
+        request: impl FnOnce(RequestBuilder) -> RequestBuilder,
+    ) -> Result<OutboundResponse, DeliveryError> {
         let url = self.check(destination)?;
         let transport = |error: reqwest::Error| Self::transport_error(&error);
         let mut response = request(self.client.request(method, url))
@@ -153,10 +191,10 @@ impl OutboundClient {
             .map_err(transport)?;
         Self::check_status(response.status(), response.headers(), Utc::now())?;
         let mut body = Vec::new();
-        while body.len() < MAX_RESPONSE_BYTES
+        while body.len() < limit
             && let Some(chunk) = response.chunk().await.map_err(transport)?
         {
-            let room = MAX_RESPONSE_BYTES - body.len();
+            let room = limit - body.len();
             body.extend_from_slice(&chunk[..chunk.len().min(room)]);
         }
         Ok(OutboundResponse {

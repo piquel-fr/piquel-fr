@@ -16,8 +16,8 @@ use topcoat::{
 /// The file input an upload sends its picture in.
 pub const PICTURE_FIELD: &str = "picture";
 
-/// The media types auth reads a picture from, as an upload's file input names
-/// them; auth recognises the format by content.
+/// The media types auth reads a picture from, as an upload's file input and a
+/// fetch's `Accept` header name them; auth recognises the format by content.
 pub const PICTURE_TYPES: &str = "image/png,image/jpeg,image/gif";
 
 /// A change the profile page posts, named by its `action` field. A field the user

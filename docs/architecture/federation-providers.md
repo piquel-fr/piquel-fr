@@ -86,7 +86,9 @@ specific to the provider:
   - Read every response through `Self::json`. It enforces the size limit and keeps
     the provider's OAuth error when a request fails.
   - Build the result with `VerifiedIdentity::new`, which bounds the subject and
-    display name and drops invalid emails.
+    display name and drops invalid emails and pictures. Pass the profile picture's
+    URL if the provider reports one: a social signup imports it as the account's
+    first picture.
 - **Response types:** private `Deserialize` structs for the provider's JSON.
 
 ## 5. Connect it in `providers/mod.rs`
@@ -94,6 +96,9 @@ specific to the provider:
 - Declare `mod gitlab;` and re-export `GitLabProtocol`.
 - Add `ProviderError::GitLab(#[from] gitlab::GitLabError)`.
 - Add the `Provider::GitLab => Self::gitlab()` arm to `ProviderEndpoints::new`.
+- Add the `Provider::GitLab` arm to `ProviderPicture::parse`: the host, or the
+  domain, its pictures are on, and how to ask for the stored size, if it can.
+  Nothing else is ever fetched.
 - Add an `IdentityStrategy::GitLab(GitLabProtocol)` variant, then its arms:
   - in `extend_authorization`: an `OpenID` Connect provider must send the flow's
     `nonce` (see `GoogleProtocol::extend_authorization`);

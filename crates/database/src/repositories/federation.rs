@@ -110,6 +110,9 @@ pub struct PendingFederation {
     pub email: Option<String>,
     /// Display name suggested by the provider.
     pub display_name: String,
+    /// URL of the profile picture the provider reported, if any, on one of its
+    /// own hosts.
+    pub picture_url: Option<String>,
     /// Validated address the browser returns to afterwards.
     pub return_to: String,
     /// Account to link the identity to, for link flows.
@@ -336,8 +339,9 @@ impl FederationRepository<'_> {
             sqlx::query!(
                 "INSERT INTO pending_federation (
                     id, browser_digest, provider_name, issuer, subject, email,
-                    display_name, return_to, link_user_id, link_session_id, expires_at
-                ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)",
+                    display_name, return_to, link_user_id, link_session_id, expires_at,
+                    picture_url
+                ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)",
                 input.id.as_uuid(),
                 input.browser_digest,
                 input.provider.as_str(),
@@ -349,6 +353,7 @@ impl FederationRepository<'_> {
                 input.link_user_id.map(UserId::as_uuid),
                 input.link_session_id.map(SessionId::as_uuid),
                 input.expires_at,
+                input.picture_url,
             )
         )?;
         Ok(())
@@ -372,7 +377,7 @@ impl FederationRepository<'_> {
                     id AS "id: TokenId", browser_digest, provider_name AS "provider: Provider",
                     issuer, subject, email, display_name, return_to,
                     link_user_id AS "link_user_id: UserId",
-                    link_session_id AS "link_session_id: SessionId", expires_at
+                    link_session_id AS "link_session_id: SessionId", expires_at, picture_url
                 FROM pending_federation
                 WHERE browser_digest = $1
                 AND consumed_at IS NULL
@@ -409,7 +414,7 @@ impl FederationRepository<'_> {
                     id AS "id: TokenId", browser_digest, provider_name AS "provider: Provider",
                     issuer, subject, email, display_name, return_to,
                     link_user_id AS "link_user_id: UserId",
-                    link_session_id AS "link_session_id: SessionId", expires_at"#,
+                    link_session_id AS "link_session_id: SessionId", expires_at, picture_url"#,
                 id.as_uuid(),
                 digest,
             )
