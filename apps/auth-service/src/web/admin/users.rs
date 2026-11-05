@@ -174,7 +174,7 @@ pub(super) async fn detail(cx: &Cx) -> Result<Response> {
     Box::pin(App::render(
         cx,
         StatusCode::OK,
-        Crumb::Name(detail.user.display_name.as_str()),
+        Crumb::Name(detail.user.handle.as_str()),
         page,
     ))
     .await

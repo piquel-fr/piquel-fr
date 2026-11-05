@@ -548,7 +548,7 @@ async fn an_accounts_page_names_no_passkey() {
 }
 
 /// A page inside a tab has the tab in its crumb, linking its page: an account's
-/// reads "admin / users / name", and the account's history "admin / users /
+/// reads "admin / users / handle", and the account's history "admin / users /
 /// handle / security history", the handle linking the account. The tab's own
 /// page names it once. The menus' names are lowercase; the account's are not.
 #[tokio::test]
@@ -564,7 +564,7 @@ async fn the_crumb_leads_through_the_tab() {
     assert!(page.contains(users), "{page}");
     // The menus' names are lowercase in the crumb; the account's own are not.
     assert!(page.contains(r#"<a href="/">admin</a>"#), "{page}");
-    assert!(page.contains("<b>Browser test</b>"), "{page}");
+    assert!(page.contains("<b>browser-"), "{page}");
     let page = html(harness.visit(&dashboard, "/users").await).await;
     assert!(!page.contains(users), "{page}");
     assert!(page.contains("<b>users</b>"), "{page}");

@@ -601,9 +601,10 @@ impl AdminApplication {
     }
 
     /// The page the request's page is under, inside `current`, among `tabs`, if
-    /// any, named and linked in the crumb: the account under Users, or the client
-    /// under Clients, which a page such as `/users/{account}/disable` changes.
-    /// The account's or client's own page, and a tab's other pages, have none. A
+    /// any, named and linked in the crumb: the account under Users or
+    /// Administrators, or the client under Clients, which a page such as
+    /// `/users/{account}/disable` changes. The account's or client's own page,
+    /// and a tab's other pages, have none. A
     /// parent that cannot be read, such as on the error page of an account that
     /// does not exist, is left out: the page itself says what went wrong.
     async fn parent(
@@ -621,7 +622,8 @@ impl AdminApplication {
         let (id, _) = below.split_once('/')?;
         let service = &Self::of(cx).service;
         match current {
-            DashboardTab::Users => {
+            // An administrator's page is their account's, under Users.
+            DashboardTab::Users | DashboardTab::Administrators => {
                 let id: UserId = id.parse().ok()?;
                 let handle = service.user_handle(&admin.operator, id).await.ok()?;
                 Some((handle.to_string(), Self::account(cx, id)))
