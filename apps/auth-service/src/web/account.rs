@@ -224,6 +224,9 @@ pub(super) struct Framed<'a> {
     pub(super) section: Section,
     /// The settings tab it is, if it is one, which the sidebar marks.
     pub(super) tab: Option<Tab>,
+    /// The pages it is under, named and linked in the crumb: an app's page is
+    /// under the app.
+    pub(super) trail: &'a [(Crumb<'a>, &'a str)],
     /// Its title in the browser and its name in the crumb.
     pub(super) title: Crumb<'a>,
     /// What opens it, above its messages, such as an app's header.
@@ -352,6 +355,7 @@ impl WebApplication {
                 let framed = Framed {
                     section: P::SECTION,
                     tab: None,
+                    trail: &[],
                     title: P::TITLE.into(),
                     head: Child::new(head),
                     page: Child::default(),
@@ -405,6 +409,7 @@ impl WebApplication {
         let Framed {
             section,
             tab,
+            trail,
             title,
             head,
             page,
@@ -460,6 +465,7 @@ impl WebApplication {
             piquel_ui::account(
                 nav: nav,
                 who: who,
+                trail: trail,
                 title: title,
                 home: page::settings::HOME,
                 sign_out: page::LOGOUT,

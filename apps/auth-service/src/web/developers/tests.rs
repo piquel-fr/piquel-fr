@@ -452,3 +452,41 @@ async fn backchannel_logout_uris_are_set_changed_and_removed() {
     assert_eq!(saved.status(), StatusCode::SEE_OTHER);
     assert_eq!(stored().await, None);
 }
+
+/// The crumb leads through the console to an app, named as its owner named it,
+/// and on to its settings, named in lowercase like the console: an app's page
+/// reads "developers / Console test", its settings "developers / Console test /
+/// settings", the app linking its page.
+#[tokio::test]
+#[ignore = "requires TEST_DATABASE_URL"]
+async fn the_crumb_leads_through_the_app() {
+    let replicas = Replicas::new().await;
+    let database = Replicas::database().await;
+    let browser = Browser::new_account(&database).await;
+    let registered = browser
+        .post(
+            &replicas,
+            NEW,
+            &registration(ClientKind::Public, "https://console.example/callback"),
+        )
+        .await;
+    let overview = redirect(&registered).to_owned();
+    let page = html(browser.visit(&replicas.a, &overview).await).await;
+    assert!(
+        page.contains(r#"<a href="/developers">developers</a>"#),
+        "{page}"
+    );
+    assert!(page.contains("<b>Console test</b>"), "{page}");
+    let id: ClientId = overview
+        .strip_prefix("/developers/clients/")
+        .expect("an app's overview")
+        .parse()
+        .expect("app ID");
+    let settings = developers::of(APP_SETTINGS, &id);
+    let page = html(browser.visit(&replicas.a, &settings).await).await;
+    assert!(
+        page.contains(&format!(r#"<a href="{overview}">Console test</a>"#)),
+        "{page}"
+    );
+    assert!(page.contains("<b>settings</b>"), "{page}");
+}

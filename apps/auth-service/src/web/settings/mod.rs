@@ -176,6 +176,7 @@ impl WebApplication {
         let framed = Framed {
             section: Section::Account,
             tab: Some(tab),
+            trail: &[],
             title: tab.label().into(),
             head: Child::default(),
             page,

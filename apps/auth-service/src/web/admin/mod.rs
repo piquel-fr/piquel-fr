@@ -604,9 +604,9 @@ impl AdminApplication {
     /// any, named and linked in the crumb: the account under Users or
     /// Administrators, or the client under Clients, which a page such as
     /// `/users/{account}/disable` changes. The account's or client's own page,
-    /// and a tab's other pages, have none. A
-    /// parent that cannot be read, such as on the error page of an account that
-    /// does not exist, is left out: the page itself says what went wrong.
+    /// and a tab's other pages, have none. A parent that cannot be read, such as
+    /// on the error page of an account that does not exist, is left out: the
+    /// page itself says what went wrong.
     async fn parent(
         cx: &Cx,
         admin: Option<&SignedInAdmin>,

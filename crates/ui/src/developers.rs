@@ -159,24 +159,21 @@ pub enum AppTab {
 }
 
 impl AppTab {
-    /// Its page's title in the browser, for the app named `app`.
+    /// The tab's label, also its page's title in the browser.
     #[must_use]
-    pub fn title(self, app: &str) -> String {
-        match self {
-            Self::Overview => app.to_owned(),
-            Self::Settings | Self::Secrets => format!("{} · {app}", self.label()),
-        }
-    }
-}
-
-impl Label for AppTab {
-    /// Its tab's label.
-    fn label(self) -> &'static str {
+    pub const fn label(self) -> &'static str {
         match self {
             Self::Overview => "Overview",
             Self::Settings => "Settings",
             Self::Secrets => "Secrets",
         }
+    }
+}
+
+impl Label for AppTab {
+    /// [`AppTab::label`].
+    fn label(self) -> &'static str {
+        self.label()
     }
 }
 
