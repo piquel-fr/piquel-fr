@@ -69,8 +69,8 @@ const SIX_TO_FOUR: Ipv6Net = Ipv6Net::new_assert(Ipv6Addr::new(0x2002, 0, 0, 0, 
 /// A successful response, with at most its caller's limit of its body:
 /// [`MAX_RESPONSE_BYTES`] for [`OutboundClient::send`].
 // Back-channel logout needs only the status class, and a fetched file only its
-// body; channels that read the status, such as SCIM, will. `expect` fails the
-// build once one does.
+// body; a future channel may read the status. `expect` fails the build once one
+// does.
 #[derive(Debug)]
 pub(crate) struct OutboundResponse {
     /// The successful status.
