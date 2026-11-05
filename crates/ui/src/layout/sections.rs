@@ -66,11 +66,10 @@ pub struct AccountNav<'a> {
 /// for `who`, signing out by posting to `sign_out`, the preference forms posting
 /// to `preferences_action`, reversing `preferences`, and coming back to `here`,
 /// the page named `title` in the crumb after `trail`, the pages it is under,
-/// and the status bar linking Piquel's
-/// `policies`; an administrator's sidebar also links the dashboard. Then what
-/// the account's `recovery` that can still be undone asks,
-/// if any, such as a [`crate::recovery_banner`]; the page's `head`, such as an
-/// app's tabs, its `messages`, and the page as `child`.
+/// and the status bar linking Piquel's `policies`; an administrator's sidebar
+/// also links the dashboard. Then what the account's `recovery` that can still
+/// be undone asks, if any, such as a [`crate::recovery_banner`]; the page's
+/// `head`, such as an app's tabs, its `messages`, and the page as `child`.
 #[component]
 pub async fn account<'a>(
     nav: AccountNav<'a>,
