@@ -100,6 +100,9 @@ pub struct Shell<'a> {
     pub who: Option<Who<'a>>,
     /// Their own page, which the top bar's avatar links.
     pub me: Option<&'a str>,
+    /// The tab the page belongs to, between the area and the page in the
+    /// crumb, when the page is not the tab's own: its name and its page.
+    pub tab: Option<(&'a str, &'a str)>,
     /// The page's name in the crumb, after the area's link.
     pub page: &'a str,
     /// A search form in the top bar, if the area has one.
@@ -235,6 +238,10 @@ async fn topbar<'a>(frame: &'a Shell<'a>) -> Result<impl View> {
             <div class="crumb">
                 <a href=(frame.area_home)>(frame.area.to_lowercase())</a>
                 <span aria-hidden="true">"/"</span>
+                if let Some((label, href)) = frame.tab {
+                    <a href=(href)>(label.to_lowercase())</a>
+                    <span aria-hidden="true">"/"</span>
+                }
                 <b>(frame.page)</b>
             </div>
             <div class="right">

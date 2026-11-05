@@ -301,15 +301,11 @@ async fn listed_status<'a>(client: &'a Client) -> Result<impl View> {
     })
 }
 
-/// One client's page, linking back to the clients at `back`, as of `now`: what
-/// it is, why it does not sign users in, if it does not, its changes, a
-/// confidential client's secrets, and the origins its pages sign users in on.
+/// One client's page as of `now`: what it is, why it does not sign users in,
+/// if it does not, its changes, a confidential client's secrets, and the
+/// origins its pages sign users in on.
 #[component]
-pub async fn client_page<'a>(
-    page: &'a ClientPage<'a>,
-    back: &'a str,
-    now: DateTime<Utc>,
-) -> Result<impl View> {
+pub async fn client_page<'a>(page: &'a ClientPage<'a>, now: DateTime<Utc>) -> Result<impl View> {
     let client = page.client;
     let title = if client.name.is_empty() {
         client.id.as_str()
@@ -317,7 +313,6 @@ pub async fn client_page<'a>(
         client.name
     };
     Ok(view! {
-        <p><a href=(back)>"← Clients"</a></p>
         page_head(
             title: title,
             lead: client.id.to_string(),

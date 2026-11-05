@@ -148,6 +148,7 @@ pub async fn account<'a>(
             groups: &groups,
             who: Some(who),
             me: Some(home),
+            tab: None,
             page: title,
             search: None,
             preferences,

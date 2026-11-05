@@ -219,6 +219,14 @@ pub async fn dashboard_frame<'a>(
             warning: warning && *tab == Tab::Overview,
         })
         .collect();
+    // A page inside a tab, such as one account under Users, has the tab in its
+    // crumb; the tab's own page, at its path, is named once.
+    let path = dashboard.here.split('?').next().unwrap_or_default();
+    let tab = dashboard
+        .current
+        .and_then(|current| dashboard.tabs.iter().find(|(tab, _)| *tab == current))
+        .filter(|(_, href)| *href != path)
+        .map(|(tab, href)| (tab.label(), *href));
     Ok(view! {
         let groups = [NavGroup {
             label: Some("dashboard"),
@@ -231,6 +239,7 @@ pub async fn dashboard_frame<'a>(
             groups: &groups,
             who: dashboard.administrator,
             me: dashboard.administrator.map(|_| dashboard.me),
+            tab,
             page: dashboard.title,
             search: dashboard.administrator.map(|_| dashboard.search),
             preferences: dashboard.preferences,

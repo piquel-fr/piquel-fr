@@ -145,9 +145,9 @@ pub(super) async fn detail(cx: &Cx) -> Result<Response> {
         approve,
         changes,
     };
-    let (shown, back) = (&shown, &href!(list).resolve(cx));
+    let shown = &shown;
     let page = view! { cx =>
-        piquel_ui::client_page(page: shown, back: back.as_str(), now: Utc::now())
+        piquel_ui::client_page(page: shown, now: Utc::now())
     };
     // A large page: its future is boxed, off the handler's stack.
     Box::pin(App::render(cx, StatusCode::OK, App::title(stored), page)).await
