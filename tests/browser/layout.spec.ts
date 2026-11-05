@@ -1,24 +1,5 @@
-import { expect, test, type Page } from '@playwright/test';
-import { signUp, withPasskeys } from './helpers';
-
-/**
- * The window sizes the pages must work at, the smallest phone to a wide desktop,
- * either side of the drawer's breakpoint. Few, and few pages each: auth's pages
- * share one request budget a minute, which the whole suite spends.
- */
-const viewports = [
-  { name: 'small phone', width: 320, height: 568 },
-  { name: 'tablet', width: 768, height: 1024 },
-  { name: 'laptop', width: 1280, height: 800 },
-  { name: 'desktop', width: 1920, height: 1080 }
-];
-
-/** Whether the page body scrolls sideways, which no page may. */
-async function scrollsSideways(page: Page): Promise<boolean> {
-  return page.evaluate(
-    () => document.documentElement.scrollWidth > document.documentElement.clientWidth
-  );
-}
+import { expect, test } from '@playwright/test';
+import { scrollsSideways, signUp, viewports, withPasskeys } from './helpers';
 
 /**
  * The shell at every size: the sidebar beside the page on wide windows, a drawer

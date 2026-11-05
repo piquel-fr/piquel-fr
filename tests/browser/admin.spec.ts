@@ -8,9 +8,11 @@ import {
   consent,
   mailed,
   mailUrl,
+  scrollsSideways,
   serveClient,
   signedUp,
   signUp,
+  viewports,
   withPasskeys
 } from './helpers';
 
@@ -70,6 +72,43 @@ function entry(page: Page, change: string, reason: string) {
     .filter({ hasText: `By a Piquel administrator: “${reason}”` })
     .first();
 }
+
+/**
+ * The top bar at every size: the crumb, the search box and the avatar each keep
+ * their own room. The search box has run under the avatar on tablets before, as
+ * its input refused to shrink with the form.
+ */
+test("the dashboard's top bar fits every window size", async ({ browser }) => {
+  const admin = await administrator(browser, `bar-${Date.now().toString(36)}`);
+  await admin.goto(`${adminUrl}/users`);
+  const bar = admin.locator('.topbar');
+  const parts = {
+    crumb: bar.locator('.crumb'),
+    search: bar.locator('.search-box'),
+    avatar: bar.getByRole('link', { name: 'Your account', exact: true })
+  };
+  for (const viewport of viewports) {
+    await admin.setViewportSize(viewport);
+    expect(await scrollsSideways(admin), viewport.name).toBe(false);
+    const boxes = await Promise.all(
+      Object.entries(parts).map(async ([name, part]) => {
+        const box = await part.boundingBox();
+        if (!box) throw new Error(`${viewport.name}: the ${name} is not shown`);
+        return { name, ...box };
+      })
+    );
+    for (const [i, a] of boxes.entries()) {
+      for (const b of boxes.slice(i + 1)) {
+        const crosses =
+          a.x < b.x + b.width &&
+          b.x < a.x + a.width &&
+          a.y < b.y + b.height &&
+          b.y < a.y + a.height;
+        expect(crosses, `${viewport.name}: ${a.name} crosses ${b.name}`).toBe(false);
+      }
+    }
+  }
+});
 
 test('an administrator disables a user from the dashboard, and the user is signed out', async ({
   browser

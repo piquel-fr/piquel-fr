@@ -114,11 +114,6 @@
   .status {
     padding-inline: 1rem;
   }
-  .topbar .search {
-    width: auto;
-    flex: 1 1 6rem;
-    max-width: 50%;
-  }
   .crumb {
     flex: 1 1 auto;
   }
@@ -141,7 +136,6 @@
   .topbar .search {
     order: 10;
     flex: 1 1 100%;
-    max-width: none;
   }
 }
 @media (max-width: 520px) {
