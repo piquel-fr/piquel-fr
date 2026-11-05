@@ -31,7 +31,7 @@ use piquel_common::{
 };
 use piquel_repository::StoredOidcClient;
 use piquel_ui::{
-    Action, AdminClientRow, Change, ClientChanges, ClientPage, ClientRow, ClientStatus,
+    Action, AdminClientRow, Change, ClientChanges, ClientPage, ClientRow, ClientStatus, Crumb,
     NewClientForm, OperatorDraft, Query, Registration, Revealed, SecretRow, SecretsChange,
     SecretsState,
 };
@@ -145,12 +145,18 @@ pub(super) async fn detail(cx: &Cx) -> Result<Response> {
         approve,
         changes,
     };
-    let (shown, back) = (&shown, &href!(list).resolve(cx));
+    let shown = &shown;
     let page = view! { cx =>
-        piquel_ui::client_page(page: shown, back: back.as_str(), now: Utc::now())
+        piquel_ui::client_page(page: shown, now: Utc::now())
     };
     // A large page: its future is boxed, off the handler's stack.
-    Box::pin(App::render(cx, StatusCode::OK, App::title(stored), page)).await
+    Box::pin(App::render(
+        cx,
+        StatusCode::OK,
+        Crumb::Name(App::title(stored)),
+        page,
+    ))
+    .await
 }
 
 /// `/clients/new`: registers a client operators manage, then goes on to its page,
@@ -270,9 +276,8 @@ pub(super) async fn rotate(cx: &Cx, form: Option<Form<SecretsChange>>) -> Result
             expires_at: secret.expires_at,
         })
         .collect();
-    let (here, back, name, secrets, state, refusal) = (
+    let (here, name, secrets, state, refusal) = (
         &here,
-        &href!(detail, Client(id.clone())).resolve(cx),
         App::title(&details.client),
         &secrets,
         &state,
@@ -281,7 +286,6 @@ pub(super) async fn rotate(cx: &Cx, form: Option<Form<SecretsChange>>) -> Result
     let page = view! { cx =>
         piquel_ui::client_secrets(
             page: here.as_str(),
-            back: back.as_str(),
             name: name,
             secrets: secrets,
             now: Utc::now(),
@@ -459,7 +463,7 @@ impl App {
 
     /// The name of client `stored`'s pages: its own, or its ID once deleted, which
     /// erases its name.
-    fn title(stored: &StoredOidcClient) -> &str {
+    pub(super) fn title(stored: &StoredOidcClient) -> &str {
         if stored.display_name.is_empty() {
             stored.id.as_str()
         } else {
@@ -492,20 +496,13 @@ impl App {
         settings: &OperatorDraft,
         refusal: Option<&str>,
     ) -> Result<Response> {
-        let back = match registration {
-            Registration::New { .. } => href!(list).resolve(cx),
-            Registration::Edit { .. } => {
-                href!(detail, Client(path_param::<Client>(cx)?.clone())).resolve(cx)
-            }
-        };
         let here = uri(cx).path().to_owned();
-        let (title, back, here) = (registration.title(), &back, &here);
+        let (title, here) = (registration.title(), &here);
         let page = view! { cx =>
             piquel_ui::client_registration(
                 registration: registration,
                 settings: settings,
                 action: here.as_str(),
-                back: back.as_str(),
                 refusal: refusal,
             )
         };

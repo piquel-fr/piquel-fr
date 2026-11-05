@@ -140,13 +140,12 @@ impl Registration<'_> {
 /// The page registering or changing a client, posting to `action`: the
 /// console's settings form showing `settings`, with the ID and kind of a client
 /// not registered yet, and the inputs only operators fill in. `refusal` says why
-/// the last attempt was refused; `back` leads away.
+/// the last attempt was refused.
 #[component]
 pub async fn client_registration<'a>(
     registration: Registration<'a>,
     settings: &'a OperatorDraft,
     action: &'a str,
-    back: &'a str,
     #[into]
     #[default]
     refusal: Option<&'a str>,
@@ -157,7 +156,6 @@ pub async fn client_registration<'a>(
         Registration::Edit { .. } => (None, None),
     };
     Ok(view! {
-        <p><a href=(back)>"← Back"</a></p>
         page_head(title: title, lead: lead)
         if let Some(refusal) = refusal {
             <p class="notice error" role="alert">(refusal)</p>
@@ -301,15 +299,11 @@ async fn listed_status<'a>(client: &'a Client) -> Result<impl View> {
     })
 }
 
-/// One client's page, linking back to the clients at `back`, as of `now`: what
-/// it is, why it does not sign users in, if it does not, its changes, a
-/// confidential client's secrets, and the origins its pages sign users in on.
+/// One client's page as of `now`: what it is, why it does not sign users in,
+/// if it does not, its changes, a confidential client's secrets, and the
+/// origins its pages sign users in on.
 #[component]
-pub async fn client_page<'a>(
-    page: &'a ClientPage<'a>,
-    back: &'a str,
-    now: DateTime<Utc>,
-) -> Result<impl View> {
+pub async fn client_page<'a>(page: &'a ClientPage<'a>, now: DateTime<Utc>) -> Result<impl View> {
     let client = page.client;
     let title = if client.name.is_empty() {
         client.id.as_str()
@@ -317,7 +311,6 @@ pub async fn client_page<'a>(
         client.name
     };
     Ok(view! {
-        <p><a href=(back)>"← Clients"</a></p>
         page_head(
             title: title,
             lead: client.id.to_string(),
@@ -388,14 +381,13 @@ pub async fn client_page<'a>(
     })
 }
 
-/// A confidential client's secrets on `page`, linking back to the client at
-/// `back`, named `name`: the developer console's, the one a rotation just made,
-/// once, then the lifetimes of its `secrets` as of `now`, and rotating, with the
-/// grace `state` chose. `refusal` says why the last rotation was refused.
+/// A confidential client's secrets on `page`, the client named `name`: the
+/// developer console's, the one a rotation just made, once, then the lifetimes
+/// of its `secrets` as of `now`, and rotating, with the grace `state` chose.
+/// `refusal` says why the last rotation was refused.
 #[component]
 pub async fn client_secrets<'a>(
     page: &'a str,
-    back: &'a str,
     name: &'a str,
     secrets: &'a [SecretRow],
     now: DateTime<Utc>,
@@ -405,7 +397,6 @@ pub async fn client_secrets<'a>(
     refusal: Option<&'a str>,
 ) -> Result<impl View> {
     Ok(view! {
-        <p><a href=(back)>"← Back to the client"</a></p>
         page_head(title: "Client secrets", lead: name.to_owned())
         if let Some(refusal) = refusal {
             <p class="notice error" role="alert">(refusal)</p>

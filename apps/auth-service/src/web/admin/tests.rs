@@ -547,6 +547,40 @@ async fn an_accounts_page_names_no_passkey() {
     assert!(!page.contains(&passkey.friendly_name), "{page}");
 }
 
+/// A page inside a tab has the tab in its crumb, linking its page: an account's
+/// reads "admin / users / handle", and the account's history "admin / users /
+/// handle / security history", the handle linking the account. The tab's own
+/// page names it once. The menus' names are lowercase; the account's are not.
+#[tokio::test]
+#[ignore = "requires TEST_DATABASE_URL"]
+async fn the_crumb_leads_through_the_tab() {
+    let harness = Harness::new().await;
+    let admin = harness.admin().await;
+    let owner = Browser::new_account(&harness.database).await;
+    let account = format!("/users/{}", owner.user_id);
+    let dashboard = harness.sign_in(&admin, &account).await;
+    let page = html(harness.visit(&dashboard, &account).await).await;
+    let users = r#"<a href="/users">users</a>"#;
+    assert!(page.contains(users), "{page}");
+    // The menus' names are lowercase in the crumb; the account's own are not.
+    assert!(page.contains(r#"<a href="/">admin</a>"#), "{page}");
+    assert!(page.contains("<b>browser-"), "{page}");
+    let page = html(harness.visit(&dashboard, "/users").await).await;
+    assert!(!page.contains(users), "{page}");
+    assert!(page.contains("<b>users</b>"), "{page}");
+    let page = html(
+        harness
+            .visit(&dashboard, &format!("{account}/history"))
+            .await,
+    )
+    .await;
+    assert!(
+        page.contains(&format!(r#"<a href="{account}">browser-"#)),
+        "{page}"
+    );
+    assert!(page.contains("<b>security history</b>"), "{page}");
+}
+
 /// The audit page shows the chain as `audit verify` reports it, and says that
 /// pruning is the database owner's, from the command line.
 #[tokio::test]

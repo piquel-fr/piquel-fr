@@ -52,8 +52,8 @@ use crate::{
     form::{Precision, time},
     icons::Icon,
     layout::{
-        Health, Label, NavGroup, NavItem, Policies, Preferences, Search, Shell, Who, page_head,
-        shell,
+        Crumb, Health, Label, NavGroup, NavItem, Policies, Preferences, Search, Shell, Who,
+        page_head, shell,
     },
     settings::{Tab as SettingsTab, settings_tabs},
 };
@@ -165,7 +165,7 @@ impl Label for Tab {
 #[derive(Clone, Copy, Debug)]
 pub struct Dashboard<'a> {
     /// The page's name, in the crumb.
-    pub title: &'a str,
+    pub title: Crumb<'a>,
     /// Where the brand links: the overview.
     pub home: &'a str,
     /// The signed-in administrator, if the browser is signed in.
@@ -177,6 +177,9 @@ pub struct Dashboard<'a> {
     pub tabs: &'a [(Tab, &'a str)],
     /// The tab the page belongs to, if any.
     pub current: Option<Tab>,
+    /// The page the page is under, inside its tab, if any, named and linked in
+    /// the crumb: the account under Users, or the client under Clients.
+    pub parent: Option<(&'a str, &'a str)>,
     /// Where signing out posts.
     pub sign_out: &'a str,
     /// What the browser chose, which the preference forms reverse.
@@ -219,6 +222,19 @@ pub async fn dashboard_frame<'a>(
             warning: warning && *tab == Tab::Overview,
         })
         .collect();
+    // A page inside a tab, such as one account under Users, has the tab in its
+    // crumb, then the page it is under; the tab's own page, at its path, is
+    // named once.
+    let path = dashboard.here.split('?').next().unwrap_or_default();
+    let tab = dashboard
+        .current
+        .and_then(|current| dashboard.tabs.iter().find(|(tab, _)| *tab == current))
+        .filter(|(_, href)| *href != path)
+        .map(|(tab, href)| (Crumb::Label(tab.label()), *href));
+    let parent = dashboard
+        .parent
+        .map(|(name, href)| (Crumb::Name(name), href));
+    let trail: Vec<_> = tab.into_iter().chain(parent).collect();
     Ok(view! {
         let groups = [NavGroup {
             label: Some("dashboard"),
@@ -231,6 +247,7 @@ pub async fn dashboard_frame<'a>(
             groups: &groups,
             who: dashboard.administrator,
             me: dashboard.administrator.map(|_| dashboard.me),
+            trail: &trail,
             page: dashboard.title,
             search: dashboard.administrator.map(|_| dashboard.search),
             preferences: dashboard.preferences,
@@ -674,12 +691,11 @@ pub(crate) async fn confirm<'a>(
     })
 }
 
-/// An account's settings tab, as an administrator changes them: a link `back` to
-/// the account, the `tabs`, `current` among them, why the change just posted was
-/// refused, if it was, and the tab's section as `child`.
+/// An account's settings tab, as an administrator changes them: the `tabs`,
+/// `current` among them, why the change just posted was refused, if it was, and
+/// the tab's section as `child`.
 #[component]
 pub async fn account_settings<'a>(
-    back: &'a str,
     tabs: &'a [(SettingsTab, &'a str)],
     current: SettingsTab,
     #[into]
@@ -688,7 +704,6 @@ pub async fn account_settings<'a>(
     child: Child<'_>,
 ) -> Result<impl View> {
     Ok(view! {
-        <p><a href=(back)>"← Back to the account"</a></p>
         settings_tabs(tabs: tabs, current: current)
         if let Some(refusal) = refusal {
             <p class="notice error" role="alert">(refusal)</p>

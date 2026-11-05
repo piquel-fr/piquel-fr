@@ -285,13 +285,18 @@ body.admin .main::before {
   color: var(--muted);
   white-space: nowrap;
   overflow: hidden;
-  text-overflow: ellipsis;
 }
+/* A trail too long for the bar shortens its long links, such as a handle, to
+   an ellipsis, and keeps the short ones and the page's name whole. */
 .crumb b {
+  flex-shrink: 0;
   color: var(--fg);
   font-weight: 500;
 }
 .crumb a {
+  min-width: 5ch;
+  overflow: hidden;
+  text-overflow: ellipsis;
   color: inherit;
   text-decoration: none;
 }

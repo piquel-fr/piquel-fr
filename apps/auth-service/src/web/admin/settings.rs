@@ -423,11 +423,9 @@ impl App {
             .iter()
             .map(|(tab, link)| (*tab, link.as_str()))
             .collect();
-        let back = &Self::account(cx, user);
         let section = Child::new(section);
         let page = view! { cx =>
             piquel_ui::account_settings(
-                back: back.as_str(),
                 tabs: tabs,
                 current: tab,
                 refusal: refused,

@@ -8,7 +8,7 @@ use piquel_common::{
 };
 use piquel_repository::{RecentRecovery, RecoveryState};
 use piquel_ui::{
-    AccountPages, Action, Change, Pager, Query, RecoveryKey, RecoveryRow, RecoveryStanding,
+    AccountPages, Action, Change, Crumb, Pager, Query, RecoveryKey, RecoveryRow, RecoveryStanding,
     SessionRow, UserRow,
 };
 use serde::de::IgnoredAny;
@@ -174,7 +174,7 @@ pub(super) async fn detail(cx: &Cx) -> Result<Response> {
     Box::pin(App::render(
         cx,
         StatusCode::OK,
-        detail.user.display_name.as_str(),
+        Crumb::Name(detail.user.handle.as_str()),
         page,
     ))
     .await

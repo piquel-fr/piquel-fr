@@ -61,6 +61,22 @@ impl AdminService {
         found.ok_or(AdminError::UserNotFound)
     }
 
+    /// The handle of the account `user_id`, in any status, which names it.
+    pub(crate) async fn user_handle(
+        &self,
+        operator: &Operator,
+        user_id: UserId,
+    ) -> Result<Handle, AdminError> {
+        operator.authorize_read(&self.database).await?;
+        let user = self
+            .database
+            .users()
+            .find_by_id(user_id)
+            .await?
+            .ok_or(AdminError::UserNotFound)?;
+        Ok(user.handle)
+    }
+
     /// Lists `page` of the accounts matching `query`, by handle: the first page
     /// when `None`.
     pub(crate) async fn search_users(

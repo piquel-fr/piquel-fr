@@ -85,6 +85,41 @@ pub struct Search<'a> {
     pub value: &'a str,
 }
 
+/// A page's name in the crumb.
+#[derive(Clone, Copy, Debug)]
+pub enum Crumb<'a> {
+    /// A menu's label, which the crumb shows in lowercase like the rest of
+    /// the bar.
+    Label(&'a str),
+    /// A name someone chose, such as a handle or an app's, shown as it is.
+    Name(&'a str),
+}
+
+impl<'a> Crumb<'a> {
+    /// The name as written, for the browser's title.
+    #[must_use]
+    pub fn as_str(self) -> &'a str {
+        match self {
+            Self::Label(name) | Self::Name(name) => name,
+        }
+    }
+
+    /// The name as the crumb shows it.
+    fn text(self) -> String {
+        match self {
+            Self::Label(label) => label.to_lowercase(),
+            Self::Name(name) => name.to_owned(),
+        }
+    }
+}
+
+impl<'a> From<&'a str> for Crumb<'a> {
+    /// A plain string names a page from a menu.
+    fn from(label: &'a str) -> Self {
+        Self::Label(label)
+    }
+}
+
 /// The frame of a signed-in page: what every part of the shell shows.
 #[derive(Clone, Copy, Debug)]
 pub struct Shell<'a> {
@@ -100,8 +135,11 @@ pub struct Shell<'a> {
     pub who: Option<Who<'a>>,
     /// Their own page, which the top bar's avatar links.
     pub me: Option<&'a str>,
+    /// The pages between the area and the page in the crumb, each named and
+    /// linked: the tab the page belongs to, then the page it is under, if any.
+    pub trail: &'a [(Crumb<'a>, &'a str)],
     /// The page's name in the crumb, after the area's link.
-    pub page: &'a str,
+    pub page: Crumb<'a>,
     /// A search form in the top bar, if the area has one.
     pub search: Option<Search<'a>>,
     /// What the browser chose, which the toggles reverse.
@@ -235,7 +273,11 @@ async fn topbar<'a>(frame: &'a Shell<'a>) -> Result<impl View> {
             <div class="crumb">
                 <a href=(frame.area_home)>(frame.area.to_lowercase())</a>
                 <span aria-hidden="true">"/"</span>
-                <b>(frame.page)</b>
+                for (name, href) in frame.trail {
+                    <a href=(*href)>(name.text())</a>
+                    <span aria-hidden="true">"/"</span>
+                }
+                <b>(frame.page.text())</b>
             </div>
             <div class="right">
                 if let Some(search) = frame.search {

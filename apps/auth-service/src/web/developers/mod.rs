@@ -26,8 +26,8 @@ use crate::{
 };
 use piquel_common::clients::ClientKind;
 use piquel_ui::{
-    AppLink, AppTab, ClientDraft, ClientRow, ClientStatus, Messages, NewAppChange, NewAppState,
-    Notice, Registered, Revealed, Section, Title,
+    AppLink, AppTab, ClientDraft, ClientRow, ClientStatus, Crumb, Messages, NewAppChange,
+    NewAppState, Notice, Registered, Revealed, Section, Title,
 };
 use topcoat::{
     context::Cx,
@@ -221,7 +221,7 @@ impl WebApplication {
     async fn console_page(
         &self,
         cx: &Cx,
-        title: &str,
+        title: impl Into<Crumb<'_>>,
         reader: &Reader,
         outcome: (StatusCode, Messages<'_>),
         head: Child<'_>,
@@ -230,7 +230,8 @@ impl WebApplication {
         let framed = Framed {
             section: Section::Developers,
             tab: None,
-            title,
+            trail: &[],
+            title: title.into(),
             head,
             page,
         };
@@ -255,11 +256,26 @@ impl WebApplication {
             .map(|(tab, route)| (tab, developers::of(route, &client.id)))
             .collect();
         let row = ClientRow::from(client);
+        // The app's own page is named after it; its other pages are under it.
+        let app = Crumb::Name(&client.display_name);
+        let overview = developers::of(APP, &client.id);
+        let (trail, title) = match tab {
+            AppTab::Overview => (vec![], app),
+            AppTab::Settings | AppTab::Secrets => {
+                (vec![(app, overview.as_str())], Crumb::Label(tab.label()))
+            }
+        };
         let head = view! { cx =>
             piquel_ui::app_header(home: HOME, client: row, tabs: &tabs, current: tab)
         };
-        let title = tab.title(&client.display_name);
-        self.console_page(cx, &title, reader, outcome, Child::new(head), page)
-            .await
+        let framed = Framed {
+            section: Section::Developers,
+            tab: None,
+            trail: &trail,
+            title,
+            head: Child::new(head),
+            page,
+        };
+        self.account_page(cx, reader, outcome, &[], framed).await
     }
 }
