@@ -721,14 +721,17 @@ explains how to choose a requirement and handle the challenge.
   established account's passkeys.
 - Sensitive changes (changing the handle, adding or removing a passkey, linking or unlinking a provider,
   adding, removing or changing the primary email address, and registering an OIDC
-  client, rotating its secret, deleting it or changing its redirect or post-logout
-  URIs) need a passkey confirmation of the current browser session from the last five
-  minutes. A passkey sign-in counts; social sign-in never does. The age counts from
-  the confirmation and is never extended by use, and it never applies to another
-  session. Without one, a page asks for the passkey before it posts the change, or,
-  for a client's URIs, once the change is refused; the API answers `403` with
-  `"code": "step_up_required"` and `max_age`. Reads, renaming a passkey, changing
-  the display name and a client's other settings need only ordinary login.
+  client or changing one in any way: its settings, enabling or disabling it,
+  rotating its secret or deleting it) need a passkey confirmation of the current
+  browser session from the last five minutes. A passkey sign-in counts; social
+  sign-in never does. The age counts from the confirmation and is never extended
+  by use, and it never applies to another session. Adding a passkey checks it
+  when the ceremony starts, so a confirmation that lapses while the authenticator
+  runs, which may take the ceremony's five minutes, does not discard the new
+  passkey. Without one, a page asks for the passkey before it posts the change,
+  and again if the change is refused; the API answers `403` with
+  `"code": "step_up_required"` and `max_age`. Reads, renaming a passkey and
+  changing the display name need only ordinary login.
 - Matching verified email suggests linking; it never grants account access.
   Linking requires possession of the provider account and the target account's
   passkey confirmation. Explicit linking, started from settings, permits
@@ -746,8 +749,12 @@ explains how to choose a requirement and handle the challenge.
   detects reuse and stops when its central session expires or is revoked. Ending a
   session tells the clients that registered a back-channel logout URI, which end
   their own sessions; already issued access tokens stay valid until they expire.
-- Browser state and opaque secrets are random, hashed where lookup is needed, and
-  bound to the initiating browser. Auth cookies are host-only, Secure and HttpOnly.
+- Browser state and opaque secrets are random, and hashed where lookup is needed.
+  A social sign-in's provider redirect and a pending social signup are bound, by
+  a cookie, to the browser that started them. A pending authorization is not: its
+  token travels in the sign-in and consent URLs, as the authorization request it
+  continues does, and only a session that meets the request's requirements
+  finishes it. Auth cookies are host-only, Secure and HttpOnly.
   Mutations require an exact allowed origin and CSRF header; OIDC back-channel
   endpoints instead validate their protocol credentials. A form posted to one of
   auth's server-rendered pages must come from auth's own pages: `Sec-Fetch-Site:

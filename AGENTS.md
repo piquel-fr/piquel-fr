@@ -24,7 +24,7 @@ should support all features. Don't let anything be left behind.
 The CLI is the most complete surface. An admin operation may stay CLI-only
 (`AdminApplication::page()` in `apps/auth-service/src/web/admin/mod.rs` maps
 it to `None`) only with a documented reason next to its arm, as `PurgeUser` and
-`PruneAuditChain` have; the other `None` arms are pages still to build.
+`PruneAuditChain` have.
 
 Generated files are committed; regenerate them with `just db prepare` (SQLx
 cache), `just sdk-vectors` and `just sdk-types`. `just validate` is the local

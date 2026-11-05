@@ -34,21 +34,26 @@ WWW-Authenticate: Bearer error="insufficient_user_authentication",
   error_description="A passkey confirmation is required", acr_values="phr", max_age="300"
 ```
 
-In Rust, `piquel_auth::StepUpRequirement` holds the
-requirement and checks the claims. Auth's own settings use the same check.
+In Rust, `piquel_auth::StepUpRequirement` holds the requirement, and
+`AccessToken::require_authentication` checks a validated token against it. Auth's
+own settings use the same check.
 
 ```rust
 use piquel_auth::StepUpRequirement;
 
 const DELETE_REPOSITORY: StepUpRequirement = StepUpRequirement::passkey_within(300);
 
-if let Err(requirement) = DELETE_REPOSITORY.check(acr, auth_time, now - LEEWAY) {
-    // Answer 401 with the challenge for `requirement`.
+// `token` is the validated `AccessToken`, `validator` the `ResourceValidator` that
+// validated it.
+if let Err(error) = token.require_authentication(DELETE_REPOSITORY, validator.now()) {
+    // Answer 401 with `error.challenge()`.
 }
 ```
 
-Pass `now` minus your clock-skew leeway, since `auth_time` comes from auth's
-clock.
+Pass the issuer's clock, `ResourceValidator::now`. The SDK allows its 30-second
+leeway on `auth_time` itself, since `auth_time` comes from auth's clock. With the
+`axum` feature, the `RequireAuthentication<P>` extractor does all of this for an
+`AuthenticationPolicy` `P` that names the requirement.
 
 ## Clients
 
@@ -77,8 +82,8 @@ API becomes a redirect to the app's login route, with the requirement attached.
 Auth's settings pages, developer console and account API use the session cookie,
 not bearer tokens, so they don't send RFC 9470 challenges. They check the same
 requirement. A form whose change needs it confirms the passkey on the page before
-it posts; a change refused without it, such as an app's new redirect URIs, shows
-its form again asking for the passkey. The account API answers
+it posts; a change refused without it, such as one posted after the confirmation
+lapsed, shows its form again asking for the passkey. The account API answers
 `403 {"error": "...", "code": "step_up_required", "max_age": 300}`, and auth's
 own pages then confirm the passkey and retry once.
 

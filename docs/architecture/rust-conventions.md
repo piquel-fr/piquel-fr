@@ -5,21 +5,30 @@ Keep implementations simple. Follow neighbouring modules and share repeated logi
 ## Crates
 
 - `piquel-common` (`crates/common`): the one home for shared types, depending on
-  no other workspace crate. IDs, account status, authentication methods,
-  providers, `Personal<T>`, error-chain formatting, `str_enum!`, and under
-  `protocol` the wire types shared with the SDKs: token claims, metadata, JWK sets,
-  OAuth/OIDC vocabulary and errors, bearer challenges, and the same-origin rule
-  for browser requests. Server-only parts are features: `config` (environment
-  variables, validated origins, secret references), `email` (address normalization),
-  `events` (domain events) and `sqlx` (column decoding).
+  no other workspace crate. IDs, handles, account status, authentication methods,
+  providers, `Personal<T>`, error-chain formatting, `str_enum!`, the client
+  registration types (`clients`), and under `protocol` the wire types shared with
+  the SDKs: token claims, metadata, JWK sets, OAuth/OIDC vocabulary and errors,
+  bearer challenges, step-up requirements, SDK error codes, the bodies of auth's
+  settings API, and the same-origin rule for browser requests. The rest are
+  features: `admin` (the views of administration, which the admin dashboard
+  shows, the CLI prints as JSON and the database crate decodes into),
+  `client-spans` (`SendTraced`, client spans around `reqwest` requests, for auth
+  and the SDK), `config` (environment variables, validated origins, secret
+  references), `email` (address normalization), `events` (domain events) and
+  `sqlx` (column decoding, enabled only by the database crate).
 - `piquel-crypto` (`crates/crypto`): random secrets, digests, HMAC, constant-time
   comparison, PKCE, RS256 signing, key sets, AES-256-GCM sealing of keys at rest
-  and Ed25519 signed notes.
+  and Ed25519 signed notes, for audit checkpoints.
 - `piquel-auth` (`crates/auth-sdk`): the public Rust SDK, following
-  [sdk.md](sdk.md). It depends only on `piquel-common`, without features, among
-  the workspace crates, since it is published.
-- `piquel-repository` (`crates/database`): the only SQLx consumer; typed
-  repositories, transactions and storage vocabulary.
+  [sdk.md](sdk.md): token validation, typed scopes, login and the JWKS cache auth
+  also uses for Google; its `axum` feature adds extractors, a bearer layer and
+  login routes over an application's own session backend. It depends only on
+  `piquel-common`, with `client-spans` alone, among the workspace crates, since
+  it is published.
+- `piquel-repository` (`crates/database`): the only SQLx consumer; PostgreSQL
+  connections, migrations, typed repositories, transactions and storage
+  vocabulary.
 - `piquel-telemetry` (`crates/telemetry`): logs, traces and metrics, following
   [telemetry.md](telemetry.md).
 - `piquel-ui` (`crates/ui`): the Topcoat components and layouts of auth's
@@ -42,8 +51,9 @@ Keep implementations simple. Follow neighbouring modules and share repeated logi
   inline glyphs; `asset` the files pages link, embedded in the executable: the
   stylesheet, `STYLESHEET`, under a path naming its content, and the `FONTS` it
   links, under paths naming their version, which the admin dashboard serves
-  with its own. It depends only on `piquel-common` (with `events`), `chrono`,
-  `serde`, `serde_urlencoded` and Topcoat's `view`, so it compiles beside the
+  with its own, and the document piquel.fr's pages share. It depends only on
+  `piquel-common` (with `admin` and `events`), `chrono`, `serde`, `serde_json`,
+  `serde_urlencoded`, `url` and Topcoat's `view`, so it compiles beside the
   database crate.
 
 Application code uses `Secret`, `Digest`, `Pkce`, `Rs256Key`, `KeySet`,
@@ -261,8 +271,8 @@ transaction that makes the change. It takes a `ClientRegistration` from
 never reaches the repository. `AdminService` (for the `client` command) and the
 owner's `AccountService` operations (`src/clients/owned.rs`), which the developer
 console calls, use it, and a registration API (RFC 7591) should too. The owner's input types there are the policy for
-clients accounts own: they hold no ID, trust or back-channel logout URI, and only
-standard scopes, and an invalid one names its field (`InvalidSetting`). Every
+clients accounts own: they hold no ID or trust, and only standard scopes, and an
+invalid one names its field (`InvalidSetting`). Every
 owner operation looks the client up as the owner's first, so any other client is
 not found, and nothing checks ownership again. Clients are read from the database on each
 request and nothing is cached, so changes apply at once on every replica.
