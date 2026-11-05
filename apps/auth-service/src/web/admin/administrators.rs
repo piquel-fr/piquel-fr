@@ -73,7 +73,7 @@ pub(super) async fn grant(cx: &Cx, form: Option<Form<GrantForm>>) -> Result<Resp
         .as_ref()
         .map(|Form(form)| (form.q.clone(), form.page))
         .unwrap_or_default();
-    let refusal = App::submit(cx, form, back.clone(), |input: GrantForm| async move {
+    let refusal = App::submit(cx, form, back, |input: GrantForm| async move {
         let user_id = input.user_id.ok_or(AdminError::UserNotFound)?;
         service.grant_administrator(&admin.operator, user_id).await
     })
@@ -109,7 +109,6 @@ pub(super) async fn grant(cx: &Cx, form: Option<Form<GrantForm>>) -> Result<Resp
             q: q.as_str(),
             rows: rows,
             pages: pager,
-            back: back.as_str(),
             refusal: refusal,
         )
     };

@@ -59,7 +59,7 @@ use crate::{
 };
 use axum::http::header::InvalidHeaderValue;
 use chrono::Duration;
-use piquel_common::{ErrorChain, config::Origin};
+use piquel_common::{ClientId, ErrorChain, UserId, config::Origin};
 use piquel_crypto::{KeyEncryptionKey, NoteVerifier};
 use piquel_repository::Database;
 use piquel_telemetry::HttpTelemetry;
@@ -600,6 +600,45 @@ impl AdminApplication {
             .or_else(|| (path == tabs[0].1).then_some(DashboardTab::Overview))
     }
 
+    /// The page the request's page is under, inside `current`, among `tabs`, if
+    /// any, named and linked in the crumb: the account under Users, or the client
+    /// under Clients, which a page such as `/users/{account}/disable` changes.
+    /// The account's or client's own page, and a tab's other pages, have none. A
+    /// parent that cannot be read, such as on the error page of an account that
+    /// does not exist, is left out: the page itself says what went wrong.
+    async fn parent(
+        cx: &Cx,
+        admin: Option<&SignedInAdmin>,
+        tabs: &[(DashboardTab, String)],
+        current: Option<DashboardTab>,
+    ) -> Option<(String, String)> {
+        let (admin, current) = (admin?, current?);
+        let path = uri(cx).path();
+        let (_, tab) = tabs.iter().find(|(tab, _)| *tab == current)?;
+        // Only a page below the account's or client's has one: `/clients/new`
+        // names no client, whatever its registry holds.
+        let below = path.strip_prefix(tab.as_str())?.strip_prefix('/')?;
+        let (id, _) = below.split_once('/')?;
+        let service = &Self::of(cx).service;
+        match current {
+            DashboardTab::Users => {
+                let id: UserId = id.parse().ok()?;
+                let handle = service.user_handle(&admin.operator, id).await.ok()?;
+                Some((handle.to_string(), Self::account(cx, id)))
+            }
+            DashboardTab::Clients => {
+                let id: ClientId = id.parse().ok()?;
+                let href = href!(clients::detail, clients::Client(id.clone())).resolve(cx);
+                if path == href {
+                    return None;
+                }
+                let details = service.client_details(&admin.operator, &id).await.ok()?;
+                Some((Self::title(&details.client).to_owned(), href))
+            }
+            _ => None,
+        }
+    }
+
     /// Answers with the page named `title` and `page`, at `status`, in the shell
     /// every page shares: the sidebar of tabs, the signed-in administrator and
     /// signing out, the account search, the service's health, and the trace ID
@@ -610,6 +649,7 @@ impl AdminApplication {
         let app = Self::of(cx);
         let tabs = Self::tabs(cx);
         let current = Self::current_tab(cx, &tabs);
+        let parent = Self::parent(cx, admin, &tabs, current).await;
         let links: &Vec<_> = &tabs
             .iter()
             .map(|(tab, link)| (*tab, link.as_str()))
@@ -649,6 +689,9 @@ impl AdminApplication {
             me: &me,
             tabs: links,
             current,
+            parent: parent
+                .as_ref()
+                .map(|(name, href)| (name.as_str(), href.as_str())),
             sign_out: leave,
             preferences: BrowserCookie::read_preferences(headers(cx)),
             preferences_action: prefer,

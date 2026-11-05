@@ -101,7 +101,6 @@ pub async fn grant_search<'a>(
     q: &'a str,
     rows: &'a [UserRow<'a>],
     pages: &'a Pager,
-    back: &'a str,
     #[into]
     #[default]
     refusal: Option<&'a str>,
@@ -113,11 +112,7 @@ pub async fn grant_search<'a>(
         inline: true,
     };
     Ok(view! {
-        page_head(
-            title: change.title(),
-            lead: change.description().to_owned(),
-            actions: view! { <a class="button secondary" href=(back)>"Back to administrators"</a> },
-        )
+        page_head(title: change.title(), lead: change.description().to_owned())
         if let Some(refusal) = refusal {
             <p class="notice error" role="alert">(refusal)</p>
         }

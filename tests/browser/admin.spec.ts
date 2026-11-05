@@ -413,8 +413,12 @@ test('an administrator registers a client, suspends it and rotates its secret, e
   expect(await admin.content()).not.toContain(rotated);
   await expect(admin.getByText('Expiring', { exact: true })).toHaveCount(1);
 
-  // Deleting it goes back to the list, which still opens its page.
-  await admin.getByRole('link', { name: 'Back to the client', exact: false }).click();
+  // The crumb leads back to the client. Deleting it goes back to the list,
+  // which still opens its page.
+  await admin
+    .locator('.crumb')
+    .getByRole('link', { name: `E2E ${suffix}`, exact: true })
+    .click();
   await admin.getByRole('button', { name: 'Delete', exact: true }).click();
   const remove = admin.getByRole('dialog', { name: 'Delete this client' });
   await remove.getByRole('button', { name: 'Delete for good', exact: true }).click();

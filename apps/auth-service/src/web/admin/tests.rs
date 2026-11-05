@@ -548,7 +548,9 @@ async fn an_accounts_page_names_no_passkey() {
 }
 
 /// A page inside a tab has the tab in its crumb, linking its page: an account's
-/// reads "admin / users / handle". The tab's own page names it once.
+/// reads "admin / users / handle", and the account's history "admin / users /
+/// handle / Security history", the handle linking the account. The tab's own
+/// page names it once.
 #[tokio::test]
 #[ignore = "requires TEST_DATABASE_URL"]
 async fn the_crumb_leads_through_the_tab() {
@@ -563,6 +565,17 @@ async fn the_crumb_leads_through_the_tab() {
     let page = html(harness.visit(&dashboard, "/users").await).await;
     assert!(!page.contains(users), "{page}");
     assert!(page.contains("<b>Users</b>"), "{page}");
+    let page = html(
+        harness
+            .visit(&dashboard, &format!("{account}/history"))
+            .await,
+    )
+    .await;
+    assert!(
+        page.contains(&format!(r#"<a href="{account}">browser-"#)),
+        "{page}"
+    );
+    assert!(page.contains("<b>Security history</b>"), "{page}");
 }
 
 /// The audit page shows the chain as `audit verify` reports it, and says that

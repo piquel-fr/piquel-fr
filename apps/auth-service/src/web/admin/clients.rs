@@ -270,9 +270,8 @@ pub(super) async fn rotate(cx: &Cx, form: Option<Form<SecretsChange>>) -> Result
             expires_at: secret.expires_at,
         })
         .collect();
-    let (here, back, name, secrets, state, refusal) = (
+    let (here, name, secrets, state, refusal) = (
         &here,
-        &href!(detail, Client(id.clone())).resolve(cx),
         App::title(&details.client),
         &secrets,
         &state,
@@ -281,7 +280,6 @@ pub(super) async fn rotate(cx: &Cx, form: Option<Form<SecretsChange>>) -> Result
     let page = view! { cx =>
         piquel_ui::client_secrets(
             page: here.as_str(),
-            back: back.as_str(),
             name: name,
             secrets: secrets,
             now: Utc::now(),
@@ -459,7 +457,7 @@ impl App {
 
     /// The name of client `stored`'s pages: its own, or its ID once deleted, which
     /// erases its name.
-    fn title(stored: &StoredOidcClient) -> &str {
+    pub(super) fn title(stored: &StoredOidcClient) -> &str {
         if stored.display_name.is_empty() {
             stored.id.as_str()
         } else {
@@ -492,20 +490,13 @@ impl App {
         settings: &OperatorDraft,
         refusal: Option<&str>,
     ) -> Result<Response> {
-        let back = match registration {
-            Registration::New { .. } => href!(list).resolve(cx),
-            Registration::Edit { .. } => {
-                href!(detail, Client(path_param::<Client>(cx)?.clone())).resolve(cx)
-            }
-        };
         let here = uri(cx).path().to_owned();
-        let (title, back, here) = (registration.title(), &back, &here);
+        let (title, here) = (registration.title(), &here);
         let page = view! { cx =>
             piquel_ui::client_registration(
                 registration: registration,
                 settings: settings,
                 action: here.as_str(),
-                back: back.as_str(),
                 refusal: refusal,
             )
         };
