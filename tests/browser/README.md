@@ -4,8 +4,8 @@ isolated database: tests create accounts and credentials. CI runs it against the
 debug binary `just rust build` makes, behind Caddy over HTTPS, as configured below.
 
 `settings.spec.ts` checks auth's own settings pages: renaming, adding and removing
-passkeys, a passkey ceremony that fails, the passkey confirmation the passkey
-script runs, devices, an email link's token and signing out. It also removes a
+passkeys, a passkey ceremony that fails, devices, an email link's token and
+signing out. It also removes a
 connected app, which then asks for consent again; reports a passkey in the
 security history as not the owner's, which signs out another device holding the
 same passkey and offers to remove it.
@@ -116,7 +116,7 @@ those external systems.
 `admin.spec.ts` checks the admin dashboard, which CI serves on its own origin,
 `https://localhost:3444`: a non-administrator is handed nothing, an administrator signs in
 through auth's handoff page, confirms a change with a passkey for the dashboard
-only, in the dialog the dashboard's script opens, or on auth's handoff page when a
+only, in the dialog the dashboard opens, or on auth's handoff page when a
 change's page is opened directly, and disables an account, whose settings page then
 loses its session; signing out of the dashboard keeps the Piquel session, and
 signed out of both, a passkey sign-in on auth goes on to the dashboard. CI's

@@ -91,7 +91,7 @@ pub async fn user_search<'a>(
                         </thead>
                         <tbody>
                             #[key(position)]
-                            for (position, row) in rows.into_iter().enumerate() {
+                            for (position, row) in rows.iter().enumerate() {
                                 <tr>
                                     <td><a class="mono" href=(row.href.as_str())>(format!("@{}", row.user.handle))</a></td>
                                     <td>
@@ -266,7 +266,7 @@ async fn session_list<'a>(
                     </thead>
                     <tbody>
                         #[key(position)]
-                        for (position, row) in sessions.into_iter().enumerate() {
+                        for (position, row) in sessions.iter().enumerate() {
                             <tr>
                                 <td>moment(at: row.session.authenticated_at)</td>
                                 <td>(row.methods())</td>

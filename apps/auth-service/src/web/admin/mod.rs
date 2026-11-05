@@ -16,10 +16,10 @@
 //! back. A page that changes something needs the dashboard's own passkey
 //! confirmation, recent enough that the service still accepts it once the form
 //! is submitted; without one, it sends the browser to confirm on auth's handoff
-//! page, and back to the page. The dashboard's script spares the page that trip:
-//! before following a link to such a page or posting a change, as the frame says
-//! it must (see `piquel_ui::DashboardConfirmation`), it asks for a passkey in a
-//! dialog on the page itself, [`start_confirmation`] and [`finish_confirmation`]
+//! page, and back to the page. The frame's dialog spares the page that trip:
+//! before following a link to such a page or posting a change, once too little
+//! of the confirmation is left (see `piquel_ui::DashboardConfirmation`), the
+//! browser asks for a passkey in it, on the page itself, [`start_confirmation`] and [`finish_confirmation`]
 //! running the ceremony for the dashboard's origin, which auth lists as a related
 //! origin of its RP ID. Every page still works without it.
 
@@ -477,7 +477,7 @@ impl AdminApplication {
         }
     }
 
-    /// The answer of a JSON route the dashboard's script calls: `answered`, or its
+    /// The answer of a JSON route the dashboard's dialog calls: `answered`, or its
     /// refusal in JSON, as auth's own JSON routes answer.
     fn json(answered: Result<axum::response::Response, ApiError>) -> Response {
         answered
@@ -890,7 +890,7 @@ async fn sign_in(cx: &Cx) -> Result<Response> {
     }
 }
 
-/// `POST /confirm/start`: starts the passkey ceremony the dashboard's script runs,
+/// `POST /confirm/start`: starts the passkey ceremony the dashboard's dialog runs,
 /// in its dialog, to confirm the dashboard on the page itself, for the auth
 /// session it rests on. It answers as auth's own ceremonies do, in JSON.
 #[route(POST "/confirm/start")]
@@ -904,10 +904,10 @@ async fn start_confirmation(cx: &Cx) -> Result<Response> {
     Ok(AdminApplication::json(started))
 }
 
-/// `POST /confirm/finish`: verifies the passkey assertion the dashboard's script
+/// `POST /confirm/finish`: verifies the passkey assertion the dashboard's dialog
 /// posts, signed for the dashboard's origin in the ceremony
 /// [`start_confirmation`] started, and confirms the dashboard's session with it.
-/// The script then goes on to the change it was for.
+/// The browser then goes on to the change it was for.
 #[route(POST "/confirm/finish")]
 async fn finish_confirmation(cx: &Cx, Json(input): Json<AuthenticationFinish>) -> Result<Response> {
     let admin = AdminApplication::admin(cx).await?;

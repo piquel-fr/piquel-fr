@@ -62,7 +62,7 @@ pub async fn signing_key_list<'a>(
                         </thead>
                         <tbody>
                             #[key(position)]
-                            for (position, row) in rows.into_iter().enumerate() {
+                            for (position, row) in rows.iter().enumerate() {
                                 let key = row.key;
                                 let (tone, label) = state_badge(key.state);
                                 <tr>

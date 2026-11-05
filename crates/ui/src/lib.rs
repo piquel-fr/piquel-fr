@@ -23,7 +23,7 @@
 //!
 //! # #[tokio::main(flavor = "current_thread")]
 //! # async fn main() -> topcoat::Result<()> {
-//! let cx = Cx::default();
+//! let cx = &Cx::default();
 //! let html = view! {
 //!     piquel_ui::document(title: "Sign out", stylesheet: "/assets/style.css",
 //!         runtime: true,
@@ -34,7 +34,7 @@
 //! }
 //! .single()
 //! .await?
-//! .render(&cx);
+//! .render(cx);
 //! assert!(html.contains(r#"<input type="hidden" name="client_id" value="notes">"#));
 //! # Ok(())
 //! # }

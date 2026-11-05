@@ -26,6 +26,13 @@ The CLI is the most complete surface. An admin operation may stay CLI-only
 it to `None`) only with a documented reason next to its arm, as `PurgeUser` and
 `PruneAuditChain` have.
 
+Pages load no JavaScript of their own. What a page does in the browser is Rust,
+in its `crates/ui` components, on Topcoat's runtime: signals, `@event` handlers and
+`:` bindings. A browser API Topcoat's expressions cannot name, such as WebAuthn or
+the clipboard, gets one `raw!` method on `Browser` in `crates/ui/src/browser.rs`,
+never a script file. Topcoat is a fork (see `Cargo.toml`) whose pages carry their
+expressions as data, so they run under a policy with no `'unsafe-eval'`.
+
 Generated files are committed; regenerate them with `just db prepare` (SQLx
 cache), `just sdk-vectors` and `just sdk-types`. `just validate` is the local
 check.

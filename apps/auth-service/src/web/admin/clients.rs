@@ -293,7 +293,7 @@ pub(super) async fn rotate(cx: &Cx, form: Option<Form<SecretsChange>>) -> Result
             refusal: refusal,
         )
     };
-    App::render(cx, StatusCode::OK, "Client secrets", page).await
+    Box::pin(App::render(cx, StatusCode::OK, "Client secrets", page)).await
 }
 
 /// A change to a client that only needs confirming, as its `client` command

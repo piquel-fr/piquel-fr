@@ -5,9 +5,9 @@
 //! them, with the links their handler resolves. Each change has its own page: a
 //! `GET` shows its form, and only that form's `POST` makes the change, so a link,
 //! even with a query, never changes anything. A passkey confirmation happens in
-//! a dialog on the page, which the dashboard's one script opens, as
-//! [`Confirmation`] says; without the script, the browser confirms on auth's
-//! handoff page, and comes back. Every page works without it.
+//! a dialog on the page, which the browser opens, as [`Confirmation`] says;
+//! without scripts, the browser confirms on auth's handoff page, and comes back.
+//! Every page works without them.
 
 /// The audit chain's state and its checkpoints.
 mod audit;
@@ -90,14 +90,15 @@ pub struct HandoffQuery {
 impl Query for HandoffQuery {}
 
 /// What the handoff page's form posts once a passkey proved the handoff: the
-/// handoff, and the proof, which the passkey script fills in.
+/// handoff, and the proof, which the browser fills in.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct HandoffProof {
     /// The state of the handoff.
     pub state: String,
     /// The dashboard path to go on to.
     pub return_to: String,
-    /// The passkey's assertion, as the passkey script encodes it.
+    /// The passkey's assertion, as the browser encodes it: its ceremony and the
+    /// credential's JSON.
     #[serde(default)]
     pub assertion: String,
 }
@@ -306,8 +307,8 @@ impl Gate {
             Browser::hide(Self::DIALOG),
             Browser::shown(Self::DIALOG),
         );
-        let start = Browser::ceremony(None, &self.start, Expr::from(String::new()));
-        let go_on = Browser::go_on(expr!(change.get()));
+        let start = Browser::ceremony(None, &self.start, &Expr::from(String::new()));
+        let go_on = Browser::go_on(&expr!(change.get()));
         expr!(async |e: Event| {
             // Topcoat's events name no element, so the change the click makes is
             // read from the DOM event: a link's `a:` and its URL, or `b:` for a
@@ -370,9 +371,9 @@ impl Gate {
         );
         let (busy, error) = (self.busy.clone(), self.error.clone());
         let (hide, shown) = (Browser::hide(Self::DIALOG), Browser::shown(Self::DIALOG));
-        let run = Browser::ceremony(None, &self.run, expr!(started.get()));
-        let start = Browser::ceremony(None, &self.start, Expr::from(String::new()));
-        let go_on = Browser::go_on(expr!(change.get()));
+        let run = Browser::ceremony(None, &self.run, &expr!(started.get()));
+        let start = Browser::ceremony(None, &self.start, &Expr::from(String::new()));
+        let go_on = Browser::go_on(&expr!(change.get()));
         expr!(async |_e: Event| {
             let confirming = change.get();
             busy.set(true);
@@ -828,7 +829,7 @@ impl Change {
 /// A change's button on a row, with where it posts: its page, at `href`. A
 /// dashboard confirmed with a passkey makes the change `inline`, from a dialog
 /// on the row's page; one that is not links the page, which confirms first,
-/// in the frame's dialog where the dashboard's script can open it.
+/// in the frame's dialog where the browser can open it.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Action {
     /// The change's page, whose `POST` makes it.

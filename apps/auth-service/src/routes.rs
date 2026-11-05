@@ -203,7 +203,7 @@ pub(crate) mod oidc {
 pub(crate) mod dashboard {
     /// Redeems auth's handoff code, signing the browser in to the dashboard.
     pub(crate) const SIGN_IN: &str = "/sign-in";
-    /// The passkey ceremony the dashboard's script runs, under `/start` and
+    /// The passkey ceremony the dashboard's dialog runs, under `/start` and
     /// `/finish`, to confirm the dashboard on its own page.
     pub(crate) const CONFIRM: &str = "/confirm";
     /// Keeps the theme and sidebar preferences a page's forms post, in cookies.

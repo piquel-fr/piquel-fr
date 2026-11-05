@@ -68,7 +68,7 @@ pub async fn recovery_list<'a>(cx: &Cx, rows: &'a [RecoveryRow]) -> Result<impl 
                 </thead>
                 <tbody>
                     #[key(position)]
-                    for (position, row) in rows.into_iter().enumerate() {
+                    for (position, row) in rows.iter().enumerate() {
                         <tr>
                             <td>moment(at: row.started_at)</td>
                             <td>

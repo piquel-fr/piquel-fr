@@ -532,7 +532,7 @@ impl Passkey {
     /// The form's `@submit` handler, which runs the ceremony once at a time.
     pub(crate) fn submit(&self) -> Expr<impl AsyncHandler + use<>> {
         let (busy, error) = (self.busy.clone(), self.error.clone());
-        let ceremony = Browser::ceremony(Some(&self.id), &self.request, Expr::from(String::new()));
+        let ceremony = Browser::ceremony(Some(&self.id), &self.request, &Expr::from(String::new()));
         expr!(async |e: Event| {
             e.prevent_default();
             if !busy.get() {
@@ -714,7 +714,7 @@ pub struct CeremonyRoutes {
 }
 
 /// Where auth runs the passkey ceremonies its forms ask for. Auth's router keeps
-/// it in every page's context, where [`Passkey`] forms read it.
+/// it in every page's context, where passkey forms read it.
 #[derive(Clone, Copy, Debug)]
 pub struct PasskeyRoutes {
     /// Signing in.
@@ -909,11 +909,8 @@ pub(crate) async fn fragment_form<'a>(
     let once = Once::new(cx);
     // The fragment, once the browser read it: only it sees the fragment.
     let (fragment, read) = (signal(cx, String::new), signal(cx, || false));
-    let complete = Browser::fragment_holds(fragments, expr!(fragment.get()));
-    let (link, follow) = (
-        Browser::fragment(),
-        Browser::follow_fragment(fragment.clone()),
-    );
+    let complete = Browser::fragment_holds(fragments, &expr!(fragment.get()));
+    let (link, follow) = (Browser::fragment(), Browser::follow_fragment(&fragment));
     let (fill, drop) = (Browser::fill_from_fragment(&id), Browser::drop_fragment());
     let sent = once.sent.clone();
     Ok(view! {

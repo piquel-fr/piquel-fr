@@ -153,7 +153,7 @@ pub enum RecoverChange {
         #[serde(default, skip_serializing_if = "String::is_empty")]
         token: String,
     },
-    /// Shows that the passkey script just added the passkey, which signed the
+    /// Shows that the browser just added the passkey, which signed the
     /// browser in: this changes nothing.
     Recovered {},
 }
@@ -173,11 +173,11 @@ pub enum UndoChange {
         )]
         recovery: Option<RecoveryId>,
     },
-    /// Shows that the passkey script just undid the recovery, cancelling its link
+    /// Shows that the browser just undid the recovery, cancelling its link
     /// and taking back what the link did, if it was used: this changes nothing.
     Undone {
         /// Whether the undo signed the browser in, as its finish answered, which
-        /// the passkey script fills in. An undo on a disabled account signs nobody
+        /// the browser fills in. An undo on a disabled account signs nobody
         /// in.
         #[serde(default, deserialize_with = "Fields::lenient_or_default")]
         signed_in: bool,
@@ -197,7 +197,7 @@ pub enum RecoverStep<'a> {
         display_name: &'a str,
         /// When the link stops working.
         expires_at: DateTime<Utc>,
-        /// The link's token, which the passkey script starts the ceremony with.
+        /// The link's token, which the passkey ceremony starts with.
         token: &'a str,
         /// How many days the new passkey can't confirm changes, and the recovery
         /// can be undone.
@@ -345,7 +345,7 @@ pub async fn undo_recovery<'a>(
 }
 
 /// Undoing `recovery` of the account `handle` names, or of "your account", by
-/// posting to `action` once the passkey script ran its ceremony with a passkey from
+/// posting to `action` once the browser ran its ceremony with a passkey from
 /// before it. Without one, only support can.
 #[component]
 async fn undoing<'a>(

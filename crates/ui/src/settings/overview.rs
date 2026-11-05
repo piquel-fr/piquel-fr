@@ -172,7 +172,7 @@ async fn link_hint<'a>(cx: &Cx, provider: Provider, sign_in: &'a str) -> Result<
             </div>
             change_form(
                 action: sign_in,
-                change: SignInChange::Link { provider: provider },
+                change: SignInChange::Link { provider },
                 label: format!("Link {name}"),
                 class: "small",
             )

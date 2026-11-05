@@ -115,8 +115,9 @@ impl Browser {
     pub(crate) fn ceremony(
         form: Option<&str>,
         request: &CeremonyRequest,
-        started: Expr<String>,
+        started: &Expr<String>,
     ) -> Expr<Result<String, Refusal>> {
+        let started = started.clone();
         let form = form.unwrap_or_default().to_owned();
         // A request serializes: its fields are strings, string lists and JSON maps.
         let request = serde_json::to_string(request).unwrap_or_default();
@@ -267,7 +268,8 @@ impl Browser {
 
     /// Whether the fragment `fragment` evaluates to holds a value for each of
     /// `names`.
-    pub(crate) fn fragment_holds(names: &[&str], fragment: Expr<String>) -> Expr<bool> {
+    pub(crate) fn fragment_holds(names: &[&str], fragment: &Expr<String>) -> Expr<bool> {
+        let fragment = fragment.clone();
         let names = names.join(" ");
         expr!(raw!(
             "cx.hydrate(String(${names}).split(' ').every((name) => new URLSearchParams(String(${fragment})).get(name)))",
@@ -287,7 +289,8 @@ impl Browser {
 
     /// Sets `fragment` to the link's fragment whenever it changes: following a
     /// link that differs only in its fragment does not reload the page.
-    pub(crate) fn follow_fragment(fragment: Signal<String>) -> Expr<()> {
+    pub(crate) fn follow_fragment(fragment: &Signal<String>) -> Expr<()> {
+        let fragment = fragment.clone();
         expr!(raw!(
             "addEventListener('hashchange', () => ${fragment}.set(cx.hydrate(location.hash.slice(1))))",
             ()
@@ -352,7 +355,8 @@ impl Browser {
     /// Goes on with the change `change` evaluates to, as a dashboard's click
     /// marked it: `a:` and the link it follows, or `b:` for the button marked
     /// `data-pending`, whose form it posts with that button.
-    pub(crate) fn go_on(change: Expr<String>) -> Expr<()> {
+    pub(crate) fn go_on(change: &Expr<String>) -> Expr<()> {
+        let change = change.clone();
         expr!(raw!(
             r#"((change) => {
                 if (change.startsWith('a:')) return location.assign(change.slice(2));

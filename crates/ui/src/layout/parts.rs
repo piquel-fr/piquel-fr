@@ -264,7 +264,7 @@ pub(crate) async fn navigation<'a, T: Label>(
     Ok(view! {
         <nav class=(class) aria-label=(label)>
             #[key(position)]
-            for (position, (link, href)) in links.into_iter().enumerate() {
+            for (position, (link, href)) in links.iter().enumerate() {
                 <a href=(*href) aria-current=((*link == current).then_some(T::CURRENT)) data-confirm-first=(link.confirms_first())>(link.label())</a>
             }
         </nav>

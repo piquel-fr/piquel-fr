@@ -45,7 +45,7 @@ pub enum SignInChange {
         /// The provider.
         provider: Provider,
     },
-    /// Shows that the passkey script just added a passkey, through the account API:
+    /// Shows that the browser just added a passkey, through the account API:
     /// this changes nothing.
     Enrolled {},
 }
@@ -136,7 +136,7 @@ async fn passkey_list<'a>(
             </header>
             <ul class="list">
                 #[key(position)]
-                for (position, passkey) in passkeys.into_iter().enumerate() {
+                for (position, passkey) in passkeys.iter().enumerate() {
                     let recovered = added == Some(passkey.id);
                     passkey_row(
                         page: page,
@@ -279,7 +279,7 @@ async fn passkey_row<'a>(
     })
 }
 
-/// Adding a passkey, which the passkey script runs, then posts the form to `page`,
+/// Adding a passkey, which the browser runs, then posts the form to `page`,
 /// which says so. On Android, it offers Google Password Manager.
 #[component]
 async fn enroll(cx: &Cx, page: &str, android: bool) -> Result<impl View> {
@@ -318,7 +318,7 @@ async fn social<'a>(
             </header>
             <ul class="list">
                 #[key(position)]
-                for (position, row) in providers.into_iter().enumerate() {
+                for (position, row) in providers.iter().enumerate() {
                     provider_row(
                         page: page,
                         row: *row,

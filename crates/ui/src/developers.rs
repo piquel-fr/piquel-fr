@@ -3,8 +3,8 @@
 //!
 //! A secret shows only in the response to the change that made it, a registration
 //! or a rotation: the change's query holds it in a field no link or form
-//! serializes, and the panel showing it asks the passkey script to put back the
-//! page's own address, so reloading gets the page without it.
+//! serializes, and the panel showing it puts back the page's own address in the
+//! browser, so reloading gets the page without it.
 
 use crate::{
     clients::{
@@ -267,7 +267,7 @@ pub async fn apps<'a>(
             </header>
             <ul class="list">
                 #[key(position)]
-                for (position, app) in links.into_iter().enumerate() {
+                for (position, app) in links.iter().enumerate() {
                     <li>
                         <div class="text">
                             <a href=(app.page.as_str())><strong>(app.client.name)</strong></a>

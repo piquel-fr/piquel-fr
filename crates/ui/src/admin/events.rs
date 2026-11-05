@@ -481,7 +481,7 @@ pub async fn event_rows<'a>(cx: &Cx, rows: &'a [EventRow<'a>]) -> Result<impl Vi
         } else {
             <ul class="events">
                 #[key(position)]
-                for (position, row) in rows.into_iter().enumerate() {
+                for (position, row) in rows.iter().enumerate() {
                     let described = row.describe();
                     let (actor, _) = row.actor();
                     <li>

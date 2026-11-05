@@ -389,7 +389,7 @@ pub(crate) async fn client_status<'a>(cx: &Cx, client: ClientRow<'a>) -> Result<
 pub(crate) async fn copy<'a>(cx: &Cx, target: &'a str, label: &'a str) -> Result<impl View> {
     let (usable, status) = (signal(cx, || false), signal(cx, String::new));
     // Each copy's status clears a moment after it, unless another one followed.
-    let copies = signal(cx, || 0usize);
+    let clicks = signal(cx, || 0usize);
     let (clipboard, copied, moment) = (
         Browser::clipboard(),
         Browser::copy(target),
@@ -405,8 +405,8 @@ pub(crate) async fn copy<'a>(cx: &Cx, target: &'a str, label: &'a str) -> Result
                 :hidden=$(!usable.get())
                 @mount=$(|_e: Event| usable.set(clipboard))
                 @click=$(async |_e: Event| {
-                    copies.increment();
-                    let copy = copies.get();
+                    clicks.increment();
+                    let click = clicks.get();
                     let done = raw!("await ${copied}", false);
                     status.set(if done {
                         "Copied".to_owned()
@@ -414,7 +414,7 @@ pub(crate) async fn copy<'a>(cx: &Cx, target: &'a str, label: &'a str) -> Result
                         "Could not copy: select the text instead".to_owned()
                     });
                     let _waited = raw!("await ${moment}", ());
-                    if copies.get() == copy {
+                    if clicks.get() == click {
                         status.set("".to_owned());
                     }
                 })
@@ -479,7 +479,7 @@ pub(crate) async fn client_facts<'a>(
             <dt>"Redirect URIs"</dt>
             <dd>
                 #[key(position)]
-                for (position, uri) in client.redirect_uris.into_iter().enumerate() {
+                for (position, uri) in client.redirect_uris.iter().enumerate() {
                     <div><code>(uri.as_str())</code></div>
                 }
             </dd>
@@ -597,8 +597,8 @@ async fn scope_choices<'a>(
 /// kind, `kind` chosen. Each input is named by its label alone, and described by
 /// its help. The service's `error` shows beside the input of its setting, which
 /// takes the focus, or above the inputs for a setting with no place for one (see
-/// [`FieldError::placed`]). With `confirm`, the passkey script confirms with a
-/// passkey first. The admin dashboard adds the inputs only operators fill in:
+/// [`FieldError::placed`]). With `confirm`, the browser confirms with a passkey
+/// first. The admin dashboard adds the inputs only operators fill in:
 /// `head` after the name, and `child` after the rest.
 #[component]
 pub(crate) async fn client_form<'a>(
@@ -739,7 +739,7 @@ pub(crate) async fn secrets_list<'a>(
     Ok(view! {
         <ul class="list">
             #[key(position)]
-            for (position, secret) in secrets.into_iter().enumerate() {
+            for (position, secret) in secrets.iter().enumerate() {
                 <li>
                     <div class="text">
                         <strong>"Created " time(at: secret.created_at, precision: Precision::Minute)</strong>

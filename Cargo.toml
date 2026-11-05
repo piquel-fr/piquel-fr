@@ -72,7 +72,11 @@ sqlx = { version = "0.8", default-features = false, features = ["runtime-tokio-r
 thiserror = "2.0"
 # Server-rendered pages: the router, `view!` and the tower service only. Its
 # defaults add a browser runtime, `asset!` and discovery, which auth's pages avoid.
-topcoat = { path = "/tmp/claude-1000/-home-piquel--t3-worktrees-piquel-fr-t3-f459f41e/1e4346e8-2cb2-49d6-9fb9-a1f05a929e77/scratchpad/topcoat-csp/crates/topcoat", default-features = false }
+# A fork whose runtime expressions are a static script the pages name, not code
+# they carry, so they run under a policy with no 'unsafe-eval'
+# (tokio-rs/topcoat#484), with `@mount` handlers (tokio-rs/topcoat#550). Back to
+# crates.io once Topcoat has both.
+topcoat = { git = "https://github.com/PiquelChips/topcoat", rev = "7d8b92b0c2e9d99e3fd065a01d93f3e1186aa274", default-features = false }
 tokio = { version = "1.48", features = ["macros", "rt-multi-thread", "signal", "net", "sync", "time"] }
 tower = { version = "0.5", features = ["util"] }
 tracing = "0.1"

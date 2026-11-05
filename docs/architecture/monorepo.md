@@ -5,7 +5,7 @@ is authentication, with its account settings, and the admin dashboard.
 
 | Location | Responsibility |
 | --- | --- |
-| `apps/auth-service` | Rust auth authority, browser ceremonies, social adapters, OIDC, server-rendered pages, the settings API, the admin dashboard at admin.piquel.fr, CLI; `assets/passkey.js`, the WebAuthn passkey ceremonies and the form hooks that run them, and `assets/picture.js`, which lets the picture form choose its crop: the scripts its pages load |
+| `apps/auth-service` | Rust auth authority, browser ceremonies, social adapters, OIDC, server-rendered pages, the settings API, the admin dashboard at admin.piquel.fr, CLI |
 | `apps/web` | `piquel-web`, piquel.fr's own web server: the homepage and Piquel's policies (`assets/policies/`), and a redirect of every other path to auth. It relies on auth only to sign people in |
 | `packages/auth` | `@piquel/auth`, the TypeScript SDK, not yet published: its `.` entry point (discovery, token validation, typed scopes, challenges, the JWKS cache and the login client), `./server` (server-side login over `Request` and `Response`) and `./browser` (a public client, with passkey sign-in on the app's page), with no runtime dependencies; `src/protocol.ts` is generated from `piquel_common::protocol` |
 | `tests/sdk-vectors` | Generated cases every SDK must pass; see [sdk.md](sdk.md) |
@@ -16,8 +16,7 @@ in [rust-conventions.md](rust-conventions.md#crates).
 
 Prettier and type-aware ESLint cover all web code from the root configuration, as
 rustfmt and Clippy cover Rust; `just fmt`, `just lint` and `just check` run both.
-`tsc` checks the pages' scripts' JSDoc types as strictly as TypeScript's. The
-TypeScript SDK is the one package that builds JavaScript, with `tsc`, and is the
+The pages load no JavaScript of their own. The TypeScript SDK is the one package that builds JavaScript, with `tsc`, and is the
 pnpm workspace's only member besides the root; auth's executable builds none.
 
 Only `crates/database` runs SQL. `piquel-common` has an optional `sqlx` feature,
@@ -32,7 +31,8 @@ after it.
 
 The auth runtime is one executable with one public HTTP listener, plus the admin
 dashboard's listener when it is configured, which only a private route reaches.
-The executable embeds the shared stylesheet and the pages' scripts. Auth renders every
+The executable embeds the shared stylesheet, Topcoat's runtime and the expressions
+module it builds from the pages' components. Auth renders every
 page itself, sign-in included, and the account settings at `/settings`; piquel.fr's
 server redirects there every path it doesn't serve. The permanent WebAuthn RP ID is the auth hostname, never a wildcard over
 piquel.fr subdomains.

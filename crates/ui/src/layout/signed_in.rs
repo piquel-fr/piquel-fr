@@ -44,7 +44,7 @@ pub struct NavGroup<'a> {
 /// Who is signed in, as the sidebar and top bar show them.
 #[derive(Clone, Copy, Debug)]
 pub struct Who<'a> {
-    /// Their account, which the passkey script tells the password manager.
+    /// Their account, which the page tells the password manager.
     pub user: Option<UserId>,
     /// The name shown.
     pub name: &'a str,
@@ -220,13 +220,13 @@ async fn sidebar<'a>(cx: &Cx, frame: &'a Shell<'a>) -> Result<impl View> {
                 </label>
             </div>
             #[key(position)]
-            for (position, group) in frame.groups.into_iter().enumerate() {
+            for (position, group) in frame.groups.iter().enumerate() {
                 if let Some(label) = group.label {
                     <div class="group">(label)</div>
                 }
                 <nav aria-label=(group.label.unwrap_or(frame.area))>
                     #[key(position)]
-                    for (position, item) in group.items.into_iter().enumerate() {
+                    for (position, item) in group.items.iter().enumerate() {
                         <a
                             href=(item.href)
                             title=(item.label)
@@ -290,7 +290,7 @@ async fn topbar<'a>(cx: &Cx, frame: &'a Shell<'a>) -> Result<impl View> {
                 <a href=(frame.area_home)>(frame.area.to_lowercase())</a>
                 <span aria-hidden="true">"/"</span>
                 #[key(position)]
-                for (position, (name, href)) in frame.trail.into_iter().enumerate() {
+                for (position, (name, href)) in frame.trail.iter().enumerate() {
                     <a href=(*href)>(name.text())</a>
                     <span aria-hidden="true">"/"</span>
                 }

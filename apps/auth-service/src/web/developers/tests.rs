@@ -1,9 +1,9 @@
 //! The developer console through the whole service, as a browser uses it.
 
 use crate::{
+    routes,
     routes::page::developers::{self, APP, APP_SECRETS, APP_SETTINGS, HOME, NEW},
     security::BrowserCookie,
-    routes,
     tests::{Browser, Replicas, captures, ceremonies, cookie, html, policy, redirect},
     web::tests::value_after,
 };
@@ -106,7 +106,7 @@ fn browser_forms_decode() {
 }
 
 /// A confidential app's secret shows once, in the answer registering it, which
-/// nothing stores and which asks the passkey script to put back the form's address;
+/// nothing stores and which puts back the form's address in the browser;
 /// neither its overview nor the apps show it again. A rotation shows the new one the
 /// same way, and lists when the earlier one stops working: once the grace chosen
 /// ends.
@@ -290,7 +290,11 @@ async fn every_change_needs_a_passkey() {
     .await;
     let settings = developers::of(APP_SETTINGS, &id);
     let page = html(social.visit(&replicas.a, &settings).await).await;
-    assert_eq!(ceremonies(&page, routes::passkey::CONFIRM_START), 2, "{page}");
+    assert_eq!(
+        ceremonies(&page, routes::passkey::CONFIRM_START),
+        2,
+        "{page}"
+    );
     let app = async || {
         database
             .oidc()
@@ -318,7 +322,10 @@ async fn every_change_needs_a_passkey() {
         "{page}"
     );
     assert!(page.contains(r#"value="Renamed""#), "{page}");
-    assert!(ceremonies(&page, routes::passkey::CONFIRM_START) > 0, "{page}");
+    assert!(
+        ceremonies(&page, routes::passkey::CONFIRM_START) > 0,
+        "{page}"
+    );
 
     let refused = social
         .post(&replicas, &settings, &AppChange::Disable {})
@@ -341,7 +348,11 @@ async fn every_change_needs_a_passkey() {
     assert!(after.enabled && after.deleted_at.is_none());
 
     let page = html(confirmed.visit(&replicas.a, &settings).await).await;
-    assert_eq!(ceremonies(&page, routes::passkey::CONFIRM_START), 0, "{page}");
+    assert_eq!(
+        ceremonies(&page, routes::passkey::CONFIRM_START),
+        0,
+        "{page}"
+    );
     let saved = confirmed.post(&replicas, &settings, &save).await;
     assert_eq!(saved.status(), StatusCode::SEE_OTHER);
     assert_eq!(redirect(&saved), settings);

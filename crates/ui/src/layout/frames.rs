@@ -142,7 +142,7 @@ pub async fn site_shell<'a>(
                 </a>
                 <nav class="site-links" aria-label="Piquel">
                     #[key(position)]
-                    for (position, (label, href)) in links.into_iter().enumerate() {
+                    for (position, (label, href)) in links.iter().enumerate() {
                         <a href=(*href)>(*label)</a>
                     }
                 </nav>

@@ -54,7 +54,7 @@ pub async fn consent<'a>(
             <header><h2 id="access-heading">(format!("{client} will receive"))</h2></header>
             <ul class="list">
                 #[key(position)]
-                for (position, scope) in scopes.into_iter().enumerate() {
+                for (position, scope) in scopes.iter().enumerate() {
                     <li>icon(kind: Icon::Check)<span class="text">(scope_label(scope))</span></li>
                 }
             </ul>
@@ -103,7 +103,7 @@ pub async fn logout<'a>(
         </div>
         <form method="post" action=(action)>
             #[key(position)]
-            for (position, (name, value)) in fields.into_iter().enumerate() {
+            for (position, (name, value)) in fields.iter().enumerate() {
                 <input type="hidden" name=(*name) value=(*value)>
             }
             <button>"Sign out"</button>

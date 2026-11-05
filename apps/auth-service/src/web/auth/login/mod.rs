@@ -244,8 +244,7 @@ impl WebApplication {
     /// `GET` of the sign-in page `page`: the step the browser is at.
     pub(in crate::web) async fn sign_in(cx: &Cx, page: SignInPage) -> Result<Response, Failure> {
         let web = context::<Self>(cx);
-        web.sign_in_page(cx, page, Visit::new(web, cx).await, None)
-            .await
+        Box::pin(web.sign_in_page(cx, page, Visit::new(web, cx).await, None)).await
     }
 
     /// `POST` of the sign-in page `page`: makes the change its form names, then
@@ -266,8 +265,7 @@ impl WebApplication {
             },
             None => ApiError::bad_request(piquel_ui::OUT_OF_DATE),
         };
-        web.sign_in_page(cx, page, Visit::new(web, cx).await, Some(refused))
-            .await
+        Box::pin(web.sign_in_page(cx, page, Visit::new(web, cx).await, Some(refused))).await
     }
 
     /// Makes `change`, posted to `page` on the `visit`, and answers where the
@@ -280,7 +278,7 @@ impl WebApplication {
         change: LoginChange,
     ) -> Result<Response, Refusal> {
         let (mut response, cookie) = match change {
-            // The passkey script signed the browser in before posting, unless its
+            // The browser signed in with a passkey before posting, unless its
             // passkey's account is scheduled for deletion: then it left an offer to
             // restore it instead, which the page shows.
             LoginChange::SignedIn {} | LoginChange::Registered {} => {
@@ -552,8 +550,6 @@ impl WebApplication {
                 alert: alert,
             )
         };
-        Ok(self
-            .render(cx, status, step.title().as_str(), &targets, view)
-            .await?)
+        Ok(Box::pin(self.render(cx, status, step.title().as_str(), &targets, view)).await?)
     }
 }

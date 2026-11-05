@@ -130,7 +130,7 @@ pub async fn devices<'a>(
             </header>
             <ul class="list">
                 #[key(position)]
-                for (position, row) in rows.into_iter().enumerate() {
+                for (position, row) in rows.iter().enumerate() {
                     let name = row.name();
                     <li>
                         <div class="text">

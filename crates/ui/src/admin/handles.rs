@@ -77,7 +77,7 @@ pub async fn handle_list<'a>(cx: &Cx, page: HandlesPage<'a>) -> Result<impl View
             } else {
                 <ul class="list">
                     #[key(position)]
-                    for (position, row) in page.reserved.into_iter().enumerate() {
+                    for (position, row) in page.reserved.iter().enumerate() {
                         let handle = format!("@{}", row.reservation.handle);
                         <li>
                             <div class="text">
@@ -108,7 +108,7 @@ pub async fn handle_list<'a>(cx: &Cx, page: HandlesPage<'a>) -> Result<impl View
             } else {
                 <ul class="list">
                     #[key(position)]
-                    for (position, row) in page.holders.into_iter().enumerate() {
+                    for (position, row) in page.holders.iter().enumerate() {
                         <li>
                             <div class="text">
                                 <a href=(row.account.as_str())><strong>(format!("@{}", row.handle))</strong></a>
@@ -128,7 +128,7 @@ pub async fn handle_list<'a>(cx: &Cx, page: HandlesPage<'a>) -> Result<impl View
             } else {
                 <ul class="list">
                     #[key(position)]
-                    for (position, row) in page.released.into_iter().enumerate() {
+                    for (position, row) in page.released.iter().enumerate() {
                         let handle = format!("@{}", row.released.handle);
                         <li>
                             <div class="text">

@@ -71,7 +71,7 @@ pub async fn administrator_list<'a>(
         <section class="card">
             <ul class="list">
                 #[key(position)]
-                for (position, row) in rows.into_iter().enumerate() {
+                for (position, row) in rows.iter().enumerate() {
                     let who = Who {
                         user: None,
                         name: row.administrator.handle.as_str(),
@@ -147,7 +147,7 @@ pub async fn grant_search<'a>(
                 } else {
                     <ul class="list">
                         #[key(position)]
-                        for (position, row) in rows.into_iter().enumerate() {
+                        for (position, row) in rows.iter().enumerate() {
                             let subject = format!("@{}", row.user.handle);
                             <li>
                                 avatar(who: row.who())
@@ -214,7 +214,7 @@ pub async fn invitation_list<'a>(
                                 </thead>
                                 <tbody>
                                     #[key(position)]
-                                    for (position, row) in rows.into_iter().enumerate() {
+                                    for (position, row) in rows.iter().enumerate() {
                                         let (tone, label) = row.state(now);
                                         <tr>
                                             <td>moment(at: row.invitation.created_at)</td>

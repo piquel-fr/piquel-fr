@@ -4,9 +4,9 @@
 //! Neither is an [`AccountPage`](crate::web::account::AccountPage): whoever opens a
 //! recovery's links may have no session. Each link carries what it names in its
 //! fragment, which never reaches a server, so a page's `GET` only offers the form
-//! posting it, and changes nothing: mail scanners open links. The passkey script
-//! runs the passkey ceremony against the recovery's JSON routes, then posts that it
-//! is done, and the page sends the browser on.
+//! posting it, and changes nothing: mail scanners open links. The browser runs the
+//! passkey ceremony against the recovery's JSON routes, then posts that it is done,
+//! and the page sends it on.
 
 use crate::web::{Failure, WebApplication};
 use crate::{
@@ -83,8 +83,7 @@ impl WebApplication {
 
     /// `POST /recover`: opens the link whose token the form posts, asking for a
     /// passkey for its account, or says why the link no longer works. Once the
-    /// passkey script added the passkey, which signed the browser in, it goes on to
-    /// the settings. A form from an older page that does not decode changes
+    /// browser added the passkey, which signed it in, it goes on to the settings. A form from an older page that does not decode changes
     /// nothing.
     pub(in crate::web) async fn recover_change(cx: &Cx, body: Body) -> Result<Response, Failure> {
         let web = context::<Self>(cx);
@@ -138,7 +137,7 @@ impl WebApplication {
 
     /// `POST /recover/undo`: says what undoing the recovery the form names takes
     /// back, offering to undo it with a passkey from before it, or that there is
-    /// nothing to undo. Once the passkey script undid it, says so: on the settings
+    /// nothing to undo. Once the browser undid it, says so: on the settings
     /// of the browser the undo signed in, or here when it signed nobody in, as on a
     /// disabled account. It needs no session and works on a disabled account, as
     /// the undo does. A form from an older page that does not decode changes

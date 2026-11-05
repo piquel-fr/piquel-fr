@@ -13,8 +13,6 @@ test('settings on auth: passkeys, devices, an email link and signing out', async
   const context = await browser.newContext();
   const page = await context.newPage();
   const { cdp, authenticatorId } = await addPasskeys(context, page);
-  let assertions = 0;
-  cdp.on('WebAuthn.credentialAsserted', () => (assertions += 1));
   const username = `settings-${Date.now().toString(36)}`;
   await signUp(page, username, 'First passkey');
   // The settings open on the overview; the sidebar leads to the sign-in methods.
@@ -33,14 +31,15 @@ test('settings on auth: passkeys, devices, an email link and signing out', async
   // An authenticator already holding the account's credential refuses a second one:
   // the form says why, and can be tried again.
   // The form is folded behind a button until it is wanted.
-  const enroll = page.locator('form[data-passkey-enroll]');
+  const create = page.getByRole('button', { name: 'Create the passkey', exact: true });
+  const enroll = page.locator('form', { has: create });
   await expect(enroll).toBeHidden();
   await page.getByText('Add a passkey', { exact: true }).click();
   await page.getByLabel('New passkey name', { exact: true }).fill('Second passkey');
-  await page.getByRole('button', { name: 'Create the passkey', exact: true }).click();
+  await create.click();
   await expect(enroll.getByRole('alert')).toBeVisible();
 
-  // The passkey script enables adding a passkey, then comes back with the notice.
+  // The page enables adding a passkey, then comes back with the notice.
   // Add it to another authenticator.
   await cdp.send('WebAuthn.setAutomaticPresenceSimulation', { authenticatorId, enabled: false });
   const second = await cdp.send('WebAuthn.addVirtualAuthenticator', {
@@ -53,27 +52,17 @@ test('settings on auth: passkeys, devices, an email link and signing out', async
       automaticPresenceSimulation: true
     }
   });
-  await page.getByRole('button', { name: 'Create the passkey', exact: true }).click();
+  await create.click();
   await expect(page.getByText('The passkey was added.')).toBeVisible();
   await expect(page.getByText('Second passkey', { exact: true })).toBeVisible();
 
   // The session confirmed with a passkey moments ago, so the page asks for no new
-  // confirmation. Mark the form as a page with a lapsed one would, to run it.
+  // confirmation.
   await page.getByRole('button', { name: 'Remove Second passkey', exact: true }).click();
-  // The passkey script runs once the page has loaded.
   await page.waitForURL(/[?&]remove=/);
-  const removal = page.locator('form', {
-    has: page.getByRole('button', { name: 'Confirm removal' })
-  });
-  await removal.evaluate((form) => {
-    form.setAttribute('data-passkey-confirm', '');
-  });
-  const asserted = assertions;
   await page.getByRole('button', { name: 'Confirm removal', exact: true }).click();
   await expect(page.getByText('The passkey was removed.')).toBeVisible();
   await expect(page.getByText('Second passkey', { exact: true })).toHaveCount(0);
-  // The passkey script confirmed with a passkey before posting.
-  expect(assertions).toBeGreaterThan(asserted);
 
   await page.getByRole('link', { name: 'Devices', exact: true }).click();
   await expect(page.getByText('This device', { exact: true })).toBeVisible();

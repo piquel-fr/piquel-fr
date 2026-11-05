@@ -235,8 +235,8 @@ async fn a_server_error_shows_its_trace_id() {
 
 /// An administrator's passkey session signs in to the dashboard through auth's
 /// handoff page, silently. The code works once, only in the browser holding the
-/// state it was bound to. Every page loads the dashboard's script alone, and
-/// posts only to itself.
+/// state it was bound to. Every page loads Topcoat's runtime and its expressions
+/// alone, and posts only to itself.
 #[tokio::test]
 #[ignore = "requires TEST_DATABASE_URL"]
 async fn signing_in_hands_off_through_auth_once() {
@@ -401,7 +401,10 @@ async fn the_dialog_confirms_on_the_page() {
     // needs.
     assert!(ceremonies(&page, "/confirm/start") > 0, "{page}");
     assert!(page.contains("{&quot;v&quot;:120000.0}"), "{page}");
-    assert!(page.contains(r#"\&quot;finish\&quot;:\&quot;/confirm/finish\&quot;"#), "{page}");
+    assert!(
+        page.contains(r"\&quot;finish\&quot;:\&quot;/confirm/finish\&quot;"),
+        "{page}"
+    );
     assert!(page.contains(UNCONFIRMED), "{page}");
     let url = format!("{DASHBOARD}/confirm/start");
     let started = dashboard

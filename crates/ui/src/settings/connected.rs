@@ -74,7 +74,7 @@ pub async fn connected_apps<'a>(
             </header>
             <ul class="list">
                 #[key(position)]
-                for (position, row) in rows.into_iter().enumerate() {
+                for (position, row) in rows.iter().enumerate() {
                     app_row(
                         page: page,
                         row: *row,

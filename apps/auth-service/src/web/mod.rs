@@ -11,9 +11,10 @@
 //! fallback, so the security layer classifies them as pages by their route: it
 //! attaches the request context, spends the pages' own rate budget, and accepts a
 //! form only from auth's own pages. Every page's Content-Security-Policy loads
-//! nothing but the stylesheet, the passkey and picture scripts and auth's own
-//! images, the profile pictures and the `blob:` of one being chosen, and lets its
-//! forms post only to auth and to where they redirect.
+//! nothing but the stylesheet, Topcoat's runtime and the expressions it runs, and
+//! auth's own images, the profile pictures, and lets its forms post only to auth
+//! and to where they redirect. Pages carry their expressions as data, so nothing
+//! a page holds runs.
 
 /// A page's entry in [`WebApplication::pages`]: its path, and the handlers showing it
 /// and taking its form, whose failures explain themselves as the page `title`.

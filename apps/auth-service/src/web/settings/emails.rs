@@ -22,7 +22,7 @@ use topcoat::{
 /// What the verification page posts.
 #[derive(Deserialize)]
 struct Verification {
-    /// The link's token, which the passkey script copies from its fragment.
+    /// The link's token, which the browser copies from its fragment.
     token: String,
 }
 

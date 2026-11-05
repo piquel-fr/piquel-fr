@@ -194,11 +194,7 @@ async fn recovery_links_enroll_a_passkey_from_their_form() {
     let page = html(opened).await;
     let heading = format!("Add a passkey to @{} (Browser test)", recovering.handle);
     assert!(page.contains(&heading), "{page}");
-    assert_eq!(
-        ceremonies(&page, routes::recovery::START),
-        1,
-        "{page}"
-    );
+    assert_eq!(ceremonies(&page, routes::recovery::START), 1, "{page}");
     assert!(sends(&page, "token", &recovering.token), "{page}");
     assert!(!page.contains(r#"name="token""#), "{page}");
     assert!(captures(&page, RECOVER), "{page}");
@@ -229,7 +225,7 @@ async fn recovery_links_enroll_a_passkey_from_their_form() {
 /// enrollment time and ID only, then offers the ceremony. Without a passkey from
 /// before, only support can undo it, and an unknown recovery leaves nothing to
 /// undo. Signed in, the page offers the account's own recovery should the link name
-/// none. Once the passkey script undid it, a browser the undo signed in goes on to
+/// none. Once the browser undid it, a browser the undo signed in goes on to
 /// the settings, and one it did not is told why, whatever session it holds.
 #[tokio::test]
 #[ignore = "requires TEST_DATABASE_URL"]
@@ -286,11 +282,7 @@ async fn the_undo_page_cancels_or_undoes_by_id() {
     let unaided = open(Some(unaided.id));
     let page = html(browser.post(&replicas, RECOVER_UNDO, &unaided).await).await;
     assert!(page.contains("only Piquel support can undo it"), "{page}");
-    assert_eq!(
-        ceremonies(&page, routes::recovery::UNDO_START),
-        0,
-        "{page}"
-    );
+    assert_eq!(ceremonies(&page, routes::recovery::UNDO_START), 0, "{page}");
 
     let undone = |signed_in| UndoChange::Undone { signed_in };
     let answered = signed_in.post(&replicas, RECOVER_UNDO, &undone(true)).await;
@@ -312,7 +304,7 @@ async fn the_undo_page_cancels_or_undoes_by_id() {
 }
 
 /// While a recovery can be undone, the account's pages ask whether it was the
-/// owner's once the passkey script finds this session has not answered at this
+/// owner's once the browser finds this session has not answered at this
 /// stage, with a link to cancel or undo it. While its link works, no passkey can
 /// be removed; once it is used, the pages say until when the probation holds its
 /// passkey back, and only that passkey can be removed. The passkey list, its

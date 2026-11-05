@@ -244,7 +244,14 @@ pub(super) async fn emails(cx: &Cx, body: Body) -> Result<Response> {
             sends: false,
         )
     };
-    App::settings_page(cx, user, Tab::Emails, refused.as_deref(), section).await
+    Box::pin(App::settings_page(
+        cx,
+        user,
+        Tab::Emails,
+        refused.as_deref(),
+        section,
+    ))
+    .await
 }
 
 /// `/users/{account}/apps`: the apps that keep access to the account, to remove
@@ -327,7 +334,7 @@ pub(super) async fn history(cx: &Cx) -> Result<Response> {
     };
     let rows = &rows;
     let section = view! { piquel_ui::history(rows: rows, holds: holds, page: page) };
-    App::settings_page(cx, user, Tab::History, None, section).await
+    Box::pin(App::settings_page(cx, user, Tab::History, None, section)).await
 }
 
 /// `/users/{account}/handle`: gives the account a new handle, such as one that

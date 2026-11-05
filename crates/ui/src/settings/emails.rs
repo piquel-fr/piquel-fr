@@ -96,7 +96,7 @@ pub async fn addresses<'a>(
             </header>
             <ul class="list">
                 #[key(position)]
-                for (position, email) in emails.into_iter().enumerate() {
+                for (position, email) in emails.iter().enumerate() {
                     address_row(
                         page: page,
                         email: *email,
@@ -242,9 +242,8 @@ async fn address_row<'a>(
 
 /// Confirming an address from its verification link, which posts to `action`.
 /// The link carries its token in the fragment, which never reaches a server: the
-/// passkey script copies it into the form when it is posted, enabling the button
-/// once it finds one, and shows instead that the link is incomplete when it has
-/// none, as after a confirmation that failed, whose `alert` says why. Its links
+/// browser copies it into the form when it is posted, enabling the button once it
+/// finds one, and shows instead that the link is incomplete when it has none, as after a confirmation that failed, whose `alert` says why. Its links
 /// lead to the addresses at `emails`.
 #[component]
 pub async fn verify<'a>(

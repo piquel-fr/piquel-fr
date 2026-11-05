@@ -430,7 +430,7 @@ pub(crate) async fn activity_feed<'a>(
     Ok(view! {
         <ul class="events">
             #[key(position)]
-            for (position, row) in rows.into_iter().enumerate() {
+            for (position, row) in rows.iter().enumerate() {
                 <li>
                     time(at: row.occurred_at, precision: Precision::Minute)
                     <span class=(class!("dot", "warning" if row.worrying(), "ok" if !row.worrying()))></span>
