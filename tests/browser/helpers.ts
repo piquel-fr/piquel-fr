@@ -140,7 +140,9 @@ export async function signedUp(browser: Browser, username: string): Promise<Page
  * then genuinely cross-origin. Chromium counts a page with no address as public, and
  * asks before it fetches auth on a local address, as in CI and on previews, so
  * `origin` is granted local network access. `modules` maps paths to JavaScript
- * files served from disk, such as the built SDK.
+ * files served from disk, such as the built SDK. The page declares an icon, so
+ * Chromium never asks for `/favicon.ico`: nothing waits for that request, so its
+ * answer could still be on its way when a test ends there, and fail.
  */
 export async function serveClient(
   context: BrowserContext,
@@ -159,7 +161,7 @@ export async function serveClient(
         { name: 'Content-Type', value: module === undefined ? 'text/html' : 'text/javascript' }
       ],
       body: (module === undefined
-        ? Buffer.from('<!doctype html><title>Client</title>')
+        ? Buffer.from('<!doctype html><title>Client</title><link rel="icon" href="data:,">')
         : readFileSync(module)
       ).toString('base64')
     });
