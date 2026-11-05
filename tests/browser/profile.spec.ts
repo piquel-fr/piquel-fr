@@ -62,12 +62,14 @@ test('profile: picture, display name and a notice that closes', async ({ browser
 
 /**
  * The picture script's crop: a chosen image shows under a circle, at its centred
- * square, and zooming in and dragging it choose the square the form sends.
+ * square, and zooming in and dragging it choose the square the form sends, which
+ * auth keeps.
  */
 test('profile: zooming and dragging choose the square a picture keeps', async ({ browser }) => {
   const page = await signedUp(browser, `crop-${Date.now().toString(36)}`);
   await page.goto('/settings/profile');
-  // A 600 by 400 image, drawn here.
+  // A 600 by 400 image, drawn here: blue, but red along its top 100 pixels, which
+  // the centred square keeps and the square chosen below leaves out.
   const wide = await page.evaluate(() => {
     const canvas = document.createElement('canvas');
     canvas.width = 600;
@@ -76,6 +78,8 @@ test('profile: zooming and dragging choose the square a picture keeps', async ({
     if (!context) throw new Error('no canvas');
     context.fillStyle = '#4353e0';
     context.fillRect(0, 0, 600, 400);
+    context.fillStyle = '#e04343';
+    context.fillRect(0, 0, 600, 100);
     return canvas.toDataURL('image/png').split(',')[1];
   });
   await page.getByRole('button', { name: 'Add a picture', exact: true }).click();
@@ -113,4 +117,19 @@ test('profile: zooming and dragging choose the square a picture keeps', async ({
 
   await choose.getByRole('button', { name: 'Upload picture', exact: true }).click();
   await expect(page.getByText('Your profile picture changed.')).toBeVisible();
+  // The stored picture's top-left corner is blue, not the centred square's red.
+  const stored = page.locator('img.avatar.large');
+  await expect
+    .poll(() => stored.evaluate((image: HTMLImageElement) => image.naturalWidth))
+    .toBe(512);
+  const corner = await stored.evaluate((image: HTMLImageElement) => {
+    const canvas = document.createElement('canvas');
+    canvas.width = canvas.height = 512;
+    const context = canvas.getContext('2d');
+    if (!context) throw new Error('no canvas');
+    context.drawImage(image, 0, 0);
+    return Array.from(context.getImageData(8, 8, 1, 1).data.slice(0, 3));
+  });
+  const [red, , blue] = corner;
+  expect(blue).toBeGreaterThan(red);
 });

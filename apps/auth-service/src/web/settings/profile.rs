@@ -2,7 +2,7 @@
 
 use crate::{
     account::{AccountError, Owner, Subject},
-    pictures::{Crop, CropFields, PictureError},
+    pictures::{CropFields, PictureError},
     routes::{page::settings, pictures},
     web::{
         Failure, WebApplication,
@@ -41,7 +41,7 @@ impl Profile {
 pub(in crate::web) enum ProfileEdit {
     /// Makes the image the account's picture, keeping the square chosen, or its
     /// centred one. Empty when a text form named it, which chose no image.
-    Upload(Vec<u8>, Option<Crop>),
+    Upload(Vec<u8>, CropFields),
     /// The upload was over the page's body limit.
     Oversize,
     /// Removes the account's picture.
@@ -56,7 +56,7 @@ impl From<ProfileChange> for ProfileEdit {
     /// The change a text form names: an upload in one carries no image.
     fn from(change: ProfileChange) -> Self {
         match change {
-            ProfileChange::Upload => Self::Upload(Vec::new(), None),
+            ProfileChange::Upload => Self::Upload(Vec::new(), CropFields::default()),
             ProfileChange::Remove => Self::Remove,
             ProfileChange::DisplayName { display_name } => Self::DisplayName(display_name),
             ProfileChange::Handle { handle } => Self::Handle(handle),
@@ -107,7 +107,7 @@ impl Profile {
         let action = serde_json::json!({ "action": action? });
         Some(match serde_json::from_value(action).ok()? {
             ProfileChange::Upload => {
-                ProfileEdit::Upload(picture.map(Vec::from).unwrap_or_default(), crop.crop())
+                ProfileEdit::Upload(picture.map(Vec::from).unwrap_or_default(), crop)
             }
             change => change.into(),
         })
@@ -153,7 +153,7 @@ impl AccountPage for Profile {
     ) -> Result<Applied<ProfileState>, AccountError> {
         let notice = match change {
             ProfileEdit::Upload(image, crop) => {
-                web.account.set_picture(&owner, image, crop).await?;
+                web.account.set_picture(&owner, image, crop.crop()?).await?;
                 Notice::PictureChanged
             }
             ProfileEdit::Oversize => return Err(PictureError::TooLarge.into()),

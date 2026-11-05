@@ -86,13 +86,17 @@ pub(crate) struct CropFields {
 }
 
 impl CropFields {
-    /// The square, if all three numbers are given.
-    pub(crate) fn crop(self) -> Option<Crop> {
-        Some(Crop {
-            x: self.x?,
-            y: self.y?,
-            size: self.size?,
-        })
+    /// The square, or `None` when none of its numbers is given.
+    ///
+    /// # Errors
+    ///
+    /// [`PictureError::PartialCrop`] when only some are.
+    pub(crate) fn crop(self) -> Result<Option<Crop>, PictureError> {
+        match (self.x, self.y, self.size) {
+            (Some(x), Some(y), Some(size)) => Ok(Some(Crop { x, y, size })),
+            (None, None, None) => Ok(None),
+            _ => Err(PictureError::PartialCrop),
+        }
     }
 }
 

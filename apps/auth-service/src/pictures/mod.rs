@@ -49,6 +49,9 @@ pub(crate) enum PictureError {
     /// The upload is not a PNG, JPEG or GIF.
     #[error("the upload is not a PNG, JPEG or GIF image")]
     Unsupported,
+    /// The square to keep names only some of its left edge, top edge and side.
+    #[error("the crop names only some of x, y and size")]
+    PartialCrop,
     /// The upload declares more pixels, or a longer side, than may be decoded.
     #[error("the image's dimensions are over the limits")]
     Dimensions,
@@ -87,6 +90,9 @@ impl From<PictureError> for ApiError {
                 Self::bad_request(format!("Choose an image of at most {size} MB."))
             }
             PictureError::Unsupported => Self::bad_request("Choose a PNG, JPEG or GIF image."),
+            PictureError::PartialCrop => {
+                Self::bad_request("Give the square to keep as all of x, y and size, or none.")
+            }
             PictureError::Dimensions => Self::bad_request(
                 "This image is too large to process. Choose one under 24 megapixels.",
             ),
@@ -279,7 +285,7 @@ impl PictureApplication {
         body: Bytes,
     ) -> Result<Json<PictureView>, ApiError> {
         let picture = AccountService::new(app.database.clone())
-            .set_picture(&owner, body.into(), crop.crop())
+            .set_picture(&owner, body.into(), crop.crop()?)
             .await?;
         Ok(Json(picture))
     }
