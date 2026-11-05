@@ -27,8 +27,9 @@ policy layer per listener. Auth keeps its state in PostgreSQL, so it runs
 as several replicas (see "Running several replicas" in `infra/README.md`). Every page it
 serves, sign-in, consent, logout, account recovery, the settings and the
 developer console, is server-rendered in the executable, with plain forms, and
-never cached. Their only script is the passkey script, which runs the passkey
-ceremonies their forms need and keeps a form from posting twice.
+never cached. Their scripts are the passkey script, which runs the passkey
+ceremonies their forms need and keeps a form from posting twice, and the picture
+script, which lets the picture form choose its crop.
 
 Passkeys are bound to the `auth.piquel.fr` RP ID, so passkey ceremonies always
 run on auth. A settings change that needs a recent passkey confirmation asks for
@@ -227,7 +228,11 @@ bar, and the dashboard's account lists and pages. The SDKs read it as
 accounts carry its ID. The owner sets it on the settings' Profile tab, which
 shows the account as apps do, with its handle, display name and picture, each
 changed in a dialog the popover API opens with no script; the picture's is a
-`multipart/form-data` form. `PUT /account/picture` sets it too. Administrators
+`multipart/form-data` form. There the picture script shows the chosen image under
+a circle, as apps show it, to drag and zoom; the form sends the square under the
+circle in the image's upright pixels (`crop_x`, `crop_y`, `crop_size`), and
+without the script auth keeps the centred square. `PUT /account/picture` sets it
+too, taking the square as `?x=…&y=…&size=…`. Administrators
 may view and remove it, with a reason, such as one that impersonates someone,
 but never set one; their Profile tab links the dashboard's own pages for the
 name and the handle.
@@ -237,7 +242,8 @@ name and the handle.
   whose header declares more than 8192 pixels on a side or 24 megapixels, or
   whose decoded image is over 96 MiB, before decoding it, and bounds what the
   decoder allocates. It turns the image upright from its EXIF orientation, crops
-  it to its centred square before scaling it to 512 pixels, flattens transparency
+  it to the square the owner chose, or its centred square, before scaling it to
+  512 pixels, flattens transparency
   onto white and encodes a JPEG of at most 128 KiB. The upload itself is never
   stored, so no metadata, such as a photo's location, survives. JPEG because
   every consumer of `picture` reads it, and the `image` crate's WebP encoder is

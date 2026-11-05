@@ -11,9 +11,9 @@
 //! fallback, so the security layer classifies them as pages by their route: it
 //! attaches the request context, spends the pages' own rate budget, and accepts a
 //! form only from auth's own pages. Every page's Content-Security-Policy loads
-//! nothing but the stylesheet, the passkey script and auth's own images, the
-//! profile pictures, and lets its forms post only to auth and to where they
-//! redirect.
+//! nothing but the stylesheet, the passkey and picture scripts and auth's own
+//! images, the profile pictures and the `blob:` of one being chosen, and lets its
+//! forms post only to auth and to where they redirect.
 
 /// A page's entry in [`WebApplication::pages`]: its path, and the handlers showing it
 /// and taking its form, whose failures explain themselves as the page `title`.
@@ -179,12 +179,15 @@ impl WebApplication {
         let origin = &config.oidc.origin;
         // A source with a path needs the whole URL: `'self'` names none. The passkey
         // script's ceremonies fetch auth's own JSON routes. Profile pictures are
-        // auth's own.
+        // auth's own, and the picture script shows the one being chosen from a
+        // `blob:` URL of the file, before it is uploaded.
+        let scripts = EmbeddedAssets::SCRIPTS.map(|script| origin.join(&script.path()));
         let policy = format!(
             "default-src 'none'; style-src {}; script-src {}; font-src 'self'; \
-             connect-src 'self'; img-src 'self'; frame-ancestors 'none'; base-uri 'none'",
+             connect-src 'self'; img-src 'self' blob:; frame-ancestors 'none'; \
+             base-uri 'none'",
             origin.join(&EmbeddedAssets::STYLESHEET.path()),
-            origin.join(&EmbeddedAssets::SCRIPT.path()),
+            scripts.join(" "),
         );
         let dashboard = config.dashboard.as_ref().map(|dashboard| {
             DashboardSignIn::new(database.clone(), origin.clone(), dashboard.origin.clone())
@@ -490,16 +493,15 @@ impl WebApplication {
         page: impl View,
     ) -> Result<Response> {
         let page = Child::new(page);
-        let (stylesheet, script) = (
-            EmbeddedAssets::STYLESHEET.path(),
-            EmbeddedAssets::SCRIPT.path(),
-        );
+        let stylesheet = EmbeddedAssets::STYLESHEET.path();
+        let paths = EmbeddedAssets::SCRIPTS.map(|script| script.path());
+        let scripts = &paths.each_ref().map(String::as_str);
         let preferences = BrowserCookie::read_preferences(headers(cx));
         let html = view! { cx =>
             piquel_ui::document(
                 title: title,
                 stylesheet: &stylesheet,
-                script: script.as_str(),
+                scripts: scripts,
                 preferences: preferences,
                 admin: admin,
                 (page)

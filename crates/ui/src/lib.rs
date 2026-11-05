@@ -20,7 +20,7 @@
 //! let cx = Cx::default();
 //! let html = view! { cx =>
 //!     piquel_ui::document(title: "Sign out", stylesheet: "/assets/style.css",
-//!         script: "/assets/passkey.js",
+//!         scripts: &["/assets/passkey.js"],
 //!         piquel_ui::auth_shell(home: "/settings", policies: piquel_ui::Policies::PATHS,
 //!             piquel_ui::logout(action: "/logout", fields: &[("client_id", "notes")], keep: "/login")
 //!         )
@@ -97,10 +97,11 @@ pub use recovery::{
     recover, recovery_banner, recovery_prompt, undo_recovery,
 };
 pub use settings::{
-    AccountOverview, Audience, ConnectedAppChange, ConnectedAppRow, ConnectedAppsState, DataChange,
-    DataState, DeviceChange, DeviceRow, EmailChange, EmailRow, EmailsState, HistoryChange,
-    HistoryPage, HistoryRow, HistoryState, Holdings, OverviewLinks, PICTURE_FIELD, PICTURE_TYPES,
-    ProfileChange, ProfileDialog, ProfilePages, ProfileState, ProviderRow, SignInChange,
-    SignInState, Tab, account_data, account_deleted, account_overview, addresses, connected_apps,
-    devices, history, profile_settings, sign_in_methods, verified, verify,
+    AccountOverview, Audience, CROP_SIZE, CROP_X, CROP_Y, ConnectedAppChange, ConnectedAppRow,
+    ConnectedAppsState, DataChange, DataState, DeviceChange, DeviceRow, EmailChange, EmailRow,
+    EmailsState, HistoryChange, HistoryPage, HistoryRow, HistoryState, Holdings, OverviewLinks,
+    PICTURE_FIELD, PICTURE_TYPES, ProfileChange, ProfileDialog, ProfilePages, ProfileState,
+    ProviderRow, SignInChange, SignInState, Tab, account_data, account_deleted, account_overview,
+    addresses, connected_apps, devices, history, profile_settings, sign_in_methods, verified,
+    verify,
 };

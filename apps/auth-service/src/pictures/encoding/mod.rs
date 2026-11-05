@@ -8,6 +8,7 @@ use image::{
     DynamicImage, ExtendedColorType, ImageDecoder, ImageError, ImageFormat, ImageReader, Limits,
     RgbImage, codecs::jpeg::JpegEncoder, imageops::FilterType,
 };
+use serde::Deserialize;
 use std::io::Cursor;
 use tokio::sync::Semaphore;
 
@@ -36,22 +37,86 @@ const QUALITIES: [u8; 3] = [85, 75, 65];
 /// most; the rest wait their turn. Uploads are rare.
 static DECODING: Semaphore = Semaphore::const_new(1);
 
+/// The square of an upload to keep, in the upload's pixels once upright: its
+/// top-left corner and its side, as the owner chose it. A square that leaves the
+/// image is moved and shrunk until it fits.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Deserialize)]
+pub(crate) struct Crop {
+    /// Its left edge.
+    pub(crate) x: u32,
+    /// Its top edge.
+    pub(crate) y: u32,
+    /// Its side.
+    pub(crate) size: u32,
+}
+
+impl Crop {
+    /// The largest square centred in an image `width` by `height`, which an
+    /// upload keeps when its owner chose none.
+    const fn centred(width: u32, height: u32) -> Self {
+        let size = if width < height { width } else { height };
+        Self {
+            x: (width - size) / 2,
+            y: (height - size) / 2,
+            size,
+        }
+    }
+
+    /// This square moved and shrunk into an image `width` by `height`.
+    fn within(self, width: u32, height: u32) -> Self {
+        let size = self.size.clamp(1, width.min(height));
+        Self {
+            x: self.x.min(width - size),
+            y: self.y.min(height - size),
+            size,
+        }
+    }
+}
+
+/// The square to keep as an upload names it, all three of its numbers or none:
+/// the API's query (`?x=…&y=…&size=…`) or the profile page's fields.
+#[derive(Debug, Default, Deserialize)]
+pub(crate) struct CropFields {
+    /// The left edge.
+    pub(crate) x: Option<u32>,
+    /// The top edge.
+    pub(crate) y: Option<u32>,
+    /// The side.
+    pub(crate) size: Option<u32>,
+}
+
+impl CropFields {
+    /// The square, or `None` when none of its numbers is given.
+    ///
+    /// # Errors
+    ///
+    /// [`PictureError::PartialCrop`] when only some are.
+    pub(crate) fn crop(self) -> Result<Option<Crop>, PictureError> {
+        match (self.x, self.y, self.size) {
+            (Some(x), Some(y), Some(size)) => Ok(Some(Crop { x, y, size })),
+            (None, None, None) => Ok(None),
+            _ => Err(PictureError::PartialCrop),
+        }
+    }
+}
+
 /// A picture as auth stores and serves it: a [`SIDE`]-pixel square JPEG of at
 /// most [`MAX_STORED_BYTES`], which only [`Self::encode`] makes.
 pub(crate) struct Jpeg(Vec<u8>);
 
 impl Jpeg {
     /// Encodes `upload`, a PNG, JPEG or GIF (its first frame), recognised by its
-    /// content, on the blocking pool, waiting for a turn among [`DECODING`]. The
-    /// blocking task holds the turn, so a request that is cancelled meanwhile
-    /// gives it back only once its decoding is done.
-    pub(crate) async fn encode(upload: Vec<u8>) -> Result<Self, PictureError> {
+    /// content, keeping its `crop`, or its centred square, on the blocking pool,
+    /// waiting for a turn among [`DECODING`]. The blocking task holds the turn, so
+    /// a request that is cancelled meanwhile gives it back only once its decoding
+    /// is done.
+    pub(crate) async fn encode(upload: Vec<u8>, crop: Option<Crop>) -> Result<Self, PictureError> {
         if upload.len() > MAX_UPLOAD_BYTES {
             return Err(PictureError::TooLarge);
         }
         let turn = DECODING.acquire().await.map_err(PictureError::Busy)?;
         tokio::task::spawn_blocking(move || {
-            let encoded = Self::from_upload(&upload);
+            let encoded = Self::from_upload(&upload, crop);
             drop(turn);
             encoded
         })
@@ -63,13 +128,13 @@ impl Jpeg {
         &self.0
     }
 
-    /// Decodes `upload`, makes it upright, crops it to its centred square, scales
-    /// that to [`SIDE`] pixels and encodes it.
+    /// Decodes `upload`, makes it upright, crops it to `crop`, or its centred
+    /// square, scales that to [`SIDE`] pixels and encodes it.
     ///
     /// WebP is refused: its decoder decodes a frame larger than the canvas its
     /// header declares before it checks the two match, so the limits here would
     /// not bound it.
-    fn from_upload(upload: &[u8]) -> Result<Self, PictureError> {
+    fn from_upload(upload: &[u8], crop: Option<Crop>) -> Result<Self, PictureError> {
         let mut reader = ImageReader::new(Cursor::new(upload))
             .with_guessed_format()
             .map_err(|error| PictureError::Unreadable(error.into()))?;
@@ -85,7 +150,12 @@ impl Jpeg {
         let mut decoder = reader.into_decoder().map_err(PictureError::decoding)?;
         let (width, height) = decoder.dimensions();
         // `from_decoder` allocates the decoded image without charging the limits.
-        if u64::from(width) * u64::from(height) > MAX_PIXELS || decoder.total_bytes() > MAX_ALLOC {
+        // An image with a side of no pixels has no square to keep.
+        if width == 0
+            || height == 0
+            || u64::from(width) * u64::from(height) > MAX_PIXELS
+            || decoder.total_bytes() > MAX_ALLOC
+        {
             return Err(PictureError::Dimensions);
         }
         let orientation = decoder.orientation().map_err(PictureError::decoding)?;
@@ -96,13 +166,12 @@ impl Jpeg {
             image.apply_orientation(orientation);
             // Cropped before it is scaled: scaling a long strip to fill the square
             // first would allocate an image as many times wider.
-            let side = image.width().min(image.height());
-            image.crop_imm(
-                (image.width() - side) / 2,
-                (image.height() - side) / 2,
-                side,
-                side,
-            )
+            let (width, height) = (image.width(), image.height());
+            let Crop { x, y, size } = crop.map_or_else(
+                || Crop::centred(width, height),
+                |crop| crop.within(width, height),
+            );
+            image.crop_imm(x, y, size, size)
         };
         let square = square.resize_exact(SIDE, SIDE, FilterType::Lanczos3);
         Self::compress(&Self::flatten(&square))

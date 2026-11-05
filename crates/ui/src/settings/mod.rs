@@ -23,8 +23,8 @@ pub use data::{DataChange, DataState, account_data, account_deleted};
 pub use emails::{EmailChange, EmailRow, EmailsState, addresses, verified, verify};
 pub use overview::{AccountOverview, OverviewLinks, account_overview};
 pub use profile::{
-    PICTURE_FIELD, PICTURE_TYPES, ProfileChange, ProfileDialog, ProfilePages, ProfileState,
-    profile_settings,
+    CROP_SIZE, CROP_X, CROP_Y, PICTURE_FIELD, PICTURE_TYPES, ProfileChange, ProfileDialog,
+    ProfilePages, ProfileState, profile_settings,
 };
 pub use sessions::{DeviceChange, DeviceRow, devices};
 pub use sign_in::{ProviderRow, SignInChange, SignInState, sign_in_methods};

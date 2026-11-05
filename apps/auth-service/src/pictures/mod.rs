@@ -13,7 +13,7 @@ mod encoding;
 #[cfg(test)]
 mod tests;
 
-pub(crate) use encoding::{MAX_UPLOAD_BYTES, SIDE};
+pub(crate) use encoding::{Crop, CropFields, MAX_UPLOAD_BYTES, SIDE};
 
 use crate::{
     account::{AccountError, AccountService, Owner, Subject, Viewer},
@@ -25,7 +25,7 @@ use crate::{
 use axum::{
     Json, Router,
     body::Bytes,
-    extract::{DefaultBodyLimit, FromRef, Path, State},
+    extract::{DefaultBodyLimit, FromRef, Path, Query, State},
     http::{HeaderValue, header},
     response::{IntoResponse, Response},
     routing::{get, put},
@@ -49,6 +49,9 @@ pub(crate) enum PictureError {
     /// The upload is not a PNG, JPEG or GIF.
     #[error("the upload is not a PNG, JPEG or GIF image")]
     Unsupported,
+    /// The square to keep names only some of its left edge, top edge and side.
+    #[error("the crop names only some of x, y and size")]
+    PartialCrop,
     /// The upload declares more pixels, or a longer side, than may be decoded.
     #[error("the image's dimensions are over the limits")]
     Dimensions,
@@ -87,6 +90,9 @@ impl From<PictureError> for ApiError {
                 Self::bad_request(format!("Choose an image of at most {size} MB."))
             }
             PictureError::Unsupported => Self::bad_request("Choose a PNG, JPEG or GIF image."),
+            PictureError::PartialCrop => {
+                Self::bad_request("Give the square to keep as all of x, y and size, or none.")
+            }
             PictureError::Dimensions => Self::bad_request(
                 "This image is too large to process. Choose one under 24 megapixels.",
             ),
@@ -129,15 +135,17 @@ impl From<StoredPicture> for PictureView {
 }
 
 impl AccountService {
-    /// Makes `upload` the owner's picture, replacing any other, once encoded. The
-    /// encoding runs before the transaction, which holds no lock meanwhile. A
-    /// picture grants nothing, so the session is enough.
+    /// Makes `upload` the owner's picture, replacing any other, once encoded,
+    /// keeping its `crop`, or its centred square. The encoding runs before the
+    /// transaction, which holds no lock meanwhile. A picture grants nothing, so
+    /// the session is enough.
     pub(crate) async fn set_picture(
         &self,
         owner: &Owner,
         upload: Vec<u8>,
+        crop: Option<Crop>,
     ) -> Result<PictureView, AccountError> {
-        let jpeg = Jpeg::encode(upload).await?;
+        let jpeg = Jpeg::encode(upload, crop).await?;
         let id = PictureId::new();
         let mut tx = self.database.begin().await?;
         owner.lock(&mut tx).await?;
@@ -168,7 +176,7 @@ impl AccountService {
             .get(url.as_str(), piquel_ui::PICTURE_TYPES, MAX_UPLOAD_BYTES + 1)
             .await
             .map_err(PictureError::Fetch)?;
-        let jpeg = Jpeg::encode(upload).await?;
+        let jpeg = Jpeg::encode(upload, None).await?;
         let mut tx = self.database.begin().await?;
         if tx
             .users()
@@ -268,14 +276,16 @@ impl PictureApplication {
         Ok(Cached(CacheClass::Immutable, (jpeg, image)).into_response())
     }
 
-    /// Makes the raw body the owner's picture, and answers it as stored.
+    /// Makes the raw body the owner's picture, keeping the square the query names,
+    /// or its centred one, and answers it as stored.
     async fn upload(
         State(app): State<Self>,
         owner: Owner,
+        Query(crop): Query<CropFields>,
         body: Bytes,
     ) -> Result<Json<PictureView>, ApiError> {
         let picture = AccountService::new(app.database.clone())
-            .set_picture(&owner, body.into())
+            .set_picture(&owner, body.into(), crop.crop()?)
             .await?;
         Ok(Json(picture))
     }

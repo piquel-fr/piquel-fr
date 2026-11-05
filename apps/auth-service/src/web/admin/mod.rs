@@ -765,11 +765,12 @@ impl AdminApplication {
             }),
         };
         let page = Child::new(page);
+        let scripts = [script.as_str()];
         let html = view! { cx =>
             piquel_ui::document(
                 title: title.as_str(),
                 stylesheet: stylesheet,
-                script: script.as_str(),
+                scripts: &scripts,
                 preferences: dashboard.preferences,
                 admin: true,
                 piquel_ui::dashboard_frame(dashboard: &dashboard, (page))

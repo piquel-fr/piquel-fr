@@ -1,4 +1,4 @@
-//! The stylesheet, typefaces and passkey script of auth's pages, and the admin
+//! The stylesheet, typefaces and scripts of auth's pages, and the admin
 //! dashboard's script, embedded under paths that never serve other content, so
 //! browsers and shared caches keep them forever.
 
@@ -30,9 +30,14 @@ pub(crate) struct EmbeddedAssets;
 impl EmbeddedAssets {
     /// The stylesheet of auth's pages, `piquel-ui`'s.
     pub(crate) const STYLESHEET: Asset = piquel_ui::STYLESHEET;
-    /// The passkey script, the one script of auth's pages.
+    /// The passkey script, which runs the pages' passkey ceremonies.
     pub(crate) const SCRIPT: Asset =
         Asset::script("passkey", include_bytes!("../assets/passkey.js"));
+    /// The picture script, which lets the profile's picture form choose its crop.
+    pub(crate) const PICTURE_SCRIPT: Asset =
+        Asset::script("picture", include_bytes!("../assets/picture.js"));
+    /// The scripts every page of auth's own loads.
+    pub(crate) const SCRIPTS: [Asset; 2] = [Self::SCRIPT, Self::PICTURE_SCRIPT];
     /// The admin dashboard's script, which confirms it with a passkey in a
     /// dialog on its page. Auth's own pages never load it.
     pub(crate) const DASHBOARD_SCRIPT: Asset =
@@ -51,7 +56,8 @@ impl EmbeddedAssets {
     pub(crate) fn serve(path: &str) -> Result<Response, ApiError> {
         let asset = Self::SHARED
             .into_iter()
-            .chain([Self::SCRIPT, Self::DASHBOARD_SCRIPT])
+            .chain(Self::SCRIPTS)
+            .chain([Self::DASHBOARD_SCRIPT])
             .find(|asset| asset.path() == path)
             .ok_or(AssetError::NotFound)?;
         let headers = [(header::CONTENT_TYPE, asset.content_type())];
@@ -72,6 +78,10 @@ mod tests {
         for (asset, content_type) in [
             (EmbeddedAssets::STYLESHEET, "text/css; charset=utf-8"),
             (EmbeddedAssets::SCRIPT, "text/javascript; charset=utf-8"),
+            (
+                EmbeddedAssets::PICTURE_SCRIPT,
+                "text/javascript; charset=utf-8",
+            ),
             (
                 EmbeddedAssets::DASHBOARD_SCRIPT,
                 "text/javascript; charset=utf-8",

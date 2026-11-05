@@ -5,7 +5,7 @@ is authentication, with its account settings, and the admin dashboard.
 
 | Location | Responsibility |
 | --- | --- |
-| `apps/auth-service` | Rust auth authority, browser ceremonies, social adapters, OIDC, server-rendered pages, the settings API, the admin dashboard at admin.piquel.fr, CLI; `assets/passkey.js`, the one script its pages load: the WebAuthn passkey ceremonies and the form hooks that run them |
+| `apps/auth-service` | Rust auth authority, browser ceremonies, social adapters, OIDC, server-rendered pages, the settings API, the admin dashboard at admin.piquel.fr, CLI; `assets/passkey.js`, the WebAuthn passkey ceremonies and the form hooks that run them, and `assets/picture.js`, which lets the picture form choose its crop: the scripts its pages load |
 | `apps/web` | `piquel-web`, piquel.fr's own web server: the homepage and Piquel's policies (`assets/policies/`), and a redirect of every other path to auth. It relies on auth only to sign people in |
 | `crates/database` | `piquel-repository`: PostgreSQL connections, migrations and typed persistence operations |
 | `crates/auth-sdk` | `piquel-auth`, the public Rust SDK: token validation, typed scopes, login and the JWKS cache auth also uses for Google; `axum` feature: extractors, bearer layer, login routes over an application's own session backend |
@@ -18,7 +18,7 @@ is authentication, with its account settings, and the admin dashboard.
 
 Prettier and type-aware ESLint cover all web code from the root configuration, as
 rustfmt and Clippy cover Rust; `just fmt`, `just lint` and `just check` run both.
-`tsc` checks the passkey script's JSDoc types as strictly as TypeScript's. The
+`tsc` checks the pages' scripts' JSDoc types as strictly as TypeScript's. The
 TypeScript SDK is the one package that builds JavaScript, with `tsc`, and is the
 pnpm workspace's only member besides the root; auth's executable builds none.
 
@@ -34,7 +34,7 @@ after it.
 
 The auth runtime is one executable with one public HTTP listener, plus the admin
 dashboard's listener when it is configured, which only a private route reaches.
-The executable embeds the shared stylesheet and the passkey script. Auth renders every
+The executable embeds the shared stylesheet and the pages' scripts. Auth renders every
 page itself, sign-in included, and the account settings at `/settings`; piquel.fr's
 server redirects there every path it doesn't serve. The permanent WebAuthn RP ID is the auth hostname, never a wildcard over
 piquel.fr subdomains.

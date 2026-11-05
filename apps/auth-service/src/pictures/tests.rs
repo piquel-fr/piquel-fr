@@ -22,15 +22,16 @@ use tower::ServiceExt;
 
 /// `PUT /account/picture` makes the raw body the owner's picture, lifting the API's
 /// default body limit for it, and answers the picture as the owner's reads then show
-/// it. Without a session it sets none.
+/// it. Without a session, or with a square naming only some of its numbers, it sets
+/// none.
 #[tokio::test]
 #[ignore = "requires TEST_DATABASE_URL"]
 async fn the_account_api_uploads_a_picture() {
     let replicas = Replicas::new().await;
     let owner = Browser::new_account(&Replicas::database().await).await;
     // As a Piquel page sends it, with the browser's cookies.
-    let upload = async |browser: &Browser| {
-        let mut request = Request::put(pictures::OWN)
+    let upload = async |browser: &Browser, query: &str| {
+        let mut request = Request::put(format!("{}{query}", pictures::OWN))
             .header(header::ORIGIN, AUTH_ORIGIN)
             .header(CSRF_HEADER, "1")
             .header(header::CONTENT_TYPE, "image/png");
@@ -50,10 +51,14 @@ async fn the_account_api_uploads_a_picture() {
         )
     };
 
-    let (status, refused) = upload(&Browser::signed_out()).await;
+    let (status, refused) = upload(&Browser::signed_out(), "").await;
     assert_eq!(status, StatusCode::UNAUTHORIZED, "{refused}");
+    let (status, refused) = upload(&owner, "?x=0&y=0").await;
+    assert_eq!(status, StatusCode::BAD_REQUEST, "{refused}");
+    let (status, read) = owner.call(&replicas.a, Method::GET, pictures::OWN).await;
+    assert_eq!((status, read), (StatusCode::OK, Value::Null));
 
-    let (status, uploaded) = upload(&owner).await;
+    let (status, uploaded) = upload(&owner, "").await;
     assert_eq!(status, StatusCode::OK, "{uploaded}");
     assert!(
         uploaded["url"]
