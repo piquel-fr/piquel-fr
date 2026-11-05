@@ -22,7 +22,8 @@ use crate::{
 use piquel_common::ErrorChain;
 use piquel_telemetry::HttpTelemetry;
 use piquel_ui::{
-    AccountNav, Alert, FieldError, LoginQuery, Messages, Notice, Query, Recovery, Section, Tab, Who,
+    AccountNav, Alert, Crumb, FieldError, LoginQuery, Messages, Notice, Query, Recovery, Section,
+    Tab, Who,
 };
 use serde::{Deserialize, de::DeserializeOwned};
 use topcoat::{
@@ -223,8 +224,8 @@ pub(super) struct Framed<'a> {
     pub(super) section: Section,
     /// The settings tab it is, if it is one, which the sidebar marks.
     pub(super) tab: Option<Tab>,
-    /// Its title in the browser.
-    pub(super) title: &'a str,
+    /// Its title in the browser and its name in the crumb.
+    pub(super) title: Crumb<'a>,
     /// What opens it, above its messages, such as an app's header.
     pub(super) head: Child<'a>,
     /// The page.
@@ -351,7 +352,7 @@ impl WebApplication {
                 let framed = Framed {
                     section: P::SECTION,
                     tab: None,
-                    title: P::TITLE,
+                    title: P::TITLE.into(),
                     head: Child::new(head),
                     page: Child::default(),
                 };
@@ -413,7 +414,7 @@ impl WebApplication {
             Ok(profile) => profile,
             Err(AccountError::Owner(SessionError::Missing)) => {
                 return self
-                    .signed_out(cx, section, title, StatusCode::UNAUTHORIZED)
+                    .signed_out(cx, section, title.as_str(), StatusCode::UNAUTHORIZED)
                     .await;
             }
             Err(error) => return Err(error.into()),
@@ -483,7 +484,7 @@ impl WebApplication {
             )
         };
         Ok(self
-            .render_document(cx, status, title, targets, false, page)
+            .render_document(cx, status, title.as_str(), targets, false, page)
             .await?)
     }
 

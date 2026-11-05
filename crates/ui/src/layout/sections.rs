@@ -2,7 +2,7 @@
 //! pages in the shell: its sidebar, and what they show a browser that is not
 //! signed in.
 
-use super::{NavGroup, NavItem, Policies, Preferences, Shell, Who, page_messages, shell};
+use super::{Crumb, NavGroup, NavItem, Policies, Preferences, Shell, Who, page_messages, shell};
 use crate::{Messages, icons::Icon, settings::Tab};
 use piquel_common::TraceId;
 use topcoat::{
@@ -74,7 +74,7 @@ pub struct AccountNav<'a> {
 pub async fn account<'a>(
     nav: AccountNav<'a>,
     who: Who<'a>,
-    title: &'a str,
+    title: Crumb<'a>,
     home: &'a str,
     sign_out: &'a str,
     preferences: Preferences,

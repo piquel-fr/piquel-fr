@@ -52,8 +52,8 @@ use crate::{
     form::{Precision, time},
     icons::Icon,
     layout::{
-        Health, Label, NavGroup, NavItem, Policies, Preferences, Search, Shell, Who, page_head,
-        shell,
+        Crumb, Health, Label, NavGroup, NavItem, Policies, Preferences, Search, Shell, Who,
+        page_head, shell,
     },
     settings::{Tab as SettingsTab, settings_tabs},
 };
@@ -165,7 +165,7 @@ impl Label for Tab {
 #[derive(Clone, Copy, Debug)]
 pub struct Dashboard<'a> {
     /// The page's name, in the crumb.
-    pub title: &'a str,
+    pub title: Crumb<'a>,
     /// Where the brand links: the overview.
     pub home: &'a str,
     /// The signed-in administrator, if the browser is signed in.
@@ -230,8 +230,11 @@ pub async fn dashboard_frame<'a>(
         .current
         .and_then(|current| dashboard.tabs.iter().find(|(tab, _)| *tab == current))
         .filter(|(_, href)| *href != path)
-        .map(|(tab, href)| (tab.label(), *href));
-    let trail: Vec<_> = tab.into_iter().chain(dashboard.parent).collect();
+        .map(|(tab, href)| (Crumb::Label(tab.label()), *href));
+    let parent = dashboard
+        .parent
+        .map(|(name, href)| (Crumb::Name(name), href));
+    let trail: Vec<_> = tab.into_iter().chain(parent).collect();
     Ok(view! {
         let groups = [NavGroup {
             label: Some("dashboard"),

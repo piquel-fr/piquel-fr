@@ -63,7 +63,7 @@ use piquel_common::{ClientId, ErrorChain, UserId, config::Origin};
 use piquel_crypto::{KeyEncryptionKey, NoteVerifier};
 use piquel_repository::Database;
 use piquel_telemetry::HttpTelemetry;
-use piquel_ui::{Dashboard, DashboardTab, Health, PreferenceChange, Search, Who};
+use piquel_ui::{Crumb, Dashboard, DashboardTab, Health, PreferenceChange, Search, Who};
 use serde::Deserialize;
 use std::{
     future::Future,
@@ -643,7 +643,13 @@ impl AdminApplication {
     /// every page shares: the sidebar of tabs, the signed-in administrator and
     /// signing out, the account search, the service's health, and the trace ID
     /// of a server error.
-    async fn render(cx: &Cx, status: StatusCode, title: &str, page: impl View) -> Result<Response> {
+    async fn render<'a>(
+        cx: &Cx,
+        status: StatusCode,
+        title: impl Into<Crumb<'a>>,
+        page: impl View,
+    ) -> Result<Response> {
+        let title = title.into();
         // A browser that is not signed in is sent on by the page itself.
         let admin = Self::admin(cx).await.ok();
         let app = Self::of(cx);
@@ -710,7 +716,7 @@ impl AdminApplication {
         let page = Child::new(page);
         let html = view! { cx =>
             piquel_ui::document(
-                title: title,
+                title: title.as_str(),
                 stylesheet: stylesheet,
                 preferences: dashboard.preferences,
                 admin: true,

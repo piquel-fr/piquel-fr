@@ -31,7 +31,7 @@ use piquel_common::{
 };
 use piquel_repository::StoredOidcClient;
 use piquel_ui::{
-    Action, AdminClientRow, Change, ClientChanges, ClientPage, ClientRow, ClientStatus,
+    Action, AdminClientRow, Change, ClientChanges, ClientPage, ClientRow, ClientStatus, Crumb,
     NewClientForm, OperatorDraft, Query, Registration, Revealed, SecretRow, SecretsChange,
     SecretsState,
 };
@@ -150,7 +150,13 @@ pub(super) async fn detail(cx: &Cx) -> Result<Response> {
         piquel_ui::client_page(page: shown, now: Utc::now())
     };
     // A large page: its future is boxed, off the handler's stack.
-    Box::pin(App::render(cx, StatusCode::OK, App::title(stored), page)).await
+    Box::pin(App::render(
+        cx,
+        StatusCode::OK,
+        Crumb::Name(App::title(stored)),
+        page,
+    ))
+    .await
 }
 
 /// `/clients/new`: registers a client operators manage, then goes on to its page,

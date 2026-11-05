@@ -26,8 +26,8 @@ use crate::{
 };
 use piquel_common::clients::ClientKind;
 use piquel_ui::{
-    AppLink, AppTab, ClientDraft, ClientRow, ClientStatus, Messages, NewAppChange, NewAppState,
-    Notice, Registered, Revealed, Section, Title,
+    AppLink, AppTab, ClientDraft, ClientRow, ClientStatus, Crumb, Messages, NewAppChange,
+    NewAppState, Notice, Registered, Revealed, Section, Title,
 };
 use topcoat::{
     context::Cx,
@@ -221,7 +221,7 @@ impl WebApplication {
     async fn console_page(
         &self,
         cx: &Cx,
-        title: &str,
+        title: impl Into<Crumb<'_>>,
         reader: &Reader,
         outcome: (StatusCode, Messages<'_>),
         head: Child<'_>,
@@ -230,7 +230,7 @@ impl WebApplication {
         let framed = Framed {
             section: Section::Developers,
             tab: None,
-            title,
+            title: title.into(),
             head,
             page,
         };
@@ -259,7 +259,14 @@ impl WebApplication {
             piquel_ui::app_header(home: HOME, client: row, tabs: &tabs, current: tab)
         };
         let title = tab.title(&client.display_name);
-        self.console_page(cx, &title, reader, outcome, Child::new(head), page)
-            .await
+        self.console_page(
+            cx,
+            Crumb::Name(&title),
+            reader,
+            outcome,
+            Child::new(head),
+            page,
+        )
+        .await
     }
 }

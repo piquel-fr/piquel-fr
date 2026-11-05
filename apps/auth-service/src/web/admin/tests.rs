@@ -548,9 +548,9 @@ async fn an_accounts_page_names_no_passkey() {
 }
 
 /// A page inside a tab has the tab in its crumb, linking its page: an account's
-/// reads "admin / users / handle", and the account's history "admin / users /
-/// handle / Security history", the handle linking the account. The tab's own
-/// page names it once.
+/// reads "admin / users / name", and the account's history "admin / users /
+/// handle / security history", the handle linking the account. The tab's own
+/// page names it once. The menus' names are lowercase; the account's are not.
 #[tokio::test]
 #[ignore = "requires TEST_DATABASE_URL"]
 async fn the_crumb_leads_through_the_tab() {
@@ -560,11 +560,14 @@ async fn the_crumb_leads_through_the_tab() {
     let account = format!("/users/{}", owner.user_id);
     let dashboard = harness.sign_in(&admin, &account).await;
     let page = html(harness.visit(&dashboard, &account).await).await;
-    let users = r#"<a href="/users">Users</a>"#;
+    let users = r#"<a href="/users">users</a>"#;
     assert!(page.contains(users), "{page}");
+    // The menus' names are lowercase in the crumb; the account's own are not.
+    assert!(page.contains(r#"<a href="/">admin</a>"#), "{page}");
+    assert!(page.contains("<b>Browser test</b>"), "{page}");
     let page = html(harness.visit(&dashboard, "/users").await).await;
     assert!(!page.contains(users), "{page}");
-    assert!(page.contains("<b>Users</b>"), "{page}");
+    assert!(page.contains("<b>users</b>"), "{page}");
     let page = html(
         harness
             .visit(&dashboard, &format!("{account}/history"))
@@ -575,7 +578,7 @@ async fn the_crumb_leads_through_the_tab() {
         page.contains(&format!(r#"<a href="{account}">browser-"#)),
         "{page}"
     );
-    assert!(page.contains("<b>Security history</b>"), "{page}");
+    assert!(page.contains("<b>security history</b>"), "{page}");
 }
 
 /// The audit page shows the chain as `audit verify` reports it, and says that
