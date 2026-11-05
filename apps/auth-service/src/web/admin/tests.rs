@@ -560,7 +560,7 @@ async fn the_crumb_leads_through_the_tab() {
     let account = format!("/users/{}", owner.user_id);
     let dashboard = harness.sign_in(&admin, &account).await;
     let page = html(harness.visit(&dashboard, &account).await).await;
-    let users = r#"<a href="/users">users</a>"#;
+    let users = r#"<a href="/users">Users</a>"#;
     assert!(page.contains(users), "{page}");
     let page = html(harness.visit(&dashboard, "/users").await).await;
     assert!(!page.contains(users), "{page}");

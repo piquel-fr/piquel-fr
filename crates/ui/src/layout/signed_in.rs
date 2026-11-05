@@ -236,7 +236,7 @@ async fn topbar<'a>(frame: &'a Shell<'a>) -> Result<impl View> {
                 icon(kind: Icon::Menu)
             </label>
             <div class="crumb">
-                <a href=(frame.area_home)>(frame.area.to_lowercase())</a>
+                <a href=(frame.area_home)>(frame.area)</a>
                 <span aria-hidden="true">"/"</span>
                 for (label, href) in frame.trail {
                     <a href=(*href)>(*label)</a>

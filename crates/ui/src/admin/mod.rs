@@ -230,17 +230,13 @@ pub async fn dashboard_frame<'a>(
         .current
         .and_then(|current| dashboard.tabs.iter().find(|(tab, _)| *tab == current))
         .filter(|(_, href)| *href != path)
-        .map(|(tab, href)| (tab.label().to_lowercase(), *href));
+        .map(|(tab, href)| (tab.label(), *href));
+    let trail: Vec<_> = tab.into_iter().chain(dashboard.parent).collect();
     Ok(view! {
         let groups = [NavGroup {
             label: Some("dashboard"),
             items: &items,
         }];
-        let trail: Vec<_> = tab
-            .iter()
-            .map(|(label, href)| (label.as_str(), *href))
-            .chain(dashboard.parent)
-            .collect();
         let frame = Shell {
             home: dashboard.home,
             area: "Admin",
