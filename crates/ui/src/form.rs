@@ -36,6 +36,7 @@ use std::str::FromStr;
 pub use serde_urlencoded::ser::Error as QueryError;
 use topcoat::{
     Result,
+    context::Cx,
     view::{Child, View, component, view},
 };
 
@@ -405,7 +406,7 @@ impl Precision {
 /// A moment, in UTC, at `precision`. Its `datetime` is to the second, as HTML
 /// allows no more than three fractional digits.
 #[component]
-pub(crate) async fn time(at: DateTime<Utc>, precision: Precision) -> Result<impl View> {
+pub(crate) async fn time(cx: &Cx, at: DateTime<Utc>, precision: Precision) -> Result<impl View> {
     Ok(view! {
         <time datetime=(at.to_rfc3339_opts(SecondsFormat::Secs, true))>(precision.write(at))</time>
     })
@@ -413,7 +414,7 @@ pub(crate) async fn time(at: DateTime<Utc>, precision: Precision) -> Result<impl
 
 /// The hidden inputs sending `fields`.
 #[component]
-pub(crate) async fn hidden(#[into] fields: Fields) -> Result<impl View> {
+pub(crate) async fn hidden(cx: &Cx, #[into] fields: Fields) -> Result<impl View> {
     let pairs = fields.pairs()?;
     Ok(view! {
         for (name, value) in &pairs {
@@ -429,6 +430,7 @@ pub(crate) async fn hidden(#[into] fields: Fields) -> Result<impl View> {
 /// the session with a passkey; a ceremony that fails says why in the form.
 #[component]
 pub(crate) async fn change_form<'a>(
+    cx: &Cx,
     action: &'a str,
     #[into] change: Fields,
     #[into] label: String,
@@ -531,6 +533,7 @@ impl Ceremony<'_> {
 /// that fails says why in the form.
 #[component]
 pub(crate) async fn passkey_form<'a>(
+    cx: &Cx,
     action: &'a str,
     ceremony: Ceremony<'a>,
     #[into] change: Fields,
@@ -568,6 +571,7 @@ pub(crate) async fn passkey_form<'a>(
 /// save it with Google Password Manager, where it is saved.
 #[component]
 pub(crate) async fn new_passkey<'a>(
+    cx: &Cx,
     label: &'a str,
     #[into]
     #[default]
@@ -603,6 +607,7 @@ pub(crate) async fn new_passkey<'a>(
 /// gone by then. With `alert_replaces_missing`, the alert says why alone.
 #[component]
 pub(crate) async fn fragment_form<'a>(
+    cx: &Cx,
     action: &'a str,
     #[into] change: Fields,
     fragments: &'a [&'a str],
@@ -638,6 +643,7 @@ pub(crate) async fn fragment_form<'a>(
 /// focus with `focus`.
 #[component]
 pub(crate) async fn handle_input<'a>(
+    cx: &Cx,
     new: bool,
     #[default] value: Option<&'a str>,
     #[default] focus: bool,
@@ -671,6 +677,7 @@ pub(crate) async fn handle_input<'a>(
 /// text button, a `secondary` one, or a `danger` one for a removal.
 #[component]
 pub(crate) async fn open<'a>(
+    cx: &Cx,
     page: &'a str,
     #[into] opens: Fields,
     label: &'a str,

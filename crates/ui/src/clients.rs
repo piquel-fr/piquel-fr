@@ -13,6 +13,7 @@ use serde::{Deserialize, Serialize};
 use std::{borrow::Cow, fmt};
 use topcoat::{
     Result,
+    context::Cx,
     view::{Child, View, component, view},
 };
 
@@ -366,7 +367,7 @@ const fn scope_description(scope: Scope) -> &'static str {
 
 /// A client's kind, then a warning when it does not sign users in, as badges.
 #[component]
-pub(crate) async fn client_status<'a>(client: ClientRow<'a>) -> Result<impl View> {
+pub(crate) async fn client_status<'a>(cx: &Cx, client: ClientRow<'a>) -> Result<impl View> {
     Ok(view! {
         <span class="badge neutral">(client.kind_name())</span>
         if let ClientStatus::Suspended { .. } = client.status {
@@ -381,7 +382,7 @@ pub(crate) async fn client_status<'a>(client: ClientRow<'a>) -> Result<impl View
 /// screen readers, after the status saying whether it did. It starts hidden; the
 /// passkey script shows it once it can write to the clipboard.
 #[component]
-pub(crate) async fn copy<'a>(target: &'a str, label: &'a str) -> Result<impl View> {
+pub(crate) async fn copy<'a>(cx: &Cx, target: &'a str, label: &'a str) -> Result<impl View> {
     Ok(view! {
         <span class="copy">
             <span class="help" role="status"></span>
@@ -394,7 +395,12 @@ pub(crate) async fn copy<'a>(target: &'a str, label: &'a str) -> Result<impl Vie
 
 /// `value` as code, the element `id`, beside a button copying it, named `label`.
 #[component]
-pub(crate) async fn copyable<'a>(id: &'a str, label: &'a str, value: &'a str) -> Result<impl View> {
+pub(crate) async fn copyable<'a>(
+    cx: &Cx,
+    id: &'a str,
+    label: &'a str,
+    value: &'a str,
+) -> Result<impl View> {
     Ok(view! {
         <div class="code-line">
             <code id=(id)>(value)</code>
@@ -407,6 +413,7 @@ pub(crate) async fn copyable<'a>(id: &'a str, label: &'a str, value: &'a str) ->
 /// `connection`, each value with a button copying it, then its redirect URIs.
 #[component]
 pub(crate) async fn client_facts<'a>(
+    cx: &Cx,
     client: ClientRow<'a>,
     connection: Connection<'a>,
 ) -> Result<impl View> {
@@ -448,7 +455,7 @@ pub(crate) async fn client_facts<'a>(
 
 /// Help with the input `of`, below it.
 #[component]
-async fn help<'a>(of: &'a Described<'a>, child: Child<'_>) -> Result<impl View> {
+async fn help<'a>(cx: &Cx, of: &'a Described<'a>, child: Child<'_>) -> Result<impl View> {
     Ok(view! {
         <small class="field-help" id=(of.help())>(child)</small>
     })
@@ -456,7 +463,7 @@ async fn help<'a>(of: &'a Described<'a>, child: Child<'_>) -> Result<impl View> 
 
 /// Why the service refused the setting of the input `of`, if it did, below it.
 #[component]
-async fn refusal<'a>(of: &'a Described<'a>) -> Result<impl View> {
+async fn refusal<'a>(cx: &Cx, of: &'a Described<'a>) -> Result<impl View> {
     Ok(view! {
         if let Some(message) = of.refusal {
             <p class="field-error" id=(of.error())>(message)</p>
@@ -469,6 +476,7 @@ async fn refusal<'a>(of: &'a Described<'a>) -> Result<impl View> {
 /// its `label` beside it, then its `detail` below, which describes it.
 #[component]
 pub(crate) async fn choice<'a>(
+    cx: &Cx,
     name: &'a str,
     #[default] value: Option<&'a str>,
     checked: bool,
@@ -497,7 +505,7 @@ pub(crate) async fn choice<'a>(
 
 /// The question of a new client's kind, `chosen` checked.
 #[component]
-async fn kind_question(chosen: ClientKind) -> Result<impl View> {
+async fn kind_question(cx: &Cx, chosen: ClientKind) -> Result<impl View> {
     Ok(view! {
         <fieldset>
             <legend>"Does your app have a backend that can keep a secret?"</legend>
@@ -528,7 +536,11 @@ async fn kind_question(chosen: ClientKind) -> Result<impl View> {
 /// A checkbox for each standard scope, those of `chosen` checked, and why the
 /// service refused them, as `scopes` says, if it did.
 #[component]
-async fn scope_choices<'a>(chosen: ScopeChoice, scopes: &'a Described<'a>) -> Result<impl View> {
+async fn scope_choices<'a>(
+    cx: &Cx,
+    chosen: ScopeChoice,
+    scopes: &'a Described<'a>,
+) -> Result<impl View> {
     Ok(view! {
         <fieldset aria-describedby=(scopes.refused().then(|| scopes.error()))>
             <legend>"Scopes"</legend>
@@ -556,6 +568,7 @@ async fn scope_choices<'a>(chosen: ScopeChoice, scopes: &'a Described<'a>) -> Re
 /// `head` after the name, and `child` after the rest.
 #[component]
 pub(crate) async fn client_form<'a>(
+    cx: &Cx,
     action: &'a str,
     #[into] change: Fields,
     draft: &'a ClientDraft,
@@ -659,7 +672,7 @@ pub(crate) async fn client_form<'a>(
 /// The input of a client's back-channel logout URI, showing `uri`, described as
 /// `of` says.
 #[component]
-async fn backchannel_input<'a>(uri: &'a str, of: &'a Described<'a>) -> Result<impl View> {
+async fn backchannel_input<'a>(cx: &Cx, uri: &'a str, of: &'a Described<'a>) -> Result<impl View> {
     Ok(view! {
         <label>
             "Back-channel logout URI"
@@ -685,6 +698,7 @@ async fn backchannel_input<'a>(uri: &'a str, of: &'a Described<'a>) -> Result<im
 /// made, and when it stops or stopped working.
 #[component]
 pub(crate) async fn secrets_list<'a>(
+    cx: &Cx,
     secrets: &'a [SecretRow],
     now: DateTime<Utc>,
 ) -> Result<impl View> {
@@ -721,6 +735,7 @@ pub(crate) async fn secrets_list<'a>(
 /// hidden.
 #[component]
 pub(crate) async fn secret_panel<'a>(
+    cx: &Cx,
     secret: &'a Revealed,
     page: &'a str,
     next: &'a str,

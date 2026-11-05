@@ -11,6 +11,7 @@ use serde::{Deserialize, Serialize};
 use std::net::IpAddr;
 use topcoat::{
     Result,
+    context::Cx,
     view::{View, component, view},
 };
 
@@ -102,6 +103,7 @@ impl DeviceRow<'_> {
 /// one out, or every other one, posts to `page`.
 #[component]
 pub async fn devices<'a>(
+    cx: &Cx,
     page: &'a str,
     rows: &'a [DeviceRow<'a>],
     now: DateTime<Utc>,

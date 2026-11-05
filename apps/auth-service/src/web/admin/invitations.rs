@@ -18,7 +18,7 @@ use topcoat::{
     view::view,
 };
 
-path_param!(pub invitation: TokenId, error = not_found);
+path_param!(pub invitation: TokenId else not_found);
 
 impl App {
     /// Requires signup to need invitations, without which there are none to
@@ -58,7 +58,7 @@ pub(super) async fn list(cx: &Cx) -> Result<Response> {
             .collect()
     });
     let (creating, rows) = (&href!(create).resolve(cx), rows.as_deref());
-    let page = view! { cx =>
+    let page = view! {
         piquel_ui::invitation_list(rows: rows, create: creating.as_str(), now: Utc::now())
     };
     App::render(cx, StatusCode::OK, "Invitations", page).await
@@ -101,7 +101,7 @@ pub(super) async fn create(cx: &Cx, form: Option<Form<CreateInvitation>>) -> Res
         .as_ref()
         .and_then(|refused| refused.form.expires_in.clone());
     let (created, refused) = (&created, refused.as_deref());
-    let page = view! { cx =>
+    let page = view! {
         match created {
             Some(created) => {
                 piquel_ui::invitation_created(
@@ -140,7 +140,7 @@ pub(super) async fn revoke(cx: &Cx, form: Option<Form<IgnoredAny>>) -> Result<Re
         service.revoke_invitation(&admin.operator, id)
     })
     .await?;
-    let page = view! { cx =>
+    let page = view! {
         piquel_ui::dashboard_change(
             change: Change::RevokeInvitation,
             back: back.as_str(),

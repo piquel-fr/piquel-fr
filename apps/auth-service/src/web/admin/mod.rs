@@ -81,7 +81,7 @@ use std::{
 };
 use topcoat::{
     Error, Result,
-    context::{Cx, app_context, memoize},
+    context::{Cx, context, memoize},
     router::{
         Body, BodyLimit, HeaderValue, Method, Next, OriginPolicy, Route, Router, StatusCode,
         content::{Form, Json},
@@ -251,12 +251,12 @@ impl AdminApplication {
     /// every path below, and its stylesheet.
     pub(crate) fn routes(self) -> axum::Router {
         let pages = Router::builder()
-            .app_context(self)
+            .with(self)
             // The security layer already accepts forms only from the dashboard's own
             // pages, by a stricter rule: Topcoat's also takes `Sec-Fetch-Site: none`.
-            .origin_policy(OriginPolicy::dangerous_disable())
+            .with(OriginPolicy::dangerous_disable())
             // axum's body limit does not reach Topcoat, whose own default is 2 MiB.
-            .layer(BodyLimit::max(MAX_REQUEST_BODY_BYTES))
+            .with(BodyLimit::max(MAX_REQUEST_BODY_BYTES))
             .layer(answers)
             .route(overview::overview)
             .route(preferences)
@@ -384,7 +384,7 @@ impl AdminApplication {
 
     /// The dashboard's application context.
     fn of(cx: &Cx) -> &Self {
-        app_context::<Self>(cx)
+        context::<Self>(cx)
     }
 
     /// The administrator signed in to the dashboard. A browser without a session
@@ -766,7 +766,7 @@ impl AdminApplication {
         };
         let page = Child::new(page);
         let scripts = [script.as_str()];
-        let html = view! { cx =>
+        let html = view! {
             piquel_ui::document(
                 title: title.as_str(),
                 stylesheet: stylesheet,
@@ -810,7 +810,7 @@ impl AdminApplication {
             refused.log_refusal();
             if let AdminError::NotAdministrator = refused {
                 let home = &Self::of(cx).auth.join(routes::page::settings::HOME);
-                let page = view! { cx => piquel_ui::no_access(home: home.as_str()) };
+                let page = view! { piquel_ui::no_access(home: home.as_str()) };
                 return Self::render(cx, StatusCode::FORBIDDEN, "No access", page).await;
             }
         }
@@ -824,7 +824,7 @@ impl AdminApplication {
             },
         };
         let (status, detail) = refused.public();
-        let page = view! { cx =>
+        let page = view! {
             piquel_ui::dashboard_failure(title: "That did not work", detail: Self::sentence(detail))
         };
         Self::render(cx, status, "Refused", page).await
@@ -840,7 +840,7 @@ impl AdminApplication {
             return Ok(answered);
         }
         ApiError::log_error(&*error);
-        let page = view! { cx =>
+        let page = view! {
             piquel_ui::dashboard_failure(
                 title: "That did not work",
                 detail: "Something went wrong on our side. Please try again.",
@@ -884,7 +884,7 @@ async fn sign_in(cx: &Cx) -> Result<Response> {
         Err(refused @ AdminError::InvalidHandoff) => {
             refused.log_refusal();
             let retry = href!(overview::overview).resolve(cx);
-            let page = view! { cx =>
+            let page = view! {
                 piquel_ui::dashboard_failure(
                     title: "Sign-in did not work",
                     detail: "The sign-in link expired, was used already, or was opened in another browser.",
@@ -955,7 +955,7 @@ async fn sign_out(cx: &Cx) -> Result<Response> {
         &href!(overview::overview).resolve(cx),
         &app.auth.join(routes::page::LOGOUT),
     );
-    let page = view! { cx =>
+    let page = view! {
         piquel_ui::dashboard_signed_out(sign_in: again, auth_sign_out: auth_sign_out)
     };
     AdminApplication::render(cx, StatusCode::OK, "Signed out", page).await

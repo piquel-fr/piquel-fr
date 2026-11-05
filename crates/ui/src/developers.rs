@@ -19,6 +19,7 @@ use piquel_common::{clients::ClientKind, protocol::oauth::Scope};
 use serde::{Deserialize, Serialize};
 use topcoat::{
     Result,
+    context::Cx,
     view::{View, component, view},
 };
 
@@ -242,7 +243,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {{
 /// `limit` it may have, a link to register one at `new` while it may, and where
 /// to learn more.
 #[component]
-pub async fn apps<'a>(links: &'a [AppLink<'a>], limit: u32, new: &'a str) -> Result<impl View> {
+pub async fn apps<'a>(
+    cx: &Cx,
+    links: &'a [AppLink<'a>],
+    limit: u32,
+    new: &'a str,
+) -> Result<impl View> {
     let count = links.len();
     let room = u32::try_from(count).is_ok_and(|count| count < limit);
     Ok(view! {
@@ -303,7 +309,7 @@ pub async fn apps<'a>(links: &'a [AppLink<'a>], limit: u32, new: &'a str) -> Res
 
 /// The link back to the console's `home`, the account's apps.
 #[component]
-pub async fn back_to_apps(home: &str) -> Result<impl View> {
+pub async fn back_to_apps(cx: &Cx, home: &str) -> Result<impl View> {
     Ok(view! {
         <p><a href=(home)>"← Your apps"</a></p>
     })
@@ -315,6 +321,7 @@ pub async fn back_to_apps(home: &str) -> Result<impl View> {
 /// app is registered, its secret instead, once.
 #[component]
 pub async fn new_app<'a>(
+    cx: &Cx,
     page: &'a str,
     home: &'a str,
     state: &'a NewAppState,
@@ -348,6 +355,7 @@ pub async fn new_app<'a>(
 /// name and status, and its `tabs`, `current` among them.
 #[component]
 pub async fn app_header<'a>(
+    cx: &Cx,
     home: &'a str,
     client: ClientRow<'a>,
     tabs: &'a [(AppTab, String)],
@@ -374,6 +382,7 @@ pub async fn app_header<'a>(
 /// secrets page.
 #[component]
 pub async fn overview<'a>(
+    cx: &Cx,
     client: ClientRow<'a>,
     connection: Connection<'a>,
     #[default] secrets: Option<&'a str>,
@@ -438,6 +447,7 @@ pub async fn overview<'a>(
 /// Each change needs a passkey confirmation unless `confirmed`.
 #[component]
 pub async fn app_settings<'a>(
+    cx: &Cx,
     page: &'a str,
     client: ClientRow<'a>,
     state: &'a AppSettingsState,
@@ -531,6 +541,7 @@ pub async fn app_settings<'a>(
 /// `state` chose, which needs a passkey confirmation unless `confirmed`.
 #[component]
 pub async fn app_secrets<'a>(
+    cx: &Cx,
     page: &'a str,
     secrets: &'a [SecretRow],
     now: DateTime<Utc>,

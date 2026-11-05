@@ -8,6 +8,7 @@ use crate::{
 use piquel_common::admin::Paging;
 use topcoat::{
     Result,
+    context::Cx,
     view::{Child, View, component, view},
 };
 
@@ -59,7 +60,7 @@ impl Pager {
 /// The pager below a list of `what`: which items the page shows of how many, and
 /// the previous and next pages. A list that fits one page shows only its count.
 #[component]
-pub(crate) async fn pager<'a>(pages: &'a Pager, what: &'a str) -> Result<impl View> {
+pub(crate) async fn pager<'a>(cx: &Cx, pages: &'a Pager, what: &'a str) -> Result<impl View> {
     let paging = pages.paging;
     let shown = match paging.range() {
         Some((first, last)) => format!("{first}–{last} of {} {what}", paging.total),
@@ -89,6 +90,7 @@ pub(crate) async fn pager<'a>(pages: &'a Pager, what: &'a str) -> Result<impl Vi
 /// the whole page as `actions`, beside them.
 #[component]
 pub async fn page_head(
+    cx: &Cx,
     #[into] title: String,
     #[into]
     #[default]
@@ -113,7 +115,7 @@ pub async fn page_head(
 /// What a page says: the `alert` of a change that failed, and the `notice` of
 /// the one just made.
 #[component]
-pub(crate) async fn page_messages<'a>(messages: Messages<'a>) -> Result<impl View> {
+pub(crate) async fn page_messages<'a>(cx: &Cx, messages: Messages<'a>) -> Result<impl View> {
     Ok(view! {
         // A refused setting is said beside its input instead.
         if let Some(Alert::Page(alert)) = messages.alert {
@@ -135,7 +137,7 @@ pub(crate) async fn page_messages<'a>(messages: Messages<'a>) -> Result<impl Vie
 
 /// Why a change failed, as `message` says it.
 #[component]
-pub(crate) async fn alert_notice<'a>(message: &'a str) -> Result<impl View> {
+pub(crate) async fn alert_notice<'a>(cx: &Cx, message: &'a str) -> Result<impl View> {
     Ok(view! {
         <p class="notice error" role="alert">icon(kind: Icon::Warning)<span class="text">(message)</span></p>
     })
@@ -150,6 +152,7 @@ pub(crate) async fn alert_notice<'a>(message: &'a str) -> Result<impl View> {
 /// into it as it opens; one that does autofocuses its input.
 #[component]
 pub(crate) async fn dialog<'a>(
+    cx: &Cx,
     id: &'a str,
     title: &'a str,
     shown: bool,
@@ -192,7 +195,7 @@ pub(crate) async fn dialog<'a>(
 /// clicking again blurs it. A checkbox, visually hidden, holds whether it shows,
 /// so it needs no script.
 #[component]
-pub(crate) async fn private_address<'a>(address: &'a str) -> Result<impl View> {
+pub(crate) async fn private_address<'a>(cx: &Cx, address: &'a str) -> Result<impl View> {
     Ok(view! {
         <label class="private-address">
             <input type="checkbox" aria-label="Show address">
@@ -206,6 +209,7 @@ pub(crate) async fn private_address<'a>(address: &'a str) -> Result<impl View> {
 /// `data-confirm-first` when [`Label::confirms_first`].
 #[component]
 pub(crate) async fn navigation<'a, T: Label>(
+    cx: &Cx,
     label: &'a str,
     class: &'a str,
     links: &'a [(T, &'a str)],

@@ -99,7 +99,7 @@ impl AccountPage for Overview {
             devices: settings::SESSIONS,
             history: settings::HISTORY,
         };
-        let page = Child::new(view! { cx =>
+        let page = Child::new(view! {
             piquel_ui::account_overview(overview: overview, links: links)
         });
         // Linking a provider goes on at the provider, so the page's forms may

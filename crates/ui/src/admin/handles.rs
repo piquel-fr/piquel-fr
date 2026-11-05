@@ -6,6 +6,7 @@ use crate::{clients::choice, layout::page_head};
 use piquel_common::admin::{ReleasedHandle, ReservedHandle};
 use topcoat::{
     Result,
+    context::Cx,
     view::{View, component, view},
 };
 
@@ -61,7 +62,7 @@ pub struct HandlesPage<'a> {
 /// The handles page: the reserved list, with the built-in names, the accounts
 /// holding a reserved handle, and the released handles, each with its change.
 #[component]
-pub async fn handle_list<'a>(page: HandlesPage<'a>) -> Result<impl View> {
+pub async fn handle_list<'a>(cx: &Cx, page: HandlesPage<'a>) -> Result<impl View> {
     Ok(view! {
         page_head(
             title: "Handles",
@@ -149,7 +150,7 @@ pub async fn handle_list<'a>(page: HandlesPage<'a>) -> Result<impl View> {
 
 /// The choice letting a rename take a reserved handle, `checked` or not.
 #[component]
-pub async fn reserved_handle_choice(checked: bool) -> Result<impl View> {
+pub async fn reserved_handle_choice(cx: &Cx, checked: bool) -> Result<impl View> {
     Ok(view! {
         choice(
             name: "allow_reserved",

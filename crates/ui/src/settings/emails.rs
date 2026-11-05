@@ -9,6 +9,7 @@ use piquel_common::EmailId;
 use serde::{Deserialize, Serialize};
 use topcoat::{
     Result,
+    context::Cx,
     view::{View, component, view},
 };
 
@@ -72,6 +73,7 @@ pub struct EmailRow<'a> {
 /// email.
 #[component]
 pub async fn addresses<'a>(
+    cx: &Cx,
     page: &'a str,
     emails: &'a [EmailRow<'a>],
     state: &'a EmailsState,
@@ -144,6 +146,7 @@ pub async fn addresses<'a>(
 /// a new link only when Piquel `sends` email.
 #[component]
 async fn address_row<'a>(
+    cx: &Cx,
     page: &'a str,
     email: EmailRow<'a>,
     replaceable: bool,
@@ -244,6 +247,7 @@ async fn address_row<'a>(
 /// lead to the addresses at `emails`.
 #[component]
 pub async fn verify<'a>(
+    cx: &Cx,
     action: &'a str,
     emails: &'a str,
     #[default] alert: Option<&'a str>,
@@ -272,7 +276,12 @@ pub async fn verify<'a>(
 /// The address now confirmed, and whether it became the `primary` one; its link
 /// leads to the addresses at `emails`.
 #[component]
-pub async fn verified<'a>(address: &'a str, primary: bool, emails: &'a str) -> Result<impl View> {
+pub async fn verified<'a>(
+    cx: &Cx,
+    address: &'a str,
+    primary: bool,
+    emails: &'a str,
+) -> Result<impl View> {
     Ok(view! {
         <h1>"Address confirmed"</h1>
         <p class="lead">

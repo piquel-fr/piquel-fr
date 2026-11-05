@@ -10,6 +10,7 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use topcoat::{
     Result,
+    context::Cx,
     view::{View, component, view},
 };
 
@@ -138,6 +139,7 @@ pub struct ProfilePages<'a> {
 /// when another tab removed the picture.
 #[component]
 pub async fn profile_settings<'a>(
+    cx: &Cx,
     page: &'a str,
     who: Who<'a>,
     stored: bool,
@@ -247,6 +249,7 @@ pub async fn profile_settings<'a>(
 /// with the `alert` saying why its change was refused.
 #[component]
 async fn profile_dialogs<'a>(
+    cx: &Cx,
     page: &'a str,
     who: Who<'a>,
     stored: bool,

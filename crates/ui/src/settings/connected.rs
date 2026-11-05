@@ -10,6 +10,7 @@ use piquel_common::ClientId;
 use serde::{Deserialize, Serialize};
 use topcoat::{
     Result,
+    context::Cx,
     view::{View, component, view},
 };
 
@@ -54,6 +55,7 @@ pub struct ConnectedAppRow<'a> {
 /// as `state` opens it, for `audience`. Its changes post to `page`.
 #[component]
 pub async fn connected_apps<'a>(
+    cx: &Cx,
     page: &'a str,
     rows: &'a [ConnectedAppRow<'a>],
     state: &'a ConnectedAppsState,
@@ -93,6 +95,7 @@ pub async fn connected_apps<'a>(
 /// removal row takes the focus.
 #[component]
 async fn app_row<'a>(
+    cx: &Cx,
     page: &'a str,
     row: ConnectedAppRow<'a>,
     removing: bool,

@@ -67,6 +67,7 @@ use piquel_common::{
 use serde::{Deserialize, Serialize};
 use topcoat::{
     Result,
+    context::Cx,
     view::{Child, View, class, component, view},
 };
 
@@ -232,6 +233,7 @@ pub struct Confirmation<'a> {
 /// service's health; then the page as `child`.
 #[component]
 pub async fn dashboard_frame<'a>(
+    cx: &Cx,
     dashboard: &'a Dashboard<'a>,
     child: Child<'_>,
 ) -> Result<impl View> {
@@ -648,6 +650,7 @@ impl Action {
 /// typed. The handler confirms a recent passkey before showing it.
 #[component]
 pub async fn dashboard_change<'a>(
+    cx: &Cx,
     change: Change,
     back: &'a str,
     #[into]
@@ -679,6 +682,7 @@ pub async fn dashboard_change<'a>(
 /// The reason input of `change`'s form, if it asks why, holding `value`.
 #[component]
 async fn reason_field<'a>(
+    cx: &Cx,
     change: Change,
     #[into]
     #[default]
@@ -702,6 +706,7 @@ async fn reason_field<'a>(
 /// shows and its button is named by.
 #[component]
 pub(crate) async fn confirm<'a>(
+    cx: &Cx,
     action: &'a Action,
     change: Change,
     #[into]
@@ -747,6 +752,7 @@ pub(crate) async fn confirm<'a>(
 /// the tab's section as `child`.
 #[component]
 pub async fn account_settings<'a>(
+    cx: &Cx,
     tabs: &'a [(SettingsTab, &'a str)],
     current: SettingsTab,
     #[into]
@@ -765,7 +771,11 @@ pub async fn account_settings<'a>(
 
 /// A change the service would refuse, shown disabled with the `reason`.
 #[component]
-pub(crate) async fn refused_action<'a>(label: &'a str, reason: &'a str) -> Result<impl View> {
+pub(crate) async fn refused_action<'a>(
+    cx: &Cx,
+    label: &'a str,
+    reason: &'a str,
+) -> Result<impl View> {
     Ok(view! {
         <span class="refused">
             <button class="secondary small" disabled="" title=(reason)>(label)</button>
@@ -776,7 +786,7 @@ pub(crate) async fn refused_action<'a>(label: &'a str, reason: &'a str) -> Resul
 
 /// An account's status, as a badge.
 #[component]
-pub(crate) async fn account_status(status: AccountStatus) -> Result<impl View> {
+pub(crate) async fn account_status(cx: &Cx, status: AccountStatus) -> Result<impl View> {
     let (tone, label) = match status {
         AccountStatus::Active => ("ok", "Active"),
         AccountStatus::Disabled => ("neutral", "Disabled"),
@@ -789,14 +799,14 @@ pub(crate) async fn account_status(status: AccountStatus) -> Result<impl View> {
 
 /// A moment, to the minute, in UTC.
 #[component]
-pub(crate) async fn moment(at: DateTime<Utc>) -> Result<impl View> {
+pub(crate) async fn moment(cx: &Cx, at: DateTime<Utc>) -> Result<impl View> {
     Ok(view! { time(at: at, precision: Precision::Minute) })
 }
 
 /// What an account that does not administer Piquel sees, on the dashboard or on
 /// auth's handoff page, and where it may go instead.
 #[component]
-pub async fn no_access<'a>(home: &'a str) -> Result<impl View> {
+pub async fn no_access<'a>(cx: &Cx, home: &'a str) -> Result<impl View> {
     Ok(view! {
         <h1>"This account has no access"</h1>
         <p class="lead">"Only administrators can use the admin dashboard."</p>
@@ -808,6 +818,7 @@ pub async fn no_access<'a>(home: &'a str) -> Result<impl View> {
 /// `title`, the `detail` of why, and a link to `retry`, if there is one.
 #[component]
 pub async fn dashboard_failure<'a>(
+    cx: &Cx,
     title: &'a str,
     #[into] detail: String,
     #[into]
@@ -827,6 +838,7 @@ pub async fn dashboard_failure<'a>(
 /// quick while the Piquel session lasts, which signs out at `auth_sign_out`.
 #[component]
 pub async fn dashboard_signed_out<'a>(
+    cx: &Cx,
     sign_in: &'a str,
     auth_sign_out: &'a str,
 ) -> Result<impl View> {
@@ -847,6 +859,7 @@ pub async fn dashboard_signed_out<'a>(
 /// as `alert`, if it was.
 #[component]
 pub async fn handoff_proof<'a>(
+    cx: &Cx,
     action: &'a str,
     proof: &'a str,
     query: &'a HandoffQuery,

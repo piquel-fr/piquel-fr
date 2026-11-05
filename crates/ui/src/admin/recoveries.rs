@@ -6,6 +6,7 @@ use chrono::{DateTime, Utc};
 use piquel_common::PasskeyId;
 use topcoat::{
     Result,
+    context::Cx,
     view::{View, component, view},
 };
 
@@ -56,7 +57,7 @@ pub struct RecoveryRow {
 
 /// An account's recoveries of the last 15 days, newest first.
 #[component]
-pub async fn recovery_list<'a>(rows: &'a [RecoveryRow]) -> Result<impl View> {
+pub async fn recovery_list<'a>(cx: &Cx, rows: &'a [RecoveryRow]) -> Result<impl View> {
     Ok(view! {
         if rows.is_empty() {
             <p class="empty">"No recovery in the last 15 days."</p>

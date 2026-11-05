@@ -12,7 +12,7 @@ use topcoat::{
     view::view,
 };
 
-path_param!(pub administrator: UserId, error = not_found);
+path_param!(pub administrator: UserId else not_found);
 
 /// `/administrators`: who administers Piquel.
 #[route(GET "/administrators")]
@@ -42,7 +42,7 @@ pub(super) async fn list(cx: &Cx) -> Result<Response> {
         })
         .collect();
     let (granting, rows) = (&href!(grant).resolve(cx), &rows);
-    let page = view! { cx =>
+    let page = view! {
         piquel_ui::administrator_list(rows: rows, grant: granting.as_str())
     };
     App::render(cx, StatusCode::OK, "Administrators", page).await
@@ -96,7 +96,7 @@ pub(super) async fn grant(cx: &Cx, form: Option<Form<GrantForm>>) -> Result<Resp
         .on(&action)
     })?;
     let (q, rows, pager, refusal) = (&q, &rows, &pager, refusal.as_deref());
-    let page = view! { cx =>
+    let page = view! {
         piquel_ui::grant_search(
             action: action.as_str(),
             q: q.as_str(),
@@ -121,7 +121,7 @@ pub(super) async fn revoke(cx: &Cx, form: Option<Form<IgnoredAny>>) -> Result<Re
         service.revoke_administrator(&admin.operator, id)
     })
     .await?;
-    let page = view! { cx =>
+    let page = view! {
         piquel_ui::dashboard_change(
             change: Change::RevokeAdministrator,
             back: back.as_str(),

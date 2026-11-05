@@ -15,6 +15,7 @@ use serde_json::Value;
 use std::fmt::Display;
 use topcoat::{
     Result,
+    context::Cx,
     view::{View, class, component, view},
 };
 
@@ -432,6 +433,7 @@ impl EventRow<'_> {
 /// by itself), the events, and the `pages` through them.
 #[component]
 pub async fn event_list<'a>(
+    cx: &Cx,
     action: &'a str,
     #[into]
     #[default]
@@ -472,7 +474,7 @@ pub async fn event_list<'a>(
 /// A feed of events, each in words, linking the account it concerns and the one
 /// that caused it, with its stored JSON behind a disclosure.
 #[component]
-pub async fn event_rows<'a>(rows: &'a [EventRow<'a>]) -> Result<impl View> {
+pub async fn event_rows<'a>(cx: &Cx, rows: &'a [EventRow<'a>]) -> Result<impl View> {
     Ok(view! {
         if rows.is_empty() {
             <p class="empty">"No event."</p>

@@ -17,6 +17,7 @@ use piquel_common::{Provider, TokenId, protocol::claims::Acr};
 use serde::{Deserialize, Serialize};
 use topcoat::{
     Result,
+    context::Cx,
     view::{View, component, view},
 };
 
@@ -295,6 +296,7 @@ impl<'a> Step<'a> {
 /// which it agrees to.
 #[component]
 pub async fn sign_in<'a>(
+    cx: &Cx,
     step: Step<'a>,
     page: &'a str,
     query: &'a LoginQuery,
@@ -404,6 +406,7 @@ pub async fn sign_in<'a>(
 /// `signed_in`, signing it out first.
 #[component]
 async fn sign_in_forms<'a>(
+    cx: &Cx,
     action: &'a str,
     page: &'a str,
     query: &'a LoginQuery,
@@ -444,6 +447,7 @@ async fn sign_in_forms<'a>(
 /// Android, it offers Google Password Manager.
 #[component]
 async fn sign_up_form<'a>(
+    cx: &Cx,
     action: &'a str,
     social: Option<(Provider, TokenId)>,
     invitation: Option<&'a str>,
@@ -475,7 +479,7 @@ async fn sign_up_form<'a>(
 /// The forms of [`Step::Restore`], posting to `action`: restoring the account and
 /// signing in, or leaving it scheduled for deletion.
 #[component]
-async fn restore_forms<'a>(action: &'a str) -> Result<impl View> {
+async fn restore_forms<'a>(cx: &Cx, action: &'a str) -> Result<impl View> {
     Ok(view! {
         change_form(
             action: action,
@@ -498,6 +502,7 @@ async fn restore_forms<'a>(action: &'a str) -> Result<impl View> {
 /// cancelling. Signing in opens `page` with `query` to ask for a handle.
 #[component]
 async fn link_forms<'a>(
+    cx: &Cx,
     action: &'a str,
     page: &'a str,
     query: &'a LoginQuery,
@@ -543,6 +548,7 @@ async fn link_forms<'a>(
 /// `class`. The consent page offers it too.
 #[component]
 pub(crate) async fn switch_account<'a>(
+    cx: &Cx,
     action: &'a str,
     label: &'a str,
     class: &'a str,
@@ -563,6 +569,7 @@ pub(crate) async fn switch_account<'a>(
 /// opens `page` with `query` asking for it.
 #[component]
 async fn passkey_sign_in<'a>(
+    cx: &Cx,
     action: &'a str,
     page: &'a str,
     query: &'a LoginQuery,

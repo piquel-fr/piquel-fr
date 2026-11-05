@@ -9,6 +9,7 @@ use crate::{
 use chrono::{DateTime, Utc};
 use topcoat::{
     Result,
+    context::Cx,
     view::{View, class, component, view},
 };
 
@@ -137,7 +138,7 @@ pub struct AdminOverview<'a> {
 
 /// The overview page.
 #[component]
-pub async fn admin_overview<'a>(overview: AdminOverview<'a>) -> Result<impl View> {
+pub async fn admin_overview<'a>(cx: &Cx, overview: AdminOverview<'a>) -> Result<impl View> {
     Ok(view! {
         page_head(
             title: "Overview",
@@ -199,7 +200,7 @@ pub async fn admin_overview<'a>(overview: AdminOverview<'a>) -> Result<impl View
 
 /// What a `problem` says, and where to look.
 #[component]
-async fn problem_notice<'a>(problem: &'a Problem<'a>) -> Result<impl View> {
+async fn problem_notice<'a>(cx: &Cx, problem: &'a Problem<'a>) -> Result<impl View> {
     Ok(view! {
         match problem {
             Problem::FailedSignIns { count, usual, events } => {

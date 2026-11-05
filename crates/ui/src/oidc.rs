@@ -11,6 +11,7 @@ use piquel_common::{
 };
 use topcoat::{
     Result,
+    context::Cx,
     view::{View, component, view},
 };
 
@@ -24,6 +25,7 @@ use topcoat::{
 /// authorization already used.
 #[component]
 pub async fn consent<'a>(
+    cx: &Cx,
     client: &'a str,
     host: &'a str,
     #[default] registered_by: Option<&'a str>,
@@ -87,6 +89,7 @@ pub(crate) fn scope_label(scope: &str) -> &str {
 /// the request's parameters, back to `action`, and a link to `keep` the session.
 #[component]
 pub async fn logout<'a>(
+    cx: &Cx,
     action: &'a str,
     fields: &'a [(&'a str, &'a str)],
     keep: &'a str,
@@ -111,6 +114,7 @@ pub async fn logout<'a>(
 /// onwards as its label and URL.
 #[component]
 pub async fn failure<'a>(
+    cx: &Cx,
     code: &'a ErrorCode,
     #[default] description: Option<&'a str>,
     #[default] link: Option<(&'a str, &'a str)>,
@@ -162,7 +166,7 @@ pub enum Onward {
 /// application's loopback address: a link to `href`, which leads `to` there, that
 /// the user follows instead.
 #[component]
-pub async fn onward(href: &str, to: Onward) -> Result<impl View> {
+pub async fn onward(cx: &Cx, href: &str, to: Onward) -> Result<impl View> {
     let (title, lead) = match to {
         Onward::Application => (
             "Return to the application".to_owned(),

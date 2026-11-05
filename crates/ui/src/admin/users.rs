@@ -10,6 +10,7 @@ use piquel_common::{
 };
 use topcoat::{
     Result,
+    context::Cx,
     view::{View, component, view},
 };
 
@@ -54,6 +55,7 @@ pub struct SessionRow<'a> {
 /// inviting someone, while signup needs invitations.
 #[component]
 pub async fn user_search<'a>(
+    cx: &Cx,
     q: &'a str,
     rows: &'a [UserRow<'a>],
     pages: &'a Pager,
@@ -153,6 +155,7 @@ pub struct AccountPages<'a> {
 /// events, linking `all_events`.
 #[component]
 pub async fn user_page<'a>(
+    cx: &Cx,
     detail: &'a UserDetail,
     picture: Option<&'a str>,
     pages: Result<AccountPages<'a>, &'a str>,
@@ -232,6 +235,7 @@ pub async fn user_page<'a>(
 /// them all, or why the `pages` offer none.
 #[component]
 async fn session_list<'a>(
+    cx: &Cx,
     sessions: &'a [SessionRow<'a>],
     pages: Result<AccountPages<'a>, &'a str>,
 ) -> Result<impl View> {
@@ -283,6 +287,7 @@ async fn session_list<'a>(
 /// What may be done to `user`, by its `pages`, or why nothing may.
 #[component]
 async fn account_actions<'a>(
+    cx: &Cx,
     user: &'a User,
     pages: Result<AccountPages<'a>, &'a str>,
 ) -> Result<impl View> {
@@ -324,7 +329,7 @@ async fn account_actions<'a>(
 /// when each was added, never by name: a recovery's passkey was named by whoever
 /// used its link.
 #[component]
-async fn credentials<'a>(detail: &'a UserDetail) -> Result<impl View> {
+async fn credentials<'a>(cx: &Cx, detail: &'a UserDetail) -> Result<impl View> {
     Ok(view! {
         <section class="card">
             <header><h2>"Emails " <span class="count">(detail.emails.len().to_string())</span></h2></header>

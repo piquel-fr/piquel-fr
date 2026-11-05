@@ -62,7 +62,7 @@ impl AccountPage for Devices {
     ) -> Result<Response, Failure> {
         let sessions = web.account.sessions(&reader.viewer()).await?;
         let rows: Vec<_> = sessions.iter().map(DeviceRow::from).collect();
-        let page = Child::new(view! { cx =>
+        let page = Child::new(view! {
             piquel_ui::devices(page: settings::SESSIONS, rows: &rows, now: Utc::now())
         });
         web.settings_page(cx, Self::TAB, reader, outcome, &[], page)

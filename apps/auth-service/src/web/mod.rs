@@ -287,21 +287,25 @@ impl WebApplication {
     /// trailing-slash twin, and the redirect of auth's root to the settings.
     pub(crate) fn routes(self) -> axum::Router {
         let mut pages = Router::builder()
-            .app_context(self)
+            .with(self)
             // The security layer already accepts forms only from auth's own pages, by a
             // stricter rule: Topcoat's also takes `Sec-Fetch-Site: none`.
-            .origin_policy(OriginPolicy::dangerous_disable())
+            .with(OriginPolicy::dangerous_disable())
             // axum's body limit does not reach Topcoat, whose own default is 2 MiB.
-            .layer(BodyLimit::max(MAX_REQUEST_BODY_BYTES))
-            // An upload's image, and the rest of its form.
-            .layer(
-                BodyLimit::max(pictures::MAX_UPLOAD_BYTES + MAX_REQUEST_BODY_BYTES)
-                    .at(routes::page::settings::PROFILE),
-            );
+            .with(BodyLimit::max(MAX_REQUEST_BODY_BYTES));
         for (path, show, submit) in Self::pages() {
+            // An upload's image, and the rest of its form.
+            let submit = RouteFn::new(Method::POST, path, submit);
+            let submit = if path == routes::page::settings::PROFILE {
+                submit.with(BodyLimit::max(
+                    pictures::MAX_UPLOAD_BYTES + MAX_REQUEST_BODY_BYTES,
+                ))
+            } else {
+                submit
+            };
             pages = pages
                 .route(RouteFn::new(Method::GET, path, show))
-                .route(RouteFn::new(Method::POST, path, submit));
+                .route(submit);
         }
         let service = TowerService::new(pages.build());
         Self::pages()
@@ -334,7 +338,7 @@ impl WebApplication {
         title: &str,
         page: impl Future<Output = std::result::Result<Response, Failure>>,
     ) -> Result<Response> {
-        let web = topcoat::context::app_context::<Self>(cx);
+        let web = topcoat::context::context::<Self>(cx);
         let error = match page.await {
             Ok(response) => return Ok(response),
             Err(Failure::Explained { error, link }) => {
@@ -414,7 +418,7 @@ impl WebApplication {
     /// The page titled `title` linking to `target`, which leads `to` there. Following
     /// a link submits no form, so no `form-action` governs where it redirects.
     async fn link(&self, cx: &Cx, title: &str, target: &Url, to: Onward) -> Result<Response> {
-        let page = view! { cx => piquel_ui::onward(href: target.as_str(), to: to) };
+        let page = view! { piquel_ui::onward(href: target.as_str(), to: to) };
         self.render(cx, StatusCode::OK, title, &[], page).await
     }
 
@@ -465,7 +469,7 @@ impl WebApplication {
         page: impl View,
     ) -> Result<Response> {
         let page = Child::new(page);
-        let framed = view! { cx =>
+        let framed = view! {
             piquel_ui::auth_shell(
                 home: routes::page::settings::HOME,
                 reference: HttpTelemetry::trace_id(status),
@@ -497,7 +501,7 @@ impl WebApplication {
         let paths = EmbeddedAssets::SCRIPTS.map(|script| script.path());
         let scripts = &paths.each_ref().map(String::as_str);
         let preferences = BrowserCookie::read_preferences(headers(cx));
-        let html = view! { cx =>
+        let html = view! {
             piquel_ui::document(
                 title: title,
                 stylesheet: &stylesheet,
@@ -545,8 +549,7 @@ impl WebApplication {
     ) -> Result<Response> {
         let (status, code, description) = error.public();
         let description = status.is_client_error().then_some(description);
-        let page =
-            view! { cx => piquel_ui::failure(code: &code, description: description, link: link) };
+        let page = view! { piquel_ui::failure(code: &code, description: description, link: link) };
         self.render(cx, status, title, &[], page).await
     }
 }

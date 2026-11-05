@@ -14,6 +14,7 @@ use piquel_common::{PasskeyId, RecoveryId, SessionId};
 use serde::{Deserialize, Serialize};
 use topcoat::{
     Result,
+    context::Cx,
     view::{View, component, view},
 };
 
@@ -210,6 +211,7 @@ pub enum RecoverStep<'a> {
 /// never posts the link's form again.
 #[component]
 pub async fn recover<'a>(
+    cx: &Cx,
     action: &'a str,
     step: RecoverStep<'a>,
     #[default] alert: Option<&'a str>,
@@ -286,6 +288,7 @@ pub enum UndoStep<'a> {
 /// post to `action`, and `alert` says why the link's form was refused.
 #[component]
 pub async fn undo_recovery<'a>(
+    cx: &Cx,
     action: &'a str,
     step: UndoStep<'a>,
     #[default] alert: Option<&'a str>,
@@ -335,6 +338,7 @@ pub async fn undo_recovery<'a>(
 /// before it. Without one, only support can.
 #[component]
 async fn undoing<'a>(
+    cx: &Cx,
     action: &'a str,
     recovery: &'a Recovery,
     handle: Option<&'a str>,
@@ -398,7 +402,7 @@ async fn undoing<'a>(
 
 /// What a recovery's page shows when its link lacks what it names.
 #[component]
-async fn incomplete() -> Result<impl View> {
+async fn incomplete(cx: &Cx) -> Result<impl View> {
     Ok(view! {
         <h2>"This link is incomplete"</h2>
         <p>"Open it again from the email, or ask Piquel support for a new one."</p>
@@ -413,6 +417,7 @@ async fn incomplete() -> Result<impl View> {
 /// holds back meanwhile, and who can undo it.
 #[component]
 pub async fn recovery_banner<'a>(
+    cx: &Cx,
     recovery: &'a Recovery,
     session: SessionId,
     confirmed: bool,
@@ -449,6 +454,7 @@ pub async fn recovery_banner<'a>(
 /// not kept, so the account's pages still ask.
 #[component]
 pub async fn recovery_prompt<'a>(
+    cx: &Cx,
     recovery: &'a Recovery,
     continue_href: &'a str,
     undo: &'a str,

@@ -15,6 +15,7 @@ use piquel_common::{
 use serde::{Deserialize, Serialize};
 use topcoat::{
     Result,
+    context::Cx,
     view::{View, class, component, view},
 };
 
@@ -342,6 +343,7 @@ pub struct HistoryPage<'a> {
 /// owner reports.
 #[component]
 pub async fn history<'a>(
+    cx: &Cx,
     rows: &'a [HistoryRow<'a>],
     holds: Holdings<'a>,
     page: HistoryPage<'a>,
@@ -419,6 +421,7 @@ pub async fn history<'a>(
 /// overview shows them: each with its day and time.
 #[component]
 pub(crate) async fn activity_feed<'a>(
+    cx: &Cx,
     rows: &'a [HistoryRow<'a>],
     holds: &'a Holdings<'a>,
 ) -> Result<impl View> {
@@ -442,6 +445,7 @@ pub(crate) async fn activity_feed<'a>(
 /// it, whose confirmation goes back to `back` and takes the focus once open.
 #[component]
 async fn entry<'a>(
+    cx: &Cx,
     row: &'a HistoryRow<'a>,
     holds: &'a Holdings<'a>,
     page: &'a HistoryPage<'a>,

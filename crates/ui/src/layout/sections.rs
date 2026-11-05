@@ -7,6 +7,7 @@ use crate::{Messages, icons::Icon, settings::Tab};
 use piquel_common::TraceId;
 use topcoat::{
     Result,
+    context::Cx,
     view::{Child, View, component, view},
 };
 
@@ -72,6 +73,7 @@ pub struct AccountNav<'a> {
 /// `head`, such as an app's tabs, its `messages`, and the page as `child`.
 #[component]
 pub async fn account<'a>(
+    cx: &Cx,
     nav: AccountNav<'a>,
     who: Who<'a>,
     #[default] trail: &'a [(Crumb<'a>, &'a str)],
@@ -174,7 +176,7 @@ pub async fn account<'a>(
 /// What `section`'s pages show a browser that is not signed in: a link to sign
 /// in, at `sign_in`, which comes back to the page.
 #[component]
-pub async fn signed_out(section: Section, sign_in: &str) -> Result<impl View> {
+pub async fn signed_out(cx: &Cx, section: Section, sign_in: &str) -> Result<impl View> {
     let (title, why) = section.sign_in();
     Ok(view! {
         <h1>(title)</h1>

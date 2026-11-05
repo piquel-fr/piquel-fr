@@ -13,6 +13,7 @@ use crate::{
 use chrono::{DateTime, Utc};
 use topcoat::{
     Result,
+    context::Cx,
     view::{View, component, view},
 };
 
@@ -56,6 +57,7 @@ pub struct AccountOverview<'a> {
 /// and the devices signed in, linking the pages in `links`.
 #[component]
 pub async fn account_overview<'a>(
+    cx: &Cx,
     overview: AccountOverview<'a>,
     links: OverviewLinks<'a>,
 ) -> Result<impl View> {

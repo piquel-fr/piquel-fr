@@ -53,7 +53,7 @@ pub(super) async fn approve(cx: &Cx, form: Option<Form<ApproveOrigin>>) -> Resul
     let typed = refusal.as_ref().map(|refused| refused.form.origin.clone());
     let client =
         format!("Client {id}. Browsers honour at most {MAX_RELATED_ORIGIN_DOMAINS} domains.");
-    let page = view! { cx =>
+    let page = view! {
         piquel_ui::dashboard_change(
             change: Change::ApproveOrigin,
             back: back.as_str(),
@@ -84,7 +84,7 @@ pub(super) async fn remove(cx: &Cx, form: Option<Form<IgnoredAny>>) -> Result<Re
     })
     .await?;
     let which = format!("Client {id}, origin {origin}.");
-    let page = view! { cx =>
+    let page = view! {
         piquel_ui::dashboard_change(
             change: Change::RemoveOrigin,
             back: back.as_str(),

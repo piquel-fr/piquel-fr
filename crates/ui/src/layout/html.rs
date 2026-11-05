@@ -5,6 +5,7 @@ use crate::form::Fields;
 use serde::{Deserialize, Serialize};
 use topcoat::{
     Result,
+    context::Cx,
     view::{Child, View, component, view},
 };
 
@@ -128,6 +129,7 @@ pub struct PreferenceChange {
 /// by search engines.
 #[component]
 pub async fn document<'a>(
+    cx: &Cx,
     title: &'a str,
     stylesheet: &'a str,
     #[default] scripts: &'a [&'a str],

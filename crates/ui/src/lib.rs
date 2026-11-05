@@ -18,7 +18,7 @@
 //! # #[tokio::main(flavor = "current_thread")]
 //! # async fn main() -> topcoat::Result<()> {
 //! let cx = Cx::default();
-//! let html = view! { cx =>
+//! let html = view! {
 //!     piquel_ui::document(title: "Sign out", stylesheet: "/assets/style.css",
 //!         scripts: &["/assets/passkey.js"],
 //!         piquel_ui::auth_shell(home: "/settings", policies: piquel_ui::Policies::PATHS,

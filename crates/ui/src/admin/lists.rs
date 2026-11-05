@@ -12,6 +12,7 @@ use piquel_common::{
 };
 use topcoat::{
     Result,
+    context::Cx,
     view::{View, class, component, view},
 };
 
@@ -57,6 +58,7 @@ impl InvitationRow<'_> {
 /// Who administers Piquel, with the page granting rights at `grant`.
 #[component]
 pub async fn administrator_list<'a>(
+    cx: &Cx,
     rows: &'a [AdministratorRow<'a>],
     grant: &'a str,
 ) -> Result<impl View> {
@@ -100,6 +102,7 @@ pub async fn administrator_list<'a>(
 /// cannot sign in, gets none. `refusal` says why the last grant was refused.
 #[component]
 pub async fn grant_search<'a>(
+    cx: &Cx,
     action: &'a str,
     q: &'a str,
     rows: &'a [UserRow<'a>],
@@ -176,6 +179,7 @@ pub async fn grant_search<'a>(
 /// with no `rows`, that signup is open.
 #[component]
 pub async fn invitation_list<'a>(
+    cx: &Cx,
     #[into] rows: Option<&'a [InvitationRow<'a>]>,
     create: &'a str,
     now: DateTime<Utc>,
@@ -235,6 +239,7 @@ pub async fn invitation_list<'a>(
 /// back to `back`.
 #[component]
 pub async fn invitation_created<'a>(
+    cx: &Cx,
     link: &'a str,
     expires_at: DateTime<Utc>,
     back: &'a str,
