@@ -24,9 +24,10 @@ impl Command {
         let keys = store.start().await?;
         let router = config.router(database.clone(), &keys)?;
         let admin = match admin {
-            Some((listener, dashboard)) => {
-                Some((listener, config.admin_router(database.clone(), dashboard)?))
-            }
+            Some((listener, dashboard)) => Some((
+                listener,
+                config.admin_router(database.clone(), &keys, dashboard)?,
+            )),
             None => None,
         };
         database.observe_connections();

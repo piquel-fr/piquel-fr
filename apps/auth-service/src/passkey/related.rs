@@ -44,15 +44,29 @@ struct ClientData {
 
 impl PasskeyApplication {
     /// Lists the approved origins, which browsers fetch before letting their pages
-    /// use auth's RP ID.
+    /// use auth's RP ID, and the admin dashboard's, whose pages confirm with a
+    /// passkey. The dashboard's comes first: browsers read the origins of only
+    /// five domains. A dashboard origin that is no related origin, such as plain
+    /// HTTP in development, is left out: browsers would refuse it anyway.
     pub(super) async fn related_origins(
         State(app): State<Self>,
     ) -> Result<Cached<Json<RelatedOrigins>>, ApiError> {
-        let origins = app.database.oidc().related_origins().await?;
+        let approved = app.database.oidc().related_origins().await?;
+        let dashboard = app.dashboard.as_ref().and_then(|dashboard| {
+            dashboard
+                .as_url()
+                .origin()
+                .ascii_serialization()
+                .parse()
+                .ok()
+        });
         Ok(Cached(
             RELATED_ORIGINS_CACHE,
             Json(RelatedOrigins {
-                origins: origins.into_iter().map(|origin| origin.origin).collect(),
+                origins: dashboard
+                    .into_iter()
+                    .chain(approved.into_iter().map(|origin| origin.origin))
+                    .collect(),
             }),
         ))
     }
@@ -137,13 +151,14 @@ impl PasskeyApplication {
             return Err(PasskeyError::OriginNotApproved.into());
         }
         // The verifier also accepts auth's own origin, so the page's is checked here.
-        if let Err(error) = Self::signed_for(&input.credential, &origin) {
+        if let Err(error) = Self::signed_for(&input.credential, origin.url()) {
             return Err(app
                 .reject(context, Actor::Anonymous, None, error)
                 .await
                 .into());
         }
-        let webauthn = Self::webauthn(&app.origin, Some(&origin)).map_err(PasskeyError::from)?;
+        let webauthn =
+            Self::webauthn(&app.origin, Some(origin.url())).map_err(PasskeyError::from)?;
         let (user_id, verified) = app
             .verify(&webauthn, context, sign_in, &input.credential)
             .await?;
@@ -183,16 +198,16 @@ impl PasskeyApplication {
             .ok_or(PasskeyError::OriginNotApproved)
     }
 
-    /// Requires `credential`'s client data to name `origin`, compared as an origin
-    /// tuple: scheme, host and port.
-    fn signed_for(
+    /// Requires `credential`'s client data to name the origin of `origin`, compared
+    /// as an origin tuple: scheme, host and port.
+    pub(super) fn signed_for(
         credential: &PublicKeyCredential,
-        origin: &RelatedOrigin,
+        origin: &Url,
     ) -> Result<(), PasskeyError> {
         let data: ClientData =
             serde_json::from_slice(credential.response.client_data_json.as_ref())
                 .map_err(PasskeyError::ClientData)?;
-        if data.origin.origin() == origin.url().origin() {
+        if data.origin.origin() == origin.origin() {
             Ok(())
         } else {
             Err(PasskeyError::SignedForAnotherOrigin)

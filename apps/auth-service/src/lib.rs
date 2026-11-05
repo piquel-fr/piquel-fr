@@ -126,7 +126,7 @@ impl AuthConfig {
     pub fn router(&self, database: Database, keys: &SigningKeys) -> Result<Router, StartupError> {
         let oidc = OidcApplication::new(database.clone(), &self.oidc, keys.clone())?;
         let federation = FederationApplication::new(database.clone(), &self.federation)?;
-        let passkeys = PasskeyApplication::new(database.clone(), &self.passkey, oidc.clone())?;
+        let passkeys = self.passkeys(database.clone(), oidc.clone())?;
         let web = WebApplication::new(
             database.clone(),
             self,
@@ -160,21 +160,53 @@ impl AuthConfig {
             .wrap(protected))
     }
 
+    /// The passkey ceremonies over `database`, completing related origins'
+    /// sign-ins with `oidc`, for the dashboard too if auth serves one.
+    fn passkeys(
+        &self,
+        database: Database,
+        oidc: OidcApplication,
+    ) -> Result<PasskeyApplication, StartupError> {
+        let dashboard = self.dashboard.as_ref().map(|dashboard| &dashboard.origin);
+        Ok(PasskeyApplication::new(
+            database,
+            &self.passkey,
+            dashboard,
+            oidc,
+        )?)
+    }
+
+    /// The admin dashboard's passkey ceremonies over `database`: auth's, with an
+    /// OIDC application of their own, signing with `keys`.
+    pub(crate) fn dashboard_passkeys(
+        &self,
+        database: Database,
+        keys: &SigningKeys,
+    ) -> Result<PasskeyApplication, StartupError> {
+        let oidc = OidcApplication::new(database.clone(), &self.oidc, keys.clone())?;
+        self.passkeys(database, oidc)
+    }
+
     /// Builds the admin dashboard `dashboard` sets up, for the admin listener
     /// only, under that listener's own security layer: the dashboard's host and
     /// origin only, the same-origin rule for its forms, its own request budget,
     /// and the public listener's body limit and deadline. Its telemetry is
-    /// labelled `piquel.listener = "admin"`.
+    /// labelled `piquel.listener = "admin"`. Its passkey confirmations sign
+    /// nothing, but auth's passkey ceremonies, which they run, are built with
+    /// `keys`.
     ///
     /// # Errors
-    /// Fails when the dashboard's origin or policy cannot be sent in a header.
+    /// Fails when the dashboard's origin or policy cannot be sent in a header, or
+    /// its passkey ceremonies cannot initialize.
     pub fn admin_router(
         &self,
         database: Database,
+        keys: &SigningKeys,
         dashboard: &DashboardConfig,
     ) -> Result<Router, StartupError> {
         let policy = security::HttpSecurity::admin(self, database.clone(), &dashboard.origin)?;
-        let pages = AdminApplication::new(database, self, dashboard)?
+        let passkeys = self.dashboard_passkeys(database.clone(), keys)?;
+        let pages = AdminApplication::new(database, self, dashboard, passkeys)?
             .routes()
             .layer(DefaultBodyLimit::max(MAX_REQUEST_BODY_BYTES))
             .layer(middleware::from_fn_with_state(

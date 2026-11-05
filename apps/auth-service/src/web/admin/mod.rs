@@ -7,15 +7,20 @@
 //! The pages declare their own paths, under [`routes::dashboard::PREFIXES`], and
 //! the admin listener mounts them there, never as the fallback, so the listener's
 //! security layer gives each its request context and rate budget. Every answer
-//! carries the dashboard's Content-Security-Policy: no script, the stylesheet
-//! alone, and forms posting only to the dashboard, whose answer may go on to
-//! auth's handoff page.
+//! carries the dashboard's Content-Security-Policy: its own script and
+//! stylesheet alone, fetching from the dashboard only, and forms posting only to
+//! the dashboard, whose answer may go on to auth's handoff page.
 //!
 //! A browser without a dashboard session goes through auth's handoff page and
 //! back. A page that changes something needs the dashboard's own passkey
 //! confirmation, recent enough that the service still accepts it once the form
 //! is submitted; without one, it sends the browser to confirm on auth's handoff
-//! page, and back to the page.
+//! page, and back to the page. The dashboard's script spares the page that trip:
+//! before following a link to such a page or posting a change, as the frame says
+//! it must (see `piquel_ui::DashboardConfirmation`), it asks for a passkey in a
+//! dialog on the page itself, [`start_confirmation`] and [`finish_confirmation`]
+//! running the ceremony for the dashboard's origin, which auth lists as a related
+//! origin of its RP ID. Every page still works without it.
 
 /// The administrators.
 mod administrators;
@@ -53,6 +58,7 @@ use crate::{
     assets::EmbeddedAssets,
     config::{DashboardConfig, PolicyLinks},
     federation::ReturnTo,
+    passkey::{AuthenticationFinish, PasskeyApplication},
     recovery::RecoveryLinks,
     routes,
     security::{ApiError, BrowserCookie, RequestContext},
@@ -63,7 +69,9 @@ use piquel_common::{ClientId, ErrorChain, UserId, config::Origin};
 use piquel_crypto::{KeyEncryptionKey, NoteVerifier};
 use piquel_repository::Database;
 use piquel_telemetry::HttpTelemetry;
-use piquel_ui::{Crumb, Dashboard, DashboardTab, Health, PreferenceChange, Search, Who};
+use piquel_ui::{
+    Crumb, Dashboard, DashboardConfirmation, DashboardTab, Health, PreferenceChange, Search, Who,
+};
 use serde::Deserialize;
 use std::{
     future::Future,
@@ -75,7 +83,7 @@ use topcoat::{
     context::{Cx, app_context, memoize},
     router::{
         Body, BodyLimit, HeaderValue, Method, Next, OriginPolicy, Route, Router, StatusCode,
-        content::Form,
+        content::{Form, Json},
         error::see_other,
         header, href, layer, parse_query_params,
         request::{extensions, headers, method, uri},
@@ -103,6 +111,8 @@ pub(crate) struct AdminApplication {
     account: AccountService,
     /// Who is signed in, and signing in through auth.
     sign_in: DashboardSignIn,
+    /// The passkey ceremonies that confirm the dashboard on its own pages.
+    passkeys: PasskeyApplication,
     /// Auth's origin: invitations link its registration page, and the dashboard
     /// links the account's settings and signing out of Piquel.
     auth: Origin,
@@ -195,18 +205,25 @@ struct SignInQuery {
 
 impl AdminApplication {
     /// Builds the dashboard at `dashboard`'s origin over `database`, signing in
-    /// through auth's handoff page, as `config` sets auth up.
+    /// through auth's handoff page, as `config` sets auth up, and confirming with
+    /// `passkeys` on its own pages.
     pub(crate) fn new(
         database: Database,
         config: &AuthConfig,
         dashboard: &DashboardConfig,
+        passkeys: PasskeyApplication,
     ) -> Result<Self, InvalidHeaderValue> {
         let auth = config.passkey.origin.clone();
         // A form's answer may send the browser on to auth's handoff page, to sign
         // in or confirm again: browsers apply `form-action` to its redirects too.
+        // The script fetches only the passkey ceremonies of the dashboard's own.
         let policy = format!(
-            "default-src 'none'; style-src {}; font-src 'self'; form-action 'self' {}; \
-             frame-ancestors 'none'; base-uri 'none'",
+            "default-src 'none'; script-src {}; style-src {}; font-src 'self'; \
+             connect-src 'self'; form-action 'self' {}; frame-ancestors 'none'; \
+             base-uri 'none'",
+            dashboard
+                .origin
+                .join(&EmbeddedAssets::DASHBOARD_SCRIPT.path()),
             dashboard.origin.join(&EmbeddedAssets::STYLESHEET.path()),
             auth.join(routes::page::ADMIN),
         );
@@ -215,6 +232,7 @@ impl AdminApplication {
             account: AccountService::new(database.clone()),
             keys: KeyStore::new(database.clone(), Arc::clone(&config.key_encryption_key)),
             sign_in: DashboardSignIn::new(database, auth.clone(), dashboard.origin.clone()),
+            passkeys,
             auth,
             invitations: config.passkey.invite_required,
             links: config.email.recovery_links.clone(),
@@ -240,6 +258,8 @@ impl AdminApplication {
             .route(overview::overview)
             .route(preferences)
             .route(sign_in)
+            .route(start_confirmation)
+            .route(finish_confirmation)
             .route(sign_out)
             // The settings administrators share with owners, the account
             // service's operations.
@@ -266,8 +286,12 @@ impl AdminApplication {
                         }
                     }
                 });
-        // The stylesheet and the fonts it links, the dashboard's only files.
-        EmbeddedAssets::SHARED.iter().fold(router, |router, asset| {
+        // The stylesheet, the fonts it links and the script, the dashboard's
+        // only files.
+        let assets = EmbeddedAssets::SHARED
+            .iter()
+            .chain([&EmbeddedAssets::DASHBOARD_SCRIPT]);
+        assets.fold(router, |router, asset| {
             router.route(
                 &asset.path(),
                 axum::routing::get(|uri: axum::http::Uri| {
@@ -452,6 +476,14 @@ impl AdminApplication {
                 }))),
             },
         }
+    }
+
+    /// The answer of a JSON route the dashboard's script calls: `answered`, or its
+    /// refusal in JSON, as auth's own JSON routes answer.
+    fn json(answered: Result<axum::response::Response, ApiError>) -> Response {
+        answered
+            .unwrap_or_else(axum::response::IntoResponse::into_response)
+            .map(Body::new)
     }
 
     /// Like [`Self::change`], then goes to `done` once the change is made.
@@ -662,12 +694,17 @@ impl AdminApplication {
             .iter()
             .map(|(tab, link)| (*tab, link.as_str()))
             .collect();
-        let (stylesheet, home, leave, search, prefer) = (
+        let (stylesheet, script, home, leave, search, prefer) = (
             &EmbeddedAssets::STYLESHEET.path(),
+            &EmbeddedAssets::DASHBOARD_SCRIPT.path(),
             &tabs[0].1,
             &href!(sign_out).resolve(cx),
             &href!(users::search).resolve(cx),
             &href!(preferences).resolve(cx),
+        );
+        let (start, finish) = (
+            &href!(start_confirmation).resolve(cx),
+            &href!(finish_confirmation).resolve(cx),
         );
         // The preference forms come back here by GET, which a page answering a
         // POST cannot show again, so those come back to the overview.
@@ -714,12 +751,19 @@ impl AdminApplication {
                 value: &searched,
             },
             reference: HttpTelemetry::trace_id(status),
+            confirmation: admin.map(|admin| DashboardConfirmation {
+                start,
+                finish,
+                left: admin.operator.confirmation_left().num_seconds(),
+                form_time: FORM_TIME.num_seconds(),
+            }),
         };
         let page = Child::new(page);
         let html = view! { cx =>
             piquel_ui::document(
                 title: title.as_str(),
                 stylesheet: stylesheet,
+                script: script.as_str(),
                 preferences: dashboard.preferences,
                 admin: true,
                 piquel_ui::dashboard_frame(dashboard: &dashboard, (page))
@@ -844,6 +888,48 @@ async fn sign_in(cx: &Cx) -> Result<Response> {
         }
         Err(error) => Err(error.into()),
     }
+}
+
+/// `POST /confirm/start`: starts the passkey ceremony the dashboard's script runs,
+/// in its dialog, to confirm the dashboard on the page itself, for the auth
+/// session it rests on. It answers as auth's own ceremonies do, in JSON.
+#[route(POST "/confirm/start")]
+async fn start_confirmation(cx: &Cx) -> Result<Response> {
+    let admin = AdminApplication::admin(cx).await?;
+    let app = AdminApplication::of(cx);
+    let started = app
+        .passkeys
+        .start_proof(headers(cx), admin.user_id, admin.session_id)
+        .await;
+    Ok(AdminApplication::json(started))
+}
+
+/// `POST /confirm/finish`: verifies the passkey assertion the dashboard's script
+/// posts, signed for the dashboard's origin in the ceremony
+/// [`start_confirmation`] started, and confirms the dashboard's session with it.
+/// The script then goes on to the change it was for.
+#[route(POST "/confirm/finish")]
+async fn finish_confirmation(cx: &Cx, Json(input): Json<AuthenticationFinish>) -> Result<Response> {
+    let admin = AdminApplication::admin(cx).await?;
+    let app = AdminApplication::of(cx);
+    let context = RequestContext::of(extensions(cx))?;
+    let confirmed = async {
+        let proof = app
+            .passkeys
+            .verify_dashboard_proof(
+                headers(cx),
+                context,
+                admin.user_id,
+                admin.session_id,
+                &input,
+            )
+            .await?;
+        app.sign_in.confirm(headers(cx), &proof).await?;
+        Ok(axum::response::IntoResponse::into_response(
+            StatusCode::NO_CONTENT,
+        ))
+    };
+    Ok(AdminApplication::json(confirmed.await))
 }
 
 /// `/sign-out`: ends the dashboard's session, by `POST`, then says so, by `GET`.

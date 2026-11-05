@@ -153,13 +153,17 @@ pub(crate) mod oidc {
 pub(crate) mod dashboard {
     /// Redeems auth's handoff code, signing the browser in to the dashboard.
     pub(crate) const SIGN_IN: &str = "/sign-in";
+    /// The passkey ceremony the dashboard's script runs, under `/start` and
+    /// `/finish`, to confirm the dashboard on its own page.
+    pub(crate) const CONFIRM: &str = "/confirm";
     /// Keeps the theme and sidebar preferences a page's forms post, in cookies.
     pub(crate) const PREFERENCES: &str = "/preferences";
     /// Every path the dashboard serves is one of these, or under one: the admin
     /// listener mounts the pages on them, and nowhere else.
-    pub(crate) const PREFIXES: [&str; 14] = [
+    pub(crate) const PREFIXES: [&str; 15] = [
         "/",
         SIGN_IN,
+        CONFIRM,
         "/sign-out",
         PREFERENCES,
         "/assets",

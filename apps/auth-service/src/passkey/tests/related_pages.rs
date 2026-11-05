@@ -2,6 +2,7 @@
 
 use super::*;
 use crate::tests::{change, register};
+use piquel_common::clients::RelatedOrigin;
 
 /// PKCE verifier of the pushed requests related pages complete.
 const PAGE_VERIFIER: &str = "related-page-verifier-0123456789-abcdefghijklmnop";

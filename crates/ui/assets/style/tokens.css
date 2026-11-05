@@ -3,7 +3,7 @@
    set applies when the browser prefers it, unless the page chose a theme. The
    admin dashboard's pages swap the brand marks for red, and keep the accent of
    links and buttons, so red there always means an administrator or a loss.
-   Every rule works without scripts: the dashboard loads none. */
+   Every rule works without scripts. */
 
 /* Tokens: light. */
 :root {

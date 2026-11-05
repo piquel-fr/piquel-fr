@@ -1,5 +1,6 @@
 //! Browser-bound `WebAuthn` ceremonies, passkey management and session confirmation,
-//! and passkey sign-in on the pages of approved related origins.
+//! passkey sign-in on the pages of approved related origins, and the admin
+//! dashboard's own passkey confirmation, on its origin.
 use crate::account::AccountService;
 use crate::config::PasskeyConfig;
 use crate::oidc::OidcApplication;
@@ -13,7 +14,6 @@ use axum::{
 };
 use piquel_common::{
     PasskeyId, UserId,
-    clients::RelatedOrigin,
     config::Origin,
     events::{DomainEvent, EventContext},
 };
@@ -22,6 +22,7 @@ use piquel_repository::{
     Database, DatabaseError, DatabaseTransaction, InsertPasskey, StoredPasskey,
 };
 use std::sync::Arc;
+use url::Url;
 use webauthn_rs::{Webauthn, WebauthnBuilder, prelude::*};
 use webauthn_rs_proto::ResidentKeyRequirement;
 
@@ -29,7 +30,7 @@ use webauthn_rs_proto::ResidentKeyRequirement;
 mod acceptance;
 /// Typed challenge payloads and browser binding.
 mod ceremonies;
-/// Proofs a signed-in session gives: confirmation, admin handoffs and enrollment.
+/// Proofs a signed-in session gives: confirmation, the admin dashboard's, and enrollment.
 mod confirmation;
 /// Passkey failures and their browser response mapping.
 mod error;
@@ -49,7 +50,7 @@ pub use error::PasskeyConfigError;
 pub(crate) use error::PasskeyError;
 pub(crate) use recovery::VerifiedRecoveryUndo;
 use types::PasskeyKind;
-pub(crate) use types::{DisplayName, PasskeyName, Rename};
+pub(crate) use types::{AuthenticationFinish, DisplayName, PasskeyName, Rename};
 
 /// Browser passkey ceremonies, passkey management and session confirmation.
 #[derive(Clone)]
@@ -62,6 +63,9 @@ pub struct PasskeyApplication {
     webauthn: Arc<Webauthn>,
     /// Completes the authorization requests of related origins' sign-ins.
     oidc: OidcApplication,
+    /// The admin dashboard's origin, if auth serves one: a related origin whose
+    /// pages confirm the dashboard with a passkey.
+    dashboard: Option<Origin>,
     /// Whether ordinary registration needs an invitation.
     invite_required: bool,
 }
@@ -73,10 +77,13 @@ const ANDROID_USER_AGENT: &str = "Android";
 
 impl PasskeyApplication {
     /// Builds `WebAuthn` from the already validated origin and admission policy.
-    /// `oidc` completes the authorization requests of related origins' sign-ins.
+    /// `oidc` completes the authorization requests of related origins' sign-ins,
+    /// and the admin dashboard at `dashboard`, if auth serves one, confirms with
+    /// passkeys on its own pages.
     pub(crate) fn new(
         database: Database,
         config: &PasskeyConfig,
+        dashboard: Option<&Origin>,
         oidc: OidcApplication,
     ) -> Result<Self, PasskeyConfigError> {
         Ok(Self {
@@ -84,20 +91,18 @@ impl PasskeyApplication {
             webauthn: Arc::new(Self::webauthn(&config.origin, None)?),
             origin: config.origin.clone(),
             oidc,
+            dashboard: dashboard.cloned(),
             invite_required: config.invite_required,
         })
     }
 
     /// A verifier for auth's RP ID that accepts assertions signed for `origin`, and
-    /// for `related` too when given.
-    fn webauthn(
-        origin: &Origin,
-        related: Option<&RelatedOrigin>,
-    ) -> Result<Webauthn, WebauthnError> {
+    /// for the origin of `related` too when given.
+    fn webauthn(origin: &Origin, related: Option<&Url>) -> Result<Webauthn, WebauthnError> {
         let mut builder =
             WebauthnBuilder::new(origin.host(), origin.as_url())?.rp_name(RELYING_PARTY_NAME);
         if let Some(related) = related {
-            builder = builder.append_allowed_origin(related.url());
+            builder = builder.append_allowed_origin(related);
         }
         builder.build()
     }

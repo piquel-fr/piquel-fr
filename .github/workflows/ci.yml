@@ -226,11 +226,14 @@ jobs:
       # The suite runs serially from one address, and spends in a minute what a
       # person would in an hour.
       AUTH_REQUESTS_PER_MINUTE: '1000'
-      # The dashboard on its own host, as admin.piquel.fr is: browsers resolve
-      # `*.localhost` to the loopback address.
+      # The dashboard on an origin of its own, as admin.piquel.fr is, on another
+      # port of auth's host: its passkey dialog may use auth's RP ID there, which
+      # admin.piquel.fr does through auth's related origins. Browsers fetch those
+      # from the RP ID on port 443, which CI does not serve. Cookies ignore the
+      # port, so here the dashboard and auth share them; previews keep them apart.
       AUTH_ADMIN_LISTENER: 127.0.0.1:3001
-      AUTH_ADMIN_ORIGIN: https://admin.localhost:3443
-      E2E_ADMIN_URL: https://admin.localhost:3443
+      AUTH_ADMIN_ORIGIN: https://localhost:3444
+      E2E_ADMIN_URL: https://localhost:3444
       E2E_GRANT_ADMIN: target/debug/auth-service admin grant
       E2E_RECOVER: target/debug/auth-service user recover
       # The secret `just web browser-client` registers for the example app of
@@ -273,7 +276,7 @@ jobs:
           localhost:3443 {
             reverse_proxy 127.0.0.1:3000
           }
-          admin.localhost:3443 {
+          localhost:3444 {
             reverse_proxy 127.0.0.1:3001
           }
           web.localhost:3443 {

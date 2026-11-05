@@ -1,0 +1,16 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE dashboard_sessions SET confirmed_at = $3\n                WHERE secret_digest = $1 AND session_id = $2",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Bytea",
+        "Uuid",
+        "Timestamptz"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "b76a57f0a637d0ca871dce0369637df4e4a7c9991b168a0cec74bef38d4baf3b"
+}

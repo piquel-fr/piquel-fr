@@ -68,9 +68,9 @@ The network path is a second wall, not the authorization.
 The admin listener has a security layer of its own. It answers only requests that
 name the dashboard's host, takes a form only from the dashboard's own pages (the
 same-origin rule auth's pages follow), spends a request budget of its own, and
-limits bodies to 64 KiB. Every page loads no script and only the stylesheet, and
-its forms post only to the dashboard, whose answer may go on to auth's handoff
-page.
+limits bodies to 64 KiB. Every page loads only the stylesheet and the dashboard's
+own script, which its Content-Security-Policy names alone, and its forms post only
+to the dashboard, whose answer may go on to auth's handoff page.
 
 The dashboard is no OIDC client. An administrator signs in by a handoff from auth:
 
@@ -98,6 +98,19 @@ confirmation stays as it was. Once confirmed, a short change such as revoking a
 session confirms in a dialog on the list page itself, which the browser opens
 and closes with no script (`popovertarget`), posting to the change's own page;
 a dashboard not confirmed yet links that page instead, which confirms first.
+
+The dashboard's script spares the browser that trip: before following a link to a
+page that confirms first, or posting a change once the confirmation is too old, it
+asks for a passkey in a dialog on the page, then goes on to the change. Each page's
+frame says how long its confirmation lasts. The dialog runs the ceremony for auth's
+RP ID on the dashboard's own origin, which auth's `/.well-known/webauthn` lists as
+a related origin (`WebAuthn` Level 3 §5.11), against the dashboard's `/confirm`
+routes. The proof is the handoff's kind: started by the dashboard session's auth
+session, bound to the browser, signed for the dashboard's origin, which the
+handoff refuses, and kept as the dashboard's confirmation only. Without the
+script, or in a browser without related origins, the browser goes to the handoff
+page and back as before.
+
 Lists page by number, with their totals, as the CLI's `--page` does.
 
 Administrators manage the administrator list too, but never their own rights or

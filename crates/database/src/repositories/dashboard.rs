@@ -163,6 +163,34 @@ impl DashboardRepository<'_> {
         Ok(())
     }
 
+    /// Records that a passkey confirmed the dashboard session with this cookie
+    /// digest at `confirmed_at`, if it still rests on the auth session
+    /// `session_id`. Returns `false` if it does not, or there is none.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`DatabaseError`] if the update fails.
+    pub async fn confirm_session(
+        &mut self,
+        secret_digest: &[u8],
+        session_id: SessionId,
+        confirmed_at: DateTime<Utc>,
+    ) -> Result<bool, DatabaseError> {
+        Ok(run!(
+            self,
+            execute,
+            sqlx::query!(
+                "UPDATE dashboard_sessions SET confirmed_at = $3
+                WHERE secret_digest = $1 AND session_id = $2",
+                secret_digest,
+                session_id.as_uuid(),
+                confirmed_at,
+            )
+        )?
+        .rows_affected()
+            == 1)
+    }
+
     /// The dashboard session with this cookie digest, if its auth session is still
     /// active: signing out, a revocation or an expiry of the auth session ends it.
     ///

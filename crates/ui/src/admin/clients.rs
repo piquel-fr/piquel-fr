@@ -248,7 +248,7 @@ pub async fn client_list<'a>(rows: &'a [AdminClientRow<'a>], new: &'a str) -> Re
             title: "Clients",
             lead: "Applications that sign users in with Piquel.".to_owned(),
             actions: view! {
-                <a class="button" href=(new)>"Register a client"</a>
+                <a data-confirm-first="" class="button" href=(new)>"Register a client"</a>
             },
         )
         <section class="card">
@@ -346,7 +346,7 @@ pub async fn client_page<'a>(page: &'a ClientPage<'a>, now: DateTime<Utc>) -> Re
                 <header>
                     <h2 id="secrets-heading">"Client secrets " <span class="count">(page.secrets.len().to_string())</span></h2>
                     if let Some(rotate) = page.changes.as_ref().and_then(|changes| changes.secret.as_deref()) {
-                        <a class="button secondary small" href=(rotate)>"Rotate the secret"</a>
+                        <a data-confirm-first="" class="button secondary small" href=(rotate)>"Rotate the secret"</a>
                     }
                 </header>
                 secrets_list(secrets: page.secrets, now: now)
@@ -356,7 +356,7 @@ pub async fn client_page<'a>(page: &'a ClientPage<'a>, now: DateTime<Utc>) -> Re
             <header>
                 <h2 id="origins-heading">"Passkey sign-in"</h2>
                 if let Ok(href) = &page.approve {
-                    <a class="button secondary small" href=(href.as_str())>(Change::ApproveOrigin.title())</a>
+                    <a data-confirm-first="" class="button secondary small" href=(href.as_str())>(Change::ApproveOrigin.title())</a>
                 }
             </header>
             <div class="body">
@@ -372,7 +372,7 @@ pub async fn client_page<'a>(page: &'a ClientPage<'a>, now: DateTime<Utc>) -> Re
                     for (origin, remove) in &page.origins {
                         <li>
                             <div class="text"><code>(*origin)</code></div>
-                            <a class="button secondary small" href=(remove.as_str()) aria-label=(format!("Remove {origin}"))>"Remove"</a>
+                            <a data-confirm-first="" class="button secondary small" href=(remove.as_str()) aria-label=(format!("Remove {origin}"))>"Remove"</a>
                         </li>
                     }
                 </ul>
@@ -480,7 +480,7 @@ async fn client_actions<'a>(
 ) -> Result<impl View> {
     Ok(view! {
         <div class="row actions">
-            <a class="button secondary small" href=(changes.settings.as_str())>"Edit settings"</a>
+            <a data-confirm-first="" class="button secondary small" href=(changes.settings.as_str())>"Edit settings"</a>
             match &changes.status {
                 Some(action) if client.status == ClientStatus::Enabled => confirm(action: action, change: Change::DisableClient),
                 Some(action) => confirm(action: action, change: Change::EnableClient),

@@ -120,7 +120,7 @@ pub struct PreferenceChange {
 }
 
 /// The document around every page: the head, which links `stylesheet` and loads
-/// the passkey `script`, if the page has one, and the page as `child`. `title`
+/// the page's `script`, if it has one, and the page as `child`. `title`
 /// names the page in the browser, before "· Piquel". The browser's `preferences`
 /// set the theme and the sidebar's width on the root, where the stylesheet reads
 /// them, and an `admin` page is marked so the stylesheet colours it as the

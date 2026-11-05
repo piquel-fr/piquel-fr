@@ -147,8 +147,8 @@ impl Flow {
             )),
         )
         .expect("OIDC application");
-        let passkeys =
-            PasskeyApplication::new(db.clone(), &config.passkey, app.clone()).expect("passkeys");
+        let passkeys = PasskeyApplication::new(db.clone(), &config.passkey, None, app.clone())
+            .expect("passkeys");
         Self {
             router: WebApplication::new(db, &config, app.clone(), federation, passkeys)
                 .routes()

@@ -127,15 +127,18 @@ impl Operator {
     /// requirement `ahead` from now, so that a form shown now can still be
     /// submitted. The terminal needs none.
     pub(crate) fn is_confirmed(&self, ahead: Duration) -> bool {
+        self.confirmation_left() >= ahead
+    }
+
+    /// How much longer the operator's passkey confirmation meets a mutation's
+    /// requirement: less than zero once it ended, and the least there is without
+    /// one. The terminal's never ends.
+    pub(crate) fn confirmation_left(&self) -> Duration {
         match self {
-            Self::Admin(session) => RECENT_PASSKEY
-                .check(
-                    Some(&Acr::PhishingResistant),
-                    session.confirmed_at,
-                    Utc::now() + ahead,
-                )
-                .is_ok(),
-            Self::Cli { .. } => true,
+            Self::Admin(session) => session.confirmed_at.map_or(Duration::MIN, |at| {
+                at + Duration::seconds(CONFIRMATION_MAX_AGE.into()) - Utc::now()
+            }),
+            Self::Cli { .. } => Duration::MAX,
         }
     }
 

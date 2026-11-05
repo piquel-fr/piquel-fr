@@ -71,7 +71,7 @@ pub async fn user_search<'a>(
             lead: lead,
             actions: view! {
                 if let Some(invite) = invite {
-                    <a class="button secondary" href=(invite)>"Invite someone"</a>
+                    <a data-confirm-first="" class="button secondary" href=(invite)>"Invite someone"</a>
                 }
             },
         )
@@ -294,14 +294,14 @@ async fn account_actions<'a>(
                             confirm(action: pages.status, change: Change::Restore)
                         },
                     }
-                    <a class="button secondary small" href=(pages.recover)>"Recover"</a>
-                    <a class="button secondary small" href=(pages.undo_recovery)>"Undo recovery"</a>
-                    <a class="button secondary small" href=(pages.sign_in)>"Sign-in methods"</a>
-                    <a class="button secondary small" href=(pages.emails)>"Email addresses"</a>
-                    <a class="button secondary small" href=(pages.apps)>"Connected apps"</a>
+                    <a data-confirm-first="" class="button secondary small" href=(pages.recover)>"Recover"</a>
+                    <a data-confirm-first="" class="button secondary small" href=(pages.undo_recovery)>"Undo recovery"</a>
+                    <a data-confirm-first="" class="button secondary small" href=(pages.sign_in)>"Sign-in methods"</a>
+                    <a data-confirm-first="" class="button secondary small" href=(pages.emails)>"Email addresses"</a>
+                    <a data-confirm-first="" class="button secondary small" href=(pages.apps)>"Connected apps"</a>
                     <a class="button secondary small" href=(pages.history)>"Security history"</a>
-                    <a class="button secondary small" href=(pages.handle)>"Change handle"</a>
-                    <a class="button secondary small" href=(pages.display_name)>"Change display name"</a>
+                    <a data-confirm-first="" class="button secondary small" href=(pages.handle)>"Change handle"</a>
+                    <a data-confirm-first="" class="button secondary small" href=(pages.display_name)>"Change display name"</a>
                 },
                 Err(reason) => {
                     refused_action(label: "Change", reason: reason)
