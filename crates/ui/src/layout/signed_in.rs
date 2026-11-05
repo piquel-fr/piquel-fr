@@ -4,13 +4,16 @@
 
 use super::{Health, Policies, Preferences, Sidebar, frames::status_bar};
 use crate::{
+    browser::Browser,
     clients::copyable,
+    form::post_form,
     icons::{Icon, icon},
 };
 use piquel_common::{TraceId, UserId};
 use topcoat::{
     Result,
     context::Cx,
+    runtime::Event,
     view::{Child, View, class, component, view},
 };
 
@@ -216,12 +219,14 @@ async fn sidebar<'a>(cx: &Cx, frame: &'a Shell<'a>) -> Result<impl View> {
                     icon(kind: Icon::Close)
                 </label>
             </div>
-            for group in frame.groups {
+            #[key(position)]
+            for (position, group) in frame.groups.into_iter().enumerate() {
                 if let Some(label) = group.label {
                     <div class="group">(label)</div>
                 }
                 <nav aria-label=(group.label.unwrap_or(frame.area))>
-                    for item in group.items {
+                    #[key(position)]
+                    for (position, item) in group.items.into_iter().enumerate() {
                         <a
                             href=(item.href)
                             title=(item.label)
@@ -239,19 +244,26 @@ async fn sidebar<'a>(cx: &Cx, frame: &'a Shell<'a>) -> Result<impl View> {
             <div class="end">
                 theme_toggle(action: frame.preferences_action, here: frame.here)
                 if let Some(sign_out) = frame.sign_out {
-                    <form method="post" action=(sign_out) data-submit-once="">
+                    post_form(action: sign_out,
                         <button type="submit" title="Sign out">
                             icon(kind: Icon::SignOut)
                             <span class="label">"Sign out"</span>
                         </button>
-                    </form>
+                    )
                 }
                 if let Some(who) = frame.who {
+                    // The account's passkeys show its current handle and name in the
+                    // browser's password manager, after a change.
+                    let signal = who.user.map(|user| {
+                        Browser::signal_account(&user.to_string(), who.handle, who.name)
+                    });
                     <div
                         class="who"
-                        data-passkey-user=(who.user.map(|user| user.to_string()))
-                        data-passkey-name=(who.user.map(|_| who.handle))
-                        data-passkey-display-name=(who.user.map(|_| who.name))
+                        if let Some(signal) = signal {
+                            @mount=$(|_e: Event| {
+                                let _signalled = signal;
+                            })
+                        }
                     >
                         avatar(who: who)
                         <div>
@@ -277,7 +289,8 @@ async fn topbar<'a>(cx: &Cx, frame: &'a Shell<'a>) -> Result<impl View> {
             <div class="crumb">
                 <a href=(frame.area_home)>(frame.area.to_lowercase())</a>
                 <span aria-hidden="true">"/"</span>
-                for (name, href) in frame.trail {
+                #[key(position)]
+                for (position, (name, href)) in frame.trail.into_iter().enumerate() {
                     <a href=(*href)>(name.text())</a>
                     <span aria-hidden="true">"/"</span>
                 }

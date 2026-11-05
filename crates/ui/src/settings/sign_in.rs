@@ -135,7 +135,8 @@ async fn passkey_list<'a>(
                 <h2 id="passkeys-heading">"Passkeys " <span class="count">(count.to_string())</span></h2>
             </header>
             <ul class="list">
-                for passkey in passkeys {
+                #[key(position)]
+                for (position, passkey) in passkeys.into_iter().enumerate() {
                     let recovered = added == Some(passkey.id);
                     passkey_row(
                         page: page,
@@ -316,7 +317,8 @@ async fn social<'a>(
                 </h2>
             </header>
             <ul class="list">
-                for row in providers {
+                #[key(position)]
+                for (position, row) in providers.into_iter().enumerate() {
                     provider_row(
                         page: page,
                         row: *row,

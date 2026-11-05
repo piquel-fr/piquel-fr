@@ -3,14 +3,60 @@
 
 use crate::{
     Alert, Messages,
+    browser::Browser,
     icons::{Icon, icon},
 };
 use piquel_common::admin::Paging;
 use topcoat::{
     Result,
     context::Cx,
+    runtime::{Event, Expr, Signal, expr, signal},
     view::{Child, View, component, view},
 };
+
+/// Something a page offers until this browser dismisses it, by its key: it starts
+/// hidden, and shows unless dismissed. Where the browser keeps no local storage,
+/// it shows on every page, and dismissing it hides it on that page only.
+pub(crate) struct Dismissal {
+    /// The key this browser keeps it dismissed under.
+    key: String,
+    /// Whether it shows.
+    shown: Signal<bool>,
+}
+
+impl Dismissal {
+    /// The one dismissed under `key`.
+    pub(crate) fn new(cx: &Cx, key: String) -> Self {
+        Self {
+            key,
+            shown: signal(cx, || false),
+        }
+    }
+
+    /// Its `@mount` handler, which shows it unless this browser dismissed it.
+    pub(crate) fn mount(&self) -> Expr<impl FnOnce(Event) + use<>> {
+        let (shown, dismissed) = (self.shown.clone(), Browser::dismissed(&self.key));
+        expr!(|_e: Event| shown.set(!dismissed))
+    }
+
+    /// Whether it is hidden.
+    pub(crate) fn hidden(&self) -> Expr<bool> {
+        let shown = self.shown.clone();
+        expr!(!shown.get())
+    }
+
+    /// The `@click` handler of the button dismissing it, which hides it from then
+    /// on. Hiding it takes the focus from the button, so the page's heading gets it.
+    pub(crate) fn dismiss(&self) -> Expr<impl FnOnce(Event) + use<>> {
+        let shown = self.shown.clone();
+        let (focus, dismiss) = (Browser::focus_heading(), Browser::dismiss(&self.key));
+        expr!(|_e: Event| {
+            let _focused = focus;
+            shown.set(false);
+            let _dismissed = dismiss;
+        })
+    }
+}
 
 /// Something a navigation links, by its label.
 pub(crate) trait Label: Copy + PartialEq + Send + Sync + 'static {
@@ -22,7 +68,7 @@ pub(crate) trait Label: Copy + PartialEq + Send + Sync + 'static {
     fn label(self) -> &'static str;
 
     /// Whether its page needs the dashboard's passkey confirmation, so the
-    /// dashboard's script confirms before following its link.
+    /// dashboard confirms before following its link.
     fn confirms_first(self) -> bool {
         false
     }
@@ -217,7 +263,8 @@ pub(crate) async fn navigation<'a, T: Label>(
 ) -> Result<impl View> {
     Ok(view! {
         <nav class=(class) aria-label=(label)>
-            for (link, href) in links {
+            #[key(position)]
+            for (position, (link, href)) in links.into_iter().enumerate() {
                 <a href=(*href) aria-current=((*link == current).then_some(T::CURRENT)) data-confirm-first=(link.confirms_first())>(link.label())</a>
             }
         </nav>

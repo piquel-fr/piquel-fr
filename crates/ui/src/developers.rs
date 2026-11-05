@@ -266,7 +266,8 @@ pub async fn apps<'a>(
                 <h2 id="apps-heading">"Apps " <span class="count">(format!("{count} / {limit}"))</span></h2>
             </header>
             <ul class="list">
-                for app in links {
+                #[key(position)]
+                for (position, app) in links.into_iter().enumerate() {
                     <li>
                         <div class="text">
                             <a href=(app.page.as_str())><strong>(app.client.name)</strong></a>

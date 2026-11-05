@@ -2,6 +2,7 @@
 //! cannot go on.
 
 use crate::{
+    form::post_form,
     icons::{Icon, icon},
     login::switch_account,
 };
@@ -52,7 +53,8 @@ pub async fn consent<'a>(
         <section class="card" aria-labelledby="access-heading">
             <header><h2 id="access-heading">(format!("{client} will receive"))</h2></header>
             <ul class="list">
-                for scope in scopes {
+                #[key(position)]
+                for (position, scope) in scopes.into_iter().enumerate() {
                     <li>icon(kind: Icon::Check)<span class="text">(scope_label(scope))</span></li>
                 }
             </ul>
@@ -60,11 +62,11 @@ pub async fn consent<'a>(
         <p class="help">
             (format!("{client} cannot see your passkeys or change your account. You can remove its access at any time from your connected apps."))
         </p>
-        <form method="post" action=(action) data-submit-once="">
+        post_form(action: action,
             <input type="hidden" name="transaction" value=(transaction)>
             <button name="decision" value="approve">"Continue"</button>
             <button class="secondary" name="decision" value="deny">"Cancel"</button>
-        </form>
+        )
         <footer>
             <p class="help">(format!("Signed in as @{account}."))</p>
             switch_account(action: sign_in, label: "Not you? Switch account", class: "text-button")
@@ -100,7 +102,8 @@ pub async fn logout<'a>(
             <p class="lead">"This will end your Piquel sign-in session in this browser."</p>
         </div>
         <form method="post" action=(action)>
-            for (name, value) in fields {
+            #[key(position)]
+            for (position, (name, value)) in fields.into_iter().enumerate() {
                 <input type="hidden" name=(*name) value=(*value)>
             }
             <button>"Sign out"</button>

@@ -393,11 +393,13 @@ pub async fn history<'a>(
                 }
             </div>
         }
-        for (day, entries) in HistoryRow::days(rows) {
+        #[key(position)]
+        for (position, (day, entries)) in HistoryRow::days(rows).into_iter().enumerate() {
             <section class="card" aria-label=(day.as_str())>
                 <header><h2>(day.as_str())</h2></header>
                 <ul class="events">
-                    for row in entries {
+                    #[key(position)]
+                    for (position, row) in entries.into_iter().enumerate() {
                         entry(row: row, holds: &holds, page: &page, back: back.as_str())
                     }
                 </ul>
@@ -427,7 +429,8 @@ pub(crate) async fn activity_feed<'a>(
 ) -> Result<impl View> {
     Ok(view! {
         <ul class="events">
-            for row in rows {
+            #[key(position)]
+            for (position, row) in rows.into_iter().enumerate() {
                 <li>
                     time(at: row.occurred_at, precision: Precision::Minute)
                     <span class=(class!("dot", "warning" if row.worrying(), "ok" if !row.worrying()))></span>

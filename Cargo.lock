@@ -1593,6 +1593,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "inventory"
+version = "0.3.25"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "6928282826c822ad91bf1c9a1cb90a30ba1c26770749929b4656cd6be829cd7c"
+dependencies = [
+ "rustversion",
+]
+
+[[package]]
 name = "ipnet"
 version = "2.12.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3624,16 +3633,19 @@ version = "0.11.0"
 dependencies = [
  "serde",
  "topcoat-asset",
+ "topcoat-asset-macro",
  "topcoat-cookie",
  "topcoat-core",
  "topcoat-core-macro",
  "topcoat-font",
+ "topcoat-font-macro",
  "topcoat-l10n",
  "topcoat-mail",
  "topcoat-metadata",
  "topcoat-router",
  "topcoat-router-macro",
  "topcoat-runtime",
+ "topcoat-runtime-macro",
  "topcoat-session",
  "topcoat-view",
  "topcoat-view-macro",
@@ -3734,6 +3746,26 @@ dependencies = [
 ]
 
 [[package]]
+name = "topcoat-font-grammar"
+version = "0.11.0"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 3.0.8",
+ "topcoat-core-grammar",
+ "topcoat-font",
+]
+
+[[package]]
+name = "topcoat-font-macro"
+version = "0.11.0"
+dependencies = [
+ "quote",
+ "syn 3.0.8",
+ "topcoat-font-grammar",
+]
+
+[[package]]
 name = "topcoat-l10n"
 version = "0.11.0"
 dependencies = [
@@ -3825,10 +3857,12 @@ name = "topcoat-runtime"
 version = "0.11.0"
 dependencies = [
  "futures-util",
+ "inventory",
  "pin-project-lite",
  "ref-cast",
  "serde",
  "serde_json",
+ "sha2 0.11.1",
  "tokio",
  "topcoat-asset",
  "topcoat-asset-macro",
@@ -3836,6 +3870,29 @@ dependencies = [
  "topcoat-router",
  "topcoat-view",
  "topcoat-view-macro",
+]
+
+[[package]]
+name = "topcoat-runtime-grammar"
+version = "0.11.0"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "serde",
+ "serde_json",
+ "syn 3.0.8",
+ "topcoat-core-grammar",
+ "topcoat-router",
+ "topcoat-runtime",
+]
+
+[[package]]
+name = "topcoat-runtime-macro"
+version = "0.11.0"
+dependencies = [
+ "quote",
+ "syn 3.0.8",
+ "topcoat-runtime-grammar",
 ]
 
 [[package]]

@@ -6,10 +6,13 @@ use crate::{
     account::AccountService,
     deletion::Deletions,
     federation::ReturnTo,
-    routes::page::{LOGIN, REGISTER, settings},
+    routes::{
+        self,
+        page::{LOGIN, REGISTER, settings},
+    },
     security::BrowserCookie,
     tests::{
-        AUTH_ORIGIN, Browser, OWN_PAGE, Replicas, cookie, html, location, parameter,
+        AUTH_ORIGIN, Browser, OWN_PAGE, Replicas, ceremonies, cookie, html, location, parameter,
         pending_sign_in, policy, redirect, register, registration, unusable_passkey,
     },
     web::tests::{authorize, value_after},
@@ -148,8 +151,13 @@ async fn signing_in_offers_passkeys_providers_and_a_handle() {
     let action = attribute(&link(LOGIN, &query));
     assert!(
         page.contains(&format!(
-            r#"<form class="stack" method="post" action="{action}" data-passkey-sign-in="">"#
+            r#" class="stack" method="post" action="{action}" "#
         )),
+        "{page}"
+    );
+    assert_eq!(
+        ceremonies(&page, routes::passkey::AUTHENTICATE_START),
+        1,
         "{page}"
     );
     assert!(
@@ -157,7 +165,7 @@ async fn signing_in_offers_passkeys_providers_and_a_handle() {
         "{page}"
     );
     assert_eq!(
-        count(&page, ">Sign in with a passkey</button>"),
+        count(&page, ">Sign in with a passkey<"),
         1,
         "{page}"
     );
@@ -192,7 +200,7 @@ async fn signing_in_offers_passkeys_providers_and_a_handle() {
     assert!(page.contains(">Handle<"), "{page}");
     assert!(!page.contains("Use a handle instead"), "{page}");
     assert_eq!(
-        count(&page, ">Sign in with a passkey</button>"),
+        count(&page, ">Sign in with a passkey<"),
         1,
         "{page}"
     );
@@ -430,7 +438,11 @@ async fn signing_up_starts_with_the_invitation() {
         "{page}"
     );
     assert!(page.contains("<h1>Create your account</h1>"), "{page}");
-    assert!(page.contains("data-passkey-register"), "{page}");
+    assert_eq!(
+        ceremonies(&page, routes::passkey::REGISTER_START),
+        1,
+        "{page}"
+    );
     assert!(
         page.contains(r#"<input type="hidden" name="action" value="registered">"#),
         "{page}"
@@ -453,7 +465,7 @@ async fn signing_up_starts_with_the_invitation() {
         "{page}"
     );
     assert_eq!(
-        count(&page, ">Create account with a passkey</button>"),
+        count(&page, ">Create account with a passkey<"),
         1,
         "{page}"
     );
@@ -581,7 +593,11 @@ async fn linking_confirms_the_account_with_a_passkey() {
         page.contains(&format!(r#"<p class="notice info">{email}</p>"#)),
         "{page}"
     );
-    assert!(page.contains("data-passkey-sign-in"), "{page}");
+    assert_eq!(
+        ceremonies(&page, routes::passkey::AUTHENTICATE_START),
+        1,
+        "{page}"
+    );
     assert!(
         page.contains(r#"<input type="hidden" name="action" value="link">"#),
         "{page}"
@@ -605,9 +621,9 @@ async fn linking_confirms_the_account_with_a_passkey() {
     );
     let page = html(stale.visit(&replicas.a, &here).await).await;
     assert!(page.contains(&signed_in_as), "{page}");
-    assert!(page.contains("data-passkey-confirm"), "{page}");
+    assert!(ceremonies(&page, routes::passkey::CONFIRM_START) > 0, "{page}");
     assert!(
-        page.contains(">Verify passkey and add provider</button>"),
+        page.contains(">Verify passkey and add provider<"),
         "{page}"
     );
     assert!(page.contains(">Use a different account</button>"), "{page}");
@@ -618,12 +634,12 @@ async fn linking_confirms_the_account_with_a_passkey() {
         page.contains("Confirm with your passkey to continue."),
         "{page}"
     );
-    assert!(page.contains("data-passkey-confirm"), "{page}");
+    assert!(ceremonies(&page, routes::passkey::CONFIRM_START) > 0, "{page}");
 
     let recent = holding(&owner);
     let page = html(recent.visit(&replicas.a, &here).await).await;
     assert!(page.contains(&signed_in_as), "{page}");
-    assert!(!page.contains("data-passkey-confirm"), "{page}");
+    assert_eq!(ceremonies(&page, routes::passkey::CONFIRM_START), 0, "{page}");
     let linked = recent.post(&replicas, &here, &LoginChange::Link {}).await;
     assert_eq!(linked.status(), StatusCode::SEE_OTHER);
     assert_eq!(redirect(&linked), settings::SESSIONS);
@@ -776,7 +792,7 @@ async fn failures_are_said_above_the_page() {
         assert!(page.contains(&alert), "{page}");
         assert!(!page.contains(&format!("error={error}")), "{page}");
         assert_eq!(
-            count(&page, ">Sign in with a passkey</button>"),
+            count(&page, ">Sign in with a passkey<"),
             1,
             "{page}"
         );

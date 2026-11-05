@@ -87,7 +87,8 @@ pub async fn audit_page<'a>(
                             <tr><th>"position"</th><th>"signed"</th><th>"pruning"</th></tr>
                         </thead>
                         <tbody>
-                            for checkpoint in &page.checkpoints {
+                            #[key(position)]
+                            for (position, checkpoint) in page.checkpoints.iter().enumerate() {
                                 <tr>
                                     <td><code title=(checkpoint.point.hash.as_str())>(checkpoint.point.position.to_string())</code></td>
                                     <td>moment(at: checkpoint.signed_at)</td>

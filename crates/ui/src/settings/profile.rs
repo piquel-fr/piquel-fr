@@ -3,7 +3,7 @@
 
 use super::Audience;
 use crate::{
-    form::{Precision, Query, change_form, handle_input, hidden, time},
+    form::{Precision, Query, change_form, handle_input, hidden, post_form, time},
     layout::{AvatarSize, Who, alert_notice, avatar, dialog, page_head},
 };
 use chrono::{DateTime, Utc};
@@ -304,7 +304,7 @@ async fn profile_dialogs<'a>(
         if available(ProfileDialog::Picture) {
             dialog(id: ProfileDialog::Picture.id(), title: "Choose a picture", shown: shown(ProfileDialog::Picture), back: page, alert: alert,
                 <p class="help">"A PNG, JPEG or GIF of up to 10 MB, cropped to a square. Nothing but the image is kept, so not where a photo was taken."</p>
-                <form method="post" action=(page) enctype="multipart/form-data" data-submit-once="">
+                post_form(action: page, multipart: true,
                     hidden(fields: ProfileChange::Upload)
                     <label>
                         "Picture"
@@ -334,7 +334,7 @@ async fn profile_dialogs<'a>(
                     <div class="row actions">
                         <button>"Upload picture"</button>
                     </div>
-                </form>
+                )
             )
         }
         if available(ProfileDialog::Remove) {

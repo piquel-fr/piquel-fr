@@ -73,7 +73,8 @@ pub async fn connected_apps<'a>(
                 <h2 id="apps-heading">"Connected apps " <span class="count">(rows.len().to_string())</span></h2>
             </header>
             <ul class="list">
-                for row in rows {
+                #[key(position)]
+                for (position, row) in rows.into_iter().enumerate() {
                     app_row(
                         page: page,
                         row: *row,

@@ -217,15 +217,13 @@ impl AdminApplication {
         let auth = config.passkey.origin.clone();
         // A form's answer may send the browser on to auth's handoff page, to sign
         // in or confirm again: browsers apply `form-action` to its redirects too.
-        // The script fetches only the passkey ceremonies of the dashboard's own.
+        // The pages fetch only the passkey ceremonies of the dashboard's own.
         // Profile pictures are served by auth.
         let policy = format!(
             "default-src 'none'; script-src {}; style-src {}; font-src 'self'; img-src {}; \
              connect-src 'self'; form-action 'self' {}; frame-ancestors 'none'; \
              base-uri 'none'",
-            dashboard
-                .origin
-                .join(&EmbeddedAssets::DASHBOARD_SCRIPT.path()),
+            EmbeddedAssets::script_src(&dashboard.origin),
             dashboard.origin.join(&EmbeddedAssets::STYLESHEET.path()),
             auth.serialized(),
             auth.join(routes::page::ADMIN),
@@ -290,12 +288,9 @@ impl AdminApplication {
                         }
                     }
                 });
-        // The stylesheet, the fonts it links and the script, the dashboard's
-        // only files.
-        let assets = EmbeddedAssets::SHARED
-            .iter()
-            .chain([&EmbeddedAssets::DASHBOARD_SCRIPT]);
-        assets.fold(router, |router, asset| {
+        // The stylesheet, the fonts it links and the scripts, the dashboard's only
+        // files.
+        EmbeddedAssets::all().iter().fold(router, |router, asset| {
             router.route(
                 &asset.path(),
                 axum::routing::get(|uri: axum::http::Uri| {
@@ -698,9 +693,8 @@ impl AdminApplication {
             .iter()
             .map(|(tab, link)| (*tab, link.as_str()))
             .collect();
-        let (stylesheet, script, home, leave, search, prefer) = (
+        let (stylesheet, home, leave, search, prefer) = (
             &EmbeddedAssets::STYLESHEET.path(),
-            &EmbeddedAssets::DASHBOARD_SCRIPT.path(),
             &tabs[0].1,
             &href!(sign_out).resolve(cx),
             &href!(users::search).resolve(cx),
@@ -765,12 +759,11 @@ impl AdminApplication {
             }),
         };
         let page = Child::new(page);
-        let scripts = [script.as_str()];
         let html = view! {
             piquel_ui::document(
                 title: title.as_str(),
                 stylesheet: stylesheet,
-                scripts: &scripts,
+                runtime: true,
                 preferences: dashboard.preferences,
                 admin: true,
                 piquel_ui::dashboard_frame(dashboard: &dashboard, (page))

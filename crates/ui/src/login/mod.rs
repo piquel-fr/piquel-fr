@@ -426,7 +426,8 @@ async fn sign_in_forms<'a>(
         )
         if !passkey_only && !providers.is_empty() {
             <div class="divider">"or continue with"</div>
-            for provider in providers {
+            #[key(position)]
+            for (position, provider) in providers.into_iter().enumerate() {
                 change_form(
                     action: action,
                     change: LoginChange::Social { provider: *provider },

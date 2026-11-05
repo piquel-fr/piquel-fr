@@ -129,7 +129,8 @@ pub async fn devices<'a>(
                 <h2 id="sessions-heading">"Signed-in devices " <span class="count">(rows.len().to_string())</span></h2>
             </header>
             <ul class="list">
-                for row in rows {
+                #[key(position)]
+                for (position, row) in rows.into_iter().enumerate() {
                     let name = row.name();
                     <li>
                         <div class="text">

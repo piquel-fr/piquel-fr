@@ -90,7 +90,8 @@ pub async fn user_search<'a>(
                             <tr><th>"handle"</th><th>"name"</th><th>"role"</th><th>"status"</th><th>"created"</th></tr>
                         </thead>
                         <tbody>
-                            for row in rows {
+                            #[key(position)]
+                            for (position, row) in rows.into_iter().enumerate() {
                                 <tr>
                                     <td><a class="mono" href=(row.href.as_str())>(format!("@{}", row.user.handle))</a></td>
                                     <td>
@@ -210,7 +211,8 @@ pub async fn user_page<'a>(
                 <p class="empty">"No remembered consent."</p>
             } else {
                 <ul class="list">
-                    for consent in &detail.consents {
+                    #[key(position)]
+                    for (position, consent) in detail.consents.iter().enumerate() {
                         <li>
                             <div class="text">
                                 <strong>(consent.client_id.as_str())</strong>
@@ -263,7 +265,8 @@ async fn session_list<'a>(
                         <tr><th>"signed in"</th><th>"methods"</th><th>"last seen"</th><th>"expires"</th><th></th></tr>
                     </thead>
                     <tbody>
-                        for row in sessions {
+                        #[key(position)]
+                        for (position, row) in sessions.into_iter().enumerate() {
                             <tr>
                                 <td>moment(at: row.session.authenticated_at)</td>
                                 <td>(row.methods())</td>
@@ -337,7 +340,8 @@ async fn credentials<'a>(cx: &Cx, detail: &'a UserDetail) -> Result<impl View> {
                 <p class="empty">"No email address."</p>
             } else {
                 <ul class="list">
-                    for email in &detail.emails {
+                    #[key(position)]
+                    for (position, email) in detail.emails.iter().enumerate() {
                         <li>
                             <div class="text">
                                 private_address(address: email.address.as_str())
@@ -357,7 +361,8 @@ async fn credentials<'a>(cx: &Cx, detail: &'a UserDetail) -> Result<impl View> {
         <section class="card">
             <header><h2>"Sign-in methods"</h2></header>
             <ul class="list">
-                for passkey in &detail.passkeys {
+                #[key(position)]
+                for (position, passkey) in detail.passkeys.iter().enumerate() {
                     <li>
                         <div class="text">
                             <strong>"Passkey"</strong>
@@ -365,7 +370,8 @@ async fn credentials<'a>(cx: &Cx, detail: &'a UserDetail) -> Result<impl View> {
                         </div>
                     </li>
                 }
-                for identity in &detail.identities {
+                #[key(position)]
+                for (position, identity) in detail.identities.iter().enumerate() {
                     <li>
                         <div class="text">
                             <strong>(identity.provider.to_string())</strong>

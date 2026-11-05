@@ -177,17 +177,16 @@ impl WebApplication {
         passkeys: PasskeyApplication,
     ) -> Self {
         let origin = &config.oidc.origin;
-        // A source with a path needs the whole URL: `'self'` names none. The passkey
-        // script's ceremonies fetch auth's own JSON routes. Profile pictures are
-        // auth's own, and the picture script shows the one being chosen from a
+        // A source with a path needs the whole URL: `'self'` names none. The pages'
+        // passkey ceremonies fetch auth's own JSON routes. Profile pictures are
+        // auth's own, and the picture form shows the one being chosen from a
         // `blob:` URL of the file, before it is uploaded.
-        let scripts = EmbeddedAssets::SCRIPTS.map(|script| origin.join(&script.path()));
         let policy = format!(
             "default-src 'none'; style-src {}; script-src {}; font-src 'self'; \
              connect-src 'self'; img-src 'self' blob:; frame-ancestors 'none'; \
              base-uri 'none'",
             origin.join(&EmbeddedAssets::STYLESHEET.path()),
-            scripts.join(" "),
+            EmbeddedAssets::script_src(origin),
         );
         let dashboard = config.dashboard.as_ref().map(|dashboard| {
             DashboardSignIn::new(database.clone(), origin.clone(), dashboard.origin.clone())
@@ -288,6 +287,8 @@ impl WebApplication {
     pub(crate) fn routes(self) -> axum::Router {
         let mut pages = Router::builder()
             .with(self)
+            // Where the pages' passkey forms run their ceremonies.
+            .with(routes::passkey::CEREMONIES)
             // The security layer already accepts forms only from auth's own pages, by a
             // stricter rule: Topcoat's also takes `Sec-Fetch-Site: none`.
             .with(OriginPolicy::dangerous_disable())
@@ -498,14 +499,12 @@ impl WebApplication {
     ) -> Result<Response> {
         let page = Child::new(page);
         let stylesheet = EmbeddedAssets::STYLESHEET.path();
-        let paths = EmbeddedAssets::SCRIPTS.map(|script| script.path());
-        let scripts = &paths.each_ref().map(String::as_str);
         let preferences = BrowserCookie::read_preferences(headers(cx));
         let html = view! {
             piquel_ui::document(
                 title: title,
                 stylesheet: &stylesheet,
-                scripts: scripts,
+                runtime: true,
                 preferences: preferences,
                 admin: admin,
                 (page)

@@ -95,7 +95,8 @@ pub async fn addresses<'a>(
                 <h2 id="emails-heading">"Your addresses " <span class="count">(emails.len().to_string())</span></h2>
             </header>
             <ul class="list">
-                for email in emails {
+                #[key(position)]
+                for (position, email) in emails.into_iter().enumerate() {
                     address_row(
                         page: page,
                         email: *email,

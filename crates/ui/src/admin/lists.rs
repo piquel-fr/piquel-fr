@@ -70,7 +70,8 @@ pub async fn administrator_list<'a>(
         )
         <section class="card">
             <ul class="list">
-                for row in rows {
+                #[key(position)]
+                for (position, row) in rows.into_iter().enumerate() {
                     let who = Who {
                         user: None,
                         name: row.administrator.handle.as_str(),
@@ -145,7 +146,8 @@ pub async fn grant_search<'a>(
                     <p class="empty">(format!("No account matches “{q}”."))</p>
                 } else {
                     <ul class="list">
-                        for row in rows {
+                        #[key(position)]
+                        for (position, row) in rows.into_iter().enumerate() {
                             let subject = format!("@{}", row.user.handle);
                             <li>
                                 avatar(who: row.who())
@@ -211,7 +213,8 @@ pub async fn invitation_list<'a>(
                                     <tr><th>"created"</th><th>"expires"</th><th>"state"</th><th></th></tr>
                                 </thead>
                                 <tbody>
-                                    for row in rows {
+                                    #[key(position)]
+                                    for (position, row) in rows.into_iter().enumerate() {
                                         let (tone, label) = row.state(now);
                                         <tr>
                                             <td>moment(at: row.invitation.created_at)</td>

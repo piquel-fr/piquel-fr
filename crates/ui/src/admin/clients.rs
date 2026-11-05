@@ -267,7 +267,8 @@ pub async fn client_list<'a>(
                             <tr><th>"name"</th><th>"ID"</th><th>"managed by"</th><th>"status"</th><th></th></tr>
                         </thead>
                         <tbody>
-                            for row in rows {
+                            #[key(position)]
+                            for (position, row) in rows.into_iter().enumerate() {
                                 let client = row.client;
                                 <tr>
                                     <td>
@@ -379,7 +380,8 @@ pub async fn client_page<'a>(
                 <p class="empty">"No origin is approved."</p>
             } else {
                 <ul class="list">
-                    for (origin, remove) in &page.origins {
+                    #[key(position)]
+                    for (position, (origin, remove)) in page.origins.iter().enumerate() {
                         <li>
                             <div class="text"><code>(*origin)</code></div>
                             <a data-confirm-first="" class="button secondary small" href=(remove.as_str()) aria-label=(format!("Remove {origin}"))>"Remove"</a>
@@ -444,13 +446,15 @@ async fn client_facts<'a>(cx: &Cx, page: &'a ClientPage<'a>) -> Result<impl View
             </dd>
             <dt>"Redirect URIs"</dt>
             <dd>
-                for uri in client.redirect_uris {
+                #[key(position)]
+                for (position, uri) in client.redirect_uris.into_iter().enumerate() {
                     <div><code>(uri.as_str())</code></div>
                 }
             </dd>
             <dt>"After sign-out"</dt>
             <dd>
-                for uri in client.post_logout_uris {
+                #[key(position)]
+                for (position, uri) in client.post_logout_uris.into_iter().enumerate() {
                     <div><code>(uri.as_str())</code></div>
                 }
                 if client.post_logout_uris.is_empty() { "None" }

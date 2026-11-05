@@ -141,7 +141,8 @@ pub async fn site_shell<'a>(
                     "piquel"
                 </a>
                 <nav class="site-links" aria-label="Piquel">
-                    for (label, href) in links {
+                    #[key(position)]
+                    for (position, (label, href)) in links.into_iter().enumerate() {
                         <a href=(*href)>(*label)</a>
                     }
                 </nav>

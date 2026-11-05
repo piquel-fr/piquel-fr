@@ -147,11 +147,13 @@ pub async fn admin_overview<'a>(cx: &Cx, overview: AdminOverview<'a>) -> Result<
                 overview.accounts, overview.administrators
             ),
         )
-        for problem in overview.problems {
+        #[key(position)]
+        for (position, problem) in overview.problems.into_iter().enumerate() {
             problem_notice(problem: problem)
         }
         <div class="stats">
-            for measure in overview.measures {
+            #[key(position)]
+            for (position, measure) in overview.measures.into_iter().enumerate() {
                 let warning = measure.warning(overview.problems);
                 <div class=(class!("stat", "warning" if warning))>
                     <span class="label">(measure.label())</span>
@@ -177,7 +179,8 @@ pub async fn admin_overview<'a>(cx: &Cx, overview: AdminOverview<'a>) -> Result<
                     <p class="empty">"No account yet."</p>
                 } else {
                     <ul class="list">
-                        for row in overview.newest {
+                        #[key(position)]
+                        for (position, row) in overview.newest.into_iter().enumerate() {
                             <li>
                                 avatar(who: row.who(), size: AvatarSize::Small)
                                 <div class="text">

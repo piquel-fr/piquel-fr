@@ -480,7 +480,8 @@ pub async fn event_rows<'a>(cx: &Cx, rows: &'a [EventRow<'a>]) -> Result<impl Vi
             <p class="empty">"No event."</p>
         } else {
             <ul class="events">
-                for row in rows {
+                #[key(position)]
+                for (position, row) in rows.into_iter().enumerate() {
                     let described = row.describe();
                     let (actor, _) = row.actor();
                     <li>
@@ -498,7 +499,8 @@ pub async fn event_rows<'a>(cx: &Cx, rows: &'a [EventRow<'a>]) -> Result<impl Vi
                                 if let Some(account) = row.account.as_ref().filter(|account| row.actor.as_ref() != Some(account)) {
                                     " · " <a href=(account.as_str())>"account"</a>
                                 }
-                                for (name, value) in &described.facts {
+                                #[key(position)]
+                                for (position, (name, value)) in described.facts.iter().enumerate() {
                                     " · " (*name) " " <span class="fact">(value.as_str())</span>
                                 }
                             </small>

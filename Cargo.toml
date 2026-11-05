@@ -72,7 +72,7 @@ sqlx = { version = "0.8", default-features = false, features = ["runtime-tokio-r
 thiserror = "2.0"
 # Server-rendered pages: the router, `view!` and the tower service only. Its
 # defaults add a browser runtime, `asset!` and discovery, which auth's pages avoid.
-topcoat = { path = "/tmp/claude-1000/-home-piquel--t3-worktrees-piquel-fr-t3-f459f41e/1e4346e8-2cb2-49d6-9fb9-a1f05a929e77/scratchpad/topcoat/crates/topcoat", default-features = false }
+topcoat = { path = "/tmp/claude-1000/-home-piquel--t3-worktrees-piquel-fr-t3-f459f41e/1e4346e8-2cb2-49d6-9fb9-a1f05a929e77/scratchpad/topcoat-csp/crates/topcoat", default-features = false }
 tokio = { version = "1.48", features = ["macros", "rt-multi-thread", "signal", "net", "sync", "time"] }
 tower = { version = "0.5", features = ["util"] }
 tracing = "0.1"

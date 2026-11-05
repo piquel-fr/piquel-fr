@@ -79,7 +79,8 @@ pub async fn delivery_list<'a>(
                             </tr>
                         </thead>
                         <tbody>
-                            for row in rows {
+                            #[key(position)]
+                            for (position, row) in rows.into_iter().enumerate() {
                                 let delivery = row.delivery;
                                 let (tone, label) = status_badge(delivery.status);
                                 let subject = delivery.id.to_string();

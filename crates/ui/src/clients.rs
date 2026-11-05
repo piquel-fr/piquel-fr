@@ -2,7 +2,10 @@
 //! form of its settings, its secrets and the one just made. The developer console
 //! shows an account's own apps with these, and the admin dashboard every client.
 
-use crate::form::{Checkbox, Fields, Lines, Precision, change_form, time};
+use crate::{
+    browser::Browser,
+    form::{Checkbox, Fields, Lines, Precision, change_form, time},
+};
 use chrono::{DateTime, Utc};
 use piquel_common::{
     ClientId,
@@ -14,6 +17,7 @@ use std::{borrow::Cow, fmt};
 use topcoat::{
     Result,
     context::Cx,
+    runtime::{Event, signal},
     view::{Child, View, component, view},
 };
 
@@ -379,14 +383,42 @@ pub(crate) async fn client_status<'a>(cx: &Cx, client: ClientRow<'a>) -> Result<
 }
 
 /// A button copying the text of the element whose ID is `target`, named `label` for
-/// screen readers, after the status saying whether it did. It starts hidden; the
-/// passkey script shows it once it can write to the clipboard.
+/// screen readers, after the status saying, for a moment, whether it did. It starts
+/// hidden, and shows once the browser can write to the clipboard.
 #[component]
 pub(crate) async fn copy<'a>(cx: &Cx, target: &'a str, label: &'a str) -> Result<impl View> {
+    let (usable, status) = (signal(cx, || false), signal(cx, String::new));
+    // Each copy's status clears a moment after it, unless another one followed.
+    let copies = signal(cx, || 0usize);
+    let (clipboard, copied, moment) = (
+        Browser::clipboard(),
+        Browser::copy(target),
+        Browser::moment(),
+    );
     Ok(view! {
         <span class="copy">
-            <span class="help" role="status"></span>
-            <button type="button" class="text-button small" data-copy=(target) aria-label=(format!("Copy {label}")) hidden="">
+            <span class="help" role="status">$(status.get())</span>
+            <button
+                type="button"
+                class="text-button small"
+                aria-label=(format!("Copy {label}"))
+                :hidden=$(!usable.get())
+                @mount=$(|_e: Event| usable.set(clipboard))
+                @click=$(async |_e: Event| {
+                    copies.increment();
+                    let copy = copies.get();
+                    let done = raw!("await ${copied}", false);
+                    status.set(if done {
+                        "Copied".to_owned()
+                    } else {
+                        "Could not copy: select the text instead".to_owned()
+                    });
+                    let _waited = raw!("await ${moment}", ());
+                    if copies.get() == copy {
+                        status.set("".to_owned());
+                    }
+                })
+            >
                 "Copy"
             </button>
         </span>
@@ -439,13 +471,15 @@ pub(crate) async fn client_facts<'a>(
     );
     Ok(view! {
         <dl class="facts">
-            for (id, label, value) in facts {
+            #[key(position)]
+            for (position, (id, label, value)) in facts.into_iter().enumerate() {
                 <dt>(label)</dt>
                 <dd>copyable(id: id, label: label, value: &value)</dd>
             }
             <dt>"Redirect URIs"</dt>
             <dd>
-                for uri in client.redirect_uris {
+                #[key(position)]
+                for (position, uri) in client.redirect_uris.into_iter().enumerate() {
                     <div><code>(uri.as_str())</code></div>
                 }
             </dd>
@@ -704,7 +738,8 @@ pub(crate) async fn secrets_list<'a>(
 ) -> Result<impl View> {
     Ok(view! {
         <ul class="list">
-            for secret in secrets {
+            #[key(position)]
+            for (position, secret) in secrets.into_iter().enumerate() {
                 <li>
                     <div class="text">
                         <strong>"Created " time(at: secret.created_at, precision: Precision::Minute)</strong>
@@ -729,10 +764,8 @@ pub(crate) async fn secrets_list<'a>(
 }
 
 /// A client `secret` Piquel just made, shown once, with a button copying it, on
-/// `page`, whose address the passkey script, where the page loads it, puts back
-/// so that reloading it gets the page without the secret; saving it leads on to
-/// `next`. The admin dashboard loads no passkey script, so its copy button stays
-/// hidden.
+/// `page`, whose address the browser puts back so that reloading it gets the page
+/// without the secret; saving it leads on to `next`.
 #[component]
 pub(crate) async fn secret_panel<'a>(
     cx: &Cx,
@@ -740,8 +773,15 @@ pub(crate) async fn secret_panel<'a>(
     page: &'a str,
     next: &'a str,
 ) -> Result<impl View> {
+    let replaced = Browser::replace_url(page);
     Ok(view! {
-        <section class="card" aria-labelledby="secret-heading" data-replace-url=(page)>
+        <section
+            class="card"
+            aria-labelledby="secret-heading"
+            @mount=$(|_e: Event| {
+                let _replaced = replaced;
+            })
+        >
             <header><h2 id="secret-heading" tabindex="-1" autofocus="">"Your client secret"</h2></header>
             <div class="body">
                 <p class="notice warning" role="alert">

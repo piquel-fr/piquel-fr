@@ -7,7 +7,9 @@
 
 use crate::{
     Notice, Title,
+    browser::Browser,
     form::{Ceremony, Fields, Precision, fragment_form, new_passkey, passkey_form, time},
+    layout::Dismissal,
 };
 use chrono::{DateTime, Utc};
 use piquel_common::{PasskeyId, RecoveryId, SessionId};
@@ -15,6 +17,7 @@ use serde::{Deserialize, Serialize};
 use topcoat::{
     Result,
     context::Cx,
+    runtime::Event,
     view::{View, component, view},
 };
 
@@ -238,7 +241,15 @@ pub async fn recover<'a>(
                 missing: view! { incomplete() },
             ),
             RecoverStep::Enroll { expires_at, token, probation_days, android, .. } => {
-                <div class="stack" data-replace-url=(action)>
+                // The link's address keeps its fragment out of the history: reloading
+                // gets the page by `GET`, without it.
+                let replaced = Browser::replace_url(action);
+                <div
+                    class="stack"
+                    @mount=$(|_e: Event| {
+                        let _replaced = replaced;
+                    })
+                >
                     <p class="lead">"This link works until " time(at: expires_at, precision: Precision::Minute) "."</p>
                     <p class="notice warning">
                         (format!(
@@ -410,8 +421,8 @@ async fn incomplete(cx: &Cx) -> Result<impl View> {
 }
 
 /// What the account's pages ask of its `recovery` that can still be undone, until
-/// `session` answers: whether it was the owner's, which the passkey script shows
-/// unless this browser already said yes to it at this stage, and since a passkey
+/// `session` answers: whether it was the owner's, which shows unless this browser
+/// already said yes to it at this stage, and since a passkey
 /// `confirmed` the session, if one did, with a link to undo it on the undo page,
 /// `undo`. In probation, a notice, shown without scripts, says what the recovery
 /// holds back meanwhile, and who can undo it.
@@ -423,13 +434,13 @@ pub async fn recovery_banner<'a>(
     confirmed: bool,
     undo: &'a str,
 ) -> Result<impl View> {
-    let key = recovery.dismiss_key(session, confirmed);
+    let dismissal = Dismissal::new(cx, recovery.dismiss_key(session, confirmed));
     let href = recovery.undo_href(undo);
     Ok(view! {
-        <section class="notice warning stack" data-dismiss=(key.as_str()) hidden="">
+        <section class="notice warning stack" :hidden=(dismissal.hidden()) @mount=(dismissal.mount())>
             <p>(recovery.question())</p>
             <div class="row">
-                <button type="button" class="secondary small" data-dismisses=(key.as_str())>"Yes, it was me"</button>
+                <button type="button" class="secondary small" @click=(dismissal.dismiss())>"Yes, it was me"</button>
                 <a class="button danger small" href=(href.as_str())>(recovery.refusal())</a>
             </div>
         </section>

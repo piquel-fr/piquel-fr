@@ -177,7 +177,7 @@ impl WebApplication {
         let page = view! {
             piquel_ui::handoff_proof(
                 action: action,
-                proof: routes::passkey::ADMIN_PROOF,
+                proof: routes::passkey::ADMIN_PROOF_START,
                 query: query,
                 alert: alert,
             )
