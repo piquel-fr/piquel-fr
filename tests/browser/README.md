@@ -126,7 +126,8 @@ reason, and start a recovery whose link is mailed, then undo it. Support also
 renames a handle, which an owner may change only 30 days after signup: the new
 one signs in at once, and the old one no longer does. Another reads an account's
 security history, rotates a signing key and revokes it again, filters the
-delivery queue, and reserves a handle and removes the reservation again. Set
+delivery queue, and reserves a handle and removes the reservation again. The
+top bar keeps its crumb, search box and avatar apart at every window size. Set
 `E2E_ADMIN_URL` to the dashboard's origin and `E2E_GRANT_ADMIN` to a command
 that grants administrator rights to the handle appended to it, e.g. `just auth
 admin grant` with the deployment's configuration. Without them, the tests are

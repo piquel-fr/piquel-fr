@@ -13,6 +13,25 @@ import {
 export const authUrl = process.env.E2E_AUTH_URL ?? 'http://localhost:3000';
 
 /**
+ * The window sizes the pages must work at, the smallest phone to a wide desktop,
+ * either side of the drawer's breakpoint. Few, and few pages each: auth's pages
+ * share one request budget a minute, which the whole suite spends.
+ */
+export const viewports = [
+  { name: 'small phone', width: 320, height: 568 },
+  { name: 'tablet', width: 768, height: 1024 },
+  { name: 'laptop', width: 1280, height: 800 },
+  { name: 'desktop', width: 1920, height: 1080 }
+];
+
+/** Whether the page body scrolls sideways, which no page may. */
+export async function scrollsSideways(page: Page): Promise<boolean> {
+  return page.evaluate(
+    () => document.documentElement.scrollWidth > document.documentElement.clientWidth
+  );
+}
+
+/**
  * A virtual platform authenticator on `page`, which verifies its user without
  * asking. A `synced` one backs its credentials up, like a synced passkey.
  */
