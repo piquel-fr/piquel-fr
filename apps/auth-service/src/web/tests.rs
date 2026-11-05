@@ -18,7 +18,8 @@ use crate::{
     },
 };
 use axum::{
-    http::{StatusCode, header},
+    body::Body,
+    http::{Method, Request, StatusCode, header},
     response::Response,
 };
 use piquel_common::{
@@ -27,6 +28,7 @@ use piquel_common::{
 };
 use piquel_ui::{DeviceChange, Section};
 use serde::Serialize;
+use tower::ServiceExt;
 use url::{Position, Url, form_urlencoded};
 
 /// A PKCE `S256` challenge (RFC 7636 appendix B). No test redeems its code.
@@ -129,6 +131,55 @@ impl Browser {
             .collect();
         self.submit(&replicas.b, path, &fields, OWN_PAGE).await
     }
+
+    /// Posts a page's upload form to `path` on `replicas`' second replica, as
+    /// `multipart/form-data`: the `change` it names, and `file` in the file input
+    /// `input`.
+    pub(super) async fn upload(
+        &self,
+        replicas: &Replicas,
+        path: &str,
+        change: &impl Serialize,
+        (input, file): (&str, &[u8]),
+    ) -> Response {
+        const BOUNDARY: &str = "picture-upload-boundary";
+        let encoded = serde_urlencoded::to_string(change).expect("change");
+        let fields: Vec<(String, String)> = serde_urlencoded::from_str(&encoded).expect("fields");
+        let mut body = Vec::new();
+        for (name, value) in &fields {
+            body.extend_from_slice(
+                format!(
+                    "--{BOUNDARY}\r\nContent-Disposition: form-data; name=\"{name}\"\r\n\r\n{value}\r\n"
+                )
+                .as_bytes(),
+            );
+        }
+        body.extend_from_slice(
+            format!(
+                "--{BOUNDARY}\r\nContent-Disposition: form-data; name=\"{input}\"; filename=\"picture\"\r\nContent-Type: application/octet-stream\r\n\r\n"
+            )
+            .as_bytes(),
+        );
+        body.extend_from_slice(file);
+        body.extend_from_slice(format!("\r\n--{BOUNDARY}--\r\n").as_bytes());
+        let mut request = Request::builder()
+            .method(Method::POST)
+            .uri(path)
+            .header(header::COOKIE, &self.cookie)
+            .header(
+                header::CONTENT_TYPE,
+                format!("multipart/form-data; boundary={BOUNDARY}"),
+            );
+        for (name, value) in OWN_PAGE {
+            request = request.header(*name, *value);
+        }
+        replicas
+            .b
+            .clone()
+            .oneshot(request.body(Body::from(body)).expect("request"))
+            .await
+            .expect("response")
+    }
 }
 
 /// The value `page` writes right after `marker`, up to the next quote or tag, such
@@ -181,7 +232,9 @@ async fn consent_page_decides_from_its_own_form() {
     let html = html(response).await;
     assert!(html.contains("<h1>Continue to Test app?</h1>"), "{html}");
     assert!(
-        html.contains(r#"<span class="text">Your username and display name</span></li>"#),
+        html.contains(
+            r#"<span class="text">Your username, display name and profile picture</span></li>"#
+        ),
         "{html}"
     );
 

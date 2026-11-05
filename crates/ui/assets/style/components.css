@@ -90,6 +90,98 @@
     0 0 0 1.5px var(--surface),
     0 0 0 3px var(--admin-ring);
 }
+/* A profile picture, stored square, fills the circle the initials would. */
+img.avatar {
+  object-fit: cover;
+}
+.avatar.large {
+  width: 112px;
+  height: 112px;
+  font-size: 2.5rem;
+}
+
+/* The profile: the account as apps show it, then a row for each thing they see,
+   each changed in a dialog. */
+.card.profile .identity {
+  display: flex;
+  align-items: center;
+  gap: 1.3rem;
+  padding: 1.4rem 1.25rem;
+  border-bottom: 1px solid var(--line);
+  border-radius: var(--radius) var(--radius) 0 0;
+  background: var(--surface-2);
+}
+.card.profile .names {
+  display: grid;
+  gap: 0.25rem;
+  min-width: 0;
+}
+.card.profile .names h2 {
+  font-size: 1.6rem;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  line-height: 1.15;
+  overflow-wrap: anywhere;
+}
+.card.profile .names .handle {
+  font-family: var(--mono);
+  font-size: 0.95rem;
+  color: var(--muted);
+  overflow-wrap: anywhere;
+}
+.card.profile .fields {
+  margin: 0;
+}
+.card.profile .field {
+  display: grid;
+  grid-template-columns: 9rem minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 0.35rem 1rem;
+  padding: 0.85rem 1.25rem;
+}
+.card.profile .field + .field {
+  border-top: 1px solid var(--line);
+}
+.card.profile .field dt {
+  font-size: 0.86rem;
+  font-weight: 600;
+  color: var(--muted);
+}
+.card.profile .field dd {
+  display: grid;
+  gap: 0.15rem;
+  min-width: 0;
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+.card.profile .field dd.actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 0.5rem;
+  margin: 0;
+}
+@media (max-width: 600px) {
+  .card.profile .identity {
+    gap: 1rem;
+    padding: 1.1rem 1rem;
+  }
+  .card.profile .identity .avatar.large {
+    width: 80px;
+    height: 80px;
+    font-size: 1.8rem;
+  }
+  .card.profile .names h2 {
+    font-size: 1.3rem;
+  }
+  .card.profile .field {
+    grid-template-columns: minmax(0, 1fr) auto;
+    padding: 0.8rem 1rem;
+  }
+  .card.profile .field dt {
+    grid-column: 1 / -1;
+  }
+}
 
 /* Messages: what the last change did, why one failed, and what to do. */
 .notice {
@@ -128,6 +220,38 @@
 .notice.stack {
   display: grid;
   gap: 0.7rem;
+}
+/* Dismissing a notice: a visually hidden checkbox the notice reads, so it needs
+   no script. */
+.notice .dismiss {
+  display: grid;
+  place-items: center;
+  flex: none;
+  width: 26px;
+  height: 26px;
+  margin: -0.2rem -0.3rem -0.2rem 0;
+  border-radius: 6px;
+  color: var(--muted);
+  cursor: pointer;
+}
+.notice .dismiss:hover {
+  background: var(--surface-2);
+  color: var(--fg);
+}
+.notice .dismiss input {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  min-height: 0;
+  padding: 0;
+  opacity: 0;
+}
+.notice .dismiss:has(input:focus-visible) {
+  outline: 2px solid var(--focus);
+  outline-offset: 1px;
+}
+.notice:has(.dismiss input:checked) {
+  display: none;
 }
 .hint {
   display: flex;

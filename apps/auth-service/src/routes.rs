@@ -82,6 +82,27 @@ pub(crate) mod recovery {
     pub(crate) const UNDO_FINISH: &str = "/account/recovery/undo/finish";
 }
 
+/// Profile pictures.
+pub(crate) mod pictures {
+    use piquel_common::{PictureId, config::Origin};
+
+    /// A picture, by the ID of its upload. No file extension, so the edge, which
+    /// caches static files by extension, keeps no copy past its removal.
+    pub(crate) const IMAGE: &str = "/pictures/{id}";
+    /// The account's own picture: viewing, setting and removing it.
+    pub(crate) const OWN: &str = "/account/picture";
+
+    /// The path of the picture `id`. IDs need no escaping in a path segment.
+    pub(crate) fn of(id: PictureId) -> String {
+        IMAGE.replace("{id}", &id.to_string())
+    }
+
+    /// The picture `id`'s URL on `origin`: its `picture` claim.
+    pub(crate) fn url(origin: &Origin, id: PictureId) -> String {
+        origin.join(&of(id))
+    }
+}
+
 /// The account's security history.
 pub(crate) mod history {
     /// Pages through the account's history, newest first.
@@ -209,6 +230,8 @@ pub(crate) mod page {
         pub(crate) const HOME: &str = "/settings";
         /// Sign-in methods: passkeys and social sign-in.
         pub(crate) const SIGN_IN: &str = "/settings/sign-in";
+        /// The profile: its handle, display name and picture.
+        pub(crate) const PROFILE: &str = "/settings/profile";
         /// Email addresses.
         pub(crate) const EMAILS: &str = "/settings/emails";
         /// Confirming an address, from its verification link.
@@ -248,7 +271,7 @@ pub(crate) mod page {
 
     /// Every server-rendered page's route, which the security layer classifies as
     /// pages.
-    pub(crate) const ALL: [&str; 21] = [
+    pub(crate) const ALL: [&str; 22] = [
         LOGIN,
         REGISTER,
         CONSENT,
@@ -257,6 +280,7 @@ pub(crate) mod page {
         PREFERENCES,
         settings::HOME,
         settings::SIGN_IN,
+        settings::PROFILE,
         settings::EMAILS,
         settings::VERIFY,
         settings::SESSIONS,

@@ -27,8 +27,6 @@ test('signing in with a handle, after one without an account is refused', async 
   await field.fill(handle);
   await signIn.click();
   await expect(page).toHaveURL('/settings');
-  await page.goto('/settings/sign-in');
-  await expect(
-    page.getByRole('region', { name: 'Handle' }).getByText(`@${handle}`, { exact: true })
-  ).toBeVisible();
+  await page.goto('/settings/profile');
+  await expect(page.getByRole('definition').getByText(`@${handle}`, { exact: true })).toBeVisible();
 });

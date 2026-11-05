@@ -3,7 +3,7 @@
 use super::{RepositoryExecutor, Unsigned, UserRepository};
 use crate::DatabaseError;
 use chrono::{DateTime, Utc};
-use piquel_common::{AccountStatus, Handle, UserId, admin::User};
+use piquel_common::{AccountStatus, Handle, PictureId, UserId, admin::User};
 
 /// A user account row, with its current handle.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -18,6 +18,9 @@ pub struct StoredUser {
     pub display_name: String,
     /// Starts at 1; bumped when profile claims change.
     pub profile_version: u64,
+    /// The current profile picture, while the account is active, as auth serves
+    /// it only then.
+    pub picture: Option<PictureId>,
     /// Whether the account can authenticate.
     pub status: AccountStatus,
     /// When the account was created.
@@ -33,6 +36,7 @@ impl From<StoredUser> for User {
             handle: user.handle,
             display_name: user.display_name,
             status: user.status,
+            picture: user.picture,
             created_at: user.created_at,
         }
     }
@@ -96,7 +100,8 @@ impl UserRepository<'_> {
                 SELECT
                     u.id AS "id: UserId", h.handle AS "handle: Handle", u.handle_changed_at,
                     u.display_name, u.profile_version AS "profile_version: Unsigned",
-                    u.status AS "status: AccountStatus", u.created_at, u.updated_at
+                    u.status AS "status: AccountStatus", u.created_at, u.updated_at,
+                    NULL::uuid AS "picture?: PictureId"
                 FROM u, h"#,
                 input.id.as_uuid(),
                 input.handle.as_str(),
@@ -119,9 +124,11 @@ impl UserRepository<'_> {
                 r#"SELECT
                     u.id AS "id: UserId", h.handle AS "handle: Handle", u.handle_changed_at,
                     u.display_name, u.profile_version AS "profile_version: Unsigned",
-                    u.status AS "status: AccountStatus", u.created_at, u.updated_at
+                    u.status AS "status: AccountStatus", u.created_at, u.updated_at,
+                    p.id AS "picture?: PictureId"
                 FROM users u
                 JOIN handles h ON h.user_id = u.id AND h.released_at IS NULL
+                LEFT JOIN profile_pictures p ON p.user_id = u.id AND u.status = 'active'
                 WHERE u.id = $1"#,
                 id.as_uuid(),
             )
@@ -187,9 +194,11 @@ impl UserRepository<'_> {
                 r#"SELECT
                     u.id AS "id: UserId", h.handle AS "handle: Handle", u.handle_changed_at,
                     u.display_name, u.profile_version AS "profile_version: Unsigned",
-                    u.status AS "status: AccountStatus", u.created_at, u.updated_at
+                    u.status AS "status: AccountStatus", u.created_at, u.updated_at,
+                    p.id AS "picture?: PictureId"
                 FROM users u
                 JOIN handles h ON h.user_id = u.id AND h.released_at IS NULL
+                LEFT JOIN profile_pictures p ON p.user_id = u.id AND u.status = 'active'
                 WHERE h.handle = $1
                 AND u.status = 'active'"#,
                 handle.as_str(),
@@ -227,9 +236,11 @@ impl UserRepository<'_> {
                 r#"SELECT
                     u.id AS "id: UserId", h.handle AS "handle: Handle", u.handle_changed_at,
                     u.display_name, u.profile_version AS "profile_version: Unsigned",
-                    u.status AS "status: AccountStatus", u.created_at, u.updated_at
+                    u.status AS "status: AccountStatus", u.created_at, u.updated_at,
+                    p.id AS "picture?: PictureId"
                 FROM users u
                 JOIN handles h ON h.user_id = u.id AND h.released_at IS NULL
+                LEFT JOIN profile_pictures p ON p.user_id = u.id AND u.status = 'active'
                 WHERE h.handle = $1"#,
                 handle.as_str(),
             )
@@ -365,9 +376,10 @@ impl UserRepository<'_> {
                 User,
                 r#"SELECT
                     u.id AS "id: UserId", h.handle AS "handle: Handle", u.display_name,
-                    u.status AS "status: AccountStatus", u.created_at
+                    u.status AS "status: AccountStatus", p.id AS "picture?: PictureId", u.created_at
                 FROM users u
                 JOIN handles h ON h.user_id = u.id AND h.released_at IS NULL
+                LEFT JOIN profile_pictures p ON p.user_id = u.id AND u.status = 'active'
                 ORDER BY u.created_at DESC, u.id DESC
                 LIMIT $1"#,
                 i64::from(limit),
@@ -429,9 +441,10 @@ impl UserRepository<'_> {
                 User,
                 r#"SELECT
                     u.id AS "id: UserId", h.handle AS "handle: Handle", u.display_name,
-                    u.status AS "status: AccountStatus", u.created_at
+                    u.status AS "status: AccountStatus", p.id AS "picture?: PictureId", u.created_at
                 FROM users u
                 JOIN handles h ON h.user_id = u.id AND h.released_at IS NULL
+                LEFT JOIN profile_pictures p ON p.user_id = u.id AND u.status = 'active'
                 WHERE (
                     $1 = ''
                     OR u.id::text = $1

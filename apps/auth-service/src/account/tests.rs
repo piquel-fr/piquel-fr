@@ -306,6 +306,7 @@ impl AccountOperation {
             Self::ListSessions => service.sessions(viewer).await.map(drop),
             Self::ListApps => service.apps(viewer).await.map(drop),
             Self::ViewHistory => service.history(viewer, None).await.map(drop),
+            Self::ViewPicture => service.picture(viewer).await.map(drop),
             Self::RenamePasskey
             | Self::RevokePasskey
             | Self::UnlinkIdentity
@@ -314,7 +315,8 @@ impl AccountOperation {
             | Self::RevokeSession
             | Self::RevokeOtherSessions
             | Self::RemoveApp
-            | Self::ChangeDisplayName => return None,
+            | Self::ChangeDisplayName
+            | Self::RemovePicture => return None,
         })
     }
 }

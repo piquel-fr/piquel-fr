@@ -685,6 +685,16 @@ export class SignedIn {
   }
 
   /**
+   * The URL of the user's profile picture, a square JPEG, when the `profile` scope
+   * was granted and the account has one. The image at a URL never changes, so
+   * `<img>` tags and caches may keep it; a new picture comes with a new URL, at the
+   * next sign-in.
+   */
+  get picture(): string | undefined {
+    return this.claims.picture;
+  }
+
+  /**
    * `null` if the sign-in meets `requirement`, else the {@link SignedIn.stepUp}
    * response asking for it.
    */

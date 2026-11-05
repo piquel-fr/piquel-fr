@@ -121,6 +121,8 @@ repositories! {
     signing_keys: SigningKeyRepository;
     /// Accounts scheduled for deletion, and their purge.
     deletions: AccountDeletionRepository;
+    /// Profile pictures.
+    pictures: PictureRepository;
 }
 
 /// Runs a checked query on the repository's pool or transaction connection, in a
@@ -332,6 +334,8 @@ pub(crate) mod maintenance;
 pub(crate) mod oidc;
 /// Passkey credentials and single-use ceremony records.
 pub(crate) mod passkeys;
+/// Profile pictures and what their URLs serve.
+pub(crate) mod pictures;
 /// Account recoveries and their links.
 pub(crate) mod recoveries;
 /// Signup invitations and shared request budgets.

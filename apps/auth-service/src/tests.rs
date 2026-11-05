@@ -399,6 +399,27 @@ impl Browser {
     }
 }
 
+/// A PNG of faint noise, over the default body limit an upload's own lifts, of little
+/// enough detail to store.
+pub(crate) fn detailed_png() -> Vec<u8> {
+    let noise = image::RgbImage::from_fn(384, 288, |x, y| {
+        // MurmurHash3's finalizer, which no PNG filter predicts.
+        let mut hash = u64::from(y << 9 | x);
+        for multiplier in [0xff51_afd7_ed55_8ccd, 0xc4ce_b9fe_1a85_ec53] {
+            hash ^= hash >> 33;
+            hash = hash.wrapping_mul(multiplier);
+        }
+        let [a, b, c, ..] = (hash ^ hash >> 33).to_le_bytes();
+        image::Rgb([a, b, c].map(|channel| 112 + channel % 32))
+    });
+    let mut png = std::io::Cursor::new(Vec::new());
+    image::DynamicImage::from(noise)
+        .write_to(&mut png, image::ImageFormat::Png)
+        .expect("PNG");
+    assert!(png.get_ref().len() > crate::MAX_REQUEST_BODY_BYTES);
+    png.into_inner()
+}
+
 /// The value `response` sets the cookie `name` to, and the cookie's attributes.
 pub(crate) fn cookie(response: &Response, name: BrowserCookie) -> (&str, &str) {
     response

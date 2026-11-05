@@ -1,15 +1,11 @@
-//! The handle, display name, passkeys and social sign-in.
+//! Passkeys and social sign-in.
 
 use super::Audience;
 use crate::{
     Recovery, RecoveryPasskey, RecoveryStage,
-    form::{
-        Ceremony, Checkbox, Precision, Query, change_form, handle_input, new_passkey, open,
-        passkey_form, time,
-    },
+    form::{Ceremony, Precision, Query, change_form, new_passkey, open, passkey_form, time},
     layout::page_head,
 };
-use chrono::{DateTime, Utc};
 use piquel_common::{
     PasskeyId, Provider,
     protocol::api::{Identity, Passkey},
@@ -25,18 +21,6 @@ use topcoat::{
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(tag = "action", rename_all = "snake_case")]
 pub enum SignInChange {
-    /// Changes the account's handle, once confirmed with a passkey.
-    Handle {
-        /// The new handle, which the user types.
-        #[serde(skip_serializing_if = "String::is_empty")]
-        handle: String,
-    },
-    /// Changes the account's display name.
-    DisplayName {
-        /// The new name, which the user types.
-        #[serde(skip_serializing_if = "String::is_empty")]
-        display_name: String,
-    },
     /// Renames a passkey.
     Rename {
         /// The passkey.
@@ -68,22 +52,6 @@ pub enum SignInChange {
 /// Which row of the sign-in methods is open, as the page's query names it.
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
 pub struct SignInState {
-    /// The handle is being changed.
-    #[serde(default, rename = "handle", skip_serializing_if = "Checkbox::is_off")]
-    pub changing_handle: Checkbox,
-    /// The handle a change that failed asked for, to ask for it again.
-    #[serde(skip)]
-    pub handle: Option<String>,
-    /// The display name is being changed.
-    #[serde(
-        default,
-        rename = "display_name",
-        skip_serializing_if = "Checkbox::is_off"
-    )]
-    pub changing_display_name: Checkbox,
-    /// The display name a change that failed asked for, to ask for it again.
-    #[serde(skip)]
-    pub display_name: Option<String>,
     /// The passkey being renamed.
     #[serde(rename = "rename")]
     pub renaming: Option<PasskeyId>,
@@ -112,20 +80,8 @@ pub struct ProviderRow<'a> {
     pub enabled: bool,
 }
 
-/// The account's handle and display name, as its owner's sign-in methods show
-/// them.
-#[derive(Clone, Copy, Debug)]
-pub struct ProfileRow<'a> {
-    /// The handle.
-    pub handle: &'a str,
-    /// When the handle may change again, if not yet.
-    pub changeable_at: Option<DateTime<Utc>>,
-    /// The display name.
-    pub display_name: &'a str,
-}
-
-/// The sign-in methods page: the account's `profile`, if its owner may change it
-/// here, its `passkeys`, and the social sign-in `providers`. Its rows open on
+/// The sign-in methods page: the account's `passkeys`, and the social sign-in
+/// `providers`. Its rows open on
 /// `page` as `state` says, and its changes post there, for `audience`. On Android,
 /// adding a passkey offers Google Password Manager. While the account has a
 /// `recovery` that can still be undone, only its passkey can be removed.
@@ -138,7 +94,6 @@ pub async fn sign_in_methods<'a>(
     audience: Audience<'a>,
     android: bool,
     recovery: Option<&'a Recovery>,
-    #[default] profile: Option<ProfileRow<'a>>,
 ) -> Result<impl View> {
     Ok(view! {
         if audience.owns() {
@@ -146,10 +101,6 @@ pub async fn sign_in_methods<'a>(
                 title: "Sign-in methods",
                 lead: "The passkeys and linked providers that can sign in to your account.".to_owned(),
             )
-        }
-        if let Some(profile) = profile {
-            handle_card(page: page, row: profile, state: state, audience: audience)
-            name_card(page: page, name: profile.display_name, state: state)
         }
         passkey_list(
             page: page,
@@ -160,123 +111,6 @@ pub async fn sign_in_methods<'a>(
             recovery: recovery,
         )
         social(page: page, providers: providers, state: state, audience: audience)
-    })
-}
-
-/// The handle section of [`sign_in_methods`]: the handle, and changing it when
-/// `state` opens it, which takes the focus. While the last change is recent, it says
-/// when the handle may change again instead.
-#[component]
-async fn handle_card<'a>(
-    page: &'a str,
-    row: ProfileRow<'a>,
-    state: &'a SignInState,
-    audience: Audience<'a>,
-) -> Result<impl View> {
-    let current = row.handle;
-    Ok(view! {
-        <section class="card" aria-labelledby="handle-heading">
-            <header>
-                <h2 id="handle-heading">"Handle"</h2>
-                if !(state.changing_handle.0 && row.changeable_at.is_none()) {
-                    open(
-                        page: page,
-                        opens: SignInState { changing_handle: Checkbox(true), ..SignInState::default() },
-                        label: "Change",
-                        aria_label: "Change handle".to_owned(),
-                        disabled: row.changeable_at.is_some(),
-                        secondary: true,
-                    )
-                }
-            </header>
-            if state.changing_handle.0 && row.changeable_at.is_none() {
-                <div class="open-row">
-                    change_form(
-                        action: page,
-                        change: SignInChange::Handle { handle: String::new() },
-                        label: "Change handle",
-                        confirm: audience.confirms(),
-                        cancel: page.to_owned(),
-                        handle_input(new: true, value: state.handle.as_deref().or(Some(current)), focus: true)
-                        <div class="notice warning stack">
-                            <p>
-                                <strong>(format!("@{current} stops working right away."))</strong>
-                                " Links to it, and apps and services that look you up by it, stop finding you."
-                            </p>
-                            <p>"It stays reserved for you: nobody else can take it unless Piquel support releases it, and you can take it back later. You can change your handle once every 30 days."</p>
-                        </div>
-                    )
-                </div>
-            } else {
-                <ul class="list">
-                    <li>
-                        <div class="text">
-                            <strong>(format!("@{current}"))</strong>
-                            <small>
-                                "Your public name on Piquel and the name you sign in with. Apps you use see it as your username."
-                            </small>
-                            if let Some(at) = row.changeable_at {
-                                <small>
-                                    "You can change it again on " time(at: at, precision: Precision::Day) "."
-                                </small>
-                            }
-                        </div>
-                    </li>
-                </ul>
-            }
-        </section>
-    })
-}
-
-/// The display name section of [`sign_in_methods`]: the name, and changing it
-/// when `state` opens it, which takes the focus.
-#[component]
-async fn name_card<'a>(page: &'a str, name: &'a str, state: &'a SignInState) -> Result<impl View> {
-    let changing = state.changing_display_name.0;
-    Ok(view! {
-        <section class="card" aria-labelledby="display-name-heading">
-            <header>
-                <h2 id="display-name-heading">"Display name"</h2>
-                if !changing {
-                    open(
-                        page: page,
-                        opens: SignInState { changing_display_name: Checkbox(true), ..SignInState::default() },
-                        label: "Change",
-                        aria_label: "Change display name".to_owned(),
-                        secondary: true,
-                    )
-                }
-            </header>
-            if changing {
-                <div class="open-row">
-                    change_form(
-                        action: page,
-                        change: SignInChange::DisplayName { display_name: String::new() },
-                        label: "Save name",
-                        cancel: page.to_owned(),
-                        <label>
-                            "Display name"
-                            <input
-                                name="display_name"
-                                value=(state.display_name.as_deref().unwrap_or(name))
-                                maxlength="80"
-                                required=""
-                                autofocus=""
-                            >
-                        </label>
-                    )
-                </div>
-            } else {
-                <ul class="list">
-                    <li>
-                        <div class="text">
-                            <strong>(name)</strong>
-                            <small>"The name shown on your account. Apps you use see it as your name."</small>
-                        </div>
-                    </li>
-                </ul>
-            }
-        </section>
     })
 }
 

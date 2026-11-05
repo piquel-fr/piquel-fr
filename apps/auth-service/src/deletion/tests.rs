@@ -222,7 +222,7 @@ async fn exports_hold_every_category_and_no_secret() {
     let export = serde_json::to_value(export).expect("JSON");
     assert_eq!(
         (&export["format"], &export["version"]),
-        (&json!("piquel.account-export"), &json!(1))
+        (&json!("piquel.account-export"), &json!(2))
     );
     assert_eq!(export["profile"]["handle"], handle.as_str());
     let count = |category: &str| export[category].as_array().map_or(0, Vec::len);

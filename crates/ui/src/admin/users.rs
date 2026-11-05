@@ -3,7 +3,7 @@
 use super::{
     Action, Change, EventRow, account_status, confirm, event_rows, moment, refused_action,
 };
-use crate::layout::{Pager, Who, avatar, page_head, pager, private_address};
+use crate::layout::{AvatarSize, Pager, Who, avatar, page_head, pager, private_address};
 use piquel_common::{
     AccountStatus, AuthenticationMethod,
     admin::{Session, User, UserDetail},
@@ -22,6 +22,8 @@ pub struct UserRow<'a> {
     pub administrator: bool,
     /// Its page.
     pub href: String,
+    /// Where its profile picture is served, if it has one.
+    pub picture: Option<String>,
 }
 
 impl UserRow<'_> {
@@ -31,6 +33,7 @@ impl UserRow<'_> {
             user: None,
             name: &self.user.display_name,
             handle: self.user.handle.as_str(),
+            picture: self.picture.as_deref(),
             administrator: self.administrator,
         }
     }
@@ -90,7 +93,7 @@ pub async fn user_search<'a>(
                                     <td><a class="mono" href=(row.href.as_str())>(format!("@{}", row.user.handle))</a></td>
                                     <td>
                                         <span class="row nowrap">
-                                            avatar(who: row.who(), small: true)
+                                            avatar(who: row.who(), size: AvatarSize::Small)
                                             (row.user.display_name.as_str())
                                         </span>
                                     </td>
@@ -131,6 +134,8 @@ pub struct AccountPages<'a> {
     pub undo_recovery: &'a str,
     /// Its passkeys and social sign-in.
     pub sign_in: &'a str,
+    /// Its profile picture.
+    pub profile: &'a str,
     /// Its email addresses.
     pub emails: &'a str,
     /// The apps that keep access to it.
@@ -143,11 +148,13 @@ pub struct AccountPages<'a> {
     pub display_name: &'a str,
 }
 
-/// One account's page: `detail`, with the `pages` changing it, or why there are
-/// none, its `sessions`, and its `recent` events, linking `all_events`.
+/// One account's page: `detail`, with its profile picture at `picture`, the
+/// `pages` changing it, or why there are none, its `sessions`, and its `recent`
+/// events, linking `all_events`.
 #[component]
 pub async fn user_page<'a>(
     detail: &'a UserDetail,
+    picture: Option<&'a str>,
     pages: Result<AccountPages<'a>, &'a str>,
     sessions: &'a [SessionRow<'a>],
     recent: &'a [EventRow<'a>],
@@ -158,6 +165,7 @@ pub async fn user_page<'a>(
         user: None,
         name: &user.display_name,
         handle: user.handle.as_str(),
+        picture,
         administrator: detail.administrator,
     };
     Ok(view! {
@@ -297,6 +305,7 @@ async fn account_actions<'a>(
                     <a data-confirm-first="" class="button secondary small" href=(pages.recover)>"Recover"</a>
                     <a data-confirm-first="" class="button secondary small" href=(pages.undo_recovery)>"Undo recovery"</a>
                     <a data-confirm-first="" class="button secondary small" href=(pages.sign_in)>"Sign-in methods"</a>
+                    <a data-confirm-first="" class="button secondary small" href=(pages.profile)>"Profile"</a>
                     <a data-confirm-first="" class="button secondary small" href=(pages.emails)>"Email addresses"</a>
                     <a data-confirm-first="" class="button secondary small" href=(pages.apps)>"Connected apps"</a>
                     <a class="button secondary small" href=(pages.history)>"Security history"</a>

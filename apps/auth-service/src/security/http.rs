@@ -59,7 +59,9 @@ pub(super) enum CorsGrant {
 pub(crate) enum CacheClass {
     /// Never stored: pages, APIs, OAuth, errors and every response without a class.
     NoStore,
-    /// Content-addressed build assets, which any cache may keep for a year.
+    /// Content that never changes at its URL: the build assets, named by their
+    /// content, and profile pictures, named by their upload. Any cache may keep it
+    /// for a year.
     Immutable,
     /// Public, credential-free data, the same for every caller and readable from any
     /// origin. Its route must accept any `Origin` and never read the session.
@@ -332,8 +334,10 @@ impl HttpSecurity {
         endpoint: Endpoint,
         origin: &str,
     ) -> Result<bool, HttpSecurityError> {
-        if matches!(endpoint, Endpoint::Discovery | Endpoint::Checkpoints)
-            || origin == self.origin.ascii_serialization()
+        if matches!(
+            endpoint,
+            Endpoint::Discovery | Endpoint::Checkpoints | Endpoint::Picture
+        ) || origin == self.origin.ascii_serialization()
         {
             return Ok(true);
         }
@@ -349,6 +353,7 @@ impl HttpSecurity {
                 .is_some(),
             Endpoint::Discovery
             | Endpoint::Checkpoints
+            | Endpoint::Picture
             | Endpoint::Health
             | Endpoint::Authorize
             | Endpoint::Logout
@@ -388,7 +393,9 @@ impl HttpSecurity {
         .flatten()
         .unwrap_or_else(|error| ApiError::from(error).into_response());
         let grant = match endpoint {
-            Endpoint::Discovery | Endpoint::Checkpoints => Some(CorsGrant::Public),
+            Endpoint::Discovery | Endpoint::Checkpoints | Endpoint::Picture => {
+                Some(CorsGrant::Public)
+            }
             Endpoint::RelatedLogin => origin.filter(|_| allowed).map(CorsGrant::Related),
             _ => origin.filter(|_| allowed).map(CorsGrant::Client),
         };
@@ -485,7 +492,8 @@ impl HttpSecurity {
         let grant = match class {
             CacheClass::NoStore => grant,
             CacheClass::Public { .. } => Some(CorsGrant::Public),
-            CacheClass::Immutable => None,
+            // Pictures are public; the build assets need no grant.
+            CacheClass::Immutable => grant.filter(|grant| matches!(grant, CorsGrant::Public)),
         };
         let headers = response.headers_mut();
         // Replaces any handler value: only the class decides.

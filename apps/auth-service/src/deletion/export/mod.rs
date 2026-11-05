@@ -5,12 +5,15 @@
 use crate::{
     clients::OwnedClientView, emails::EmailView, history::HistoryItem, sessions::SessionItem,
 };
+use base64::Engine;
 use chrono::{DateTime, Utc};
 use piquel_common::admin::Consent;
-use piquel_common::{AccountStatus, Handle, PasskeyId, Provider, RecoveryId, SessionId, UserId};
+use piquel_common::{
+    AccountStatus, Handle, PasskeyId, PictureId, Provider, RecoveryId, SessionId, UserId,
+};
 use piquel_repository::{
     DashboardSignIn, DatabaseError, DatabaseTransaction, RecentRecovery, RecoveryState,
-    StoredExternalIdentity, StoredGrant, StoredHandle, StoredPasskey, StoredUser,
+    StoredExternalIdentity, StoredGrant, StoredHandle, StoredPasskey, StoredPicture, StoredUser,
 };
 use serde::Serialize;
 use serde_json::Value;
@@ -18,14 +21,15 @@ use serde_json::Value;
 /// The `format` of every export.
 const FORMAT: &str = "piquel.account-export";
 /// The export's version; a change to its shape gets a new one.
-const VERSION: u32 = 1;
+const VERSION: u32 = 2;
 /// Where the serialized credential holds whether the passkey may be synced.
 const BACKUP_ELIGIBLE_POINTER: &str = "/cred/backup_eligible";
 /// Where the serialized credential holds whether the passkey is synced.
 const BACKED_UP_POINTER: &str = "/cred/backup_state";
 
 /// Everything auth stores about an account, in one document:
-/// `{"format": "piquel.account-export", "version": 1, …}`.
+/// `{"format": "piquel.account-export", "version": 2, …}`. Version 2 added the
+/// profile picture.
 #[derive(Serialize)]
 pub(crate) struct AccountExport {
     /// Always [`FORMAT`].
@@ -36,6 +40,8 @@ pub(crate) struct AccountExport {
     exported_at: DateTime<Utc>,
     /// The account itself.
     profile: Profile,
+    /// The profile picture, if the account has one.
+    picture: Option<Picture>,
     /// The handles the account holds or held, the current one first.
     handles: Vec<HandleHeld>,
     /// Whether the account is an administrator.
@@ -78,6 +84,31 @@ struct Profile {
     created_at: DateTime<Utc>,
     /// When the profile last changed.
     updated_at: DateTime<Utc>,
+}
+
+/// The profile picture: the JPEG auth stores and serves.
+#[derive(Debug, Serialize)]
+struct Picture {
+    /// Picture ID, in its URL.
+    id: PictureId,
+    /// When it was uploaded.
+    created_at: DateTime<Utc>,
+    /// Always `image/jpeg`.
+    content_type: &'static str,
+    /// The image, in standard base64.
+    data: String,
+}
+
+impl Picture {
+    /// `picture`, whose bytes are `image`.
+    fn new(picture: StoredPicture, image: &[u8]) -> Self {
+        Self {
+            id: picture.id,
+            created_at: picture.created_at,
+            content_type: "image/jpeg",
+            data: base64::engine::general_purpose::STANDARD.encode(image),
+        }
+    }
 }
 
 /// A passkey, without its credential.
@@ -251,10 +282,18 @@ impl AccountExport {
             .find_by_id(user_id)
             .await?
             .ok_or(DatabaseError::NotFound)?;
+        let picture = match tx.pictures().find(user_id).await? {
+            Some(picture) => {
+                let image = tx.pictures().image_of(user_id).await?;
+                image.map(|image| Picture::new(picture, &image))
+            }
+            None => None,
+        };
         Ok(Self {
             format: FORMAT,
             version: VERSION,
             exported_at: Utc::now(),
+            picture,
             handles: (tx.handles().of_user(user_id).await?)
                 .into_iter()
                 .map(HandleHeld::from)

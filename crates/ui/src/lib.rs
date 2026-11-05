@@ -99,7 +99,8 @@ pub use recovery::{
 pub use settings::{
     AccountOverview, Audience, ConnectedAppChange, ConnectedAppRow, ConnectedAppsState, DataChange,
     DataState, DeviceChange, DeviceRow, EmailChange, EmailRow, EmailsState, HistoryChange,
-    HistoryPage, HistoryRow, HistoryState, Holdings, OverviewLinks, ProfileRow, ProviderRow,
-    SignInChange, SignInState, Tab, account_data, account_deleted, account_overview, addresses,
-    connected_apps, devices, history, sign_in_methods, verified, verify,
+    HistoryPage, HistoryRow, HistoryState, Holdings, OverviewLinks, PICTURE_FIELD, PICTURE_TYPES,
+    ProfileChange, ProfileDialog, ProfilePages, ProfileState, ProviderRow, SignInChange,
+    SignInState, Tab, account_data, account_deleted, account_overview, addresses, connected_apps,
+    devices, history, profile_settings, sign_in_methods, verified, verify,
 };

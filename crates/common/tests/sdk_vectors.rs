@@ -298,6 +298,7 @@ impl Vectors {
                 Claim::Subject,
                 Claim::Name,
                 Claim::Username,
+                Claim::Picture,
                 Claim::Email,
                 Claim::EmailVerified,
                 Claim::ProfileVersion,
@@ -961,6 +962,9 @@ impl Vectors {
         ProfileClaims {
             preferred_username: Some("ada".into()),
             name: Some("Ada Lovelace".into()),
+            picture: Some(format!(
+                "{ISSUER}/pictures/0199a000-0000-7000-8000-000000000001"
+            )),
             profile_version: Some(1),
             ..ProfileClaims::default()
         }

@@ -15,7 +15,7 @@ use crate::{
     clients::OwnedClientError,
     deletion::{AccountDeleted, AccountExport},
     federation::FlowCookie,
-    routes::page,
+    routes::{self, page},
     security::{ApiError, BrowserCookie, SessionError},
     web::settings::TABS,
 };
@@ -60,6 +60,14 @@ pub(super) trait AccountPage: 'static {
 
     /// The row a failed `change` shows open again, with what was typed into it.
     fn reopened(change: &Self::Change) -> Self::Row;
+
+    /// The change the page's form posted, or `None` when it does not decode, as a
+    /// form from an older page does. Forms post text, which
+    /// [`WebApplication::change`] reads, unless the page reads its own, as an
+    /// upload's.
+    fn decode(cx: &Cx, body: Body) -> impl Future<Output = Option<Self::Change>> + Send {
+        WebApplication::change(cx, body)
+    }
 
     /// Makes `change` as `owner`, on the page `cx` requests, whose path may name
     /// an app.
@@ -289,7 +297,7 @@ impl WebApplication {
                 .signed_out(cx, P::SECTION, P::TITLE, StatusCode::UNAUTHORIZED)
                 .await;
         };
-        let Some(change) = Self::change::<P::Change>(cx, body).await else {
+        let Some(change) = P::decode(cx, body).await else {
             let outcome = (
                 StatusCode::BAD_REQUEST,
                 Messages::alert(Alert::Page(piquel_ui::OUT_OF_DATE)),
@@ -441,10 +449,12 @@ impl WebApplication {
                 .path_and_query()
                 .map_or(page::settings::HOME, |path| path.as_str())
         };
+        let picture = profile.picture.map(routes::pictures::of);
         let who = Who {
             user: Some(reader.owner().user()),
             name: &profile.display_name,
             handle: profile.handle.as_str(),
+            picture: picture.as_deref(),
             administrator,
         };
         // Only an administrator's sidebar links the dashboard, on deployments

@@ -589,10 +589,9 @@ test('a handle support renames signs in at once, while the owner waits a month',
   const admin = await administrator(browser, `renamer-${suffix}`);
   const owner = await signedUp(browser, `old-${suffix}`);
   // An owner changes their handle once every 30 days, counting from signup.
-  await owner.goto('/settings/sign-in');
-  const card = owner.getByRole('region', { name: 'Handle' });
-  await expect(card.getByRole('button', { name: 'Change handle', exact: true })).toBeDisabled();
-  await expect(card.getByText(/You can change it again on/)).toBeVisible();
+  await owner.goto('/settings/profile');
+  await expect(owner.getByRole('button', { name: 'Change handle', exact: true })).toBeDisabled();
+  await expect(owner.getByText(/You can change it again on/)).toBeVisible();
 
   // Support renames it without waiting, such as a handle that impersonates another.
   await openAccount(admin, `old-${suffix}`);
@@ -600,10 +599,15 @@ test('a handle support renames signs in at once, while the owner waits a month',
   await admin.getByLabel('New handle').fill(`new-${suffix}`);
   await admin.getByLabel('Reason, shown to the owner in their history').fill('Impersonation');
   await admin.getByRole('button', { name: 'Change handle', exact: true }).click();
-  await expect(admin.getByText(`@new-${suffix}`, { exact: true })).toBeVisible();
+  // It lands on the account's Profile tab, whose Handle row shows the new one.
+  await expect(
+    admin.getByRole('definition').getByText(`@new-${suffix}`, { exact: true })
+  ).toBeVisible();
 
   await owner.reload();
-  await expect(card.getByText(`@new-${suffix}`, { exact: true })).toBeVisible();
+  await expect(
+    owner.getByRole('definition').getByText(`@new-${suffix}`, { exact: true })
+  ).toBeVisible();
   await owner.goto('/settings/history');
   await expect(entry(owner, 'Handle changed', 'Impersonation')).toBeVisible();
 

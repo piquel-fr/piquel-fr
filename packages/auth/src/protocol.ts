@@ -76,6 +76,12 @@ preferred_username?: string,
  */
 name?: string,
 /**
+ * URL of the profile picture, a square JPEG, with the profile scope. Absent
+ * when the account has none. A new picture has a new URL, so the image at one
+ * never changes and may be cached for good.
+ */
+picture?: string,
+/**
  * Bumped when profile claims change, so clients can tell cached data is stale.
  */
 profile_version?: number,
@@ -149,6 +155,12 @@ preferred_username?: string,
  * Display name, with the profile scope.
  */
 name?: string,
+/**
+ * URL of the profile picture, a square JPEG, with the profile scope. Absent
+ * when the account has none. A new picture has a new URL, so the image at one
+ * never changes and may be cached for good.
+ */
+picture?: string,
 /**
  * Bumped when profile claims change, so clients can tell cached data is stale.
  */
@@ -225,6 +237,12 @@ preferred_username?: string,
  */
 name?: string,
 /**
+ * URL of the profile picture, a square JPEG, with the profile scope. Absent
+ * when the account has none. A new picture has a new URL, so the image at one
+ * never changes and may be cached for good.
+ */
+picture?: string,
+/**
  * Bumped when profile claims change, so clients can tell cached data is stale.
  */
 profile_version?: number,
@@ -272,6 +290,12 @@ preferred_username?: string,
  * Display name, with the profile scope.
  */
 name?: string,
+/**
+ * URL of the profile picture, a square JPEG, with the profile scope. Absent
+ * when the account has none. A new picture has a new URL, so the image at one
+ * never changes and may be cached for good.
+ */
+picture?: string,
 /**
  * Bumped when profile claims change, so clients can tell cached data is stale.
  */
@@ -470,7 +494,7 @@ max_age?: number, };
 
 export type TokenType = "at+jwt" | "JWT" | "logout+jwt";
 
-export type Claim = "iss" | "sub" | "aud" | "iat" | "exp" | "nbf" | "sid" | "auth_time" | "amr" | "acr" | "act" | "cnf" | "azp" | "name" | "preferred_username" | "email" | "email_verified" | "profile_version" | "client_id" | "jti" | "scope" | "nonce";
+export type Claim = "iss" | "sub" | "aud" | "iat" | "exp" | "nbf" | "sid" | "auth_time" | "amr" | "acr" | "act" | "cnf" | "azp" | "name" | "preferred_username" | "picture" | "email" | "email_verified" | "profile_version" | "client_id" | "jti" | "scope" | "nonce";
 
 export type Algorithm = "RS256";
 

@@ -1,10 +1,10 @@
 //! Account search, one account's page, and the changes made to an account.
 
 use super::{AdminApplication as App, invitations, lists, settings};
-use crate::Reason;
+use crate::{Reason, routes};
 use piquel_common::{
-    AccountStatus, SessionId, UserId,
-    admin::{DisableUser, EventSearch, UserSearch},
+    AccountStatus, PictureId, SessionId, UserId,
+    admin::{DisableUser, EventSearch, User, UserSearch},
 };
 use piquel_repository::{RecentRecovery, RecoveryState};
 use piquel_ui::{
@@ -58,15 +58,7 @@ pub(super) async fn search(cx: &Cx) -> Result<Response> {
         .map(|administrator| administrator.user_id)
         .collect();
     let action = href!(search).resolve(cx);
-    let rows: Vec<_> = found
-        .users
-        .iter()
-        .map(|user| UserRow {
-            user,
-            administrator: administrators.contains(&user.id),
-            href: App::account(cx, user.id),
-        })
-        .collect();
+    let rows = App::user_rows(cx, &found.users, &administrators);
     let pager = Pager::of(found.paging, |page| {
         UserSearch {
             q: q.clone(),
@@ -107,6 +99,7 @@ pub(super) async fn detail(cx: &Cx) -> Result<Response> {
         href!(recover, Account(id)).resolve(cx),
         href!(undo_recovery, Account(id)).resolve(cx),
         href!(settings::sign_in, Account(id)).resolve(cx),
+        href!(settings::profile, Account(id)).resolve(cx),
         href!(settings::emails, Account(id)).resolve(cx),
         href!(settings::apps, Account(id)).resolve(cx),
         href!(settings::history, Account(id)).resolve(cx),
@@ -117,6 +110,7 @@ pub(super) async fn detail(cx: &Cx) -> Result<Response> {
         recovering,
         undoing,
         signing_in,
+        picturing,
         addresses,
         connected,
         happened,
@@ -138,6 +132,7 @@ pub(super) async fn detail(cx: &Cx) -> Result<Response> {
             recover: recovering,
             undo_recovery: undoing,
             sign_in: signing_in,
+            profile: picturing,
             emails: addresses,
             apps: connected,
             history: happened,
@@ -160,10 +155,12 @@ pub(super) async fn detail(cx: &Cx) -> Result<Response> {
     let events = App::event_rows(cx, &recent.events);
     let all_events = filter.on(&href!(lists::events).resolve(cx))?;
     // The page names only references: a view moves what it names.
+    let picture = App::picture(cx, detail.user.picture);
     let (detail, sessions, events, all_events) = (&detail, &sessions, &events, &all_events);
     let page = view! { cx =>
         piquel_ui::user_page(
             detail: detail,
+            picture: picture.as_deref(),
             pages: pages,
             sessions: sessions,
             recent: events,
@@ -441,5 +438,27 @@ impl App {
     /// The page of the account `id`.
     pub(super) fn account(cx: &Cx, id: UserId) -> String {
         href!(detail, Account(id)).resolve(cx)
+    }
+
+    /// Where auth serves the picture `id`, if any: the dashboard serves none.
+    pub(super) fn picture(cx: &Cx, id: Option<PictureId>) -> Option<String> {
+        id.map(|id| routes::pictures::url(&Self::of(cx).auth, id))
+    }
+
+    /// `users` as a list shows them, those in `administrators` marked.
+    pub(super) fn user_rows<'a>(
+        cx: &Cx,
+        users: &'a [User],
+        administrators: &[UserId],
+    ) -> Vec<UserRow<'a>> {
+        users
+            .iter()
+            .map(|user| UserRow {
+                user,
+                administrator: administrators.contains(&user.id),
+                href: Self::account(cx, user.id),
+                picture: Self::picture(cx, user.picture),
+            })
+            .collect()
     }
 }

@@ -1,0 +1,22 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT p.image FROM profile_pictures p\n                JOIN users u ON u.id = p.user_id AND u.status = 'active'\n                WHERE p.id = $1",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "image",
+        "type_info": "Bytea"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "d73b8f6b78173562f7f737e943d810ab71d6902666f5d63d603f06948bc1da80"
+}

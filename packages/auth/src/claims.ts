@@ -55,6 +55,7 @@ const authentication = {
 const profile = {
   preferred_username: json.optional(json.string),
   name: json.optional(json.string),
+  picture: json.optional(json.string),
   profile_version: json.optional(json.integer(0, Number.MAX_SAFE_INTEGER)),
   email: json.optional(json.string),
   email_verified: json.optional(json.boolean)

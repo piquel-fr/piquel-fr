@@ -52,7 +52,7 @@ pub async fn consent(
 pub(crate) fn scope_label(scope: &str) -> &str {
     match scope.parse() {
         Ok(Scope::OpenId) => "Your account identifier",
-        Ok(Scope::Profile) => "Your username and display name",
+        Ok(Scope::Profile) => "Your username, display name and profile picture",
         Ok(Scope::Email) => "Your verified email address",
         Ok(Scope::OfflineAccess) => "Stay signed in",
         Err(_) => scope,

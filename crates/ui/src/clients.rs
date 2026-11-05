@@ -358,7 +358,7 @@ impl<'a> Described<'a> {
 const fn scope_description(scope: Scope) -> &'static str {
     match scope {
         Scope::OpenId => "Sign users in: their stable user ID",
-        Scope::Profile => "Their handle and display name",
+        Scope::Profile => "Their handle, display name and profile picture",
         Scope::Email => "Their email address, when they have one",
         Scope::OfflineAccess => "Refresh tokens, if refresh is allowed",
     }

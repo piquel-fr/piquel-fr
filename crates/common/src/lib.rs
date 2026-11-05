@@ -413,6 +413,10 @@ uuid_id!(
     "Identifier of an outbound delivery, reused by every attempt as its `jti` or `Message-ID`."
 );
 uuid_id!(
+    PictureId,
+    "Identifier of one upload of an account's profile picture, in its URL: a new picture gets a new one."
+);
+uuid_id!(
     RecoveryId,
     "Identifier of an account recovery, which its link's token is derived from."
 );

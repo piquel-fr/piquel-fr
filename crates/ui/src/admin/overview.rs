@@ -4,7 +4,7 @@
 use super::{EventRow, UserRow, account_status, event_rows, moment};
 use crate::{
     icons::{Icon, icon},
-    layout::{avatar, page_head},
+    layout::{AvatarSize, avatar, page_head},
 };
 use chrono::{DateTime, Utc};
 use topcoat::{
@@ -178,7 +178,7 @@ pub async fn admin_overview<'a>(overview: AdminOverview<'a>) -> Result<impl View
                     <ul class="list">
                         for row in overview.newest {
                             <li>
-                                avatar(who: row.who(), small: true)
+                                avatar(who: row.who(), size: AvatarSize::Small)
                                 <div class="text">
                                     <a href=(row.href.as_str())><strong>(format!("@{}", row.user.handle))</strong></a>
                                     <small>"joined " moment(at: row.user.created_at)</small>

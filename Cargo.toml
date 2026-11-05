@@ -83,6 +83,11 @@ unicode-normalization = "0.1"
 uuid = { version = "1.19", features = ["v7", "serde"] }
 webauthn-rs = { version = "0.5.5", features = ["danger-allow-state-serialisation", "conditional-ui", "workaround-google-passkey-specific-issues"] }
 
+# Profile pictures: decodes the formats uploads may use, pure Rust, and writes the
+# JPEG every stored picture is. No AVIF (C or a heavy encoder), no SVG, and no WebP
+# until its decoder checks a frame's size against its canvas before decoding it.
+image = { version = "0.25", default-features = false, features = ["jpeg", "png", "gif"] }
+
 # Transactional email: SMTP over implicit TLS or required STARTTLS, with rustls
 # (ring, as reqwest uses) and webpki roots, never native-tls/OpenSSL.
 lettre = { version = "0.11", default-features = false, features = ["builder", "smtp-transport", "tokio1-rustls-tls"] }

@@ -24,5 +24,7 @@ pub use parts::{Pager, page_head};
 pub use sections::{AccountNav, Section, account, signed_out};
 pub use signed_in::{Crumb, NavGroup, NavItem, Search, Shell, Who, shell};
 
-pub(crate) use parts::{Label, navigation, page_messages, pager, private_address};
-pub(crate) use signed_in::avatar;
+pub(crate) use parts::{
+    Label, alert_notice, dialog, navigation, page_messages, pager, private_address,
+};
+pub(crate) use signed_in::{AvatarSize, avatar};

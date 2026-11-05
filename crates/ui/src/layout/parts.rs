@@ -117,11 +117,74 @@ pub(crate) async fn page_messages<'a>(messages: Messages<'a>) -> Result<impl Vie
     Ok(view! {
         // A refused setting is said beside its input instead.
         if let Some(Alert::Page(alert)) = messages.alert {
-            <p class="notice error" role="alert">icon(kind: Icon::Warning)<span class="text">(alert)</span></p>
+            alert_notice(message: alert)
         }
         if let Some(notice) = messages.notice {
-            <p class="notice" role="status">icon(kind: Icon::Check)<span class="text">(notice.message())</span></p>
+            // A checkbox, visually hidden, dismisses it, so it needs no script.
+            <p class="notice" role="status">
+                icon(kind: Icon::Check)
+                <span class="text">(notice.message())</span>
+                <label class="dismiss" title="Dismiss">
+                    <input type="checkbox" aria-label="Dismiss">
+                    icon(kind: Icon::Close)
+                </label>
+            </p>
         }
+    })
+}
+
+/// Why a change failed, as `message` says it.
+#[component]
+pub(crate) async fn alert_notice<'a>(message: &'a str) -> Result<impl View> {
+    Ok(view! {
+        <p class="notice error" role="alert">icon(kind: Icon::Warning)<span class="text">(message)</span></p>
+    })
+}
+
+/// A dialog titled `title`, its element `id`, holding `child`. A button naming
+/// `id` as its `popovertarget` opens it, and the browser closes it on Escape or a
+/// click outside, with no script. Once `shown`, as when a change it holds was
+/// refused, it is open as the page loads, saying the refusal's `alert` above its
+/// form, over a scrim, and closing it, by its Close or a click outside, goes
+/// `back`. A dialog that asks no input says to `focus_close`, so the focus moves
+/// into it as it opens; one that does autofocuses its input.
+#[component]
+pub(crate) async fn dialog<'a>(
+    id: &'a str,
+    title: &'a str,
+    shown: bool,
+    back: &'a str,
+    #[default] alert: Option<&'a str>,
+    #[default] focus_close: bool,
+    child: Child<'_>,
+) -> Result<impl View> {
+    let heading = format!("{id}-title");
+    Ok(view! {
+        if shown {
+            <a class="dialog-scrim" href=(back) tabindex="-1" aria-hidden="true"></a>
+        }
+        <div
+            class=(if shown { "dialog shown" } else { "dialog" })
+            id=(id)
+            popover=((!shown).then_some(""))
+            role="dialog"
+            aria-labelledby=(heading.as_str())
+        >
+            <header>
+                <h2 id=(heading.as_str())>(title)</h2>
+                if shown {
+                    <a class="close" href=(back) aria-label="Close" autofocus=(focus_close)>icon(kind: Icon::Close)</a>
+                } else {
+                    <button type="button" class="close" popovertarget=(id) popovertargetaction="hide" aria-label="Close" autofocus=(focus_close)>
+                        icon(kind: Icon::Close)
+                    </button>
+                }
+            </header>
+            if let Some(alert) = alert.filter(|_| shown) {
+                alert_notice(message: alert)
+            }
+            (child)
+        </div>
     })
 }
 

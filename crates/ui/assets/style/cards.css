@@ -183,6 +183,44 @@
   width: 1.2rem;
   height: 1.2rem;
 }
+.dialog > header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.6rem;
+}
+.dialog .close {
+  display: grid;
+  place-items: center;
+  flex: none;
+  width: 30px;
+  min-height: 30px;
+  padding: 0;
+  border-color: transparent;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--muted);
+}
+.dialog .close:hover {
+  background: var(--surface-2);
+  color: var(--fg);
+  filter: none;
+}
+/* A dialog open as the page loads, its change having been refused: placed as an
+   open one is, over a scrim that dims the page and closes it when clicked. */
+.dialog.shown {
+  position: fixed;
+  z-index: 40;
+  display: grid;
+  gap: 0.8rem;
+  height: fit-content;
+}
+.dialog-scrim {
+  position: fixed;
+  inset: 0;
+  z-index: 39;
+  background: rgba(0, 0, 0, 0.45);
+}
 /* Where a list's page stands, and the pages before and after it. */
 .pager {
   display: flex;

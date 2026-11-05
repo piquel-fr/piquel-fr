@@ -386,6 +386,61 @@ async fn policy_reduction_blocks_outstanding_codes_and_refresh() {
     assert_eq!(response.status(), StatusCode::BAD_REQUEST);
 }
 
+/// A new picture bumps the profile version, and the next token carries its URL on
+/// auth's origin as `picture`.
+#[tokio::test]
+#[ignore = "requires TEST_DATABASE_URL"]
+async fn pictures_reach_the_next_token() {
+    let flow = Flow::new(true, true).await;
+    let code = flow.code(PROFILE_REFRESH_SCOPES).await;
+    let (tokens, claims) = flow
+        .id_token(
+            flow.exchange(&code, Flow::verifier(), flow.basic.as_deref())
+                .await,
+        )
+        .await;
+    assert_eq!(claims.get("picture"), None, "no picture yet");
+    let picture = piquel_common::PictureId::new();
+    flow.app
+        .database
+        .pictures()
+        .set(flow.user_id, picture, b"jpeg")
+        .await
+        .expect("picture");
+    let (_, refreshed) = flow
+        .id_token(
+            flow.refresh(tokens["refresh_token"].as_str().expect("refresh token"))
+                .await,
+        )
+        .await;
+    let issuer = refreshed["iss"].as_str().expect("issuer");
+    assert_eq!(refreshed["picture"], format!("{issuer}/pictures/{picture}"));
+    assert_eq!(
+        refreshed["profile_version"],
+        claims["profile_version"].as_u64().expect("version") + 1
+    );
+}
+
+/// The picture is a profile claim: only the `profile` scope releases it.
+#[test]
+fn the_picture_needs_the_profile_scope() {
+    let claims = ProfileClaims {
+        picture: Some(format!(
+            "{AUTH_ORIGIN}/pictures/{}",
+            piquel_common::PictureId::new()
+        )),
+        ..ProfileClaims::default()
+    };
+    let released = |scopes: &str| {
+        Scopes::parse(scopes)
+            .expect("scopes")
+            .release(claims.clone())
+            .picture
+    };
+    assert_eq!(released("openid email"), None);
+    assert_eq!(released("openid profile"), claims.picture);
+}
+
 /// A rename bumps the profile version, and the next token carries the new
 /// `preferred_username`.
 #[tokio::test]

@@ -1,0 +1,46 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT d.session_id AS \"session_id: SessionId\",\n                    s.user_id AS \"user_id: UserId\", h.handle AS \"handle: Handle\",\n                    p.id AS \"picture?: PictureId\", d.confirmed_at\n                FROM dashboard_sessions d\n                JOIN sessions s ON s.id = d.session_id\n                JOIN handles h ON h.user_id = s.user_id AND h.released_at IS NULL\n                LEFT JOIN profile_pictures p ON p.user_id = s.user_id\n                WHERE d.secret_digest = $1\n                AND s.revoked_at IS NULL AND s.expires_at > now()",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "session_id: SessionId",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "user_id: UserId",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 2,
+        "name": "handle: Handle",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 3,
+        "name": "picture?: PictureId",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 4,
+        "name": "confirmed_at",
+        "type_info": "Timestamptz"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Bytea"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      true
+    ]
+  },
+  "hash": "fb1919aec11320d8d3a8e4dbe34c99b56114ad0e7c2672428f3679cde786799e"
+}

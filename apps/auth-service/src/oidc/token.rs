@@ -4,7 +4,10 @@ use super::{
     ACCESS_TOKEN_SECONDS, AuthScheme, GrantType, OAuthCode, OAuthError, OidcApplication,
     OpaqueToken, Reject, Scope, Scopes, TokenPrefix, TokenType,
 };
-use crate::security::{ApiError, RequestContext};
+use crate::{
+    routes,
+    security::{ApiError, RequestContext},
+};
 use axum::{
     Form, Json,
     extract::State,
@@ -148,6 +151,9 @@ impl TokenGrant<'_> {
         let profile = scopes.release(ProfileClaims {
             preferred_username: Some(user.handle.to_string()),
             name: Some(user.display_name.clone()),
+            picture: user
+                .picture
+                .map(|picture| routes::pictures::url(&app.origin, picture)),
             profile_version: Some(user.profile_version),
             email: email.map(str::to_owned),
             email_verified: email.map(|_| true),
