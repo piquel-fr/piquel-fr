@@ -20,6 +20,16 @@ pub const PICTURE_FIELD: &str = "picture";
 /// fetch's `Accept` header name them; auth recognises the format by content.
 pub const PICTURE_TYPES: &str = "image/png,image/jpeg,image/gif";
 
+/// The hidden inputs an upload sends the square to keep in, in the picture's
+/// pixels once upright: its left edge, its top edge and its side. The picture
+/// script fills them as the owner moves and zooms the picture; without a script
+/// they stay empty, and auth keeps the centred square.
+pub const CROP_X: &str = "crop_x";
+/// See [`CROP_X`].
+pub const CROP_Y: &str = "crop_y";
+/// See [`CROP_X`].
+pub const CROP_SIZE: &str = "crop_size";
+
 /// A change the profile page posts, named by its `action` field. A field the user
 /// types is left empty here, and the form renders its input instead.
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -290,13 +300,34 @@ async fn profile_dialogs<'a>(
         }
         if available(ProfileDialog::Picture) {
             dialog(id: ProfileDialog::Picture.id(), title: "Choose a picture", shown: shown(ProfileDialog::Picture), back: page, alert: alert,
-                <p class="help">"A PNG, JPEG or GIF of up to 10 MB. It is cropped to a square, and nothing but the image is kept, so not where a photo was taken."</p>
+                <p class="help">"A PNG, JPEG or GIF of up to 10 MB, cropped to a square. Nothing but the image is kept, so not where a photo was taken."</p>
                 <form method="post" action=(page) enctype="multipart/form-data" data-submit-once="">
                     hidden(fields: ProfileChange::Upload)
                     <label>
                         "Picture"
                         <input type="file" name=(PICTURE_FIELD) accept=(PICTURE_TYPES) required="" autofocus="">
                     </label>
+                    // The picture script shows the image chosen here, to move and
+                    // zoom it; without a script it stays hidden and auth keeps the
+                    // centred square.
+                    <div class="cropper" data-cropper="" hidden="">
+                        <div
+                            class="crop-stage"
+                            data-crop-stage=""
+                            tabindex="0"
+                            role="application"
+                            aria-label="The part of the picture apps show. Drag it, or use the arrow keys, to move it."
+                        >
+                            <img alt="" data-crop-image="">
+                        </div>
+                        <label>
+                            "Zoom"
+                            <input type="range" min="1" max="4" step="0.01" value="1" data-crop-zoom="">
+                        </label>
+                    </div>
+                    <input type="hidden" name=(CROP_X) data-crop="x">
+                    <input type="hidden" name=(CROP_Y) data-crop="y">
+                    <input type="hidden" name=(CROP_SIZE) data-crop="size">
                     <div class="row actions">
                         <button>"Upload picture"</button>
                     </div>

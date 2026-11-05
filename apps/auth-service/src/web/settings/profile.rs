@@ -2,7 +2,7 @@
 
 use crate::{
     account::{AccountError, Owner, Subject},
-    pictures::PictureError,
+    pictures::{Crop, CropFields, PictureError},
     routes::{page::settings, pictures},
     web::{
         Failure, WebApplication,
@@ -10,8 +10,8 @@ use crate::{
     },
 };
 use piquel_ui::{
-    Alert, Audience, Messages, Notice, PICTURE_FIELD, ProfileChange, ProfileDialog, ProfileState,
-    Section, Tab, Who,
+    Alert, Audience, CROP_SIZE, CROP_X, CROP_Y, Messages, Notice, PICTURE_FIELD, ProfileChange,
+    ProfileDialog, ProfileState, Section, Tab, Who,
 };
 use serde::Deserialize;
 use topcoat::{
@@ -39,9 +39,9 @@ impl Profile {
 #[derive(Deserialize)]
 #[serde(from = "ProfileChange")]
 pub(in crate::web) enum ProfileEdit {
-    /// Makes the image the account's picture. Empty when a text form named it,
-    /// which chose no image.
-    Upload(Vec<u8>),
+    /// Makes the image the account's picture, keeping the square chosen, or its
+    /// centred one. Empty when a text form named it, which chose no image.
+    Upload(Vec<u8>, Option<Crop>),
     /// The upload was over the page's body limit.
     Oversize,
     /// Removes the account's picture.
@@ -56,7 +56,7 @@ impl From<ProfileChange> for ProfileEdit {
     /// The change a text form names: an upload in one carries no image.
     fn from(change: ProfileChange) -> Self {
         match change {
-            ProfileChange::Upload => Self::Upload(Vec::new()),
+            ProfileChange::Upload => Self::Upload(Vec::new(), None),
             ProfileChange::Remove => Self::Remove,
             ProfileChange::DisplayName { display_name } => Self::DisplayName(display_name),
             ProfileChange::Handle { handle } => Self::Handle(handle),
@@ -71,6 +71,7 @@ impl Profile {
     /// that does not read changes nothing.
     async fn upload(mut multipart: Multipart) -> Option<ProfileEdit> {
         let (mut action, mut picture) = (None, None);
+        let mut crop = CropFields::default();
         loop {
             let field = match multipart.next_field().await {
                 Ok(Some(field)) => field,
@@ -86,6 +87,9 @@ impl Profile {
             let read = match field.name() {
                 Some("action") => field.text().await.map(|text| action = Some(text)),
                 Some(PICTURE_FIELD) => field.bytes().await.map(|bytes| picture = Some(bytes)),
+                Some(CROP_X) => field.text().await.map(|text| crop.x = text.parse().ok()),
+                Some(CROP_Y) => field.text().await.map(|text| crop.y = text.parse().ok()),
+                Some(CROP_SIZE) => field.text().await.map(|text| crop.size = text.parse().ok()),
                 _ => Ok(()),
             };
             match read {
@@ -103,7 +107,7 @@ impl Profile {
         let action = serde_json::json!({ "action": action? });
         Some(match serde_json::from_value(action).ok()? {
             ProfileChange::Upload => {
-                ProfileEdit::Upload(picture.map(Vec::from).unwrap_or_default())
+                ProfileEdit::Upload(picture.map(Vec::from).unwrap_or_default(), crop.crop())
             }
             change => change.into(),
         })
@@ -120,7 +124,7 @@ impl AccountPage for Profile {
     /// A refused change shows its dialog again, holding what was typed.
     fn reopened(change: &ProfileEdit) -> ProfileState {
         let (open, display_name, handle) = match change {
-            ProfileEdit::Upload(_) | ProfileEdit::Oversize => (ProfileDialog::Picture, None, None),
+            ProfileEdit::Upload(..) | ProfileEdit::Oversize => (ProfileDialog::Picture, None, None),
             ProfileEdit::Remove => (ProfileDialog::Remove, None, None),
             ProfileEdit::DisplayName(name) => (ProfileDialog::Name, Some(name.clone()), None),
             ProfileEdit::Handle(handle) => (ProfileDialog::Handle, None, Some(handle.clone())),
@@ -148,8 +152,8 @@ impl AccountPage for Profile {
         change: ProfileEdit,
     ) -> Result<Applied<ProfileState>, AccountError> {
         let notice = match change {
-            ProfileEdit::Upload(image) => {
-                web.account.set_picture(&owner, image).await?;
+            ProfileEdit::Upload(image, crop) => {
+                web.account.set_picture(&owner, image, crop).await?;
                 Notice::PictureChanged
             }
             ProfileEdit::Oversize => return Err(PictureError::TooLarge.into()),

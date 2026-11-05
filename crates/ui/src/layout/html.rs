@@ -120,7 +120,7 @@ pub struct PreferenceChange {
 }
 
 /// The document around every page: the head, which links `stylesheet` and loads
-/// the page's `script`, if it has one, and the page as `child`. `title`
+/// the page's `scripts`, if it has any, and the page as `child`. `title`
 /// names the page in the browser, before "· Piquel". The browser's `preferences`
 /// set the theme and the sidebar's width on the root, where the stylesheet reads
 /// them, and an `admin` page is marked so the stylesheet colours it as the
@@ -130,9 +130,7 @@ pub struct PreferenceChange {
 pub async fn document<'a>(
     title: &'a str,
     stylesheet: &'a str,
-    #[into]
-    #[default]
-    script: Option<&'a str>,
+    #[default] scripts: &'a [&'a str],
     #[default] preferences: Preferences,
     #[default] admin: bool,
     #[default] indexable: bool,
@@ -154,8 +152,8 @@ pub async fn document<'a>(
                 <meta name="color-scheme" content="light dark">
                 <title>(format!("{title} · Piquel"))</title>
                 <link rel="stylesheet" href=(stylesheet)>
-                if let Some(script) = script {
-                    <script type="module" src=(script)></script>
+                for script in scripts {
+                    <script type="module" src=(*script)></script>
                 }
             </head>
             <body class=(admin.then_some("admin"))>

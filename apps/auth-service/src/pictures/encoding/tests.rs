@@ -1,5 +1,5 @@
 //! What an upload becomes, and which uploads are refused.
-use super::{Jpeg, MAX_STORED_BYTES, SIDE};
+use super::{Crop, Jpeg, MAX_STORED_BYTES, SIDE};
 use crate::pictures::PictureError;
 use image::{
     DynamicImage, GrayImage, ImageEncoder, ImageFormat, Rgb, RgbImage, Rgba, RgbaImage,
@@ -16,7 +16,12 @@ fn encoded(image: &DynamicImage, format: ImageFormat) -> Vec<u8> {
 
 /// The stored picture `upload` becomes, decoded back.
 fn stored(upload: &[u8]) -> (Vec<u8>, RgbImage) {
-    let jpeg = Jpeg::from_upload(upload).expect("stored picture").0;
+    cropped(upload, None)
+}
+
+/// The stored picture `upload` becomes, keeping `crop`, decoded back.
+fn cropped(upload: &[u8], crop: Option<Crop>) -> (Vec<u8>, RgbImage) {
+    let jpeg = Jpeg::from_upload(upload, crop).expect("stored picture").0;
     let image = image::load_from_memory_with_format(&jpeg, ImageFormat::Jpeg)
         .expect("a JPEG")
         .to_rgb8();
@@ -85,6 +90,39 @@ fn a_rotated_photo_comes_out_upright_without_metadata() {
     );
 }
 
+/// The square the owner chose is the one kept, and one that leaves the image is
+/// moved and shrunk until it fits.
+#[test]
+fn a_chosen_square_is_kept_and_fitted_into_the_image() {
+    // Red, green, blue and white quarters, from the top left.
+    let image = RgbImage::from_fn(400, 400, |x, y| match (x < 200, y < 200) {
+        (true, true) => Rgb([255, 0, 0]),
+        (false, true) => Rgb([0, 255, 0]),
+        (true, false) => Rgb([0, 0, 255]),
+        (false, false) => Rgb([255, 255, 255]),
+    });
+    let upload = encoded(&image.into(), ImageFormat::Png);
+    let top_right = Crop {
+        x: 200,
+        y: 0,
+        size: 200,
+    };
+    let (_, image) = cropped(&upload, Some(top_right));
+    assert!(near(*image.get_pixel(SIDE / 2, SIDE / 2), [0, 255, 0]));
+
+    let beyond = Crop {
+        x: 1000,
+        y: 1000,
+        size: 10_000,
+    };
+    let (_, image) = cropped(&upload, Some(beyond));
+    assert!(near(*image.get_pixel(10, 10), [255, 0, 0]));
+    assert!(near(
+        *image.get_pixel(SIDE - 10, SIDE - 10),
+        [255, 255, 255]
+    ));
+}
+
 /// Text, SVG, WebP and an empty upload are no picture; damaged bytes in a known
 /// format are unreadable.
 #[test]
@@ -93,14 +131,17 @@ fn what_is_not_a_raster_image_is_refused() {
     let webp = b"RIFF\x1a\0\0\0WEBPVP8X\x0a\0\0\0\0\0\0\0\0\0\0\0\0\0";
     for upload in [&b"hello"[..], svg, webp, b""] {
         assert!(
-            matches!(Jpeg::from_upload(upload), Err(PictureError::Unsupported)),
+            matches!(
+                Jpeg::from_upload(upload, None),
+                Err(PictureError::Unsupported)
+            ),
             "{upload:?}"
         );
     }
     let mut damaged = encoded(&RgbImage::new(64, 64).into(), ImageFormat::Png);
     damaged.truncate(40);
     assert!(matches!(
-        Jpeg::from_upload(&damaged),
+        Jpeg::from_upload(&damaged, None),
         Err(PictureError::Unreadable(_))
     ));
 }
@@ -112,8 +153,36 @@ fn an_oversize_image_is_refused_before_decoding() {
     for (width, height) in [(9000, 1), (6000, 6000)] {
         let upload = encoded(&GrayImage::new(width, height).into(), ImageFormat::Png);
         assert!(
-            matches!(Jpeg::from_upload(&upload), Err(PictureError::Dimensions)),
+            matches!(
+                Jpeg::from_upload(&upload, None),
+                Err(PictureError::Dimensions)
+            ),
             "{width}x{height}"
+        );
+    }
+}
+
+/// An image declaring a side of no pixels is refused before decoding, with or
+/// without a square to keep: it has none.
+#[test]
+fn an_image_with_no_pixels_on_a_side_is_refused() {
+    // A GIF whose screen is 0 by 1 pixels, holding one 1 by 1 frame.
+    let gif = [
+        &b"GIF89a"[..],
+        &[0, 0, 1, 0, 0, 0, 0],
+        &[0x2c, 0, 0, 0, 0, 1, 0, 1, 0, 0],
+        &[2, 2, 0x4c, 0x01, 0, 0x3b],
+    ]
+    .concat();
+    let square = Crop {
+        x: 0,
+        y: 0,
+        size: 1,
+    };
+    for crop in [None, Some(square)] {
+        assert!(
+            matches!(Jpeg::from_upload(&gif, crop), Err(PictureError::Dimensions)),
+            "{crop:?}"
         );
     }
 }
@@ -134,7 +203,7 @@ fn an_image_over_the_allocation_limit_is_refused() {
     let image = image::ImageBuffer::<Rgba<u16>, _>::new(3600, 3600);
     let upload = encoded(&DynamicImage::ImageRgba16(image), ImageFormat::Png);
     assert!(matches!(
-        Jpeg::from_upload(&upload),
+        Jpeg::from_upload(&upload, None),
         Err(PictureError::Dimensions)
     ));
 }
@@ -144,7 +213,7 @@ fn an_image_over_the_allocation_limit_is_refused() {
 async fn an_oversize_upload_is_refused() {
     let upload = vec![0; super::MAX_UPLOAD_BYTES + 1];
     assert!(matches!(
-        Jpeg::encode(upload).await,
+        Jpeg::encode(upload, None).await,
         Err(PictureError::TooLarge)
     ));
 }

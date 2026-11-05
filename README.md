@@ -25,7 +25,7 @@ just build
 The executables are `target/release/auth-service` and `target/release/piquel-web`.
 Both embed the stylesheet (`crates/ui/assets/style/`, its parts joined into one
 file) and its typefaces (`crates/ui/assets/fonts`, under the SIL Open Font
-License); auth also embeds the passkey script (`apps/auth-service/assets/passkey.js`),
+License); auth also embeds its pages' scripts (`apps/auth-service/assets/`),
 and piquel-web the policies (`apps/web/assets/policies/`). Rebuild Rust after
 changing them.
 
@@ -775,7 +775,7 @@ Use individual recipes while iterating:
 | --- | --- |
 | Full validation (format, Clippy/ESLint, unused code and dependencies, Rust/TypeScript checks, Rust and SDK unit tests, doc tests, audits) | `just validate` |
 | Format Rust and web / check formatting | `just fmt` / `just fmt-check` |
-| Rust / TypeScript checks (tsc, the passkey script's JSDoc types included) | `just rust check` / `just web check` |
+| Rust / TypeScript checks (tsc, the pages' scripts' JSDoc types included) | `just rust check` / `just web check` |
 | Clippy and ESLint, warnings denied; `publint` and `attw` on the built TypeScript SDK | `just lint` (`just rust lint` / `just web lint`) |
 | Unused Rust dependencies (cargo-machete); unused web files, exports and dependencies (knip, entry points in `knip.json`) | `just unused` (`just rust unused` / `just web unused`) |
 | Regenerate the SDK vectors / the TypeScript SDK's wire types | `just sdk-vectors` / `just sdk-types` |
@@ -803,7 +803,7 @@ Web code is formatted by Prettier and linted by type-aware ESLint (typescript-es
 `strictTypeChecked`), configured once at the repository root.
 Test recipes forward extra arguments to nextest or Playwright, including quoted
 filter expressions. `just auth run` forwards arguments to the auth binary.
-Cargo embeds the stylesheet, the passkey script and migrations during compilation.
+Cargo embeds the stylesheet, the pages' scripts and migrations during compilation.
 
 Queries in `crates/database` are checked at compile time against
 `crates/database/.sqlx/`. Changing a query's text without `just db prepare` fails

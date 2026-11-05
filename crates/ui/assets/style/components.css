@@ -161,6 +161,62 @@ img.avatar {
   gap: 0.5rem;
   margin: 0;
 }
+/* Choosing which square of a picture apps show: the image moves and zooms under
+   a circle, as apps show it. The picture script shows it once an image is
+   chosen. */
+.cropper {
+  display: grid;
+  justify-items: center;
+  gap: 0.8rem;
+}
+.cropper[hidden] {
+  display: none;
+}
+.crop-stage {
+  position: relative;
+  width: min(100%, 16rem);
+  aspect-ratio: 1;
+  overflow: hidden;
+  border-radius: var(--radius);
+  background: var(--surface-2);
+  touch-action: none;
+  user-select: none;
+  cursor: grab;
+}
+.crop-stage:active {
+  cursor: grabbing;
+}
+.crop-stage:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 2px;
+}
+.crop-stage img {
+  position: absolute;
+  top: 0;
+  left: 0;
+  max-width: none;
+  height: auto;
+  transform-origin: 0 0;
+  pointer-events: none;
+}
+.crop-stage::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: 50%;
+  box-shadow: 0 0 0 100vmax rgba(0, 0, 0, 0.5);
+  pointer-events: none;
+}
+.cropper label {
+  width: min(100%, 16rem);
+}
+.cropper input[type='range'] {
+  min-height: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  accent-color: var(--accent);
+}
 @media (max-width: 600px) {
   .card.profile .identity {
     gap: 1rem;
