@@ -39,7 +39,7 @@ pub async fn signing_key_list<'a>(
         page_head(
             title: "Signing keys",
             lead: "The keys that sign tokens. A new key waits a day before it signs, so verifiers have it first, signs for 90 days, then stays published while its tokens may be valid. Every replica picks up a change within a minute.".to_owned(),
-            actions: view! { <a class="button" href=(rotate)>"Rotate"</a> },
+            actions: view! { <a data-confirm-first="" class="button" href=(rotate)>"Rotate"</a> },
         )
         <section class="card">
             if rows.is_empty() {

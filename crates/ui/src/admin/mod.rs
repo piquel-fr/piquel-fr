@@ -4,8 +4,10 @@
 //! The pages render the views of `piquel_common::admin`, as the service returns
 //! them, with the links their handler resolves. Each change has its own page: a
 //! `GET` shows its form, and only that form's `POST` makes the change, so a link,
-//! even with a query, never changes anything. The dashboard loads no script: a
-//! passkey confirmation happens on auth's handoff page.
+//! even with a query, never changes anything. A passkey confirmation happens in
+//! a dialog on the page, which the dashboard's one script opens, as
+//! [`Confirmation`] says; without the script, the browser confirms on auth's
+//! handoff page, and comes back. Every page works without it.
 
 /// The audit chain's state and its checkpoints.
 mod audit;
@@ -50,7 +52,7 @@ pub use users::{AccountPages, SessionRow, UserRow, user_page, user_search};
 use crate::{
     Checkbox, Query,
     form::{Precision, time},
-    icons::Icon,
+    icons::{Icon, icon},
     layout::{
         Crumb, Health, Label, NavGroup, NavItem, Policies, Preferences, Search, Shell, Who,
         page_head, shell,
@@ -198,6 +200,31 @@ pub struct Dashboard<'a> {
     pub search: Search<'a>,
     /// The `reference` of a server error's trace, for the user to quote.
     pub reference: Option<TraceId>,
+    /// The signed-in administrator's passkey confirmation, if the browser is
+    /// signed in.
+    pub confirmation: Option<Confirmation<'a>>,
+}
+
+/// The dialog confirming the dashboard with a passkey, which its script opens,
+/// and how long the confirmation lasts, which it reads from the dialog. Once too
+/// little is left, it asks for a passkey there before it follows a link marked
+/// `data-confirm-first`, to a change's page, or posts a form in the page's
+/// `<main>`, a change; then it goes on. Without the script, or a browser that
+/// cannot run the ceremony on the dashboard's origin, the browser goes on at
+/// once, and the page confirms on auth's handoff page instead.
+#[derive(Clone, Copy, Debug)]
+pub struct Confirmation<'a> {
+    /// Where the script starts the passkey ceremony, for the dashboard's
+    /// origin.
+    pub start: &'a str,
+    /// Where it posts the assertion, which confirms the dashboard.
+    pub finish: &'a str,
+    /// The seconds the confirmation still lasts: a change posted later needs a
+    /// new one. Zero or less without one.
+    pub left: i64,
+    /// The seconds a change's page needs left to show its form: a link to one
+    /// followed with less confirms first.
+    pub form_time: i64,
 }
 
 /// The document around every dashboard page, in the shell `dashboard` describes:
@@ -259,6 +286,29 @@ pub async fn dashboard_frame<'a>(
             policies: dashboard.policies,
             reference: dashboard.reference,
         };
+        if let Some(confirmation) = dashboard.confirmation {
+            <div
+                class="dialog"
+                id="passkey-confirmation"
+                popover=""
+                role="dialog"
+                aria-labelledby="passkey-confirmation-title"
+                aria-describedby="passkey-confirmation-help"
+                data-confirmation-start=(confirmation.start)
+                data-confirmation-finish=(confirmation.finish)
+                data-confirmed-for=(confirmation.left.max(0).to_string())
+                data-form-time=(confirmation.form_time.to_string())
+            >
+                <span class="dialog-mark">icon(kind: Icon::Key)</span>
+                <h2 id="passkey-confirmation-title">"Confirm it's you"</h2>
+                <p class="help" id="passkey-confirmation-help">"This change needs your passkey. It confirms the dashboard only, for five minutes."</p>
+                <p class="notice error" role="alert" data-passkey-error="" hidden=""></p>
+                <div class="row actions">
+                    <button type="button" data-passkey-confirm="" autofocus="">"Confirm with a passkey"</button>
+                    <button type="button" class="secondary" popovertarget="passkey-confirmation" popovertargetaction="hide">"Cancel"</button>
+                </div>
+            </div>
+        }
         shell(frame: &frame, (child))
     })
 }
@@ -568,7 +618,8 @@ impl Change {
 
 /// A change's button on a row, with where it posts: its page, at `href`. A
 /// dashboard confirmed with a passkey makes the change `inline`, from a dialog
-/// on the row's page; one that is not links the page, which confirms first.
+/// on the row's page; one that is not links the page, which confirms first,
+/// in the frame's dialog where the dashboard's script can open it.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Action {
     /// The change's page, whose `POST` makes it.
@@ -686,7 +737,7 @@ pub(crate) async fn confirm<'a>(
                 </form>
             </div>
         } else {
-            <a class=(class) href=(action.href.as_str()) aria-label=(name.as_deref())>(change.label())</a>
+            <a data-confirm-first="" class=(class) href=(action.href.as_str()) aria-label=(name.as_deref())>(change.label())</a>
         }
     })
 }

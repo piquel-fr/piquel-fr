@@ -15,6 +15,11 @@
 //!    a session of its own, storing only its cookie's digest, with the auth
 //!    session and the confirmation ([`DashboardSignIn::finish`]).
 //!
+//! The dashboard's own page may confirm its session later, with a passkey proved
+//! for the dashboard's origin, a related origin of auth's RP ID
+//! ([`DashboardSignIn::confirm`]), sparing the browser the trip to the handoff
+//! page and back.
+//!
 //! A dashboard session lasts while its auth session does: signing out of auth,
 //! revoking that session or replacing it ends the dashboard's too. Every request
 //! checks the administrator's rights again ([`DashboardSignIn::operator`]).
@@ -29,7 +34,7 @@ use crate::{
 };
 use axum::http::{HeaderMap, header::InvalidHeaderValue};
 use chrono::{Duration, Utc};
-use piquel_common::{Handle, UserId, config::Origin};
+use piquel_common::{Handle, SessionId, UserId, config::Origin};
 use piquel_crypto::Secret;
 use piquel_repository::{Database, InsertHandoff};
 use piquel_ui::{Checkbox, HandoffQuery, Query};
@@ -55,6 +60,8 @@ pub(crate) struct SignedInAdmin {
     pub(crate) operator: Operator,
     /// Their account.
     pub(crate) user_id: UserId,
+    /// The auth session the dashboard's session rests on.
+    pub(crate) session_id: SessionId,
     /// Their handle, which the dashboard shows.
     pub(crate) handle: Handle,
 }
@@ -238,11 +245,31 @@ impl DashboardSignIn {
             Ok(()) => Ok(Some(SignedInAdmin {
                 operator,
                 user_id: stored.user_id,
+                session_id: stored.session_id,
                 handle: stored.handle,
             })),
             Err(AdminError::SessionEnded) => Ok(None),
             Err(error) => Err(error),
         }
+    }
+
+    /// Confirms the dashboard session of the browser whose cookies `headers`
+    /// carries with `proof`, a passkey's on the dashboard's own page, which must be
+    /// of the auth session it rests on.
+    pub(crate) async fn confirm(
+        &self,
+        headers: &HeaderMap,
+        proof: &AdminProof,
+    ) -> Result<(), AdminError> {
+        let secret = BrowserCookie::Dashboard
+            .read(headers)
+            .ok_or(AdminError::SessionEnded)?;
+        let confirmed = self
+            .database
+            .dashboard()
+            .confirm_session(secret.digest().as_bytes(), proof.session_id(), proof.at())
+            .await?;
+        confirmed.then_some(()).ok_or(AdminError::SessionEnded)
     }
 
     /// Ends the dashboard session of the browser whose cookies `headers` carries.

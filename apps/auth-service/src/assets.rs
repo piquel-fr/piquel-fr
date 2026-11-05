@@ -1,6 +1,6 @@
-//! The stylesheet, typefaces and passkey script of auth's pages, embedded under
-//! paths that never serve other content, so browsers and shared caches keep them
-//! forever.
+//! The stylesheet, typefaces and passkey script of auth's pages, and the admin
+//! dashboard's script, embedded under paths that never serve other content, so
+//! browsers and shared caches keep them forever.
 
 use crate::security::{ApiError, CacheClass, Cached};
 use axum::{
@@ -33,6 +33,10 @@ impl EmbeddedAssets {
     /// The passkey script, the one script of auth's pages.
     pub(crate) const SCRIPT: Asset =
         Asset::script("passkey", include_bytes!("../assets/passkey.js"));
+    /// The admin dashboard's script, which confirms it with a passkey in a
+    /// dialog on its page. Auth's own pages never load it.
+    pub(crate) const DASHBOARD_SCRIPT: Asset =
+        Asset::script("dashboard", include_bytes!("../assets/dashboard.js"));
     /// The files the admin dashboard serves too: the stylesheet and the
     /// typefaces it links.
     pub(crate) const SHARED: [Asset; 4] = [
@@ -47,7 +51,7 @@ impl EmbeddedAssets {
     pub(crate) fn serve(path: &str) -> Result<Response, ApiError> {
         let asset = Self::SHARED
             .into_iter()
-            .chain([Self::SCRIPT])
+            .chain([Self::SCRIPT, Self::DASHBOARD_SCRIPT])
             .find(|asset| asset.path() == path)
             .ok_or(AssetError::NotFound)?;
         let headers = [(header::CONTENT_TYPE, asset.content_type())];
@@ -60,7 +64,7 @@ mod tests {
     //! Focused coverage of embedded file serving.
     use super::*;
 
-    /// The pages' stylesheet, typefaces and passkey script are served at the paths
+    /// The pages' stylesheet, typefaces and scripts are served at the paths
     /// naming their content or version, as their own type, so they are cached
     /// forever.
     #[test]
@@ -68,6 +72,10 @@ mod tests {
         for (asset, content_type) in [
             (EmbeddedAssets::STYLESHEET, "text/css; charset=utf-8"),
             (EmbeddedAssets::SCRIPT, "text/javascript; charset=utf-8"),
+            (
+                EmbeddedAssets::DASHBOARD_SCRIPT,
+                "text/javascript; charset=utf-8",
+            ),
             (piquel_ui::FONTS[0], "font/woff2"),
         ] {
             let response = EmbeddedAssets::serve(&asset.path()).expect("found");

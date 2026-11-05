@@ -1,4 +1,4 @@
-import { expect, test, type Browser, type Page } from '@playwright/test';
+import { expect, test, type Browser, type Locator, type Page } from '@playwright/test';
 import {
   addPasskeys,
   addSecondPasskey,
@@ -35,13 +35,29 @@ async function administrator(browser: Browser, handle: string): Promise<Page> {
 }
 
 /**
- * Confirms the dashboard with a passkey, which its first change asks for: auth asks
- * for one, for the dashboard only, then the dashboard shows the change's form.
+ * Confirms the dashboard with a passkey on auth's handoff page, where a change's
+ * page opened without the dashboard's script sends the browser: auth asks for one,
+ * for the dashboard only, then the dashboard shows the change's form.
  */
-async function confirmDashboard(admin: Page): Promise<void> {
+async function confirmThroughAuth(admin: Page): Promise<void> {
   await expect(admin.getByRole('heading', { name: "Confirm it's you" })).toBeVisible();
   await admin.getByRole('button', { name: 'Confirm with a passkey', exact: true }).click();
   await admin.waitForURL((url) => url.origin === adminUrl);
+}
+
+/**
+ * Follows the dashboard's `link` to a change, which its first change asks to
+ * confirm: the dashboard's script asks for a passkey, for the dashboard only, in a
+ * dialog on the page. The page then goes on to the change's form, never leaving
+ * the dashboard.
+ */
+async function confirmInDialog(admin: Page, link: Locator): Promise<void> {
+  const target = await link.evaluate((anchor: HTMLAnchorElement) => anchor.href);
+  await link.click();
+  const dialog = admin.getByRole('dialog', { name: "Confirm it's you" });
+  await expect(dialog).toBeVisible();
+  await dialog.getByRole('button', { name: 'Confirm with a passkey', exact: true }).click();
+  await expect(admin).toHaveURL(target);
 }
 
 /** Opens the dashboard's page of the account `handle`. */
@@ -125,16 +141,15 @@ test('an administrator disables a user from the dashboard, and the user is signe
   // The administrator's passkey session hands off to the dashboard silently. A
   // change needs the dashboard's own confirmation.
   await openAccount(admin, `user-${suffix}`);
-  await admin.getByRole('link', { name: 'Disable', exact: true }).click();
-  await confirmDashboard(admin);
+  await confirmInDialog(admin, admin.getByRole('link', { name: 'Disable', exact: true }));
   await admin.getByLabel('Reason').fill('Browser test');
   await admin.getByRole('button', { name: 'Disable', exact: true }).click();
   await expect(admin.getByText('Disabled', { exact: true })).toBeVisible();
   await expect(admin.getByText('No active session.')).toBeVisible();
 
   // Confirmed now, the dashboard offers the next change in a dialog on the page
-  // itself, which the browser opens and closes with no script: the dashboard
-  // loads none. Cancelling leaves the account as it is; confirming enables it.
+  // itself, which the browser opens and closes with no script. Cancelling leaves
+  // the account as it is; confirming enables it.
   await admin.getByRole('button', { name: 'Enable', exact: true }).click();
   const dialog = admin.getByRole('dialog', { name: 'Enable this account' });
   await expect(dialog).toBeVisible();
@@ -219,7 +234,7 @@ test('rights granted from the dashboard open it, until revoked, and the audit ch
 
   // Rights are granted from a search, each result confirming in its own dialog.
   await admin.goto(`${adminUrl}/administrators/grant?q=grantee-${suffix}`);
-  await confirmDashboard(admin);
+  await confirmThroughAuth(admin);
   await admin
     .getByRole('button', { name: `Grant administrator rights: @grantee-${suffix}`, exact: true })
     .click();
@@ -280,7 +295,7 @@ test('an invitation from the dashboard signs one person up, and a revoked one no
     await expect(page).toHaveURL(/\/register/);
   };
   await admin.goto(`${adminUrl}/invitations/new`);
-  await confirmDashboard(admin);
+  await confirmThroughAuth(admin);
   const first = await invite();
   expect(new URL(first).origin).toBe(authUrl);
   // The link shows once, on a page reached by `GET`: reloading it shows the form
@@ -329,8 +344,10 @@ test('an origin approved from the dashboard is listed for passkeys until removed
   await admin.goto(`${adminUrl}/clients`);
   await admin.getByRole('link', { name: 'Browser E2E SDK', exact: true }).click();
   await expect(admin).toHaveURL(page);
-  await card.getByRole('link', { name: 'Add approved origin', exact: true }).click();
-  await confirmDashboard(admin);
+  await confirmInDialog(
+    admin,
+    card.getByRole('link', { name: 'Add approved origin', exact: true })
+  );
   // An origin of none of the client's redirect URIs is refused, keeping what was typed.
   const field = admin.getByLabel('Origin', { exact: true });
   await field.fill('https://elsewhere-e2e.test');
@@ -360,8 +377,7 @@ test('an administrator registers a client, suspends it and rotates its secret, e
 
   // Registering is a change, so the dashboard confirms with a passkey first.
   await admin.goto(`${adminUrl}/clients`);
-  await admin.getByRole('link', { name: 'Register a client', exact: true }).click();
-  await confirmDashboard(admin);
+  await confirmInDialog(admin, admin.getByRole('link', { name: 'Register a client', exact: true }));
   await admin.getByRole('textbox', { name: 'Client ID', exact: true }).fill(id);
   await admin.getByRole('textbox', { name: 'App name', exact: true }).fill(`E2E ${suffix}`);
   const redirects = admin.getByRole('textbox', { name: 'Redirect URIs', exact: true });
@@ -461,8 +477,7 @@ test("an administrator changes an account's passkeys, addresses and apps, and it
 
   // Every change asks why, beside its own form.
   await openAccount(admin, handle);
-  await admin.getByRole('link', { name: 'Sign-in methods', exact: true }).click();
-  await confirmDashboard(admin);
+  await confirmInDialog(admin, admin.getByRole('link', { name: 'Sign-in methods', exact: true }));
   await admin.getByRole('button', { name: 'Rename Second passkey', exact: true }).click();
   await admin.getByLabel('Passkey name', { exact: true }).fill('Lost passkey');
   await admin.getByLabel('Reason, shown to the owner in their history').fill('Named for the owner');
@@ -530,8 +545,7 @@ test('a recovery started from the dashboard mails its link, and the dashboard un
   await addAddress(owner, address);
 
   await openAccount(admin, handle);
-  await admin.getByRole('link', { name: 'Recover', exact: true }).click();
-  await confirmDashboard(admin);
+  await confirmInDialog(admin, admin.getByRole('link', { name: 'Recover', exact: true }));
   const reason = 'Reason, shown to the owner in their history: what was asked, never the evidence';
   await admin.getByLabel(reason).fill('Lost every passkey');
   await admin.getByRole('button', { name: 'Send the recovery link', exact: true }).click();
@@ -582,8 +596,7 @@ test('a handle support renames signs in at once, while the owner waits a month',
 
   // Support renames it without waiting, such as a handle that impersonates another.
   await openAccount(admin, `old-${suffix}`);
-  await admin.getByRole('link', { name: 'Change handle', exact: true }).click();
-  await confirmDashboard(admin);
+  await confirmInDialog(admin, admin.getByRole('link', { name: 'Change handle', exact: true }));
   await admin.getByLabel('New handle').fill(`new-${suffix}`);
   await admin.getByLabel('Reason, shown to the owner in their history').fill('Impersonation');
   await admin.getByRole('button', { name: 'Change handle', exact: true }).click();
@@ -633,8 +646,7 @@ test('an administrator reads a history, rotates a key and checks the queue and h
   // Rotating publishes a key that waits a day; revoking it from its row's dialog
   // leaves the key set as it was.
   await admin.getByRole('link', { name: 'Signing keys', exact: true }).click();
-  await admin.getByRole('link', { name: 'Rotate', exact: true }).click();
-  await confirmDashboard(admin);
+  await confirmInDialog(admin, admin.getByRole('link', { name: 'Rotate', exact: true }));
   await admin.getByRole('button', { name: 'Rotate', exact: true }).click();
   await expect(admin).toHaveURL(`${adminUrl}/keys`);
   // The badge, not the revoke dialog's text, which every row holds.

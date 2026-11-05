@@ -3,7 +3,7 @@
 //! the account's pages and the admin dashboard both use, and the narrow column
 //! of the pages a signed-out browser sees.
 //!
-//! Everything works without scripts, since the dashboard loads none: the theme
+//! Everything works without scripts, which the dashboard's pages may lack: the theme
 //! and the sidebar's width are preferences a form posts and a cookie keeps, and
 //! on phones a checkbox the shell reads opens the sidebar as a drawer.
 

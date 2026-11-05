@@ -143,8 +143,8 @@
 .refused small {
   font-size: 0.76rem;
 }
-/* A confirmation the browser opens over the page, with no script, and closes
-   on a click outside or Escape. */
+/* A confirmation the browser opens over the page, with no script or from the
+   dashboard's, and closes on a click outside or Escape. */
 .dialog {
   margin: auto;
   inset: 0;
@@ -168,6 +168,20 @@
 }
 .dialog h2 {
   font-size: 1.05rem;
+}
+/* The mark a dialog may start with, such as the passkey's. */
+.dialog-mark {
+  display: grid;
+  place-items: center;
+  width: 2.4rem;
+  height: 2.4rem;
+  border-radius: 50%;
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+.dialog-mark .icon {
+  width: 1.2rem;
+  height: 1.2rem;
 }
 /* Where a list's page stands, and the pages before and after it. */
 .pager {

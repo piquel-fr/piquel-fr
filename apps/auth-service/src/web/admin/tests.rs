@@ -7,6 +7,7 @@ use crate::{
     AdminService, AuthConfig, DashboardConfig, Reason,
     account::AccountService,
     admin::DashboardSignIn,
+    assets::EmbeddedAssets,
     config::EmailConfig,
     passkey::AdminProof,
     routes,
@@ -208,7 +209,12 @@ async fn a_server_error_shows_its_trace_id() {
     let config = AuthConfig::test(&AUTH_ORIGIN.parse().expect("auth origin"));
     // Without the security layer, which gives every page its request context, every
     // page fails internally.
-    let pages = AdminApplication::new(Replicas::database().await, &config, &dashboard)
+    let database = Replicas::database().await;
+    let keys = config.test_keys(database.clone()).await;
+    let passkeys = config
+        .dashboard_passkeys(database.clone(), &keys)
+        .expect("passkeys");
+    let pages = AdminApplication::new(database, &config, &dashboard, passkeys)
         .expect("dashboard")
         .routes();
     let pages = HttpTelemetry::default().wrap(pages);
@@ -230,7 +236,8 @@ async fn a_server_error_shows_its_trace_id() {
 
 /// An administrator's passkey session signs in to the dashboard through auth's
 /// handoff page, silently. The code works once, only in the browser holding the
-/// state it was bound to. Every page loads no script, and posts only to itself.
+/// state it was bound to. Every page loads the dashboard's script alone, and
+/// posts only to itself.
 #[tokio::test]
 #[ignore = "requires TEST_DATABASE_URL"]
 async fn signing_in_hands_off_through_auth_once() {
@@ -250,7 +257,12 @@ async fn signing_in_hands_off_through_auth_once() {
     let csp = policy(&page).to_owned();
     let handoff = format!("form-action 'self' {AUTH_ORIGIN}{};", routes::page::ADMIN);
     assert!(csp.contains(&handoff), "{csp}");
-    assert!(!csp.contains("script-src"), "{csp}");
+    let script = EmbeddedAssets::DASHBOARD_SCRIPT.path();
+    assert!(
+        csp.contains(&format!("script-src {DASHBOARD}{script};"))
+            && csp.contains("connect-src 'self';"),
+        "{csp}"
+    );
     let handle = format!("@browser-{}", &admin.user_id.to_string()[24..]);
     assert!(
         html(page).await.contains(&handle),
@@ -365,6 +377,42 @@ async fn a_change_needs_a_confirmation_done_for_the_dashboard() {
         .expect("lookup")
         .expect("user");
     assert_eq!(stored.status, AccountStatus::Disabled);
+}
+
+/// The frame's dialog confirms the dashboard on its own page: it says how long
+/// the confirmation lasts, nothing before it and five minutes after, and starts
+/// the passkey ceremony for auth's RP ID, bound to the browser, as auth's own
+/// pages do.
+#[tokio::test]
+#[ignore = "requires TEST_DATABASE_URL"]
+async fn the_dialog_confirms_on_the_page() {
+    let harness = Harness::new().await;
+    let admin = harness.admin().await;
+    let dashboard = harness.sign_in(&admin, "/users").await;
+    let page = html(harness.visit(&dashboard, "/users").await).await;
+    assert!(
+        page.contains(
+            r#"data-confirmation-start="/confirm/start" data-confirmation-finish="/confirm/finish" data-confirmed-for="0" data-form-time="120""#
+        ),
+        "{page}"
+    );
+    let url = format!("{DASHBOARD}/confirm/start");
+    let started = dashboard
+        .submit(&harness.dashboard, &url, &[], OWN_PAGE)
+        .await;
+    assert_eq!(started.status(), StatusCode::OK);
+    cookie(&started, BrowserCookie::Ceremony);
+    let body: serde_json::Value = serde_json::from_str(&html(started).await).expect("JSON");
+    assert!(body["ceremony_id"].is_string(), "{body}");
+    let host = Url::parse(AUTH_ORIGIN).expect("auth origin");
+    assert_eq!(
+        body["public_key"]["publicKey"]["rpId"],
+        host.host_str().expect("host")
+    );
+
+    let confirmed = harness.confirmed(&admin, "/users", Utc::now()).await;
+    let page = html(harness.visit(&confirmed, "/users").await).await;
+    assert!(!page.contains(r#"data-confirmed-for="0""#), "{page}");
 }
 
 /// While email is disabled, the Recover page says why the service refuses a

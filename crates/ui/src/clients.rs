@@ -717,7 +717,8 @@ pub(crate) async fn secrets_list<'a>(
 /// A client `secret` Piquel just made, shown once, with a button copying it, on
 /// `page`, whose address the passkey script, where the page loads it, puts back
 /// so that reloading it gets the page without the secret; saving it leads on to
-/// `next`. The admin dashboard loads no script, so its copy button stays hidden.
+/// `next`. The admin dashboard loads no passkey script, so its copy button stays
+/// hidden.
 #[component]
 pub(crate) async fn secret_panel<'a>(
     secret: &'a Revealed,

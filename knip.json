@@ -2,7 +2,7 @@
   "$schema": "https://unpkg.com/knip@6.43.0/schema.json",
   "workspaces": {
     ".": {
-      "entry": ["apps/auth-service/assets/passkey.js"]
+      "entry": ["apps/auth-service/assets/passkey.js", "apps/auth-service/assets/dashboard.js"]
     }
   }
 }

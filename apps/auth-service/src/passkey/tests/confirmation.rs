@@ -1,7 +1,10 @@
-//! Browser binding, session confirmation and admin handoff proofs.
+//! Browser binding, session confirmation and admin proofs, from a handoff or the
+//! dashboard's own page.
 
 use super::*;
-use piquel_common::events::RevocationReason;
+use crate::{config::PasskeyConfig, security::Cached};
+use axum::{Json, extract::State};
+use piquel_common::{config::Origin, events::RevocationReason};
 
 /// Checks browser binding, and that a passkey confirmation belongs to one session,
 /// counts from its own time and is required only where an action needs it.
@@ -258,13 +261,8 @@ async fn an_admin_proof_counts_for_its_handoff_only() {
     let mut fixture = Fixture::new().await;
     let cookie = fixture.login().await;
     let session = fixture.session(&cookie).await.expect("session");
-    let headers = |cookies: &str| {
-        let mut headers = HeaderMap::new();
-        headers.insert(header::COOKIE, cookies.parse().expect("cookies"));
-        headers
-    };
     let owner = AccountService::new(fixture.database().clone())
-        .owner(RequestContext::TEST, &headers(&cookie))
+        .owner(RequestContext::TEST, &cookies(&cookie))
         .await
         .expect("lookup")
         .expect("signed in");
@@ -278,19 +276,19 @@ async fn an_admin_proof_counts_for_its_handoff_only() {
     let (confirmation, browser) = prove(&mut fixture, routes::passkey::CONFIRM_START).await;
     let refused = fixture
         .app
-        .verify_admin_proof(&headers(&browser), &owner, &confirmation)
+        .verify_admin_proof(&cookies(&browser), &owner, &confirmation)
         .await;
     assert!(refused.is_err(), "a confirmation of the session");
 
     let (assertion, browser) = prove(&mut fixture, routes::passkey::ADMIN_PROOF_START).await;
     let refused = fixture
         .app
-        .verify_admin_proof(&headers(&cookie), &owner, &assertion)
+        .verify_admin_proof(&cookies(&cookie), &owner, &assertion)
         .await;
     assert!(refused.is_err(), "another browser");
     let proof = fixture
         .app
-        .verify_admin_proof(&headers(&browser), &owner, &assertion)
+        .verify_admin_proof(&cookies(&browser), &owner, &assertion)
         .await
         .expect("proved");
     assert_eq!(proof.session_id(), session.id);
@@ -301,7 +299,91 @@ async fn an_admin_proof_counts_for_its_handoff_only() {
     );
     let replayed = fixture
         .app
-        .verify_admin_proof(&headers(&browser), &owner, &assertion)
+        .verify_admin_proof(&cookies(&browser), &owner, &assertion)
         .await;
     assert!(replayed.is_err(), "once only");
+}
+
+/// The admin dashboard confirms on its own page with a passkey signed for its
+/// origin, which `/.well-known/webauthn` lists for browsers. That proof counts
+/// for the dashboard only: auth's handoff refuses it, and the dashboard refuses
+/// one signed for auth's own pages.
+#[tokio::test]
+#[ignore = "requires TEST_DATABASE_URL"]
+async fn the_dashboard_proves_with_passkeys_signed_for_its_origin() {
+    let mut fixture = Fixture::new().await;
+    let cookie = fixture.login().await;
+    let session = fixture.session(&cookie).await.expect("session");
+    // The software authenticator knows no related origins, so the dashboard is on a
+    // subdomain of auth's RP ID, which it signs for.
+    let dashboard: Origin = "https://admin.auth.piquel.fr"
+        .parse()
+        .expect("dashboard origin");
+    let app = PasskeyApplication::new(
+        fixture.database().clone(),
+        &PasskeyConfig {
+            origin: AUTH_ORIGIN.parse().expect("origin"),
+            invite_required: false,
+        },
+        Some(&dashboard),
+        fixture.app.oidc.clone(),
+    )
+    .expect("passkeys");
+    let Cached(_, Json(listed)) = PasskeyApplication::related_origins(State(app.clone()))
+        .await
+        .expect("related origins");
+    assert!(
+        listed
+            .origins
+            .iter()
+            .any(|origin| origin.as_str() == "https://admin.auth.piquel.fr")
+    );
+    let owner = AccountService::new(fixture.database().clone())
+        .owner(RequestContext::TEST, &cookies(&cookie))
+        .await
+        .expect("lookup")
+        .expect("signed in");
+    let prove = async |fixture: &mut Fixture, origin: &Url| {
+        let (started, browser) = fixture
+            .start(routes::passkey::ADMIN_PROOF_START, &cookie, json!({}))
+            .await;
+        let credential = fixture.assertion_for(origin.clone(), &started);
+        let assertion = json!({"ceremony_id": started["ceremony_id"], "credential": credential});
+        (assertion, cookies(&format!("{cookie}; {browser}")))
+    };
+    let verify = async |headers: &HeaderMap, assertion: &Value| {
+        let input = serde_json::from_value(assertion.clone()).expect("assertion");
+        app.verify_dashboard_proof(
+            headers,
+            RequestContext::TEST,
+            session.user_id,
+            session.id,
+            &input,
+        )
+        .await
+    };
+
+    let auth = fixture.origin.clone();
+    let (assertion, browser) = prove(&mut fixture, &auth).await;
+    assert!(
+        verify(&browser, &assertion).await.is_err(),
+        "auth's own origin"
+    );
+
+    let (assertion, browser) = prove(&mut fixture, dashboard.as_url()).await;
+    let refused = app
+        .verify_admin_proof(&browser, &owner, &assertion.to_string())
+        .await;
+    assert!(refused.is_err(), "a handoff");
+
+    let (assertion, browser) = prove(&mut fixture, dashboard.as_url()).await;
+    let proof = verify(&browser, &assertion).await.expect("proved");
+    assert_eq!(proof.session_id(), session.id);
+}
+
+/// Headers carrying the browser's `cookies`.
+fn cookies(cookies: &str) -> HeaderMap {
+    let mut headers = HeaderMap::new();
+    headers.insert(header::COOKIE, cookies.parse().expect("cookies"));
+    headers
 }

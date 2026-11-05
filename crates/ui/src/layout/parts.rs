@@ -19,6 +19,12 @@ pub(crate) trait Label: Copy + PartialEq + Send + Sync + 'static {
 
     /// The link's text.
     fn label(self) -> &'static str;
+
+    /// Whether its page needs the dashboard's passkey confirmation, so the
+    /// dashboard's script confirms before following its link.
+    fn confirms_first(self) -> bool {
+        false
+    }
 }
 
 /// Where a list's page stands, and the links to the pages before and after it.
@@ -120,8 +126,8 @@ pub(crate) async fn page_messages<'a>(messages: Messages<'a>) -> Result<impl Vie
 }
 
 /// An email `address`, blurred until clicked so a shared screen does not show it;
-/// clicking again blurs it. A checkbox, visually hidden, holds whether it shows:
-/// the admin dashboard allows no script.
+/// clicking again blurs it. A checkbox, visually hidden, holds whether it shows,
+/// so it needs no script.
 #[component]
 pub(crate) async fn private_address<'a>(address: &'a str) -> Result<impl View> {
     Ok(view! {
@@ -133,7 +139,8 @@ pub(crate) async fn private_address<'a>(address: &'a str) -> Result<impl View> {
 }
 
 /// The navigation named `label`, of `class`, linking each of `links` to its URL,
-/// `current` among them, whose link is marked [`Label::CURRENT`].
+/// `current` among them, whose link is marked [`Label::CURRENT`], and marked
+/// `data-confirm-first` when [`Label::confirms_first`].
 #[component]
 pub(crate) async fn navigation<'a, T: Label>(
     label: &'a str,
@@ -144,7 +151,7 @@ pub(crate) async fn navigation<'a, T: Label>(
     Ok(view! {
         <nav class=(class) aria-label=(label)>
             for (link, href) in links {
-                <a href=(*href) aria-current=((*link == current).then_some(T::CURRENT))>(link.label())</a>
+                <a href=(*href) aria-current=((*link == current).then_some(T::CURRENT)) data-confirm-first=(link.confirms_first())>(link.label())</a>
             }
         </nav>
     })

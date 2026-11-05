@@ -66,7 +66,7 @@ pub async fn handle_list<'a>(page: HandlesPage<'a>) -> Result<impl View> {
         page_head(
             title: "Handles",
             lead: "Reserve handles for the people or teams who will need them, give them out, and free the ones no account holds anymore.".to_owned(),
-            actions: view! { <a class="button" href=(page.reserve)>"Reserve a handle"</a> },
+            actions: view! { <a data-confirm-first="" class="button" href=(page.reserve)>"Reserve a handle"</a> },
         )
         <section class="card" aria-labelledby="reserved-heading">
             <header><h2 id="reserved-heading">"Reserved"</h2></header>
@@ -110,7 +110,7 @@ pub async fn handle_list<'a>(page: HandlesPage<'a>) -> Result<impl View> {
                                 <a href=(row.account.as_str())><strong>(format!("@{}", row.handle))</strong></a>
                                 <small>(row.why.as_str())</small>
                             </div>
-                            <a class="button secondary small" href=(row.change.as_str()) aria-label=(format!("Change handle: @{}", row.handle))>"Change handle"</a>
+                            <a data-confirm-first="" class="button secondary small" href=(row.change.as_str()) aria-label=(format!("Change handle: @{}", row.handle))>"Change handle"</a>
                         </li>
                     }
                 </ul>

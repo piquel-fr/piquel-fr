@@ -105,12 +105,17 @@ password-manager synchronization and live Google/GitHub callbacks also need a
 manual check with actual providers/devices; this suite does not claim to verify
 those external systems.
 
-`admin.spec.ts` checks the admin dashboard, which CI serves on its own host,
-`admin.localhost`: a non-administrator is handed nothing, an administrator signs in
+`admin.spec.ts` checks the admin dashboard, which CI serves on its own origin,
+`https://localhost:3444`: a non-administrator is handed nothing, an administrator signs in
 through auth's handoff page, confirms a change with a passkey for the dashboard
-only, and disables an account, whose settings page then loses its session; signing
-out of the dashboard keeps the Piquel session, and signed out of both, a passkey
-sign-in on auth goes on to the dashboard. Another lists an account's events without
+only, in the dialog the dashboard's script opens, or on auth's handoff page when a
+change's page is opened directly, and disables an account, whose settings page then
+loses its session; signing out of the dashboard keeps the Piquel session, and
+signed out of both, a passkey sign-in on auth goes on to the dashboard. CI's
+dashboard is on auth's host, `localhost`, so its dialog may use auth's RP ID with
+no list, as `related-origins.spec.ts`'s page does; a preview's has a host of its
+own, so there the browser checks auth's `/.well-known/webauthn` first, which lists
+the dashboard's origin. Another lists an account's events without
 the administrator's view of it until "Show views", which keeps the account filter,
 and hides it again with "Hide views". Its other tests grant administrator
 rights from a search and revoke them, each change moving on the audit chain,

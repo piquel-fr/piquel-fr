@@ -62,7 +62,7 @@ pub async fn administrator_list<'a>(
         page_head(
             title: "Administrators",
             lead: "The accounts that can use this dashboard and every admin operation.".to_owned(),
-            actions: view! { <a class="button" href=(grant)>"Grant rights"</a> },
+            actions: view! { <a data-confirm-first="" class="button" href=(grant)>"Grant rights"</a> },
         )
         <section class="card">
             <ul class="list">
@@ -192,7 +192,7 @@ pub async fn invitation_list<'a>(
                 page_head(
                     title: "Invitations",
                     lead: "Single-use signup links, while signup needs one.".to_owned(),
-                    actions: view! { <a class="button" href=(create)>"Invite someone"</a> },
+                    actions: view! { <a data-confirm-first="" class="button" href=(create)>"Invite someone"</a> },
                 )
                 <section class="card">
                     if rows.is_empty() {

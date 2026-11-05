@@ -132,6 +132,12 @@ impl Label for Tab {
     fn label(self) -> &'static str {
         Self::label(self)
     }
+
+    /// The tabs an administrator changes, whose pages confirm first: all those
+    /// [`settings_tabs`] shows but the history, which they only read.
+    fn confirms_first(self) -> bool {
+        matches!(self, Self::SignIn | Self::Emails | Self::Apps)
+    }
 }
 
 /// The settings pages an administrator changes for an account, as tabs within

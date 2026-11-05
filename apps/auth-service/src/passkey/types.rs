@@ -162,9 +162,10 @@ pub(super) struct LoginStart {
     pub(super) handle: Option<String>,
 }
 
-/// Browser assertion response for login and session confirmation.
+/// Browser assertion response for login and session confirmation, and the admin
+/// dashboard's.
 #[derive(Deserialize)]
-pub(super) struct AuthenticationFinish {
+pub(crate) struct AuthenticationFinish {
     /// Server-side ceremony to consume exactly once.
     pub(super) ceremony_id: TokenId,
     /// Authenticator's signed assertion, never logged.

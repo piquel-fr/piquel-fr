@@ -2,7 +2,7 @@
 //! and the fixtures shared by the applications' tests.
 
 use crate::{
-    AuthConfig, ClientRegistry, ClientRegistryError, KeyStore, Operator, Reason,
+    AuthConfig, ClientRegistry, ClientRegistryError, KeyStore, Operator, Reason, SigningKeys,
     account::{AccountService, Owner},
     clients::{ClientSettings, NewClient},
     config::{
@@ -73,13 +73,18 @@ impl AuthConfig {
     /// One replica of this service on `database`, with its own signing key store,
     /// receiving every request from `peer`.
     pub(crate) async fn test_router(&self, database: Database, peer: SocketAddr) -> Router {
-        let keys = KeyStore::new(database.clone(), Arc::clone(&self.key_encryption_key))
-            .start()
-            .await
-            .expect("signing keys");
+        let keys = self.test_keys(database.clone()).await;
         self.router(database, &keys)
             .expect("replica")
             .layer(Extension(ConnectInfo(peer)))
+    }
+
+    /// Signing keys on `database`, as a replica starts them.
+    pub(crate) async fn test_keys(&self, database: Database) -> SigningKeys {
+        KeyStore::new(database, Arc::clone(&self.key_encryption_key))
+            .start()
+            .await
+            .expect("signing keys")
     }
 
     /// The configuration of a test service at `origin`: no providers, email sent, a
@@ -154,8 +159,10 @@ impl Replicas {
     /// address of its own.
     pub(crate) async fn dashboard(config: &AuthConfig) -> Router {
         let dashboard = config.dashboard.as_ref().expect("a dashboard");
+        let database = Self::database().await;
+        let keys = config.test_keys(database.clone()).await;
         config
-            .admin_router(Self::database().await, dashboard)
+            .admin_router(database, &keys, dashboard)
             .expect("dashboard")
             .layer(Extension(ConnectInfo(Self::peer())))
     }
