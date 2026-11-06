@@ -155,8 +155,9 @@ async fn confirmations_never_reach_owners_found_before_them() {
 }
 
 /// An invalid setting names its field apart from what is wrong with it, so a
-/// form can show the message beside it: owners grant only the standard scopes
-/// and send browsers only to URIs auth accepts. Settings are checked before
+/// form can show the message beside it: owners grant only the standard scopes,
+/// send browsers only to URIs auth accepts and name no client after a reserved
+/// brand. Settings are checked before
 /// anything else, so an unconfirmed owner's invalid registration is refused for
 /// its settings rather than for the confirmation.
 #[tokio::test]
@@ -207,6 +208,13 @@ async fn invalid_settings_name_their_field_first() {
         (
             ClientPatch {
                 display_name: Some(" ".into()),
+                ..ClientPatch::default()
+            },
+            ClientField::DisplayName,
+        ),
+        (
+            ClientPatch {
+                display_name: Some("Piquel Settings".into()),
                 ..ClientPatch::default()
             },
             ClientField::DisplayName,

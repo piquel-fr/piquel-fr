@@ -27,7 +27,7 @@ again.
 
 | Setting | Meaning |
 | --- | --- |
-| Name | The name the consent screen shows, at most 80 characters |
+| Name | The name the consent screen shows, at most 80 characters. It cannot contain Piquel or another well-known brand, such as Google or GitHub, even disguised (`P1quel`) |
 | Kind | A web app with a backend (confidential, signs in with a client secret) or an app running in the browser or on a device (public, with PKCE alone). Both sign in with S256 PKCE, and the kind never changes |
 | Redirect URIs | 1 to 16 authorization callbacks, one per line, matched exactly, under the same rules as for operators' clients |
 | Post-logout URIs | Up to 16 pages the browser may return to after logout, one per line; none by default |
@@ -38,7 +38,8 @@ again.
 
 Auth chooses the ID, `c_` followed by 20 random characters, so nobody can claim a
 name like `piquel-admin`. Your apps are never trusted: users always see the
-consent screen. Every change to an app needs a confirmation, so a stolen session
+consent screen, which names the host your redirect URI sends them to and says
+your app is unverified and registered by your handle. Every change to an app needs a confirmation, so a stolen session
 cookie cannot add a redirect URI and collect authorization codes, nor enable a
 disabled app again, which revives its users' refresh tokens. An invalid setting is
 refused with what to fix, beside its input.

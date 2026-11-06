@@ -2,9 +2,10 @@
 //! under, and the [`AccountService`] operations that apply it, for the owner
 //! only. The policy lives in the input types rather than in callers: an owner
 //! never chooses a client's ID, which auth generates, or its trust, so its
-//! clients always show the consent screen, and scopes are limited to the standard
-//! [`Scope`]s. [`OperatorSettings`] validate the same settings for an operator,
-//! who also chooses any scope and a client's trust.
+//! clients always show the consent screen, scopes are limited to the standard
+//! [`Scope`]s, and names to those without a reserved brand. [`OperatorSettings`]
+//! validate the same settings for an operator, who also chooses any scope, any
+//! name and a client's trust.
 
 use super::{ClientRegistry, ClientRegistryError, MAX_DAILY_REGISTRATIONS, MAX_OWNED_CLIENTS};
 use crate::{
@@ -157,7 +158,8 @@ pub(crate) struct InvalidSetting {
 impl ClientSettings {
     /// Validates every setting, naming the first one that is invalid, and builds
     /// the registration of an untrusted client `id` of `kind`. Each URI is a
-    /// [`RedirectUri`], as the `client` command parses it.
+    /// [`RedirectUri`], as the `client` command parses it, and the name must not
+    /// contain a reserved brand, which only operators' clients use.
     fn registration(
         self,
         id: ClientId,
@@ -176,7 +178,12 @@ impl ClientSettings {
                 })
             })
             .collect::<Result<Vec<_>, _>>()?;
-        self.validated(id, kind, scopes, false)
+        let registration = self.validated(id, kind, scopes, false)?;
+        registration
+            .display_name
+            .ensure_unreserved()
+            .map_err(InvalidSetting::with(ClientField::DisplayName))?;
+        Ok(registration)
     }
 
     /// Validates every setting but the scopes, already `scopes`, and builds the

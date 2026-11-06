@@ -28,7 +28,8 @@ test('the developer console registers an app, shows its secret once, and the app
 }) => {
   const { cdp } = await addPasskeys(context, page);
   await serveClient(context, cdp, client);
-  await signUp(page, `console-${Date.now().toString(36)}`);
+  const handle = `console-${Date.now().toString(36)}`;
+  await signUp(page, handle);
   /**
    * Reloads the page showing the secret `shown`: it loads again by `GET`, so the
    * change that made it never posts twice, and the secret is gone.
@@ -58,6 +59,13 @@ test('the developer console registers an app, shows its secret once, and the app
   await expect(page.locator('#redirect_uris-error')).toContainText('must use https');
   await expect(redirects).toHaveAttribute('aria-invalid', 'true');
   await expect(page.getByLabel('App name', { exact: true })).toHaveValue('Console E2E');
+
+  // Accounts cannot name an app after Piquel or another well-known brand.
+  await page.getByLabel('App name', { exact: true }).fill('P1quel Settings');
+  await redirects.fill(`${client}/callback`);
+  await page.getByRole('button', { name: 'Register app', exact: true }).click();
+  await expect(page.locator('#display_name-error')).toContainText('reserved');
+  await page.getByLabel('App name', { exact: true }).fill('Console E2E');
 
   // A confidential app's secret shows only in the answer to its registration, which
   // no cache keeps, and never reaches a URL, the history or the browser's storage.
@@ -106,9 +114,13 @@ test('the developer console registers an app, shows its secret once, and the app
   expect(rotated).not.toBe(secret);
   await reloadsSafely(rotated);
 
-  // The app signs a user in, and redeems the code with its new secret.
+  // The app signs a user in, and redeems the code with its new secret. Its consent
+  // page says where the app sends the browser, and who registered it, unverified.
   const { url, verifier, nonce } = authorization(id, redirectUri);
   await page.goto(url);
+  await expect(page.locator('.lead strong')).toHaveText(new URL(client).host);
+  await expect(page.getByText(`Unverified app, registered by @${handle}`)).toBeVisible();
+  await expect(page.getByText(`Signed in as @${handle}.`)).toBeVisible();
   const code = await consent(page, 'Console E2E', client);
   const tokens = await redeem(page, id, rotated, code, verifier);
   expect(tokens.status()).toBe(200);

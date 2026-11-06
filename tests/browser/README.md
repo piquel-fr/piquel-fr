@@ -25,10 +25,11 @@ account by typing its handle, and restores it: signing in with its passkey offer
 restore it instead of a session, and restoring signs in.
 
 `developers.spec.ts` registers a confidential app in the developer console: a
-setting refused beside its input, the back-channel logout URI its overview shows
-once registered, the secret shown once, in an answer no cache
-keeps and nowhere in the URL, history or storage, and the app then signing a user
-in, redeeming the code with its secret. Its app runs on `https://console-e2e.test`,
+setting refused beside its input, a name with a reserved brand refused, the
+back-channel logout URI its overview shows once registered, the secret shown once,
+in an answer no cache keeps and nowhere in the URL, history or storage, and the app
+then signing a user in, through a consent page naming its host and its owner, who
+did not verify it, and redeeming the code with its secret. Its app runs on `https://console-e2e.test`,
 which the test serves as `oidc.spec.ts` does its client. A second test rotates an
 app's secret with no grace, which leaves only the new one redeeming codes,
 changes its back-channel logout URI in its settings, which refuse an `http://`

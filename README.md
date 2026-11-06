@@ -524,8 +524,9 @@ Accounts can also register clients for their own applications in the developer
 console, at `auth.piquel.fr/developers`: see
 [Managing your own OIDC clients](docs/guides/client-management.md).
 Auth generates their IDs and limits their scopes to `openid`, `profile`, `email`
-and `offline_access`; they are never trusted, and an account can have 10 and
-register 20 a day. They never appear in other accounts' consoles, while
+and `offline_access`; they are never trusted, their names cannot contain Piquel's
+or another well-known brand (`RESERVED_BRANDS` in `piquel_common::clients`), and
+an account can have 10 and register 20 a day. They never appear in other accounts' consoles, while
 `client list` shows every client. Owners can disable and enable their clients;
 `client suspend` disables one so that its owner cannot enable it until
 `client unsuspend`, which leaves it disabled. Deleting a client, from either side, disables it, revokes its
@@ -591,7 +592,10 @@ intended for the configured client audience. Only requested claims are released;
 passkey-only accounts have no email claim. Browser clients should keep tokens in
 memory and use SSO again after reload. Refresh permission is off unless explicitly
 enabled and `offline_access` is allowed/requested. Consent is remembered per user,
-client and scope; explicitly trusted clients bypass consent. Users see the apps
+client and scope; explicitly trusted clients bypass consent. The consent page
+names the host the app sends the browser back to and the signed-in account, which
+can switch to another, and labels an app an account registered as unverified,
+with its owner's handle. Users see the apps
 they consented to, or whose refresh grants still work, under Connected apps in
 settings (`/settings/apps`), and remove an app's access there: its refresh grants
 end, it asks for consent again, and its outstanding codes stop working. Access
