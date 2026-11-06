@@ -27,7 +27,7 @@ pub use payload::{
 use crate::{
     AuthenticationMethod, ClientId, DeliveryId, EmailId, EventId, Handle, PasskeyId, Personal,
     PictureId, Provider, RecoveryId, SessionId, TokenId,
-    admin::AuditVerification,
+    admin::{AuditVerification, ChainBreak, ChainProblem, VerificationKeys},
     clients::{ClientField, ClientKind},
     email::NormalizedEmail,
     protocol::jwt::KeyId,
@@ -617,6 +617,31 @@ impl DomainEvent {
             Self::AuditHistoryPruned { .. } => "audit_history_pruned",
             Self::AuditChainVerified(_) => "audit_chain_verified",
             Self::Imported(_) => "imported",
+        }
+    }
+}
+
+impl AuditVerification {
+    /// Its payload version as a recorded event. A new [`ChainProblem`] or
+    /// [`VerificationKeys`] is one older releases cannot decode, so it fails to
+    /// compile here until it is given the next version.
+    #[must_use]
+    pub const fn version(&self) -> i16 {
+        if let Some(ChainBreak { problem, .. }) = &self.broken {
+            match problem {
+                ChainProblem::MissingEvent
+                | ChainProblem::EventBeforeAnchor
+                | ChainProblem::EventChanged
+                | ChainProblem::CheckpointMismatch
+                | ChainProblem::CheckpointSignature
+                | ChainProblem::CheckpointMalformed
+                | ChainProblem::CheckpointBeyondChain => {}
+            }
+        }
+        match self.keys {
+            VerificationKeys::Committed
+            | VerificationKeys::Given
+            | VerificationKeys::Uncommitted => DomainEvent::FIRST_VERSION,
         }
     }
 }

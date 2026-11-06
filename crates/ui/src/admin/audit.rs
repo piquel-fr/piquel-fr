@@ -46,7 +46,8 @@ pub async fn audit_page<'a>(
             <header><h2>"Checkpoints"</h2></header>
             <p class="help">
                 "Pruning deletes every event up to a checkpoint. It needs the database owner, \
-                 which auth never holds, so run the command shown as the owner."
+                 which auth never holds, so run the command shown as the owner. It verifies the \
+                 chain again first, and refuses if it breaks."
             </p>
             if page.checkpoints.is_empty() {
                 <p class="empty">"No checkpoint to show."</p>
@@ -104,13 +105,15 @@ async fn chain_card<'a>(page: &'a AuditPage, uncommitted: bool) -> Result<impl V
         .as_ref()
         .map(|verified| &verified.verification);
     let broken = verification.and_then(|verification| verification.broken.as_ref());
-    // Events sealed since the newest verification, which it could not check.
+    // Events sealed since an intact verification, which it could not check. A
+    // broken one stopped before the newest events, so none of those count.
     let since = verification
+        .filter(|verification| verification.broken.is_none())
         .map(|verification| position(&chain.newest).saturating_sub(position(&verification.newest)));
     let (badge, status) = match (verification, broken) {
         (None, _) => ("warning", "Not verified"),
-        (Some(_), Some(_)) => ("danger", "Broken"),
-        (Some(_), None) => ("ok", "Intact"),
+        (Some(_), Some(_)) => ("danger", "Broken at last check"),
+        (Some(_), None) => ("ok", "Intact at last check"),
     };
     Ok(view! {
         <section class="card">
@@ -121,7 +124,7 @@ async fn chain_card<'a>(page: &'a AuditPage, uncommitted: bool) -> Result<impl V
             <div class="body">
                 if let Some(broken) = broken {
                     <p class="notice error" role="alert">
-                        (format!("Broken at position {}: {}.", broken.position, broken.problem))
+                        (format!("The last check found the chain broken at position {}: {}.", broken.position, broken.problem))
                         " The change may also be a removal or insertion just before it."
                     </p>
                 }
@@ -152,12 +155,13 @@ async fn chain_card<'a>(page: &'a AuditPage, uncommitted: bool) -> Result<impl V
                     <dt>"Unsealed"</dt><dd>(chain.unsealed.to_string())</dd>
                     <dt>"Pruned through"</dt><dd><code>(point(&chain.anchor))</code></dd>
                     <dt>"Newest"</dt><dd><code>(point(&chain.newest))</code></dd>
-                    <dt>"Latest checkpoint"</dt><dd><code>(point(&chain.latest_checkpoint))</code></dd>
                 </dl>
                 <form class="stack" method="post" data-submit-once="">
                     <p class="help">
-                        "This page shows the newest verification recorded. Verifying recomputes the \
-                         whole history, as auth-service audit verify does, and records what it finds."
+                        "This is the newest verification the audit log records, not a check made now: \
+                         events sealed since were not checked, and someone with auth's database role could \
+                         record a forged result. Verifying recomputes the whole history, as \
+                         auth-service audit verify does, and records what it finds."
                     </p>
                     <div class="row actions"><button class="secondary">"Verify now"</button></div>
                 </form>

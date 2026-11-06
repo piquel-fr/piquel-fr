@@ -434,31 +434,6 @@ pub struct AuditVerification {
     pub keys: VerificationKeys,
 }
 
-impl AuditVerification {
-    /// Its payload version as a recorded event. A new [`ChainProblem`] or
-    /// [`VerificationKeys`] is one older releases cannot decode, so it fails to
-    /// compile here until it is given the next version.
-    #[must_use]
-    pub const fn version(&self) -> i16 {
-        if let Some(ChainBreak { problem, .. }) = &self.broken {
-            match problem {
-                ChainProblem::MissingEvent
-                | ChainProblem::EventBeforeAnchor
-                | ChainProblem::EventChanged
-                | ChainProblem::CheckpointMismatch
-                | ChainProblem::CheckpointSignature
-                | ChainProblem::CheckpointMalformed
-                | ChainProblem::CheckpointBeyondChain => {}
-            }
-        }
-        match self.keys {
-            VerificationKeys::Committed
-            | VerificationKeys::Given
-            | VerificationKeys::Uncommitted => crate::events::DomainEvent::FIRST_VERSION,
-        }
-    }
-}
-
 /// A position on the audit chain and the chain hash through it.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ChainPoint {
@@ -578,8 +553,6 @@ pub struct StoredChain {
     pub anchor: Option<ChainPoint>,
     /// The newest sealed event, or the anchor once every sealed event was pruned.
     pub newest: Option<ChainPoint>,
-    /// The newest checkpoint.
-    pub latest_checkpoint: Option<ChainPoint>,
     /// Events not sealed yet.
     pub unsealed: u64,
 }

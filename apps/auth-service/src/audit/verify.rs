@@ -8,7 +8,7 @@ use super::{
 };
 use piquel_common::events::DomainEvent;
 use piquel_crypto::CryptoError;
-use piquel_repository::{ChainLink, Checkpoint, DatabaseTransaction, EventFilter, RecordedEvent};
+use piquel_repository::{ChainLink, Checkpoint, DatabaseTransaction, RecordedEvent};
 use std::collections::BTreeMap;
 
 /// A checkpoint checked on its own, before the chain is compared with it.
@@ -99,20 +99,14 @@ impl AuditChain {
         let chain = StoredChain {
             anchor: tx.audit().anchor().await?.map(point),
             newest: tx.audit().head().await?.as_ref().map(Chain::point),
-            latest_checkpoint: tx.audit().latest_checkpoint().await?.map(point),
             unsealed: tx.audit().unsealed_count().await?,
-        };
-        let recorded = EventFilter {
-            kind: Some("audit_chain_verified".to_owned()),
-            ..EventFilter::default()
         };
         // A verification a newer release recorded reads as unknown, so as none.
         let verified = tx
             .events()
-            .list(&recorded, 1)
+            .newest_of_kind("audit_chain_verified")
             .await?
-            .into_iter()
-            .find_map(|stored| match stored.event {
+            .and_then(|stored| match stored.event {
                 RecordedEvent::Known(DomainEvent::AuditChainVerified(verification)) => {
                     Some(RecordedVerification {
                         at: stored.occurred_at,

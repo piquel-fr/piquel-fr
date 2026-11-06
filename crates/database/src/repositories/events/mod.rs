@@ -459,6 +459,43 @@ impl EventRepository<'_> {
         .collect()
     }
 
+    /// The newest event of `kind`, the serde tag of a [`DomainEvent`] variant, e.g.
+    /// `audit_chain_verified`. It reads one entry of the `(kind, occurred_at)`
+    /// index, so it costs the same however many events there are.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`DatabaseError`] if the query fails or the stored event does not decode.
+    pub async fn newest_of_kind(
+        &mut self,
+        kind: &str,
+    ) -> Result<Option<StoredEvent>, DatabaseError> {
+        run!(
+            self,
+            fetch_optional,
+            sqlx::query_as!(
+                EventRow,
+                r#"SELECT
+                    e.id AS "id: EventId", e.txid::text::bigint AS "txid!", e.sequence,
+                    e.occurred_at, e.kind, e.version, e.payload, e.actor AS "actor: Json<Actor>",
+                    e.subject_user_id AS "subject_user_id: UserId",
+                    e.trace_id AS "trace_id: TraceId",
+                    p.event_id IS NOT NULL AS "personal!", p.client_ip AS "client_ip?: IpAddr",
+                    p.user_agent_family AS "browser?: Browser",
+                    p.platform AS "platform?: Platform",
+                    p.details AS "details?", p.reason AS "reason?"
+                FROM domain_events e
+                LEFT JOIN event_personal_data p ON p.event_id = e.id
+                WHERE e.kind = $1
+                ORDER BY e.occurred_at DESC
+                LIMIT 1"#,
+                kind,
+            )
+        )?
+        .map(StoredEvent::try_from)
+        .transpose()
+    }
+
     /// Counts the events of any of `kinds`, the serde tags of [`DomainEvent`]
     /// variants, recorded since `since`: every account's, or only those
     /// concerning `subject`.
