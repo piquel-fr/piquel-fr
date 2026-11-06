@@ -43,7 +43,8 @@ export type AuthErrorDetail =
     }
   | {
       code: Extract<ErrorCategory, 'keys'>;
-      reason: Extract<ErrorReason, 'invalid_document' | 'duplicate_key_id' | 'unusable_key'>;
+      /** Absent when the key set URL does not use `https`. */
+      reason?: Extract<ErrorReason, 'invalid_document' | 'duplicate_key_id' | 'unusable_key'>;
     }
   | { code: Extract<ErrorCategory, 'invalid_token'>; reason: TokenReason }
   /** `scope` is every scope the request needs, space-separated. */

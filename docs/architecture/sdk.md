@@ -57,12 +57,15 @@ older SDKs.
 
 The SDK takes an injectable clock, so tests and the vectors can pin time, and an
 injectable HTTP client: a `reqwest` client builder in Rust, a `fetch` in TypeScript.
-The Rust SDK's transport policy holds whatever the client does: every request goes
-to an `https` URL, a redirect is an error and is never followed, since a 307 or 308
-would resend a code or token elsewhere, and a request that takes over 10 seconds,
-from connecting to its last body byte, fails. The TypeScript SDK asks its `fetch`
-not to redirect and to stop after 10 seconds, but does not yet refuse `http` key
-set URLs, and relies on the injected `fetch` honouring both.
+The SDK's transport policy holds whatever the client does: every request goes to an
+`https` URL, a redirect is an error and is never followed, since a 307 or 308 would
+resend a code or token elsewhere, and a request that takes over 10 seconds, from
+connecting to its last body byte, fails. The Rust SDK sets this policy on the
+client it builds. The TypeScript SDK checks the URL itself, asks `fetch` not to
+follow redirects and refuses any it gets, and holds its own deadline, which does
+not wait on `fetch` to honour its abort signal. Only an injected `fetch` that
+follows redirects despite `redirect: 'manual'` can resend a request before the SDK
+refuses it.
 
 ## Token validation
 
@@ -131,10 +134,9 @@ The SDK caches the issuer's key set:
 - Fetch at most once every 30 seconds, whatever the reason. A token with another
   unknown `kid` inside that window fails without a request, so unknown key IDs
   cannot be used to flood the issuer.
-- Keys stay fresh for the response's `Cache-Control: max-age`, bounded to between
-  30 seconds and 24 hours, or for one hour when there is none. The Rust SDK also
-  reads a quoted `max-age`, and keeps keys sent with `no-store` or `no-cache` only
-  the 30 seconds; the TypeScript SDK does not yet.
+- Keys stay fresh for the response's `Cache-Control: max-age`, quoted or not,
+  bounded to between 30 seconds and 24 hours, or for one hour when there is none.
+  `no-store` or `no-cache` keeps them only the 30 seconds.
 - A failed refresh keeps the last good set, and still counts as a fetch.
 - Keys of an unknown `kty`, keys whose `use` is not `sig`, and keys whose `key_ops`
   does not list `verify` are skipped (RFC 7517 §4.3, §5). A set where two keys share a `kid` is rejected as a whole, and the previous
