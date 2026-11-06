@@ -27,7 +27,8 @@ export default defineConfig({
       name: 'docs',
       testDir: './tests/browser/screenshots',
       snapshotPathTemplate: 'docs/images/{arg}{ext}',
-      use: { browserName: 'chromium' }
+      // The pages follow the browser's preference, so they show their dark theme.
+      use: { browserName: 'chromium', colorScheme: 'dark' }
     }
   ]
 });
