@@ -769,9 +769,8 @@ async fn checkpoints_never_sign_events_out_of_order() {
 }
 
 /// A checkpoint that fails does not stop sealing: the pass seals every batch,
-/// then returns the error. Five events in batches of two take one pass, or two
-/// if another test's transaction holds some back; sealing a batch per pass
-/// would take three.
+/// then returns the error. Five events of one transaction, in batches of two,
+/// are sealed in one pass; sealing a batch per pass would take three.
 #[tokio::test]
 #[ignore = "requires TEST_DATABASE_URL"]
 async fn sealing_goes_on_when_a_checkpoint_fails() {
@@ -789,15 +788,24 @@ async fn sealing_goes_on_when_a_checkpoint_fails() {
         fixture.record_in(&mut tx).await;
     }
     tx.commit().await.expect("commit");
-    let mut passes = 0;
-    while fixture.unsealed().await > 0 && passes < 3 {
-        let pass = fixture.sealer.pass(&mut lock, None).await;
-        assert!(matches!(pass, Err(AuditError::Broken(_))), "{pass:?}");
-        passes += 1;
-    }
+    // Events are sealed only once every older transaction has ended, and other
+    // tests' transactions can delay that, so passes that seal nothing don't count.
+    let mut sealing = 0;
+    tokio::time::timeout(Duration::from_secs(30), async {
+        while let unsealed @ 1.. = fixture.unsealed().await {
+            let pass = fixture.sealer.pass(&mut lock, None).await;
+            assert!(matches!(pass, Err(AuditError::Broken(_))), "{pass:?}");
+            if fixture.unsealed().await < unsealed {
+                sealing += 1;
+            } else {
+                tokio::time::sleep(Duration::from_millis(20)).await;
+            }
+        }
+    })
+    .await
+    .expect("every committed event is sealed");
     lock.release().await.expect("release");
-    assert_eq!(fixture.unsealed().await, 0);
-    assert!(passes <= 2, "{passes} passes");
+    assert_eq!(sealing, 1, "{sealing} passes sealed events");
 }
 
 /// More checkpoints that do not verify than the sealer looks past, as removing a
