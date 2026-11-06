@@ -60,8 +60,13 @@ impl DomainEvent {
             Self::IdentityUnlinked { provider } => HistoryEntry::IdentityUnlinked {
                 provider: *provider,
             },
-            Self::EmailAdded { email_id, address } => HistoryEntry::EmailAdded {
+            Self::EmailAdded {
+                email_id,
+                address,
+                provider,
+            } => HistoryEntry::EmailAdded {
                 email_id: *email_id,
+                provider: *provider,
                 address: match address {
                     Personal::Value(address) => Some(address.clone()),
                     Personal::Erased => None,
@@ -216,13 +221,15 @@ pub enum HistoryEntry {
         /// Its provider.
         provider: Provider,
     },
-    /// An email address was added, unverified.
+    /// An email address was added.
     #[serde(rename = "email.added")]
     EmailAdded {
         /// The address's ID.
         email_id: EmailId,
         /// The address, until retention deletes it.
         address: Option<NormalizedEmail>,
+        /// The provider it was imported from, if any.
+        provider: Option<Provider>,
     },
     /// An email address was verified.
     #[serde(rename = "email.verified")]

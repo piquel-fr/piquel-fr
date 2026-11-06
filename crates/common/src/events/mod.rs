@@ -109,14 +109,19 @@ pub enum DomainEvent {
         provider: Provider,
     },
     /// An unverified email address was added to the account. Its verification
-    /// email is queued with it.
+    /// email is queued with it, unless a provider imported it verified, which
+    /// [`Self::EmailVerified`] then records.
     EmailAdded {
         /// The new address.
         email_id: EmailId,
         /// The address itself.
         address: Personal<NormalizedEmail>,
+        /// The provider it was imported from, when signing up or linking with one.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        provider: Option<Provider>,
     },
-    /// Someone holding the address's verification link confirmed it.
+    /// Someone holding the address's verification link confirmed it, or the
+    /// provider it was imported from is authoritative for it.
     EmailVerified {
         /// The verified address.
         email_id: EmailId,

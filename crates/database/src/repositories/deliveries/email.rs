@@ -174,12 +174,18 @@ impl EmailMessage {
         tx: &mut DatabaseTransaction<'_>,
     ) -> Result<Option<(EmailId, Self)>, DatabaseError> {
         Ok(match event {
-            DomainEvent::EmailAdded { email_id, .. } => Some((
-                *email_id,
-                Self::VerifyAddress {
-                    email_id: *email_id,
-                },
-            )),
+            // An address a provider imported verified needs no link.
+            DomainEvent::EmailAdded { email_id, .. } => tx
+                .emails()
+                .find(user_id, *email_id)
+                .await?
+                .filter(|email| email.verified_at.is_none())
+                .map(|_| {
+                    let message = Self::VerifyAddress {
+                        email_id: *email_id,
+                    };
+                    (*email_id, message)
+                }),
             DomainEvent::PrimaryEmailChanged {
                 previous_email_id: Some(previous),
                 ..

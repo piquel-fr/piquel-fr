@@ -96,7 +96,7 @@ pub(crate) struct WebApplication {
     dashboard: Option<DashboardSignIn>,
     /// Whether creating an account needs an invitation.
     invite_required: bool,
-    /// Whether email is sent, which adding an address needs.
+    /// Whether email is sent, which adding or importing an address needs.
     email: EmailConfig,
     /// The `OpenID` Connect issuer, which the console tells apps to discover.
     issuer: Origin,

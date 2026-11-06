@@ -1,0 +1,23 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT EXISTS (\n                    SELECT 1 FROM active_verified_email_ownership\n                    WHERE normalized_email = $1 AND user_id <> $2\n                ) AS \"owned!\"",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "owned!",
+        "type_info": "Bool"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      null
+    ]
+  },
+  "hash": "9f233de84352634ef8d6fec15bdb4090adf42c7adedb7fef7e9a12f70d74f98a"
+}

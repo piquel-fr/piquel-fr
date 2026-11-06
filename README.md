@@ -394,6 +394,12 @@ address, receives at most 3. An address another active account verified cannot b
 verified again; adding it is allowed, so adding reveals nothing. The email names
 the account the address would join, and a browser signed in to another account
 cannot confirm it. An address that stops being primary, or is removed, is told.
+Signing up or linking with GitHub or Google imports the provider's address into an
+account without a verified one, recorded in its history as imported. It arrives
+verified only where the provider hosts the mailbox, Gmail and the account's
+Google Workspace domain; any other address arrives unverified with a link, since
+it may have changed owners. An address another account verified, or whose link
+can't be sent now, is skipped.
 
 Auth sends email through the delivery queue, never from a request. Messages are
 transactional security notices: no tracking, no remote images, and links only to

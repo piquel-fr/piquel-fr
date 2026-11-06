@@ -25,6 +25,8 @@ const SCOPES: &[&str] = &[
 const CLOCK_SKEW_SECONDS: i64 = 30;
 /// Display name proposed when the token carries no usable name.
 const FALLBACK_NAME: &str = "Google user";
+/// The domain of Gmail addresses, which Google always hosts.
+const GMAIL_DOMAIN: &str = "gmail.com";
 /// Google's published signing keys.
 const KEYS_URL: &str = "https://www.googleapis.com/oauth2/v3/certs";
 
@@ -116,10 +118,14 @@ impl FederationApplication {
     ) -> Result<VerifiedIdentity, ProviderError> {
         let token: GoogleToken = Self::json(response).await?;
         let claims = GoogleClaims::verify(&token.id_token, protocol, client_id, nonce).await?;
+        let authoritative = claims.authoritative();
         VerifiedIdentity::new(
             Provider::Google,
             claims.sub,
-            claims.email.filter(|_| claims.email_verified),
+            (
+                claims.email.filter(|_| claims.email_verified),
+                authoritative,
+            ),
             (claims.name, FALLBACK_NAME.into()),
             claims.picture.as_deref(),
         )
@@ -155,6 +161,8 @@ pub(in crate::federation) struct GoogleClaims {
     /// Whether Google verified `email`.
     #[serde(default)]
     email_verified: bool,
+    /// The Google Workspace domain of the account, if it is one.
+    hd: Option<String>,
     /// Profile name proposed for onboarding.
     name: Option<String>,
     /// The profile picture's URL, with the `profile` scope.
@@ -201,5 +209,24 @@ impl GoogleClaims {
             return Err(GoogleError::AuthorizedPartyMismatch);
         }
         Ok(claims)
+    }
+
+    /// Whether Google is authoritative for `email`, as Google documents: a Gmail
+    /// address, or one under the account's Workspace domain. Google verified other
+    /// addresses once, and they may have changed owners since.
+    pub(in crate::federation) fn authoritative(&self) -> bool {
+        let Some((_, domain)) = self
+            .email
+            .as_deref()
+            .and_then(|email| email.rsplit_once('@'))
+        else {
+            return false;
+        };
+        self.email_verified
+            && (domain.eq_ignore_ascii_case(GMAIL_DOMAIN)
+                || self
+                    .hd
+                    .as_deref()
+                    .is_some_and(|hd| domain.eq_ignore_ascii_case(hd)))
     }
 }

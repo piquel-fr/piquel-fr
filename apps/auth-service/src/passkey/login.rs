@@ -164,8 +164,16 @@ impl PasskeyApplication {
         let passkey = Self::insert_passkey(&mut tx, &actor, user_id, key, friendly_name).await?;
         let picture = match pending {
             Some(pending) => {
-                FederationApplication::attach_signup(&mut tx, &actor, pending, &headers, user_id)
-                    .await?
+                FederationApplication::attach_signup(
+                    &mut tx,
+                    &actor,
+                    &app.email,
+                    context.client_ip,
+                    pending,
+                    &headers,
+                    user_id,
+                )
+                .await?
             }
             None => None,
         };

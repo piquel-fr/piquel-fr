@@ -159,12 +159,21 @@ impl HistoryRow<'_> {
             HistoryEntry::IdentityUnlinked { provider } => {
                 format!("{} sign-in unlinked", provider.name())
             }
-            HistoryEntry::EmailAdded { email_id, address } => {
+            HistoryEntry::EmailAdded {
+                email_id,
+                address,
+                provider,
+            } => {
                 let address = address.as_ref().map_or_else(
                     || holdings.email(*email_id),
                     |address| format!(" {address}"),
                 );
-                format!("Email address{address} added")
+                match provider {
+                    Some(provider) => {
+                        format!("Email address{address} added from {}", provider.name())
+                    }
+                    None => format!("Email address{address} added"),
+                }
             }
             HistoryEntry::EmailVerified { email_id } => {
                 format!("Email address{} confirmed", holdings.email(*email_id))

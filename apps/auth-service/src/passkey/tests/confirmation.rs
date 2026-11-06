@@ -325,6 +325,7 @@ async fn the_dashboard_proves_with_passkeys_signed_for_its_origin() {
             origin: AUTH_ORIGIN.parse().expect("origin"),
             invite_required: false,
         },
+        &fixture.app.email,
         Some(&dashboard),
         fixture.app.oidc.clone(),
     )

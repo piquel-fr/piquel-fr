@@ -2,7 +2,7 @@
 //! passkey sign-in on the pages of approved related origins, and the admin
 //! dashboard's own passkey confirmation, on its origin.
 use crate::account::AccountService;
-use crate::config::PasskeyConfig;
+use crate::config::{EmailConfig, PasskeyConfig};
 use crate::deliveries::OutboundClient;
 use crate::oidc::OidcApplication;
 use crate::routes;
@@ -71,6 +71,8 @@ pub struct PasskeyApplication {
     invite_required: bool,
     /// Fetches the picture a social signup's provider reported.
     outbound: OutboundClient,
+    /// Whether email is sent, which importing a social signup's address needs.
+    email: EmailConfig,
 }
 
 /// Human-readable `WebAuthn` relying party name.
@@ -82,10 +84,12 @@ impl PasskeyApplication {
     /// Builds `WebAuthn` from the already validated origin and admission policy.
     /// `oidc` completes the authorization requests of related origins' sign-ins,
     /// and the admin dashboard at `dashboard`, if auth serves one, confirms with
-    /// passkeys on its own pages.
+    /// passkeys on its own pages. `email` verifies the addresses social signups
+    /// bring.
     pub(crate) fn new(
         database: Database,
         config: &PasskeyConfig,
+        email: &EmailConfig,
         dashboard: Option<&Origin>,
         oidc: OidcApplication,
     ) -> Result<Self, PasskeyConfigError> {
@@ -97,6 +101,7 @@ impl PasskeyApplication {
             dashboard: dashboard.cloned(),
             invite_required: config.invite_required,
             outbound: OutboundClient::new().map_err(PasskeyConfigError::Outbound)?,
+            email: email.clone(),
         })
     }
 
