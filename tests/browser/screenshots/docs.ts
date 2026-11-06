@@ -51,13 +51,14 @@ export async function shoot(page: Page, name: string, area?: Locator): Promise<v
         return seen.get(value) ?? value;
       };
       const replacements: [RegExp, string | ((match: string) => string)][] = [
-        [/\b([a-z]+)-docs[a-z0-9]+\b/g, '$1'],
+        // Hosts first: a preview's host may contain what looks like a handle.
         ...shownHosts.map(
           ([from, to]) => [new RegExp(from.replaceAll('.', '\\.'), 'g'), to] as [RegExp, string]
         ),
+        [/\b([a-z]+)-docs[a-z0-9]+\b/g, '$1'],
         [/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/g, id],
         // Client IDs, which auth generates for the apps accounts register.
-        [/\bc_[\w-]{16,}/g, () => 'c_Nq4dX8vLr2KmT9wZbYp3Fh'],
+        [/\bc_[a-z2-7]{20}\b/g, 'c_nq4dx3vlr2kmt7wzbyp5'],
         [
           /\b(Monday|Tuesday|Wednesday|Thursday|Friday|Saturday|Sunday) \d{1,2} [A-Z][a-z]+ \d{4}\b/g,
           'Tuesday 12 May 2026'
