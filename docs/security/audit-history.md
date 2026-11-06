@@ -164,7 +164,9 @@ use the CLI. It checks against the environment's committed key, or, on a
 preview, which commits none, against the server's own key, and says so. Someone
 with auth's database role can record a verification that says the chain is
 intact, as they can any event, so the tab tells you what the last check found,
-not that the chain is intact now: verify again before relying on it.
+not that the chain is intact now: verify again before relying on it. The newest
+is the one recorded last by the clock, so after the server's clock steps back the
+tab can show an older one until the next verification.
 
 To detect truncation, also compare the published checkpoints with copies kept
 elsewhere; see [Limits](#limits).

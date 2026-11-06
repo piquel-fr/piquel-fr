@@ -459,10 +459,11 @@ impl EventRepository<'_> {
         .collect()
     }
 
-    /// The newest `audit_chain_verified` event, in recording order, which a clock
-    /// stepped back does not change. The kind is written into the query, not
-    /// bound, so every plan reads the index of verifications alone: one entry,
-    /// however many events there are.
+    /// The newest `audit_chain_verified` event, by when it was recorded. The kind
+    /// is written into the query, not bound, so every plan reads the `(kind,
+    /// occurred_at)` index: one entry, however many events there are. After the
+    /// clock steps back, an older verification can read as the newest until the
+    /// next one is recorded.
     ///
     /// # Errors
     ///
@@ -487,7 +488,7 @@ impl EventRepository<'_> {
                 FROM domain_events e
                 LEFT JOIN event_personal_data p ON p.event_id = e.id
                 WHERE e.kind = 'audit_chain_verified'
-                ORDER BY e.sequence DESC
+                ORDER BY e.occurred_at DESC
                 LIMIT 1"#
             )
         )?
