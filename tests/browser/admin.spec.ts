@@ -213,7 +213,9 @@ test('rights granted from the dashboard open it, until revoked, and the audit ch
   const admin = await administrator(browser, `granter-${suffix}`);
   const user = await signedUp(browser, `grantee-${suffix}`);
 
-  // The chain's newest position, once every event so far is sealed, within seconds.
+  // The chain's newest position, once every event so far is sealed, within
+  // seconds, after verifying that the chain is intact. The page verifies only
+  // when asked, and records the verification as an event of its own.
   const newest = async () => {
     await expect
       .poll(
@@ -224,10 +226,12 @@ test('rights granted from the dashboard open it, until revoked, and the audit ch
         { timeout: 15_000 }
       )
       .toBe('0');
-    await expect(admin.getByText('Intact', { exact: true })).toBeVisible();
-    await expect(admin.getByText('Broken', { exact: true })).toHaveCount(0);
     // A point of the chain reads as its position, then its hash.
     const point = await admin.locator('dt:text-is("Newest") + dd').textContent();
+    await admin.getByRole('button', { name: 'Verify now', exact: true }).click();
+    await expect(admin).toHaveURL(`${adminUrl}/audit`);
+    await expect(admin.getByText('Intact at last check', { exact: true })).toBeVisible();
+    await expect(admin.getByText('Broken at last check', { exact: true })).toHaveCount(0);
     return Number(point?.split(' ')[0]);
   };
   const before = await newest();
