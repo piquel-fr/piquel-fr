@@ -114,7 +114,7 @@ export async function fetch(request: Request): Promise<Response> {
   const user = await login.session(request); // null, the signed-in user, or a response
   if (user instanceof Response) return user; // 403 from another site, or 503
   // `respond` adds the cookies the read needs, such as the refreshed session.
-  if (!user) return login.respond(request, login.signIn(request)); // through login and back
+  if (!user) return login.respond(request, login.signIn(request)); // through login and back, or 401
   const stepUp = user.require({ acr_values: 'phr', max_age: 300 });
   if (stepUp) return login.respond(request, stepUp); // a recent passkey sign-in
   return login.respond(request, new Response(`Hello ${user.name}`)); // await user.accessToken() calls APIs
@@ -146,10 +146,15 @@ export async function fetch(request: Request): Promise<Response> {
   when it sets the session. A response without them loses those updates: the next
   request refreshes again, a dead cookie is sent until it expires, and the marker
   lingers for its minute.
+- **Redirects**: `signIn` and `stepUp` redirect only a browser navigating to a page
+  (`GET` with `Sec-Fetch-Mode: navigate`). Any other request, a `fetch` or a client
+  sending no fetch metadata, gets 401, since a `fetch` following a redirect to auth
+  would fail its CORS check; a script handles it, for example by sending the browser
+  to `/auth/login`.
 - **Logout** revokes the session's refresh token at auth, clears the cookies and
-  redirects to RP-initiated logout. When auth cannot revoke it, logout answers 502 and
-  keeps the cookie, for the user to try again. A sign-in revokes the session it
-  replaces.
+  redirects to RP-initiated logout. When auth cannot revoke it within five seconds,
+  logout answers 502 and keeps the cookie, for the user to try again. A sign-in
+  revokes the session it replaces, and answers 502 the same way.
 - **Cross-site writes**: `SameSite=Lax` keeps the cookie off other sites' posts, but
   not off a sibling's under the same domain. So `session()` answers a request that is
   not `GET`, `HEAD`, `OPTIONS` or `TRACE` with a 403 response, before reading the

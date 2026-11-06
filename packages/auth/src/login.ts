@@ -29,6 +29,11 @@ const PENDING_LIFETIME = 10 * 60_000;
 const DEFAULT_SESSION_LIFETIME = 12 * 60 * 60_000;
 /** Longest a refresh may take, auth's response and its ID token check included. */
 const REFRESH_DEADLINE = 20_000;
+/**
+ * Longest a session's revocation may hold up the sign-in or logout ending it,
+ * whatever the injected `fetch` does with its own timeout.
+ */
+const REVOCATION_DEADLINE = 5_000;
 /** Longest back-channel logout request read: a logout token is at most 16 KiB. */
 const MAX_LOGOUT_REQUEST = 64 * 1024;
 /** Methods that must not change anything, so any origin may send them with the session cookie. */
@@ -130,12 +135,12 @@ type RequestSession = {
  *   `state`; a login that lands in a taken slot replaces the one there.
  * - `GET /callback` completes the login its `state` names and starts a session,
  *   first revoking the refresh token of any session the browser already had, or
- *   answering 502 and keeping that session when auth cannot.
+ *   answering 502 and keeping that session when auth cannot within five seconds.
  * - `POST /logout` revokes the session's refresh token at auth, clears the cookies,
  *   and redirects to RP-initiated logout; it answers 502, keeping the cookie, when
- *   auth cannot revoke it. It accepts only requests from the app's own pages:
- *   `Sec-Fetch-Site: same-origin` when the browser sends it, and otherwise an
- *   `Origin` equal to the redirect URI's.
+ *   auth cannot revoke it within five seconds. It accepts only requests from the
+ *   app's own pages: `Sec-Fetch-Site: same-origin` when the browser sends it, and
+ *   otherwise an `Origin` equal to the redirect URI's.
  * - `POST /backchannel-logout`, only with {@link LoginOptions.backchannelLogout}.
  *
  * Every login requests `offline_access`, which the client's registration must allow:
@@ -337,13 +342,14 @@ export class Login {
 
   /**
    * A response sending the browser through login and back to the request's page: a
-   * redirect for a `GET`, and 401 for other methods, which cannot be repeated after
-   * a redirect. With `stepUp`, the new sign-in must meet it, and the page's return is
-   * marked as the step-up's retry; prefer {@link SignedIn.stepUp}, which stops at
-   * one retry.
+   * redirect for a browser navigating to a page with `GET` (`Sec-Fetch-Mode:
+   * navigate`), and 401 for any other request, a `fetch` or a client sending no fetch
+   * metadata included, since following a redirect to auth would fail its CORS check.
+   * With `stepUp`, the new sign-in must meet it, and the page's return is marked as
+   * the step-up's retry; prefer {@link SignedIn.stepUp}, which stops at one retry.
    */
   signIn(request: Request, stepUp?: StepUpRequirement): Response {
-    if (request.method !== 'GET') return new Response(null, { status: 401 });
+    if (!Login.#navigation(request)) return new Response(null, { status: 401 });
     const query = new URLSearchParams();
     const returnTo = Login.#returnTo(Login.#page(request));
     if (returnTo !== undefined) query.append('return_to', returnTo);
@@ -372,6 +378,16 @@ export class Login {
       /^\/(?![/\\])[\x21-\x7e]*$/.test(path) &&
       !/[\\#]/.test(path);
     return local ? path : undefined;
+  }
+
+  /**
+   * Whether the request is a browser navigating to a page with `GET`
+   * (`Sec-Fetch-Mode: navigate`), the only request a redirect through login serves:
+   * a `fetch` following it would fail auth's CORS check, and a client sending no
+   * fetch metadata is no browser that could sign in.
+   */
+  static #navigation(request: Request): boolean {
+    return request.method === 'GET' && request.headers.get('sec-fetch-mode') === 'navigate';
   }
 
   /** The request's path and query. */
@@ -565,6 +581,27 @@ export class Login {
   }
 
   /**
+   * Revokes `refreshToken` at auth within {@link REVOCATION_DEADLINE}, so a hanging
+   * auth cannot hold up the sign-in or logout around it. Returns whether auth
+   * revoked it, logging why not.
+   */
+  async #revoke(refreshToken: string): Promise<boolean> {
+    let revoked;
+    try {
+      revoked = await Login.#within(REVOCATION_DEADLINE, this.client.revoke(refreshToken));
+    } catch (error) {
+      if (!(error instanceof AuthError)) throw error;
+      console.warn('@piquel/auth: a refresh token could not be revoked', error);
+      return false;
+    }
+    if (revoked === TIMED_OUT) {
+      console.warn('@piquel/auth: revoking a refresh token timed out');
+      return false;
+    }
+    return true;
+  }
+
+  /**
    * The name of the cookie holding the login started with `state`: its slot, by the
    * first byte of the `state`'s SHA-256.
    */
@@ -660,8 +697,8 @@ export class Login {
    * Completes `pending` from `callback` and starts its session. The session the
    * browser had is replaced, and its refresh token revoked first, so no copy of it,
    * nor a response still in flight that sets it back, outlives its access token. If
-   * auth cannot revoke it, the sign-in stops before the code is redeemed, with 502,
-   * and the browser keeps its session.
+   * auth cannot revoke it within {@link REVOCATION_DEADLINE}, the sign-in stops
+   * before the code is redeemed, with 502, and the browser keeps its session.
    */
   async #complete(
     request: Request,
@@ -669,17 +706,12 @@ export class Login {
     callback: URLSearchParams
   ): Promise<Response> {
     const previous = await this.openSession(request);
-    if (previous instanceof StoredLogin && previous.refreshToken !== undefined) {
-      try {
-        await this.client.revoke(previous.refreshToken);
-      } catch (error) {
-        if (!(error instanceof AuthError)) throw error;
-        console.warn(
-          "@piquel/auth: the replaced session's refresh token could not be revoked",
-          error
-        );
-        return Login.text(502, 'Signing in could not end your previous session; start again.');
-      }
+    if (
+      previous instanceof StoredLogin &&
+      previous.refreshToken !== undefined &&
+      !(await this.#revoke(previous.refreshToken))
+    ) {
+      return Login.text(502, 'Signing in could not end your previous session; start again.');
     }
     let tokens;
     try {
@@ -726,9 +758,10 @@ export class Login {
   /**
    * `POST /logout`: revokes the session's refresh token at auth, so no copy of the
    * cookie refreshes again, clears the cookies, and redirects to RP-initiated logout.
-   * If auth cannot revoke it, the answer is 502 and the cookie is kept, so the user can
-   * try again: clearing it would leave copies refreshing. `POST` only, and only from
-   * the app's own pages, so another site cannot sign the user out.
+   * If auth cannot revoke it within {@link REVOCATION_DEADLINE}, the answer is 502 and
+   * the cookie is kept, so the user can try again: clearing it would leave copies
+   * refreshing. `POST` only, and only from the app's own pages, so another site
+   * cannot sign the user out.
    */
   async #logout(request: Request): Promise<Response> {
     if (!this.#sameOrigin(request)) {
@@ -737,14 +770,8 @@ export class Login {
     let destination = this.#home;
     const session = await this.openSession(request);
     if (session instanceof StoredLogin) {
-      if (session.refreshToken !== undefined) {
-        try {
-          await this.client.revoke(session.refreshToken);
-        } catch (error) {
-          if (!(error instanceof AuthError)) throw error;
-          console.warn("@piquel/auth: the session's refresh token could not be revoked", error);
-          return Login.text(502, 'Signing out could not reach the sign-in service; try again.');
-        }
+      if (session.refreshToken !== undefined && !(await this.#revoke(session.refreshToken))) {
+        return Login.text(502, 'Signing out could not reach the sign-in service; try again.');
       }
       destination = this.client.logoutUrl(undefined, this.#afterLogout);
     }
@@ -875,8 +902,9 @@ export class SignedIn {
   /**
    * The response signing the user in again as `requirement` asks, such as an API's
    * `insufficient_user_authentication` challenge read with `parseChallenge`, and
-   * coming back to the same page to try again: a redirect through login for a `GET`,
-   * 401 for other methods. The login fails unless the new sign-in meets the
+   * coming back to the same page to try again: a redirect through login for a
+   * browser's navigation, 401 for any other request, a `fetch` included, as
+   * {@link Login.signIn} answers. The login fails unless the new sign-in meets the
    * requirement. On that return the retry is spent: if the page asks again, the
    * answer is 403 instead of another redirect. The return is the first `GET` of the
    * page within a minute of the login; a later one counts as a new action.

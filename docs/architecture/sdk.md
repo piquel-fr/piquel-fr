@@ -286,8 +286,7 @@ nothing: it holds a 32-byte cookie key, the same on every replica.
   through login. Any other request gets 401, a client sending no fetch metadata
   included, since a `fetch` following a redirect to auth would fail its CORS
   check. The redirect returns to the path the browser asked for, the prefix of a
-  nested router included. The Rust SDK does this; `@piquel/auth/server` does not
-  yet, and has no revocation deadline either.
+  nested axum router included; a TypeScript `Request` always carries its full URL.
 
 So an app cannot end a session by itself. Clearing the cookie ends it in one
 browser; a copy lives on until auth revokes the grant, through the app's logout or
