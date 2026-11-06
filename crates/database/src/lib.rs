@@ -29,7 +29,6 @@ pub use repositories::{
     OidcRepository, PasskeyRepository, PictureRepository, RecoveryRepository, SecurityRepository,
     SessionRepository, SigningKeyRepository, TokenRepository, UserRepository,
     administrators::AdministratorsLocked,
-    alerts::StoredAlert,
     audit::{ChainLink, ChainedEvent, Checkpoint, EventContent, SealedEvent},
     dashboard::{DashboardSignIn, InsertHandoff, RedeemedHandoff, StoredDashboardSession},
     deletions::{AccountDeletion, RestoreToken},

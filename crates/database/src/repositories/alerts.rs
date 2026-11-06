@@ -7,28 +7,10 @@ use crate::{DatabaseError, LockKey};
 use chrono::{DateTime, Utc};
 use piquel_common::{
     AlertId,
-    alerts::{Alert, AlertKind},
+    alerts::{Alert, AlertKind, StoredAlert},
     events::DomainEvent,
 };
 use serde_json::Value;
-
-/// An alert, as stored.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct StoredAlert {
-    /// Alert identifier.
-    pub id: AlertId,
-    /// What it says; `None` for a kind a newer release raised, which this one
-    /// cannot show.
-    pub alert: Option<Alert>,
-    /// When it was raised.
-    pub raised_at: DateTime<Utc>,
-    /// When auth last found its condition holding.
-    pub seen_at: DateTime<Utc>,
-    /// When an administrator acknowledged it, if one did.
-    pub acknowledged_at: Option<DateTime<Utc>>,
-    /// When its condition stopped holding, or changed, if it did.
-    pub cleared_at: Option<DateTime<Utc>>,
-}
 
 /// An alert as the queries return it, before its payload decodes.
 struct AlertRow {
@@ -168,5 +150,50 @@ impl AlertRepository<'_> {
             )
         )?;
         Ok(())
+    }
+
+    /// Acknowledges alert `id`, if it is open, and returns it.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`DatabaseError`] if the query fails or its payload does not decode.
+    pub async fn acknowledge(&mut self, id: AlertId) -> Result<Option<StoredAlert>, DatabaseError> {
+        run!(
+            self,
+            fetch_optional,
+            sqlx::query_as!(
+                AlertRow,
+                r#"UPDATE alerts SET acknowledged_at = now()
+                WHERE id = $1 AND acknowledged_at IS NULL AND cleared_at IS NULL
+                RETURNING id AS "id: AlertId", payload, version, raised_at, seen_at,
+                    acknowledged_at, cleared_at"#,
+                id.as_uuid(),
+            )
+        )?
+        .map(StoredAlert::try_from)
+        .transpose()
+    }
+
+    /// Up to `limit` alerts: the current ones, then those that cleared, each
+    /// newest first.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`DatabaseError`] if the query fails or a payload does not decode.
+    pub async fn list(&mut self, limit: u32) -> Result<Vec<StoredAlert>, DatabaseError> {
+        let rows = run!(
+            self,
+            fetch_all,
+            sqlx::query_as!(
+                AlertRow,
+                r#"SELECT id AS "id: AlertId", payload, version, raised_at, seen_at,
+                    acknowledged_at, cleared_at
+                FROM alerts
+                ORDER BY cleared_at IS NULL DESC, raised_at DESC, id DESC
+                LIMIT $1"#,
+                i64::from(limit),
+            )
+        )?;
+        rows.into_iter().map(StoredAlert::try_from).collect()
     }
 }

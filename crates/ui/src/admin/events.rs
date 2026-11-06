@@ -413,6 +413,9 @@ impl EventRow<'_> {
             DomainEvent::AlertRaised { alert_id, alert } => {
                 Self::alert("Alert raised", alert_id, &alert)
             }
+            DomainEvent::AlertAcknowledged { alert_id, alert } => {
+                Self::alert("Alert acknowledged", alert_id, &alert)
+            }
             DomainEvent::AlertCleared { alert_id, alert } => {
                 Self::alert("Alert cleared", alert_id, &alert)
             }

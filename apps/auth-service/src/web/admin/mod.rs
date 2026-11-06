@@ -25,6 +25,8 @@
 
 /// The administrators.
 mod administrators;
+/// The alerts administrators are shown, and acknowledging one.
+mod alerts;
 /// The audit chain's state, and the checkpoints it may be pruned through.
 mod audit;
 /// The OIDC clients, one client, and the changes made to them.
@@ -352,6 +354,8 @@ impl AdminApplication {
             Op::ListSigningKeys => &keys::list,
             Op::RotateSigningKey => &keys::rotate,
             Op::RevokeSigningKey => &keys::revoke,
+            Op::ListAlerts => &alerts::list,
+            Op::AcknowledgeAlert => &alerts::acknowledge,
             // Purging at once cannot be undone, so only the terminal offers it.
             Op::PurgeUser
             // Importing takes the deployment's PEM private key, which must never
@@ -512,6 +516,15 @@ impl AdminApplication {
     }
 }
 
+/// The form of a change that only asks why, such as scheduling an account's
+/// deletion, whose reason the owner sees in their history, or acknowledging an
+/// alert.
+#[derive(Clone, Deserialize)]
+struct ReasonForm {
+    /// Why, recorded with the change.
+    reason: String,
+}
+
 /// A change the service refused: why, and the form as it was posted, which the
 /// page shows again so nothing typed is lost. It reads as its message.
 struct Refused<I> {
@@ -599,7 +612,7 @@ impl AdminApplication {
     }
 
     /// Each tab's page, in the sidebar's order.
-    fn tabs(cx: &Cx) -> [(DashboardTab, String); 10] {
+    fn tabs(cx: &Cx) -> [(DashboardTab, String); 11] {
         [
             (
                 DashboardTab::Overview,
@@ -623,6 +636,7 @@ impl AdminApplication {
             ),
             (DashboardTab::SigningKeys, href!(keys::list).resolve(cx)),
             (DashboardTab::Audit, href!(audit::verify).resolve(cx)),
+            (DashboardTab::Alerts, href!(alerts::list).resolve(cx)),
         ]
     }
 

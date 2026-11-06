@@ -1,0 +1,58 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE alerts SET acknowledged_at = now()\n                WHERE id = $1 AND acknowledged_at IS NULL AND cleared_at IS NULL\n                RETURNING id AS \"id: AlertId\", payload, version, raised_at, seen_at,\n                    acknowledged_at, cleared_at",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id: AlertId",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "payload",
+        "type_info": "Jsonb"
+      },
+      {
+        "ordinal": 2,
+        "name": "version",
+        "type_info": "Int2"
+      },
+      {
+        "ordinal": 3,
+        "name": "raised_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 4,
+        "name": "seen_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 5,
+        "name": "acknowledged_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 6,
+        "name": "cleared_at",
+        "type_info": "Timestamptz"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false,
+      true,
+      true
+    ]
+  },
+  "hash": "a4ca061f5e179841c109dbd3abc8b332aa327052e25650dcacc41ef33d1ee197"
+}

@@ -3,10 +3,10 @@
 //! clears it once it no longer does, each change recorded as an event.
 
 use piquel_common::{
-    alerts::{Alert, AlertKind},
+    alerts::{Alert, AlertKind, StoredAlert},
     events::{DomainEvent, EventContext},
 };
-use piquel_repository::{DatabaseError, DatabaseTransaction, StoredAlert};
+use piquel_repository::{DatabaseError, DatabaseTransaction};
 
 /// Raises and clears alerts in a transaction, recording each change as caused
 /// as its context says.

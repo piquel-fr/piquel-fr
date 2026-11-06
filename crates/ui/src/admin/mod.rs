@@ -9,6 +9,8 @@
 //! [`Confirmation`] says; without the script, the browser confirms on auth's
 //! handoff page, and comes back. Every page works without it.
 
+/// The alerts administrators are shown.
+mod alerts;
 /// The audit chain's state and its checkpoints.
 mod audit;
 /// The OIDC clients, one client, and registering and changing them.
@@ -30,6 +32,7 @@ mod recoveries;
 /// Account search and one account.
 mod users;
 
+pub use alerts::{AlertRow, alert_list};
 pub use audit::audit_page;
 pub use clients::{
     AdminClientRow, ClientChanges, ClientPage, NewClientForm, OperatorDraft, Registration,
@@ -125,6 +128,8 @@ pub enum Tab {
     SigningKeys,
     /// The tamper-evident audit chain.
     Audit,
+    /// What needs an administrator's attention.
+    Alerts,
 }
 
 impl Tab {
@@ -141,6 +146,7 @@ impl Tab {
             Self::Deliveries => Icon::Send,
             Self::SigningKeys => Icon::Key,
             Self::Audit => Icon::Audit,
+            Self::Alerts => Icon::Warning,
         }
     }
 }
@@ -159,6 +165,7 @@ impl Label for Tab {
             Self::Deliveries => "Deliveries",
             Self::SigningKeys => "Signing keys",
             Self::Audit => "Audit",
+            Self::Alerts => "Alerts",
         }
     }
 }
@@ -376,6 +383,8 @@ pub enum Change {
     RotateSigningKey,
     /// Deleting a signing key at once.
     RevokeSigningKey,
+    /// Acknowledging an open alert, with a reason.
+    AcknowledgeAlert,
 }
 
 impl Change {
@@ -411,6 +420,7 @@ impl Change {
             Self::CancelDelivery => "Cancel this delivery",
             Self::RotateSigningKey => "Rotate the signing key",
             Self::RevokeSigningKey => "Revoke this signing key",
+            Self::AcknowledgeAlert => "Acknowledge this alert",
         }
     }
 
@@ -493,6 +503,9 @@ impl Change {
             Self::DeleteClient => {
                 "It stops working at once: its refresh tokens are revoked, and its secrets and the consents users gave it are removed. Its ID can never be registered again. This cannot be undone."
             }
+            Self::AcknowledgeAlert => {
+                "It no longer needs attention, though it stays current while its condition holds as it says. If the condition changes, or clears and comes back, a new alert is raised."
+            }
         }
     }
 
@@ -525,6 +538,7 @@ impl Change {
             // Not "Cancel", which closes its dialog.
             Self::CancelDelivery => "Cancel delivery",
             Self::RotateSigningKey => "Rotate",
+            Self::AcknowledgeAlert => "Acknowledge",
         }
     }
 
@@ -557,7 +571,8 @@ impl Change {
             | Self::RetryDelivery
             | Self::CancelDelivery
             | Self::RotateSigningKey
-            | Self::RevokeSigningKey => self.button(),
+            | Self::RevokeSigningKey
+            | Self::AcknowledgeAlert => self.button(),
         }
     }
 
@@ -592,6 +607,7 @@ impl Change {
                 Some("Reason, shown to the owner in their history")
             }
             Self::ReserveHandle => Some("Who or what it is kept for"),
+            Self::AcknowledgeAlert => Some("Reason, such as who is looking into it"),
             Self::Recover | Self::UndoRecovery => Some(
                 "Reason, shown to the owner in their history: what was asked, never the evidence",
             ),

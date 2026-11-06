@@ -9,6 +9,8 @@
 mod account;
 /// Granting, revoking and listing administrators.
 mod admin;
+/// Listing and acknowledging alerts.
+mod alerts;
 /// The audit history.
 mod audit;
 /// Registering, inspecting and changing OIDC clients.
@@ -37,6 +39,7 @@ use crate::{
 };
 use account::AccountCommand;
 use admin::AdminCommand;
+use alerts::AlertsCommand;
 use audit::AuditCommand;
 use clap::{Parser, Subcommand};
 use client::{ClientCommand, OriginCommand};
@@ -112,6 +115,9 @@ enum Administration {
     /// Inspect, retry and cancel outbound deliveries.
     #[command(subcommand)]
     Deliveries(DeliveriesCommand),
+    /// List and acknowledge the alerts that need an administrator's attention.
+    #[command(subcommand)]
+    Alerts(AlertsCommand),
     /// Read or change one account's settings on its owner's behalf.
     Account(AccountCommand),
 }
@@ -242,6 +248,10 @@ impl Administration {
                 DeliveriesCommand::Retry { .. } => Op::RetryDelivery,
                 DeliveriesCommand::Cancel { .. } => Op::CancelDelivery,
             },
+            Self::Alerts(command) => match command {
+                AlertsCommand::List { .. } => Op::ListAlerts,
+                AlertsCommand::Acknowledge { .. } => Op::AcknowledgeAlert,
+            },
         })
     }
 
@@ -263,6 +273,7 @@ impl Administration {
             Self::Admin(command) => command.run(console).await,
             Self::Handle(command) => command.run(console).await,
             Self::Deliveries(command) => command.run(console).await,
+            Self::Alerts(command) => command.run(console).await,
             Self::Account(command) => command.run(console).await,
         }
     }

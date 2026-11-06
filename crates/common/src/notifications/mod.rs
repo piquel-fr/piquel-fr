@@ -152,6 +152,7 @@ impl DomainEvent {
             | Self::AuditHistoryPruned { .. }
             | Self::AuditChainVerified(_)
             | Self::AlertRaised { .. }
+            | Self::AlertAcknowledged { .. }
             | Self::AlertCleared { .. }
             | Self::Imported(_) => return None,
         })

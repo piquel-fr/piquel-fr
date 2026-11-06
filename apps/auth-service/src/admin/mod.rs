@@ -25,6 +25,7 @@ pub(crate) use operation::AdminOperation;
 use operator::AdminSession;
 pub use operator::Operator;
 pub(crate) use overview::{Kinds, Overview, Problem};
+pub(crate) use service::ALERTS_SHOWN;
 pub use service::AdminService;
 pub(crate) use sign_in::{DashboardSignIn, SignedInAdmin};
 pub use types::{GracePeriod, HandleProblem, InvalidLifetime, InviteExpiry, Reason, UserRef};

@@ -99,7 +99,7 @@ impl Harness {
     }
 
     /// The service under test.
-    fn service(&self) -> AdminService {
+    pub(crate) fn service(&self) -> AdminService {
         AdminService::new(self.database.clone(), true)
     }
 
