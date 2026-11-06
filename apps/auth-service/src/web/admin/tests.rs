@@ -1681,6 +1681,7 @@ async fn administrators_read_an_accounts_inbox_and_history() {
 
 /// The Alerts page lists an open alert with its acknowledgement, which asks why
 /// and is recorded as the administrator's; the alert then shows as acknowledged.
+/// The overview names it while it is open.
 #[tokio::test]
 #[ignore = "requires TEST_DATABASE_URL"]
 async fn alerts_are_acknowledged_from_the_dashboard() {
@@ -1725,6 +1726,12 @@ async fn alerts_are_acknowledged_from_the_dashboard() {
         "{page}"
     );
     assert!(page.contains(&position.to_string()), "{page}");
+    let overview = html(harness.visit(&dashboard, "/").await).await;
+    assert!(
+        overview.contains("Acknowledge it once someone is looking into it")
+            && overview.contains("See the alerts"),
+        "{overview}"
+    );
 
     let url = format!("{DASHBOARD}{acknowledge}");
     let reason = [("reason", "Looking into it")];
@@ -1735,6 +1742,11 @@ async fn alerts_are_acknowledged_from_the_dashboard() {
     let page = html(harness.visit(&dashboard, "/alerts").await).await;
     assert!(!page.contains(&acknowledge), "{page}");
     assert!(page.contains("Acknowledged"), "{page}");
+    let overview = html(harness.visit(&dashboard, "/").await).await;
+    assert!(
+        !overview.contains("Acknowledge it once someone is looking into it"),
+        "{overview}"
+    );
     let actor = harness
         .actor_of("alert_acknowledged", |event| {
             matches!(event, DomainEvent::AlertAcknowledged { alert_id, .. } if *alert_id == id)

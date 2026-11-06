@@ -5,7 +5,7 @@ use crate::Reason;
 use clap::Subcommand;
 use piquel_common::{
     AlertId,
-    alerts::{AlertState, StoredAlert},
+    alerts::{Alert, AlertState, StoredAlert},
 };
 
 /// Listing and acknowledging alerts.
@@ -61,7 +61,7 @@ impl AlertsCommand {
             AlertState::Cleared => "cleared",
         };
         let says = alert.alert.as_ref().map_or_else(
-            || "an alert this release cannot show".to_owned(),
+            || Alert::UNKNOWN.to_owned(),
             |alert| format!("{} {}", alert.subject(), alert.body()),
         );
         println!(

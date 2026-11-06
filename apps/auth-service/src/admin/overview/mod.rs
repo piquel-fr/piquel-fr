@@ -3,7 +3,10 @@
 
 use super::{AdminError, AdminService, Operator};
 use chrono::{DateTime, Duration, Utc};
-use piquel_common::admin::{Event, EventSearch, User};
+use piquel_common::{
+    admin::{Event, EventSearch, User},
+    alerts::{Alert, StoredAlert},
+};
 use piquel_repository::{DeliveryBacklog, Email};
 
 /// How many of the newest events the overview shows.
@@ -59,6 +62,13 @@ impl Rate {
 /// What needs an administrator's attention.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Problem {
+    /// An alert is open: it says `subject`, and was raised at `raised_at`.
+    OpenAlert {
+        /// What it says, in one line.
+        subject: &'static str,
+        /// When it was raised.
+        raised_at: DateTime<Utc>,
+    },
     /// Far more sign-ins failed in the last hour than usually do.
     FailedSignIns(Rate),
     /// Messages wait to be delivered, the oldest for longer than they should.
@@ -91,6 +101,8 @@ pub struct Overview {
     pub newest: Vec<User>,
     /// The emails waiting to be sent.
     pub email_backlog: DeliveryBacklog,
+    /// The open alerts, oldest first.
+    pub open_alerts: Vec<StoredAlert>,
     /// When it was read.
     pub now: DateTime<Utc>,
 }
@@ -99,7 +111,14 @@ impl Overview {
     /// What needs attention, most pressing first.
     #[must_use]
     pub fn problems(&self) -> Vec<Problem> {
-        let mut problems = Vec::new();
+        let mut problems: Vec<_> = self
+            .open_alerts
+            .iter()
+            .map(|alert| Problem::OpenAlert {
+                subject: alert.alert.as_ref().map_or(Alert::UNKNOWN, Alert::subject),
+                raised_at: alert.raised_at,
+            })
+            .collect();
         if self.failed_sign_ins.spikes() {
             problems.push(Problem::FailedSignIns(self.failed_sign_ins));
         }
@@ -117,7 +136,8 @@ impl Overview {
 
 impl AdminService {
     /// Reads the overview: the last hour's rates against the week's, what is
-    /// signed in now, the newest events and accounts, and the email backlog.
+    /// signed in now, the newest events and accounts, the email backlog and the
+    /// open alerts.
     ///
     /// # Errors
     /// Fails when the operator may not read, or a query fails.
@@ -148,6 +168,7 @@ impl AdminService {
             events: newest_events,
             newest: self.database.users().newest(NEWEST_SHOWN).await?,
             email_backlog: self.database.deliveries().backlog::<Email>().await?,
+            open_alerts: self.database.alerts().open().await?,
             now,
         })
     }

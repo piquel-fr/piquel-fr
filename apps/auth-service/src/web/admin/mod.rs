@@ -611,6 +611,15 @@ impl AdminApplication {
         health
     }
 
+    /// Forgets the health every page shows, so the next page reads it again: an
+    /// administrator's own change, such as acknowledging an alert, shows at once.
+    pub(super) fn forget_health(cx: &Cx) {
+        *Self::of(cx)
+            .health
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner) = None;
+    }
+
     /// Each tab's page, in the sidebar's order.
     fn tabs(cx: &Cx) -> [(DashboardTab, String); 11] {
         [
