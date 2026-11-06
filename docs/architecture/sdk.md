@@ -106,8 +106,10 @@ validating, and each SDK's compiler enforces it. In Rust, `AccessToken` and
 `IdToken` have private fields and no public constructor, scope markers are types
 with no values, and whether a token holds a scope set is always the SDK's check,
 since applications cannot implement it. In TypeScript, their constructors are
-private and their builders internal, so no object made by hand types as one, and a
-token's proven scopes exist only in its type. Neither SDK deserializes a token: a
+private, their builders internal, each token type carries a brand only the SDK can
+name, and the classes are exported as types only, so no object made by hand types as
+one, nor does a token of another kind. A token's proven scopes exist only in its
+type. Neither SDK deserializes a token: a
 session keeps only the ID token's claims.
 
 ## Signing keys
