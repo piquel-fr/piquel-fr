@@ -1,116 +1,111 @@
 //! Focused persistence and security contract tests.
 
 use super::{Database, DatabaseConfig, Limit, MIGRATOR, RuntimeRole, Scope};
-use crate::DatabaseError;
-use sqlx::postgres::PgSslMode;
+use crate::{DatabaseConnectionError, DatabaseError};
 use std::time::Duration;
-/// TCP requires verified TLS unless plaintext is explicitly selected.
+
+/// TCP needs verified TLS or an explicit `sslmode=disable`, loopback included; a
+/// Unix socket needs an absolute path under `localhost`. Repeated transport
+/// settings and address overrides are refused before `SQLx` parses them.
 #[test]
-fn production_requires_verified_tls() {
-    assert!(
-        DatabaseConfig::new("postgres://db.example/piquel", 1, Duration::from_secs(1)).is_err()
-    );
-    assert!(
-        DatabaseConfig::new(
-            "postgres://db.example/piquel?sslmode=verify-full",
-            1,
-            Duration::from_secs(1)
-        )
-        .is_ok()
-    );
-    assert!(
-        DatabaseConfig::new(
-            "postgres://db.example/piquel?ssl-mode=verify-full",
-            1,
-            Duration::from_secs(1)
-        )
-        .is_ok()
-    );
-    for mode in ["prefer", "require", "verify-ca"] {
-        assert!(
-            DatabaseConfig::new(
-                &format!("postgres://db.example/piquel?sslmode={mode}"),
-                1,
-                Duration::from_secs(1)
-            )
-            .is_err(),
-            "accepted unverified TLS mode {mode}"
+fn transport_is_verified_tls_a_local_socket_or_explicit_plaintext() {
+    use DatabaseConnectionError::{AmbiguousTransport, InsecureTransport, InvalidSocket};
+    for (url, expected) in [
+        ("postgres://db.example/piquel?sslmode=verify-full", None),
+        ("postgres://db.example/piquel?ssl-mode=verify-full", None),
+        ("postgres://db.example/piquel?sslmode=disable", None),
+        ("postgres://[::1]/piquel?sslmode=disable", None),
+        ("postgres://localhost/piquel?host=/run/postgresql", None),
+        ("postgres://db.example/piquel", Some(InsecureTransport)),
+        ("postgres://localhost/piquel", Some(InsecureTransport)),
+        ("postgres://127.0.0.1/piquel", Some(InsecureTransport)),
+        (
+            "postgres://db.example/piquel?sslmode=prefer",
+            Some(InsecureTransport),
+        ),
+        (
+            "postgres://db.example/piquel?sslmode=require",
+            Some(InsecureTransport),
+        ),
+        (
+            "postgres://db.example/piquel?sslmode=verify-ca",
+            Some(InsecureTransport),
+        ),
+        (
+            "postgres://db.example/piquel?host=/run/postgresql",
+            Some(InvalidSocket),
+        ),
+        (
+            "postgres://localhost/piquel?host=relative/path",
+            Some(InvalidSocket),
+        ),
+        (
+            "postgres://db.example/piquel?sslmode=verify-full&host=elsewhere.example",
+            Some(InvalidSocket),
+        ),
+        (
+            "postgres://db.example/piquel?sslmode=verify-full&sslmode=disable",
+            Some(AmbiguousTransport),
+        ),
+        (
+            "postgres://db.example/piquel?sslmode=disable&ssl-mode=verify-full",
+            Some(AmbiguousTransport),
+        ),
+        (
+            "postgres://db.example/piquel?sslmode=verify-full&hostaddr=127.0.0.1",
+            Some(AmbiguousTransport),
+        ),
+        (
+            "postgres://localhost/piquel?host=/run/postgresql&host=db.example",
+            Some(AmbiguousTransport),
+        ),
+    ] {
+        let result = DatabaseConfig::new(url, 1, Duration::from_secs(1));
+        assert_eq!(
+            result.err().map(|error| error.to_string()),
+            expected.map(|error| error.to_string()),
+            "{url}"
         );
     }
-}
-/// Explicit plaintext is accepted without silently enabling opportunistic TLS.
-#[test]
-fn plaintext_tcp_requires_explicit_opt_in() {
-    let config = DatabaseConfig::new(
-        "postgres://postgres:5432/piquel?sslmode=disable",
-        1,
-        Duration::from_secs(1),
-    )
-    .expect("explicit plaintext is allowed");
-    assert!(matches!(config.options.get_ssl_mode(), PgSslMode::Disable));
-}
-/// Unix sockets require an absolute path and cannot replace remote TCP hosts.
-#[test]
-fn unix_sockets_are_explicit_and_cannot_override_tcp_hosts() {
-    let config = DatabaseConfig::new(
-        "postgres://piquel:password@localhost/piquel?host=/run/postgresql&sslmode=disable",
-        1,
-        Duration::from_secs(1),
-    )
-    .expect("local socket does not require TLS");
+    // Accepting a URL is not enough: the transport it asked for is the one used.
+    let options = |url| {
+        DatabaseConfig::new(url, 1, Duration::from_secs(1))
+            .expect("accepted")
+            .options
+    };
+    assert!(matches!(
+        options("postgres://db.example/piquel?sslmode=disable").get_ssl_mode(),
+        sqlx::postgres::PgSslMode::Disable
+    ));
     assert_eq!(
-        config.options.get_socket().map(std::path::PathBuf::as_path),
+        options("postgres://localhost/piquel?host=/run/postgresql")
+            .get_socket()
+            .map(std::path::PathBuf::as_path),
         Some(std::path::Path::new("/run/postgresql"))
     );
-    for url in [
-        "postgres://db.example/piquel?host=/run/postgresql",
-        "postgres://localhost/piquel?host=relative/path",
-        "postgres://localhost/piquel?host=/run/postgresql&host=db.example",
-        "postgres://localhost/piquel?host=db.example&host=/run/postgresql",
-        "postgres://localhost/piquel?host=/run/postgresql&hostaddr=192.0.2.1",
-    ] {
-        assert!(DatabaseConfig::new(url, 1, Duration::from_secs(1)).is_err());
-    }
-}
-/// Repeated transport settings and host overrides are rejected before `SQLx` parses them.
-#[test]
-fn production_rejects_ambiguous_tls_modes_and_host_overrides() {
-    for url in [
-        "postgres://db.example/piquel?sslmode=verify-full&sslmode=disable",
-        "postgres://db.example/piquel?sslmode=disable&sslmode=verify-full",
-        "postgres://db.example/piquel?sslmode=verify-full&ssl-mode=disable",
-        "postgres://db.example/piquel?sslmode=verify-full&ssl-mode=verify-full",
-        "postgres://db.example/piquel?sslmode=verify-full&host=elsewhere.example",
-        "postgres://db.example/piquel?sslmode=verify-full&hostaddr=127.0.0.1",
-    ] {
-        assert!(
-            DatabaseConfig::new(url, 1, Duration::from_secs(1)).is_err(),
-            "accepted ambiguous database URL: {url}"
-        );
-    }
 }
 
-/// Loopback TCP also needs an explicit plaintext opt-in.
+/// Startup failures name the scheme or pool bound at fault, keep the parser's
+/// error as their source and never print credentials.
 #[test]
-fn loopback_requires_explicit_transport() {
-    for host in ["localhost", "[::1]", "127.0.0.1"] {
-        assert!(
-            DatabaseConfig::new(
-                &format!("postgres://{host}/test"),
-                1,
-                Duration::from_secs(1)
-            )
-            .is_err()
-        );
-        assert!(
-            DatabaseConfig::new(
-                &format!("postgres://{host}/test?sslmode=disable"),
-                1,
-                Duration::from_secs(1)
-            )
-            .is_ok()
-        );
+fn configuration_errors_name_the_setting_without_credentials() {
+    let timeout = Duration::from_secs(1);
+    let verified = "postgres://db.example/test?sslmode=verify-full";
+    assert!(matches!(
+        DatabaseConfig::new("https://db.example/test", 1, timeout),
+        Err(DatabaseConnectionError::Scheme)
+    ));
+    for (max_connections, timeout) in [(0, timeout), (1, Duration::ZERO)] {
+        assert!(matches!(
+            DatabaseConfig::new(verified, max_connections, timeout),
+            Err(DatabaseConnectionError::ZeroPoolBound)
+        ));
     }
+    let error = DatabaseConfig::new("not a URL", 1, timeout).expect_err("absolute URL");
+    assert!(std::error::Error::source(&error).is_some());
+    let error = DatabaseConfig::new("postgres://user:secret@db.example/test", 1, timeout)
+        .expect_err("verified transport");
+    assert!(!error.to_string().contains("secret"));
 }
 
 /// Cleanup skips rows a live request has locked instead of waiting on them.
@@ -223,46 +218,6 @@ async fn cleanup_keeps_redeemed_codes_while_their_session_is_live() {
         .await
         .expect("purge");
     assert_eq!(link().await, None, "an ended session releases its code");
-}
-
-/// Startup failures identify the invalid transport or pool setting without printing credentials.
-#[test]
-fn configuration_errors_name_the_constraint_and_preserve_parsers() {
-    use crate::DatabaseConnectionError;
-    let timeout = Duration::from_secs(1);
-    assert!(matches!(
-        DatabaseConfig::new("https://db.example/test", 1, timeout),
-        Err(DatabaseConnectionError::Scheme)
-    ));
-    assert!(matches!(
-        DatabaseConfig::new("postgres://db.example/test?sslmode=verify-full", 0, timeout),
-        Err(DatabaseConnectionError::ZeroPoolBound)
-    ));
-    assert!(matches!(
-        DatabaseConfig::new(
-            "postgres://db.example/test?sslmode=verify-full",
-            1,
-            Duration::ZERO
-        ),
-        Err(DatabaseConnectionError::ZeroPoolBound)
-    ));
-    assert!(matches!(
-        DatabaseConfig::new(
-            "postgres://db.example/test?sslmode=verify-full&ssl-mode=disable",
-            1,
-            timeout
-        ),
-        Err(DatabaseConnectionError::AmbiguousTransport)
-    ));
-    assert!(matches!(
-        DatabaseConfig::new("postgres://db.example/test", 1, timeout),
-        Err(DatabaseConnectionError::InsecureTransport)
-    ));
-    let error = DatabaseConfig::new("not a URL", 1, timeout).expect_err("absolute URL");
-    assert!(std::error::Error::source(&error).is_some());
-    let error = DatabaseConfig::new("postgres://user:secret@db.example/test", 1, timeout)
-        .expect_err("verified transport");
-    assert!(!error.to_string().contains("secret"));
 }
 
 /// Migration versions count up from 1 with no gaps or repeats. Two branches

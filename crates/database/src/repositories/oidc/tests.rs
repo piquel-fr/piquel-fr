@@ -2,10 +2,7 @@
 //! public clients may call from, when pushed authorization requests can be claimed,
 //! and which clients of live sessions the back-channel logout migration finds.
 use crate::repositories::{EventRepository, OidcRepository, UserRepository};
-use crate::{
-    Database, DatabaseTransaction, InsertAuthorizationRequest, InsertUser, RecordedEvent,
-    connection::MIGRATOR,
-};
+use crate::{Database, DatabaseTransaction, InsertAuthorizationRequest, InsertUser, RecordedEvent};
 use chrono::{DateTime, Duration, Utc};
 use piquel_common::{
     AuthenticationMethod, ClientId, Personal, SessionId, TokenId, UserId,
@@ -16,8 +13,8 @@ use piquel_common::{
     events::{Actor, DomainEvent, EventContext, InlineSignIn, RecordedOrigin, RequestOrigin},
     protocol::oauth::{Interaction, Scope},
 };
-use sqlx::{Connection, PgConnection, PgPool};
-use std::{net::IpAddr, ops::RangeBounds};
+use sqlx::PgPool;
+use std::net::IpAddr;
 
 /// A registration of `kind` named after a fresh ID, redirecting to `origin`.
 fn registration(kind: ClientKind, origin: &str) -> ClientRegistration {
@@ -270,35 +267,13 @@ async fn purging_an_owner_needs_its_live_clients_deleted() {
     }
 }
 
-/// A connection to a new scratch schema with the migrations in `versions` applied,
-/// and the schema's name, for tests of a migration: the test database is already
-/// migrated.
-async fn scratch_schema(versions: impl RangeBounds<i64>) -> (PgConnection, String) {
-    let url = std::env::var("TEST_DATABASE_URL").expect("TEST_DATABASE_URL");
-    let mut connection = PgConnection::connect(&url).await.expect("connect");
-    let schema = format!("migration_{}", UserId::new().as_uuid().simple());
-    sqlx::raw_sql(&format!(
-        "CREATE SCHEMA {schema}; SET search_path TO {schema}"
-    ))
-    .execute(&mut connection)
-    .await
-    .expect("schema");
-    for migration in MIGRATOR.iter().filter(|m| versions.contains(&m.version)) {
-        sqlx::raw_sql(&migration.sql)
-            .execute(&mut connection)
-            .await
-            .expect("earlier migration");
-    }
-    (connection, schema)
-}
-
 /// The back-channel logout migration finds the clients of live sessions in what is
 /// left of their exchanges: redeemed codes and refresh families. Unredeemed codes
 /// and sessions that ended are left out.
 #[tokio::test]
 #[ignore = "requires a disposable TEST_DATABASE_URL"]
 async fn migration_finds_the_clients_of_live_sessions() {
-    let (mut connection, schema) = scratch_schema(..13).await;
+    let mut connection = Database::scratch_schema(..13).await;
     let user = UserId::new();
     let (live, revoked, expired) = (SessionId::new(), SessionId::new(), SessionId::new());
     sqlx::raw_sql(&format!(
@@ -337,12 +312,7 @@ async fn migration_finds_the_clients_of_live_sessions() {
     .await
     .expect("sessions and their exchanges");
 
-    sqlx::raw_sql(include_str!(
-        "../../../migrations/0013_backchannel_logout.sql"
-    ))
-    .execute(&mut connection)
-    .await
-    .expect("migration");
+    Database::apply_migrations(&mut connection, 13..=13).await;
     let found: Vec<(uuid::Uuid, String)> =
         sqlx::query_as("SELECT session_id, client_id FROM oidc_session_clients ORDER BY client_id")
             .fetch_all(&mut connection)
@@ -355,10 +325,6 @@ async fn migration_finds_the_clients_of_live_sessions() {
             (live.as_uuid(), "refreshed".to_owned()),
         ]
     );
-    sqlx::raw_sql(&format!("DROP SCHEMA {schema} CASCADE"))
-        .execute(&mut connection)
-        .await
-        .expect("drop schema");
 }
 
 /// Purging an app's owner erases the app's related origins from events that name

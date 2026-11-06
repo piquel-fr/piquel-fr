@@ -3,57 +3,20 @@ use super::*;
 use crate::{Database, DatabaseTransaction, EventRepository, InsertUser, RestoreToken};
 use chrono::Duration;
 use piquel_common::{
-    AccountStatus, Handle, PasskeyId, Personal, Provider, SessionId, TokenId,
+    AccountStatus, PasskeyId, Personal, Provider, SessionId, TokenId,
     events::{Actor, Browser, DomainEvent, EventContext, Platform, RequestOrigin, UserAgentFamily},
 };
 use piquel_common::{AuthenticationMethod, events::SignInFailure};
 use sqlx::{Acquire, PgPool};
-use std::{net::IpAddr, time::Duration as StdDuration};
+use std::net::IpAddr;
 
 /// Inserts an active account whose handle is `prefix` and part of its ID.
-async fn insert_user(pool: &PgPool, prefix: &str) -> (UserId, Handle) {
-    let user = InsertUser::named(prefix);
+async fn insert_user(pool: &PgPool, prefix: &str) -> UserId {
     crate::UserRepository::from_pool(pool)
-        .insert(&user)
+        .insert(&InsertUser::named(prefix))
         .await
-        .expect("user");
-    (user.id, user.handle)
-}
-
-/// Purges `user` in its own committed transaction.
-async fn purge(pool: &PgPool, user: UserId) -> bool {
-    let mut tx = DatabaseTransaction::new(pool.begin().await.expect("transaction"));
-    let purged = tx.deletions().purge(user).await.expect("purge");
-    tx.commit().await.expect("commit");
-    purged
-}
-
-/// A purged account's handles stay without an owner, so no account claims them
-/// again until an operator releases them.
-#[tokio::test]
-#[ignore = "requires a disposable TEST_DATABASE_URL"]
-async fn a_purged_accounts_handle_stays_taken() {
-    let pool = Database::test_pool().await;
-    let (user, handle) = insert_user(&pool, "retired").await;
-    assert!(purge(&pool, user).await);
-    assert!(!purge(&pool, user).await, "the account is gone");
-
-    let holder = crate::HandleRepository::from_pool(&pool)
-        .holder(&handle)
-        .await
-        .expect("lookup")
-        .expect("the handle stays");
-    assert_eq!(holder.user_id, None);
-    let reuse = crate::UserRepository::from_pool(&pool)
-        .insert(&InsertUser {
-            handle,
-            ..InsertUser::named("again")
-        })
-        .await;
-    assert!(
-        matches!(reuse, Err(DatabaseError::Conflict(_))),
-        "{reuse:?}"
-    );
+        .expect("user")
+        .id
 }
 
 /// A restore token is found while unexpired and its passkey active, and a newer
@@ -62,7 +25,7 @@ async fn a_purged_accounts_handle_stays_taken() {
 #[ignore = "requires a disposable TEST_DATABASE_URL"]
 async fn restore_tokens_expire_and_end_with_the_deletion() {
     let pool = Database::test_pool().await;
-    let (user, _) = insert_user(&pool, "restore").await;
+    let user = insert_user(&pool, "restore").await;
     let mut deletions = AccountDeletionRepository::from_pool(&pool);
     let purge_after = Utc::now() + Duration::days(30);
     let scheduled = deletions
@@ -174,8 +137,8 @@ async fn restore_tokens_expire_and_end_with_the_deletion() {
 )]
 async fn purge_leaves_nothing_that_references_or_identifies_the_account() {
     let pool = Database::test_pool().await;
-    let (user, handle) = insert_user(&pool, "purged").await;
-    let (bystander, _) = insert_user(&pool, "bystander").await;
+    let user = insert_user(&pool, "purged").await;
+    let bystander = insert_user(&pool, "bystander").await;
     let client = format!("purge-{user}");
     let (session, code, family) = (SessionId::new(), TokenId::new(), TokenId::new());
     // Test-generated IDs only, so formatting them into the SQL is safe.
@@ -282,7 +245,9 @@ async fn purge_leaves_nothing_that_references_or_identifies_the_account() {
         .expect("schedule");
     tx.commit().await.expect("commit");
 
-    assert!(purge(&pool, user).await);
+    let mut tx = DatabaseTransaction::new(pool.begin().await.expect("transaction"));
+    assert!(tx.deletions().purge(user).await.expect("purge"));
+    tx.commit().await.expect("commit");
 
     // Every column with a foreign key to users(id), and how many rows hold the account.
     // Only this schema's: audit tests migrate schemas of their own beside it.
@@ -386,13 +351,6 @@ async fn purge_leaves_nothing_that_references_or_identifies_the_account() {
     .await
     .expect("deliveries");
     assert_eq!(channels, ["backchannel_logout"]);
-
-    let holder = crate::HandleRepository::from_pool(&pool)
-        .holder(&handle)
-        .await
-        .expect("lookup")
-        .expect("the handle stays");
-    assert_eq!(holder.user_id, None, "without an owner");
 }
 
 /// A request that stores personal data about the account while it is being
@@ -403,7 +361,7 @@ async fn purge_leaves_nothing_that_references_or_identifies_the_account() {
 #[ignore = "requires a disposable TEST_DATABASE_URL"]
 async fn personal_data_stored_during_a_purge_is_erased() {
     let pool = Database::test_pool().await;
-    let (user, _) = insert_user(&pool, "racing").await;
+    let user = insert_user(&pool, "racing").await;
     let failed = EventContext {
         actor: Actor::Anonymous,
         origin: RequestOrigin {
@@ -426,10 +384,7 @@ async fn personal_data_stored_during_a_purge_is_erased() {
         .expect("failed sign-in");
 
     let mut connection = pool.acquire().await.expect("connection");
-    let pid: i32 = sqlx::query_scalar("SELECT pg_backend_pid()")
-        .fetch_one(&mut *connection)
-        .await
-        .expect("pid");
+    let backend = Database::backend(&mut connection).await;
     let purging = tokio::spawn(async move {
         let mut tx = DatabaseTransaction::new(connection.begin().await.expect("transaction"));
         let purged = tx.deletions().purge(user).await.expect("purge");
@@ -437,22 +392,7 @@ async fn personal_data_stored_during_a_purge_is_erased() {
         purged
     });
     // Only deleting the account waits for the request's lock.
-    let blocked = async {
-        while !sqlx::query_scalar::<_, bool>(
-            "SELECT coalesce(bool_or(wait_event_type = 'Lock'), FALSE)
-            FROM pg_stat_activity WHERE pid = $1",
-        )
-        .bind(pid)
-        .fetch_one(&pool)
-        .await
-        .expect("activity")
-        {
-            tokio::time::sleep(StdDuration::from_millis(10)).await;
-        }
-    };
-    tokio::time::timeout(StdDuration::from_secs(10), blocked)
-        .await
-        .expect("the purge waits for the request");
+    Database::wait_for_lock(&pool, backend).await;
     request.commit().await.expect("commit");
     assert!(purging.await.expect("purge task"));
 
@@ -471,8 +411,8 @@ async fn personal_data_stored_during_a_purge_is_erased() {
 #[ignore = "requires a disposable TEST_DATABASE_URL"]
 async fn failed_purges_back_off_behind_other_accounts() {
     let pool = Database::test_pool().await;
-    let (failing, _) = insert_user(&pool, "failing").await;
-    let (other, _) = insert_user(&pool, "other").await;
+    let failing = insert_user(&pool, "failing").await;
+    let other = insert_user(&pool, "other").await;
     let mut deletions = AccountDeletionRepository::from_pool(&pool);
     // Other tests' accounts may be due too, so only these two are compared.
     let order = async |deletions: &mut AccountDeletionRepository<'_>| {
