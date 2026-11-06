@@ -16,9 +16,12 @@
 #   docker -> the deployment images: auth and piquel.fr's web server
 #
 # Pull requests run only the jobs their changes can affect (see `changes`).
-# Pushes to main and manual runs run everything. `ci` is the single status to
-# require: it fails if any job failed and passes when the rest succeeded or
-# were skipped. audit.yml audits new advisories weekly.
+# The merge queue, pushes to main and manual runs run everything: the queue
+# tests each pull request on top of the latest main before it merges, so two
+# pull requests that pass alone cannot break main together. `ci` is the single
+# status to require, and the queue waits for it: it fails if any job failed
+# and passes when the rest succeeded or were skipped. audit.yml audits new
+# advisories weekly.
 #
 # Rust caches are saved from main only. Pull requests restore main's caches,
 # so a branch never evicts them with copies no other branch can read. pnpm's
@@ -28,6 +31,7 @@ name: CI
 
 on:
   pull_request:
+  merge_group:
   push:
     branches: [main]
   workflow_dispatch:
