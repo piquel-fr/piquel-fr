@@ -34,6 +34,9 @@ stale:
   does, its format, and whether it is required. The default is added from the
   code.
 
+`.gitattributes` marks every generated file, so GitHub collapses it in pull
+request diffs: list a new one there too.
+
 Don't document what explains itself elsewhere. A migration says what it does,
 and why, in its own SQL comments. A test says what it checks in its name and
 doc comment. Commit history records how things changed.

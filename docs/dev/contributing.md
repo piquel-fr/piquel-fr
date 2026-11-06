@@ -31,7 +31,8 @@ arm in `AdminApplication::page()` (`apps/auth-service/src/web/admin/mod.rs`), as
 ## Generated files
 
 Generated files are committed, and `just test` fails while one is stale.
-Regenerate them in the same commit as their source:
+Regenerate them in the same commit as their source, and list a new one in
+`.gitattributes`, so GitHub collapses it in diffs:
 
 | Files | Source | Recipe |
 | --- | --- | --- |
