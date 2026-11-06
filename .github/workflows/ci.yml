@@ -13,7 +13,7 @@
 #             with the admin dashboard on its own listener and host, piquel.fr's
 #             web server on its own host, Mailpit receiving auth's email, and
 #             the binary's CLI granting administrators and recovering accounts
-#   docker -> the deployment images: auth and piquel.fr's web server
+#   docker -> the deployment images: auth, piquel.fr's web server and the docs
 #   docs   -> the documentation book, built with warnings denied, with every
 #             link and heading anchor in it and in the repository's Markdown
 #             checked offline
@@ -317,6 +317,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       - run: docker build --file infra/auth.Dockerfile .
       - run: docker build --file infra/web.Dockerfile .
+      - run: docker build --file infra/docs.Dockerfile .
 
   # mdBook and lychee at the versions `just install-tools` installs.
   docs:
