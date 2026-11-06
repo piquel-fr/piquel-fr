@@ -423,6 +423,11 @@ async fn signing_up_starts_with_the_invitation() {
         page.contains(r#"name="handle" autocomplete="username""#),
         "{page}"
     );
+    // The browser checks a handle's syntax before posting it.
+    assert!(
+        page.contains(r#"pattern="[a-z0-9]+(-[a-z0-9]+)*""#),
+        "{page}"
+    );
     assert!(
         page.contains(r#"<input name="friendly_name" value="My passkey""#),
         "{page}"

@@ -931,6 +931,10 @@ async fn administrators_change_an_accounts_settings_with_a_reason() {
         page.contains(&format!(r#"href="{name}">Change display name</a>"#)),
         "{page}"
     );
+    // A refused name keeps the reason typed beside it.
+    let page = html(post(&name, &[("display_name", " "), reason]).await).await;
+    assert!(page.contains("Choose a display name"), "{page}");
+    assert!(page.contains(r#"value="Asked by email""#), "{page}");
     let done = post(&name, &[("display_name", " Renamed by support "), reason]).await;
     assert_eq!(redirect(&done), format!("{account}/profile"));
     let stored = harness

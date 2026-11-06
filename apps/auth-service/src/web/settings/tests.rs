@@ -698,7 +698,7 @@ async fn verification_links_are_confirmed_by_their_form() {
     assert!(page.contains(&format!("{address} is verified")), "{page}");
 }
 
-/// The data page asks a session without a recent passkey confirmation for one
+/// The data page offers a session without a recent passkey confirmation one
 /// before it downloads the account's records, and deletes the account once its
 /// handle is typed: every browser is signed out, and the answer says when the
 /// account is purged.
