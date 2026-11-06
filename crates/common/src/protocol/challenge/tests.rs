@@ -34,7 +34,7 @@ fn formatting_never_emits_control_characters() {
 }
 
 /// Malformed, repeated or non-Bearer headers are rejected, with the reason. The
-/// shared vectors' parse cases cover missing commas, tabs and quotes in values.
+/// shared vectors' `parse-*` cases cover the other syntax errors.
 #[test]
 fn rejects_invalid_headers() {
     for (header, expected) in [
@@ -44,12 +44,20 @@ fn rejects_invalid_headers() {
         ("Bearer error=\"a\r\nb\"", ChallengeError::Syntax(13)),
         ("Negotiate abc==, error=x", ChallengeError::Syntax(17)),
         (
+            "Bearer scope=\"a\tb\"",
+            ChallengeError::InvalidValue("scope"),
+        ),
+        (
             "Bearer scope=a, scope=b",
             ChallengeError::Duplicate("scope".into()),
         ),
         (
             "Bearer max_age=soon",
             ChallengeError::InvalidValue("max_age"),
+        ),
+        (
+            "Bearer error_description=\"say \\\"hi\\\"\"",
+            ChallengeError::InvalidValue("error_description"),
         ),
     ] {
         assert_eq!(header.parse::<BearerChallenge>(), Err(expected), "{header}");
