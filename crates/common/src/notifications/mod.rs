@@ -156,7 +156,39 @@ impl DomainEvent {
     }
 }
 
+/// Which of the account's verified addresses a notification's email goes to,
+/// each once.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Addressees {
+    /// Every verified address, so one compromised mailbox cannot hide it.
+    Verified,
+    /// The address its event replaced or removed, so whoever reads that mailbox
+    /// hears of it.
+    Affected,
+    /// The primary verified address. An account without one gets no email.
+    Primary,
+}
+
 impl Notification {
+    /// Where its email goes. Every notification is emailed: each is about the
+    /// account itself, so none can be turned off.
+    #[must_use]
+    #[deny(clippy::wildcard_enum_match_arm)]
+    pub const fn addressees(&self) -> Addressees {
+        match self {
+            Self::AccountSecured { .. } | Self::Recovered => Addressees::Verified,
+            Self::PrimaryEmailChanged | Self::EmailRemoved => Addressees::Affected,
+            Self::RecoveryUndone
+            | Self::HandleChanged
+            | Self::DisplayNameChanged
+            | Self::PictureRemoved
+            | Self::AccountDisabled
+            | Self::AccountEnabled
+            | Self::DeletionScheduled { .. }
+            | Self::AccountRestored => Addressees::Primary,
+        }
+    }
+
     /// Its subject: one line, in the inbox and as an email's subject.
     #[must_use]
     pub const fn subject(&self) -> &'static str {
@@ -180,17 +212,17 @@ impl Notification {
     #[must_use]
     pub fn body(&self) -> String {
         match self {
-            Self::PrimaryEmailChanged => "Another of your verified addresses is now the primary one. Piquel sends notices about your account there, and apps that read your email address see it the next time they refresh your profile.".to_owned(),
-            Self::EmailRemoved => "Piquel no longer sends anything to that address.".to_owned(),
+            Self::PrimaryEmailChanged => "Another of your verified addresses is now the primary one. Piquel sends notices about your account there, and apps that read your email address see it the next time they refresh your profile. If you didn’t make this change, sign in and review your security history.".to_owned(),
+            Self::EmailRemoved => "Piquel no longer sends anything to that address. If you didn’t remove it, sign in and review your security history.".to_owned(),
             Self::AccountSecured { kept } => {
                 let undo = if *kept {
-                    "If you didn’t ask for this, undo it with a passkey you kept."
+                    "If you didn’t ask for this, undo it with a passkey you kept, then contact Piquel support."
                 } else {
                     "If you didn’t ask for this, contact Piquel support."
                 };
                 format!("Support signed your account out everywhere, removed your other passkeys, unlinked your social sign-ins and withdrew every app’s access, then sent a recovery link to whoever asked for help. {undo}")
             }
-            Self::Recovered => "Someone used a recovery link from Piquel support to add a passkey and sign in. If it wasn’t you, undo the recovery with a passkey from before it: that removes the new passkey and signs every device out.".to_owned(),
+            Self::Recovered => "Someone used a recovery link from Piquel support to add a passkey and sign in. Until the recovery settles, that passkey can sign in but can’t change your account’s security settings. If it wasn’t you, undo the recovery with a passkey from before it: that removes the new passkey, signs every device out and withdraws every app’s access. With no passkey from before it, contact Piquel support, who can undo it for you.".to_owned(),
             Self::RecoveryUndone => "The recovery Piquel support started no longer works: any passkey it added was removed, and every device and app was signed out.".to_owned(),
             Self::HandleChanged => "You now sign in with your new handle, and apps see it the next time they refresh your profile. Your security history says why it changed.".to_owned(),
             Self::DisplayNameChanged => "Apps see your new name the next time they refresh your profile. Your security history says why it changed.".to_owned(),

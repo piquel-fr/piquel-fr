@@ -7,7 +7,7 @@
 //! their transactions committed. See `docs/architecture/delivery-queue.md`.
 
 use super::{DeliveryRepository, RepositoryExecutor, Unsigned};
-use crate::{DatabaseError, DatabaseTransaction};
+use crate::{DatabaseError, DatabaseTransaction, repositories::notifications::Notified};
 use chrono::{DateTime, Utc};
 pub use piquel_common::admin::{DeliveryStatus, DeliverySummary};
 use piquel_common::{DeliveryId, EventId, UserId, events::DomainEvent};
@@ -33,13 +33,15 @@ pub trait Channel: Sized + Send + Sync + 'static {
     /// The message. Never a plaintext secret: payloads are stored as they are.
     type Payload: Serialize + DeserializeOwned + Send + Sync;
 
-    /// The deliveries `event`, concerning `subject`, causes. Runs inside the
-    /// event's transaction, which sees the rows as the change left them, or as they
-    /// were for an event recorded before its change, such as `EmailRemoved`. A
+    /// The deliveries `event`, concerning `subject`, causes, with the
+    /// notification it just gave `subject`, if any. Runs inside the event's
+    /// transaction, which sees the rows as the change left them, or as they were
+    /// for an event recorded before its change, such as `EmailRemoved`. A
     /// committed event has all its deliveries and a rolled-back one has none.
     fn deliveries(
         event: &DomainEvent,
         subject: Option<UserId>,
+        notified: Option<&Notified>,
         tx: &mut DatabaseTransaction<'_>,
     ) -> impl Future<Output = Result<Vec<NewDelivery<Self>>, DatabaseError>> + Send;
 }
@@ -54,6 +56,7 @@ pub(crate) trait Channels {
         event_id: EventId,
         subject: Option<UserId>,
         event: &DomainEvent,
+        notified: Option<&Notified>,
     ) -> impl Future<Output = Result<(), DatabaseError>> + Send;
 }
 
@@ -67,6 +70,7 @@ impl Channels for () {
         _: EventId,
         _: Option<UserId>,
         _: &DomainEvent,
+        _: Option<&Notified>,
     ) -> impl Future<Output = Result<(), DatabaseError>> + Send {
         std::future::ready(Ok(()))
     }
@@ -79,11 +83,12 @@ impl<C: Channel, Rest: Channels> Channels for (C, Rest) {
         event_id: EventId,
         subject: Option<UserId>,
         event: &DomainEvent,
+        notified: Option<&Notified>,
     ) -> Result<(), DatabaseError> {
-        for delivery in C::deliveries(event, subject, tx).await? {
+        for delivery in C::deliveries(event, subject, notified, tx).await? {
             tx.deliveries().insert(Some(event_id), delivery).await?;
         }
-        Rest::fan_out(tx, event_id, subject, event).await
+        Rest::fan_out(tx, event_id, subject, event, notified).await
     }
 }
 

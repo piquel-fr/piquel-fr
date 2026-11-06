@@ -306,8 +306,8 @@ impl AccountDeletionRepository<'_> {
             // Cascades to cookie digests, ceremonies and provider redirects.
             "DELETE FROM sessions WHERE user_id = $1",
             "DELETE FROM administrators WHERE user_id = $1",
-            // Notices to removed or replaced addresses copy them; the account's
-            // other channels' deliveries hold no personal data.
+            // Notification emails copy their address; the account's other
+            // channels' deliveries hold no personal data.
             "DELETE FROM deliveries WHERE channel = 'email' AND recipient = to_jsonb($1::uuid::text)",
         );
         // An operator's approval and another person's inline sign-in name neither

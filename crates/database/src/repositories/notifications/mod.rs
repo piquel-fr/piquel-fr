@@ -25,6 +25,16 @@ pub struct StoredNotification {
     pub read_at: Option<DateTime<Utc>>,
 }
 
+/// A notification `record` just wrote, which the channels its event fans out to
+/// see: the `email` channel sends it.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Notified {
+    /// The notification's ID, which its page's path names.
+    pub id: NotificationId,
+    /// What it says.
+    pub notification: Notification,
+}
+
 /// A notification as the queries return it, before its payload decodes.
 struct NotificationRow {
     /// Notification identifier.

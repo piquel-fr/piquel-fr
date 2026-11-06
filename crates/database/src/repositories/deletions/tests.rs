@@ -221,7 +221,7 @@ async fn purge_leaves_nothing_that_references_or_identifies_the_account() {
         VALUES (uuidv7(), '{family}', uuid_send('{family}'), now() + interval '1 day');
         INSERT INTO deliveries (id, channel, destination, recipient, payload, status) VALUES
             (uuidv7(), 'email', 'account', to_jsonb('{user}'::text),
-                '{{\"type\": \"address_removed\", \"address\": \"{client}@example.com\"}}', 'succeeded'),
+                '{{\"type\": \"notification\", \"address\": \"{client}@example.com\"}}', 'succeeded'),
             (uuidv7(), 'backchannel_logout', 'https://client.example/logout', to_jsonb('{user}'::text),
                 '{{}}', 'pending');"
     ))

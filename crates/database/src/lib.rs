@@ -45,7 +45,7 @@ pub use repositories::{
     },
     handles::{StoredHandle, StoredReservation},
     maintenance::{DigestUsage, DigestedSecret},
-    notifications::StoredNotification,
+    notifications::{Notified, StoredNotification},
     oidc::{
         CodeRedemptionError, ConsumedAuthorizationCode, InsertAuthorizationCode,
         InsertAuthorizationRequest, OidcRedirectKind, OwnedClientCounts, StoredApp,

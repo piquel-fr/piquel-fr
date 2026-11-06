@@ -96,14 +96,22 @@ delivery stores the account's ID as its recipient and a typed `EmailMessage` as
 its payload. A verification link stores only the address's ID: the sender reads
 the address, and the account's handle the message names, when it sends, so a link
 to an address removed, replaced or verified meanwhile, or of an account no longer
-active, is not sent, and the delivery succeeds without a send. The notices that an address stopped being
-primary, or was removed, copy the address instead, read in the event's
-transaction, so removing the address right after cannot cancel them. A recovery's
+active, is not sent, and the delivery succeeds without a send. A recovery's
 link stores the recovery's ID and the primary address's, and is not sent once the
-link was used, cancelled or expired, or the account was disabled. The notices that
-a recovery enrolled a passkey, or that support revoked passkeys and started one,
-go to every verified address, copying it. The copied addresses are the channel's
-only personal data, deleted with the delivery. The `destination` column names the
+link was used, cancelled or expired, or the account was disabled.
+
+Every notification an event gives its subject (`DomainEvent::notification`) is
+emailed too: `record` hands the notification it just wrote to the channels, and
+the `email` channel queues one `EmailMessage::Notification` per address that
+`Notification::addressees` names, each once. A recovery's notifications go to
+every verified address, so a compromised one cannot hide them; a replaced or
+removed address's to that address, so whoever reads it hears of it; any other to
+the primary verified address, and an account without one gets no email. The
+message copies the address and the notification, read in the event's
+transaction, so removing the address right after cannot cancel it, and says what
+the inbox says, linking the notification's page and,
+while a passkey can still undo a recovery, its undo page. The copied addresses
+are the channel's only personal data, deleted with the delivery. The `destination` column names the
 account and the address's ID, for operators.
 
 A link's token is never stored, not even in the payload: it is an HMAC of the

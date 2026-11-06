@@ -191,7 +191,7 @@ async fn revoke_takes_back_every_way_in_but_the_kept_passkeys() {
         (1, 1),
         "a notice to every verified address, and no link"
     );
-    let notice = ("recovery_revoked".to_owned(), Some(true));
+    let notice = ("account_secured".to_owned(), Some(true));
     assert_eq!(scenario.messages(other).await.last(), Some(&notice), "kept");
 
     let (status, body, _) = scenario.undo(recovery).await;
