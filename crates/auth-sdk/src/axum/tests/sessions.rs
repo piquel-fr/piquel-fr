@@ -266,6 +266,7 @@ fn worst_case_tokens(access_bytes: usize) -> Tokens {
     Tokens {
         id_token: Some(IdToken::unchecked(
             serde_json::from_value(claims).expect("claims"),
+            "",
         )),
         access_token: BearerToken::new("a".repeat(access_bytes)),
         expires_at: Utc::now() + TimeDelta::minutes(5),

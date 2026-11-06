@@ -527,13 +527,13 @@ impl std::fmt::Debug for IdToken {
 }
 
 impl IdToken {
-    /// A token holding `claims` without validating anything, for the axum tests that
-    /// need a signed-in user.
+    /// A token holding `claims` and the compact form `raw` without validating
+    /// anything, for the axum tests that need a signed-in user.
     #[cfg(all(test, feature = "axum"))]
-    pub(crate) fn unchecked(claims: IdTokenClaims) -> Self {
+    pub(crate) fn unchecked(claims: IdTokenClaims, raw: &str) -> Self {
         Self {
             claims,
-            raw: String::new(),
+            raw: raw.to_owned(),
         }
     }
 
