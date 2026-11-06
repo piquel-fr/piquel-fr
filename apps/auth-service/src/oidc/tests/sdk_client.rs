@@ -112,7 +112,7 @@ async fn sdk_login_client_runs_against_the_provider() {
         .as_str()
         .parse()
         .expect("post-logout URI");
-    let logout = client.logout_url(id_token, Some(&post_logout));
+    let logout = client.logout_url(Some(id_token), Some(&post_logout));
     let confirmation = location(
         &flow
             .request(

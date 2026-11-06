@@ -58,7 +58,7 @@ type Context = {
 };
 
 /** A validated token reporting how the user authenticated: an access or ID token. */
-abstract class AuthenticatedToken<C extends AuthenticationClaims> {
+export abstract class AuthenticatedToken<C extends AuthenticationClaims> {
   /** The validated claims. */
   readonly claims: C;
   /** @internal */
@@ -80,14 +80,26 @@ abstract class AuthenticatedToken<C extends AuthenticationClaims> {
    * 30-second leeway. A missing claim meets no requirement on it.
    */
   meets(requirement: StepUpRequirement): boolean {
-    const { acr, auth_time } = this.claims;
+    return AuthenticatedToken.claimsMeet(this.claims, requirement, this.context.clock());
+  }
+
+  /**
+   * @internal Whether an authentication described by `claims` meets `requirement` at
+   * `now`, in milliseconds since the epoch, as {@link AuthenticatedToken.meets} judges
+   * it; for a server session, which keeps the claims without the token.
+   */
+  static claimsMeet(
+    claims: AuthenticationClaims,
+    requirement: StepUpRequirement,
+    now: number
+  ): boolean {
+    const { acr, auth_time } = claims;
     const strong =
       requirement.acr_values === undefined ||
       AuthenticatedToken.#satisfies(acr, requirement.acr_values);
     const recent =
       requirement.max_age === undefined ||
-      (auth_time !== undefined &&
-        this.context.clock() - LEEWAY - auth_time * 1000 <= requirement.max_age * 1000);
+      (auth_time !== undefined && now - LEEWAY - auth_time * 1000 <= requirement.max_age * 1000);
     return strong && recent;
   }
 
@@ -210,8 +222,8 @@ export class IdToken extends AuthenticatedToken<IdTokenClaims> {
   }
 
   /** @internal Whether `other` names the same user at the same issuer, as a refresh's ID token must (OIDC Core §12.2). */
-  sameUser(other: IdToken): boolean {
-    return other.claims.sub === this.claims.sub && other.claims.iss === this.claims.iss;
+  sameUser(other: Pick<IdTokenClaims, 'sub' | 'iss'>): boolean {
+    return other.sub === this.claims.sub && other.iss === this.claims.iss;
   }
 }
 

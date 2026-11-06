@@ -93,67 +93,87 @@ A confidential client authenticates with HTTP Basic, and a public one sends its
 
 ## Server-side login
 
-`@piquel/auth/server` is the recommended way to sign users in: tokens stay on the
-server, and the browser holds only a random session key. It takes a standard
-`Request` and returns a `Response`, so it runs as is in Node, Bun, Workers,
-Hono or SvelteKit. [`examples/server.ts`](examples/server.ts) is a whole app on
-Node's `http` server.
+`@piquel/auth/server` is the recommended way to sign users in: tokens stay out of
+scripts' reach, in a cookie sealed with the app's `CookieKey`, so the app stores
+nothing. It takes a standard `Request` and returns a `Response`, so it runs as is in
+Node, Bun, Workers, Hono or SvelteKit. [`examples/server.ts`](examples/server.ts) is
+a whole app on Node's `http` server.
 
 ```ts
-import { Login, MemoryBackend } from '@piquel/auth/server';
+import { CookieKey, Login } from '@piquel/auth/server';
 
 const login = new Login(
   issuer.client({ clientId, clientSecret, redirectUri: 'https://notes.example/auth/callback' }),
-  { backend: new MemoryBackend(), scopes: ['profile', 'offline_access'] }
+  // `openssl rand -base64 32`, the same on every replica, kept like the client secret.
+  { cookieKey: CookieKey.fromBase64(process.env.NOTES_COOKIE_KEY ?? ''), scopes: ['profile'] }
 );
 
 export async function fetch(request: Request): Promise<Response> {
   const routed = await login.handle(request); // the routes under /auth; null otherwise
   if (routed) return routed;
-  const user = await login.session(request); // null, the signed-in user, or a 403
-  if (user instanceof Response) return user; // an unsafe request from another site
-  if (!user) return login.signIn(request); // through login, and back to this page
+  const user = await login.session(request); // null, the signed-in user, or a response
+  if (user instanceof Response) return user; // 403 from another site, or 503
+  // `respond` adds the cookies the read needs, such as the refreshed session.
+  if (!user) return login.respond(request, login.signIn(request)); // through login and back
   const stepUp = user.require({ acr_values: 'phr', max_age: 300 });
-  if (stepUp) return stepUp; // a recent passkey sign-in, or through login again
-  return new Response(`Hello ${user.name}`); // await user.accessToken() calls APIs
+  if (stepUp) return login.respond(request, stepUp); // a recent passkey sign-in
+  return login.respond(request, new Response(`Hello ${user.name}`)); // await user.accessToken() calls APIs
 }
 ```
 
 - **Routes**, under `mount` (`/auth` by default): `GET /login?return_to=/page`,
-  `GET /callback`, `POST /logout` and `POST /backchannel-logout`. Register
-  `<app>/auth/callback` as the redirect URI and `<app>/auth/backchannel-logout` as
-  the back-channel logout URI. `return_to` must be a same-origin path, and logout
-  accepts only posts from the app's own pages (`Sec-Fetch-Site`, else `Origin`). Every
-  answer has `Cache-Control: no-store`, and a backend failure answers 500, reported
-  with `console.error`.
-- **Sessions** live under a `__Host-piquel-session` cookie (`Secure`, `HttpOnly`,
-  `SameSite=Lax`), under a fresh key on every sign-in, for `sessionLifetime` (12 hours
-  by default). `session()` refreshes an access token about to expire, once for every
-  concurrent request and replica, through a lease in the session record; a refresh
-  whose outcome is unknown, or that auth refuses with `invalid_grant`, ends the
-  session.
+  `GET /callback` and `POST /logout`. Register `<app>/auth/callback` as the redirect
+  URI. `return_to` must be a same-origin path, and logout accepts only posts from the
+  app's own pages (`Sec-Fetch-Site`, else `Origin`). Every answer has
+  `Cache-Control: no-store`, and a failure answers 500, reported with
+  `console.error`.
+- **Confidential clients only**: `new Login` throws a `TypeError` for a client without
+  a secret. Every login requests `offline_access`, which the client's registration
+  must allow: auth does not rotate a confidential client's refresh token, so every
+  copy of the cookie refreshes safely.
+- **Sessions** live in the `__Host-piquel-<client_id>-session` cookie (`Secure`,
+  `HttpOnly`, `SameSite=Lax`), sealed with AES-256-GCM, for `sessionLifetime` (12
+  hours by default). It holds the tokens and the ID token's claims, not the ID token.
+  A browser keeps up to three logins in progress, in cookie slots chosen by their
+  `state`, so logins started in several tabs usually all complete; one that lands in
+  a taken slot replaces the login there. `session()` refreshes an access token about to expire, and concurrent
+  requests may each refresh. Auth's `invalid_grant` ends the session, so one auth
+  ended stops within an access token's 5 minutes; any other failure keeps it while
+  its access token is valid, and then answers 503 until auth answers again. A sign-in
+  without a refresh token lasts as long as its access token.
+- **`respond`** adds what `session()` recorded: the refreshed session, an ended
+  session's deletion, and the spent step-up marker, with `Cache-Control: no-store`
+  when it sets the session. A response without them loses those updates: the next
+  request refreshes again, a dead cookie is sent until it expires, and the marker
+  lingers for its minute.
+- **Logout** revokes the session's refresh token at auth, clears the cookies and
+  redirects to RP-initiated logout. When auth cannot revoke it, logout answers 502 and
+  keeps the cookie, for the user to try again. A sign-in revokes the session it
+  replaces.
 - **Cross-site writes**: `SameSite=Lax` keeps the cookie off other sites' posts, but
   not off a sibling's under the same domain. So `session()` answers a request that is
   not `GET`, `HEAD`, `OPTIONS` or `TRACE` with a 403 response, before reading the
   session and with or without a cookie, unless it comes from the app's own pages, by
   logout's rule. Handlers need no CSRF token. An endpoint that other origins call
   with the cookie, such as a sibling site's `fetch` with credentials under CORS, opts
-  out with `login.session(request, { crossOrigin: true })`, which never answers 403,
-  and guards against cross-site request forgery itself.
-- **Back-channel logout** ends every session started under the token's `sid`, or
-  every session of its `sub`, on every replica sharing the backend. A replayed token
-  changes nothing.
+  out with `login.session(request, { crossOrigin: true })`, and guards against
+  cross-site request forgery itself.
+- **Back-channel logout**, for an app that must end sessions sooner than their next
+  refresh: `backchannelLogout: async (token) => …` mounts
+  `POST /backchannel-logout`, to register as the client's back-channel logout URI.
+  The route validates the token and hands it to the handler, which records it where
+  every replica sees it; the app then refuses sessions with the token's `sid`
+  (`user.sid`), or for a token naming only the user, every session of `user.sub`
+  signed in (`auth_time`) before the token's `iat`. A record can go after a session
+  lifetime. Auth delivers again until it gets a 200, so the handler must be idempotent
+  and resolve only once its record is durable; a rejection answers 500.
 - **Step-up**: `user.require(requirement)` and `user.stepUp(challenge)`, for an API's
   `insufficient_user_authentication` challenge read with `parseChallenge`, redirect
   through login with `acr_values` and `max_age`, back to the same page. That return
   is the retry: asked again, they answer 403 instead of another redirect.
 
-`MemoryBackend` loses every session on restart and is not shared between replicas.
-Apps implement `SessionBackend` instead: `load`, `insert` (only where no record is),
-`replace` (only at the expected version) and `remove`, over opaque records whose
-keys are SHA-256 digests, so one table with a single statement per operation is
-enough (the type's documentation shows PostgreSQL). Test it with
-`checkBackend(backend)`, which throws on the first broken rule.
+The `CookieKey` must be the same on every replica; changing it signs every user out.
+`CookieKey.generate()` makes a random one, for development and tests.
 
 ## Browser apps
 

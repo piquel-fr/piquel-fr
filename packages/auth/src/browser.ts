@@ -377,7 +377,7 @@ export class Session {
   async #refresh(refreshToken: string): Promise<void> {
     const tokens = await this.#owner.client.refresh(refreshToken);
     const idToken = tokens.idToken ?? this.#tokens.idToken;
-    if (!this.#tokens.idToken.sameUser(idToken)) {
+    if (!this.#tokens.idToken.sameUser(idToken.claims)) {
       throw new AuthError(
         { code: 'invalid_token', reason: 'invalid_claims' },
         'the refreshed ID token names another user'

@@ -189,8 +189,8 @@ Login uses the authorization code flow with S256 PKCE, `state` and `nonce`:
    only `client_id` and the returned `request_uri`; otherwise the URL carries the
    request. So a client auth requires to push still signs in. A push auth refuses
    is an `oauth` error, and one that cannot reach auth a `network` error. The
-   pending login is stored server-side and consumed by the callback, so a callback
-   completes at most once.
+   pending login is kept until the callback, and auth redeems a code once, so a
+   callback completes at most once.
 2. The callback is checked before the code goes anywhere:
    1. `state` equals the pending login's (`state_mismatch`).
    2. RFC 9207 §2.4: when the response carries `iss`, it must equal the issuer
@@ -208,11 +208,6 @@ The SDK never sends the `audience` parameter auth accepts today; auth then uses 
 client's default resource. They will send `resource` (RFC 8707) once auth supports
 it.
 
-Server-side apps keep tokens in a server-side session and give the browser only a
-random session key, as the Rust SDK's axum login routes and `@piquel/auth/server`
-do, in a `__Host-` cookie that is `Secure`, `HttpOnly` and `SameSite=Lax`. Every
-sign-in starts a session under a fresh key. Refresh tokens never reach the browser.
-
 Browser apps with no server are public clients and keep tokens in the page's memory
 only. Only the pending login crosses a redirect, in `sessionStorage`, and its
 callback deletes it. After a reload they authorize again with `prompt=none`; once
@@ -221,30 +216,86 @@ load does not try again, so a user signed out at auth does not loop. A restore
 after a failed step-up keeps the step-up's one retry spent for the minute after its
 return.
 
-Applications choose where sessions live by implementing a small storage backend:
-load, an insert that stores only where no record is, a compare-and-swap replace, and
-a remove that reports whether the record existed. The SDK keeps everything else: the
-record format and its validation, expiry, pending logins, the refresh lease, and the
-records back-channel logout needs. Backends see only opaque records under
-the SHA-256 of each session key, so reading the backend does not give access to
-sessions. The SDK ships an in-memory backend for development and tests, and a check
-applications run against their own backend.
+## Sessions
 
-Auth rotates a public client's refresh tokens and revokes the whole family on
-reuse, so concurrent refreshes of one session are serialized through a lease the
-SDK keeps in the session record, shared by every replica through the backend's compare-and-swap. Leases
-expire by wall-clock time, so replicas need synchronized clocks; a lease lasts a
-minute, and its holder must refresh and save before it expires, or give it back.
-The lease is taken only at the session version the request read, so a request that
-read the session before another refresh reloads it instead of redeeming the rotated
-token. Each lease has an ID, and only its holder can save the result, so a slow
-attempt cannot overwrite a later one or resurrect a logged-out session. Once a
-refresh may have reached auth without its answer being saved (a timeout, a lost
-response, a lease that expired unreleased), the stored token may be spent, so the
-session ends and the user signs in again rather than risk a reuse that would revoke
-the family. `invalid_grant` ends the session too. Any other error answer from auth
-keeps it, as does a refresh that could not connect to auth. A confidential client
-keeps its refresh token across refreshes, so for it the lease guards nothing.
+Server-side apps keep each session in the browser, sealed, as the Rust SDK's axum
+login routes and `@piquel/auth/server` do. The app stores nothing and implements
+nothing: it holds a 32-byte cookie key, the same on every replica.
+
+- **Cookies.** Each name carries the client ID, so apps sharing a host keep their
+  own: `__Host-piquel-<client_id>-session`, `-step-up`, and `-login-<state>` for
+  each pending login's slot. All are `Secure`, `HttpOnly`, `SameSite=Lax` and host-only.
+- **Sealing.** AES-256-GCM, under a key HKDF-SHA256 derives from the cookie key with
+  no salt and the `info` `piquel-auth session v1` for sessions, or
+  `piquel-auth pending login v1` for pending logins. The associated data is the
+  client ID and the cookie name, joined by NUL, so a value opens only as the cookie
+  it was sealed as, for its own client. A sealed value is the base64url of the
+  12-byte random nonce, the ciphertext and the tag. A cookie that does not open is
+  never trusted: a session cookie is cleared, and any other is left alone.
+- **The session.** Its JSON is `claims`, the validated claims of the sign-in's ID
+  token or of the latest refresh's (not the token itself, which would not fit),
+  `access_token`, `expires_at`, `scopes`, `refresh_token` and `ends_at`, with times
+  in Unix seconds. `tests/sdk-vectors/sessions` pins it, so a cookie one SDK seals
+  opens in the other. A session is over once `ends_at` passes, 12 hours after
+  sign-in by default, whatever the cookie's `Max-Age`, which a copied cookie
+  escapes, even when it comes while a refresh runs; refreshes keep it. A refresh replaces `claims` with the new ID token's,
+  so a changed name or picture shows. The cookie's name and value must fit in 4096
+  bytes, or browsers drop it, so a sign-in whose session would not fit fails, and a
+  refresh whose session would not fit serves its request and leaves the cookie as
+  it was, for the next request to refresh again. A typical session takes some
+  2.5 KB; a long profile, many scopes, or access tokens that copy the profile
+  (#279) make it larger.
+- **Refresh.** The login routes take only confidential clients, whose refresh
+  tokens auth does not rotate, and every login requests `offline_access`, which the
+  client's registration must allow. A request
+  whose access token expires within 30 seconds refreshes it, and its response sets
+  the new cookie with `Cache-Control: no-store`: the axum layer adds it, and in
+  TypeScript `login.respond(request, response)` does, which an app that forgets
+  pays for only with another refresh. There is no lease: concurrent
+  requests may each refresh, and each gets valid tokens. `invalid_grant` ends the
+  session and clears its cookie. Any other failure, or no answer within 20 seconds,
+  spends nothing: the session goes on while its access token is valid, and once
+  that expired the request gets 503 and the cookie stays for the next request to
+  try again, so a session auth ended never outlives its access token, even while
+  auth is unreachable. A refreshed ID token naming another `sub` or `iss` ends the session (OIDC
+  Core §12.2). A sign-in that brings no refresh token ends with its access token.
+- **Pending logins.** Each waits in one of three cookie slots, `-login-0` to
+  `-login-2`, chosen by the first byte of its `state`'s SHA-256, with its own expiry
+  10 minutes out. A login that lands in a taken slot replaces the one there, so two
+  tabs signing in at once usually both complete. A callback reads and drops only the
+  slot holding its `state`. Fixed slots bound the cookies even when responses to
+  logins started at once cannot see each other's: each is at most 1000 bytes, so
+  3000 together. A `return_to` too long for its slot returns home instead, or to
+  `/` if home is too long too.
+- **Step-up marker.** The `-step-up` cookie names the page a step-up returns to by
+  the base64url of its SHA-256, for a minute.
+- **Header size.** Common proxies refuse a `Cookie` header over 8 KiB. The session,
+  pending logins and marker take at most some 7.2 KB of it, so an app's own cookies
+  on the host share the rest.
+- **Logout.** `POST <mount>/logout` revokes the session's refresh token at auth
+  (RFC 7009), clears the cookies, and redirects to RP-initiated logout with
+  `client_id`, since there is no ID token to send as `id_token_hint`. If auth
+  cannot revoke it, the answer is 502 and the cookie stays, for the user to try
+  again: clearing it would leave any copy refreshing. A sign-in revokes the refresh
+  token of the session it replaces before redeeming its code, and answers 502,
+  keeping that session, when it cannot.
+
+So an app cannot end a session by itself. Clearing the cookie ends it in one
+browser; a copy lives on until auth revokes the grant, through the app's logout or
+a new sign-in, the user's own logout at auth, removal of the app, or the account
+being disabled or deleted, and then ends at its next refresh, within an access
+token's 5 minutes. Nothing orders the cookies responses set, either: a response
+still in flight when the user signs out or in again can set the previous session
+back, which then also ends with its access token. An app that needs sessions to end
+sooner handles back-channel logout.
+
+Changing the cookie key signs every user out of the app, but ends no grant at auth.
+Whoever holds a leaked key can open captured cookies and read their refresh tokens,
+which stay valid until auth's session ends and no longer rotate (#384), so only the
+client secret then stands between them and new tokens. So after a leak, change the
+key and rotate the client secret with no grace period too: `just auth client
+rotate-secret <id> --grace 0`, or "at once" on the app's Secrets tab in the
+developer console.
 
 `SameSite=Lax` keeps the session cookie off other sites' posts, but not off a
 sibling site's under the same domain: any `*.piquel.fr` page could post to an app as
@@ -265,46 +316,22 @@ request forgery itself.
 
 When auth ends a session, it posts a logout token (OIDC Back-Channel Logout 1.0) to
 each client that received tokens from it, as an `application/x-www-form-urlencoded`
-`logout_token` field. Server-side integrations receive it at
-`POST <mount>/backchannel-logout` next to their login routes, which the client
-registers as its back-channel logout URI. The signed token is the authentication, so
-there is no origin check. The token is validated as above, and one whose `jti` was
-applied before changes nothing.
+`logout_token` field. The SDKs keep no sessions, and a server-side app's sessions
+end at their next refresh anyway. An app that must end them sooner gives its login
+routes a handler (`LoginRoutes::on_backchannel_logout` in axum, `backchannelLogout`
+in TypeScript), which mounts `POST <mount>/backchannel-logout`; the client
+registers it as its back-channel logout URI. Without a handler there is no route.
 
-The route answers 200 once the matching sessions are gone, including when there
-were none or it applied the token before, and 400 with
-`{"error":"invalid_request"}` for an invalid token. It answers 503 when signing keys
-cannot be fetched and 500 when the backend fails, so auth retries. Every answer has
-`Cache-Control: no-store`.
-
-A token with `sid` ends every session started under that auth session; one with only
-`sub` ends every session of that user. The SDK finds them through records it keeps
-in the application's backend, with the same four operations:
-
-- **Indexes.** One record per issuer and `sid`, and one per issuer and `sub`, keyed
-  by their SHA-256, lists the backend keys of the sessions started under it, each
-  with its expiry. A sign-in stores its session, then adds it to both indexes by
-  insert or compare-and-swap, retrying on conflict. Each write drops expired
-  entries, and the record expires with its last session.
-- **Ended sessions.** A logout with `sid` marks that index ended and keeps it for a
-  session lifetime, then deletes the sessions it lists, which stay listed so a retry
-  finds them again. A sign-in whose `sid` is ended deletes its session and fails, so
-  a logout that overtakes a sign-in never leaves a live session; auth never accepts
-  an ended session again. A logout with only `sub` deletes the sessions listed for
-  the user and leaves no mark, so a sign-in that stored its session but had not yet
-  listed it can survive; auth sends no such logout until subject logout (#80), which
-  must close this race. Sessions stored before the indexes existed are not read, so
-  their users sign in again.
-- **Replays.** A token whose `jti` is recorded was applied: it changes nothing and
-  is answered 200, so auth's retry after a lost answer succeeds, and a copy cannot
-  end sessions started since. Once its sessions are deleted, the SDK records the
-  `jti` until the token's `exp` plus the leeway, so every replica knows it.
-  Recording it last means a request cut short by a failure, a crash or auth hanging
-  up is applied again on auth's retry; two copies racing may both apply, which ends
-  the same sessions twice.
-- **Versions.** A new index or `jti` record starts at the current time in
-  microseconds rather than 1, so a sign-in that read an expired record the backend
-  has since deleted cannot overwrite the logout's replacement with its stale version.
+The signed token is the authentication, so there is no origin check. The route
+validates the token as above and passes it to the handler, which records what it
+names where every replica sees it, so the app refuses those sessions itself: those
+with the token's `sid` (auth's session ID), or without one, every session of its
+`sub` (the user) signed in before the token's `iat`. A record can go a session
+lifetime after its token. Auth delivers again until it gets a 200, so a handler
+must be idempotent and return only once its record is durable. The route answers
+200 once the handler succeeds, 400 with `{"error":"invalid_request"}` for an invalid
+token, 503 when signing keys cannot be fetched and 500 when the handler fails, so
+auth retries. Every answer has `Cache-Control: no-store`.
 
 ## Step-up
 

@@ -67,7 +67,9 @@ test('the server SDK signs in, keeps the session across a reload, and signs out'
   await expect(page.getByText(`Signed in as ${username}.`)).toBeVisible();
   expect(new URL(page.url()).origin).toBe(app);
   const cookies = await appCookies(context);
-  expect(cookies.map((cookie) => cookie.name)).toEqual(['__Host-piquel-session']);
+  expect(cookies.map((cookie) => cookie.name)).toEqual([
+    '__Host-piquel-browser-e2e-server-session'
+  ]);
   expect(cookies[0]).toMatchObject({ httpOnly: true, secure: true, sameSite: 'Lax', path: '/' });
 
   await page.reload();

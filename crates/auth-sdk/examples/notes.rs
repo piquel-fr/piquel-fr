@@ -6,13 +6,14 @@
 //! ```sh
 //! NOTES_CLIENT_ID=notes-web NOTES_CLIENT_SECRET=… \
 //! NOTES_REDIRECT_URI=https://notes.example.com/auth/callback \
+//! NOTES_COOKIE_KEY="$(openssl rand -base64 32)" \
 //! cargo run -p piquel-auth --features axum --example notes
 //! ```
 
 use axum::{Json, Router, extract::State, http::StatusCode, routing::get};
 use piquel_auth::{
     ClientConfig, Credentials, Issuer, Resource,
-    axum::{BearerLayer, LoginRoutes, MemoryBackend, Scoped, SignedIn},
+    axum::{BearerLayer, CookieKey, LoginRoutes, Scoped, SignedIn},
 };
 use std::{
     env,
@@ -73,10 +74,9 @@ async fn main() -> Result<(), Box<dyn Error>> {
         credentials: Credentials::Secret(env::var("NOTES_CLIENT_SECRET")?.into()),
         redirect_uri: env::var("NOTES_REDIRECT_URI")?.parse()?,
     };
-    // Sessions in memory, lost on restart: a real deployment implements
-    // `SessionBackend` over its own database.
-    let auth = LoginRoutes::new(issuer.client(config), MemoryBackend::default())
-        .scopes("profile".parse()?);
+    // Sessions live in the browser, sealed with this key: every replica uses the same.
+    let key = CookieKey::from_base64(&env::var("NOTES_COOKIE_KEY")?)?;
+    let auth = LoginRoutes::new(issuer.client(config), key)?.scopes("profile".parse()?);
 
     let app = Router::new()
         .route("/", get(home))

@@ -24,6 +24,8 @@ use topcoat::{
 
 /// The Rust SDK's source and guide.
 const RUST_SDK: &str = "https://github.com/piquel-fr/piquel-fr/tree/main/crates/auth-sdk";
+/// The TypeScript SDK, whose `@piquel/auth/browser` signs users in from the browser.
+const TYPESCRIPT_SDK: &str = "https://github.com/piquel-fr/piquel-fr/tree/main/packages/auth";
 /// The guide to asking for a passkey before sensitive actions.
 const STEP_UP_GUIDE: &str =
     "https://github.com/piquel-fr/piquel-fr/blob/main/docs/guides/step-up-authentication.md";
@@ -178,17 +180,11 @@ impl Label for AppTab {
 }
 
 impl ClientRow<'_> {
-    /// A Rust program signing users in through this app at `issuer`, with the Rust
-    /// SDK's axum routes. It never holds the secret: it reads it from the
-    /// environment.
+    /// A Rust program signing users in through this confidential app at `issuer`,
+    /// with the Rust SDK's axum routes. It never holds the secret or the cookie key:
+    /// it reads them from the environment.
     fn rust_example(&self, issuer: &str) -> String {
         let id = self.id;
-        let credentials = match self.kind {
-            ClientKind::Confidential => {
-                r#"Credentials::Secret(std::env::var("PIQUEL_CLIENT_SECRET")?.into())"#
-            }
-            ClientKind::Public => "Credentials::None",
-        };
         let redirect = self
             .redirect_uris
             .first()
@@ -207,7 +203,7 @@ impl ClientRow<'_> {
 // axum = "0.8"
 // tokio = {{ version = "1", features = ["macros", "rt-multi-thread", "net"] }}
 use axum::{{Router, routing::get}};
-use piquel_auth::axum::{{LoginRoutes, MemoryBackend, SignedIn}};
+use piquel_auth::axum::{{CookieKey, LoginRoutes, SignedIn}};
 use piquel_auth::{{ClientConfig, Credentials, Issuer}};
 
 async fn home(user: SignedIn) -> String {{
@@ -219,13 +215,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {{
     let issuer = Issuer::discover("{issuer}").await?;
     let config = ClientConfig {{
         client_id: "{id}".parse()?,
-        credentials: {credentials},
+        credentials: Credentials::Secret(std::env::var("PIQUEL_CLIENT_SECRET")?.into()),
         // The login routes' callback, nested at /auth below: register it as a redirect URI.
         redirect_uri: "{redirect}".parse()?,
     }};
-    // Sessions in memory, lost on restart: implement SessionBackend to keep them.
-    let auth = LoginRoutes::new(issuer.client(config), MemoryBackend::default())
-        .scopes("{scopes}".parse()?);
+    // Seals the session cookie, which holds the user's tokens: the same key on every
+    // server, generated once with `openssl rand -base64 32`.
+    let key = CookieKey::from_base64(&std::env::var("PIQUEL_COOKIE_KEY")?)?;
+    let auth = LoginRoutes::new(issuer.client(config), key)?.scopes("{scopes}".parse()?);
     let app = Router::new()
         .route("/", get(home))
         .nest("/auth", auth.router())
@@ -378,8 +375,8 @@ pub async fn overview<'a>(
     connection: Connection<'a>,
     #[default] secrets: Option<&'a str>,
 ) -> Result<impl View> {
-    let example = client.rust_example(connection.issuer);
     let confidential = client.kind == ClientKind::Confidential;
+    let example = confidential.then(|| client.rust_example(connection.issuer));
     Ok(view! {
         if let ClientStatus::Suspended { at } = client.status {
             <p class="notice error">
@@ -410,18 +407,29 @@ pub async fn overview<'a>(
                 }
             </div>
         </section>
-        <section class="card" aria-labelledby="rust-heading">
-            <header>
-                <h2 id="rust-heading">"Rust with axum"</h2>
-                copy(target: "rust-example", label: "Rust example")
-            </header>
-            <div class="body">
+        if let Some(example) = example {
+            <section class="card" aria-labelledby="rust-heading">
+                <header>
+                    <h2 id="rust-heading">"Rust with axum"</h2>
+                    copy(target: "rust-example", label: "Rust example")
+                </header>
+                <div class="body">
+                    <p class="help">
+                        "The " <a href=(RUST_SDK)>"Rust SDK"</a> " signs users in on your server. Their tokens stay in a cookie sealed with your key, which the browser cannot read."
+                    </p>
+                    <pre><code id="rust-example">(example)</code></pre>
+                </div>
+            </section>
+        } else {
+            <section class="card" aria-labelledby="browser-heading">
+                <header><h2 id="browser-heading">"Signing in from the browser"</h2></header>
                 <p class="help">
-                    "The " <a href=(RUST_SDK)>"Rust SDK"</a> " signs users in on your server and keeps their tokens there."
+                    "A public app has no secret, so it signs users in from the browser, with the "
+                    <a href=(TYPESCRIPT_SDK)>"TypeScript SDK"</a> "'s " <code>"@piquel/auth/browser"</code>
+                    ". To sign users in on a server, register a confidential app."
                 </p>
-                <pre><code id="rust-example">(example)</code></pre>
-            </div>
-        </section>
+            </section>
+        }
         <section class="card" aria-labelledby="step-up-heading">
             <header><h2 id="step-up-heading">"Sensitive actions"</h2></header>
             <p class="help">
