@@ -1,7 +1,7 @@
 /** The key cache's fetch rules: one refetch per unknown kid, spacing, freshness and outages, and fixed sets. */
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { Jws, KeyCache, KeySet } from '../src/index.ts';
+import { AuthError, Jws, KeyCache, KeySet } from '../src/index.ts';
 import * as base64 from '../src/base64.ts';
 import { FakeFetch, JWKS_URI, ManualClock, outcome, vector } from './vectors.ts';
 
@@ -82,8 +82,12 @@ test('keys stay fresh for max-age, bounded to 30 seconds through 24 hours, or an
   for (const [cacheControl, lifetime] of [
     ['max-age=5', 30],
     ['public, max-age=600', 600],
+    ['Max-Age="600"', 600],
     ['max-age=999999', 24 * 3600],
-    ['no-cache', 3600]
+    ['public', 3600],
+    // Keys a cache must not keep stay fresh only the 30-second minimum.
+    ['no-store', 30],
+    ['max-age=600, no-cache', 30]
   ] as const) {
     const server = new KeyServer([jwks('rotation-before')], { 'cache-control': cacheControl });
     const clock = new ManualClock(1_767_225_600);
@@ -111,6 +115,13 @@ test('a set with a duplicate kid is rejected and the previous set stays in use',
     error: { code: 'keys', reason: 'duplicate_key_id' }
   });
   assert.equal(server.served, 3);
+});
+
+test('keys are fetched only over https', () => {
+  assert.throws(
+    () => new KeyCache('http://auth.example.com/jwks'),
+    (error: unknown) => error instanceof AuthError && error.code === 'keys'
+  );
 });
 
 test('a key whose key_ops does not list verify is skipped', () => {

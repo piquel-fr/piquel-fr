@@ -333,7 +333,9 @@ type Source = {
  * - Keys are fetched at most once every 30 seconds, whatever the reason, so unknown
  *   key IDs cannot flood the issuer.
  * - Keys stay fresh for the response's `Cache-Control: max-age`, bounded to 30
- *   seconds through 24 hours, or one hour without one.
+ *   seconds through 24 hours, or one hour without one; `no-store` or `no-cache`
+ *   keeps them 30 seconds.
+ * - Every fetch is `https`, follows no redirect, and gives up after 10 seconds.
  * - A failed fetch keeps the last good keys, and still counts as a fetch.
  */
 export class KeyCache {
@@ -351,12 +353,18 @@ export class KeyCache {
   /** The fetch in flight, which concurrent verifications wait for instead of fetching. */
   #fetching: Promise<void> | undefined;
 
-  /** Keys fetched from `jwksUri` on first use. */
+  /** Keys fetched from `jwksUri` on first use; throws a `keys` error unless it uses `https`. */
   constructor(jwksUri: string, options?: KeyCacheOptions);
   /** @internal A fixed set; {@link KeyCache.fixed} is its public name. */
   constructor(keys: KeySet);
   constructor(source: string | KeySet, options: KeyCacheOptions = {}) {
     if (typeof source === 'string') {
+      if (asciiLowercase(source.slice(0, 8)) !== 'https://') {
+        throw new AuthError(
+          { code: 'keys' },
+          `signing keys at ${source} must be fetched over https`
+        );
+      }
       this.#source = { url: source, http: new Http(options.fetch) };
     } else {
       this.#source = undefined;

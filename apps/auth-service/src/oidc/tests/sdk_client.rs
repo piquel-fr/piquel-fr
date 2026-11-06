@@ -22,11 +22,7 @@ async fn sdk_login_client_runs_against_the_provider() {
     let origin = format!("https://localhost:{port}");
     let flow = Flow::at(&origin, true, false).await;
     let certificate = TlsListener::serve(tcp, flow.app.clone().routes());
-    let http = reqwest::Client::builder()
-        .add_root_certificate(certificate)
-        .redirect(reqwest::redirect::Policy::none())
-        .build()
-        .expect("HTTP client");
+    let http = reqwest::Client::builder().add_root_certificate(certificate);
     let issuer = piquel_auth::Issuer::builder()
         .http_client(http)
         .discover(&origin)

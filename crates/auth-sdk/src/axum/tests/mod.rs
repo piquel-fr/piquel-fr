@@ -15,7 +15,7 @@ use crate::{
     AuthenticationPolicy, ClientConfig, ClientId, Credentials, Issuer, KeyCache, KeySet, Resource,
     StepUpRequirement,
     http::Http,
-    tests::{Case, ManualClock, issuer, metadata, serve, vector_token},
+    tests::{Case, ManualClock, issuer, metadata, serve, token_case, vector_token},
 };
 use ::axum::{
     Router,
@@ -60,14 +60,6 @@ const CLIENT: &str = "notes-web";
 const SESSION_COOKIE: &str = "__Host-piquel-notes-web-session";
 /// The fixture user's account ID.
 const USER: &str = "01936f3e-8c00-7000-8000-000000000001";
-
-/// A token vector case by name.
-fn token_case(name: &str) -> Case {
-    Case::all("tokens")
-        .into_iter()
-        .find(|case| case.name.ends_with(&format!("/{name}.json")))
-        .expect("token vector")
-}
 
 /// Sends a `GET` with optional `Authorization` and `Cookie` values, as a browser
 /// navigating to a page (`Sec-Fetch-Mode: navigate`).
@@ -237,7 +229,7 @@ impl TokenEndpoint {
 
     /// The vectors' issuer, using these endpoints, at `clock`.
     fn issuer(&self, clock: &ManualClock) -> Issuer {
-        self.issuer_with(clock, Http::default_client().expect("HTTP client"))
+        self.issuer_with(clock, Http::plain(reqwest::Client::builder()))
     }
 
     /// The vectors' issuer, using these endpoints through `http`, at `clock`.

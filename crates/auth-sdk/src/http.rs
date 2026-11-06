@@ -1,9 +1,12 @@
-//! The SDK's HTTP client: bounded bodies, errors that name the URL, and a client span
-//! around each request.
+//! The SDK's HTTP client: its transport policy, bounded bodies, errors that name the
+//! URL, and a client span around each request.
 
 use base64::{Engine, engine::general_purpose::STANDARD};
 use piquel_common::SendTraced;
-use reqwest::{RequestBuilder, StatusCode, header};
+use reqwest::{
+    RequestBuilder, StatusCode,
+    header::{self, HeaderMap},
+};
 use std::time::Duration;
 use thiserror::Error;
 use url::Url;
@@ -11,8 +14,9 @@ use url::Url;
 /// Most bytes read from any response. Metadata, key sets and token responses are a
 /// few kilobytes.
 const MAX_BODY_BYTES: usize = 256 * 1024;
-/// Timeout of the default client.
-const TIMEOUT: Duration = Duration::from_secs(10);
+/// Longest a request may take, from connecting to its last body byte, whatever the
+/// client's own timeout.
+const DEADLINE: Duration = Duration::from_secs(10);
 
 /// Auth could not be reached, or answered outside its protocol.
 #[derive(Debug, Error)]
@@ -20,7 +24,7 @@ pub enum NetworkError {
     /// The default HTTP client could not be built.
     #[error("could not build the HTTP client")]
     Client(#[source] reqwest::Error),
-    /// The request failed or timed out.
+    /// The request failed, or timed out by the client's own timeout.
     #[error("request to {url} failed")]
     Request {
         /// Where the request went.
@@ -28,6 +32,24 @@ pub enum NetworkError {
         /// Why it failed.
         #[source]
         source: reqwest::Error,
+    },
+    /// The request did not finish within the SDK's 10-second deadline.
+    #[error("request to {url} took longer than {} seconds", DEADLINE.as_secs())]
+    TimedOut {
+        /// Where the request went.
+        url: Url,
+        /// The deadline that passed.
+        #[source]
+        source: tokio::time::error::Elapsed,
+    },
+    /// The endpoint redirected. No auth endpoint does, and following would carry
+    /// credentials elsewhere, so the SDK never does.
+    #[error("{url} redirected with HTTP {status}")]
+    Redirected {
+        /// Where the request went.
+        url: Url,
+        /// The redirect status.
+        status: u16,
     },
     /// A document endpoint answered with an unexpected status.
     #[error("{url} answered HTTP {status}")]
@@ -49,13 +71,37 @@ pub enum NetworkError {
 pub(crate) struct Reply {
     /// HTTP status.
     pub(crate) status: StatusCode,
-    /// `Cache-Control: max-age`, in seconds, when present.
+    /// How long `Cache-Control` lets the body be kept, in seconds, when it says.
     pub(crate) max_age: Option<u64>,
     /// The body, at most [`MAX_BODY_BYTES`].
     pub(crate) body: Vec<u8>,
 }
 
 impl Reply {
+    /// How long `headers` let a response be kept, in seconds (RFC 9111 §5.2): none with
+    /// `no-store` or `no-cache`, whatever else they say, else `max-age`, quoted or not.
+    pub(crate) fn max_age(headers: &HeaderMap) -> Option<u64> {
+        let mut max_age = None;
+        let directives = headers
+            .get_all(header::CACHE_CONTROL)
+            .iter()
+            .filter_map(|value| value.to_str().ok())
+            .flat_map(|value| value.split(','));
+        for directive in directives {
+            let (name, value) = directive
+                .split_once('=')
+                .map_or((directive, None), |(name, value)| (name, Some(value)));
+            let name = name.trim();
+            if name.eq_ignore_ascii_case("no-store") || name.eq_ignore_ascii_case("no-cache") {
+                return Some(0);
+            }
+            if name.eq_ignore_ascii_case("max-age") && max_age.is_none() {
+                max_age = value.and_then(|value| value.trim().trim_matches('"').parse().ok());
+            }
+        }
+        max_age
+    }
+
     /// Requires `200 OK`, as document endpoints answer.
     pub(crate) fn ok(self, url: &Url) -> Result<Self, NetworkError> {
         if self.status == StatusCode::OK {
@@ -79,25 +125,38 @@ pub(crate) enum Authorization<'a> {
     Basic(&'a str, &'a str),
 }
 
-/// A shared `reqwest` client.
+/// A shared `reqwest` client, held to the SDK's transport policy: `https` only, no
+/// redirects, and a 10-second deadline on every request.
 #[derive(Clone, Debug)]
 pub(crate) struct Http(reqwest::Client);
 
 impl Http {
-    /// Wraps an application's client.
-    pub(crate) const fn new(client: reqwest::Client) -> Self {
-        Self(client)
-    }
-
-    /// The default client: a 10-second timeout, and no redirects, since no auth
-    /// endpoint redirects and a redirect would carry credentials elsewhere.
-    pub(crate) fn default_client() -> Result<Self, NetworkError> {
-        reqwest::Client::builder()
-            .timeout(TIMEOUT)
-            .redirect(reqwest::redirect::Policy::none())
+    /// Builds the client from an application's `builder`, for proxies or extra
+    /// trusted roots. Whatever it sets, the client then follows no redirects, since a
+    /// 307 or 308 would resend a code or token elsewhere, and refuses any URL but
+    /// `https`.
+    pub(crate) fn build(builder: reqwest::ClientBuilder) -> Result<Self, NetworkError> {
+        Self::without_redirects(builder)
+            .https_only(true)
             .build()
             .map(Self)
             .map_err(NetworkError::Client)
+    }
+
+    /// Like [`Self::build`] from `builder`, but also reaching `http` URLs, for the
+    /// tests' local servers.
+    #[cfg(test)]
+    pub(crate) fn plain(builder: reqwest::ClientBuilder) -> Self {
+        Self(
+            Self::without_redirects(builder)
+                .build()
+                .expect("a test HTTP client"),
+        )
+    }
+
+    /// `builder`, made to follow no redirects.
+    fn without_redirects(builder: reqwest::ClientBuilder) -> reqwest::ClientBuilder {
+        builder.redirect(reqwest::redirect::Policy::none())
     }
 
     /// Sends a `GET`.
@@ -127,8 +186,9 @@ impl Http {
         self.send(url, request, authorization).await
     }
 
-    /// Authenticates, sends and reads a request. It is sent in the `http.client` span
-    /// of [`SendTraced`], which records only the method, host and status.
+    /// Authenticates, sends and reads a request within the deadline. It is sent in the
+    /// `http.client` span of [`SendTraced`], which records only the method, host and
+    /// status.
     async fn send(
         &self,
         url: &Url,
@@ -147,19 +207,30 @@ impl Http {
                 request.header(header::AUTHORIZATION, format!("Basic {credentials}"))
             }
         };
+        tokio::time::timeout(DEADLINE, Self::read(url, request))
+            .await
+            .map_err(|source| NetworkError::TimedOut {
+                url: url.clone(),
+                source,
+            })?
+    }
+
+    /// Sends a request and reads its response, refusing redirects and bodies over
+    /// the limit.
+    async fn read(url: &Url, request: RequestBuilder) -> Result<Reply, NetworkError> {
         let failed = |source| NetworkError::Request {
             url: url.clone(),
             source,
         };
         let mut response = request.send_traced().await.map_err(failed)?;
         let status = response.status();
-        let max_age = response
-            .headers()
-            .get_all(header::CACHE_CONTROL)
-            .iter()
-            .filter_map(|value| value.to_str().ok())
-            .flat_map(|value| value.split(','))
-            .find_map(|directive| directive.trim().strip_prefix("max-age=")?.parse().ok());
+        if status.is_redirection() {
+            return Err(NetworkError::Redirected {
+                url: url.clone(),
+                status: status.as_u16(),
+            });
+        }
+        let max_age = Reply::max_age(response.headers());
         let mut body = Vec::new();
         while let Some(chunk) = response.chunk().await.map_err(failed)? {
             if body.len() + chunk.len() > MAX_BODY_BYTES {

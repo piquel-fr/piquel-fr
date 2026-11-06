@@ -81,8 +81,9 @@
 //! # Time and HTTP
 //!
 //! [`IssuerBuilder::clock`] injects a [`Clock`], so tests can pin time.
-//! [`IssuerBuilder::http_client`] injects the `reqwest` client, for timeouts, proxies
-//! or extra trusted roots.
+//! [`IssuerBuilder::http_client`] takes a `reqwest::ClientBuilder`, for proxies or
+//! extra trusted roots. Whatever it sets, the SDK's transport policy holds: every
+//! request is `https`, follows no redirect, and gives up after 10 seconds.
 //!
 //! Each request runs in an `http.client` `tracing` span, at `info` under the
 //! `piquel_common` target, with its method, host and status only, as OpenTelemetry's
