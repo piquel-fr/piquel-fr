@@ -38,19 +38,32 @@ on events whose transaction, and every older one, has finished. No event can
 therefore appear later before one already sealed. A long-running transaction
 delays sealing for as long as it runs.
 
-Auth runs as a restricted database role. It may insert events, but update only
-their chain position and hash, which a trigger allows only while they are unset.
-It may add checkpoints but not change them, and may not move the anchor. So a
-compromise of auth alone cannot rewrite, delete or reorder sealed history. The
-schema owner can, by dropping the triggers; the chain is what detects that.
+Auth runs as a restricted database role. It may insert events, but not choose
+their transaction, time, sequence or chain columns, which keep their defaults,
+nor store one auth could not read back, such as one over 8 KiB, which would stop
+every sealing pass.
+It may update only their chain position and hash, which triggers allow only
+while they are unset, and only at the position right after a sealed event or the
+anchor. It may add checkpoints but not change them, and a trigger refuses one
+that is not of a sealed event's hash, is dated at an infinite time or more than
+a minute ahead, or has a note over 1 KiB. It may not move the anchor. So a compromise of auth alone
+cannot rewrite, delete, reorder or backdate sealed history, nor stop sealing or
+signing with a forged position, an unreadable event or a checkpoint time. The
+schema owner can, by dropping the triggers; the chain is what detects that. The
+database cannot check a hash or a checkpoint's signature, so that role can still
+seal an event wrongly, or add a checkpoint with a forged signature; see
+[Limits](#limits).
 
 ### Personal data is not covered
 
 IP addresses, browser families and every `Personal` payload value live in
 `event_personal_data`, which the chain never hashes. The stored payload holds
-`"$erased"` in their place. Retention, after 90 days, and account purges delete
-those rows without touching the chain. The trade-off is that personal data is
-not tamper-evident.
+`"$erased"` in their place, and reads fill only those slots back in. Retention,
+after 90 days, and account purges delete those rows without touching the chain.
+The trade-off is that personal data is not tamper-evident. Auth's role can still
+erase it, but not rewrite it: it records personal data only with its event, in
+the same transaction, which a trigger checks, and an update may only remove
+values.
 
 What a sealed event holds therefore cannot be erased without breaking the chain.
 Apps' related origins were held there until they became personal data: events
@@ -228,8 +241,26 @@ so keep every key that signed a checkpoint still in the database.
   next checkpoint signs the edited history. Before signing, the sealer
   recomputes the events since the latest checkpoint, so edits that leave the
   stored hashes as they were, and recent deletions, are refused instead.
+- **Open sessions.** Rotating the runtime role's password does not end the
+  sessions already open with it, and one of them could set the role's password
+  and settings again. So after a compromise, as the schema owner, first stop
+  the role logging in (`ALTER ROLE piquel_auth NOLOGIN`), then end its sessions
+  (`SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE usename =
+  'piquel_auth'`), then deploy with a new `database-runtime-password`, whose
+  `migrate` sets it, logs the role in again and resets its settings. Auth cannot
+  reach the database in between. Until then, the old sessions can still take the
+  sealer's lock or hold a transaction open, which stops sealing.
+- **Wrong seals.** Auth's database role seals events, so someone with it can seal
+  the next event with a wrong hash. `audit verify` reports it, and the sealer
+  refuses to sign on top of it, until the schema owner repairs the chain.
+- **Forged checkpoints.** Someone with auth's database role but not the audit
+  key can add a checkpoint of a real sealed position and hash with a forged
+  signature. `audit verify` reports it as `checkpoint_signature`, and the chain
+  cannot be pruned through it, until the schema owner removes it.
 - **New events.** Someone with auth's database role can insert events, which
-  are then sealed and signed like genuine ones.
+  are then sealed and signed like genuine ones. They are dated when inserted, so
+  they cannot pass for older ones, and ordered by the transaction inserting
+  them, which may have started earlier.
 - **Pruning look-alikes.** Someone with the schema owner's rights can delete
   history up to a checkpoint and move the anchor, which looks like a prune
   without its `audit_history_pruned` event. Compare the anchor with the

@@ -47,6 +47,21 @@ async fn record(pool: &PgPool, user: UserId, event: DomainEvent) {
     tx.commit().await.expect("commit");
 }
 
+/// Stored personal data fills only the payload's `"$erased"` slots: one naming
+/// any other value leaves it as recorded.
+#[test]
+fn personal_data_restores_only_erased_values() {
+    let mut payload = serde_json::json!({"provider": "github", "subject": ERASED});
+    let details = serde_json::json!({"/provider": "forged", "/subject": "subject-1"});
+    serde_json::from_value::<PersonalDetails>(details)
+        .expect("details")
+        .restore(&mut payload);
+    assert_eq!(
+        payload,
+        serde_json::json!({"provider": "github", "subject": {PERSONAL_KEY: "subject-1"}})
+    );
+}
+
 /// Events commit and roll back with their transaction. Personal values, the
 /// request origin and the reason stay out of the event row, read back while kept,
 /// and read as erased once their row is deleted.

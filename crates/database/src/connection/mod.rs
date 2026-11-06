@@ -329,9 +329,10 @@ impl Database {
     ///
     /// # Errors
     ///
-    /// Returns [`DatabaseError::Operation`] if `role` is the schema owner or a
-    /// superuser, if its verifier cannot be derived, or if a statement fails, e.g.
-    /// when the owner is not a superuser.
+    /// Returns [`DatabaseError::Operation`] if `role` is the schema owner, a
+    /// superuser, a member of another role or the owner of anything, if it or
+    /// `PUBLIC` was granted a server parameter, if its verifier cannot be
+    /// derived, or if a statement fails, e.g. when the owner is not a superuser.
     pub async fn provision(&self, role: &RuntimeRole) -> Result<(), DatabaseError> {
         let verifier = ScramVerifier::new(&role.password)
             .map_err(|error| DatabaseError::Operation(Box::new(error)))?;

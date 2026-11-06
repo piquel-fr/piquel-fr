@@ -47,7 +47,9 @@ impl Owner {
     /// Runs `sql` in one transaction, serialized with every other test's: grants
     /// on the same tables from concurrent transactions fail.
     async fn raw(&self, sql: &str) {
-        let serialized = format!("BEGIN; SELECT pg_advisory_xact_lock(4519); {sql}; COMMIT;");
+        // Provisioning's lock (`LockKey::Provisioning`): other tests provision
+        // roles at the same time, and privileges on the schema are one catalog row.
+        let serialized = format!("BEGIN; SELECT pg_advisory_xact_lock(2); {sql}; COMMIT;");
         sqlx::raw_sql(&serialized)
             .execute(&self.pool)
             .await

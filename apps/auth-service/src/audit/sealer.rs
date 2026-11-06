@@ -20,8 +20,9 @@ pub(crate) struct Sealer {
 }
 
 impl Sealer {
-    /// Events sealed per transaction.
-    const BATCH: u32 = 1_000;
+    /// Events sealed per transaction: few enough that a batch of the largest events
+    /// migration 0035 allows still fits in memory.
+    const BATCH: u32 = 100;
     /// The least time between two checkpoints in production.
     const CHECKPOINT_EVERY: TimeDelta = TimeDelta::minutes(5);
 
