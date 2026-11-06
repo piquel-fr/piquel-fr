@@ -151,6 +151,8 @@ impl DomainEvent {
             | Self::SigningKeyChanged { .. }
             | Self::AuditHistoryPruned { .. }
             | Self::AuditChainVerified(_)
+            | Self::AlertRaised { .. }
+            | Self::AlertCleared { .. }
             | Self::Imported(_) => return None,
         })
     }

@@ -29,6 +29,10 @@ pub enum LockKey {
     /// The periodic verification of the audit chain, apart from
     /// [`Self::AuditChain`] so it never holds sealing back.
     AuditVerification = 8,
+    /// Changes to alerts, taken per transaction by
+    /// [`AlertRepository::current`](crate::AlertRepository::current), so two
+    /// changes to the same kind never both find none current.
+    Alerts = 9,
     /// The job runner panic test; no release takes it.
     #[cfg(any(test, feature = "test-util"))]
     Test = -1,

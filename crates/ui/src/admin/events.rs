@@ -4,8 +4,9 @@
 use super::moment;
 use crate::layout::{Pager, page_head, pager};
 use piquel_common::{
-    AuthenticationMethod, Personal, Provider,
+    AlertId, AuthenticationMethod, Personal, Provider,
     admin::Event,
+    alerts::Alert,
     events::{
         Actor, CodeRedemptionFailure, DomainEvent, GrantRevocation, JobName, RecordedOrigin,
         RevocationReason, SignInFailure,
@@ -409,9 +410,27 @@ impl EventRow<'_> {
                 })
                 .with("events checked", verification.events_checked)
             }
+            DomainEvent::AlertRaised { alert_id, alert } => {
+                Self::alert("Alert raised", alert_id, &alert)
+            }
+            DomainEvent::AlertCleared { alert_id, alert } => {
+                Self::alert("Alert cleared", alert_id, &alert)
+            }
             DomainEvent::Imported(audit) => {
                 Description::new(format!("{} ({})", audit.action(), audit.outcome()))
             }
+        }
+    }
+
+    /// What happened to the alert `id`, which says `alert`, with where it found the
+    /// chain broken, for a broken chain.
+    fn alert(what: &str, id: AlertId, alert: &Alert) -> Description {
+        let description =
+            Description::new(format!("{what}: {}", alert.subject())).with("alert", id);
+        match alert {
+            Alert::AuditChainBroken(broken) => description
+                .with("position", broken.position)
+                .with("problem", broken.problem),
         }
     }
 

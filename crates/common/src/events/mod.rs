@@ -25,9 +25,10 @@ pub use payload::{
 };
 
 use crate::{
-    AuthenticationMethod, ClientId, DeliveryId, EmailId, EventId, Handle, PasskeyId, Personal,
-    PictureId, Provider, RecoveryId, SessionId, TokenId,
+    AlertId, AuthenticationMethod, ClientId, DeliveryId, EmailId, EventId, Handle, PasskeyId,
+    Personal, PictureId, Provider, RecoveryId, SessionId, TokenId,
     admin::{AuditVerification, ChainBreak, ChainProblem, VerificationKeys},
+    alerts::Alert,
     clients::{ClientField, ClientKind},
     email::NormalizedEmail,
     protocol::jwt::KeyId,
@@ -403,6 +404,22 @@ pub enum DomainEvent {
     /// dashboard or by auth's own verifier job, with what that found. It concerns
     /// no account.
     AuditChainVerified(AuditVerification),
+    /// A condition that needs an administrator's attention began to hold, so the
+    /// alert `alert_id` was raised. It concerns no account.
+    AlertRaised {
+        /// The alert.
+        alert_id: AlertId,
+        /// What it says.
+        alert: Alert,
+    },
+    /// The condition of the alert `alert_id` no longer holds, or holds
+    /// differently, as another alert, so it cleared. It concerns no account.
+    AlertCleared {
+        /// The alert.
+        alert_id: AlertId,
+        /// What it said.
+        alert: Alert,
+    },
     /// A row of the security audit log that preceded typed events. Only
     /// migrations write these; its fields are private, so one is only ever read back.
     Imported(ImportedAudit),
@@ -430,6 +447,7 @@ impl DomainEvent {
                 ..
             } => origin.version(),
             Self::AuditChainVerified(verification) => verification.version(),
+            Self::AlertRaised { alert, .. } | Self::AlertCleared { alert, .. } => alert.version(),
             _ => Self::FIRST_VERSION,
         }
     }
@@ -503,6 +521,8 @@ impl DomainEvent {
             | Self::AccountPurged {}
             | Self::AuditHistoryPruned { .. }
             | Self::AuditChainVerified(_)
+            | Self::AlertRaised { .. }
+            | Self::AlertCleared { .. }
             | Self::Imported(_) => None,
         }
     }
@@ -568,6 +588,8 @@ impl DomainEvent {
             | Self::AccountPurged {}
             | Self::AuditHistoryPruned { .. }
             | Self::AuditChainVerified(_)
+            | Self::AlertRaised { .. }
+            | Self::AlertCleared { .. }
             | Self::Imported(_) => None,
         }
     }
@@ -633,6 +655,8 @@ impl DomainEvent {
             Self::AccountPurged {} => "account_purged",
             Self::AuditHistoryPruned { .. } => "audit_history_pruned",
             Self::AuditChainVerified(_) => "audit_chain_verified",
+            Self::AlertRaised { .. } => "alert_raised",
+            Self::AlertCleared { .. } => "alert_cleared",
             Self::Imported(_) => "imported",
         }
     }

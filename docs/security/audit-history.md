@@ -205,7 +205,10 @@ Every verification is recorded as an `audit_chain_verified` event, with who
 made it and what it found. Auth also verifies the chain on its own: every ten
 minutes one replica checks the newest recorded verification, and once it is six
 hours old, whoever made it, verifies the whole chain with the dashboard's keys
-(below) and records it as the `audit_verification` job. The admin dashboard's
+(below) and records it as the `audit_verification` job. A verification that
+finds the chain broken raises the `audit_chain_broken` alert for administrators,
+and the next one that finds it intact clears it. One with keys given with
+`--key` changes neither. The admin dashboard's
 Audit tab shows the newest one and when it was made, beside the chain as stored,
 so loading it costs the same however long the history. It recomputes nothing
 until an administrator presses **Verify now**, which runs the same
