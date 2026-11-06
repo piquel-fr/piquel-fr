@@ -12,3 +12,5 @@ packages/auth/src/protocol.ts linguist-generated
 # The CLI and configuration references, written by `just docs reference`.
 docs/dev/operations/cli-commands.md linguist-generated
 docs/dev/operations/variables/*.md linguist-generated
+# The documentation's screenshots, retaken by `just docs screenshots`.
+docs/images/** linguist-generated
