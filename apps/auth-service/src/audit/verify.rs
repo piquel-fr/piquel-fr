@@ -102,19 +102,19 @@ impl AuditChain {
             unsealed: tx.audit().unsealed_count().await?,
         };
         // A verification a newer release recorded reads as unknown, so as none.
-        let verified = tx
-            .events()
-            .newest_of_kind("audit_chain_verified")
-            .await?
-            .and_then(|stored| match stored.event {
-                RecordedEvent::Known(DomainEvent::AuditChainVerified(verification)) => {
-                    Some(RecordedVerification {
-                        at: stored.occurred_at,
-                        verification,
-                    })
-                }
-                _ => None,
-            });
+        let verified =
+            tx.events()
+                .newest_audit_verification()
+                .await?
+                .and_then(|stored| match stored.event {
+                    RecordedEvent::Known(DomainEvent::AuditChainVerified(verification)) => {
+                        Some(RecordedVerification {
+                            at: stored.occurred_at,
+                            verification,
+                        })
+                    }
+                    _ => None,
+                });
         let after =
             after.unwrap_or_else(|| chain.anchor.as_ref().map_or(0, |anchor| anchor.position));
         // One more than a page tells whether another follows.

@@ -459,16 +459,16 @@ impl EventRepository<'_> {
         .collect()
     }
 
-    /// The newest event of `kind`, the serde tag of a [`DomainEvent`] variant, e.g.
-    /// `audit_chain_verified`. It reads one entry of the `(kind, occurred_at)`
-    /// index, so it costs the same however many events there are.
+    /// The newest `audit_chain_verified` event, in recording order, which a clock
+    /// stepped back does not change. The kind is written into the query, not
+    /// bound, so every plan reads the index of verifications alone: one entry,
+    /// however many events there are.
     ///
     /// # Errors
     ///
     /// Returns [`DatabaseError`] if the query fails or the stored event does not decode.
-    pub async fn newest_of_kind(
+    pub async fn newest_audit_verification(
         &mut self,
-        kind: &str,
     ) -> Result<Option<StoredEvent>, DatabaseError> {
         run!(
             self,
@@ -486,10 +486,9 @@ impl EventRepository<'_> {
                     p.details AS "details?", p.reason AS "reason?"
                 FROM domain_events e
                 LEFT JOIN event_personal_data p ON p.event_id = e.id
-                WHERE e.kind = $1
-                ORDER BY e.occurred_at DESC
-                LIMIT 1"#,
-                kind,
+                WHERE e.kind = 'audit_chain_verified'
+                ORDER BY e.sequence DESC
+                LIMIT 1"#
             )
         )?
         .map(StoredEvent::try_from)

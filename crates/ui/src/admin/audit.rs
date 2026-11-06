@@ -47,7 +47,7 @@ pub async fn audit_page<'a>(
             <p class="help">
                 "Pruning deletes every event up to a checkpoint. It needs the database owner, \
                  which auth never holds, so run the command shown as the owner. It verifies the \
-                 chain again first, and refuses if it breaks."
+                 chain again first, and refuses if it breaks at or before that checkpoint."
             </p>
             if page.checkpoints.is_empty() {
                 <p class="empty">"No checkpoint to show."</p>
