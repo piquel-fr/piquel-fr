@@ -11,8 +11,8 @@ mod keys;
 
 pub(crate) use email::EmailConfig;
 pub(crate) use federation::{FederationConfig, ProviderConfig};
-pub(crate) use keys::LinkKeys;
 use keys::KEY_ENCRYPTION_KEY;
+pub(crate) use keys::LinkKeys;
 #[cfg(test)]
 pub(crate) use keys::TokenDigestKey;
 pub use keys::{AuditConfig, TokenDigestKeys};
