@@ -26,7 +26,7 @@ mod session;
 
 pub(crate) use context::RequestContext;
 pub(crate) use cookie::BrowserCookie;
-pub(crate) use http::{CacheClass, Cached, HttpSecurity, HttpSecurityError};
+pub(crate) use http::{CacheClass, Cached, FETCH_SITE_HEADER, HttpSecurity, HttpSecurityError};
 pub(crate) use session::{Confirmed, Credential, OptionalSession, Session, SessionError};
 
 /// Name of the browser proof required on non-protocol mutations.

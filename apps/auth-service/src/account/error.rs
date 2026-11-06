@@ -9,6 +9,7 @@ use crate::{
     grants::GrantError,
     handles::HandlesError,
     history::HistoryError,
+    notifications::NotificationError,
     passkey::PasskeyError,
     pictures::PictureError,
     recovery::RecoveryError,
@@ -46,6 +47,9 @@ pub(crate) enum AccountError {
     /// A history entry could not be reported.
     #[error(transparent)]
     History(#[from] HistoryError),
+    /// A notification could not be read or marked.
+    #[error(transparent)]
+    Notification(#[from] NotificationError),
     /// One of the owner's clients could not be registered or changed.
     #[error(transparent)]
     Client(#[from] OwnedClientError),
@@ -78,6 +82,7 @@ impl From<AccountError> for ApiError {
             AccountError::Handle(error) => error.into(),
             AccountError::Picture(error) => error.into(),
             AccountError::History(error) => error.into(),
+            AccountError::Notification(error) => error.into(),
             AccountError::Client(error) => error.into(),
             AccountError::Recovery(error) => error.into(),
             AccountError::Deletion(error) => error.into(),

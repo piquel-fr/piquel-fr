@@ -6,7 +6,7 @@
 //! value, lives in a separate row that retention and account purges delete; reads
 //! then return [`Personal::Erased`] in its place.
 
-use super::{EventRepository, RepositoryExecutor};
+use super::{EventRepository, KindProbe, RepositoryExecutor};
 use crate::DatabaseError;
 use chrono::{DateTime, Utc};
 use piquel_common::{
@@ -14,10 +14,10 @@ use piquel_common::{
     events::{Actor, Browser, DomainEvent, EventContext, Platform, RequestOrigin, UserAgentFamily},
 };
 use piquel_telemetry::Telemetry;
-use serde::{Deserialize, Serialize, de::value::MapDeserializer};
+use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
 use sqlx::types::Json;
-use std::{fmt::Display, iter, net::IpAddr};
+use std::net::IpAddr;
 
 /// Key under which a [`Personal`] value serializes; matches its serde rename.
 const PERSONAL_KEY: &str = "$personal";
@@ -114,39 +114,6 @@ impl RecordedEvent {
     }
 }
 
-/// How decoding `{"kind": …}` alone as a [`DomainEvent`] fails, which tells
-/// whether this release knows the kind. Only serde's derive knows the variant
-/// names, and it reports an unknown one through [`serde::de::Error::unknown_variant`].
-#[derive(Debug, thiserror::Error)]
-enum KindProbe {
-    /// The kind is no variant of this release's [`DomainEvent`].
-    #[error("unknown event kind")]
-    Unknown,
-    /// Anything else, such as the missing data of a known kind.
-    #[error("{0}")]
-    Other(String),
-}
-
-impl serde::de::Error for KindProbe {
-    /// Keeps the message, for the error to be complete.
-    fn custom<T: Display>(message: T) -> Self {
-        Self::Other(message.to_string())
-    }
-
-    /// Marks the kind as unknown.
-    fn unknown_variant(_: &str, _: &'static [&'static str]) -> Self {
-        Self::Unknown
-    }
-}
-
-impl KindProbe {
-    /// Whether `kind` is the serde tag of a [`DomainEvent`] variant of this release.
-    fn knows(kind: &str) -> bool {
-        let tag = MapDeserializer::<_, Self>::new(iter::once(("kind", kind)));
-        !matches!(DomainEvent::deserialize(tag), Err(Self::Unknown))
-    }
-}
-
 /// An event joined with its personal data, as the read queries return it.
 struct EventRow {
     /// Event identifier.
@@ -211,7 +178,7 @@ impl TryFrom<EventRow> for StoredEvent {
         };
         // Known only if it decodes to an event this release writes in the same
         // version. A version this release does not write came from a newer one.
-        let decoded = KindProbe::knows(&row.kind).then(|| {
+        let decoded = KindProbe::knows::<DomainEvent>(&row.kind).then(|| {
             DomainEvent::deserialize(&Value::Object(Map::from_iter([
                 ("kind".to_owned(), Value::String(row.kind.clone())),
                 ("data".to_owned(), payload.clone()),

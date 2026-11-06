@@ -284,11 +284,11 @@ just auth account alice picture remove --reason "Impersonates someone"
   Without a terminal they refuse unless given `--yes`.
 - `account <user>` reads and changes the settings administrators share with the
   owner: the display name, passkeys, social identities, email addresses,
-  sessions, connected apps, the profile picture and the security history, with
-  the owner's own operations. It never adds a way to sign in or an address. Every
-  change needs `--reason`, which the owner sees in their history; reads are
-  recorded as views, once an hour per operator, which only the audit shows, not
-  the owner. See
+  sessions, connected apps, the profile picture, the security history and the
+  notifications, with the owner's own operations. It never adds a way to sign in
+  or an address. Every change needs `--reason`, which the owner sees in their
+  history; reads are recorded as views, once an hour per operator, which only the
+  audit shows, not the owner. See
   [surfaces.md](docs/architecture/surfaces.md#changing-an-account-on-its-owners-behalf)
   for what is shared.
 - `user recover` is for an owner who lost every passkey. It signs the account
@@ -380,6 +380,28 @@ Upgrading from a release that stored usernames: run its `handle check`, and rena
 every account it lists with its `handle rename`, before deploying. The migration
 that moves usernames into handles refuses to run, naming them, while any remain.
 
+### Notifications
+
+Every account has an inbox at `auth.piquel.fr/settings/notifications`: what
+Piquel tells its owner about the account, newest first, with the unread count in
+the settings sidebar and on the overview. Today that is a replaced primary
+address, a removed address, a recovery that revoked the account's passkeys,
+enrolled one or was undone, an account disabled, enabled, scheduled for deletion
+or restored, and a handle or display name changed, or a profile picture removed,
+by support. Each notification opens on a page of its own, which marks it read
+when the browser came from auth's own pages, so a link from another site cannot
+dismiss one, and shows the security history entry of the event it came from
+while the history keeps it, with "This wasn’t me" where the history allows a
+report. A notification holds no personal data, so it reads the same after its
+event's personal data is erased or the event is pruned.
+
+The owner marks one unread, or every one read, in settings or through
+`POST /account/notifications/{id}/read`, `…/{id}/unread` and
+`/account/notifications/read`. `GET /account/notifications`, `…/{id}` and
+`…/unread` read them without marking anything. Administrators read an account's
+inbox on its dashboard page and operators with `account <user> notifications
+list|show`; neither marks anything read. The data export includes the inbox.
+
 ### Email
 
 Accounts add, verify, choose the primary of and remove their addresses on
@@ -418,7 +440,8 @@ probation sign-in.
   and backup state, no key material), linked identities, devices with their IP
   addresses, an administrator's dashboard sign-ins, consents, refresh grants, the
   apps the account registered, its recoveries (dates, state and the passkey each
-  enrolled, never a link) and the security history. It is read
+  enrolled, never a link), the security history and the notifications with when
+  each was read. It is read
   from one snapshot, holds no secret or digest, nothing may cache it, and it is
   recorded in the history.
 - **Deleting** asks for the account's handle. The account becomes `deleting`, every

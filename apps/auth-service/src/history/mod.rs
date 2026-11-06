@@ -152,6 +152,26 @@ impl HistoryItem {
             .collect())
     }
 
+    /// The entry the event `event_id` of `user`'s shows, if their history shows
+    /// one and still keeps the event: what a notification's page shows of the
+    /// event it comes from.
+    pub(crate) async fn find(
+        database: &Database,
+        user: UserId,
+        event_id: EventId,
+    ) -> Result<Option<Self>, DatabaseError> {
+        let filter = EventFilter {
+            subject: Some(user),
+            id: Some(event_id),
+            ..EventFilter::default()
+        };
+        let Some(stored) = database.events().list(&filter, 1).await?.pop() else {
+            return Ok(None);
+        };
+        let clients = Self::client_names(database.oidc()).await?;
+        Ok(Self::new(&stored, &clients))
+    }
+
     /// Every entry of the account's history, newest first, read in `tx`, for its
     /// data export.
     pub(crate) async fn all(

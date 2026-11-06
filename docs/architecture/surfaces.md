@@ -15,8 +15,9 @@ The auth executable owns everything that authenticates someone or issues a
 credential: discovery, JWKS, authorization, token, userinfo, logout, and the
 pages a ceremony needs (login, signup, consent, passkey confirmation, account
 recovery at `/recover` and `/recover/undo`, device verification *(planned)*). It
-also serves the account settings at `/settings`, an overview first, with the
-sign-in methods at `/settings/sign-in` and the other pages on the paths
+also serves the account settings at `/settings`, an overview first, then the
+inbox at `/settings/notifications`, the sign-in methods at `/settings/sign-in` and
+the other pages on the paths
 piquel.fr used, and redirects its root there, and the developer console, where
 accounts register their own OIDC clients, at `/developers`. The admin dashboard is the same
 executable too, on another listener and host (see admin.piquel.fr below).
@@ -129,10 +130,10 @@ who acts on it, and a read a `Viewer`, the account and who reads it. The owner's
 settings pages and `/account` routes run them as the owner of the session cookie,
 the only way to act as an owner. The `auth-service account <user> …`
 command runs them as the operator at the terminal, and the dashboard's display
-name, sign-in methods, profile picture, email addresses, connected apps and
-security history pages call them in-process as an administrator, rendering the
-owner's own settings sections without what adds a way in, and asking for a
-reason with each change. All run the same safety
+name, sign-in methods, profile picture, email addresses, connected apps,
+security history and notifications pages call them in-process as an
+administrator, rendering the owner's own settings sections without what adds a
+way in, and asking for a reason with each change. All run the same safety
 rules: for example, one active passkey always remains, whoever removes the
 others.
 
@@ -154,6 +155,7 @@ signed out, and confirming with a passkey by the session it confirms.
 | Sessions | list, sign out one, sign out all | |
 | Connected apps | list, remove an app's access | |
 | Security history | read | report an entry |
+| Notifications | list, read | mark read or unread |
 | Account data | | download |
 | OIDC clients (the developer console) | | all; administrators use `AdminService`'s |
 

@@ -247,6 +247,7 @@ pub async fn dashboard_frame<'a>(
             href,
             current: dashboard.current == Some(*tab),
             warning: warning && *tab == Tab::Overview,
+            count: None,
         })
         .collect();
     // A page inside a tab, such as one account under Users, has the tab in its

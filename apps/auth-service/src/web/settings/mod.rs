@@ -12,6 +12,8 @@ mod data;
 mod emails;
 /// Security history.
 mod history;
+/// The inbox, and one notification's page.
+mod notifications;
 /// The account at a glance.
 mod overview;
 /// The profile: its handle, display name and picture.
@@ -27,6 +29,7 @@ pub(super) use connected::ConnectedApps;
 pub(super) use data::AccountData;
 pub(super) use emails::Addresses;
 pub(super) use history::History;
+pub(super) use notifications::{Inbox, NotificationPage};
 pub(super) use overview::Overview;
 pub(super) use profile::Profile;
 pub(super) use sessions::Devices;
@@ -41,12 +44,13 @@ use crate::{
     federation::FederationApplication,
     grants::ConnectedApp,
     history::{HistoryItem, HistoryPage},
+    notifications::NotificationItem,
     routes::page::settings,
     sessions::SessionItem,
 };
 use piquel_common::protocol::api::Identity;
 use piquel_ui::{
-    ConnectedAppRow, DeviceRow, EmailRow, HistoryRow, Messages, ProviderRow, Section, Tab,
+    ConnectedAppRow, DeviceRow, EmailRow, HistoryRow, InboxRow, Messages, ProviderRow, Section, Tab,
 };
 use topcoat::{
     context::Cx,
@@ -56,8 +60,9 @@ use topcoat::{
 use url::Url;
 
 /// Each tab and the page it links, in the sidebar's order.
-pub(super) const TABS: [(Tab, &str); 8] = [
+pub(super) const TABS: [(Tab, &str); 9] = [
     (Tab::Overview, settings::HOME),
+    (Tab::Notifications, settings::NOTIFICATIONS),
     (Tab::SignIn, settings::SIGN_IN),
     (Tab::Profile, settings::PROFILE),
     (Tab::Emails, settings::EMAILS),
@@ -124,6 +129,19 @@ impl<'a> From<&'a HistoryItem> for HistoryRow<'a> {
             ip: item.ip,
             device: item.device,
             erased: item.erased,
+        }
+    }
+}
+
+impl<'a> From<&'a NotificationItem> for InboxRow<'a> {
+    /// The notification as a page lists it.
+    fn from(item: &'a NotificationItem) -> Self {
+        Self {
+            id: item.id,
+            created_at: item.created_at,
+            read: item.read(),
+            subject: item.subject,
+            body: &item.body,
         }
     }
 }

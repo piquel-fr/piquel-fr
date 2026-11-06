@@ -165,6 +165,8 @@ impl AccountOperation {
                 "--reason",
                 "Impersonation",
             ],
+            Self::ListNotifications => &["account", "alice", "notifications", "list"],
+            Self::ViewNotification => &["account", "alice", "notifications", "show", AN_ID],
         }
     }
 }

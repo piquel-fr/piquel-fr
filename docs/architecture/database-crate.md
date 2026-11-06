@@ -509,3 +509,17 @@ theirs. One transaction records `CompromiseReported`, ends the account's other
 sessions with `RevocationReason::CompromiseReported` and revokes every refresh
 family. The answer names the action that undoes the entry, such as removing the
 passkey it added, which still needs a passkey confirmation.
+
+### Notifications
+
+`DomainEvent::notification` decides which events tell their subject something,
+naming every variant as `history_entry` does. `record` writes that notification
+to the subject's inbox (`notifications`) in the event's transaction, so a
+committed event has its notification and a rolled-back one has none; an account
+purged while a request was in flight gets none. A notification stores the
+serialized `Notification` and no personal data, and `event_id` is no foreign key:
+it renders the same once its event's personal data is erased or the event is
+pruned. Pages order by `(created_at, id)`, since notifications written in one
+transaction share `now()`. A kind a newer release wrote reads as unknown, as
+events' kinds do, and the inbox skips it. Purging an account deletes its
+notifications by cascade.

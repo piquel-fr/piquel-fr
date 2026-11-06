@@ -307,6 +307,12 @@ impl AccountOperation {
             Self::ListApps => service.apps(viewer).await.map(drop),
             Self::ViewHistory => service.history(viewer, None).await.map(drop),
             Self::ViewPicture => service.picture(viewer).await.map(drop),
+            Self::ListNotifications => service.notifications(viewer, None).await.map(drop),
+            // Checked before it looks the notification up, so any ID will do.
+            Self::ViewNotification => service
+                .notification(viewer, piquel_common::NotificationId::new())
+                .await
+                .map(drop),
             Self::RenamePasskey
             | Self::RevokePasskey
             | Self::UnlinkIdentity

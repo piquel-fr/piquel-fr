@@ -63,6 +63,8 @@ pub struct AccountNav<'a> {
     /// The admin dashboard, for an account that administers Piquel; a section of
     /// its own in the sidebar, which nobody else sees.
     pub dashboard: Option<&'a str>,
+    /// How many notifications are unread, which the inbox's tab counts.
+    pub unread: u64,
 }
 
 /// A signed-in page of `section`, in the account's shell: the sidebar of `nav`
@@ -106,6 +108,7 @@ pub async fn account<'a>(
             href,
             current: nav.current == Some(*tab),
             warning: false,
+            count: (*tab == Tab::Notifications && nav.unread > 0).then_some(nav.unread),
         })
         .collect();
     let console = [NavItem {
@@ -114,6 +117,7 @@ pub async fn account<'a>(
         href: nav.developers,
         current: nav.section == Section::Developers,
         warning: false,
+        count: None,
     }];
     let dashboard: Vec<_> = nav
         .dashboard
@@ -123,6 +127,7 @@ pub async fn account<'a>(
             href,
             current: false,
             warning: false,
+            count: None,
         })
         .into_iter()
         .collect();

@@ -114,6 +114,14 @@ html[data-sidebar='collapsed'] .shell {
   font-size: 0.74rem;
   color: var(--muted);
 }
+.sidebar .count.new {
+  min-width: 1.2rem;
+  padding: 0 0.3rem;
+  border-radius: 999px;
+  background: var(--accent);
+  color: var(--on-accent);
+  text-align: center;
+}
 .sidebar .count.warning {
   width: 8px;
   height: 8px;
@@ -210,7 +218,7 @@ html[data-sidebar='collapsed'] .sidebar .top {
 html[data-sidebar='collapsed'] .sidebar .brand .name,
 html[data-sidebar='collapsed'] .sidebar .area,
 html[data-sidebar='collapsed'] .sidebar .label,
-html[data-sidebar='collapsed'] .sidebar .count:not(.warning),
+html[data-sidebar='collapsed'] .sidebar .count:not(.warning, .new),
 html[data-sidebar='collapsed'] .sidebar .who > div {
   display: none;
 }
@@ -241,6 +249,15 @@ html[data-sidebar='collapsed'] .sidebar .who {
 html[data-sidebar='collapsed'] .sidebar nav a[aria-current] {
   box-shadow: inset 0 0 0 1px var(--line);
 }
+html[data-sidebar='collapsed'] .sidebar .count.new {
+  min-width: 0;
+  width: 8px;
+  height: 8px;
+  padding: 0;
+  overflow: hidden;
+  color: transparent;
+}
+html[data-sidebar='collapsed'] .sidebar .count.new,
 html[data-sidebar='collapsed'] .sidebar .count.warning {
   position: absolute;
   top: 5px;

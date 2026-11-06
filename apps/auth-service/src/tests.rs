@@ -320,11 +320,22 @@ impl Browser {
     /// Navigates to `path` on the whole service as this browser, and returns the
     /// whole response.
     pub(crate) async fn visit(&self, router: &Router, path: &str) -> Response {
-        let request = self
-            .request(Method::GET, path)
-            .body(Body::empty())
-            .expect("request");
-        Self::dispatch(router, request).await
+        self.visit_from(router, path, &[]).await
+    }
+
+    /// [`Self::visit`], with `headers` such as the `Sec-Fetch-Site` a navigation
+    /// sends.
+    pub(crate) async fn visit_from(
+        &self,
+        router: &Router,
+        path: &str,
+        headers: &[(&str, &str)],
+    ) -> Response {
+        let mut request = self.request(Method::GET, path);
+        for (name, value) in headers {
+            request = request.header(*name, *value);
+        }
+        Self::dispatch(router, request.body(Body::empty()).expect("request")).await
     }
 
     /// Posts a page's form, `fields`, to `path` on the whole service as this browser,

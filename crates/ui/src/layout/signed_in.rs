@@ -26,6 +26,8 @@ pub struct NavItem<'a> {
     pub current: bool,
     /// Whether something there needs attention, which a dot shows.
     pub warning: bool,
+    /// How many things there are new, such as unread notifications, if any.
+    pub count: Option<u64>,
 }
 
 /// A group of the sidebar's links, under its label, if any.
@@ -245,6 +247,8 @@ async fn sidebar<'a>(frame: &'a Shell<'a>) -> Result<impl View> {
                             <span class="label">(item.label)</span>
                             if item.warning {
                                 <span class="count warning" title="Needs attention"></span>
+                            } else if let Some(count) = item.count {
+                                <span class="count new" title=(format!("{count} new"))>(count.to_string())</span>
                             }
                         </a>
                     }

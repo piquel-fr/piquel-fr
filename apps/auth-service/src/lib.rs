@@ -35,6 +35,8 @@ mod history;
 mod jobs;
 /// Signing keys: sealed storage, rotation and the key set every replica reloads.
 mod keys;
+/// The account's inbox: its notifications, read and unread.
+mod notifications;
 /// OAuth and `OpenID` Connect protocol application.
 mod oidc;
 /// Lists of operations every surface serving them must cover.
@@ -77,6 +79,7 @@ pub use handles::HandlesError;
 use history::HistoryApplication;
 pub use jobs::Jobs;
 pub use keys::{KeyError, KeyStore, SigningKeys};
+use notifications::NotificationApplication;
 use oidc::OidcApplication;
 use passkey::PasskeyApplication;
 use pictures::PictureApplication;
@@ -142,6 +145,7 @@ impl AuthConfig {
             .merge(passkeys.routes())
             .merge(federation.clone().routes())
             .merge(HistoryApplication::new(database.clone()).routes())
+            .merge(NotificationApplication::new(database.clone()).routes())
             .merge(AuditApplication::new(database.clone()).routes())
             .merge(AccountApplication::new(database.clone()).routes())
             .merge(EmailApplication::new(database.clone(), &self.email).routes())

@@ -191,6 +191,8 @@ async fn purge_leaves_nothing_that_references_or_identifies_the_account() {
         INSERT INTO oidc_consents (user_id, client_id, audience, scopes)
         VALUES ('{user}', '{client}', 'test', '[]');
         INSERT INTO administrators (user_id) VALUES ('{user}');
+        INSERT INTO notifications (id, user_id, payload)
+        VALUES (uuidv7(), '{user}', '{{\"kind\": \"account_enabled\"}}');
         INSERT INTO authorization_requests (
             id, secret_digest, client_id, redirect_uri, client_state, pkce_challenge, scopes,
             audience, interaction, expires_at, hinted_user_id
@@ -318,6 +320,7 @@ async fn purge_leaves_nothing_that_references_or_identifies_the_account() {
         "refresh_token_families.user_id",
         "administrators.user_id",
         "account_deletions.user_id",
+        "notifications.user_id",
     ] {
         assert!(
             referencing.iter().any(|column| column == expected),

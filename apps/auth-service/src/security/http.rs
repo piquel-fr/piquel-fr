@@ -26,7 +26,7 @@ use std::{
 use thiserror::Error;
 
 /// Fetch metadata header naming how a request's initiator relates to its target.
-pub(super) const FETCH_SITE_HEADER: &str = "sec-fetch-site";
+pub(crate) const FETCH_SITE_HEADER: &str = "sec-fetch-site";
 /// Trusted ingress must overwrite this header with exactly one client address.
 pub(super) const FORWARDED_FOR_HEADER: &str = "x-forwarded-for";
 /// Requests refused because their client's budget was exhausted, by category.

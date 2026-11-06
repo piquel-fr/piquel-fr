@@ -12,14 +12,15 @@ use crate::{
 };
 use axum::http::{StatusCode, header};
 use piquel_common::{
-    AuthenticationMethod, EventId, Provider, TokenId,
+    AuthenticationMethod, EmailId, EventId, Provider, TokenId,
     events::{Actor, DomainEvent, EventContext, RequestOrigin},
 };
 use piquel_crypto::Secret;
 use piquel_repository::InsertExternalIdentity;
 use piquel_ui::{
     ConnectedAppChange, ConnectedAppsState, DataChange, DeviceChange, EmailChange, HistoryChange,
-    HistoryState, PICTURE_FIELD, ProfileChange, ProfileDialog, ProfileState, Query, SignInChange,
+    HistoryState, InboxChange, NotificationState, PICTURE_FIELD, ProfileChange, ProfileDialog,
+    ProfileState, Query, SignInChange,
 };
 
 /// The devices page lists every signed-in browser, and signs one or all of the
@@ -443,6 +444,97 @@ async fn linking_starts_at_the_provider() {
             settings::SIGN_IN
         )
     );
+}
+
+/// The inbox lists a notification bold while unread, and the sidebar counts it.
+/// Opening it from auth's own pages marks it read; a link from another site
+/// does not. Its page offers to report the entry its event made, and marking it
+/// unread, or every one read, goes back to the inbox.
+#[tokio::test]
+#[ignore = "requires TEST_DATABASE_URL"]
+async fn notifications_are_read_by_opening_them() {
+    let replicas = Replicas::new().await;
+    let database = Replicas::database().await;
+    let browser = Browser::new_account(&database).await;
+    let context = EventContext {
+        actor: Actor::User {
+            user_id: browser.user_id,
+            session_id: Some(browser.session_id),
+        },
+        origin: RequestOrigin::default(),
+        reason: None,
+    };
+    let removed = DomainEvent::EmailRemoved {
+        email_id: EmailId::new(),
+    };
+    let mut tx = database.begin().await.expect("transaction");
+    tx.record(&context, Some(browser.user_id), removed)
+        .await
+        .expect("record");
+    tx.commit().await.expect("commit");
+    let unread = async || {
+        database
+            .notifications()
+            .unread(browser.user_id)
+            .await
+            .expect("unread")
+    };
+    let subject = "An email address was removed from your account";
+
+    let page = html(browser.visit(&replicas.a, settings::NOTIFICATIONS).await).await;
+    assert!(
+        page.contains(&format!("<strong>{subject}</strong>")),
+        "{page}"
+    );
+    assert!(
+        page.contains(r#"<span class="count new" title="1 new">1</span>"#),
+        "{page}"
+    );
+    let id = database
+        .notifications()
+        .list(browser.user_id, None, 1)
+        .await
+        .expect("inbox")[0]
+        .id;
+    let item = settings::NOTIFICATION.replace("{id}", &id.to_string());
+
+    let foreign = [("sec-fetch-site", "cross-site")];
+    let page = html(browser.visit_from(&replicas.a, &item, &foreign).await).await;
+    assert!(
+        page.contains("Piquel no longer sends anything to that address."),
+        "{page}"
+    );
+    assert_eq!(unread().await, 1, "a link from another site marks nothing");
+    let page = html(browser.visit_from(&replicas.a, &item, OWN_PAGE).await).await;
+    assert_eq!(unread().await, 0);
+    assert!(page.contains("This wasn’t me"), "{page}");
+    let reporting = NotificationState { reporting: true }
+        .on(&item)
+        .expect("link");
+    let page = html(browser.visit(&replicas.a, &reporting).await).await;
+    assert!(page.contains("Secure your account?"), "{page}");
+    assert!(
+        page.contains(&format!(r#"action="{}""#, settings::HISTORY)),
+        "{page}"
+    );
+
+    let marked = browser
+        .post(
+            &replicas,
+            settings::NOTIFICATIONS,
+            &InboxChange::MarkUnread { id },
+        )
+        .await;
+    assert_eq!(redirect(&marked), settings::NOTIFICATIONS);
+    assert_eq!(unread().await, 1);
+    browser
+        .post(&replicas, settings::NOTIFICATIONS, &InboxChange::ReadAll)
+        .await;
+    assert_eq!(unread().await, 0);
+
+    let missing = settings::NOTIFICATION.replace("{id}", "not-an-id");
+    let shown = browser.visit_from(&replicas.a, &missing, OWN_PAGE).await;
+    assert_eq!(shown.status(), StatusCode::NOT_FOUND);
 }
 
 /// A history page lists entries with a report button each, older ones a page at a
