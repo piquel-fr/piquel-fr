@@ -103,7 +103,7 @@ repositories! {
     passkeys: PasskeyRepository;
     /// OIDC clients, authorization requests, codes and consent.
     oidc: OidcRepository;
-    /// Refresh token families and their rotation.
+    /// Refresh token families and their redemption.
     tokens: TokenRepository;
     /// Social login transactions, pending signups and linked identities.
     federation: FederationRepository;
@@ -347,7 +347,7 @@ pub(crate) mod signing_keys;
 /// Focused tests for the column types shared by every repository.
 #[cfg(test)]
 mod tests;
-/// Refresh-token grants, rotation and replay revocation.
+/// Refresh-token grants, their redemption and replay revocation.
 pub(crate) mod tokens;
 /// Account records and serialization locks.
 pub(crate) mod users;

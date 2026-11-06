@@ -426,7 +426,7 @@ impl<'a, 't> ClientRegistry<'a, 't> {
     /// Fails if the client does not exist or was already deleted, or the database
     /// fails.
     pub async fn delete(&mut self, id: &ClientId) -> Result<(), ClientRegistryError> {
-        // Families before the client, in the order a refresh rotation locks them.
+        // Families before the client, in the order a refresh locks them.
         self.tx
             .tokens()
             .lock_client_families(std::slice::from_ref(id))

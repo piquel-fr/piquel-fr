@@ -3,7 +3,7 @@
 use super::*;
 use crate::tests::{refresh_grant, sign_out};
 use piquel_common::{TokenId, events::Actor};
-use piquel_repository::RefreshRotationError;
+use piquel_repository::{RefreshRedemption, RefreshRedemptionError};
 use tokio::task::JoinHandle;
 
 /// A public client and an account holding refresh grants to it, which the
@@ -91,9 +91,14 @@ async fn deleted_clients_stay_deleted() {
     let mut tx = database.begin().await.expect("transaction");
     assert!(matches!(
         tx.tokens()
-            .consume_for_rotation(token, std::slice::from_ref(&digest), client_id.as_str())
+            .redeem_refresh(
+                token,
+                std::slice::from_ref(&digest),
+                client_id.as_str(),
+                RefreshRedemption::Rotate
+            )
             .await,
-        Err(RefreshRotationError::Invalid)
+        Err(RefreshRedemptionError::Invalid)
     ));
     drop(tx);
     let oidc = &mut database.oidc();
@@ -174,10 +179,11 @@ async fn deletion_and_refresh_rotation_never_deadlock() {
     until_blocked(&mut holder, 1).await;
     holder
         .tokens()
-        .consume_for_rotation(
+        .redeem_refresh(
             rotated,
             std::slice::from_ref(&rotated_digest),
             granting.client.as_str(),
+            RefreshRedemption::Rotate,
         )
         .await
         .expect("the rotation locks the client while the deletion waits");
@@ -190,13 +196,14 @@ async fn deletion_and_refresh_rotation_never_deadlock() {
     let mut tx = granting.database.begin().await.expect("transaction");
     assert!(matches!(
         tx.tokens()
-            .consume_for_rotation(
+            .redeem_refresh(
                 rotated,
                 std::slice::from_ref(&rotated_digest),
-                granting.client.as_str()
+                granting.client.as_str(),
+                RefreshRedemption::Rotate
             )
             .await,
-        Err(RefreshRotationError::Invalid | RefreshRotationError::Replay { .. })
+        Err(RefreshRedemptionError::Invalid | RefreshRedemptionError::Replay { .. })
     ));
 }
 
@@ -236,9 +243,14 @@ async fn deletion_skips_families_granted_while_it_waits() {
     assert!(matches!(
         rotation
             .tokens()
-            .consume_for_rotation(token, std::slice::from_ref(&digest), id)
+            .redeem_refresh(
+                token,
+                std::slice::from_ref(&digest),
+                id,
+                RefreshRedemption::Rotate
+            )
             .await,
-        Err(RefreshRotationError::Invalid)
+        Err(RefreshRedemptionError::Invalid)
     ));
 }
 

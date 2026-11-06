@@ -334,20 +334,20 @@ impl From<piquel_repository::CodeRedemptionError> for OAuthError {
     }
 }
 
-impl From<piquel_repository::RefreshRotationError> for OAuthError {
-    /// Rotation failures reject the grant; persistence failures retain their internal status.
-    fn from(error: piquel_repository::RefreshRotationError) -> Self {
+impl From<piquel_repository::RefreshRedemptionError> for OAuthError {
+    /// Redemption failures reject the grant; persistence failures retain their internal status.
+    fn from(error: piquel_repository::RefreshRedemptionError) -> Self {
         match error {
-            piquel_repository::RefreshRotationError::Database(source) => source.into(),
-            error @ piquel_repository::RefreshRotationError::Invalid => OAuthCode::InvalidGrant
+            piquel_repository::RefreshRedemptionError::Database(source) => source.into(),
+            error @ piquel_repository::RefreshRedemptionError::Invalid => OAuthCode::InvalidGrant
                 .reject_with("refresh_token is unknown, expired or revoked", error),
-            error @ piquel_repository::RefreshRotationError::Replay { .. } => {
+            error @ piquel_repository::RefreshRedemptionError::Replay { .. } => {
                 OAuthCode::InvalidGrant.reject_with(
                     "refresh_token was already used, so its whole token family is now revoked",
                     error,
                 )
             }
-            error @ piquel_repository::RefreshRotationError::Policy { .. } => {
+            error @ piquel_repository::RefreshRedemptionError::Policy { .. } => {
                 OAuthCode::InvalidGrant.reject_with(
                     "the client or account no longer allows this grant, so its token family \
                      is now revoked",

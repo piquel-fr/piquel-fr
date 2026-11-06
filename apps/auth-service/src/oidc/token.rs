@@ -1,4 +1,4 @@
-//! Token exchange, refresh rotation, revocation and `UserInfo`.
+//! Token exchange, refresh, revocation and `UserInfo`.
 
 use super::{
     ACCESS_TOKEN_SECONDS, AuthScheme, GrantType, OAuthCode, OAuthError, OidcApplication,
@@ -13,7 +13,7 @@ use axum::{
     extract::State,
     http::{HeaderMap, StatusCode, header},
 };
-use chrono::{Duration, Utc};
+use chrono::{DateTime, Duration, Utc};
 use piquel_common::{
     ClientId, SessionId, TokenId, UserId,
     events::{CodeRedemptionFailure, DomainEvent, EventContext, GrantRevocation},
@@ -27,7 +27,8 @@ use piquel_common::{
 };
 use piquel_repository::{
     CodeRedemptionError, ConsumedAuthorizationCode, DatabaseTransaction, InsertRefreshFamily,
-    InsertRefreshToken, RefreshRotationError, SessionAuthentication,
+    InsertRefreshToken, RefreshRedemption, RefreshRedemptionError, SessionAuthentication,
+    StoredOidcClient,
 };
 use piquel_telemetry::{Counter, Label};
 use serde::{Deserialize, Serialize};
@@ -45,7 +46,7 @@ pub(super) struct TokenForm {
     redirect_uri: Option<String>,
     /// Secret verifier proving possession of the original PKCE challenge.
     code_verifier: Option<String>,
-    /// Opaque rotating refresh token, when refresh policy permits one.
+    /// Opaque refresh token to redeem.
     refresh_token: Option<String>,
     /// Space-separated scopes requested or granted.
     scope: Option<String>,
@@ -116,7 +117,8 @@ pub(super) struct TokenResponse {
     /// Signed client-bound identity token, present only for openid grants.
     #[serde(skip_serializing_if = "Option::is_none")]
     id_token: Option<String>,
-    /// Opaque rotating refresh token, when refresh policy permits one.
+    /// Opaque refresh token: the first of a grant refresh policy permits, or the
+    /// replacement of a rotated one. A client that keeps its token gets none.
     #[serde(skip_serializing_if = "Option::is_none")]
     refresh_token: Option<String>,
 }
@@ -143,7 +145,7 @@ static TOKENS_ISSUED: Counter<[Label; 2]> = Counter::new(
     "Tokens issued by the token endpoint, by grant type and token type.",
 );
 
-/// Client-bound claim policy shared by initial exchanges and refresh rotation.
+/// Client-bound claim policy shared by initial exchanges and refreshes.
 struct TokenGrant<'a> {
     /// Client identifier bound into the token claims.
     client: &'a ClientId,
@@ -275,10 +277,10 @@ impl OidcApplication {
         let context = context.client(&client.id);
         let tokens = match grant {
             GrantType::AuthorizationCode => app.exchange_code(form, &client.id, &context).await,
-            GrantType::RefreshToken => app.rotate_refresh(form, &client.id, &context).await,
+            GrantType::RefreshToken => app.refresh(form, &client, &context).await,
         }?;
         tokens.count(grant);
-        // After the grant committed, outside its transaction: concurrent rotations
+        // After the grant committed, outside its transaction: concurrent refreshes
         // of one client each hold their family and share-lock the client, so the
         // hourly write, which needs the client exclusively, would deadlock them if
         // two made it inside. The tokens are issued, so a failure here only leaves
@@ -309,7 +311,7 @@ impl OidcApplication {
         )?;
         let digests = self.accepted_digests(&opaque)?;
         let mut tx = self.database.begin().await?;
-        // Lock the account before the code, as refresh rotation and removing an app
+        // Lock the account before the code, as a refresh and removing an app
         // do: a removal then either commits first and expires the code, or waits
         // for this exchange and revokes the refresh family it creates.
         if let Some(user) = tx.oidc().code_user(opaque.id, &digests).await? {
@@ -401,13 +403,16 @@ impl OidcApplication {
         })
     }
 
-    /// Rotates the authenticated client's valid token, and commits replay or policy
-    /// revocation before rejecting it. The new tokens report the grant's original
-    /// authentication, not the session's current one (OIDC Core §12.2).
-    async fn rotate_refresh(
+    /// Redeems the authenticated client's valid token, and commits replay or policy
+    /// revocation before rejecting it. A public client's token rotates: the response
+    /// carries its replacement. A confidential client keeps its token, so the
+    /// response carries none and the refresh writes nothing. The new tokens report
+    /// the grant's original authentication, not the session's current one (OIDC
+    /// Core §12.2).
+    async fn refresh(
         &self,
         form: TokenForm,
-        client_id: &ClientId,
+        client: &StoredOidcClient,
         context: &EventContext,
     ) -> Result<TokenResponse, OAuthError> {
         let opaque = OpaqueToken::parse(
@@ -417,58 +422,57 @@ impl OidcApplication {
                 .ok_or_else(|| OAuthCode::InvalidGrant.reject("refresh_token is required"))?,
         )?;
         let digests = self.accepted_digests(&opaque)?;
+        let redemption = RefreshRedemption::from(client.kind);
         let mut tx = self.database.begin().await?;
-        let rotated = match tx
+        let redeemed = match tx
             .tokens()
-            .consume_for_rotation(opaque.id, &digests, client_id.as_str())
+            .redeem_refresh(opaque.id, &digests, client.id.as_str(), redemption)
             .await
         {
             Ok(value) => value,
             Err(error) => {
-                return Err(Self::refresh_rejection(tx, context, client_id, error).await);
+                return Err(Self::refresh_rejection(tx, context, &client.id, error).await);
             }
         };
-        if rotated.client_id != client_id.as_str() {
+        if redeemed.client_id != client.id.as_str() {
             return Err(
                 OAuthCode::InvalidGrant.reject("refresh_token was issued to another client")
             );
         }
-        let scopes = form.refresh_scopes(&rotated.scopes)?;
+        let scopes = form.refresh_scopes(&redeemed.scopes)?;
         let user = tx
             .users()
-            .find_by_id(rotated.user_id)
+            .find_by_id(redeemed.user_id)
             .await?
             .ok_or_else(|| OAuthCode::InvalidGrant.reject("the account no longer exists"))?;
         let session = tx
             .sessions()
-            .find_by_id(rotated.session_id)
+            .find_by_id(redeemed.session_id)
             .await?
             .ok_or_else(|| OAuthCode::InvalidGrant.reject(SESSION_ENDED))?;
-        let opaque_refresh = OpaqueToken::new(TokenPrefix::RefreshToken)?;
-        let raw = opaque_refresh.encoded();
-        let (secret_digest, digest_key) = self.token_digest(&opaque_refresh)?;
-        tx.tokens()
-            .insert_token(&InsertRefreshToken {
-                id: opaque_refresh.id,
-                family_id: rotated.family_id,
-                secret_digest,
-                digest_key,
-                expires_at: session.expires_at,
-            })
-            .await?;
+        let refresh_token = match redemption {
+            RefreshRedemption::Rotate => {
+                let (token, raw) = self.new_refresh(redeemed.family_id, session.expires_at)?;
+                tx.tokens().insert_token(&token).await?;
+                Some(raw)
+            }
+            RefreshRedemption::Keep => None,
+        };
         let email = tx.oidc().primary_email(user.id).await?;
-        let mut tokens = TokenGrant {
-            client: client_id,
-            audience: &rotated.audience,
+        let tokens = TokenGrant {
+            client: &client.id,
+            audience: &redeemed.audience,
             scopes: &scopes,
             nonce: None,
             session: session.id,
-            authentication: &rotated.authentication,
+            authentication: &redeemed.authentication,
         }
         .issue(self, &user, email.as_deref())?;
-        tokens.refresh_token = Some(raw);
         tx.commit().await?;
-        Ok(tokens)
+        Ok(TokenResponse {
+            refresh_token,
+            ..tokens
+        })
     }
 
     /// Creates the refresh family of a redeemed code, linked to the code so a replay
@@ -485,9 +489,7 @@ impl OidcApplication {
             .await?
             .ok_or_else(|| OAuthCode::InvalidGrant.reject(SESSION_ENDED))?;
         let family_id = TokenId::new();
-        let opaque = OpaqueToken::new(TokenPrefix::RefreshToken)?;
-        let raw = opaque.encoded();
-        let (secret_digest, digest_key) = self.token_digest(&opaque)?;
+        let (token, raw) = self.new_refresh(family_id, session.expires_at)?;
         tx.tokens()
             .insert_family(
                 &InsertRefreshFamily {
@@ -500,16 +502,29 @@ impl OidcApplication {
                     scopes: code.scopes,
                     authentication: code.authentication,
                 },
-                &InsertRefreshToken {
-                    id: opaque.id,
-                    family_id,
-                    secret_digest,
-                    digest_key,
-                    expires_at: session.expires_at,
-                },
+                &token,
             )
             .await?;
         Ok((family_id, raw))
+    }
+
+    /// Generates a refresh token of `family_id`, accepted until `expires_at`, the
+    /// end of its browser session. Returns the row to insert and the encoded token.
+    fn new_refresh(
+        &self,
+        family_id: TokenId,
+        expires_at: DateTime<Utc>,
+    ) -> Result<(InsertRefreshToken, String), OAuthError> {
+        let opaque = OpaqueToken::new(TokenPrefix::RefreshToken)?;
+        let (secret_digest, digest_key) = self.token_digest(&opaque)?;
+        let token = InsertRefreshToken {
+            id: opaque.id,
+            family_id,
+            secret_digest,
+            digest_key,
+            expires_at,
+        };
+        Ok((token, opaque.encoded()))
     }
 
     /// Revokes the authenticated client’s refresh family, concealing invalid-token existence.
@@ -596,21 +611,21 @@ impl OidcApplication {
     }
 
     /// Persists replay/policy revocation, recorded as a revoked grant, before
-    /// returning the preserved rotation failure.
+    /// returning the preserved redemption failure.
     async fn refresh_rejection(
         tx: DatabaseTransaction<'_>,
         context: &EventContext,
         client_id: &ClientId,
-        error: RefreshRotationError,
+        error: RefreshRedemptionError,
     ) -> OAuthError {
         let (user_id, family_id, reason) = match error {
-            RefreshRotationError::Replay { user_id, family_id } => {
+            RefreshRedemptionError::Replay { user_id, family_id } => {
                 (user_id, family_id, GrantRevocation::RefreshReplay)
             }
-            RefreshRotationError::Policy { user_id, family_id } => {
+            RefreshRedemptionError::Policy { user_id, family_id } => {
                 (user_id, family_id, GrantRevocation::PolicyRejected)
             }
-            RefreshRotationError::Invalid | RefreshRotationError::Database(_) => {
+            RefreshRedemptionError::Invalid | RefreshRedemptionError::Database(_) => {
                 return error.into();
             }
         };

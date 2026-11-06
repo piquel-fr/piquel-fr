@@ -97,17 +97,13 @@ async fn sdk_login_client_runs_against_the_provider() {
     assert_eq!(user.sub, flow.user_id.to_string());
     assert!(user.profile.email.is_some());
 
+    // A confidential client keeps its refresh token, so a refresh returns none.
     let first = tokens.refresh_token.expect("refresh token");
-    let rotated = client
-        .refresh(&first)
-        .await
-        .expect("refresh")
-        .refresh_token
-        .expect("rotated refresh token");
-    assert_ne!(rotated.expose(), first.expose());
-    client.revoke(&rotated).await.expect("revoke");
+    let refreshed = client.refresh(&first).await.expect("refresh");
+    assert!(refreshed.refresh_token.is_none());
+    client.revoke(&first).await.expect("revoke");
     assert!(matches!(
-        client.refresh(&rotated).await,
+        client.refresh(&first).await,
         Err(OAuthError::Rejected { response, .. })
             if response.error == OAuthCode::InvalidGrant
     ));

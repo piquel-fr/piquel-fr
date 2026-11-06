@@ -1,4 +1,5 @@
-//! Authorization Code + PKCE, signed tokens, and rotating opaque refresh tokens.
+//! Authorization Code + PKCE, signed tokens, and opaque refresh tokens, rotated for
+//! public clients.
 
 /// Authorization, login continuation and consent.
 mod authorize;
@@ -10,7 +11,7 @@ mod inline;
 mod logout;
 /// The check of a client's current policy every authorization step runs.
 mod policy;
-/// Code exchanges, refresh rotation and identity claims.
+/// Code exchanges, refreshes and identity claims.
 mod token;
 
 use crate::config::{OidcConfig, TokenDigestKeys};
