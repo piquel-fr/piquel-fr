@@ -101,6 +101,13 @@ Checks run in this order, and the first failure is reported. Each failure is an
 Scope and step-up requirements are checked after validation, and fail with their
 own categories.
 
+A validated token is proof that every check passed, so an SDK builds one only by
+validating. In Rust the compiler enforces it: `AccessToken` and `IdToken` have
+private fields and no public constructor, scope markers are types with no values,
+and whether a token holds a scope set is always the SDK's check, since applications
+cannot implement it. Neither token deserializes: a session keeps only the ID
+token's claims.
+
 ## Signing keys
 
 The SDK caches the issuer's key set:
@@ -113,8 +120,8 @@ The SDK caches the issuer's key set:
 - Keys stay fresh for the response's `Cache-Control: max-age`, bounded to between
   30 seconds and 24 hours, or for one hour when there is none.
 - A failed refresh keeps the last good set, and still counts as a fetch.
-- Keys of an unknown `kty`, and keys whose `use` is not `sig`, are skipped (RFC 7517
-  §5). A set where two keys share a `kid` is rejected as a whole, and the previous
+- Keys of an unknown `kty`, keys whose `use` is not `sig`, and keys whose `key_ops`
+  does not list `verify` are skipped (RFC 7517 §4.3, §5). A set where two keys share a `kid` is rejected as a whole, and the previous
   set stays in use.
 - An RSA key whose modulus is under 2048 or over 8192 bits verifies nothing: its
   tokens fail with `bad_signature`.
@@ -134,7 +141,8 @@ Scopes are space-separated strings on the wire (RFC 6749 §3.3), and each token 
 printable ASCII without spaces, `"` or `\`. Each SDK types them, so a misspelled
 scope does not compile: the Rust SDK declares an application's scopes once with a
 macro, so a required scope is a type, and the TypeScript SDK with `defineScopes`,
-whose names become a union that `AccessToken.require` accepts.
+whose names become a union that `AccessToken.require` accepts. A scope list built
+from separate values checks each one, so one value never holds two scopes.
 
 ## Errors
 
@@ -144,7 +152,7 @@ the same values, listed in `piquel_common::protocol::sdk`.
 | Category | Meaning | Reasons |
 | --- | --- | --- |
 | `discovery` | Metadata could not be used | `issuer_mismatch`, `invalid_document`, `pkce_unsupported` |
-| `keys` | The key set could not be used | `invalid_document`, `duplicate_key_id` |
+| `keys` | The key set could not be used | `invalid_document`, `duplicate_key_id`, `unusable_key` |
 | `invalid_token` | A token failed validation | see [Token validation](#token-validation) and [Login](#login) |
 | `insufficient_scope` | A valid token lacks a required scope | none |
 | `insufficient_user_authentication` | A valid token's authentication is too weak or too old | none |
@@ -213,6 +221,10 @@ without `nonce` or `max_age`, then requires it to carry the sign-in over: the sa
 sign-in's (`authentication_changed`). `UserInfo` must name the ID token's `sub`
 (`subject_mismatch`). Both SDKs check these, taking the sign-in's ID token claims
 in `refresh` and `userinfo`.
+
+A callback that fails on the issuer's side, with a `network` or `keys` error, is
+not the browser's fault: server-side login answers it with 502, and any other
+failure with 400.
 
 The SDK never sends the `audience` parameter auth accepts today; auth then uses the
 client's default resource. They will send `resource` (RFC 8707) once auth supports

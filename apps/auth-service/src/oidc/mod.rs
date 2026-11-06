@@ -220,8 +220,11 @@ impl Scopes {
     }
 
     /// Rebuilds a scope set read from the database.
-    fn from_stored(scopes: &[String]) -> Self {
-        Self(scopes.iter().cloned().collect())
+    ///
+    /// # Errors
+    /// [`InvalidScope`](oauth::InvalidScope) if a stored scope is corrupt.
+    fn from_stored(scopes: &[String]) -> Result<Self, oauth::InvalidScope> {
+        oauth::Scopes::try_from_iter(scopes.iter().cloned()).map(Self)
     }
 
     /// Wraps the scopes of a token auth signed, which were limited when it was issued.

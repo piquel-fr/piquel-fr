@@ -91,7 +91,7 @@ impl TokenForm {
     /// Permits refresh scope narrowing while rejecting additions to the original grant.
     fn refresh_scopes(&self, granted: &[String]) -> Result<Scopes, OAuthError> {
         let Some(requested) = self.scope.as_deref() else {
-            return Ok(Scopes::from_stored(granted));
+            return Ok(Scopes::from_stored(granted)?);
         };
         let scopes = Scopes::parse(requested)?;
         if !scopes.allowed_by(granted) {
@@ -369,7 +369,7 @@ impl OidcApplication {
             return Err(OAuthCode::InvalidGrant.reject(CONSENT_WITHDRAWN));
         }
         let email = tx.oidc().primary_email(user.id).await?;
-        let scopes = Scopes::from_stored(&code.scopes);
+        let scopes = Scopes::from_stored(&code.scopes)?;
         let tokens = TokenGrant {
             client: &client.id,
             audience: &code.audience,

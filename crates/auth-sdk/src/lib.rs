@@ -25,7 +25,7 @@
 //! let issuer = Issuer::discover("https://auth.piquel.fr").await?;
 //! let notes = issuer.resource(Resource::new("notes-api")?);
 //! let token = notes.validate::<notes::Read>("eyJ...").await?;
-//! if let Subject::User(user) = token.subject {
+//! if let Subject::User(user) = token.subject() {
 //!     println!("{user} may read notes");
 //! }
 //! # Ok(()) }
@@ -186,5 +186,5 @@ impl Clock for SystemClock {
 /// Items the exported macros expand to; not part of the public API.
 #[doc(hidden)]
 pub mod __private {
-    pub use crate::protocol::oauth::Scopes;
+    pub use crate::{protocol::oauth::Scopes, scope::Declared};
 }

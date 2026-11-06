@@ -18,7 +18,7 @@
 //! }
 //!
 //! async fn list(Scoped(token): Scoped<notes::Read>) -> Json<Vec<String>> {
-//!     Json(vec![format!("notes of {:?}", token.subject)])
+//!     Json(vec![format!("notes of {:?}", token.subject())])
 //! }
 //!
 //! # async fn run() -> Result<(), Box<dyn std::error::Error>> {

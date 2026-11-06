@@ -3,7 +3,7 @@
 
 use super::*;
 use crate::{
-    Tokens,
+    BearerToken, IdToken, RefreshToken, Tokens,
     axum::login::{SessionCookie, SessionCookieError},
 };
 use ::axum::http::HeaderMap;
@@ -263,14 +263,21 @@ fn worst_case_tokens(access_bytes: usize) -> Tokens {
     claims["email_verified"] = json!(true);
     claims["preferred_username"] = json!("u".repeat(32));
     claims["profile_version"] = json!(u32::MAX);
-    serde_json::from_value(json!({
-        "id_token": { "claims": claims, "raw": "unused" },
-        "access_token": "a".repeat(access_bytes),
-        "expires_at": Utc::now() + TimeDelta::minutes(5),
-        "scopes": "email offline_access openid profile",
-        "refresh_token": format!("prt_{}.{}", USER, "s".repeat(43)),
-    }))
-    .expect("tokens")
+    Tokens {
+        id_token: Some(IdToken::unchecked(
+            serde_json::from_value(claims).expect("claims"),
+        )),
+        access_token: BearerToken::new("a".repeat(access_bytes)),
+        expires_at: Utc::now() + TimeDelta::minutes(5),
+        scopes: "email offline_access openid profile"
+            .parse()
+            .expect("scopes"),
+        refresh_token: Some(RefreshToken::new(format!(
+            "prt_{}.{}",
+            USER,
+            "s".repeat(43)
+        ))),
+    }
 }
 
 /// A worst-case session fits in a cookie once access tokens carry no profile (#279),

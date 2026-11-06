@@ -199,6 +199,17 @@ pub enum KeyError {
     /// Two usable keys share a `kid`, so a token's key would be ambiguous.
     #[error("two signing keys share the key ID {0:?}")]
     DuplicateKeyId(String),
+    /// No verifier can be built from the key `kid` names for the token's algorithm:
+    /// the issuer's key set is at fault, not the token. RSA material that is too weak
+    /// or malformed still fails as [`TokenError::BadSignature`], as every SDK does.
+    #[error("signing key {kid:?} cannot verify signatures")]
+    UnusableKey {
+        /// The key's ID.
+        kid: String,
+        /// Why no verifier could be built from it.
+        #[source]
+        source: jsonwebtoken::errors::Error,
+    },
     /// The last fetch failed and the next is not due yet, so whether the key exists
     /// is unknown.
     #[error("signing keys could not be fetched recently")]
@@ -216,6 +227,9 @@ impl KeyError {
             }
             Self::DuplicateKeyId(_) => {
                 SdkError::new(ErrorCategory::Keys, ErrorReason::DuplicateKeyId)
+            }
+            Self::UnusableKey { .. } => {
+                SdkError::new(ErrorCategory::Keys, ErrorReason::UnusableKey)
             }
         }
     }
@@ -240,6 +254,7 @@ struct Key {
 /// let keys = KeySet::parse(br#"{"keys": [
 ///     {"kty": "RSA", "kid": "key-2026", "use": "sig", "alg": "RS256", "n": "AQAB", "e": "AQAB"},
 ///     {"kty": "RSA", "kid": "encryption", "use": "enc", "n": "AQAB", "e": "AQAB"},
+///     {"kty": "RSA", "kid": "wrapping", "key_ops": ["wrapKey"], "n": "AQAB", "e": "AQAB"},
 ///     {"kty": "OKP", "kid": "future", "crv": "Ed25519", "x": "AQAB"}
 /// ]}"#)?;
 /// // Keys for encryption, or of a type the SDK does not know, are skipped.
@@ -267,7 +282,8 @@ impl fmt::Debug for KeySet {
 
 impl KeySet {
     /// Parses a key set. Keys this SDK cannot use are skipped, as RFC 7517 §5 asks: an
-    /// unknown `kty` or `alg`, a `use` other than `sig`, no `kid`, or invalid material.
+    /// unknown `kty` or `alg`, a `use` other than `sig`, `key_ops` without `verify`, no
+    /// `kid`, or invalid material.
     ///
     /// # Errors
     /// Fails when the document is not a key set, or two usable keys share a `kid`.
@@ -276,7 +292,10 @@ impl KeySet {
             serde_json::from_slice(document).map_err(KeyError::InvalidDocument)?;
         let mut keys: Vec<Key> = Vec::with_capacity(set.keys.len());
         for value in set.keys {
-            let Ok(jwk) = serde_json::from_value::<Jwk>(value) else {
+            let Some(jwk) = serde_json::from_value::<Jwk>(value)
+                .ok()
+                .filter(Jwk::verifies)
+            else {
                 continue;
             };
             let Ok(decoding) = DecodingKey::from_rsa_components(&jwk.n, &jwk.e) else {
@@ -431,7 +450,7 @@ impl KeyCache {
     ///
     /// # Errors
     /// [`TokenError::UnknownKey`] when no usable key matches, [`TokenError::Keys`]
-    /// when keys were needed but could not be fetched, and
+    /// when keys were needed but could not be fetched or the key cannot verify, and
     /// [`TokenError::BadSignature`] when the signature does not verify.
     pub async fn verify(&self, jws: &Jws<'_>, algorithm: Algorithm) -> Result<(), TokenError> {
         let kid = jws
@@ -449,11 +468,16 @@ impl KeyCache {
         // The aws-lc-rs provider is named explicitly instead of through
         // jsonwebtoken's process default, which an application enabling another
         // backend would make ambiguous.
-        let verifier = (DEFAULT_PROVIDER.verifier_factory)(&name, &key.decoding)
-            .map_err(|_| TokenError::BadSignature)?;
+        let verifier =
+            (DEFAULT_PROVIDER.verifier_factory)(&name, &key.decoding).map_err(|source| {
+                TokenError::Keys(KeyError::UnusableKey {
+                    kid: kid.to_owned(),
+                    source,
+                })
+            })?;
         verifier
             .verify(jws.signing_input.as_bytes(), &jws.signature)
-            .map_err(|_| TokenError::BadSignature)
+            .map_err(TokenError::BadSignature)
     }
 
     /// The cached keys. Nothing panics while holding the lock, so poisoning is

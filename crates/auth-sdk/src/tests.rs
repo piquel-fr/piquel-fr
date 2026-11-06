@@ -283,46 +283,26 @@ fn step_up_challenge_round_trips() {
 #[test]
 fn authentication_requirements_follow_auth() {
     let now = Utc::now();
-    let token = |acr, age: i64| AccessToken {
-        subject: Subject::User(UserId::new()),
-        client_id: "notes-web".parse::<ClientId>().expect("client ID"),
-        scopes: Scopes::default(),
-        token_id: TokenId::new(),
-        session_id: None,
-        auth_time: Some(now - TimeDelta::seconds(age)),
-        amr: Vec::new(),
-        acr: Some(acr),
-        actor: None,
-        confirmation: None,
-        profile: ProfileClaims::default(),
-        issued_at: now,
-        expires_at: now,
-        extra: (),
+    let check = |acr, age: i64, requirement| {
+        TokenError::require_authentication(
+            requirement,
+            Some(&acr),
+            Some(now - TimeDelta::seconds(age)),
+            now,
+        )
     };
     let social = StepUpRequirement {
         acr: Some(Acr::Social),
         max_age: None,
     };
-    assert!(
-        token(Acr::PhishingResistant, 0)
-            .require_authentication(social, now)
-            .is_ok()
-    );
+    assert!(check(Acr::PhishingResistant, 0, social).is_ok());
     let recent = StepUpRequirement::passkey_within(300);
-    assert!(
-        token(Acr::PhishingResistant, 330)
-            .require_authentication(recent, now)
-            .is_ok()
-    );
+    assert!(check(Acr::PhishingResistant, 330, recent).is_ok());
     assert!(matches!(
-        token(Acr::PhishingResistant, 331).require_authentication(recent, now),
+        check(Acr::PhishingResistant, 331, recent),
         Err(TokenError::InsufficientUserAuthentication(requirement)) if requirement == recent
     ));
-    assert!(
-        token(Acr::Social, 0)
-            .require_authentication(recent, now)
-            .is_err()
-    );
+    assert!(check(Acr::Social, 0, recent).is_err());
 }
 
 /// Callbacks are checked before any code exchange.

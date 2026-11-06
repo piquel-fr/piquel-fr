@@ -38,6 +38,8 @@ crate::str_enum! {
         PkceUnsupported = "pkce_unsupported",
         /// Two keys in one set share a `kid`.
         DuplicateKeyId = "duplicate_key_id",
+        /// No verifier can be built from a key for the token's algorithm.
+        UnusableKey = "unusable_key",
         /// The token is not a compact JWS, or a segment does not decode.
         Malformed = "malformed",
         /// The header lists `crit` extensions, which the SDKs do not support

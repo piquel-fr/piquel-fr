@@ -191,7 +191,7 @@ fn scope_sets_preserve_existing_wire_semantics() {
     let stored = scopes.clone().into_stored();
     assert!(scopes.allowed_by(&stored));
     assert!(!scopes.allowed_by(&[Scope::OpenId.as_str().into()]));
-    assert_eq!(Scopes::from_stored(&stored), scopes);
+    assert_eq!(Scopes::from_stored(&stored), Ok(scopes));
     assert!(Scopes::parse(" ").is_err());
     let too_many = (0..=MAX_SCOPES)
         .map(|index| format!("scope{index}"))

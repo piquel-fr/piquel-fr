@@ -13,6 +13,7 @@ fn key(id: &str, state: SigningKeyState) -> InsertSigningKey {
         public_jwk: Jwk {
             alg: None,
             e: "AQAB".into(),
+            key_ops: None,
             kid: id.into(),
             kty: KeyType::Rsa,
             n: "AQAB".into(),

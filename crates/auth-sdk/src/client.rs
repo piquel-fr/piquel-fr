@@ -328,7 +328,7 @@ credential!(
 );
 
 /// Tokens from a code exchange or refresh.
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug)]
 pub struct Tokens {
     /// The access token.
     pub access_token: BearerToken,
@@ -614,12 +614,8 @@ impl Client {
                 .as_ref()
                 .map(|hint| hint.claims().sub.clone()),
         };
-        let scopes: Scopes = request
-            .scopes
-            .iter()
-            .chain([Scope::OpenId.as_str()])
-            .map(str::to_owned)
-            .collect();
+        let mut scopes = request.scopes.clone();
+        scopes.insert(Scope::OpenId);
         let challenge = URL_SAFE_NO_PAD.encode(Sha256::digest(pending.verifier.as_bytes()));
         // `audience` is never sent: auth then picks the client's default resource.
         // `client_id` is added where the request goes, as `post` adds it.

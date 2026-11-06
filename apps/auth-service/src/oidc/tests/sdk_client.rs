@@ -87,8 +87,8 @@ async fn sdk_login_client_runs_against_the_provider() {
         .validate::<Scopes>(tokens.access_token.expose())
         .await
         .expect("valid access token");
-    assert_eq!(access.subject, Subject::User(flow.user_id));
-    assert!(access.scopes.contains(Scope::OfflineAccess.as_str()));
+    assert_eq!(access.subject(), &Subject::User(flow.user_id));
+    assert!(access.scopes().contains(Scope::OfflineAccess.as_str()));
 
     let user = client
         .userinfo(&tokens.access_token, id_token.claims())
