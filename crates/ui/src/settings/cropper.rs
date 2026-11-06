@@ -196,7 +196,7 @@ impl Cropper {
             y.set(height.get() / 2.0);
             zoom.set(1.0);
             // The cropper shows once the page applies the width.
-            raw!("await Promise.resolve()", ());
+            let _shown = raw!("await Promise.resolve()", ());
             side.set(raw!(
                 "cx.hydrate(document.getElementById(String(${stage})).clientWidth)",
                 0.0
@@ -228,7 +228,7 @@ impl Cropper {
                 drag_x.set(e.client_x);
                 drag_y.set(e.client_y);
                 let _pointer = drag.get();
-                raw!(
+                let _captured = raw!(
                     "document.getElementById(String(${stage})).setPointerCapture(${_pointer}.dehydrate())",
                     ()
                 );
