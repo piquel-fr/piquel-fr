@@ -211,6 +211,18 @@ impl Browser {
         ))
     }
 
+    /// `number`, rounded to the nearest whole number, as JavaScript rounds.
+    pub(crate) fn round(number: &Expr<f64>) -> Expr<f64> {
+        let number = number.clone();
+        expr!(raw!("cx.hydrate(Math.round(${number}.dehydrate()))", 0.0))
+    }
+
+    /// `number` as text, as an input sends it.
+    pub(crate) fn text(number: &Expr<f64>) -> Expr<String> {
+        let number = number.clone();
+        expr!(raw!("cx.hydrate(String(${number}))", String::new()))
+    }
+
     /// A promise that resolves after a moment: as long as a status, such as
     /// "Copied", shows before it clears.
     pub(crate) fn moment() -> Expr<()> {

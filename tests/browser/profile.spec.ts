@@ -61,7 +61,7 @@ test('profile: picture, display name and a notice that closes', async ({ browser
 });
 
 /**
- * The picture script's crop: a chosen image shows under a circle, at its centred
+ * The picture form's crop: a chosen image shows under a circle, at its centred
  * square, and zooming in and dragging it choose the square the form sends, which
  * auth keeps.
  */

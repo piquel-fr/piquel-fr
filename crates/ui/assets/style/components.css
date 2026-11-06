@@ -162,8 +162,7 @@ img.avatar {
   margin: 0;
 }
 /* Choosing which square of a picture apps show: the image moves and zooms under
-   a circle, as apps show it. The picture script shows it once an image is
-   chosen. */
+   a circle, as apps show it. It shows once an image is chosen. */
 .cropper {
   display: grid;
   justify-items: center;

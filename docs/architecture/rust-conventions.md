@@ -130,7 +130,7 @@ form that succeeds answers `303`. Pages use Topcoat's browser runtime, but no
 `suspense`, `live!` or `asset!`, and register every route explicitly. Their
 Content-Security-Policy loads only the stylesheet, its typefaces, Topcoat's runtime
 and the expressions module embedded under `/assets/`, and auth's own profile
-pictures, lets the pages fetch only auth itself (`connect-src 'self'`), for their
+pictures and the `blob:` of one being chosen, lets the pages fetch only auth itself (`connect-src 'self'`), for their
 passkey ceremonies,
 and lets forms post only to auth and to where they redirect, since browsers apply
 `form-action` to a form's redirects: the consent and logout pages' redirect
@@ -214,7 +214,8 @@ saying why, until the browser finds it can work. While a ceremony runs, its
 form's button is disabled and says it waits for the passkey, and the form's last
 error hides. A dismissible hint shows unless the browser's local storage holds
 its key; without local storage, it shows on every page. A copy button copies a
-value, and a page that shows a secret reloads by `GET`. What Topcoat's expressions
+value, a page that shows a secret reloads by `GET`, and the picture form moves and
+zooms the chosen image to choose the square auth keeps. What Topcoat's expressions
 cannot name, such as `WebAuthn` and the clipboard, is a `raw!` call in
 `crates/ui/src/browser.rs`, one per browser API; no page loads a script of its
 own.

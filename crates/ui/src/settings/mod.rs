@@ -3,6 +3,8 @@
 
 /// Connected apps.
 mod connected;
+/// Choosing which square of a new picture auth keeps.
+mod cropper;
 /// Downloading the account's data, and deleting the account.
 mod data;
 /// Email addresses, and confirming one.

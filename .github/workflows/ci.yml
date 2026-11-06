@@ -246,7 +246,7 @@ jobs:
       - *setup-node
       - *rust-cache
       - run: just install
-      # The binary embeds the passkey script and the stylesheet, as in the
+      # The binary embeds Topcoat's runtime and the stylesheet, as in the
       # deployed image.
       - run: just rust build
       # The keys reach every later step, so the commands the suite runs, such as

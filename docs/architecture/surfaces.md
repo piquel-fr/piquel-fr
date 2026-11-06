@@ -229,10 +229,10 @@ views of accounts and administrators (`piquel_common::admin`), which the dashboa
 shows and the CLI prints as JSON, carry its ID. The owner sets it on the settings' Profile tab, which
 shows the account as apps do, with its handle, display name and picture, each
 changed in a dialog the popover API opens with no script; the picture's is a
-`multipart/form-data` form. There the picture script shows the chosen image under
-a circle, as apps show it, to drag and zoom; the form sends the square under the
+`multipart/form-data` form. There the browser shows the chosen image under a
+circle, as apps show it, to drag and zoom; the form sends the square under the
 circle in the image's upright pixels (`crop_x`, `crop_y`, `crop_size`), and
-without the script auth keeps the centred square. `PUT /account/picture` sets it
+without scripts auth keeps the centred square. `PUT /account/picture` sets it
 too, taking the square as `?x=…&y=…&size=…`. Administrators
 may view and remove it, with a reason, such as one that impersonates someone,
 but never set one; their Profile tab links the dashboard's own pages for the

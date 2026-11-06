@@ -13,7 +13,7 @@ same passkey and offers to remove it.
 `profile.spec.ts` uses the Profile tab's dialogs, which open with no script: it
 uploads a picture, which the tab, the sidebar and the top bar load under the
 pages' Content-Security-Policy, closes the notice saying so, changes the display
-name, and removes the picture. Then the picture script's crop: a chosen image
+name, and removes the picture. Then the picture form's crop: a chosen image
 shows at its centred square, and zooming in and dragging it change the square the
 form sends.
 
