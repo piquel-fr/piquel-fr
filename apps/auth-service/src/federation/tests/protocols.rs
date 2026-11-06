@@ -185,7 +185,6 @@ async fn google_signed_tokens_are_verified() {
             .as_deref(),
         Some("Google ID token failed verification")
     );
-    // Expiry has no leeway: a token that expired a second ago is refused.
     for (field, value, error) in [
         (
             "nonce",
@@ -197,6 +196,7 @@ async fn google_signed_tokens_are_verified() {
             serde_json::json!(Utc::now().timestamp() + 3600),
             "Google ID token is issued in the future",
         ),
+        // Expiry has no leeway: a token that expired a second ago is refused.
         (
             "exp",
             serde_json::json!(Utc::now().timestamp() - 1),
