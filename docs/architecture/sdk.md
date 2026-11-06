@@ -75,9 +75,10 @@ Checks run in this order, and the first failure is reported. Each failure is an
    (`unsupported_algorithm`).
 5. `kid` names a known key, after at most one refetch (`unknown_key`).
 6. The key can verify: an RSA key's modulus is 2048 to 8192 bits, not counting
-   leading zero bytes, and its exponent odd and at least 3. Any other key is the
-   key set's fault, a `keys` error (`unusable_key`), not the token's. Then the
-   signature verifies (`bad_signature`).
+   leading zero bytes, and its exponent is 65537, the only one every runtime the
+   SDKs support imports (Cloudflare Workers accepts just 3, 17 and 65537). Any
+   other key is the key set's fault, a `keys` error (`unusable_key`), not the
+   token's. Then the signature verifies (`bad_signature`).
 7. The claims parse as the shared claim type, so required claims are present and
    well typed (`invalid_claims`). A logout token's `events` must hold the
    back-channel logout event with an object value, and it must have no `nonce`,
@@ -131,9 +132,9 @@ The SDK caches the issuer's key set:
   does not list `verify` are skipped (RFC 7517 §4.3, §5). A set where two keys share a `kid` is rejected as a whole, and the previous
   set stays in use.
 - An RSA key whose modulus is under 2048 or over 8192 bits, or whose exponent is
-  even or under 3, verifies nothing: its tokens fail with `unusable_key`, so a
-  resource server answers 503 and a callback 502, as for any key set the issuer
-  got wrong.
+  not 65537, verifies nothing: its tokens fail with `unusable_key`, so a resource
+  server answers 503 and a callback 502, as for any key set the issuer got wrong.
+  Leading zero bytes in `n` or `e` change nothing.
 
 This handles signing key rotation: auth publishes the new key before it signs with
 it, so tokens from both keys verify during the overlap. Both SDKs' key caches work

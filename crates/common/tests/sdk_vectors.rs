@@ -564,16 +564,35 @@ impl Vectors {
             ),
             Expected::error(ErrorCategory::Keys, ErrorReason::UnusableKey),
         );
-        let mut even_exponent = self.jwks(&[OLD_KID]);
-        even_exponent["keys"][0]["e"] = json!(URL_SAFE_NO_PAD.encode([2]));
+        // The old key with each of `members`, `n` or `e`, replaced by `component(bytes)`.
+        let old_key = self.jwks(&[OLD_KID]);
+        let altered = |members: &[&str], component: &dyn Fn(Vec<u8>) -> Vec<u8>| {
+            let mut jwks = old_key.clone();
+            for member in members {
+                let value = jwks["keys"][0][member].as_str().expect("key member");
+                let bytes = URL_SAFE_NO_PAD.decode(value).expect("base64url");
+                jwks["keys"][0][member] = json!(URL_SAFE_NO_PAD.encode(component(bytes)));
+            }
+            jwks
+        };
         self.token(
-            "access-even-exponent",
-            "an RSA key with an even exponent verifies nothing: the key set is at fault",
-            access_case(
-                Self::sign(&self.old, TokenType::Access, &access),
-                &even_exponent,
-            ),
+            "access-small-exponent",
+            "an RSA key whose exponent is not 65537 verifies nothing: the key set is at fault",
+            access_case(valid.clone(), &altered(&["e"], &|_| vec![3])),
             Expected::error(ErrorCategory::Keys, ErrorReason::UnusableKey),
+        );
+        self.token(
+            "access-zero-modulus",
+            "an RSA modulus of zero bytes alone verifies nothing: the key set is at fault",
+            access_case(valid.clone(), &altered(&["n"], &|_| vec![0; 257])),
+            Expected::error(ErrorCategory::Keys, ErrorReason::UnusableKey),
+        );
+        let padded = altered(&["n", "e"], &|bytes| [vec![0], bytes].concat());
+        self.token(
+            "access-padded-key",
+            "leading zero bytes in a key's n and e change nothing",
+            access_case(valid.clone(), &padded),
+            Expected::ok(&access),
         );
         let mut incomplete = serde_json::to_value(&access).expect("serialize claims");
         incomplete

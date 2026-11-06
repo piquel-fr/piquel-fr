@@ -241,8 +241,8 @@ pub enum KeyDefect {
     /// bits.
     #[error("its RSA modulus is {0} bits, outside 2048 to 8192")]
     ModulusSize(usize),
-    /// The RSA exponent is even or under 3.
-    #[error("its RSA exponent is not an odd number of at least 3")]
+    /// The RSA exponent is not 65537, the one every SDK's runtime verifies with.
+    #[error("its RSA exponent is not 65537")]
     Exponent,
     /// No verifier can be built from it for the token's algorithm.
     #[error("no verifier can be built from it")]
@@ -253,6 +253,9 @@ pub enum KeyDefect {
 const MIN_MODULUS_BITS: usize = 2048;
 /// Longest RSA modulus a key may have, in bits, as aws-lc verifies.
 const MAX_MODULUS_BITS: usize = 8192;
+/// The only RSA exponent a key may have, big-endian: 65537. Cloudflare Workers imports
+/// only 3, 17 and 65537, so a wider rule would let SDKs disagree on a key.
+const EXPONENT: [u8; 3] = [1, 0, 1];
 
 /// One signing key a set lists for verification.
 #[derive(Clone)]
@@ -265,13 +268,14 @@ struct Key {
     decoding: DecodingKey,
     /// The modulus's size in bits, not counting leading zero bytes.
     modulus_bits: usize,
-    /// Whether the exponent is odd and at least 3.
+    /// Whether the exponent is 65537.
     exponent_valid: bool,
 }
 
 impl Key {
-    /// Reads the RSA facts of `n` and `e`, big-endian bytes.
-    fn new(kid: String, alg: Option<Algorithm>, decoding: DecodingKey, n: &[u8], e: &[u8]) -> Self {
+    /// The key with modulus `n` and exponent `e`, big-endian bytes. Leading zero bytes
+    /// are dropped, so a padded key verifies as it does in every SDK.
+    fn new(kid: String, alg: Option<Algorithm>, n: &[u8], e: &[u8]) -> Self {
         let significant = |bytes: &[u8]| {
             let start = bytes
                 .iter()
@@ -283,14 +287,12 @@ impl Key {
         let modulus_bits = n.first().map_or(0, |first| {
             n.len() * 8 - usize::try_from(first.leading_zeros()).unwrap_or(0)
         });
-        let exponent_valid = e.last().is_some_and(|last| last % 2 == 1)
-            && (e.len() > 1 || e.first().is_some_and(|first| *first >= 3));
         Self {
             kid,
             alg,
-            decoding,
+            decoding: DecodingKey::from_rsa_raw_components(&n, &e),
             modulus_bits,
-            exponent_valid,
+            exponent_valid: e == EXPONENT,
         }
     }
 
@@ -358,8 +360,7 @@ impl KeySet {
             else {
                 continue;
             };
-            let (Ok(decoding), Ok(n), Ok(e)) = (
-                DecodingKey::from_rsa_components(&jwk.n, &jwk.e),
+            let (Ok(n), Ok(e)) = (
                 URL_SAFE_NO_PAD.decode(&jwk.n),
                 URL_SAFE_NO_PAD.decode(&jwk.e),
             ) else {
@@ -368,7 +369,7 @@ impl KeySet {
             if keys.iter().any(|key| key.kid == jwk.kid) {
                 return Err(KeyError::DuplicateKeyId(jwk.kid));
             }
-            keys.push(Key::new(jwk.kid, jwk.alg, decoding, &n, &e));
+            keys.push(Key::new(jwk.kid, jwk.alg, &n, &e));
         }
         Ok(Self { keys })
     }

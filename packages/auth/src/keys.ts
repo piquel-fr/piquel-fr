@@ -165,9 +165,17 @@ const jwkSet = json.object({ keys: json.array((value) => value) });
 
 /** Shortest and longest RSA modulus a key may have, in bits (RFC 7518 §3.3). */
 const MODULUS_BITS = { min: 2048, max: 8192 };
+/**
+ * The only RSA exponent a key may have, 65537 in base64url: Cloudflare Workers
+ * imports only 3, 17 and 65537, so a wider rule would let runtimes disagree on a key.
+ */
+const EXPONENT = 'AQAB';
 
 /** `bytes` without their leading zero bytes, which add nothing to a big-endian number. */
-const significant = (bytes: Uint8Array) => bytes.subarray(Math.max(bytes.findIndex(Boolean), 0));
+const significant = (bytes: Uint8Array) => {
+  const start = bytes.findIndex(Boolean);
+  return bytes.subarray(start < 0 ? bytes.length : start);
+};
 
 /** One signing key a set lists for verification. */
 class SigningKey {
@@ -177,11 +185,12 @@ class SigningKey {
   readonly algorithms: readonly Algorithm[];
   /**
    * What keeps the key from verifying, as every SDK judges it: a modulus outside 2048
-   * to 8192 bits, not counting leading zero bytes, or an exponent that is even or
-   * under 3. `undefined` for a usable key.
+   * to 8192 bits, not counting leading zero bytes, or an exponent other than 65537.
+   * `undefined` for a usable key.
    */
   readonly defect: string | undefined;
-  readonly #jwk: Jwk;
+  /** The modulus without its leading zero bytes, in base64url, as it is imported. */
+  readonly #n: string;
   /** The imported key, once a token needed it. */
   #imported: Promise<CryptoKey> | undefined;
 
@@ -189,22 +198,25 @@ class SigningKey {
   constructor(key: Jwk, n: Uint8Array, e: Uint8Array) {
     this.kid = key.kid;
     this.algorithms = key.alg === undefined ? ALGORITHMS : [key.alg];
-    this.#jwk = key;
     const [modulus, exponent] = [significant(n), significant(e)];
+    this.#n = base64.encode(modulus);
     const bits = modulus.length === 0 ? 0 : modulus.length * 8 - Math.clz32(modulus[0] ?? 0) + 24;
-    const last = exponent.at(-1) ?? 0;
     if (bits < MODULUS_BITS.min || bits > MODULUS_BITS.max) {
       this.defect = `its RSA modulus is ${String(bits)} bits, outside 2048 to 8192`;
-    } else if (last % 2 === 0 || (exponent.length === 1 && last < 3)) {
-      this.defect = 'its RSA exponent is not an odd number of at least 3';
+    } else if (base64.encode(exponent) !== EXPONENT) {
+      this.defect = 'its RSA exponent is not 65537';
     }
   }
 
-  /** The key, imported for RS256 verification on first use. */
+  /**
+   * The key, imported for RS256 verification on first use, without leading zero bytes,
+   * so a padded key verifies in every runtime. Only a key without a defect is imported,
+   * so its exponent is 65537.
+   */
   imported(): Promise<CryptoKey> {
     this.#imported ??= crypto.subtle.importKey(
       'jwk',
-      { kty: this.#jwk.kty, n: this.#jwk.n, e: this.#jwk.e },
+      { kty: 'RSA', n: this.#n, e: EXPONENT },
       { name: 'RSASSA-PKCS1-v1_5', hash: 'SHA-256' },
       false,
       ['verify']
