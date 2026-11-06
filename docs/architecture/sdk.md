@@ -145,7 +145,7 @@ the same values, listed in `piquel_common::protocol::sdk`.
 | --- | --- | --- |
 | `discovery` | Metadata could not be used | `issuer_mismatch`, `invalid_document`, `pkce_unsupported` |
 | `keys` | The key set could not be used | `invalid_document`, `duplicate_key_id` |
-| `invalid_token` | A token failed validation | see [Token validation](#token-validation) |
+| `invalid_token` | A token failed validation | see [Token validation](#token-validation) and [Login](#login) |
 | `insufficient_scope` | A valid token lacks a required scope | none |
 | `insufficient_user_authentication` | A valid token's authentication is too weak or too old | none |
 | `callback` | An authorization response failed before the code exchange | `state_mismatch`, `issuer_mismatch`, `missing_issuer`, `missing_code` |
@@ -202,7 +202,17 @@ Login uses the authorization code flow with S256 PKCE, `state` and `nonce`:
 3. The code is exchanged with the verifier and redirect URI, and the ID token is
    validated against the pending login's `nonce` and `max_age`. It must also meet
    the login's step-up requirement (`insufficient_user_authentication`), so a
-   step-up login that falls short fails instead of being asked for again.
+   step-up login that falls short fails instead of being asked for again. A login
+   that sent the signed-in user's ID token as `id_token_hint` fails unless the new
+   ID token names the same `sub` (`invalid_token`, `subject_mismatch`).
+
+A sign-in stays tied to its user and its authentication afterwards too (OIDC Core
+§12.2, §5.3.2). A refresh that returns an ID token validates it as the sign-in's,
+without `nonce` or `max_age`, then requires it to carry the sign-in over: the same
+`sub` (`subject_mismatch`), the same `auth_time` and `acr`, and no `nonce` but the
+sign-in's (`authentication_changed`). `UserInfo` must name the ID token's `sub`
+(`subject_mismatch`). The Rust SDK checks these, taking the sign-in's ID token
+claims in `refresh` and `userinfo`; `@piquel/auth` does not yet.
 
 The SDK never sends the `audience` parameter auth accepts today; auth then uses the
 client's default resource. They will send `resource` (RFC 8707) once auth supports
@@ -257,8 +267,11 @@ nothing: it holds a 32-byte cookie key, the same on every replica.
   spends nothing: the session goes on while its access token is valid, and once
   that expired the request gets 503 and the cookie stays for the next request to
   try again, so a session auth ended never outlives its access token, even while
-  auth is unreachable. A refreshed ID token naming another `sub` or `iss` ends the session (OIDC
-  Core §12.2). A sign-in that brings no refresh token ends with its access token.
+  auth is unreachable. A refreshed ID token that breaks the checks above, naming
+  another user or changing the sign-in, ends the session. The session keeps the
+  latest ID token's claims, and when one comes without a `nonce`, the sign-in's,
+  which the next refresh is checked against. A sign-in that brings no refresh token
+  ends with its access token.
 - **Pending logins.** Each waits in one of three cookie slots, `-login-0` to
   `-login-2`, chosen by the first byte of its `state`'s SHA-256, with its own expiry
   10 minutes out. A login that lands in a taken slot replaces the one there, so two
@@ -277,8 +290,10 @@ nothing: it holds a 32-byte cookie key, the same on every replica.
   `client_id`, since there is no ID token to send as `id_token_hint`. If auth
   cannot revoke it, the answer is 502 and the cookie stays, for the user to try
   again: clearing it would leave any copy refreshing. A sign-in revokes the refresh
-  token of the session it replaces before redeeming its code, and answers 502,
-  keeping that session, when it cannot. A revocation that takes over five seconds
+  token of the session it replaces once its code is redeemed and its user checked,
+  before setting the new session, and answers 502, keeping that session, when it
+  cannot; the code is spent then, so the new grant is revoked too, and the user
+  starts again. A revocation that takes over five seconds
   counts as failed, whatever the HTTP client's own timeout, so a hanging auth never
   holds a sign-in or logout open.
 - **Redirects.** Without a session, or when a page asks to step up, only a browser
@@ -370,7 +385,15 @@ into a requirement, taking the first `acr_values` entry it knows, as auth does, 
 runs authorization again with those values.
 
 A client retries at most once per user action. It signs the user in again with the
-challenge's values and returns to the same page. If the resource still refuses on
+challenge's values and returns to the same page. The sign-in must be the same
+user's: a client holding the user's ID token sends it as `id_token_hint`, so auth
+signs in that account only. A server-side client, whose session keeps only the ID
+token's claims, records the user's `sub` in the pending login instead, and fails
+the return, keeping the session unrevoked, when the new sign-in names another
+account than that or than the session it would replace, as after switching
+accounts in another tab. Either way, the refused sign-in's grant is revoked, so it
+does not live on at auth unused. It checks this before revoking the session it replaces,
+so it redeems the code first. If the resource still refuses on
 that return, the client reports the error instead of redirecting again. A server-side
 client recognizes the return by a short-lived marker, so a much later return counts
 as a new action; a browser client by the session the return created, for a minute. The login check above also means a step-up sign-in never completes

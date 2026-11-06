@@ -47,6 +47,7 @@ impl Login {
     /// `GET /login`: keeps a pending login in a sealed cookie and redirects to auth.
     pub(super) async fn start(
         State(login): State<Arc<Self>>,
+        headers: HeaderMap,
         Query(query): Query<StartQuery>,
     ) -> Response {
         let return_to = query
@@ -86,10 +87,18 @@ impl Login {
             }
         };
         let name = login.cookies.pending(pending.state());
+        // A step-up strengthens the session it starts from, so it is pinned to its
+        // user. The session holds no raw ID token to send as `id_token_hint`, so auth
+        // may let another account sign in; the callback refuses it.
+        let subject = match login.open_session(&headers) {
+            SessionCookie::Open(session) if query.step_up => Some(session.subject().to_owned()),
+            _ => None,
+        };
         let mut pending = PendingAuthorization {
             login: pending,
             return_to,
             step_up: query.step_up,
+            subject,
             expires_at: login.now() + PENDING_LIFETIME,
         };
         // A `return_to` too long for the cookie returns home instead, or to the root
@@ -173,26 +182,21 @@ impl Login {
     }
 
     /// Completes `pending` from `callback` and starts its session. The session the
-    /// browser had, in `headers`, is replaced, and its refresh token revoked first,
-    /// so no copy of it, nor a response still in flight that sets it back, outlives
-    /// its access token. If auth cannot revoke it, the sign-in stops before the code
-    /// is redeemed, with 502, and the browser keeps its session.
+    /// browser had, in `headers`, is replaced, and its refresh token revoked before
+    /// the new session is set, so no copy of it, nor a response still in flight that
+    /// sets it back, outlives its access token. If auth cannot revoke it, the sign-in
+    /// fails with 502 and the browser keeps its session; the code is spent, so the
+    /// user starts again.
+    ///
+    /// A step-up must sign in the user it started from, and the one whose session it
+    /// replaces, as after switching accounts in another tab: otherwise it fails, and
+    /// the session it would replace is kept, its refresh token unrevoked.
     async fn complete(
         &self,
         headers: &HeaderMap,
         pending: PendingAuthorization,
         callback: &CallbackParams,
     ) -> Response {
-        if let SessionCookie::Open(previous) = self.open_session(headers)
-            && let Some(refresh_token) = previous.refresh_token()
-            && !self.revoke(refresh_token).await
-        {
-            return (
-                StatusCode::BAD_GATEWAY,
-                "Signing in could not end your previous session; start again.",
-            )
-                .into_response();
-        }
         let tokens = match self.client.complete(pending.login, callback).await {
             Ok(tokens) => tokens,
             Err(error) => {
@@ -208,6 +212,37 @@ impl Login {
         let Some(stored) = StoredLogin::new(tokens, self.now() + self.lifetime) else {
             return StatusCode::BAD_GATEWAY.into_response();
         };
+        let previous = match self.open_session(headers) {
+            SessionCookie::Open(previous) => Some(previous),
+            _ => None,
+        };
+        let replaced = previous.as_ref().map(|previous| previous.subject());
+        if pending.step_up
+            && [pending.subject.as_deref(), replaced]
+                .into_iter()
+                .flatten()
+                .any(|subject| subject != stored.subject())
+        {
+            tracing::debug!("a step-up signed in another account");
+            self.abandon(&stored).await;
+            return (
+                StatusCode::BAD_REQUEST,
+                "Sign-in failed: this step-up signed in another account than this session's.",
+            )
+                .into_response();
+        }
+        if let Some(refresh_token) = previous
+            .as_ref()
+            .and_then(|previous| previous.refresh_token())
+            && !self.revoke(refresh_token).await
+        {
+            self.abandon(&stored).await;
+            return (
+                StatusCode::BAD_GATEWAY,
+                "Signing in could not end your previous session; start again.",
+            )
+                .into_response();
+        }
         let session = match self.session_cookie(&stored) {
             Ok(session) => session,
             Err(error) => {
@@ -235,6 +270,15 @@ impl Login {
         };
         cookies.append(header::SET_COOKIE, marker);
         response
+    }
+
+    /// Revokes the grant of `login`, a sign-in the callback refuses after redeeming
+    /// its code, so it does not live on at auth unused. A failure is logged by
+    /// [`Self::revoke`] and changes nothing: the refusal stands either way.
+    async fn abandon(&self, login: &StoredLogin) {
+        if let Some(refresh_token) = login.refresh_token() {
+            self.revoke(refresh_token).await;
+        }
     }
 
     /// Revokes `refresh_token` at auth, within [`REVOCATION_DEADLINE`], so a hanging

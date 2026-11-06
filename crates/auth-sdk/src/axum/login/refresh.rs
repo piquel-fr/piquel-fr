@@ -9,7 +9,7 @@
 
 use super::{Login, SessionCookie, SignedIn, layer::RequestSession};
 use crate::{
-    OAuthError,
+    OAuthError, TokenError,
     axum::{StoredLogin, bearer::ErrorChain},
     protocol::oauth::{ErrorCode, ErrorResponse},
 };
@@ -32,7 +32,8 @@ enum Refresh {
     /// Auth could not be asked, or answered with an error other than a refusal: the
     /// session goes on as it was, and a later request tries again.
     Kept,
-    /// Auth refused the refresh token, or named another user: the session is over.
+    /// Auth refused the refresh token, or named another user or sign-in: the session
+    /// is over.
     Ended,
 }
 
@@ -113,19 +114,21 @@ impl Login {
         let Some(refresh_token) = login.refresh_token() else {
             return Refresh::Kept;
         };
-        let refreshing = self.client.refresh(refresh_token);
+        let refreshing = self.client.refresh(refresh_token, login.claims());
         let Ok(refreshed) = tokio::time::timeout(REFRESH_DEADLINE, refreshing).await else {
             tracing::warn!("session refresh timed out");
             return Refresh::Kept;
         };
         match refreshed {
-            Ok(tokens) => login.refreshed(tokens).map_or_else(
-                || {
-                    tracing::warn!("refresh returned an ID token for another user");
-                    Refresh::Ended
-                },
-                |refreshed| Refresh::Refreshed(Box::new(refreshed)),
-            ),
+            Ok(tokens) => Refresh::Refreshed(Box::new(login.refreshed(tokens))),
+            // The new ID token names another user or another sign-in (OIDC Core
+            // §12.2): the session cannot go on as either.
+            Err(OAuthError::IdToken(
+                error @ (TokenError::SubjectMismatch { .. } | TokenError::AuthenticationChanged(_)),
+            )) => {
+                tracing::warn!(error = %ErrorChain(&error), "a refresh changed the signed-in user or sign-in");
+                Refresh::Ended
+            }
             // Auth refused the refresh token: the grant is over.
             Err(
                 error @ OAuthError::Rejected {

@@ -91,19 +91,25 @@ async fn sdk_login_client_runs_against_the_provider() {
     assert!(access.scopes.contains(Scope::OfflineAccess.as_str()));
 
     let user = client
-        .userinfo(&tokens.access_token)
+        .userinfo(&tokens.access_token, id_token.claims())
         .await
         .expect("UserInfo");
     assert_eq!(user.sub, flow.user_id.to_string());
     assert!(user.profile.email.is_some());
 
-    // A confidential client keeps its refresh token, so a refresh returns none.
+    // A confidential client keeps its refresh token, so a refresh returns none. Auth
+    // carries the sign-in over to the refreshed ID token (OIDC Core §12.2), which
+    // the SDK requires.
     let first = tokens.refresh_token.expect("refresh token");
-    let refreshed = client.refresh(&first).await.expect("refresh");
+    let refreshed = client
+        .refresh(&first, id_token.claims())
+        .await
+        .expect("refresh");
+    assert!(refreshed.id_token.is_some());
     assert!(refreshed.refresh_token.is_none());
     client.revoke(&first).await.expect("revoke");
     assert!(matches!(
-        client.refresh(&first).await,
+        client.refresh(&first, id_token.claims()).await,
         Err(OAuthError::Rejected { response, .. })
             if response.error == OAuthCode::InvalidGrant
     ));

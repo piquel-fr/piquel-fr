@@ -128,6 +128,8 @@ struct TokenEndpoint {
     revocations_received: Arc<AtomicUsize>,
     /// Whether revocations fail, as when auth is down.
     revocations_fail: Arc<AtomicBool>,
+    /// Tokens whose revocation fails, while others' succeeds.
+    refused: Arc<Mutex<Vec<String>>>,
     /// Whether revocations hang for an hour before answering, as a stuck auth would.
     revocations_hang: Arc<AtomicBool>,
 }
@@ -164,9 +166,10 @@ impl TokenEndpoint {
         })
     }
 
-    /// Serves the endpoints. A code is redeemed with an ID token for the user and
-    /// nonce it names ([`code`]), `access-0` and the refresh token `refresh-0`; the
-    /// `n`th refresh is answered with `refresh(n)`.
+    /// Serves the endpoints. The `n`th code redeemed, counting from 0, gets an ID
+    /// token for the user and nonce it names ([`code`]), `access-0` and the refresh
+    /// token `refresh-n`, so each grant is told apart; the `n`th refresh is answered
+    /// with `refresh(n)`.
     async fn refreshing<F, Fut>(refresh: F) -> Self
     where
         F: Fn(usize) -> Fut + Clone + Send + Sync + 'static,
@@ -176,6 +179,8 @@ impl TokenEndpoint {
         let revoked = Arc::new(Mutex::new(Vec::new()));
         let revocations_received = Arc::new(AtomicUsize::new(0));
         let revocations_fail = Arc::new(AtomicBool::new(false));
+        let refused: Arc<Mutex<Vec<String>>> = Arc::default();
+        let refusing = refused.clone();
         let revocations_hang = Arc::new(AtomicBool::new(false));
         let (counted, recorded, received, failing, hanging) = (
             refreshes.clone(),
@@ -184,8 +189,9 @@ impl TokenEndpoint {
             revocations_fail.clone(),
             revocations_hang.clone(),
         );
+        let codes = Arc::new(AtomicUsize::new(0));
         let token = move |::axum::Form(form): ::axum::Form<Form>| {
-            let (counted, refresh) = (counted.clone(), refresh.clone());
+            let (counted, refresh, codes) = (counted.clone(), refresh.clone(), codes.clone());
             async move {
                 let Some(code) = form.get("code") else {
                     return refresh(counted.fetch_add(1, Ordering::SeqCst) + 1).await;
@@ -193,7 +199,8 @@ impl TokenEndpoint {
                 let (sub, nonce) = code.split_once('.').expect("a code from `code`");
                 let mut tokens = Self::tokens("access-0");
                 tokens["id_token"] = json!(id_token(sub, nonce));
-                tokens["refresh_token"] = json!("refresh-0");
+                let grant = codes.fetch_add(1, Ordering::SeqCst);
+                tokens["refresh_token"] = json!(format!("refresh-{grant}"));
                 ::axum::Json(tokens).into_response()
             }
         };
@@ -202,7 +209,8 @@ impl TokenEndpoint {
             if hanging.load(Ordering::SeqCst) {
                 tokio::time::sleep(Duration::from_secs(3600)).await;
             }
-            if failing.load(Ordering::SeqCst) {
+            let token = &form["token"];
+            if failing.load(Ordering::SeqCst) || refusing.lock().expect("refused").contains(token) {
                 return StatusCode::SERVICE_UNAVAILABLE;
             }
             recorded
@@ -222,6 +230,7 @@ impl TokenEndpoint {
             revoked,
             revocations_received,
             revocations_fail,
+            refused,
             revocations_hang,
         }
     }
@@ -284,14 +293,27 @@ fn sign(claims: &serde_json::Value, typ: &str) -> String {
 
 /// An ID token for `sub`, signed now, echoing `nonce`.
 fn id_token(sub: &str, nonce: &str) -> String {
+    let mut claims = id_claims(sub);
+    claims["nonce"] = json!(nonce);
+    sign(&claims, "JWT")
+}
+
+/// The claims of the vectors' valid ID token for `sub`, without a `nonce`, issued
+/// now and valid for an hour, so tests may move their clock past a few refreshes.
+/// Their `auth_time` is the same for every token of the test run, as auth keeps it
+/// across refreshes.
+fn id_claims(sub: &str) -> serde_json::Value {
+    /// When every test's user signed in.
+    static AUTH_TIME: std::sync::LazyLock<i64> =
+        std::sync::LazyLock::new(|| Utc::now().timestamp());
     let now = Utc::now().timestamp();
     let mut claims = token_case("id-valid").json["expected"]["ok"].clone();
     claims["sub"] = json!(sub);
     claims["iat"] = json!(now);
-    claims["exp"] = json!(now + 300);
-    claims["auth_time"] = json!(now);
-    claims["nonce"] = json!(nonce);
-    sign(&claims, "JWT")
+    claims["exp"] = json!(now + 3600);
+    claims["auth_time"] = json!(*AUTH_TIME);
+    claims.as_object_mut().expect("claims").remove("nonce");
+    claims
 }
 
 /// The test client, confidential.
