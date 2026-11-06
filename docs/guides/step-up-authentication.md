@@ -36,7 +36,7 @@ WWW-Authenticate: Bearer error="insufficient_user_authentication",
 
 In Rust, `piquel_auth::StepUpRequirement` holds the requirement, and
 `AccessToken::require_authentication` checks a validated token against it. Auth's
-own settings use the same check.
+own settings check the same requirement without the SDK's 30-second leeway.
 
 ```rust
 use piquel_auth::StepUpRequirement;
