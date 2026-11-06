@@ -7,18 +7,25 @@ mod pages;
 /// The router.
 mod site;
 
-use piquel_common::config::{ConfigurationError, Origin, Variable};
+use piquel_common::config::{ConfigurationError, Origin};
 use piquel_telemetry::{Telemetry, TelemetryError};
 use site::Site;
 use std::{net::SocketAddr, process::ExitCode};
 use tokio::{net::TcpListener, signal::unix::SignalKind};
 
-/// The HTTP listener behind piqueld's gateway.
-const LISTENER: Variable = Variable::new("WEB_LISTENER");
+piquel_common::variables! {
+    /// Every variable piquel-web reads, in the configuration reference's order.
+    #[cfg(test)]
+    const VARIABLES;
+
+    /// Auth's origin, such as `https://auth.piquel.fr`. piquel.fr links its pages
+    /// and redirects every other path there. Required.
+    const AUTH_ORIGIN = "WEB_AUTH_ORIGIN";
+    /// The address piquel-web listens on, behind piqueld's gateway.
+    const LISTENER = "WEB_LISTENER", default DEFAULT_LISTENER;
+}
 /// [`LISTENER`] when none is configured.
 const DEFAULT_LISTENER: &str = "127.0.0.1:8080";
-/// Auth's origin, e.g. `https://auth.piquel.fr`.
-const AUTH_ORIGIN: Variable = Variable::new("WEB_AUTH_ORIGIN");
 
 /// The default `service.name` of exported telemetry.
 const SERVICE_NAME: &str = "piquel-web";
@@ -108,4 +115,29 @@ async fn main() -> ExitCode {
             ExitCode::FAILURE
         }
     }
+}
+
+/// The configuration reference's piquel-web section says what this file declares.
+/// `just docs reference` rewrites it.
+#[cfg(test)]
+#[test]
+fn configuration_reference_is_current() {
+    use piquel_common::config::{GeneratedFile, Section};
+    GeneratedFile {
+        path: concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../docs/dev/operations/variables/piquel-web.md"
+        )
+        .into(),
+        text: Section::render(
+            &[Section {
+                title: "Service",
+                variables: VARIABLES,
+            }],
+            3,
+            "the variables in `apps/web/src/main.rs`",
+        ),
+    }
+    .write_or_compare()
+    .expect("current reference");
 }
