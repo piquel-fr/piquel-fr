@@ -1,6 +1,7 @@
 import { expect, test } from '@playwright/test';
 import {
   addPasskeys,
+  addSecondPasskey,
   expectAccepted,
   recordAcceptedCredentials,
   secondAuthenticator,
@@ -100,4 +101,43 @@ test('settings on auth: passkeys, devices, an email link and signing out', async
   await page.getByRole('button', { name: 'Sign in with a passkey', exact: true }).click();
   await expect(page).toHaveURL(/\/settings\/sessions$/);
   await expect(page.getByText('This device', { exact: true })).toBeVisible();
+});
+
+test('reporting a change in the history signs every other device out, and undoes it', async ({
+  browser
+}) => {
+  const context = await browser.newContext();
+  const page = await context.newPage();
+  const { cdp, authenticatorId } = await addPasskeys(context, page);
+  await signUp(page, `history-${Date.now().toString(36)}`, 'First passkey');
+
+  // Another device signs in with the same passkey, synced to its authenticator.
+  const elsewhere = await browser.newContext();
+  const other = await elsewhere.newPage();
+  const synced = await addPasskeys(elsewhere, other);
+  const { credentials } = await cdp.send('WebAuthn.getCredentials', { authenticatorId });
+  await synced.cdp.send('WebAuthn.addCredential', {
+    authenticatorId: synced.authenticatorId,
+    credential: credentials[0]
+  });
+  await other.goto('/login');
+  await other.getByRole('button', { name: 'Sign in with a passkey', exact: true }).click();
+  await expect(other).toHaveURL('/settings');
+
+  await addSecondPasskey(page, cdp, authenticatorId, 'Unknown passkey');
+  await page.getByRole('link', { name: 'Security history', exact: true }).click();
+  await page
+    .getByRole('button', { name: 'This wasn’t me: Passkey “Unknown passkey” added', exact: true })
+    .click();
+  await expect(page.getByText('Secure your account?')).toBeVisible();
+  await page.getByRole('button', { name: 'Sign out everywhere else', exact: true }).click();
+  await expect(page.getByText('Your account is secured.')).toBeVisible();
+  await expect(page.getByText('You reported activity that wasn’t you')).toBeVisible();
+  await other.reload();
+  await expect(other.getByRole('link', { name: 'Sign in', exact: true })).toBeVisible();
+
+  // The report offers to undo the change it was about.
+  await page.getByRole('button', { name: 'Remove passkey “Unknown passkey”', exact: true }).click();
+  await expect(page.getByText('The passkey was removed.')).toBeVisible();
+  await expect(page.getByText('Unknown passkey', { exact: true })).toHaveCount(0);
 });

@@ -2,13 +2,15 @@ import { expect, test, type Browser, type Locator, type Page } from '@playwright
 import {
   addPasskeys,
   addSecondPasskey,
+  authUrl,
   cli,
   mailed,
   mailUrl,
   scrollsSideways,
   signedUp,
   signUp,
-  viewports
+  viewports,
+  withPasskeys
 } from './helpers';
 
 const adminUrl = process.env.E2E_ADMIN_URL ?? '';
@@ -240,6 +242,60 @@ test('rights granted from the dashboard open it, until revoked', async ({ browse
   await expect(user.getByRole('heading', { name: 'This account has no access' })).toBeVisible();
 });
 
+test('an invitation from the dashboard signs one person up, and a revoked one nobody', async ({
+  browser
+}) => {
+  test.skip(!process.env.E2E_INVITE, 'Signup needs no invitation: set E2E_INVITE where it does.');
+  const suffix = Date.now().toString(36);
+  const admin = await administrator(browser, `inviter-${suffix}`);
+  /** Creates an invitation, valid for a day, and answers its link. */
+  const invite = async () => {
+    await admin.goto(`${adminUrl}/invitations`);
+    await admin.getByRole('link', { name: 'Invite someone', exact: true }).click();
+    await admin.getByLabel('Valid for').fill('1d');
+    await admin.getByRole('button', { name: 'Create link', exact: true }).click();
+    await expect(admin.getByRole('heading', { name: 'Invitation created' })).toBeVisible();
+    return admin.getByLabel('Signup link').inputValue();
+  };
+  /** Whether signing up as `handle` with `link`'s invitation is refused. */
+  const refused = async (link: string, handle: string) => {
+    const page = await withPasskeys(browser);
+    await page.goto(link);
+    await page.getByLabel('Handle', { exact: true }).fill(handle);
+    await page.getByLabel('Passkey name', { exact: true }).fill('Passkey');
+    await page.getByRole('button', { name: 'Create account with a passkey' }).click();
+    await expect(page.getByRole('alert')).toBeVisible();
+    await expect(page).toHaveURL(/\/register/);
+  };
+  await admin.goto(`${adminUrl}/invitations/new`);
+  await confirmThroughAuth(admin);
+  const first = await invite();
+  expect(new URL(first).origin).toBe(authUrl);
+  // The link shows once, on a page reached by `GET`: reloading it shows the form
+  // again, and creates nothing.
+  await admin.reload();
+  await expect(admin.getByRole('heading', { name: 'Invitation created' })).toHaveCount(0);
+  await expect(admin.getByLabel('Valid for')).toBeVisible();
+
+  // The link signs one account up, once.
+  await signUp(await withPasskeys(browser), `invited-${suffix}`, 'Passkey', first);
+  await refused(first, `again-${suffix}`);
+
+  // A revoked link signs nobody up. The open invitation is the only one with a
+  // button: the redeemed one has none.
+  const second = await invite();
+  await admin.getByRole('link', { name: 'Done', exact: true }).click();
+  // Invitations list newest first.
+  await admin.getByRole('row').nth(1).getByRole('button', { name: 'Revoke', exact: true }).click();
+  await admin
+    .getByRole('dialog', { name: 'Revoke this invitation' })
+    .getByRole('button', { name: 'Revoke', exact: true })
+    .click();
+  await expect(admin).toHaveURL(`${adminUrl}/invitations`);
+  await expect(admin.getByRole('row').nth(1)).toContainText('Revoked');
+  await refused(second, `revoked-${suffix}`);
+});
+
 test("an administrator changes an account's passkeys and addresses, and its owner sees why", async ({
   browser
 }) => {
@@ -305,4 +361,49 @@ test("an administrator changes an account's passkeys and addresses, and its owne
   ]) {
     await expect(entry(owner, change, reason)).toBeVisible();
   }
+});
+
+test('a handle support renames signs in at once, while the owner waits a month', async ({
+  browser
+}) => {
+  const suffix = Date.now().toString(36);
+  const admin = await administrator(browser, `renamer-${suffix}`);
+  const owner = await signedUp(browser, `old-${suffix}`);
+  // An owner changes their handle once every 30 days, counting from signup.
+  await owner.goto('/settings/profile');
+  await expect(owner.getByRole('button', { name: 'Change handle', exact: true })).toBeDisabled();
+  await expect(owner.getByText(/You can change it again on/)).toBeVisible();
+
+  // Support renames it without waiting, such as a handle that impersonates another.
+  await openAccount(admin, `old-${suffix}`);
+  await confirmInDialog(admin, admin.getByRole('link', { name: 'Change handle', exact: true }));
+  await admin.getByLabel('New handle').fill(`new-${suffix}`);
+  await admin.getByLabel('Reason, shown to the owner in their history').fill('Impersonation');
+  await admin.getByRole('button', { name: 'Change handle', exact: true }).click();
+  // It lands on the account's Profile tab, whose Handle row shows the new one.
+  await expect(
+    admin.getByRole('definition').getByText(`@new-${suffix}`, { exact: true })
+  ).toBeVisible();
+
+  await owner.reload();
+  await expect(
+    owner.getByRole('definition').getByText(`@new-${suffix}`, { exact: true })
+  ).toBeVisible();
+  await owner.goto('/settings/history');
+  await expect(entry(owner, 'Handle changed', 'Impersonation')).toBeVisible();
+
+  // The old handle signs nobody in; the new one does.
+  await owner.context().clearCookies();
+  await owner.goto('/login');
+  await owner.getByRole('button', { name: 'Use a handle instead', exact: true }).click();
+  const field = owner.getByLabel('Handle', { exact: true });
+  const signIn = owner.getByRole('button', { name: 'Sign in with a passkey', exact: true });
+  await field.fill(`old-${suffix}`);
+  await signIn.click();
+  await expect(owner.locator('form[data-passkey-sign-in]').getByRole('alert')).toHaveText(
+    'No active account has this handle.'
+  );
+  await field.fill(`new-${suffix}`);
+  await signIn.click();
+  await expect(owner).toHaveURL('/settings');
 });

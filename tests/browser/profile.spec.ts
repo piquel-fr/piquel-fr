@@ -50,8 +50,8 @@ test('profile: a picture, and a notice that closes', async ({ browser }) => {
   await remove.getByRole('button', { name: 'Remove picture', exact: true }).click();
   await expect(page.getByText('Your profile picture was removed.')).toBeVisible();
   await expect(pictures).toHaveCount(0);
-  // The handle's, as the account has no display name.
-  await expect(page.locator('span.avatar.large')).toHaveText(/^PI?$/);
+  // The display name's initial: signup names the account after its handle.
+  await expect(page.locator('span.avatar.large')).toHaveText('P');
 });
 
 /**

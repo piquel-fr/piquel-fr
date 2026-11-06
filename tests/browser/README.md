@@ -7,7 +7,9 @@ debug binary `just rust build` makes, behind Caddy over HTTPS, as configured bel
 passkeys, which each page then tells the password manager, listing exactly the
 passkeys the virtual authenticators hold that still sign in, a passkey ceremony
 that fails, the passkey confirmation the passkey script runs, an email link's
-token and signing out, which a sign-in from the devices page comes back to.
+token and signing out, which a sign-in from the devices page comes back to. It
+also reports a passkey in the security history as not the owner's, which signs
+out another device holding the same passkey and offers to remove it.
 
 `profile.spec.ts` uses the Profile tab's dialogs, which open with no script: it
 uploads a picture, which the tab, the sidebar and the top bar load under the
@@ -91,10 +93,10 @@ configuration: every signup runs it. Previews allow registration without one.
 
 `E2E_MAIL_URL` names the API of a [Mailpit](https://mailpit.axllent.org) that
 receives the deployment's email, as CI's does over plain SMTP on its loopback
-address, `AUTH_SMTP_URL=smtp://127.0.0.1:1025`. The tests that confirm an
-address or follow a recovery link read the email there, and are skipped without
-it. A run sends two confirmation links, and auth sends at most ten an hour to
-one IP address, so reruns against one deployment wait between batches.
+address, `AUTH_SMTP_URL=smtp://127.0.0.1:1025`. The test that confirms
+addresses reads the email there, and is skipped without it. A run sends two
+confirmation links, and auth sends at most ten an hour to one IP address, so reruns
+against one deployment wait between batches.
 
 `CHROMIUM_EXECUTABLE` can select an existing Chromium installation.
 `E2E_ALLOW_SELF_SIGNED_TLS=1` permits local test certificates only.
@@ -118,9 +120,13 @@ own, so there the browser checks auth's `/.well-known/webauthn` first, which lis
 the dashboard's origin. Another lists an account's events without
 the administrator's view of it until "Show views", which keeps the account filter,
 and hides it again with "Hide views". Another grants administrator rights from a
-search, which then opens the dashboard to the account, and revokes them; and, with
-`E2E_MAIL_URL`, one changes an account's passkeys and addresses, each confirmed
-from its mailed link, on its owner's behalf, whose history shows each reason. The
+search, which then opens the dashboard to the account, and revokes them; creates
+an invitation, whose link signs one account up once, and revokes another, which
+then signs nobody up, when `E2E_INVITE` is set; and, with `E2E_MAIL_URL`, one
+changes an account's passkeys and addresses, each confirmed from its mailed link,
+on its owner's behalf, whose history shows each reason. Support also renames a
+handle, which an owner may change only 30 days after signup: the new one signs in
+at once, and the old one no longer does. The
 top bar keeps its crumb, search box and avatar apart at every window size. Set
 `E2E_ADMIN_URL` to the dashboard's origin and `E2E_GRANT_ADMIN` to a command
 that grants administrator rights to the handle appended to it, e.g. `just auth
