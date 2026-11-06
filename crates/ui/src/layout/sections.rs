@@ -66,8 +66,9 @@ pub struct AccountNav<'a> {
 }
 
 /// A signed-in page of `section`, in the account's shell: the sidebar of `nav`
-/// for `who`, whose passkey script tells the password manager `signal`, signing out by posting to `sign_out`, the preference forms posting
-/// to `preferences_action`, reversing `preferences`, and coming back to `here`,
+/// for `who`, whose passkey script tells the password manager `signal`, signing
+/// out by posting to `sign_out`, the preference forms posting to
+/// `preferences_action`, reversing `preferences`, and coming back to `here`,
 /// the page named `title` in the crumb after `trail`, the pages it is under,
 /// and the status bar linking Piquel's `policies`; an administrator's sidebar
 /// also links the dashboard. Then what the account's `recovery` that can still
