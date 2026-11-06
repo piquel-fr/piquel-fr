@@ -15,7 +15,7 @@ services and any app built on them.
 
 ## Documentation
 
-The [documentation](docs/README.md) has a user guide, for account holders and
+The [documentation](https://docs.piquel.fr) has a user guide, for account holders and
 app developers, and a contributor guide, for people who change piquel.fr.
 
 ## Quick start

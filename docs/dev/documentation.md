@@ -188,3 +188,8 @@ fail whenever one of them is down.
 
 The `docs` CI job runs `just docs` on every pull request, because a change
 anywhere in the repository can break a link to it.
+
+Every deployment publishes the book of its own commit: production at
+<https://docs.piquel.fr>, staging at `docs.staging.piquel.fr`, and `just preview`
+at the `docs-<slug>.dev.piquel.fr` it prints. See
+[documentation](operations/deploying.md#documentation).
