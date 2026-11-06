@@ -1,6 +1,7 @@
 /**
  * Server-side login: the sealed cookies, `return_to`, pending logins, the origin
- * checks, refresh without a lease, logout, back-channel logout and step-up.
+ * checks, redirects, refresh without a lease, logout and its deadline, back-channel
+ * logout and step-up.
  */
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
@@ -261,17 +262,18 @@ class Browser {
   }
 
   /**
-   * A `GET` of the app's page at `path`, as an app answers it: its session, and the
-   * response {@link Login.respond} completed, whose cookies the browser keeps.
+   * A browser's navigation to the app's page at `path`, as an app answers it: its
+   * session, and the response {@link Login.respond} completed, whose cookies the
+   * browser keeps.
    */
   async visit(path = '/') {
-    const request = this.request(path);
+    const request = this.request(path, { headers: { 'sec-fetch-mode': 'navigate' } });
     const user = await this.#auth.login.session(request);
     const answer = user instanceof Response ? user : new Response('page');
     return { user, response: this.keep(this.#auth.login.respond(request, answer)) };
   }
 
-  /** The session of a `GET` of `path`, which the origin check lets through. */
+  /** The session of a navigation to `path`, which the origin check lets through. */
   async session(path = '/') {
     const { user } = await this.visit(path);
     assert.ok(!(user instanceof Response));
@@ -382,6 +384,52 @@ test('a sign-in revokes the session it replaces first, or keeps it when it canno
   // Both attempts asked to revoke the first session's token.
   assert.deepEqual(auth.revoked(), ['rt-1', 'rt-1']);
   assert.notEqual(await (await browser.session())?.accessToken(), 'at-1');
+});
+
+test('a sign-in redirects only navigations, with their full path', async () => {
+  const auth = await Auth.start();
+  const browser = new Browser(auth);
+  const signIn = (headers: Record<string, string>) =>
+    auth.login.signIn(browser.request('/notes?page=2', { headers }));
+  const navigation = signIn({ 'sec-fetch-mode': 'navigate' });
+  assert.equal(navigation.status, 303);
+  assert.equal(navigation.headers.get('location'), '/auth/login?return_to=%2Fnotes%3Fpage%3D2');
+  // Following a redirect to auth would fail a `fetch`'s CORS check.
+  for (const mode of ['cors', 'same-origin', 'no-cors', undefined]) {
+    const headers: Record<string, string> = mode === undefined ? {} : { 'sec-fetch-mode': mode };
+    assert.equal(signIn(headers).status, 401, String(mode));
+  }
+});
+
+test('revocations give up after their deadline', { timeout: 10_000 }, async (t) => {
+  const auth = await Auth.start();
+  const browser = new Browser(auth);
+  await browser.signIn();
+  // Auth never answers, and the injected `fetch` ignores its own timeout.
+  let revoking: () => void = () => undefined;
+  auth.revoke = () => {
+    revoking();
+    return new Promise(() => undefined);
+  };
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  /** What `send` answers once its revocation has waited out the five seconds. */
+  const deadline = async (send: () => Promise<Response>) => {
+    const revoked = new Promise<void>((resolve) => {
+      revoking = resolve;
+    });
+    const answer = send();
+    await revoked;
+    t.mock.timers.tick(5000);
+    return answer;
+  };
+  const logout = await deadline(() =>
+    browser.send('/auth/logout', { method: 'POST', headers: { 'sec-fetch-site': 'same-origin' } })
+  );
+  assert.equal(logout.status, 502);
+  assert.deepEqual(logout.headers.getSetCookie(), []);
+  const signIn = await deadline(() => browser.signIn());
+  assert.equal(signIn.status, 502);
+  assert.equal(setCookie(signIn, SESSION_COOKIE), undefined, 'the old session stays');
 });
 
 test('return_to accepts only same-origin paths', async () => {
@@ -768,10 +816,13 @@ test('a step-up returns to the page, retries once, then answers 403', async () =
   // The marker is spent, so a later visit is a new action.
   assert.equal(setCookie(response, STEP_UP_COOKIE), `${STEP_UP_COOKIE}=`);
   assert.equal((await page()).status, 303);
-  // Other methods cannot follow a redirect.
-  const posted = await auth.login.session(
-    browser.request('/settings', { method: 'POST', headers: { 'sec-fetch-site': 'same-origin' } })
-  );
-  assert.ok(posted instanceof SignedIn);
-  assert.equal(posted.stepUp(requirement).status, 401);
+  // Only a navigation is redirected: a `fetch` gets the 401, as do other methods.
+  for (const init of [
+    { headers: { 'sec-fetch-mode': 'cors' } },
+    { method: 'POST', headers: { 'sec-fetch-site': 'same-origin' } }
+  ]) {
+    const user = await auth.login.session(browser.request('/settings', init));
+    assert.ok(user instanceof SignedIn);
+    assert.equal(user.stepUp(requirement).status, 401);
+  }
 });
