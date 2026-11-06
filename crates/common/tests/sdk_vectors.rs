@@ -543,7 +543,8 @@ impl Vectors {
             ),
             Expected::error(ErrorCategory::InvalidToken, ErrorReason::BadSignature),
         );
-        // The Rust SDK's verifier refuses RSA keys under 2048 bits, so every SDK must.
+        // A key too weak to verify is the issuer's fault, not the token's: every SDK
+        // refuses it before checking the signature.
         let weak = PKey::private_key_from_pem(self.weak_pem.as_bytes()).expect("weak test key");
         let weak = weak.rsa().expect("RSA test key");
         let weak_jwks = json!({ "keys": [{
@@ -556,12 +557,23 @@ impl Vectors {
         });
         self.token(
             "access-weak-key",
-            "a token signed with a 1024-bit RSA key is rejected",
+            "a 1024-bit RSA key verifies nothing: the key set is at fault",
             access_case(
                 Self::sign_with(&self.weak_pem, &weak_header, &access),
                 &weak_jwks,
             ),
-            Expected::error(ErrorCategory::InvalidToken, ErrorReason::BadSignature),
+            Expected::error(ErrorCategory::Keys, ErrorReason::UnusableKey),
+        );
+        let mut even_exponent = self.jwks(&[OLD_KID]);
+        even_exponent["keys"][0]["e"] = json!(URL_SAFE_NO_PAD.encode([2]));
+        self.token(
+            "access-even-exponent",
+            "an RSA key with an even exponent verifies nothing: the key set is at fault",
+            access_case(
+                Self::sign(&self.old, TokenType::Access, &access),
+                &even_exponent,
+            ),
+            Expected::error(ErrorCategory::Keys, ErrorReason::UnusableKey),
         );
         let mut incomplete = serde_json::to_value(&access).expect("serialize claims");
         incomplete

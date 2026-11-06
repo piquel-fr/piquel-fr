@@ -163,41 +163,52 @@ const jwk: json.Decoder<Jwk> = json.object({
 
 const jwkSet = json.object({ keys: json.array((value) => value) });
 
-/** One usable signing key. */
+/** Shortest and longest RSA modulus a key may have, in bits (RFC 7518 §3.3). */
+const MODULUS_BITS = { min: 2048, max: 8192 };
+
+/** `bytes` without their leading zero bytes, which add nothing to a big-endian number. */
+const significant = (bytes: Uint8Array) => bytes.subarray(Math.max(bytes.findIndex(Boolean), 0));
+
+/** One signing key a set lists for verification. */
 class SigningKey {
   /** Key ID matched against token headers. */
   readonly kid: string;
   /** The algorithms the key may verify: the one the set names, or any. */
   readonly algorithms: readonly Algorithm[];
+  /**
+   * What keeps the key from verifying, as every SDK judges it: a modulus outside 2048
+   * to 8192 bits, not counting leading zero bytes, or an exponent that is even or
+   * under 3. `undefined` for a usable key.
+   */
+  readonly defect: string | undefined;
   readonly #jwk: Jwk;
   /** The imported key, once a token needed it. */
   #imported: Promise<CryptoKey> | undefined;
 
-  constructor(key: Jwk) {
+  /** A key whose `n` and `e` decoded to `n` and `e`. */
+  constructor(key: Jwk, n: Uint8Array, e: Uint8Array) {
     this.kid = key.kid;
     this.algorithms = key.alg === undefined ? ALGORITHMS : [key.alg];
     this.#jwk = key;
+    const [modulus, exponent] = [significant(n), significant(e)];
+    const bits = modulus.length === 0 ? 0 : modulus.length * 8 - Math.clz32(modulus[0] ?? 0) + 24;
+    const last = exponent.at(-1) ?? 0;
+    if (bits < MODULUS_BITS.min || bits > MODULUS_BITS.max) {
+      this.defect = `its RSA modulus is ${String(bits)} bits, outside 2048 to 8192`;
+    } else if (last % 2 === 0 || (exponent.length === 1 && last < 3)) {
+      this.defect = 'its RSA exponent is not an odd number of at least 3';
+    }
   }
 
-  /**
-   * The key, imported for RS256 verification on first use. A modulus outside 2048 to
-   * 8192 bits is refused, as the Rust SDK's verifier refuses it, so no SDK accepts a
-   * token signed with a weak key.
-   */
+  /** The key, imported for RS256 verification on first use. */
   imported(): Promise<CryptoKey> {
-    this.#imported ??= (async () => {
-      const key = await crypto.subtle.importKey(
-        'jwk',
-        { kty: this.#jwk.kty, n: this.#jwk.n, e: this.#jwk.e },
-        { name: 'RSASSA-PKCS1-v1_5', hash: 'SHA-256' },
-        false,
-        ['verify']
-      );
-      // The modulus's real size: leading zero bytes in `n` add none.
-      const bits = (key.algorithm as RsaHashedKeyAlgorithm).modulusLength;
-      if (bits < 2048 || bits > 8192) throw new RangeError(`an RSA key of ${String(bits)} bits`);
-      return key;
-    })();
+    this.#imported ??= crypto.subtle.importKey(
+      'jwk',
+      { kty: this.#jwk.kty, n: this.#jwk.n, e: this.#jwk.e },
+      { name: 'RSASSA-PKCS1-v1_5', hash: 'SHA-256' },
+      false,
+      ['verify']
+    );
     return this.#imported;
   }
 }
@@ -261,14 +272,15 @@ export class KeySet {
         continue;
       }
       if (key.key_ops !== undefined && !key.key_ops.includes('verify')) continue;
-      if (base64.decode(key.n) === undefined || base64.decode(key.e) === undefined) continue;
+      const [n, e] = [base64.decode(key.n), base64.decode(key.e)];
+      if (n === undefined || e === undefined) continue;
       if (keys.some((usable) => usable.kid === key.kid)) {
         throw new AuthError(
           { code: 'keys', reason: 'duplicate_key_id' },
           `two signing keys share the key ID ${JSON.stringify(key.kid)}`
         );
       }
-      keys.push(new SigningKey(key));
+      keys.push(new SigningKey(key, n, e));
     }
     return new KeySet(keys);
   }
@@ -358,7 +370,8 @@ export class KeyCache {
    * Verifies `jws`'s signature under `algorithm`, which the caller checked with
    * {@link Jws.requireAlgorithm}, with the key its `kid` names. Throws `unknown_key`
    * when no usable key matches, `keys` or `network` errors when keys were needed but
-   * could not be fetched, and `bad_signature` when the signature does not verify.
+   * could not be fetched, `unusable_key` when the key cannot verify, which is the key
+   * set's fault, and `bad_signature` when the signature does not verify.
    */
   async verify(jws: Jws, algorithm: Algorithm): Promise<void> {
     const kid = jws.header.kid;
@@ -370,12 +383,24 @@ export class KeyCache {
         `key ${JSON.stringify(kid)} is not for ${algorithm}`
       );
     }
+    const unusable = (why: string, cause?: unknown) =>
+      new AuthError(
+        { code: 'keys', reason: 'unusable_key' },
+        `signing key ${JSON.stringify(kid)} cannot verify signatures: ${why}`,
+        { cause }
+      );
+    if (key.defect !== undefined) throw unusable(key.defect);
+    let imported: CryptoKey;
+    try {
+      imported = await key.imported();
+    } catch (error) {
+      throw unusable('no verifier can be built from it', error);
+    }
     let verified = false;
     let cause: unknown;
     try {
-      verified = await jws.verifiedBy(await key.imported());
+      verified = await jws.verifiedBy(imported);
     } catch (error) {
-      // The key could not verify RS256, such as a key too weak for it.
       cause = error;
     }
     if (!verified) {
