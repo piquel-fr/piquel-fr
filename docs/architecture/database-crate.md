@@ -156,6 +156,9 @@ Important invariants:
   copy them when issued, and refresh families copy them from the code, so a grant
   keeps reporting its original authentication.
 - Authorization codes are single-use and bound to client, redirect and PKCE.
+  The exchange checks that binding with the code locked (`lock_code`); a failed
+  check expires the code at `-infinity` instead of consuming it, so it can't be
+  tried again and `oidc_session_clients` never records its client.
   Refresh tokens rotate transactionally, remain bound to their client/session,
   and reuse revokes the family.
 - Each refresh family records the code it was redeemed from. Redeeming that code
