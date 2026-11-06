@@ -405,7 +405,9 @@ trace its logs, and two dashboards in the `piquel.fr` folder:
   viewed accounts. Below are their timelines, the dashboard's traffic, actions by
   administrator, and
   the matching log lines and traces. Its counts come from the event and failure
-  log lines, so they are exact.
+  log lines, which, like all telemetry, are best effort: a request cancelled
+  while its commit is in flight can record an event that is never logged (see `docs/architecture/telemetry.md`). The stored history, on
+  the dashboard's Events page, is the audit record.
 
 To look up a failed request, paste its trace ID into Explore > Tempo: the
 reference that auth's pages and the admin dashboard show below a server error,

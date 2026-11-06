@@ -143,7 +143,8 @@ pub use protocol::{
 
 use chrono::{DateTime, TimeDelta, Utc};
 
-/// Clock skew tolerated on `exp`, `nbf`, `iat` and `auth_time`, matching auth's own.
+/// Clock skew tolerated on `exp`, `nbf`, `iat` and `auth_time`. Auth tolerates the
+/// same on `iat` alone, and none on `exp` or `max_age`.
 const LEEWAY: TimeDelta = TimeDelta::seconds(30);
 
 /// The time source for every expiry and cache check. Inject one with

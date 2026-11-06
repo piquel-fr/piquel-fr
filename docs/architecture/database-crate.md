@@ -479,7 +479,9 @@ run as the schema owner, deletes sealed events: it sets `piquel.audit_prune` for
 its own transaction, then moves the anchor (`audit_anchor`) to the checkpoint it
 pruned through. The anchor only moves forward, so of two concurrent prunes, the
 one that would move it back fails. Personal data is not covered, so retention
-keeps deleting `event_personal_data` freely.
+keeps deleting `event_personal_data` freely. Migration `0006`'s comment says
+nothing deletes events; pruning does. `deliveries.event_id` has no foreign key,
+so a delivery may name an event already pruned.
 
 Verification tests need history no other test shares: `Database::isolated` (behind
 `test-util`) migrates a schema of its own, and `audit().tamper` applies the

@@ -64,15 +64,15 @@ pub(crate) struct NewClient {
     pub(crate) settings: ClientSettings,
 }
 
-/// A change an owner makes: each given setting replaces the stored one. The
-/// default changes nothing.
+/// A change an owner makes: each given setting replaces the stored one, and any
+/// change needs a passkey confirmation. The default changes nothing.
 #[derive(Default)]
 pub(crate) struct ClientPatch {
     /// A new consent-screen name.
     pub(crate) display_name: Option<String>,
-    /// New authorization callbacks; changing them needs a passkey confirmation.
+    /// New authorization callbacks.
     pub(crate) redirect_uris: Option<Vec<String>>,
-    /// New post-logout pages; changing them needs a passkey confirmation.
+    /// New post-logout pages.
     pub(crate) post_logout_uris: Option<Vec<String>>,
     /// New scopes.
     pub(crate) allowed_scopes: Option<Vec<String>>,

@@ -224,8 +224,9 @@ An account may have one profile picture, which apps receive as the `picture`
 claim under the `profile` scope, in ID tokens, access tokens and UserInfo, and
 which every avatar shows in place of the initials: the account's sidebar and top
 bar, and the dashboard's account lists and pages. The SDKs read it as
-`SignedIn::picture()` in Rust and `user.picture` in TypeScript, and the admin API's
-accounts carry its ID. The owner sets it on the settings' Profile tab, which
+`SignedIn::picture()` in Rust and `user.picture` in TypeScript, and the admin
+views of accounts and administrators (`piquel_common::admin`), which the dashboard
+shows and the CLI prints as JSON, carry its ID. The owner sets it on the settings' Profile tab, which
 shows the account as apps do, with its handle, display name and picture, each
 changed in a dialog the popover API opens with no script; the picture's is a
 `multipart/form-data` form. There the picture script shows the chosen image under

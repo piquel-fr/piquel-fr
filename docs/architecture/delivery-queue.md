@@ -1,8 +1,9 @@
 # Outbound delivery queue
 
-Auth sends messages to other systems through a PostgreSQL queue: back-channel
-logout tokens, Security Event Tokens, SCIM requests, email and, later, audit
-witness checkpoints. Request handlers never send them inline. A slow or unreachable
+Auth sends messages to other systems through a PostgreSQL queue. Two channels
+exist: back-channel logout tokens and email (see [Channels](#channels)). Other
+kinds, such as audit witness checkpoints, would join them as channels of their
+own. Request handlers never send them inline. A slow or unreachable
 receiver must not slow a login, and a message must survive a restart.
 
 The repository owns the queue (`crates/database/src/repositories/deliveries/`).
@@ -24,8 +25,8 @@ page.
 - **At least once, with possible duplicates.** A worker that stops after sending
   but before recording the outcome lets its lease expire, and another worker sends
   the delivery again. Every attempt carries the same delivery ID, which receivers
-  use to deduplicate: it is the `jti` of logout tokens and SETs, and the source of
-  an email's `Message-ID`. Auth-service's `deliveries/tests.rs` kills a replica
+  use to deduplicate: it is the `jti` of logout tokens, and the source of an
+  email's `Message-ID`. Auth-service's `deliveries/tests.rs` kills a replica
   mid-send, and stalls another past its lease, to check this end to end.
 - **Ordered per key.** Deliveries that share an ordering key are sent one at a
   time, in the order their transactions committed, whatever the replicas' clocks
@@ -131,7 +132,7 @@ plain-text and the HTML template must match.
 ## Operations
 
 ```sh
-auth-service deliveries list [--status failed] [--channel scim] [--limit 100]
+auth-service deliveries list [--status failed] [--channel email] [--limit 100]
 auth-service deliveries retry <id>    # a failed, or cancelled unordered, delivery
 auth-service deliveries cancel <id>   # a pending or failed delivery
 ```
@@ -212,11 +213,12 @@ The examples follow the back-channel logout channel
    `deliveries` runs inside the event's transaction, so it sees the rows as the
    change left them. Copy everything a send needs; a send must not read rows that
    can change or disappear. Set `ordering_key` only if receivers need deliveries
-   in order, like SCIM per client and user, since a failure blocks the key.
+   in order, such as a future provisioning channel's changes per client and user,
+   since a failure blocks the key. Neither channel today sets one.
 
 2. **Register it** by adding it to `Registered` in `deliveries/mod.rs`, a nested
-   list: adding `Scim` makes it
-   `pub(crate) type Registered = (BackchannelLogout, (Email, (Scim, ())));`.
+   list: adding a channel `Provisioning` makes it
+   `pub(crate) type Registered = (BackchannelLogout, (Email, (Provisioning, ())));`.
 
 3. **Send it**, in `apps/auth-service/src/deliveries/`: a type implementing
    `Sender` with `type Channel = BackchannelLogout`. `MAX_AGE` bounds how long it
