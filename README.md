@@ -510,7 +510,8 @@ behind it. See `docs/architecture/delivery-queue.md`.
 ### Alerts
 
 Conditions that need an administrator's attention, such as a broken audit chain,
-are raised as alerts. The dashboard's overview shows each open one, and its
+are raised as alerts. Every active administrator's primary verified address is
+emailed each new one. The dashboard's overview shows each open one, and its
 status bar counts them with the other problems. Its Alerts tab lists them all,
 and so does:
 

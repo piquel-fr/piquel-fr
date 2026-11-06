@@ -9,9 +9,11 @@ use crate::{
     tests::{AUTH_ORIGIN, Browser, Replicas, verified_address},
 };
 use piquel_common::{
-    AccountStatus, EmailId, Handle, NotificationId, PasskeyId, RecoveryId,
+    AccountStatus, AlertId, EmailId, Handle, NotificationId, PasskeyId, RecoveryId,
+    admin::{ChainBreak, ChainProblem},
+    alerts::Alert,
     config::Origin,
-    events::{Actor, DomainEvent, EventContext, RequestOrigin},
+    events::{Actor, DomainEvent, EventContext, JobName, RequestOrigin},
     notifications::Notification,
 };
 use piquel_crypto::Secret;
@@ -531,4 +533,81 @@ async fn notifications_are_emailed_to_the_addresses_their_kind_names() {
             .any(|delivery| delivery.destination.starts_with(&to)),
         "no email without a verified address"
     );
+}
+
+/// A raised alert is emailed to every active administrator's primary verified
+/// address, and nowhere else: not their other addresses, nor a disabled
+/// administrator, nor an account that administers nothing. It says what the
+/// Alerts tab says, and links it.
+#[tokio::test]
+#[ignore = "requires TEST_DATABASE_URL"]
+async fn a_raised_alert_is_emailed_to_active_administrators() {
+    let database = Replicas::database().await;
+    let addressed = async || {
+        let user_id = account(&database).await;
+        let primary =
+            verified_address(&database, user_id, &format!("{user_id}@example.com"), true).await;
+        let other = format!("other-{user_id}@example.com");
+        let other = verified_address(&database, user_id, &other, false).await;
+        (user_id, primary, other)
+    };
+    let (admin, primary, other) = addressed().await;
+    let (disabled, disabled_primary, _) = addressed().await;
+    let (member, member_primary, _) = addressed().await;
+    for user_id in [admin, disabled] {
+        database
+            .administrators()
+            .grant(user_id)
+            .await
+            .expect("grant");
+    }
+    database
+        .users()
+        .set_status(disabled, AccountStatus::Disabled)
+        .await
+        .expect("disable");
+    let alert = Alert::AuditChainBroken(ChainBreak {
+        position: 5,
+        problem: ChainProblem::EventChanged,
+    });
+    let alert_id = AlertId::new();
+    let context = EventContext {
+        actor: Actor::System {
+            job: JobName::AuditVerification,
+        },
+        origin: RequestOrigin::default(),
+        reason: None,
+    };
+    let mut tx = database.begin().await.expect("transaction");
+    let raised = DomainEvent::AlertRaised {
+        alert_id,
+        alert: alert.clone(),
+    };
+    tx.record(&context, None, raised).await.expect("record");
+    tx.commit().await.expect("commit");
+    let emailed = async |user_id: UserId, email_id: EmailId| {
+        let destination = format!("administrator {user_id}, address {email_id}");
+        let payloads = database.deliveries().payloads(&destination).await;
+        payloads.expect("payloads").len()
+    };
+    assert_eq!(emailed(admin, primary).await, 1);
+    assert_eq!(emailed(admin, other).await, 0);
+    assert_eq!(emailed(disabled, disabled_primary).await, 0);
+    assert_eq!(emailed(member, member_primary).await, 0);
+
+    let config = EmailConfig::test(&AUTH_ORIGIN.parse().expect("auth origin"), true);
+    let sender = EmailSender::with_mailer(database.clone(), None::<Arc<Outbox>>, &config)
+        .linking(Some("https://admin.piquel.fr".parse().expect("origin")));
+    let message = EmailMessage::Alert {
+        address: format!("{admin}@example.com"),
+        alert_id,
+        alert,
+    };
+    let says = sender.content(admin, &message).await.expect("content");
+    assert!(
+        matches!(&says, Some(Content::Alert { alerts: Some(alerts), subject, .. })
+            if alerts == "https://admin.piquel.fr/alerts" && *subject == "The audit chain is broken"),
+        "the email links the Alerts tab"
+    );
+    sender.assert_renders(admin, &message).await;
 }

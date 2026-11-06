@@ -1,0 +1,32 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT a.user_id AS \"user_id: UserId\", e.id AS \"email_id: EmailId\",\n                    e.normalized_email AS address\n                FROM administrators a\n                JOIN users u ON u.id = a.user_id AND u.status = 'active'\n                JOIN user_emails e ON e.user_id = a.user_id\n                    AND e.is_primary AND e.verified_at IS NOT NULL\n                ORDER BY a.user_id",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "user_id: UserId",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "email_id: EmailId",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 2,
+        "name": "address",
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": [
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "e8d42563781f979e9ae998ccd8df1c86ef2371df1d92b2c9bf91132b51dd7b18"
+}

@@ -10,7 +10,8 @@
 //! Every notification an event gives its subject is emailed too, to the addresses
 //! [`Notification::addressees`] names, and says what the inbox says. Its delivery
 //! copies the address and the notification, so removing the address cannot
-//! cancel it.
+//! cancel it. So does an alert's email, which every active administrator's
+//! primary verified address is sent when the alert is raised.
 
 use super::{Channel, NewDelivery};
 use crate::{
@@ -18,7 +19,8 @@ use crate::{
     repositories::{EmailRepository, RepositoryExecutor},
 };
 use piquel_common::{
-    EmailId, Handle, NotificationId, RecoveryId, UserId,
+    AlertId, EmailId, Handle, NotificationId, RecoveryId, UserId,
+    alerts::Alert,
     events::DomainEvent,
     notifications::{Addressees, Notification},
 };
@@ -58,6 +60,25 @@ pub enum EmailMessage {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         recovery_id: Option<RecoveryId>,
     },
+    /// An alert that was raised, to an administrator's primary verified address.
+    Alert {
+        /// The address, copied when the alert was raised.
+        address: String,
+        /// The alert.
+        alert_id: AlertId,
+        /// What it says.
+        alert: Alert,
+    },
+}
+
+/// Where an active administrator's email goes: their primary verified address.
+struct AdministratorAddress {
+    /// The administrator.
+    user_id: UserId,
+    /// The address.
+    email_id: EmailId,
+    /// The address itself.
+    address: String,
 }
 
 /// A recovery whose link still works, and where it goes.
@@ -184,14 +205,34 @@ impl Channel for Email {
     type Payload = EmailMessage;
 
     /// One message to each address of the event's subject that its link or
-    /// notification goes to. Its `destination` names the account and the
-    /// address's ID, never the address.
+    /// notification goes to, or, for a raised alert, to each active
+    /// administrator's primary verified address. Its `destination` names the
+    /// account and the address's ID, never the address.
     async fn deliveries(
         event: &DomainEvent,
         subject: Option<UserId>,
         notified: Option<&Notified>,
         tx: &mut DatabaseTransaction<'_>,
     ) -> Result<Vec<NewDelivery<Self>>, DatabaseError> {
+        if let DomainEvent::AlertRaised { alert_id, alert } = event {
+            let administrators = tx.emails().administrator_addresses().await?;
+            return Ok(administrators
+                .into_iter()
+                .map(|administrator| NewDelivery {
+                    destination: format!(
+                        "administrator {}, address {}",
+                        administrator.user_id, administrator.email_id
+                    ),
+                    recipient: administrator.user_id,
+                    payload: EmailMessage::Alert {
+                        address: administrator.address,
+                        alert_id: *alert_id,
+                        alert: alert.clone(),
+                    },
+                    ordering_key: None,
+                })
+                .collect());
+        }
         let Some(user_id) = subject else {
             return Ok(vec![]);
         };
@@ -209,6 +250,30 @@ impl Channel for Email {
 }
 
 impl EmailRepository<'_> {
+    /// The primary verified address of every active administrator.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`DatabaseError`] if the query fails.
+    async fn administrator_addresses(
+        &mut self,
+    ) -> Result<Vec<AdministratorAddress>, DatabaseError> {
+        run!(
+            self,
+            fetch_all,
+            sqlx::query_as!(
+                AdministratorAddress,
+                r#"SELECT a.user_id AS "user_id: UserId", e.id AS "email_id: EmailId",
+                    e.normalized_email AS address
+                FROM administrators a
+                JOIN users u ON u.id = a.user_id AND u.status = 'active'
+                JOIN user_emails e ON e.user_id = a.user_id
+                    AND e.is_primary AND e.verified_at IS NOT NULL
+                ORDER BY a.user_id"#
+            )
+        )
+    }
+
     /// `user_id`'s verified address `email_id`, if recovery `recovery_id` of the
     /// active account still has a working link, with the account's handle.
     ///

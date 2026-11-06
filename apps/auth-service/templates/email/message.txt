@@ -30,6 +30,18 @@ Undo the recovery:
 Read it in your Piquel notifications:
 
 {{ page }}
+{%- when Content::Alert { address: _, subject, body, alerts } %}
+{{ subject }}.
+
+{{ body }}
+
+You receive this as a Piquel administrator. Acknowledge it once someone is looking into it,
+{%- match alerts %}
+{%- when Some with (alerts) %} on the dashboard:
+
+{{ alerts }}
+{%- when None %} with auth-service alerts acknowledge.
+{%- endmatch %}
 {%- endmatch %}
 
 Piquel
