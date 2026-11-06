@@ -1,0 +1,299 @@
+//! The session cookie: the shared vectors, refresh without a lease, how a refresh
+//! failure ends a session, logout, and the cookie's size.
+
+use super::*;
+use crate::{
+    Tokens,
+    axum::login::{SessionCookie, SessionCookieError},
+};
+use ::axum::http::HeaderMap;
+use chrono::TimeDelta;
+
+/// The session a `Cookie` header holds is the one the vectors expect, read back in
+/// the shape they write, or none.
+#[tokio::test]
+async fn session_cookie_vectors() {
+    let endpoint = TokenEndpoint::start(Duration::ZERO).await;
+    for case in Case::all("sessions") {
+        let client = endpoint.issuer(&case.clock()).client(ClientConfig {
+            client_id: case.text("client_id").parse().expect("client ID"),
+            credentials: Credentials::Secret("secret".to_owned().into()),
+            redirect_uri: "https://notes.example.com/auth/callback"
+                .parse()
+                .expect("callback"),
+        });
+        let key = CookieKey::from_base64(case.text("cookie_key")).expect("cookie key");
+        let routes = LoginRoutes::new(client, key).expect("a confidential client");
+        let mut headers = HeaderMap::new();
+        headers.insert(
+            header::COOKIE,
+            case.text("cookie").parse().expect("cookie header"),
+        );
+        let session = match routes.0.open_session(&headers) {
+            SessionCookie::Open(login) => serde_json::to_value(&login.0).expect("session"),
+            SessionCookie::Ended | SessionCookie::Absent => serde_json::Value::Null,
+        };
+        assert_eq!(session, case.json["expected"]["ok"], "{}", case.name);
+    }
+}
+
+/// The app's home page for the browser holding `session`: its status, the access
+/// token it shows, and the session cookie the response sets, if any.
+async fn home(app: &Router, session: &str) -> (StatusCode, String, Option<String>) {
+    let response = get_with(app, "/", &[(header::COOKIE, session)]).await;
+    let cookie = set_cookie(&response, SESSION_COOKIE);
+    if cookie.is_some() {
+        assert_eq!(response.headers()[header::CACHE_CONTROL], "no-store");
+    }
+    (response.status(), text(response).await, cookie)
+}
+
+/// Two requests that both find the access token expired both refresh, with no lease
+/// between them, and both succeed: a confidential client's refresh token does not
+/// rotate. Each response carries its new session, and a request that reads the
+/// session twice refreshes once.
+#[tokio::test]
+async fn concurrent_refreshes_all_succeed() {
+    let endpoint = TokenEndpoint::start(Duration::from_millis(100)).await;
+    let clock = clock();
+    let app = login_app(&endpoint.issuer(&clock));
+    let session = sign_in(&app, USER).await;
+    assert_eq!(
+        home(&app, &session).await,
+        (StatusCode::OK, "access-0".into(), None)
+    );
+
+    clock.advance(300);
+    let (first, second) = tokio::join!(home(&app, &session), home(&app, &session));
+    assert_eq!((first.0, second.0), (StatusCode::OK, StatusCode::OK));
+    let mut tokens = [first.1.clone(), second.1];
+    tokens.sort();
+    assert_eq!(tokens, ["access-1", "access-2"]);
+    assert_eq!(endpoint.refreshes.load(Ordering::SeqCst), 2);
+    let refreshed = first.2.expect("the refreshed session");
+    assert_eq!(
+        home(&app, &refreshed).await,
+        (StatusCode::OK, first.1, None)
+    );
+
+    let response = get_with(&app, "/both", &[(header::COOKIE, &session)]).await;
+    assert_eq!(text(response).await, "access-3 access-3");
+    assert_eq!(endpoint.refreshes.load(Ordering::SeqCst), 3, "one refresh");
+}
+
+/// Auth's refusal of the refresh token ends the session and clears its cookie. Any
+/// other failure spends nothing: the session goes on with its access token while
+/// that is valid, and once it expired the request is refused with 503, keeping the
+/// cookie for a later refresh, so a session auth ended never outlives its token.
+#[tokio::test]
+async fn refresh_failures_end_the_session_only_when_auth_refuses() {
+    /// The home page, `seconds` after signing in at `endpoint`.
+    async fn after(endpoint: &TokenEndpoint, seconds: i64) -> Response {
+        let clock = clock();
+        let app = login_app(&endpoint.issuer(&clock));
+        let session = sign_in(&app, USER).await;
+        clock.advance(seconds);
+        get_with(&app, "/", &[(header::COOKIE, &session)]).await
+    }
+    let refused = TokenEndpoint::refusing(StatusCode::BAD_REQUEST, "invalid_grant").await;
+    let response = after(&refused, 280).await;
+    assert_eq!(response.status(), StatusCode::SEE_OTHER, "signed out");
+    assert_eq!(
+        set_cookie(&response, SESSION_COOKIE),
+        Some(format!("{SESSION_COOKIE}="))
+    );
+    for status in [StatusCode::BAD_REQUEST, StatusCode::SERVICE_UNAVAILABLE] {
+        let failing = TokenEndpoint::refusing(status, "temporarily_unavailable").await;
+        let response = after(&failing, 280).await;
+        assert_eq!(response.status(), StatusCode::OK, "{status}");
+        assert_eq!(set_cookie(&response, SESSION_COOKIE), None, "{status}");
+        assert_eq!(text(response).await, "access-0");
+        let response = after(&failing, 300).await;
+        assert_eq!(
+            response.status(),
+            StatusCode::SERVICE_UNAVAILABLE,
+            "{status}"
+        );
+        assert_eq!(set_cookie(&response, SESSION_COOKIE), None, "{status}");
+    }
+}
+
+/// A cookie that does not open, or whose session ended, is no session, and the
+/// response clears it.
+#[tokio::test]
+async fn ended_sessions_are_cleared() {
+    let endpoint = TokenEndpoint::start(Duration::ZERO).await;
+    let clock = clock();
+    let app = login_app(&endpoint.issuer(&clock));
+    let session = sign_in(&app, USER).await;
+    let other_app = sign_in(&login_app(&endpoint.issuer(&clock)), USER).await;
+    clock.advance(TimeDelta::hours(12).num_seconds());
+    for cookie in [session, other_app] {
+        let response = get_with(&app, "/", &[(header::COOKIE, &cookie)]).await;
+        assert_eq!(response.status(), StatusCode::SEE_OTHER);
+        assert_eq!(
+            set_cookie(&response, SESSION_COOKIE),
+            Some(format!("{SESSION_COOKIE}="))
+        );
+    }
+}
+
+/// Logout revokes the session's refresh token at auth, so no copy of the cookie
+/// refreshes again, clears the cookie, and sends the browser to auth's logout with
+/// the client, there being no ID token to hint with. If auth cannot revoke it, the
+/// cookie stays, for the user to try again.
+#[tokio::test]
+async fn logout_revokes_the_refresh_token() {
+    let endpoint = TokenEndpoint::start(Duration::ZERO).await;
+    let app = login_app(&endpoint.issuer(&clock()));
+    let session = sign_in(&app, USER).await;
+    let logout = || async {
+        let request = Request::post("/auth/logout")
+            .header(header::COOKIE, &session)
+            .header(header::ORIGIN, "https://notes.example.com")
+            .body(Body::empty())
+            .expect("request");
+        app.clone().oneshot(request).await.expect("response")
+    };
+    endpoint.revocations_fail.store(true, Ordering::SeqCst);
+    let response = logout().await;
+    assert_eq!(response.status(), StatusCode::BAD_GATEWAY);
+    assert_eq!(set_cookies(&response), Vec::<String>::new());
+
+    endpoint.revocations_fail.store(false, Ordering::SeqCst);
+    let response = logout().await;
+    assert_eq!(response.status(), StatusCode::SEE_OTHER);
+    assert_eq!(
+        *endpoint.revoked.lock().expect("revocations"),
+        ["refresh-0"]
+    );
+    assert_eq!(
+        set_cookie(&response, SESSION_COOKIE),
+        Some(format!("{SESSION_COOKIE}="))
+    );
+    let location: Url = response.headers()[header::LOCATION]
+        .to_str()
+        .expect("location")
+        .parse()
+        .expect("logout URL");
+    let query: Vec<_> = location
+        .query_pairs()
+        .map(|(name, _)| name.into_owned())
+        .collect();
+    assert_eq!(query, ["client_id"]);
+}
+
+/// A sign-in replacing the browser's session first revokes that session's refresh
+/// token, so no copy of the old cookie outlives its access token. If auth cannot
+/// revoke it, the sign-in stops before redeeming its code, and the old session stays.
+#[tokio::test]
+async fn sign_ins_revoke_the_session_they_replace() {
+    let endpoint = TokenEndpoint::start(Duration::ZERO).await;
+    let app = login_app(&endpoint.issuer(&clock()));
+    let first = sign_in(&app, USER).await;
+    let replace = async || {
+        let login = Started::at(&app, "%2F", &[]).await;
+        login
+            .complete(&app, USER, &[login.cookie.clone(), first.clone()])
+            .await
+    };
+    endpoint.revocations_fail.store(true, Ordering::SeqCst);
+    let response = replace().await;
+    assert_eq!(response.status(), StatusCode::BAD_GATEWAY);
+    assert_eq!(
+        set_cookie(&response, SESSION_COOKIE),
+        None,
+        "the old session stays"
+    );
+
+    endpoint.revocations_fail.store(false, Ordering::SeqCst);
+    let response = replace().await;
+    assert_eq!(response.status(), StatusCode::SEE_OTHER);
+    assert_eq!(
+        *endpoint.revoked.lock().expect("revocations"),
+        ["refresh-0"]
+    );
+}
+
+/// A session whose end comes while its refresh runs is over: the request has no
+/// session, and the response clears the cookie.
+#[tokio::test]
+async fn sessions_end_on_time_even_mid_refresh() {
+    let clock = clock();
+    let during = clock.clone();
+    let endpoint = TokenEndpoint::refreshing(move |call| {
+        // The refresh takes ten seconds.
+        during.advance(10);
+        async move { ::axum::Json(TokenEndpoint::tokens(&format!("access-{call}"))).into_response() }
+    })
+    .await;
+    let app = login_app(&endpoint.issuer(&clock));
+    let session = sign_in(&app, USER).await;
+    clock.advance(TimeDelta::hours(12).num_seconds() - 5);
+    let response = get_with(&app, "/", &[(header::COOKIE, &session)]).await;
+    assert_eq!(endpoint.refreshes.load(Ordering::SeqCst), 1);
+    assert_eq!(response.status(), StatusCode::SEE_OTHER);
+    assert_eq!(
+        set_cookie(&response, SESSION_COOKIE),
+        Some(format!("{SESSION_COOKIE}="))
+    );
+}
+
+/// Tokens of a sign-in for the vectors' user whose access token is `access_bytes`
+/// long and whose name and email are as long as auth allows, in 4-byte characters.
+fn worst_case_tokens(access_bytes: usize) -> Tokens {
+    let mut claims = token_case("id-valid").json["expected"]["ok"].clone();
+    claims["name"] = json!("😀".repeat(80));
+    claims["email"] = json!(format!("{}@example.com", "e".repeat(242)));
+    claims["email_verified"] = json!(true);
+    claims["preferred_username"] = json!("u".repeat(32));
+    claims["profile_version"] = json!(u32::MAX);
+    serde_json::from_value(json!({
+        "id_token": { "claims": claims, "raw": "unused" },
+        "access_token": "a".repeat(access_bytes),
+        "expires_at": Utc::now() + TimeDelta::minutes(5),
+        "scopes": "email offline_access openid profile",
+        "refresh_token": format!("prt_{}.{}", USER, "s".repeat(43)),
+    }))
+    .expect("tokens")
+}
+
+/// A worst-case session fits in a cookie once access tokens carry no profile (#279),
+/// as the 1,227-byte token of a 3072-bit key, 64-byte client and resource IDs, and
+/// today's other claims make; a larger one fails rather than set a cookie the browser
+/// would drop.
+#[tokio::test]
+async fn sessions_fit_in_a_cookie() {
+    let endpoint = TokenEndpoint::start(Duration::ZERO).await;
+    let routes = LoginRoutes::new(
+        client(&endpoint.issuer(&clock())),
+        CookieKey::generate().expect("cookie key"),
+    )
+    .expect("a confidential client");
+    let ends_at = Utc::now() + TimeDelta::hours(12);
+    let minimal = StoredLogin::new(worst_case_tokens(1227), ends_at).expect("a session");
+    let cookie = routes.0.session_cookie(&minimal).expect("fits");
+    let pair = cookie
+        .to_str()
+        .expect("text")
+        .split(';')
+        .next()
+        .expect("pair");
+    assert!(pair.len() <= 4096, "{}", pair.len());
+    let today = StoredLogin::new(worst_case_tokens(2272), ends_at).expect("a session");
+    assert!(matches!(
+        routes.0.session_cookie(&today),
+        Err(SessionCookieError::TooLarge(_))
+    ));
+}
+
+/// Without a refresh token, a session cannot learn that auth ended it, so it ends
+/// with its access token.
+#[test]
+fn sessions_without_a_refresh_token_end_with_their_access_token() {
+    let mut tokens = worst_case_tokens(100);
+    tokens.refresh_token = None;
+    let expires_at = tokens.expires_at;
+    let login = StoredLogin::new(tokens, Utc::now() + TimeDelta::hours(12)).expect("a session");
+    assert_eq!(login.ends_at(), expires_at);
+}

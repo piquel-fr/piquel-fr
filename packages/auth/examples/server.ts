@@ -1,20 +1,23 @@
 /**
  * A server-side app signing users in with `@piquel/auth/server`, in one file, on
- * Node's `http` server. Tokens stay on the server; the browser holds only a session
- * cookie. Run it with Node 22.18 or later, which runs TypeScript directly:
+ * Node's `http` server. The session lives in the browser, in a cookie sealed with
+ * `COOKIE_KEY`, so the app stores nothing. Run it with Node 22.18 or later, which runs
+ * TypeScript directly:
  *
  * ```sh
  * AUTH_URL=https://auth.piquel.fr CLIENT_ID=notes-web CLIENT_SECRET=pqcs_… \
- *   APP_URL=http://127.0.0.1:4100 node packages/auth/examples/server.ts
+ *   COOKIE_KEY="$(openssl rand -base64 32)" APP_URL=http://127.0.0.1:4100 \
+ *   node packages/auth/examples/server.ts
  * ```
  *
- * Register the client as confidential, with the redirect URI `$APP_URL/auth/callback`
- * and the post-logout URI `$APP_URL/`. An app outside this repository imports
- * `@piquel/auth` and `@piquel/auth/server` instead of the sources.
+ * Register the client as confidential, allowed `offline_access`, with the redirect
+ * URI `$APP_URL/auth/callback` and the post-logout URI `$APP_URL/`. An app outside
+ * this repository imports `@piquel/auth` and `@piquel/auth/server` instead of the
+ * sources.
  */
 import { type IncomingMessage, type ServerResponse, createServer } from 'node:http';
 import { Issuer } from '../src/index.ts';
-import { Login, MemoryBackend } from '../src/server.ts';
+import { CookieKey, Login, type SignedIn } from '../src/server.ts';
 
 /** A required environment variable. */
 function env(name: string): string {
@@ -32,8 +35,11 @@ const login = new Login(
     redirectUri: new URL('/auth/callback', app).href
   }),
   {
-    // Sessions are lost on restart: a real app implements `SessionBackend`.
-    backend: new MemoryBackend(),
+    // The same key on every replica, kept like the client secret. Without one, a
+    // random key signs every user out on restart.
+    cookieKey: process.env.COOKIE_KEY
+      ? CookieKey.fromBase64(process.env.COOKIE_KEY)
+      : CookieKey.generate(),
     scopes: ['profile'],
     afterLogout: new URL('/', app).href
   }
@@ -55,7 +61,13 @@ async function handle(request: Request): Promise<Response> {
   const routed = await login.handle(request);
   if (routed) return routed;
   const user = await login.session(request);
-  if (user instanceof Response) return user; // 403: an unsafe request from another site
+  if (user instanceof Response) return user; // 403 from another site, or 503
+  // Sets the cookies the session's read needs, such as a refreshed session.
+  return login.respond(request, answer(request, user));
+}
+
+/** The app's page `request` asks for, for `user` when signed in. */
+function answer(request: Request, user: SignedIn | null): Response {
   switch (new URL(request.url).pathname) {
     case '/':
       if (!user) return page('<h1>Notes</h1><a href="/auth/login">Sign in</a>');

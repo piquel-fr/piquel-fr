@@ -1,205 +1,149 @@
-//! Reading the request's session, and refreshing its access token under the
-//! lease the SDK keeps in the session record, so one request at a time calls auth.
+//! Reading the request's session from its cookie, and refreshing its access token.
+//!
+//! The login routes take only confidential clients, whose refresh tokens auth does
+//! not rotate, so concurrent requests may each refresh: every one gets valid tokens,
+//! and the browser keeps whichever cookie arrives last. A failed refresh spends
+//! nothing, so only auth's refusal ends the session; but an access token that
+//! expired and could not be refreshed is never handed out, so a session auth ended
+//! stops within an access token's lifetime even while auth is unreachable.
 
-use super::{Login, SESSION_COOKIE, SignedIn};
-use crate::axum::{
-    StoredLogin,
-    bearer::ErrorChain,
-    session::{BackendError, Lease, LeaseId, Session, SessionKey},
+use super::{Login, SessionCookie, SignedIn, layer::RequestSession};
+use crate::{
+    OAuthError,
+    axum::{StoredLogin, bearer::ErrorChain},
+    protocol::oauth::{ErrorCode, ErrorResponse},
 };
-use axum::http::HeaderMap;
-use chrono::{DateTime, TimeDelta, Utc};
+use axum::{
+    http::{HeaderMap, StatusCode},
+    response::{IntoResponse, Response},
+};
+use chrono::TimeDelta;
 use std::time::Duration;
 
 /// Access tokens this close to expiry are refreshed first.
 const REFRESH_MARGIN: TimeDelta = TimeDelta::seconds(30);
 /// Longest a refresh may take, auth's response and its ID token check included.
 const REFRESH_DEADLINE: Duration = Duration::from_secs(20);
-/// Time kept back from a lease for saving its result, so the save lands before the
-/// lease expires even when the backend is slow.
-const SAVE_MARGIN: TimeDelta = TimeDelta::seconds(10);
-/// How long a refresh lease lasts if its holder never releases it.
-const REFRESH_LEASE: Duration = Duration::from_secs(60);
-/// How long a request waits for another's refresh before using what it has.
-const REFRESH_WAIT: Duration = Duration::from_secs(25);
-/// How often a request waiting for another's refresh reloads the session.
-const REFRESH_POLL: Duration = Duration::from_millis(50);
+
+/// What refreshing a session came to.
+enum Refresh {
+    /// New tokens.
+    Refreshed(Box<StoredLogin>),
+    /// Auth could not be asked, or answered with an error other than a refusal: the
+    /// session goes on as it was, and a later request tries again.
+    Kept,
+    /// Auth refused the refresh token, or named another user: the session is over.
+    Ended,
+}
+
+/// The session's access token expired and could not be refreshed: the request is
+/// refused for now, and the cookie kept for a later request to refresh.
+#[derive(Clone, Copy, Debug)]
+pub(super) struct Unavailable;
+
+impl IntoResponse for Unavailable {
+    /// 503, for the browser to try again.
+    fn into_response(self) -> Response {
+        (
+            StatusCode::SERVICE_UNAVAILABLE,
+            "Your session could not be renewed; try again in a moment.",
+        )
+            .into_response()
+    }
+}
 
 impl Login {
-    /// The signed-in session the request's cookie names, its access token refreshed
-    /// when it is about to expire.
-    /// `retry` marks a request returning from a step-up login.
+    /// The signed-in user the request's session cookie holds, its access token
+    /// refreshed when it is about to expire. Records in `request` the cookie the
+    /// response must set: the refreshed session, or the deletion of an ended one.
+    ///
+    /// # Errors
+    /// [`Unavailable`] when the access token expired and auth could not renew it.
     pub(super) async fn session(
         &self,
         headers: &HeaderMap,
-        retry: bool,
-    ) -> Result<Option<SignedIn>, BackendError> {
-        let Some(key) = Self::cookie(headers, SESSION_COOKIE).and_then(SessionKey::parse) else {
-            return Ok(None);
+        request: &RequestSession,
+    ) -> Result<Option<SignedIn>, Unavailable> {
+        let mut login = match self.open_session(headers) {
+            SessionCookie::Absent => return Ok(None),
+            SessionCookie::Ended => {
+                request.set_cookie(Self::clear_cookie(&self.cookies.session));
+                return Ok(None);
+            }
+            SessionCookie::Open(login) => *login,
         };
-        let Some(mut current) = self.sessions.load(&key, self.now()).await? else {
-            return Ok(None);
-        };
-        let login = &current.login;
-        if login.refresh_token.is_some() && login.expires_at <= self.now() + REFRESH_MARGIN {
-            match self.refresh(&key, current).await? {
-                Some(refreshed) => current = refreshed,
-                None => return Ok(None),
+        if login.refresh_token().is_some() && login.expires_at() <= self.now() + REFRESH_MARGIN {
+            match self.refresh(&login).await {
+                Refresh::Refreshed(refreshed) => {
+                    let refreshed = *refreshed;
+                    // On failure, as when new profile claims outgrow the cookie, this
+                    // request still uses the new tokens, and the next refreshes again.
+                    match self.session_cookie(&refreshed) {
+                        Ok(cookie) => request.set_cookie(cookie),
+                        Err(error) => tracing::warn!(
+                            error = %ErrorChain(&error),
+                            "the refreshed session could not be saved"
+                        ),
+                    }
+                    login = refreshed;
+                }
+                Refresh::Kept if login.expires_at() <= self.now() => return Err(Unavailable),
+                Refresh::Kept => {}
+                Refresh::Ended => {
+                    request.set_cookie(Self::clear_cookie(&self.cookies.session));
+                    return Ok(None);
+                }
             }
         }
+        // The session may have reached its end while the refresh ran.
+        let now = self.now();
+        if login.ends_at() <= now {
+            request.set_cookie(Self::clear_cookie(&self.cookies.session));
+            return Ok(None);
+        }
         Ok(Some(SignedIn {
-            login: current.login,
-            checked_at: self.now(),
-            retry,
+            login,
+            checked_at: now,
+            retry: request.retry,
         }))
     }
 
-    /// Refreshes the session's access token, serialized through the lease the SDK
-    /// keeps in the session record: only the lease holder calls auth, and other
-    /// requests wait for its result. Returns `None` once the session is gone.
-    ///
-    /// Auth rotates the refresh token as it answers, so once a refresh may have
-    /// reached auth without its answer being saved, the stored token may be spent and
-    /// is never redeemed again: the session ends instead, and the user signs in anew.
-    async fn refresh(
-        &self,
-        key: &SessionKey,
-        current: Session,
-    ) -> Result<Option<Session>, BackendError> {
-        let Ok(lease) = LeaseId::generate() else {
-            tracing::error!("operating system randomness is unavailable");
-            return Ok(Some(current));
+    /// Refreshes the session's access token.
+    async fn refresh(&self, login: &StoredLogin) -> Refresh {
+        let Some(refresh_token) = login.refresh_token() else {
+            return Refresh::Kept;
         };
-        match self
-            .sessions
-            .lease(key, current.version, &lease, REFRESH_LEASE, self.now())
-            .await?
-        {
-            Lease::Missing => Ok(None),
-            Lease::Abandoned => {
-                tracing::warn!("a refresh never finished; ending the session");
-                self.end(key).await
-            }
-            // Another request refreshed since this one read the session, or is
-            // refreshing now: use its result.
-            Lease::Changed | Lease::Busy => self.wait(key, current).await,
-            Lease::Acquired(until) => self.refresh_leased(key, &lease, until, current).await,
-        }
-    }
-
-    /// Waits for another request's refresh to finish, then returns its result. After
-    /// [`REFRESH_WAIT`], the session as last read is the best known.
-    async fn wait(
-        &self,
-        key: &SessionKey,
-        current: Session,
-    ) -> Result<Option<Session>, BackendError> {
-        let deadline = tokio::time::Instant::now() + REFRESH_WAIT;
-        loop {
-            match self.sessions.load(key, self.now()).await? {
-                Some(reloaded) if reloaded.leased => {}
-                other => return Ok(other),
-            }
-            if tokio::time::Instant::now() >= deadline {
-                return Ok(Some(current));
-            }
-            tokio::time::sleep(REFRESH_POLL).await;
-        }
-    }
-
-    /// Refreshes while holding `lease` until `until`, then saves the result or gives
-    /// the lease back. The refresh must finish while enough of the lease is left to
-    /// save: the time is measured after acquiring the lease, since the backend calls
-    /// that acquired it may have been slow.
-    async fn refresh_leased(
-        &self,
-        key: &SessionKey,
-        lease: &LeaseId,
-        until: DateTime<Utc>,
-        current: Session,
-    ) -> Result<Option<Session>, BackendError> {
-        let budget = (until - self.now() - SAVE_MARGIN)
-            .to_std()
-            .ok()
-            .filter(|budget| !budget.is_zero());
-        let (Some(refresh), Some(budget)) = (&current.login.refresh_token, budget) else {
-            // Nothing to refresh, or no time left to do it safely: auth was not
-            // called, so give the lease back with the session unchanged.
-            return self.save(key, lease, until, current.login).await;
-        };
-        let Ok(refreshed) =
-            tokio::time::timeout(budget.min(REFRESH_DEADLINE), self.client.refresh(refresh)).await
-        else {
-            tracing::warn!("session refresh timed out; ending the session");
-            return self.end(key).await;
+        let refreshing = self.client.refresh(refresh_token);
+        let Ok(refreshed) = tokio::time::timeout(REFRESH_DEADLINE, refreshing).await else {
+            tracing::warn!("session refresh timed out");
+            return Refresh::Kept;
         };
         match refreshed {
-            Ok(tokens) => {
-                let Some(refreshed) = current.login.refreshed(tokens) else {
+            Ok(tokens) => login.refreshed(tokens).map_or_else(
+                || {
                     tracing::warn!("refresh returned an ID token for another user");
-                    return self.end(key).await;
-                };
-                self.save(key, lease, until, refreshed).await
-            }
+                    Refresh::Ended
+                },
+                |refreshed| Refresh::Refreshed(Box::new(refreshed)),
+            ),
             // Auth refused the refresh token: the grant is over.
             Err(
-                error @ crate::OAuthError::Rejected {
+                error @ OAuthError::Rejected {
                     response:
-                        crate::protocol::oauth::ErrorResponse {
-                            error: crate::protocol::oauth::ErrorCode::InvalidGrant,
+                        ErrorResponse {
+                            error: ErrorCode::InvalidGrant,
                             ..
                         },
                     ..
                 },
             ) => {
-                tracing::debug!(error = %ErrorChain(&error), "session refresh rejected");
-                self.end(key).await
+                tracing::debug!(error = %ErrorChain(&error), "session refresh refused");
+                Refresh::Ended
             }
-            // Auth answered with another error, so it rotated nothing: keep the
-            // session and give the lease back.
-            Err(error @ crate::OAuthError::Rejected { .. }) => {
-                tracing::warn!(error = %ErrorChain(&error), "session refresh failed");
-                self.save(key, lease, until, current.login).await
-            }
-            // The request never reached auth, so nothing was rotated either.
-            Err(crate::OAuthError::Network(error)) if error.unsent() => {
-                tracing::warn!(error = %ErrorChain(&error), "session refresh could not reach auth");
-                self.save(key, lease, until, current.login).await
-            }
-            // No usable answer: auth may have rotated the token.
             Err(error) => {
-                tracing::warn!(error = %ErrorChain(&error), "session refresh failed; ending the session");
-                self.end(key).await
+                tracing::warn!(error = %ErrorChain(&error), "session refresh failed");
+                Refresh::Kept
             }
         }
-    }
-
-    /// Saves `login` under `lease`, giving the lease back. If the session no longer
-    /// holds the lease, it was logged out meanwhile and must stay that way.
-    ///
-    /// The save must land before the lease expires, since afterwards another request
-    /// may find it abandoned and delete the session. A save still running at expiry
-    /// may or may not have landed, so the session ends.
-    async fn save(
-        &self,
-        key: &SessionKey,
-        lease: &LeaseId,
-        until: DateTime<Utc>,
-        login: StoredLogin,
-    ) -> Result<Option<Session>, BackendError> {
-        let remaining = (until - self.now()).to_std().unwrap_or_default();
-        let saving = self.sessions.save(key, lease, login, || self.now());
-        if let Ok(saved) = tokio::time::timeout(remaining, saving).await {
-            saved
-        } else {
-            tracing::warn!("saving a refresh outlasted its lease; ending the session");
-            self.end(key).await
-        }
-    }
-
-    /// Ends the session.
-    async fn end(&self, key: &SessionKey) -> Result<Option<Session>, BackendError> {
-        self.sessions.delete(key).await?;
-        Ok(None)
     }
 }

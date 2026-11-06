@@ -30,15 +30,16 @@
 //! ```
 //!
 //! **Apps that sign users in** mount [`LoginRoutes`] and its layer, then take
-//! [`SignedIn`] or [`MaybeSignedIn`]. Tokens stay server-side, in the application's
-//! [`SessionBackend`]; the browser holds only a random session key. Both refuse a
-//! request that is not `GET`, `HEAD`, `OPTIONS` or `TRACE` unless it comes from the
-//! app's own pages, so handlers need no CSRF token; [`CrossOrigin`] opts an endpoint
-//! out.
+//! [`SignedIn`] or [`MaybeSignedIn`]. The session lives in the browser, in a cookie
+//! sealed with the app's [`CookieKey`], so the app stores nothing and implements
+//! nothing; the layer refreshes the access token and sets the new cookie. Both refuse
+//! a request that is not `GET`, `HEAD`, `OPTIONS` or `TRACE` unless it comes from
+//! the app's own pages, so handlers need no CSRF token; [`CrossOrigin`] opts an
+//! endpoint out.
 //!
 //! ```no_run
 //! use axum::{Router, routing::get};
-//! use piquel_auth::axum::{LoginRoutes, MemoryBackend, SignedIn};
+//! use piquel_auth::axum::{CookieKey, LoginRoutes, SignedIn};
 //! # use piquel_auth::{ClientConfig, Credentials, Issuer};
 //!
 //! async fn home(user: SignedIn) -> String {
@@ -49,11 +50,12 @@
 //! # let issuer = Issuer::discover("https://auth.piquel.fr").await?;
 //! # let config = ClientConfig {
 //! #     client_id: "notes-web".parse()?,
-//! #     credentials: Credentials::None,
+//! #     credentials: Credentials::Secret(std::env::var("NOTES_CLIENT_SECRET")?.into()),
 //! #     redirect_uri: "https://notes.piquel.fr/auth/callback".parse()?,
 //! # };
-//! // `MemoryBackend` is for development: implement `SessionBackend` to persist sessions.
-//! let auth = LoginRoutes::new(issuer.client(config), MemoryBackend::default())
+//! // The same key on every replica: `openssl rand -base64 32`.
+//! let key = CookieKey::from_base64(&std::env::var("NOTES_COOKIE_KEY")?)?;
+//! let auth = LoginRoutes::new(issuer.client(config), key)?
 //!     .scopes("profile".parse()?)
 //!     .after_login("/notes".parse()?);
 //! let app: Router = Router::new()
@@ -63,11 +65,10 @@
 //! # Ok(()) }
 //! ```
 //!
-//! **Back-channel logout.** When auth ends a session, it posts a logout token to the
-//! login routes' `/backchannel-logout`: register `https://<app>/auth/backchannel-logout`,
-//! with the routes' mount in place of `/auth`, as the client's back-channel logout
-//! URI. The routes delete every session started under the token's `sid`, or every
-//! session of its `sub`, in the shared backend, so the logout reaches every replica.
+//! **Logout.** Auth revokes an app's refresh token when the user signs out there,
+//! removes the app, or loses the account, and the session ends at its next refresh,
+//! within an access token's 5 minutes. An app that must end sessions sooner handles
+//! back-channel logout with [`LoginRoutes::on_backchannel_logout`].
 //!
 //! **Step-up.** A page that needs a stronger or more recent sign-in returns the
 //! [`StepUp`] from [`SignedIn::require`], and one calling an API answers the API's
@@ -80,7 +81,9 @@
 mod bearer;
 /// Server-side login routes and session extractors.
 mod login;
-/// Session storage.
+/// Sealing the browser's cookies.
+mod seal;
+/// What the browser's cookies hold.
 mod session;
 #[cfg(test)]
 mod tests;
@@ -89,12 +92,11 @@ pub use bearer::{
     AuthRejection, Authenticated, BearerLayer, BearerService, RequireAuthentication, Scoped,
 };
 pub use login::{
-    CrossOrigin, InvalidReturnTo, LoginLayer, LoginRoutes, LoginService, MaybeSignedIn, ReturnTo,
-    SignedIn, StepUp,
+    CrossOrigin, InvalidReturnTo, LoginLayer, LoginRoutes, LoginService, MaybeSignedIn,
+    PublicClient, ReturnTo, SignedIn, StepUp,
 };
-#[cfg(any(test, feature = "test-util"))]
-pub use session::{BackendCheckError, check_backend};
-pub use session::{MemoryBackend, SessionBackend, SessionRecord, StoredLogin};
+pub use seal::{CookieKey, CookieKeyError};
+pub use session::StoredLogin;
 
 use std::{future::Future, pin::Pin};
 

@@ -322,14 +322,16 @@ pub struct Tokens {
     pub scopes: Scopes,
     /// The validated ID token, when `openid` was granted.
     pub id_token: Option<IdToken>,
-    /// A refresh token, when `offline_access` was granted. Auth rotates it on every
-    /// refresh, and revokes the whole family if an old one is reused.
+    /// A refresh token, when `offline_access` was granted. A public client's rotates
+    /// on every refresh, and auth revokes the whole family if an old one is reused; a
+    /// confidential client's is kept.
     pub refresh_token: Option<RefreshToken>,
 }
 
-/// A login waiting for its callback. Store it server-side, keyed by [`Self::state`],
-/// and pass it to [`Client::complete`], which consumes it so a callback completes at
-/// most once.
+/// A login waiting for its callback. It holds the PKCE verifier, so keep it
+/// server-side, keyed by [`Self::state`], or seal it into a cookie as the axum login
+/// routes do, and pass it to [`Client::complete`]. Auth redeems a code once, so a
+/// callback completes at most once.
 #[derive(Clone, Serialize, Deserialize)]
 pub struct PendingLogin {
     /// Issuer the login was started with.
@@ -508,7 +510,7 @@ struct ClientInner {
 /// });
 ///
 /// // 1. Send the browser to `url`, and keep the pending login server-side under its
-/// //    state, never in the browser: it holds the PKCE verifier.
+/// //    state, never in the browser unsealed: it holds the PKCE verifier.
 /// let (url, pending) = client
 ///     .authorize(&AuthorizeRequest {
 ///         scopes: "profile offline_access".parse()?,
@@ -558,7 +560,7 @@ impl Client {
     }
 
     /// Starts a login: the authorization URL to redirect the browser to, and the
-    /// pending login to store server-side until the callback.
+    /// pending login to keep until the callback.
     ///
     /// When discovery advertises a pushed authorization endpoint, the request is
     /// pushed there (RFC 9126), authenticated as at the token endpoint, and the URL
@@ -700,8 +702,9 @@ impl Client {
         Ok(tokens)
     }
 
-    /// Redeems a refresh token. The response carries a new refresh token; the old one
-    /// must not be used again. A returned ID token is validated, but has no pending
+    /// Redeems a refresh token. For a public client, the response carries a new
+    /// refresh token and the old one must not be used again; a confidential client's
+    /// stays valid, and the response carries none. A returned ID token is validated, but has no pending
     /// login to compare with: callers holding the previous ID token must check that
     /// `sub` is unchanged (OIDC Core §12.2), as the axum login routes do.
     ///
@@ -711,8 +714,8 @@ impl Client {
     /// ```no_run
     /// # async fn run(client: piquel_auth::Client, stored: piquel_auth::RefreshToken) -> Result<(), Box<dyn std::error::Error>> {
     /// let tokens = client.refresh(&stored).await?;
-    /// // Store the rotated token in place of the old one, which auth now refuses.
-    /// let rotated = tokens.refresh_token.unwrap_or(stored);
+    /// // A public client stores the rotated token in place of the old one.
+    /// let current = tokens.refresh_token.unwrap_or(stored);
     /// # Ok(()) }
     /// ```
     pub async fn refresh(&self, refresh: &RefreshToken) -> Result<Tokens, OAuthError> {
@@ -768,23 +771,25 @@ impl Client {
 
     /// The RP-initiated logout URL: auth ends the browser session, then sends the
     /// browser to `post_logout`, which must be registered for this client. Without
-    /// one, auth shows its own page.
+    /// one, auth shows its own page. `id_token_hint` names the sign-in being ended
+    /// when the app kept its ID token; auth asks the user to confirm either way.
     ///
     /// ```no_run
     /// # fn run(client: piquel_auth::Client, id_token: piquel_auth::IdToken) -> Result<(), url::ParseError> {
     /// // Redirect the browser here once the app's own session is gone.
     /// let after: url::Url = "https://notes.piquel.fr/".parse()?;
-    /// let logout = client.logout_url(&id_token, Some(&after));
+    /// let logout = client.logout_url(Some(&id_token), Some(&after));
     /// # Ok(()) }
     /// ```
     #[must_use]
-    pub fn logout_url(&self, id_token: &IdToken, post_logout: Option<&Url>) -> Url {
+    pub fn logout_url(&self, id_token_hint: Option<&IdToken>, post_logout: Option<&Url>) -> Url {
         let mut url = self.issuer().metadata().end_session_endpoint.clone();
         {
             let mut query = url.query_pairs_mut();
-            query
-                .append_pair("id_token_hint", id_token.as_str())
-                .append_pair("client_id", self.config().client_id.as_str());
+            if let Some(id_token) = id_token_hint {
+                query.append_pair("id_token_hint", id_token.as_str());
+            }
+            query.append_pair("client_id", self.config().client_id.as_str());
             if let Some(post_logout) = post_logout {
                 query.append_pair("post_logout_redirect_uri", post_logout.as_str());
             }

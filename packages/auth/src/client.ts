@@ -88,7 +88,8 @@ export type Tokens = {
   idToken?: IdToken;
   /**
    * A refresh token, when `offline_access` was granted. Keep it server-side. Auth
-   * rotates it on every refresh, and revokes the whole family if an old one is reused.
+   * rotates a public client's on every refresh, and revokes the whole family if an old
+   * one is reused; a confidential client's does not rotate.
    */
   refreshToken?: string;
 };
@@ -144,6 +145,14 @@ export class Client {
     this.issuer = issuer;
     this.config = { ...registration, redirectUri: new URL(registration.redirectUri).href };
     this.#secret = clientSecret;
+  }
+
+  /**
+   * Whether the client authenticates with a secret. Only a confidential client's
+   * refresh token does not rotate, so only it can sign users in with `Login`.
+   */
+  get confidential(): boolean {
+    return this.#secret !== undefined;
   }
 
   /** @internal Use {@link Issuer.client}. */
@@ -230,10 +239,11 @@ export class Client {
   }
 
   /**
-   * Redeems a refresh token. The response carries a new one; the old one must not be
-   * used again. A returned ID token is validated, but has no pending login to compare
-   * with: a caller holding the previous ID token must check that `sub` is unchanged
-   * (OIDC Core §12.2).
+   * Redeems a refresh token. A public client gets a new one, and must not use the old
+   * one again; a confidential client's stays valid, so concurrent refreshes are safe.
+   * A returned ID token is validated, but has no pending login to compare with: a
+   * caller holding the previous ID token must check that `sub` is unchanged (OIDC
+   * Core §12.2).
    */
   async refresh(refreshToken: string): Promise<Tokens> {
     const reply = await this.#post(this.issuer.metadata.token_endpoint, {
@@ -263,11 +273,12 @@ export class Client {
   /**
    * The RP-initiated logout URL: auth ends the browser session, then sends the
    * browser to `postLogout`, which must be registered for this client. Without one,
-   * auth shows its own page.
+   * auth shows its own page. `idTokenHint`, the sign-in's ID token when the app kept
+   * it, is sent as `id_token_hint`; `client_id` always is.
    */
-  logoutUrl(idToken: IdToken, postLogout?: string): string {
+  logoutUrl(idTokenHint?: IdToken, postLogout?: string): string {
     const url = new URL(this.issuer.metadata.end_session_endpoint);
-    url.searchParams.append('id_token_hint', idToken.token);
+    if (idTokenHint !== undefined) url.searchParams.append('id_token_hint', idTokenHint.token);
     url.searchParams.append('client_id', this.config.clientId);
     if (postLogout !== undefined) url.searchParams.append('post_logout_redirect_uri', postLogout);
     return url.href;

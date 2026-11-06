@@ -198,9 +198,15 @@ impl TokenError {
         }
     }
 
+    /// The account `sub` names.
+    pub(crate) fn account(sub: &str) -> Result<UserId, Self> {
+        sub.parse()
+            .map_err(|_| Self::InvalidSubject(sub.to_owned()))
+    }
+
     /// Requires the authentication `acr` and `auth_time` describe to meet
     /// `requirement` at `now`, allowing the leeway on `auth_time`.
-    fn require_authentication(
+    pub(crate) fn require_authentication(
         requirement: StepUpRequirement,
         acr: Option<&Acr>,
         auth_time: Option<DateTime<Utc>>,
@@ -347,12 +353,7 @@ impl<X> AccessToken<Scopes, X> {
         let subject = if session_id.is_none() && claims.sub == claims.client_id.as_str() {
             Subject::Client(claims.client_id.clone())
         } else {
-            Subject::User(
-                claims
-                    .sub
-                    .parse()
-                    .map_err(|_| TokenError::InvalidSubject(claims.sub.clone()))?,
-            )
+            Subject::User(TokenError::account(&claims.sub)?)
         };
         Ok(Self {
             subject,
@@ -442,6 +443,12 @@ impl IdToken {
         &self.raw
     }
 
+    /// The validated claims, without the token.
+    #[must_use]
+    pub fn into_claims(self) -> IdTokenClaims {
+        self.claims
+    }
+
     /// Requires the sign-in to meet `requirement` at `now`, with the leeway on
     /// `auth_time`.
     ///
@@ -466,10 +473,7 @@ impl IdToken {
     /// # Errors
     /// [`TokenError::InvalidSubject`] if `sub` is not an account ID.
     pub fn user_id(&self) -> Result<UserId, TokenError> {
-        self.claims
-            .sub
-            .parse()
-            .map_err(|_| TokenError::InvalidSubject(self.claims.sub.clone()))
+        TokenError::account(&self.claims.sub)
     }
 }
 

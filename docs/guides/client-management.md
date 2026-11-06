@@ -34,7 +34,7 @@ again.
 | Scopes | Any of `openid`, `profile`, `email` and `offline_access`; `openid profile email` by default |
 | Refresh tokens | Whether the app may receive refresh tokens when it requests `offline_access`; off by default |
 | Pushed requests | Whether the app must push its authorization requests to `/oauth/par` (RFC 9126), so none of their parameters travel through the browser; off by default |
-| Back-channel logout URI | Where auth tells the app that a user's session ended ([back-channel logout](../../README.md#back-channel-logout)), under the same rules as redirect URIs; none by default. The SDKs serve it beside their login routes, e.g. at `https://app.example/auth/backchannel-logout`. Auth posts only to HTTPS URIs with public addresses |
+| Back-channel logout URI | Where auth tells the app that a user's session ended ([back-channel logout](../../README.md#back-channel-logout)), under the same rules as redirect URIs; none by default. The SDKs serve it beside their login routes, e.g. at `https://app.example/auth/backchannel-logout`, for an app that gives them a logout handler; without one, its sessions end at their next refresh, within five minutes. Auth posts only to HTTPS URIs with public addresses |
 
 Auth chooses the ID, `c_` followed by 20 random characters, so nobody can claim a
 name like `piquel-admin`. Your apps are never trusted: users always see the

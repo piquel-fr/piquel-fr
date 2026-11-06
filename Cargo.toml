@@ -99,6 +99,9 @@ askama = { version = "0.16", default-features = false, features = ["derive", "st
 # JWS signature checks only; the SDK validates claims itself. aws-lc-rs is
 # constant-time and avoids the RustCrypto `rsa` crate's RUSTSEC-2023-0071.
 jsonwebtoken = { version = "11.1", default-features = false, features = ["aws_lc_rs"] }
+# The SDK's AES-256-GCM and HKDF-SHA256, sealing session and login cookies; already
+# in the tree through jsonwebtoken's aws_lc_rs.
+aws-lc-rs = "1.18"
 secrecy = "0.10"
 # Test-only: TypeScript declarations of the protocol types, which piquel-common's
 # tests write to packages/auth/src/protocol.ts for the TypeScript SDK. The only serde

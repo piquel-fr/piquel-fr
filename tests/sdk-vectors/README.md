@@ -41,8 +41,12 @@ Each file is one case:
 | `tokens/` | `issuer`, `jwks`, `kind` (`access`, `id` or `logout`), `audience` (the resource, or the client for ID and logout tokens), `token`; ID tokens add `nonce` and `max_age` (`null` when not sent) | the token's claims |
 | `challenges/` | `challenge` (format cases) or `header` (parse cases) | `status` and `header`, or `challenge` |
 | `callbacks/` | `issuer`, `authorization_response_iss_parameter_supported`, the expected `state`, and the callback's query `parameters` | `code` |
+| `sessions/` | `cookie_key` (standard base64), `client_id`, and the `cookie` header the browser sends | the session the cookie holds, in the cookie's JSON, or `null` for none |
 
 Challenge format cases go both ways: `challenge` must format to exactly `header`,
 and `header` must parse back to `challenge`. Parse cases only parse, since their
 headers are not in canonical form; `challenge` is `null` when the header holds no
 valid Bearer challenge.
+
+Session cases are sealed with OpenSSL and a fixed nonce, apart from either SDK's own
+sealing, so an SDK that opens them reads the format every SDK writes.
