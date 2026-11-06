@@ -2,9 +2,9 @@
 //! own page, from an approved related origin. The page gets the code as JSON
 //! instead of through the redirect URI; it is useless without the PKCE verifier.
 
-use super::OidcApplication;
+use super::{OAuthCode, OidcApplication, policy::ClientPolicy};
 use crate::security::ApiError;
-use piquel_common::{ClientId, TokenId, UserId};
+use piquel_common::{ClientId, TokenId, UserId, clients::RelatedOrigin};
 use piquel_repository::{DatabaseTransaction, StoredSession};
 use serde::{Deserialize, Serialize};
 
@@ -59,23 +59,32 @@ impl OidcApplication {
         })
     }
 
-    /// Consumes the claimed request inside `tx` and issues its code to `session`,
-    /// which the inline passkey sign-in just created, if it meets the request's
-    /// requirements as the redirect flow's would. A new session meets any
-    /// `prompt=login` and `max_age`, and the sign-in offered only the hinted
-    /// account's passkeys. A recovered passkey during its probation does not
-    /// confirm the session, so it meets no `acr_values=phr`: the page then sends
-    /// the browser to auth, whose answer the client understands.
+    /// Consumes `client_id`'s claimed request inside `tx` and issues its code to
+    /// `session`, which the inline passkey sign-in on the page at `origin` just
+    /// created, if it meets the request's requirements as the redirect flow's would.
+    /// A new session meets any `prompt=login` and `max_age`, and the sign-in offered
+    /// only the hinted account's passkeys. A recovered passkey during its probation
+    /// does not confirm the session, so it meets no `acr_values=phr`: the page then
+    /// sends the browser to auth, whose answer the client understands. The client
+    /// is share-locked and must still allow the request, be trusted and have
+    /// `origin` approved, so a change made during the ceremony applies to it.
     pub(crate) async fn complete_inline(
         &self,
         tx: &mut DatabaseTransaction<'_>,
         claim: &InlineClaim,
         session: &StoredSession,
+        client_id: &ClientId,
+        origin: &RelatedOrigin,
     ) -> Result<InlineResponse, ApiError> {
+        let policy = ClientPolicy::share(tx, client_id).await?;
         let request = tx
             .oidc()
             .consume_authorization_request(claim.id, &claim.digests)
             .await?;
+        let approved = tx.oidc().related_origin_client(origin.as_str()).await?;
+        policy
+            .allows_inline(&request, approved.as_ref())
+            .map_err(|refusal| refusal.reject(OAuthCode::InvalidRequest))?;
         if !Self::satisfies(&request, session) {
             return Err(ApiError::interaction_required(
                 "This sign-in does not meet what the application asked for.",

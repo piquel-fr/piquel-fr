@@ -587,7 +587,12 @@ come back as JSON. Discovery advertises `pushed_authorization_request_endpoint`.
 Client-hosted request objects (`request` and `request_uri` from RFC 9101) are not
 supported.
 The endpoints implement code exchange, RS256 ID/access tokens, userinfo, opt-in
-rotating refresh tokens, revocation, RP-initiated and back-channel logout. Access tokens are
+rotating refresh tokens, revocation, RP-initiated and back-channel logout. A code
+is tried once: a redemption by another client, with another `redirect_uri` or a
+wrong `code_verifier` expires it and records `code_redemption_failed`, so it
+can't be tried again. Every step of an authorization checks the client's registration
+as it is then, under a share lock when it issues a code or tokens: a client
+disabled, suspended or changed meanwhile gets nothing it no longer allows. Access tokens are
 intended for the configured client audience. Only requested claims are released;
 passkey-only accounts have no email claim. Browser clients should keep tokens in
 memory and use SSO again after reload. Refresh permission is off unless explicitly

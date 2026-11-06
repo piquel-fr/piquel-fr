@@ -14,7 +14,9 @@ pub(crate) use consent::AuthorizationDecision;
 use consent::ConsentDecision;
 use parameters::AuthorizationParameters;
 
-use super::{OAuthCode, OAuthError, OidcApplication, OpaqueToken, Reject, TokenPrefix};
+use super::{
+    OAuthCode, OAuthError, OidcApplication, OpaqueToken, Reject, TokenPrefix, policy::ClientPolicy,
+};
 use crate::{
     routes,
     security::{RequestContext, Session},
@@ -160,18 +162,28 @@ impl OidcApplication {
         })
     }
 
-    /// Finds a live pending authorization by its opaque token.
+    /// Finds a live pending authorization by its opaque token, while its client
+    /// still allows it. Every page and redirect continuing an authorization starts
+    /// here, so none leads the browser to a redirect URI, or for a request, that
+    /// the client no longer allows: such a request explains itself on auth's page
+    /// instead.
     async fn find_authorization_request(
         &self,
         value: &str,
     ) -> Result<StoredAuthorizationRequest, OAuthError> {
         let opaque = OpaqueToken::parse(TokenPrefix::AuthorizationRequest, value)?;
         let digests = self.accepted_digests(&opaque)?;
-        self.database
+        let request = self
+            .database
             .oidc()
             .find_authorization_request(opaque.id, &digests)
             .await?
-            .ok_or_else(|| OAuthCode::InvalidRequest.reject(UNKNOWN_TRANSACTION))
+            .ok_or_else(|| OAuthCode::InvalidRequest.reject(UNKNOWN_TRANSACTION))?;
+        ClientPolicy::read(&self.database, &request.client_id)
+            .await?
+            .allows(&request)
+            .map_err(|refusal| refusal.reject(OAuthCode::InvalidRequest))?;
+        Ok(request)
     }
 
     /// The sign-in page continuing the pending authorization `transaction`. A target

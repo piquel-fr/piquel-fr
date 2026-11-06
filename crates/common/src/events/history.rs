@@ -119,6 +119,9 @@ impl DomainEvent {
             | Self::GrantIssued { .. }
             | Self::InvitationCreated { .. }
             | Self::InvitationRevoked { .. }
+            // The app's own mistake, or a stolen code's failed use: either way, the
+            // account's owner has nothing to do about it.
+            | Self::CodeRedemptionFailed { .. }
             // The handle was the account's no more.
             | Self::HandleReleased { .. }
             // Reservations concern names, not an account.

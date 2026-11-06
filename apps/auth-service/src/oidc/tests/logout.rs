@@ -131,3 +131,40 @@ async fn logout_posts_a_logout_token_to_the_clients_of_the_session() {
         })
     );
 }
+
+/// A client whose code redemption failed received nothing from the session, so the
+/// session's logout tells it nothing.
+#[tokio::test]
+#[ignore = "requires TEST_DATABASE_URL"]
+async fn a_failed_redemption_leaves_the_client_out_of_logout() {
+    let flow = Flow::new(true, true).await;
+    let (uri, _, _) = logout_receiver().await;
+    let client = ClientRegistration {
+        backchannel_logout_uri: Some(uri.clone()),
+        ..flow.client.clone()
+    };
+    crate::tests::replace(&flow.app.database, &client)
+        .await
+        .expect("register the logout URI");
+    let code = flow.code(Scope::OpenId.as_str()).await;
+    let response = flow.exchange(&code, "wrong", flow.basic.as_deref()).await;
+    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+    let response = flow
+        .request(
+            Method::POST,
+            routes::page::LOGOUT,
+            &[("client_id", client.id.as_str())],
+            None,
+        )
+        .await;
+    assert_eq!(response.status(), StatusCode::SEE_OTHER);
+
+    let queued = flow
+        .app
+        .database
+        .deliveries()
+        .payloads(uri.as_str())
+        .await
+        .expect("deliveries");
+    assert!(queued.is_empty(), "{queued:?}");
+}

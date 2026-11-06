@@ -5,7 +5,7 @@ use super::UNKNOWN_TRANSACTION;
 use crate::{
     oidc::{
         AUTHORIZATION_CODE_MINUTES, OAuthCode, OAuthError, OidcApplication, OpaqueToken, Reject,
-        TokenPrefix,
+        TokenPrefix, policy::ClientPolicy,
     },
     security::{RequestContext, Session, SessionError},
 };
@@ -14,7 +14,7 @@ use chrono::{Duration, Utc};
 use piquel_common::{Handle, UserId, events::DomainEvent};
 use piquel_repository::{
     DatabaseTransaction, InsertAuthorizationCode, SessionAuthentication,
-    StoredAuthorizationRequest, StoredOidcClient, StoredSession,
+    StoredAuthorizationRequest, StoredSession,
 };
 use serde::Deserialize;
 use url::Url;
@@ -72,7 +72,8 @@ impl OidcApplication {
         let session = Session::required(&self.database, headers).await?;
         let request = self.find_authorization_request(transaction).await?;
         Self::require_authorization_session(&request, &session)?;
-        let registered_by = match self.client(&request).await?.owner_id {
+        let client = ClientPolicy::read(&self.database, &request.client_id).await?;
+        let registered_by = match client.client().owner_id {
             Some(owner) => Some(self.handle(owner).await?.ok_or_else(Self::unregistered)?),
             None => None,
         };
@@ -93,19 +94,7 @@ impl OidcApplication {
         Ok(user.map(|user| user.handle))
     }
 
-    /// The client `request` is for, as it is registered now.
-    async fn client(
-        &self,
-        request: &StoredAuthorizationRequest,
-    ) -> Result<StoredOidcClient, OAuthError> {
-        self.database
-            .oidc()
-            .find_client(request.client_id.as_str())
-            .await?
-            .ok_or_else(Self::unregistered)
-    }
-
-    /// Refuses a request whose client, or its owner, is gone since it was found.
+    /// Refuses a request whose client's owner is gone since it was found.
     fn unregistered() -> OAuthError {
         OAuthCode::InvalidRequest.reject("the client is no longer registered")
     }
@@ -130,6 +119,18 @@ impl OidcApplication {
         let opaque = OpaqueToken::parse(TokenPrefix::AuthorizationRequest, &input.transaction)?;
         let digests = self.accepted_digests(&opaque)?;
         let mut transaction = self.database.begin().await?;
+        // An approval locks the account first: before writing consent, whose row's
+        // foreign key would otherwise take a key-share lock that deadlocks with a
+        // concurrent login, and before the client, which an owner changing it locks
+        // after their account. The session is read again under the lock, so a
+        // consent that waited while its session ended, signed out or revoked, is not
+        // saved after it.
+        if input.decision == ConsentDecision::Approve {
+            Session::lock(&mut transaction, &session).await?;
+        }
+        // Checked again under the client's lock, so no change to the client commits
+        // between this check and the code.
+        let policy = ClientPolicy::share(&mut transaction, &pending.client_id).await?;
         let request = transaction
             .oidc()
             .consume_authorization_request(opaque.id, &digests)
@@ -137,6 +138,9 @@ impl OidcApplication {
             .map_err(|error| {
                 OAuthError::database(error, OAuthCode::InvalidRequest, UNKNOWN_TRANSACTION)
             })?;
+        policy
+            .allows(&request)
+            .map_err(|refusal| refusal.reject(OAuthCode::InvalidRequest))?;
         Self::require_authorization_session(&request, &session)?;
         let redirect = Url::parse(&request.redirect_uri)?;
         let client_redirect = self.client_redirect(&redirect, &request.client_state);
@@ -147,11 +151,6 @@ impl OidcApplication {
             ConsentDecision::Deny => OAuthCode::AccessDenied
                 .redirect_url(&client_redirect, "the user denied the request"),
             ConsentDecision::Approve => {
-                // Lock the account before writing consent: the consent row's foreign key
-                // would otherwise take a key-share lock that deadlocks with a concurrent login.
-                // The session is read again under the lock, so a consent that waited while
-                // its session ended, signed out or revoked, is not saved after it.
-                Session::lock(&mut transaction, &session).await?;
                 if let Some(context) = consent {
                     transaction
                         .oidc()
@@ -223,7 +222,8 @@ impl OidcApplication {
         if request.interaction.forces_consent() {
             return Ok(false);
         }
-        Ok(self.client(request).await?.trusted
+        let client = ClientPolicy::read(&self.database, &request.client_id).await?;
+        Ok(client.client().trusted
             || self
                 .database
                 .oidc()

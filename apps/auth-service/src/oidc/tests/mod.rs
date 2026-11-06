@@ -16,7 +16,7 @@ use chrono::Utc;
 use piquel_common::{
     AuthenticationMethod, Handle, PasskeyId, UserId,
     clients::{ClientKind, ClientRegistration},
-    events::{Actor, DomainEvent, RevocationReason},
+    events::{Actor, CodeRedemptionFailure, DomainEvent, RevocationReason},
     protocol::claims::{Acr, IdTokenClaims},
 };
 use piquel_crypto::{KeySet, Rs256Key};
@@ -29,6 +29,7 @@ use url::Url;
 mod app_removal;
 mod authorization;
 mod logout;
+mod policy;
 mod protocol;
 mod pushed;
 mod sdk_client;

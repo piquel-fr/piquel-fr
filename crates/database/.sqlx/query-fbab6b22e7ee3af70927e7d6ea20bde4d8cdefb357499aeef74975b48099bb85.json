@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE authorization_codes SET expires_at = '-infinity' WHERE id = $1",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "fbab6b22e7ee3af70927e7d6ea20bde4d8cdefb357499aeef74975b48099bb85"
+}

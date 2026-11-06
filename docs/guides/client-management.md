@@ -57,9 +57,12 @@ you enable it again.
 
 ## What changes take effect
 
-Every change applies to the next request, on every replica. Disabling or deleting
-an app also stops its pending sign-ins and unused authorization codes. Removing a
-redirect URI stops the pending sign-ins that use it.
+Every change applies to the next request, on every replica, and to sign-ins
+already under way. Disabling or deleting an app also stops its pending sign-ins
+and unused authorization codes. Removing a redirect URI or a scope stops the
+pending sign-ins and codes that use it, and requiring pushed requests stops the
+pending ones the browser brought. A change made during a code exchange either
+waits for it to finish or applies to it.
 
 Deleting an app also revokes its refresh tokens and removes its secrets and the
 consents users gave it. Its ID stays reserved forever, because tokens name their

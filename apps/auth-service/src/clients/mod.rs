@@ -540,12 +540,16 @@ impl<'a, 't> ClientRegistry<'a, 't> {
     /// already started can no longer finish.
     ///
     /// # Errors
-    /// Fails if the origin is not approved for the client or the database fails.
+    /// Fails if the client is unknown or deleted, the origin is not approved for it,
+    /// or the database fails.
     pub async fn remove_origin(
         &mut self,
         id: &ClientId,
         origin: &RelatedOrigin,
     ) -> Result<(), ClientRegistryError> {
+        // Locked as every change to a client is, so an inline sign-in completing
+        // under the client's share lock sees the origin approved or gone.
+        self.locked(id).await?;
         if !self.tx.oidc().remove_related_origin(id, origin).await? {
             return Err(ClientRegistryError::OriginNotApproved {
                 origin: origin.clone(),

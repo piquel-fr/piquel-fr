@@ -8,6 +8,8 @@ mod error;
 mod inline;
 /// RP-initiated logout and confirmation.
 mod logout;
+/// The check of a client's current policy every authorization step runs.
+mod policy;
 /// Code exchanges, refresh rotation and identity claims.
 mod token;
 
