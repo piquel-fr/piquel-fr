@@ -217,21 +217,25 @@ impl Cropper {
         })
     }
 
-    /// The stage's `@pointerdown` handler, which starts dragging with the main
-    /// button.
+    /// The stage's `@pointerdown` handler, which starts dragging with the primary
+    /// pointer's main button.
     fn grab(&self) -> Expr<impl FnOnce(Event) + use<>> {
         let (drag, drag_x, drag_y) = (self.drag.clone(), self.drag_x.clone(), self.drag_y.clone());
         let stage = self.stage.clone();
         expr!(|e: Event| {
-            if e.button == 0.0 {
-                drag.set(e.pointer_id);
-                drag_x.set(e.client_x);
-                drag_y.set(e.client_y);
-                let _pointer = drag.get();
-                let _captured = raw!(
-                    "document.getElementById(String(${stage})).setPointerCapture(${_pointer}.dehydrate())",
-                    ()
-                );
+            // Topcoat's events do not say whether the pointer is the primary one.
+            let primary = raw!("cx.hydrate(${e}.inner.isPrimary)", true);
+            if primary {
+                if e.button == 0.0 {
+                    drag.set(e.pointer_id);
+                    drag_x.set(e.client_x);
+                    drag_y.set(e.client_y);
+                    let _pointer = drag.get();
+                    let _captured = raw!(
+                        "document.getElementById(String(${stage})).setPointerCapture(${_pointer}.dehydrate())",
+                        ()
+                    );
+                }
             }
         })
     }

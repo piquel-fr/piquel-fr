@@ -96,11 +96,10 @@ impl<F: FnOnce(Event) -> R, R: Future<Output = ()>> AsyncHandler for F {
 pub(crate) struct Browser;
 
 impl Browser {
-    /// Whether this browser can run passkey ceremonies on this page, reading their
-    /// options as JSON.
+    /// Whether this browser can run passkey ceremonies on this page.
     pub(crate) fn passkeys() -> Expr<bool> {
         expr!(raw!(
-            "cx.hydrate(window.isSecureContext && 'PublicKeyCredential' in window && 'parseRequestOptionsFromJSON' in PublicKeyCredential)",
+            "cx.hydrate(window.isSecureContext && 'PublicKeyCredential' in window)",
             false
         ))
     }
@@ -143,16 +142,41 @@ impl Browser {
                     .map((name) => [name, String(data.get(name) ?? '').trim()])
                     .filter(([, value]) => value));
                 const body = () => ({ ...request.fixed, ...values(request.fields) });
+                // Unpadded base64url, which auth's options and credentials use for
+                // bytes: coded here, as browsers without WebAuthn's JSON helpers
+                // still run ceremonies.
+                const decode = (value) => Uint8Array.from(
+                    atob(value.replace(/-/g, '+').replace(/_/g, '/')), (c) => c.charCodeAt(0)).buffer;
+                const encode = (value) => btoa(String.fromCharCode(...new Uint8Array(value)))
+                    .replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+                const descriptors = (list) => list?.map((item) => ({ ...item, id: decode(item.id) }));
                 const prove = async (start, body, create) => {
                     const answer = started ?? await post(start, body);
                     // A start serves one try.
                     started = undefined;
                     const options = answer.public_key.publicKey;
-                    const credential = create
-                        ? await navigator.credentials.create({ publicKey: PublicKeyCredential.parseCreationOptionsFromJSON(options) })
-                        : await navigator.credentials.get({ publicKey: PublicKeyCredential.parseRequestOptionsFromJSON(options) });
+                    const publicKey = { ...options, challenge: decode(options.challenge), ...(create
+                        ? { user: { ...options.user, id: decode(options.user.id) }, excludeCredentials: descriptors(options.excludeCredentials) }
+                        : { allowCredentials: descriptors(options.allowCredentials) }) };
+                    const credential = await navigator.credentials[create ? 'create' : 'get']({ publicKey });
                     if (!credential) throw new Error('The passkey request was cancelled.');
-                    return { ceremony_id: answer.ceremony_id, credential: credential.toJSON() };
+                    const response = credential.response;
+                    return { ceremony_id: answer.ceremony_id, credential: {
+                        id: credential.id,
+                        rawId: encode(credential.rawId),
+                        type: credential.type,
+                        response: create ? {
+                            attestationObject: encode(response.attestationObject),
+                            clientDataJSON: encode(response.clientDataJSON),
+                            transports: response.getTransports()
+                        } : {
+                            authenticatorData: encode(response.authenticatorData),
+                            clientDataJSON: encode(response.clientDataJSON),
+                            signature: encode(response.signature),
+                            userHandle: response.userHandle ? encode(response.userHandle) : null
+                        },
+                        clientExtensionResults: credential.getClientExtensionResults()
+                    } };
                 };
                 const run = async () => {
                     const proof = await prove(request.start, body(), request.create);
@@ -336,7 +360,7 @@ impl Browser {
     /// the dashboard's needs. A promise.
     pub(crate) fn related_origins() -> Expr<bool> {
         expr!(raw!(
-            "(async () => window.isSecureContext && 'PublicKeyCredential' in window && 'parseRequestOptionsFromJSON' in PublicKeyCredential && (await PublicKeyCredential.getClientCapabilities?.().catch(() => ({})))?.relatedOrigins === true)().then((capable) => cx.hydrate(Boolean(capable)))",
+            "(async () => window.isSecureContext && 'PublicKeyCredential' in window && (await PublicKeyCredential.getClientCapabilities?.().catch(() => ({})))?.relatedOrigins === true)().then((capable) => cx.hydrate(Boolean(capable)))",
             false
         ))
     }

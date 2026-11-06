@@ -322,6 +322,8 @@ impl Gate {
                             ? 'a:' + link.href : '';
                     const button = target?.closest('button');
                     if (!button || button.type !== 'submit' || button.form?.method !== 'post') return '';
+                    // A form that does not validate posts nothing: the browser says why.
+                    if (!button.formNoValidate && !button.form.noValidate && !button.form.checkValidity()) return '';
                     for (const marked of document.querySelectorAll('[data-pending]')) marked.removeAttribute('data-pending');
                     button.setAttribute('data-pending', '');
                     return 'b:';
@@ -399,8 +401,15 @@ impl Gate {
                             started.set("".to_owned());
                             let again =
                                 raw!("await ${start}", Ok::<String, Refusal>(String::new()));
-                            if again.is_ok() {
-                                started.set(again.unwrap());
+                            // One that does not start again goes on at once, as in
+                            // `intercept`.
+                            if change.get() == confirming {
+                                if again.is_ok() {
+                                    started.set(again.unwrap());
+                                } else {
+                                    let _hidden = hide;
+                                    let _went = go_on;
+                                }
                             }
                         }
                     }
