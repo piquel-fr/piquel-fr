@@ -31,6 +31,9 @@ mod serve;
 mod session;
 /// Finding, showing, disabling and reactivating accounts.
 mod user;
+/// The generated command reference.
+#[cfg(test)]
+mod reference;
 
 use crate::{
     AuthConfig, SERVICE_NAME, TELEMETRY_FILTER, account::AccountOperation, admin::AdminOperation,

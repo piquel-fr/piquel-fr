@@ -6,6 +6,7 @@ run the same code.
 
 ## The command line
 
+[auth-service commands](cli-commands.md) lists every command with its options.
 Every administrative operation has a command, which runs the same code as the
 admin dashboard (`AdminService` in `apps/auth-service/src/admin`), and so does every
 setting administrators may change on another account (`AccountService` in

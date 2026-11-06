@@ -11,7 +11,7 @@ recipe in `rust` and `web`. Use individual recipes while iterating:
 | Rust / TypeScript checks (tsc, the pages' scripts' JSDoc types included) | `just rust check` / `just web check` |
 | Clippy and ESLint, warnings denied; `publint` and `attw` on the built TypeScript SDK | `just lint` (`just rust lint` / `just web lint`) |
 | Unused Rust dependencies (cargo-machete); unused web files, exports and dependencies (knip, entry points in `knip.json`) | `just unused` (`just rust unused` / `just web unused`) |
-| Regenerate the SDK vectors / the TypeScript SDK's wire types | `just sdk-vectors` / `just sdk-types` |
+| Regenerate the SDK vectors / the TypeScript SDK's wire types / the generated documentation | `just sdk-vectors` / `just sdk-types` / `just docs reference` |
 | Unit tests / focused package tests | `just test` / `just test -p auth-service` |
 | TypeScript SDK tests with coverage, the shared vectors included / the built SDK in Node, Bun and workerd | `just web test` / `just web smoke` |
 | Documentation tests | `just doc-test` |

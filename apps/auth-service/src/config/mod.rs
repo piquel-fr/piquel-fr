@@ -12,6 +12,7 @@ mod keys;
 pub(crate) use email::EmailConfig;
 pub(crate) use federation::{FederationConfig, ProviderConfig};
 pub(crate) use keys::LinkKeys;
+use keys::KEY_ENCRYPTION_KEY;
 #[cfg(test)]
 pub(crate) use keys::TokenDigestKey;
 pub use keys::{AuditConfig, TokenDigestKeys};
@@ -27,26 +28,52 @@ use std::{
 };
 use url::Url;
 
-/// Listener address when none is configured; the HTTPS ingress proxies to it.
+/// [`PUBLIC_LISTENER`] when none is configured; the HTTPS ingress proxies to it.
 const DEFAULT_PUBLIC_LISTENER: &str = "127.0.0.1:8080";
-
-/// Authentication origin, shared by all application sections.
-pub const PUBLIC_BASE_URL: Variable = Variable::new("AUTH_PUBLIC_BASE_URL");
-/// piquel.fr's origin, whose policies every page links and discovery advertises.
-const WEB_ORIGIN: Variable = Variable::new("AUTH_WEB_ORIGIN");
 /// [`WEB_ORIGIN`] when none is configured: production's.
 const DEFAULT_WEB_ORIGIN: &str = "https://piquel.fr";
-/// HTTP listener behind the HTTPS ingress.
-const PUBLIC_LISTENER: Variable = Variable::new("AUTH_PUBLIC_LISTENER");
-/// Optional listener serving only the admin dashboard, which only a private route
-/// may reach.
-const ADMIN_LISTENER: Variable = Variable::new("AUTH_ADMIN_LISTENER");
-/// The admin dashboard's origin, e.g. `https://admin.piquel.fr`, set with
-/// [`ADMIN_LISTENER`].
-const ADMIN_ORIGIN: Variable = Variable::new("AUTH_ADMIN_ORIGIN");
+/// [`REQUESTS_PER_MINUTE`] when none is configured: enough for a person, not
+/// for a browser suite or a scraper.
+const DEFAULT_REQUESTS_PER_MINUTE: &str = "120";
 
-/// Reference to the key that seals signing keys in the database.
-const KEY_ENCRYPTION_KEY: Variable = Variable::new("AUTH_KEY_ENCRYPTION_KEY");
+piquel_common::variables! {
+    /// The service's own variables, in the configuration reference's order.
+    #[cfg(test)]
+    pub(crate) const VARIABLES;
+
+    /// The exact origin auth serves, such as `https://auth.piquel.fr`. It is the
+    /// OpenID Connect issuer and the passkeys' relying party, so it must use a
+    /// domain name. Required.
+    pub const PUBLIC_BASE_URL = "AUTH_PUBLIC_BASE_URL";
+    /// The address auth listens on, behind the HTTPS ingress.
+    const PUBLIC_LISTENER = "AUTH_PUBLIC_LISTENER", default DEFAULT_PUBLIC_LISTENER;
+    /// piquel.fr's origin. Every page links its privacy policy and terms, and
+    /// discovery advertises them.
+    const WEB_ORIGIN = "AUTH_WEB_ORIGIN", default DEFAULT_WEB_ORIGIN;
+    /// The address the admin dashboard listens on, such as `0.0.0.0:8081`. Set it
+    /// together with `AUTH_ADMIN_ORIGIN`; without them, auth serves no dashboard.
+    /// Only a private route may reach this listener.
+    const ADMIN_LISTENER = "AUTH_ADMIN_LISTENER";
+    /// The admin dashboard's origin, such as `https://admin.piquel.fr`. Set it
+    /// together with `AUTH_ADMIN_LISTENER`.
+    const ADMIN_ORIGIN = "AUTH_ADMIN_ORIGIN";
+    /// `false` lets anyone sign up; `true`, the default, requires an invitation.
+    /// It changes signing up only: existing accounts keep their access.
+    const INVITE_REQUIRED = "AUTH_INVITE_REQUIRED";
+    /// How many requests one client may make a minute in each rate category, such
+    /// as pages, sign-in and tokens.
+    const REQUESTS_PER_MINUTE = "AUTH_REQUESTS_PER_MINUTE", default DEFAULT_REQUESTS_PER_MINUTE;
+    /// The proxies in front of auth, as comma-separated IP addresses or CIDR
+    /// ranges. Each must overwrite `X-Forwarded-For` with the one client address,
+    /// which auth then throttles on. A missing or ambiguous header from one of them
+    /// is refused, and the header is ignored from any other peer. Unset, auth
+    /// trusts `PIQUELD_INGRESS_PROXIES`, and without either it throttles on the
+    /// direct peer's address.
+    const TRUSTED_PROXIES = "AUTH_TRUSTED_PROXIES";
+    /// The gateway ranges piqueld gives every service, trusted when
+    /// `AUTH_TRUSTED_PROXIES` is unset.
+    const INGRESS_PROXIES = "PIQUELD_INGRESS_PROXIES";
+}
 
 /// The removed PEM signing key and its ID. Startup refuses them, so a deployment
 /// that still sets them learns that signing keys now live in the database.
@@ -54,20 +81,9 @@ const REMOVED_KEY_VARIABLES: [Variable; 2] = [
     Variable::new("AUTH_KEY_PROVIDER"),
     Variable::new("AUTH_SIGNING_KEY_ID"),
 ];
-/// Whether registration requires an invitation.
-const INVITE_REQUIRED: Variable = Variable::new("AUTH_INVITE_REQUIRED");
 /// The removed OIDC clients file. Startup refuses it, so a deployment that still
 /// sets it fails loudly instead of silently serving without its clients.
 const CLIENTS_FILE: Variable = Variable::new("AUTH_CLIENTS_FILE");
-/// Operator-specified trusted ingress peers.
-const TRUSTED_PROXIES: Variable = Variable::new("AUTH_TRUSTED_PROXIES");
-/// How many requests a client may make a minute, in each rate category.
-const REQUESTS_PER_MINUTE: Variable = Variable::new("AUTH_REQUESTS_PER_MINUTE");
-/// [`REQUESTS_PER_MINUTE`] when none is configured: enough for a person, not
-/// for a browser suite or a scraper.
-const DEFAULT_REQUESTS_PER_MINUTE: &str = "120";
-/// Default ingress peers provided by piqueld.
-const INGRESS_PROXIES: Variable = Variable::new("PIQUELD_INGRESS_PROXIES");
 
 /// Passkey relying-party configuration.
 #[derive(Clone)]

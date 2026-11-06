@@ -11,14 +11,30 @@ const DATABASE_POOL_SIZE: u32 = 10;
 /// Maximum startup wait for a pooled database connection.
 const DATABASE_CONNECT_TIMEOUT: Duration = Duration::from_secs(5);
 
-/// `PostgreSQL` transport and database.
-const DATABASE_URL: Variable = Variable::new("AUTH_DATABASE_URL");
-/// Optional separately mounted database password.
-const DATABASE_PASSWORD: Variable = Variable::new("AUTH_DATABASE_PASSWORD");
-/// Optional schema owner `migrate` connects as, to provision the runtime role.
-const DATABASE_OWNER_URL: Variable = Variable::new("AUTH_DATABASE_OWNER_URL");
-/// Optional separately mounted schema owner password.
-const DATABASE_OWNER_PASSWORD: Variable = Variable::new("AUTH_DATABASE_OWNER_PASSWORD");
+piquel_common::variables! {
+    /// The database's variables, in the configuration reference's order.
+    #[cfg(test)]
+    pub(crate) const VARIABLES;
+
+    /// The PostgreSQL URL every command connects with. Over TCP it requires
+    /// `sslmode=verify-full`, or an explicit `sslmode=disable` on a trusted
+    /// private network. For a local Unix socket, use `localhost` as the host and
+    /// the socket's absolute directory as the `host` parameter, such as
+    /// `postgres://USER:PASSWORD@localhost/piquel?host=/run/postgresql&sslmode=disable`.
+    /// Required.
+    const DATABASE_URL = "AUTH_DATABASE_URL";
+    /// Where to read the database password, through `env://NAME` or
+    /// `file:///path`, when the URL leaves it out.
+    const DATABASE_PASSWORD = "AUTH_DATABASE_PASSWORD";
+    /// The schema owner `migrate` connects as instead, in the same format as
+    /// `AUTH_DATABASE_URL`, which `audit prune` uses too. `migrate` then creates
+    /// or resets the role `AUTH_DATABASE_URL` names, with the
+    /// `AUTH_DATABASE_PASSWORD` password and only row access to auth's tables. The
+    /// owner must be a superuser.
+    const DATABASE_OWNER_URL = "AUTH_DATABASE_OWNER_URL";
+    /// Where to read the schema owner's password, as for `AUTH_DATABASE_PASSWORD`.
+    const DATABASE_OWNER_PASSWORD = "AUTH_DATABASE_OWNER_PASSWORD";
+}
 /// The connection every command uses.
 const RUNTIME_DATABASE: DatabaseVariables = DatabaseVariables {
     url: DATABASE_URL,

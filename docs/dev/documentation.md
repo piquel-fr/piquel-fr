@@ -20,6 +20,20 @@ root, configures it.
   `packages/auth/README.md` also introduces the TypeScript SDK wherever the
   package is read on its own.
 
+Some pages are generated from the code, so they can't fall behind it. Change
+their source, then run `just docs reference`; `just test` fails while they are
+stale:
+
+- `docs/dev/operations/cli-commands.md` comes from the `auth-service` command
+  line's clap definitions in `apps/auth-service/src/cli`: their doc comments are
+  also what `--help` prints.
+- `docs/dev/operations/variables/` comes from the doc comments of the variables
+  that `piquel_common::variables!` declares, in `apps/auth-service/src/config`
+  and `apps/web/src/main.rs`. The configuration page includes them with
+  `{{#include}}`. Write those doc comments for operators: what the variable
+  does, its format, and whether it is required. The default is added from the
+  code.
+
 Don't document what explains itself elsewhere. A migration says what it does,
 and why, in its own SQL comments. A test says what it checks in its name and
 doc comment. Commit history records how things changed.
