@@ -193,16 +193,24 @@ pub(super) enum SignIn {
 }
 
 impl Acceptance for SignIn {
-    /// A session for an active account, an offer for one being deleted.
+    /// A session for an active account, an offer for one being deleted. A
+    /// recovery's passkey in probation is offered nothing: restoring takes back a
+    /// deletion only a confirmed session or support could make, so it needs
+    /// another of the account's passkeys, which may confirm.
     fn accept(
         status: AccountStatus,
         passkey: PasskeyId,
         credential: Credential,
     ) -> Result<Self, PasskeyError> {
-        match status {
-            AccountStatus::Active => Ok(Self::Session(credential)),
-            AccountStatus::Deleting => Ok(Self::Restore(passkey)),
-            AccountStatus::Disabled => Err(PasskeyError::AccountInactive),
+        match (status, credential) {
+            (AccountStatus::Active, credential) => Ok(Self::Session(credential)),
+            (AccountStatus::Deleting, Credential::Probation(_)) => {
+                Err(PasskeyError::RestoreInProbation)
+            }
+            (AccountStatus::Deleting, Credential::Passkey(_) | Credential::Federation) => {
+                Ok(Self::Restore(passkey))
+            }
+            (AccountStatus::Disabled, _) => Err(PasskeyError::AccountInactive),
         }
     }
 }

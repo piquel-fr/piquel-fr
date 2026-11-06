@@ -67,6 +67,30 @@ impl Fixture {
         self.user(user_id).await.map(|user| user.status)
     }
 
+    /// A signed-out browser holding the offer to restore `user_id`'s account
+    /// that a sign-in with `passkey` made.
+    async fn offer(&self, user_id: UserId, passkey: PasskeyId) -> Browser {
+        let mut tx = self.database.begin().await.expect("transaction");
+        tx.users()
+            .find_by_id_for_update(user_id)
+            .await
+            .expect("lock");
+        let offered = Deletions::offer_restore(tx, user_id, passkey)
+            .await
+            .expect("offer");
+        let mut response = axum::http::Response::new(());
+        offered.set_on(&mut response).expect("cookie");
+        let (name, value) = response.headers()[header::SET_COOKIE]
+            .to_str()
+            .expect("cookie")
+            .split(';')
+            .next()
+            .and_then(|pair| pair.split_once('='))
+            .expect("cookie pair");
+        assert_eq!(name, BrowserCookie::Restore.as_str());
+        Browser::signed_out().with_cookie(BrowserCookie::Restore, value)
+    }
+
     /// The handle of `browser`'s account.
     async fn handle(&self, browser: &Browser) -> String {
         self.user(browser.user_id)
@@ -397,25 +421,7 @@ async fn a_restore_offer_restores_the_account_once() {
         .await
         .expect("delete");
 
-    let mut tx = fixture.database.begin().await.expect("transaction");
-    tx.users()
-        .find_by_id_for_update(browser.user_id)
-        .await
-        .expect("lock");
-    let offered = Deletions::offer_restore(tx, browser.user_id, passkey)
-        .await
-        .expect("offer");
-    let mut response = axum::http::Response::new(());
-    offered.set_on(&mut response).expect("cookie");
-    let (name, value) = response.headers()[header::SET_COOKIE]
-        .to_str()
-        .expect("cookie")
-        .split(';')
-        .next()
-        .and_then(|pair| pair.split_once('='))
-        .expect("cookie pair");
-    assert_eq!(name, BrowserCookie::Restore.as_str());
-    let holding = Browser::signed_out().with_cookie(BrowserCookie::Restore, value);
+    let holding = fixture.offer(browser.user_id, passkey).await;
 
     assert!(
         fixture
@@ -473,6 +479,36 @@ async fn a_restore_offer_restores_the_account_once() {
         Some(passkey),
         "signed in with the offer's passkey"
     );
+    assert!(matches!(
+        fixture
+            .account
+            .restore(RequestContext::TEST, &holding.headers())
+            .await,
+        Err(AccountError::Deletion(DeletionError::RestoreExpired))
+    ));
+}
+
+/// An offer whose passkey was revoked since restores nothing: restoring would
+/// sign in with it.
+#[tokio::test]
+#[ignore = "requires TEST_DATABASE_URL"]
+async fn a_restore_offer_dies_with_its_passkey() {
+    let fixture = Fixture::new().await;
+    let browser = Browser::new_account(&fixture.database).await;
+    let passkey = crate::tests::unusable_passkey(browser.user_id);
+    let passkeys = || fixture.database.passkeys();
+    passkeys().insert(&passkey).await.expect("passkey");
+    let handle = fixture.handle(&browser).await;
+    let _signed_out = fixture
+        .account
+        .delete_account(&browser.owner(&fixture.database).await, &handle)
+        .await
+        .expect("delete");
+    let holding = fixture.offer(browser.user_id, passkey.id).await;
+    let revoked = passkeys().revoke(passkey.id, browser.user_id).await;
+    assert!(revoked.expect("revoke"));
+    let offer = fixture.account.restore_offer(&holding.headers()).await;
+    assert!(offer.expect("lookup").is_none());
     assert!(matches!(
         fixture
             .account

@@ -349,8 +349,8 @@ impl AccountService {
             session_id: None,
         });
         Deletions::new(&mut tx, actor).restore(&user).await?;
-        // As the passkey's sign-in would have: a recovery's passkey in probation
-        // confirms nothing.
+        // As the passkey's sign-in would have. A recovery's passkey in probation
+        // gets no offer, so this passkey may confirm.
         let credential = PasskeyApplication::credential(&mut tx, offer.passkey_id).await?;
         let session = Session::sign_in(&mut tx, context, headers, user.id, credential).await?;
         tx.commit().await?;

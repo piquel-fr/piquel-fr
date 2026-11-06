@@ -36,8 +36,9 @@ export class PasskeyError extends Error {
   readonly step: PasskeyStep;
   /**
    * Whether auth answered `interaction_required`: this sign-in needs auth's pages,
-   * such as a request with `prompt=consent`, or a passkey that falls short of its
-   * `acr_values`.
+   * such as a request with `prompt=consent`, a passkey that falls short of its
+   * `acr_values`, or an account with a recovery that can still be undone, which
+   * auth's pages ask about first.
    */
   readonly interactionRequired: boolean;
 

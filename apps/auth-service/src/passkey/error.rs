@@ -70,6 +70,10 @@ pub(crate) enum PasskeyError {
     /// The account, or the credential it signed with, was disabled or removed.
     #[error("active account and credential required")]
     AccountInactive,
+    /// A recovery's passkey in probation signed in to an account scheduled for
+    /// deletion, which only a passkey from before the recovery may restore.
+    #[error("a recovery's passkey cannot restore an account scheduled for deletion")]
+    RestoreInProbation,
     /// The authenticator did not verify the person using it.
     #[error("passkey user verification required")]
     UserVerificationRequired,
@@ -150,6 +154,9 @@ impl From<PasskeyError> for ApiError {
             PasskeyError::AccountInactive => {
                 Self::unauthorized("This account is disabled, or this passkey was removed from it.")
             }
+            PasskeyError::RestoreInProbation => Self::forbidden(
+                "This account is scheduled for deletion. A passkey added by a recovery can't restore it. Use a passkey you had before, or ask Piquel support.",
+            ),
             PasskeyError::UnknownHandle => Self::not_found("No active account has this handle."),
             PasskeyError::PasskeyNotFound => Self::bad_request("Passkey not found."),
             PasskeyError::LastPasskey => {
@@ -199,7 +206,9 @@ impl PasskeyError {
     pub(super) const fn sign_in_failure(&self) -> Option<SignInFailure> {
         match self {
             Self::CounterRegression => Some(SignInFailure::CounterRegression),
-            Self::AccountInactive => Some(SignInFailure::AccountUnavailable),
+            Self::AccountInactive | Self::RestoreInProbation => {
+                Some(SignInFailure::AccountUnavailable)
+            }
             Self::Webauthn(_)
             | Self::SignedForAnotherOrigin
             | Self::ClientData(_)

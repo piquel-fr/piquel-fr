@@ -185,9 +185,10 @@ the user already allowed sends the browser straight back and on to the client. A
 passkey ceremony runs in the browser through the passkey script, then posts the
 form's change: signing in or up changes nothing and continues, and linking while
 signed out links once the sign-in succeeds. While the account has a recovery that
-can be undone, a passkey sign-in that continues an authorization first asks whether
-it was the owner's, and goes on by a plain link that resumes the authorization. The
-recovery pages (`src/web/auth/recovery`), `/recover` and `/recover/undo`, which a
+can be undone, every sign-in that continues an authorization first asks whether it
+was the owner's: `OidcApplication::continue_authorization` sends a session that
+signed in for the authorization to the sign-in page's question, whose form goes on.
+The recovery pages (`src/web/auth/recovery`), `/recover` and `/recover/undo`, which a
 recovery's emails link to, serve signed-out browsers too, so they are pages of their
 own as well.
 
@@ -207,9 +208,11 @@ emailed link's token never reaches the server in a URL. A ceremony form's or a
 fragment form's button starts disabled, with a `data-unavailable` note saying why,
 until the script finds it can work. While a ceremony runs, its form's button is
 disabled and says it waits for the passkey, and the form's last error hides. A
-`data-dismiss` element, rendered hidden, shows unless the browser's local storage
-holds its key, which a `data-dismisses` button with that key stores as it hides the
-element; without local storage, it shows on every page. A `data-copy` button copies
+`data-dismiss` element shows unless the browser's local storage holds its key,
+which a `data-dismisses` button with that key stores as it hides the element;
+without local storage, it shows on every page. A hint renders hidden, so it never
+flashes once dismissed, and the recovery question renders shown, so it asks without
+scripts too. A `data-copy` button copies
 a value, and a `data-replace-url` element makes a page that shows a secret reload by
 `GET`. The script is plain JavaScript, embedded as written: `tsc` checks its JSDoc
 types, and ESLint lints it as it does the browser tests.

@@ -131,12 +131,12 @@ async fn nothing_removes_an_older_passkey_mid_recovery() {
 
 /// A probation passkey's session never confirms, so it can neither download the
 /// account's data nor delete the account: both require a recent passkey
-/// confirmation, checked under the account lock. An account support scheduled
-/// for deletion meanwhile is restored by its probation passkey into a session that
-/// still confirms nothing.
+/// confirmation, checked under the account lock. Nor can it restore an account
+/// scheduled for deletion meanwhile: signing in offers it nothing, since only a
+/// passkey from before the recovery may take back a deletion.
 #[tokio::test]
 #[ignore = "requires TEST_DATABASE_URL"]
-async fn a_probation_passkey_neither_exports_nor_deletes_the_account() {
+async fn a_probation_passkey_neither_exports_deletes_nor_restores_the_account() {
     let mut scenario = Scenario::new().await;
     let token = scenario.recover().await;
     let cookie = scenario.enroll(&token).await;
@@ -174,78 +174,21 @@ async fn a_probation_passkey_neither_exports_nor_deletes_the_account() {
         .await
         .expect("support schedules the deletion");
     scenario.swap();
-    let offered = scenario.login("").await;
-    assert_eq!(offered.status(), StatusCode::NO_CONTENT);
-    let offer = Fixture::cookie(&offered);
-    assert!(
-        offer.starts_with(BrowserCookie::Restore.as_str()),
-        "{offer}"
+    let refused = scenario.login("").await;
+    assert_eq!(
+        refused.status(),
+        StatusCode::FORBIDDEN,
+        "offered no restore"
     );
-    let holder = Browser {
-        cookie: offer,
-        ..Browser::signed_out()
-    };
-    let mut restored = axum::http::Response::new(());
-    service
-        .restore(RequestContext::TEST, &holder.headers())
-        .await
-        .expect("restore")
-        .set_on(&mut restored)
-        .expect("cookies");
-    let session = restored
-        .headers()
-        .get_all(axum::http::header::SET_COOKIE)
-        .iter()
-        .filter_map(|cookie| cookie.to_str().ok())
-        .find(|cookie| cookie.starts_with(BrowserCookie::Session.as_str()))
-        .and_then(|cookie| cookie.split(';').next())
-        .expect("signed in")
-        .to_owned();
-    let session = scenario.session(&session).await.expect("session");
-    assert_eq!(session.passkey_confirmed_at, None, "still not confirmed");
-}
-
-/// An offer to restore an account scheduled for deletion restores nothing once
-/// its passkey is revoked, as support undoing the recovery of a probation passkey
-/// revokes it: otherwise restoring would sign in with it, confirmed.
-#[tokio::test]
-#[ignore = "requires TEST_DATABASE_URL"]
-async fn an_undone_recoverys_passkey_restores_nothing() {
-    let mut scenario = Scenario::new().await;
-    let token = scenario.recover().await;
-    scenario.enroll(&token).await;
-    scenario
-        .admin()
-        .schedule_deletion(&cli(), scenario.user(), recovery_reason())
-        .await
-        .expect("support schedules the deletion");
-    scenario.swap();
-    let offered = scenario.login("").await;
-    assert_eq!(offered.status(), StatusCode::NO_CONTENT);
-    let holder = Browser {
-        cookie: Fixture::cookie(&offered),
-        ..Browser::signed_out()
-    };
-    let service = AccountService::new(scenario.database().clone());
-    let offer = service.restore_offer(&holder.headers()).await;
-    assert!(offer.expect("offer").is_some(), "offered");
-
-    scenario
-        .admin()
-        .undo_recovery(&cli(), scenario.user(), recovery_reason())
-        .await
-        .expect("support undoes the recovery");
-    let offer = service.restore_offer(&holder.headers()).await;
-    assert!(offer.expect("offer").is_none(), "withdrawn");
-    assert!(matches!(
-        service
-            .restore(RequestContext::TEST, &holder.headers())
-            .await
-            .map(drop),
-        Err(AccountError::Deletion(
-            crate::deletion::DeletionError::RestoreExpired
-        ))
-    ));
+    assert!(
+        refused
+            .headers()
+            .get_all(axum::http::header::SET_COOKIE)
+            .iter()
+            .filter_map(|cookie| cookie.to_str().ok())
+            .all(|cookie| !cookie.starts_with(BrowserCookie::Restore.as_str())),
+        "no offer cookie"
+    );
     let account = scenario
         .database()
         .users()
